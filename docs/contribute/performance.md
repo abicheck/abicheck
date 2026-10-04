@@ -659,6 +659,7 @@ and type churn, add/remove), whose every entity population grows with `n`.
 | `tests/test_compare_call_complexity.py` | No first-party function's **call count** grows faster than `(size ratio)^1.5` in `compare()`, for every workload in three modes (default, `--contract` evaluation, pattern verdicts + surface metrics). Names the `path:line(function)`. Oracle is the input's size ratio, not a recorded baseline. | unit |
 | `tests/test_pipeline_call_complexity.py` | The same, for snapshot serialization round trips, every report format (JSON, Markdown, SARIF, HTML, JUnit) over real findings, and release reconciliation as the **member count** grows. | unit |
 | `tests/test_compare_cost_budgets.py` + `tests/perf_call_budgets.json` | Exact ratchet budgets per mode: **same-argument repeat calls** of a reviewed list of expensive functions (graph/surface/idiom builders, `demangle_batch`, ...) and **child processes** per `compare()`, which must also not grow with input size. A figure above *or below* its budget fails; re-record with `python scripts/audit_repeated_calls.py --write-budgets`. | unit |
+| `tests/test_extract_call_complexity.py` + `tests/_cpp_corpus.py` | Call-count complexity of `dump()` over a generated real C++ library (namespaces, virtuals, overloads, templates, typedef chains), and of `compare()` over two dumped versions at 10% and 100% churn. | integration |
 | `perf-antipatterns` (`scripts/perf_antipatterns.py`) | No *new* list-membership, `re.compile`, `json.loads`/`deepcopy`, self-copying accumulation, `subprocess` call, loop-invariant re-sort/copy or `str +=` inside a loop under `abicheck/`; existing sites are per-function counts in `scripts/perf_antipatterns_baseline.json`. | `ai-readiness` |
 | `tests/test_history_scaling.py` | `build_longitudinal_history` stays linear in the number of releases (call counts, K=5 vs 20) and its time exponent over up to 50 releases stays sub-quadratic. | unit + `slow` |
 | `tests/test_compare_scaling_shapes.py` | Wall-clock exponent per workload shape -- catches a linear number of calls whose per-call cost grows. | `slow` |
@@ -1417,3 +1418,7 @@ recommendation for a clang-only (no castxml) CI runner on a library this
 size remains: skip `scan --depth source` in favor of `compare` for the L1/L2
 release gate, or scope it with `--since`/`--changed-path` to just the
 changed files rather than the whole library.
+
+## Weekly optimization report
+
+`python scripts/perf_report.py [--corpus N] [-o FILE]` ranks hot functions, costed same-argument repeats (`audit_repeated_calls.py --by-cost`), calls per declaration (`per_decl_x10:*` budgets) and anti-pattern sites. `performance.yml` runs it weekly into the step summary. Record what you decide about a candidate in the [findings registry](perf-findings.md).

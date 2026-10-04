@@ -1446,6 +1446,7 @@ Manual-only investigation tools (never gates):
   `compare()`. Read it with judgement: a cheap string helper hit 400 times on
   `"int"` is the synthetic workload's repetitiveness, not waste; a
   whole-snapshot builder repeated on the same snapshot object is.
+- **Backlog snapshot:** `python scripts/perf_report.py --corpus 30 -o perf-report.md` (hot functions, costed repeats via `audit_repeated_calls.py --by-cost`, calls per declaration, lint counts; runs weekly in `performance.yml`). Check and update `docs/contribute/perf-findings.md` before and after chasing a candidate. Real-library gate: `pytest tests/test_extract_call_complexity.py -m integration -q` (needs g++/castxml).
 - **Which call counts grow:** `profile_call_counts` + `superlinear_call_sites`
   (`tests/_call_counts.py`) at two sizes. Salt each run's names (the
   workloads' `tag` argument) — demangling and canonical-spelling caches are
