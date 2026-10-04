@@ -192,36 +192,50 @@ def variable_churn(n: int, tag: str = "") -> tuple[AbiSnapshot, AbiSnapshot]:
 
 
 def nested_type_churn(n: int, tag: str = "") -> tuple[AbiSnapshot, AbiSnapshot]:
-    """A chain ``S_i { int x; S_{i-1} inner; }`` whose innermost record grows
-    by one ``int``: every record embedding it by value grows too, so the
-    change propagates through the whole chain (one size finding per link)."""
-    k = max(4, n // 4)
+    """Many chains ``S_c_i { int x; S_c_{i-1} inner; }`` of fixed depth whose
+    innermost record grows by one ``int``: every record embedding it by value
+    grows too, so each change propagates through its chain (one size finding
+    per link).
+
+    Depth is bounded and the chain count grows with *n*. A single chain of
+    depth ~n made every finding list nearly every function as affected -- an
+    output quadratic by construction, which a scaling gate would then report
+    as a regression in what is only the size of a correct result.
+    """
+    depth = 6
+    chains = max(2, n // 24)
 
     def types(grow: bool) -> list[RecordType]:
         out = []
-        inner_bits = 0
-        for i in range(k):
-            fields = [TypeField(name="x", type="int", offset_bits=0)]
-            if i == 0:
-                if grow:
-                    fields.append(TypeField(name="z", type="int", offset_bits=32))
-                size = 64 if grow else 32
-            else:
-                fields.append(
-                    TypeField(name="inner", type=f"{tag}S{i - 1}", offset_bits=32)
+        for c in range(chains):
+            inner_bits = 0
+            for i in range(depth):
+                fields = [TypeField(name="x", type="int", offset_bits=0)]
+                if i == 0:
+                    if grow:
+                        fields.append(TypeField(name="z", type="int", offset_bits=32))
+                    size = 64 if grow else 32
+                else:
+                    fields.append(
+                        TypeField(
+                            name="inner", type=f"{tag}S{c}_{i - 1}", offset_bits=32
+                        )
+                    )
+                    size = 32 + inner_bits
+                inner_bits = size
+                out.append(
+                    RecordType(
+                        name=f"{tag}S{c}_{i}",
+                        kind="struct",
+                        size_bits=size,
+                        fields=fields,
+                    )
                 )
-                size = 32 + inner_bits
-            inner_bits = size
-            out.append(
-                RecordType(
-                    name=f"{tag}S{i}", kind="struct", size_bits=size, fields=fields
-                )
-            )
         return out
 
     funcs = []
     for i in range(n):
-        nm, st = f"{tag}h{i}", f"{tag}S{i % k}"
+        nm, st = f"{tag}h{i}", f"{tag}S{i % chains}_{(i // chains) % depth}"
         funcs.append(
             _fn(
                 nm,
