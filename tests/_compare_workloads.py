@@ -1,0 +1,253 @@
+# Copyright 2026 Nikolay Petrov
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Synthetic ``compare()`` workloads whose size is one integer.
+
+Shared by the deterministic call-count complexity gate
+(``test_compare_call_complexity.py``, unit lane) and the wall-clock scaling
+exponents (``test_compare_scaling_shapes.py``, ``slow`` lane), so both
+measure the *same* shapes. Each builder returns an ``(old, new)`` pair whose
+entity count grows linearly in ``n`` and in which **every** entity changes,
+so a run cannot shortcut past the detectors under test.
+
+``tag`` salts every symbol/type name. Several helpers on the compare path
+keep process-wide caches (demangling, canonical spellings); without a salt a
+smaller run made by an earlier test pre-warms a larger one, and a call-count
+comparison between the two sizes would measure cache state rather than
+algorithmic shape.
+
+The shapes are chosen to reach different detector families:
+
+* ``signature_churn`` -- every function's return and parameter type change
+  (``diff_symbols`` signature checks, parameter diffing).
+* ``rename_churn`` -- every function removed and a same-shaped one added
+  (rename / fingerprint matching, removed-vs-added pairing).
+* ``enum_churn`` -- enums whose member values move, used by functions
+  (``diff_types`` enum checks, affected-symbol enrichment).
+* ``variable_churn`` -- every variable's type changes.
+* ``nested_type_churn`` -- a chain of structs embedding each other whose
+  innermost member grows (transitive type-reachability propagation).
+* ``type_churn`` -- many functions taking changed structs by pointer (the
+  functions x types post-processing path ``test_performance.py`` guards).
+* ``add_remove`` -- half the functions removed, a quarter added.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Callable
+
+from abicheck.model import (
+    AbiSnapshot,
+    Function,
+    Param,
+    RecordType,
+    TypeField,
+    Variable,
+    Visibility,
+)
+from abicheck.model.entities import EnumMember, EnumType
+
+Workload = Callable[..., tuple[AbiSnapshot, AbiSnapshot]]
+
+
+def _fn(
+    name: str, mangled: str, ret: str = "int", params: list[Param] | None = None
+) -> Function:
+    return Function(
+        name=name,
+        mangled=mangled,
+        return_type=ret,
+        params=list(params or []),
+        visibility=Visibility.PUBLIC,
+    )
+
+
+def _pair(old: dict, new: dict) -> tuple[AbiSnapshot, AbiSnapshot]:
+    return (
+        AbiSnapshot(library="libshape.so", version="1.0", **old),
+        AbiSnapshot(library="libshape.so", version="2.0", **new),
+    )
+
+
+def signature_churn(n: int, tag: str = "") -> tuple[AbiSnapshot, AbiSnapshot]:
+    def name(i: int) -> str:
+        return f"{tag}f{i}"
+
+    old = [
+        _fn(
+            name(i), f"_Z{len(name(i))}{name(i)}i", params=[Param(name="a", type="int")]
+        )
+        for i in range(n)
+    ]
+    new = [
+        _fn(
+            name(i),
+            f"_Z{len(name(i))}{name(i)}i",
+            ret="long",
+            params=[Param(name="a", type="long")],
+        )
+        for i in range(n)
+    ]
+    return _pair({"functions": old}, {"functions": new})
+
+
+def rename_churn(n: int, tag: str = "") -> tuple[AbiSnapshot, AbiSnapshot]:
+    def side(stem: str) -> list[Function]:
+        out = []
+        for i in range(n):
+            nm = f"{tag}{stem}_{i}"
+            out.append(
+                _fn(
+                    nm,
+                    f"_Z{len(nm)}{nm}P2T{i % 7}",
+                    params=[Param(name="a", type=f"T{i % 7} *")],
+                )
+            )
+        return out
+
+    return _pair({"functions": side("old_name")}, {"functions": side("new_name")})
+
+
+def enum_churn(n: int, tag: str = "") -> tuple[AbiSnapshot, AbiSnapshot]:
+    k = max(10, n // 20)
+
+    def enums(shift: int) -> list[EnumType]:
+        return [
+            EnumType(
+                name=f"{tag}E{j}",
+                members=[
+                    EnumMember(f"{tag}E{j}_{m}", m + shift * (m % 2)) for m in range(20)
+                ],
+            )
+            for j in range(k)
+        ]
+
+    funcs = []
+    for i in range(n):
+        nm, en = f"{tag}g{i}", f"{tag}E{i % k}"
+        funcs.append(
+            _fn(nm, f"_Z{len(nm)}{nm}{len(en)}{en}", params=[Param(name="e", type=en)])
+        )
+    return _pair(
+        {"functions": funcs, "enums": enums(0)},
+        {"functions": list(funcs), "enums": enums(1)},
+    )
+
+
+def variable_churn(n: int, tag: str = "") -> tuple[AbiSnapshot, AbiSnapshot]:
+    old = [
+        Variable(name=f"{tag}v{i}", mangled=f"{tag}v{i}", type="int") for i in range(n)
+    ]
+    new = [
+        Variable(name=f"{tag}v{i}", mangled=f"{tag}v{i}", type="long") for i in range(n)
+    ]
+    return _pair({"variables": old}, {"variables": new})
+
+
+def nested_type_churn(n: int, tag: str = "") -> tuple[AbiSnapshot, AbiSnapshot]:
+    k = max(4, n // 4)
+
+    def types(grow: bool) -> list[RecordType]:
+        out = []
+        for i in range(k):
+            fields = [TypeField(name="x", type="int", offset_bits=0)]
+            if i > 0:
+                fields.append(
+                    TypeField(name="inner", type=f"{tag}S{i - 1}", offset_bits=32)
+                )
+            if grow and i == 0:
+                fields.append(TypeField(name="z", type="int", offset_bits=96))
+            out.append(
+                RecordType(
+                    name=f"{tag}S{i}", kind="struct", size_bits=64, fields=fields
+                )
+            )
+        return out
+
+    funcs = []
+    for i in range(n):
+        nm, st = f"{tag}h{i}", f"{tag}S{i % k}"
+        funcs.append(
+            _fn(
+                nm,
+                f"_Z{len(nm)}{nm}P{len(st)}{st}",
+                params=[Param(name="p", type=f"{st} *")],
+            )
+        )
+    return _pair(
+        {"functions": funcs, "types": types(False)},
+        {"functions": list(funcs), "types": types(True)},
+    )
+
+
+def type_churn(n: int, tag: str = "") -> tuple[AbiSnapshot, AbiSnapshot]:
+    k = max(50, n // 20)
+
+    def types(grow: bool) -> list[RecordType]:
+        out = []
+        for i in range(k):
+            fields = [
+                TypeField(name="a", type="int", offset_bits=0),
+                TypeField(name="b", type="int", offset_bits=32),
+            ]
+            if grow:
+                fields.append(TypeField(name="c", type="int", offset_bits=64))
+            out.append(
+                RecordType(
+                    name=f"{tag}Type_{i}",
+                    kind="struct",
+                    size_bits=96 if grow else 64,
+                    fields=fields,
+                )
+            )
+        return out
+
+    funcs = []
+    for i in range(n):
+        nm, st = f"{tag}use_{i}", f"{tag}Type_{i % k}"
+        funcs.append(
+            _fn(
+                nm,
+                f"_Z{len(nm)}{nm}P{len(st)}{st}",
+                params=[Param(name="p", type=f"{st} *")],
+            )
+        )
+    return _pair(
+        {"functions": funcs, "types": types(False)},
+        {"functions": list(funcs), "types": types(True)},
+    )
+
+
+def add_remove(n: int, tag: str = "") -> tuple[AbiSnapshot, AbiSnapshot]:
+    def fn(stem: str, i: int) -> Function:
+        nm = f"{tag}{stem}_{i}"
+        return _fn(nm, f"_Z{len(nm)}{nm}v")
+
+    old = [fn("func", i) for i in range(n)]
+    new = [fn("func", i) for i in range(n // 2)] + [
+        fn("added", i) for i in range(n // 4)
+    ]
+    return _pair({"functions": old}, {"functions": new})
+
+
+WORKLOADS: dict[str, Workload] = {
+    "signature_churn": signature_churn,
+    "rename_churn": rename_churn,
+    "enum_churn": enum_churn,
+    "variable_churn": variable_churn,
+    "nested_type_churn": nested_type_churn,
+    "type_churn": type_churn,
+    "add_remove": add_remove,
+}

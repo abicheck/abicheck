@@ -646,6 +646,32 @@ path-dependent identity shows up first as a spurious verdict, which no
 synthetic lane below would catch. A re-measurement should record all five
 columns, not wall time alone.
 
+## Call-count complexity gate (unit lane)
+
+Timing exponents need several sizes, repeats and the `slow` lane. Most real
+O(n²) regressions have a cheaper, exact symptom: some function's *call count*
+grows quadratically (a per-entity linear scan, an index rebuilt per lookup).
+`tests/test_compare_call_complexity.py` runs every synthetic workload in
+`tests/_compare_workloads.py` (signature, rename, enum, variable, nested-type
+and type churn, add/remove) at two sizes in each `compare()` mode that turns
+on a separate pass (default, `--contract` evaluation, pattern verdicts +
+surface metrics), counts every first-party function's calls under cProfile
+(`tests/_call_counts.py`), and fails if any count grows faster than
+`(size ratio)^1.5`, naming the `path:line(function)`. Counts are exact, so
+this gates in the ordinary unit lane with no noise budget, and the oracle is
+the input's size ratio, not a recorded baseline, so there is nothing to
+re-record when a detector is added. The test injects a real quadratic loop
+into `diff_symbols` to prove the gate fires.
+
+Its wall-clock sibling, `tests/test_compare_scaling_shapes.py` (`slow`),
+fits a time exponent for the same shapes, which catches what call counts
+cannot: a linear number of calls whose per-call cost grows with the input.
+
+To check a new workload or mode by hand, call `profile_call_counts` at two
+sizes and pass both tables to `superlinear_call_sites`. Salt each run's
+names (the `tag` argument), since demangling and canonical-spelling caches
+are process-wide.
+
 ## Coverage gaps this workflow does not close
 
 An external performance audit (2026-08) found that `compare()`/dump/scan
