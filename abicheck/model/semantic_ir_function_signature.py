@@ -60,6 +60,16 @@ SIGNATURE_FIELDS = (
     "parameter_kinds",
     "ref_qualifier",
     "is_variadic",
+    # The function-qualifier cohort (same document version, same fill).
+    "is_extern_c",
+    "is_noexcept",
+    "is_virtual",
+    "is_explicit",
+    "is_hidden_friend",
+    "hidden_friend_owner",
+    "contract_attributes",
+    "exception_spec",
+    "vtable_index",
 )
 
 #: Stamped on a signature fact decoded from a pre-v3 ``semantic_ir`` document.
@@ -78,9 +88,24 @@ def _param_kind(param: Any) -> str:
     return str(getattr(kind, "value", kind))
 
 
+def _optional(value: Any) -> Fact[Any]:
+    """``PRESENT`` for a captured value, ``NOT_COLLECTED`` for ``None``."""
+    return Fact.not_collected() if value is None else Fact.present(value)
+
+
 def function_signature_facts(fn: Function) -> dict[str, Any]:
-    """The five signature facts for *fn*, keyed by field name."""
+    """Every :data:`SIGNATURE_FIELDS` fact for *fn*, keyed by field name."""
+    attrs = fn.contract_attributes
     return {
+        "is_extern_c": Fact.present(bool(fn.is_extern_c)),
+        "is_noexcept": Fact.present(bool(fn.is_noexcept)),
+        "is_virtual": Fact.present(bool(fn.is_virtual)),
+        "is_explicit": _optional(fn.is_explicit),
+        "is_hidden_friend": _optional(fn.is_hidden_friend),
+        "hidden_friend_owner": _optional(fn.hidden_friend_owner),
+        "contract_attributes": _optional(None if attrs is None else tuple(attrs)),
+        "exception_spec": _optional(fn.exception_spec),
+        "vtable_index": _optional(fn.vtable_index),
         "return_type_spelling": Fact.present(fn.return_type),
         "parameter_type_spellings": Fact.present(tuple(p.type for p in fn.params)),
         "parameter_kinds": Fact.present(tuple(_param_kind(p) for p in fn.params)),

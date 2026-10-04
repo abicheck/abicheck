@@ -32,6 +32,7 @@ from abicheck.model.occurrence import OccurrenceId
 from abicheck.model.semantic_ir import CanonicalEntity, SemanticIR
 from abicheck.model.semantic_ir_function_signature import (
     LEGACY_SIGNATURE_DIAGNOSTIC,
+    SIGNATURE_FIELDS,
     with_function_signatures,
 )
 from abicheck.serialization import snapshot_from_dict, snapshot_to_dict
@@ -109,14 +110,14 @@ def _oracle(o: Function, n: Function) -> list[ChangeKind]:
 
 def _run(old: AbiSnapshot, new: AbiSnapshot) -> list[ChangeKind]:
     (o,), (n,) = old.declarations.functions, new.declarations.functions
-    head, refq, variadic = function_signature_changes(
+    changes = function_signature_changes(
         o.mangled,
         o.name,
         function_signature_index(old.canonical_ir, [o]).entity_for(o),
         function_signature_index(new.canonical_ir, [n]).entity_for(n),
         entity_id=o.entity_id,
     )
-    return [c.kind for c in head + refq + variadic]
+    return [c.kind for c in changes]
 
 
 @settings(max_examples=400, deadline=None)
@@ -231,13 +232,7 @@ class TestCodec:
         doc = semantic_ir_to_document(snap.canonical_ir, {})
         doc["semantic_ir"]["version"] = 2
         for occ in doc["semantic_ir"]["occurrences"]:
-            for name in (
-                "return_type_spelling",
-                "parameter_type_spellings",
-                "parameter_kinds",
-                "ref_qualifier",
-                "is_variadic",
-            ):
+            for name in SIGNATURE_FIELDS:
                 del occ["entity"][name]
         ir, _ = semantic_ir_from_document(doc)
         (entity,) = ir.occurrences.values()

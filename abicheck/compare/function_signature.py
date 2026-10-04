@@ -53,6 +53,7 @@ from typing import TYPE_CHECKING, Any
 
 from ..diff_helpers import bool_transition, make_change
 from ..diff_symbols_scalar import _abi_equivalent_scalar
+from ..model.cc_attributes import is_cc_attribute
 from ..model.change_catalog.kinds import ChangeKind
 from ..model.fact import Fact
 from ..model.identity import EntityKind
@@ -79,6 +80,7 @@ __all__ = [
     "FunctionSignatureIndex",
     "function_signature_changes",
     "function_signature_index",
+    "hidden_friend_changes",
     "signature_of",
 ]
 
@@ -100,6 +102,15 @@ class FunctionSignature:
     param_kinds: tuple[str, ...] | None
     ref_qualifier: str | None
     is_variadic: bool | None
+    is_extern_c: bool | None = None
+    is_noexcept: bool | None = None
+    is_virtual: bool | None = None
+    is_explicit: bool | None = None
+    is_hidden_friend: bool | None = None
+    hidden_friend_owner: str | None = None
+    contract_attributes: tuple[str, ...] | None = None
+    exception_spec: str | None = None
+    vtable_index: int | None = None
 
 
 def signature_of(entity: CanonicalEntity | None) -> FunctionSignature:
@@ -116,6 +127,15 @@ def signature_of(entity: CanonicalEntity | None) -> FunctionSignature:
         param_kinds=value(entity.parameter_kinds),
         ref_qualifier=value(entity.ref_qualifier),
         is_variadic=value(entity.is_variadic),
+        is_extern_c=value(entity.is_extern_c),
+        is_noexcept=value(entity.is_noexcept),
+        is_virtual=value(entity.is_virtual),
+        is_explicit=value(entity.is_explicit),
+        is_hidden_friend=value(entity.is_hidden_friend),
+        hidden_friend_owner=value(entity.hidden_friend_owner),
+        contract_attributes=value(entity.contract_attributes),
+        exception_spec=value(entity.exception_spec),
+        vtable_index=value(entity.vtable_index),
     )
 
 
@@ -167,6 +187,12 @@ def _decline(mangled: str, what: str, both: bool) -> None:
         mangled,
         f"function {what} not established on {'both sides' if both else 'one side'}",
     )
+
+
+def _decline_flag(mangled: str, what: str, old: object, new: object) -> None:
+    """A flag every producer records (linkage, noexcept, virtual) that is not
+    established on a side: declined, never read as ``False``."""
+    _decline(mangled, what, old is None and new is None)
 
 
 def _format_params(types: tuple[str, ...]) -> str:
@@ -340,6 +366,291 @@ def _variadic_changes(
     )
 
 
+def _check_linkage_change(
+    mangled: str,
+    name: str,
+    old: FunctionSignature,
+    new: FunctionSignature,
+    entity_id: EntityId | None,
+) -> list[Change]:
+    """Emit a change if the language linkage (extern \"C\" ↔ C++) was modified."""
+    if old.is_extern_c is None or new.is_extern_c is None:
+        _decline_flag(mangled, "linkage", old.is_extern_c, new.is_extern_c)
+        return []
+    if old.is_extern_c == new.is_extern_c:
+        return []
+    old_linkage = 'extern "C"' if old.is_extern_c else "C++"
+    new_linkage = 'extern "C"' if new.is_extern_c else "C++"
+    return [
+        make_change(
+            ChangeKind.FUNC_LANGUAGE_LINKAGE_CHANGED,
+            symbol=mangled,
+            name=name,
+            old=old_linkage,
+            new=new_linkage,
+            entity_id=entity_id,
+        )
+    ]
+
+
+def _check_noexcept_change(
+    mangled: str,
+    name: str,
+    old: FunctionSignature,
+    new: FunctionSignature,
+    entity_id: EntityId | None,
+) -> list[Change]:
+    """Emit a change if the noexcept specifier was added or removed."""
+    if old.is_noexcept is None or new.is_noexcept is None:
+        _decline_flag(mangled, "noexcept specifier", old.is_noexcept, new.is_noexcept)
+        return []
+    return bool_transition(
+        old.is_noexcept,
+        new.is_noexcept,
+        mangled,
+        added=(
+            ChangeKind.FUNC_NOEXCEPT_ADDED,
+            f"noexcept specifier added: {name}",
+        ),
+        removed=(
+            ChangeKind.FUNC_NOEXCEPT_REMOVED,
+            f"noexcept specifier removed: {name}",
+        ),
+        entity_id=entity_id,
+    )
+
+
+def _check_virtual_change(
+    mangled: str,
+    name: str,
+    old: FunctionSignature,
+    new: FunctionSignature,
+    entity_id: EntityId | None,
+) -> list[Change]:
+    """Emit a change if the virtual specifier was added or removed."""
+    if old.is_virtual is None or new.is_virtual is None:
+        _decline_flag(mangled, "virtual specifier", old.is_virtual, new.is_virtual)
+        return []
+    return bool_transition(
+        old.is_virtual,
+        new.is_virtual,
+        mangled,
+        added=(ChangeKind.FUNC_VIRTUAL_ADDED, f"Function became virtual: {name}"),
+        removed=(
+            ChangeKind.FUNC_VIRTUAL_REMOVED,
+            f"Function is no longer virtual: {name}",
+        ),
+        entity_id=entity_id,
+    )
+
+
+def _check_explicit_change(
+    mangled: str,
+    name: str,
+    old: FunctionSignature,
+    new: FunctionSignature,
+    entity_id: EntityId | None,
+) -> list[Change]:
+    """Emit a change if the explicit specifier was added or removed.
+
+    Tri-state: only fire when BOTH sides record explicit data. None means
+    the dumper/loader couldn't determine it — typically an older snapshot
+    that predates the field, or a Function/Destructor where ``explicit`` is
+    N/A. Skipping in that case avoids false API_BREAK findings produced
+    purely by snapshot schema evolution.
+    """
+    return bool_transition(
+        old.is_explicit,
+        new.is_explicit,
+        mangled,
+        skip_none=True,
+        added=(
+            ChangeKind.CTOR_EXPLICIT_ADDED,
+            f"Constructor/conversion gained `explicit` specifier: {name}",
+        ),
+        added_values=("implicit", "explicit"),
+        removed=(
+            ChangeKind.CTOR_EXPLICIT_REMOVED,
+            f"Constructor/conversion lost `explicit` specifier: {name}",
+        ),
+        removed_values=("explicit", "implicit"),
+        entity_id=entity_id,
+    )
+
+
+def _check_contract_attributes_change(
+    mangled: str,
+    name: str,
+    old: FunctionSignature,
+    new: FunctionSignature,
+    entity_id: EntityId | None,
+) -> list[Change]:
+    """Emit changes for gained/lost semantic contract attributes.
+
+    Skips when either side did not capture attributes (None); an empty list
+    means "captured, none present" and does participate. Calling-convention
+    attribute flips (stdcall/regparm/ms_abi/...) route to the dedicated
+    BREAKING ``CALLING_CONVENTION_CHANGED`` kind instead.
+    """
+    if old.contract_attributes is None or new.contract_attributes is None:
+        return []
+    old_attrs = set(old.contract_attributes)
+    new_attrs = set(new.contract_attributes)
+    if old_attrs == new_attrs:
+        return []
+    changes: list[Change] = []
+
+    old_cc = {a for a in old_attrs if is_cc_attribute(a)}
+    new_cc = {a for a in new_attrs if is_cc_attribute(a)}
+    if old_cc != new_cc:
+        changes.append(
+            make_change(
+                ChangeKind.CALLING_CONVENTION_CHANGED,
+                symbol=mangled,
+                description=(
+                    f"Calling-convention attribute changed for {name}: "
+                    f"{', '.join(sorted(old_cc)) or '(default)'} → "
+                    f"{', '.join(sorted(new_cc)) or '(default)'}"
+                ),
+                old_value=", ".join(sorted(old_cc)) or "(default)",
+                new_value=", ".join(sorted(new_cc)) or "(default)",
+                entity_id=entity_id,
+            )
+        )
+        old_attrs -= old_cc
+        new_attrs -= new_cc
+
+    gained = sorted(new_attrs - old_attrs)
+    lost = sorted(old_attrs - new_attrs)
+    if gained:
+        changes.append(
+            make_change(
+                ChangeKind.FUNC_CONTRACT_ATTRIBUTE_ADDED,
+                symbol=mangled,
+                name=name,
+                detail=", ".join(gained),
+                new_value=", ".join(gained),
+                entity_id=entity_id,
+            )
+        )
+    if lost:
+        changes.append(
+            make_change(
+                ChangeKind.FUNC_CONTRACT_ATTRIBUTE_REMOVED,
+                symbol=mangled,
+                name=name,
+                detail=", ".join(lost),
+                old_value=", ".join(lost),
+                entity_id=entity_id,
+            )
+        )
+    return changes
+
+
+def _check_exception_spec_change(
+    mangled: str,
+    name: str,
+    old: FunctionSignature,
+    new: FunctionSignature,
+    entity_id: EntityId | None,
+) -> list[Change]:
+    """Emit a change if the dynamic exception specification changed.
+
+    ``noexcept`` transitions keep their dedicated kinds; this covers the
+    legacy ``throw(...)`` spellings only. Tri-state: None = not captured.
+    """
+    if old.exception_spec is None or new.exception_spec is None:
+        return []
+    if old.exception_spec == new.exception_spec:
+        return []
+    return [
+        make_change(
+            ChangeKind.FUNC_EXCEPTION_SPEC_CHANGED,
+            symbol=mangled,
+            name=name,
+            old=old.exception_spec or "(none)",
+            new=new.exception_spec or "(none)",
+            entity_id=entity_id,
+        )
+    ]
+
+
+def _check_vtable_index_change(
+    mangled: str,
+    name: str,
+    old: FunctionSignature,
+    new: FunctionSignature,
+    entity_id: EntityId | None,
+) -> list[Change]:
+    """Emit a change when a persisting virtual method moved to another slot.
+
+    ``vtable_index`` is modeled per-function; the per-type vtable array diff
+    misses snapshots that carry indices but no reconstructed vtable list.
+    Reuses TYPE_VTABLE_CHANGED — a moved slot IS a vtable reorder.
+    """
+    if old.vtable_index is None or new.vtable_index is None:
+        return []
+    if old.vtable_index == new.vtable_index:
+        return []
+    return [
+        make_change(
+            ChangeKind.TYPE_VTABLE_CHANGED,
+            symbol=mangled,
+            description=(
+                f"vtable slot index changed for {name}: "
+                f"{old.vtable_index} → {new.vtable_index}"
+            ),
+            old_value=str(old.vtable_index),
+            new_value=str(new.vtable_index),
+            entity_id=entity_id,
+        )
+    ]
+
+
+def hidden_friend_changes(
+    mangled: str,
+    name: str,
+    old: FunctionSignature,
+    new: FunctionSignature,
+    entity_id: EntityId | None,
+) -> list[Change]:
+    """Emit a change if the hidden-friend status transitioned.
+
+    Hidden-friend transitions: an in-class ``friend`` declaration was
+    added or removed across versions. Tri-state — skip when either
+    side's snapshot did not record the flag (e.g. DWARF-only path or
+    an older snapshot). Called both from the public-symbol pairing (a
+    friend with an out-of-line definition, i.e. a real exported symbol)
+    and from ``diff_inline_hidden_friends`` below for an inline-only
+    friend that keeps the same mangled key on both sides but is HIDDEN
+    on at least one — the public pairing never sees that case at all.
+
+    ``caused_by_type`` carries the befriending class's qualified name (the
+    side that is/was actually a hidden friend) so surface classification can
+    key demotion off the *owner's* header origin rather than unconditionally
+    retaining every hidden-friend finding (``surface.py``).
+    """
+    owner = new.hidden_friend_owner if new.is_hidden_friend else old.hidden_friend_owner
+    return bool_transition(
+        old.is_hidden_friend,
+        new.is_hidden_friend,
+        mangled,
+        skip_none=True,
+        added=(
+            ChangeKind.HIDDEN_FRIEND_ADDED,
+            f"Function became an in-class friend declaration: {name}",
+        ),
+        added_values=("non-friend", "hidden friend"),
+        removed=(
+            ChangeKind.HIDDEN_FRIEND_REMOVED,
+            f"Function is no longer an in-class friend declaration: {name}",
+        ),
+        removed_values=("hidden friend", "non-friend"),
+        caused_by_type=owner,
+        entity_id=entity_id,
+    )
+
+
 def function_signature_changes(
     mangled: str,
     name: str,
@@ -349,18 +660,30 @@ def function_signature_changes(
     entity_id: EntityId | None,
     params_unconfirmed: bool = False,
     is_llp64: bool = False,
-) -> tuple[list[Change], list[Change], list[Change]]:
-    """The return/params changes, the ref-qualifier changes, and the
-    variadic changes for one matched pair -- returned in three groups so the
-    caller can keep its historical finding order (return, params,
-    ref-qualifier, ..., variadic)."""
+) -> list[Change]:
+    """Every signature and qualifier change for one matched pair, in the
+    order the findings were historically emitted (return, params,
+    ref-qualifier, linkage, noexcept, virtual, hidden friend, explicit,
+    variadic, contract attributes, exception spec, vtable slot)."""
     old, new = signature_of(old_entity), signature_of(new_entity)
-    head = _return_changes(mangled, name, old, new, entity_id, is_llp64)
-    head += _params_changes(
+    changes = _return_changes(mangled, name, old, new, entity_id, is_llp64)
+    changes += _params_changes(
         mangled, name, old, new, entity_id, params_unconfirmed, is_llp64
     )
-    return (
-        head,
-        _ref_qualifier_changes(mangled, name, old, new, entity_id),
-        _variadic_changes(mangled, name, old, new, entity_id),
-    )
+    changes += _ref_qualifier_changes(mangled, name, old, new, entity_id)
+    for check in (
+        _check_linkage_change,
+        _check_noexcept_change,
+        _check_virtual_change,
+        hidden_friend_changes,
+        _check_explicit_change,
+    ):
+        changes += check(mangled, name, old, new, entity_id)
+    changes += _variadic_changes(mangled, name, old, new, entity_id)
+    for check in (
+        _check_contract_attributes_change,
+        _check_exception_spec_change,
+        _check_vtable_index_change,
+    ):
+        changes += check(mangled, name, old, new, entity_id)
+    return changes

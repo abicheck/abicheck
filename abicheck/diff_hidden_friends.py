@@ -25,53 +25,16 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 from .checker_types import Change
-from .diff_helpers import bool_transition, make_change
+from .compare.function_signature import (
+    FunctionSignature,
+    FunctionSignatureIndex,
+    function_signature_index,
+    hidden_friend_changes,
+    signature_of,
+)
+from .diff_helpers import make_change
 from .model import Function
 from .model.change_catalog.kinds import ChangeKind
-
-
-def check_hidden_friend_change(
-    mangled: str, f_old: Function, f_new: Function
-) -> list[Change]:
-    """Emit a change if the hidden-friend status transitioned.
-
-    Hidden-friend transitions: an in-class ``friend`` declaration was
-    added or removed across versions. Tri-state — skip when either
-    side's snapshot did not record the flag (e.g. DWARF-only path or
-    an older snapshot). Called both from the public-symbol pairing (a
-    friend with an out-of-line definition, i.e. a real exported symbol)
-    and from ``diff_inline_hidden_friends`` below for an inline-only
-    friend that keeps the same mangled key on both sides but is HIDDEN
-    on at least one — the public pairing never sees that case at all.
-
-    ``caused_by_type`` carries the befriending class's qualified name (the
-    side that is/was actually a hidden friend) so surface classification can
-    key demotion off the *owner's* header origin rather than unconditionally
-    retaining every hidden-friend finding (``surface.py``).
-    """
-    owner = (
-        f_new.hidden_friend_owner
-        if f_new.is_hidden_friend
-        else f_old.hidden_friend_owner
-    )
-    return bool_transition(
-        f_old.is_hidden_friend,
-        f_new.is_hidden_friend,
-        mangled,
-        skip_none=True,
-        added=(
-            ChangeKind.HIDDEN_FRIEND_ADDED,
-            f"Function became an in-class friend declaration: {f_old.name}",
-        ),
-        added_values=("non-friend", "hidden friend"),
-        removed=(
-            ChangeKind.HIDDEN_FRIEND_REMOVED,
-            f"Function is no longer an in-class friend declaration: {f_old.name}",
-        ),
-        removed_values=("hidden friend", "non-friend"),
-        caused_by_type=owner,
-        entity_id=f_old.entity_id or f_new.entity_id,
-    )
 
 
 def diff_inline_hidden_friends(
@@ -79,6 +42,7 @@ def diff_inline_hidden_friends(
     new_all: Mapping[str, Function],
     old_public: Mapping[str, Function],
     new_public: Mapping[str, Function],
+    signatures: tuple[FunctionSignatureIndex, FunctionSignatureIndex] | None = None,
 ) -> list[Change]:
     """Pick up hidden-friend transitions that the public-symbol diff misses.
 
@@ -100,40 +64,64 @@ def diff_inline_hidden_friends(
       since a hidden friend already mangles under its enclosing
       namespace, not the class). When at least one side is HIDDEN this
       transition would otherwise never be observed — the sibling
-      ``check_hidden_friend_change`` only runs on pairs matched from
+      paired hidden-friend check (``compare/function_signature.py``) only runs on pairs matched from
       *old_public*/*new_public* — so it is checked here too, but only
       when the pair was NOT already covered by that public-symbol
       pairing (both sides public), to avoid emitting it twice (Codex
       review).
+
+    The hidden-friend facts are read through each side's ``SemanticIR``
+    (*signatures*, ADR-063 6B function-qualifier cohort); without one, each
+    side is projected from its own functions with the same formula.
     """
+    if signatures is None:
+        signatures = (
+            function_signature_index(None, old_all.values()),
+            function_signature_index(None, new_all.values()),
+        )
+    old_index, new_index = signatures
+
+    def facts(index: FunctionSignatureIndex, fn: Function) -> FunctionSignature:
+        return signature_of(index.entity_for(fn))
+
     changes: list[Change] = []
     for mangled, f_old in old_all.items():
         f_new = new_all.get(mangled)
+        old_sig = facts(old_index, f_old)
         if f_new is None:
-            if f_old.is_hidden_friend:
+            if old_sig.is_hidden_friend:
                 changes.append(
                     make_change(
                         ChangeKind.HIDDEN_FRIEND_REMOVED,
                         symbol=mangled,
                         old=f_old.name,
-                        caused_by_type=f_old.hidden_friend_owner,
+                        caused_by_type=old_sig.hidden_friend_owner,
                         entity_id=f_old.entity_id,
                     )
                 )
             continue
         if mangled in old_public and mangled in new_public:
             continue
-        changes.extend(check_hidden_friend_change(mangled, f_old, f_new))
+        changes.extend(
+            hidden_friend_changes(
+                mangled,
+                f_old.name,
+                old_sig,
+                facts(new_index, f_new),
+                f_old.entity_id or f_new.entity_id,
+            )
+        )
     for mangled, f_new in new_all.items():
         if mangled in old_all:
             continue
-        if f_new.is_hidden_friend:
+        new_sig = facts(new_index, f_new)
+        if new_sig.is_hidden_friend:
             changes.append(
                 make_change(
                     ChangeKind.HIDDEN_FRIEND_ADDED,
                     symbol=mangled,
                     new=f_new.name,
-                    caused_by_type=f_new.hidden_friend_owner,
+                    caused_by_type=new_sig.hidden_friend_owner,
                     entity_id=f_new.entity_id,
                 )
             )

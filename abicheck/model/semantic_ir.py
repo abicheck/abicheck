@@ -101,6 +101,16 @@ def canonical_cv_qualification(spellings: Iterable[str]) -> tuple[str, ...]:
 
 _FIELD_NAMES: dict[type, tuple[str, ...]] = {}
 
+#: The bool-valued ``CanonicalEntity`` facts.
+_BOOL_FACTS = (
+    "is_variadic",
+    "is_extern_c",
+    "is_noexcept",
+    "is_virtual",
+    "is_explicit",
+    "is_hidden_friend",
+)
+
 
 @dataclass(frozen=True, slots=True)
 class CanonicalEntity:
@@ -158,6 +168,20 @@ class CanonicalEntity:
     )
     ref_qualifier: Fact[str] = field(default_factory=lambda: Fact.not_collected())
     is_variadic: Fact[bool] = field(default_factory=lambda: Fact.not_collected())
+    #: A function's qualifiers (ADR-063 6B, function-qualifier cohort),
+    #: ``NOT_COLLECTED`` for every non-function kind and wherever the producer
+    #: did not capture the value.
+    is_extern_c: Fact[bool] = field(default_factory=lambda: Fact.not_collected())
+    is_noexcept: Fact[bool] = field(default_factory=lambda: Fact.not_collected())
+    is_virtual: Fact[bool] = field(default_factory=lambda: Fact.not_collected())
+    is_explicit: Fact[bool] = field(default_factory=lambda: Fact.not_collected())
+    is_hidden_friend: Fact[bool] = field(default_factory=lambda: Fact.not_collected())
+    hidden_friend_owner: Fact[str] = field(default_factory=lambda: Fact.not_collected())
+    contract_attributes: Fact[tuple[str, ...]] = field(
+        default_factory=lambda: Fact.not_collected()
+    )
+    exception_spec: Fact[str] = field(default_factory=lambda: Fact.not_collected())
+    vtable_index: Fact[int] = field(default_factory=lambda: Fact.not_collected())
     producer: str = ""
 
     def __post_init__(self) -> None:
@@ -185,9 +209,15 @@ class CanonicalEntity:
                 isinstance(layout.value, bool) or not isinstance(layout.value, int)
             ):
                 raise ValueError(f"{name} must carry an int, got {layout.value!r}")
-        variadic = self.is_variadic
-        if variadic.is_present and not isinstance(variadic.value, bool):
-            raise ValueError(f"is_variadic must carry a bool, got {variadic.value!r}")
+        for name in _BOOL_FACTS:
+            flag = getattr(self, name)
+            if flag.is_present and not isinstance(flag.value, bool):
+                raise ValueError(f"{name} must carry a bool, got {flag.value!r}")
+        slot = self.vtable_index
+        if slot.is_present and (
+            isinstance(slot.value, bool) or not isinstance(slot.value, int)
+        ):
+            raise ValueError(f"vtable_index must carry an int, got {slot.value!r}")
         cv = self.cv_qualification
         # `is_present`, not `status is PRESENT`: `PARTIAL` is usable evidence
         # everywhere else in this IR (`Fact.is_present`,

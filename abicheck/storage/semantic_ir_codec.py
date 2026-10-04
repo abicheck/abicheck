@@ -103,7 +103,7 @@ _LAYOUT_FACTS = ("size_bits", "alignment_bits")
 #: fills them from the snapshot's own records). A newer version is refused,
 #: never read as if it were this one.
 IR_DOCUMENT_VERSION = 3
-_INT_VALUED_FACTS = _LAYOUT_FACTS
+_INT_VALUED_FACTS = (*_LAYOUT_FACTS, "vtable_index")
 
 #: The function-signature facts (ADR-063 6B, function-signature cohort).
 #: Written only for a ``FUNCTION`` occurrence, from document version 3 on; an
@@ -111,7 +111,14 @@ _INT_VALUED_FACTS = _LAYOUT_FACTS
 #: ``LEGACY_SIGNATURE_DIAGNOSTIC`` and the load path fills them from the
 #: snapshot's own functions (``model/semantic_ir_function_signature.py``).
 _SIGNATURE_FACTS = SIGNATURE_FIELDS
-_BOOL_VALUED_FACTS = ("is_variadic",)
+_BOOL_VALUED_FACTS = (
+    "is_variadic",
+    "is_extern_c",
+    "is_noexcept",
+    "is_virtual",
+    "is_explicit",
+    "is_hidden_friend",
+)
 
 #: The ``CanonicalEntity`` fields carrying a tuple-valued ``Fact``. JSON has
 #: no tuple, so these come back as lists and are re-tupled on load — without
@@ -122,6 +129,7 @@ _TUPLE_VALUED_FACTS = (
     "cv_qualification",
     "parameter_type_spellings",
     "parameter_kinds",
+    "contract_attributes",
 )
 
 

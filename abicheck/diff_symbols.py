@@ -57,14 +57,13 @@ from .diff_default_value_reliability import (
 )
 from .diff_helpers import (
     TypeMap,
-    bool_transition,
     build_type_map,
     diff_by_key,
     lookup_matched_type,
     make_change,
     type_map_key,
 )
-from .diff_hidden_friends import check_hidden_friend_change, diff_inline_hidden_friends
+from .diff_hidden_friends import diff_inline_hidden_friends
 from .diff_symbols_anon_fields import (
     check_anon_fields_for_type,
 )
@@ -141,7 +140,6 @@ from .model import (
 # with no I/O, living in model so extract's tu_merge.py can use it too
 # without a forbidden extract -> compare edge. Re-exported by value here
 # for back-compat.
-from .model.cc_attributes import is_cc_attribute as _is_cc_attribute
 from .model.change_catalog.kinds import ChangeKind
 from .model.snapshot_reliability import family_reliable
 from .model.surface_facts import (
@@ -418,210 +416,6 @@ def _check_removed_function(
     )
 
 
-def _check_linkage_change(
-    mangled: str, f_old: Function, f_new: Function
-) -> list[Change]:
-    """Emit a change if the language linkage (extern \"C\" ↔ C++) was modified."""
-    if f_old.is_extern_c == f_new.is_extern_c:
-        return []
-    old_linkage = 'extern "C"' if f_old.is_extern_c else "C++"
-    new_linkage = 'extern "C"' if f_new.is_extern_c else "C++"
-    return [
-        make_change(
-            ChangeKind.FUNC_LANGUAGE_LINKAGE_CHANGED,
-            symbol=mangled,
-            name=f_old.name,
-            old=old_linkage,
-            new=new_linkage,
-            entity_id=f_old.entity_id or f_new.entity_id,
-        )
-    ]
-
-
-def _check_noexcept_change(
-    mangled: str, f_old: Function, f_new: Function
-) -> list[Change]:
-    """Emit a change if the noexcept specifier was added or removed."""
-    return bool_transition(
-        f_old.is_noexcept,
-        f_new.is_noexcept,
-        mangled,
-        added=(
-            ChangeKind.FUNC_NOEXCEPT_ADDED,
-            f"noexcept specifier added: {f_old.name}",
-        ),
-        removed=(
-            ChangeKind.FUNC_NOEXCEPT_REMOVED,
-            f"noexcept specifier removed: {f_old.name}",
-        ),
-        entity_id=f_old.entity_id or f_new.entity_id,
-    )
-
-
-def _check_virtual_change(
-    mangled: str, f_old: Function, f_new: Function
-) -> list[Change]:
-    """Emit a change if the virtual specifier was added or removed."""
-    return bool_transition(
-        f_old.is_virtual,
-        f_new.is_virtual,
-        mangled,
-        added=(ChangeKind.FUNC_VIRTUAL_ADDED, f"Function became virtual: {f_old.name}"),
-        removed=(
-            ChangeKind.FUNC_VIRTUAL_REMOVED,
-            f"Function is no longer virtual: {f_old.name}",
-        ),
-        entity_id=f_old.entity_id or f_new.entity_id,
-    )
-
-
-def _check_explicit_change(
-    mangled: str, f_old: Function, f_new: Function
-) -> list[Change]:
-    """Emit a change if the explicit specifier was added or removed.
-
-    Tri-state: only fire when BOTH sides record explicit data. None means
-    the dumper/loader couldn't determine it — typically an older snapshot
-    that predates the field, or a Function/Destructor where ``explicit`` is
-    N/A. Skipping in that case avoids false API_BREAK findings produced
-    purely by snapshot schema evolution.
-    """
-    return bool_transition(
-        f_old.is_explicit,
-        f_new.is_explicit,
-        mangled,
-        skip_none=True,
-        added=(
-            ChangeKind.CTOR_EXPLICIT_ADDED,
-            f"Constructor/conversion gained `explicit` specifier: {f_old.name}",
-        ),
-        added_values=("implicit", "explicit"),
-        removed=(
-            ChangeKind.CTOR_EXPLICIT_REMOVED,
-            f"Constructor/conversion lost `explicit` specifier: {f_old.name}",
-        ),
-        removed_values=("explicit", "implicit"),
-        entity_id=f_old.entity_id or f_new.entity_id,
-    )
-
-
-def _check_contract_attributes_change(
-    mangled: str, f_old: Function, f_new: Function
-) -> list[Change]:
-    """Emit changes for gained/lost semantic contract attributes.
-
-    Skips when either side did not capture attributes (None); an empty list
-    means "captured, none present" and does participate. Calling-convention
-    attribute flips (stdcall/regparm/ms_abi/...) route to the dedicated
-    BREAKING ``CALLING_CONVENTION_CHANGED`` kind instead.
-    """
-    if f_old.contract_attributes is None or f_new.contract_attributes is None:
-        return []
-    old_attrs = set(f_old.contract_attributes)
-    new_attrs = set(f_new.contract_attributes)
-    if old_attrs == new_attrs:
-        return []
-    changes: list[Change] = []
-
-    old_cc = {a for a in old_attrs if _is_cc_attribute(a)}
-    new_cc = {a for a in new_attrs if _is_cc_attribute(a)}
-    if old_cc != new_cc:
-        changes.append(
-            make_change(
-                ChangeKind.CALLING_CONVENTION_CHANGED,
-                symbol=mangled,
-                description=(
-                    f"Calling-convention attribute changed for {f_old.name}: "
-                    f"{', '.join(sorted(old_cc)) or '(default)'} → "
-                    f"{', '.join(sorted(new_cc)) or '(default)'}"
-                ),
-                old_value=", ".join(sorted(old_cc)) or "(default)",
-                new_value=", ".join(sorted(new_cc)) or "(default)",
-                entity_id=f_old.entity_id or f_new.entity_id,
-            )
-        )
-        old_attrs -= old_cc
-        new_attrs -= new_cc
-
-    gained = sorted(new_attrs - old_attrs)
-    lost = sorted(old_attrs - new_attrs)
-    if gained:
-        changes.append(
-            make_change(
-                ChangeKind.FUNC_CONTRACT_ATTRIBUTE_ADDED,
-                symbol=mangled,
-                name=f_old.name,
-                detail=", ".join(gained),
-                new_value=", ".join(gained),
-                entity_id=f_old.entity_id or f_new.entity_id,
-            )
-        )
-    if lost:
-        changes.append(
-            make_change(
-                ChangeKind.FUNC_CONTRACT_ATTRIBUTE_REMOVED,
-                symbol=mangled,
-                name=f_old.name,
-                detail=", ".join(lost),
-                old_value=", ".join(lost),
-                entity_id=f_old.entity_id or f_new.entity_id,
-            )
-        )
-    return changes
-
-
-def _check_exception_spec_change(
-    mangled: str, f_old: Function, f_new: Function
-) -> list[Change]:
-    """Emit a change if the dynamic exception specification changed.
-
-    ``noexcept`` transitions keep their dedicated kinds; this covers the
-    legacy ``throw(...)`` spellings only. Tri-state: None = not captured.
-    """
-    if f_old.exception_spec is None or f_new.exception_spec is None:
-        return []
-    if f_old.exception_spec == f_new.exception_spec:
-        return []
-    return [
-        make_change(
-            ChangeKind.FUNC_EXCEPTION_SPEC_CHANGED,
-            symbol=mangled,
-            name=f_old.name,
-            old=f_old.exception_spec or "(none)",
-            new=f_new.exception_spec or "(none)",
-            entity_id=f_old.entity_id or f_new.entity_id,
-        )
-    ]
-
-
-def _check_vtable_index_change(
-    mangled: str, f_old: Function, f_new: Function
-) -> list[Change]:
-    """Emit a change when a persisting virtual method moved to another slot.
-
-    ``vtable_index`` is modeled per-function; the per-type vtable array diff
-    misses snapshots that carry indices but no reconstructed vtable list.
-    Reuses TYPE_VTABLE_CHANGED — a moved slot IS a vtable reorder.
-    """
-    if f_old.vtable_index is None or f_new.vtable_index is None:
-        return []
-    if f_old.vtable_index == f_new.vtable_index:
-        return []
-    return [
-        make_change(
-            ChangeKind.TYPE_VTABLE_CHANGED,
-            symbol=mangled,
-            description=(
-                f"vtable slot index changed for {f_old.name}: "
-                f"{f_old.vtable_index} → {f_new.vtable_index}"
-            ),
-            old_value=str(f_old.vtable_index),
-            new_value=str(f_new.vtable_index),
-            entity_id=f_old.entity_id or f_new.entity_id,
-        )
-    ]
-
-
 def _check_function_signature(
     mangled: str,
     f_old: Function,
@@ -633,7 +427,7 @@ def _check_function_signature(
 ) -> list[Change]:
     """Compare signatures and qualifiers of two matched functions.
 
-    The return/parameter/ref-qualifier/variadic half reads each side's
+    Every signature and qualifier comparison reads each side's
     ``SemanticIR`` through *signatures* (``compare/function_signature.py``,
     ADR-063 6B function-signature cohort). Without one -- a caller pairing
     two functions outside a snapshot comparison -- each side is projected on
@@ -644,7 +438,7 @@ def _check_function_signature(
             function_signature_index(None, [f_old]),
             function_signature_index(None, [f_new]),
         )
-    head, ref_qual, variadic = function_signature_changes(
+    changes = function_signature_changes(
         mangled,
         f_old.name,
         signatures[0].entity_for(f_old),
@@ -653,16 +447,6 @@ def _check_function_signature(
         params_unconfirmed=params_unconfirmed,
         is_llp64=is_llp64,
     )
-    changes: list[Change] = head + ref_qual
-    changes.extend(_check_linkage_change(mangled, f_old, f_new))
-    changes.extend(_check_noexcept_change(mangled, f_old, f_new))
-    changes.extend(_check_virtual_change(mangled, f_old, f_new))
-    changes.extend(check_hidden_friend_change(mangled, f_old, f_new))
-    changes.extend(_check_explicit_change(mangled, f_old, f_new))
-    changes.extend(variadic)
-    changes.extend(_check_contract_attributes_change(mangled, f_old, f_new))
-    changes.extend(_check_exception_spec_change(mangled, f_old, f_new))
-    changes.extend(_check_vtable_index_change(mangled, f_old, f_new))
     changes.extend(_export_transition.check_function(mangled, f_old, f_new))
     return changes
 
@@ -986,7 +770,18 @@ def _diff_functions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     # by mangled name across the FULL function map (not just public) —
     # old_map/new_map are passed too so a same-key pair already covered by
     # the public-symbol pairing above is not re-processed (Codex review).
-    changes.extend(diff_inline_hidden_friends(old_all, new_all_map, old_map, new_map))
+    changes.extend(
+        diff_inline_hidden_friends(
+            old_all,
+            new_all_map,
+            old_map,
+            new_map,
+            signatures=(
+                function_signature_index(old.canonical_ir, old_all.values()),
+                function_signature_index(new.canonical_ir, new_all_map.values()),
+            ),
+        )
+    )
 
     return changes
 
