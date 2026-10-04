@@ -101,18 +101,50 @@ def canonical_cv_qualification(spellings: Iterable[str]) -> tuple[str, ...]:
 
 _FIELD_NAMES: dict[type, tuple[str, ...]] = {}
 
+#: Every ``CanonicalEntity`` fact's default: the one shared ``NOT_COLLECTED``
+#: instance ``Fact.not_collected()`` already returns. A constant rather than a
+#: ``default_factory`` per field, since an entity is built per declaration and
+#: most of its ~45 facts are left at the default.
+_NOT_COLLECTED: Fact[Any] = Fact.not_collected()
+
+
+def _fact_field_names(cls: type) -> tuple[str, ...]:
+    """*cls*'s ``Fact``-annotated field names, in declaration order (resolved
+    once per class: ``dataclasses.fields()`` per call was most of
+    ``__post_init__``'s cost on a large snapshot). Annotations are strings
+    under ``from __future__ import annotations``."""
+    names = _FIELD_NAMES.get(cls)
+    if names is None:
+        names = _FIELD_NAMES[cls] = tuple(
+            f.name for f in fields(cls) if str(f.type).startswith("Fact")
+        )
+    return names
+
+
+#: The int-valued ``CanonicalEntity`` facts.
+_INT_FACTS = frozenset(
+    {
+        "size_bits",
+        "alignment_bits",
+        "vtable_index",
+        "declared_alignment_bits",
+        "return_pointer_depth",
+    }
+)
 #: The bool-valued ``CanonicalEntity`` facts.
-_BOOL_FACTS = (
-    "is_variadic",
-    "is_extern_c",
-    "is_noexcept",
-    "is_virtual",
-    "is_explicit",
-    "is_hidden_friend",
-    "is_override",
-    "is_inline",
-    "is_deleted",
-    "deleted_from_dwarf",
+_BOOL_FACTS = frozenset(
+    (
+        "is_variadic",
+        "is_extern_c",
+        "is_noexcept",
+        "is_virtual",
+        "is_explicit",
+        "is_hidden_friend",
+        "is_override",
+        "is_inline",
+        "is_deleted",
+        "deleted_from_dwarf",
+    )
 )
 
 
@@ -138,22 +170,18 @@ class CanonicalEntity:
     #: The canonical, ordered template-argument spellings, empty for a
     #: non-template declaration (``Fact.present(())``, which is a *confirmed*
     #: absence — distinct from ``Fact.not_collected()``).
-    template_arguments: Fact[tuple[str, ...]] = field(
-        default_factory=lambda: Fact.not_collected()
-    )
+    template_arguments: Fact[tuple[str, ...]] = _NOT_COLLECTED
     #: CV-qualification in :data:`CV_QUALIFIER_ORDER` order — see
     #: :func:`canonical_cv_qualification`.
-    cv_qualification: Fact[tuple[str, ...]] = field(
-        default_factory=lambda: Fact.not_collected()
-    )
+    cv_qualification: Fact[tuple[str, ...]] = _NOT_COLLECTED
     #: A record's ``sizeof`` and alignment, in bits (ADR-063 6B, record-layout
     #: cohort). ``NOT_COLLECTED`` for every non-record kind and for a record
     #: whose producer established no layout (an opaque declaration, a clang
     #: record DWARF could not fill); a present value is always an ``int``.
     #: See ``model/semantic_ir_record_layout.py`` for how these are kept in
     #: step with the ``RecordType`` they describe.
-    size_bits: Fact[int] = field(default_factory=lambda: Fact.not_collected())
-    alignment_bits: Fact[int] = field(default_factory=lambda: Fact.not_collected())
+    size_bits: Fact[int] = _NOT_COLLECTED
+    alignment_bits: Fact[int] = _NOT_COLLECTED
     #: A function's signature, per position (ADR-063 6B, function-signature
     #: cohort). ``NOT_COLLECTED`` for every non-function kind. The spellings
     #: are the producer's own, *not* canonicalized: the signature detectors'
@@ -161,70 +189,46 @@ class CanonicalEntity:
     #: canonical form would change what they decide. ``parameter_kinds`` holds
     #: one ``ParamKind`` value per parameter, ``""`` where the producer did not
     #: establish that parameter's kind. See ``model/semantic_ir_function_signature.py``.
-    return_type_spelling: Fact[str] = field(
-        default_factory=lambda: Fact.not_collected()
-    )
-    parameter_type_spellings: Fact[tuple[str, ...]] = field(
-        default_factory=lambda: Fact.not_collected()
-    )
-    parameter_kinds: Fact[tuple[str, ...]] = field(
-        default_factory=lambda: Fact.not_collected()
-    )
-    ref_qualifier: Fact[str] = field(default_factory=lambda: Fact.not_collected())
-    is_variadic: Fact[bool] = field(default_factory=lambda: Fact.not_collected())
+    return_type_spelling: Fact[str] = _NOT_COLLECTED
+    parameter_type_spellings: Fact[tuple[str, ...]] = _NOT_COLLECTED
+    parameter_kinds: Fact[tuple[str, ...]] = _NOT_COLLECTED
+    ref_qualifier: Fact[str] = _NOT_COLLECTED
+    is_variadic: Fact[bool] = _NOT_COLLECTED
     #: A function's qualifiers (ADR-063 6B, function-qualifier cohort),
     #: ``NOT_COLLECTED`` for every non-function kind and wherever the producer
     #: did not capture the value.
-    is_extern_c: Fact[bool] = field(default_factory=lambda: Fact.not_collected())
-    is_noexcept: Fact[bool] = field(default_factory=lambda: Fact.not_collected())
-    is_virtual: Fact[bool] = field(default_factory=lambda: Fact.not_collected())
-    is_explicit: Fact[bool] = field(default_factory=lambda: Fact.not_collected())
-    is_hidden_friend: Fact[bool] = field(default_factory=lambda: Fact.not_collected())
-    hidden_friend_owner: Fact[str] = field(default_factory=lambda: Fact.not_collected())
-    contract_attributes: Fact[tuple[str, ...]] = field(
-        default_factory=lambda: Fact.not_collected()
-    )
-    exception_spec: Fact[str] = field(default_factory=lambda: Fact.not_collected())
-    vtable_index: Fact[int] = field(default_factory=lambda: Fact.not_collected())
-    is_override: Fact[bool] = field(default_factory=lambda: Fact.not_collected())
-    is_inline: Fact[bool] = field(default_factory=lambda: Fact.not_collected())
-    is_deleted: Fact[bool] = field(default_factory=lambda: Fact.not_collected())
-    deleted_from_dwarf: Fact[bool] = field(default_factory=lambda: Fact.not_collected())
+    is_extern_c: Fact[bool] = _NOT_COLLECTED
+    is_noexcept: Fact[bool] = _NOT_COLLECTED
+    is_virtual: Fact[bool] = _NOT_COLLECTED
+    is_explicit: Fact[bool] = _NOT_COLLECTED
+    is_hidden_friend: Fact[bool] = _NOT_COLLECTED
+    hidden_friend_owner: Fact[str] = _NOT_COLLECTED
+    contract_attributes: Fact[tuple[str, ...]] = _NOT_COLLECTED
+    exception_spec: Fact[str] = _NOT_COLLECTED
+    vtable_index: Fact[int] = _NOT_COLLECTED
+    is_override: Fact[bool] = _NOT_COLLECTED
+    is_inline: Fact[bool] = _NOT_COLLECTED
+    is_deleted: Fact[bool] = _NOT_COLLECTED
+    deleted_from_dwarf: Fact[bool] = _NOT_COLLECTED
     #: Per-parameter facts (ADR-063 6B, parameter cohort), one entry per
     #: parameter: the names, the default expressions (``None`` where a
     #: parameter has none), the pointer depths, and the ``restrict``/
     #: ``va_list`` flags as ``"true"``/``"false"``, ``""`` where the producer
     #: did not establish that parameter's flag. Plus the return pointer depth.
-    parameter_names: Fact[tuple[str, ...]] = field(
-        default_factory=lambda: Fact.not_collected()
-    )
-    parameter_defaults: Fact[tuple[str | None, ...]] = field(
-        default_factory=lambda: Fact.not_collected()
-    )
-    parameter_pointer_depths: Fact[tuple[int, ...]] = field(
-        default_factory=lambda: Fact.not_collected()
-    )
-    parameter_restrict: Fact[tuple[str, ...]] = field(
-        default_factory=lambda: Fact.not_collected()
-    )
-    parameter_va_list: Fact[tuple[str, ...]] = field(
-        default_factory=lambda: Fact.not_collected()
-    )
-    return_pointer_depth: Fact[int] = field(
-        default_factory=lambda: Fact.not_collected()
-    )
+    parameter_names: Fact[tuple[str, ...]] = _NOT_COLLECTED
+    parameter_defaults: Fact[tuple[str | None, ...]] = _NOT_COLLECTED
+    parameter_pointer_depths: Fact[tuple[int, ...]] = _NOT_COLLECTED
+    parameter_restrict: Fact[tuple[str, ...]] = _NOT_COLLECTED
+    parameter_va_list: Fact[tuple[str, ...]] = _NOT_COLLECTED
+    return_pointer_depth: Fact[int] = _NOT_COLLECTED
     #: Function and variable declaration facts (ADR-063 6B, declaration-fact
     #: cohort): the deprecation as ``(message,)`` (``()`` when confirmed not
     #: deprecated), the ``AccessLevel`` value, and a variable's declared
     #: alignment in bits. Each keeps the status its producer gave the source
     #: ``Fact`` -- see ``model/semantic_ir_declaration_facts.py``.
-    deprecated: Fact[tuple[str, ...]] = field(
-        default_factory=lambda: Fact.not_collected()
-    )
-    access: Fact[str] = field(default_factory=lambda: Fact.not_collected())
-    declared_alignment_bits: Fact[int] = field(
-        default_factory=lambda: Fact.not_collected()
-    )
+    deprecated: Fact[tuple[str, ...]] = _NOT_COLLECTED
+    access: Fact[str] = _NOT_COLLECTED
+    declared_alignment_bits: Fact[int] = _NOT_COLLECTED
     producer: str = ""
 
     def __post_init__(self) -> None:
@@ -238,30 +242,23 @@ class CanonicalEntity:
         # `resolved_fact_count` — and through it `canonical_entities()`'s
         # reduction and the hybrid merge's backfill — treat a value the
         # entity does not carry as usable evidence (Codex review).
-        for name, fact in self.fact_items():
-            if fact.value is None and fact.is_present:
+        for name in _fact_field_names(type(self)):
+            fact = getattr(self, name)
+            if fact is _NOT_COLLECTED or not fact.is_present:
+                continue
+            value = fact.value
+            if value is None:
                 raise ValueError(
                     f"{name} is {fact.status.value} but carries no value; "
                     "confirmed absence is spelled with this field's own "
                     'empty value ("" or ()), never None'
                 )
-        for name in ("size_bits", "alignment_bits"):
-            layout = getattr(self, name)
-            # `bool` is an `int` subclass; a JSON `true` must not pass as 1.
-            if layout.is_present and (
-                isinstance(layout.value, bool) or not isinstance(layout.value, int)
-            ):
-                raise ValueError(f"{name} must carry an int, got {layout.value!r}")
-        for name in _BOOL_FACTS:
-            flag = getattr(self, name)
-            if flag.is_present and not isinstance(flag.value, bool):
-                raise ValueError(f"{name} must carry a bool, got {flag.value!r}")
-        for name in ("vtable_index", "declared_alignment_bits", "return_pointer_depth"):
-            slot = getattr(self, name)
-            if slot.is_present and (
-                isinstance(slot.value, bool) or not isinstance(slot.value, int)
-            ):
-                raise ValueError(f"{name} must carry an int, got {slot.value!r}")
+            if name in _INT_FACTS:
+                # `bool` is an `int` subclass; a JSON `true` must not pass as 1.
+                if isinstance(value, bool) or not isinstance(value, int):
+                    raise ValueError(f"{name} must carry an int, got {value!r}")
+            elif name in _BOOL_FACTS and not isinstance(value, bool):
+                raise ValueError(f"{name} must carry a bool, got {value!r}")
         cv = self.cv_qualification
         # `is_present`, not `status is PRESENT`: `PARTIAL` is usable evidence
         # everywhere else in this IR (`Fact.is_present`,
@@ -288,23 +285,20 @@ class CanonicalEntity:
         instead of restating the field list, so adding a field to this class
         cannot leave one of them silently ignoring it.
         """
-        # Field names resolved once per class: `dataclasses.fields()` per
-        # call was most of `__post_init__`'s cost on a large snapshot.
-        cls = type(self)
-        names = _FIELD_NAMES.get(cls)
-        if names is None:
-            names = _FIELD_NAMES[cls] = tuple(f.name for f in fields(cls))
         return tuple(
-            (name, value)
-            for name in names
-            if isinstance(value := getattr(self, name), Fact)
+            (name, getattr(self, name)) for name in _fact_field_names(type(self))
         )
 
     def resolved_fact_count(self) -> int:
         """How many of this entity's facts carry usable evidence
         (``PRESENT``/``PARTIAL``, i.e. ``Fact.is_present``) — the ranking
         :meth:`SemanticIR.canonical_entities` reduces on."""
-        return sum(1 for _, fact in self.fact_items() if fact.is_present)
+        count = 0
+        for name in _fact_field_names(type(self)):
+            fact = getattr(self, name)
+            if fact is not _NOT_COLLECTED and fact.is_present:
+                count += 1
+        return count
 
 
 @dataclass(frozen=True)

@@ -34,7 +34,9 @@ from abicheck.model.semantic_ir_declaration_facts import DECLARATION_FIELDS
 from abicheck.model.semantic_ir_function_signature import (
     LEGACY_SIGNATURE_DIAGNOSTIC,
     SIGNATURE_FIELDS,
-    with_function_signatures,
+)
+from abicheck.model.semantic_ir_legacy_adapter import (
+    legacy_function_signature_occurrences,
 )
 from abicheck.serialization import snapshot_from_dict, snapshot_to_dict
 from abicheck.storage.semantic_ir_codec import (
@@ -185,10 +187,11 @@ def test_end_to_end_compare_reads_the_ir() -> None:
     } <= kinds
 
 
-class TestFill:
-    def test_construction_fills_a_normalized_ir(self) -> None:
+class TestNormalizedIR:
+    def test_a_normalized_side_compares_by_its_declarations(self) -> None:
         snap = _snap(_fn("int", ["char *"], "&", True), with_ir=True)
-        (entity,) = snap.canonical_ir.occurrences.values()
+        (fn,) = snap.declarations.functions
+        entity = function_signature_index(snap.canonical_ir, [fn]).entity_for(fn)
         assert entity.return_type_spelling.value == "int"
         assert entity.parameter_type_spellings.value == ("char *",)
         assert entity.ref_qualifier.value == "&"
@@ -196,45 +199,26 @@ class TestFill:
 
     def test_unknown_variadic_stays_not_collected(self) -> None:
         snap = _snap(_fn("int", [], "", None), with_ir=True)
-        (entity,) = snap.canonical_ir.occurrences.values()
+        (fn,) = snap.declarations.functions
+        entity = function_signature_index(snap.canonical_ir, [fn]).entity_for(fn)
         assert entity.is_variadic.status is FactStatus.NOT_COLLECTED
-
-    def test_fill_never_overrides_an_established_fact(self) -> None:
-        fn = _fn("int", [], "", False)
-        entity = CanonicalEntity(
-            canonical_spelling=Fact.not_collected(),
-            return_type_spelling=Fact.present("long"),
-        )
-        ir = SemanticIR(occurrences={OccurrenceId(fn.entity_id): entity})
-        (filled,) = with_function_signatures(ir, [fn]).occurrences.values()
-        assert filled.return_type_spelling.value == "long"
-        assert filled.ref_qualifier.value == ""
-
-    def test_conflicting_functions_under_one_identity_fill_nothing(self) -> None:
-        a, b = _fn("int", [], "", False), _fn("long", [], "", False)
-        ir = SemanticIR(
-            occurrences={
-                OccurrenceId(a.entity_id): CanonicalEntity(
-                    canonical_spelling=Fact.not_collected()
-                )
-            }
-        )
-        assert with_function_signatures(ir, [a, b]) is ir
 
 
 class TestCodec:
     def test_round_trip_writes_signature_only_for_functions(self) -> None:
-        snap = _snap(_fn("int", ["int"], "&&", False), with_ir=True)
-        doc = semantic_ir_to_document(snap.canonical_ir, {})
+        fn = _fn("int", ["int"], "&&", False)
+        projected, _ = legacy_function_signature_occurrences([fn])
+        doc = semantic_ir_to_document(projected, {})
         assert doc["semantic_ir"]["version"] == 3
         (occ,) = doc["semantic_ir"]["occurrences"]
         assert occ["entity"]["parameter_type_spellings"]["value"] == ["int"]
         ir, _ = semantic_ir_from_document(doc)
-        assert ir == snap.canonical_ir
+        assert ir == projected
+        snap = _snap(fn, with_ir=True)
         reloaded = snapshot_from_dict(snapshot_to_dict(snap))
         assert reloaded.canonical_ir == snap.canonical_ir
 
-    def test_a_version_2_document_loads_and_is_filled(self) -> None:
+    def test_a_version_2_document_loads_and_compares_by_its_declarations(self) -> None:
         snap = _snap(_fn("int", ["int"], "", True), with_ir=True)
         doc = semantic_ir_to_document(snap.canonical_ir, {})
         doc["semantic_ir"]["version"] = 2
@@ -244,8 +228,8 @@ class TestCodec:
         ir, _ = semantic_ir_from_document(doc)
         (entity,) = ir.occurrences.values()
         assert entity.return_type_spelling.diagnostics == (LEGACY_SIGNATURE_DIAGNOSTIC,)
-        filled = with_function_signatures(ir, snap.declarations.functions)
-        (entity,) = filled.occurrences.values()
+        (fn,) = snap.declarations.functions
+        entity = function_signature_index(ir, [fn]).entity_for(fn)
         assert entity.return_type_spelling.value == "int"
         assert entity.is_variadic.value is True
 

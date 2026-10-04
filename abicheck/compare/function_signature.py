@@ -23,19 +23,20 @@
 ``is_variadic`` (semantic_ir document version 3, snapshot schema v57). The
 spellings are the producer's own rather than canonicalized, because the cv-
 and scalar-equivalence predicates below decide on raw spellings; storing a
-canonical form would change what they decide. The facts are filled at the
-snapshot boundary from the snapshot's final functions
-(``model/semantic_ir_function_signature.py``), so a hybrid merge, a layout
-backfill or a pre-v57 document all reach this module with the same facts.
+canonical form would change what they decide. A paired declaration is
+re-projected over its occurrence at comparison time
+(``model/semantic_ir_function_signature.with_declaration_signature``), so an
+occurrence written before version 3, or edited after load, reaches this
+module with the declaration's own facts.
 
 **Authority, per side** (the T3 rule the record-layout and variable cohorts
-follow): a function is read from its side's ``SemanticIR`` when that IR has
-an occurrence for its ``entity_id`` carrying a signature. A function the IR
-cannot speak for -- no ``entity_id``, no occurrence, an occurrence the fill
-declined (two different signatures under one identity), or a side with no
-function occurrences at all -- is projected through the legacy adapter
-(``semantic_ir_legacy_adapter.legacy_function_signature_occurrences``) with
-the same formula. Nothing re-reads a ``Function``'s signature fields here.
+follow): a function is read from its side's ``SemanticIR`` occurrence for
+its ``entity_id`` when that occurrence carries a signature, with the
+declaration re-projected over it as above. A function the IR cannot speak
+for -- no ``entity_id``, no occurrence, an occurrence without a signature, or
+a side with no function occurrences at all -- is projected through the
+legacy adapter (``semantic_ir_legacy_adapter.legacy_function_signature_entity``)
+with the same formula. Nothing re-reads a ``Function``'s signature fields here.
 
 **This module may not read a function's signature off ``Function``**, nor a
 snapshot's functions: ``scripts/semantic_ir_cutover.py`` forbids

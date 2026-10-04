@@ -160,7 +160,8 @@ def test_round_trip_keeps_absent_defaults_and_depths() -> None:
         functions=[fn],
     )
     snap = AbiSnapshot(library="l", version="1", functions=[fn], semantic_ir=ir)
-    (entity,) = snap.canonical_ir.occurrences.values()
+    (f,) = snap.declarations.functions
+    entity = function_signature_index(snap.canonical_ir, [f]).entity_for(f)
     assert entity.parameter_defaults.value == (None, "3")
     assert entity.parameter_pointer_depths.value == (1, 0)
     assert entity.parameter_restrict.value == ("true", "")

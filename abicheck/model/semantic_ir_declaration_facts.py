@@ -20,8 +20,7 @@ occurrences (ADR-063 6B, declaration-fact cohort).
 ``VAR_ACCESS_*`` and ``VAR_ALIGNMENT_CHANGED`` read
 ``CanonicalEntity.deprecated``/``access``/``declared_alignment_bits``. This
 module is the one formula from a parsed ``Function``/``Variable`` to those
-facts, and the snapshot-boundary fill for variables (functions are filled by
-``semantic_ir_function_signature``, which folds these in).
+facts (``semantic_ir_function_signature`` folds them into a function's).
 
 **Statuses are copied, not invented.** Each declaration already carries a
 ``Fact`` for the value (``deprecated_fact``, ``access_fact``,
@@ -37,22 +36,14 @@ recorded, so it is ``PRESENT``.
 
 from __future__ import annotations
 
-import dataclasses
-from collections.abc import Iterable
 from typing import Any
 
-from .availability import FactStatus
 from .declarations import Function, Variable
 from .fact import Fact
-from .identity import EntityId, EntityKind
-from .occurrence import OccurrenceId
-from .semantic_ir import CanonicalEntity, SemanticIR
 
 __all__ = [
     "DECLARATION_FIELDS",
     "declaration_facts",
-    "sync_snapshot_variable_facts",
-    "with_variable_facts",
 ]
 
 #: The ``CanonicalEntity`` fields this cohort owns.
@@ -91,49 +82,3 @@ def declaration_facts(decl: Function | Variable) -> dict[str, Any]:
         "access": access,
         "declared_alignment_bits": alignment,
     }
-
-
-def with_variable_facts(ir: SemanticIR, variables: Iterable[Variable]) -> SemanticIR:
-    """*ir* with every variable occurrence's missing declaration facts filled
-    from *variables*; *ir* itself when nothing changes. Same rules as the
-    function fill: only ``NOT_COLLECTED`` is filled, and two variables under
-    one identity with different facts fill nothing."""
-    by_id: dict[EntityId, dict[str, Any] | None] = {}
-    for var in variables:
-        eid = var.entity_id
-        if eid is None or eid.kind is not EntityKind.VARIABLE:
-            continue
-        facts = declaration_facts(var)
-        if eid in by_id and by_id[eid] != facts:
-            by_id[eid] = None
-        else:
-            by_id.setdefault(eid, facts)
-    if not by_id:
-        return ir
-    changed: dict[OccurrenceId, CanonicalEntity] = {}
-    for occ_id, entity in ir.occurrences.items():
-        known = by_id.get(occ_id.entity_id)
-        if known is None:
-            continue
-        updates = {
-            name: value
-            for name, value in known.items()
-            if getattr(entity, name).status is FactStatus.NOT_COLLECTED
-            and value.status is not FactStatus.NOT_COLLECTED
-        }
-        if updates:
-            changed[occ_id] = dataclasses.replace(entity, **updates)
-    if not changed:
-        return ir
-    return dataclasses.replace(ir, occurrences={**ir.occurrences, **changed})
-
-
-def sync_snapshot_variable_facts(snapshot: object) -> None:
-    """Fill *snapshot*'s ``semantic_ir`` variable declaration facts from its
-    own variables (see ``sync_snapshot_record_layout`` for where and why)."""
-    ir = getattr(snapshot, "semantic_ir", None)
-    if ir is None:
-        return
-    synced = with_variable_facts(ir, snapshot.declarations.variables)  # type: ignore[attr-defined]
-    if synced is not ir:
-        snapshot.semantic_ir = synced  # type: ignore[attr-defined]

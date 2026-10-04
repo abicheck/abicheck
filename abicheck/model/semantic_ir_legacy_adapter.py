@@ -114,11 +114,7 @@ from .identity import (
 )
 from .occurrence import OccurrenceId
 from .semantic_ir import CanonicalEntity, SemanticIR
-from .semantic_ir_declaration_facts import sync_snapshot_variable_facts
-from .semantic_ir_function_signature import (
-    function_signature_facts,
-    sync_snapshot_function_signatures,
-)
+from .semantic_ir_function_signature import function_signature_facts
 from .semantic_ir_record_layout import record_layout_facts, sync_snapshot_record_layout
 
 if TYPE_CHECKING:
@@ -466,7 +462,7 @@ def legacy_function_signature_occurrences(
     function plus each function's occurrence in input order --
     :func:`legacy_variable_occurrences`' shape. The payload is
     ``semantic_ir_function_signature.function_signature_facts``, the same
-    formula the load-time fill applies to a real IR.
+    formula the normalizer applies to a real IR.
     """
     occurrences: dict[OccurrenceId, CanonicalEntity] = {}
     seen: dict[EntityId, int] = {}
@@ -718,5 +714,8 @@ def finalize_snapshot_semantic_ir(snapshot: AbiSnapshot) -> None:
     again after a storage decode assigns ``semantic_ir``."""
     assert_snapshot_semantic_ir_consistent(snapshot)
     sync_snapshot_record_layout(snapshot)
-    sync_snapshot_function_signatures(snapshot)
-    sync_snapshot_variable_facts(snapshot)
+    # No function/variable fill here: the comparison indexes
+    # (``compare/function_signature.py``, ``compare/variables.py``) re-project
+    # each paired declaration over its occurrence, which a boundary copy
+    # would only duplicate (and which an in-place edit after load would leave
+    # stale).

@@ -129,7 +129,41 @@ from abicheck.model.snapshot import AbiSnapshot
 
 #: Sites the harness cannot ablate yet. Shrink-only: see
 #: ``test_uncovered_is_shrink_only``.
-UNCOVERED: dict[str, str] = {}
+_DECLARATION_PROJECTION = (
+    "comparison-time projection of the paired Function/Variable "
+    "(compare/function_signature.py, compare/variables.py re-project the "
+    "declaration over its occurrence), so the evidence is the declaration's "
+    "own field, which H1 ablates; no producer persists this fact any more"
+)
+
+UNCOVERED: dict[str, str] = {
+    "CanonicalEntity.access": _DECLARATION_PROJECTION,
+    "CanonicalEntity.contract_attributes": _DECLARATION_PROJECTION,
+    "CanonicalEntity.declared_alignment_bits": _DECLARATION_PROJECTION,
+    "CanonicalEntity.deleted_from_dwarf": _DECLARATION_PROJECTION,
+    "CanonicalEntity.deprecated": _DECLARATION_PROJECTION,
+    "CanonicalEntity.exception_spec": _DECLARATION_PROJECTION,
+    "CanonicalEntity.hidden_friend_owner": _DECLARATION_PROJECTION,
+    "CanonicalEntity.is_deleted": _DECLARATION_PROJECTION,
+    "CanonicalEntity.is_explicit": _DECLARATION_PROJECTION,
+    "CanonicalEntity.is_extern_c": _DECLARATION_PROJECTION,
+    "CanonicalEntity.is_hidden_friend": _DECLARATION_PROJECTION,
+    "CanonicalEntity.is_inline": _DECLARATION_PROJECTION,
+    "CanonicalEntity.is_noexcept": _DECLARATION_PROJECTION,
+    "CanonicalEntity.is_override": _DECLARATION_PROJECTION,
+    "CanonicalEntity.is_variadic": _DECLARATION_PROJECTION,
+    "CanonicalEntity.is_virtual": _DECLARATION_PROJECTION,
+    "CanonicalEntity.parameter_defaults": _DECLARATION_PROJECTION,
+    "CanonicalEntity.parameter_kinds": _DECLARATION_PROJECTION,
+    "CanonicalEntity.parameter_names": _DECLARATION_PROJECTION,
+    "CanonicalEntity.parameter_pointer_depths": _DECLARATION_PROJECTION,
+    "CanonicalEntity.parameter_restrict": _DECLARATION_PROJECTION,
+    "CanonicalEntity.parameter_va_list": _DECLARATION_PROJECTION,
+    "CanonicalEntity.ref_qualifier": _DECLARATION_PROJECTION,
+    "CanonicalEntity.return_pointer_depth": _DECLARATION_PROJECTION,
+    "CanonicalEntity.return_type_spelling": _DECLARATION_PROJECTION,
+    "CanonicalEntity.vtable_index": _DECLARATION_PROJECTION,
+}
 
 #: The real current violations this harness found (see module docstring).
 #: ``(case, site, side)``. Empty since the header-origin seeding fix; the
