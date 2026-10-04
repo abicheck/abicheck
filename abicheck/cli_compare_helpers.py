@@ -78,7 +78,7 @@ from .errors import PolicyError, ProfileMismatchError, ScopeMismatchError
 from .frontends.cli import compare_enrichment as _enrichment
 from .frontends.cli.acknowledgment_config import (
     compare_acknowledgments_for,
-    note_unapplied_acknowledgments,
+    release_acknowledgment_inputs,
 )
 from .frontends.cli.compare_report import (
     # A cohesive slice of ``run_compare``'s post-comparison phase (scoped
@@ -1387,9 +1387,6 @@ def run_compare(
             route="a directory/package comparison",
             reason="the per-library fan-out has no contract-overlay channel",
         )
-        note_unapplied_acknowledgments(
-            project_cfg, route="a directory/package comparison"
-        )
         # Codex review, fresh evidence ("Validate release-only view
         # restrictions before dry-run exit"): --view leaf/root-cause is
         # rejected for a directory/package operand inside
@@ -1598,6 +1595,9 @@ def run_compare(
                 new_dir=new_input,
                 project_policy_overrides=resolve_release_project_policy_overrides(
                     project_cfg, cfg_path
+                ),
+                **release_acknowledgment_inputs(
+                    project_cfg, cfg_path, config_explicit=config is not None
                 ),
                 headers=headers,
                 includes=directory_includes,

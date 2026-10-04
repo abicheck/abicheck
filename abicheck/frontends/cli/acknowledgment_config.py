@@ -26,8 +26,8 @@
   supply records. A discovered value is noted on stderr and not loaded --
   the trust boundary ``contract_overlays.py`` states for
   ``contract.overlays``.
-- A route that applies no acknowledgments (the directory/package release
-  fan-out) says so on stderr when the block is set.
+- The directory/package fan-out forwards the same two values to every
+  member's ``CompareRequest`` (:func:`release_acknowledgment_inputs`).
 
 A relative ``file`` resolves against the project root.
 """
@@ -47,7 +47,7 @@ from ...workflows.acknowledgment_inputs import (
 __all__ = [
     "CONFIG_KEY",
     "compare_acknowledgments_for",
-    "note_unapplied_acknowledgments",
+    "release_acknowledgment_inputs",
 ]
 
 CONFIG_KEY = "acknowledgment"
@@ -79,12 +79,7 @@ def compare_acknowledgments_for(
     ack_cfg = getattr(project_cfg, "acknowledgment", None)
     records_path = _records_path(project_cfg, cfg_path)
     if records_path is not None and not config_explicit:
-        click.echo(
-            f"Note: the auto-discovered {cfg_path}'s {CONFIG_KEY}.file is not "
-            "loaded: a discovered config is not trusted to accept findings. "
-            "Name the config with --config to apply it.",
-            err=True,
-        )
+        _note_untrusted_records(cfg_path)
         records_path = None
     try:
         return resolve_compare_acknowledgments(
@@ -96,11 +91,32 @@ def compare_acknowledgments_for(
         raise click.UsageError(f"{CONFIG_KEY}.file: {exc}") from exc
 
 
-def note_unapplied_acknowledgments(project_cfg: object, *, route: str) -> None:
-    """For a *route* that applies no acknowledgments: a stderr note when set."""
-    if getattr(project_cfg, "acknowledgment", None) is not None:
-        click.echo(
-            f"Note: .abicheck.yml's {CONFIG_KEY} block is not applied on "
-            f"{route}; it applies to a single-pair compare.",
-            err=True,
-        )
+def release_acknowledgment_inputs(
+    project_cfg: object, cfg_path: Path | None, *, config_explicit: bool
+) -> dict[str, object]:
+    """The directory/package fan-out's two ``CompareRequest`` fields, under the
+    same trust rule as :func:`compare_acknowledgments_for`; each member's
+    ``run_compare`` resolves them (and a ``--policy`` block's precedence) the
+    way a single-pair compare does."""
+    records_path = _records_path(project_cfg, cfg_path)
+    if records_path is not None and not config_explicit:
+        _note_untrusted_records(cfg_path)
+        records_path = None
+    if records_path is not None and not records_path.is_file():
+        raise click.UsageError(f"{CONFIG_KEY}.file: no such file: {records_path}")
+    ack_cfg = getattr(project_cfg, "acknowledgment", None)
+    return {
+        "acknowledgments_path": records_path,
+        "acknowledgment_unacknowledged_additions": getattr(
+            ack_cfg, "unacknowledged_additions", None
+        ),
+    }
+
+
+def _note_untrusted_records(cfg_path: Path | None) -> None:
+    click.echo(
+        f"Note: the auto-discovered {cfg_path}'s {CONFIG_KEY}.file is not "
+        "loaded: a discovered config is not trusted to accept findings. "
+        "Name the config with --config to apply it.",
+        err=True,
+    )

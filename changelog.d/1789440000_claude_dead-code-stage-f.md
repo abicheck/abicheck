@@ -56,8 +56,12 @@
   config's, and is now honored by the CLI too. Under `block`, unacknowledged
   public additions raise a clean exit to `1` (reason `additions_review`), and
   the GitHub Action publishes the verdict `ADDITIONS_UNACKNOWLEDGED`.
-  Single-pair `compare` only; a directory/package comparison notes the block
-  as unapplied.
+  Applies to a single-pair and a directory/package `compare` (where any
+  library's unacknowledged addition gates the release). The typed API takes
+  the same two settings as `CompareRequest(acknowledgments_path=...,
+  acknowledgment_unacknowledged_additions=...)`.
+- A dominant exit reason (for example a budget overflow) no longer resets the
+  other exit-axis contributions recorded under it to `0` in the report.
 
 ### Fixed
 

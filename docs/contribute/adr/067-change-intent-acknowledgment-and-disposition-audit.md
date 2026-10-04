@@ -93,13 +93,14 @@ acknowledgment document from a path exists yet — that front-end wiring is
 left to a follow-up, the same staged "engine primitive, then CLI surface"
 sequencing ADR-049's own contract-coverage axis used (Phase 5 landed the
 ledger; Phase 7 wired the exit). **That follow-up landed (2026-10) for a
-single-pair `compare`:** `.abicheck.yml`'s `acknowledgment:` block names the
+single-pair `compare`, then for the directory/package fan-out and the typed
+API's `CompareRequest`:** `.abicheck.yml`'s `acknowledgment:` block names the
 records `file` (loaded only from an explicit `--config`, the trust boundary
 `contract.overlays` has) and `unacknowledged_additions`; a `--policy`
 document's own `acknowledgment:` block outranks it (ADR-049 D7); the
-Action publishes `ADDITIONS_UNACKNOWLEDGED`. Still open: the
-directory/package fan-out (notes the block as unapplied) and a
-`CompareRequest` field for the typed API. See
+Action publishes `ADDITIONS_UNACKNOWLEDGED`; the release fan-out folds each
+member's contribution with `max`; `CompareRequest.acknowledgments_path`/
+`acknowledgment_unacknowledged_additions` carry both settings. See
 [Change acknowledgment](../../use/acknowledgments.md) for the user-facing
 format and gate contract.
 

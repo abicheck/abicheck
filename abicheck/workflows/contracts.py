@@ -316,6 +316,15 @@ class CompareRequest:
     project_policy_overrides: tuple[tuple[ChangeKind, Verdict], ...] | None = field(
         default=None, kw_only=True
     )
+    #: ``.abicheck.yml``'s ``acknowledgment:`` block (ADR-067 D5/D6), at the
+    #: same project-config tier: a ``policy_file_path`` document that states
+    #: its own ``acknowledgment:`` block outranks the gate setting. Whether a
+    #: project config is trusted to supply the records is the caller's call
+    #: (the CLI loads them only from an explicit ``--config``).
+    acknowledgments_path: Path | None = field(default=None, kw_only=True)
+    acknowledgment_unacknowledged_additions: str | None = field(
+        default=None, kw_only=True
+    )
     #: ``surface.internal_namespaces`` when a pack supplied it — see
     #: ``pack_policy_overrides`` above for why this field exists and how it
     #: is applied. ``None`` means "no pack stated this"; distinct from an
@@ -505,6 +514,7 @@ class CompareRequest:
                     errors.append(
                         f"{field_name} kind {kind.value!r} may not target Verdict.NO_CHANGE"
                     )
+        errors += _acknowledgment_errors(self)
         for label, side in (("old", self.old), ("new", self.new)):
             errors += _path_required_errors(label, side, source_only_allowed=False)
             errors += _side_errors(label, side)
@@ -748,3 +758,20 @@ __all__ = [
     "frontend_value_errors",
     "required_path",
 ]
+
+
+def _acknowledgment_errors(request: CompareRequest) -> list[str]:
+    """``CompareRequest``'s ADR-067 D5/D6 fields, checked up front."""
+    from ..model.acknowledgment_policy import VALID_UNACKNOWLEDGED_ADDITIONS_ACTIONS
+
+    errors: list[str] = []
+    action = request.acknowledgment_unacknowledged_additions
+    if action is not None and action not in VALID_UNACKNOWLEDGED_ADDITIONS_ACTIONS:
+        errors.append(
+            "acknowledgment_unacknowledged_additions must be one of "
+            f"{sorted(VALID_UNACKNOWLEDGED_ADDITIONS_ACTIONS)}; got {action!r}"
+        )
+    path = request.acknowledgments_path
+    if path is not None and not Path(path).is_file():
+        errors.append(f"acknowledgments file not found: {path}")
+    return errors

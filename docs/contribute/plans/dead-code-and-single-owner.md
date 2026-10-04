@@ -252,7 +252,7 @@ consumer that does not exist yet.
 | `storage.import_baseline_set.import_baseline_set`/`export_baseline_set`, with `dto.baseline_set_metadata_from_dto`/`_to_dto` | ADR-062 (Proposed); [storage-format-v2](storage-format-v2.md); G40 | A baseline publish/load path in `compare` or `project` that goes through the BundleFacts→ProjectSnapshot adapter (streaming variant is a known gap). |
 | `storage.entity_ids.elf_symbol_occurrence` | ADR-062 Phase 0 (storage-format-v2 A0.2/A0.3) | A storage-v2 ELF symbol-occurrence producer (later ADR-062 phases). |
 | `binary_fingerprint.compute_function_fingerprints` | ADR-003 | `diff_symbols_renames.py`'s ELF-only rename path describes fingerprinting when a binary path is available; the call was never made. |
-| `acknowledgment_gate.additions_review_exit_contribution` | ADR-067 D6 | **Wired for a single-pair `compare` (2026-10):** an `ExitDecision` axis (`additions_review_contribution`, schema 5.13); `.abicheck.yml`'s `acknowledgment:` block supplies the records and the gate; the Action publishes `ADDITIONS_UNACKNOWLEDGED`. Remaining: the directory/package fan-out and a typed-API `CompareRequest` field (see `known-gaps.md`). |
+| `acknowledgment_gate.additions_review_exit_contribution` | ADR-067 D6 | **Wired (2026-10) for a single-pair and directory/package `compare` and the typed API:** an `ExitDecision` axis (`additions_review_contribution`, schema 5.13); `.abicheck.yml`'s `acknowledgment:` block supplies the records and the gate; the Action publishes `ADDITIONS_UNACKNOWLEDGED`. The release fan-out `max`s each member's contribution; `CompareRequest` carries both settings. |
 
 Two rows first listed here were not wiring gaps. `legacy_record_ir` was a
 wrapper: `compare/record_layout.py` already reads through

@@ -385,6 +385,13 @@ def _compare_one_library(
         stamp_member_assurance(
             entry, result, require_complete=require_complete_analysis
         )
+        # ADR-067 D6's additions-review floor (0/1), per member; folded with
+        # max() by the release exit resolver, like the assurance axis.
+        from .workflows.gate import additions_review_exit_contribution
+
+        entry["additions_review_exit_contribution"] = (
+            additions_review_exit_contribution(result)
+        )
         if contract_evaluation:
             # ADR-049 Phase 7's orthogonal contract-coverage floor (0/1),
             # read off this library's own persisted contract context --
@@ -644,6 +651,8 @@ def _compare_release_libraries(
     env_matrix: EnvironmentMatrix | None = None,
     exclude_headers: tuple[str, ...] = (),
     lang_explicit: bool = False,
+    acknowledgments_path: Path | None = None,
+    acknowledgment_unacknowledged_additions: str | None = None,
 ) -> tuple[list[dict[str, object]], str, list[tuple[DiffResult, SymbolInventory]]]:
     """Compare each matched library pair and collect results.
 
@@ -703,6 +712,8 @@ def _compare_release_libraries(
             project_policy_overrides=project_policy_overrides,
             env_matrix=env_matrix,
             exclude_headers=exclude_headers,
+            acknowledgments_path=acknowledgments_path,
+            acknowledgment_unacknowledged_additions=acknowledgment_unacknowledged_additions,
         ),
         old_map=old_map,
         new_map=new_map,

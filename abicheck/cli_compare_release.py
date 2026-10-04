@@ -482,6 +482,8 @@ def compare_release_cmd(
     # default) is a true no-op: every library is compared exactly as it was
     # before this parameter existed.
     project_policy_overrides: dict[Any, Any] | None = None,
+    acknowledgments_path: Path | None = None,
+    acknowledgment_unacknowledged_additions: str | None = None,
     # ADR-020b / ADR-068 D5: resolved once by the caller
     # (`cli_compare_helpers.run_compare`'s `resolved_cfg.deployment`, the
     # same place `collapse_versioned_symbols`/`public_header_dirs` above are
@@ -799,6 +801,8 @@ def compare_release_cmd(
                 env_matrix=env_matrix,
                 exclude_headers=exclude_headers,
                 lang_explicit=lang_explicit,
+                acknowledgments_path=acknowledgments_path,
+                acknowledgment_unacknowledged_additions=acknowledgment_unacknowledged_additions,
             )
 
             for key in matched_keys:

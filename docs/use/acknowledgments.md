@@ -35,11 +35,13 @@ boundary [`contract.overlays`](../reference/config-file.md#contract) has.
 `unacknowledged_additions` applies from any config, because `warn`/`block`
 can only add to what a run reports.
 
-Today this applies to a single-pair `compare`. A directory/package comparison
-notes on stderr that the block was not applied. The typed Python API passes
-records directly (`checker.compare(acknowledgments=AcknowledgmentList.load(path))`)
-and takes the gate from a `--policy` document's own `acknowledgment:` block;
-`CompareRequest` has no field for the records yet.
+This applies to a single-pair `compare` and to a directory/package
+comparison, where every library is reviewed against the same records and the
+release exits `1` if any library has an unacknowledged addition under `block`.
+From the typed Python API, set `CompareRequest(acknowledgments_path=...,
+acknowledgment_unacknowledged_additions="block")`; a `policy_file_path`
+document's own `acknowledgment:` block outranks the second field, as on the
+CLI.
 
 > Acknowledgment is **not** suppression. A suppressed finding disappears
 > from the report and the gate before the verdict is computed. An
