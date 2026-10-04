@@ -138,6 +138,7 @@ from .evidence_depth import (
 )
 from .model import AbiSnapshot
 from .model.change_catalog.kinds import ChangeKind
+from .policy.analysis_assurance_declined import declined_comparison_notes
 from .policy.analysis_assurance_l0_context import (
     l0_context_status as _l0_context_status,
 )
@@ -1419,6 +1420,7 @@ def compute_analysis_assurance(
         old_pack, new_pack
     )
     notes.extend(manifest_notes)
+    notes.extend(declined_comparison_notes(result.detector_results))
 
     if (export_accounting.unaccounted or 0) > 0:
         notes.append(

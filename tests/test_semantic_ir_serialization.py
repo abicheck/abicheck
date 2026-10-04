@@ -530,7 +530,7 @@ class TestAbsence:
 
     def test_empty_ir_round_trips_as_empty_not_none(self) -> None:
         document = snapshot_to_dict(_snapshot(SemanticIR()))
-        assert document["semantic_ir"] == {"version": 2, "occurrences": []}
+        assert document["semantic_ir"] == {"version": 3, "occurrences": []}
         # An IR that observed nothing is not the same as no IR at all — the
         # first says a narrowed backend ran and found nothing, the second
         # that no backend produced one — so the two must not both decode to

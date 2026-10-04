@@ -61,7 +61,7 @@ too, discarding the real mangled identity clang correctly observed.
 **Nineteenth round, fresh evidence, two independent findings on the SAME
 commit** further narrowed the gate (the seventeenth/eighteenth rounds in
 between were about a different artifact --
-``extract.semantic_normalizer_artifacts``'s opaque-``FunctionType``
+``model.castxml_spelling_artifacts``'s opaque-``FunctionType``
 regex, documented in ``test_semantic_normalizer_artifacts.py`` instead):
 
   1. ``is_darwin_target`` checked only for an ``"apple"`` VENDOR

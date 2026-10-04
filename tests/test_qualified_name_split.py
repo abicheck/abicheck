@@ -174,7 +174,7 @@ class TestIterTopLevelChars:
         argument WITHOUT a disambiguating `(...)`/`[...]` wrap around it
         (`S<N < 2, &h>`) is still mistaken for a nested template
         open/close, the same accepted residual
-        `extract.semantic_normalizer_artifacts.has_unresolved_component`
+        `model.castxml_spelling_artifacts.has_unresolved_component`
         already documents for the identical case -- disambiguating this
         needs real expression parsing, not a textual bracket stack.
         Pinned as a test so the gap is executable rather than prose --

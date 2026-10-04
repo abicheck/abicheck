@@ -19,7 +19,7 @@ Phase 6, fourth slice) -- exercised through ``normalize_header_ast`` itself.
 Split out of ``test_semantic_normalizer.py`` once that file's accumulated
 regression tests for these primitives pushed it past the AI-readiness
 gate's 1200-line cap for a new test file, mirroring the production-code
-split of ``extract/semantic_normalizer_artifacts.py`` out of
+split of ``model/castxml_spelling_artifacts.py`` out of
 ``extract/semantic_normalizer.py`` for the identical reason. Scope: the
 unresolved-type sentinel, castxml's opaque ``FunctionType`` tag, clang's
 compound-initializer expression fingerprint, and clang's Python-bool-derived

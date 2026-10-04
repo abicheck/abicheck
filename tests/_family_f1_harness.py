@@ -479,6 +479,19 @@ def _base() -> Side:
             _fn("baz", "long", ()),
             _fn("move", "void", ("Point",)),
             _fn("use", "void", ("Derived*",)),
+            # A virtual method with a recorded vtable slot and a hidden friend
+            # with a recorded owner, so both function-qualifier IR facts
+            # (``CanonicalEntity.vtable_index``/``hidden_friend_owner``) are
+            # PRESENT in the baseline and H1 ablates them.
+            _fn("area", "double", (), is_virtual=True, vtable_index=0),
+            _fn(
+                "swap",
+                "void",
+                ("Point",),
+                is_hidden_friend=True,
+                hidden_friend_owner="Point",
+                hidden_friend_owner_fact=Fact.present("Point"),
+            ),
         ),
         variables=(_var("g_count"),),
         types=(

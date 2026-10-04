@@ -17,22 +17,41 @@
 
 from __future__ import annotations
 
-import re
-from collections.abc import Callable, Container, Mapping
+import functools
+from collections.abc import Callable, Container, Iterator, Mapping
 from typing import Any
 
 from .checker_types import Change
 from .compare import export_transition as _export_transition
 from .compare.constants import constant_index_pair, diff_constants
+from .compare.declaration_facts import access_changes, deprecation_changes
 from .compare.edge_query import export_table_covered
 from .compare.elf_only_demangle import (
     elf_only_demangled_name,
     prewarm_elf_only_demangling,
 )
-from .compare.fact_comparison import compare_facts
-from .compare.fact_gate import both_facts_present
+from .compare.function_lifecycle import (
+    converting_ctor_signature,
+    deletion_kind,
+    inline_changes,
+    is_deleted,
+)
+from .compare.function_signature import (
+    FunctionSignatureIndex,
+    function_signature_changes,
+    function_signature_index,
+)
 from .compare.functions import function_identity_index
 from .compare.naming_conventions import PREFIX_RENAME
+from .compare.parameter_facts import (
+    ParameterView,
+    override_changes,
+    parameter_default_changes,
+    parameter_rename_changes,
+    pointer_level_changes,
+    restrict_changes,
+    va_list_changes,
+)
 from .compare.surface_reconcile import (
     RECONCILED_FUNCTIONS,
     RECONCILED_VARIABLES,
@@ -52,14 +71,13 @@ from .diff_default_value_reliability import (
 )
 from .diff_helpers import (
     TypeMap,
-    bool_transition,
     build_type_map,
     diff_by_key,
     lookup_matched_type,
     make_change,
     type_map_key,
 )
-from .diff_hidden_friends import check_hidden_friend_change, diff_inline_hidden_friends
+from .diff_hidden_friends import diff_inline_hidden_friends
 from .diff_symbols_anon_fields import (
     check_anon_fields_for_type,
 )
@@ -101,7 +119,7 @@ from .diff_symbols_variables import (
     _var_added,
     _var_removed,
     addition_evidence,
-    var_access_changes,
+    variable_type_index_for,
 )
 from .elf_symbol_filter import (
     FUNCTION_SYMBOL_TYPES,
@@ -123,15 +141,9 @@ from .finding_identity_ctor_dtor import (
 )
 from .model import (
     AbiSnapshot,
-    AccessLevel,
     Function,
-    Param,
-    ParamKind,
     RecordType,
     Variable,
-    canonicalize_type_name,
-    cv_qualifiers_only_differ,
-    func_signature_cv_only_differ,
     is_abi_surface_type_name,
     stdlib_namespaces_excluded,
 )
@@ -140,7 +152,6 @@ from .model import (
 # with no I/O, living in model so extract's tu_merge.py can use it too
 # without a forbidden extract -> compare edge. Re-exported by value here
 # for back-compat.
-from .model.cc_attributes import is_cc_attribute as _is_cc_attribute
 from .model.change_catalog.kinds import ChangeKind
 from .model.snapshot_reliability import family_reliable
 from .model.surface_facts import (
@@ -339,17 +350,6 @@ def _reconciled_variable_surfaces(
     )
 
 
-def _format_params(params: list[Param]) -> str:
-    """Format a parameter list as a human-readable string.
-
-    ``Param.type`` already carries pointer/reference sigils (e.g. ``int *``,
-    ``Foo &``), so we use it directly — appending ``_KIND_SUFFIX`` would
-    duplicate them.
-    """
-    parts = [p.type for p in params]
-    return ", ".join(parts) if parts else "(none)"
-
-
 _elf_only_demangled_name = elf_only_demangled_name
 _prewarm_elf_only_demangling = prewarm_elf_only_demangling
 
@@ -428,384 +428,6 @@ def _check_removed_function(
     )
 
 
-def _check_return_type_change(
-    mangled: str,
-    f_old: Function,
-    f_new: Function,
-    *,
-    is_llp64: bool = False,
-) -> list[Change]:
-    """Emit a change if the return type was modified."""
-    # RD2-5: a stripped side reports return_type "?"; that is unknown, not a change.
-    if _type_unknown(f_old.return_type) or _type_unknown(f_new.return_type):
-        return []
-    if canonicalize_type_name(f_old.return_type) == canonicalize_type_name(
-        f_new.return_type
-    ):
-        return []
-    # A pointee/by-value const-or-volatile qualification change (e.g.
-    # ``char *`` -> ``const char *``) does not change the return register or
-    # calling convention; it is a source/API-signature difference, not a
-    # binary ABI break (ISSUE-29/52: libuv/Wayland const-pointer churn).
-    if cv_qualifiers_only_differ(f_old.return_type, f_new.return_type):
-        return []
-    # A top-level BY-VALUE cv change on the return type (``int`` -> ``volatile
-    # int``) is absent from the function's mangled name entirely, unlike the
-    # equivalent field/variable case — see func_signature_cv_only_differ's
-    # docstring (Codex review, PR #582).
-    if func_signature_cv_only_differ(f_old.return_type, f_new.return_type):
-        return []
-    # A name-only change between ABI-equivalent integer spellings (e.g.
-    # long -> long long, size_t -> unsigned long on LP64) is not a binary ABI
-    # break: same width, signedness, and calling convention.
-    if _abi_equivalent_scalar(f_old.return_type, f_new.return_type, is_llp64):
-        return []
-    return [
-        make_change(
-            ChangeKind.FUNC_RETURN_CHANGED,
-            symbol=mangled,
-            name=f_old.name,
-            old=f_old.return_type,
-            new=f_new.return_type,
-            entity_id=f_old.entity_id or f_new.entity_id,
-        )
-    ]
-
-
-def _params_differ(p_old: Param, p_new: Param, is_llp64: bool) -> bool:
-    """Whether two positionally-matched parameters differ in an ABI-relevant way."""
-    if _type_unknown(p_old.type) or _type_unknown(p_new.type):
-        return False  # diffing a known type against unknown is meaningless
-    # Gated through compare_facts rather than a bare `p_old.kind !=
-    # p_new.kind`: neither header-AST backend
-    # determined a parameter's indirection kind at all before schema v45
-    # (the stale 'param_kind' fact family (model.snapshot_reliability)), so every parameter's `kind`
-    # read the dataclass's own resting ParamKind.VALUE -- comparing that raw
-    # default against DWARF's real POINTER/REFERENCE/RVALUE_REF reading
-    # fabricated FUNC_PARAMS_CHANGED for every pointer/reference parameter
-    # whenever a header-derived snapshot was compared against a
-    # DWARF-derived one of the identical, unchanged library. Same shape as
-    # is_restrict/is_va_list's own producer gate (diff_param_qualifiers.py):
-    # a pair whose evidence is incomplete on either side is skipped here,
-    # not read as "confirmed same/different" -- the type-spelling comparison
-    # below (which already renders a pointer/reference in the spelling
-    # itself, e.g. "S*"/"S *") is what still catches a real kind change on
-    # such a pair.
-    kind_cmp = compare_facts(p_old.kind_fact, p_new.kind_fact, ParamKind.VALUE)
-    if kind_cmp.is_comparable and kind_cmp.old_value != kind_cmp.new_value:
-        return True
-    if canonicalize_type_name(p_old.type) == canonicalize_type_name(p_new.type):
-        return False
-    # A pointee/by-value const-or-volatile qualification change (e.g.
-    # ``wl_display *`` -> ``const wl_display *``) leaves the parameter's
-    # calling convention and binary layout identical — it is source/API churn,
-    # not a binary ABI break (ISSUE-29/52).
-    if cv_qualifiers_only_differ(p_old.type, p_new.type):
-        return False
-    # A top-level BY-VALUE cv change (``int`` -> ``volatile int``) is, unlike
-    # the equivalent field/variable case, not merely layout-neutral but
-    # genuinely absent from the function's type/mangled name — see
-    # func_signature_cv_only_differ's docstring (Codex review, PR #582).
-    if func_signature_cv_only_differ(p_old.type, p_new.type):
-        return False
-    # Same kind, different spelling: not a change if the integer types are
-    # ABI-equivalent (long -> long long, size_t -> unsigned long on LP64).
-    return not _abi_equivalent_scalar(p_old.type, p_new.type, is_llp64)
-
-
-def _check_params_change(
-    mangled: str,
-    f_old: Function,
-    f_new: Function,
-    *,
-    params_unconfirmed: bool = False,
-    is_llp64: bool = False,
-) -> list[Change]:
-    """Emit a change if the parameter list was modified."""
-    # RD2-5: suppress only when one side is a stripped symbols-only stub (its
-    # empty param list is "unknown", not "zero args"). Otherwise compare
-    # position-by-position, ignoring only the individual parameters whose type is
-    # the unresolved "?" sentinel — diffing a known type against unknown is
-    # meaningless, but an unrelated unknown must not mask a real change on a
-    # fully-known parameter (e.g. f(?, int) -> f(?, long)). Parameter *count*
-    # changes are always real in a resolved snapshot (Codex reviews, PR #275).
-    if params_unconfirmed:
-        return []
-    changed: bool
-    if len(f_old.params) != len(f_new.params):
-        changed = True
-    else:
-        changed = any(
-            _params_differ(p_old, p_new, is_llp64)
-            for p_old, p_new in zip(f_old.params, f_new.params)
-        )
-    if not changed:
-        return []
-    return [
-        make_change(
-            ChangeKind.FUNC_PARAMS_CHANGED,
-            symbol=mangled,
-            name=f_old.name,
-            old=_format_params(f_old.params),
-            new=_format_params(f_new.params),
-            entity_id=f_old.entity_id or f_new.entity_id,
-        )
-    ]
-
-
-def _check_ref_qualifier_change(
-    mangled: str, f_old: Function, f_new: Function
-) -> list[Change]:
-    """Emit a change if the ref-qualifier (&/&&) was modified."""
-    old_rq = f_old.ref_qualifier or ""
-    new_rq = f_new.ref_qualifier or ""
-    if old_rq == new_rq:
-        return []
-    return [
-        make_change(
-            ChangeKind.FUNC_REF_QUAL_CHANGED,
-            symbol=mangled,
-            name=f_old.name,
-            old=repr(old_rq),
-            new=repr(new_rq),
-            old_value=old_rq or "(none)",
-            new_value=new_rq or "(none)",
-            entity_id=f_old.entity_id or f_new.entity_id,
-        )
-    ]
-
-
-def _check_linkage_change(
-    mangled: str, f_old: Function, f_new: Function
-) -> list[Change]:
-    """Emit a change if the language linkage (extern \"C\" ↔ C++) was modified."""
-    if f_old.is_extern_c == f_new.is_extern_c:
-        return []
-    old_linkage = 'extern "C"' if f_old.is_extern_c else "C++"
-    new_linkage = 'extern "C"' if f_new.is_extern_c else "C++"
-    return [
-        make_change(
-            ChangeKind.FUNC_LANGUAGE_LINKAGE_CHANGED,
-            symbol=mangled,
-            name=f_old.name,
-            old=old_linkage,
-            new=new_linkage,
-            entity_id=f_old.entity_id or f_new.entity_id,
-        )
-    ]
-
-
-def _check_noexcept_change(
-    mangled: str, f_old: Function, f_new: Function
-) -> list[Change]:
-    """Emit a change if the noexcept specifier was added or removed."""
-    return bool_transition(
-        f_old.is_noexcept,
-        f_new.is_noexcept,
-        mangled,
-        added=(
-            ChangeKind.FUNC_NOEXCEPT_ADDED,
-            f"noexcept specifier added: {f_old.name}",
-        ),
-        removed=(
-            ChangeKind.FUNC_NOEXCEPT_REMOVED,
-            f"noexcept specifier removed: {f_old.name}",
-        ),
-        entity_id=f_old.entity_id or f_new.entity_id,
-    )
-
-
-def _check_virtual_change(
-    mangled: str, f_old: Function, f_new: Function
-) -> list[Change]:
-    """Emit a change if the virtual specifier was added or removed."""
-    return bool_transition(
-        f_old.is_virtual,
-        f_new.is_virtual,
-        mangled,
-        added=(ChangeKind.FUNC_VIRTUAL_ADDED, f"Function became virtual: {f_old.name}"),
-        removed=(
-            ChangeKind.FUNC_VIRTUAL_REMOVED,
-            f"Function is no longer virtual: {f_old.name}",
-        ),
-        entity_id=f_old.entity_id or f_new.entity_id,
-    )
-
-
-def _check_explicit_change(
-    mangled: str, f_old: Function, f_new: Function
-) -> list[Change]:
-    """Emit a change if the explicit specifier was added or removed.
-
-    Tri-state: only fire when BOTH sides record explicit data. None means
-    the dumper/loader couldn't determine it — typically an older snapshot
-    that predates the field, or a Function/Destructor where ``explicit`` is
-    N/A. Skipping in that case avoids false API_BREAK findings produced
-    purely by snapshot schema evolution.
-    """
-    return bool_transition(
-        f_old.is_explicit,
-        f_new.is_explicit,
-        mangled,
-        skip_none=True,
-        added=(
-            ChangeKind.CTOR_EXPLICIT_ADDED,
-            f"Constructor/conversion gained `explicit` specifier: {f_old.name}",
-        ),
-        added_values=("implicit", "explicit"),
-        removed=(
-            ChangeKind.CTOR_EXPLICIT_REMOVED,
-            f"Constructor/conversion lost `explicit` specifier: {f_old.name}",
-        ),
-        removed_values=("explicit", "implicit"),
-        entity_id=f_old.entity_id or f_new.entity_id,
-    )
-
-
-def _check_variadic_change(
-    mangled: str, f_old: Function, f_new: Function
-) -> list[Change]:
-    """Emit a change if the C ellipsis (...) was added or removed.
-
-    Tri-state — skip when either snapshot did not record variadicness
-    (older snapshots / dumpers without the field).
-    """
-    return bool_transition(
-        f_old.is_variadic,
-        f_new.is_variadic,
-        mangled,
-        skip_none=True,
-        added=(
-            ChangeKind.FUNC_VARIADIC_ADDED,
-            f"Function became variadic (gained ...): {f_old.name}",
-        ),
-        added_values=("fixed-arity", "variadic"),
-        removed=(
-            ChangeKind.FUNC_VARIADIC_REMOVED,
-            f"Function is no longer variadic (lost ...): {f_old.name}",
-        ),
-        removed_values=("variadic", "fixed-arity"),
-        entity_id=f_old.entity_id or f_new.entity_id,
-    )
-
-
-def _check_contract_attributes_change(
-    mangled: str, f_old: Function, f_new: Function
-) -> list[Change]:
-    """Emit changes for gained/lost semantic contract attributes.
-
-    Skips when either side did not capture attributes (None); an empty list
-    means "captured, none present" and does participate. Calling-convention
-    attribute flips (stdcall/regparm/ms_abi/...) route to the dedicated
-    BREAKING ``CALLING_CONVENTION_CHANGED`` kind instead.
-    """
-    if f_old.contract_attributes is None or f_new.contract_attributes is None:
-        return []
-    old_attrs = set(f_old.contract_attributes)
-    new_attrs = set(f_new.contract_attributes)
-    if old_attrs == new_attrs:
-        return []
-    changes: list[Change] = []
-
-    old_cc = {a for a in old_attrs if _is_cc_attribute(a)}
-    new_cc = {a for a in new_attrs if _is_cc_attribute(a)}
-    if old_cc != new_cc:
-        changes.append(
-            make_change(
-                ChangeKind.CALLING_CONVENTION_CHANGED,
-                symbol=mangled,
-                description=(
-                    f"Calling-convention attribute changed for {f_old.name}: "
-                    f"{', '.join(sorted(old_cc)) or '(default)'} → "
-                    f"{', '.join(sorted(new_cc)) or '(default)'}"
-                ),
-                old_value=", ".join(sorted(old_cc)) or "(default)",
-                new_value=", ".join(sorted(new_cc)) or "(default)",
-                entity_id=f_old.entity_id or f_new.entity_id,
-            )
-        )
-        old_attrs -= old_cc
-        new_attrs -= new_cc
-
-    gained = sorted(new_attrs - old_attrs)
-    lost = sorted(old_attrs - new_attrs)
-    if gained:
-        changes.append(
-            make_change(
-                ChangeKind.FUNC_CONTRACT_ATTRIBUTE_ADDED,
-                symbol=mangled,
-                name=f_old.name,
-                detail=", ".join(gained),
-                new_value=", ".join(gained),
-                entity_id=f_old.entity_id or f_new.entity_id,
-            )
-        )
-    if lost:
-        changes.append(
-            make_change(
-                ChangeKind.FUNC_CONTRACT_ATTRIBUTE_REMOVED,
-                symbol=mangled,
-                name=f_old.name,
-                detail=", ".join(lost),
-                old_value=", ".join(lost),
-                entity_id=f_old.entity_id or f_new.entity_id,
-            )
-        )
-    return changes
-
-
-def _check_exception_spec_change(
-    mangled: str, f_old: Function, f_new: Function
-) -> list[Change]:
-    """Emit a change if the dynamic exception specification changed.
-
-    ``noexcept`` transitions keep their dedicated kinds; this covers the
-    legacy ``throw(...)`` spellings only. Tri-state: None = not captured.
-    """
-    if f_old.exception_spec is None or f_new.exception_spec is None:
-        return []
-    if f_old.exception_spec == f_new.exception_spec:
-        return []
-    return [
-        make_change(
-            ChangeKind.FUNC_EXCEPTION_SPEC_CHANGED,
-            symbol=mangled,
-            name=f_old.name,
-            old=f_old.exception_spec or "(none)",
-            new=f_new.exception_spec or "(none)",
-            entity_id=f_old.entity_id or f_new.entity_id,
-        )
-    ]
-
-
-def _check_vtable_index_change(
-    mangled: str, f_old: Function, f_new: Function
-) -> list[Change]:
-    """Emit a change when a persisting virtual method moved to another slot.
-
-    ``vtable_index`` is modeled per-function; the per-type vtable array diff
-    misses snapshots that carry indices but no reconstructed vtable list.
-    Reuses TYPE_VTABLE_CHANGED — a moved slot IS a vtable reorder.
-    """
-    if f_old.vtable_index is None or f_new.vtable_index is None:
-        return []
-    if f_old.vtable_index == f_new.vtable_index:
-        return []
-    return [
-        make_change(
-            ChangeKind.TYPE_VTABLE_CHANGED,
-            symbol=mangled,
-            description=(
-                f"vtable slot index changed for {f_old.name}: "
-                f"{f_old.vtable_index} → {f_new.vtable_index}"
-            ),
-            old_value=str(f_old.vtable_index),
-            new_value=str(f_new.vtable_index),
-            entity_id=f_old.entity_id or f_new.entity_id,
-        )
-    ]
-
-
 def _check_function_signature(
     mangled: str,
     f_old: Function,
@@ -813,29 +435,30 @@ def _check_function_signature(
     *,
     params_unconfirmed: bool = False,
     is_llp64: bool = False,
+    signatures: tuple[FunctionSignatureIndex, FunctionSignatureIndex] | None = None,
 ) -> list[Change]:
-    """Compare signatures and qualifiers of two matched functions."""
-    changes: list[Change] = []
-    changes.extend(_check_return_type_change(mangled, f_old, f_new, is_llp64=is_llp64))
-    changes.extend(
-        _check_params_change(
-            mangled,
-            f_old,
-            f_new,
-            params_unconfirmed=params_unconfirmed,
-            is_llp64=is_llp64,
+    """Compare signatures and qualifiers of two matched functions.
+
+    Every signature and qualifier comparison reads each side's
+    ``SemanticIR`` through *signatures* (``compare/function_signature.py``,
+    ADR-063 6B function-signature cohort). Without one -- a caller pairing
+    two functions outside a snapshot comparison -- each side is projected on
+    its own, with the same formula.
+    """
+    if signatures is None:
+        signatures = (
+            function_signature_index(None, [f_old]),
+            function_signature_index(None, [f_new]),
         )
+    changes = function_signature_changes(
+        mangled,
+        f_old.name,
+        signatures[0].signature_for(f_old),
+        signatures[1].signature_for(f_new),
+        entity_id=f_old.entity_id or f_new.entity_id,
+        params_unconfirmed=params_unconfirmed,
+        is_llp64=is_llp64,
     )
-    changes.extend(_check_ref_qualifier_change(mangled, f_old, f_new))
-    changes.extend(_check_linkage_change(mangled, f_old, f_new))
-    changes.extend(_check_noexcept_change(mangled, f_old, f_new))
-    changes.extend(_check_virtual_change(mangled, f_old, f_new))
-    changes.extend(check_hidden_friend_change(mangled, f_old, f_new))
-    changes.extend(_check_explicit_change(mangled, f_old, f_new))
-    changes.extend(_check_variadic_change(mangled, f_old, f_new))
-    changes.extend(_check_contract_attributes_change(mangled, f_old, f_new))
-    changes.extend(_check_exception_spec_change(mangled, f_old, f_new))
-    changes.extend(_check_vtable_index_change(mangled, f_old, f_new))
     changes.extend(_export_transition.check_function(mangled, f_old, f_new))
     return changes
 
@@ -843,44 +466,27 @@ def _check_function_signature(
 def _check_inline_transitions(
     old_map: Mapping[str, Function],
     new_map: Mapping[str, Function],
+    old_snapshot: AbiSnapshot,
     new_snapshot: AbiSnapshot,
 ) -> list[Change]:
     """Detect inline/non-inline transitions for functions present in both
     snapshots -- including a ctor/dtor pair only visible via synthetic-key
     format-drift reconciliation (``iter_matched_function_pairs``, PR #761
     finding 2)."""
+    old_index = function_signature_index(old_snapshot.canonical_ir, old_map.values())
+    new_index = function_signature_index(new_snapshot.canonical_ir, new_map.values())
+    new_elf = new_snapshot.elf
     changes: list[Change] = []
     for mangled, f_old, f_new in iter_matched_function_pairs(old_map, new_map):
-        if not f_old.is_inline and f_new.is_inline:
-            new_elf = new_snapshot.elf
-            still_exported = new_elf is not None and any(
-                s.name == mangled for s in new_elf.symbols
-            )
-            changes.append(
-                make_change(
-                    ChangeKind.FUNC_BECAME_INLINE,
-                    symbol=mangled,
-                    description=(
-                        f"Function became inline, symbol still exported: {f_old.name}"
-                        if still_exported
-                        else f"Function became inline (symbol may be removed from DSO): {f_old.name}"
-                    ),
-                    old_value="non-inline",
-                    new_value="inline",
-                    entity_id=f_old.entity_id or f_new.entity_id,
-                )
-            )
-        elif f_old.is_inline and not f_new.is_inline:
-            changes.append(
-                make_change(
-                    ChangeKind.FUNC_LOST_INLINE,
-                    symbol=mangled,
-                    name=f_old.name,
-                    old="inline",
-                    new="non-inline",
-                    entity_id=f_old.entity_id or f_new.entity_id,
-                )
-            )
+        changes += inline_changes(
+            mangled,
+            f_old.name,
+            old_index.entity_for(f_old),
+            new_index.entity_for(f_new),
+            entity_id=f_old.entity_id or f_new.entity_id,
+            still_exported=new_elf is not None
+            and any(sym.name == mangled for sym in new_elf.symbols),
+        )
     return changes
 
 
@@ -899,6 +505,7 @@ def _match_old_function(
     params_unconfirmed: bool = False,
     is_llp64: bool = False,
     old_exported_symbols: Container[str] = frozenset(),
+    check_signature: Callable[..., list[Change]] | None = None,
 ) -> list[Change]:
     """Classify a single old function: matched by mangled, extern-C fallback, or removed.
 
@@ -909,10 +516,11 @@ def _match_old_function(
     same rule the hand-rolled name multimap this replaced used, now living
     in the shared primitive every other flat join uses too).
     """
+    check = check_signature or _check_function_signature
     f_new_exact = new_index.get(mangled)
     if f_new_exact is not None:
         return list(
-            _check_function_signature(
+            check(
                 mangled,
                 f_old,
                 f_new_exact,
@@ -947,7 +555,7 @@ def _match_old_function(
     )
     if name_match is not None:
         result = list(
-            _check_function_signature(
+            check(
                 f_old.name,
                 f_old,
                 name_match.declaration,
@@ -990,8 +598,14 @@ def _detect_newly_deleted_functions(
     both_tables_read = export_table_covered(
         new_snapshot, "elf"
     ) and export_table_covered(old_snapshot, "elf")
+    old_index = function_signature_index(old_snapshot.canonical_ir, old_all.values())
+    new_index = function_signature_index(new_snapshot.canonical_ir, new_all.values())
+    drift_entities = function_signature_index(
+        old_snapshot.canonical_ir, drift_old_by_new_key.values()
+    )
     for mangled, f_new in new_all.items():
-        if not f_new.is_deleted:
+        new_entity = new_index.entity_for(f_new)
+        if is_deleted(new_entity) is not True:
             continue
         # Suppress only a *genuinely internal* DWARF-deleted member: not
         # exported now AND not exported before either. One that *was* an old
@@ -999,22 +613,23 @@ def _detect_newly_deleted_functions(
         # deletion and must still be reported (the removal-side path defers
         # to this detector for it).
         if (
-            f_new.deleted_from_dwarf
+            new_entity is not None
+            and new_entity.deleted_from_dwarf.value
             and both_tables_read
             and mangled not in exported
             and mangled not in old_exported
         ):
             continue
-        f_old_any = old_all.get(mangled) or drift_old_by_new_key.get(mangled)
+        f_old_any = old_all.get(mangled)
+        old_entity = old_index.entity_for(f_old_any) if f_old_any is not None else None
+        if f_old_any is None:
+            f_old_any = drift_old_by_new_key.get(mangled)
+            if f_old_any is not None:
+                old_entity = drift_entities.entity_for(f_old_any)
         if not _export_transition.deleted_declaration_is_public(f_new, f_old_any):
             continue
-        if f_old_any is not None and not f_old_any.is_deleted:
-            kind = (
-                ChangeKind.FUNC_DELETED_DWARF
-                if f_new.deleted_from_dwarf
-                else ChangeKind.FUNC_DELETED
-            )
-            deleted_entity_id = f_old_any.entity_id or f_new.entity_id
+        kind = deletion_kind(old_entity, new_entity)
+        if f_old_any is not None and kind is not None:
             changes.append(
                 make_change(
                     kind,
@@ -1022,7 +637,7 @@ def _detect_newly_deleted_functions(
                     name=f_new.name,
                     old_value="callable",
                     new_value="deleted",
-                    entity_id=deleted_entity_id,
+                    entity_id=f_old_any.entity_id or f_new.entity_id,
                 )
             )
     return changes
@@ -1083,9 +698,19 @@ def _diff_functions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
 
     matched_by_name: set[str] = set()
 
+    # ADR-063 6B function-signature cohort: the signature comparison reads
+    # each side's SemanticIR; pairing stays with the identity index above.
+    signatures = (
+        function_signature_index(old.canonical_ir, old_map.values()),
+        function_signature_index(new.canonical_ir, new_map.values()),
+    )
+    check_signature = functools.partial(
+        _check_function_signature, signatures=signatures
+    )
+
     ctor_dtor_consumed_old, ctor_dtor_consumed_new, ctor_dtor_changes = (
         reconcile_ctor_dtor_key_drift(
-            old_map, new_map, _check_function_signature, params_unconfirmed, is_llp64
+            old_map, new_map, check_signature, params_unconfirmed, is_llp64
         )
     )
     changes.extend(ctor_dtor_changes)
@@ -1104,6 +729,7 @@ def _diff_functions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                 params_unconfirmed,
                 is_llp64,
                 old_exported_symbols=_old_exported_functions,
+                check_signature=check_signature,
             )
         )
 
@@ -1138,7 +764,7 @@ def _diff_functions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     changes.extend(_detect_newly_deleted_functions(old_all, new_all_map, old, new))
 
     # FUNC_BECAME_INLINE / FUNC_LOST_INLINE: detect inline↔non-inline transitions
-    changes.extend(_check_inline_transitions(old_map, new_map, new))
+    changes.extend(_check_inline_transitions(old_map, new_map, old, new))
 
     # HIDDEN_FRIEND_ADDED / HIDDEN_FRIEND_REMOVED for the inline-only case.
     # Inline hidden friends have no external symbol (visibility=HIDDEN) so
@@ -1146,16 +772,20 @@ def _diff_functions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     # by mangled name across the FULL function map (not just public) —
     # old_map/new_map are passed too so a same-key pair already covered by
     # the public-symbol pairing above is not re-processed (Codex review).
-    changes.extend(diff_inline_hidden_friends(old_all, new_all_map, old_map, new_map))
+    changes.extend(
+        diff_inline_hidden_friends(
+            old_all,
+            new_all_map,
+            old_map,
+            new_map,
+            signatures=(
+                function_signature_index(old.canonical_ir, old_all.values()),
+                function_signature_index(new.canonical_ir, new_all_map.values()),
+            ),
+        )
+    )
 
     return changes
-
-
-# Word-boundary-anchored so a class whose own name merely *contains* "const"/
-# "volatile" (e.g. ``myconst``) is not corrupted by the strip — a blind
-# substring .replace() previously turned ``myconst`` into ``my`` and made the
-# copy/move constructor look like a converting overload (Codex review).
-_CV_QUALIFIER_RE = re.compile(r"\b(?:const|volatile)\b")
 
 
 def _converting_ctors_by_class(
@@ -1172,29 +802,18 @@ def _converting_ctors_by_class(
     constructors. Keyed by param-type tuple.
     """
     by_class: dict[str, dict[tuple[str, ...], Function]] = {}
-    for f in snap.declarations.functions:
+    functions = snap.declarations.functions
+    index = function_signature_index(snap.canonical_ir, functions)
+    for f in functions:
         owner = owner_class_of(f) or _synthetic_ctor_scope(f.mangled) or f.name
         canonical = class_aliases.get(owner) or class_aliases.get(
             owner.rsplit("::", 1)[-1]
         )
         if canonical is None:
             continue
-        if f.is_deleted or f.is_explicit is not False:
-            continue
-        if f.access != AccessLevel.PUBLIC:
-            continue
-        if not f.params:
-            continue
-        required = [p for p in f.params if p.default is None]
-        if len(required) > 1:
-            continue
-        arg_type = " ".join(
-            _CV_QUALIFIER_RE.sub("", f.params[0].type).replace("&", "").split()
-        )
-        if arg_type == f.name:
-            continue
-        sig = tuple(p.type for p in f.params)
-        by_class.setdefault(canonical, {})[sig] = f
+        sig = converting_ctor_signature(f.name, index.entity_for(f))
+        if sig is not None:
+            by_class.setdefault(canonical, {})[sig] = f
     return by_class
 
 
@@ -1290,13 +909,22 @@ def _diff_variables(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     old_vars, _reconciled_new_vars = _reconciled_variable_surfaces(old, new)
     new_vars_index = SymbolIdentityIndex.for_variables(_reconciled_new_vars)
     _prewarm_elf_only_demangling(old_vars, new_vars_index)
+    # ADR-063 6B variable cohort: the type/const comparison reads each side's
+    # SemanticIR; pairing stays with the identity index above.
+    old_types = variable_type_index_for(old, old_vars.values())
+    new_types = variable_type_index_for(new, _reconciled_new_vars.values())
     return diff_by_key(
         SymbolIdentityIndex.for_variables(old_vars),
         new_vars_index,
         on_removed=_var_removed,
         on_added=_var_added,
         on_common=lambda m, o, n: _check_variable(
-            m, o, n, cv_facts_reliable=cv_facts_reliable
+            m,
+            o,
+            n,
+            old_index=old_types,
+            new_index=new_types,
+            cv_facts_reliable=cv_facts_reliable,
         ),
     )
 
@@ -1317,6 +945,27 @@ def _both_header_aware(old: AbiSnapshot, new: AbiSnapshot) -> bool:
         and new.from_headers
         and not new.from_headers_inferred
     )
+
+
+def _parameter_view_pairs(
+    old: AbiSnapshot,
+    new: AbiSnapshot,
+    old_map: dict[str, Function],
+    new_map: dict[str, Function],
+) -> Iterator[tuple[str, Function, Function, ParameterView, ParameterView]]:
+    """Every matched function pair (``iter_matched_function_pairs``) with each
+    side's per-parameter facts read from its ``SemanticIR`` (ADR-063 6B
+    parameter cohort, ``compare/parameter_facts.py``)."""
+    old_index = function_signature_index(old.canonical_ir, old_map.values())
+    new_index = function_signature_index(new.canonical_ir, new_map.values())
+    for mangled, f_old, f_new in iter_matched_function_pairs(old_map, new_map):
+        yield (
+            mangled,
+            f_old,
+            f_new,
+            old_index.parameters_for(f_old),
+            new_index.parameters_for(f_new),
+        )
 
 
 @registry.detector("param_defaults")
@@ -1359,7 +1008,9 @@ def _diff_param_defaults(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     def _param_defaults_producer(snap: AbiSnapshot, f: Function) -> str | None:
         return fact_producer(snap, func_fact_key(f.mangled, "param_defaults"))
 
-    for mangled, f_old, f_new in iter_matched_function_pairs(old_map, new_map):
+    for mangled, f_old, f_new, v_old, v_new in _parameter_view_pairs(
+        old, new, old_map, new_map
+    ):
         old_producer = _param_defaults_producer(old, f_old)
         new_producer = _param_defaults_producer(new, f_new)
         if (
@@ -1368,40 +1019,20 @@ def _diff_param_defaults(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
             and old_producer != new_producer
         ):
             continue
-        # Compare parameter defaults pairwise
-        for i, (p_old, p_new) in enumerate(zip(f_old.params, f_new.params)):
-            if p_old.default is not None and p_new.default is None:
-                changes.append(
-                    make_change(
-                        ChangeKind.PARAM_DEFAULT_VALUE_REMOVED,
-                        symbol=mangled,
-                        name=f_old.name,
-                        detail=str(p_old.name or i),
-                        old_value=p_old.default,
-                        new_value=None,
-                        entity_id=f_old.entity_id or f_new.entity_id,
-                    )
-                )
-            elif (
-                p_old.default is not None
-                and p_new.default is not None
-                and p_old.default != p_new.default
-            ):
-                if default_value_fingerprint_comparison_unreliable(
-                    old, new, old_producer, new_producer, p_old.default, p_new.default
-                ):
-                    continue
-                changes.append(
-                    make_change(
-                        ChangeKind.PARAM_DEFAULT_VALUE_CHANGED,
-                        symbol=mangled,
-                        name=f_old.name,
-                        detail=str(p_old.name or i),
-                        old_value=p_old.default,
-                        new_value=p_new.default,
-                        entity_id=f_old.entity_id or f_new.entity_id,
-                    )
-                )
+        changes += parameter_default_changes(
+            mangled,
+            f_old.name,
+            v_old,
+            v_new,
+            entity_id=f_old.entity_id or f_new.entity_id,
+            value_comparison_unreliable=functools.partial(
+                default_value_fingerprint_comparison_unreliable,
+                old,
+                new,
+                old_producer,
+                new_producer,
+            ),
+        )
 
     return changes
 
@@ -1418,26 +1049,16 @@ def _diff_param_renames(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     if old.from_headers_inferred or new.from_headers_inferred:
         return changes
     old_map, new_map = _reconciled_function_surfaces(old, new)
-
-    for mangled, f_old, f_new in iter_matched_function_pairs(old_map, new_map):
-        for i, (p_old, p_new) in enumerate(zip(f_old.params, f_new.params)):
-            if (
-                p_old.type == p_new.type
-                and p_old.name
-                and p_new.name
-                and p_old.name != p_new.name
-            ):
-                changes.append(
-                    make_change(
-                        ChangeKind.PARAM_RENAMED,
-                        symbol=mangled,
-                        name=f_old.name,
-                        detail=str(i),
-                        old=p_old.name,
-                        new=p_new.name,
-                        entity_id=f_old.entity_id or f_new.entity_id,
-                    )
-                )
+    for mangled, f_old, f_new, v_old, v_new in _parameter_view_pairs(
+        old, new, old_map, new_map
+    ):
+        changes += parameter_rename_changes(
+            mangled,
+            f_old.name,
+            v_old,
+            v_new,
+            entity_id=f_old.entity_id or f_new.entity_id,
+        )
 
     return changes
 
@@ -1454,50 +1075,17 @@ def _diff_pointer_levels(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         new
     )
 
-    for mangled, f_old, f_new in iter_matched_function_pairs(old_map, new_map):
-        return_known = not (
-            _type_unknown(f_old.return_type) or _type_unknown(f_new.return_type)
+    for mangled, f_old, f_new, v_old, v_new in _parameter_view_pairs(
+        old, new, old_map, new_map
+    ):
+        changes += pointer_level_changes(
+            mangled,
+            f_old.name,
+            v_old,
+            v_new,
+            entity_id=f_old.entity_id or f_new.entity_id,
+            params_unconfirmed=params_unconfirmed,
         )
-        # Return pointer depth
-        if (
-            return_known
-            and f_old.return_pointer_depth != f_new.return_pointer_depth
-            and (f_old.return_pointer_depth > 0 or f_new.return_pointer_depth > 0)
-        ):
-            changes.append(
-                make_change(
-                    ChangeKind.RETURN_POINTER_LEVEL_CHANGED,
-                    symbol=mangled,
-                    name=f_old.name,
-                    old=str(f_old.return_pointer_depth),
-                    new=str(f_new.return_pointer_depth),
-                    entity_id=f_old.entity_id or f_new.entity_id,
-                )
-            )
-
-        if params_unconfirmed:
-            continue
-
-        # Param pointer depths
-        for i, (p_old, p_new) in enumerate(zip(f_old.params, f_new.params)):
-            # Skip individually unresolved params ("?"): depth falls back to 0
-            # and would read as a phantom level change (matches _check_params_change).
-            if _type_unknown(p_old.type) or _type_unknown(p_new.type):
-                continue
-            if p_old.pointer_depth != p_new.pointer_depth and (
-                p_old.pointer_depth > 0 or p_new.pointer_depth > 0
-            ):
-                changes.append(
-                    make_change(
-                        ChangeKind.PARAM_POINTER_LEVEL_CHANGED,
-                        symbol=mangled,
-                        name=f_old.name,
-                        detail=str(p_old.name or i),
-                        old=str(p_old.pointer_depth),
-                        new=str(p_new.pointer_depth),
-                        entity_id=f_old.entity_id or f_new.entity_id,
-                    )
-                )
 
     return changes
 
@@ -1505,23 +1093,29 @@ def _diff_pointer_levels(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
 def _check_method_access_changes(
     old_map: dict[str, Function],
     new_map: dict[str, Function],
+    old: AbiSnapshot | None = None,
+    new: AbiSnapshot | None = None,
 ) -> list[Change]:
-    """Emit METHOD_ACCESS_CHANGED for narrowing access transitions, including a ctor/dtor pair only visible via synthetic-key format-drift reconciliation (``iter_matched_function_pairs``, PR #761 finding 2)."""
+    """Emit METHOD_ACCESS_CHANGED for narrowing access transitions, including a ctor/dtor pair only visible via synthetic-key format-drift reconciliation (``iter_matched_function_pairs``, PR #761 finding 2).
+
+    Access is read from each side's ``SemanticIR`` (``compare/
+    declaration_facts.py``, ADR-063 6B declaration-fact cohort)."""
+    old_index = function_signature_index(
+        old.canonical_ir if old is not None else None, old_map.values()
+    )
+    new_index = function_signature_index(
+        new.canonical_ir if new is not None else None, new_map.values()
+    )
     changes: list[Change] = []
     for mangled, f_old, f_new in iter_matched_function_pairs(old_map, new_map):
-        if f_old.access != f_new.access and _is_access_narrowing(
-            f_old.access, f_new.access
-        ):
-            changes.append(
-                make_change(
-                    ChangeKind.METHOD_ACCESS_CHANGED,
-                    symbol=mangled,
-                    name=f_old.name,
-                    old=f_old.access.value,
-                    new=f_new.access.value,
-                    entity_id=f_old.entity_id or f_new.entity_id,
-                )
-            )
+        changes += access_changes(
+            mangled,
+            f_old.name,
+            old_index.entity_for(f_old),
+            new_index.entity_for(f_new),
+            entity_id=f_old.entity_id or f_new.entity_id,
+            is_variable=False,
+        )
     return changes
 
 
@@ -1570,7 +1164,7 @@ def _diff_access_levels(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """
     changes: list[Change] = []
     changes.extend(
-        _check_method_access_changes(*_reconciled_function_surfaces(old, new))
+        _check_method_access_changes(*_reconciled_function_surfaces(old, new), old, new)
     )
     excl = stdlib_namespaces_excluded(old, new)
     old_types = build_type_map(
@@ -1682,16 +1276,25 @@ def _diff_param_restrict(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     the same reasoning ``fact_provenance.both_known_backed_fact`` encodes
     for ``deprecated``/``is_scoped``.
 
-    The loop itself lives in ``diff_param_qualifiers`` (this file is at the
-    2000-line hard cap); the registration stays HERE so the detector keeps
-    its original position in the registry, which orders findings in every
-    report. See that module's docstring.
+    The per-parameter comparison reads the IR (``compare/parameter_facts.
+    py``, ADR-063 6B parameter cohort); the registration stays HERE so the
+    detector keeps its original position in the registry, which orders
+    findings in every report.
     """
-    from .diff_param_qualifiers import param_restrict_changes
-
     if not _both_header_aware(old, new):
         return []
-    return param_restrict_changes(*_reconciled_function_surfaces(old, new))
+    changes: list[Change] = []
+    for mangled, f_old, f_new, v_old, v_new in _parameter_view_pairs(
+        old, new, *_reconciled_function_surfaces(old, new)
+    ):
+        changes += restrict_changes(
+            mangled,
+            f_old.name,
+            v_old,
+            v_new,
+            entity_id=f_old.entity_id or f_new.entity_id,
+        )
+    return changes
 
 
 @registry.detector("func_deprecated")
@@ -1709,31 +1312,18 @@ def _diff_func_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """
     changes: list[Change] = []
     old_map, new_map = _reconciled_function_surfaces(old, new)
-
+    old_index = function_signature_index(old.canonical_ir, old_map.values())
+    new_index = function_signature_index(new.canonical_ir, new_map.values())
     for mangled, f_old, f_new in iter_matched_function_pairs(old_map, new_map):
-        if not both_facts_present(f_old, f_new, "deprecated", mangled):
-            continue
-        if f_old.deprecated is None and f_new.deprecated is not None:
-            changes.append(
-                make_change(
-                    ChangeKind.FUNC_DEPRECATED_ADDED,
-                    symbol=mangled,
-                    name=f_old.name,
-                    detail=f_new.deprecated,
-                    new_value=f_new.deprecated,
-                    entity_id=f_old.entity_id or f_new.entity_id,
-                )
-            )
-        elif f_old.deprecated is not None and f_new.deprecated is None:
-            changes.append(
-                make_change(
-                    ChangeKind.FUNC_DEPRECATED_REMOVED,
-                    symbol=mangled,
-                    name=f_old.name,
-                    old_value=f_old.deprecated,
-                    entity_id=f_old.entity_id or f_new.entity_id,
-                )
-            )
+        changes += deprecation_changes(
+            mangled,
+            f_old.name,
+            old_index.entity_for(f_old),
+            new_index.entity_for(f_new),
+            entity_id=f_old.entity_id or f_new.entity_id,
+            added=ChangeKind.FUNC_DEPRECATED_ADDED,
+            removed=ChangeKind.FUNC_DEPRECATED_REMOVED,
+        )
     return changes
 
 
@@ -1756,38 +1346,21 @@ def _diff_func_override_specifier(old: AbiSnapshot, new: AbiSnapshot) -> list[Ch
     changes: list[Change] = []
     old_map, new_map = _reconciled_function_surfaces(old, new)
 
+    old_index = function_signature_index(old.canonical_ir, old_map.values())
+    new_index = function_signature_index(new.canonical_ir, new_map.values())
     for mangled, f_old in old_map.items():
         f_new = new_map.get(mangled)
         if f_new is None:
             continue
-        if f_old.is_override is None or f_new.is_override is None:
-            continue
         if not both_known_backed_fact(old, new, func_fact_key(mangled, "is_override")):
             continue
-        if f_old.is_override == f_new.is_override:
-            continue
-        if f_new.is_override:
-            changes.append(
-                make_change(
-                    ChangeKind.FUNC_OVERRIDE_SPECIFIER_ADDED,
-                    symbol=mangled,
-                    name=f_old.name,
-                    old_value="no override",
-                    new_value="override",
-                    entity_id=f_old.entity_id or f_new.entity_id,
-                )
-            )
-        else:
-            changes.append(
-                make_change(
-                    ChangeKind.FUNC_OVERRIDE_SPECIFIER_REMOVED,
-                    symbol=mangled,
-                    name=f_old.name,
-                    old_value="override",
-                    new_value="no override",
-                    entity_id=f_old.entity_id or f_new.entity_id,
-                )
-            )
+        changes += override_changes(
+            mangled,
+            f_old.name,
+            old_index.parameters_for(f_old),
+            new_index.parameters_for(f_new),
+            entity_id=f_old.entity_id or f_new.entity_id,
+        )
     return changes
 
 
@@ -1803,34 +1376,21 @@ def _diff_var_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """
     changes: list[Change] = []
     old_map, new_map = _reconciled_variable_surfaces(old, new)
-
+    old_index = variable_type_index_for(old, old_map.values())
+    new_index = variable_type_index_for(new, new_map.values())
     for mangled, v_old in old_map.items():
         v_new = new_map.get(mangled)
         if v_new is None:
             continue
-        if not both_facts_present(v_old, v_new, "deprecated", mangled):
-            continue
-        if v_old.deprecated is None and v_new.deprecated is not None:
-            changes.append(
-                make_change(
-                    ChangeKind.VAR_DEPRECATED_ADDED,
-                    symbol=mangled,
-                    name=v_old.name,
-                    detail=v_new.deprecated,
-                    new_value=v_new.deprecated,
-                    entity_id=v_old.entity_id or v_new.entity_id,
-                )
-            )
-        elif v_old.deprecated is not None and v_new.deprecated is None:
-            changes.append(
-                make_change(
-                    ChangeKind.VAR_DEPRECATED_REMOVED,
-                    symbol=mangled,
-                    name=v_old.name,
-                    old_value=v_old.deprecated,
-                    entity_id=v_old.entity_id or v_new.entity_id,
-                )
-            )
+        changes += deprecation_changes(
+            mangled,
+            v_old.name,
+            old_index.entity_for(v_old),
+            new_index.entity_for(v_new),
+            entity_id=v_old.entity_id or v_new.entity_id,
+            added=ChangeKind.VAR_DEPRECATED_ADDED,
+            removed=ChangeKind.VAR_DEPRECATED_REMOVED,
+        )
     return changes
 
 
@@ -1840,19 +1400,25 @@ def _diff_param_va_list(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
 
     Header-tier, "clang"-producer-ONLY (deliberately NOT "hybrid" -- unlike
     ``param_restrict``'s gate just above), and reliability-gated -- see
-    ``diff_param_qualifiers.param_va_list_changes`` for the full reasoning
-    (G31 Phase C continued, Codex review).
-
-    The loop lives in ``diff_param_qualifiers`` (this file is at the
-    2000-line hard cap); registration stays HERE for registry ordering.
+    ``compare/parameter_facts.va_list_changes`` (G31 Phase C continued,
+    Codex review); registration stays HERE for registry ordering.
     """
-    from .diff_param_qualifiers import param_va_list_changes
-
     if not _both_header_aware(old, new):
         return []
     if old.ast_producer != "clang" or new.ast_producer != "clang":
         return []
-    return param_va_list_changes(*_reconciled_function_surfaces(old, new))
+    changes: list[Change] = []
+    for mangled, f_old, f_new, v_old, v_new in _parameter_view_pairs(
+        old, new, *_reconciled_function_surfaces(old, new)
+    ):
+        changes += va_list_changes(
+            mangled,
+            f_old.name,
+            v_old,
+            v_new,
+            entity_id=f_old.entity_id or f_new.entity_id,
+        )
+    return changes
 
 
 @registry.detector("constants")
@@ -1926,4 +1492,20 @@ def _diff_var_access(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         return []
     if old.ast_producer != "castxml" or new.ast_producer != "castxml":
         return []
-    return var_access_changes(*_reconciled_variable_surfaces(old, new))
+    old_map, new_map = _reconciled_variable_surfaces(old, new)
+    old_index = variable_type_index_for(old, old_map.values())
+    new_index = variable_type_index_for(new, new_map.values())
+    changes: list[Change] = []
+    for mangled, v_old in old_map.items():
+        v_new = new_map.get(mangled)
+        if v_new is None:
+            continue
+        changes += access_changes(
+            mangled,
+            v_old.name,
+            old_index.entity_for(v_old),
+            new_index.entity_for(v_new),
+            entity_id=v_old.entity_id or v_new.entity_id,
+            is_variable=True,
+        )
+    return changes

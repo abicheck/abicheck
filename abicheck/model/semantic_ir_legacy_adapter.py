@@ -99,8 +99,8 @@ Leaf module: depends only on other ``model`` modules, per ADR-061 D1's
 
 from __future__ import annotations
 
-from collections.abc import Iterable
-from typing import TYPE_CHECKING
+from collections.abc import Callable, Iterable
+from typing import TYPE_CHECKING, Any
 
 from ..errors import SemanticIrAuthorityError
 from .fact import Fact
@@ -114,12 +114,15 @@ from .identity import (
 )
 from .occurrence import OccurrenceId
 from .semantic_ir import CanonicalEntity, SemanticIR
+from .semantic_ir_function_signature import (
+    function_signature_entity,
+)
 from .semantic_ir_record_layout import record_layout_facts, sync_snapshot_record_layout
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-    from .declarations import Function
+    from .declarations import Function, Variable
     from .entities import RecordType
     from .snapshot import AbiSnapshot
 
@@ -133,7 +136,10 @@ __all__ = [
     "assert_typedef_ir_consistent",
     "legacy_constant_ir",
     "legacy_function_ir",
+    "legacy_function_signature_entity",
+    "legacy_function_signature_occurrences",
     "legacy_typedef_ir",
+    "legacy_variable_occurrences",
     "producer_entity_id",
     "producer_occurrence_disambiguator",
     "render_display_name",
@@ -416,6 +422,74 @@ def legacy_constant_ir(snapshot: AbiSnapshot, constants: dict[str, str]) -> Sema
     return SemanticIR(occurrences=occurrences)
 
 
+def legacy_variable_occurrences(
+    variables: Iterable[Variable],
+    project: Callable[[Variable], CanonicalEntity],
+) -> tuple[SemanticIR, tuple[OccurrenceId, ...]]:
+    """Project variables into a real ``SemanticIR`` (ADR-063 6B, variable
+    cohort), one occurrence per variable, plus each variable's occurrence in
+    input order -- :func:`legacy_record_occurrences`' shape, for the same
+    reason: the caller has already paired specific declarations, so two that
+    share a key are kept apart by an ordinal disambiguator, never collapsed.
+
+    *project* computes the payload. It is injected rather than restated here
+    because the formula is the normalizer's own
+    (``extract.semantic_normalizer.variable_canonical_entity``), and this
+    module may not import ``extract``; restating it would be a second
+    reading of "canonical" for the adapter path to drift from.
+
+    Keyed by the variable's producer-resolved ``entity_id`` when it has one,
+    else a synthetic identity from its mangled spelling.
+    """
+    occurrences: dict[OccurrenceId, CanonicalEntity] = {}
+    seen: dict[EntityId, int] = {}
+    order: list[OccurrenceId] = []
+    for var in variables:
+        key = var.entity_id or _synthetic_entity_id(
+            EntityKind.VARIABLE, var.mangled or var.name
+        )
+        ordinal = seen.get(key, 0)
+        seen[key] = ordinal + 1
+        occ_id = OccurrenceId(key, str(ordinal) if ordinal else "")
+        occurrences[occ_id] = project(var)
+        order.append(occ_id)
+    return SemanticIR(occurrences=occurrences), tuple(order)
+
+
+def legacy_function_signature_occurrences(
+    functions: Iterable[Function],
+) -> tuple[SemanticIR, tuple[OccurrenceId, ...]]:
+    """Project functions into a real ``SemanticIR`` carrying their signature
+    facts (ADR-063 6B, function-signature cohort), one occurrence per
+    function plus each function's occurrence in input order --
+    :func:`legacy_variable_occurrences`' shape. The payload is
+    ``semantic_ir_function_signature.function_signature_facts``, the same
+    formula the normalizer applies to a real IR.
+    """
+    occurrences: dict[OccurrenceId, CanonicalEntity] = {}
+    seen: dict[EntityId, int] = {}
+    order: list[OccurrenceId] = []
+    for fn in functions:
+        key = fn.entity_id or _synthetic_entity_id(
+            EntityKind.FUNCTION, fn.mangled or fn.name
+        )
+        ordinal = seen.get(key, 0)
+        seen[key] = ordinal + 1
+        occ_id = OccurrenceId(key, str(ordinal) if ordinal else "")
+        occurrences[occ_id] = legacy_function_signature_entity(fn)
+        order.append(occ_id)
+    return SemanticIR(occurrences=occurrences), tuple(order)
+
+
+def legacy_function_signature_entity(
+    fn: Function, shared: dict[Any, CanonicalEntity] | None = None
+) -> CanonicalEntity:
+    """One function's :func:`legacy_function_signature_occurrences` payload,
+    without the ``SemanticIR`` around it (*shared*: see
+    ``semantic_ir_function_signature.function_signature_entity``)."""
+    return function_signature_entity(fn, shared)
+
+
 def legacy_function_ir(functions: Mapping[str, Function]) -> SemanticIR:
     """Project one comparison's (already ELF/API-surface-selected) function
     collection into a real ``SemanticIR`` -- the fallback half of
@@ -642,3 +716,8 @@ def finalize_snapshot_semantic_ir(snapshot: AbiSnapshot) -> None:
     again after a storage decode assigns ``semantic_ir``."""
     assert_snapshot_semantic_ir_consistent(snapshot)
     sync_snapshot_record_layout(snapshot)
+    # No function/variable fill here: the comparison indexes
+    # (``compare/function_signature.py``, ``compare/variables.py``) re-project
+    # each paired declaration over its occurrence, which a boundary copy
+    # would only duplicate (and which an in-place edit after load would leave
+    # stale).

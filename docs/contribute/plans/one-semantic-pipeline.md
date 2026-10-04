@@ -12044,6 +12044,70 @@ every other detector family still reads the legacy collections.
 
 ---
 
+**Landed (2026-10-04): Phase 6B's fourth checker cutover -- variable type and
+const (`VAR_TYPE_CHANGED`/`VAR_BECAME_CONST`/`VAR_LOST_CONST`).** No schema
+change: the IR already carried both facts this family decides on
+(`canonical_spelling`, `cv_qualification`). `compare/variables.py` reads them
+per side with the record-layout cohort's authority rule (IR when it has an
+occurrence for the variable's `entity_id`, else the adapter's
+`legacy_variable_occurrences`, never both adjudicated). The projection
+formula moved to `model/semantic_ir_variable_payload.py` so the normalizer
+and the adapter share one implementation (`compare` may import only
+`model`); `extract/semantic_normalizer_artifacts.py` moved to
+`model/castxml_spelling_artifacts.py` for the same reason. Gate:
+`MIGRATED_COHORTS` entry `variables` (`type`/`is_const`/`variables`/
+`variable_map`). Two intentional refinements over the old read: top-level
+const (from `cv_qualification`, not `Variable.is_const`'s whole-spelling word
+search) and "unknown" covering any depth-zero unresolved component.
+Verification: `tests/test_variable_cutover.py` (Hypothesis equivalence over
+IR/adapter mixes against a hand-written oracle, authority, projection-vs-
+normalizer agreement, gate firing).
+
+**Landed (2026-10-04, same PR): the function-signature cohort, with the
+schema bump it needed (v57, approved by the maintainer).** `CanonicalEntity`
+gained `return_type_spelling`/`parameter_type_spellings`/`parameter_kinds`/
+`ref_qualifier`/`is_variadic`, written for `FUNCTION` occurrences only in a
+`semantic_ir` document stamped `"version": 3` (`ProjectSnapshot` section v3,
+v2->v3 migration). The spellings are deliberately the producer's raw ones:
+the detectors' cv- and scalar-equivalence predicates decide on raw text, so a
+canonical form would have changed verdicts. The facts are filled at the
+snapshot boundary from the final `Function` objects
+(`model/semantic_ir_function_signature.py`, the record-layout fill's shape),
+not by the per-backend normalizer, so a hybrid merge records no new conflicts
+and a pre-v57 document reaches the checker with the same facts.
+`compare/function_signature.py` decides the four families per side with the
+T3 authority rule; an unestablished fact is a recorded decline (T9), which the
+evidence-ablation gate required. A shadow run of the old and new paths over
+the whole unit lane disagreed only on deliberately ablated facts. Gate:
+`MIGRATED_COHORTS` entry `function_signature` (`return_type`/`params`/
+`functions`/`function_map`; `ref_qualifier`/`is_variadic` share names with
+the IR facts, so the name-based scan cannot police them).
+
+**Landed (same PR): the function-qualifier and declaration-fact cohorts.**
+The v3 document also carries `is_extern_c`/`is_noexcept`/`is_virtual`/
+`is_explicit`/`is_hidden_friend`/`hidden_friend_owner`/`contract_attributes`/
+`exception_spec`/`vtable_index` on every function occurrence, and
+`deprecated` (`()` = confirmed not deprecated, `(message,)` otherwise --
+a bare `[[deprecated]]` has an empty message, so `""` cannot mean "none")/
+`access`/`declared_alignment_bits` on function and variable occurrences
+(`model/semantic_ir_declaration_facts.py`, which copies each source
+`Fact`'s status rather than inventing one). Every per-pair function check in
+`diff_symbols._check_function_signature`, the inline hidden-friend pass, and
+the deprecation/access/alignment detectors now decide from those facts
+(`compare/function_signature.py`, `compare/declaration_facts.py`); gate
+entries `function_signature` and `declaration_facts`. The H1 ablation corpus
+gained a virtual method with a recorded slot and a hidden friend with an
+owner so every new fact is ablated.
+
+*Still open.* `FUNC_OVERRIDE_SPECIFIER_*` (gated on per-snapshot
+`fact_provenance`, which the IR does not carry), parameter defaults/renames/
+restrict/`va_list`/pointer levels, constructor-overload ambiguity, inline
+transitions and deletion detection still read the declaration objects.
+Pairing still runs on `SymbolIdentityIndex` over the declaration store, and
+the store itself is Phase 10's removal.
+
+---
+
 ### Phase 3 — public surface as a graph query over one evidence graph (D5)
 
 **Landed (thirteen slices, 2026-08-31): the plumbing, not the traversal
@@ -15113,7 +15177,7 @@ already carries) -- closing that needs real structural evidence from the
 parser, not a normalizer-only text fix. These three artifact-recognition
 functions (`has_unresolved_component`, `is_castxml_opaque_function_type`,
 `CLANG_EXPR_FINGERPRINT_RE`) were split out into a new sibling leaf module,
-`extract/semantic_normalizer_artifacts.py`, once their accumulated
+`model/castxml_spelling_artifacts.py`, once their accumulated
 docstrings pushed `semantic_normalizer.py` itself past the AI-readiness
 gate's 800-line cap for a new file -- mirroring `model.declarator_
 qualifiers.py`'s own split from `model.signature_normalization.py` for the
