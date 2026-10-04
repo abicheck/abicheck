@@ -89,6 +89,26 @@ def release_analysis_assurance_contribution(
     )
 
 
+def release_additions_review_contribution(
+    library_results: list[dict[str, object]],
+) -> int:
+    """ADR-067 D6's additions-review floor across a release's members:
+    ``max()`` over each member's ``additions_review_exit_contribution``.
+
+    Derived here, like the assurance and evidence-contract axes, so every
+    reporter of the release decision reads the same value.
+    """
+    return max(
+        (
+            value
+            for entry in library_results
+            if isinstance(entry, dict)
+            and type(value := entry.get("additions_review_exit_contribution", 0)) is int
+        ),
+        default=0,
+    )
+
+
 def release_evidence_contract_contribution(
     library_results: list[dict[str, object]],
 ) -> int:
@@ -311,4 +331,7 @@ def resolve_release_exit_decision_for_report(
         operational_error_contribution=operational_error_contribution,
         incomplete_scope_contribution=incomplete_scope_contribution,
         no_comparison_completed_contribution=no_comparison_completed_contribution,
+        additions_review_contribution=release_additions_review_contribution(
+            library_results
+        ),
     )

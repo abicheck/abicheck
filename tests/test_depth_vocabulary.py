@@ -157,18 +157,17 @@ def test_depth_monotone() -> None:
 
 
 def test_graph_excluded_from_user_ladder_but_kept_internal() -> None:
-    """``graph`` is dropped from the user dial (D6) yet survives internally for
-    the scan ``pr-deep`` mode / S4 — removing it would break determinism."""
+    """``graph`` is dropped from the user dial (D6) yet survives internally,
+    where it still names S4's graph-only collection."""
     from abicheck.model.evidence_depth_levels import (
         USER_DEPTHS,
         EvidenceDepth,
-        ScanMode,
-        mode_preset,
+        collect_mode_for_depth,
     )
 
     assert EvidenceDepth.GRAPH not in USER_DEPTHS
-    # still the internal target of pr-deep (the L5-edges preset).
-    assert mode_preset(ScanMode.PR_DEEP)[1] is EvidenceDepth.GRAPH
+    assert EvidenceDepth("graph") is EvidenceDepth.GRAPH
+    assert collect_mode_for_depth("graph") == "graph-build"
 
 
 # ── L5 graph is internal at --depth source (D6) ──────────────────────────────

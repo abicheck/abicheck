@@ -64,6 +64,8 @@ from ..policy_file import (
 if TYPE_CHECKING:
     from ..checker_types import Change
     from ..environment_matrix import EnvironmentMatrix
+    from ..model.acknowledgment_policy import AcknowledgmentPolicy
+    from ..policy.acknowledgment import AcknowledgmentList
     from ..policy_file import PolicyFile
     from ..suppression import SuppressionList
 
@@ -190,6 +192,8 @@ def compare_snapshots(
     diagnostic_comparison: bool = False,
     contract_evaluation: bool = False,
     contract_mode: str | None = None,
+    acknowledgments: AcknowledgmentList | None = None,
+    acknowledgment_policy: AcknowledgmentPolicy | None = None,
 ) -> DiffResult:
     """Classify two already-resolved snapshots — the Tier-2 snapshot verb.
 
@@ -281,6 +285,8 @@ def compare_snapshots(
         contract_mode=contract_mode,
         old_public_entity_ids=query.resolve(old),
         new_public_entity_ids=query.resolve(new),
+        acknowledgments=acknowledgments,
+        acknowledgment_policy=acknowledgment_policy,
     )
 
 

@@ -482,6 +482,8 @@ def compare_release_cmd(
     # default) is a true no-op: every library is compared exactly as it was
     # before this parameter existed.
     project_policy_overrides: dict[Any, Any] | None = None,
+    acknowledgments_path: Path | None = None,
+    acknowledgment_unacknowledged_additions: str | None = None,
     # ADR-020b / ADR-068 D5: resolved once by the caller
     # (`cli_compare_helpers.run_compare`'s `resolved_cfg.deployment`, the
     # same place `collapse_versioned_symbols`/`public_header_dirs` above are
@@ -574,6 +576,12 @@ def compare_release_cmd(
             new_variant = variant_kwargs["new_variant"]
 
     _setup_verbosity(verbose)
+
+    # G26/G27: a wheel's own tag and METADATA become the deployment contract
+    # its members are checked against, unless `runtime_floors` was declared.
+    from .workflows.release_inputs import wheel_release_env_matrix
+
+    env_matrix = wheel_release_env_matrix(env_matrix, new_dir)
 
     # ADR-065 S1: an explicit, identity-keyed release member selection --
     # see abicheck.model.release_selection's own docstring. `None` (no
@@ -793,6 +801,8 @@ def compare_release_cmd(
                 env_matrix=env_matrix,
                 exclude_headers=exclude_headers,
                 lang_explicit=lang_explicit,
+                acknowledgments_path=acknowledgments_path,
+                acknowledgment_unacknowledged_additions=acknowledgment_unacknowledged_additions,
             )
 
             for key in matched_keys:
@@ -1140,7 +1150,7 @@ def compare_release_cmd(
             # ADR-049 Phase 7's orthogonal contract-coverage floor, aggregated
             # across every library with max() -- one library's incomplete
             # evidence must still raise the release's exit code, the same rule
-            # contract_coverage_exit.fold_coverage_exit applies to a single pair.
+            # ExitDecision applies to a single pair.
             # `0` (the default fold value) when --contract was never
             # given, or every library's own selected domain closed cleanly.
             contract_coverage_exit_contribution = max(

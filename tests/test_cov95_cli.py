@@ -61,6 +61,7 @@ from abicheck.frontends.cli.runtime import (
     _write_or_echo,
 )
 from abicheck.model import AbiSnapshot, Function, Visibility
+from abicheck.policy.effective_gate import EffectiveGate
 from abicheck.serialization import snapshot_to_json
 from tests.schema_validation import validate_instance
 
@@ -660,7 +661,7 @@ class TestExitSchemeHelpers:
             old_version="1", new_version="2", library="x", verdict=Verdict.BREAKING
         )
         with pytest.raises(SystemExit) as exc:
-            _exit_with_severity_or_verdict(result, None, "legacy")
+            _exit_with_severity_or_verdict(result, EffectiveGate.from_severity(None))
         assert exc.value.code == 4
 
     def test_exit_verdict_api_break(self) -> None:
@@ -668,7 +669,7 @@ class TestExitSchemeHelpers:
             old_version="1", new_version="2", library="x", verdict=Verdict.API_BREAK
         )
         with pytest.raises(SystemExit) as exc:
-            _exit_with_severity_or_verdict(result, None, "legacy")
+            _exit_with_severity_or_verdict(result, EffectiveGate.from_severity(None))
         assert exc.value.code == 2
 
     def test_exit_verdict_compatible_no_exit(self) -> None:
@@ -676,7 +677,10 @@ class TestExitSchemeHelpers:
             old_version="1", new_version="2", library="x", verdict=Verdict.COMPATIBLE
         )
         # Compatible verdict returns normally (no SystemExit).
-        assert _exit_with_severity_or_verdict(result, None, "legacy") is None
+        assert (
+            _exit_with_severity_or_verdict(result, EffectiveGate.from_severity(None))
+            is None
+        )
 
 
 # ── compare command CliRunner error/branch paths ──────────────────────────────

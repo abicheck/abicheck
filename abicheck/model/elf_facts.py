@@ -66,6 +66,11 @@ class ElfSymbol:
     # preserved at runtime. 0 = unknown (st_value 0, or a legacy snapshot).
     # Used to detect exported-data alignment reductions (copy-reloc hazard).
     value_alignment: int = 0
+    # BLAKE2b-128 hex of a STT_FUNC symbol's code bytes
+    # (extract/elf_code_hash.py). "" = not hashed (not a function, too small,
+    # unreadable, or a pre-v56 snapshot). Equal hashes mean identical bytes;
+    # unequal hashes are no evidence (PC-relative displacements move).
+    code_hash: str = ""
 
 
 @dataclass

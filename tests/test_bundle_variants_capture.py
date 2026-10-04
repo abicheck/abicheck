@@ -48,7 +48,6 @@ from abicheck.model.variant_pairing import (
 from abicheck.project_snapshot_store import (
     DirectoryObjectStore,
     read_manifest_summary,
-    read_project_manifest,
     read_variant_ref,
 )
 from abicheck.serialization import save_snapshot
@@ -61,6 +60,7 @@ from abicheck.workflows.bundle_variants_capture import (
     plan_variant_capture,
 )
 from abicheck.workflows.variant_pairing import package_variant_views
+from tests._project_manifest_reader import read_project_manifest
 
 
 def _snap(

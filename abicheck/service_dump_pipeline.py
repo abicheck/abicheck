@@ -554,7 +554,7 @@ def execute_dump_request(
     # first, matching `ResolvedExecutionContext.from_plan`'s own
     # case-normalization (see that method's docstring) -- `DumpRequest.depth`
     # is not itself normalized, and both `depth_rank` and the ladder
-    # `EvidenceView.available_depths` states are case-sensitive.
+    # (`evidence_depth.DEPTH_RANK`) are case-sensitive.
     resolved_execution_context = None
     if resolved.resolved_execution_context is not None:
         requested_depth = (

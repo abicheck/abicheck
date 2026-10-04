@@ -160,12 +160,12 @@ class TestEvidenceView:
         assert evidence.effective_depth is None
         assert evidence.depth_satisfied is None
 
-    def test_available_depths_is_the_public_depth_ladder(self):
+    def test_depth_rank_is_the_public_depth_ladder(self):
+        from abicheck.evidence_depth import DEPTH_RANK
         from abicheck.model.evidence_depth_levels import USER_DEPTHS
 
-        evidence = EvidenceView()
-        assert evidence.available_depths == tuple(d.value for d in USER_DEPTHS)
-        assert evidence.available_depths == ("binary", "headers", "build", "source")
+        assert tuple(DEPTH_RANK) == tuple(d.value for d in USER_DEPTHS)
+        assert tuple(DEPTH_RANK) == ("binary", "headers", "build", "source")
 
     def test_for_request_carries_only_the_requested_depth(self):
         evidence = EvidenceView.for_request("headers")
@@ -204,13 +204,6 @@ class TestEvidenceView:
         assert evidence.requested_depth is None
         assert evidence.effective_depth is None
         assert evidence.depth_satisfied is None
-
-    def test_available_depths_cannot_be_overridden_via_the_constructor(self):
-        """Codex review, PR #1027, fourth round: `available_depths` is a
-        read-only property, not a constructor parameter -- passing it is a
-        `TypeError`, not a silently-accepted competing value."""
-        with pytest.raises(TypeError):
-            EvidenceView(available_depths=("bogus",))  # type: ignore[call-arg]
 
     def test_from_assurance_falls_back_to_the_given_requested_depth_when_assurances_own_is_none(
         self,
@@ -264,13 +257,15 @@ class TestResolvedExecutionContextEvidenceIntegration:
         does not normalize it -- ``service_compare_pipeline.classify_
         compare_pair`` only normalizes ``DiffResult.requested_depth`` later,
         after this context already exists. Without normalizing here too,
-        the mixed-case value fails to appear in its own
-        ``available_depths`` (the ladder is lower-case) and differs from an
+        the mixed-case value fails to appear in the lower-case ladder
+        (``DEPTH_RANK``) and differs from an
         equivalent lower-case request (Codex review, PR #1031)."""
         plan = _plan(requested_depth="HEADERS")
         ctx = ResolvedExecutionContext.from_plan(plan)
         assert ctx.evidence.requested_depth == "headers"
-        assert ctx.evidence.requested_depth in ctx.evidence.available_depths
+        from abicheck.evidence_depth import DEPTH_RANK
+
+        assert ctx.evidence.requested_depth in DEPTH_RANK
 
         lower_ctx = ResolvedExecutionContext.from_plan(_plan(requested_depth="headers"))
         assert ctx.evidence == lower_ctx.evidence

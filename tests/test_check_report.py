@@ -24,6 +24,8 @@ this module's logic backs.
 
 from __future__ import annotations
 
+import dataclasses
+
 import pytest
 
 from abicheck.buildsource.check_report import (
@@ -39,24 +41,19 @@ from abicheck.buildsource.check_report import (
     final_exit_code,
     validate_identifier,
 )
+from abicheck.policy.exit_decision import ExitDecision
 
 #: The clean `ExitDecision.to_dict()` shape, shared by every `augment_report`
-#: neutralization assertion below so a future schema bump touches one spot.
+#: neutralization assertion below: every contribution axis at `0`. The axis
+#: set is read off the dataclass so a new axis cannot be missed here.
 _CLEAN_EXIT_BLOCK = {
     "code": 0,
     "reasons": ["clean"],
-    "compatibility_contribution": 0,
-    "contract_coverage_contribution": 0,
-    "analysis_assurance_contribution": 0,
-    "crosscheck_promotion_contribution": 0,
-    "operational_error_contribution": 0,
-    "evidence_contract_error_contribution": 0,
-    "budget_overflow_contribution": 0,
-    "not_comparable_contribution": 0,
-    "removed_required_library_contribution": 0,
-    "incomplete_scope_contribution": 0,
-    "no_comparison_completed_contribution": 0,
-    "loadability_contribution": 0,
+    **{
+        f.name: 0
+        for f in dataclasses.fields(ExitDecision)
+        if f.name.endswith("_contribution")
+    },
 }
 
 

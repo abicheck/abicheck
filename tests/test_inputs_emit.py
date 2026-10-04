@@ -32,7 +32,6 @@ from abicheck.buildsource import (
     append_source_facts,
     ingest_inputs_pack,
     init_inputs_pack,
-    write_inputs_pack,
 )
 from abicheck.buildsource.inputs_emit import (
     facts_filename,
@@ -43,6 +42,7 @@ from abicheck.cc_wrapper import (
     main,
     run_cc_wrapper,
 )
+from tests._inputs_pack_writer import write_inputs_pack
 
 
 def _tu(name: str, *, mangled: str, source: str = "src/foo.cpp") -> SourceAbiTu:

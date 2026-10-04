@@ -18,7 +18,6 @@ from abicheck.model.bundle_facts import BundleFacts
 from abicheck.model.snapshot import AbiSnapshot
 from abicheck.project_snapshot_store import (
     DirectoryObjectStore,
-    read_project_manifest,
     write_project_manifest,
 )
 from abicheck.storage.bundle_facts_package import (
@@ -27,6 +26,7 @@ from abicheck.storage.bundle_facts_package import (
 )
 from abicheck.storage.package import InMemoryObjectStore
 from abicheck.workflows.bundle_facts_capture import capture_bundle_facts
+from tests._project_manifest_reader import read_project_manifest
 
 
 def _snapshot(name: str) -> AbiSnapshot:

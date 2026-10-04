@@ -68,16 +68,12 @@ from .cli_compare_release_helpers import (  # noqa: F401
 # re-exports them *from here* and direct tests import them by those names --
 # deleting them would be an import break for no gain, so the blocks are
 # marked rather than trimmed.
-from .cli_helpers_compare import _build_match_map  # noqa: F401
 from .frontends.cli.options.params import (
     DEFAULT_POLICY_PROFILE,
     _load_suppression_and_policy,
 )
 from .frontends.cli.release_summary import (  # moved (ADR-065 S2), re-exported
     _write_release_summary_file as _write_release_summary_file,
-)
-from .frontends.cli.release_variant_operand import (  # noqa: F401
-    _resolve_release_package_side,
 )
 from .frontends.cli.runtime import _safe_write_output, _write_or_echo  # noqa: F401
 from .model.symbol_inventory import SymbolInventory
@@ -106,10 +102,7 @@ if TYPE_CHECKING:
 #: ``ReleaseOperandUsageError``, which
 #: ``frontends.cli.release_compare_request`` translates at the CLI boundary
 #: into the two ``click`` types (and therefore the two exit codes) this
-#: command always produced. The ``_extract_if_package``/``_build_match_map``
-#: wrappers in this file's sibling CLI modules keep their own translation for
-#: their *other* callers (``dump``, ``compare --bundle-facts``), which still
-#: reach them directly.
+#: command always produced.
 from .workflows import release_inputs as _release_inputs  # noqa: E402
 
 # Plain assignments, for the same `no_implicit_reexport` reason

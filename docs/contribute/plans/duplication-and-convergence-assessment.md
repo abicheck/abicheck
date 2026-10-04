@@ -494,6 +494,22 @@ is the reason the mirror existed — the release fan-out still has no
 two callers still fold onto different runtime shapes around the one shared
 rule. That remains this section's target.
 
+**Single-pair consumers cut over (2026-10).** `policy.exit_decision.
+resolve_compare_exit_decision` and its abort-axes wrapper take one
+`EffectiveGate` instead of `(sev_config, scheme, require_complete_analysis)`;
+so does `frontends/cli/runtime._exit_with_severity_or_verdict`. The scoped
+gate (`cli_helpers_compare._apply_used_by_scoping`/
+`_apply_required_symbol_scoping`) takes the gate's `severity` (`None` under
+the legacy scheme) and derives its scheme from it, and the effective-config
+digest lost its `exit_code_scheme` override. `tests/
+test_effective_gate_single_input.py` states the class: no function under
+`abicheck/` takes a scheme beside a severity map (one named exception, the
+persisted `with_resolved_gate` receipt), and the process exit, report `exit`
+block and digest agree over every finding subset and severity setting. The
+release fan-out's exit resolver was checked and needs no cutover: its scheme
+is `severity_exit_code is None`, whose single producer derives it from
+`GateOptions.severity`.
+
 **Target:** one runtime object,
 
 ```python

@@ -36,7 +36,6 @@ from ....cli_dump_helpers import (
     resolve_dump_debug_format,
 )
 from ....cli_helpers_compare import (  # noqa: F401  — re-exported to keep cli import sites stable
-    _build_match_map as _build_match_map,
     _canonical_library_key as _canonical_library_key,
     _collect_force_public_symbols as _collect_force_public_symbols,
     _merge_redundant_changes as _merge_redundant_changes,

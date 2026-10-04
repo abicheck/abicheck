@@ -1481,8 +1481,8 @@ IMPORT_CYCLE_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
         # each already had its own standalone `{"cli", "cli_X"}` entry above,
         # which covers the trivial two-node cycle from `cli`'s tail-of-module
         # registration import. But `cli_config` reaches the shared machinery
-        # via `cli_compare_helpers` (config `show-effective` reuses `_cli_flag`
-        # from it) and `cli_doctor` via `cli_helpers_compare`, both of which are
+        # via `cli_compare_helpers` (config `show-effective` reused a CLI-flag
+        # helper from it) and `cli_doctor` via `cli_helpers_compare`, both of which are
         # already members of this cluster — so the *full* SCC computed by
         # Tarjan's algorithm over the real import graph includes all three,
         # regardless of which representative simple cycle the (traversal-order

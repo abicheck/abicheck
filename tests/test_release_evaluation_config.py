@@ -199,9 +199,7 @@ class TestReleaseFanOutStampsResolvedConfig:
         attribute got set."""
         result = _result()
         result.evaluation_config = _minimal_evaluation_config()
-        fields = effective_config_fields_from_raw(
-            result, severity_config=None, exit_code_scheme="legacy"
-        )
+        fields = effective_config_fields_from_raw(result, severity_config=None)
         assert fields["_tier"] == "contract"
 
     def test_two_pack_revisions_with_identical_assignments_differ_by_identity(
@@ -229,12 +227,8 @@ class TestReleaseFanOutStampsResolvedConfig:
         result1, result2 = _result(), _result()
         result1.evaluation_config = rev1
         result2.evaluation_config = rev2
-        fields1 = effective_config_fields_from_raw(
-            result1, severity_config=None, exit_code_scheme="legacy"
-        )
-        fields2 = effective_config_fields_from_raw(
-            result2, severity_config=None, exit_code_scheme="legacy"
-        )
+        fields1 = effective_config_fields_from_raw(result1, severity_config=None)
+        fields2 = effective_config_fields_from_raw(result2, severity_config=None)
         assert fields1["_tier"] == fields2["_tier"] == "contract"
         assert effective_config_digest(fields1) != effective_config_digest(fields2)
 
@@ -393,9 +387,7 @@ class TestReleaseFanOutMergesContractContext:
 
         record_release_resolved_config(diff, pack_config)
 
-        fields = effective_config_fields_from_raw(
-            diff, severity_config=None, exit_code_scheme="legacy"
-        )
+        fields = effective_config_fields_from_raw(diff, severity_config=None)
         assert fields["_tier"] == "contract"
         # Reflects the merged (pack-carrying) config, not the stale one the
         # context was built with.

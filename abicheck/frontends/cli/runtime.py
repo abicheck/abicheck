@@ -54,7 +54,6 @@ except ImportError:  # pragma: no cover - rich-click is a declared dependency
 from ...checker_types import DiffResult, LibraryMetadata
 from ...cli_audit import echo_filtered_surface, echo_reconciled
 from ...cli_helpers_compare import (  # noqa: F401  — re-exported to keep cli import sites stable
-    _build_match_map as _build_match_map,
     _canonical_library_key as _canonical_library_key,
     _collect_force_public_symbols as _collect_force_public_symbols,
     _merge_redundant_changes as _merge_redundant_changes,
@@ -75,7 +74,7 @@ from .options.params import (
 if TYPE_CHECKING:
     from ...checker_types import Change
     from ...workflows.extraction import DebugArtifact
-    from ...workflows.gate import SeverityConfig
+    from ...workflows.gate import EffectiveGate, SeverityConfig
 
 from ...model import AbiSnapshot
 
@@ -530,12 +529,9 @@ def _announce_exit_scheme(
 
 def _exit_with_severity_or_verdict(
     result: DiffResult,
-    sev_config: SeverityConfig | None,
-    scheme: str,
+    gate: EffectiveGate,
     fmt: str | None = None,
     secondary_fmts: Sequence[str] = (),
-    *,
-    require_complete_analysis: bool = False,
 ) -> None:
     """Exit with the appropriate code for the resolved exit-code scheme.
 
@@ -565,12 +561,7 @@ def _exit_with_severity_or_verdict(
         resolve_compare_exit_decision_with_abort_axes,
     )
 
-    decision = resolve_compare_exit_decision_with_abort_axes(
-        result,
-        sev_config,
-        scheme,
-        require_complete_analysis=require_complete_analysis,
-    )
+    decision = resolve_compare_exit_decision_with_abort_axes(result, gate)
     announce_coverage_floor(
         result,
         base_exit=decision.compatibility_contribution,
@@ -587,22 +578,17 @@ def _exit_with_severity_or_verdict(
         decision.contract_coverage_contribution,
     )
     diagnostic = assurance_floor_diagnostic(
-        result, require_complete=require_complete_analysis, base_exit=pre_assurance_exit
+        result,
+        require_complete=gate.require_complete_analysis,
+        base_exit=pre_assurance_exit,
     )
     if diagnostic is not None:
         click.echo(diagnostic, err=True)
-    # ADR-067 D6: the additions-review gate is a fourth orthogonal axis, not
-    # yet folded into `exit_decision.ExitDecision` itself (it is `0` for
-    # every run that never supplied `acknowledgments=...` to
-    # `checker.compare()`, so this can never move an existing invocation's
-    # exit code). Reached through `workflows.gate` (ADR-061 Phase 4 item 4),
-    # never `policy.acknowledgment_gate` directly -- `frontends` may only
-    # import `model`/`report`/`workflows`.
-    from ...workflows.gate import fold_additions_review_exit
-
-    code = fold_additions_review_exit(decision.code, result)
-    if code != 0:
-        sys.exit(code)
+    # ADR-067 D6's additions-review axis is one of the decision's own
+    # contributions, so the process exit and the report's `exit.code` are
+    # the same number.
+    if decision.code != 0:
+        sys.exit(decision.code)
 
 
 def _log_one_side_debug(

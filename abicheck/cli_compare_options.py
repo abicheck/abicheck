@@ -42,15 +42,6 @@ from typing import Any, NamedTuple
 import click
 
 
-def _cli_flag(name: str, value: bool) -> bool | None:
-    """Return *value* only when *name* actually came from the command line.
-
-    So a flag default (e.g. ``--policy``'s ``strict_abi``) doesn't mask config.
-    """
-    src = click.get_current_context().get_parameter_source(name)
-    return value if src == click.core.ParameterSource.COMMANDLINE else None
-
-
 def _param_from_cli(name: str) -> bool:
     """True when parameter *name*'s value came from the command line (not default)."""
     src = click.get_current_context().get_parameter_source(name)

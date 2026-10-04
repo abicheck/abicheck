@@ -210,6 +210,14 @@ REQUEST_ROUTING: dict[str, tuple[str, Any]] = {
     "enable_debuginfod": (_UC, "network"),
     "debuginfod_url": (_UC, "network"),
     "env_matrix": (_UC, ".abicheck.yml deployment: block only"),
+    "acknowledgments_path": (
+        _UC,
+        ".abicheck.yml acknowledgment.file (explicit --config only); CLI/release/API parity is test_acknowledgment_release_and_api.py",
+    ),
+    "acknowledgment_unacknowledged_additions": (
+        _UC,
+        ".abicheck.yml acknowledgment.unacknowledged_additions; CLI/release/API parity is test_acknowledgment_release_and_api.py",
+    ),
     "depth": (_UC, "needs live extraction"),
     "budget_s": (_UC, "nondeterministic"),
     "dwarf_only": (_UC, "needs a live binary"),

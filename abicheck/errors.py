@@ -159,10 +159,8 @@ class AmbiguousLibraryMatchError(AbicheckError, ValueError):
     A plain :class:`AbicheckError`/:class:`ValueError`, not a CLI-specific
     exception: :func:`build_match_map` is a pure matching primitive with
     callers outside any Click command (e.g. ``bundle_side_input.py``).
-    ``cli_helpers_compare._build_match_map`` -- the CLI-facing wrapper every
-    ``compare``/``compare-release`` call site already used before this
-    class existed -- catches this and re-raises ``click.ClickException``
-    with the identical message, so no existing CLI-facing behavior changes.
+    The release resolution raises it unchanged and the CLI boundary
+    (``frontends.cli.release_compare_request``) translates it.
     """
 
 

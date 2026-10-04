@@ -276,7 +276,7 @@ underlying library functions were *not* deleted, only their Click wiring:
 | `--source-abi-cache` (persistent per-TU replay cache) | `abicheck.buildsource.source_replay.SourceAbiCache` / the `ABICHECK_L4_CACHE_DIR` env var still works with `dump --sources` |
 | `--extractor-manifest` (external CLI extractors) | `abicheck.buildsource.extractor_manifest.load_extractor_manifest()` / `run_external_extractor()` — see "External CLI extractors" below |
 | `--collection-mode {permissive,strict,audit}` | No survivor — a failed producer step degrades coverage silently when scripted directly; call the library function inline in your own producer script if you need one of these behaviors |
-| `--kythe-entries`/`--codeql-results` | `abicheck.buildsource.graph_backends.ingest_kythe_entries()` / `ingest_codeql_call_results()` |
+| `--kythe-entries`/`--codeql-results` | `abicheck.buildsource.graph_backends.ingest_kythe_entries()` / `ingest_codeql_call_results()` for a call-graph query result, and `ingest_codeql_extends_results()` for a class-hierarchy (`getASuperType()`-style) query result. CodeQL output does not say which query produced it, so the caller picks the function |
 
 See `abicheck/buildsource/CLAUDE.md` for the full module map if you need to
 script one of these directly.

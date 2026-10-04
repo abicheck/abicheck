@@ -76,6 +76,10 @@ from .cli_resolve import (
 from .contract_scoped_promotion import stamp_scoped_result_findings
 from .errors import PolicyError, ProfileMismatchError, ScopeMismatchError
 from .frontends.cli import compare_enrichment as _enrichment
+from .frontends.cli.acknowledgment_config import (
+    compare_acknowledgments_for,
+    release_acknowledgment_inputs,
+)
 from .frontends.cli.compare_report import (
     # A cohesive slice of ``run_compare``'s post-comparison phase (scoped
     # gating, report rendering, suppression-audit attachment, set-input flag
@@ -818,7 +822,6 @@ def _report_compare_result(
     new_input: Path,
     resolved_cfg: Any,
     evaluation_config: Any,
-    sev_config: Any,
     report_severity: Any,
     layer_coverage_rows: Any,
     evidence_metrics: Any,
@@ -986,8 +989,7 @@ def _report_compare_result(
         required_symbols=required_symbols,
         used_by_old_input=used_by_old_input,
         used_by_new_input=used_by_new_input,
-        exit_code_scheme=resolved_cfg.exit_code_scheme,
-        sev_config=sev_config,
+        severity=report_severity,
         suppression=suppression,
     )
     # `result.scoped_exit_code` (as computed by `_apply_scoped_gating`) is
@@ -1084,13 +1086,17 @@ def _report_compare_result(
     # the compatibility verdict a supplied consumer enriches can never be
     # narrowed or replaced by that consumer's own result.
     _announce_exit_scheme(resolved_cfg.exit_code_scheme, fmt=fmt)
+    from .workflows.gate import effective_gate_for_resolved_compare_config
+
     _exit_with_severity_or_verdict(
         result,
-        sev_config,
-        resolved_cfg.exit_code_scheme,
+        effective_gate_for_resolved_compare_config(
+            resolved_cfg,
+            result=result,
+            require_complete_analysis=require_complete_analysis,
+        ),
         fmt,
         [f for f, _ in secondary_writes],
-        require_complete_analysis=require_complete_analysis,
     )
 
 
@@ -1276,7 +1282,6 @@ def run_compare(
         config=config,
         severity_preset=severity_preset,
     )
-    sev_config = resolved_cfg.severity
     # `scope.exclude_headers` -- the config equivalent of `--exclude-header`
     # (see `BuildConfig.exclude_headers` for why it is its own key and not
     # `sources.exclude`). Weaker than the flag and never unioned with it: a
@@ -1590,6 +1595,9 @@ def run_compare(
                 new_dir=new_input,
                 project_policy_overrides=resolve_release_project_policy_overrides(
                     project_cfg, cfg_path
+                ),
+                **release_acknowledgment_inputs(
+                    project_cfg, cfg_path, config_explicit=config is not None
                 ),
                 headers=headers,
                 includes=directory_includes,
@@ -1995,10 +2003,6 @@ def run_compare(
         _pf0, pf, project_path=cfg_path
     ):
         click.echo(f"Warning: {w}", err=True)
-    # A gate pack may have moved a severity level; later consumers read it
-    # off here, so re-derive rather than keep the pre-pack value.
-    sev_config = resolved_cfg.severity
-
     extra_changes = _load_probe_matrix_changes(probe_matrix_old, probe_matrix_new)
 
     # A header-scoped compare can silently drop a function that's genuinely
@@ -2057,6 +2061,11 @@ def run_compare(
     post_manifest_allowlist = post_manifest_allowlist_for(
         project_cfg, cfg_path, old, new, config_explicit=config is not None
     )
+    # ADR-067 D5/D6: `.abicheck.yml`'s `acknowledgment:` block (records only
+    # from an explicit --config; see acknowledgment_config.py).
+    acks = compare_acknowledgments_for(
+        project_cfg, cfg_path, pf, config_explicit=config is not None
+    )
 
     # ADR-068 D4 (the correctness fix this phase exists for): pattern-verdict
     # modulation is unconditional now, not a flag (removed; see
@@ -2070,11 +2079,14 @@ def run_compare(
     # what the (now vestigial, accepted-for-compatibility) flag says, the
     # same "the flag is a no-op, the analysis always runs" treatment
     # pattern_verdicts=True above already gets.
-    # Reporting reads the severity config only under the severity exit scheme;
-    # resolved once here rather than re-spelled at each of the five consumers.
-    report_severity = (
-        sev_config if resolved_cfg.exit_code_scheme == "severity" else None
-    )
+    # The run's one resolved gate (duplication-and-convergence P0
+    # `EffectiveGate`), read after any gate pack moved a severity level. Its
+    # severity is `None` exactly under the legacy scheme, so every consumer
+    # below -- report rendering, the scoped gate -- reads one value instead of
+    # re-pairing a severity map with a separately-derived scheme.
+    from .workflows.gate import effective_gate_for_resolved_compare_config
+
+    report_severity = effective_gate_for_resolved_compare_config(resolved_cfg).severity
     # One Semantic Pipeline plan, 4B: use evaluation_config's resolved
     # contract.mode -- but only under contract_evaluation itself, since a
     # --pack-only run resolves a non-None config with a concrete mode too.
@@ -2108,6 +2120,8 @@ def run_compare(
             diagnostic_comparison=diagnostic_comparison,
             contract_evaluation=contract_evaluation,
             contract_mode=resolved_contract_mode,
+            acknowledgments=acks.records,
+            acknowledgment_policy=acks.policy,
         )
     except (ProfileMismatchError, ScopeMismatchError) as exc:
         report_not_comparable_and_exit(
@@ -2155,7 +2169,6 @@ def run_compare(
         new_input=new_input,
         resolved_cfg=resolved_cfg,
         evaluation_config=evaluation_config,
-        sev_config=sev_config,
         report_severity=report_severity,
         layer_coverage_rows=layer_coverage_rows,
         evidence_metrics=evidence_metrics,

@@ -33,6 +33,7 @@ from abicheck.checker_policy import ChangeKind, Verdict
 from abicheck.checker_types import Change, DiffResult
 from abicheck.errors import PolicyError
 from abicheck.model import AbiSnapshot
+from abicheck.model.acknowledgment_policy import AcknowledgmentPolicy
 from abicheck.model.declarations import Function
 from abicheck.policy.acknowledgment import (
     AcknowledgmentList,
@@ -40,14 +41,13 @@ from abicheck.policy.acknowledgment import (
 )
 from abicheck.policy.acknowledgment_gate import (
     evaluate_unacknowledged_additions,
-    fold_additions_review_exit,
 )
-from abicheck.policy.acknowledgment_policy import AcknowledgmentPolicy
 from abicheck.policy.disposition_close import (
     acknowledged_total,
     acknowledgments as ledger_acknowledgments,
     ledger_for,
 )
+from abicheck.policy.effective_gate import EffectiveGate
 from abicheck.policy_file import PolicyFile
 from abicheck.report.disposition_audit import compute_disposition_audit
 
@@ -517,26 +517,51 @@ def test_additions_review_never_changes_the_verdict_class() -> None:
     assert change.kind is ChangeKind.FUNC_ADDED
 
 
-def test_fold_additions_review_exit_never_lowers_a_real_gate_code() -> None:
+def _decision(diff: DiffResult, verdict: Verdict) -> object:
+    from abicheck.policy.effective_gate import EffectiveGate
+    from abicheck.policy.exit_decision import resolve_compare_exit_decision
+
+    diff.verdict = verdict
+    return resolve_compare_exit_decision(diff, EffectiveGate.from_severity(None))
+
+
+@pytest.mark.parametrize(
+    ("verdict", "action", "code"),
+    [
+        (Verdict.COMPATIBLE, "block", 1),
+        (Verdict.COMPATIBLE, "warn", 0),
+        (Verdict.COMPATIBLE, "allow", 0),
+        (Verdict.API_BREAK, "block", 2),
+        (Verdict.BREAKING, "block", 4),
+    ],
+)
+def test_additions_review_is_an_exit_decision_axis(verdict, action, code) -> None:
+    """D6's floor is folded inside ``ExitDecision``: it raises a clean exit to
+    ``1`` under ``block`` only, never lowers a real ``2``/``4``, and is named
+    in ``reasons`` when it decides the code."""
+    from abicheck.policy.exit_decision import ExitReason
+
     diff = DiffResult(changes=[], old_version="1", new_version="2", library="l")
     diff.unacknowledged_additions_review = evaluate_unacknowledged_additions(
         [Change(kind=ChangeKind.FUNC_ADDED, symbol="bar", description="x")],
         None,
-        AcknowledgmentPolicy(unacknowledged_additions="block"),
+        AcknowledgmentPolicy(unacknowledged_additions=action),
     )
-    # A compatibility gate that already exited 4 (ABI break) is never
-    # lowered by a 0/1 orthogonal axis.
-    assert fold_additions_review_exit(4, diff) == 4
-    # A clean 0 is raised to the axis's own contribution.
-    assert fold_additions_review_exit(0, diff) == 1
+    decision = _decision(diff, verdict)
+    assert decision.code == code
+    assert decision.additions_review_contribution == (1 if action == "block" else 0)
+    assert (ExitReason.ADDITIONS_REVIEW in decision.reasons) == (code == 1)
+    assert decision.to_dict()["additions_review_contribution"] == (
+        decision.additions_review_contribution
+    )
 
 
-def test_fold_additions_review_exit_is_zero_when_never_evaluated() -> None:
-    """No `acknowledgments=...` was ever supplied -- the axis contributes
+def test_additions_review_is_zero_when_never_evaluated() -> None:
+    """No acknowledgment records were ever supplied -- the axis contributes
     nothing, so no pre-existing invocation's exit code moves."""
     diff = DiffResult(changes=[], old_version="1", new_version="2", library="l")
-    assert fold_additions_review_exit(0, diff) == 0
-    assert fold_additions_review_exit(4, diff) == 4
+    assert _decision(diff, Verdict.COMPATIBLE).code == 0
+    assert _decision(diff, Verdict.BREAKING).code == 4
 
 
 def test_unacknowledged_addition_to_dict_and_from_dict() -> None:
@@ -711,7 +736,7 @@ def test_compare_blocks_on_a_real_unacknowledged_addition(tmp_path: Path) -> Non
     )
     assert result.verdict == Verdict.COMPATIBLE
     with pytest.raises(SystemExit) as exc_info:
-        _exit_with_severity_or_verdict(result, None, "legacy")
+        _exit_with_severity_or_verdict(result, EffectiveGate.from_severity(None))
     assert exc_info.value.code == 1
 
 

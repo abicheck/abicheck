@@ -561,13 +561,9 @@ def classify_compare_pair(
     suppression, pf = load_suppression_and_policy(
         request.suppress, request.policy, request.policy_file_path
     )
-    # CLI cleanup phase two, PR B slice 1: fold an already-resolved pack's
-    # policy/contract-surface contributions into the loaded PolicyFile, the
-    # same way `pack_application.policy_file_with_packs` does for single-pair
-    # `compare` -- a no-op unless a caller populated `CompareRequest.
-    # pack_policy_overrides`/`pack_internal_namespaces`. `pf` is reused for
-    # the receipt below too (`compare_gate_receipt._with_pack_forwarded_
-    # provenance` records the forwarded pack's own contribution honestly).
+    # A forwarded pack's policy contribution, folded the way
+    # `pack_application.policy_file_with_packs` does for single-pair
+    # `compare`; a no-op unless the caller populated the pack fields.
     if request.pack_policy_overrides or request.pack_internal_namespaces is not None:
         from .pack_application import PackApplication, policy_file_with_packs
 
@@ -579,19 +575,13 @@ def classify_compare_pair(
             ),
             base_policy=request.policy,
         )
-    # 4B: one D7 config from the loaded inputs, pre-project-fold; read by the receipt and context below.
-    from .workflows.compare_gate_receipt import resolve_request_evaluation_config
+    # The rest of the request's policy inputs (evaluation config, project
+    # fold, acknowledgments), resolved once in `workflows`.
+    from .workflows.compare_request_policy import resolve_request_policy_inputs
 
-    evaluation_config = resolve_request_evaluation_config(request, pf, suppression)
-    # ADR-068 §3 #23 / ADR-049 D7: fold project-config overrides at the weakest tier, after the pack fold above.
-    if request.project_policy_overrides:
-        from .policy.policy_file_project_overrides import (
-            apply_lower_precedence_overrides,
-        )
-
-        pf = apply_lower_precedence_overrides(
-            pf, dict(request.project_policy_overrides), base_policy=request.policy
-        )
+    policy_inputs = resolve_request_policy_inputs(request, suppression, pf)
+    suppression, pf = policy_inputs.suppression, policy_inputs.policy_file
+    evaluation_config = policy_inputs.evaluation_config
     # The four Nones are the out-of-band pack-override params -- reusing the
     # raw sources/build_info paths would make `_resolve_side_pack` try (and
     # fail) to reload them as packs; None uses the embedded facts.
@@ -618,6 +608,8 @@ def classify_compare_pair(
         suppression=suppression,
         policy=request.policy,
         policy_file=pf,
+        acknowledgments=policy_inputs.acknowledgments.records,
+        acknowledgment_policy=policy_inputs.acknowledgments.policy,
         scope_to_public_surface=request.scope_public,
         force_public_symbols=(
             set(request.force_public_symbols) if request.force_public_symbols else None
@@ -730,7 +722,7 @@ def classify_compare_pair(
     )
     # Abort-axes-aware (plan P3): a typed caller's own `exit_decision` reports an `--abi3` evidence-contract abort too.
     exit_decision = gate_workflow.resolve_compare_exit_decision_with_abort_axes(
-        result, gate.severity, gate.exit_code_scheme
+        result, gate.effective_gate
     )
 
     # Installs the same gate onto result.contract_context; see
@@ -854,6 +846,8 @@ def run_compare(
     project_policy_overrides: dict[Any, Any] | None = None,
     env_matrix: EnvironmentMatrix | None = None,
     exclude_headers: tuple[str, ...] = (),
+    acknowledgments_path: Path | None = None,
+    acknowledgment_unacknowledged_additions: str | None = None,
 ) -> CompareResult:
     """Compare two ABI inputs and return the classified diff result.
 
@@ -1015,5 +1009,7 @@ def run_compare(
         severity_preset=severity_preset,
         collapse_versioned_symbols=collapse_versioned_symbols,
         env_matrix=env_matrix,
+        acknowledgments_path=acknowledgments_path,
+        acknowledgment_unacknowledged_additions=acknowledgment_unacknowledged_additions,
     )
     return run_compare_request(request)

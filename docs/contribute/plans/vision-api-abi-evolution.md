@@ -361,7 +361,8 @@ and an ambiguous match is a hard error rather than a nearest-match
 resolution — both enforce D5 and vision.md's "a baseline refresh or a broad
 ignore rule is not an acknowledgment" invariant); the additions review gate
 (`abicheck/policy/acknowledgment_gate.py`, `allow` default, wired as a
-fourth orthogonal exit axis via `fold_additions_review_exit`); acknowledgment
+fourth orthogonal exit axis, inside `ExitDecision` since 2026-10 and loaded
+by `compare` (single-pair and directory/package) and the typed `CompareRequest` from `.abicheck.yml`'s `acknowledgment:` block); acknowledgment
 recorded through the same ledger primitive suppression/reclassification
 already use (`DispositionLedger.resolve_acknowledgments`,
 `DispositionRecord.acknowledged_by`); shared record ids with B

@@ -52,6 +52,7 @@ from abicheck.checker_policy import Verdict
 from abicheck.cli import main
 from abicheck.exit_decision import ExitDecision, ExitReason, resolve_exit_decision
 from abicheck.model import AbiSnapshot, Function, Visibility
+from abicheck.policy.effective_gate import EffectiveGate
 from abicheck.policy.exit_decision import resolve_compare_exit_decision
 from abicheck.policy.exit_decision_precedence import (
     resolve_compare_exit_decision_with_abort_axes,
@@ -167,6 +168,7 @@ class TestResolveExitDecision:
             "incomplete_scope_contribution": 0,
             "no_comparison_completed_contribution": 0,
             "loadability_contribution": 0,
+            "additions_review_contribution": 0,
         }
 
     def test_crosscheck_promotion_has_no_live_producer(self) -> None:
@@ -243,7 +245,9 @@ class TestResolveCompareExitDecisionAdr064Axes:
         # the bare resolver stays the pre-P3 pure fold for every other
         # caller (test_used_by_gate_enrichment.py's Hypothesis suite incl.).
         result = self._result(Verdict.BREAKING, evidence_contract_error=True)
-        decision = resolve_compare_exit_decision(result, None, "legacy")
+        decision = resolve_compare_exit_decision(
+            result, EffectiveGate.from_severity(None)
+        )
         assert decision.code == 4
         assert decision.reasons == (ExitReason.COMPATIBILITY_GATE,)
         assert decision.evidence_contract_error_contribution == 0
@@ -254,8 +258,7 @@ class TestResolveCompareExitDecisionAdr064Axes:
         result = self._result(Verdict.BREAKING)
         decision = resolve_compare_exit_decision_with_abort_axes(
             result,
-            None,
-            "legacy",
+            EffectiveGate.from_severity(None),
         )
         assert decision.code == 4
         assert decision.reasons == (ExitReason.COMPATIBILITY_GATE,)
@@ -266,8 +269,7 @@ class TestResolveCompareExitDecisionAdr064Axes:
         result = self._result(Verdict.NO_CHANGE, evidence_contract_error=True)
         decision = resolve_compare_exit_decision_with_abort_axes(
             result,
-            None,
-            "legacy",
+            EffectiveGate.from_severity(None),
         )
         assert decision.code == 7
         assert decision.reasons == (ExitReason.EVIDENCE_CONTRACT_ERROR,)
@@ -280,8 +282,7 @@ class TestResolveCompareExitDecisionAdr064Axes:
         result = self._result(Verdict.BREAKING, budget_overflow=True)
         decision = resolve_compare_exit_decision_with_abort_axes(
             result,
-            None,
-            "legacy",
+            EffectiveGate.from_severity(None),
         )
         assert decision.code == 5
         assert decision.reasons == (ExitReason.BUDGET_OVERFLOW,)
@@ -296,8 +297,7 @@ class TestResolveCompareExitDecisionAdr064Axes:
         )
         decision = resolve_compare_exit_decision_with_abort_axes(
             result,
-            None,
-            "legacy",
+            EffectiveGate.from_severity(None),
         )
         assert decision.code == 7
         assert decision.reasons == (ExitReason.EVIDENCE_CONTRACT_ERROR,)
@@ -307,8 +307,7 @@ class TestResolveCompareExitDecisionAdr064Axes:
         result = self._result(Verdict.API_BREAK, budget_overflow=True)
         decision = resolve_compare_exit_decision_with_abort_axes(
             result,
-            None,
-            "legacy",
+            EffectiveGate.from_severity(None),
         )
         prior = resolve_exit_decision(compatibility_contribution=2)
         expected = resolve_scan_exit_decision(
@@ -872,6 +871,7 @@ class TestCompareExitDecisionIntegration:
             "incomplete_scope_contribution": 0,
             "no_comparison_completed_contribution": 0,
             "loadability_contribution": 0,
+            "additions_review_contribution": 0,
         }
 
     def test_breaking_comparison_reports_the_compatibility_gate_reason(

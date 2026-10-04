@@ -48,7 +48,7 @@ the upward-dependency mistake Phase 2 already caught and corrected for
 ``model/identity.py``, recreated in this leaf. The fix is the same shape:
 :func:`_matches_finding_id` never computes a canonical finding id itself —
 it only compares an already-computed string. The **caller**
-(``Suppression.selector_matches()``, comparison-layer code that already
+(``Suppression._selector_match()``, comparison-layer code that already
 imports ``finding_identity.py`` today) computes
 ``report_canonical_finding_id(change)`` once and passes the resulting string
 in via :meth:`SelectorSet.matches_selectors`'s ``canonical_finding_id``
@@ -310,7 +310,7 @@ def _matches_finding_id(finding_id: str, canonical_finding_id: str | None) -> bo
     module's own docstring), so it cannot compute
     ``report_canonical_finding_id(change)`` itself. The caller (comparison-
     layer code that already imports ``finding_identity.py`` today, e.g.
-    :meth:`~abicheck.suppression.Suppression.selector_matches`) computes
+    ``Suppression._selector_match``) computes
     that value once and passes it in here; ``None`` (no value was computed
     for this change, or the caller never bothers because its own selector
     grammar has no ``finding_id`` field, as :class:`~abicheck.reclassify.
@@ -432,8 +432,7 @@ class SelectorSet:
     A caller constructs one of these in its own ``__post_init__`` from its
     own selector fields (mirroring the identically-named/-typed fields on
     :class:`Suppression`/:class:`ReclassifyRule`), then delegates matching
-    to :meth:`matches_selectors`/:meth:`is_expired` on every ``matches()``/
-    ``selector_matches()`` call. Validation (mutual exclusivity, unknown
+    to :meth:`matches_selectors`/:meth:`is_expired` on every ``matches()`` call. Validation (mutual exclusivity, unknown
     ``change_kind``, malformed glob/regex, "at least one selector",
     malformed ``binding``) happens once, here, at construction time — a
     ``ValueError`` raised here propagates unchanged to the caller's own

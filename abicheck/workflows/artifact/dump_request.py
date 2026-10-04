@@ -124,7 +124,7 @@ class ResolvedDumpRequest:
     (``resolve_dump_request`` already calls ``AnalysisPlanner.resolve``
     for its ADR-063 Phase 4 pre-flight check -- this is not a second
     resolution). ``operation`` reads ``"dump"`` off the plan; ``evidence``
-    carries only ``requested_depth``/``available_depths`` at this point --
+    carries only ``requested_depth`` at this point --
     the pre-execution view, via :meth:`~abicheck.workflows.
     resolved_execution_context.ResolvedExecutionContext.from_plan` with no
     *assurance*. Optional and additive: excluded from ``compare=False`` for

@@ -211,11 +211,6 @@ class ExportSet:
         """Every target that writes to the filesystem (not stdout)."""
         return tuple(t for t in self.targets if not t.to_stdout)
 
-    @property
-    def destinations(self) -> tuple[Path, ...]:
-        """Every filesystem destination, in request order."""
-        return tuple(t.destination for t in self.file_targets if t.destination)
-
 
 def _grammar_error(value: str, formats: Sequence[str], detail: str) -> str:
     example = formats[0] if formats else "json"

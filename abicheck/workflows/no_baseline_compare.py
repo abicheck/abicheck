@@ -104,7 +104,6 @@ __all__ = [
     "NoBaselineCompareResult",
     "audit_no_baseline_candidate",
     "candidate_is_live_artifact",
-    "candidate_is_stored_snapshot",
     "declared_absent_acquisition_record",
     "public_header_sets_for_candidate",
     "resolve_no_baseline_candidate",
@@ -283,24 +282,6 @@ def public_header_sets_for_candidate(
         [*split_files, *public_headers],
         [*split_dirs, *public_header_dirs],
     )
-
-
-def candidate_is_stored_snapshot(path: Path) -> bool:
-    """Whether *path* is an already-serialized snapshot, in either shape.
-
-    The ``workflows``-layer spelling of
-    ``input_resolution.is_stored_snapshot_operand`` for a ``frontends``
-    caller, which may not import ``extract``/``storage`` internals directly
-    (ADR-061's dependency direction) and would otherwise re-derive the
-    package test from the filesystem. The CLI needs the same answer the
-    depth-floor carve-out needs, for a different reason: to tell a
-    directory-backed ``ProjectSnapshot`` *package* -- one artifact, which
-    this path audits fine -- from a release *directory* of several
-    libraries, which needs a fan-out it does not have yet.
-    """
-    from .input_resolution import is_stored_snapshot_operand
-
-    return is_stored_snapshot_operand(path)
 
 
 def candidate_is_live_artifact(

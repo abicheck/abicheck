@@ -159,6 +159,7 @@ Embeds `abicheck.environment_matrix.EnvironmentMatrix`'s own YAML shape wholesal
 
 Recognized (so they don't trigger the unknown-key warning) but parsed by a sibling module rather than `BuildConfig` itself — see `abicheck/buildsource/CLAUDE.md`'s module map for which one:
 
+- `acknowledgment`
 - `aggregate`
 - `baseline`
 - `bundle_variants`

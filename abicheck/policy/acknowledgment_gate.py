@@ -35,7 +35,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from .acknowledgment_policy import AcknowledgmentPolicy
+from ..model.acknowledgment_policy import AcknowledgmentPolicy
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from ..checker_types import Change, DiffResult
@@ -199,11 +199,23 @@ def additions_review_exit_contribution(result: DiffResult) -> int:
     return int(getattr(review, "gate_contribution", 0) or 0)
 
 
-def fold_additions_review_exit(base: int, result: DiffResult) -> int:
-    """*base* raised to the additions-review floor — D6's orthogonal fold.
+def effective_acknowledgment_policy(
+    policy_file: object, configured_action: str | None
+) -> AcknowledgmentPolicy | None:
+    """The run's D6 gate policy, or ``None`` when nothing states one.
 
-    ``max()``, exactly like :func:`abicheck.policy.contract_coverage_exit.
-    fold_coverage_exit`: the axis can raise a clean ``0`` to ``1`` and can
-    never lower a real ``2``/``4`` compatibility-gate exit.
+    ADR-049 D7's tiers: a ``--policy`` file that states its own
+    ``acknowledgment:`` block outranks ``.abicheck.yml``'s
+    ``acknowledgment.unacknowledged_additions`` (*configured_action*). ``None``
+    -- neither states it -- keeps the review from running at all, which is
+    every pre-existing invocation.
     """
-    return max(base, additions_review_exit_contribution(result))
+    if getattr(policy_file, "acknowledgment_policy_stated", False):
+        stated = getattr(policy_file, "acknowledgment_policy", None)
+        if isinstance(stated, AcknowledgmentPolicy):
+            return stated
+    if configured_action is None:
+        return None
+    return AcknowledgmentPolicy(
+        unacknowledged_additions=configured_action  # type: ignore[arg-type]
+    )

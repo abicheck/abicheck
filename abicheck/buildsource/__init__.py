@@ -89,7 +89,6 @@ from .include_graph import (
 from .inputs_emit import (
     append_source_facts,
     init_inputs_pack,
-    write_inputs_pack,
 )
 from .inputs_pack import (
     ABICHECK_INPUTS_VERSION,
@@ -148,7 +147,6 @@ __all__ = [
     "init_inputs_pack",
     "is_inputs_pack",
     "read_source_facts",
-    "write_inputs_pack",
     "REPLAY_SCOPES",
     "SOURCE_ABI_VERSION",
     "SOURCE_GRAPH_VERSION",

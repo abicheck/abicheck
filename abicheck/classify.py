@@ -103,23 +103,46 @@ class FileClassifier(ABC):
 # ---------------------------------------------------------------------------
 
 
+class DebugCompanionClassifier(FileClassifier):
+    """Reject separate debug-info companions, whatever their content.
+
+    A macOS ``*.dSYM`` bundle holds a Mach-O copy of the library's DWARF
+    (``libx.so.dSYM/Contents/Resources/DWARF/libx.so``) plus dsymutil's
+    relocation maps; a ``*.debug`` file is a separate ELF debuginfo object.
+    Both are real binaries with the library's own name, so a name or magic
+    check accepts them, and a release directory then held two ``libx.so``
+    members (an ambiguous match) or compared the debug copy as if it were the
+    library. They are evidence about a library, never a library.
+    """
+
+    #: A ``*.debug`` file, or a ``*.dSYM`` bundle directory, as a path
+    #: component -- matched against the file's own name and its parents.
+    _COMPANION_RE: re.Pattern[str] = re.compile(r"\.(?:debug|dsym)$")
+
+    def accepts(self, path: Path) -> bool | None:
+        components = (path.name, *path.parent.parts)
+        if any(self._COMPANION_RE.search(c.lower()) for c in components):
+            return False
+        return None
+
+
 class BinaryExtensionClassifier(FileClassifier):
     """Fast accept based on known binary file extensions.
 
-    Uses a regex for ``.so`` to enforce an extension boundary and avoid
-    false positives from substrings like ``some``, ``solution``, ``resolve``.
+    A name is only a hint. ``libfoo.so`` and ``libfoo.so.<digits>`` are
+    accepted on the name alone -- that keeps a text linker-script stub such
+    as ``libc.so`` discoverable, which content sniffing would reject. Any
+    other ``.so.<suffix>`` (``libfoo.so.c``, ``libfoo.so.bak``, but also a
+    real ``libfoo.so.0d``) abstains, so :class:`MagicByteClassifier` decides
+    from the file's content. Accepting every ``.so.`` name let a source or
+    backup file next to a library become a release member that then failed
+    to load, failing the whole directory comparison.
     """
 
-    _SO_RE: re.Pattern[str] = re.compile(r"\.so(?:\.|$)")
-    _BINARY_EXTS: frozenset[str] = frozenset({".dll", ".dylib", ".pyd"})
+    _NAME_ONLY_RE: re.Pattern[str] = re.compile(r"\.(?:so(?:\.\d+)*|dll|dylib|pyd)$")
 
     def accepts(self, path: Path) -> bool | None:
-        lower = path.name.lower()
-        if self._SO_RE.search(lower):
-            return True
-        if any(lower.endswith(ext) for ext in self._BINARY_EXTS):
-            return True
-        return None
+        return True if self._NAME_ONLY_RE.search(path.name.lower()) else None
 
 
 class MagicByteClassifier(FileClassifier):
@@ -324,6 +347,7 @@ class FallbackSniffClassifier(FileClassifier):
 # ---------------------------------------------------------------------------
 
 _PIPELINE: list[FileClassifier] = [
+    DebugCompanionClassifier(),
     BinaryExtensionClassifier(),
     MagicByteClassifier(),
     AbiJsonClassifier(),

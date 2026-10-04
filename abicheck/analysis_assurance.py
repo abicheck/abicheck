@@ -1539,20 +1539,6 @@ def analysis_assurance_exit_contribution(
     return 0 if aa.status == "complete" else INCOMPLETE_ANALYSIS_EXIT_CONTRIBUTION
 
 
-def fold_analysis_assurance_exit(
-    base: int, result: DiffResult, *, require_complete: bool
-) -> int:
-    """*base* raised to the assurance floor -- the same ``max`` discipline
-    :func:`abicheck.contract_coverage_exit.fold_coverage_exit` uses for its
-    own orthogonal axis: never lowers a real ``2``/``4`` compatibility exit,
-    only ever raises a clean ``0`` to ``1``.
-    """
-    return max(
-        base,
-        analysis_assurance_exit_contribution(result, require_complete=require_complete),
-    )
-
-
 def assurance_floor_diagnostic(
     result: DiffResult, *, require_complete: bool, base_exit: int
 ) -> str | None:

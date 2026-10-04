@@ -137,7 +137,7 @@ def test_compare_reports_the_decline_and_leaves_findings_unchanged():
         assert listed[det.name]["declined"] == [
             {"entity": e, "reason": r} for e, r in det.declined
         ]
-    assert doc["report_schema_version"] == "5.12"
+    assert doc["report_schema_version"] == "5.13"
     from pathlib import Path
 
     from schema_validation import jsonschema_available, validate_instance

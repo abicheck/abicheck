@@ -212,3 +212,141 @@ editing a copy of it.
 | buildsource: `build_check_id` `environment_id`; `build_header_only_graph` `ast_root`; `BuildSourcePack.from_embedded_dict` `root`; `find_pattern_facts`, `resolve_expected_source_inputs` and `resolve_source_inputs` `changed_paths` (with `path_changed`); `to_aggregate_manifest` `head_sha`; `parse_android_dump` `tu_id`; `assemble_source_tu` `diagnostics`; `resolve_source_extractor` `fallback`/`preference`; `compute_tu_cache_key` `schema_version`; `run_source_replay` `library`/`forced_public`/`target_id`, then `link_source_abi` `forced_public` and `select_compile_units`/`public_header_roots_for`/`_extract_one` `target_id`; `run_layout_tool` `timeout`; `dump_source_only` (and `_write_snapshot_output`, the CLI `embed_build_source`) `build_query`/`build_compile_db`/`build_targets`; the evidence adapters' `quiet`; `resolve_dump_collect_context` `inputs_pack`; `attach_build_context_for_parsed_headers` `compile_db`; `parse_sycl_metadata` `extra_plugin_paths` | **Removed.** `forced_public` is applied by the contract pipeline's overlay, which never needed L4's copy. The changed-path narrowing of the pre-scan's inputs had only `scan` as a caller; `SourceInputDisposition.EXCLUDED` stays in the vocabulary with no producer. `target` replay scope is now every unit attached to a build target, which is what every production call already got. `build_mode_from_signals`' `raw_producer`/`raw_comment`/`dwarf_language` are **kept and recorded as a known gap**: removing them would leave `detect_compiler_family`/`detect_cxx_standard` reachable only from tests, and no dump path sets `AbiSnapshot.build_mode` at all. |
 | Kept, with the reason | Test seams: `run_inferred_build_query` `timeout`/`which`, `run_cc_wrapper` `runner`/`env`/`emit`, `meminfo_available_gib` `path`, `enforce_ast_cache_budget` `max_bytes`/`now`, `SuppressionList.check_expired_strict` `today`, `compact_json_stream`/`decode_and_select_frontend_context_from_path` `chunk_size`, `capture_variants` `dump`, `run_ast_passes` `passes`, plus the seams the report-renderer row keeps. `depfile_args_from_argv` `trusted_root`: the opt-in that lets a raw `@file` token expand only under a verified root; neither call site has one, so such a token is dropped, as its docstring says. `ingest_inputs_pack` `attribution`/`expected_target_id`: the ADR-053 D3 filter no caller performs yet, which is why the project workflow's resolver rejects an inferred pack (`tests/test_reusable_workflows_project_evidence.py`). Recomputed after these rows: 31 parameters on 19 functions, every one kept above or recorded as a known gap. |
 | Documented-API list (parameters on functions the docs name): `dry_run_estimate.estimate_scan`'s `mode`/`source_method`/`depth`/`seeded`/`max_tus`/`compile_db`; `cli_buildsource.embed_build_source`'s `quiet`; `check_requested_depth_satisfied`'s `build_source`; `process_resources.python_parallelism`'s `diagnostics`; `inline_graph_fold.fold_archive_graph`'s `search_roots` | **Removed**, and the first was a bug: the `compare --dry-run` cost preview, `estimate_scan`'s one caller, re-derived what the run resolves. It picked its own compile DB, ignoring `.abicheck.yml`'s `build.compile_db` and falling back to the source tree after a `--build-info` directory with no DB (where the run collects nothing), and it never saw `--since`/`--changed-path`, so it stated and priced "target" scope for a run that replays the changed units. `buildsource.inline.plan_compile_db` is now the one statement of the compile-DB order (`_resolve_compile_db` executes what it names), `frontends/cli/compare_enrichment.resolve_compare_changed_seed` the one seed resolution, and `estimate_scan` takes the run's level, collect mode and seed. `tests/test_compare_dry_run_compile_db.py` checks the preview against the run's own collector over {no DB, conventional DB, config-named DB, both} x {no config, in-tree, `--config`, stale `--config`} x {no/with/without-DB `--build-info`} (29 of 48 fail on the previous code) and the stated scope over {binary, headers, build, source} x four seeds (3 of 16). `tests/scan_estimate_helpers.py`, an orphan once `scan`'s cost-model tests went, is deleted. `python_parallelism` now ignores an unparsable `ABICHECK_MEMBER_JOBS` silently, as every other sizing variable in the module does. **Kept:** `resolve_compatibility_evaluation_config`'s `api_spellings` (its reference page states why), `collect_inline_pack`'s cache dirs and `run_dump_request`'s `notify` (documented library capabilities), `read_legacy_snapshot_document`'s `artifact_id` (the selector for a multi-artifact package), `ObjectStore.put`'s `algorithm`, `save_snapshot`'s `compression`, `snapshot_to_json`'s `indent`, and the detector thresholds `min_removed`/`min_overloads`/`top_n`. |
+
+## Stage F — recomputed after #1477
+
+The same recording on `main` after #1477 (CLI cleanup Phase 9b–9d) listed
+**8** dead functions and **2** new dead parameters, each left by that change
+or by Stage E's own removals. Recomputed after the rows below: **0** dead
+functions, and the parameter list is Stage E's 31 plus `run_no_baseline_set`'s
+`audit`, kept.
+
+| Item | Decision |
+|---|---|
+| `evidence_depth_levels.resolve_level`/`resolve_source_method`/`mode_preset`, with `ScanMode`, `_MODE_PRESET` and `UNPINNED_DEPTH` | **Deleted.** They were `scan`'s `--mode`/`--source-method` precedence resolver; only tests called them. Following them found a single-owner item: "explicit `--depth` → collect mode" had three copies (`cli_dump_depth.resolve_dump_depth`, `service_compare_evidence._resolve_depth_collect_mode`, `workflows/plan._depth_implied_collect_mode`), two of them saying they were "duplicated to stay a leaf", though `model/` is the leaf all three already imported. They agreed; `evidence_depth_levels.collect_mode_for_depth` is now the one answer, and `tests/test_evidence_depth_levels.py` checks all three callers against a table written from ADR-033 D2/ADR-043 D3 over every depth in every letter case. |
+| `dry_run_estimate.expand_public_header_inputs`, `_compile_db_in` | **Deleted.** The first served `embed_side_build_source`'s `expand_public_header_roots`, which Stage E removed because only `scan` set it (L4's mirror detection samples a directory root itself, `clang_public_roots._public_root_samples`); the second was the cost preview's own compile-DB lookup, replaced by `buildsource.inline.plan_compile_db` in Stage E. |
+| `cli_compare_options._cli_flag`, `no_baseline_compare.candidate_is_stored_snapshot`, `release_package.dso_only_filter_pair` | **Deleted.** Callers removed by #1477's directory `--no-baseline` and the release-matrix rewrite; nothing else asked. |
+| `no_baseline_set.resolve_no_baseline_set_plan`'s `make_temp_dir` | **Removed**: no caller, test or production, passed one. |
+| `no_baseline_set.run_no_baseline_set`'s `audit` | **Kept**, test seam: the per-member failure-isolation tests inject an audit that raises for one member. |
+
+
+## Named only by an ADR or plan — rollout map
+
+`usecase_paths.py dead` keeps a function with no production caller out of the
+dead list when an ADR or plan names it. On the Stage F recording that is
+**95** functions: 27 are the test hooks and inert primitives this plan already
+decided above, and the other **68** are mapped here. Each one is in exactly
+one of four groups, so a feature that is still rolling out is not counted as
+dead, and is not mistaken for shipped either. Recompute with the same command;
+a function that gains a production caller leaves this list by itself.
+
+### Rolling out — planned, not yet wired into production
+
+Each row is real remaining work: the owning document plans a production
+consumer that does not exist yet.
+
+| Item | Owner | Remaining work to reach production |
+|---|---|---|
+| `SemanticIR.occurrences_for`, `SemanticIRIndex.occurrences_for` | ADR-063 / [one-semantic-pipeline](one-semantic-pipeline.md) Phase 6 "PR 2" | Consumer cutover: `diff_symbols.py`/`diff_types.py` match through `SemanticIRIndex` instead of `AbiSnapshot.functions`/`variables`/`types`. |
+| `GateOptions.effective_gate`, `workflows.gate.effective_gate_for_resolved_compare_config` | ADR-061; [duplication-and-convergence-assessment](duplication-and-convergence-assessment.md) P0 `EffectiveGate` | **Single-pair `compare` cut over (2026-10):** the process exit, the report's `exit` block, the typed API's `exit_decision`, the `--used-by`/`--required-symbol` scoped gate and the effective-config digest all resolve from one `EffectiveGate`; none takes a scheme beside a severity map (`tests/test_effective_gate_single_input.py` scans for that shape). The release fan-out was checked and has no split pair: its scheme is not an input but `severity_exit_code is None`, and that code's one producer (`cli_compare_release_helpers._compute_release_severity_exit_code(library_results, gate)`) returns `None` exactly when `gate.severity is None`; `fail_on_removed`/`require_complete_analysis` are independent axes. The precomputed code stays, since it must be computed while each member's `DiffResult` still exists. |
+| `storage.import_baseline_set.import_baseline_set`/`export_baseline_set`, with `dto.baseline_set_metadata_from_dto`/`_to_dto` | ADR-062 (Proposed); [storage-format-v2](storage-format-v2.md); G40 | A baseline publish/load path in `compare` or `project` that goes through the BundleFacts→ProjectSnapshot adapter (streaming variant is a known gap). |
+| `storage.entity_ids.elf_symbol_occurrence` | ADR-062 Phase 0 (storage-format-v2 A0.2/A0.3) | A storage-v2 ELF symbol-occurrence producer (later ADR-062 phases). |
+| `binary_fingerprint.compute_function_fingerprints` | ADR-003 | **Replaced (2026-10):** the dump hashes each exported function (`extract/elf_code_hash.py`) into `ElfSymbol.code_hash` (snapshot schema v56), and the `fingerprint_renames` detector reads it. The file-reading function and its private section-buffering helpers were deleted rather than kept as a second extraction path. A hash only confirms a match (equal bytes) or breaks a same-size tie; unequal hashes are no evidence, and the name predicate gates every pass. |
+| `acknowledgment_gate.additions_review_exit_contribution` | ADR-067 D6 | **Wired (2026-10) for a single-pair and directory/package `compare` and the typed API:** an `ExitDecision` axis (`additions_review_contribution`, schema 5.13); `.abicheck.yml`'s `acknowledgment:` block supplies the records and the gate; the Action publishes `ADDITIONS_UNACKNOWLEDGED`. The release fan-out `max`s each member's contribution; `CompareRequest` carries both settings. |
+
+Two rows first listed here were not wiring gaps. `legacy_record_ir` was a
+wrapper: `compare/record_layout.py` already reads through
+`legacy_record_occurrences`, and the plan named the wrapper, so the wrapper
+is deleted and one-semantic-pipeline now names the real function.
+`surface_facts.binary_export_match` is the reader of the export-match tier
+producers stamp (ADR-063), used by the tests that check that tier; whether
+weaker tiers should stop counting as exported is the separate policy
+question ADR-063 leaves open, so it is kept as that question's inert reader.
+
+`graph_backends.ingest_codeql_extends_results` was listed here as rolling
+out; it is the documented library sibling of `ingest_codeql_call_results`
+(the survivor of `--codeql-results`), which has no production caller
+either. `docs/use/build-evidence-setup.md` now names it beside the call
+graph reader.
+
+`binary_fingerprint.compute_function_fingerprints` needed a format decision
+rather than a call, since a detector sees only snapshots: code hashes are now
+computed at dump time and stored on `ElfSymbol` (schema v56). A pre-v56 side
+carries no hashes, and the detector then runs exactly as before.
+
+The wheel rows (G26's `numpy` requirement parsers, G27's tag floor parsers
+and `parse_wheel_architecture_claim`) are **wired**: `compare old.whl
+new.whl` with no declared `runtime_floors` derives them from the NEW wheel
+(`extract.wheel_tags.wheel_declared_runtime_floors`, chosen by
+`workflows.release_inputs.wheel_release_env_matrix`), and
+`diff_numpy_capi.check_numpy_metadata_contract`, deleted as uncalled in
+#1448, is restored as the consumer of `NUMPY_REQUIREMENT` -- which also gives
+`numpy_metadata_understates_required_version` and
+`numpy_abi_major_incompatible` an emitter again.
+`tests/test_wheel_declared_contract.py` checks the glibc baseline and the
+NumPy contract against independent oracles and drives the CLI over real
+wheels.
+
+`EvidenceView.available_depths` was listed here as rolling out; it was a
+read-only restatement of the `--depth` ladder `evidence_depth.DEPTH_RANK`
+already owns (derived from `USER_DEPTHS`), read by nothing, so it is
+deleted and its ladder test now pins `DEPTH_RANK` against `USER_DEPTHS`.
+
+`snapshot_digest_cache.digest_scope` was listed here as rolling out; it is
+not. Both front ends open the same scope through `run_scoped_digest_cache`,
+and the measurement and the H5 cell that now covers it are recorded in
+design-hardening Phase 4, which this closes.
+
+### Library API group — decided
+
+The Python API is `abicheck.service.__all__`
+(`docs/reference/python-api-reference.md` is generated from it). None of
+these was in it, so each was decided rather than documented by default:
+
+| Item | Decision |
+|---|---|
+| `TypeMetadataSource` and its accessors on `BtfMetadata`/`CtfMetadata`/`DwarfMetadata` (`get_struct_layout`, `get_enum_info`, `has_data`, and `get_function_proto`/`get_typedef`) | **Deleted.** Its docstring said detectors accept the protocol; none did, and nothing used it as an annotation. BTF and CTF reach the checker as `DwarfMetadata` through `to_dwarf_metadata()`. `tests/test_type_metadata.py`, which checked only protocol conformance, is deleted; the BTF/CTF parser tests now read the parsed tables directly. ADR-007 carries a dated amendment. |
+| `wheel_tags.parse_manylinux_glibc_floor`/`parse_musllinux_floor`/`parse_macos_deployment_target_floor` | **Wired, not API:** G27 derives `runtime_floors` from a compared wheel's own tag (`extract.wheel_tags.wheel_declared_runtime_floors`, used when no floors are declared). Listed with `parse_wheel_architecture_claim`, which Stage D kept for the same entry point. |
+| `inputs_emit.write_inputs_pack` | **Moved to `tests/_inputs_pack_writer.py`.** No producer writes a pack in one call; the `abicheck-cc` wrapper and the Clang plugin write incrementally through `init_inputs_pack`/`append_source_facts`, which the helper still uses, so its packs exercise the real format. |
+| `project_snapshot_store.read_project_manifest` | **Moved to `tests/_project_manifest_reader.py`.** Every production reader goes through the lazy primitives (ADR-062 D8); the eager convenience was assembled from them and only tests loaded a whole manifest. |
+| `EntityResolver.v1_id_for` | **Deleted.** The mapping it read is live (`resolve` detects conflicts with it); the tests now state the representative through that behaviour: a third node with the same identity conflicts with the first, not the second. |
+| `snapshot_io.read_snapshot_storage_info` | **Kept, test hook:** the observation point the compression tests read a written envelope through, over the same `_classify_with_skippable_fallback` the read path uses. |
+| `contract_replay.replay_original_decisions`, `workflows.input_resolution.load_env_matrix` | **Kept**, as Stage C already decided (ADR-049 D6's replay procedure; ADR-068's migration path for `env_matrix_path`). |
+
+### Test hooks and oracles
+
+Kept for the tests that assert through them; not rollout work.
+`DecisionComparison.is_sound`, `contract_graph_encoding.resolve_graph_node`
+(the slow reference resolver), `coverage_ledger.suppression_reaches_coverage_failures`
+and `SuppressionList.is_suppressed` (the unsuppressibility proof), all under
+[public-contract-default](public-contract-default.md);
+`scope_segments.flat_names`, `legacy_function_ir` (one-semantic-pipeline);
+`evidence_merge.presence_in`, `execution_cache.cache_stats`,
+`model.name_heuristics.heuristic_callables`,
+`policy.name_heuristics.name_heuristic_registry`/`registry_problems`
+(design-hardening); `DetectorRegistry.detector_names` (G31);
+`probe_harness._snapshot_object_file` (duplication-and-convergence, recorded
+exception).
+
+### Stale references — decided in Stage G
+
+The documents naming these described a superseded or deleted path, so the
+name kept dead code alive. Each was checked for a dropped wiring first; see
+Stage G below for the decisions.
+
+## Stage G — the stale references
+
+| Item | Decision |
+|---|---|
+| `contract_coverage_exit.fold_coverage_exit`, `analysis_assurance.fold_analysis_assurance_exit` | **Deleted, superseded.** `policy.exit_decision.resolve_exit_decision` is the one fold: it takes `coverage_exit_floor` and `analysis_assurance_exit_contribution` and applies the `max`, so the wrappers were a second statement of that fold with no caller. Their tests now assert through `resolve_exit_decision`. (`acknowledgment_gate.fold_additions_review_exit` was folded *outside* `ExitDecision`, after the decision was made; it is deleted too, and the axis is now an `ExitDecision` contribution, `additions_review_contribution`.) |
+| `workflows.plan.scan_bazel_scoping_failure` | **Deleted.** Its callers went with `scan`; `compare`/`dump` carry the same guard as `_check_bazel_target_scoping`, with the same headers-or-collection rule. |
+| `evidence_depth_levels.parse_user_depth` and its `symbols` alias | **Deleted.** It served `ScanRequest`; `collect_mode_for_depth` rejects `symbols`, as the three copies it replaced did. |
+| `Suppression.selector_matches` | **Deleted.** Its named consumer, `ReclassifyRule`, matches through its own `SelectorSet`. |
+| `ExportSet.destinations` | **Deleted** (no reader). |
+| `cli_helpers_compare._build_match_map`, `frontends/cli/release_variant_operand.py` (`_resolve_release_package_side`) | **Deleted.** Both were Click-translating wrappers whose callers moved to the engine (`binary_utils.build_match_map`, `workflows.release_inputs.resolve_release_package_side`) with translation at `frontends.cli.release_compare_request`; five modules imported them without calling them. Their tests now assert the typed error from the engine function. |
+| `storage.atomic_file.atomic_copy` | **Deleted.** It existed to stream the clang AST cache write; that write now streams through `storage/json_compact.py` and `json_chunked_write.py`, so the memory property it protected still holds. |
+| `binary_fingerprint.compute_section_summary` with `BinarySummary`, `SectionSummary`, `_ABI_SECTIONS`, `_extract_section_summary` | **Deleted.** ADR-003 listed a section-hash triage that no detector or command consumed. |
+| `fact_provenance.is_castxml_backed_fact`/`both_castxml_backed_fact` | **Deleted.** G31 Phase C replaced the castxml-only gate with `both_known_backed_fact`/`fact_producer`; the hybrid-merge tests now read provenance through `fact_producer`. |
+| `evidence_depth._l5_payload_empty` | **Deleted.** It was a wrapper over `resolve_l5_source_graph`, and the callers already use that resolver directly. `layer_payload_empty`'s own L5 case reads `pack.source_graph` directly; its one caller (`cli_buildsource`) has a pack and no snapshot, so the resolver's snapshot fallback does not apply. |
+
+The names are registered in `scripts/retired_surfaces.py`.

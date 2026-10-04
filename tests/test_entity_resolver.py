@@ -73,8 +73,10 @@ class TestEntityResolverResolve:
         conflict = r.conflicts[0]
         assert conflict.canonical_id == "usr:c:@F@foo#"
         assert conflict.node_ids == ("decl://a", "decl://b")
-        # The first-seen v1 id stays the representative.
-        assert r.v1_id_for("usr:c:@F@foo#") == "decl://a"
+        # The first-seen v1 id stays the representative: a third node with
+        # the same identity conflicts with it, not with the second.
+        r.resolve(_node("decl://c", usr="c:@F@foo#", name="foo"))
+        assert r.conflicts[1].node_ids == ("decl://a", "decl://c")
 
     def test_distinct_entities_never_conflict(self) -> None:
         r = EntityResolver()
@@ -95,7 +97,8 @@ class TestEntityResolverSerialization:
             c.to_dict() for c in r.conflicts
         ]
         # The representative v1 id survives the round trip too.
-        assert restored.v1_id_for("usr:c:@F@foo#") == "decl://a"
+        restored.resolve(_node("decl://c", usr="c:@F@foo#", name="foo"))
+        assert restored.conflicts[-1].node_ids == ("decl://a", "decl://c")
 
     def test_from_dict_defaults_on_empty_input(self) -> None:
         r = EntityResolver.from_dict({})

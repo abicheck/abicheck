@@ -232,8 +232,8 @@ def announce_coverage_floor(
 ) -> None:
     """Print the coverage notice to stderr, unless the report already says it.
 
-    The front end's half of the split: :func:`fold_coverage_exit` stays pure
-    for ``dry_run_estimate.run_scan()``, and this is the only thing that writes.
+    The front end's half of the split: :func:`coverage_exit_floor` stays pure,
+    and this is the only thing that writes.
     It lives beside the message rather than in each command so the decision
     "does this invocation need telling?" has one answer, and so a second CLI
     exit path cannot acquire the floor without the explanation.
@@ -248,21 +248,3 @@ def announce_coverage_floor(
     import click
 
     click.echo(diagnostic, err=True)
-
-
-def fold_coverage_exit(base: int, result: Any) -> int:
-    """*base* raised to the coverage floor -- Section 7's orthogonal fold.
-
-    One function so every command folds the axis the same way. ``max`` rather
-    than "1 when the ledger fails", because the two axes are independent and
-    the compatibility one is strictly more severe when it speaks at all.
-
-    **Pure**, deliberately: this is on the path ``dry_run_estimate.run_scan()``
-    takes, and a library call that writes to stderr is an unexpected side
-    effect for a caller that already gets the coverage details back in its
-    result (Codex review). Announcing belongs to the front end, which is
-    also the only layer that knows the output format --
-    :func:`coverage_failure_diagnostic` and :func:`report_carries_the_ledger`
-    are what it uses.
-    """
-    return max(base, coverage_exit_floor(result))

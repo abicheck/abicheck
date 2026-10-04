@@ -114,7 +114,6 @@ __all__ = [
     "PlanningFailure",
     "SidePlan",
     "bazel_target_scoping_failure",
-    "scan_bazel_scoping_failure",
 ]
 
 
@@ -401,78 +400,19 @@ def bazel_target_scoping_failure(
     )
 
 
-def scan_bazel_scoping_failure(
-    headers: object,
-    eff_depth: object,
-    collect_mode: str,
-    build_info: Path | None,
-    build_targets: tuple[str, ...],
-    sources: Path | None = None,
-    build_config: Path | None = None,
-) -> PlanningFailure | None:
-    """The shared ``scan`` pre-flight guard for :func:`bazel_target_scoping_failure`.
-
-    Was used by the retired ``scan_engine.run_scan_core`` (per-member), ``dry_run_estimate.
-    run_scan_set`` (once, before discovery), and both of ``cli_scan.py``'s
-    CLI-reachable pre-flight checks (``scan_cmd``'s single-binary path,
-    ``_run_artifact_set``'s own) so every caller shares one exemption rule,
-    and the depth=binary header-clearing it depends on, rather than
-    independently-maintained copies. Exempt only when
-    *neither* consumer can reach ``build_info`` at all: empty collection
-    layers (``embed_build_source`` no-ops) AND no headers (the L2 seed's own
-    independent ``collect_inline_pack`` call no-ops too -- ``--depth headers``
-    keeps real headers, so it stays unexempted despite its own ``collect_mode``
-    being ``"off"``, same as ``--depth binary``).
-
-    *sources*/*build_config* forward to :func:`bazel_target_scoping_failure`
-    unchanged -- see that function's own docstring for the config-sourced
-    (no explicit ``build_targets``) fallback they enable, and for what
-    *headers_present* (derived here, not accepted as a parameter) governs.
-    Both default ``None``, reproducing the prior, request-level-flag-only
-    behavior for any caller that doesn't pass them.
-    """
-    from ..buildsource.source_replay import collection_for_ci_mode
-    from ..model.evidence_depth_levels import EvidenceDepth
-
-    effective_headers = [] if eff_depth is EvidenceDepth.BINARY else headers
-    if not effective_headers and not collection_for_ci_mode(collect_mode)[1]:
-        return None
-    return bazel_target_scoping_failure(
-        "candidate",
-        build_info,
-        build_targets,
-        sources=sources,
-        build_config=build_config,
-        headers_present=bool(effective_headers),
-    )
-
-
 def _depth_implied_collect_mode(depth: str) -> str:
     """The collect mode an *explicit* ``depth`` value resolves to on its own.
 
-    Mirrors ``service_compare_evidence._resolve_depth_collect_mode``'s
-    explicit-depth branch (duplicated, not imported, for the same
-    leaf-module reason that function's own docstring states) -- with an
-    explicit depth, both ``dump``'s and ``compare``'s own resolvers ignore
-    their differing "omitted depth" defaults and compute identically, so
-    there is exactly one mapping to mirror. ``"binary"`` and ``"headers"``
+    With an explicit depth, ``dump``'s and ``compare``'s resolvers ignore
+    their differing "omitted depth" defaults and both answer
+    :func:`~abicheck.model.evidence_depth_levels.collect_mode_for_depth`,
+    which this asks too. ``"binary"`` and ``"headers"``
     both resolve to ``"off"``; only ``"binary"`` additionally clears headers
     (see :func:`_check_bazel_target_scoping`'s own comment).
     """
-    from ..model.evidence_depth_levels import (
-        EvidenceDepth,
-        SourceScope,
-        depth_to_method,
-        level_to_collect_mode,
-    )
+    from ..model.evidence_depth_levels import collect_mode_for_depth
 
-    evidence_depth = EvidenceDepth(depth.lower())
-    method = depth_to_method(evidence_depth)
-    if method is None:
-        return "off"
-    return level_to_collect_mode(
-        method, evidence_depth, source_scope=SourceScope.TARGET
-    )
+    return collect_mode_for_depth(depth)
 
 
 def _check_bazel_target_scoping(side: SidePlan) -> PlanningFailure | None:
@@ -502,8 +442,8 @@ def _check_bazel_target_scoping(side: SidePlan) -> PlanningFailure | None:
     # override) is not sufficient on its own: the L2 seed's own independent
     # header-seeding pass (`_seeded_includes_and_compile_context` /
     # `collect_inline_pack`) runs whenever real headers are present,
-    # regardless of collect mode -- mirroring `scan_bazel_scoping_failure`'s
-    # own `headers or collection_for_ci_mode(...)[1]` rule above.
+    # regardless of collect mode -- so the guard applies whenever there are
+    # headers or the collect mode collects anything.
     # `depth="binary"` clears headers to empty before execution
     # (`service_compare_evidence._headers`) independent of any
     # `resolved_collect_mode` override, so that clearing is folded into

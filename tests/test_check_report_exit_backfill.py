@@ -47,6 +47,8 @@ _ADR_064_EXIT_FIELDS = (
     "no_comparison_completed_contribution",
     # ADR-068 D6 (one-comparison-product.md Phase 8): same treatment again.
     "loadability_contribution",
+    # ADR-067 D6 (schema 5.13): same treatment again.
+    "additions_review_contribution",
 )
 
 

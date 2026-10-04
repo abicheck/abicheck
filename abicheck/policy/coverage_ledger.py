@@ -333,7 +333,7 @@ def coverage_exit_contribution(failures: Sequence[CoverageFailure]) -> int:
     Section 6.1: "The sibling contract-coverage ledger may contribute exit
     `1`; it never rewrites the null compatibility decision or the finding's
     zero gate contribution." Derived here and reported; ADR-049 Phase 7
-    *applies* it -- `contract_coverage_exit.fold_coverage_exit` folds it into
+    *applies* it -- `policy.exit_decision.resolve_exit_decision` folds it into
     the process exit status with ``max``. This function stays the pure
     derivation, so the number a report states and the number that gated the
     run cannot diverge.

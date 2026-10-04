@@ -286,6 +286,17 @@ _SNAPSHOT_SKIP_FIELDS = frozenset(
 _DWARF_ODR_KEYS = ("struct_odr_conflicts", "enum_odr_conflicts")
 
 
+def _drop_unhashed_elf_symbols(d: dict[str, Any]) -> None:
+    """v56: ``ElfSymbol.code_hash`` is written only when computed, so a
+    snapshot without hashes encodes exactly as v55."""
+    elf = d.get("elf")
+    if not isinstance(elf, dict):
+        return
+    for sym in elf.get("symbols") or ():
+        if isinstance(sym, dict) and not sym.get("code_hash"):
+            sym.pop("code_hash", None)
+
+
 def _drop_unobserved_odr_conflicts(d: dict[str, Any]) -> None:
     dwarf = d.get("dwarf")
     if not isinstance(dwarf, dict):
@@ -416,6 +427,7 @@ def _snapshot_to_dict(snap: AbiSnapshot, encode: Any) -> dict[str, Any]:
     # ElfMetadata/PeMetadata/MachoMetadata enums -> strings (storage/enum_codec.py).
     encode_platform_enums(d)
     _drop_unobserved_odr_conflicts(d)
+    _drop_unhashed_elf_symbols(d)
     _drop_uncaptured_type_identities(d)
 
     # ADR-063 Phase 0 (schema v26): see storage/fact_codec.py.

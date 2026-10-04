@@ -595,8 +595,8 @@ class TestVariantSelection:
         identity is A1.4's own still-open follow-up, not something this
         fixture needs to resolve).
         """
-        from abicheck.project_snapshot_store import read_project_manifest
         from abicheck.storage.package import PackageManifest
+        from tests._project_manifest_reader import read_project_manifest
 
         old_libs, _ = _old_new_libraries()
         store = DirectoryObjectStore(root)
@@ -674,10 +674,10 @@ class TestMultiVariantSingleArtifactClassification:
 
     def _single_artifact_two_variant_package(self, root: Path) -> None:
         from abicheck.project_snapshot_store import (
-            read_project_manifest,
             write_project_manifest,
         )
         from abicheck.storage.package import PackageManifest, VariantRef
+        from tests._project_manifest_reader import read_project_manifest
 
         old_libs, _ = _old_new_libraries()
         _write_package(root, {"liba.so": old_libs["liba.so"]}, variant_id="v1")
@@ -804,7 +804,7 @@ class TestMaterializationPreservesBundleComposition:
         # Every materialized sub-package must carry the composition
         # forward -- pick any one and read its own manifest back.
         sub_dir = next(iter(resolved.values()))
-        from abicheck.project_snapshot_store import read_project_manifest
+        from tests._project_manifest_reader import read_project_manifest
 
         sub_manifest = read_project_manifest(sub_dir)
         assert len(sub_manifest.variant_refs) == 1

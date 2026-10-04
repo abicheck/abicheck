@@ -77,7 +77,8 @@ block (`unacknowledged_additions: allow|warn|block`, default `allow` — no
 existing run changes; `abicheck/policy_file_acknowledgment.py`), evaluated
 as a fourth orthogonal `0`/`1` exit axis folded with `max()` beside contract
 coverage and analysis assurance
-(`policy.acknowledgment_gate.fold_additions_review_exit`) — it never
+(an `ExitDecision` axis since 2026-10: `exit.additions_review_contribution`,
+reason `additions_review`, report schema 5.13) — it never
 reclassifies an addition's `ChangeKind` or verdict, per D6's own "policy
 acceptance, never reclassification" requirement. Record ids share B's
 component/release-label scheme (`Acknowledgment.record_id`, built from the
@@ -91,7 +92,15 @@ _exit_with_severity_or_verdict`) both honor a supplied
 acknowledgment document from a path exists yet — that front-end wiring is
 left to a follow-up, the same staged "engine primitive, then CLI surface"
 sequencing ADR-049's own contract-coverage axis used (Phase 5 landed the
-ledger; Phase 7 wired the exit). See
+ledger; Phase 7 wired the exit). **That follow-up landed (2026-10) for a
+single-pair `compare`, then for the directory/package fan-out and the typed
+API's `CompareRequest`:** `.abicheck.yml`'s `acknowledgment:` block names the
+records `file` (loaded only from an explicit `--config`, the trust boundary
+`contract.overlays` has) and `unacknowledged_additions`; a `--policy`
+document's own `acknowledgment:` block outranks it (ADR-049 D7); the
+Action publishes `ADDITIONS_UNACKNOWLEDGED`; the release fan-out folds each
+member's contribution with `max`; `CompareRequest.acknowledgments_path`/
+`acknowledgment_unacknowledged_additions` carry both settings. See
 [Change acknowledgment](../../use/acknowledgments.md) for the user-facing
 format and gate contract.
 

@@ -89,13 +89,13 @@ _VALID_REACHABILITY: frozenset[str] = frozenset(
 @dataclass
 class Suppression:
     """One suppression rule. See individual field docstrings below for the
-    selector grammar and :meth:`matches`/:meth:`selector_matches` for how
+    selector grammar and :meth:`matches` for how
     they're evaluated.
 
     **Selector fields are read once, at construction time, into an internal
     :class:`~abicheck.policy.selectors.SelectorSet` (ADR-063 D10) — mutating
-    a field after construction does not change what :meth:`matches`/
-    :meth:`selector_matches` matches.** This was already true for every
+    a field after construction does not change what :meth:`matches`
+    matches.** This was already true for every
     *compiled* selector (``symbol_pattern``/``type_pattern``/``member_name``/
     ``source_location``/``namespace``/``entity_namespace``/``cause_namespace``)
     before this refactor -- each was compiled once in ``__post_init__`` and
@@ -448,20 +448,6 @@ class Suppression:
         return self._passes_reachability_gate(
             change
         ) and self._passes_public_break_gate(change)
-
-    def selector_matches(self, change: Change, today: date | None = None) -> bool:
-        """Return True if this rule's selectors alone match *change*.
-
-        Public alias for :meth:`_selector_match`, deliberately skipping the
-        reachability / ``allow_public_break`` gates :meth:`matches` applies
-        on top. Those gates exist to guard against a suppression rule
-        *hiding* a finding it never should have — a concern that doesn't
-        apply to a consumer that keeps the finding visible and only changes
-        its verdict (``abicheck/reclassify.py``'s ``ReclassifyRule``, which
-        reuses this class purely for its selector grammar rather than
-        re-implementing the glob/regex machinery a second time).
-        """
-        return self._selector_match(change, today)
 
     def would_withhold(self, change: Change, today: date | None = None) -> bool:
         """True if this rule's selectors match *change*, *change* is a

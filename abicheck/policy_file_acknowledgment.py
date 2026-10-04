@@ -30,7 +30,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from .errors import PolicyError
-from .policy.acknowledgment_policy import (
+from .model.acknowledgment_policy import (
     VALID_UNACKNOWLEDGED_ADDITIONS_ACTIONS,
     AcknowledgmentPolicy,
     UnacknowledgedAdditionsAction,

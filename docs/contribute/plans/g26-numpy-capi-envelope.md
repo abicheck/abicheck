@@ -16,10 +16,13 @@ a string literal, so recovering them needs disassembly — a new heavy
 dependency this project's no-heavy-deps policy rules out (same reasoning
 that keeps G4 out of scope). Delivered: consumption detection
 (`_ARRAY_API`/`_UFUNC_API` presence), the `NPY_TARGET_VERSION` string, a
-two-snapshot delta detector wired into `compare()`, and a standalone
-wheel-metadata cross-check (`check_numpy_metadata_contract`, mirroring
-G10's `parse_manylinux_glibc_floor` — not auto-wired into the CLI compare
-path, same rationale). Deferred, and why, in "Out of scope" below.
+two-snapshot delta detector wired into `compare()`, and the
+wheel-metadata cross-check (`check_numpy_metadata_contract`), which runs
+whenever a wheel's declared `numpy` requirement is known: derived from the
+NEW wheel's `METADATA` in `compare old.whl new.whl`, or declared as
+`deployment.runtime_floors.NUMPY_REQUIREMENT`. (It was removed as uncalled
+in dead-code-and-single-owner #1448, which left its two `ChangeKind`s with
+no emitter; wiring it restored them.) Deferred, and why, in "Out of scope" below.
 
 ## Problem
 
@@ -120,10 +123,10 @@ entries) as the "declared" side.
   field.
 - `check_numpy_metadata_contract(surface, declared_numpy_requirement)` — a
   single-artifact self-consistency check (declared range vs. binary
-  target). Needs wheel-level metadata `compare()` has no access to per
-  library, so — like G10's `package.parse_manylinux_glibc_floor` — this is
-  a standalone function for programmatic use, not auto-wired into the CLI
-  compare path.
+  target). `compare()` gets the declared requirement as
+  `runtime_floors["NUMPY_REQUIREMENT"]` and runs the check in
+  `checker._runtime_floor_checks` under the `WHEEL_CONTEXT` gate; an absent
+  key means "not known", never "declares no numpy".
 
 ## Files & surfaces
 

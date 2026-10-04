@@ -258,10 +258,10 @@ class TestRemediationNamesOnlyLiveFlags:
 
     def _multi_variant_package(self, root: Path) -> None:
         from abicheck.project_snapshot_store import (
-            read_project_manifest,
             write_project_manifest,
         )
         from abicheck.storage.package import PackageManifest, VariantRef
+        from tests._project_manifest_reader import read_project_manifest
 
         old_libs, _ = _old_new_libraries()
         _write_package(root, {"liba.so": old_libs["liba.so"]}, variant_id="gcc13")
@@ -380,10 +380,10 @@ class TestRemediationNamesOnlyLiveFlags:
             materialize_release_variant_artifacts,
         )
         from abicheck.project_snapshot_store import (
-            read_project_manifest,
             write_project_manifest,
         )
         from abicheck.storage.package import PackageManifest
+        from tests._project_manifest_reader import read_project_manifest
 
         old_libs, _ = _old_new_libraries()
         pkg = tmp_path / "pkg"

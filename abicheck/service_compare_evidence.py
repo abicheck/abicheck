@@ -28,13 +28,13 @@ would churn every import for no reader benefit.)
 Split out of ``service.py`` rather than inlined there: that module sits at the
 2000-line AI-readiness hard cap. Deliberately kept a *leaf* module (only
 ``compile_context``/``model.evidence_depth_levels``, both stdlib-deps-only) rather
-than reusing ``cli_dump_helpers.resolve_dump_depth`` -- that module is a member
+than importing ``cli_dump_helpers.resolve_dump_depth`` -- that module is a member
 of the CLI/service import-cycle-allowlisted cluster (CLAUDE.md "M1-3"), and
 this module is called from ``service.py`` (also a cluster member), so
 importing a cluster module here would fold this module into that cluster too
 (AGENTS.md "What NOT to do": prefer a leaf module over extending
-``IMPORT_CYCLE_ALLOWLIST``). The depth->collect-mode mapping is small enough
-to inline directly against ``model.evidence_depth_levels`` instead.
+``IMPORT_CYCLE_ALLOWLIST``). Both ask ``model.evidence_depth_levels.
+collect_mode_for_depth``, the one depth->collect-mode mapping.
 """
 
 from __future__ import annotations
@@ -44,12 +44,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from .compile_context import CompileContext
-from .model.evidence_depth_levels import (
-    EvidenceDepth,
-    SourceScope,
-    depth_to_method,
-    level_to_collect_mode,
-)
+from .model.evidence_depth_levels import collect_mode_for_depth
 from .workflows.changed_paths import localized_collect_mode
 
 if TYPE_CHECKING:
@@ -168,18 +163,9 @@ class SideEvidence:
 
 
 def _resolve_depth_collect_mode(depth: str | None, default_mode: str) -> str:
-    # Mirrors cli_dump_helpers.resolve_dump_depth's own depth->collect-mode
-    # mapping (duplicated here, not imported, to stay a leaf module -- see
-    # this module's own docstring).
     if depth is None:
         return default_mode
-    evidence_depth = EvidenceDepth(depth.lower())
-    method = depth_to_method(evidence_depth)
-    if method is None:
-        return "off"
-    return level_to_collect_mode(
-        method, evidence_depth, source_scope=SourceScope.TARGET
-    )
+    return collect_mode_for_depth(depth)
 
 
 def collect_mode_for(depth: str | None, *sides: InputSpec) -> str:

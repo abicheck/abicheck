@@ -1,13 +1,18 @@
 """The effective-config digest's gate is built in one place
-(``effective_config_fields_from_raw``), and an unstated scheme keeps the
-derived one (dead-code plan, Stage D)."""
+(``effective_config_fields_from_raw``), and its scheme is always the one
+``EffectiveGate`` derives from the severity setting -- there is no scheme
+parameter left to state it separately (dead-code plan, Stage D; single
+``EffectiveGate`` cutover)."""
 
 from __future__ import annotations
+
+import inspect
 
 import pytest
 
 from abicheck.checker import DiffResult, Verdict
 from abicheck.effective_config_digest import effective_config_fields_from_raw
+from abicheck.reporter_contract_blocks import add_effective_config_digest
 from abicheck.severity import resolve_severity_config
 
 
@@ -20,30 +25,27 @@ def _result() -> DiffResult:
     )
 
 
-class TestUnstatedSchemeFallsBack:
-    """``add_effective_config_digest`` and the raw-input entry point are one
-    path now; an unstated scheme (``None`` or ``""``) must keep the scheme the
-    gate derives, never record an empty one."""
+@pytest.mark.parametrize(
+    "fn", [effective_config_fields_from_raw, add_effective_config_digest]
+)
+def test_no_scheme_parameter(fn) -> None:
+    assert not any("scheme" in name for name in inspect.signature(fn).parameters)
 
-    @pytest.mark.parametrize("unstated", [None, ""])
-    @pytest.mark.parametrize("preset", [None, "strict"])
-    def test_unstated_scheme_keeps_the_derived_one(self, unstated, preset):
-        severity = None if preset is None else resolve_severity_config(preset)
-        fields = effective_config_fields_from_raw(
-            _result(), severity_config=severity, exit_code_scheme=unstated
-        )
-        assert fields["gate.exit_code_scheme"] == (
-            "legacy" if severity is None else "severity"
-        )
 
-    @pytest.mark.parametrize("unstated", [None, ""])
-    def test_report_block_matches_the_raw_entry_point(self, unstated):
-        from abicheck.reporter_contract_blocks import add_effective_config_digest
+@pytest.mark.parametrize("preset", [None, "default", "strict", "info-only"])
+def test_scheme_follows_the_severity_setting(preset) -> None:
+    severity = None if preset is None else resolve_severity_config(preset)
+    fields = effective_config_fields_from_raw(_result(), severity_config=severity)
+    assert fields["gate.exit_code_scheme"] == (
+        "legacy" if severity is None else "severity"
+    )
 
-        d: dict = {}
-        add_effective_config_digest(
-            d, _result(), severity_config=None, exit_code_scheme=unstated
-        )
-        assert d["effective_config_fields"] == effective_config_fields_from_raw(
-            _result(), severity_config=None, exit_code_scheme=unstated
-        )
+
+@pytest.mark.parametrize("preset", [None, "strict"])
+def test_report_block_matches_the_raw_entry_point(preset) -> None:
+    severity = None if preset is None else resolve_severity_config(preset)
+    d: dict = {}
+    add_effective_config_digest(d, _result(), severity_config=severity)
+    assert d["effective_config_fields"] == effective_config_fields_from_raw(
+        _result(), severity_config=severity
+    )

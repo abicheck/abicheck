@@ -50,6 +50,7 @@ See `stack_checker.exit_decision_for_stack_compare`/
 
 from __future__ import annotations
 
+import dataclasses
 from typing import TYPE_CHECKING
 
 from .exit_decision import ExitDecision, ExitReason, resolve_exit_decision
@@ -58,7 +59,7 @@ if TYPE_CHECKING:
     from datetime import date
 
     from ..checker_types import DiffResult
-    from .severity import SeverityConfig
+    from .effective_gate import EffectiveGate
 
 #: Which of :class:`ExitDecision`'s four ADR-064 fields corresponds to each
 #: dominant :class:`ExitReason`. `_dominant_decision` uses this so exactly
@@ -84,6 +85,7 @@ def _dominant_decision(
     operational_error_contribution: int = 0,
     incomplete_scope_contribution: int = 0,
     no_comparison_completed_contribution: int = 0,
+    additions_review_contribution: int = 0,
 ) -> ExitDecision:
     """One of ADR-064's four axes overrides whatever the ordinary
     gate/coverage/assurance fold would otherwise have decided.
@@ -144,6 +146,7 @@ def _dominant_decision(
         "operational_error_contribution": operational_error_contribution,
         "incomplete_scope_contribution": incomplete_scope_contribution,
         "no_comparison_completed_contribution": no_comparison_completed_contribution,
+        "additions_review_contribution": additions_review_contribution,
     }
     # A field that is *also* the dominant axis is not a preserved value: it
     # is set to `code` below. Generic, where this was a hand-written special
@@ -154,15 +157,13 @@ def _dominant_decision(
         raw[dominant_field] = 0
     preserved: tuple[int, ...]
     if prior is not None:
-        preserved = (
-            prior.compatibility_contribution,
-            prior.contract_coverage_contribution,
-            prior.analysis_assurance_contribution,
-            prior.crosscheck_promotion_contribution,
-            prior.operational_error_contribution,
-            prior.removed_required_library_contribution,
-            prior.incomplete_scope_contribution,
-            prior.no_comparison_completed_contribution,
+        # Every contribution *prior* carries except the dominant one, read
+        # off the dataclass: a hand-written list here dropped each axis added
+        # after it was written (the additions-review axis first).
+        preserved = tuple(
+            getattr(prior, f.name)
+            for f in dataclasses.fields(prior)
+            if f.name not in ("code", "reasons") and f.name != dominant_field
         )
     else:
         preserved = tuple(raw.values())
@@ -176,29 +177,8 @@ def _dominant_decision(
             "`reasons` (if equal)"
         )
     if prior is not None:
-        return ExitDecision(
-            code=code,
-            reasons=(reason,),
-            compatibility_contribution=prior.compatibility_contribution,
-            contract_coverage_contribution=prior.contract_coverage_contribution,
-            analysis_assurance_contribution=prior.analysis_assurance_contribution,
-            crosscheck_promotion_contribution=prior.crosscheck_promotion_contribution,
-            operational_error_contribution=prior.operational_error_contribution,
-            incomplete_scope_contribution=prior.incomplete_scope_contribution,
-            no_comparison_completed_contribution=(
-                prior.no_comparison_completed_contribution
-            ),
-            **{
-                # `dominant_field` may name one of the fields above, so this
-                # is a mapping rather than a keyword: passing both would be
-                # a duplicate-keyword TypeError. Dominant assigned last.
-                **{
-                    "removed_required_library_contribution": (
-                        prior.removed_required_library_contribution
-                    )
-                },
-                dominant_field: code,
-            },
+        return dataclasses.replace(
+            prior, code=code, reasons=(reason,), **{dominant_field: code}
         )
     contributions = dict(raw)
     contributions[dominant_field] = code
@@ -324,10 +304,8 @@ def resolve_scan_exit_decision(
 
 def resolve_compare_exit_decision_with_abort_axes(
     result: DiffResult,
-    sev_config: SeverityConfig | None,
-    scheme: str,
+    gate: EffectiveGate,
     *,
-    require_complete_analysis: bool = False,
     today: date | None = None,
 ) -> ExitDecision:
     """`one-comparison-product.md` P3: `resolve_compare_exit_decision`,
@@ -365,13 +343,7 @@ def resolve_compare_exit_decision_with_abort_axes(
     """
     from .exit_decision import resolve_compare_exit_decision
 
-    ordinary = resolve_compare_exit_decision(
-        result,
-        sev_config,
-        scheme,
-        require_complete_analysis=require_complete_analysis,
-        today=today,
-    )
+    ordinary = resolve_compare_exit_decision(result, gate, today=today)
     evidence_contract_error = getattr(result, "evidence_contract_error", False)
     budget_overflow = getattr(result, "budget_overflow", False)
     if not (evidence_contract_error or budget_overflow):
@@ -400,6 +372,7 @@ def resolve_release_exit_decision(
     operational_error_contribution: int = 0,
     incomplete_scope_contribution: int = 0,
     no_comparison_completed_contribution: int = 0,
+    additions_review_contribution: int = 0,
 ) -> ExitDecision:
     """ADR-064's precedence for a directory/package release comparison,
     reproducing `cli_compare_release_helpers._exit_compare_release` exactly
@@ -558,6 +531,7 @@ def resolve_release_exit_decision(
             operational_error_contribution=operational_error_contribution,
             incomplete_scope_contribution=incomplete_scope_contribution,
             no_comparison_completed_contribution=no_comparison_completed_contribution,
+            additions_review_contribution=additions_review_contribution,
         )
 
     if evidence_contract_error_contribution:
@@ -611,6 +585,7 @@ def resolve_release_exit_decision(
                 operational_error_contribution=operational_error_contribution,
                 incomplete_scope_contribution=incomplete_scope_contribution,
                 no_comparison_completed_contribution=no_comparison_completed_contribution,
+                additions_review_contribution=additions_review_contribution,
             )
         return _dominant_decision(
             evidence_contract_error_contribution,
@@ -621,6 +596,7 @@ def resolve_release_exit_decision(
             operational_error_contribution=operational_error_contribution,
             incomplete_scope_contribution=incomplete_scope_contribution,
             no_comparison_completed_contribution=no_comparison_completed_contribution,
+            additions_review_contribution=additions_review_contribution,
         )
 
     if severity_scheme_active:
@@ -643,6 +619,7 @@ def resolve_release_exit_decision(
                 operational_error_contribution=operational_error_contribution,
                 incomplete_scope_contribution=incomplete_scope_contribution,
                 no_comparison_completed_contribution=no_comparison_completed_contribution,
+                additions_review_contribution=additions_review_contribution,
             )
         return resolve_exit_decision(
             compatibility_contribution=verdict_or_severity_contribution,
@@ -651,6 +628,7 @@ def resolve_release_exit_decision(
             operational_error_contribution=operational_error_contribution,
             incomplete_scope_contribution=incomplete_scope_contribution,
             no_comparison_completed_contribution=no_comparison_completed_contribution,
+            additions_review_contribution=additions_review_contribution,
         )
 
     # Legacy scheme: a nonzero fold of the verdict/severity and operational-
@@ -664,6 +642,7 @@ def resolve_release_exit_decision(
             operational_error_contribution=operational_error_contribution,
             incomplete_scope_contribution=incomplete_scope_contribution,
             no_comparison_completed_contribution=no_comparison_completed_contribution,
+            additions_review_contribution=additions_review_contribution,
         )
     if removed_required_library:
         # Both axes are 0 here by construction (the branch above already
@@ -676,6 +655,7 @@ def resolve_release_exit_decision(
             analysis_assurance_contribution=analysis_assurance_contribution,
             incomplete_scope_contribution=incomplete_scope_contribution,
             no_comparison_completed_contribution=no_comparison_completed_contribution,
+            additions_review_contribution=additions_review_contribution,
         )
     return resolve_exit_decision(
         compatibility_contribution=0,
@@ -683,6 +663,7 @@ def resolve_release_exit_decision(
         analysis_assurance_contribution=analysis_assurance_contribution,
         incomplete_scope_contribution=incomplete_scope_contribution,
         no_comparison_completed_contribution=no_comparison_completed_contribution,
+        additions_review_contribution=additions_review_contribution,
     )
 
 

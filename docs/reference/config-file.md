@@ -342,6 +342,23 @@ apply it and say so on stderr (an unapplied narrowing overlay can only add
 findings, never hide one). A stored-bundle-facts baseline rejects the
 `contract:` block like the other blocks it cannot honour.
 
+### `acknowledgment:`
+
+Acknowledgment records and the additions-review gate. `file:` names the
+records document (a relative path resolves against the project root) and
+`unacknowledged_additions:` is `allow` (default), `warn` or `block`.
+
+```yaml
+acknowledgment:
+  file: abi/acknowledgments.yml
+  unacknowledged_additions: block
+```
+
+`file` applies only from a config named with `--config`; a discovered value
+is noted and not loaded. `unacknowledged_additions` applies from any config.
+A `--policy` document stating its own `acknowledgment:` block wins over this
+one. See [Change acknowledgment](../use/acknowledgments.md).
+
 ### `suppression:`
 
 Suppression **hygiene policy** (a project rule, distinct from the suppression
@@ -573,6 +590,20 @@ deployment:
     implementation: dpcpp
     backends: [level_zero, opencl]
 ```
+
+**Comparing wheels.** When NEW is a `.whl` and this block declares no
+`runtime_floors`, the wheel's own claims become them: its platform tag's
+floor (`GLIBC` from a `manylinux_X_Y` tag, `MUSLLINUX`,
+`MACOS_DEPLOYMENT_TARGET`), the single architecture it names (`WHEEL_ARCH`),
+`WHEEL_CONTEXT`, and the `numpy` requirement from its `METADATA`
+(`NUMPY_REQUIREMENT`). Each library in the wheel is then checked against
+what the wheel promises: a binary needing a newer glibc than the tag allows
+is `platform_baseline_floor_raised`, and a NumPy C-API target above the
+declared `numpy` floor is `numpy_metadata_understates_required_version`
+(plus `numpy_abi_major_incompatible` when the target needs NumPy 2 and the
+declaration still admits 1.x). A declared `runtime_floors` wins whole; the
+tag does not fill its gaps. `NUMPY_REQUIREMENT` can also be declared by hand
+as a PEP 440 specifier set (`""` for no floor).
 
 See [Environment & Toolchain Drift](../learn/environment-drift.md) for the
 full worked example, including CI/GitHub Action usage.

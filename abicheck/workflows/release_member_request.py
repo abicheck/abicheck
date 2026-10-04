@@ -94,6 +94,10 @@ class ReleaseMemberCompareRequest:
     project_policy_overrides: dict[Any, Any] | None = None
     env_matrix: EnvironmentMatrix | None = None
     exclude_headers: tuple[str, ...] = ()
+    #: ADR-067 D5/D6, from `.abicheck.yml`'s `acknowledgment:` block (the
+    #: records only when the config was named with --config).
+    acknowledgments_path: Path | None = None
+    acknowledgment_unacknowledged_additions: str | None = None
 
 
 @dataclass(frozen=True)

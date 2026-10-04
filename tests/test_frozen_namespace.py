@@ -18,6 +18,7 @@ from abicheck.checker import compare
 from abicheck.checker_policy import ChangeKind, Verdict
 from abicheck.checker_types import Change
 from abicheck.model import AbiSnapshot, Function, Param, Visibility
+from abicheck.policy.effective_gate import EffectiveGate
 from abicheck.policy_file import PolicyFile
 from abicheck.post_processing import (
     DEFAULT_PIPELINE,
@@ -323,7 +324,9 @@ class TestFrozenNamespaceBlocksDowngrade:
         from abicheck.frontends.cli.runtime import _exit_with_severity_or_verdict
 
         with pytest.raises(SystemExit) as excinfo:
-            _exit_with_severity_or_verdict(r, PRESET_DEFAULT, True)
+            _exit_with_severity_or_verdict(
+                r, EffectiveGate.from_severity(PRESET_DEFAULT)
+            )
         assert excinfo.value.code == 4
         assert len(r.breaking) >= 1
 

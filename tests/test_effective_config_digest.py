@@ -89,9 +89,7 @@ def _result(**overrides) -> DiffResult:
 class TestEffectiveConfigFields:
     def test_baseline_tier_with_no_configuration(self):
         result = _result()
-        fields = effective_config_fields_from_raw(
-            result, severity_config=None, exit_code_scheme="legacy"
-        )
+        fields = effective_config_fields_from_raw(result, severity_config=None)
         assert fields["_tier"] == "baseline"
         assert fields["gate.exit_code_scheme"] == "legacy"
         assert fields["policy.overrides"] == ""
@@ -105,9 +103,7 @@ class TestEffectiveConfigFields:
         )
         result = _result(policy="strict_abi", policy_file=policy_file)
         severity = resolve_severity_config("strict")
-        fields = effective_config_fields_from_raw(
-            result, severity_config=severity, exit_code_scheme="severity"
-        )
+        fields = effective_config_fields_from_raw(result, severity_config=severity)
         assert fields["_tier"] == "baseline"
         assert fields["policy.base"].startswith("strict_abi@")
         assert fields["policy.overrides"] == "func_removed=API_BREAK"
@@ -117,52 +113,39 @@ class TestEffectiveConfigFields:
 
     def test_all_declared_keys_are_present(self):
         result = _result()
-        fields = effective_config_fields_from_raw(
-            result, severity_config=None, exit_code_scheme="legacy"
-        )
+        fields = effective_config_fields_from_raw(result, severity_config=None)
         for key in EFFECTIVE_CONFIG_FIELD_KEYS:
             assert key in fields, key
 
 
 class TestEffectiveConfigDigest:
     def test_digest_is_a_sha256_uri(self):
-        fields = effective_config_fields_from_raw(
-            _result(), severity_config=None, exit_code_scheme="legacy"
-        )
+        fields = effective_config_fields_from_raw(_result(), severity_config=None)
         digest = effective_config_digest(fields)
         assert digest.startswith("sha256:")
         assert len(digest) == len("sha256:") + 64
 
     def test_deterministic_for_equal_fields(self):
-        a = effective_config_fields_from_raw(
-            _result(), severity_config=None, exit_code_scheme="legacy"
-        )
-        b = effective_config_fields_from_raw(
-            _result(), severity_config=None, exit_code_scheme="legacy"
-        )
+        a = effective_config_fields_from_raw(_result(), severity_config=None)
+        b = effective_config_fields_from_raw(_result(), severity_config=None)
         assert effective_config_digest(a) == effective_config_digest(b)
 
     def test_differs_when_exit_code_scheme_differs(self):
-        legacy = effective_config_fields_from_raw(
-            _result(), severity_config=None, exit_code_scheme="legacy"
-        )
+        legacy = effective_config_fields_from_raw(_result(), severity_config=None)
         severity_cfg = resolve_severity_config("default")
         severity = effective_config_fields_from_raw(
-            _result(), severity_config=severity_cfg, exit_code_scheme="severity"
+            _result(), severity_config=severity_cfg
         )
         assert effective_config_digest(legacy) != effective_config_digest(severity)
 
     def test_differs_when_policy_overrides_differ(self):
-        plain = effective_config_fields_from_raw(
-            _result(), severity_config=None, exit_code_scheme="legacy"
-        )
+        plain = effective_config_fields_from_raw(_result(), severity_config=None)
         policy_file = PolicyFile(
             overrides={ChangeKind.FUNC_REMOVED: Verdict.COMPATIBLE}
         )
         overridden = effective_config_fields_from_raw(
             _result(policy_file=policy_file),
             severity_config=None,
-            exit_code_scheme="legacy",
         )
         assert effective_config_digest(plain) != effective_config_digest(overridden)
 
@@ -208,16 +191,12 @@ class TestScanReportCarriesTheSameDigestAsCompare:
 
     def test_scan_and_compare_agree_for_equivalent_configuration(self):
         result = _result(verdict=Verdict.COMPATIBLE)
-        compare_fields = effective_config_fields_from_raw(
-            result, severity_config=None, exit_code_scheme="legacy"
-        )
+        compare_fields = effective_config_fields_from_raw(result, severity_config=None)
         # `_run_baseline_compare` calls the identical function with the same
         # (diff, severity_config, exit_code_scheme) shape it resolves its own
         # `exit` block from -- reproduced directly here rather than driving
         # the full scan CLI pipeline, which needs real binaries.
-        scan_fields = effective_config_fields_from_raw(
-            result, severity_config=None, exit_code_scheme="legacy"
-        )
+        scan_fields = effective_config_fields_from_raw(result, severity_config=None)
         assert effective_config_digest(compare_fields) == effective_config_digest(
             scan_fields
         )
@@ -236,9 +215,7 @@ class TestRichTierFromEvaluationConfig:
             )
         )
         result = _result(evaluation_config=config)
-        fields = effective_config_fields_from_raw(
-            result, severity_config=None, exit_code_scheme="legacy"
-        )
+        fields = effective_config_fields_from_raw(result, severity_config=None)
         assert fields["_tier"] == "contract"
         assert "my_pack@2:digest" in fields["packs"]
 
@@ -247,9 +224,7 @@ class TestRichTierFromEvaluationConfig:
         # something that isn't a real `CompatibilityEvaluationConfig` must
         # not be read as one.
         result = _result(evaluation_config="not-a-real-config")
-        fields = effective_config_fields_from_raw(
-            result, severity_config=None, exit_code_scheme="legacy"
-        )
+        fields = effective_config_fields_from_raw(result, severity_config=None)
         assert fields["_tier"] == "baseline"
 
     def test_pack_identity_change_changes_the_digest(self):
@@ -267,12 +242,8 @@ class TestRichTierFromEvaluationConfig:
                 )
             )
         )
-        f1 = effective_config_fields_from_raw(
-            base, severity_config=None, exit_code_scheme="legacy"
-        )
-        f2 = effective_config_fields_from_raw(
-            bumped, severity_config=None, exit_code_scheme="legacy"
-        )
+        f1 = effective_config_fields_from_raw(base, severity_config=None)
+        f2 = effective_config_fields_from_raw(bumped, severity_config=None)
         assert effective_config_digest(f1) != effective_config_digest(f2)
 
 
@@ -284,12 +255,8 @@ class TestAdditionalAxes:
     def test_scope_to_public_surface_changes_the_baseline_digest(self):
         unscoped = _result(scope_to_public_surface=False)
         scoped = _result(scope_to_public_surface=True)
-        f1 = effective_config_fields_from_raw(
-            unscoped, severity_config=None, exit_code_scheme="legacy"
-        )
-        f2 = effective_config_fields_from_raw(
-            scoped, severity_config=None, exit_code_scheme="legacy"
-        )
+        f1 = effective_config_fields_from_raw(unscoped, severity_config=None)
+        f2 = effective_config_fields_from_raw(scoped, severity_config=None)
         assert f1["surface.scope_to_public_surface"] == "False"
         assert f2["surface.scope_to_public_surface"] == "True"
         assert effective_config_digest(f1) != effective_config_digest(f2)
@@ -298,12 +265,8 @@ class TestAdditionalAxes:
         plain = _result()
         rule = ReclassifyRule(to_verdict=Verdict.COMPATIBLE_WITH_RISK, symbol="foo")
         reclassified = _result(policy_file=PolicyFile(reclassify=[rule]))
-        f1 = effective_config_fields_from_raw(
-            plain, severity_config=None, exit_code_scheme="legacy"
-        )
-        f2 = effective_config_fields_from_raw(
-            reclassified, severity_config=None, exit_code_scheme="legacy"
-        )
+        f1 = effective_config_fields_from_raw(plain, severity_config=None)
+        f2 = effective_config_fields_from_raw(reclassified, severity_config=None)
         assert f1["policy.reclassify"] == "[]"
         assert f2["policy.reclassify"] != ""
         assert effective_config_digest(f1) != effective_config_digest(f2)
@@ -317,12 +280,8 @@ class TestAdditionalAxes:
                 suppressions=SuppressionConfig(sha256="suppress-digest")
             )
         )
-        f1 = effective_config_fields_from_raw(
-            no_suppressions, severity_config=None, exit_code_scheme="legacy"
-        )
-        f2 = effective_config_fields_from_raw(
-            with_suppressions, severity_config=None, exit_code_scheme="legacy"
-        )
+        f1 = effective_config_fields_from_raw(no_suppressions, severity_config=None)
+        f2 = effective_config_fields_from_raw(with_suppressions, severity_config=None)
         assert f1["suppressions"] == ""
         assert f2["suppressions"] == "suppress-digest"
         assert effective_config_digest(f1) != effective_config_digest(f2)
@@ -336,12 +295,8 @@ class TestAdditionalAxes:
                 )
             )
         )
-        f1 = effective_config_fields_from_raw(
-            no_scope, severity_config=None, exit_code_scheme="legacy"
-        )
-        f2 = effective_config_fields_from_raw(
-            with_scope, severity_config=None, exit_code_scheme="legacy"
-        )
+        f1 = effective_config_fields_from_raw(no_scope, severity_config=None)
+        f2 = effective_config_fields_from_raw(with_scope, severity_config=None)
         assert f1["surface.explicit_scope"] == ""
         # Merged with the (empty, here) result-level scope digest -- see
         # TestRichTierMergesResultExplicitScope for the merge itself.
@@ -356,12 +311,8 @@ class TestAdditionalAxes:
                 contract=ContractConfig(mode=ContractMode.PUBLIC, overlays=("api::v2",))
             )
         )
-        f1 = effective_config_fields_from_raw(
-            no_overlays, severity_config=None, exit_code_scheme="legacy"
-        )
-        f2 = effective_config_fields_from_raw(
-            with_overlays, severity_config=None, exit_code_scheme="legacy"
-        )
+        f1 = effective_config_fields_from_raw(no_overlays, severity_config=None)
+        f2 = effective_config_fields_from_raw(with_overlays, severity_config=None)
         assert f1["contract.overlays"] == "[]"
         assert f2["contract.overlays"] == '["api::v2"]'
         assert effective_config_digest(f1) != effective_config_digest(f2)
@@ -378,12 +329,8 @@ class TestAdditionalAxes:
             evaluation_config=_minimal_evaluation_config(),
             scope_to_public_surface=True,
         )
-        f1 = effective_config_fields_from_raw(
-            unscoped, severity_config=None, exit_code_scheme="legacy"
-        )
-        f2 = effective_config_fields_from_raw(
-            scoped, severity_config=None, exit_code_scheme="legacy"
-        )
+        f1 = effective_config_fields_from_raw(unscoped, severity_config=None)
+        f2 = effective_config_fields_from_raw(scoped, severity_config=None)
         assert f1["surface.scope_to_public_surface"] == "False"
         assert f2["surface.scope_to_public_surface"] == "True"
         assert effective_config_digest(f1) != effective_config_digest(f2)
@@ -395,12 +342,8 @@ class TestAdditionalAxes:
         field must read DiffResult.suppression_source_sha256 directly."""
         no_suppress = _result()
         with_suppress = _result(suppression_source_sha256="sha256:abc123")
-        f1 = effective_config_fields_from_raw(
-            no_suppress, severity_config=None, exit_code_scheme="legacy"
-        )
-        f2 = effective_config_fields_from_raw(
-            with_suppress, severity_config=None, exit_code_scheme="legacy"
-        )
+        f1 = effective_config_fields_from_raw(no_suppress, severity_config=None)
+        f2 = effective_config_fields_from_raw(with_suppress, severity_config=None)
         assert f1["suppressions"] == ""
         assert f2["suppressions"] == "sha256:abc123"
         assert effective_config_digest(f1) != effective_config_digest(f2)
@@ -462,12 +405,8 @@ class TestSuppressionsWithNoSourceDigest:
         config = suppression_config_for(rules)
         active = _result(suppression_source_sha256=config.sha256)
 
-        f1 = effective_config_fields_from_raw(
-            empty, severity_config=None, exit_code_scheme="legacy"
-        )
-        f2 = effective_config_fields_from_raw(
-            active, severity_config=None, exit_code_scheme="legacy"
-        )
+        f1 = effective_config_fields_from_raw(empty, severity_config=None)
+        f2 = effective_config_fields_from_raw(active, severity_config=None)
         assert f1["suppressions"] == ""
         assert f2["suppressions"] != ""
         assert effective_config_digest(f1) != effective_config_digest(f2)
@@ -492,12 +431,8 @@ class TestPolicyFrozenNamespaces:
     def test_frozen_namespaces_change_the_baseline_digest(self):
         plain = _result()
         frozen = _result(policy_file=PolicyFile(frozen_namespaces=["detail::impl"]))
-        f1 = effective_config_fields_from_raw(
-            plain, severity_config=None, exit_code_scheme="legacy"
-        )
-        f2 = effective_config_fields_from_raw(
-            frozen, severity_config=None, exit_code_scheme="legacy"
-        )
+        f1 = effective_config_fields_from_raw(plain, severity_config=None)
+        f2 = effective_config_fields_from_raw(frozen, severity_config=None)
         assert f1["policy.frozen_namespaces"] == "[]"
         assert f2["policy.frozen_namespaces"] == '["detail::impl"]'
         assert effective_config_digest(f1) != effective_config_digest(f2)
@@ -516,13 +451,11 @@ class TestRequireCompleteAnalysisAxis:
         f1 = effective_config_fields_from_raw(
             result,
             severity_config=None,
-            exit_code_scheme="legacy",
             require_complete_analysis=False,
         )
         f2 = effective_config_fields_from_raw(
             result,
             severity_config=None,
-            exit_code_scheme="legacy",
             require_complete_analysis=True,
         )
         assert f1["gate.require_complete_analysis"] == "False"
@@ -534,13 +467,11 @@ class TestRequireCompleteAnalysisAxis:
         f1 = effective_config_fields_from_raw(
             result,
             severity_config=None,
-            exit_code_scheme="legacy",
             require_complete_analysis=False,
         )
         f2 = effective_config_fields_from_raw(
             result,
             severity_config=None,
-            exit_code_scheme="legacy",
             require_complete_analysis=True,
         )
         assert f1["gate.require_complete_analysis"] == "False"
@@ -634,9 +565,7 @@ class TestBaselineTierBuiltinPolicyIdentity:
         )
 
         result = _result(policy="strict_abi")
-        fields = effective_config_fields_from_raw(
-            result, severity_config=None, exit_code_scheme="legacy"
-        )
+        fields = effective_config_fields_from_raw(result, severity_config=None)
         identity = builtin_policy_identity("strict_abi")
         assert (
             fields["policy.base"] == f"strict_abi@{identity.version}:{identity.sha256}"
@@ -646,12 +575,10 @@ class TestBaselineTierBuiltinPolicyIdentity:
         f1 = effective_config_fields_from_raw(
             _result(policy="strict_abi"),
             severity_config=None,
-            exit_code_scheme="legacy",
         )
         f2 = effective_config_fields_from_raw(
             _result(policy="sdk_vendor"),
             severity_config=None,
-            exit_code_scheme="legacy",
         )
         assert f1["policy.base"] != f2["policy.base"]
         assert effective_config_digest(f1) != effective_config_digest(f2)
@@ -662,16 +589,12 @@ class TestBaselineTierBuiltinPolicyIdentity:
         compatibility_evaluation_frontend.stated_policy_base's own
         docstring for the precedent)."""
         result = _result(policy="totally_unknown_policy")
-        fields = effective_config_fields_from_raw(
-            result, severity_config=None, exit_code_scheme="legacy"
-        )
+        fields = effective_config_fields_from_raw(result, severity_config=None)
         assert fields["policy.base"] == "totally_unknown_policy"
 
     def test_empty_policy_name_is_empty_string(self):
         result = _result(policy="")
-        fields = effective_config_fields_from_raw(
-            result, severity_config=None, exit_code_scheme="legacy"
-        )
+        fields = effective_config_fields_from_raw(result, severity_config=None)
         assert fields["policy.base"] == ""
 
 
@@ -756,21 +679,17 @@ class TestGateScopeAxis:
 
     def test_no_scoping_is_empty_string(self):
         result = _result()
-        fields = effective_config_fields_from_raw(
-            result, severity_config=None, exit_code_scheme="legacy"
-        )
+        fields = effective_config_fields_from_raw(result, severity_config=None)
         assert fields["gate.scope"] == ""
 
     def test_different_used_by_apps_hash_differently(self):
         f1 = effective_config_fields_from_raw(
             _scoped_result(gate_scope="used_by", used_by=[{"app": "app1.so"}]),
             severity_config=None,
-            exit_code_scheme="legacy",
         )
         f2 = effective_config_fields_from_raw(
             _scoped_result(gate_scope="used_by", used_by=[{"app": "app2.so"}]),
             severity_config=None,
-            exit_code_scheme="legacy",
         )
         assert f1["gate.scope"] != f2["gate.scope"]
         assert effective_config_digest(f1) != effective_config_digest(f2)
@@ -782,7 +701,6 @@ class TestGateScopeAxis:
                 required_symbols={"required_entrypoints": ["sym_a"]},
             ),
             severity_config=None,
-            exit_code_scheme="legacy",
         )
         f2 = effective_config_fields_from_raw(
             _scoped_result(
@@ -790,7 +708,6 @@ class TestGateScopeAxis:
                 required_symbols={"required_entrypoints": ["sym_b"]},
             ),
             severity_config=None,
-            exit_code_scheme="legacy",
         )
         assert f1["gate.scope"] != f2["gate.scope"]
         assert effective_config_digest(f1) != effective_config_digest(f2)
@@ -800,7 +717,6 @@ class TestGateScopeAxis:
         f1 = effective_config_fields_from_raw(
             _scoped_result(gate_scope="used_by", used_by=[{"app": "libfoo"}]),
             severity_config=None,
-            exit_code_scheme="legacy",
         )
         f2 = effective_config_fields_from_raw(
             _scoped_result(
@@ -808,7 +724,6 @@ class TestGateScopeAxis:
                 required_symbols={"required_entrypoints": ["libfoo"]},
             ),
             severity_config=None,
-            exit_code_scheme="legacy",
         )
         assert f1["gate.scope"] != f2["gate.scope"]
 
@@ -819,12 +734,10 @@ class TestGateScopeAxis:
         f1 = effective_config_fields_from_raw(
             scoped,
             severity_config=None,
-            exit_code_scheme="legacy",
         )
         f2 = effective_config_fields_from_raw(
             _result(evaluation_config=_minimal_evaluation_config()),
             severity_config=None,
-            exit_code_scheme="legacy",
         )
         assert f1["gate.scope"] != f2["gate.scope"]
         assert effective_config_digest(f1) != effective_config_digest(f2)
@@ -854,10 +767,10 @@ class TestRichTierGateAxesUseCallerSuppliedValues:
         real_severity = resolve_severity_config("strict")
 
         fields_with_real_gate = effective_config_fields_from_raw(
-            result, severity_config=real_severity, exit_code_scheme="severity"
+            result, severity_config=real_severity
         )
         fields_with_blanked_gate = effective_config_fields_from_raw(
-            result, severity_config=None, exit_code_scheme="legacy"
+            result, severity_config=None
         )
         assert fields_with_real_gate["gate.exit_code_scheme"] == "severity"
         assert fields_with_blanked_gate["gate.exit_code_scheme"] == "legacy"
@@ -871,12 +784,8 @@ class TestRichTierGateAxesUseCallerSuppliedValues:
         strict = resolve_severity_config("strict")
         info_only = resolve_severity_config("info-only")
 
-        f_strict = effective_config_fields_from_raw(
-            result, severity_config=strict, exit_code_scheme="severity"
-        )
-        f_info = effective_config_fields_from_raw(
-            result, severity_config=info_only, exit_code_scheme="severity"
-        )
+        f_strict = effective_config_fields_from_raw(result, severity_config=strict)
+        f_info = effective_config_fields_from_raw(result, severity_config=info_only)
         assert (
             f_strict["gate.severity.abi_breaking"]
             != f_info["gate.severity.abi_breaking"]
@@ -901,12 +810,8 @@ class TestReclassifyPreservesOrder:
         ignore_first = _result(
             policy_file=PolicyFile(reclassify=[ignore_rule, break_rule])
         )
-        f1 = effective_config_fields_from_raw(
-            break_first, severity_config=None, exit_code_scheme="legacy"
-        )
-        f2 = effective_config_fields_from_raw(
-            ignore_first, severity_config=None, exit_code_scheme="legacy"
-        )
+        f1 = effective_config_fields_from_raw(break_first, severity_config=None)
+        f2 = effective_config_fields_from_raw(ignore_first, severity_config=None)
         assert f1["policy.reclassify"] != f2["policy.reclassify"]
         assert effective_config_digest(f1) != effective_config_digest(f2)
 
@@ -941,9 +846,7 @@ class TestRichTierPrefersContractContextMergedConfig:
         result = _result(evaluation_config=unmerged)
         result.contract_context = self._persisted_context(merged)
 
-        fields = effective_config_fields_from_raw(
-            result, severity_config=None, exit_code_scheme="legacy"
-        )
+        fields = effective_config_fields_from_raw(result, severity_config=None)
         # Must reflect the *merged* config's overlays, not the unmerged one.
         assert fields["contract.overlays"] == '["api::v2"]'
 
@@ -956,9 +859,7 @@ class TestRichTierPrefersContractContextMergedConfig:
         result = _result(evaluation_config=config)
         assert getattr(result, "contract_context", None) is None
 
-        fields = effective_config_fields_from_raw(
-            result, severity_config=None, exit_code_scheme="legacy"
-        )
+        fields = effective_config_fields_from_raw(result, severity_config=None)
         assert fields["contract.overlays"] == '["api::v3"]'
 
 
@@ -971,21 +872,17 @@ class TestBaselineExplicitScope:
 
     def test_no_explicit_scope_is_empty_string(self):
         result = _result()
-        fields = effective_config_fields_from_raw(
-            result, severity_config=None, exit_code_scheme="legacy"
-        )
+        fields = effective_config_fields_from_raw(result, severity_config=None)
         assert fields["surface.explicit_scope"] == ""
 
     def test_different_forced_public_scopes_hash_differently(self):
         f1 = effective_config_fields_from_raw(
             _result(explicit_scope_source_sha256="sha256:aaa"),
             severity_config=None,
-            exit_code_scheme="legacy",
         )
         f2 = effective_config_fields_from_raw(
             _result(explicit_scope_source_sha256="sha256:bbb"),
             severity_config=None,
-            exit_code_scheme="legacy",
         )
         assert f1["surface.explicit_scope"] != f2["surface.explicit_scope"]
         assert effective_config_digest(f1) != effective_config_digest(f2)
@@ -1142,10 +1039,10 @@ class TestBaselineExplicitScopeCoversPostManifest:
         )
 
         fields_no_manifest = effective_config_fields_from_raw(
-            no_manifest, severity_config=None, exit_code_scheme="legacy"
+            no_manifest, severity_config=None
         )
         fields_empty_manifest = effective_config_fields_from_raw(
-            empty_manifest, severity_config=None, exit_code_scheme="legacy"
+            empty_manifest, severity_config=None
         )
         assert (
             fields_no_manifest["surface.explicit_scope"]
@@ -1175,9 +1072,7 @@ class TestRichTierMergesResultExplicitScope:
         )
         assert getattr(result, "contract_context", None) is None
 
-        fields = effective_config_fields_from_raw(
-            result, severity_config=None, exit_code_scheme="legacy"
-        )
+        fields = effective_config_fields_from_raw(result, severity_config=None)
         assert fields["surface.explicit_scope"] != ""
 
     def test_a_change_to_either_source_changes_the_merged_scope(self):
@@ -1205,10 +1100,10 @@ class TestRichTierMergesResultExplicitScope:
             explicit_scope_source_sha256="sha256:frompostmanifest",
         )
         fields_config_a = effective_config_fields_from_raw(
-            result_config_a, severity_config=None, exit_code_scheme="legacy"
+            result_config_a, severity_config=None
         )
         fields_config_b = effective_config_fields_from_raw(
-            result_config_b, severity_config=None, exit_code_scheme="legacy"
+            result_config_b, severity_config=None
         )
         assert (
             fields_config_a["surface.explicit_scope"]
@@ -1228,10 +1123,10 @@ class TestRichTierMergesResultExplicitScope:
             explicit_scope_source_sha256="sha256:manifest_b",
         )
         fields_manifest_a = effective_config_fields_from_raw(
-            result_manifest_a, severity_config=None, exit_code_scheme="legacy"
+            result_manifest_a, severity_config=None
         )
         fields_manifest_b = effective_config_fields_from_raw(
-            result_manifest_b, severity_config=None, exit_code_scheme="legacy"
+            result_manifest_b, severity_config=None
         )
         assert (
             fields_manifest_a["surface.explicit_scope"]
@@ -1251,12 +1146,8 @@ class TestRichTierMergesResultExplicitScope:
             evaluation_config=config,
             explicit_scope_source_sha256="sha256:manifest_b",
         )
-        fields_a = effective_config_fields_from_raw(
-            result_a, severity_config=None, exit_code_scheme="legacy"
-        )
-        fields_b = effective_config_fields_from_raw(
-            result_b, severity_config=None, exit_code_scheme="legacy"
-        )
+        fields_a = effective_config_fields_from_raw(result_a, severity_config=None)
+        fields_b = effective_config_fields_from_raw(result_b, severity_config=None)
         assert fields_a["surface.explicit_scope"] != fields_b["surface.explicit_scope"]
         assert effective_config_digest(fields_a) != effective_config_digest(fields_b)
 
@@ -1274,12 +1165,8 @@ class TestPatternVerdictsAxis:
     def test_flag_changes_the_baseline_digest(self):
         off = _result(pattern_verdicts_enabled=False)
         on = _result(pattern_verdicts_enabled=True)
-        f1 = effective_config_fields_from_raw(
-            off, severity_config=None, exit_code_scheme="legacy"
-        )
-        f2 = effective_config_fields_from_raw(
-            on, severity_config=None, exit_code_scheme="legacy"
-        )
+        f1 = effective_config_fields_from_raw(off, severity_config=None)
+        f2 = effective_config_fields_from_raw(on, severity_config=None)
         assert f1["policy.pattern_verdicts"] == "False"
         assert f2["policy.pattern_verdicts"] == "True"
         assert effective_config_digest(f1) != effective_config_digest(f2)
@@ -1288,12 +1175,8 @@ class TestPatternVerdictsAxis:
         config = _minimal_evaluation_config()
         off = _result(evaluation_config=config, pattern_verdicts_enabled=False)
         on = _result(evaluation_config=config, pattern_verdicts_enabled=True)
-        f1 = effective_config_fields_from_raw(
-            off, severity_config=None, exit_code_scheme="legacy"
-        )
-        f2 = effective_config_fields_from_raw(
-            on, severity_config=None, exit_code_scheme="legacy"
-        )
+        f1 = effective_config_fields_from_raw(off, severity_config=None)
+        f2 = effective_config_fields_from_raw(on, severity_config=None)
         assert f1["policy.pattern_verdicts"] == "False"
         assert f2["policy.pattern_verdicts"] == "True"
         assert effective_config_digest(f1) != effective_config_digest(f2)
@@ -1327,12 +1210,8 @@ class TestPatternVerdictsAxis:
         assert on.pattern_verdicts_enabled is True
         assert on.pattern_modulations == []  # nothing matched -- ledger stays empty
 
-        f_off = effective_config_fields_from_raw(
-            off, severity_config=None, exit_code_scheme="legacy"
-        )
-        f_on = effective_config_fields_from_raw(
-            on, severity_config=None, exit_code_scheme="legacy"
-        )
+        f_off = effective_config_fields_from_raw(off, severity_config=None)
+        f_on = effective_config_fields_from_raw(on, severity_config=None)
         assert f_off["policy.pattern_verdicts"] != f_on["policy.pattern_verdicts"]
         assert effective_config_digest(f_off) != effective_config_digest(f_on)
 
@@ -1347,12 +1226,8 @@ class TestCollapseVersionedSymbolsAxis:
     def test_flag_changes_the_baseline_digest(self):
         off = _result(collapse_versioned_symbols_enabled=False)
         on = _result(collapse_versioned_symbols_enabled=True)
-        f1 = effective_config_fields_from_raw(
-            off, severity_config=None, exit_code_scheme="legacy"
-        )
-        f2 = effective_config_fields_from_raw(
-            on, severity_config=None, exit_code_scheme="legacy"
-        )
+        f1 = effective_config_fields_from_raw(off, severity_config=None)
+        f2 = effective_config_fields_from_raw(on, severity_config=None)
         assert f1["policy.collapse_versioned_symbols"] == "False"
         assert f2["policy.collapse_versioned_symbols"] == "True"
         assert effective_config_digest(f1) != effective_config_digest(f2)
@@ -1363,12 +1238,8 @@ class TestCollapseVersionedSymbolsAxis:
             evaluation_config=config, collapse_versioned_symbols_enabled=False
         )
         on = _result(evaluation_config=config, collapse_versioned_symbols_enabled=True)
-        f1 = effective_config_fields_from_raw(
-            off, severity_config=None, exit_code_scheme="legacy"
-        )
-        f2 = effective_config_fields_from_raw(
-            on, severity_config=None, exit_code_scheme="legacy"
-        )
+        f1 = effective_config_fields_from_raw(off, severity_config=None)
+        f2 = effective_config_fields_from_raw(on, severity_config=None)
         assert (
             f1["policy.collapse_versioned_symbols"]
             != f2["policy.collapse_versioned_symbols"]
@@ -1408,12 +1279,8 @@ class TestSurfaceMetricsAxis:
     def test_flag_changes_the_baseline_digest(self):
         off = _result(surface_metrics_enabled=False)
         on = _result(surface_metrics_enabled=True)
-        f1 = effective_config_fields_from_raw(
-            off, severity_config=None, exit_code_scheme="legacy"
-        )
-        f2 = effective_config_fields_from_raw(
-            on, severity_config=None, exit_code_scheme="legacy"
-        )
+        f1 = effective_config_fields_from_raw(off, severity_config=None)
+        f2 = effective_config_fields_from_raw(on, severity_config=None)
         assert f1["policy.surface_metrics"] == "False"
         assert f2["policy.surface_metrics"] == "True"
         assert effective_config_digest(f1) != effective_config_digest(f2)
@@ -1422,12 +1289,8 @@ class TestSurfaceMetricsAxis:
         config = _minimal_evaluation_config()
         off = _result(evaluation_config=config, surface_metrics_enabled=False)
         on = _result(evaluation_config=config, surface_metrics_enabled=True)
-        f1 = effective_config_fields_from_raw(
-            off, severity_config=None, exit_code_scheme="legacy"
-        )
-        f2 = effective_config_fields_from_raw(
-            on, severity_config=None, exit_code_scheme="legacy"
-        )
+        f1 = effective_config_fields_from_raw(off, severity_config=None)
+        f2 = effective_config_fields_from_raw(on, severity_config=None)
         assert f1["policy.surface_metrics"] != f2["policy.surface_metrics"]
         assert effective_config_digest(f1) != effective_config_digest(f2)
 
@@ -1466,12 +1329,8 @@ class TestEnvMatrixAxis:
     def test_env_matrix_changes_the_baseline_digest(self):
         no_matrix = _result()
         with_matrix = _result(env_matrix_source_sha256="sha256:envdigest")
-        f1 = effective_config_fields_from_raw(
-            no_matrix, severity_config=None, exit_code_scheme="legacy"
-        )
-        f2 = effective_config_fields_from_raw(
-            with_matrix, severity_config=None, exit_code_scheme="legacy"
-        )
+        f1 = effective_config_fields_from_raw(no_matrix, severity_config=None)
+        f2 = effective_config_fields_from_raw(with_matrix, severity_config=None)
         assert f1["policy.env_matrix"] == ""
         assert f2["policy.env_matrix"] == "sha256:envdigest"
         assert effective_config_digest(f1) != effective_config_digest(f2)
@@ -1484,12 +1343,8 @@ class TestEnvMatrixAxis:
         result_b = _result(
             evaluation_config=config, env_matrix_source_sha256="sha256:matrix_b"
         )
-        f1 = effective_config_fields_from_raw(
-            result_a, severity_config=None, exit_code_scheme="legacy"
-        )
-        f2 = effective_config_fields_from_raw(
-            result_b, severity_config=None, exit_code_scheme="legacy"
-        )
+        f1 = effective_config_fields_from_raw(result_a, severity_config=None)
+        f2 = effective_config_fields_from_raw(result_b, severity_config=None)
         assert f1["policy.env_matrix"] != f2["policy.env_matrix"]
         assert effective_config_digest(f1) != effective_config_digest(f2)
 
@@ -1541,12 +1396,8 @@ class TestReconcileBuildContextAxis:
     def test_flag_changes_the_baseline_digest(self):
         off = _result(reconcile_build_context_enabled=False)
         on = _result(reconcile_build_context_enabled=True)
-        f1 = effective_config_fields_from_raw(
-            off, severity_config=None, exit_code_scheme="legacy"
-        )
-        f2 = effective_config_fields_from_raw(
-            on, severity_config=None, exit_code_scheme="legacy"
-        )
+        f1 = effective_config_fields_from_raw(off, severity_config=None)
+        f2 = effective_config_fields_from_raw(on, severity_config=None)
         assert f1["policy.reconcile_build_context"] == "False"
         assert f2["policy.reconcile_build_context"] == "True"
         assert effective_config_digest(f1) != effective_config_digest(f2)
@@ -1555,12 +1406,8 @@ class TestReconcileBuildContextAxis:
         config = _minimal_evaluation_config()
         off = _result(evaluation_config=config, reconcile_build_context_enabled=False)
         on = _result(evaluation_config=config, reconcile_build_context_enabled=True)
-        f1 = effective_config_fields_from_raw(
-            off, severity_config=None, exit_code_scheme="legacy"
-        )
-        f2 = effective_config_fields_from_raw(
-            on, severity_config=None, exit_code_scheme="legacy"
-        )
+        f1 = effective_config_fields_from_raw(off, severity_config=None)
+        f2 = effective_config_fields_from_raw(on, severity_config=None)
         assert (
             f1["policy.reconcile_build_context"] != f2["policy.reconcile_build_context"]
         )
@@ -1605,12 +1452,8 @@ class TestScopeToPublicSurfaceRequestedAxis:
     def test_flag_changes_the_baseline_digest(self):
         raw_false = _result(scope_to_public_surface_requested=False)
         raw_true = _result(scope_to_public_surface_requested=True)
-        f1 = effective_config_fields_from_raw(
-            raw_false, severity_config=None, exit_code_scheme="legacy"
-        )
-        f2 = effective_config_fields_from_raw(
-            raw_true, severity_config=None, exit_code_scheme="legacy"
-        )
+        f1 = effective_config_fields_from_raw(raw_false, severity_config=None)
+        f2 = effective_config_fields_from_raw(raw_true, severity_config=None)
         assert f1["surface.scope_to_public_surface_requested"] == "False"
         assert f2["surface.scope_to_public_surface_requested"] == "True"
         assert effective_config_digest(f1) != effective_config_digest(f2)
@@ -1623,12 +1466,8 @@ class TestScopeToPublicSurfaceRequestedAxis:
         raw_true = _result(
             evaluation_config=config, scope_to_public_surface_requested=True
         )
-        f1 = effective_config_fields_from_raw(
-            raw_false, severity_config=None, exit_code_scheme="legacy"
-        )
-        f2 = effective_config_fields_from_raw(
-            raw_true, severity_config=None, exit_code_scheme="legacy"
-        )
+        f1 = effective_config_fields_from_raw(raw_false, severity_config=None)
+        f2 = effective_config_fields_from_raw(raw_true, severity_config=None)
         assert (
             f1["surface.scope_to_public_surface_requested"]
             != f2["surface.scope_to_public_surface_requested"]
@@ -1685,12 +1524,8 @@ class TestScopeToPublicSurfaceRequestedAxis:
         priv_b_kept_off = any("priv_b" in c.symbol for c in scoped_off.changes)
         assert priv_b_kept_on != priv_b_kept_off
 
-        fields_on = effective_config_fields_from_raw(
-            scoped_on, severity_config=None, exit_code_scheme="legacy"
-        )
-        fields_off = effective_config_fields_from_raw(
-            scoped_off, severity_config=None, exit_code_scheme="legacy"
-        )
+        fields_on = effective_config_fields_from_raw(scoped_on, severity_config=None)
+        fields_off = effective_config_fields_from_raw(scoped_off, severity_config=None)
         assert (
             fields_on["surface.scope_to_public_surface_requested"]
             != fields_off["surface.scope_to_public_surface_requested"]

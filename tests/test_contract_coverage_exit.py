@@ -87,7 +87,7 @@ def _compare_result(
 ) -> DiffResult:
     """The `DiffResult` the CLI would gate on, for the fold-level assertions.
 
-    `fold_coverage_exit`/`_coverage_message` take the result and a base exit,
+    `coverage_exit_floor`/`_coverage_message` take the result and a base exit,
     so a test of the *fold* needs the former without going through a process
     exit that has already folded it.
     """
@@ -137,7 +137,8 @@ class TestTheCoverageExitIsApplied:
         turn a removed export into "warnings only" -- the axes are
         orthogonal and the compatibility one is more severe when it speaks.
 
-        Asserted at :func:`fold_coverage_exit` over a run whose ledger really
+        Asserted at the exit fold (:func:`~abicheck.policy.exit_decision.
+        resolve_exit_decision`, fed :func:`coverage_exit_floor`) over a run whose ledger really
         did fail, rather than end to end. Once contract relevance became
         authoritative (Phase 7) the two conditions stopped co-occurring for
         an entity finding under one domain: a domain short of the evidence
@@ -146,12 +147,17 @@ class TestTheCoverageExitIsApplied:
         in exactly the runs whose ledger fails. The fold is where the claim
         lives, and it holds for any base the compatibility axis hands it.
         """
-        from abicheck.contract_coverage_exit import fold_coverage_exit
+        from abicheck.contract_coverage_exit import coverage_exit_floor
+        from abicheck.policy.exit_decision import resolve_exit_decision
 
         result = _compare_result(_compatible_pair(), contract_mode="exports")
-        assert fold_coverage_exit(0, result) == 1
-        assert fold_coverage_exit(2, result) == 2
-        assert fold_coverage_exit(4, result) == 4
+        floor = coverage_exit_floor(result)
+        for base, expected in ((0, 1), (2, 2), (4, 4)):
+            decision = resolve_exit_decision(
+                compatibility_contribution=base,
+                contract_coverage_contribution=floor,
+            )
+            assert decision.code == expected
 
     def test_an_unresolvable_break_exits_1_not_4(self, tmp_path: Path) -> None:
         """ADR-049 D1: "uncertainty itself never becomes an ABI break".
@@ -482,21 +488,21 @@ class TestTheExitCodeContractIsDocumented:
 
 
 class TestTheProgrammaticApiStaysQuiet:
-    """`fold_coverage_exit` is on `dry_run_estimate.run_scan()`'s path, so it must
-    stay pure. A library call that writes to stderr is an unexpected side
+    """`coverage_exit_floor` is what a library caller derives the coverage
+    axis from, so it must stay pure. A library call that writes to stderr is an unexpected side
     effect for a caller that already gets the coverage details back in its
     result (Codex review) -- and it was a real one, since the announcement
     briefly lived inside the fold."""
 
     def test_folding_writes_nothing(self, tmp_path: Path, capsys) -> None:
-        from abicheck.contract_coverage_exit import fold_coverage_exit
+        from abicheck.contract_coverage_exit import coverage_exit_floor
 
         class _Ctx:
             pass
 
         # A result with no context is the trivial case; the point is that the
         # fold has no output path at all, so nothing can leak from it.
-        assert fold_coverage_exit(4, object()) == 4
+        assert coverage_exit_floor(object()) == 0
         assert capsys.readouterr().err == ""
 
     def test_the_module_does_not_import_click_at_module_scope(self) -> None:

@@ -34,7 +34,6 @@ from .policy.contract_coverage_exit import (
     coverage_exit_for_context as coverage_exit_for_context,
     coverage_failure_diagnostic as coverage_failure_diagnostic,
     coverage_failures_for_context as coverage_failures_for_context,
-    fold_coverage_exit as fold_coverage_exit,
     report_carries_the_ledger as report_carries_the_ledger,
 )
 
@@ -47,6 +46,5 @@ __all__ = [
     "coverage_exit_for_context",
     "coverage_failure_diagnostic",
     "coverage_failures_for_context",
-    "fold_coverage_exit",
     "report_carries_the_ledger",
 ]

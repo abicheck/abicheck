@@ -46,35 +46,11 @@ def resolve_dump_depth(
     *default_mode* is returned (``dump`` embeds at ``source-target``;
     ``compare`` reads at ``off``).
     """
-    from .model.evidence_depth_levels import (
-        EvidenceDepth,
-        SourceScope,
-        depth_to_method,
-        level_to_collect_mode,
-    )
+    from .model.evidence_depth_levels import collect_mode_for_depth
 
     if depth is None:
         return default_mode
-    # Lowercased before the EvidenceDepth lookup (CodeRabbit review): the real
-    # `dump` CLI always hands this an already-lowercased value (Click's own
-    # `DepthParam.convert()`), but this function is also called directly
-    # (tests, other typed-API callers) bypassing that normalization -- an
-    # un-lowercased value raised a bare ValueError instead of resolving, and
-    # this function's own deliberately-duplicated leaf mirror,
-    # `service_compare_evidence._resolve_depth_collect_mode`, already
-    # lowercases here.
-    evidence_depth = EvidenceDepth(depth.lower())
-    method = depth_to_method(evidence_depth)
-    if method is None:
-        # headers/binary depth reaches no source method (L2 is intrinsic) --
-        # collect nothing.
-        return "off"
-    # dump/compare always resolve --depth source at target scope (ADR-043 D3):
-    # the fix for the zero-TU defect where an explicit deep depth without a
-    # change seed silently selected no translation units.
-    return level_to_collect_mode(
-        method, evidence_depth, source_scope=SourceScope.TARGET
-    )
+    return collect_mode_for_depth(depth)
 
 
 def resolve_dump_collect_context(

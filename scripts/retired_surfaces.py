@@ -1115,6 +1115,32 @@ RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
         ),
         frozenset({"contribute/known-gaps.md"}),
     ),
+    (
+        "Removed by plans/dead-code-and-single-owner.md Stages F and G:"
+        " scan's --mode preset resolver, the coverage/assurance exit folds"
+        " ExitDecision superseded, and helpers whose last caller went with"
+        " scan or #1477",
+        (
+            "ScanMode",
+            "mode_preset",
+            "resolve_source_method",
+            "parse_user_depth",
+            "fold_coverage_exit",
+            "fold_analysis_assurance_exit",
+            "fold_additions_review_exit",
+            "compute_section_summary",
+            "both_castxml_backed_fact",
+            "is_castxml_backed_fact",
+            "scan_bazel_scoping_failure",
+            "expand_public_header_inputs",
+            "dso_only_filter_pair",
+            "TypeMetadataSource",
+            "v1_id_for",
+            "legacy_record_ir",
+            "available_depths",
+        ),
+        frozenset({"contribute/known-gaps.md"}),
+    ),
 )
 
 

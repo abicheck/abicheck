@@ -19,8 +19,8 @@
 single-pair `compare` invocation's exit code is folded from
 several independently-computed, orthogonal contributions today
 (`severity.compute_exit_code`/`severity.legacy_exit_code`,
-`contract_coverage_exit.fold_coverage_exit`,
-`analysis_assurance.fold_analysis_assurance_exit`), each folded in with
+`contract_coverage_exit.coverage_exit_floor`,
+`analysis_assurance.analysis_assurance_exit_contribution`), each folded in with
 `max()` at the call site (`cli._exit_with_severity_or_verdict`) rather than
 through one shared, explainable object. That is fine for computing *a*
 number, but leaves no answer to "why is this exit 1" when more than one axis
@@ -120,7 +120,7 @@ if TYPE_CHECKING:
 
     from ..checker_types import DiffResult
     from ..model.change_catalog.registry import Verdict
-    from .severity import SeverityConfig
+    from .effective_gate import EffectiveGate
 
 
 class ExitReason(str, Enum):
@@ -228,6 +228,13 @@ class ExitReason(str, Enum):
     #: all) uses this axis alone, with `compatibility_contribution` fixed at
     #: `0`.
     LOADABILITY = "loadability"
+    #: ADR-067 D6: public additions a run's acknowledgment records do not
+    #: cover, under ``acknowledgment.unacknowledged_additions: block``. A
+    #: ``0``/``1`` fold participant like ``CONTRACT_COVERAGE``: it raises a
+    #: clean exit to ``1`` and never lowers a real ``2``/``4``, and it never
+    #: reclassifies the addition itself (D6, "policy acceptance, never
+    #: reclassification").
+    ADDITIONS_REVIEW = "additions_review"
 
 
 @dataclass(frozen=True)
@@ -373,6 +380,10 @@ class ExitDecision:
     #: documents): a positional caller of this public constructor keeps
     #: binding the older tail.
     loadability_contribution: int = 0
+    #: ADR-067 D6's additions-review floor -- see
+    #: :class:`ExitReason.ADDITIONS_REVIEW`. ``0`` for every run that supplied
+    #: no acknowledgment records, or whose policy is ``allow``/``warn``.
+    additions_review_contribution: int = 0
 
     def exit_without_analysis_assurance(self) -> int:
         """The code this decision would have had with no assurance axis.
@@ -434,6 +445,7 @@ class ExitDecision:
                 self.no_comparison_completed_contribution
             ),
             "loadability_contribution": self.loadability_contribution,
+            "additions_review_contribution": self.additions_review_contribution,
         }
 
     @classmethod
@@ -476,6 +488,7 @@ class ExitDecision:
                 "no_comparison_completed_contribution", 0
             ),
             loadability_contribution=d.get("loadability_contribution", 0),
+            additions_review_contribution=d.get("additions_review_contribution", 0),
         )
 
 
@@ -491,6 +504,7 @@ def resolve_exit_decision(
     incomplete_scope_contribution: int = 0,
     no_comparison_completed_contribution: int = 0,
     loadability_contribution: int = 0,
+    additions_review_contribution: int = 0,
     compatibility_reason: ExitReason = ExitReason.COMPATIBILITY_GATE,
 ) -> ExitDecision:
     """Fold the axis contributions below into one explainable decision.
@@ -563,6 +577,7 @@ def resolve_exit_decision(
         ExitReason.INCOMPLETE_SCOPE: incomplete_scope_contribution,
         ExitReason.NO_COMPARISON_COMPLETED: no_comparison_completed_contribution,
         ExitReason.LOADABILITY: loadability_contribution,
+        ExitReason.ADDITIONS_REVIEW: additions_review_contribution,
     }
     code = max(contributions.values())
     if code == 0:
@@ -586,15 +601,14 @@ def resolve_exit_decision(
         incomplete_scope_contribution=incomplete_scope_contribution,
         no_comparison_completed_contribution=no_comparison_completed_contribution,
         loadability_contribution=loadability_contribution,
+        additions_review_contribution=additions_review_contribution,
     )
 
 
 def resolve_compare_exit_decision(
     result: DiffResult,
-    sev_config: SeverityConfig | None,
-    scheme: str,
+    gate: EffectiveGate,
     *,
-    require_complete_analysis: bool = False,
     today: date | None = None,
 ) -> ExitDecision:
     """:func:`resolve_exit_decision`, deriving every contribution from
@@ -648,19 +662,23 @@ def resolve_compare_exit_decision(
     with an already-frozen ``ReportEnvelope`` (Codex review, fresh evidence).
     """
     from ..analysis_assurance import analysis_assurance_exit_contribution
+    from .acknowledgment_gate import additions_review_exit_contribution
     from .contract_coverage_exit import coverage_exit_floor
     from .severity import compute_exit_code, legacy_exit_code
 
     coverage_contribution = coverage_exit_floor(result)
     assurance_contribution = analysis_assurance_exit_contribution(
-        result, require_complete=require_complete_analysis
+        result, require_complete=gate.require_complete_analysis
     )
 
-    if scheme == "severity":
-        assert sev_config is not None
+    # *gate* is the one resolved gate object (duplication-and-convergence
+    # P0): its severity is `None` exactly when the legacy scheme is in
+    # effect, so the scheme and the severity map can no longer be passed
+    # in disagreement.
+    if gate.severity is not None:
         compatibility_contribution = compute_exit_code(
             result.changes,
-            sev_config,
+            gate.severity,
             policy=result.policy,
             kind_sets=result._effective_kind_sets(),
             policy_file=result.policy_file,
@@ -686,6 +704,7 @@ def resolve_compare_exit_decision(
         compatibility_contribution=compatibility_contribution,
         contract_coverage_contribution=coverage_contribution,
         analysis_assurance_contribution=assurance_contribution,
+        additions_review_contribution=additions_review_exit_contribution(result),
     )
 
 

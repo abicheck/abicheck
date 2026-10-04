@@ -921,7 +921,13 @@ outputs:
       completed no comparison at all -- the completeness axis, orthogonal
       to the compatibility verdict, which then covers the compared members
       only; fails the step unconditionally, since no fail-on-* input governs
-      it), ANALYSIS_INCOMPLETE (with `.abicheck.yml`'s
+      it), ADDITIONS_UNACKNOWLEDGED (single-pair compare with
+      `.abicheck.yml`'s `acknowledgment.unacknowledged_additions: block`,
+      when public additions are not covered by a record in the
+      `acknowledgment.file` it names -- the additions-review axis,
+      orthogonal to the compatibility verdict: the additions keep their
+      verdict; fails the step unconditionally, since no fail-on-* input
+      governs it), ANALYSIS_INCOMPLETE (with `.abicheck.yml`'s
       `assurance.require_complete: true`, when
       analysis_assurance.status is not "complete" -- P0.4's orthogonal
       assurance axis, which likewise leaves the compatibility verdict

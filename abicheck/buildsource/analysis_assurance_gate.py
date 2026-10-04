@@ -23,7 +23,7 @@ plan, and honored by nothing: the only analysis-completeness axis this
 codebase actually wires into an exit code is
 ``compare``'s ``.abicheck.yml`` ``assurance.require_complete: true`` boolean
 gate (``abicheck.analysis_assurance.AnalysisAssurance``/
-``fold_analysis_assurance_exit`` -- config-only since the CLI's own former
+``analysis_assurance_exit_contribution``, folded by ``ExitDecision`` -- config-only since the CLI's own former
 ``--require-complete-analysis`` flag was demoted, rulings.py deferred-option
 followup) -- there is no graduated or otherwise distinct assurance-level
 mechanism a declared check could select between. So a project author

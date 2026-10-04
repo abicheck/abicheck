@@ -150,12 +150,12 @@ class TestRelevanceRunsBeforePolicy:
         """The other half of the sentence above: not a break, not green
         either. Anything else would make missing evidence the cheapest way to
         pass."""
-        from abicheck.contract_coverage_exit import fold_coverage_exit
+        from abicheck.contract_coverage_exit import coverage_exit_floor
 
         result = compare(
             *_removal_pair(), contract_evaluation=True, contract_mode="exports"
         )
-        assert fold_coverage_exit(0, result) == 1
+        assert coverage_exit_floor(result) == 1
 
 
 class TestTheCanonicalPerFindingShape:

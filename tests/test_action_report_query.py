@@ -106,6 +106,7 @@ QUERIES = (
     "blocking_categories",
     "coverage_where",
     "scope_contribution",
+    "additions_review_contribution",
     "scope_incomplete",
     "scope_where",
     "assurance_notes",

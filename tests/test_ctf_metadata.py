@@ -337,12 +337,12 @@ class TestCtfErrorHandling:
 
 
 # ---------------------------------------------------------------------------
-# TypeMetadataSource protocol
+# Parsed struct/enum tables
 # ---------------------------------------------------------------------------
 
 
-class TestTypeMetadataSourceProtocol:
-    def test_protocol_methods(self) -> None:
+class TestParsedTypeTables:
+    def test_struct_and_enum_tables(self) -> None:
         b = CtfBuilder()
         int_enc = struct.pack("<I", 32)
         b.add_type("int", CTF_K_INTEGER, 0, 4, extra=int_enc)
@@ -356,17 +356,11 @@ class TestTypeMetadataSourceProtocol:
 
         meta = parse_ctf_from_bytes(b.build())
 
-        assert meta.has_data is True
-        assert meta.get_struct_layout("point") is not None
-        assert meta.get_struct_layout("nonexistent") is None
-        assert meta.get_enum_info("my_enum") is not None
-        assert meta.get_enum_info("nonexistent") is None
-
-    def test_isinstance_check(self) -> None:
-        from abicheck.type_metadata import TypeMetadataSource
-
-        meta = CtfMetadata(has_ctf=True)
-        assert isinstance(meta, TypeMetadataSource)
+        assert meta.has_ctf is True
+        assert meta.structs.get("point") is not None
+        assert meta.structs.get("nonexistent") is None
+        assert meta.enums.get("my_enum") is not None
+        assert meta.enums.get("nonexistent") is None
 
 
 # ---------------------------------------------------------------------------
@@ -377,19 +371,19 @@ class TestTypeMetadataSourceProtocol:
 class TestCtfMetadataAccessors:
     def test_get_function_proto(self) -> None:
         meta = CtfMetadata(has_ctf=True)
-        assert meta.get_function_proto("x") is None
+        assert meta.func_protos.get("x") is None
 
     def test_get_typedef(self) -> None:
         meta = CtfMetadata(has_ctf=True)
-        assert meta.get_typedef("x") is None
+        assert meta.typedefs.get("x") is None
 
     def test_empty_metadata(self) -> None:
         meta = CtfMetadata()
-        assert meta.has_data is False
-        assert meta.get_struct_layout("x") is None
-        assert meta.get_enum_info("x") is None
-        assert meta.get_function_proto("x") is None
-        assert meta.get_typedef("x") is None
+        assert meta.has_ctf is False
+        assert meta.structs.get("x") is None
+        assert meta.enums.get("x") is None
+        assert meta.func_protos.get("x") is None
+        assert meta.typedefs.get("x") is None
 
     def test_isroot_property(self) -> None:
         from abicheck.ctf_metadata import CtfType

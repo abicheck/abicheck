@@ -91,52 +91,11 @@ def field_fact_key(type_name: str, field_name: str, fact: str) -> str:
     return f"type:{type_name}:field:{field_name}:{fact}"
 
 
-def is_castxml_backed_fact(snap: AbiSnapshot, key: str) -> bool:
-    """True if *key* is known to be castxml-sourced on *snap*.
-
-    Mirrors ``diff_symbols._both_header_aware``'s "confirmed header tier"
-    requirement inline rather than importing it, to avoid this low-level,
-    dependency-free module reaching back into the diff layer.
-
-    - Not (confirmed) header-aware: False — same as today's whole-snapshot
-      gate, regardless of producer.
-    - ``ast_producer == "castxml"``: True unconditionally, matching every
-      existing single-backend snapshot's behavior (a castxml snapshot's
-      *own* facts are all castxml-sourced, by construction — no per-key
-      lookup needed, and none is recorded for these).
-    - ``ast_producer == "hybrid"``: True only if the merge actually recorded
-      this specific *key* as castxml-sourced. A hybrid snapshot's merge
-      policy is "prefer castxml, backfill from clang only when castxml's own
-      value is null" (see dumper_hybrid.py) — so this is False for a
-      declaration that exists only via clang, or whose value for this
-      specific fact was backfilled from clang rather than read from castxml.
-    - Anything else (pure "clang", ``None``/unknown producer): False.
-    """
-    if not (snap.from_headers and not snap.from_headers_inferred):
-        return False
-    if snap.ast_producer == "castxml":
-        return True
-    if snap.ast_producer == "hybrid":
-        return snap.fact_provenance.get(key) == "castxml"
-    return False
-
-
-def both_castxml_backed_fact(old: AbiSnapshot, new: AbiSnapshot, key: str) -> bool:
-    """True if *key* is castxml-sourced on BOTH *old* and *new*.
-
-    Drop-in per-fact replacement for ``diff_symbols._both_castxml_backed``'s
-    whole-snapshot check at each individual per-declaration comparison site.
-    """
-    return is_castxml_backed_fact(old, key) and is_castxml_backed_fact(new, key)
-
-
 def fact_producer(snap: AbiSnapshot, key: str) -> str | None:
     """Which single backend ("castxml"/"clang") actually backs *key* on
     *snap*, or ``None`` if that isn't known.
 
-    Unlike :func:`is_castxml_backed_fact` (which answers "is this
-    castxml-sourced, yes/no" for facts ONLY castxml ever populates), this is
-    for a fact BOTH backends can independently produce a real, same-backend-
+    For a fact BOTH backends can independently produce a real, same-backend-
     comparable value for (e.g. ``Function.params[i].default`` once
     ``dumper_clang.py`` started populating it too) — the risk there isn't
     "clang has no value", it's that the two backends' value *representations*
@@ -179,11 +138,10 @@ def both_known_backed_fact(old: AbiSnapshot, new: AbiSnapshot, key: str) -> bool
     between backends (e.g. ``deprecated``'s message string, or
     ``EnumType.is_scoped``'s plain bool — both backends extract the exact
     same real-world fact, not a backend-specific encoding of it), this is
-    the correct gate once more than one backend populates it: unlike
-    :func:`both_castxml_backed_fact` (for a fact only ONE backend, castxml,
-    can produce at all — using this on a now-multi-backend fact would wrongly
-    keep rejecting a perfectly good clang-vs-clang or clang-vs-castxml pair
-    just because neither/one side is castxml), and unlike the same-producer
+    the correct gate once more than one backend populates it: unlike the
+    retired castxml-only gate (which rejected a perfectly good
+    clang-vs-clang or clang-vs-castxml pair just because neither/one side
+    was castxml), and unlike the same-producer
     check ``diff_symbols._diff_param_defaults`` uses via plain
     :func:`fact_producer` (needed only when the two backends' value
     representations are NOT cross-comparable, e.g. ``Param.default``'s real
@@ -236,10 +194,7 @@ def same_producer_backed_fact_qualified(
     VALUE REPRESENTATIONS are not cross-comparable — ``TypeField.default``
     (this function's only current caller), where castxml keeps the verbatim
     source expression and clang falls back to a literal/structural
-    fingerprint. It sits between this module's two other gates:
-    :func:`both_castxml_backed_fact` (for a fact only castxml can produce at
-    all — too strict here, it would decline a perfectly comparable
-    clang-vs-clang pair) and :func:`both_known_backed_fact` (for a fact whose
+    fingerprint. It is stricter than :func:`both_known_backed_fact` (for a fact whose
     values ARE cross-comparable — too loose here, it would compare castxml's
     source text against clang's fingerprint and read every initializer as
     changed).
@@ -254,12 +209,12 @@ def same_producer_backed_fact_qualified(
     (unlike ``deprecated``/``is_scoped``) offers no way to tell those apart
     from the values alone. Treating "unknown" as "assume comparable" here
     would reintroduce exactly the false ``FIELD_DEFAULT_INITIALIZER_CHANGED``
-    this detector's PREDECESSOR gate (``both_castxml_backed_fact``, which
+    this detector's PREDECESSOR gate (a castxml-only check, which
     also required a POSITIVELY known ``"castxml"`` on both sides — ``None``
     never passed it either) never produced. Requiring both producers
     positively known restores that original guarantee while still comparing
     a same-known-producer pair regardless of which backend it is (unlike
-    ``both_castxml_backed_fact``, which only ever accepts ``"castxml"``).
+    that predecessor, which only ever accepted ``"castxml"``).
     """
     old_producer = resolved_fact_producer(
         old, old_qualified_key, bare_key, bare_unambiguous=old_bare_unambiguous
