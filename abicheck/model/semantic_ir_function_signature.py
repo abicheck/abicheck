@@ -35,11 +35,11 @@ never the authority over the declaration it was copied from.
 from __future__ import annotations
 
 import dataclasses
-import functools
 from typing import Any
 
 from .availability import FactStatus
 from .declarations import Function
+from .execution_cache import memoized
 from .fact import Fact
 from .semantic_ir import CanonicalEntity
 from .semantic_ir_declaration_facts import (
@@ -102,8 +102,9 @@ def _param_kind(param: Any) -> str:
     return str(getattr(kind, "value", kind))
 
 
-@functools.lru_cache(maxsize=8192, typed=True)
-def _shared_present(value: Any) -> Fact[Any]:
+@memoized(maxsize=8192)
+def _shared_present(value_type: type, value: Any) -> Fact[Any]:
+    """Keyed on the value's type too, since ``True == 1``."""
     return Fact.present(value)
 
 
@@ -113,11 +114,11 @@ def _present(value: Any) -> Fact[Any]:
     A signature's facts repeat across a library (``"int"``, ``()``, depth
     ``0``, ``("",)``...), and ``Fact`` is frozen, so the comparison-time
     projection hands out shared instances instead of allocating ~25 per
-    function. ``typed`` keeps ``0``/``False`` apart at the top level; no
+    function. The key carries the type, keeping ``0``/``False`` apart; no
     signature tuple mixes ``bool`` with ``int``. An unhashable value (a
     producer that left a list) is allocated as before."""
     try:
-        return _shared_present(value)
+        return _shared_present(type(value), value)
     except TypeError:
         return Fact.present(value)
 
@@ -235,12 +236,12 @@ def _facts_from_inputs(inputs: tuple[Any, ...]) -> dict[str, Any]:
     }
 
 
-@functools.lru_cache(maxsize=16384)
+@memoized(maxsize=16384)
 def _cached_facts(inputs: tuple[Any, ...]) -> tuple[tuple[str, Any], ...]:
     return tuple(_facts_from_inputs(inputs).items())
 
 
-@functools.lru_cache(maxsize=16384)
+@memoized(maxsize=16384)
 def _cached_entity(inputs: tuple[Any, ...]) -> CanonicalEntity:
     return CanonicalEntity(
         canonical_spelling=Fact.not_collected(),

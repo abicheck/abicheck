@@ -158,6 +158,7 @@ UNCOVERED: dict[str, str] = {
     "CanonicalEntity.parameter_names": _DECLARATION_PROJECTION,
     "CanonicalEntity.parameter_pointer_depths": _DECLARATION_PROJECTION,
     "CanonicalEntity.parameter_restrict": _DECLARATION_PROJECTION,
+    "CanonicalEntity.parameter_type_spellings": _DECLARATION_PROJECTION,
     "CanonicalEntity.parameter_va_list": _DECLARATION_PROJECTION,
     "CanonicalEntity.ref_qualifier": _DECLARATION_PROJECTION,
     "CanonicalEntity.return_pointer_depth": _DECLARATION_PROJECTION,
