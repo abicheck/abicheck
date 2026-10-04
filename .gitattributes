@@ -13,30 +13,22 @@
 skills-src/evaluation/agents/skills/graders/**/*.py text eol=lf
 skills-src/evaluation/agents/skills/shim/** text eol=lf
 skills-src/evaluation/agents/skills/harbor/verify_run.py text eol=lf
-skills-src/evaluation/agents/skills/harbor/tasks/**/*.md text eol=lf
-skills-src/evaluation/agents/skills/harbor/tasks/**/*.toml text eol=lf
-skills-src/evaluation/agents/skills/harbor/tasks/**/*.json text eol=lf
-skills-src/evaluation/agents/skills/harbor/tasks/**/*.sh text eol=lf
-skills-src/evaluation/agents/skills/harbor/tasks/**/*.c text eol=lf
-skills-src/evaluation/agents/skills/harbor/tasks/**/*.h text eol=lf
-skills-src/evaluation/agents/skills/harbor/tasks/**/*.cc text eol=lf
-skills-src/evaluation/agents/skills/harbor/tasks/**/*.cpp text eol=lf
-skills-src/evaluation/agents/skills/harbor/tasks/**/*.cxx text eol=lf
-skills-src/evaluation/agents/skills/harbor/tasks/**/*.hpp text eol=lf
-skills-src/evaluation/agents/skills/harbor/tasks/**/*.hh text eol=lf
-skills-src/evaluation/agents/skills/harbor/tasks/**/Dockerfile text eol=lf
+# text=auto: every generated text file (incl. linker .map scripts), not a
+# per-suffix list that silently missed some; binaries are left alone.
+skills-src/evaluation/agents/skills/harbor/tasks/** text=auto eol=lf
 skills-src/evaluation/agents/skills/harbor/tasks/**/*.so binary
 
 # The same fixture sources these generated tasks copy from -- kept
 # consistent so a fresh regeneration (which reads these fixtures) matches
 # the already-committed generated tree regardless of checkout platform.
-skills-src/evaluation/agents/skills/fixtures/**/*.c text eol=lf
-skills-src/evaluation/agents/skills/fixtures/**/*.h text eol=lf
-skills-src/evaluation/agents/skills/fixtures/**/*.cc text eol=lf
-skills-src/evaluation/agents/skills/fixtures/**/*.cpp text eol=lf
-skills-src/evaluation/agents/skills/fixtures/**/*.cxx text eol=lf
-skills-src/evaluation/agents/skills/fixtures/**/*.hpp text eol=lf
-skills-src/evaluation/agents/skills/fixtures/**/*.hh text eol=lf
-skills-src/evaluation/agents/skills/fixtures/**/*.json text eol=lf
-skills-src/evaluation/agents/skills/fixtures/**/*.md text eol=lf
+# text=auto: every text fixture (sources, setup.sh, ...), not a per-suffix
+# list that silently missed setup.sh; binaries are left alone.
+skills-src/evaluation/agents/skills/fixtures/** text=auto eol=lf
 skills-src/evaluation/agents/skills/fixtures/**/*.so binary
+
+# Category A Harbor tasks copy their library straight from catalog/cases/
+# (scripts/gen_harbor_tasks.py `_prepared_library`), and a file it does not
+# rewrite is copied byte-for-byte -- so a CRLF checkout of the catalog made
+# the regenerated tree differ from the committed LF one on Windows.
+# text=auto: binaries (prebuilt .so fixtures) are left alone.
+catalog/cases/** text=auto eol=lf

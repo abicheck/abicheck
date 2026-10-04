@@ -96,12 +96,19 @@ def _hostile(
         )
         for info, data in members:
             zf.writestr(
-                info
-                if isinstance(info, zipfile.ZipInfo)
-                else deterministic_zipinfo(info),
+                info if isinstance(info, zipfile.ZipInfo) else _raw_zipinfo(info),
                 data,
             )
     return archive
+
+
+def _raw_zipinfo(name: str) -> zipfile.ZipInfo:
+    """A member stored under exactly *name*. ``ZipInfo`` rewrites a
+    backslash to "/" on Windows, which would turn a hostile name into a
+    benign one before it ever reached the archive under test."""
+    info = deterministic_zipinfo(name)
+    info.filename = name
+    return info
 
 
 def _symlink_member(name: str) -> zipfile.ZipInfo:
@@ -246,3 +253,26 @@ def test_resolve_input_reads_a_single_artifact_archive_like_its_directory(
     )
     assert set(Path(tempfile.gettempdir()).glob("abicheck-package-*")) == before
     assert is_stored_snapshot_operand(archive)
+
+
+@pytest.mark.parametrize(
+    "member",
+    ["refs\\artifacts\\x.json", "refs\\variants\\v.json", "manifest\\x.json"],
+)
+def test_a_name_zipfile_rewrites_is_refused_as_on_windows(
+    tmp_path: Path, member: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Read the archive the way Windows does: ``zipfile`` turns each
+    backslash into "/" in ``ZipInfo.filename`` there, so validating that
+    field alone accepts a name every other platform refuses."""
+    archive = _hostile(tmp_path, [(member, b"{}")])
+    real = zipfile._sanitize_filename
+
+    def _windows(name: str) -> str:
+        return real(name).replace("\\", "/")
+
+    monkeypatch.setattr(zipfile, "_sanitize_filename", _windows)
+    dest = tmp_path / "dest"
+    with pytest.raises(SnapshotError, match="portable"):
+        unpack_project_package(archive, dest)
+    assert not dest.exists() or not any(dest.iterdir())

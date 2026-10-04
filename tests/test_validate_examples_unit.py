@@ -1048,7 +1048,16 @@ class TestWorkDirsDistinctPerCaseAndVariant:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         gt = json.loads(ve.GROUND_TRUTH.read_text())["verdicts"]
-        name = next(k for k, v in sorted(gt.items()) if v.get("source_smoke"))
+        # A case whose smoke runs here: run_case skips a case (or just its
+        # smoke) scoped to other platforms, which would leave nothing to see.
+        name = next(
+            k
+            for k, v in sorted(gt.items())
+            if v.get("source_smoke")
+            and ve.CURRENT_PLATFORM in v.get("platforms", [ve.CURRENT_PLATFORM])
+            and ve.CURRENT_PLATFORM
+            in (v["source_smoke"].get("platforms") or [ve.CURRENT_PLATFORM])
+        )
         seen: list[Path] = []
 
         def _record(spec, *, work_dir, **_kw):

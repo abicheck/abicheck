@@ -174,6 +174,15 @@ def is_project_package_archive(path: str | Path) -> bool:
 
 def _check_member(info: zipfile.ZipInfo, archive: Path) -> None:
     name = info.filename
+    # The name as stored, not as zipfile rewrote it: on Windows ``filename``
+    # has every backslash turned into "/" (and any NUL-suffix cut), so a
+    # member spelled ``refs\\artifacts\\x.json`` would pass as a D6 path there
+    # while being refused everywhere else. The layout is a byte-exact
+    # contract, so any rewriting at all is a refusal.
+    if info.orig_filename != name:
+        raise SnapshotError(
+            f"{archive}: member {info.orig_filename!r} is not a portable package path"
+        )
     mode = info.external_attr >> 16
     if stat.S_ISLNK(mode):
         raise SnapshotError(f"{archive}: member {name!r} is a symlink")

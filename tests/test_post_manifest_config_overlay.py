@@ -271,11 +271,14 @@ def test_the_action_relocation_keeps_the_overlay_path_pointing_home(
     assert rebased["contract"]["overlays"]["post_manifest"] == str(
         (root / "m.json").resolve()
     )
+    # Absolute on this platform: "/x/m.json" has no drive on Windows, so it
+    # is (correctly) drive-relative there, not absolute.
+    elsewhere = str(tmp_path / "elsewhere" / "m.json")
     absolute = rebase_relative_config_paths(
-        {"contract": {"overlays": {"post_manifest": "/x/m.json"}}},
+        {"contract": {"overlays": {"post_manifest": elsewhere}}},
         found_path=root / ".abicheck.yml",
     )
-    assert absolute["contract"]["overlays"]["post_manifest"] == "/x/m.json"
+    assert absolute["contract"]["overlays"]["post_manifest"] == elsewhere
 
 
 @pytest.mark.parametrize(

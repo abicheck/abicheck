@@ -224,3 +224,48 @@ def test_parallel_jobs_report_matches_serial(car, capsys) -> None:
     parallel = capsys.readouterr().out
     assert rc_serial == rc_parallel
     assert serial == parallel
+
+
+def test_jobs_under_spawn_never_breaks_the_pool(car, capsys, monkeypatch) -> None:
+    """Windows and macOS spawn workers, which re-import this module by name.
+    The fixture loads it under an invented one, so a spawned pool could not
+    unpickle the task: the run must fall back to serial, same report."""
+    import multiprocessing
+
+    monkeypatch.setattr(multiprocessing, "get_start_method", lambda *a, **k: "spawn")
+    assert car._workers_can_import_this_module() is False
+    argv = ["--only", "claude-md-coverage", "--only", "test-ratio", "--json"]
+    rc_serial = car.main(argv)
+    serial = capsys.readouterr().out
+    rc_jobs = car.main([*argv, "--jobs", "2"])
+    assert (rc_jobs, capsys.readouterr().out) == (rc_serial, serial)
+
+
+def test_a_dotted_name_resolves_every_component(tmp_path, monkeypatch) -> None:
+    """A findable top-level package proves nothing about the submodule a
+    spawned worker must import; only the full name, ending at this file, does."""
+    import importlib.util
+    import multiprocessing
+
+    monkeypatch.setattr(multiprocessing, "get_start_method", lambda *a, **k: "spawn")
+    src = ROOT / "scripts" / "check_ai_readiness.py"
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    (pkg / "__init__.py").write_text("")
+    (pkg / "real.py").write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
+    monkeypatch.syspath_prepend(str(tmp_path))
+    monkeypatch.syspath_prepend(str(ROOT / "scripts"))
+
+    def load(name: str, path: Path):
+        spec = importlib.util.spec_from_file_location(name, path)
+        module = importlib.util.module_from_spec(spec)
+        monkeypatch.setitem(sys.modules, name, module)
+        spec.loader.exec_module(module)
+        return module
+
+    # The package resolves, the submodule does not: must not claim workers can.
+    assert load("pkg.missing", src)._workers_can_import_this_module() is False
+    # Resolves fully and lands on the very file that is running: workers can.
+    assert load("pkg.real", pkg / "real.py")._workers_can_import_this_module() is True
+    # Resolves fully, but to a different file than the one running: they can't.
+    assert load("pkg.real", src)._workers_can_import_this_module() is False
