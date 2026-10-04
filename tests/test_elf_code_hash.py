@@ -224,3 +224,20 @@ def test_malformed_section_lookup_is_unknown_not_an_error(exc) -> None:
         get_section=get_section,
     )
     assert CodeHasher(elf).hash(0, 16, 1) == ""
+
+
+def test_section_extending_past_the_file_is_unknown() -> None:
+    """A section header claiming more bytes than the file holds: the short
+    read yields "", never a digest of a truncated function."""
+    hasher = CodeHasher(_elf(b"\x90" * 40, {1: (0, 0, 256, "SHT_PROGBITS")}))
+    assert hasher.hash(32, 16, 1) == ""
+
+
+def test_unreadable_stream_is_unknown() -> None:
+    class Broken(io.BytesIO):
+        def read(self, *_a):
+            raise OSError("gone")
+
+    elf = _elf(b"", {1: (0, 0, 256, "SHT_PROGBITS")})
+    elf.stream = Broken()
+    assert CodeHasher(elf).hash(0, 16, 1) == ""
