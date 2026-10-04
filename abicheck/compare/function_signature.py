@@ -202,7 +202,9 @@ def _named_signature_entities(ir: SemanticIR) -> dict[EntityId, CanonicalEntity]
 
 
 def _project(
-    functions: list[Function], named: dict[EntityId, CanonicalEntity]
+    functions: list[Function],
+    named: dict[EntityId, CanonicalEntity],
+    shared: dict[Any, CanonicalEntity] | None,
 ) -> list[CanonicalEntity]:
     """Each function's entity: its named occurrence with the declaration
     re-projected over it, or the legacy adapter's projection when the IR
@@ -217,7 +219,7 @@ def _project(
     for fn in functions:
         entity = named.get(fn.entity_id) if fn.entity_id is not None else None
         out.append(
-            legacy_function_signature_entity(fn)
+            legacy_function_signature_entity(fn, shared)
             if entity is None
             else with_declaration_signature(entity, fn)
         )
@@ -253,7 +255,17 @@ def function_signature_index(
             None,
             partial(_named_signature_entities, ir_used),
         )
-        for f, entity in zip(missing, _project(missing, named), strict=True):
+        for f, entity in zip(
+            missing,
+            _project(
+                missing,
+                named,
+                # One map for the whole comparison (both sides), so equal
+                # signatures share an entity; dropped with the scope.
+                memoized("function_signature_shared", _EMPTY_IR, None, dict),
+            ),
+            strict=True,
+        ):
             seen[id(f)] = (f, entity)
     projected = {id(f): seen[id(f)][1] for f in functions}
     views: dict[int, list[Any]] = memoized(

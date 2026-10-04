@@ -100,7 +100,7 @@ Leaf module: depends only on other ``model`` modules, per ADR-061 D1's
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from ..errors import SemanticIrAuthorityError
 from .fact import Fact
@@ -481,10 +481,13 @@ def legacy_function_signature_occurrences(
     return SemanticIR(occurrences=occurrences), tuple(order)
 
 
-def legacy_function_signature_entity(fn: Function) -> CanonicalEntity:
+def legacy_function_signature_entity(
+    fn: Function, shared: dict[Any, CanonicalEntity] | None = None
+) -> CanonicalEntity:
     """One function's :func:`legacy_function_signature_occurrences` payload,
-    without the ``SemanticIR`` around it."""
-    return function_signature_entity(fn)
+    without the ``SemanticIR`` around it (*shared*: see
+    ``semantic_ir_function_signature.function_signature_entity``)."""
+    return function_signature_entity(fn, shared)
 
 
 def legacy_function_ir(functions: Mapping[str, Function]) -> SemanticIR:

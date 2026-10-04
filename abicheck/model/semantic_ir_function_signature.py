@@ -236,47 +236,39 @@ def _facts_from_inputs(inputs: tuple[Any, ...]) -> dict[str, Any]:
     }
 
 
-@memoized(maxsize=16384)
-def _cached_facts(inputs: tuple[Any, ...]) -> tuple[tuple[str, Any], ...]:
-    return tuple(_facts_from_inputs(inputs).items())
-
-
-@memoized(maxsize=16384)
-def _cached_entity(inputs: tuple[Any, ...]) -> CanonicalEntity:
+def _entity_from_inputs(inputs: tuple[Any, ...]) -> CanonicalEntity:
     return CanonicalEntity(
         canonical_spelling=Fact.not_collected(),
-        **dict(_cached_facts(inputs)),
+        **_facts_from_inputs(inputs),
         _trusted=True,
     )
 
 
-def function_signature_entity(fn: Function) -> CanonicalEntity:
-    """*fn*'s projected signature entity (the legacy adapter's payload),
-    shared across functions with equal :func:`_signature_inputs`: an entity
-    is frozen and carries no identity of its own."""
+def function_signature_entity(
+    fn: Function, shared: dict[Any, CanonicalEntity] | None = None
+) -> CanonicalEntity:
+    """*fn*'s projected signature entity (the legacy adapter's payload).
+
+    *shared*, when given, maps :func:`_signature_inputs` tuples to entities
+    already built, so functions with equal inputs share one: an entity is
+    frozen and carries no identity of its own. The caller owns its lifetime
+    (one comparison), so nothing is retained past it. An unhashable input (a
+    producer that left a list where a value belongs) is built unshared."""
     inputs = _signature_inputs(fn)
+    if shared is None:
+        return _entity_from_inputs(inputs)
     try:
-        return _cached_entity(inputs)
+        entity = shared.get(inputs)
     except TypeError:
-        return CanonicalEntity(
-            canonical_spelling=Fact.not_collected(),
-            **_facts_from_inputs(inputs),
-            _trusted=True,
-        )
+        return _entity_from_inputs(inputs)
+    if entity is None:
+        entity = shared[inputs] = _entity_from_inputs(inputs)
+    return entity
 
 
 def function_signature_facts(fn: Function) -> dict[str, Any]:
-    """Every :data:`SIGNATURE_FIELDS` fact for *fn*, keyed by field name.
-
-    Built once per distinct :func:`_signature_inputs` tuple: a library's
-    functions repeat signatures heavily, and ``Fact`` is frozen, so equal
-    inputs share instances. An unhashable input (a producer that left a
-    list where a value belongs) is built uncached."""
-    inputs = _signature_inputs(fn)
-    try:
-        return dict(_cached_facts(inputs))
-    except TypeError:
-        return _facts_from_inputs(inputs)
+    """Every :data:`SIGNATURE_FIELDS` fact for *fn*, keyed by field name."""
+    return _facts_from_inputs(_signature_inputs(fn))
 
 
 def with_declaration_signature(
