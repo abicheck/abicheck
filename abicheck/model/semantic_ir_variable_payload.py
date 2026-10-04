@@ -305,9 +305,10 @@ def _variable_cv_qualification_fact(
 ) -> Fact[tuple[str, ...]]:
     """A variable's ``cv_qualification`` fact, producer-aware: castxml/clang
     get :func:`_variable_top_level_cv_qualification`'s text scan over
-    ``var.type``; DWARF gets its own structural computation instead -- see
-    :mod:`~abicheck.extract.semantic_normalizer_dwarf`'s own docstring for
-    why the two backends need different sources of evidence here."""
+    ``var.type``; DWARF reads its structural ``is_const`` (see
+    :mod:`~abicheck.extract.semantic_normalizer_dwarf`); any other producer
+    is scanned only when its spelling names a qualifier, and otherwise reads
+    ``is_const`` the DWARF way."""
     if producer == DWARF_PRODUCER:
         return _dwarf_variable_cv_qualification(var.is_const)
     if producer in _HEADER_AST_PRODUCERS or _CV_KEYWORD_RE.search(var.type):

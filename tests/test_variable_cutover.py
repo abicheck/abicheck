@@ -279,3 +279,113 @@ class TestCutoverGate:
     def test_fires_on_a_legacy_variable_read(self, source: str) -> None:
         forbidden = frozenset({"type", "is_const", "variables", "variable_map"})
         assert self._gate().legacy_collection_reads(ast.parse(source), forbidden)
+
+
+#: Canonical spelling -> the same type with only the variable's own
+#: top-level const removed (hand-written, not derived from the helper).
+_TOP_LEVEL_CONST_CASES = {
+    "int": "int",
+    "const int": "int",
+    "int const": "int",
+    "int *const": "int *",
+    "int * const": "int *",
+    "const int *": "const int *",
+    "int const *": "int const *",
+    "const std::vector<int>": "std::vector<int>",
+    "std::vector<int *> const": "std::vector<int *>",
+    "const std::vector<int> *": "const std::vector<int> *",
+    "void ( *const)(int *)": "void ( *)(int *)",
+    "void ( *const volatile)()": "void ( *volatile)()",
+    "void ( *volatile const)()": "void ( *volatile)()",
+    "int ( *const)[5]": "int ( *)[5]",
+    "void (C:: *)(int) const": "void (C:: *)(int) const",
+    "void ( *)(int) const": "void ( *)(int) const",
+}
+
+
+@pytest.mark.parametrize(
+    ("spelling", "expected"), sorted(_TOP_LEVEL_CONST_CASES.items())
+)
+def test_without_top_level_const(spelling: str, expected: str) -> None:
+    from abicheck.compare.variables import _without_top_level_const
+
+    assert _without_top_level_const(spelling) == expected
+
+
+def test_facts_of_a_missing_entity_are_unknown() -> None:
+    assert variable_type_facts(None) == (None, None)
+
+
+def test_unestablished_spelling_is_recorded_as_declined() -> None:
+    from abicheck.compare.declined_comparisons import declined_scope
+
+    known = variable_canonical_entity(_var("int"), "castxml")
+    unknown = variable_canonical_entity(_var("?"), "castxml")
+    with declined_scope() as one_side:
+        assert (
+            variable_type_changes(
+                "g", "g", ("?", "int"), unknown, known, entity_id=None
+            )
+            == []
+        )
+    with declined_scope() as both:
+        assert (
+            variable_type_changes(
+                "g", "g", ("?", "?"), unknown, unknown, entity_id=None
+            )
+            == []
+        )
+    assert [d.reason for d in one_side] == [
+        "variable type spelling not established on one side"
+    ]
+    assert [d.reason for d in both] == [
+        "variable type spelling not established on both sides"
+    ]
+
+
+class TestDeclinedComparisonNotes:
+    def _det(self, name: str, n: int):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(
+            name=name, declined=tuple((f"e{i}", "r") for i in range(n))
+        )
+
+    def test_one_note_per_declining_detector_in_order(self) -> None:
+        from abicheck.policy.analysis_assurance_declined import (
+            declined_comparison_notes,
+        )
+
+        notes = declined_comparison_notes(
+            [self._det("a", 1), self._det("quiet", 0), self._det("b", 3)]
+        )
+        assert len(notes) == 2
+        assert notes[0].startswith("detector 'a' declined 1 comparison:")
+        assert notes[1].startswith("detector 'b' declined 3 comparisons:")
+
+    def test_reaches_the_run_assurance_end_to_end(self) -> None:
+        old = _snap([_var("?*")], with_ir=True)
+        new = _snap([_var("int")], with_ir=True)
+        notes = compare(old, new).analysis_assurance.notes
+        assert any("'variables' declined 1 comparison" in n for n in notes)
+
+
+@pytest.mark.parametrize(
+    ("producer", "type_", "is_const", "expected"),
+    [
+        # Header-AST backends: the spelling is the evidence, is_const ignored.
+        ("castxml", "int", True, ()),
+        ("clang", "const int *", True, ()),
+        # DWARF: the structural is_const fact, partial (no volatile fact).
+        ("dwarf", "int", True, ("const",)),
+        # Any other producer whose spelling names no qualifier: is_const.
+        ("pdb", "int", True, ("const",)),
+        ("", "int", False, ()),
+        # ...but a spelling that names one is read structurally.
+        ("pdb", "const int *", True, ()),
+    ],
+)
+def test_cv_source_per_producer(producer, type_, is_const, expected) -> None:
+    var = Variable(name="g", mangled="g", type=type_, is_const=is_const)
+    cv = variable_canonical_entity(var, producer).cv_qualification
+    assert cv.is_present and cv.value == expected
