@@ -262,3 +262,80 @@ def test_dump_reports_its_phases_on_stderr_and_keeps_stdout_json(
     json.loads(result.stdout)  # stdout is still exactly the snapshot
     assert "abicheck: header AST parse ..." in result.stderr
     assert "abicheck: header AST parse done (" in result.stderr
+
+
+def test_note_is_one_line_when_enabled_and_silent_otherwise(
+    records: list[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    progress.note("libx.so: snapshot cache hit")
+    assert records == ["libx.so: snapshot cache hit"]
+    monkeypatch.setenv(progress.PROGRESS_ENV, "0")
+    progress.note("again")
+    assert records == ["libx.so: snapshot cache hit"]
+
+
+@pytest.mark.parametrize("hit", [True, False])
+def test_a_cache_hit_reports_itself_and_a_miss_does_not(
+    records: list[str], monkeypatch: pytest.MonkeyPatch, tmp_path: Path, hit: bool
+) -> None:
+    """A warm run skips every phase that would report, so the hit itself must
+    -- or a redirected log reads exactly like broken progress reporting."""
+    from abicheck import snapshot_cache
+
+    sentinel = object()
+    monkeypatch.setattr(
+        snapshot_cache.SNAPSHOT_DISK_CACHE, "lookup", lambda read: read()
+    )
+    monkeypatch.setattr(
+        snapshot_cache, "_read_entry", lambda key, path: sentinel if hit else None
+    )
+    got = snapshot_cache.lookup_key("k" * 16, tmp_path / "libwarm.so")
+    assert (got is sentinel) == hit
+    if hit:
+        (line,) = records
+        assert "libwarm.so" in line and "cache hit" in line
+    else:
+        assert records == []
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(not _HAVE_TOOLS, reason="gcc + castxml required")
+def test_warm_compare_still_reports_progress_on_stderr(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Invariant: every compare that resolves a side writes at least one
+    progress line for it, cold or warm. The second run here is served from
+    the snapshot cache (same inputs, same isolated cache directory)."""
+    from click.testing import CliRunner
+
+    from abicheck.cli import main
+
+    (tmp_path / "api.h").write_text("int f(void);\n")
+    (tmp_path / "lib.c").write_text("int f(void){return 1;}\n")
+    lib = tmp_path / "libwarm.so"
+    subprocess.run(
+        ["gcc", "-shared", "-fPIC", "-o", str(lib), str(tmp_path / "lib.c")],
+        check=True,
+        capture_output=True,
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv(progress.PROGRESS_ENV, "1")
+    logger = logging.getLogger(progress.LOGGER_NAME)
+    saved = (list(logger.handlers), logger.level, logger.propagate)
+    runs = []
+    try:
+        for _ in range(2):
+            runs.append(
+                CliRunner().invoke(
+                    main,
+                    ["compare", str(lib), str(lib), "-H", str(tmp_path / "api.h")],
+                )
+            )
+    finally:
+        logger.handlers[:] = saved[0]
+        logger.setLevel(saved[1])
+        logger.propagate = saved[2]
+    cold, warm = runs
+    assert "abicheck: header AST parse done (" in cold.stderr
+    assert "header AST parse" not in warm.stderr  # it really was served warm
+    assert warm.stderr.count("libwarm.so: snapshot cache hit") >= 1

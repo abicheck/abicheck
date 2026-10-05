@@ -1079,7 +1079,7 @@ class TestPostProcessingPipeline:
             "annotate_layout_unverifiable_covered_by_vtable_changed",
             "mark_reachability",
             "apply_suppression",
-            "suppress_renamed_pairs",
+            *("suppress_renamed_pairs", "fold_export_hygiene_into_existence"),
             "clear_orphaned_vtable_gap_correlation",
             *("disambiguate_type_symbols", "filter_redundant"),
             "enrich_affected_symbols",

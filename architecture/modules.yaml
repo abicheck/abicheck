@@ -80,6 +80,7 @@
         "abicheck/buildsource/compiler_record.py",
         "abicheck/buildsource/ctor_export_match.py",
         "abicheck/buildsource/embed.py",
+        "abicheck/buildsource/export_account_decision.py",
         "abicheck/buildsource/export_accounting.py",
         "abicheck/buildsource/extractor.py",
         "abicheck/buildsource/extractor_manifest.py",

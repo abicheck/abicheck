@@ -31,6 +31,10 @@ Two shapes, both cheap when disabled (one ``isEnabledFor`` check):
 
 * :func:`phase` / :func:`timed` -- a start line and a finish line with the
   elapsed time, for a single long step.
+* :func:`note` -- one line for an event that *replaces* a phase, such as a
+  cache hit that skips extraction entirely. Without it a warm run wrote
+  nothing at all, which reads exactly like a run whose progress reporting
+  broke.
 * :func:`track` -- wraps an iterable of *total* work items and reports
   ``label: i/total``, throttled to one line per :data:`TICK_INTERVAL_S`
   (plus the last item), so a 10,000-unit pool writes a few dozen lines, not
@@ -55,6 +59,7 @@ __all__ = [
     "PROGRESS_ENV",
     "TICK_INTERVAL_S",
     "enabled_by_env",
+    "note",
     "phase",
     "timed",
     "track",
@@ -100,6 +105,12 @@ def phase(label: str) -> Iterator[None]:
         _log.info("%s failed after %.1fs", label, time.monotonic() - start)
         raise
     _log.info("%s done (%.1fs)", label, time.monotonic() - start)
+
+
+def note(message: str) -> None:
+    """Report one event that stands in for a phase (e.g. a cache hit)."""
+    if _enabled():
+        _log.info("%s", message)
 
 
 def timed(label: str) -> Callable[[_F], _F]:

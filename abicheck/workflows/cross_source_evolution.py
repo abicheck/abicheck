@@ -283,6 +283,31 @@ def _run_one_side(
     return evaluated, by_identity
 
 
+def cross_source_findings(
+    old: AbiSnapshot | None, new: AbiSnapshot, changes: list[Change]
+) -> list[Change]:
+    """Every cross-source finding for this comparison, with the existence
+    findings already in *changes* worded from the same accounting.
+
+    The one entry point ``checker.compare()`` calls. Both halves read
+    ``buildsource.export_account_decision`` -- the ``exported_not_public``
+    check per side, then :func:`~abicheck.workflows.export_existence_wording.
+    describe_export_existence` for the ``*_elf_only`` findings the detectors
+    produced -- inside one accounting scope, so each snapshot's public
+    headers are read and scanned once, and the two findings about one
+    export state one answer.
+    """
+    from ..buildsource.export_account_decision import accounting_scope
+    from .export_existence_wording import describe_export_existence
+
+    with accounting_scope():
+        if old is None:
+            return compute_candidate_cross_source_findings(new)
+        found = compute_cross_source_evolution(old, new)
+        describe_export_existence(changes, old, new)
+    return found
+
+
 def compute_candidate_cross_source_findings(new: AbiSnapshot) -> list[Change]:
     """Run every migrated cross-source check against *new* alone.
 

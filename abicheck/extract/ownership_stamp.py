@@ -61,10 +61,37 @@ def _record_root(root: str, project_root: str | None) -> str:
 
 
 def recorded_rules(request: OwnershipRequest) -> OwnershipRules:
-    """The request's rules in their recorded (fingerprinted) spelling."""
+    """The request's rules in their recorded (fingerprinted) spelling.
+
+    A root the run's operand contributed (``OwnershipRequest.operand_roots``)
+    is recorded relative to the operand's own anchor; every other root
+    relative to the project root. The recorded form is then a function of
+    the rules alone, not of where each side's tree sits on disk.
+    """
     rules, root = request.rules, request.project_root
+    anchor = request.operand_anchor
+    operand = {os.path.normpath(os.path.abspath(r)) for r in request.operand_roots}
+
+    # When the config states target roots of its own, an operand root's
+    # anchor-relative label could equal a config root's project-relative one
+    # (both "." for the project directory and a lone operand root), and the
+    # canonical rule set would drop one. Mark operand labels then; with no
+    # config-stated root there is nothing to collide with, and the recorded
+    # form stays exactly the unconfigured one.
+    stated = any(
+        os.path.normpath(os.path.abspath(r)) not in operand for r in rules.target_roots
+    )
+
+    def target(r: str) -> str:
+        if anchor is not None and os.path.normpath(os.path.abspath(r)) in operand:
+            label = _record_root(r, anchor)
+            if stated:
+                return "@operand" if label == "." else f"@operand/{label}"
+            return label
+        return _record_root(r, root)
+
     return OwnershipRules(
-        target_roots=tuple(_record_root(r, root) for r in rules.target_roots),
+        target_roots=tuple(target(r) for r in rules.target_roots),
         dependencies=tuple(
             DependencyRoots(
                 d.name, tuple(_record_root(r, root) for r in d.header_roots)
@@ -129,12 +156,15 @@ def stamp_ownership(snapshot: AbiSnapshot, request: OwnershipRequest) -> AbiSnap
     rules contradict themselves (one root claimed twice) -- a configuration
     error the caller surfaces, never a silently partial stamp.
     """
-    # Resolve the *recorded* spelling (relative roots are relative to the
-    # project root, the rest absolute): matching is unchanged, and each
-    # decision's rule id names the root exactly as the snapshot records it,
-    # not as this machine happened to spell it.
+    # Match against the request's own (absolute) roots -- an operand root's
+    # recorded spelling is relative to the operand anchor, not to the project
+    # root -- and label each decision with the recorded spelling, so its rule
+    # id names the root exactly as the snapshot records it, not as this
+    # machine happened to spell it.
     recorded = recorded_rules(request)
-    resolved = resolve_ownership_rules(recorded, request.project_root or os.getcwd())
+    resolved = resolve_ownership_rules(
+        request.rules, request.project_root or os.getcwd(), labels=recorded
+    )
     # Distinct decisions are few; share one Fact per decision.
     interned: dict[tuple[str, str, str], Fact[EntityOwnership]] = {}
     diagnostics: set[str] = set()

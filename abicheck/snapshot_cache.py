@@ -28,9 +28,11 @@ import logging
 import os
 import stat
 import tempfile
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from .extract import progress
 from .extract.cache_header_scan import iter_cache_header_files
 from .model.execution_cache_scoped import DiskCache
 from .storage.code_identity import abicheck_code_fingerprint
@@ -519,7 +521,17 @@ def lookup_key(key: str, binary_path: Path) -> AbiSnapshot | None:
     any other read problem here -- never a caller-visible failure."""
     if not key:
         return None
-    return SNAPSHOT_DISK_CACHE.lookup(lambda: _read_entry(key, binary_path))
+    started = time.monotonic()
+    snap = SNAPSHOT_DISK_CACHE.lookup(lambda: _read_entry(key, binary_path))
+    if snap is not None:
+        # A hit replaces every extraction phase, each of which reports its own
+        # progress line. Say so, or a warm run's redirected log is silent --
+        # indistinguishable from progress reporting being broken.
+        progress.note(
+            f"{binary_path.name}: snapshot cache hit, extraction skipped "
+            f"(loaded in {time.monotonic() - started:.1f}s)"
+        )
+    return snap
 
 
 def _read_entry(key: str, binary_path: Path) -> AbiSnapshot | None:

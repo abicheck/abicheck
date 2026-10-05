@@ -90,30 +90,21 @@ from ..model.cxx_artifact_symbols import is_cxx_class_artifact_symbol
 from ..model.graph_facts import GraphNode
 from ..model.source_graph import DEPENDENCY_EDGE_KINDS, SourceGraphSummary
 from ..policy.evidence_status import Confidence
-from .export_accounting import (
-    _ALLOCATOR_INTERPOSER_MARKER,
-    _ALLOCATOR_INTERPOSER_SYMBOLS,
-    _UNDOCUMENTED_ACCOUNTS,
-    ACCOUNT_ALLOCATOR_INTERPOSER,
-    ACCOUNT_CXX_ARTIFACT,
-    ACCOUNT_EXTERNAL_DEP,
-    ACCOUNT_OWN_TYPE_INSTANTIATION,
-    ACCOUNT_PUBLIC,
-    ACCOUNT_PUBLIC_TEMPLATE,
-    _account_undocumented_export,
-    _external_dependency_origin,
-    _library_self_names,
-    _linked_library_names,
-)
 
 # Export accounting (ADR-035 D4) lives in a sibling module (crosscheck hit the
 # 2000-line file cap). Re-exported so ``_check_exported_not_public`` and the tests
 # keep importing these names from ``crosscheck``.
-from .export_declaration_evidence import (
-    build_export_declaration_evidence,
-    instantiated_over_owned_types,
-    public_template_for_export,
-    textual_declaration_hint,
+from .export_account_decision import (
+    _MANGLE_SIGILS,
+    account_export,
+    accounting_context,
+)
+from .export_accounting import (
+    _UNDOCUMENTED_ACCOUNTS,
+    ACCOUNT_ALLOCATOR_INTERPOSER,
+    ACCOUNT_CXX_ARTIFACT,
+    ACCOUNT_PUBLIC,
+    ACCOUNT_PUBLIC_TEMPLATE,
 )
 from .export_obligation_linkage import (
     inline_declared_symbols as inline_declared_symbols,
@@ -304,17 +295,6 @@ def run_crosschecks(
 # ---------------------------------------------------------------------------
 
 
-def _leaked_dependency_origin(
-    sym: str, own_inst: bool, needed_libs: list[str], self_names: tuple[str, ...]
-) -> str | None:
-    """The external library *sym* leaked from, or ``None``; a std/vendored
-    template instantiated over the library's own types (*own_inst*) is the
-    library's own vague-linkage copy, never a statically linked dependency."""
-    if own_inst:
-        return None
-    return _external_dependency_origin(sym, needed_libs, self_names)
-
-
 def _check_exported_not_public(
     snapshot: AbiSnapshot, cfg: CrosscheckConfig
 ) -> _CheckOutput:
@@ -355,85 +335,30 @@ def _check_exported_not_public(
             [], "skipped", "no binary export table on the snapshot", providers
         )
 
-    # Symbols a public header declares (so an export of them is documented), and
-    # a decl lookup for enriching the message when one exists in a non-public
-    # header.
-    public_syms: set[str] = set()
-    decl_by_sym: dict[str, Function | Variable] = {}
-    all_decls: list[Function | Variable] = [
-        *snapshot.declarations.functions,
-        *snapshot.declarations.variables,
-    ]
-    for d in all_decls:
-        for sym in _candidate_symbols(d):
-            decl_by_sym.setdefault(sym, d)
-            if d.origin == ScopeOrigin.PUBLIC_HEADER:
-                public_syms.add(sym)
-
-    # The binary's linked-library list (ELF DT_NEEDED / Mach-O LC_LOAD_DYLIB / PE
-    # imports) feeds the external-dependency origin finders, so a leaked C++-runtime
-    # symbol names the runtime the binary actually links (e.g. the ``libc++.1.dylib``
-    # dylib on macOS rather than a hard-coded ELF soname).
-    needed_libs = _linked_library_names(snapshot)
-    # The audited library's own identity — a vendored namespace (fmt/boost/…) that
-    # is the library *being scanned* is native, not a leaked dependency.
-    self_names = _library_self_names(snapshot)
-    # An allocator-interposition library (malloc proxy) deliberately exports
-    # malloc/operator-new/… replacements; those are native, not a leaked dependency.
-    interposer = _ALLOCATOR_INTERPOSER_MARKER in exported
-    evidence = build_export_declaration_evidence(snapshot)
+    ctx = accounting_context(snapshot, frozenset(exported))
 
     # Account for *every* export with a precise reason so the report can state
     # "100 % accounted": documented API and compiler artifacts are legitimate;
     # each undocumented reason yields a finding whose message names the reason
     # (an external-dependency leak reads very differently from an internal-
-    # namespace escape). ``account`` sums to len(exported).
+    # namespace escape). ``account`` sums to len(exported). The decision itself
+    # is `export_account_decision.account_export`, shared with the wording of
+    # the `*_elf_only` existence findings so the two can never disagree.
     account: Counter[str] = Counter()
     findings: list[Change] = []
     for sym in sorted(exported):
-        if sym in public_syms:
-            account[ACCOUNT_PUBLIC] += 1
+        decision = account_export(sym, ctx)
+        account[decision.category] += 1
+        if decision.documented:
             continue
-        # A malloc-proxy library deliberately exports allocator replacements
-        # (``malloc``/``operator new``/…); they are native + intentional, so account
-        # them as legitimate and emit no finding — never advise hiding them (Codex).
-        if interposer and sym in _ALLOCATOR_INTERPOSER_SYMBOLS:
-            account[ACCOUNT_ALLOCATOR_INTERPOSER] += 1
-            continue
-        # The external-dependency check runs *before* the C++ compiler-artifact
-        # exemption: a leaked libstdc++/{fmt} vtable or typeinfo (``_ZTVNSt…``,
-        # ``_ZTIN3fmt…``) is that exact leaked surface these counters measure, and
-        # exempting it as a class artifact would silently undercount it (Codex
-        # review). Only a *native* class's artifact is then exempted below.
-        # A std/vendored template instantiated over the library's own types is
-        # the library's own vague-linkage copy, never a statically linked dep.
-        own_inst = instantiated_over_owned_types(sym, evidence.owned_namespaces)
-        origin_lib = _leaked_dependency_origin(sym, own_inst, needed_libs, self_names)
-        if origin_lib is not None:
-            account[ACCOUNT_EXTERNAL_DEP] += 1
-            findings.append(
-                exported_not_public_finding(
-                    sym, ACCOUNT_EXTERNAL_DEP, origin_lib, decl_by_sym.get(sym)
-                )
-            )
-            continue
-        if _is_cxx_implementation_symbol(sym):
-            account[ACCOUNT_CXX_ARTIFACT] += 1
-            continue
-        # An instantiation of a publicly declared template is public API a
-        # consumer links against; "hide it" would break that consumer.
-        if public_template_for_export(sym, evidence) is not None:
-            account[ACCOUNT_PUBLIC_TEMPLATE] += 1
-            continue
-        category = (
-            ACCOUNT_OWN_TYPE_INSTANTIATION
-            if own_inst
-            else _account_undocumented_export(sym)
-        )
-        account[category] += 1
-        hint = textual_declaration_hint(sym, evidence)
         findings.append(
-            exported_not_public_finding(sym, category, None, decl_by_sym.get(sym), hint)
+            exported_not_public_finding(
+                sym,
+                decision.category,
+                decision.origin_lib,
+                decision.decl,
+                decision.hint,
+            )
         )
 
     documented = (
@@ -1392,12 +1317,6 @@ def _origin_resolvable(snapshot: AbiSnapshot) -> bool:
     return False
 
 
-#: Mangling sigils: Itanium C++ (``_Z…``) and MSVC (``?…``). A non-extern-C
-#: declaration whose ``mangled`` lacks one of these is a castxml fallback to the
-#: display name (notably for constructors/destructors), not a comparable symbol.
-_MANGLE_SIGILS = ("_Z", "?")
-
-
 def _bare_name_exports(decl: Function | Variable) -> bool:
     """Whether *decl* legitimately exports under its bare (un-mangled) name.
 
@@ -1423,21 +1342,6 @@ def _looks_mangled(decl: Function | Variable) -> bool:
 #: Shared with public-surface scoping (``model.cxx_artifact_symbols``), which must
 #: make the identical exemption -- see that function's own docstring.
 _is_cxx_implementation_symbol = is_cxx_class_artifact_symbol
-
-
-def _candidate_symbols(decl: Function | Variable) -> tuple[str, ...]:
-    """Export symbols *decl* could provide, for matching against the export table.
-
-    Keyed on whether ``mangled`` is a *real* mangling (``_Z…`` / ``?…``): a C++
-    function or namespace/global variable exports under its mangled name only, so
-    its bare source spelling must **not** be added (an unrelated accidental export
-    sharing that spelling would otherwise look documented — Codex review). An
-    un-mangled decl (C / ``extern "C"`` / C data, where the extractor left the
-    bare name) exports under that bare name.
-    """
-    if decl.mangled.startswith(_MANGLE_SIGILS):
-        return (decl.mangled,)
-    return tuple({s for s in (decl.mangled, decl.name) if s})
 
 
 def _l4_reconciled_symbols(snapshot: AbiSnapshot, exported: set[str]) -> set[str]:
