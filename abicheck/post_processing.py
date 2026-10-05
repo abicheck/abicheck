@@ -401,7 +401,11 @@ class FilterNonPublicSurface:
             return changes
 
         from .policy.public_surface_query import PublicSurfaceQuery
-        from .surface import classify_change_surface, surface_unions
+        from .surface import (
+            classify_change_surface,
+            demangle_batch_on_first_need,
+            surface_unions,
+        )
 
         surf_old = PublicSurfaceQuery.resolve_public_domain(ctx.baseline_or_empty)
         surf_new = PublicSurfaceQuery.resolve_public_domain(ctx.new)
@@ -419,6 +423,7 @@ class FilterNonPublicSurface:
         # this per change is O(findings × surface) and makes large comparisons
         # quadratic.
         unions = surface_unions(surf_old, surf_new)
+        warm_demangling = demangle_batch_on_first_need(changes)
         kept: list[Change] = []
         for c in changes:
             # Widening overlay (ADR-024 §D6): a user-guaranteed public symbol
@@ -427,7 +432,7 @@ class FilterNonPublicSurface:
                 kept.append(c)
                 continue
             in_surface, reason = classify_change_surface(
-                c, surf_old, surf_new, unions=unions
+                c, surf_old, surf_new, unions=unions, on_demangle_needed=warm_demangling
             )
             if in_surface:
                 kept.append(c)

@@ -150,6 +150,15 @@ def is_confirmed_false(fact: Fact[bool]) -> bool:
 # ---------------------------------------------------------------------------
 
 
+# The legacy-fallback answers are the same three values every time, and a
+# ``Fact`` is frozen, so they are built once rather than on every query --
+# a pre-v46 or hand-built declaration otherwise allocated a fresh ``Fact``
+# per accessor call, several times per declaration per detector.
+_LEGACY_PARTIAL_TRUE: Fact[bool] = Fact.partial(True, DERIVED_FROM_LEGACY)
+_LEGACY_PARTIAL_FALSE: Fact[bool] = Fact.partial(False, DERIVED_FROM_LEGACY)
+_LEGACY_NOT_COLLECTED: Fact[bool] = Fact.not_collected(DERIVED_FROM_LEGACY)
+
+
 def _legacy_header_evidence(decl: SurfaceFactBearing) -> bool:
     """Whether the legacy record carries any header provenance at all."""
     return bool(
@@ -168,7 +177,7 @@ def declared_in_headers(decl: SurfaceFactBearing) -> Fact[bool]:
     if stored is not None:
         return stored
     if _legacy_header_evidence(decl):
-        return Fact.partial(True, DERIVED_FROM_LEGACY)
+        return _LEGACY_PARTIAL_TRUE
     # No recorded header provenance. The legacy enum cannot close the gap
     # for *any* of its members, `ELF_ONLY` included: both header-AST
     # backends assign `ELF_ONLY` to a declaration they parsed **out of a
@@ -184,7 +193,7 @@ def declared_in_headers(decl: SurfaceFactBearing) -> Fact[bool]:
     # Which member it was remains a real question, just a *different* one:
     # `is_export_table_only_record` answers it, and keeps the ELF-only
     # removal kind and the stub-record consumers working off the enum.
-    return Fact.not_collected(DERIVED_FROM_LEGACY)
+    return _LEGACY_NOT_COLLECTED
 
 
 def in_public_contract(decl: SurfaceFactBearing) -> Fact[bool]:
@@ -194,8 +203,8 @@ def in_public_contract(decl: SurfaceFactBearing) -> Fact[bool]:
         return stored
     vis = getattr(decl, "visibility", Visibility.PUBLIC)
     if vis is Visibility.PUBLIC:
-        return Fact.partial(True, DERIVED_FROM_LEGACY)
-    return Fact.partial(False, DERIVED_FROM_LEGACY)
+        return _LEGACY_PARTIAL_TRUE
+    return _LEGACY_PARTIAL_FALSE
 
 
 def binary_exported(decl: SurfaceFactBearing) -> Fact[bool]:
@@ -205,8 +214,8 @@ def binary_exported(decl: SurfaceFactBearing) -> Fact[bool]:
         return stored
     vis = getattr(decl, "visibility", Visibility.PUBLIC)
     if vis is Visibility.HIDDEN:
-        return Fact.partial(False, DERIVED_FROM_LEGACY)
-    return Fact.partial(True, DERIVED_FROM_LEGACY)
+        return _LEGACY_PARTIAL_FALSE
+    return _LEGACY_PARTIAL_TRUE
 
 
 def binary_export_match(decl: SurfaceFactBearing) -> ExportMatch | None:

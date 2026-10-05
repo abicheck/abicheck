@@ -1166,6 +1166,7 @@ CI runs `mypy abicheck/` as a required gate. The baseline is currently **0 error
 | `mkdocs-nav-coverage` | WARN | Every `docs/**/*.md` is in `mkdocs.yml` nav or linked from another doc |
 | `adr-index-nav-sync` | ERROR | Every `docs/contribute/adr/*.md` is linked from `adr/index.md`, and the ADR index page itself (not each individual ADR — relaxed, since that overloaded top-level nav with 50+ flat entries for no reader benefit) is listed in `mkdocs.yml`'s nav, so every ADR stays reachable from published navigation (this is what originally caught ADR-041 going missing from nav despite being accepted). Also requires every ADR to carry a Status metadata line/heading, and an ADR whose status leads with "Superseded" to link to its replacement |
 | `adr-status-sync` | ERROR on contradiction / bad receipt, WARN on staleness | An ADR's own `**Status:**` line and its row in `adr/index.md` may not *contradict* each other — one claiming nothing is implemented while the other claims something is (how ADR-056's row went stale), or disagreeing on the decision word. Paraphrase is explicitly allowed: the index cell is an abridgement, and a stricter prototype flagged 15 of 56 ADRs, nearly all false positives. Separately validates the optional `**Verified:** <ref>@<sha> on <YYYY-MM-DD>` receipt (see `adr/index.md`'s convention section): exactly one per ADR, well-formed, a real non-future date, and naming a commit reachable from the default branch — a receipt anchored to the branch that adds it vanishes on merge and then fails this required job on `main` permanently. It then WARNs when commits after that sha touched a first-party file the Status paragraph names, which is the only mechanism here that catches *document-vs-code* drift (ADR-049's status claimed its evaluator was unwired for five merged PRs after it wasn't). **A file is watched only when the Status names it by full repo-relative path** (any `FIRST_PARTY_PY_ROOTS` tree, not just `abicheck/`); a bare `x.py` is accepted only when it resolves to `abicheck/x.py`, and family shorthand (`_resolver.py`) is deliberately not guessed at — see `adr/index.md` for why. Lives in `scripts/adr_status_sync.py`, a sibling leaf module, since `check_ai_readiness.py` is already past the 2000-line hard cap |
+| `perf-antipatterns` | ERROR on growth, WARN on a stale baseline | No *new* performance anti-pattern inside a loop or comprehension under `abicheck/`: membership/`index`/`count` on a function-local list, `re.compile`, `json.loads`/`deepcopy`, self-copying accumulation (`acc = acc + [...]`, `[*acc, x]`, `{**acc, ...}`), a `subprocess` call, re-sorting or copying a loop-invariant collection, or `str +=` concatenation (error paths inside `raise` are exempt). Existing sites are per-(file, function, rule) counts in `scripts/perf_antipatterns_baseline.json` (counts, not lines, so moving code does not churn it); a count above its baseline is an error, one below is a warning to shrink it. A heuristic: a genuinely harmless new site is recorded with `--write-baseline` and its reason in the PR. Lives in `scripts/perf_antipatterns.py` |
 | `banned-imports` | ERROR | No `print(...)` outside CLI/reporter modules; no `subprocess(..., shell=True)` |
 | `project-snapshot-dto-no-asdict` | ERROR | No `dataclasses.asdict()`/`asdict()` call in a `ProjectSnapshot` DTO file (`abicheck/storage/dto.py`, `abicheck/storage/import_v1.py`, `abicheck/project_snapshot_store.py`, `abicheck/storage/semantic_ir_codec.py`) — ADR-063 Phase 8's D8 constraint, made mechanical |
 | `test-change-symbol-typed` | ERROR | No `Change(..., symbol=None)` or `make_change(symbol=None)` anywhere under `tests/`. `mypy` runs over `abicheck/` only, so a fixture could construct a `Change` in a state its own annotation (`symbol: str`) forbids and nothing would say so — which is how a `known-gaps.md` entry came to record a production defect that did not exist, from a `None` a test had fabricated. Typechecking the (unannotated) suite is not an available alternative; this is the narrow structural stand-in |
@@ -1429,6 +1430,54 @@ Several mechanisms guard test quality so coverage can't be "filled" without veri
   because the file documents the rejected `github.event.label.name` spelling in
   a comment, so a raw substring search reported the very thing it was checking
   for absent.
+
+## Performance investigation — what runs where, and the manual tools
+
+Performance is guarded by deterministic gates first and timing second (full
+table: `docs/contribute/performance.md` § "Complexity and cost gates beyond
+wall-clock time"). **CI already runs all of these; you run them by hand when
+you touch a hot path, when a gate fails, or when a user reports "slow".**
+
+| Gate | Runs in | Run it yourself |
+|---|---|---|
+| Call-count complexity (`compare()`, serialization, reports, release by member count, history by release count) | unit lane | `pytest tests/test_compare_call_complexity.py tests/test_pipeline_call_complexity.py tests/test_history_scaling.py -q -n 4` |
+| Cost budgets: same-argument repeats of expensive functions, child processes per `compare()` (`tests/perf_call_budgets.json`) | unit lane | `pytest tests/test_compare_cost_budgets.py -q -n 4` |
+| `perf-antipatterns` lint (list membership / `re.compile` / `json.loads` / `deepcopy` / self-copying accumulation / `subprocess` inside loops) | `ai-readiness` | `python scripts/perf_antipatterns.py` (`--all` lists every site) |
+| Wall-clock exponents per workload shape, history over 50 releases | `slow` | `pytest tests/test_compare_scaling_shapes.py tests/test_history_scaling.py -m slow -q` |
+
+Manual-only investigation tools (never gates):
+
+- **Missed memoization:** `python scripts/audit_repeated_calls.py --mode {default,contract,patterns_and_metrics} --n 200 --top 30`
+  lists functions called repeatedly with the *same* arguments inside one
+  `compare()`. Read it with judgement: a cheap string helper hit 400 times on
+  `"int"` is the synthetic workload's repetitiveness, not waste; a
+  whole-snapshot builder repeated on the same snapshot object is.
+- **Backlog snapshot:** `python scripts/perf_report.py --corpus 30 -o perf-report.md` (hot functions, costed repeats via `audit_repeated_calls.py --by-cost`, calls per declaration, lint counts; runs weekly in `performance.yml`). Check and update `docs/contribute/perf-findings.md` before and after chasing a candidate. Real-library gate: `pytest tests/test_extract_call_complexity.py -m integration -q` (needs g++/castxml).
+- **Which call counts grow:** `profile_call_counts` + `superlinear_call_sites`
+  (`tests/_call_counts.py`) at two sizes. Salt each run's names (the
+  workloads' `tag` argument) — demangling and canonical-spelling caches are
+  process-wide, so an unsalted second run measures cache state.
+- **Where time goes:** `python -m cProfile -o out.prof -m abicheck compare OLD NEW`
+  then `python -m pstats out.prof`; `py-spy record -o flame.svg -- abicheck compare OLD NEW`
+  for a flame graph (installed ad hoc, not a dependency). Memory:
+  `docs/contribute/memory.md` / `ABICHECK_MEMORY_TRACE`.
+
+When a gate fails:
+
+- **Superlinear call site** — fix the algorithm (build the index once, hoist
+  the set); never widen `exponent_ceiling` or shrink the workload to pass.
+  A workload whose entity population stops growing with `n` hides exactly
+  this (a fixed type count once made a types x findings scan look linear).
+- **Budget above** — remove the repeat, usually with a memo under an
+  existing scope with a sound lifetime (`compare.detection_memo` keys on
+  snapshot identity and dies with the pass). **Budget below** — an
+  improvement: re-record with `python scripts/audit_repeated_calls.py --write-budgets`.
+  Raising a budget needs its reason in the PR.
+- **New anti-pattern site** — fix it, or, if the collection provably stays
+  tiny, re-record with `python scripts/perf_antipatterns.py --write-baseline`
+  and say why in the PR. Moving a memoized helper into a nested function
+  also re-keys other per-function registries (`tests/_family_f4_registry.py`),
+  so run `verify.py --only repo-scan-tests` after such a refactor.
 
 ## Line-coverage floor
 

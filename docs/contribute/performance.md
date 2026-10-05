@@ -646,6 +646,46 @@ path-dependent identity shows up first as a spurious verdict, which no
 synthetic lane below would catch. A re-measurement should record all five
 columns, not wall time alone.
 
+## Complexity and cost gates beyond wall-clock time
+
+Timing exponents need several sizes, repeats and the `slow` lane. Most real
+regressions also have a cheaper, exact symptom, so these gates measure that
+instead and run where noted. All of them share the synthetic workloads in
+`tests/_compare_workloads.py` (signature, rename, enum, variable, nested-type
+and type churn, add/remove), whose every entity population grows with `n`.
+
+| Gate | What it pins | Lane |
+|---|---|---|
+| `tests/test_compare_call_complexity.py` | No first-party function's **call count** grows faster than `(size ratio)^1.5` in `compare()`, for every workload in three modes (default, `--contract` evaluation, pattern verdicts + surface metrics). Names the `path:line(function)`. Oracle is the input's size ratio, not a recorded baseline. | unit |
+| `tests/test_pipeline_call_complexity.py` | The same, for snapshot serialization round trips, every report format (JSON, Markdown, SARIF, HTML, JUnit) over real findings, and release reconciliation as the **member count** grows. | unit |
+| `tests/test_compare_cost_budgets.py` + `tests/perf_call_budgets.json` | Exact ratchet budgets per mode: **same-argument repeat calls** of a reviewed list of expensive functions (graph/surface/idiom builders, `demangle_batch`, ...) and **child processes** per `compare()`, which must also not grow with input size. A figure above *or below* its budget fails; re-record with `python scripts/audit_repeated_calls.py --write-budgets`. | unit |
+| `tests/test_extract_call_complexity.py` + `tests/_cpp_corpus.py` | Call-count complexity of `dump()` over a generated real C++ library (namespaces, virtuals, overloads, templates, typedef chains), and of `compare()` over two dumped versions at 10% and 100% churn. | integration |
+| `perf-antipatterns` (`scripts/perf_antipatterns.py`) | No *new* list-membership, `re.compile`, `json.loads`/`deepcopy`, self-copying accumulation, `subprocess` call, loop-invariant re-sort/copy or `str +=` inside a loop under `abicheck/`; existing sites are per-function counts in `scripts/perf_antipatterns_baseline.json`. | `ai-readiness` |
+| `tests/test_history_scaling.py` | `build_longitudinal_history` stays linear in the number of releases (call counts, K=5 vs 20) and its time exponent over up to 50 releases stays sub-quadratic. | unit + `slow` |
+| `tests/test_compare_scaling_shapes.py` | Wall-clock exponent per workload shape -- catches a linear number of calls whose per-call cost grows. | `slow` |
+
+The first of these found a real `functions x types` scan in
+`--pattern-verdicts` (per-finding rebuild of every type name), and the
+repeated-call audit found the namespace detectors demangling each snapshot
+once per detector per side; both are fixed.
+
+### Investigating by hand
+
+- **Which functions are called repeatedly with the same arguments?**
+  `python scripts/audit_repeated_calls.py --workload type_churn --n 400 --top 30`
+  (plain values compare by value, other objects by identity; generator
+  resumptions are not counted).
+- **Which call counts grow with input?** In a test or REPL, call
+  `profile_call_counts` (`tests/_call_counts.py`) at two sizes and pass both
+  tables to `superlinear_call_sites`. Salt each run's names (the workloads'
+  `tag` argument): demangling and canonical-spelling caches are process-wide.
+- **Where does the time go?** `python -m cProfile -o out.prof -m abicheck compare OLD NEW`,
+  then `python -m pstats out.prof` (`sort cumulative`, `stats 40`); for a
+  flame graph of a live run, `py-spy record -o flame.svg -- abicheck compare OLD NEW`
+  (`py-spy` is not a dependency; install it ad hoc). For memory, see
+  [memory.md](memory.md) and `ABICHECK_MEMORY_TRACE`.
+- **Every anti-pattern site, baseline or not:** `python scripts/perf_antipatterns.py --all`.
+
 ## Coverage gaps this workflow does not close
 
 An external performance audit (2026-08) found that `compare()`/dump/scan
@@ -1378,3 +1418,7 @@ recommendation for a clang-only (no castxml) CI runner on a library this
 size remains: skip `scan --depth source` in favor of `compare` for the L1/L2
 release gate, or scope it with `--since`/`--changed-path` to just the
 changed files rather than the whole library.
+
+## Weekly optimization report
+
+`python scripts/perf_report.py [--corpus N] [-o FILE]` ranks hot functions, costed same-argument repeats (`audit_repeated_calls.py --by-cost`), calls per declaration (`per_decl_x10:*` budgets) and anti-pattern sites. `performance.yml` runs it weekly into the step summary. Record what you decide about a candidate in the [findings registry](perf-findings.md).

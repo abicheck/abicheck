@@ -113,34 +113,60 @@ class PatternModulation:
         }
 
 
-def _resolve_name(keys: Iterable[str], name: str) -> str | None:
-    """Resolve *name* to a single key, requiring an *unambiguous* match.
+class _TypeNameIndex:
+    """One snapshot's type names, indexed once per comparison.
 
-    Exact (fully-qualified) match always wins. Otherwise fall back to matching
-    on the unqualified short name **only when exactly one key carries it** —
-    so two public types that share a short name across different namespaces
-    (e.g. ``ns1::Ctx`` and ``ns2::Ctx``) never borrow each other's idiom
-    evidence. An ambiguous short name returns ``None`` (no match), which keeps
-    a pattern demotion from firing on the wrong type (ADR-027 review).
+    Name resolution used to rebuild the name set and rescan it for every
+    finding (``_type_names`` + a linear short-name scan), so a run with many
+    layout findings over many types was quadratic in the type count. The
+    index answers the same questions in O(1): exact membership, the unique
+    short-name owner, and how many types share a short name.
     """
-    keyset = list(keys)
-    if name in keyset:
-        return name
-    short = name.rsplit("::", 1)[-1]
-    candidates = [k for k in keyset if k.rsplit("::", 1)[-1] == short]
-    if len(candidates) == 1:
-        return candidates[0]
-    return None
+
+    __slots__ = ("names", "by_short", "first_record")
+
+    def __init__(self, snap: AbiSnapshot) -> None:
+        self.names: frozenset[str] = frozenset(
+            rec.name for rec in snap.declarations.types
+        )
+        self.by_short: dict[str, list[str]] = {}
+        for n in self.names:
+            self.by_short.setdefault(n.rsplit("::", 1)[-1], []).append(n)
+        # First record per exact name, matching ``next(...)``'s first-match
+        # semantics over the declaration order.
+        self.first_record: dict[str, object] = {}
+        for rec in snap.declarations.types:
+            self.first_record.setdefault(rec.name, rec)
+
+    def resolve(self, name: str) -> str | None:
+        """Resolve *name* to a single key, requiring an *unambiguous* match.
+
+        Exact (fully-qualified) match always wins. Otherwise fall back to matching
+        on the unqualified short name **only when exactly one key carries it** —
+        so two public types that share a short name across different namespaces
+        (e.g. ``ns1::Ctx`` and ``ns2::Ctx``) never borrow each other's idiom
+        evidence. An ambiguous short name returns ``None`` (no match), which keeps
+        a pattern demotion from firing on the wrong type (ADR-027 review).
+        """
+        if name in self.names:
+            return name
+        candidates = self.by_short.get(name.rsplit("::", 1)[-1], [])
+        if len(candidates) == 1:
+            return candidates[0]
+        return None
+
+    def short_name_count(self, short: str) -> int:
+        return len(self.by_short.get(short, ()))
 
 
 def _tags_for(
-    idioms: dict[str, list[IdiomTag]], name: str, type_names: Iterable[str]
+    idioms: dict[str, list[IdiomTag]], name: str, type_names: _TypeNameIndex
 ) -> list[IdiomTag]:
     # Ambiguity is judged against the *whole* type universe, not just the
     # idiom-tagged subset: if two public types share a short name, an
     # unqualified reference is ambiguous and must not resolve to either (even if
     # only one happens to carry an idiom tag) — ADR-027 review.
-    key = _resolve_name(type_names, name)
+    key = type_names.resolve(name)
     return idioms.get(key, []) if key is not None else []
 
 
@@ -148,7 +174,7 @@ def _has_idiom(
     idioms: dict[str, list[IdiomTag]],
     name: str,
     idiom: Idiom,
-    type_names: Iterable[str],
+    type_names: _TypeNameIndex,
 ) -> IdiomTag | None:
     for t in _tags_for(idioms, name, type_names):
         if t.idiom == idiom:
@@ -156,15 +182,11 @@ def _has_idiom(
     return None
 
 
-def _type_names(snap: AbiSnapshot) -> frozenset[str]:
-    return frozenset(rec.name for rec in snap.declarations.types)
-
-
 def _verdict_label(v: Verdict) -> str:
     return v.value.lower()
 
 
-def _exact_record(snap: AbiSnapshot, name: str) -> object | None:
+def _exact_record(names: _TypeNameIndex, name: str) -> object | None:
     """Return the type record whose name matches *name* exactly, else None.
 
     The lost-invariant transition (D2.2) must use the **same** qualified type
@@ -174,7 +196,7 @@ def _exact_record(snap: AbiSnapshot, name: str) -> object | None:
     ``OPAQUE_INVARIANT_BROKEN`` instead of letting the normal removed/renamed
     handling cover it (ADR-027 review).
     """
-    return next((rec for rec in snap.declarations.types if rec.name == name), None)
+    return names.first_record.get(name)
 
 
 def apply_pattern_verdicts(
@@ -226,10 +248,15 @@ def apply_pattern_verdicts(
     )
 
     ledger: list[PatternModulation] = []
+    old_names = _TypeNameIndex(old)
+    new_names = _TypeNameIndex(new)
+    pimpl_index = _PimplPointeeIndex(old_idioms)
 
     # 1. Lost-invariant transitions (raises) — emitted before demotion so a type
     #    that *lost* opaqueness is never both demoted and flagged.
-    transitions = _emit_lost_invariants(changes, old, new, new_graph, old_idioms, tier)
+    transitions = _emit_lost_invariants(
+        changes, old, new, new_graph, old_idioms, tier, new_names
+    )
     changes.extend(t for t, _ in transitions)
     ledger.extend(m for _, m in transitions)
 
@@ -244,13 +271,14 @@ def apply_pattern_verdicts(
     for c in changes:
         m = _modulate_change(
             c,
-            old,
-            new,
             old_idioms,
             new_idioms,
             ap_index,
             tier,
             demote_allowed,
+            old_names,
+            new_names,
+            pimpl_index,
             protected_kinds,
         )
         if m is not None:
@@ -305,6 +333,7 @@ def _emit_lost_invariants(
     new_graph: SurfaceGraph,
     old_idioms: dict[str, list[IdiomTag]],
     tier: str,
+    new_names: _TypeNameIndex,
 ) -> list[tuple[Change, PatternModulation]]:
     """OPAQUE_INVARIANT_BROKEN + HANDLE_TYPE_CHANGED (D2.2 transitions)."""
     out: list[tuple[Change, PatternModulation]] = []
@@ -330,7 +359,7 @@ def _emit_lost_invariants(
             public_use = build_public_use_index(
                 new_graph.snapshot.declarations.functions
             )
-        new_rec = _exact_record(new, name)
+        new_rec = _exact_record(new_names, name)
         if new_rec is None:
             continue  # removed entirely → handled by TYPE_REMOVED, not this
         # Opacity is lost only when callers can now observe the layout: either
@@ -454,13 +483,14 @@ def _emit_lost_invariants(
 
 def _modulate_change(
     c: Change,
-    old: AbiSnapshot,
-    new: AbiSnapshot,
     old_idioms: dict[str, list[IdiomTag]],
     new_idioms: dict[str, list[IdiomTag]],
     ap_index: _AntiPatternIndex,
     tier: str,
     demote_allowed: bool,
+    old_names: _TypeNameIndex,
+    new_names: _TypeNameIndex,
+    pimpl_index: _PimplPointeeIndex,
     protected_kinds: frozenset[ChangeKind] = frozenset(),
 ) -> PatternModulation | None:
     """Apply the per-finding modulation rules; return a ledger row or None."""
@@ -483,8 +513,6 @@ def _modulate_change(
     if c.kind in _LAYOUT_KINDS and c.kind not in protected_kinds:
         # Rule: opaque-pointer layout (demote).
         if demote_allowed:
-            old_names = _type_names(old)
-            new_names = _type_names(new)
             tag_old = _has_idiom(old_idioms, c.symbol, Idiom.OPAQUE_POINTER, old_names)
             tag_new = _has_idiom(new_idioms, c.symbol, Idiom.OPAQUE_POINTER, new_names)
             if (
@@ -501,7 +529,7 @@ def _modulate_change(
                     list(tag_new.evidence),
                 )
             # Rule: PIMPL pointee-only (demote).
-            pimpl = _pimpl_pointee_match(c.symbol, old_idioms, new_idioms, new_names)
+            pimpl = _pimpl_pointee_match(c.symbol, pimpl_index, new_idioms, new_names)
             if pimpl is not None:
                 return _demote(
                     c,
@@ -562,9 +590,9 @@ def _demote(
 
 def _pimpl_pointee_match(
     pointee: str,
-    old_idioms: dict[str, list[IdiomTag]],
+    pimpl_index: _PimplPointeeIndex,
     new_idioms: dict[str, list[IdiomTag]],
-    new_type_names: Iterable[str],
+    new_names: _TypeNameIndex,
 ) -> list[str] | None:
     """Return evidence if *pointee* is the hidden impl of a PIMPL wrapper whose
     own layout is unchanged across both snapshots (D4.1 PIMPL guard).
@@ -578,20 +606,11 @@ def _pimpl_pointee_match(
     ``ns2::Impl`` (ADR-027 review).
     """
     short = pointee.rsplit("::", 1)[-1]
-    new_names = list(new_type_names)
-    pointee_unambiguous = (
-        sum(1 for n in new_names if n.rsplit("::", 1)[-1] == short) <= 1
-    )
-    exact: list[tuple[str, IdiomTag]] = []
-    short_matches: list[tuple[str, IdiomTag]] = []
-    for wrapper, tags in old_idioms.items():
-        for t in tags:
-            if t.idiom != Idiom.PIMPL or t.hidden_pointee is None:
-                continue
-            if t.hidden_pointee == pointee:
-                exact.append((wrapper, t))
-            elif t.hidden_pointee.rsplit("::", 1)[-1] == short:
-                short_matches.append((wrapper, t))
+    pointee_unambiguous = new_names.short_name_count(short) <= 1
+    exact = pimpl_index.by_exact.get(pointee, [])
+    # Consulted only when nothing matched exactly, so no entry in this bucket
+    # can carry the exact spelling.
+    short_matches = pimpl_index.by_short.get(short, [])
     if exact:
         candidates = exact
     elif len(short_matches) == 1 and pointee_unambiguous:
@@ -611,6 +630,30 @@ def _pimpl_pointee_match(
             f"wrapper layout byte-identical across versions"
         ]
     return None
+
+
+class _PimplPointeeIndex:
+    """OLD's PIMPL tags keyed by exact and by short hidden-pointee spelling.
+
+    Built once per comparison so the per-finding PIMPL guard no longer
+    rescans every idiom tag for every layout finding. Each bucket keeps
+    *old_idioms*' iteration order, so the first matching wrapper -- and with
+    it the emitted evidence -- is unchanged.
+    """
+
+    __slots__ = ("by_exact", "by_short")
+
+    def __init__(self, old_idioms: dict[str, list[IdiomTag]]) -> None:
+        self.by_exact: dict[str, list[tuple[str, IdiomTag]]] = {}
+        self.by_short: dict[str, list[tuple[str, IdiomTag]]] = {}
+        for wrapper, tags in old_idioms.items():
+            for t in tags:
+                if t.idiom != Idiom.PIMPL or t.hidden_pointee is None:
+                    continue
+                self.by_exact.setdefault(t.hidden_pointee, []).append((wrapper, t))
+                self.by_short.setdefault(
+                    t.hidden_pointee.rsplit("::", 1)[-1], []
+                ).append((wrapper, t))
 
 
 class _AntiPatternIndex:

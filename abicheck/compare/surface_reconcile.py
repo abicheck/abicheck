@@ -171,6 +171,11 @@ def _admit(
     # applies in its own direction.
     proposals: dict[str, _New] = {}
     claims: dict[int, int] = {}
+    # Identities already on the other side's surface, built on first need:
+    # scanning `other.values()` per resolved key was quadratic in surface
+    # size wherever most keys miss the exact join (Mach-O's `_` prefix).
+    # `other` is not mutated here and outlives the loop, so ids are stable.
+    other_ids: set[int] | None = None
     for key in src.keys() - other.keys():
         peer = other_all.get(key)
         if peer is None and resolve is not None:
@@ -188,7 +193,9 @@ def _admit(
             # kinds carry (the declared name), so the cast states what the
             # types cannot: the tier reads identity, not kind.
             peer = resolve(key, cast("Any", src[key]))
-            if peer is not None and any(p is peer for p in other.values()):
+            if peer is not None and other_ids is None:
+                other_ids = {id(p) for p in other.values()}
+            if peer is not None and other_ids is not None and id(peer) in other_ids:
                 # Already in the other side's surface under its own key: the
                 # symbol join's own alias tier pairs them, and admitting a
                 # second copy here would double-report the same declaration.

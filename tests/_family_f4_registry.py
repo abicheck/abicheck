@@ -178,7 +178,7 @@ HEURISTICS: dict[str, str] = {
     "abicheck.compare.export_owner_resolution::_placeholder_owner::affix.startswith:_CTOR_PLACEHOLDER_PREFIX": "own_format",
     "abicheck.compare.export_owner_resolution::_placeholder_owner::affix.startswith:_DTOR_PLACEHOLDER_PREFIX": "own_format",
     "abicheck.compare.namespace_move::_declaring_entity::affix.endswith:suffix": "spelling",
-    "abicheck.compare.namespace_shape_detectors::_batch_demangle_public::affix.startswith:'_Z'": "grammar",
+    "abicheck.compare.namespace_shape_detectors::_batch_demangle_public.compute::affix.startswith:'_Z'": "grammar",
     "abicheck.compare.namespace_shape_detectors::_qualified_function_name::affix.startswith:'_Z'": "grammar",
     "abicheck.compare.naming_conventions::_strip_param_decorators::re:'\\\\bconst\\\\b|\\\\bvolatile\\\\b'": "spelling",
     "abicheck.compare.opaque_struct_downgrade::struct_change_record_name::affix.endswith:f'::{c.field_name}'": "spelling",

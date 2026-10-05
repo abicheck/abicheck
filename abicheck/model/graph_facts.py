@@ -596,11 +596,11 @@ def _compute_occurrences(edge: GraphEdge) -> Sequence[str]:
     if all(_OCCURRENCE_ATTR_KEY_SET.isdisjoint(f.attrs) for f in edge.facts):
         return ()  # the common case: no fact carries occurrence-level attrs
     rk = edge.relation_key()
-    seen: list[str] = []
+    seen: set[str] = set()
     for fact in edge.facts:
         oid = edge_occurrence_id(rk, fact.attrs)
-        if oid is not None and oid not in seen:
-            seen.append(oid)
+        if oid is not None:
+            seen.add(oid)
     return sorted(seen)
 
 

@@ -307,6 +307,7 @@ nav:
       - Detector Impact Contract: contribute/detector-impact-contract.md
       - Use-Case Impact: contribute/use-case-impact.md
       - Performance: contribute/performance.md
+      - Performance findings: contribute/perf-findings.md
       - Memory: contribute/memory.md
       - Known Gaps & Reverted Fixes: contribute/known-gaps.md
     - Roadmap & Status:

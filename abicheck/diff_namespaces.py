@@ -1204,15 +1204,23 @@ def detect_namespace_patterns(
     new: AbiSnapshot,
     experimental_namespaces: tuple[str, ...] = DEFAULT_EXPERIMENTAL_NAMESPACES,
 ) -> list[Change]:
-    """Run all namespace-shape detectors and return their concatenated findings."""
+    """Run all namespace-shape detectors and return their concatenated findings.
+
+    The detectors share one :func:`~abicheck.compare.detection_memo.
+    detection_memo_scope`, so each snapshot's public names are demangled
+    once per pass rather than once per detector per side.
+    """
+    from .compare.detection_memo import detection_memo_scope
+
     out: list[Change] = []
-    out.extend(
-        detect_experimental_namespace_changes(
-            old,
-            new,
-            experimental_namespaces=experimental_namespaces,
+    with detection_memo_scope():
+        out.extend(
+            detect_experimental_namespace_changes(
+                old,
+                new,
+                experimental_namespaces=experimental_namespaces,
+            )
         )
-    )
-    out.extend(detect_std_reexport_removed(old, new))
-    out.extend(detect_inline_namespace_version_bump(old, new))
+        out.extend(detect_std_reexport_removed(old, new))
+        out.extend(detect_inline_namespace_version_bump(old, new))
     return out

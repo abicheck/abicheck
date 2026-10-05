@@ -39,6 +39,7 @@ from ..elf_symbol_filter import (
     exported_symbol_names,
 )
 from ..model import Function
+from ..model.execution_cache import memoized
 from ..model.surface_facts import in_public_surface, is_abi_visible
 from .surface_reconcile import (
     RECONCILED_ABI_VISIBLE,
@@ -85,11 +86,13 @@ def strip_template_args(name: str) -> str:
     return "".join(out).rstrip()
 
 
+@memoized(maxsize=1 << 16)
 def mask_operator_symbols(name: str) -> str:
     """*name* with each operator name's own ``<``/``>`` removed."""
     return _OPERATOR_SYMBOL_RE.sub("operator", name)
 
 
+@memoized(maxsize=1 << 16)
 def template_angle_depth(text: str) -> int:
     """How many template-argument lists are still open at the end of *text*.
 

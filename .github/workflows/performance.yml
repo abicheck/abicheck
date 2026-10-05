@@ -251,6 +251,19 @@ jobs:
         run: |
           pytest tests/test_performance.py -v --tb=short -m slow
 
+      - name: Optimization backlog report
+        # Not a gate: ranks hot functions, costed same-argument repeats,
+        # calls per declaration and anti-pattern sites
+        # (scripts/perf_report.py). Weekly/dispatch only -- a PR gets the
+        # deterministic call-count gates in ci.yml instead. Candidates and
+        # decisions are kept in docs/contribute/perf-findings.md.
+        if: github.event_name != 'pull_request'
+        continue-on-error: true
+        run: |
+          mkdir -p reports/perf
+          python scripts/perf_report.py --n 400 --top 20 --corpus 30 -o reports/perf/perf-report.md
+          cat reports/perf/perf-report.md >> "$GITHUB_STEP_SUMMARY"
+
       - name: Write job summary
         if: always()
         run: |

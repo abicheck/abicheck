@@ -690,11 +690,18 @@ def _attribute_stdlib_embedding(changes: list[Change], new: AbiSnapshot) -> None
     from .compare.record_lookup import RecordLookup
 
     records = RecordLookup(new.declarations.types)
+    # One scan per record, not per finding: a wide record emits a field-offset
+    # change per field, and rescanning every field for each of them was
+    # quadratic in the record's width. Keyed by identity -- the records live in
+    # `new` for the whole loop, so an id cannot be reused meanwhile.
+    embedded_by_record: dict[int, list[tuple[str, str]]] = {}
     for c in owner_changes:
         rec = records.resolve(_root_type_name(c), c.entity_id)
         if rec is None:
             continue
-        embedded = _embedded_stdlib_fields(rec)
+        embedded = embedded_by_record.get(id(rec))
+        if embedded is None:
+            embedded = embedded_by_record[id(rec)] = _embedded_stdlib_fields(rec)
         if not embedded:
             continue
         members = ", ".join(f"{fname} ({ftype})" for fname, ftype in embedded)

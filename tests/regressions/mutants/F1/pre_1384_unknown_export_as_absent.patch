@@ -1,6 +1,6 @@
 --- a/abicheck/model/surface_facts.py
 +++ b/abicheck/model/surface_facts.py
-@@ -206,7 +206,9 @@
+@@ -211,7 +211,9 @@
      """(c) Does the artifact's export table carry a symbol for *decl*?"""
      stored: Fact[bool] | None = getattr(decl, "binary_exported_fact", None)
      if stored is not None:
@@ -10,4 +10,4 @@
 +        return Fact.present(False)
      vis = getattr(decl, "visibility", Visibility.PUBLIC)
      if vis is Visibility.HIDDEN:
-         return Fact.partial(False, DERIVED_FROM_LEGACY)
+         return _LEGACY_PARTIAL_FALSE
