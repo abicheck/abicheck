@@ -58,6 +58,7 @@ from .compare.template_surface import (
     cpo_identity as _cpo_id,
     mask_operator_symbols,
     qualified_declaration_name as _qualified_function_name,  # noqa: F401  (re-exported)
+    qualified_name_lookup,
     reconciled_cpo_surfaces,
     reconciled_public_functions,
     strip_template_args as _strip_template_args,
@@ -741,15 +742,17 @@ def detect_cpo_kind_changed(
     only in variables (new), or vice versa, triggers the finding.
     """
 
-    def _func_names(funcs: list[Function]) -> set[str]:
+    def _func_names(snap: AbiSnapshot, funcs: list[Function]) -> set[str]:
+        name_of = qualified_name_lookup(snap)
         out: set[str] = set()
         for f in funcs:
-            qname = _qualified_function_name(f.name, f.mangled)
+            qname = name_of(f)
             if qname:
                 out.add(_cpo_function_stem(qname))
         return out
 
-    def _var_names(variables: list[Variable]) -> set[str]:
+    def _var_names(snap: AbiSnapshot, variables: list[Variable]) -> set[str]:
+        name_of = qualified_name_lookup(snap)
         out: set[str] = set()
         for v in variables:
             # castxml never namespace-qualifies Variable.name itself, but a
@@ -757,7 +760,7 @@ def detect_cpo_kind_changed(
             # full qualified path (_qualified_function_name works for a
             # plain variable too — it just returns `name` unchanged when
             # `mangled` isn't a real Itanium mangling to demangle).
-            qname = _qualified_function_name(v.name, v.mangled)
+            qname = name_of(v)
             if qname:
                 out.add(qname)
         return out
@@ -768,10 +771,10 @@ def detect_cpo_kind_changed(
     old_fs, old_vs, new_fs, new_vs = reconciled_cpo_surfaces(
         old, new, identity=partial(_cpo_id, function_stem=_cpo_function_stem)
     )
-    old_funcs = _func_names(old_fs)
-    old_vars = _var_names(old_vs)
-    new_funcs = _func_names(new_fs)
-    new_vars = _var_names(new_vs)
+    old_funcs = _func_names(old, old_fs)
+    old_vars = _var_names(old, old_vs)
+    new_funcs = _func_names(new, new_fs)
+    new_vars = _var_names(new, new_vs)
 
     changes: list[Change] = []
 
@@ -841,10 +844,11 @@ def detect_overload_set_rerouted(
     overload (silent re-routing).
     """
 
-    def _by_stem(funcs: list[Function]) -> dict[str, list[Function]]:
+    def _by_stem(snap: AbiSnapshot, funcs: list[Function]) -> dict[str, list[Function]]:
+        name_of = qualified_name_lookup(snap)
         out: dict[str, list[Function]] = defaultdict(list)
         for f in funcs:
-            qname = _qualified_function_name(f.name, f.mangled)
+            qname = name_of(f)
             stem = _strip_template_args(qname)
             out[stem].append(f)
         return out
@@ -874,7 +878,10 @@ def detect_overload_set_rerouted(
         return sig
 
     old_by_stem, new_by_stem = (
-        _by_stem(funcs) for funcs in reconciled_public_functions(old, new)
+        _by_stem(snap, funcs)
+        for snap, funcs in zip(
+            (old, new), reconciled_public_functions(old, new), strict=True
+        )
     )
 
     changes: list[Change] = []
@@ -989,8 +996,9 @@ def detect_mandatory_template_param_added(
         # this degrades to "public only if a public function contributed"
         # automatically for the common case.
         is_public: dict[str, bool] = defaultdict(bool)
+        name_of = qualified_name_lookup(snap)
         for f in funcs:
-            qname = _qualified_function_name(f.name, f.mangled)
+            qname = name_of(f)
             if "<" not in qname:
                 continue
             stem = _strip_template_args(qname)
@@ -1102,16 +1110,22 @@ def detect_unspecified_return_now_named(
     they gained or lost a deduced return.
     """
 
-    def _index(funcs: list[Function]) -> dict[tuple[str, tuple[str, ...]], str]:
+    def _index(
+        snap: AbiSnapshot, funcs: list[Function]
+    ) -> dict[tuple[str, tuple[str, ...]], str]:
+        name_of = qualified_name_lookup(snap)
         out: dict[tuple[str, tuple[str, ...]], str] = {}
         for f in funcs:
-            qname = _qualified_function_name(f.name, f.mangled)
+            qname = name_of(f)
             key = (qname, tuple(p.type for p in f.params))
             out[key] = f.return_type
         return out
 
     old_idx, new_idx = (
-        _index(funcs) for funcs in reconciled_public_functions(old, new)
+        _index(snap, funcs)
+        for snap, funcs in zip(
+            (old, new), reconciled_public_functions(old, new), strict=True
+        )
     )
 
     changes: list[Change] = []
@@ -1197,10 +1211,12 @@ def detect_missing_instantiations(
     new_mangled = {f.mangled for f in new.declarations.functions if is_public_export(f)}
     findings: list[Change] = []
     surviving_stems: set[str] = set()
+    old_name_of = qualified_name_lookup(old)
+    new_name_of = qualified_name_lookup(new)
     for fn in new.declarations.functions:
         if not is_public_export(fn):
             continue
-        qname = _qualified_function_name(fn.name, fn.mangled)
+        qname = new_name_of(fn)
         if _looks_like_template_instantiation(qname):
             surviving_stems.add(_strip_template_args(qname))
     for fn in old.declarations.functions:
@@ -1208,7 +1224,7 @@ def detect_missing_instantiations(
             continue
         if fn.mangled in new_mangled:
             continue
-        qname = _qualified_function_name(fn.name, fn.mangled)
+        qname = old_name_of(fn)
         if not _looks_like_template_instantiation(qname):
             continue
         stem = _strip_template_args(qname)

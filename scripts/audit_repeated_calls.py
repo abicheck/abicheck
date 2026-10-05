@@ -52,6 +52,7 @@ import argparse
 import enum
 import inspect
 import sys
+import time
 from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -91,7 +92,10 @@ class RepeatedCall:
 
 
 def audit_repeated_calls(
-    thunk: Callable[[], object], *, include: Callable[[str], bool] | None = None
+    thunk: Callable[[], object],
+    *,
+    include: Callable[[str], bool] | None = None,
+    repeat_seconds: dict[str, float] | None = None,
 ) -> list[RepeatedCall]:
     """Run *thunk*; return every first-party call repeated with identical
     argument fingerprints, most repeated first.
@@ -99,6 +103,15 @@ def audit_repeated_calls(
     *include* (``"path:line(name)"`` -> bool) narrows which functions are
     fingerprinted, which keeps the profile hook cheap when only a few
     functions matter.
+
+    *repeat_seconds*, when given, is filled with the inclusive wall time
+    spent inside the *repeat* calls of each site (every call after the
+    first with the same fingerprint). This is measured per call, not
+    apportioned from a cumulative total: a memoised function whose first
+    call does all the work and whose repeats are cache hits reports the
+    cost of the cache hits, not an average that includes the miss.
+    Generator/coroutine frames are counted but not timed (their frames
+    return on every ``yield``).
     """
     seen: Counter[tuple[str, tuple]] = Counter()
     labels: dict[tuple[str, tuple], str] = {}
@@ -111,6 +124,9 @@ def audit_repeated_calls(
     # resumption, not just on entry; a frame already seen is a resumption.
     # Frames are pinned for the same id()-recycling reason as arguments.
     live_frames: dict[int, object] = {}
+    # (frame, site, start) for every timed repeat call still on the stack.
+    timed: list[tuple[object, str, float]] = []
+    clock = time.perf_counter
 
     def site_of(code) -> str | None:
         name = site_names.get(code, "")
@@ -127,6 +143,14 @@ def audit_repeated_calls(
         return name
 
     def hook(frame, event, _arg):
+        if event == "return":
+            if timed and timed[-1][0] is frame:
+                _f, site, start = timed.pop()
+                if repeat_seconds is not None:
+                    repeat_seconds[site] = (
+                        repeat_seconds.get(site, 0.0) + clock() - start
+                    )
+            return
         if event != "call":
             return
         code = frame.f_code
@@ -147,6 +171,12 @@ def audit_repeated_calls(
                 f"{n}={type(v).__name__}" for n, v in zip(names, values, strict=True)
             )
         seen[key] += 1
+        if (
+            repeat_seconds is not None
+            and seen[key] > 1
+            and not code.co_flags & _RESUMABLE
+        ):
+            timed.append((frame, site, clock()))
 
     previous = sys.getprofile()
     sys.setprofile(hook)
@@ -343,16 +373,14 @@ class CostedRepeat:
     function: str
     repeats: int
     calls: int
-    cumulative_seconds: float
+    repeat_seconds: float
 
     @property
     def wasted_seconds(self) -> float:
-        # The repeated share of the function's cumulative time. Cumulative
-        # times nest (a caller's includes its callees'), so rows are an
-        # upper-bound ranking signal, not an additive budget.
-        return (
-            self.cumulative_seconds * self.repeats / self.calls if self.calls else 0.0
-        )
+        # Measured inclusive time of the repeat calls themselves. Inclusive
+        # times nest (a repeated caller includes its repeated callees), so
+        # rows are a ranking signal, not an additive budget.
+        return self.repeat_seconds
 
     def describe(self) -> str:
         return f"{self.wasted_seconds:8.3f}s  {self.repeats:7d}/{self.calls:<7d} repeated  {self.function}"
@@ -364,39 +392,26 @@ def cost_weighted_repeats(
 ) -> list[CostedRepeat]:
     """Rank first-party functions by the time their same-argument repeats cost.
 
-    *build(tag)* returns a fresh ``(old, new)`` pair; it is called twice with
-    different tags -- once under :mod:`cProfile` for cumulative time, once
-    under the repeat audit (the two hooks cannot share a run) -- so neither
-    measurement sees caches the other warmed.
+    *build(tag)* returns a fresh ``(old, new)`` pair. The cost of a site is
+    the measured time spent inside its *repeat* calls
+    (:func:`audit_repeated_calls`'s ``repeat_seconds``). An earlier version
+    apportioned cProfile's cumulative time by the repeated share of calls,
+    which charged a memoised wrapper's single real computation to its cache
+    hits: ``_reconciled_function_surfaces`` (one miss, eleven hits) ranked as
+    a top repeat cost while its repeats cost microseconds. Absolute numbers
+    include the profile hook's overhead; compare rows, not seconds.
     """
-    import cProfile
-    import pstats
-
-    old, new = build("cost_profile_")
-    profiler = cProfile.Profile()
-    profiler.enable()
-    try:
-        run(old, new)
-    finally:
-        profiler.disable()
-    cumulative: dict[str, tuple[int, float]] = {}
-    for (filename, line, func), stat in pstats.Stats(profiler).stats.items():  # type: ignore[attr-defined]
-        if filename.startswith(PACKAGE_ROOT):
-            site = f"{Path(filename).relative_to(REPO).as_posix()}:{line}"
-            cumulative[site] = (stat[1], stat[3])
-
     old, new = build("cost_audit_")
-    repeats: dict[str, tuple[str, int]] = {}
-    for row in audit_repeated_calls(lambda: run(old, new)):
-        site = row.function.split("(", 1)[0]
-        name, total = repeats.get(site, (row.function, 0))
-        repeats[site] = (name, total + row.wasted)
-
-    out = []
-    for site, (name, wasted) in repeats.items():
-        calls, cum = cumulative.get(site, (0, 0.0))
-        if calls:
-            out.append(CostedRepeat(name, min(wasted, calls), calls, cum))
+    seconds: dict[str, float] = {}
+    rows = audit_repeated_calls(lambda: run(old, new), repeat_seconds=seconds)
+    by_site: dict[str, tuple[str, int, int]] = {}
+    for row in rows:
+        name, repeats, calls = by_site.get(row.function, (row.function, 0, 0))
+        by_site[row.function] = (name, repeats + row.wasted, calls + row.calls)
+    out = [
+        CostedRepeat(name, repeats, calls, seconds.get(site, 0.0))
+        for site, (name, repeats, calls) in by_site.items()
+    ]
     return sorted(out, key=lambda r: -r.wasted_seconds)
 
 

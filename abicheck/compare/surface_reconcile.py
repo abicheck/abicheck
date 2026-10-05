@@ -55,6 +55,7 @@ from ..model import AbiSnapshot
 from ..model.comparison_memo import comparison_memo_scope
 from ..model.execution_cache import MISSING, request_key
 from ..model.execution_cache_scoped import InstanceMemo
+from .detection_memo import memoized
 from .export_transition import surface_exit_is_evidence_gap
 
 if TYPE_CHECKING:
@@ -344,12 +345,24 @@ def _alias_resolver(
         return None
     index: list[dict[str, list[_Decl]]] = []
 
+    def _build() -> dict[str, list[_Decl]]:
+        by_alias: dict[str, list[_Decl]] = {}
+        for candidate in decls:
+            by_alias.setdefault(alias_key(candidate), []).append(candidate)
+        return by_alias
+
     def _resolve(key: str, decl: _Decl) -> _Decl | None:
         if not index:
-            by_alias: dict[str, list[_Decl]] = {}
-            for candidate in decls:
-                by_alias.setdefault(alias_key(candidate), []).append(candidate)
-            index.append(by_alias)
+            # Shared across every reconciliation slot of one detector pass:
+            # each slot (public lists, maps, ABI-visible, CPO, variables)
+            # joins against the same FULL declaration list with the same
+            # alias rule, and rebuilding the index per slot re-derived every
+            # declaration's qualified name once per slot (~13 calls per
+            # declaration on ``add_remove``). Outside a pass this calls
+            # straight through, exactly as before.
+            index.append(
+                memoized("surface_reconcile.alias_index", decls, alias_key, _build)
+            )
         matches = index[0].get(alias_key(decl), ())
         return matches[0] if len(matches) == 1 else None
 
