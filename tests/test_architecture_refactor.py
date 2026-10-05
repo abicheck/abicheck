@@ -1081,6 +1081,7 @@ class TestPostProcessingPipeline:
             "apply_suppression",
             "suppress_renamed_pairs",
             "clear_orphaned_vtable_gap_correlation",
+            "disambiguate_type_symbols",
             "filter_redundant",
             "enrich_affected_symbols",
             "attribute_stdlib_embedding",

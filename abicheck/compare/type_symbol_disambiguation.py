@@ -56,6 +56,13 @@ from ..model.identity import (
     Namespace,
     Record,
 )
+from ..model.qualified_name_split import split_top_level_scopes
+from ..model.synthetic_key import (
+    SYNTHETIC_CTOR_KEY_PREFIX,
+    is_synthetic_ctor_key,
+    is_synthetic_dtor_key,
+)
+from ..model.type_identifiers import IDENT_RE
 
 __all__ = [
     "AmbiguousTypeNames",
@@ -176,12 +183,10 @@ def disambiguate_type_symbols(
             continue
         bare = eid.leaf_name
         symbol = c.symbol  # type: ignore[attr-defined]
-        if symbol == bare:
-            new_symbol = qualified
-        elif symbol.startswith(bare + "::"):
-            new_symbol = qualified + symbol[len(bare) :]
-        else:
+        parts = split_top_level_scopes(symbol)
+        if not parts or parts[0] != bare:
             continue
+        new_symbol = "::".join([qualified, *parts[1:]])
         c.symbol = new_symbol  # type: ignore[attr-defined]
         if getattr(c, "qualified_name", None) is None:
             c.qualified_name = qualified  # type: ignore[attr-defined]
@@ -218,9 +223,6 @@ def resolve_in_scope(
     return None
 
 
-_NAME_TOKEN = re.compile(r"(?<![\w:])(?:::)?[A-Za-z_]\w*(?:::[A-Za-z_]\w*)*")
-
-
 def scoped_type_mentions(
     spelling: str, scope: Iterable[str], names: AmbiguousTypeNames
 ) -> set[str]:
@@ -230,35 +232,14 @@ def scoped_type_mentions(
         return set()
     segments = tuple(scope)
     out: set[str] = set()
-    for match in _NAME_TOKEN.finditer(spelling):
-        token = match.group(0).lstrip(":")
+    for token in IDENT_RE.findall(spelling):
+        token = token.rstrip(":")
         if token.rsplit("::", 1)[-1] not in names.spellings:
             continue
         resolved = resolve_in_scope(token, segments, names)
         if resolved is not None:
             out.add(resolved)
     return out
-
-
-def _split_top_level(text: str, sep: str = "::") -> list[str]:
-    parts: list[str] = []
-    depth = 0
-    start = 0
-    i = 0
-    while i < len(text):
-        ch = text[i]
-        if ch in "<(":
-            depth += 1
-        elif ch in ">)":
-            depth -= 1
-        elif depth == 0 and text.startswith(sep, i):
-            parts.append(text[start:i])
-            i += len(sep)
-            start = i
-            continue
-        i += 1
-    parts.append(text[start:])
-    return parts
 
 
 def _head(qualified: str) -> str:
@@ -273,9 +254,6 @@ def _head(qualified: str) -> str:
     return qualified
 
 
-_SYNTHETIC_PREFIXES = ("__abicheck_ctor__", "~")
-
-
 def function_scope(name: str, mangled: str) -> tuple[str, ...]:
     """The scope a function's signature spellings are looked up from: its
     qualified name minus the leaf (``lib::m0::Svc::run`` -> ``lib``, ``m0``,
@@ -284,11 +262,16 @@ def function_scope(name: str, mangled: str) -> tuple[str, ...]:
     Empty when nothing names a scope (a C function)."""
     from .template_surface import qualified_declaration_name
 
-    for prefix in _SYNTHETIC_PREFIXES:
-        if mangled.startswith(prefix):
-            return tuple(_split_top_level(_head(mangled[len(prefix) :]).strip()))
+    if is_synthetic_ctor_key(mangled):
+        return tuple(
+            split_top_level_scopes(
+                _head(mangled[len(SYNTHETIC_CTOR_KEY_PREFIX) :]).strip()
+            )
+        )
+    if is_synthetic_dtor_key(mangled):
+        return tuple(split_top_level_scopes(_head(mangled[1:]).strip()))
     text = qualified_declaration_name(name, mangled) if mangled else name
-    return tuple(_split_top_level(_head(text).strip())[:-1])
+    return tuple(split_top_level_scopes(_head(text).strip())[:-1])
 
 
 def record_scope(decl: object) -> tuple[str, ...]:
@@ -299,7 +282,7 @@ def record_scope(decl: object) -> tuple[str, ...]:
         or getattr(decl, "qualified_name", None)
         or getattr(decl, "name", "")
     )
-    return tuple(_split_top_level(qualified or ""))
+    return tuple(split_top_level_scopes(qualified or ""))
 
 
 def attribute_scoped_types(

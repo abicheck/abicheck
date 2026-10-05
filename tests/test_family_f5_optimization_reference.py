@@ -153,6 +153,7 @@ COVERAGE: dict[str, str] = {
     "abicheck.comparability_fields::scoped_cache::_PATH_MEMO": H,
     "abicheck.compare.detection_memo::scoped_cache::_MEMO": R,
     "abicheck.model.comparison_memo::scoped_cache::_MEMO": R,
+    "abicheck.surface_graph::scoped_cache::_GRAPHS": "UNCOVERED: shared only under --pattern-verdicts plus --surface-metrics; tests/test_surface_graph_sharing.py states its contract",
     "abicheck.storage.snapshot_digest_cache::scoped_cache::_SCOPE": D,
     "abicheck.model.graph_identity::shared_scoped_cache::_NORMALIZE_MEMO": "UNCOVERED: opened only while loading a stored L5 source graph; no cell carries one",
     "abicheck.compare.surface_reconcile::instance_memo::PAIR_MEMO": R,

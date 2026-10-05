@@ -46,6 +46,7 @@ from .model import AbiSnapshot, Function
 from .model.change_catalog.kinds import ChangeKind
 from .model.identity import EntityId
 from .model.name_heuristics import NameHeuristicEffect, register_name_heuristic
+from .model.qualified_name_split import split_top_level_scopes
 from .model.surface_facts import is_abi_visible
 
 # Back-compat aliases: the ADR-063 Phase 2/10 migrations moved the
@@ -864,8 +865,10 @@ def _root_type_name(c: Change) -> str:
     ``ns::Type`` would otherwise yield the namespace ``ns``.
     """
     qualified = c.qualified_name
-    if qualified and (c.symbol == qualified or c.symbol.startswith(qualified + "::")):
-        return qualified
+    if qualified:
+        q_parts = split_top_level_scopes(qualified)
+        if split_top_level_scopes(c.symbol)[: len(q_parts)] == q_parts:
+            return qualified
     if "::" in c.symbol and c.kind in _FIELD_LEVEL_KINDS:
         return c.symbol.rsplit("::", 1)[0]
     return c.symbol
@@ -1174,7 +1177,7 @@ ROOT_TYPE_REFERENCE = register_name_heuristic(
         "is folded into that root change"
     ),
     matcher=_match_root_type,
-    helpers=(_compile_root_patterns,),
+    helpers=(_compile_root_patterns, _root_pattern),
 )
 OPAQUE_HANDLE_USAGE = register_name_heuristic(
     "opaque_handle_usage",
