@@ -190,7 +190,7 @@ def compare_snapshots(
     public_surface_allowlist: set[str] | None = None,
     env_matrix: EnvironmentMatrix | None = None,
     diagnostic_comparison: bool = False,
-    contract_evaluation: bool = False,
+    contract_evaluation: bool = True,
     contract_mode: str | None = None,
     acknowledgments: AcknowledgmentList | None = None,
     acknowledgment_policy: AcknowledgmentPolicy | None = None,
@@ -295,3 +295,27 @@ __all__ = [
     "dedup_policy_override_warnings",
     "load_suppression_and_policy",
 ]
+
+
+def stated_contract_mode(
+    evaluation_config: Any, contract_mode: str | None, *, contract_evaluation: bool
+) -> Any:
+    """The ``contract_mode`` a front end forwards to :func:`compare_snapshots`.
+
+    The resolved configuration's ``contract.mode`` when some layer stated it
+    (a CLI flag, ``.abicheck.yml``, a pack) and contract evaluation is on;
+    otherwise *contract_mode* as given. A mode only the built-in default
+    chose is not forwarded: since ADR-049 Phase 7 that default is decided
+    from the comparison's own evidence
+    (:func:`~abicheck.policy.contract_default_mode.evidence_adaptive_contract_mode`),
+    which no front end has when it resolves its configuration.
+    """
+    from ..policy.contract_default_mode import mode_is_built_in_default
+
+    if (
+        evaluation_config is None
+        or not contract_evaluation
+        or mode_is_built_in_default(evaluation_config)
+    ):
+        return contract_mode
+    return evaluation_config.contract.mode

@@ -212,6 +212,11 @@ def _failure_reason(record: EvidenceSearchRecord) -> str | None:
     return None
 
 
+def record_closes_domain(record: EvidenceSearchRecord) -> bool:
+    """Whether *record* closes its evidence domain (no coverage failure)."""
+    return _failure_reason(record) is None
+
+
 def coverage_failures(
     evidence: ContractEvidenceBlock | None,
     mode: ContractMode | str,

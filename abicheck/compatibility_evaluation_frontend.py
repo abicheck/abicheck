@@ -1821,7 +1821,10 @@ def compare_request_inputs(
         suppression = SuppressionSource.from_file(request.suppress)
     return ExplicitCompatibilityInputs(
         contract_mode=request.contract_mode,
-        scope_public_headers=request.scope_public,
+        # `scope_public=True` is the field's own default and, since ADR-049
+        # Phase 7, states no domain: the evidence-adaptive built-in default
+        # decides. Only `False` (the legacy alias for `all`) is a statement.
+        scope_public_headers=None if request.scope_public else False,
         policy_base=stated_policy_base(request.policy, policy_file),
         policy_file=policy_file,
         public_symbols=tuple(sorted(request.force_public_symbols or ())),

@@ -807,7 +807,7 @@ def _release_summary_effective_config_block(
     from .contract_context import suppression_config_for
     from .effective_config_digest import (
         effective_config_digest,
-        effective_config_fields,
+        release_summary_fields,
     )
     from .frontends.cli.options.params import _load_suppression_and_policy
     from .workflows.gate import EffectiveGate
@@ -859,7 +859,8 @@ def _release_summary_effective_config_block(
         on_incomplete_scope=on_incomplete_scope or None,
         fail_on_removed_library=fail_on_removed_library,
     )
-    ec_fields = effective_config_fields(ec_result, gate=gate)
+    resolved = getattr(pack_application, "resolved_config", None)
+    ec_fields = release_summary_fields(resolved, ec_result, policy_file=pf, gate=gate)
     return effective_config_digest(ec_fields), ec_fields
 
 

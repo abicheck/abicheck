@@ -343,7 +343,7 @@ class TestReevaluateFromEvidence:
         result = compare(
             old,
             new,
-            contract_evaluation=True,
+            contract_mode="public",
             force_public_symbols={"hidden"},
         )
         assert result.contract_context is not None

@@ -555,21 +555,21 @@ class TestCompareKeepsWhatItDoesNotScore:
         assert row["compatibility_evaluation_status"] == "NOT_EVALUATED"
         assert row["compatibility_decision"] is None
 
-    def test_an_ordinary_scan_row_states_no_decision_pair(self, tmp_path: Path) -> None:
-        """The control: absent, not null. A run that never opted in has no
-        contract decision at all, so the whole group stays off the row."""
+    def test_an_ordinary_scan_row_states_its_decision_pair(
+        self, tmp_path: Path
+    ) -> None:
+        """The control: the evidence-adaptive default (`all` here) scores it."""
         report = self._scan(tmp_path)
         row = report["changes"][0]
-        assert "compatibility_evaluation_status" not in row
-        assert "compatibility_decision" not in row
+        assert row["compatibility_evaluation_status"] == "EVALUATED"
+        assert row["compatibility_decision"] is not None
 
     def test_an_ordinary_scan_is_unchanged(self, tmp_path: Path) -> None:
-        """No opt-in means no excluded findings in the summary."""
+        """No stated domain means nothing excluded from the summary."""
         report = self._scan(tmp_path)
         assert report["summary"]["breaking"] == 1
-        assert all(
-            "compatibility_evaluation_status" not in f for f in report["changes"]
-        )
+        statuses = {f["compatibility_evaluation_status"] for f in report["changes"]}
+        assert statuses == {"EVALUATED"}
 
 
 class TestReleaseFanoutKeepsWhatItDoesNotScore:

@@ -187,23 +187,21 @@ class CompareRequest:
     # caller can still see a result but knows not to trust it. Forwarded
     # to ``checker.compare``'s own ``diagnostic_comparison`` parameter.
     diagnostic_comparison: bool = False
-    # ADR-049 Phase 3: stamp each finding's shadow, non-authoritative
-    # contract-relevance decision (``Change.contract_relevance``/
-    # ``contract_reason_code``/``contract_assurance``). Opt-in; changes no
-    # verdict, severity, or exit code. Forwarded to ``checker.compare``'s
-    # own ``contract_evaluation`` parameter -- previously reachable only by
-    # calling the Tier-1 core directly, which no front-end may do
-    # (``cli-contract`` AI-readiness gate, ADR-037 D10.1), so this field is
-    # what makes the shadow evaluator reachable through the real Tier-2
-    # chokepoint at all (Codex review, fresh evidence).
-    contract_evaluation: bool = False
+    # ADR-049: classify each finding's contract relevance before
+    # compatibility policy, which then scores only IN_CONTRACT/NOT_APPLICABLE
+    # findings. On by default since Phase 7, matching the CLI: an
+    # unstated `contract_mode` resolves to `public` with public-header
+    # evidence on every side and `exports` otherwise
+    # (`compatibility_evaluation_wiring.evidence_adaptive_contract_mode`).
+    # `False` restores the pre-Phase-7 behavior for an API caller that needs
+    # it; `contract_mode="all"` is the CLI's own rollback.
+    contract_evaluation: bool = True
     # ADR-049 Phase 6: which evidence domain `contract_evaluation` judges
     # against -- "public" (header-derived declared surface), "exports" (the
     # binary's own export table plus the raw type closure from it), or "all"
-    # (no root/closure evidence required). `None` keeps the legacy derivation
-    # from `scope_public`; an explicit value outranks it per ADR-049 D7
-    # (`explicit_cli` > `legacy_alias`). Selects the domain only -- like
-    # `contract_evaluation` itself, non-authoritative for verdict/exit code.
+    # (no root/closure evidence required). `None` lets `scope_public`
+    # (`False` -> `all`) and then the evidence-adaptive built-in default
+    # decide; an explicit value outranks both per ADR-049 D7.
     contract_mode: str | None = None
     # ADR-055 D1: the friendly evidence-depth dial (`--depth`, same vocabulary
     # as `dump`/`scan`: binary/headers/build/source). `None` (the default)

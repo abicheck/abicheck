@@ -69,9 +69,13 @@ own wiring rather than a second copy of D7's precedence.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from .contract_relevance_types import ContractMode, evaluation_status_for
+from .contract_relevance_types import (
+    ContractMode,
+    ContractRelevance,
+    evaluation_status_for,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
@@ -174,6 +178,7 @@ class ContractEvaluationStage:
             directly_referenced_stdlib_old=self.directly_referenced_stdlib_old,
             directly_referenced_stdlib_new=self.directly_referenced_stdlib_new,
         )
+        decisions = self._observed_export_fallback(fresh, decisions)
         for change, decision in zip(fresh, decisions, strict=True):
             change.contract_relevance = decision.relevance
             change.contract_reason_code = decision.reason_code
@@ -195,6 +200,43 @@ class ContractEvaluationStage:
             )
             self._classified.add(id(change))
             self.changes.append(change)
+
+    def _observed_export_fallback(
+        self, changes: list[Change], decisions: list[Any]
+    ) -> list[Any]:
+        """Re-judge, under ``exports``, each finding an evidence-adaptive
+        ``public`` default left uncommitted (see
+        :func:`~abicheck.policy.contract_default_mode.observed_export_fallback_applies`).
+        Only an ``IN_CONTRACT`` export decision replaces the header one."""
+        from .contract_evaluation import evaluate_snapshot_pair_contract_relevance
+        from .policy.contract_default_mode import observed_export_fallback_applies
+
+        idx = [
+            i
+            for i, d in enumerate(decisions)
+            if observed_export_fallback_applies(
+                self.mode, self.mode_provenance, d.reason_code
+            )
+        ]
+        if (
+            not idx
+            or not self.exports_old.resolvable
+            or not self.exports_new.resolvable
+        ):
+            return decisions
+        redone = evaluate_snapshot_pair_contract_relevance(
+            [changes[i] for i in idx],
+            self.surf_old,
+            self.surf_new,
+            mode=ContractMode.EXPORTS,
+            exports_old=self.exports_old,
+            exports_new=self.exports_new,
+        )
+        out = list(decisions)
+        for i, d in zip(idx, redone, strict=True):
+            if d.relevance is ContractRelevance.IN_CONTRACT:
+                out[i] = d
+        return out
 
     def record_compatibility_decisions(
         self,
@@ -294,6 +336,19 @@ class ContractEvaluationStage:
         )
 
 
+def _provider_closes(
+    evidence: ContractEvidenceBlock, provider: str, old: AbiSnapshot | None
+) -> bool:
+    """Whether *provider*'s records close their domain on every compared side."""
+    from .policy.coverage_ledger import record_closes_domain
+
+    sides = {"new"} if old is None else {"old", "new"}
+    records = [e.record for e in evidence.providers if e.record.provider == provider]
+    return {r.side for r in records} >= sides and all(
+        record_closes_domain(r) for r in records if r.side in sides
+    )
+
+
 def build_contract_stage(
     old: AbiSnapshot | None,
     new: AbiSnapshot,
@@ -333,9 +388,14 @@ def build_contract_stage(
     subject is the old declaration.
     """
     from .compatibility_evaluation_wiring import resolve_legacy_contract_mode
-    from .contract_evidence_collect import collect_contract_evidence
+    from .contract_evidence_collect import (
+        PROVIDER_EXPORT_TABLE,
+        PROVIDER_PUBLIC_HEADER,
+        collect_contract_evidence,
+    )
     from .contract_relevance_types import coerce_contract_mode
     from .export_surface import ExportSurface
+    from .policy.contract_default_mode import evidence_adaptive_contract_mode
     from .policy.public_surface_query import PublicSurfaceQuery
     from .surface import PublicSurface
     from .type_reachability import directly_referenced_stdlib_type_spellings
@@ -365,6 +425,8 @@ def build_contract_stage(
     mode_provenance = None
     if contract_mode is not None:
         mode = coerce_contract_mode(contract_mode)
+    elif scope_to_public_surface:
+        mode = None  # decided below, once the export surfaces are known
     else:
         # `scope_public_headers_is_explicit=True` is unconditional on
         # purpose (CodeRabbit review): this core verb receives only the
@@ -486,6 +548,20 @@ def build_contract_stage(
         public_surface_allowlist=pp_ctx.public_surface_allowlist,
         force_public_symbols=force_public_symbols,
     )
+
+    if mode is None:
+        # Nothing stated a domain and the legacy scope alias sits at its own
+        # default: the built-in default is the narrowest domain this run's
+        # evidence closes on every side it compared, judged by the same rule
+        # the coverage exit applies (ADR-049 Phase 7; see
+        # `evidence_adaptive_contract_mode`). A declared-absent baseline
+        # files no record, so only the candidate is consulted.
+        mode, mode_provenance = evidence_adaptive_contract_mode(
+            public_header_evidence=_provider_closes(
+                evidence, PROVIDER_PUBLIC_HEADER, old
+            ),
+            export_evidence=_provider_closes(evidence, PROVIDER_EXPORT_TABLE, old),
+        )
 
     # Workstream E slice S3 -- multi-source contract conflicts, collected
     # from the same evidence this function just resolved so a conflict can

@@ -605,11 +605,14 @@ Core pipeline (in order of data flow):
      resolved that early
    - `contract_evaluation.py` — ADR-049's contract-relevance evaluator: one
      `ContractEvaluationDecision` (relevance + stable reason code +
-     assurance) per already-emitted finding. Computed only when `compare`
-     is given `--contract`, which both activates the evaluation and selects
-     the evidence domain it judges against: `public|exports|all` name one
-     (ADR-049 Phase 6), while `auto` activates without naming one and lets
-     D7's lower tiers decide. Under `auto` the domain follows the legacy
+     assurance) per already-emitted finding. Computed on every comparison
+     since ADR-049 Phase 7's default flip; `--contract public|exports|all`
+     names the domain (Phase 6), while `auto` or no flag lets D7's lower
+     tiers decide and, when none states one, the evidence-adaptive default
+     (`policy/contract_default_mode.py`) picks `public` if header evidence
+     closes on every side, else `exports`, else `all` -- an unstated
+     `public` also consults observed exports for a finding the headers make
+     no commitment about, so an undeclared export's removal still gates. Under `auto` the domain follows the legacy
      alias, `.abicheck.yml`'s `scope.public` (the CLI flag pair was deleted in
      one-comparison-product Phase 9b), and an
      explicit value outranks that legacy alias via `compatibility_evaluation_wiring.resolve_legacy_contract_mode`
@@ -648,8 +651,8 @@ Core pipeline (in order of data flow):
      exit code itself; `contract_gating.py` is the leaf predicate
      `checker._compute_verdict_for` and `severity.compute_exit_code`/
      `compute_gate_decision` share so the verdict and the gate cannot exclude
-     different sets. An **unstamped** finding is evaluated, which is what
-     keeps every run without `--contract` bit-for-bit unchanged
+     different sets. An **unstamped** finding is evaluated (a direct
+     `checker.compare(..., contract_evaluation=False)` call stamps none)
    - `contract_evidence_collect.py` — ADR-049 Phase 3's *observed provider
      ledger* (plan §4.1) and the raw type graph Phase 4 persists. Produces
      one `EvidenceSearchRecord` per (provider, side) — `public_header`,
@@ -695,10 +698,9 @@ Core pipeline (in order of data flow):
      listed and unsuppressible, because accepting incomplete assurance is
      not hiding it. `reporter.py` emits *this* function's answer as
      `contract_coverage_exit_contribution`, so the number a user reads is
-     the one that gated them. `0` whenever no contract context exists: a run
-     without `--contract` has no selected domain to be short of
-     evidence for, which is what keeps every pre-existing invocation's exit
-     code unchanged
+     the one that gated them. `0` whenever no contract context exists (evaluation
+     explicitly disabled); since Phase 7 every CLI run has one, and the
+     evidence-adaptive default picks a domain its evidence closes
    - `contract_context.py` / `contract_context_io.py` / `contract_replay.py`
      — ADR-049 Phase 4's assembly, JSON round-trip, and the two procedures
      D6 names. `checker.compare(..., contract_evaluation=True)` returns a
@@ -1630,8 +1632,8 @@ Once a root command genuinely clears the bar above, pick the right home:
   **1**, folded with `max` (`contract_coverage_exit.py`). It raises a clean
   `0` to `1` and never lowers a `2`/`4`, and it never rewrites a finding's
   compatibility decision or gate contribution. Without
-  `--contract` the contribution is always `0`, so every
-  pre-existing invocation is unchanged. Every consumer that publishes an
+  `--contract` the evidence-adaptive default domain is one the run's own
+  evidence closes, so the contribution is normally `0`. Every consumer that publishes an
   exit status folds it and explains it — the two CLIs and the composite
   Action (`verdict: COVERAGE_INCOMPLETE`). A directory/package
   `compare` (the per-library release fan-out) applies the same flag to

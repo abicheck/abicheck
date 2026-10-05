@@ -1,8 +1,12 @@
 # ADR-049: Contract Relevance and Compatibility Configuration
 
 **Date:** 2026-07-21
-**Status:** Accepted (2026-07-26) — Phases 0–6 implemented, Phase 7
-partially. Phase 0's vocabulary (`abicheck/contract_relevance_types.py`)
+**Status:** Accepted (2026-07-26) — Phases 0–7 implemented. Phase 7's
+default flip landed 2026-10-05: contract evaluation runs on every
+comparison; with no `--contract` (or `auto`, with no `scope.public` legacy
+alias) the domain is evidence-adaptive — `public` when header evidence
+closes on every compared side, else `exports` when the export table does,
+else `all` (`abicheck/policy/contract_default_mode.py`). Phase 0's vocabulary (`abicheck/contract_relevance_types.py`)
 and Phase 1's typed config, precedence resolver, pack manifests, and
 per-field front-end wiring (`abicheck/compatibility_evaluation_config.py`,
 `abicheck/compatibility_evaluation_resolver.py`,

@@ -363,6 +363,9 @@ def with_resolved_config(
     )
 
     observed = context.evaluation_context.resolved_config
+    from .policy.contract_default_mode import adopt_evidence_adaptive_mode
+
+    config = adopt_evidence_adaptive_mode(config, observed)
     if observed.contract.overlays:
         provenance = dict(config.provenance)
         # A `kind: contract` pack can assign `contract.overlays` too

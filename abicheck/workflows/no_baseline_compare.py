@@ -410,7 +410,7 @@ def run_no_baseline_compare(
     force_public_symbols: set[str] | None = None,
     pattern_verdicts: bool = True,
     collapse_versioned_symbols: bool = False,
-    contract_evaluation: bool = False,
+    contract_evaluation: bool = True,
     contract_mode: str | None = None,
     depth: str | None = None,
     candidate_is_live: bool = True,
@@ -567,7 +567,7 @@ class NoBaselineAuditInputs:
     #: two-sided ``compare`` applies (``resolve_force_public_scope``).
     force_public_symbols: frozenset[str] = frozenset()
     collapse_versioned_symbols: bool = False
-    contract_evaluation: bool = False
+    contract_evaluation: bool = True
     contract_mode: str | None = None
     env_matrix: EnvironmentMatrix | None = None
 

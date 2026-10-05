@@ -186,8 +186,12 @@ def test_a_hand_built_pair_without_context_gets_none(tmp_path):
     )
     result = classify_compare_pair(request, pair)
     assert result.resolved_execution_context is None
-    # A plain request stays on the baseline digest tier (F2 route parity).
-    assert result.diff.evaluation_config is None
+    # Contract evaluation is on by default (ADR-049 Phase 7), so a plain
+    # request reaches the contract digest tier like the CLI does (F2 route
+    # parity), with the domain the evidence-adaptive default chose.
+    assert result.diff.evaluation_config is not None
+    ctx = result.diff.contract_context
+    assert ctx.evaluation_context.resolved_config.contract.mode.value == "all"
 
 
 def test_returned_context_reports_the_depth_classification_used(tmp_path):

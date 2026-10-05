@@ -523,7 +523,7 @@ def _announce_exit_scheme(
     else:
         click.echo(
             "Exit-code scheme: legacy verdict (0=compatible, 2=API break, 4=ABI break; "
-            "with --contract, 1=incomplete contract coverage; with "
+            "1=the contract domain could not be closed on the evidence; with "
             ".abicheck.yml's assurance.require_complete: true, 1=incomplete analysis "
             "assurance -- both orthogonal axes that never lower a 2/4). "
             "Set a severity setting (--severity-preset, a --pack, or "
