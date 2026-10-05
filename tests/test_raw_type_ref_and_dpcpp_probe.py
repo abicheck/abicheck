@@ -16,6 +16,7 @@ import uuid
 from types import SimpleNamespace
 
 import pytest
+from _strict_process import StrictProcessRunner, proc
 
 from abicheck import dumper_clang
 from abicheck.buildsource import dpcpp_jobs as dumper_dpcpp_jobs
@@ -261,62 +262,66 @@ def test_no_replay_for_a_request_that_is_not_host_only(tmp_path):
     )
 
 
-def test_ast_run_executes_device_then_host_and_returns_the_host_result(
-    probe, monkeypatch
-):
+def _is_device_job(argv: tuple[str, ...]) -> bool:
+    return "-fsycl-is-device" in argv and "-ast-dump=json" not in argv
+
+
+def _is_host_job(argv: tuple[str, ...]) -> bool:
+    return "-fsycl-is-host" in argv and "-ast-dump=json" in argv
+
+
+def _ast_run_script(monkeypatch, device_result, host_result=None):
+    """Script every process call of a DPC++ AST run, in order: the driver
+    plan (``-###``), the device job, then (when given) the host job."""
     import abicheck.deadline as deadline
+
+    monkeypatch.setattr(
+        dumper_dpcpp_jobs, "executable_revision", lambda b: f"id-{uuid.uuid4()}"
+    )
+    runner = StrictProcessRunner().expect(
+        argv=["icpx", "-fsycl", "-fsycl-host-only", "a.hpp", "-###"],
+        returns=proc(stderr=_DEVICE_JOB + "\n" + _HOST_JOB),
+        label="driver plan",
+    )
+    runner.expect(
+        argv_matches=_is_device_job, returns=device_result, label="device job"
+    )
+    if host_result is not None:
+        runner.expect(argv_matches=_is_host_job, returns=host_result, label="host job")
+    return runner.install(monkeypatch, deadline, "run_bounded")
+
+
+def _run_ast(monkeypatch):
     from abicheck.dumper_clang_errors import run_clang_to_ast_file
 
-    install, _ = probe
-    install(stderr=_DEVICE_JOB + "\n" + _HOST_JOB)
-    planner = deadline.run_bounded
-    ran: list[str] = []
-
-    def run(cmd, **kw):
-        if cmd[-1] == "-###":
-            return planner(cmd, **kw)
-        ran.append("device" if "-fsycl-is-device" in cmd else "host")
-        return subprocess.CompletedProcess(cmd, 0, None, "")
-
-    monkeypatch.setattr(deadline, "run_bounded", run)
     created: list[object] = []
-    result = run_clang_to_ast_file(
-        ["icpx", "-fsycl", "-fsycl-host-only", "a.hpp"],
-        timeout=5,
-        on_created=created.append,
+    try:
+        return run_clang_to_ast_file(
+            ["icpx", "-fsycl", "-fsycl-host-only", "a.hpp"],
+            timeout=5,
+            on_created=created.append,
+        )
+    finally:
+        for p in created:
+            p.unlink()
+
+
+def test_ast_run_executes_device_then_host_and_returns_the_host_result(monkeypatch):
+    runner = _ast_run_script(
+        monkeypatch, device_result=proc(), host_result=proc(stderr="")
     )
-    assert ran == ["device", "host"]
-    assert "-fsycl-is-host" in result.args
-    for p in created:
-        p.unlink()
+    _run_ast(monkeypatch)
+    runner.assert_exhausted()
+    assert "-fsycl-is-host" in runner.calls[-1].argv
 
 
-def test_a_failed_device_pass_is_reported_without_running_the_host(probe, monkeypatch):
-    import abicheck.deadline as deadline
-    from abicheck.dumper_clang_errors import run_clang_to_ast_file
-
-    install, _ = probe
-    install(stderr=_DEVICE_JOB + "\n" + _HOST_JOB)
-    planner = deadline.run_bounded
-    ran: list[str] = []
-
-    def run(cmd, **kw):
-        if cmd[-1] == "-###":
-            return planner(cmd, **kw)
-        ran.append("device" if "-fsycl-is-device" in cmd else "host")
-        return subprocess.CompletedProcess(cmd, 1, None, "device error")
-
-    monkeypatch.setattr(deadline, "run_bounded", run)
-    created: list[object] = []
-    result = run_clang_to_ast_file(
-        ["icpx", "-fsycl", "-fsycl-host-only", "a.hpp"],
-        timeout=5,
-        on_created=created.append,
+def test_a_failed_device_pass_is_reported_without_running_the_host(monkeypatch):
+    runner = _ast_run_script(
+        monkeypatch, device_result=proc(returncode=1, stderr="device error")
     )
-    assert ran == ["device"]
+    result = _run_ast(monkeypatch)
+    runner.assert_exhausted()
     assert (result.returncode, result.stderr) == (1, "device error")
-    for p in created:
-        p.unlink()
 
 
 def test_a_two_pass_driver_routes_the_host_request_to_the_selector(monkeypatch):
