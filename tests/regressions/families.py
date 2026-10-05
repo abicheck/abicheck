@@ -266,6 +266,9 @@ _F8 = (
     "scoping.system_header_layout_unrecognized",
 )
 _F7 = (
+    # Masked by suite-wide shared interpreter state: passed in a full run,
+    # failed alone (test isolation), hence F7 rather than OTHER.
+    "imports.first_import_order_cycle",
     "guard.differential_test_shares_state_with_itself",
     "invariant.blanket_assertion_over_widened_population",
     "test_double.narrower_than_the_real_signature",
