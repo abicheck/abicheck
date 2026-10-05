@@ -393,10 +393,23 @@ class SemanticIR:
         )
 
     def unattached(self) -> SemanticIR:
-        """This IR's canonical occurrences with no declaration store."""
+        """This IR's canonical occurrences with no declaration store.
+
+        The same object on every call for one IR: ``AbiSnapshot.canonical_ir``
+        reads through here, and the per-comparison memos (the function
+        signature index, ``SemanticIRIndex``) key on the IR's identity --
+        a fresh view per access made every one of them miss (``_project``
+        ran 24 times and ``canonical_entities`` 57 times on one compare).
+        Sound because both fields the view carries are immutable: a
+        ``FrozenMapping`` and a ``bool`` on a frozen dataclass.
+        """
         if self.declarations is None:
             return self
-        return SemanticIR(occurrences=self.occurrences, canonical=self.canonical)
+        view = self.__dict__.get("_unattached_view")
+        if view is None:
+            view = SemanticIR(occurrences=self.occurrences, canonical=self.canonical)
+            object.__setattr__(self, "_unattached_view", view)
+        return view
 
     def with_canonical(self, canonical_ir: SemanticIR | None) -> SemanticIR:
         """This IR's declarations under *canonical_ir*'s occurrences, or
@@ -433,13 +446,22 @@ class SemanticIR:
         them through this method would collapse an ODR-duplicate pair to
         one entry and lose the evidence ``occurrences`` exists to keep.
         """
-        best: dict[EntityId, tuple[int, str, CanonicalEntity]] = {}
-        for occ_id, entity in self.occurrences.items():
-            rank = (-entity.resolved_fact_count(), canonical_key(occ_id))
-            current = best.get(occ_id.entity_id)
-            if current is None or rank < (current[0], current[1]):
-                best[occ_id.entity_id] = (rank[0], rank[1], entity)
-        return {entity_id: chosen for entity_id, (_, _, chosen) in best.items()}
+        reduced: dict[EntityId, CanonicalEntity] | None = self.__dict__.get(
+            "_canonical_entities"
+        )
+        if reduced is None:
+            best: dict[EntityId, tuple[int, str, CanonicalEntity]] = {}
+            for occ_id, entity in self.occurrences.items():
+                rank = (-entity.resolved_fact_count(), canonical_key(occ_id))
+                current = best.get(occ_id.entity_id)
+                if current is None or rank < (current[0], current[1]):
+                    best[occ_id.entity_id] = (rank[0], rank[1], entity)
+            reduced = {entity_id: chosen for entity_id, (_, _, chosen) in best.items()}
+            # Computed once per IR: it reads only `occurrences`, an immutable
+            # mapping of frozen entities, and one compare asked for it ~35
+            # times (every `SemanticIRIndex` over the same IR).
+            object.__setattr__(self, "_canonical_entities", reduced)
+        return dict(reduced)
 
 
 def semantic_ir_conflict_key(occurrence_id: OccurrenceId, fact_name: str) -> str:

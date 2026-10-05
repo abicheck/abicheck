@@ -29,3 +29,12 @@
   same-size (removed, added) pair: the L0 export probe's compare fell from
   9.0 s to 3.8 s on a 60-module C++ library (4.4 M predicate calls), same
   findings.
+- `compare` stops recomputing per-snapshot facts it already has: the
+  detection memo now spans the whole comparison (post-processing and
+  cross-source checks included), `AbiSnapshot.canonical_ir` returns one
+  stable view per IR (a fresh object per access made every identity-keyed
+  memo miss), `SemanticIR.canonical_entities` is reduced once per IR, the
+  special-member index is built once per snapshot rather than per lost
+  export, the opaque-type by-value scan visits each distinct signature
+  spelling once, and `strip_template_args` is memoized. The main compare of
+  a 60-module C++ library fell from 12.8 s to ~9.0 s, identical findings.
