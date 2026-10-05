@@ -51,6 +51,10 @@ def test_default_is_balanced_and_changes_nothing():
         False,
         False,
     )
+    # Two live binaries resolve in concurrent children; see the routing
+    # tests below for when that path is (not) taken.
+    assert t.concurrent_side_processes
+    assert not tuning_for(PerformanceProfile.LOW_MEMORY).concurrent_side_processes
 
 
 def test_low_memory_never_runs_two_extractions_at_once():
@@ -195,6 +199,69 @@ def test_typed_api_field_overrides_the_ambient_profile(pair, forks):
             CompareRequest(old=InputSpec(path=old), new=InputSpec(path=new))
         )
     assert forks == [1, 1]  # field unset: the ambient profile applied
+
+
+def _shared_lib(tmp_path, name, body):
+    import shutil
+    import subprocess
+
+    cc = shutil.which("gcc") or shutil.which("cc")
+    if cc is None:
+        pytest.skip("no C compiler")
+    src = tmp_path / f"{name}.c"
+    src.write_text(body, encoding="utf-8")
+    out = tmp_path / f"lib{name}.so"
+    subprocess.run(  # noqa: S603 -- fixed argv
+        [cc, "-shared", "-fPIC", "-o", str(out), str(src)], check=True
+    )
+    return out
+
+
+@pytest.fixture
+def binaries(tmp_path):
+    return (
+        _shared_lib(tmp_path, "old", "int f(void){return 1;} int g(void){return 2;}\n"),
+        _shared_lib(tmp_path, "new", "int f(void){return 1;}\n"),
+    )
+
+
+@linux_only
+def test_balanced_resolves_two_live_binaries_in_concurrent_children(
+    binaries, forks, monkeypatch
+):
+    import abicheck.service_compare_pipeline as scp
+    from abicheck.service import CompareRequest, InputSpec, run_compare_request
+
+    old, new = binaries
+    request = CompareRequest(old=InputSpec(path=old), new=InputSpec(path=new))
+    # The test runner may hold threads of its own; the routing decision is
+    # what is under test, so present the single-threaded caller it requires.
+    monkeypatch.setattr(scp.threading, "active_count", lambda: 1)
+    forked = run_compare_request(request)
+    assert forks == [2]  # both sides, started together
+
+    monkeypatch.setattr(scp.threading, "active_count", lambda: 2)
+    in_process = run_compare_request(request)
+    assert forks == [2]  # a multi-threaded caller never forks
+    assert forked.diff.verdict == in_process.diff.verdict
+    assert _kinds(forked.diff.changes) == _kinds(in_process.diff.changes)
+    assert any(sym == "g" for _kind, sym in _kinds(forked.diff.changes))
+
+
+@linux_only
+def test_parallel_extraction_off_keeps_two_binaries_in_process(
+    binaries, forks, monkeypatch
+):
+    import abicheck.service_compare_pipeline as scp
+    from abicheck.service import CompareRequest, InputSpec, run_compare_request
+
+    old, new = binaries
+    monkeypatch.setattr(scp.threading, "active_count", lambda: 1)
+    monkeypatch.setenv("ABICHECK_PARALLEL_EXTRACTION", "0")
+    run_compare_request(
+        CompareRequest(old=InputSpec(path=old), new=InputSpec(path=new))
+    )
+    assert forks == []
 
 
 def test_typed_api_rejects_an_unknown_profile(pair):

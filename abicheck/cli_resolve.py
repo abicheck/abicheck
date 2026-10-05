@@ -485,9 +485,16 @@ def _resolve_compare_snapshots(
     that function into its two phases removed the reason for the copy. What
     stays CLI-specific is exactly what is genuinely CLI-specific: the
     ``click.echo`` notifier, translating the framework-free errors into
-    ``click`` exceptions (the contract ``_resolve_input`` documented), and
-    ``allow_parallel=False`` to keep both sides resolving sequentially the way
-    this path always has.
+    ``click`` exceptions (the contract ``_resolve_input`` documented).
+
+    Both sides may resolve concurrently, as on every other front end: this
+    path resolved them one after the other until that was measured -- a
+    cold compare of two live 60-module C++ libraries took 64 s sequentially
+    and 41 s with the two sides in concurrent child processes (the
+    ``balanced`` profile's choice for two live binaries), at ~1.5x peak tree
+    memory. ``ABICHECK_PARALLEL_EXTRACTION=0`` and the ``low-memory``
+    profile still resolve one side at a time; the two sides' progress notes
+    may now interleave on stderr.
 
     ``config_public_header_dirs`` (ADR-068 plan §5 P4, ``workflows.
     public_header_boundary.project_config_public_header_dirs``): a
@@ -570,7 +577,7 @@ def _resolve_compare_snapshots(
 
     try:
         pair = service.resolve_compare_request(
-            request, notify=_click_notify, allow_parallel=False
+            request, notify=_click_notify, allow_parallel=True
         )
     except (ValidationError, PlanningError) as exc:  # PlanningError: ADR-063 Phase 4
         raise click.UsageError(str(exc)) from exc

@@ -136,6 +136,17 @@ large scan measured it as neutral. It stays opt-in (the default profile is
 `balanced`) until that trade-off is measured on more workloads. The profile
 resolves the sides one at a time, so at most one child is alive at a time.
 
+`balanced` uses the same fork mechanism for the opposite trade: two live
+binaries are resolved in two *concurrent* children, because extraction is
+mostly Python holding the GIL and two threads barely overlap. A cold compare
+of two 60-module C++ libraries (castxml) took 62-65 s with the sides
+resolved one after the other or in two threads, and 41-43 s with
+concurrent children, at 815 MB instead of ~550-600 MB peak tree RSS (clang:
+90 s -> 49 s). It is skipped when either side is a stored snapshot,
+directory or package, when the caller already runs other threads (forking a
+multi-threaded process can deadlock the child), and under
+`ABICHECK_PARALLEL_EXTRACTION=0`.
+
 The profile is the user-facing name for a set of execution knobs
 (`abicheck/model/performance.py`'s `ExecutionTuning`), not a switch for
 this mechanism alone: `low-memory` also compares a release's libraries one

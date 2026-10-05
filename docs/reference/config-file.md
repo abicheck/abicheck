@@ -705,10 +705,14 @@ performance:
   profile: low-memory
 ```
 
-- **`balanced`** — fastest. Both sides of a comparison may be resolved
-  concurrently in one process (the typed API does; the `compare` CLI
-  resolves sides one after the other), and a directory/package comparison
-  sizes its worker pool to the host.
+- **`balanced`** — fastest. Both sides of a comparison are resolved
+  concurrently: two live binaries in two concurrent child processes on
+  Linux (when the caller runs no other threads), anything else in two
+  threads of one process. A directory/package comparison sizes its worker
+  pool to the host. Measured on a cold compare of two 60-module C++
+  libraries: 64 s one side at a time, 42 s with concurrent children, at
+  about 1.5x the peak memory. `ABICHECK_PARALLEL_EXTRACTION=0` resolves the
+  sides one after the other instead.
 - **`low-memory`** — lowest peak memory. The two sides are resolved one at
   a time, each in its own short-lived process on Linux, so the memory a
   side's header parse used goes back to the system before the next side

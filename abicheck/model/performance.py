@@ -48,8 +48,12 @@ __all__ = [
 class PerformanceProfile(str, Enum):
     """What a run optimizes for."""
 
-    #: Today's behavior: both sides of a comparison may be resolved at once,
-    #: in this process. Fastest; peak memory holds both sides together.
+    #: Both sides of a comparison may be resolved at once -- two live binaries
+    #: in two concurrent child processes where ``fork`` is available, since
+    #: extraction is mostly Python holding the GIL and two threads did not
+    #: overlap (measured: a cold 60-module C++ compare 64 s in-process, 41 s
+    #: with concurrent children, at ~1.5x the peak tree memory). Fastest; peak
+    #: memory holds both sides together.
     BALANCED = "balanced"
     #: Lowest peak memory: one side at a time, each in its own short-lived
     #: process where the platform supports it, so the memory a side's
@@ -71,11 +75,18 @@ class ExecutionTuning:
     #: Compare a release's libraries one at a time instead of sizing a
     #: worker pool to the host (directory/package ``compare``).
     sequential_members: bool
+    #: When both sides may resolve concurrently and both are live binaries,
+    #: resolve them in concurrent child processes rather than two threads
+    #: of this one (where ``fork`` is available).
+    concurrent_side_processes: bool = False
 
 
 _TUNING: dict[PerformanceProfile, ExecutionTuning] = {
     PerformanceProfile.BALANCED: ExecutionTuning(
-        sequential_sides=False, isolate_sides=False, sequential_members=False
+        sequential_sides=False,
+        isolate_sides=False,
+        sequential_members=False,
+        concurrent_side_processes=True,
     ),
     PerformanceProfile.LOW_MEMORY: ExecutionTuning(
         sequential_sides=True, isolate_sides=True, sequential_members=True

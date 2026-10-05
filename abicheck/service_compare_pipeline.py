@@ -51,6 +51,7 @@ from __future__ import annotations
 import contextvars
 import dataclasses
 import functools
+import threading
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -294,13 +295,10 @@ def resolve_compare_request(
     *allow_parallel* is the caller's *permission* to resolve both sides
     concurrently, not a demand: :func:`resolve_sides_sequentially` can still
     veto it (a ``dump_manifest`` on either side, or
-    ``ABICHECK_PARALLEL_EXTRACTION=0``). The native ``compare`` CLI passes
-    ``False`` — it has always resolved sequentially, and its two dumps write
-    interleaving progress notes to the same stderr, so adopting this shared
-    resolution deliberately does not change its memory or output profile.
-    Flipping the CLI to concurrent extraction is a measurable change worth
-    making on its own evidence, not a side effect of removing a duplicate
-    implementation.
+    ``ABICHECK_PARALLEL_EXTRACTION=0``). Every front end, the native
+    ``compare`` CLI included, now passes ``True``; see
+    ``cli_resolve._resolve_compare_snapshots`` for the measurement behind
+    the CLI's switch.
 
     Raises:
         ValidationError: If the request fails :meth:`CompareRequest.validate`
@@ -423,7 +421,7 @@ def resolve_compare_request(
         parse_performance_profile,
         tuning_for,
     )
-    from .workflows.side_isolation import run_isolated
+    from .workflows.side_isolation import isolation_supported, run_isolated
 
     tuning = tuning_for(
         parse_performance_profile(request.performance_profile)
@@ -447,6 +445,29 @@ def resolve_compare_request(
         ):
             old_res = _resolve_old_side()
             new_res = _resolve_new_side()
+        elif (
+            tuning.concurrent_side_processes
+            and isolation_supported()
+            and old_fmt is not None
+            and new_fmt is not None
+            and threading.active_count() == 1
+        ):
+            # Two live binaries: extraction is dominated by Python under the
+            # GIL, so two threads barely overlap; two forked children do.
+            # A stored snapshot, directory or package side keeps the thread
+            # path -- loading one is cheap, and a child would pay to pickle
+            # its result back. So does a caller that already runs other
+            # threads (a typed-API host, a test runner): forking a
+            # multi-threaded process can leave a child waiting on a lock no
+            # thread of its own will ever release.
+            _deadline_ts = deadline.current_deadline_ts()
+            old_res, new_res = run_isolated(
+                [
+                    functools.partial(_deadline_bound_side_worker, _deadline_ts, fn)
+                    for fn in (_resolve_old_side, _resolve_new_side)
+                ],
+                concurrent=True,
+            )
         else:
             # ADR-068 §3 #19 (Codex review): re-enter the captured deadline in
             # each worker -- see `_deadline_bound_side_worker`'s own docstring.
