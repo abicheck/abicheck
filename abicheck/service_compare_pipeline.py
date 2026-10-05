@@ -51,7 +51,6 @@ from __future__ import annotations
 import contextvars
 import dataclasses
 import functools
-import threading
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -421,53 +420,33 @@ def resolve_compare_request(
         parse_performance_profile,
         tuning_for,
     )
-    from .workflows.side_isolation import isolation_supported, run_isolated
+    from .workflows.side_isolation import concurrent_children_apply, run_isolated
 
     tuning = tuning_for(
         parse_performance_profile(request.performance_profile)
         if request.performance_profile is not None
         else current_performance_profile()
     )
+    concurrent = (
+        allow_parallel
+        and not tuning.sequential_sides
+        and not resolve_sides_sequentially(request)
+    )
     with ast_acquisition_scope():
-        if tuning.isolate_sides:
+        if tuning.isolate_sides or (
+            concurrent and concurrent_children_apply(tuning, old_fmt, new_fmt)
+        ):
             _deadline_ts = deadline.current_deadline_ts()
             old_res, new_res = run_isolated(
                 [
                     functools.partial(_deadline_bound_side_worker, _deadline_ts, fn)
                     for fn in (_resolve_old_side, _resolve_new_side)
                 ],
-                concurrent=False,
+                concurrent=not tuning.isolate_sides,
             )
-        elif (
-            not allow_parallel
-            or tuning.sequential_sides
-            or resolve_sides_sequentially(request)
-        ):
+        elif not concurrent:
             old_res = _resolve_old_side()
             new_res = _resolve_new_side()
-        elif (
-            tuning.concurrent_side_processes
-            and isolation_supported()
-            and old_fmt is not None
-            and new_fmt is not None
-            and threading.active_count() == 1
-        ):
-            # Two live binaries: extraction is dominated by Python under the
-            # GIL, so two threads barely overlap; two forked children do.
-            # A stored snapshot, directory or package side keeps the thread
-            # path -- loading one is cheap, and a child would pay to pickle
-            # its result back. So does a caller that already runs other
-            # threads (a typed-API host, a test runner): forking a
-            # multi-threaded process can leave a child waiting on a lock no
-            # thread of its own will ever release.
-            _deadline_ts = deadline.current_deadline_ts()
-            old_res, new_res = run_isolated(
-                [
-                    functools.partial(_deadline_bound_side_worker, _deadline_ts, fn)
-                    for fn in (_resolve_old_side, _resolve_new_side)
-                ],
-                concurrent=True,
-            )
         else:
             # ADR-068 §3 #19 (Codex review): re-enter the captured deadline in
             # each worker -- see `_deadline_bound_side_worker`'s own docstring.

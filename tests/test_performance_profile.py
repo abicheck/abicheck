@@ -229,7 +229,7 @@ def binaries(tmp_path):
 def test_balanced_resolves_two_live_binaries_in_concurrent_children(
     binaries, forks, monkeypatch
 ):
-    import abicheck.service_compare_pipeline as scp
+    import abicheck.workflows.side_isolation as scp
     from abicheck.service import CompareRequest, InputSpec, run_compare_request
 
     old, new = binaries
@@ -252,7 +252,7 @@ def test_balanced_resolves_two_live_binaries_in_concurrent_children(
 def test_parallel_extraction_off_keeps_two_binaries_in_process(
     binaries, forks, monkeypatch
 ):
-    import abicheck.service_compare_pipeline as scp
+    import abicheck.workflows.side_isolation as scp
     from abicheck.service import CompareRequest, InputSpec, run_compare_request
 
     old, new = binaries

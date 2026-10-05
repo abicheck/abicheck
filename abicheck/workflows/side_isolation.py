@@ -46,13 +46,15 @@ import gc
 import multiprocessing
 import pickle
 import sys
+import threading
 from collections.abc import Callable, Sequence
 from typing import Any, TypeVar
 
 from ..errors import SnapshotError
+from ..model.performance import ExecutionTuning
 from ..storage.acyclic_json import gc_paused
 
-__all__ = ["isolation_supported", "run_isolated"]
+__all__ = ["concurrent_children_apply", "isolation_supported", "run_isolated"]
 
 _T = TypeVar("_T")
 
@@ -60,6 +62,31 @@ _T = TypeVar("_T")
 def isolation_supported() -> bool:
     """Whether side resolution can run in forked children on this platform."""
     return sys.platform.startswith("linux")
+
+
+def concurrent_children_apply(
+    tuning: ExecutionTuning, old_fmt: str | None, new_fmt: str | None
+) -> bool:
+    """Whether two sides already cleared to resolve concurrently should do so
+    in two concurrent children rather than two threads of this process.
+
+    Only for two live binaries (*old_fmt*/*new_fmt* are their detected
+    formats): extraction is dominated by Python under the GIL, so two
+    threads barely overlap and two forked children do -- measured, a cold
+    compare of two 60-module C++ libraries went from 64 s to 41 s. A stored
+    snapshot, directory or package side keeps the thread path: loading one
+    is cheap, and a child would pay to pickle its result back. So does a
+    caller already running other threads (a typed-API host, a test runner):
+    forking a multi-threaded process can leave a child waiting on a lock no
+    thread of its own will ever release.
+    """
+    return (
+        tuning.concurrent_side_processes
+        and isolation_supported()
+        and old_fmt is not None
+        and new_fmt is not None
+        and threading.active_count() == 1
+    )
 
 
 def _child(conn: Any, fn: Callable[[], Any]) -> None:

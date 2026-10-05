@@ -611,7 +611,6 @@ def _param_trait_for_ref(
     return trait
 
 
-
 def _return_facts(
     die: Any, CU: Any, cache: _DwarfTypeCache | None
 ) -> tuple[str | None, int | None, bool]:
