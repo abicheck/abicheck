@@ -599,13 +599,8 @@ _ANON_TYPE_LOCATION_PATH_ONLY_RE = re.compile(
 
 
 def has_anonymous_type_location(name: str) -> bool:
-    """Whether :func:`strip_anonymous_type_location` could change *name*.
-
-    ``False`` means the strip is the identity on *name*, so a caller holding
-    a collection of strings can skip a rewrite walk over them entirely.
-    """
-    # The regex alone: a literal ``" at "`` prefilter would miss the
-    # ``\s+at\s+`` spellings (a tab) the strip itself rewrites.
+    """Whether :func:`strip_anonymous_type_location` could change *name*: the
+    strip's own regex, so any ``\\s+at\\s+`` spelling counts, not only a space."""
     return _ANON_TYPE_LOCATION_PATH_ONLY_RE.search(name) is not None
 
 

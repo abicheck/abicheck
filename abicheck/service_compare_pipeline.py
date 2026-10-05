@@ -294,10 +294,11 @@ def resolve_compare_request(
     *allow_parallel* is the caller's *permission* to resolve both sides
     concurrently, not a demand: :func:`resolve_sides_sequentially` can still
     veto it (a ``dump_manifest`` on either side, or
-    ``ABICHECK_PARALLEL_EXTRACTION=0``). Every front end, the native
-    ``compare`` CLI included, now passes ``True``; see
-    ``cli_resolve._resolve_compare_snapshots`` for the measurement behind
-    the CLI's switch.
+    ``ABICHECK_PARALLEL_EXTRACTION=0``) -- and covers *threads* only: two
+    live binaries resolve in two concurrent child processes either way
+    (``workflows.side_isolation.concurrent_children_apply``). The native
+    ``compare`` CLI passes ``False`` so any other pair keeps its sequential,
+    non-interleaved order.
 
     Raises:
         ValidationError: If the request fails :meth:`CompareRequest.validate`
@@ -427,11 +428,9 @@ def resolve_compare_request(
         if request.performance_profile is not None
         else current_performance_profile()
     )
-    concurrent = (
-        allow_parallel
-        and not tuning.sequential_sides
-        and not resolve_sides_sequentially(request)
-    )
+    # `allow_parallel` permits two *threads*; two live binaries may still go
+    # to two concurrent child processes without it (`concurrent_children_apply`).
+    concurrent = not tuning.sequential_sides and not resolve_sides_sequentially(request)
     with ast_acquisition_scope():
         if tuning.isolate_sides or (
             concurrent and concurrent_children_apply(tuning, old_fmt, new_fmt)
@@ -444,7 +443,7 @@ def resolve_compare_request(
                 ],
                 concurrent=not tuning.isolate_sides,
             )
-        elif not concurrent:
+        elif not (concurrent and allow_parallel):
             old_res = _resolve_old_side()
             new_res = _resolve_new_side()
         else:

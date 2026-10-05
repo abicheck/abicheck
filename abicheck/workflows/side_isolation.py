@@ -54,7 +54,12 @@ from ..errors import SnapshotError
 from ..model.performance import ExecutionTuning
 from ..storage.acyclic_json import gc_paused
 
-__all__ = ["concurrent_children_apply", "isolation_supported", "run_isolated"]
+__all__ = [
+    "concurrent_children_apply",
+    "isolation_supported",
+    "run_isolated",
+    "side_processes_enabled",
+]
 
 _T = TypeVar("_T")
 
@@ -82,11 +87,21 @@ def concurrent_children_apply(
     """
     return (
         tuning.concurrent_side_processes
+        and side_processes_enabled()
         and isolation_supported()
         and old_fmt is not None
         and new_fmt is not None
         and threading.active_count() == 1
     )
+
+
+def side_processes_enabled() -> bool:
+    """``ABICHECK_SIDE_PROCESSES`` (default on): ``0`` keeps two concurrent
+    sides in this process, as threads -- for an embedding host that must
+    not fork, or a test that observes side resolution in-process."""
+    from ..extract.env_flags import env_flag
+
+    return env_flag("ABICHECK_SIDE_PROCESSES")
 
 
 def _child(conn: Any, fn: Callable[[], Any]) -> None:

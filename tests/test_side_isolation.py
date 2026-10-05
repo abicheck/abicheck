@@ -154,6 +154,7 @@ def test_compare_report_is_identical_with_isolation(tmp_path, monkeypatch):
     # A single-threaded caller, as the CLI is: the routing must not depend on
     # whatever threads the test runner holds.
     monkeypatch.setattr(iso.threading, "active_count", lambda: 1)
+    monkeypatch.setenv("ABICHECK_SIDE_PROCESSES", "1")
     baseline = run(None)
     assert baseline[1], "fixture must produce findings or the check is vacuous"
     # `balanced`: two live binaries, both sides in one concurrent batch.

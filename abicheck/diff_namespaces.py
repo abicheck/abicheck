@@ -44,7 +44,6 @@ break is at compile time.
 from __future__ import annotations
 
 from collections.abc import Iterable
-from functools import lru_cache
 from typing import TYPE_CHECKING, NamedTuple
 
 from .checker_policy import ChangeKind, ReachabilityState
@@ -65,6 +64,7 @@ from .compare.qualified_name_normalization import (
 )
 from .diff_helpers import make_change
 from .diff_templates import _strip_param_signature
+from .model.execution_cache import memoized
 from .model.name_heuristics import (
     NameHeuristicEffect,
     StructuralFact,
@@ -742,7 +742,7 @@ def _scope_path(item: _IndexItem) -> tuple[str, ...]:
     return _scope_path_of(item.qname)
 
 
-@lru_cache(maxsize=65536)
+@memoized(maxsize=65536)
 def _scope_path_of(qname: str) -> tuple[str, ...]:
     # Pure str -> tuple; the promotion check asks for the same qname's path
     # once per removed experimental item, so memoize on the string.

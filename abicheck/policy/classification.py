@@ -47,11 +47,11 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from functools import cache
 
 from ..change_registry import REGISTRY as _REGISTRY, Verdict as Verdict
 from ..model.change_catalog.kinds import ChangeKind as ChangeKind, HasKind as HasKind
 from ..model.change_catalog.registry import VALID_BASE_POLICIES as VALID_BASE_POLICIES
+from ..model.execution_cache import memoized
 from .evidence_status import (
     EvidenceStatus,
     has_binary_evidence,
@@ -295,7 +295,7 @@ def impact_caveat_for(evidence_status: EvidenceStatus | None) -> str:
     )
 
 
-@cache
+@memoized
 def policy_kind_sets(
     policy: str,
 ) -> tuple[

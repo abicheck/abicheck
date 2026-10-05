@@ -226,6 +226,20 @@ def binaries(tmp_path):
 
 
 @linux_only
+def test_side_processes_off_keeps_two_binaries_in_process(binaries, forks, monkeypatch):
+    import abicheck.workflows.side_isolation as scp
+    from abicheck.service import CompareRequest, InputSpec, run_compare_request
+
+    old, new = binaries
+    monkeypatch.setattr(scp.threading, "active_count", lambda: 1)
+    monkeypatch.setenv("ABICHECK_SIDE_PROCESSES", "0")
+    run_compare_request(
+        CompareRequest(old=InputSpec(path=old), new=InputSpec(path=new))
+    )
+    assert forks == []
+
+
+@linux_only
 def test_balanced_resolves_two_live_binaries_in_concurrent_children(
     binaries, forks, monkeypatch
 ):
@@ -237,6 +251,7 @@ def test_balanced_resolves_two_live_binaries_in_concurrent_children(
     # The test runner may hold threads of its own; the routing decision is
     # what is under test, so present the single-threaded caller it requires.
     monkeypatch.setattr(scp.threading, "active_count", lambda: 1)
+    monkeypatch.setenv("ABICHECK_SIDE_PROCESSES", "1")
     forked = run_compare_request(request)
     assert forks == [2]  # both sides, started together
 
@@ -257,6 +272,7 @@ def test_parallel_extraction_off_keeps_two_binaries_in_process(
 
     old, new = binaries
     monkeypatch.setattr(scp.threading, "active_count", lambda: 1)
+    monkeypatch.setenv("ABICHECK_SIDE_PROCESSES", "1")
     monkeypatch.setenv("ABICHECK_PARALLEL_EXTRACTION", "0")
     run_compare_request(
         CompareRequest(old=InputSpec(path=old), new=InputSpec(path=new))

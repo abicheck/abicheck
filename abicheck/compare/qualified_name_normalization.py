@@ -38,8 +38,7 @@ only).
 
 from __future__ import annotations
 
-from functools import lru_cache
-
+from ..model.execution_cache import memoized
 from ..model.qualified_name_split import (
     is_inline_abi_namespace_segment as is_inline_abi_namespace_segment,
     split_top_level_scopes as _split_top_level_scopes,
@@ -53,7 +52,7 @@ def segments(qualified: str) -> list[str]:
     return list(_segments_cached(qualified))
 
 
-@lru_cache(maxsize=65536)
+@memoized(maxsize=65536)
 def _segments_cached(qualified: str) -> tuple[str, ...]:
     """Split a qualified C++ name into namespace segments.
 
