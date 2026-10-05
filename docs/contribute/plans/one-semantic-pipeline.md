@@ -279,6 +279,27 @@ compare identically. The "Landed (2026-10-04)" entries below describe the
 detector cut-over, which stands; their v57/version-3 storage claims are
 superseded by this paragraph.
 
+**Backend-collection reader consolidation (2026-10-05).** That baseline went
+from 22 sites / 43 reads / 16 modules to **2 sites / 2 reads / 1 module**.
+The 22 sites split into (i) evidence-tier checks -- "did this side carry debug
+info / any layout content?" (`analysis_assurance*`, `confidence`,
+`depth_projection`, `surface_graph`, `edge_query`, `diff_platform`'s support
+gate, `diff_types`/`diff_symbols`/schema-staleness stripped-binary checks,
+`diff_helpers`' typedef-qualification check) -- which now ask one model-owned
+fact, `model/debug_evidence.py`'s `debug_info_evidence(snap)` (basic and
+advanced channels kept separate, plus `layout_content`); and (ii) identity-less
+layout readers (`diff_platform._diff_dwarf`, `checker._diff_advanced_dwarf`,
+`debug_type_join`, `diff_long_double`, `internal_leak`, the
+`diff_helpers`/`diff_filtering` canonical-name scans, and depth projection's
+in-place layout narrowing), which now read `compare/debug_layout_view.py`'s
+backend-neutral `DebugLayoutView` (records/enums/base-type sizes plus the two
+channel payloads the layout detector families diff whole) and
+`restrict_debug_layout`. That module is the only remaining baseline entry,
+by design: the layout collections are still the extraction output every debug
+carrier lands in. **What remains** for criterion (4): fold the layout payload
+itself into SemanticIR at extraction so the owner reads the IR, at which point
+the baseline empties. No finding changed.
+
 **2B consumer sweep (2026-09-29).** A repository-wide inventory of
 cross-snapshot and finding-to-record lookups still keyed by bare
 `RecordType.name` (or the bare `typedefs` map) moved every one that decides

@@ -400,48 +400,18 @@ BACKEND_DECLARATION_FIELDS: frozenset[str] = frozenset({"dwarf", "dwarf_advanced
 
 #: `(module, enclosing qualname, field) -> read count`: the reviewed baseline.
 KNOWN_BACKEND_DECLARATION_READERS: dict[tuple[str, str, str], int] = {
-    ("abicheck/analysis_assurance.py", "_dwarf_context_status", "dwarf"): 2,
-    ("abicheck/analysis_assurance.py", "_dwarf_context_status", "dwarf_advanced"): 2,
+    # The one owner (ADR-063 "no backend-specific collection"): every other
+    # checker reads debug *evidence* through `model/debug_evidence.py` and
+    # debug *layout* through this module's backend-neutral `DebugLayoutView`.
+    # It stays listed because the layout collections are still the
+    # extraction output every debug carrier (DWARF, BTF/CTF/PDB reduced)
+    # lands in; folding them into SemanticIR is the remaining step.
+    ("abicheck/compare/debug_layout_view.py", "_layout_channel", "dwarf"): 1,
     (
-        "abicheck/analysis_assurance_layout.py",
-        "layout_unverified_detectors",
-        "dwarf",
-    ): 2,
-    (
-        "abicheck/analysis_assurance_layout.py",
-        "layout_unverified_detectors",
+        "abicheck/compare/debug_layout_view.py",
+        "debug_layout_view",
         "dwarf_advanced",
-    ): 2,
-    ("abicheck/checker.py", "_diff_advanced_dwarf", "dwarf_advanced"): 4,
-    ("abicheck/compare/debug_type_join.py", "join_debug_types", "dwarf"): 1,
-    ("abicheck/compare/edge_query.py", "debug_coverage_record", "dwarf"): 2,
-    ("abicheck/confidence.py", "_detect_evidence_tiers", "dwarf"): 4,
-    ("abicheck/confidence.py", "_detect_evidence_tiers", "dwarf_advanced"): 4,
-    ("abicheck/diff_filtering.py", "_enum_canonical_names", "dwarf"): 1,
-    ("abicheck/diff_helpers.py", "record_canonical_names", "dwarf"): 1,
-    ("abicheck/diff_helpers.py", "typedef_flat_map_is_dwarf_qualified", "dwarf"): 1,
-    ("abicheck/diff_long_double.py", "_ld_base_size", "dwarf"): 1,
-    ("abicheck/diff_platform.py", "_diff_dwarf", "dwarf"): 2,
-    ("abicheck/diff_platform.py", "_has_any_dwarf", "dwarf"): 2,
-    ("abicheck/diff_symbols.py", "_is_stripped_symbols_only", "dwarf"): 1,
-    ("abicheck/diff_types.py", "_has_type_evidence", "dwarf"): 1,
-    ("abicheck/internal_leak.py", "_build_type_map", "dwarf"): 1,
-    (
-        "abicheck/policy/analysis_assurance_schema_staleness.py",
-        "_side_is_stripped_symbols_only",
-        "dwarf",
     ): 1,
-    (
-        "abicheck/policy/depth_projection.py",
-        "_strip_header_and_above_evidence",
-        "dwarf",
-    ): 5,
-    (
-        "abicheck/policy/depth_projection.py",
-        "_structural_facts_are_dwarf_confirmed",
-        "dwarf",
-    ): 2,
-    ("abicheck/surface_graph.py", "_evidence_tier", "dwarf"): 1,
 }
 
 

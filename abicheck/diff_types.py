@@ -197,10 +197,11 @@ def _has_type_evidence(snap: AbiSnapshot) -> bool:
         for kind in (EntityKind.TYPE, EntityKind.ENUM, EntityKind.TYPEDEF)
     ):
         return True
-    dwarf = getattr(snap, "dwarf", None)
+    from .model.debug_evidence import debug_info_evidence
+
     # has_dwarf alone is not enough: a stripped binary can carry an empty
     # .debug_* section (has_dwarf=True, zero structs/enums). Require real content.
-    return bool(dwarf is not None and (dwarf.structs or dwarf.enums))
+    return debug_info_evidence(snap).layout_content
 
 
 def _removals_are_unconfirmed(old: AbiSnapshot, new: AbiSnapshot) -> bool:

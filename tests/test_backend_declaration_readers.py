@@ -109,8 +109,11 @@ def test_live_checker_matches_the_baseline() -> None:
     assert (
         backend_declaration_problems(current, KNOWN_BACKEND_DECLARATION_READERS) == []
     )
-    # Vacuity guard: the scan reached the DWARF-layout detector it must see.
-    assert any(rel == "abicheck/diff_platform.py" for rel, _, _ in current)
+    # Vacuity guard: the scan reached the one owner it must see.
+    assert any(rel == "abicheck/compare/debug_layout_view.py" for rel, _, _ in current)
+    # The owner is the only reader: every other checker goes through it or
+    # through `model.debug_evidence`.
+    assert {rel for rel, _, _ in current} == {"abicheck/compare/debug_layout_view.py"}
 
 
 @pytest.mark.parametrize(

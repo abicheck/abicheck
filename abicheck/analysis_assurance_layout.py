@@ -36,7 +36,7 @@ rather than from ``DetectorRegistry`` state -- this module is that signal.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .model import AbiSnapshot
@@ -60,14 +60,8 @@ def layout_unverified_detectors(old: AbiSnapshot, new: AbiSnapshot) -> tuple[str
     *old*/*new* -- see this module's own docstring.
     """
 
-    def _has_dwarf(meta: Any) -> bool:
-        return bool(meta is not None and meta.has_dwarf)
+    from .model.debug_evidence import debug_info_evidence
 
-    if (
-        _has_dwarf(old.dwarf)
-        or _has_dwarf(new.dwarf)
-        or _has_dwarf(old.dwarf_advanced)
-        or _has_dwarf(new.dwarf_advanced)
-    ):
+    if debug_info_evidence(old).any or debug_info_evidence(new).any:
         return ()
     return DWARF_ONLY_LAYOUT_DETECTORS

@@ -32,6 +32,7 @@ from .checker_types import (  # noqa: F401
     LibraryMetadata,
 )
 from .comparability import check_contracts_comparable, comparability_outcome
+from .compare.debug_layout_view import debug_layout_view as _debug_layout_view
 from .compare.edge_query import edge_coverage_report
 from .compare.surface_reconcile import releases_reconciliation
 from .confidence import _compute_confidence
@@ -123,7 +124,7 @@ from .diff_vtable_layout import (  # noqa: F401 — triggers detector registrati
 from .dwarf_advanced import (
     diff_advanced_dwarf,  # noqa: F401 — re-export for monkeypatching
 )
-from .model import AbiSnapshot, advanced_facts_collected as _advanced_collected
+from .model import AbiSnapshot
 from .model.change_catalog.kinds import ChangeKind
 from .model.extraction_scope import snapshot_scope_identity
 from .model.header_exclusion_record import comparison_exclusion_identity
@@ -519,7 +520,8 @@ def _apply_pattern_verdicts_step(
 @_detector_registry.detector(
     "advanced_dwarf",
     requires_support=lambda o, n: (
-        _advanced_collected(o.dwarf_advanced) and _advanced_collected(n.dwarf_advanced),
+        _debug_layout_view(o).advanced_collected
+        and _debug_layout_view(n).advanced_collected,
         "missing DWARF advanced metadata",
     ),
 )
@@ -531,12 +533,8 @@ def _diff_advanced_dwarf(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """
     from .dwarf_advanced import AdvancedDwarfMetadata
 
-    o: AdvancedDwarfMetadata = (
-        getattr(old, "dwarf_advanced", None) or AdvancedDwarfMetadata()
-    )
-    n: AdvancedDwarfMetadata = (
-        getattr(new, "dwarf_advanced", None) or AdvancedDwarfMetadata()
-    )
+    o: AdvancedDwarfMetadata = _debug_layout_view(old).advanced
+    n: AdvancedDwarfMetadata = _debug_layout_view(new).advanced
 
     _kind_map = {
         "calling_convention_changed": ChangeKind.CALLING_CONVENTION_CHANGED,

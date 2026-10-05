@@ -319,8 +319,9 @@ def _enum_canonical_names(snap: AbiSnapshot | None) -> dict[str, str]:
             out[e.qualified_name] = e.qualified_name
         else:
             by_bare.setdefault(e.name, set()).add(None)
-    dwarf = getattr(snap, "dwarf", None)
-    for key in getattr(dwarf, "enums", None) or ():
+    from .compare.debug_layout_view import debug_layout_view
+
+    for key in debug_layout_view(snap).enums:
         bare = depth_aware_bare_name(key)
         if bare != key:
             by_bare.setdefault(bare, set()).add(key)
