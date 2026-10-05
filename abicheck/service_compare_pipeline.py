@@ -294,13 +294,11 @@ def resolve_compare_request(
     *allow_parallel* is the caller's *permission* to resolve both sides
     concurrently, not a demand: :func:`resolve_sides_sequentially` can still
     veto it (a ``dump_manifest`` on either side, or
-    ``ABICHECK_PARALLEL_EXTRACTION=0``). The native ``compare`` CLI passes
-    ``False`` — it has always resolved sequentially, and its two dumps write
-    interleaving progress notes to the same stderr, so adopting this shared
-    resolution deliberately does not change its memory or output profile.
-    Flipping the CLI to concurrent extraction is a measurable change worth
-    making on its own evidence, not a side effect of removing a duplicate
-    implementation.
+    ``ABICHECK_PARALLEL_EXTRACTION=0``) -- and covers *threads* only: two
+    live binaries resolve in two concurrent child processes either way
+    (``workflows.side_isolation.concurrent_children_apply``). The native
+    ``compare`` CLI passes ``False`` so any other pair keeps its sequential,
+    non-interleaved order.
 
     Raises:
         ValidationError: If the request fails :meth:`CompareRequest.validate`
@@ -423,28 +421,29 @@ def resolve_compare_request(
         parse_performance_profile,
         tuning_for,
     )
-    from .workflows.side_isolation import run_isolated
+    from .workflows.side_isolation import concurrent_children_apply, run_isolated
 
     tuning = tuning_for(
         parse_performance_profile(request.performance_profile)
         if request.performance_profile is not None
         else current_performance_profile()
     )
+    # `allow_parallel` permits two *threads*; two live binaries may still go
+    # to two concurrent child processes without it (`concurrent_children_apply`).
+    concurrent = not tuning.sequential_sides and not resolve_sides_sequentially(request)
     with ast_acquisition_scope():
-        if tuning.isolate_sides:
+        if tuning.isolate_sides or (
+            concurrent and concurrent_children_apply(tuning, old_fmt, new_fmt)
+        ):
             _deadline_ts = deadline.current_deadline_ts()
             old_res, new_res = run_isolated(
                 [
                     functools.partial(_deadline_bound_side_worker, _deadline_ts, fn)
                     for fn in (_resolve_old_side, _resolve_new_side)
                 ],
-                concurrent=False,
+                concurrent=not tuning.isolate_sides,
             )
-        elif (
-            not allow_parallel
-            or tuning.sequential_sides
-            or resolve_sides_sequentially(request)
-        ):
+        elif not (concurrent and allow_parallel):
             old_res = _resolve_old_side()
             new_res = _resolve_new_side()
         else:

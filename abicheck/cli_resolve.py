@@ -486,8 +486,13 @@ def _resolve_compare_snapshots(
     stays CLI-specific is exactly what is genuinely CLI-specific: the
     ``click.echo`` notifier, translating the framework-free errors into
     ``click`` exceptions (the contract ``_resolve_input`` documented), and
-    ``allow_parallel=False`` to keep both sides resolving sequentially the way
-    this path always has.
+    ``allow_parallel=False``: no two *threads*. Two live binaries still
+    resolve in two concurrent child processes (the ``balanced`` profile;
+    measured, a cold compare of two 60-module C++ libraries went from 64 s
+    to 41 s at ~1.5x peak tree memory), so their progress notes may
+    interleave on stderr; ``ABICHECK_PARALLEL_EXTRACTION=0``,
+    ``ABICHECK_SIDE_PROCESSES=0`` and the ``low-memory`` profile keep one
+    side at a time.
 
     ``config_public_header_dirs`` (ADR-068 plan §5 P4, ``workflows.
     public_header_boundary.project_config_public_header_dirs``): a

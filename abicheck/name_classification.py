@@ -598,6 +598,12 @@ _ANON_TYPE_LOCATION_PATH_ONLY_RE = re.compile(
 )
 
 
+def has_anonymous_type_location(name: str) -> bool:
+    """Whether :func:`strip_anonymous_type_location` could change *name*: the
+    strip's own regex, so any ``\\s+at\\s+`` spelling counts, not only a space."""
+    return _ANON_TYPE_LOCATION_PATH_ONLY_RE.search(name) is not None
+
+
 def _declaring_header_discriminator(path: str) -> str:
     """Checkout-independent discriminator derived from *path*'s own
     basename (the declaring header's filename), used alongside

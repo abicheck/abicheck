@@ -46,6 +46,7 @@ from enum import Enum
 from typing import TYPE_CHECKING
 
 from ..model.owner_recovery import itanium_special_member_owner
+from .detection_memo import memoized
 
 if TYPE_CHECKING:
     from ..model import AbiSnapshot
@@ -233,8 +234,14 @@ def special_member_export_coverage(
             covered=covered,
         )
 
-    old_index = declared_special_members(old)
-    new_index = declared_special_members(new)
+    # Once per snapshot per comparison, not once per lost export: each build
+    # walks the whole function map (360 builds on a 60-module library).
+    old_index = memoized(
+        "declared_special_members", old, None, lambda: declared_special_members(old)
+    )
+    new_index = memoized(
+        "declared_special_members", new, None, lambda: declared_special_members(new)
+    )
     key = (owner.member, qualified)
     old_decls = old_index.get(key, [])
     new_decls = new_index.get(key, [])

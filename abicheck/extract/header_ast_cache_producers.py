@@ -43,6 +43,9 @@ CLANG_AST_OUTPUT_MODULES: tuple[str, ...] = (
     "abicheck.storage.json_compact",
     # DPC++: picks the stored document out of the multi-pass stream.
     "abicheck.sycl_context",
+    # DPC++: plans the device/host job replay whose host pass emits the
+    # stored document.
+    "abicheck.buildsource.dpcpp_jobs",
     # Retries with failing headers removed; the stored entry then covers
     # fewer headers than were requested.
     "abicheck.extract.headers.clang.error_header_retry",

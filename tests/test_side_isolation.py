@@ -151,12 +151,20 @@ def test_compare_report_is_identical_with_isolation(tmp_path, monkeypatch):
         return real(ctx, fns)
 
     monkeypatch.setattr(iso, "_run_children", spy)
+    # A single-threaded caller, as the CLI is: the routing must not depend on
+    # whatever threads the test runner holds.
+    monkeypatch.setattr(iso.threading, "active_count", lambda: 1)
+    monkeypatch.setenv("ABICHECK_SIDE_PROCESSES", "1")
     baseline = run(None)
     assert baseline[1], "fixture must produce findings or the check is vacuous"
-    assert forked == []
+    # `balanced`: two live binaries, both sides in one concurrent batch.
+    assert forked == [2]
     assert run("low-memory") == baseline
-    # Both sides really went through children (sequential CLI: one each).
-    assert forked == [1, 1]
+    # `low-memory`: one child per side, one after the other.
+    assert forked == [2, 1, 1]
+    monkeypatch.setenv("ABICHECK_PARALLEL_EXTRACTION", "0")
+    assert run(None) == baseline
+    assert forked == [2, 1, 1]  # sequential, in-process
 
 
 def _child_payload(fn):

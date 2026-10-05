@@ -705,8 +705,15 @@ def find_by_value_types(snap: AbiSnapshot, opaque: set[str]) -> set[str]:
     """Return the subset of *opaque* types that any public function/variable uses by value."""
     candidates = [(tname, _leaf_candidate(tname)) for tname in opaque]
     by_value_types: set[str] = set()
+    # A scan only ever adds to `by_value_types`, so a spelling already
+    # scanned cannot add anything: most parameters repeat a handful of type
+    # spellings (20k scans of a few hundred texts on a 60-module library).
+    scanned: set[str] = set()
 
     def scan(text: str) -> None:
+        if text in scanned:
+            return
+        scanned.add(text)
         for tname, leaf in candidates:
             if tname not in by_value_types and _referenced_by_value(tname, leaf, text):
                 by_value_types.add(tname)

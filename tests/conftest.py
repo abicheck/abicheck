@@ -265,6 +265,18 @@ def _isolate_snapshot_cache(tmp_path_factory: pytest.TempPathFactory, monkeypatc
 
 
 @pytest.fixture(autouse=True)
+def _side_resolution_in_process(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Resolve a comparison's two live-binary sides in this process.
+
+    The ``balanced`` profile forks one child per side for two live binaries;
+    a test that patches side resolution (``resolve_input``, the dumper) and
+    then asserts on the calls would see them happen in a child and vanish.
+    Tests of the fork path itself set ``ABICHECK_SIDE_PROCESSES=1``.
+    """
+    monkeypatch.setenv("ABICHECK_SIDE_PROCESSES", "0")
+
+
+@pytest.fixture(autouse=True)
 def _silence_progress_lines(monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep the CLI's default-on progress lines (``abicheck/progress.py``) out
     of every test's captured output.

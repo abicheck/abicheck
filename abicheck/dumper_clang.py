@@ -324,9 +324,19 @@ def _resolve_dpcpp_acquisition(
         gcc_option_tokens
     )
     direct_host = (
-        multi and frontend_context == "host" and "-fsycl-device-only" not in tokens
+        multi
+        and frontend_context == "host"
+        and "-fsycl-device-only" not in tokens
+        and _driver_host_only_is_single_pass(clang_bin, tuple(tokens))
     )
     return multi and not direct_host, direct_host
+
+
+def _driver_host_only_is_single_pass(clang_bin: str, tokens: tuple[str, ...]) -> bool:
+    """See :func:`abicheck.buildsource.dpcpp_jobs.host_only_request_usable`."""
+    from .buildsource.dpcpp_jobs import executable_revision, host_only_request_usable
+
+    return host_only_request_usable(clang_bin, executable_revision(clang_bin), tokens)
 
 
 def _needs_sycl_host_only(cc_bin: str, tokens: list[str]) -> bool:

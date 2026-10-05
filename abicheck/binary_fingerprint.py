@@ -29,7 +29,7 @@ convert "removed + added" pairs into "likely renamed" changes.
 from __future__ import annotations
 
 import bisect
-from collections.abc import Callable
+from collections.abc import Callable, Hashable, Iterable
 from dataclasses import dataclass
 
 # ---------------------------------------------------------------------------
@@ -106,6 +106,7 @@ def match_renamed_functions(
     old_fps: dict[str, FunctionFingerprint],
     new_fps: dict[str, FunctionFingerprint],
     name_filter: Callable[[str, str], bool] | None = None,
+    name_keys: Callable[[str], Iterable[Hashable]] | None = None,
 ) -> list[RenameCandidate]:
     """Find likely renamed functions by matching fingerprints.
 
@@ -138,6 +139,16 @@ def match_renamed_functions(
     implausible same-size symbol cannot greedily consume a partner that a
     plausible rename should claim. Exact (code-hash) matches are filtered
     too: two unrelated stubs can compile to identical bytes.
+
+    ``name_keys`` (optional, only with ``name_filter``): blocking keys for a
+    name, with the contract that ``name_filter(a, b)`` is true only when
+    ``name_keys(a)`` and ``name_keys(b)`` share a key. Passes 2 and 3 then
+    consult the predicate only on same-key partners instead of a whole size
+    bucket. The answer is unchanged -- each pass matches only a *unique*
+    accepted partner, and every accepted partner shares a key -- but a
+    bucket of thousands of same-size template instantiations stops costing
+    a predicate call per (removed, added) pair (4.4M calls / 11 s on a
+    60-module C++ library).
     """
     old_only = set(old_fps) - set(new_fps)
     new_only = set(new_fps) - set(old_fps)
@@ -161,6 +172,11 @@ def match_renamed_functions(
         return []
 
     new_by_size, new_by_hash = _index_new_candidates(new_candidates)
+    keyed = (
+        _KeyedBuckets(new_by_size, name_keys)
+        if name_filter is not None and name_keys is not None
+        else None
+    )
 
     used_new: set[str] = set()
     candidates = _match_exact(old_candidates, new_by_hash, used_new, name_filter)
@@ -171,7 +187,7 @@ def match_renamed_functions(
     # bounded by the size-bucket short-circuit in _match_size, so it stays cheap
     # for the spread-out symbol sizes real libraries have.
     candidates += _match_size(
-        old_candidates, new_by_size, used_new, matched_old, name_filter
+        old_candidates, new_by_size, used_new, matched_old, name_filter, keyed
     )
     # Pass 3 (fuzzy) is the only O(removed×added) pass and is a low-confidence
     # heuristic, so skip it entirely when the candidate sets are large enough
@@ -179,12 +195,59 @@ def match_renamed_functions(
     # only forgoes speculative rename matches — it never hides a break.
     if len(old_candidates) * len(new_candidates) <= _FUZZY_MAX_PAIRS:
         candidates += _match_fuzzy(
-            old_candidates, new_by_size, used_new, matched_old, name_filter
+            old_candidates, new_by_size, used_new, matched_old, name_filter, keyed
         )
 
     # Sort by confidence descending
     candidates.sort(key=lambda c: (-c.confidence, c.old_name))
     return candidates
+
+
+class _KeyedBuckets:
+    """Each size bucket's entries, indexed by ``name_keys``, built lazily per
+    size: ``partners(size, old_name)`` is the subset of the bucket sharing a
+    key with *old_name*, in bucket order -- every entry the name predicate
+    could accept, and usually far fewer than the bucket."""
+
+    __slots__ = ("_by_size", "_index", "_keys")
+
+    def __init__(
+        self,
+        by_size: dict[int, list[tuple[str, FunctionFingerprint]]],
+        name_keys: Callable[[str], Iterable[Hashable]],
+    ) -> None:
+        self._by_size = by_size
+        self._keys = name_keys
+        self._index: dict[int, dict[Hashable, list[int]]] = {}
+
+    def partners(
+        self, size: int, old_name: str
+    ) -> list[tuple[str, FunctionFingerprint]]:
+        bucket = self._by_size.get(size)
+        if not bucket:
+            return []
+        index = self._index.get(size)
+        if index is None:
+            index = self._index[size] = {}
+            for pos, (name, _fp) in enumerate(bucket):
+                for key in set(self._keys(name)):
+                    index.setdefault(key, []).append(pos)
+        positions: set[int] = set()
+        for key in self._keys(old_name):
+            positions.update(index.get(key, ()))
+        return [bucket[pos] for pos in sorted(positions)]
+
+
+def _bucket(
+    new_by_size: dict[int, list[tuple[str, FunctionFingerprint]]],
+    keyed: _KeyedBuckets | None,
+    size: int,
+    old_name: str,
+) -> list[tuple[str, FunctionFingerprint]]:
+    """The entries of size bucket *size* worth testing against *old_name*."""
+    if keyed is not None:
+        return keyed.partners(size, old_name)
+    return new_by_size.get(size, [])
 
 
 def _index_new_candidates(
@@ -246,6 +309,7 @@ def _match_size(
     used_new: set[str],
     matched_old: set[str],
     name_filter: Callable[[str, str], bool] | None = None,
+    keyed: _KeyedBuckets | None = None,
 ) -> list[RenameCandidate]:
     """Pass 2: size-only matches (same size, unique among remaining candidates)."""
     out: list[RenameCandidate] = []
@@ -256,7 +320,7 @@ def _match_size(
         # is found — this keeps a crowded size bucket from triggering an
         # O(bucket) name-filter scan per old symbol.
         size_matches: list[tuple[str, FunctionFingerprint]] = []
-        for n, fp in new_by_size.get(old_fp.size, []):
+        for n, fp in _bucket(new_by_size, keyed, old_fp.size, old_name):
             if n in used_new:
                 continue
             if name_filter is not None and not name_filter(old_name, n):
@@ -291,6 +355,7 @@ def _fuzzy_partners(
     sorted_sizes: list[int],
     used_new: set[str],
     name_filter: Callable[[str, str], bool] | None = None,
+    keyed: _KeyedBuckets | None = None,
 ) -> list[tuple[str, FunctionFingerprint]]:
     """New candidates whose size is within tolerance of ``old_fp`` and unused.
 
@@ -312,7 +377,7 @@ def _fuzzy_partners(
     left = bisect.bisect_left(sorted_sizes, lo)
     right = bisect.bisect_right(sorted_sizes, hi)
     for s in sorted_sizes[left:right]:
-        for new_name, new_fp in new_by_size.get(s, ()):
+        for new_name, new_fp in _bucket(new_by_size, keyed, s, old_fp.name):
             if new_name in used_new or new_fp.size == 0:
                 continue
             if abs(size - new_fp.size) / max(size, new_fp.size) > _SIZE_TOLERANCE_RATIO:
@@ -335,6 +400,7 @@ def _match_fuzzy(
     used_new: set[str],
     matched_old: set[str],
     name_filter: Callable[[str, str], bool] | None = None,
+    keyed: _KeyedBuckets | None = None,
 ) -> list[RenameCandidate]:
     """Pass 3: fuzzy size matches (within tolerance, unique match only)."""
     out: list[RenameCandidate] = []
@@ -345,7 +411,7 @@ def _match_fuzzy(
         if old_name in matched_old or old_fp.size == 0:
             continue
         fuzzy_matches = _fuzzy_partners(
-            old_fp, new_by_size, sorted_sizes, used_new, name_filter
+            old_fp, new_by_size, sorted_sizes, used_new, name_filter, keyed
         )
         if len(fuzzy_matches) == 1:
             new_name, new_fp = fuzzy_matches[0]

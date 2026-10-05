@@ -51,6 +51,7 @@ from dataclasses import dataclass
 from ..change_registry import REGISTRY as _REGISTRY, Verdict as Verdict
 from ..model.change_catalog.kinds import ChangeKind as ChangeKind, HasKind as HasKind
 from ..model.change_catalog.registry import VALID_BASE_POLICIES as VALID_BASE_POLICIES
+from ..model.execution_cache import memoized
 from .evidence_status import (
     EvidenceStatus,
     has_binary_evidence,
@@ -70,13 +71,13 @@ def _kinds_for(verdict_val: str) -> set[ChangeKind]:
     return {ChangeKind(v) for v in raw}
 
 
-BREAKING_KINDS: set[ChangeKind] = _kinds_for("BREAKING")
+BREAKING_KINDS: frozenset[ChangeKind] = frozenset(_kinds_for("BREAKING"))
 
-COMPATIBLE_KINDS: set[ChangeKind] = _kinds_for("COMPATIBLE")
+COMPATIBLE_KINDS: frozenset[ChangeKind] = frozenset(_kinds_for("COMPATIBLE"))
 
 RISK_KINDS: frozenset[ChangeKind] = frozenset(_kinds_for("COMPATIBLE_WITH_RISK"))
 
-API_BREAK_KINDS: set[ChangeKind] = _kinds_for("API_BREAK")
+API_BREAK_KINDS: frozenset[ChangeKind] = frozenset(_kinds_for("API_BREAK"))
 
 # ---------------------------------------------------------------------------
 # Compatible sub-categories: additions vs quality/behavioral issues
@@ -294,6 +295,7 @@ def impact_caveat_for(evidence_status: EvidenceStatus | None) -> str:
     )
 
 
+@memoized
 def policy_kind_sets(
     policy: str,
 ) -> tuple[
@@ -307,6 +309,9 @@ def policy_kind_sets(
     This is the single source of truth for policy → kind-set mapping.
     Used by compute_verdict(), DiffResult properties, and report classification.
     Unknown policy names fall back to strict_abi.
+
+    Memoized per policy name: the result is built from import-time module
+    sets nothing mutates, and the verdict path asks for it once per finding.
     """
     if policy == "sdk_vendor":
         return (

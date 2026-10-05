@@ -38,6 +38,7 @@ only).
 
 from __future__ import annotations
 
+from ..model.execution_cache import memoized
 from ..model.qualified_name_split import (
     is_inline_abi_namespace_segment as is_inline_abi_namespace_segment,
     split_top_level_scopes as _split_top_level_scopes,
@@ -46,6 +47,13 @@ from ..model.qualified_name_split import (
 
 
 def segments(qualified: str) -> list[str]:
+    """Split a qualified C++ name into namespace segments (a fresh list --
+    see :func:`_segments_cached` for the memoized work)."""
+    return list(_segments_cached(qualified))
+
+
+@memoized(maxsize=65536)
+def _segments_cached(qualified: str) -> tuple[str, ...]:
     """Split a qualified C++ name into namespace segments.
 
     Template arguments are stripped before splitting so that
@@ -55,13 +63,13 @@ def segments(qualified: str) -> list[str]:
     about segment ordering for namespace identification.
     """
     if not qualified:
-        return []
+        return ()
     # Fast path: a name with neither a ``::`` separator nor a template ``<``
     # is its own single segment -- the overwhelmingly common case. See
     # diff_namespaces.py's history for why this matters for perf on
     # versioned-symbol libraries with thousands of plain-name findings.
     if "::" not in qualified and "<" not in qualified:
-        return [qualified]
+        return (qualified,)
     out: list[str] = []
     depth = 0
     buf: list[str] = []
@@ -89,7 +97,7 @@ def segments(qualified: str) -> list[str]:
         i += 1
     if buf:
         out.append("".join(buf).strip())
-    return [s for s in out if s]
+    return tuple(s for s in out if s)
 
 
 def version_strip_segments(segs: list[str]) -> tuple[tuple[str, ...], int | None]:

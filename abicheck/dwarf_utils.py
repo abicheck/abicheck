@@ -360,7 +360,16 @@ def unwrap_cv_typedef(type_die: Any, CU: Any, depth: int = 0) -> Any | None:
 #: above). Override with ``ABICHECK_DWARF_LOW_MEMORY_MB`` (a negative value
 #: disables low-memory mode entirely -- every ``.debug_info`` size is >= 0,
 #: so it can never exceed a negative threshold).
-DEFAULT_DWARF_LOW_MEMORY_THRESHOLD_MB = 32
+#:
+#: ``0``: on for every binary with any ``.debug_info``. Measured, the
+#: cross-pass DIE reuse the cache buys does not pay for itself at any size:
+#: a 1.6 MiB-``.debug_info`` C++ fixture dumped ~5% faster with the cache
+#: freed (23.0/24.3 s vs 24.5/25.6 s, alternating) at 405 MB instead of
+#: 471-690 MB peak, and a real oneDAL dump 0:49 / 447 MB instead of
+#: 0:52 / 1.93 GB -- byte-identical snapshots in both. Retaining every DIE
+#: object costs more in allocation and GC than re-decoding the few a later
+#: pass touches.
+DEFAULT_DWARF_LOW_MEMORY_THRESHOLD_MB = 0
 
 
 def dwarf_low_memory_mode(dwarf_info: Any) -> bool:

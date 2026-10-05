@@ -253,3 +253,46 @@ def _rewrite_plan_strings(value: object) -> list[str]:
             for s in (*_rewrite_plan_strings(k), *_rewrite_plan_strings(v))
         ]
     return []
+
+
+def test_semantic_ir_occurrences_are_pruned_per_entry(monkeypatch) -> None:
+    """One closure among many occurrences sends that occurrence -- not the
+    whole ``occurrences`` mapping -- through the unpruned walk. Handing the
+    mapping off whole walked ~2M nodes on a real clang dump to rewrite 120
+    entries."""
+    occurrences = {}
+    for i in range(50):
+        spelling = f"W<{_closure('lambda', 'a.h', 3, 1)}>" if i == 7 else "int"
+        eid = entity_id_for_type((Namespace("ns"),), f"R{i}")
+        occurrences[OccurrenceId(eid)] = CanonicalEntity(
+            canonical_spelling=Fact.present(spelling)
+        )
+    # Ordinals come from the declarations; the IR's spelling is rewritten
+    # with them.
+    marked = f"W<{_closure('lambda', 'a.h', 3, 1)}>"
+    snap = AbiSnapshot(
+        library="l",
+        version="1",
+        types=[RecordType(name=marked, kind="struct", qualified_name=marked)],
+    )
+    snap.semantic_ir = SemanticIR(occurrences=occurrences)
+
+    handed: list[object] = []
+    walk = closure_marker_walk._walk_rewrite_strings
+
+    def recording(value, rewrite, *, field_name=None):  # type: ignore[no-untyped-def]
+        handed.append(value)
+        return walk(value, rewrite, field_name=field_name)
+
+    monkeypatch.setattr(closure_marker_walk, "_walk_rewrite_strings", recording)
+    renumber_anonymous_closure_identities(snap)
+
+    assert handed, "the marker-bearing occurrence must still be rewritten"
+    assert not any(type(v).__name__ == "FrozenMapping" for v in handed), [
+        type(v).__name__ for v in handed
+    ]
+    rewritten = [
+        e.canonical_spelling.value
+        for e in snap.canonical_ir.occurrences.values()  # type: ignore[union-attr]
+    ]
+    assert "W<(lambda:a.h#1)>" in rewritten

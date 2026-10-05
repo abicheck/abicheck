@@ -63,6 +63,7 @@ _ABI_TAG_RE = re.compile(r"\[abi:[^\]]*\]")
 _OPERATOR_SYMBOL_RE = re.compile(r"\boperator\s*(?:<=>|<<=|>>=|<<|>>|<=|>=|->\*?|<|>)")
 
 
+@memoized(maxsize=1 << 16)
 def strip_template_args(name: str) -> str:
     """Drop every top-level ``<...>`` template-argument list from *name*,
     keeping an operator name's own ``<``/``>`` (``C<int>::operator<<`` ->

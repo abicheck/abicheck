@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import dataclasses as _dataclasses
 import re as _re
-from collections.abc import Callable as _Callable
+from collections.abc import Callable as _Callable, Mapping as _Mapping
 from enum import Enum as _Enum
 
 from ..qualified_name_segments_walk import (
@@ -67,6 +67,32 @@ def _handoff_dataclass(value: object) -> bool:
     )
 
 
+def _other_mapping(value: object) -> bool:
+    """A mapping the walks descend entry by entry that is not a plain
+    ``dict`` -- e.g. ``SemanticIR.occurrences``' ``FrozenMapping``, by far
+    a snapshot's largest container. Handed off whole, one closure marker
+    anywhere in it sent every occurrence through the unpruned walk (2.0M
+    nodes to rewrite 120 entries on a 60-module clang dump)."""
+    return (
+        isinstance(value, _Mapping)
+        and not isinstance(value, dict)
+        and not _dataclasses.is_dataclass(value)
+    )
+
+
+def _descended(value: object, container: object = None) -> bool:
+    """Whether the pruned walks recurse into *value* (an entry of mapping
+    *container*, if given) rather than judge it as one hand-off subtree.
+
+    A non-dict mapping's dataclass values are hand-off units: each is small
+    (an occurrence's entity) and the flagger's own field loop judges it
+    faster than this module's per-field recursion would.
+    """
+    if _handoff_dataclass(value):
+        return container is None or type(container) is dict
+    return isinstance(value, list) or type(value) is dict or _other_mapping(value)
+
+
 def _collect_marking(
     value: object, out: list[str], flagged: set[int], collect: bool = True
 ) -> None:
@@ -74,7 +100,7 @@ def _collect_marking(
     the ``id`` of every hand-off subtree that may hold a marker.
 
     Descends exactly the way :func:`_rewrite_marked_subtrees` does -- lists,
-    plain dicts, non-``Fact`` dataclasses -- so every object that function
+    plain dicts, other non-dataclass mappings, non-``Fact`` dataclasses -- so every object that function
     hands to the walk has been judged here, by
     :func:`_collect_and_flag` (a superset of the walk's strings). One
     traversal answers both "which ordinals exist" and "what needs
@@ -88,15 +114,15 @@ def _collect_marking(
             if _collect_and_flag(item, out, _may_hold_marker, collect=collect):
                 flagged.add(id(item))
         return
-    if type(value) is dict:
-        for k, v in value.items():
+    if type(value) is dict or _other_mapping(value):
+        for k, v in value.items():  # type: ignore[attr-defined]
             key_collected = collect and (
                 (isinstance(k, str) and not isinstance(k, _Enum))
                 or (_dataclasses.is_dataclass(k) and not isinstance(k, type))
             )
             if _collect_and_flag(k, out, _may_hold_marker, collect=key_collected):
                 flagged.add(id(k))
-            if _handoff_dataclass(v) or isinstance(v, list) or type(v) is dict:
+            if _descended(v, value):
                 _collect_marking(v, out, flagged, collect)
             elif _collect_and_flag(v, out, _may_hold_marker, collect=collect):
                 flagged.add(id(v))
@@ -141,21 +167,24 @@ def _rewrite_marked_subtrees(
                 if new_item is not item:
                     value[i] = new_item
         return value
-    if type(value) is dict:
+    if type(value) is dict or _other_mapping(value):
         rewritten: dict[object, object] = {}
         changed = False
-        for k, v in value.items():
+        for k, v in value.items():  # type: ignore[attr-defined]
             # Only the key types the walk itself rewrites (a flag is a
             # superset, so a flagged tuple key must still stay as-is).
-            key_walked = (isinstance(k, str) and not isinstance(k, _Enum)) or (
-                _dataclasses.is_dataclass(k) and not isinstance(k, type)
+            key_walked = (
+                (isinstance(k, str) and not isinstance(k, _Enum))
+                or (_dataclasses.is_dataclass(k) and not isinstance(k, type))
+                # The unpruned walk rewrites every key of a non-dict mapping.
+                or type(value) is not dict
             )
             new_k = (
                 _walk_rewrite_strings(k, rewrite, field_name=field_name)
                 if key_walked and id(k) in flagged
                 else k
             )
-            if _handoff_dataclass(v) or isinstance(v, list) or type(v) is dict:
+            if _descended(v, value):
                 new_v = _rewrite_marked_subtrees(v, rewrite, flagged, field_name)
             elif id(v) in flagged:
                 new_v = _walk_rewrite_strings(v, rewrite, field_name=field_name)
@@ -164,9 +193,15 @@ def _rewrite_marked_subtrees(
             rewritten[new_k] = new_v
             if new_k != k or new_v is not v:
                 changed = True
-        if changed:
-            value.clear()
-            value.update(rewritten)
+        if not changed:
+            return value
+        if type(value) is not dict:
+            # The unpruned walk answers a non-dict mapping with a new plain
+            # dict too; the owning dataclass re-wraps it (``SemanticIR``'s
+            # ``__post_init__``).
+            return rewritten
+        value.clear()
+        value.update(rewritten)
         return value
     if (
         _dataclasses.is_dataclass(value)
