@@ -144,10 +144,6 @@ from ..model.change_catalog.kinds import ChangeKind, HasKind
 from ..model.execution_cache import MemoryCache, request_key
 from ..model.policy_file_protocol import ReclassifyRuleProtocol
 from .classification import (
-    API_BREAK_KINDS,
-    BREAKING_KINDS,
-    COMPATIBLE_KINDS,
-    RISK_KINDS,
     Verdict,
     effective_category,
     policy_kind_sets,
@@ -573,14 +569,7 @@ def resolve_kind_sets(
     """
     if kind_sets is not None:
         return kind_sets
-    if policy is None or policy == "strict_abi":
-        return (
-            frozenset(BREAKING_KINDS),
-            frozenset(API_BREAK_KINDS),
-            frozenset(COMPATIBLE_KINDS),
-            RISK_KINDS,
-        )
-    return policy_kind_sets(policy)
+    return policy_kind_sets(policy or "strict_abi")
 
 
 def _has_frozen_namespace_violation(change: HasKind) -> bool:

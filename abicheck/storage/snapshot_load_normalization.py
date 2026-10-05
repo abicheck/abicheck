@@ -41,7 +41,10 @@ from ..model.build_mode_facts import (
 )
 from ..model.extraction_contract import ExtractionContract
 from ..model.fact import Fact
-from ..name_classification import strip_anonymous_type_location
+from ..name_classification import (
+    has_anonymous_type_location,
+    strip_anonymous_type_location,
+)
 from ..qualified_name_segments_walk import _walk_rewrite_strings
 from .closure_identity import (
     _LAMBDA_IDENTITY_FIELDS,
@@ -88,7 +91,11 @@ def normalize_and_renumber_closure_identities_on_load(
         normalize_anonymous_type_spellings_on_load(snapshot)
         return renumber_anonymous_closure_identities(snapshot)
     marking = collect_closure_identity_marking(snapshot)
-    if not marking.has_marker:
+    if not marking.has_marker or not any(
+        has_anonymous_type_location(s) for s in marking.strings
+    ):
+        # No raw ``at <path>`` spelling: the strip would rewrite nothing, so
+        # the marking is still valid and its walk is not repeated.
         return renumber_with_marking(snapshot, marking)
     _strip_anonymous_type_locations(snapshot, marking.containers)
     return renumber_anonymous_closure_identities(snapshot)
@@ -133,7 +140,9 @@ def normalize_anonymous_type_spellings_on_load(snapshot: AbiSnapshot) -> AbiSnap
     collected = _lambda_identity_containers_and_strings(snapshot)
     if collected is None:
         return snapshot
-    containers, _strings = collected
+    containers, strings = collected
+    if not any(has_anonymous_type_location(s) for s in strings):
+        return snapshot
     _strip_anonymous_type_locations(snapshot, containers)
     return snapshot
 

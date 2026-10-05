@@ -44,6 +44,7 @@ break is at compile time.
 from __future__ import annotations
 
 from collections.abc import Iterable
+from functools import lru_cache
 from typing import TYPE_CHECKING, NamedTuple
 
 from .checker_policy import ChangeKind, ReachabilityState
@@ -738,7 +739,14 @@ def _identity_stable_keys(items: list[_IndexItem]) -> dict[object, set[str]]:
 
 def _scope_path(item: _IndexItem) -> tuple[str, ...]:
     """The declaration's own qualified-name segments, signature removed."""
-    return tuple(_segments(_strip_param_signature(item.qname)))
+    return _scope_path_of(item.qname)
+
+
+@lru_cache(maxsize=65536)
+def _scope_path_of(qname: str) -> tuple[str, ...]:
+    # Pure str -> tuple; the promotion check asks for the same qname's path
+    # once per removed experimental item, so memoize on the string.
+    return tuple(_segments(_strip_param_signature(qname)))
 
 
 def _signature_decls(
@@ -766,9 +774,9 @@ def _promotion_candidates(
     old_items: list[_IndexItem],
     new_items: list[_IndexItem],
     experimental_namespaces: tuple[str, ...],
+    old_decls: set[tuple[tuple[str, ...], tuple[str, ...]]],
 ) -> set[tuple[str, ...]]:
     """Stable, newly added NEW declarations *removed* could have moved to."""
-    old_decls = _signature_decls(old_items)
     out: set[tuple[str, ...]] = set()
     for item in new_items:
         path = _same_leaf_and_signature_under_root(item, removed, root)
@@ -787,10 +795,10 @@ def _promotion_claimants(
     old_items: list[_IndexItem],
     new_items: list[_IndexItem],
     experimental_namespaces: tuple[str, ...],
+    new_decls: set[tuple[tuple[str, ...], tuple[str, ...]]],
 ) -> set[tuple[str, ...]]:
     """Removed OLD experimental declarations that could claim the same
     target as *removed* (always including *removed* itself)."""
-    new_decls = _signature_decls(new_items)
     out: set[tuple[str, ...]] = {_scope_path(removed)}
     for item in old_items:
         path = _same_leaf_and_signature_under_root(item, removed, root)
@@ -808,6 +816,9 @@ def _unique_promotion_target(
     old_items: list[_IndexItem],
     new_items: list[_IndexItem],
     experimental_namespaces: tuple[str, ...],
+    *,
+    old_decls: set[tuple[tuple[str, ...], tuple[str, ...]]] | None = None,
+    new_decls: set[tuple[tuple[str, ...], tuple[str, ...]]] | None = None,
 ) -> str | None:
     """Return the one stable NEW declaration *removed* was promoted to, or
     ``None`` when the evidence does not prove a unique promotion.
@@ -852,13 +863,17 @@ def _unique_promotion_target(
     ):
         # `preview::foo` has no library root to anchor the search to.
         return None
+    if old_decls is None:
+        old_decls = _signature_decls(old_items)
     candidates = _promotion_candidates(
-        removed, root, old_items, new_items, experimental_namespaces
+        removed, root, old_items, new_items, experimental_namespaces, old_decls
     )
     if len(candidates) != 1:
         return None
+    if new_decls is None:
+        new_decls = _signature_decls(new_items)
     claimants = _promotion_claimants(
-        removed, root, old_items, new_items, experimental_namespaces
+        removed, root, old_items, new_items, experimental_namespaces, new_decls
     )
     if claimants != {removed_path}:
         return None
@@ -1011,6 +1026,10 @@ def _findings_for(
     behaviour. Always empty-equivalent for the type-sourced path since
     ``_type_index_items`` never assigns identity.
     """
+    # Built once per call: every removed experimental item's promotion check
+    # reads the same two declaration sets.
+    old_decls = _signature_decls(old_items or [])
+    new_decls = _signature_decls(new_items or [])
     # Grouped by RAW (stripped, leaf) key, not by qname: two overloads can
     # share one identical, undemangled declared qname (`_qualified_
     # function_name` returns a name-with-"::"  as-is, no signature), so a
@@ -1100,7 +1119,12 @@ def _findings_for(
         # of collapsed overloads is only promoted when every one is.
         promoted = bool(old_exp_items) and all(
             _unique_promotion_target(
-                item, old_items or [], new_items or [], experimental_namespaces
+                item,
+                old_items or [],
+                new_items or [],
+                experimental_namespaces,
+                old_decls=old_decls,
+                new_decls=new_decls,
             )
             is not None
             for item in old_exp_items

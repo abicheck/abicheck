@@ -29,9 +29,11 @@ def test_l4_jobs_clamps_oversubscription(monkeypatch, caplog) -> None:
     ceiling = sr._l4_jobs_ceiling()
     with caplog.at_level(logging.WARNING):
         jobs = sr._l4_jobs(100)
-    assert jobs == ceiling
-    assert jobs <= 64
-    assert any("oversubscription" in r.message for r in caplog.records)
+    # The requested 64 is itself a cap: on a host whose ceiling exceeds 64
+    # the request is honoured, not raised to the ceiling.
+    assert jobs == min(ceiling, 64)
+    clamped = any("oversubscription" in r.message for r in caplog.records)
+    assert clamped == (ceiling < 64)
 
 
 def test_l4_jobs_explicit_within_ceiling_is_honoured(monkeypatch) -> None:

@@ -47,6 +47,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from functools import cache
 
 from ..change_registry import REGISTRY as _REGISTRY, Verdict as Verdict
 from ..model.change_catalog.kinds import ChangeKind as ChangeKind, HasKind as HasKind
@@ -294,6 +295,7 @@ def impact_caveat_for(evidence_status: EvidenceStatus | None) -> str:
     )
 
 
+@cache
 def policy_kind_sets(
     policy: str,
 ) -> tuple[
@@ -307,6 +309,9 @@ def policy_kind_sets(
     This is the single source of truth for policy → kind-set mapping.
     Used by compute_verdict(), DiffResult properties, and report classification.
     Unknown policy names fall back to strict_abi.
+
+    Memoized per policy name: the result is built from import-time module
+    sets nothing mutates, and the verdict path asks for it once per finding.
     """
     if policy == "sdk_vendor":
         return (
