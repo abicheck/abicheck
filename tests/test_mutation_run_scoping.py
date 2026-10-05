@@ -866,7 +866,7 @@ def test_run_mode_unscoped_run_still_fails_on_unresolved(
             if cmd[:2] == ["mutmut", "run"]
             else (
                 "    abicheck.diff_types.x_alpha__mutmut_1: killed\n"
-                "    abicheck.diff_symbols.x_beta__mutmut_1: timeout\n",
+                "    abicheck.diff_symbols.x_beta__mutmut_1: suspicious\n",
                 0,
             )
         ),
@@ -1021,12 +1021,12 @@ def test_scoping_never_applies_over_a_saved_results_file(
         # Out of scope (diff_symbols.py, never touched by this diff) *and*
         # genuinely unresolved — must not be exempted just because
         # --scope-run-to-diff was passed.
-        "    abicheck.diff_symbols.x_beta__mutmut_1: timeout\n",
+        "    abicheck.diff_symbols.x_beta__mutmut_1: suspicious\n",
     )
     monkeypatch.setattr(
         gate,
         "load_cicd_stats",
-        lambda _dir: {"total": 2, "survived": 0, "killed": 1, "timeout": 1},
+        lambda _dir: {"total": 2, "survived": 0, "killed": 1, "suspicious": 1},
     )
     rc = gate.main(
         [

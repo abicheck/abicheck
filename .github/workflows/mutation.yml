@@ -15,7 +15,8 @@ name: Mutation testing
 #   schedule -> per-module baseline drift
 #     Full run, compared against the committed `mutation-baseline.json`. Per
 #     module, so a regression in one module cannot be paid for by an unrelated
-#     module's improvement.
+#     module's improvement. With no baseline committed it records one instead
+#     (uploaded as the `mutation-baseline` artifact) rather than failing.
 #
 #   workflow_dispatch (write_baseline: true) -> record the baseline
 #     Deliberately manual: refreshing the baseline accepts the current survivor
@@ -49,10 +50,10 @@ permissions:
   contents: read
 
 env:
-  # The `mutmut` job's name and SHARD spell this as a literal 4 too (a job
+  # The `mutmut` job's name spells this as a literal 12 too (a job
   # name cannot read `env`); tests/test_mutation_workflow_contract.py keeps
   # them in step.
-  SHARD_COUNT: 4
+  SHARD_COUNT: 12
 
 jobs:
   # Path-match OR label, resolved at job level. A workflow-level `paths:`
@@ -80,6 +81,15 @@ jobs:
     outputs:
       run: ${{ steps.decide.outputs.run }}
       require_baseline: ${{ steps.decide.outputs.require_baseline }}
+      # Is mutation-baseline.json committed? Every drift gate needs it, and it
+      # has never been recorded: the dispatch run that writes it kept timing
+      # out, so every --require-baseline run failed in ~2 minutes and every
+      # weekly run failed outright -- a lane that was red without measuring.
+      baseline_available: ${{ steps.baseline.outputs.present }}
+      # Record a baseline on this run: an explicit dispatch request, or a
+      # weekly run that has no baseline to drift against (it bootstraps one
+      # instead of failing, so the lane can reach a gating state on its own).
+      record_baseline: ${{ steps.baseline.outputs.record }}
       shards: ${{ steps.plan.outputs.shards }}
       check_selection: ${{ github.event_name != 'pull_request' || steps.changed.outputs.selection == 'true' || steps.pyproject.outputs.relevant == 'true' }}
     steps:
@@ -87,6 +97,19 @@ jobs:
         with:
           # The pyproject step compares against the merge base.
           fetch-depth: 0
+      - name: Is a baseline recorded?
+        id: baseline
+        env:
+          WRITE_BASELINE: ${{ inputs.write_baseline }}
+        run: |
+          present=false
+          if [ -s mutation-baseline.json ]; then present=true; fi
+          record=false
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ] && [ "$WRITE_BASELINE" = "true" ]; then record=true; fi
+          if [ "$GITHUB_EVENT_NAME" = "schedule" ] && [ "$present" != "true" ]; then record=true; fi
+          echo "present=$present" >> "$GITHUB_OUTPUT"
+          echo "record=$record" >> "$GITHUB_OUTPUT"
+          echo "baseline present: $present; record this run: $record"
       - name: Detect changes to mutated modules (PR only)
         id: changed
         if: github.event_name == 'pull_request'
@@ -237,7 +260,8 @@ jobs:
         if: steps.decide.outputs.run == 'true'
         env:
           REQUIRE_BASELINE: ${{ steps.decide.outputs.require_baseline }}
-          WRITE_BASELINE: ${{ inputs.write_baseline }}
+          HAS_BASELINE: ${{ steps.baseline.outputs.present }}
+          RECORD: ${{ steps.baseline.outputs.record }}
           # Through `env`, not expanded into the script (zizmor
           # template-injection; see the diff-scoped step below).
           BASE_REF: ${{ github.base_ref }}
@@ -247,10 +271,11 @@ jobs:
             pull_request)
               args+=(--diff-scoped --scope-run-to-diff --scope-run-to-functions
                      --base-ref "origin/$BASE_REF")
-              if [ "$REQUIRE_BASELINE" = "true" ]; then args+=(--require-baseline); fi ;;
-            schedule) args+=(--require-baseline) ;;
+              if [ "$REQUIRE_BASELINE" = "true" ] && [ "$HAS_BASELINE" = "true" ]; then args+=(--require-baseline); fi ;;
+            schedule)
+              if [ "$RECORD" = "true" ]; then args+=(--write-baseline); else args+=(--require-baseline); fi ;;
             workflow_dispatch)
-              if [ "$WRITE_BASELINE" = "true" ]; then args+=(--write-baseline); fi ;;
+              if [ "$RECORD" = "true" ]; then args+=(--write-baseline); fi ;;
           esac
           shards=$(python3 scripts/check_mutation_score.py "${args[@]}" | tail -n 1)
           echo "shards: $shards"
@@ -259,12 +284,13 @@ jobs:
   mutmut:
     # One job per shard. A run that must measure the whole population (the
     # weekly drift run, a baseline recording, a PR that cannot be scoped)
-    # splits only_mutate into SHARD_COUNT disjoint module sets
-    # (`check_mutation_score.py --shard`); the per-module drift gate is per
-    # module by construction, so each shard gates its own modules exactly as
-    # one job would, in a fraction of the wall-clock time. A diff-scoped PR
+    # splits only_mutate's functions into SHARD_COUNT disjoint, size-balanced
+    # sets (`check_mutation_score.py --shard`); each shard gates its own
+    # functions against the baseline's per-function counts. Splitting by
+    # module could not get under the job ceiling: diff_platform.py alone ran
+    # past the 5h45m mutmut budget at 8 module shards. A diff-scoped PR
     # run is small and is not split: resolve plans it as shard 1 alone.
-    name: mutmut shard ${{ matrix.shard }}/4
+    name: mutmut shard ${{ matrix.shard }}/12
     needs: resolve
     if: needs.resolve.outputs.run == 'true'
     runs-on: ubuntu-latest
@@ -275,7 +301,7 @@ jobs:
         # [1, 2, 3, 4] for one that measures the whole population.
         shard: ${{ fromJSON(needs.resolve.outputs.shards) }}
     env:
-      SHARD: ${{ matrix.shard }}/4
+      SHARD: ${{ matrix.shard }}/12
       SHARD_INDEX: ${{ matrix.shard }}
     # The full baseline took just over two hours when this was first set to
     # 240 minutes (2x headroom over that). `only_mutate` has grown since
@@ -342,11 +368,11 @@ jobs:
         # cannot answer (see the resolve job): without it the job reports
         # "gated nothing" and still exits 0 — green for a run that checked
         # nothing, which is the shape this lane exists to remove (Codex
-        # review). It fails until mutation-baseline.json is recorded
-        # (workflow_dispatch, write_baseline: true), which is the honest
-        # state: a weakened test is only detectable as drift.
+        # review). Until mutation-baseline.json is committed there is no
+        # drift answer to require, so the step warns instead (see below).
         env:
           REQUIRE_BASELINE: ${{ needs.resolve.outputs.require_baseline }}
+          HAS_BASELINE: ${{ needs.resolve.outputs.baseline_available }}
           # Through `env`, not expanded into the script: a branch name is
           # attacker-chosen on a fork PR, and `${{ }}` inside `run:` is
           # substituted before the shell ever sees it (CodeRabbit review,
@@ -362,7 +388,18 @@ jobs:
             --base-ref "origin/$BASE_REF" --selection tests/mutation_test_selection.txt
           require=""
           if [ "$REQUIRE_BASELINE" = "true" ]; then
-            require="--require-baseline"
+            if [ "$HAS_BASELINE" = "true" ]; then
+              require="--require-baseline"
+            else
+              # No baseline is recorded yet, so a drift answer does not exist
+              # for any run. Failing here only made every detector-test PR
+              # red without measuring anything. Gate the changed functions
+              # and say plainly what this run could not check.
+              msg="mutation-baseline.json is not recorded yet: this run gates only the functions this branch changed, not survivor drift from weakened tests. The weekly run records it; commit its mutation-baseline artifact to enable drift gating."
+              echo "::warning title=Mutation drift not checked::$msg"
+              echo "### :warning: Mutation drift not checked" >> "$GITHUB_STEP_SUMMARY"
+              echo "$msg" >> "$GITHUB_STEP_SUMMARY"
+            fi
           fi
           # --scope-run-to-functions: with no baseline recorded, only the
           # mutants of the functions this branch changed are executed, which
@@ -374,7 +411,7 @@ jobs:
             $require \
             --json mutation-receipt.json
       - name: Run mutation testing (baseline drift)
-        if: github.event_name == 'schedule'
+        if: github.event_name == 'schedule' && needs.resolve.outputs.record_baseline != 'true'
         # --require-baseline: with no baseline recorded, this lane would return
         # 0 no matter how many mutants survived — a lane that advertises drift
         # gating while being report-only. Fail loudly and point at the dispatch
@@ -384,11 +421,12 @@ jobs:
             --shard "$SHARD" \
             --json mutation-receipt.json
       - name: Run mutation testing (record baseline)
-        if: github.event_name == 'workflow_dispatch'
+        # A dispatch run, or a weekly run bootstrapping the missing baseline.
+        if: github.event_name == 'workflow_dispatch' || needs.resolve.outputs.record_baseline == 'true'
         env:
-          WRITE_BASELINE: ${{ inputs.write_baseline }}
+          RECORD: ${{ needs.resolve.outputs.record_baseline }}
         run: |
-          if [ "$WRITE_BASELINE" = "true" ]; then
+          if [ "$RECORD" = "true" ]; then
             # One part per shard; the `gate` job merges them and refuses a
             # set that does not partition only_mutate exactly.
             python scripts/check_mutation_score.py --run --write-baseline \
@@ -490,22 +528,29 @@ jobs:
           # Skipped only when this run had nothing that could stale it.
           [ "$SELECTION" = "success" ] || [ "$SELECTION" = "skipped" ]
       - uses: actions/checkout@v6
-        if: github.event_name == 'workflow_dispatch' && inputs.write_baseline
+        if: needs.resolve.outputs.record_baseline == 'true'
       - uses: actions/download-artifact@v8
-        if: github.event_name == 'workflow_dispatch' && inputs.write_baseline
+        if: needs.resolve.outputs.record_baseline == 'true'
         with:
           pattern: mutmut-results-*
           path: parts
           merge-multiple: true
       - name: Merge the per-shard baselines
-        if: github.event_name == 'workflow_dispatch' && inputs.write_baseline
+        if: needs.resolve.outputs.record_baseline == 'true'
         run: |
           python3 scripts/mutation_scope.py merge-baselines \
             parts/mutation-baseline.part-*.json --out mutation-baseline.json
           echo '--- mutation-baseline.json ---'
           cat mutation-baseline.json
+          {
+            echo "## Mutation baseline recorded"
+            echo
+            echo "Download the \`mutation-baseline\` artifact of this run and commit it"
+            echo "as \`mutation-baseline.json\` at the repository root. Until it is"
+            echo "committed, weekly runs keep recording instead of gating drift."
+          } >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v7
-        if: github.event_name == 'workflow_dispatch' && inputs.write_baseline
+        if: needs.resolve.outputs.record_baseline == 'true'
         with:
           name: mutation-baseline
           path: mutation-baseline.json

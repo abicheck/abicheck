@@ -247,12 +247,6 @@ def test_the_committed_selection_is_well_formed() -> None:
     )
 
 
-def test_extend_selection_widens_to_the_generators_own_sentinel() -> None:
-    """mutation_scope restates FULL_SELECTION rather than importing its
-    sibling at module load; the two spellings must stay one value."""
-    assert list(scope._FULL_SELECTION) == gen.FULL_SELECTION
-
-
 def test_selection_rule_accepts_both_legitimate_shapes_and_nothing_else() -> None:
     every = lambda p: True  # noqa: E731
     assert gen.FULL_SELECTION == ["tests/"]
@@ -286,8 +280,8 @@ def _exists(paths: set[str]):
         (["tests/sub/test_deep.py"], {"tests/sub/test_deep.py"}, ["tests/sub/test_deep.py", *_SEL]),
         (["tests/test_a.py"], {"tests/test_a.py"}, _SEL),
         (["tests/test_gone.py"], set(), _SEL),
-        (["tests/conftest.py"], {"tests/conftest.py"}, ["tests/"]),
-        (["tests/_helpers.py", "tests/test_new.py"], {"tests/_helpers.py", "tests/test_new.py"}, ["tests/"]),
+        (["tests/conftest.py"], {"tests/conftest.py"}, _SEL),
+        (["tests/_helpers.py", "tests/test_new.py"], {"tests/_helpers.py", "tests/test_new.py"}, [*_SEL, "tests/test_new.py"]),
         (["tests/data/x.json"], {"tests/data/x.json"}, _SEL),
     ],
 )  # fmt: skip
@@ -319,18 +313,19 @@ def test_the_widened_selection_passes_the_committed_files_own_check(seed: int) -
 
 def test_extend_selection_never_narrows() -> None:
     """Exhaustive over every subset of a small path universe: the result
-    always contains the committed selection, or is the whole suite."""
+    always contains the committed selection, and never widens to the whole
+    suite (that made every helper-touching PR run ~50k tests per mutant)."""
     universe = ["tests/test_a.py", "tests/test_new.py", "tests/conftest.py",
                 "tests/_h.py", "abicheck/x.py", "tests/d.json"]  # fmt: skip
     for mask in range(1 << len(universe)):
         changed = [p for i, p in enumerate(universe) if mask >> i & 1]
-        out = scope.extend_selection(_SEL, changed, _exists(set(universe)))
-        assert out == ["tests/"] or set(_SEL) <= set(out)
+        out = scope.extend_selection(_SEL, changed, _exists(set(universe)), {})
+        assert set(_SEL) <= set(out) and "tests/" not in out
         # The widened file is checked by the suite it feeds, under the same
         # rule as the committed one (test_the_committed_selection_is_well_formed).
         assert not gen.selection_problems(out, lambda p: True), out
         for path in changed:
-            if path.startswith("tests/test_") and out != ["tests/"]:
+            if path.startswith("tests/test_"):
                 assert path in out
 
 
@@ -466,12 +461,87 @@ def test_arm_rescans_when_a_matching_module_appears_under_another_name(
     assert len(scans) == 2
 
 
-def test_the_widened_selection_is_the_value_the_well_formed_check_accepts() -> None:
-    """``extend-selection`` writes its own spelling of "the whole suite";
-    ``test_the_committed_selection_is_well_formed`` runs inside that widened
-    stats pass and must accept exactly that value. Pinned together so a
-    change to either spelling cannot reopen the abort."""
-    widened = scope.extend_selection(
-        ["tests/test_a.py"], ["tests/_some_helper.py"], lambda p: True
+# --------------------------------------------------------------------------
+# Helper changes add their importers, not the whole suite
+# --------------------------------------------------------------------------
+
+_SOURCES = {
+    "tests/_util.py": "import os\n",
+    "tests/_mid.py": "from tests._util import thing\n",
+    "tests/regressions/manifest.py": "X = 1\n",
+    "tests/regressions/__init__.py": "",
+    "tests/test_direct.py": "from ._util import thing\n",
+    "tests/test_via_mid.py": "import tests._mid as m\n",
+    "tests/test_pkg_form.py": "from tests.regressions import manifest\n",
+    "tests/test_dotted.py": "from regressions.manifest import BUG_CLASSES\n",
+    "tests/test_unrelated.py": "import json\nfrom abicheck import util\n",
+    "tests/test_mentions_in_text.py": "# _util is mentioned, never imported\nX = '_util'\n",
+    "tests/test_multiline.py": "from tests import (\n    os_helpers,\n    _mid,\n)\n",
+    "tests/test_submodule.py": "import tests.regressions.manifest\n",
+}
+
+
+@pytest.mark.parametrize(
+    ("helper", "expected"),
+    [
+        ("tests/_util.py", {"tests/test_direct.py", "tests/test_via_mid.py", "tests/test_multiline.py"}),
+        ("tests/_mid.py", {"tests/test_via_mid.py", "tests/test_multiline.py"}),
+        ("tests/regressions/manifest.py", {"tests/test_pkg_form.py", "tests/test_dotted.py", "tests/test_submodule.py"}),
+        # A package initializer runs for every submodule import of it.
+        ("tests/regressions/__init__.py", {"tests/test_pkg_form.py", "tests/test_dotted.py", "tests/test_submodule.py"}),
+    ],
+)  # fmt: skip
+def test_helper_importers_follows_every_import_spelling(
+    helper: str, expected: set[str]
+) -> None:
+    """Independent oracle: the expected sets are written by hand from the
+    fixture's import lines, covering relative, aliased, package-attribute
+    and dotted spellings, a parenthesized multi-line import, a package
+    initializer reached through a submodule import, and a transitive
+    helper chain."""
+    assert scope.helper_importers([helper], _SOURCES) == expected
+
+
+def test_a_helper_change_adds_its_importers_and_nothing_else() -> None:
+    """A helper change used to widen the stats pass to the whole suite,
+    which made the run outlast mutmut's timeout. It now adds exactly the
+    files that import the helper, and the result passes the well-formed
+    check the stats pass runs against it."""
+    present = set(_SOURCES)
+    out = scope.extend_selection(_SEL, ["tests/_util.py"], _exists(present), _SOURCES)
+    assert out == sorted(
+        {
+            *_SEL,
+            "tests/test_direct.py",
+            "tests/test_via_mid.py",
+            "tests/test_multiline.py",
+        }
     )
-    assert widened == gen.FULL_SELECTION
+    assert out != gen.FULL_SELECTION
+    assert not gen.selection_problems(out, lambda p: True)
+
+
+@pytest.mark.parametrize("seed", range(20))
+def test_helper_importers_is_the_reachability_closure(seed: int) -> None:
+    """Random import graphs over helpers and tests: the answer equals a
+    plain BFS over the generated edge list (the oracle never parses text)."""
+    rng = random.Random(seed)
+    helpers = [f"tests/_h{i}.py" for i in range(6)]
+    tests_ = [f"tests/test_t{i}.py" for i in range(8)]
+    edges = {p: rng.sample(helpers, rng.randint(0, 2)) for p in helpers + tests_}
+    sources = {
+        p: "".join(
+            f"from tests.{PurePosixPath(d).stem} import x\n" for d in deps if d != p
+        )
+        for p, deps in edges.items()
+    }
+    changed = rng.sample(helpers, rng.randint(1, 2))
+    reached, todo = set(changed), list(changed)
+    while todo:
+        cur = todo.pop()
+        for p, deps in edges.items():
+            if cur in deps and p != cur and p not in reached:
+                reached.add(p)
+                todo.append(p)
+    expected = {p for p in reached if p in tests_}
+    assert scope.helper_importers(changed, sources) == expected
