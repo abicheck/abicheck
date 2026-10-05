@@ -56,9 +56,7 @@ from ..model.availability import FactStatus
 from ..model.fact import Fact
 from ..model.identity import EntityKind
 from ..model.occurrence import OccurrenceId, canonical_key
-from ..model.semantic_ir import CanonicalEntity, SemanticIR
-from ..model.semantic_ir_declaration_facts import DECLARATION_FIELDS
-from ..model.semantic_ir_function_signature import SIGNATURE_FIELDS
+from ..model.semantic_ir import PROJECTION_FIELD_NAMES, CanonicalEntity, SemanticIR
 from ..model.semantic_ir_record_layout import LEGACY_LAYOUT_DIAGNOSTIC
 from .entity_ids import domain_entity_id_from_dto, domain_entity_id_to_dto
 from .guards import (
@@ -91,7 +89,7 @@ __all__ = [
 #: (``compare/function_signature.py``, ``compare/variables.py``), so a stored
 #: copy would be a second representation nothing reads (the plan's "6B
 #: closure"). A document carrying one is refused rather than ignored.
-PROJECTION_FACTS = frozenset((*SIGNATURE_FIELDS, *DECLARATION_FIELDS))
+PROJECTION_FACTS = PROJECTION_FIELD_NAMES
 
 _FACT_FIELDS = tuple(
     f.name
