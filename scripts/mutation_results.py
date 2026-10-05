@@ -66,9 +66,24 @@ STATUS_SURVIVED = "survived"
 STATUS_SKIPPED = "skipped"
 STATUS_TYPE_CHECKED = "caught by type check"
 
+STATUS_TIMEOUT = "timeout"
+
 #: Statuses that represent a *resolved, acceptable* outcome: the mutant was
-#: killed by a test, deliberately excluded, or rejected by the type checker.
-RESOLVED_OK_STATUSES = frozenset({STATUS_KILLED, STATUS_SKIPPED, STATUS_TYPE_CHECKED})
+#: killed by a test, deliberately excluded, rejected by the type checker, or
+#: made the suite hang.
+#:
+#: ``timeout`` counts as detected, as it does in PIT and Stryker. Every
+#: timeout the first complete run produced (28 in one shard, reproduced
+#: locally) was a mutation that made the code loop forever --
+#: ``while i != -1`` -> ``while i != +1``, ``queue.pop()`` -> ``None`` in a
+#: BFS -- so the suite observably did not pass. Treating them as an
+#: incomplete measurement failed every full run on mutants the tests had in
+#: fact caught. The residual risk is a slow runner turning a survivor into a
+#: timeout; mutmut's per-mutant limit is a multiple of the baseline duration,
+#: and timeouts are still counted and printed separately.
+RESOLVED_OK_STATUSES = frozenset(
+    {STATUS_KILLED, STATUS_SKIPPED, STATUS_TYPE_CHECKED, STATUS_TIMEOUT}
+)
 
 #: The statuses mutmut 3.7.0 emits that mean the measurement did not resolve.
 #: Accepting any of these as "not a survivor" would let an under-resolved run
@@ -82,7 +97,6 @@ RESOLVED_OK_STATUSES = frozenset({STATUS_KILLED, STATUS_SKIPPED, STATUS_TYPE_CHE
 UNRESOLVED_STATUSES = frozenset(
     {
         "no tests",
-        "timeout",
         "suspicious",
         "not checked",
         "check was interrupted by user",
@@ -279,22 +293,27 @@ def summary_run_is_complete(text: str) -> bool:
 
 
 def count_unresolved(text: str) -> int:
-    """Mutants that neither died nor survived (timeout / suspicious / no-tests).
+    """Mutants that neither died nor survived (suspicious / no-tests / ...).
 
     Same precedence as :func:`parse_survivors`: the per-mutant listing when
-    there is one, otherwise the *last* summary render. ``🔇`` (skipped) is
-    deliberately excluded — that status means "intentionally not mutated", not
-    "not measured".
+    there is one, otherwise the *last* summary render. ``🔇`` (skipped) and
+    ``⏰`` (timeout, see :data:`RESOLVED_OK_STATUSES`) are excluded — neither
+    means "not measured".
     """
     records = parse_mutant_records(text)
     if records:
         return sum(1 for r in records if r.is_unresolved)
     total = 0
-    for pat in (_EMOJI_TIMEOUT, _EMOJI_SUSPICIOUS, _EMOJI_NO_TESTS):
+    for pat in (_EMOJI_SUSPICIOUS, _EMOJI_NO_TESTS):
         hits = pat.findall(text or "")
         if hits:
             total += int(hits[-1])
     return total
+
+
+def count_timeouts(records: list[MutantRecord]) -> int:
+    """Mutants that made the suite hang: detected, but reported on their own."""
+    return sum(1 for r in records if r.status == STATUS_TIMEOUT)
 
 
 def survivors_by_module(records: list[MutantRecord]) -> dict[str, list[str]]:

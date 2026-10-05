@@ -37,8 +37,9 @@ Three gates, in increasing order of how much they need a baseline:
 ``--baseline`` / :data:`SURVIVOR_BASELINE` (global total)
     The original whole-repository drift check, kept for continuity.
 
-Regardless of gate, an *unresolved* run (timeout / suspicious / no-tests /
-segfault / interrupted) is a failed measurement, never a clean zero.
+Regardless of gate, an *unresolved* run (suspicious / no-tests / segfault /
+interrupted) is a failed measurement, never a clean zero. A ``timeout`` is a
+detected mutant (see ``mutation_results.RESOLVED_OK_STATUSES``).
 
 Usage::
 
@@ -83,6 +84,7 @@ from mutation_results import (  # noqa: E402
     # `gate.MODULE_SCOPE`; `as` keeps `ruff --fix` from stripping it as unused.
     MODULE_SCOPE as MODULE_SCOPE,
     MutantRecord,
+    count_timeouts,
     count_unresolved,
     functions_covering_lines,
     load_cicd_stats,
@@ -94,11 +96,15 @@ from mutation_results import (  # noqa: E402
 from mutation_scope import (  # noqa: E402
     NOTHING_MATCHES_MARKER,
     function_run_scope,
+    function_scope_pattern,
     is_splittable,
-    module_scope_pattern,
+    mutation_units,
     parse_shard,
     planned_shards,
-    shard_modules,
+    report_unassigned,
+    shard_assignment,
+    shard_drift_gate,
+    unit_key,
 )
 
 __all__ = [
@@ -1391,6 +1397,7 @@ def main(argv: list[str] | None = None) -> int:
     scope_patterns: list[str] | None = None
     scope_modules: set[str] = set()
     scope_mode = "full"
+    shard_units: list[tuple[str, str]] = []
     if (
         args.run
         and not args.results_file
@@ -1503,15 +1510,20 @@ def main(argv: list[str] | None = None) -> int:
             print(f"mutation-score: shard {args.shard} has nothing to run")
             return 0
         if not unsplittable and shard_only_mutate:
-            mods = shard_modules(shard_only_mutate, shard_k, shard_n, REPO_ROOT)
-            if not mods:
-                # More shards than modules. An empty pattern list would make
+            shard_units = shard_assignment(
+                shard_only_mutate, shard_k, shard_n, REPO_ROOT
+            )
+            if not shard_units:
+                # More shards than functions. An empty pattern list would make
                 # `mutmut run` measure the *whole* population, not none of it.
-                print(f"mutation-score: shard {args.shard} has no module assigned")
+                print(f"mutation-score: shard {args.shard} has no function assigned")
                 return 0
-            scope_patterns = [module_scope_pattern(m) for m in mods]
-            scope_modules, scope_mode = set(mods), "shard"
-            print(f"mutation-score: shard {args.shard} measures: " + ", ".join(mods))
+            scope_patterns = [function_scope_pattern(m, q) for m, q in shard_units]
+            scope_modules, scope_mode = {m for m, _ in shard_units}, "shard"
+            print(
+                f"mutation-score: shard {args.shard} measures {len(shard_units)} "
+                "function(s) across: " + ", ".join(sorted(scope_modules))
+            )
 
     gather_started = time.monotonic()
     text, stats = _gather(args, scope_patterns)
@@ -1579,6 +1591,16 @@ def main(argv: list[str] | None = None) -> int:
     )
     by_module = survivors_by_module(records)
 
+    if (
+        scope_mode == "shard"
+        and records
+        and not report_unassigned(
+            ((r.module_path, r.function) for r in records),
+            mutation_units(load_only_mutate_globs() or [], REPO_ROOT),
+        )
+    ):
+        return 1
+
     # Two independent sources must agree. `mutmut results`' per-mutant listing
     # and `mutmut export-cicd-stats`' counters are produced by the same run, so
     # a disagreement means this parser no longer understands the output — which
@@ -1623,7 +1645,10 @@ def main(argv: list[str] | None = None) -> int:
     if stats:
         msg += f" of {stats.get('total', '?')} total"
     if unresolved:
-        msg += f", {unresolved} unresolved (timeout/suspicious/no-tests/segfault)"
+        msg += f", {unresolved} unresolved (suspicious/no-tests/segfault/not checked)"
+    timeouts = count_timeouts(records)
+    if timeouts:
+        msg += f", {timeouts} timed out (counted as detected)"
     print(msg)
     for module, keys in by_module.items():
         print(f"  {module}: {len(keys)}")
@@ -1650,7 +1675,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if unresolved_for_gate and (gating_active or args.write_baseline):
         print(
-            f"ERROR: {unresolved_for_gate} mutant(s) did not resolve (timeout/"
+            f"ERROR: {unresolved_for_gate} mutant(s) did not resolve ("
             "suspicious/no-tests/segfault) — the measurement is incomplete; fix "
             "or silence them so the survivor count is trustworthy."
         )
@@ -1682,15 +1707,21 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     if args.write_baseline:
+        mine = set(shard_units)
         doc = render_baseline(
-            [r for r in records if r.module_path in scope_modules]
+            [r for r in records if (r.module_path, r.function) in mine]
             if scope_mode == "shard"
             else records
         )
         # What this document measured, so `mutation_scope.py merge-baselines`
-        # can refuse shard parts that do not partition only_mutate exactly.
-        doc["measured_modules"] = sorted(
-            scope_modules if scope_mode == "shard" else load_only_mutate_globs() or []
+        # can refuse shard parts that do not partition the units exactly.
+        doc["measured_units"] = sorted(
+            unit_key(u)
+            for u in (
+                shard_units
+                if scope_mode == "shard"
+                else mutation_units(load_only_mutate_globs() or [], REPO_ROOT)
+            )
         )
         Path(args.baseline_file).write_text(
             json.dumps(doc, indent=2, sort_keys=False) + "\n", encoding="utf-8"
@@ -1783,7 +1814,15 @@ def main(argv: list[str] | None = None) -> int:
         else:
             print("mutation-score: diff-scoped OK (no survivors in changed functions)")
 
-    if baseline_modules is not None:
+    if baseline_modules is not None and scope_mode == "shard":
+        exit_code |= shard_drift_gate(
+            ((r.module_path, r.function, r.is_survivor) for r in records),
+            baseline_modules,
+            function_baseline,
+            shard_units,
+            args.baseline_file,
+        )
+    elif baseline_modules is not None:
         failures, skipped_modules = check_per_module(
             records, baseline_modules, scope_modules
         )

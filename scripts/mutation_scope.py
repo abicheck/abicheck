@@ -36,12 +36,13 @@ paths outside ``only_mutate`` does not matter here the way it does for
 module-level scoping: nothing this run reports is a claim about an
 untouched function.
 
-**Sharding** (`shard_modules`, `merge_baseline_parts`). A run that must
-measure the whole population is split into N disjoint module sets, one CI
-job each. The per-module drift gate is per module by construction, so each
-shard gates its own modules exactly as a full run would; a baseline is
-recorded per shard and merged, refusing any merge whose parts do not
-partition ``only_mutate`` exactly.
+**Sharding** (`shard_assignment`, `merge_baseline_parts`). A run that must
+measure the whole population is split into N disjoint sets of *functions*
+(`mutation_units`), balanced by size, one CI job each. Each shard gates its
+own functions against the baseline's per-function counts
+(`check_shard_drift`) and checks that every mutant mutmut produced belongs to
+some shard (`unassigned_records`); a baseline is recorded per shard and
+merged, refusing any merge whose parts do not partition the units exactly.
 """
 
 from __future__ import annotations
@@ -141,31 +142,170 @@ def parse_shard(spec: str) -> tuple[int, int]:
     return k, n
 
 
-def shard_modules(
-    only_mutate: Iterable[str], k: int, n: int, repo_root: Path = REPO_ROOT
-) -> list[str]:
-    """The modules shard *k* of *n* measures.
+def mutable_functions(source: str) -> dict[str, int]:
+    """``qualname -> source lines`` for every function mutmut mutates in *source*.
 
-    Longest-processing-time greedy over each module's source size (a proxy
-    for its mutant count), ties broken by path, so the partition is
-    deterministic, disjoint, and covers ``only_mutate`` exactly across all
-    *n* shards — every shard computes the same assignment independently.
+    Mirrors mutmut 3.x's trampoline: a top-level ``def`` (``x_<name>``) and a
+    method of a top-level class (``xǁClassǁmethod``) get mutants; a nested
+    function's mutants are attributed to its enclosing top-level function, and
+    a nested class's methods get none. A name defined twice (``@overload``, a
+    property setter) is one unit, its weights summed. Unparseable source
+    yields ``{}``; any mutant this misses is caught at run time by
+    `unassigned_records`, never silently dropped.
     """
+    try:
+        tree = ast.parse(source)
+    except (SyntaxError, ValueError):
+        return {}
+    units: dict[str, int] = {}
 
-    def weight(path: str) -> int:
+    def add(qualname: str, node: ast.AST) -> None:
+        end = getattr(node, "end_lineno", None) or node.lineno  # type: ignore[attr-defined]
+        units[qualname] = units.get(qualname, 0) + end - node.lineno + 1  # type: ignore[attr-defined]
+
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            add(node.name, node)
+        elif isinstance(node, ast.ClassDef):
+            for member in node.body:
+                if isinstance(member, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    add(f"{node.name}.{member.name}", member)
+    return units
+
+
+def mutation_units(
+    only_mutate: Iterable[str], repo_root: Path = REPO_ROOT
+) -> dict[tuple[str, str], int]:
+    """``(module_path, qualname) -> weight`` over every ``only_mutate`` module."""
+    units: dict[tuple[str, str], int] = {}
+    for module in sorted(set(only_mutate)):
         try:
-            return (repo_root / path).stat().st_size
+            source = (repo_root / module).read_text(encoding="utf-8")
         except OSError:
-            return 0
+            continue
+        for qualname, weight in mutable_functions(source).items():
+            units[(module, qualname)] = weight
+    return units
 
-    modules = sorted(set(only_mutate), key=lambda p: (-weight(p), p))
+
+def shard_assignment(
+    only_mutate: Iterable[str], k: int, n: int, repo_root: Path = REPO_ROOT
+) -> list[tuple[str, str]]:
+    """The ``(module_path, qualname)`` units shard *k* of *n* measures.
+
+    Longest-processing-time greedy over each function's line count (a proxy
+    for its mutant count), ties broken by identity, so the partition is
+    deterministic, disjoint, and covers every unit exactly across all *n*
+    shards — every shard computes the same assignment independently.
+
+    The unit is a function, not a module: the largest modules
+    (``diff_platform.py``, ``diff_types.py``) each held close to a whole
+    job's 5h45m mutmut budget on their own, so module-level shards could not
+    be balanced below that floor however many there were.
+    """
+    units = mutation_units(only_mutate, repo_root)
+    order = sorted(units, key=lambda u: (-units[u], u))
     loads = [0] * n
-    assigned: list[list[str]] = [[] for _ in range(n)]
-    for module in modules:
+    assigned: list[list[tuple[str, str]]] = [[] for _ in range(n)]
+    for unit in order:
         target = min(range(n), key=lambda i: (loads[i], i))
-        assigned[target].append(module)
-        loads[target] += weight(module)
+        assigned[target].append(unit)
+        loads[target] += units[unit]
     return sorted(assigned[k - 1])
+
+
+def unit_key(unit: tuple[str, str]) -> str:
+    """``("abicheck/x.py", "C.m")`` -> ``"abicheck/x.py::C.m"`` (JSON-safe)."""
+    return f"{unit[0]}::{unit[1]}"
+
+
+def unassigned_records(
+    records: Iterable[tuple[str, str]], units: Iterable[tuple[str, str]]
+) -> list[tuple[str, str]]:
+    """``(module_path, function)`` pairs mutmut produced that no unit covers.
+
+    Every shard sees mutmut's full listing (out-of-shard mutants read ``not
+    checked``), so each can check the whole partition. A non-empty answer
+    means `mutable_functions` no longer matches mutmut's own enumeration and
+    those mutants would be measured by no shard at all.
+    """
+    known = set(units)
+    return sorted({r for r in records if r not in known})
+
+
+def report_unassigned(
+    records: Iterable[tuple[str, str]], units: Iterable[tuple[str, str]]
+) -> bool:
+    """Print and return False when some mutant belongs to no shard."""
+    stray = unassigned_records(records, units)
+    if stray:
+        print(
+            f"ERROR: {len(stray)} function(s) carry mutants that no shard is "
+            "assigned (mutation_scope.mutable_functions no longer matches "
+            "mutmut's enumeration): " + ", ".join(f"{m}::{f}" for m, f in stray[:20])
+        )
+    return not stray
+
+
+def shard_drift_gate(
+    records: Iterable[tuple[str, str, bool]],
+    baseline_modules: Mapping[str, int],
+    function_baseline: Mapping[tuple[str, str], int],
+    units: list[tuple[str, str]],
+    baseline_file: str,
+) -> int:
+    """The drift gate for a function shard: prints its verdict, returns 0/1.
+
+    A shard holds part of a module, so the module totals in the baseline
+    cannot be compared; its per-function counts can. A baseline without them
+    fails closed rather than scoring nothing.
+    """
+    if baseline_modules and not function_baseline:
+        print(
+            f"ERROR: {baseline_file} carries no per-function counts, which a "
+            "function-sharded run needs to score drift. Re-record it "
+            "(workflow_dispatch, write_baseline: true)."
+        )
+        return 1
+    failures = check_shard_drift(records, function_baseline, units)
+    if failures:
+        print(
+            "ERROR: survivor count rose above baseline for this shard's "
+            "functions — a test was weakened or new under-verified code landed:"
+        )
+        print("\n".join(failures))
+        return 1
+    print(f"mutation-score: baseline OK for this shard's {len(units)} function(s)")
+    return 0
+
+
+def check_shard_drift(
+    records: Iterable[tuple[str, str, bool]],
+    function_baseline: Mapping[tuple[str, str], int],
+    units: Iterable[tuple[str, str]],
+) -> list[str]:
+    """Per-module drift over only the functions this shard measured.
+
+    *records* is ``(module_path, function, is_survivor)``. A shard holds part
+    of a module, so its module total is compared against the sum of the
+    baseline's per-function counts for exactly those functions.
+    """
+    mine = set(units)
+    now: dict[str, int] = {}
+    for module, function, survived in records:
+        if survived and (module, function) in mine:
+            now[module] = now.get(module, 0) + 1
+    was: dict[str, int] = {}
+    for module, function in mine:
+        was[module] = was.get(module, 0) + function_baseline.get((module, function), 0)
+    failures = []
+    for module in sorted(set(now) | set(was)):
+        current, recorded = now.get(module, 0), was.get(module, 0)
+        if current > recorded:
+            failures.append(
+                f"  {module}: {recorded} -> {current} (+{current - recorded})"
+            )
+    return failures
 
 
 def is_splittable(
@@ -192,32 +332,35 @@ def planned_shards(
 ) -> list[int]:
     """The 1-based shard indices of *n* that have work (``--plan-shards``).
 
-    A shard that would be assigned no module (``n > len(only_mutate)``) is
+    A shard that would be assigned no unit (more shards than functions) is
     not started at all.
     """
     if not splittable or not only_mutate:
         return [1]
-    return [k for k in range(1, n + 1) if shard_modules(only_mutate, k, n, repo_root)]
+    return [
+        k for k in range(1, n + 1) if shard_assignment(only_mutate, k, n, repo_root)
+    ]
 
 
 def merge_baseline_parts(
-    parts: list[dict[str, object]], only_mutate: Iterable[str]
+    parts: list[dict[str, object]], units: Iterable[tuple[str, str]]
 ) -> dict[str, object]:
     """Combine per-shard baseline documents into one full baseline.
 
-    Each part must declare ``measured_modules``. The parts must be disjoint
-    and their union must equal ``only_mutate`` — a missing shard would record
-    its modules as zero survivors, which is the silent baseline loss the
-    gate's own ``--write-baseline`` guards already refuse.
+    Each part declares ``measured_units`` (`unit_key` spellings). The parts
+    must be disjoint and their union must equal *units* — a missing shard
+    would record its functions as zero survivors, the silent baseline loss
+    the gate's own ``--write-baseline`` guards already refuse. A module split
+    across shards has its survivors, keys and per-function counts summed.
     """
-    expected = set(only_mutate)
+    expected = {unit_key(u) for u in units}
     seen: set[str] = set()
-    modules: dict[str, object] = {}
+    modules: dict[str, dict[str, object]] = {}
     comment: object = None
     for part in parts:
-        measured = part.get("measured_modules")
+        measured = part.get("measured_units")
         if not isinstance(measured, list):
-            raise ValueError("baseline part lacks a measured_modules list")
+            raise ValueError("baseline part lacks a measured_units list")
         overlap = seen & set(measured)
         if overlap:
             raise ValueError(f"baseline parts overlap on {sorted(overlap)}")
@@ -226,26 +369,32 @@ def merge_baseline_parts(
         if not isinstance(part_modules, dict):
             raise ValueError("baseline part lacks a modules mapping")
         for module, entry in part_modules.items():
-            if module not in measured:
-                raise ValueError(
-                    f"baseline part records {module}, which it did not measure"
-                )
-            modules[module] = entry
+            if not isinstance(entry, dict):
+                raise ValueError(f"baseline part entry for {module} is malformed")
+            functions = entry.get("functions") or {}
+            for function in functions:
+                if unit_key((module, function)) not in measured:
+                    raise ValueError(
+                        f"baseline part records {module}::{function}, which it "
+                        "did not measure"
+                    )
+            merged = modules.setdefault(
+                module, {"survivors": 0, "keys": [], "functions": {}}
+            )
+            merged["survivors"] += int(entry.get("survivors", 0))  # type: ignore[operator]
+            merged["keys"] = sorted([*merged["keys"], *(entry.get("keys") or [])])  # type: ignore[misc]
+            merged["functions"].update(functions)  # type: ignore[attr-defined]
         comment = comment or part.get("_comment")
     if seen != expected:
         missing = sorted(expected - seen)
         extra = sorted(seen - expected)
         raise ValueError(
-            f"baseline parts do not partition only_mutate (missing={missing}, "
-            f"unexpected={extra})"
+            f"baseline parts do not partition the mutation units "
+            f"(missing={missing[:20]}, unexpected={extra[:20]})"
         )
-    total = 0
-    for entry in modules.values():
-        if isinstance(entry, dict) and isinstance(entry.get("survivors"), int):
-            total += entry["survivors"]
     return {
         "_comment": comment,
-        "total_survivors": total,
+        "total_survivors": sum(int(m["survivors"]) for m in modules.values()),  # type: ignore[call-overload]
         "modules": dict(sorted(modules.items())),
     }
 
@@ -512,7 +661,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     parts = [json.loads(Path(p).read_text(encoding="utf-8")) for p in args.parts]
     try:
-        doc = merge_baseline_parts(parts, only_mutate)
+        doc = merge_baseline_parts(parts, mutation_units(only_mutate))
     except ValueError as e:
         print(f"ERROR: {e}")
         return 1

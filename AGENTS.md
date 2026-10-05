@@ -1216,14 +1216,18 @@ Several mechanisms guard test quality so coverage can't be "filled" without veri
 
   `SURVIVOR_BASELINE` (one global total) remains as a fallback and is the weaker gate —
   it cannot express the per-module invariant. `--require-baseline` is what stops a run
-  that gated nothing from exiting 0, and an unresolved run (timeout/suspicious/no-tests)
-  is a *failed measurement*, not zero survivors. **`mutation-baseline.json` is not
+  that gated nothing from exiting 0, and an unresolved run (suspicious/no-tests/segfault)
+  is a *failed measurement*, not zero survivors. A `timeout` counts as detected (as in
+  PIT/Stryker): every timeout the first complete run produced was a mutation that made
+  the code loop forever, and timeouts are still reported separately. **`mutation-baseline.json` is not
   recorded yet**; until it is committed, the PR lane gates only changed functions and
   warns `Mutation drift not checked` (failing every detector-test PR in two minutes
   measured nothing), and the weekly run records the baseline instead of drifting
   against it. **Run cost is scoped to what a gate reads:** with no baseline, a PR
   run executes only the changed functions' mutants (`scripts/mutation_scope.py`), and a
-  full-population run is split across 8 shard jobs, and a weekly run with no committed
+  full-population run is split across 12 shard jobs by *function* (`mutation_scope.
+  shard_assignment`; module-level shards could not fit `diff_platform.py` under the job
+  ceiling), and a weekly run with no committed
   baseline records one (artifact `mutation-baseline`) instead of failing. Per-lane trigger detail lives in
   `.github/AGENTS.md`'s workflow table rather than being copied here.
 - **Metamorphic property tests** — `tests/test_detector_properties.py` (`slow`).

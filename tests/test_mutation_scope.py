@@ -130,35 +130,105 @@ def test_module_scope_edit_alone_contributes_no_pattern() -> None:
 # --------------------------------------------------------------------------
 
 
+def _write_modules(root: Path, rng: random.Random, count: int) -> list[str]:
+    """Modules of random top-level functions and class methods."""
+    (root / "abicheck").mkdir(exist_ok=True)
+    modules = []
+    for i in range(count):
+        lines = []
+        for j in range(rng.randint(0, 6)):
+            body = "\n".join("    x = 1" for _ in range(rng.randint(1, 40)))
+            lines.append(f"def f{j}():\n{body}\n")
+        if rng.random() < 0.5:
+            lines.append("class C:\n    def m(self):\n        return 1\n")
+        path = f"abicheck/m{i}.py"
+        (root / path).write_text("\n".join(lines))
+        modules.append(path)
+    return modules
+
+
 @pytest.mark.parametrize("n", [1, 2, 3, 4, 7, 30])
-def test_shards_partition_only_mutate(tmp_path: Path, n: int) -> None:
+def test_shards_partition_every_function(tmp_path: Path, n: int) -> None:
+    """Disjoint, exhaustive and order-independent over random modules. The
+    oracle for "every function" is a plain AST walk of each file, not
+    `mutation_units`."""
+    import ast
+
     rng = random.Random(n)
-    modules = [f"abicheck/m{i}.py" for i in range(22)]
-    (tmp_path / "abicheck").mkdir()
+    modules = _write_modules(tmp_path, rng, 22)
+    expected = set()
     for m in modules:
-        (tmp_path / m).write_text("x" * rng.randint(1, 5000))
-    shards = [scope.shard_modules(modules, k, n, tmp_path) for k in range(1, n + 1)]
+        for node in ast.parse((tmp_path / m).read_text()).body:
+            if isinstance(node, ast.FunctionDef):
+                expected.add((m, node.name))
+            elif isinstance(node, ast.ClassDef):
+                expected |= {(m, f"{node.name}.{f.name}") for f in node.body}
+    shards = [scope.shard_assignment(modules, k, n, tmp_path) for k in range(1, n + 1)]
     flat = list(itertools.chain.from_iterable(shards))
-    assert sorted(flat) == sorted(modules)
+    assert set(flat) == expected
     assert len(flat) == len(set(flat))
-    # Deterministic: an order-shuffled input yields the same assignment.
     shuffled = modules[:]
     rng.shuffle(shuffled)
     assert shards == [
-        scope.shard_modules(shuffled, k, n, tmp_path) for k in range(1, n + 1)
+        scope.shard_assignment(shuffled, k, n, tmp_path) for k in range(1, n + 1)
     ]
 
 
-def test_shards_are_balanced_by_size(tmp_path: Path) -> None:
+def test_a_large_module_is_split_across_shards(tmp_path: Path) -> None:
+    """The reason the unit is a function: one module holding most of the
+    population no longer pins one shard at its whole weight."""
     (tmp_path / "abicheck").mkdir()
-    sizes = {"abicheck/big.py": 1000, "abicheck/s1.py": 400, "abicheck/s2.py": 400}
-    for m, size in sizes.items():
-        (tmp_path / m).write_text("x" * size)
-    assert scope.shard_modules(sizes, 1, 2, tmp_path) == ["abicheck/big.py"]
-    assert scope.shard_modules(sizes, 2, 2, tmp_path) == [
-        "abicheck/s1.py",
-        "abicheck/s2.py",
-    ]
+    body = "\n".join("    x = 1" for _ in range(50))
+    (tmp_path / "abicheck/big.py").write_text(
+        "\n".join(f"def f{i}():\n{body}\n" for i in range(8))
+    )
+    (tmp_path / "abicheck/small.py").write_text("def g():\n    return 1\n")
+    only = ["abicheck/big.py", "abicheck/small.py"]
+    shards = [scope.shard_assignment(only, k, 4, tmp_path) for k in range(1, 5)]
+    assert all(any(m == "abicheck/big.py" for m, _ in s) for s in shards)
+    weights = [sum(51 for m, _ in s if m == "abicheck/big.py") for s in shards]
+    assert max(weights) - min(weights) <= 51
+
+
+def test_mutable_functions_follows_mutmuts_trampoline_rules() -> None:
+    src = (
+        "def top():\n    def nested():\n        pass\n    return 1\n"
+        "async def atop():\n    return 1\n"
+        "class C:\n    def m(self):\n        return 1\n"
+        "    class Inner:\n        def hidden(self):\n            return 1\n"
+        "    @property\n    def p(self):\n        return 1\n"
+        "    @p.setter\n    def p(self, v):\n        pass\n"
+    )
+    units = scope.mutable_functions(src)
+    assert set(units) == {"top", "atop", "C.m", "C.p"}
+    assert units["C.p"] == 4  # both 2-line definitions of one name, summed
+    assert scope.mutable_functions("def broken(:\n") == {}
+
+
+def test_unassigned_records_names_mutants_no_shard_covers() -> None:
+    units = [("a.py", "f"), ("a.py", "C.m")]
+    assert scope.unassigned_records([("a.py", "f"), ("a.py", "C.m")], units) == []
+    assert scope.unassigned_records(
+        [("a.py", "f"), ("a.py", "C.Inner.x"), ("b.py", "g")], units
+    ) == [("a.py", "C.Inner.x"), ("b.py", "g")]
+
+
+@pytest.mark.parametrize(
+    ("records", "failures"),
+    [
+        ([("a.py", "f", True)], []),  # at baseline (1)
+        ([("a.py", "f", True), ("a.py", "f", True)], ["  a.py: 1 -> 2 (+1)"]),
+        # a new survivor in a function with no recorded survivors still adds
+        # to the module total this shard owns: 1 recorded, 2 now
+        ([("a.py", "f", True), ("a.py", "g", True)], ["  a.py: 1 -> 2 (+1)"]),
+        # a survivor in another shard's function is not this shard's to score
+        ([("a.py", "other", True), ("a.py", "other", True)], []),
+    ],
+)
+def test_shard_drift_compares_only_this_shards_functions(records, failures) -> None:
+    baseline = {("a.py", "f"): 1, ("a.py", "other"): 0}
+    units = [("a.py", "f"), ("a.py", "g")]
+    assert scope.check_shard_drift(records, baseline, units) == failures
 
 
 @pytest.mark.parametrize("spec", ["0/4", "5/4", "1", "a/b", "1/0", ""])
@@ -167,35 +237,48 @@ def test_parse_shard_rejects_malformed_specs(spec: str) -> None:
         scope.parse_shard(spec)
 
 
-def _part(measured: list[str], survivors: dict[str, int]) -> dict[str, object]:
+def _part(units: list[str], survivors: dict[str, dict[str, int]]) -> dict[str, object]:
     return {
         "_comment": "c",
-        "measured_modules": measured,
-        "modules": {m: {"survivors": n, "keys": []} for m, n in survivors.items()},
+        "measured_units": units,
+        "modules": {
+            m: {"survivors": sum(f.values()), "keys": [], "functions": f}
+            for m, f in survivors.items()
+        },
     }
 
 
-def test_merge_combines_a_partition() -> None:
+_UNITS = [("a.py", "f"), ("a.py", "g"), ("b.py", "h")]
+
+
+def test_merge_sums_a_module_split_across_parts() -> None:
     doc = scope.merge_baseline_parts(
-        [_part(["a.py"], {"a.py": 2}), _part(["b.py", "c.py"], {"c.py": 3})],
-        ["a.py", "b.py", "c.py"],
+        [
+            _part(["a.py::f"], {"a.py": {"f": 2}}),
+            _part(["a.py::g", "b.py::h"], {"a.py": {"g": 1}, "b.py": {"h": 3}}),
+        ],
+        _UNITS,
     )
-    assert doc["total_survivors"] == 5
-    assert set(doc["modules"]) == {"a.py", "c.py"}
+    assert doc["total_survivors"] == 6
+    assert doc["modules"]["a.py"]["survivors"] == 3
+    assert doc["modules"]["a.py"]["functions"] == {"f": 2, "g": 1}
 
 
 @pytest.mark.parametrize(
     "parts",
     [
-        [_part(["a.py"], {})],  # missing shard
-        [_part(["a.py", "b.py"], {}), _part(["b.py"], {})],  # overlap
-        [_part(["a.py"], {"b.py": 1}), _part(["b.py"], {})],  # unmeasured entry
-        [{"modules": {}}, _part(["b.py"], {})],  # no measured_modules
+        [_part(["a.py::f", "a.py::g"], {})],  # missing shard
+        [
+            _part(["a.py::f", "a.py::g"], {}),
+            _part(["a.py::g", "b.py::h"], {}),
+        ],  # overlap
+        [_part(["a.py::f"], {"b.py": {"h": 1}}), _part(["a.py::g", "b.py::h"], {})],
+        [{"modules": {}}, _part(["a.py::f", "a.py::g", "b.py::h"], {})],
     ],
 )
 def test_merge_refuses_anything_but_a_partition(parts) -> None:
     with pytest.raises(ValueError):
-        scope.merge_baseline_parts(parts, ["a.py", "b.py"])
+        scope.merge_baseline_parts(parts, _UNITS)
 
 
 # --------------------------------------------------------------------------
@@ -378,8 +461,10 @@ def test_full_run_is_sharded_and_later_shards_skip_a_scoped_run(
         gate.main(["--run", "--shard", f"{k}/2", "--baseline-file", str(repo / "n")])
         patterns.append(seen[0][2:])
     assert sorted(itertools.chain(*patterns)) == [
-        "abicheck.diff_symbols.*",
-        "abicheck.diff_types.*",
+        "abicheck.diff_symbols.x_alpha__mutmut_*",
+        "abicheck.diff_symbols.x_untouched__mutmut_*",
+        "abicheck.diff_types.x_alpha__mutmut_*",
+        "abicheck.diff_types.x_untouched__mutmut_*",
     ]
     seen.clear()
     args = ["--run", "--diff-scoped", "--scope-run-to-functions", "--diff-file",
@@ -463,7 +548,7 @@ def test_sharded_baseline_parts_merge_into_a_full_baseline(
         ) == 0  # fmt: skip
         parts.append(json.loads(part.read_text()))
     only = ["abicheck/diff_types.py", "abicheck/diff_symbols.py"]
-    doc = scope.merge_baseline_parts(parts, only)
+    doc = scope.merge_baseline_parts(parts, scope.mutation_units(only, repo))
     assert doc["modules"]["abicheck/diff_types.py"]["survivors"] == 1
 
 
@@ -524,3 +609,79 @@ def test_function_patterns_scope_a_real_mutmut_run(tmp_path: Path) -> None:
     assert mutmut("export-cicd-stats").returncode == 0
     stats = results.load_cicd_stats(tmp_path / "mutants")
     assert stats is not None and stats["total"] > 0
+
+
+def _baseline(repo: Path, modules: dict[str, object]) -> Path:
+    path = repo / "baseline.json"
+    path.write_text(json.dumps({"modules": modules}))
+    return path
+
+
+@pytest.mark.parametrize(
+    ("functions", "expected_rc"),
+    [
+        ({"alpha": 1}, 0),  # the one survivor is recorded
+        ({"alpha": 0}, 1),  # it is new: drift
+        # recorded against another function of the same module in this shard:
+        # the module total is unchanged, the same answer the unsharded
+        # per-module gate gives
+        ({"untouched": 1}, 0),
+    ],
+)
+def test_a_function_shard_gates_drift_per_function(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, functions, expected_rc
+) -> None:
+    """End to end through main(): the fake listing has one survivor in
+    diff_types.alpha; the oracle is the hand-written baseline, not the
+    gate's own counting."""
+
+    def run(cmd: list[str]) -> tuple[str, int]:
+        if cmd[:2] == ["mutmut", "run"]:
+            return ("2/2", 0)
+        return (
+            "    abicheck.diff_types.x_alpha__mutmut_1: survived\n"
+            "    abicheck.diff_types.x_untouched__mutmut_1: killed\n",
+            0,
+        )
+
+    monkeypatch.setattr(gate, "_run_mutmut", run)
+    baseline = _baseline(
+        repo,
+        {
+            "abicheck/diff_types.py": {
+                "survivors": sum(functions.values()),
+                "functions": functions,
+            }
+        },
+    )
+    rc = gate.main(["--run", "--shard", "1/1", "--baseline-file", str(baseline)])
+    assert rc == expected_rc
+
+
+def test_a_function_shard_refuses_a_baseline_without_function_counts(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(gate, "_run_mutmut", _fake_mutmut([]))
+    baseline = _baseline(repo, {"abicheck/diff_types.py": {"survivors": 5}})
+    assert gate.main(["--run", "--shard", "1/1", "--baseline-file", str(baseline)]) == 1
+    assert "no per-function counts" in capsys.readouterr().out
+
+
+def test_a_mutant_no_shard_covers_fails_the_shard(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """If mutmut ever mutates a function `mutable_functions` does not list,
+    no shard would measure it; the run must say so instead of merging a
+    baseline that silently omits it."""
+
+    def run(cmd: list[str]) -> tuple[str, int]:
+        if cmd[:2] == ["mutmut", "run"]:
+            return ("4/4", 0)
+        return ("    abicheck.diff_types.xǁGhostǁm__mutmut_1: killed\n", 0)
+
+    monkeypatch.setattr(gate, "_run_mutmut", run)
+    monkeypatch.setattr(gate, "load_cicd_stats", lambda _d: {"total": 1, "survived": 0})
+    assert (
+        gate.main(["--run", "--shard", "1/2", "--baseline-file", str(repo / "n")]) == 1
+    )
+    assert "abicheck/diff_types.py::Ghost.m" in capsys.readouterr().out
