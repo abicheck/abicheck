@@ -263,7 +263,7 @@ def captured_coordinates(snapshots: Sequence[AbiSnapshot]) -> dict[str, str]:
             fields.setdefault(key, []).append(str(value))
 
     for snap in snapshots:
-        advanced = snap.dwarf_advanced
+        advanced = snap.declarations.debug_advanced
         if advanced is not None:
             _add("compiler_family", advanced.toolchain.compiler.lower())
             _add("compiler_version", advanced.toolchain.version)

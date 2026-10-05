@@ -11,7 +11,7 @@ import dataclasses
 
 import pytest
 
-from abicheck.model.declaration_store import Declarations
+from abicheck.model.declaration_store import BUILDER_INPUTS
 from abicheck.model.snapshot import AbiSnapshot
 from abicheck.model.snapshot_reliability import RELIABILITY_FLAG_NAMES
 from abicheck.storage.legacy_sections import (
@@ -85,7 +85,9 @@ class TestSectionFieldsCompleteness:
         )
         # ADR-063 Phase 10: declaration kinds are the IR store's fields,
         # still serialized under their historical keys.
-        fields |= {f.name for f in dataclasses.fields(Declarations)}
+        # The debug layout is in that store too, persisted under its
+        # builder-input keys (`dwarf`/`dwarf_advanced`).
+        fields |= set(BUILDER_INPUTS)
         # ...and `stale_fact_families` is persisted as the eight historical
         # `*_facts_reliable` keys (storage/snapshot_encode.py).
         fields = (fields - {"stale_fact_families"}) | set(RELIABILITY_FLAG_NAMES)

@@ -1381,6 +1381,34 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
             ),
         ),
     ),
+    BugClass(
+        id="imports.first_import_order_cycle",
+        invariant=(
+            "Whether an abicheck module imports must not depend on which "
+            "abicheck module a fresh interpreter imports first: a "
+            "root-level model-layer module that `abicheck.model` imports "
+            "may not need `model/__init__` to have finished, or importing "
+            "it first raises ImportError while every suite run that "
+            "happened to import `model` earlier stays green."
+        ),
+        # #1453 made `name_classification` import `model.execution_cache`;
+        # `tests/test_anon_type_location_properties.py` then failed on its
+        # own (ImportError at collection) yet passed in the full suite.
+        fixed_by=(1453,),
+        seed_tests=("tests/test_first_import_order.py",),
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "The sweep covers `model` and every module it imports "
+                    "from outside itself, not all ~800 modules; the static "
+                    "`import-cycle-growth` gate does not model the implicit "
+                    "edge to a parent package's `__init__`, so it cannot "
+                    "see this class."
+                ),
+                reference="PR #1453",
+            ),
+        ),
+    ),
 )
 
 

@@ -1428,13 +1428,12 @@ def _has_any_dwarf(old: AbiSnapshot, new: AbiSnapshot) -> tuple[bool, str | None
     Expressed through the registry's own ``requires_support`` mechanism rather
     than a second skip vocabulary.
     """
-    from .model.dwarf_facts import DwarfMetadata
+    from .model.debug_evidence import debug_info_evidence
 
-    o = getattr(old, "dwarf", None) or DwarfMetadata()
-    n = getattr(new, "dwarf", None) or DwarfMetadata()
-    if not o.has_dwarf and not n.has_dwarf:
+    o_has, n_has = debug_info_evidence(old).basic, debug_info_evidence(new).basic
+    if not o_has and not n_has:
         return False, "no DWARF debug info on either side"
-    if not o.has_dwarf:
+    if not o_has:
         return False, (
             "old snapshot has no DWARF debug info, so the new side's layout "
             "has no baseline to be compared against"
@@ -1462,12 +1461,13 @@ def _diff_dwarf(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """
     import logging as _logging
 
+    from .compare.debug_layout_view import debug_layout_view
     from .model.dwarf_facts import DwarfMetadata
 
     _log = _logging.getLogger(__name__)
 
-    o: DwarfMetadata = getattr(old, "dwarf", None) or DwarfMetadata()
-    n: DwarfMetadata = getattr(new, "dwarf", None) or DwarfMetadata()
+    o: DwarfMetadata = debug_layout_view(old).layout
+    n: DwarfMetadata = debug_layout_view(new).layout
 
     if o.has_dwarf and not n.has_dwarf:
         _log.warning(

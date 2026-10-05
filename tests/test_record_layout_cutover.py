@@ -305,7 +305,7 @@ class TestProjectSnapshotSection:
         dto = semantic_ir_to_dto(
             _snap([_record("R", 64, 32)], with_ir=True).semantic_ir, {}
         )
-        assert dto.section_schema_version == SECTION_SCHEMA_VERSIONS["semantic_ir"] == 3
+        assert dto.section_schema_version == SECTION_SCHEMA_VERSIONS["semantic_ir"] == 2
 
     def test_a_v1_section_migrates_and_reads_layout_as_not_recorded(self) -> None:
         from abicheck.storage.dto import SectionDTO, semantic_ir_from_dto

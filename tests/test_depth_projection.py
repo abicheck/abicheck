@@ -60,7 +60,7 @@ Six real, review-caught gaps are pinned by name here so they don't recur:
    field-level type text). Only a genuinely DWARF/symbols-only snapshot
    (``from_headers is False``) may keep these wholesale; on a
    header-derived snapshot they are now always fully cleared, relying on
-   the separate, untouched ``snap.dwarf`` fields (``diff_platform.
+   the separate, untouched ``snap.declarations.debug_layout`` fields (``diff_platform.
    _diff_dwarf``) to still catch a real DWARF-visible layout change.
 8. A function/variable promoted from a header parser's own "declared
    public, without contrary evidence" fallback (e.g. an un-emitted inline
@@ -309,7 +309,7 @@ class TestStructuralFactsRequireDwarfSourcing:
         # difference between each side's own DWARF StructLayout (not
         # merely the header-parsed RecordType) -- caught by the separate,
         # DWARF-native `diff_platform._diff_dwarf` detector, which reads
-        # `snap.dwarf` directly and is never touched by this module.
+        # `snap.declarations.debug_layout` directly and is never touched by this module.
         old_layout = StructLayout(
             name="S",
             byte_size=8,
@@ -979,8 +979,8 @@ class TestProjectPairToDepthPreservesDwarfPublicScope:
         old = self._make(from_headers=True, private_size=8)
         new = self._make(from_headers=False, private_size=16)
         old_p, new_p = project_pair_to_depth(old, new, "binary")
-        assert set(old_p.dwarf.structs) == {"S"}
-        assert set(new_p.dwarf.structs) == {"S"}
+        assert set(old_p.declarations.debug_layout.structs) == {"S"}
+        assert set(new_p.declarations.debug_layout.structs) == {"S"}
 
     def test_dwarf_enums_pool_is_scoped_to_public_names(self) -> None:
         """Sibling of the struct-scoping test above, for the identical
@@ -988,8 +988,8 @@ class TestProjectPairToDepthPreservesDwarfPublicScope:
         old = self._make(from_headers=True, private_size=8)
         new = self._make(from_headers=False, private_size=16)
         old_p, new_p = project_pair_to_depth(old, new, "binary")
-        assert set(old_p.dwarf.enums) == {"E"}
-        assert set(new_p.dwarf.enums) == {"E"}
+        assert set(old_p.declarations.debug_layout.enums) == {"E"}
+        assert set(new_p.declarations.debug_layout.enums) == {"E"}
 
     def test_real_public_struct_size_change_still_detected(self) -> None:
         """Negative control: the fix must not blind the detector to a real
@@ -1004,9 +1004,9 @@ class TestProjectPairToDepthPreservesDwarfPublicScope:
         )
 
     def test_neither_side_carries_a_dwarf_block_at_all(self) -> None:
-        """``snap.dwarf is None`` (never populated at all, not merely
+        """``snap.declarations.debug_layout is None`` (never populated at all, not merely
         empty) must not raise when the joint floor tries to pre-scope it --
-        the ``if snap.dwarf is not None:`` guard's own False branch."""
+        the ``if snap.declarations.debug_layout is not None:`` guard's own False branch."""
         old = AbiSnapshot(
             library="lib",
             version="1",
@@ -1022,8 +1022,8 @@ class TestProjectPairToDepthPreservesDwarfPublicScope:
             types=[RecordType(name="S", kind="struct", size_bits=32)],
         )
         old_p, new_p = project_pair_to_depth(old, new, "binary")
-        assert old_p.dwarf is None
-        assert new_p.dwarf is None
+        assert old_p.declarations.debug_layout is None
+        assert new_p.declarations.debug_layout is None
 
     def test_empty_public_scope_skips_the_filter_entirely(self) -> None:
         """Neither side names any struct/enum at all -- ``_public_dwarf_
@@ -1052,10 +1052,10 @@ class TestProjectPairToDepthPreservesDwarfPublicScope:
             ),
         )
         old_p, new_p = project_pair_to_depth(old, new, "binary")
-        assert set(old_p.dwarf.structs) == {"Internal"}
-        assert set(new_p.dwarf.structs) == {"Internal"}
-        assert set(old_p.dwarf.enums) == {"IE"}
-        assert set(new_p.dwarf.enums) == {"IE"}
+        assert set(old_p.declarations.debug_layout.structs) == {"Internal"}
+        assert set(new_p.declarations.debug_layout.structs) == {"Internal"}
+        assert set(old_p.declarations.debug_layout.enums) == {"IE"}
+        assert set(new_p.declarations.debug_layout.enums) == {"IE"}
 
 
 class TestPublicDwarfScopeIsTheDebugTypeJoin:

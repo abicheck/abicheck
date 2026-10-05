@@ -276,12 +276,15 @@ class TestSnapshotRoundtrip:
         from abicheck.dwarf_metadata import DwarfMetadata
 
         orig = _minimal_snap()
-        orig.dwarf = DwarfMetadata(
+        orig.declarations.debug_layout = DwarfMetadata(
             has_dwarf=True, base_types={"long double": 16, "int": 4}
         )
         restored = _roundtrip(orig)
-        assert restored.dwarf is not None
-        assert restored.dwarf.base_types == {"long double": 16, "int": 4}
+        assert restored.declarations.debug_layout is not None
+        assert restored.declarations.debug_layout.base_types == {
+            "long double": 16,
+            "int": 4,
+        }
 
 
 # ---------------------------------------------------------------------------

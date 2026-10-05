@@ -113,10 +113,12 @@ def _exported(
 
 def _ld_base_size(snap: AbiSnapshot) -> int | None:
     """DWARF byte size of the ``long double`` base type, or None if unknown."""
-    dw = snap.dwarf
-    if dw is None or not dw.has_dwarf:
+    from .compare.debug_layout_view import debug_layout_view
+
+    view = debug_layout_view(snap)
+    if not view.present:
         return None
-    return dw.base_types.get("long double")
+    return view.base_type_sizes.get("long double")
 
 
 def _diff_same_mangling(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:

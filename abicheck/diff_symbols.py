@@ -201,8 +201,9 @@ def _is_stripped_symbols_only(snap: AbiSnapshot) -> bool:
         return False
     if snap.declarations.types or snap.declarations.enums or snap.declarations.typedefs:
         return False
-    dwarf = getattr(snap, "dwarf", None)
-    if dwarf is not None and (dwarf.structs or dwarf.enums):
+    from .model.debug_evidence import debug_info_evidence
+
+    if debug_info_evidence(snap).layout_content:
         return False
     return bool(snap.declarations.functions or snap.declarations.variables)
 

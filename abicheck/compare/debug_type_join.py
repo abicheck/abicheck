@@ -57,6 +57,7 @@ from ..model.graph_join import (
     resolve_join_records,
 )
 from ..model.snapshot_identity_table import identities_for_snapshot
+from .debug_layout_view import debug_layout_view
 
 if TYPE_CHECKING:
     from ..model.dwarf_facts import DwarfMetadata
@@ -182,8 +183,9 @@ def join_debug_types(
         enums.setdefault(header_type_key(en), []).append((ident.node_id, en))
         left_ids.append(ident.node_id)
 
-    dwarf = snap.dwarf
-    if dwarf is None or not dwarf.has_dwarf:
+    view = debug_layout_view(snap)
+    dwarf = view.layout
+    if not view.present:
         left = {
             node: JoinRecord(node, JoinState.UNKNOWN, reason=REASON_NO_DEBUG_INFO)
             for node in left_ids

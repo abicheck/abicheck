@@ -328,8 +328,11 @@ def test_resolve_input_ingests_raw_btf_blob() -> None:
 
     case = example_catalog.case_dir("case121_kernel_btf_struct_field_added")
     snap = resolve_input(case / "v1.btf")
-    assert snap.dwarf is not None and snap.dwarf.has_dwarf
-    assert "task_state" in (snap.dwarf.structs or {})
+    assert (
+        snap.declarations.debug_layout is not None
+        and snap.declarations.debug_layout.has_dwarf
+    )
+    assert "task_state" in (snap.declarations.debug_layout.structs or {})
 
 
 def test_resolve_input_ingests_raw_ctf_blob() -> None:
@@ -342,8 +345,11 @@ def test_resolve_input_ingests_raw_ctf_blob() -> None:
         blob = Path(td) / "types.ctf"
         blob.write_bytes(_CtfBlob().build_struct("task_state", n_fields=2))
         snap = resolve_input(blob)
-    assert snap.dwarf is not None and snap.dwarf.has_dwarf
-    assert "task_state" in (snap.dwarf.structs or {})
+    assert (
+        snap.declarations.debug_layout is not None
+        and snap.declarations.debug_layout.has_dwarf
+    )
+    assert "task_state" in (snap.declarations.debug_layout.structs or {})
 
 
 def test_resolve_input_raw_btf_blob_populates_semantic_ir() -> None:

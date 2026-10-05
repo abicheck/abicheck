@@ -1,0 +1,3 @@
+### Changed
+
+- **The debug layout is owned by the snapshot's SemanticIR** (ADR-063 criterion 4) — the record/enum layouts, base-type sizes and advanced toolchain facts every debug carrier (DWARF, BTF/CTF/PDB) reduces to now live in the IR's declaration store as `snapshot.declarations.debug_layout`/`debug_advanced`. `AbiSnapshot(dwarf=..., dwarf_advanced=...)` remain builder inputs, but `AbiSnapshot.dwarf`/`.dwarf_advanced` are no longer attributes: reading or assigning them raises and names the replacement. Stored snapshots are unchanged (same keys, same bytes, no schema bump), and no finding changes.

@@ -63,7 +63,7 @@ from abicheck.model import (
     Variable,
     Visibility,
 )
-from abicheck.model.declaration_store import DECLARATION_KINDS
+from abicheck.model.declaration_store import DEBUG_LAYOUT_KINDS
 from abicheck.model.extraction_scope import EntityOwnership
 from abicheck.model.identity import (
     entity_id_for_enum,
@@ -163,6 +163,9 @@ def container_site_inventory() -> list[str]:
         toks = set(_IDENT.findall(str(f.type)))
         if "None" in toks and toks - _SCALAR_TOKENS and "Fact" not in toks:
             out.append(f"AbiSnapshot.{f.name}")
+    # The debug-layout containers are IR-store builder inputs, not fields
+    # (ADR-063 criterion 4); they are still whole optional evidence objects.
+    out.extend(f"AbiSnapshot.{name}" for name in DEBUG_LAYOUT_KINDS)
     return out
 
 
@@ -676,8 +679,7 @@ def _rewrite(obj: Any, cls: type, fname: str, value: Any, hits: list[int]) -> An
         # ``replace`` forwards the snapshot's *current* declarations as
         # builder inputs, which would win over the rewritten store the new
         # IR carries -- so state the rewritten kinds explicitly.
-        for kind in DECLARATION_KINDS:
-            updates[kind] = getattr(ir.declarations, kind)
+        updates.update(ir.declarations.builder_inputs())
     return dataclasses.replace(obj, **updates) if updates else obj
 
 
@@ -761,11 +763,12 @@ def present_fact_sites(snap: AbiSnapshot) -> frozenset[tuple[type, str]]:
 
 def _drop(field: str) -> Callable[[AbiSnapshot], AbiSnapshot | None]:
     def op(s: AbiSnapshot) -> AbiSnapshot | None:
-        return (
-            dataclasses.replace(s, **{field: None})
-            if getattr(s, field) is not None
-            else None
+        current = (
+            getattr(s.declarations, DEBUG_LAYOUT_KINDS[field])
+            if field in DEBUG_LAYOUT_KINDS
+            else getattr(s, field)
         )
+        return dataclasses.replace(s, **{field: None}) if current is not None else None
 
     return op
 

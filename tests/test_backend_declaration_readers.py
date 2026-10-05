@@ -12,14 +12,15 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""ADR-063 6B closure: the checker reads no backend-specific declaration
-representation beyond a shrink-only baseline.
+"""ADR-063 criterion 4: the checker reads no backend-specific declaration
+representation at all -- the debug layout lives in the IR store, and the gate
+has no allowlist.
 
 The scanner is tested on synthetic sources for every read shape it must see
 (attribute, ``getattr`` through a plain name, a local alias and an aliased
 ``builtins`` module) and every shape it must not (a local variable, a string
-elsewhere), with the enclosing qualname as the oracle. The baseline
-comparison is tested on hand-built dicts, independent of the live tree.
+elsewhere), with the enclosing qualname as the oracle. The problem
+reporting is tested on hand-built dicts, independent of the live tree.
 """
 
 from __future__ import annotations
@@ -34,7 +35,6 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
 from semantic_ir_cutover import (  # noqa: E402
-    KNOWN_BACKEND_DECLARATION_READERS,
     backend_declaration_problems,
     backend_declaration_reads,
     current_backend_declaration_readers,
@@ -79,38 +79,45 @@ def test_scanner_sees_every_read_shape_and_only_those(
 
 
 _KEY = ("abicheck/diff_x.py", "f", "dwarf")
+_KEY2 = ("abicheck/compare/y.py", "C.m", "dwarf_advanced")
 
 
 @pytest.mark.parametrize(
-    ("current", "baseline", "needles"),
-    [
-        ({_KEY: 1}, {_KEY: 1}, []),
-        ({}, {}, []),
-        ({_KEY: 2}, {_KEY: 1}, ["reads `AbiSnapshot.dwarf` 2 time(s) (baseline 1)"]),
-        ({_KEY: 1}, {}, ["(baseline 0)"]),
-        ({}, {_KEY: 1}, ["lower the baseline"]),
-        ({_KEY: 1}, {_KEY: 3}, ["lower the baseline"]),
-    ],
+    "current",
+    [{}, {_KEY: 1}, {_KEY: 3}, {_KEY2: 1}, {_KEY: 1, _KEY2: 2}],
 )
-def test_baseline_only_shrinks(
+def test_every_read_is_a_problem_there_is_no_allowlist(
     current: dict[tuple[str, str, str], int],
-    baseline: dict[tuple[str, str, str], int],
-    needles: list[str],
 ) -> None:
-    problems = backend_declaration_problems(current, baseline)
-    assert len(problems) == len(needles)
-    for problem, needle in zip(problems, needles):
-        assert needle in problem
+    problems = backend_declaration_problems(current)
+    assert len(problems) == len(current)
+    for (rel, qualname, field_name), problem in zip(sorted(current), problems):
+        assert problem.startswith(f"{rel}: {qualname} reads `{field_name}`")
+        assert f"{current[(rel, qualname, field_name)]} time(s)" in problem
 
 
 @pytest.mark.repo_scan
-def test_live_checker_matches_the_baseline() -> None:
-    current = current_backend_declaration_readers()
-    assert (
-        backend_declaration_problems(current, KNOWN_BACKEND_DECLARATION_READERS) == []
-    )
-    # Vacuity guard: the scan reached the DWARF-layout detector it must see.
-    assert any(rel == "abicheck/diff_platform.py" for rel, _, _ in current)
+def test_live_checker_reads_no_backend_collection() -> None:
+    assert current_backend_declaration_readers() == {}
+
+
+def test_the_scan_reaches_the_debug_layout_owner(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Vacuity guard for the live test above: the owner module is inside the
+    scanned set, and a backend-named read placed there would be reported."""
+    import semantic_ir_cutover as gate
+
+    owner = gate.REPO_ROOT / "abicheck" / "compare" / "debug_layout_view.py"
+    assert owner in gate._checker_modules()
+    mod = tmp_path / "abicheck" / "compare" / "debug_layout_view.py"
+    mod.parent.mkdir(parents=True)
+    mod.write_text("def v(snap):\n    return getattr(snap, 'dwarf', None)\n")
+    monkeypatch.setattr(gate, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(gate, "_checker_modules", lambda: [mod])
+    assert gate.current_backend_declaration_readers() == {
+        ("abicheck/compare/debug_layout_view.py", "v", "dwarf"): 1
+    }
 
 
 @pytest.mark.parametrize(

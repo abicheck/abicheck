@@ -43,7 +43,7 @@ def test_conflicts_round_trip() -> None:
         },
         odr_conflicts_observed=True,
     )
-    back = _round_trip(_snap(dwarf)).dwarf
+    back = _round_trip(_snap(dwarf)).declarations.debug_layout
     assert back is not None
     assert back.struct_odr_conflicts == {"Dup": [_layout(16)]}
     assert back.enum_odr_conflicts["E"][0].members == {"A": 1}
@@ -52,7 +52,7 @@ def test_conflicts_round_trip() -> None:
 
 def test_observed_without_conflicts_round_trips_as_observed() -> None:
     dwarf = DwarfMetadata(has_dwarf=True, odr_conflicts_observed=True)
-    back = _round_trip(_snap(dwarf)).dwarf
+    back = _round_trip(_snap(dwarf)).declarations.debug_layout
     assert back is not None and back.odr_conflicts_observed is True
     assert back.struct_odr_conflicts == {}
 
@@ -71,7 +71,7 @@ def test_pre_v51_snapshot_reads_as_not_looked_for() -> None:
     d["schema_version"] = 50
     for key in ("struct_odr_conflicts", "enum_odr_conflicts", "odr_conflicts_observed"):
         d["dwarf"].pop(key, None)
-    back = snapshot_from_dict(d).dwarf
+    back = snapshot_from_dict(d).declarations.debug_layout
     assert back is not None
     assert back.odr_conflicts_observed is False
     assert back.struct_odr_conflicts == {}

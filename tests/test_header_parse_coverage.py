@@ -251,9 +251,11 @@ def test_dependency_scope_never_drops_an_unnamed_dwarf_type_under_partial_parse(
             source_header="/usr/include/dep.h",
         ),
     ]  # fmt: skip
-    snap.dwarf.structs["DepT"] = StructLayout(name="DepT", byte_size=1)
+    snap.declarations.debug_layout.structs["DepT"] = StructLayout(
+        name="DepT", byte_size=1
+    )
     scoped = scope_snapshot_excluding_dependencies(snap, header_roots=["/inc"])
-    kept = set(scoped.dwarf.structs)
+    kept = set(scoped.declarations.debug_layout.structs)
     # Oracle, by hand: the dependency type always goes, the public one stays,
     # the unnamed one stays exactly when the parse was partial.
     assert "DepT" not in kept

@@ -678,13 +678,11 @@ def _dwarf_context_status(old: AbiSnapshot, new: AbiSnapshot) -> tuple[str, list
     with a note naming which channel(s) specifically.
     """
 
-    def _channel_present(meta: Any) -> bool:
-        return bool(meta is not None and meta.has_dwarf)
+    from .model.debug_evidence import debug_info_evidence
 
-    old_basic = _channel_present(old.dwarf)
-    new_basic = _channel_present(new.dwarf)
-    old_advanced = _channel_present(old.dwarf_advanced)
-    new_advanced = _channel_present(new.dwarf_advanced)
+    old_ev, new_ev = debug_info_evidence(old), debug_info_evidence(new)
+    old_basic, new_basic = old_ev.basic, new_ev.basic
+    old_advanced, new_advanced = old_ev.advanced, new_ev.advanced
 
     if not (old_basic or new_basic or old_advanced or new_advanced):
         return "not_evaluated", []

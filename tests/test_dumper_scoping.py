@@ -498,8 +498,8 @@ class TestDwarfScoping:
             ),
         )
         scoped = scope_snapshot_excluding_dependencies(snap)
-        assert scoped.dwarf is not None
-        assert set(scoped.dwarf.structs) == {"Own"}
+        assert scoped.declarations.debug_layout is not None
+        assert set(scoped.declarations.debug_layout.structs) == {"Own"}
 
 
 class TestDwarfAdvancedScoping:
@@ -519,8 +519,8 @@ class TestDwarfAdvancedScoping:
             ),
         )
         scoped = scope_snapshot_excluding_dependencies(snap)
-        assert scoped.dwarf_advanced is not None
-        adv = scoped.dwarf_advanced
+        assert scoped.declarations.debug_advanced is not None
+        adv = scoped.declarations.debug_advanced
         assert adv.packed_structs == {"Own"}
         assert adv.all_struct_names == {"Own"}
         assert set(adv.calling_conventions) == {"_Z3run"}
@@ -548,8 +548,10 @@ class TestDwarfAdvancedScoping:
             ),
         )
         scoped = scope_snapshot_excluding_dependencies(snap)
-        assert scoped.dwarf_advanced is not None
-        assert set(scoped.dwarf_advanced.value_abi_traits) == {"_Z8distance5PointS_"}
+        assert scoped.declarations.debug_advanced is not None
+        assert set(scoped.declarations.debug_advanced.value_abi_traits) == {
+            "_Z8distance5PointS_"
+        }
 
     def test_dependency_function_with_genuine_mangled_name_still_dropped(self):
         """The flip side: a dependency-header function whose mangled name
@@ -567,8 +569,8 @@ class TestDwarfAdvancedScoping:
             ),
         )
         scoped = scope_snapshot_excluding_dependencies(snap)
-        assert scoped.dwarf_advanced is not None
-        assert set(scoped.dwarf_advanced.value_abi_traits) == set()
+        assert scoped.declarations.debug_advanced is not None
+        assert set(scoped.declarations.debug_advanced.value_abi_traits) == set()
 
     def test_dependency_function_with_bare_unmangled_name_still_dropped(self):
         """Codex review: a genuine C/``extern "C"`` dependency function's
@@ -593,8 +595,8 @@ class TestDwarfAdvancedScoping:
             ),
         )
         scoped = scope_snapshot_excluding_dependencies(snap)
-        assert scoped.dwarf_advanced is not None
-        assert set(scoped.dwarf_advanced.value_abi_traits) == set()
+        assert scoped.declarations.debug_advanced is not None
+        assert set(scoped.declarations.debug_advanced.value_abi_traits) == set()
 
     def test_ambiguous_bare_spelling_shared_with_a_kept_function_is_not_excluded(self):
         """Codex review, fresh evidence: a kept `extern "C" foo` genuinely has
@@ -621,8 +623,8 @@ class TestDwarfAdvancedScoping:
             ),
         )
         scoped = scope_snapshot_excluding_dependencies(snap)
-        assert scoped.dwarf_advanced is not None
-        assert set(scoped.dwarf_advanced.value_abi_traits) == {"foo"}
+        assert scoped.declarations.debug_advanced is not None
+        assert set(scoped.declarations.debug_advanced.value_abi_traits) == {"foo"}
 
     def test_kept_functions_bare_name_does_not_shadow_a_different_excluded_symbol(self):
         """Codex review, fresh evidence, second round: the collision guard
@@ -650,8 +652,10 @@ class TestDwarfAdvancedScoping:
             ),
         )
         scoped = scope_snapshot_excluding_dependencies(snap)
-        assert scoped.dwarf_advanced is not None
-        assert set(scoped.dwarf_advanced.value_abi_traits) == {"_ZN4mine3depEv"}
+        assert scoped.declarations.debug_advanced is not None
+        assert set(scoped.declarations.debug_advanced.value_abi_traits) == {
+            "_ZN4mine3depEv"
+        }
 
 
 class TestCrossPlatformSystemHeaderPaths:
@@ -824,8 +828,8 @@ class TestQualifiedNameCollision:
             ),
         )
         scoped = scope_snapshot_excluding_dependencies(snap)
-        assert scoped.dwarf is not None
-        assert set(scoped.dwarf.structs) == {"mine::Thing"}
+        assert scoped.declarations.debug_layout is not None
+        assert set(scoped.declarations.debug_layout.structs) == {"mine::Thing"}
 
 
 class TestEndToEndCompareAfterScoping:

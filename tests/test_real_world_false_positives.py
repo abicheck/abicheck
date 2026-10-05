@@ -239,7 +239,7 @@ def test_stripped_new_side_does_not_fabricate_type_removals():
         functions=[_exported_func("xmlNewNode"), _exported_func("xmlFreeDoc")],
         types=[],
     )
-    new.dwarf = None
+    new.declarations.debug_layout = None
     result = compare(old, new)
     assert result.verdict not in (Verdict.BREAKING,), (
         f"types absent only because the new side is stripped must not read as "
@@ -278,7 +278,7 @@ def test_semantic_ir_only_typedef_evidence_still_confirms_a_real_removal():
     # new: same exported function, flat `typedefs` map empty, but a real
     # SemanticIR resolves `A` (only) -- `B` was genuinely removed.
     new = _elf_snapshot(functions=[_exported_func("use_alias")])
-    new.dwarf = None
+    new.declarations.debug_layout = None
     new.semantic_ir = SemanticIR(
         occurrences={
             OccurrenceId(entity_id_for_typedef((), "A")): CanonicalEntity(
@@ -312,7 +312,7 @@ def test_real_removal_still_reported_when_symbols_also_dropped():
     )
     # new: class and ALL its methods gone (retention 0%), only a new free fn.
     new = _elf_snapshot(functions=[_exported_func("_ZN5mylib5otherEv")], types=[])
-    new.dwarf = None
+    new.declarations.debug_layout = None
     result = compare(old, new)
     assert any(c.kind in BREAKING_KINDS for c in result.changes), (
         "removing a class together with its exported methods must still break; "
@@ -346,7 +346,7 @@ def test_stripped_suppression_counts_only_exported_functions():
     )
     # new: stripped → exports the same 2 public symbols, no types, no internals.
     new = _elf_snapshot(functions=list(exported), types=[])
-    new.dwarf = None
+    new.declarations.debug_layout = None
     result = compare(old, new)
     assert not any(c.kind == ChangeKind.TYPE_REMOVED for c in result.changes), (
         "internal DWARF functions must not deflate retention and re-enable the "
@@ -389,7 +389,7 @@ def test_stripped_suppression_prefers_elf_exports_over_dwarf_public_functions():
 
     new = _elf_snapshot(functions=[_exported_func("stable_api")], types=[])
     new.elf = _elf_exports("stable_api")
-    new.dwarf = None
+    new.declarations.debug_layout = None
 
     result = compare(old, new)
     assert not any(c.kind == ChangeKind.TYPE_REMOVED for c in result.changes), (
@@ -412,7 +412,7 @@ def test_stripped_suppression_with_elf_exports_still_reports_real_symbol_loss():
 
     new = _elf_snapshot(functions=[_exported_func("stable_api")], types=[])
     new.elf = _elf_exports("stable_api")
-    new.dwarf = None
+    new.declarations.debug_layout = None
 
     result = compare(old, new)
     assert any(c.kind in BREAKING_KINDS for c in result.changes), (
@@ -434,7 +434,7 @@ def test_stripped_suppression_falls_back_when_new_side_lacks_elf_metadata():
 
     new = _elf_snapshot(functions=[_exported_func("stable_api")], types=[])
     new.elf = None
-    new.dwarf = None
+    new.declarations.debug_layout = None
 
     result = compare(old, new)
     assert not any(c.kind == ChangeKind.TYPE_REMOVED for c in result.changes), (
@@ -466,7 +466,7 @@ def test_stripped_suppression_ignores_transitive_stdlib_exports_in_retention():
 
     new = _elf_snapshot(functions=[_exported_func("stable_api")], types=[])
     new.elf = _elf_exports("stable_api")
-    new.dwarf = None
+    new.declarations.debug_layout = None
 
     result = compare(old, new)
     assert not any(c.kind == ChangeKind.TYPE_REMOVED for c in result.changes), (
@@ -501,7 +501,7 @@ def test_function_diff_prefers_elf_exports_over_dwarf_public_helpers():
 
     new = _elf_snapshot(functions=[_exported_func("stable_api")], types=[])
     new.elf = _elf_exports("stable_api")
-    new.dwarf = None
+    new.declarations.debug_layout = None
 
     result = compare(old, new)
     assert not any(c.kind == ChangeKind.FUNC_REMOVED for c in result.changes), (
@@ -603,7 +603,7 @@ def test_has_type_evidence_via_dwarf_structs_blocks_suppression():
     )
     new = _elf_snapshot(functions=[_exported_func("api")], types=[])
     # new has real DWARF content → has type evidence → not "stripped".
-    new.dwarf = DwarfMetadata(
+    new.declarations.debug_layout = DwarfMetadata(
         structs={"Other": StructLayout(name="Other", byte_size=4)}, has_dwarf=True
     )
     result = compare(old, new)
@@ -629,7 +629,7 @@ def test_stripped_suppression_with_only_variable_exports():
         ],
         types=[],
     )
-    new.dwarf = None
+    new.declarations.debug_layout = None
     result = compare(old, new)
     assert not any(c.kind == ChangeKind.TYPE_REMOVED for c in result.changes)
 
@@ -673,7 +673,7 @@ def test_unknown_signature_not_flagged_as_change():
             Variable(name="g", mangled="g", type="?", visibility=Visibility.PUBLIC)
         ],
     )
-    new.dwarf = None
+    new.declarations.debug_layout = None
     result = compare(old, new)
     phantom = {
         ChangeKind.FUNC_RETURN_CHANGED,
@@ -780,7 +780,7 @@ def test_stripped_suppression_with_no_exported_surface():
         functions=[_exported_func("xmlNewNode")],
         types=[],
     )
-    new.dwarf = None
+    new.declarations.debug_layout = None
     result = compare(old, new)
     assert not any(c.kind == ChangeKind.TYPE_REMOVED for c in result.changes)
 
@@ -884,7 +884,7 @@ def test_data_only_library_removal_still_reported_when_variables_change():
         ],
         types=[],
     )
-    new.dwarf = None
+    new.declarations.debug_layout = None
     result = compare(old, new)
     assert any(
         c.kind == ChangeKind.TYPE_REMOVED and c.symbol == "Cfg" for c in result.changes
@@ -920,7 +920,7 @@ def test_data_only_library_stripped_suppresses_when_variables_retained():
         ],
         types=[],
     )
-    new.dwarf = None
+    new.declarations.debug_layout = None
     result = compare(old, new)
     assert not any(c.kind == ChangeKind.TYPE_REMOVED for c in result.changes), (
         "a merely-stripped data-only DSO must not fabricate type removals; "
@@ -1246,7 +1246,7 @@ def test_dwarf_qualified_flat_typedefs_keep_their_key_space():
 
     old = _elf_snapshot(functions=[_exported_func("use_alias")])
     old.declarations.typedefs = {"Alias": "int", "ns::Alias": "int"}
-    old.dwarf = DwarfMetadata(has_dwarf=True)  # the content flag, not the object
+    old.declarations.debug_layout = DwarfMetadata(has_dwarf=True)  # content flag
 
     eid_global = entity_id_for_typedef((), "Alias")
     eid_ns = entity_id_for_typedef((Namespace("ns"),), "Alias")
@@ -1296,7 +1296,7 @@ def test_header_backed_snapshot_with_incidental_dwarf_stays_bare_keyed():
 
     old = _elf_snapshot(functions=[_exported_func("use_alias")])
     old.declarations.typedefs = {"Alias": "int"}
-    old.dwarf = DwarfMetadata()
+    old.declarations.debug_layout = DwarfMetadata()
     old.from_headers = True
 
     eid_ns = entity_id_for_typedef((Namespace("ns"),), "Alias")
@@ -1345,7 +1345,7 @@ def test_btf_ctf_typedef_removal_still_reported_via_leftover_fallback():
     dwarf_meta = DwarfMetadata()
     old = _elf_snapshot(functions=[_exported_func("use_alias")])
     old.declarations.typedefs = {"kept_typedef": "int", "removed_typedef": "long"}
-    old.dwarf = dwarf_meta
+    old.declarations.debug_layout = dwarf_meta
     old.semantic_ir = semantic_ir_from_debug_metadata(dwarf_meta, "btf")
 
     eid = entity_id_for_typedef((), "kept_typedef")

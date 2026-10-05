@@ -36,7 +36,7 @@ named sections.
 
 ```json
 {
-  "schema_version": 57,
+  "schema_version": 56,
   "sections": {
     "binary":       {"section_kind": "binary",       "section_schema_version": 1, "payload": {"...": "..."}},
     "declarations": {"section_kind": "declarations", "section_schema_version": 1, "payload": {"...": "..."}},
@@ -61,7 +61,7 @@ maps are verbatim; each `payload` is elided.)*
 
 | Key | Meaning |
 |---|---|
-| `schema_version` | The **document's** version — one integer, currently **`57`**. Top-level so a loader can read it without parsing the rest. |
+| `schema_version` | The **document's** version — one integer, currently **`56`**. Top-level so a loader can read it without parsing the rest. |
 | `sections` | The nine named sections. Each carries its own `section_kind`, `section_schema_version` and `payload`. |
 | `section_schema_versions` | A flat map of the same per-section versions, so a reader can check them without walking `sections`. |
 
@@ -106,14 +106,14 @@ follow from that, and they have different answers:
 Loading an older snapshot **warns**, and the warning is the point:
 
 ```text
-UserWarning: Snapshot schema_version 8 predates this abicheck's schema_version 57:
+UserWarning: Snapshot schema_version 8 predates this abicheck's schema_version 56:
 header_cv_facts_reliable, param_kind_facts_reliable are marked unreliable on this
 snapshot, so the affected detectors will decline to trust these stale facts rather
 than risk a false positive purely from this tool upgrade.
 ```
 
 **Loading and re-saving does not upgrade the evidence.** A re-saved snapshot
-carries `schema_version: 57` and the current envelope, but the warning
+carries `schema_version: 56` and the current envelope, but the warning
 persists — it then says so explicitly — and the affected facts stay
 unestablished. Serialization cannot invent evidence an older extractor never
 collected. If you need those facts, **re-run `dump`** against the artifact.
@@ -123,7 +123,7 @@ abicheck, rather than round-tripped.
 ## Schema version history
 
 `schema_version` is a single integer, not `MAJOR.MINOR`.
-The current value is **`57`**. See
+The current value is **`56`**. See
 `abicheck/storage/snapshot_schema_versions.py`'s `SCHEMA_VERSION` for the
 authoritative, up-to-date value and the full per-version comment.
 
@@ -348,13 +348,6 @@ between two same-size candidates. Unequal hashes are not treated as evidence,
 because a relative call or data reference changes when the same function moves.
 An absent key means "not hashed".
 
-(v57) `semantic_ir` function occurrences carry the five signature facts
-`return_type_spelling`, `parameter_type_spellings`, `parameter_kinds`,
-`ref_qualifier` and `is_variadic`, inside an IR document stamped
-`"version": 3`. The spellings are the producer's own, not canonicalized. A
-pre-v57 document decodes them as not collected, and loading fills them from
-the snapshot's own functions, so an older baseline compares exactly as before.
-
 (v55) `public_header_identifiers_fact` — every identifier token the public
 header set's raw text spells, every preprocessor branch included (comments and
 literals stripped). `--contract public` reads it to tell "no public header
@@ -486,7 +479,7 @@ model rather than against either physical layout. Optional keys are omitted or `
 
 | Key | Type | Meaning |
 |-----|------|---------|
-| `schema_version` | int | Snapshot format version (currently `57`). |
+| `schema_version` | int | Snapshot format version (currently `56`). |
 | `library` | string | Library identity, e.g. `libfoo.so.1`. |
 | `version` | string | Library version string, e.g. `1.2.3`. |
 | `source_path` | string \| null | Original path the snapshot was taken from. |
@@ -615,8 +608,8 @@ unknown.
 | `elf` | object \| null | ELF metadata: SONAME, `DT_NEEDED`, version defs/reqs, symbols, imports, hardening flags. |
 | `pe` | object \| null | PE/COFF metadata (Windows DLL exports, machine, characteristics). |
 | `macho` | object \| null | Mach-O metadata (dylib exports, CPU slices, install name). |
-| `dwarf` | object \| null | DWARF struct/enum layout (v51: plus ODR conflicts, see above). |
-| `dwarf_advanced` | object \| null | Toolchain, calling conventions, value-ABI traits. |
+| `dwarf` | object \| null | Debug struct/enum layout (v51: plus ODR conflicts, see above) — from DWARF, or BTF/CTF/PDB reduced to the same shape. In memory this is the IR store's `declarations.debug_layout`; the key keeps its historical name. |
+| `dwarf_advanced` | object \| null | Toolchain, calling conventions, value-ABI traits (in memory: `declarations.debug_advanced`). |
 | `sycl` | object \| null | SYCL plugin-interface metadata. |
 | `dependency_info` | object \| null | Resolved dependency graph (nodes, edges, unresolved). |
 | `build_mode` | object \| null | Normalized compiler/stdlib/standard capture (ADR build-mode work). No dump path writes it today; it is read back only from a document that carries one (see `known-gaps.md`). |
@@ -645,7 +638,7 @@ files:
 | | Snapshot (`dump`) | Comparison report (`compare -o json=-`) |
 |-|-------------------|---------------------------------------------|
 | **Version field** | `schema_version` | `report_schema_version` |
-| **Type** | integer (currently `57`) | string `MAJOR.MINOR` (e.g. `1.0`) |
+| **Type** | integer (currently `56`) | string `MAJOR.MINOR` (e.g. `1.0`) |
 | **Describes** | one library's ABI surface | the diff between two snapshots |
 
 A snapshot has no `report_schema_version`, and a report has no

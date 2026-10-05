@@ -71,12 +71,12 @@ def _detect_evidence_tiers(
         # clauses stay readable (and type-check) without `assert`s.
         old = new
     has_elf = (has_old and old.elf is not None) or new.elf is not None
-    has_dwarf = (has_old and old.dwarf is not None and old.dwarf.has_dwarf) or (
-        new.dwarf is not None and new.dwarf.has_dwarf
-    )
-    has_dwarf_advanced = (
-        has_old and old.dwarf_advanced is not None and old.dwarf_advanced.has_dwarf
-    ) or (new.dwarf_advanced is not None and new.dwarf_advanced.has_dwarf)
+    from .model.debug_evidence import debug_info_evidence
+
+    old_debug = debug_info_evidence(old if has_old else None)
+    new_debug = debug_info_evidence(new)
+    has_dwarf = old_debug.basic or new_debug.basic
+    has_dwarf_advanced = old_debug.advanced or new_debug.advanced
     has_pe = (has_old and getattr(old, "pe", None) is not None) or (
         getattr(new, "pe", None) is not None
     )

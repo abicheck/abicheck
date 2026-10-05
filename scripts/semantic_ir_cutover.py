@@ -370,11 +370,8 @@ def legacy_collection_reads(
 # (`DwarfMetadata.structs`/`enums`, a per-CU layout model with no identity)
 # and `AbiSnapshot.dwarf_advanced`. Criterion (4) of the plan's mechanical
 # definition of done is "the checker reads no backend-specific collection
-# directly", so every checker read of those two fields is recorded below and
-# may only shrink: a new reader fails, and an entry whose reads are gone must
-# be lowered or deleted. Each remaining entry is either a presence check
-# (`has_dwarf`, an evidence tier) or a DWARF-layout detector whose model
-# carries no identity to join into the IR (the plan's 2B sweep note).
+# directly". Since the debug layout moved into the IR store (2026-10-05) those
+# names are builder inputs only, and any checker read of them is an error.
 
 #: The checker layers this rule scopes to. Producers, storage and model build
 #: these representations, so they are out of scope.
@@ -398,51 +395,12 @@ CHECKER_GLOBS: tuple[str, ...] = (
 
 BACKEND_DECLARATION_FIELDS: frozenset[str] = frozenset({"dwarf", "dwarf_advanced"})
 
-#: `(module, enclosing qualname, field) -> read count`: the reviewed baseline.
-KNOWN_BACKEND_DECLARATION_READERS: dict[tuple[str, str, str], int] = {
-    ("abicheck/analysis_assurance.py", "_dwarf_context_status", "dwarf"): 2,
-    ("abicheck/analysis_assurance.py", "_dwarf_context_status", "dwarf_advanced"): 2,
-    (
-        "abicheck/analysis_assurance_layout.py",
-        "layout_unverified_detectors",
-        "dwarf",
-    ): 2,
-    (
-        "abicheck/analysis_assurance_layout.py",
-        "layout_unverified_detectors",
-        "dwarf_advanced",
-    ): 2,
-    ("abicheck/checker.py", "_diff_advanced_dwarf", "dwarf_advanced"): 4,
-    ("abicheck/compare/debug_type_join.py", "join_debug_types", "dwarf"): 1,
-    ("abicheck/compare/edge_query.py", "debug_coverage_record", "dwarf"): 2,
-    ("abicheck/confidence.py", "_detect_evidence_tiers", "dwarf"): 4,
-    ("abicheck/confidence.py", "_detect_evidence_tiers", "dwarf_advanced"): 4,
-    ("abicheck/diff_filtering.py", "_enum_canonical_names", "dwarf"): 1,
-    ("abicheck/diff_helpers.py", "record_canonical_names", "dwarf"): 1,
-    ("abicheck/diff_helpers.py", "typedef_flat_map_is_dwarf_qualified", "dwarf"): 1,
-    ("abicheck/diff_long_double.py", "_ld_base_size", "dwarf"): 1,
-    ("abicheck/diff_platform.py", "_diff_dwarf", "dwarf"): 2,
-    ("abicheck/diff_platform.py", "_has_any_dwarf", "dwarf"): 2,
-    ("abicheck/diff_symbols.py", "_is_stripped_symbols_only", "dwarf"): 1,
-    ("abicheck/diff_types.py", "_has_type_evidence", "dwarf"): 1,
-    ("abicheck/internal_leak.py", "_build_type_map", "dwarf"): 1,
-    (
-        "abicheck/policy/analysis_assurance_schema_staleness.py",
-        "_side_is_stripped_symbols_only",
-        "dwarf",
-    ): 1,
-    (
-        "abicheck/policy/depth_projection.py",
-        "_strip_header_and_above_evidence",
-        "dwarf",
-    ): 5,
-    (
-        "abicheck/policy/depth_projection.py",
-        "_structural_facts_are_dwarf_confirmed",
-        "dwarf",
-    ): 2,
-    ("abicheck/surface_graph.py", "_evidence_tier", "dwarf"): 1,
-}
+# Criterion (4) closed (2026-10-05): the debug layout was folded into the IR's
+# declaration store (`declarations.debug_layout`/`debug_advanced`,
+# `model/declaration_store.py`), so `AbiSnapshot.dwarf`/`dwarf_advanced` are
+# builder inputs, not attributes. There is no baseline: any checker read of
+# those names is an error. The scan still matters because `getattr(snap,
+# "dwarf", None)` on a snapshot would silently answer `None` rather than raise.
 
 
 def _checker_modules() -> list[Path]:
@@ -536,32 +494,18 @@ def _unmangled_qualname(qualname: str) -> str | None:
 
 def backend_declaration_problems(
     current: dict[tuple[str, str, str], int],
-    baseline: dict[tuple[str, str, str], int],
 ) -> list[str]:
-    """Why *current* disagrees with *baseline*: a read above its baseline
-    (a new reader), or a baseline above its reads (a stale entry)."""
+    """One problem per checker read in *current*: there is no allowlist."""
     problems: list[str] = []
     for key, n in sorted(current.items()):
-        allowed = baseline.get(key, 0)
-        if n > allowed:
-            rel, qualname, field_name = key
-            problems.append(
-                f"{rel}: {qualname} reads `AbiSnapshot.{field_name}` {n} time(s) "
-                f"(baseline {allowed}). The checker reads declarations through "
-                "the snapshot's SemanticIR (ADR-063 6B); a backend-specific "
-                "representation is not an input for a new detector. Read "
-                "`snapshot.declarations`/the IR, or fold the fact into the IR "
-                "at extraction"
-            )
-    for key, allowed in sorted(baseline.items()):
-        if current.get(key, 0) < allowed:
-            rel, qualname, field_name = key
-            problems.append(
-                f"KNOWN_BACKEND_DECLARATION_READERS[{key!r}] = {allowed}, but "
-                f"{rel}:{qualname} now reads `{field_name}` "
-                f"{current.get(key, 0)} time(s) -- lower the baseline (it only "
-                "shrinks)"
-            )
+        rel, qualname, field_name = key
+        problems.append(
+            f"{rel}: {qualname} reads `{field_name}` {n} time(s). "
+            f"`AbiSnapshot.{field_name}` is a builder input, not an attribute "
+            "(ADR-063 criterion 4): the debug layout lives in the IR store. "
+            "Read layout through `compare/debug_layout_view.py` and debug "
+            "evidence through `model/debug_evidence.py`"
+        )
     return problems
 
 
@@ -597,9 +541,7 @@ def check_semantic_ir_cutover(f) -> None:  # noqa: ANN001 - Findings, see caller
                     "is deliberately no per-site exemption: this cohort is "
                     "freshly migrated, so a grandfathered reader cannot exist",
                 )
-    for problem in backend_declaration_problems(
-        current_backend_declaration_readers(), KNOWN_BACKEND_DECLARATION_READERS
-    ):
+    for problem in backend_declaration_problems(current_backend_declaration_readers()):
         f.err("semantic-ir-cutover", problem)
 
 

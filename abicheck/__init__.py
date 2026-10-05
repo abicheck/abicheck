@@ -20,3 +20,16 @@ try:
     __version__: str = _pkg_version("abicheck")
 except PackageNotFoundError:
     __version__ = "0.0.0.dev0"  # running from source without install
+
+# Initialize the ``model`` package before any other abicheck module can run.
+# ``model`` (its ``__init__`` and several submodules) imports the root-level,
+# model-layer ``name_classification`` at module scope, while
+# ``name_classification`` -- like every cached helper -- imports
+# ``model.execution_cache``, which executes ``model/__init__`` first. Entered
+# from ``model`` that is harmless; entered from ``name_classification`` (or any
+# module that reaches it before ``model``) the package init found a partially
+# initialized ``name_classification`` and raised ``ImportError``. Loading
+# ``model`` here makes the import order -- and so whether import succeeds --
+# independent of which abicheck module a process imports first
+# (tests/test_first_import_order.py).
+from . import model as _model  # noqa: E402,F401
