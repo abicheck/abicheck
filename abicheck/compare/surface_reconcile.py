@@ -55,7 +55,7 @@ from ..model import AbiSnapshot
 from ..model.comparison_memo import comparison_memo_scope
 from ..model.execution_cache import MISSING, request_key
 from ..model.execution_cache_scoped import InstanceMemo
-from .detection_memo import detection_memo_scope, memoized
+from .detection_memo import memoized
 from .export_transition import surface_exit_is_evidence_gap
 
 if TYPE_CHECKING:
@@ -468,13 +468,7 @@ def releases_reconciliation(
             # Same one-comparison scope for the pure per-snapshot facts
             # (identity table, referenced identifiers, export join) several
             # stages of the comparison derive independently.
-            #
-            # The detection memo spans the whole comparison too, not only the
-            # detector loop: post-processing and the cross-source checks ask
-            # the same per-snapshot questions (the function-signature index
-            # alone was rebuilt ~24 times outside the loop, ~2 s of a 10 s
-            # compare), and they run on the same unedited snapshots.
-            with comparison_memo_scope(), detection_memo_scope():
+            with comparison_memo_scope():
                 return fn(*args, **kwargs)
         finally:
             invalidate_reconciliation(old if isinstance(old, AbiSnapshot) else None)
