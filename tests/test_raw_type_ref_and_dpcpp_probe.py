@@ -12,6 +12,7 @@ a hand-encoded oracle.
 from __future__ import annotations
 
 import subprocess
+import uuid
 from types import SimpleNamespace
 
 import pytest
@@ -159,6 +160,18 @@ def test_type_ref_offset_reads_forms_without_decoding_the_target():
 # ── icpx host-pass probe ───────────────────────────────────────────────────
 
 
+#: What the probe appends after the caller's own flags.
+_PROBE_TAIL = [
+    "-fsycl",
+    "-fsycl-host-only",
+    "-###",
+    "-fsyntax-only",
+    "-x",
+    "c++",
+    "-",
+]
+
+
 @pytest.fixture
 def probe(monkeypatch):
     """Run the probe against a scripted driver; returns the argv it saw."""
@@ -166,9 +179,10 @@ def probe(monkeypatch):
     import abicheck.dumper_toolchain as toolchain
 
     seen: list[list[str]] = []
-    counter = iter(range(10**6))
-    # A fresh identity per call so the per-executable memo never answers.
-    monkeypatch.setattr(toolchain, "_tool_identity", lambda b: f"id-{next(counter)}")
+    # A process-unique identity per call, so the per-executable memo never
+    # answers -- a per-test counter would repeat across tests and serve one
+    # test the previous test's probe result.
+    monkeypatch.setattr(toolchain, "_tool_identity", lambda b: f"id-{uuid.uuid4()}")
 
     def install(stderr: str | None = None, exc: BaseException | None = None):
         def fake(cmd, **_kw):
@@ -188,23 +202,24 @@ def test_probe_reports_a_device_pass(probe):
         stderr='"-cc1" "-triple" "spir64" "-fsycl-is-device"\n"-cc1" "-fsycl-is-host"'
     )
     assert dumper_clang._driver_host_only_is_single_pass("icpx", ("-O0",)) is False
-    assert seen[0][:2] == ["icpx", "-O0"]
-    assert {"-fsycl", "-fsycl-host-only", "-###"} <= set(seen[0])
+    assert seen == [["icpx", "-O0", *_PROBE_TAIL]]
 
 
 def test_probe_reports_a_single_host_pass(probe):
-    install, _ = probe
+    install, seen = probe
     install(stderr='"-cc1" "-triple" "x86_64" "-fsycl-is-host"')
     assert dumper_clang._driver_host_only_is_single_pass("icpx", ()) is True
+    assert seen == [["icpx", *_PROBE_TAIL]]
 
 
 @pytest.mark.parametrize(
     "exc", [OSError("no such file"), subprocess.TimeoutExpired("icpx", 30)]
 )
 def test_probe_that_cannot_run_keeps_the_host_only_request(probe, exc):
-    install, _ = probe
+    install, seen = probe
     install(exc=exc)
     assert dumper_clang._driver_host_only_is_single_pass("icpx", ()) is True
+    assert seen == [["icpx", *_PROBE_TAIL]]
 
 
 def test_a_two_pass_driver_routes_the_host_request_to_the_selector(monkeypatch):
