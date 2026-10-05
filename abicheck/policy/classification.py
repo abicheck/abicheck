@@ -71,13 +71,13 @@ def _kinds_for(verdict_val: str) -> set[ChangeKind]:
     return {ChangeKind(v) for v in raw}
 
 
-BREAKING_KINDS: set[ChangeKind] = _kinds_for("BREAKING")
+BREAKING_KINDS: frozenset[ChangeKind] = frozenset(_kinds_for("BREAKING"))
 
-COMPATIBLE_KINDS: set[ChangeKind] = _kinds_for("COMPATIBLE")
+COMPATIBLE_KINDS: frozenset[ChangeKind] = frozenset(_kinds_for("COMPATIBLE"))
 
 RISK_KINDS: frozenset[ChangeKind] = frozenset(_kinds_for("COMPATIBLE_WITH_RISK"))
 
-API_BREAK_KINDS: set[ChangeKind] = _kinds_for("API_BREAK")
+API_BREAK_KINDS: frozenset[ChangeKind] = frozenset(_kinds_for("API_BREAK"))
 
 # ---------------------------------------------------------------------------
 # Compatible sub-categories: additions vs quality/behavioral issues

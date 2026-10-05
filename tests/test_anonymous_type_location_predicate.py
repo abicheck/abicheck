@@ -21,6 +21,8 @@ _PIECES = [
     "(lambda:foo.h:4:37)",
     '"(lambda at /q/r.h:1:2)"',
     " at ",
+    "(lambda\tat /t/tab.h:3:4)",
+    "(unnamed struct  at  /two/spaces.h:5:6)",
     "(lambda at nowhere)",
     "Tag<",
 ]
@@ -42,3 +44,5 @@ def test_predicate_true_for_raw_markers_false_for_stripped() -> None:
     assert has_anonymous_type_location("g<(lambda at /a/foo.h:4:37)>")
     assert not has_anonymous_type_location("g<(lambda:foo.h:4:37)>")
     assert not has_anonymous_type_location("plain::name")
+    # Any whitespace the strip accepts, not only a single space.
+    assert has_anonymous_type_location("g<(lambda\tat /a/foo.h:4:37)>")

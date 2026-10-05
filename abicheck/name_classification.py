@@ -604,7 +604,9 @@ def has_anonymous_type_location(name: str) -> bool:
     ``False`` means the strip is the identity on *name*, so a caller holding
     a collection of strings can skip a rewrite walk over them entirely.
     """
-    return " at " in name and _ANON_TYPE_LOCATION_PATH_ONLY_RE.search(name) is not None
+    # The regex alone: a literal ``" at "`` prefilter would miss the
+    # ``\s+at\s+`` spellings (a tab) the strip itself rewrites.
+    return _ANON_TYPE_LOCATION_PATH_ONLY_RE.search(name) is not None
 
 
 def _declaring_header_discriminator(path: str) -> str:
