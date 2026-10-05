@@ -16,6 +16,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from _semantic_ir_persisted import persisted_view
 from hypothesis import given, settings, strategies as st
 
 from abicheck.checker import ChangeKind, compare
@@ -31,10 +32,7 @@ from abicheck.model.identity import EntityKind, entity_id_for_function
 from abicheck.model.occurrence import OccurrenceId
 from abicheck.model.semantic_ir import CanonicalEntity, SemanticIR
 from abicheck.model.semantic_ir_declaration_facts import DECLARATION_FIELDS
-from abicheck.model.semantic_ir_function_signature import (
-    LEGACY_SIGNATURE_DIAGNOSTIC,
-    SIGNATURE_FIELDS,
-)
+from abicheck.model.semantic_ir_function_signature import SIGNATURE_FIELDS
 from abicheck.model.semantic_ir_legacy_adapter import (
     legacy_function_signature_occurrences,
 )
@@ -205,45 +203,32 @@ class TestNormalizedIR:
 
 
 class TestCodec:
-    def test_round_trip_writes_signature_only_for_functions(self) -> None:
+    def test_signature_facts_are_never_written_and_compare_is_unchanged(self) -> None:
         fn = _fn("int", ["int"], "&&", False)
         projected, _ = legacy_function_signature_occurrences([fn])
         doc = semantic_ir_to_document(projected, {})
-        assert doc["semantic_ir"]["version"] == 3
+        assert doc["semantic_ir"]["version"] == 2
         (occ,) = doc["semantic_ir"]["occurrences"]
-        assert occ["entity"]["parameter_type_spellings"]["value"] == ["int"]
+        assert not set(occ["entity"]) & {*SIGNATURE_FIELDS, *DECLARATION_FIELDS}
         ir, _ = semantic_ir_from_document(doc)
-        assert ir == projected
+        assert ir == persisted_view(projected)
         snap = _snap(fn, with_ir=True)
         reloaded = snapshot_from_dict(snapshot_to_dict(snap))
-        assert reloaded.canonical_ir == snap.canonical_ir
+        assert reloaded.canonical_ir == persisted_view(snap.canonical_ir)
+        (live,) = snap.declarations.functions
+        (loaded,) = reloaded.declarations.functions
+        assert function_signature_index(reloaded.canonical_ir, [loaded]).entity_for(
+            loaded
+        ) == function_signature_index(snap.canonical_ir, [live]).entity_for(live)
 
-    def test_a_version_2_document_loads_and_compares_by_its_declarations(self) -> None:
-        snap = _snap(_fn("int", ["int"], "", True), with_ir=True)
-        doc = semantic_ir_to_document(snap.canonical_ir, {})
-        doc["semantic_ir"]["version"] = 2
-        for occ in doc["semantic_ir"]["occurrences"]:
-            for name in (*SIGNATURE_FIELDS, *DECLARATION_FIELDS):
-                del occ["entity"][name]
-        ir, _ = semantic_ir_from_document(doc)
-        (entity,) = ir.occurrences.values()
-        assert entity.return_type_spelling.diagnostics == (LEGACY_SIGNATURE_DIAGNOSTIC,)
-        (fn,) = snap.declarations.functions
-        entity = function_signature_index(ir, [fn]).entity_for(fn)
-        assert entity.return_type_spelling.value == "int"
-        assert entity.is_variadic.value is True
-
-    def test_a_version_2_document_carrying_signature_facts_is_refused(self) -> None:
+    def test_a_document_carrying_a_projection_fact_is_refused(self) -> None:
         snap = _snap(_fn("int", [], "", False), with_ir=True)
         doc = semantic_ir_to_document(snap.canonical_ir, {})
-        doc["semantic_ir"]["version"] = 2
-        with pytest.raises(ValueError):
-            semantic_ir_from_document(doc)
-
-    def test_a_non_boolean_variadic_is_refused(self) -> None:
-        snap = _snap(_fn("int", [], "", False), with_ir=True)
-        doc = semantic_ir_to_document(snap.canonical_ir, {})
-        doc["semantic_ir"]["occurrences"][0]["entity"]["is_variadic"]["value"] = 1
+        doc["semantic_ir"]["occurrences"][0]["entity"]["is_variadic"] = {
+            "status": "present",
+            "value": False,
+            "diagnostics": [],
+        }
         with pytest.raises(ValueError):
             semantic_ir_from_document(doc)
 

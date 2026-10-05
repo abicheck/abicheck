@@ -112,7 +112,7 @@ class TestNotEvaluatedDetectors:
         from abicheck.model.dwarf_facts import DwarfMetadata
 
         old, new = _snapshots(removed=1)
-        new.dwarf = DwarfMetadata(has_dwarf=True)
+        new.declarations.debug_layout = DwarfMetadata(has_dwarf=True)
         result = compare(old, new)
         dwarf = {d.name: d for d in result.detector_results}["dwarf"]
         assert dwarf.not_evaluated is True
@@ -127,7 +127,7 @@ class TestNotEvaluatedDetectors:
         from abicheck.model.dwarf_facts import DwarfMetadata
 
         old, new = _snapshots()
-        old.dwarf = DwarfMetadata(has_dwarf=True)
+        old.declarations.debug_layout = DwarfMetadata(has_dwarf=True)
         result = compare(old, new)
         dwarf = {d.name: d for d in result.detector_results}["dwarf"]
         assert dwarf.not_evaluated is False

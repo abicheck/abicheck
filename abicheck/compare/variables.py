@@ -63,6 +63,7 @@ from functools import partial
 from typing import TYPE_CHECKING
 
 from ..diff_helpers import bool_transition, make_change
+from ..model.castxml_spelling_artifacts import has_unresolved_component
 from ..model.change_catalog.kinds import ChangeKind
 from ..model.identity import EntityId, EntityKind
 from ..model.semantic_ir import CanonicalEntity, SemanticIR
@@ -71,6 +72,7 @@ from ..model.semantic_ir_index import SemanticIRIndex
 from ..model.semantic_ir_legacy_adapter import (
     semantic_ir_covers_kind,
 )
+from ..model.type_indirection import indirection_provably_differs
 from ..name_classification import _find_matching_close, func_signature_cv_only_differ
 from .declined_comparisons import record_declined
 from .detection_memo import memoized
@@ -166,7 +168,10 @@ def variable_type_index(
             hit = (v, _project_variable(v, named, project))
             seen[id(v)] = hit
         projected[id(v)] = hit[1]
-    return VariableTypeIndex(index=SemanticIRIndex(ir_used), projected=projected)
+    ir_index = memoized(
+        "variable_type_ir_index", ir_used, None, partial(SemanticIRIndex, ir_used)
+    )
+    return VariableTypeIndex(index=ir_index, projected=projected)
 
 
 def variable_type_facts(
@@ -182,6 +187,25 @@ def variable_type_facts(
         spelling.value if spelling.is_present else None,
         ("const" in cv.value) if cv.is_present and cv.value is not None else None,
     )
+
+
+def _unresolved_structure_differs(
+    canon_old: str | None, canon_new: str | None, displays: tuple[str, str]
+) -> bool:
+    """Whether a pair with an unestablished spelling is still a provable
+    type change: each side is either established or a castxml-unresolved
+    composite (``"?*"``, ``"const ?"``), and the resolved declarator
+    structure alone differs (``int`` -> ``"?*"``). Two compatible shapes
+    (``"?*"``/``"?*"``, ``int **``/``"?*"``) stay a decline."""
+    sides = []
+    for canon, raw in zip((canon_old, canon_new), displays):
+        if canon is not None:
+            sides.append(canon)
+        elif raw and has_unresolved_component(raw):
+            sides.append(raw)
+        else:
+            return False
+    return indirection_provably_differs(sides[0], sides[1])
 
 
 def variable_type_changes(
@@ -210,6 +234,17 @@ def variable_type_changes(
     # but it is not a confirmed "unchanged" either, so the declined
     # comparison is recorded (T9 accounting) rather than passing silently.
     if canon_old is None or canon_new is None:
+        if _unresolved_structure_differs(canon_old, canon_new, displays):
+            return [
+                make_change(
+                    ChangeKind.VAR_TYPE_CHANGED,
+                    symbol=mangled,
+                    name=name,
+                    old=displays[0],
+                    new=displays[1],
+                    entity_id=entity_id,
+                )
+            ]
         record_declined(
             mangled,
             "variable type spelling not established on "

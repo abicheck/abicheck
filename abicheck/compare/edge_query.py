@@ -288,7 +288,9 @@ def debug_coverage_record(snap: AbiSnapshot) -> CoverageRecord:
     """The debug section: ``ran`` when *snap* carries debug info (DWARF, or
     BTF/CTF/PDB reduced to it), ``not_run`` otherwise -- a stripped binary
     never proves a debug type absent."""
-    ran = snap.dwarf is not None and snap.dwarf.has_dwarf
+    from ..model.debug_evidence import debug_info_evidence
+
+    ran = debug_info_evidence(snap).basic
     return CoverageRecord(
         EDGE_KIND_DEBUG_TYPE_OF,
         PRODUCER_DEBUG_SECTION,

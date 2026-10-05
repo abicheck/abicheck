@@ -635,10 +635,10 @@ class TestPdbInAbiSnapshot:
             platform="pe",
         )
 
-        assert snap.dwarf is not None
-        assert snap.dwarf.has_dwarf
-        assert snap.dwarf_advanced is not None
-        assert snap.dwarf_advanced.has_dwarf
+        assert snap.declarations.debug_layout is not None
+        assert snap.declarations.debug_layout.has_dwarf
+        assert snap.declarations.debug_advanced is not None
+        assert snap.declarations.debug_advanced.has_dwarf
         assert snap.platform == "pe"
 
     def test_no_tpi_stream(self, tmp_path: Path) -> None:
@@ -749,13 +749,13 @@ class TestPdbInAbiSnapshot:
         json_str = snapshot_to_json(snap)
         loaded = snapshot_from_dict(json.loads(json_str))
 
-        assert loaded.dwarf is not None
-        assert loaded.dwarf.has_dwarf
-        assert "Vec3" in loaded.dwarf.structs
-        assert loaded.dwarf.structs["Vec3"].byte_size == 16
-        assert "Access" in loaded.dwarf.enums
-        assert loaded.dwarf.enums["Access"].members["READ"] == 1
+        assert loaded.declarations.debug_layout is not None
+        assert loaded.declarations.debug_layout.has_dwarf
+        assert "Vec3" in loaded.declarations.debug_layout.structs
+        assert loaded.declarations.debug_layout.structs["Vec3"].byte_size == 16
+        assert "Access" in loaded.declarations.debug_layout.enums
+        assert loaded.declarations.debug_layout.enums["Access"].members["READ"] == 1
 
-        assert loaded.dwarf_advanced is not None
-        assert loaded.dwarf_advanced.has_dwarf
-        assert loaded.dwarf_advanced.toolchain.compiler == "MSVC"
+        assert loaded.declarations.debug_advanced is not None
+        assert loaded.declarations.debug_advanced.has_dwarf
+        assert loaded.declarations.debug_advanced.toolchain.compiler == "MSVC"

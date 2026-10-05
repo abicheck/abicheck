@@ -625,7 +625,18 @@ _ACCEPTED_KILL_LOSS = {
     # bookkeeping is traced too (a 1.1 GB first-call peak aborted the stats
     # run), so it measures the instrumentation, not snapshot_io. The
     # behavioural snapshot_io tests stay in the run. Surfaced by PR #1356.
-    "tests/test_snapshot_read_allocation.py": frozenset({"abicheck.snapshot_io"}),
+    # It also reaches name_classification: importing any abicheck module now
+    # initializes `abicheck.model` first (abicheck/__init__.py, the
+    # first-import-order fix), and `model` imports name_classification.
+    "tests/test_snapshot_read_allocation.py": frozenset(
+        {"abicheck.name_classification", "abicheck.snapshot_io"}
+    ),
+    # Re-entrant `abicheck` subprocess from a scratch cwd (see its pyproject
+    # --ignore comment); reaches name_classification only through the
+    # package root's `model` initialization (abicheck/__init__.py).
+    "tests/test_publish_baseline_upload_step.py": frozenset(
+        {"abicheck.name_classification"}
+    ),
     # Its producer/consumer (subprocess-spawning) tests run `python -m abicheck.frontends.action.cli`
     # as a real subprocess, which re-enters the mutated tree with no mutmut
     # config -- the same class as the entries above. Surfaced by PR #1356.

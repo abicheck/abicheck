@@ -48,7 +48,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from ..model.dwarf_facts import debug_info_present
+from ..model.debug_evidence import debug_info_evidence
 from .evidence_policy import (
     apply_evidence_policy,
     evidence_coverage_metrics,
@@ -207,7 +207,7 @@ def intrinsic_coverage(snap: AbiSnapshot) -> list[LayerCoverage]:
 
     # Content, not object presence: every ELF dump attaches a metadata
     # object even when it collected nothing (see `debug_info_present`).
-    has_debug = debug_info_present(snap.dwarf, snap.dwarf_advanced)
+    has_debug = debug_info_evidence(snap).any
     has_headers = bool(snap.from_headers and not snap.from_headers_inferred)
     return [
         row("L0", bool(snap.elf or snap.pe or snap.macho), snap.platform or ""),

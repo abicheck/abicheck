@@ -44,7 +44,7 @@ from .model import (
     Variable,
     resolved_fact_value,
 )
-from .model.dwarf_facts import debug_info_present
+from .model.debug_evidence import debug_info_evidence
 from .model.execution_cache import request_key
 from .model.execution_cache_scoped import ScopedCache
 from .model.surface_facts import in_public_surface, is_binary_exported
@@ -378,7 +378,7 @@ def _evidence_tier(snap: AbiSnapshot) -> str:
         return EvidenceTier.HEADER_AWARE.value
     # `is not None` would make ELF_ONLY unreachable on the normal dump path,
     # which always attaches a (possibly empty) metadata object.
-    if debug_info_present(snap.dwarf):
+    if debug_info_evidence(snap).basic:
         return EvidenceTier.DWARF_AWARE.value
     return EvidenceTier.ELF_ONLY.value
 

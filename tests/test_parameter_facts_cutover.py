@@ -14,6 +14,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from _semantic_ir_persisted import persisted_view
 from hypothesis import given, settings, strategies as st
 
 from abicheck.checker import ChangeKind
@@ -165,7 +166,12 @@ def test_round_trip_keeps_absent_defaults_and_depths() -> None:
     assert entity.parameter_defaults.value == (None, "3")
     assert entity.parameter_pointer_depths.value == (1, 0)
     assert entity.parameter_restrict.value == ("true", "")
-    assert snapshot_from_dict(snapshot_to_dict(snap)).canonical_ir == snap.canonical_ir
+    reloaded = snapshot_from_dict(snapshot_to_dict(snap))
+    assert reloaded.canonical_ir == persisted_view(snap.canonical_ir)
+    (rf,) = reloaded.declarations.functions
+    assert (
+        function_signature_index(reloaded.canonical_ir, [rf]).entity_for(rf) == entity
+    )
 
 
 def test_unreliable_default_value_is_not_reported_as_changed() -> None:

@@ -1683,8 +1683,8 @@ class TestDumpPe:
                     return_value=(mock_dwarf, mock_adv),
                 ):
                     result = _dump_pe(p, "1.0")
-        assert result.dwarf is mock_dwarf
-        assert result.dwarf_advanced is mock_adv
+        assert result.declarations.debug_layout is mock_dwarf
+        assert result.declarations.debug_advanced is mock_adv
 
     def test_pdb_parsing_exception_handled(self, tmp_path):
         from abicheck.service import _dump_pe
@@ -1702,7 +1702,7 @@ class TestDumpPe:
                 "abicheck.pdb_utils.locate_pdb", side_effect=RuntimeError("pdb error")
             ):
                 result = _dump_pe(p, "1.0")
-        assert result.dwarf is None
+        assert result.declarations.debug_layout is None
 
     def test_cpp_name_not_extern_c(self, tmp_path):
         from abicheck.service import _dump_pe
@@ -3971,8 +3971,8 @@ class TestPeHeaderScoping:
         ):
             result = _dump_pe(p, "1.0", headers=[_mk_header(tmp_path)])
 
-        assert result.dwarf is dwarf_meta
-        assert result.dwarf_advanced is dwarf_adv
+        assert result.declarations.debug_layout is dwarf_meta
+        assert result.declarations.debug_advanced is dwarf_adv
 
     def test_header_directory_is_expanded(self, tmp_path):
         """`--header <dir>` must expand to files, not feed a dir to castxml."""

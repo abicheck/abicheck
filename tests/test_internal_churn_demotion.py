@@ -36,7 +36,7 @@ def _dwarf_snap(
     version: str, structs: dict[str, StructLayout], funcs=None
 ) -> AbiSnapshot:
     s = AbiSnapshot(library="libtbbmalloc.so.2", version=version, functions=funcs or [])
-    s.dwarf = DwarfMetadata(has_dwarf=True, structs=structs)  # type: ignore[attr-defined]
+    s.declarations.debug_layout = DwarfMetadata(has_dwarf=True, structs=structs)
     return s
 
 
@@ -128,7 +128,7 @@ def test_frozen_namespace_churn_is_not_demoted():
 
     old = AbiSnapshot(library="lib.so.1", version="1")
     new = AbiSnapshot(library="lib.so.1", version="2")
-    old.dwarf = DwarfMetadata(
+    old.declarations.debug_layout = DwarfMetadata(
         has_dwarf=True,
         structs={  # type: ignore[attr-defined]
             "ns::detail::r1::Impl": _layout(
@@ -136,7 +136,7 @@ def test_frozen_namespace_churn_is_not_demoted():
             ),
         },
     )
-    new.dwarf = DwarfMetadata(
+    new.declarations.debug_layout = DwarfMetadata(
         has_dwarf=True,
         structs={  # type: ignore[attr-defined]
             "ns::detail::r1::Impl": _layout(
@@ -154,13 +154,13 @@ def test_frozen_namespace_churn_is_not_demoted():
 def _frozen_dwarf_pair(type_name: str):
     old = AbiSnapshot(library="lib.so.1", version="1")
     new = AbiSnapshot(library="lib.so.1", version="2")
-    old.dwarf = DwarfMetadata(
+    old.declarations.debug_layout = DwarfMetadata(
         has_dwarf=True,
         structs={  # type: ignore[attr-defined]
             type_name: _layout(type_name, 8, [FieldInfo("a", "int", 0, 4)]),
         },
     )
-    new.dwarf = DwarfMetadata(
+    new.declarations.debug_layout = DwarfMetadata(
         has_dwarf=True,
         structs={  # type: ignore[attr-defined]
             type_name: _layout(type_name, 16, [FieldInfo("a", "long", 0, 8)]),

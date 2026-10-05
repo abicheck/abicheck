@@ -80,7 +80,7 @@ def _rec(name: str, fields: list[TypeField], *, is_union: bool = False) -> Recor
 
 def _dwarf_snap(version: str, structs: dict[str, StructLayout]) -> AbiSnapshot:
     snap = AbiSnapshot(library="libtest.so", version=version)
-    snap.dwarf = DwarfMetadata(has_dwarf=True, structs=structs)  # type: ignore[attr-defined]
+    snap.declarations.debug_layout = DwarfMetadata(has_dwarf=True, structs=structs)
     return snap
 
 

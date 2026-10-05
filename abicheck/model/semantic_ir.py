@@ -62,6 +62,7 @@ from .occurrence import OccurrenceId, canonical_key
 __all__ = [
     "CV_QUALIFIER_ORDER",
     "CanonicalEntity",
+    "PROJECTION_FIELD_NAMES",
     "SemanticIR",
     "canonical_cv_qualification",
     "conflict_value_strings",
@@ -100,6 +101,45 @@ def canonical_cv_qualification(spellings: Iterable[str]) -> tuple[str, ...]:
 
 
 _FIELD_NAMES: dict[type, tuple[str, ...]] = {}
+
+#: The comparison-time projection facts (function signature, qualifier,
+#: parameter and declaration cohorts). Derived from the declaration store at
+#: comparison time and never persisted (``storage/semantic_ir_codec``), so
+#: nothing that must agree between a fresh and a reloaded IR -- the
+#: :meth:`SemanticIR.canonical_entities` ranking -- may count them. Equal to
+#: ``SIGNATURE_FIELDS`` + ``DECLARATION_FIELDS`` (asserted by a test; spelled
+#: here because those modules import this one).
+PROJECTION_FIELD_NAMES = frozenset(
+    {
+        "return_type_spelling",
+        "parameter_type_spellings",
+        "parameter_kinds",
+        "ref_qualifier",
+        "is_variadic",
+        "is_extern_c",
+        "is_noexcept",
+        "is_virtual",
+        "is_explicit",
+        "is_hidden_friend",
+        "hidden_friend_owner",
+        "contract_attributes",
+        "exception_spec",
+        "vtable_index",
+        "is_override",
+        "is_inline",
+        "is_deleted",
+        "deleted_from_dwarf",
+        "parameter_names",
+        "parameter_defaults",
+        "parameter_pointer_depths",
+        "parameter_restrict",
+        "parameter_va_list",
+        "return_pointer_depth",
+        "deprecated",
+        "access",
+        "declared_alignment_bits",
+    }
+)
 
 #: Every ``CanonicalEntity`` fact's default: the one shared ``NOT_COLLECTED``
 #: instance ``Fact.not_collected()`` already returns. A constant rather than a
@@ -301,9 +341,14 @@ class CanonicalEntity:
     def resolved_fact_count(self) -> int:
         """How many of this entity's facts carry usable evidence
         (``PRESENT``/``PARTIAL``, i.e. ``Fact.is_present``) — the ranking
-        :meth:`SemanticIR.canonical_entities` reduces on."""
+        :meth:`SemanticIR.canonical_entities` reduces on. Projection facts
+        (:data:`PROJECTION_FIELD_NAMES`) are not counted: they are never
+        persisted, so counting them would let a fresh IR and its reloaded
+        copy pick different winners."""
         count = 0
         for name in _fact_field_names(type(self)):
+            if name in PROJECTION_FIELD_NAMES:
+                continue
             fact = getattr(self, name)
             if fact is not _NOT_COLLECTED and fact.is_present:
                 count += 1

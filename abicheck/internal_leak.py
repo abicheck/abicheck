@@ -392,12 +392,14 @@ def _build_type_map(snap: AbiSnapshot) -> tuple[dict[str, RecordType], bool]:
     out: dict[str, RecordType] = {t.name: t for t in snap.declarations.types}
     if out:
         return out, False
-    dwarf = getattr(snap, "dwarf", None)
-    if dwarf is None or not getattr(dwarf, "structs", None):
+    from .compare.debug_layout_view import debug_layout_view
+
+    debug_records = debug_layout_view(snap).records
+    if not debug_records:
         return out, False
     from .model import RecordType as _RecordType, TypeField as _TypeField
 
-    for name, layout in dwarf.structs.items():
+    for name, layout in debug_records.items():
         fields = [
             _TypeField(
                 name=fi.name,

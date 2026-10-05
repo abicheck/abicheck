@@ -574,13 +574,13 @@ def test_dwarf_tier_without_headers() -> None:
     snap = _bare_snap()
     # has_dwarf=True, not a bare DwarfMetadata(): the tier follows collected
     # debug info, and every ELF dump attaches an object either way.
-    snap.dwarf = DwarfMetadata(has_dwarf=True)
+    snap.declarations.debug_layout = DwarfMetadata(has_dwarf=True)
     assert _resolved_metrics(snap).evidence_tier == "dwarf_aware"
 
     # The complementary half, which this file could not state before: an
     # attached-but-empty object is the elf_only tier, not dwarf_aware.
     empty = _bare_snap()
-    empty.dwarf = DwarfMetadata()
+    empty.declarations.debug_layout = DwarfMetadata()
     assert _resolved_metrics(empty).evidence_tier == "elf_only"
 
 

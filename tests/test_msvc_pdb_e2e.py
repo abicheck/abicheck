@@ -126,7 +126,7 @@ def _snapshot(dll: Path, pdb: Path, version: str):
 
 def _has_struct(snap, name: str) -> bool:
     """True if the PDB parser extracted a layout for *name* into the dwarf channel."""
-    dwarf = getattr(snap, "dwarf", None)
+    dwarf = snap.declarations.debug_layout
     if dwarf is None or not getattr(dwarf, "has_dwarf", False):
         return False
     return name in (getattr(dwarf, "structs", {}) or {})
@@ -156,7 +156,7 @@ class TestMsvcPdbEndToEnd:
         snap = _snapshot(dll, pdb, "1.0")
         if not _has_struct(snap, "Widget"):
             pytest.skip("PDB parser did not extract Widget layout from this MSVC PDB")
-        widget = snap.dwarf.structs["Widget"]
+        widget = snap.declarations.debug_layout.structs["Widget"]
         assert widget.byte_size == 8  # int x + int y
 
     def test_identical_dll_is_compatible(self, tmp_path: Path) -> None:

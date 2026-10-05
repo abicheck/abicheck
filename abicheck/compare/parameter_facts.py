@@ -46,6 +46,7 @@ from typing import TYPE_CHECKING, Any
 
 from ..diff_helpers import make_change
 from ..model.change_catalog.kinds import ChangeKind
+from ..model.type_indirection import unresolved_pair_verdict
 
 if TYPE_CHECKING:
     from ..checker_types import Change
@@ -63,11 +64,17 @@ __all__ = [
     "va_list_changes",
 ]
 
-_UNKNOWN_TYPE = "?"
 
+def _depth_comparable(old: str | None, new: str | None) -> bool:
+    """Whether two spellings' recorded pointer depths may be compared.
 
-def _unknown(spelling: str | None) -> bool:
-    return spelling is None or spelling.strip() == _UNKNOWN_TYPE
+    A wholly unknown spelling never is. A partially unresolved one
+    (``"?*"``) records only a lower bound, so it is compared only when the
+    resolved structure already proves the depths differ
+    (``model.type_indirection``) -- ``int`` -> ``"?*"`` is reported,
+    ``int **`` -> ``"?*"`` is not (the ``?`` may be ``int *``)."""
+    verdict = unresolved_pair_verdict(old, new, pointer_depth=True)
+    return True if verdict is None else verdict
 
 
 class ParameterView:
@@ -207,12 +214,14 @@ def pointer_level_changes(
     """``RETURN_POINTER_LEVEL_CHANGED`` and ``PARAM_POINTER_LEVEL_CHANGED``.
 
     RD2-5: an unresolved (``"?"``) return or parameter spelling falls back to
-    depth 0 and would read as a phantom change, so it is skipped; parameter
+    depth 0 and would read as a phantom change, so it is skipped; a
+    partially unresolved one (``"?*"``) is compared only where its resolved
+    structure proves the depth changed (:func:`_depth_comparable`); parameter
     depths from a stripped symbols-only side are skipped altogether."""
     changes: list[Change] = []
     rd_old, rd_new = old.return_depth, new.return_depth
     if (
-        not (_unknown(old.return_type) or _unknown(new.return_type))
+        _depth_comparable(old.return_type, new.return_type)
         and rd_old is not None
         and rd_new is not None
         and rd_old != rd_new
@@ -232,7 +241,7 @@ def pointer_level_changes(
         return changes
     for i in range(_count(old.types, new.types, old.depths, new.depths)):
         assert old.types and new.types and old.depths and new.depths
-        if _unknown(old.types[i]) or _unknown(new.types[i]):
+        if not _depth_comparable(old.types[i], new.types[i]):
             continue
         d_old, d_new = old.depths[i], new.depths[i]
         if d_old != d_new and (d_old > 0 or d_new > 0):

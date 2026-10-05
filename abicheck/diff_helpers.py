@@ -46,7 +46,7 @@ from .compare.qualified_name_normalization import strip_inline_abi_namespaces
 from .fact_provenance import (
     same_producer_backed_fact_qualified,
 )
-from .model import AbiSnapshot, debug_info_present
+from .model import AbiSnapshot
 from .model.change_catalog.kinds import ChangeKind
 
 # Imported directly from the canonical model-layer location (ADR-061 D9's
@@ -375,7 +375,9 @@ def typedef_flat_map_is_dwarf_qualified(snapshot: AbiSnapshot) -> bool:
     27): a header-parsed ELF binary can carry DWARF too, setting both --
     ``from_headers`` distinguishes those. The DWARF half is
     ``debug_info_present``, not ``is not None``: dumps attach empty metadata."""
-    return debug_info_present(snapshot.dwarf) and not snapshot.from_headers
+    from .model.debug_evidence import debug_info_evidence
+
+    return debug_info_evidence(snapshot).basic and not snapshot.from_headers
 
 
 def lookup_matched_type(own: TypeMap[Q], other: TypeMap[Q], t: Q) -> Q | None:
@@ -562,8 +564,9 @@ def record_canonical_names(snap: AbiSnapshot | None) -> dict[str, str]:
             out[t.qualified_name] = t.qualified_name
         else:
             by_bare.setdefault(t.name, set()).add(None)
-    dwarf = getattr(snap, "dwarf", None)
-    for key in getattr(dwarf, "structs", None) or ():
+    from .compare.debug_layout_view import debug_layout_view
+
+    for key in debug_layout_view(snap).records:
         bare = depth_aware_bare_name(key)
         if bare != key:
             by_bare.setdefault(bare, set()).add(key)

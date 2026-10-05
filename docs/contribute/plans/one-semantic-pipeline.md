@@ -247,6 +247,84 @@ the identity-less DWARF-layout detector) in `KNOWN_BACKEND_DECLARATION_READERS`,
 a shrink-only baseline: a new reader fails, and a stale entry must be lowered
 (`tests/test_backend_declaration_readers.py`).
 
+**6B closure follow-up (2026-10-05, maintainer decision, option (a)): the
+function/parameter/variable projection is not a second representation, and
+its persisted shape was reverted.** abicheck/abicheck#1486 added ~30
+function-signature, qualifier, parameter and declaration facts to
+`CanonicalEntity` (`model/semantic_ir_function_signature.py`,
+`semantic_ir_declaration_facts.py`, `semantic_ir_variable_payload.py`) and
+persisted them (snapshot schema v57, `semantic_ir` document version 3,
+`ProjectSnapshot` section v3). Once its review fixes landed, nothing read the
+persisted copies: `compare/function_signature.py` and `compare/variables.py`
+re-project every paired declaration over its occurrence, so the comparison
+always derived those facts from the declaration store. Storing them anyway
+*was* the second representation the paragraph above rules out -- a stored
+copy that can disagree with the declaration it was copied from. The
+persistence is therefore reverted: the codec never writes or reads those
+fields (`storage/semantic_ir_codec.PROJECTION_FACTS`, and a document carrying
+one is refused), the snapshot schema is back to v56, the IR document to
+version 2, the section to v2 with the v2->v3 migration removed. No release
+carried v57; a v57 document is refused as newer than this build (re-dump it),
+and the next real bump uses v58 so 57 is never reused for a different shape.
+What remains is an **in-memory, comparison-time projection**: derived only
+from the declaration store by one formula, never persisted, never an
+authority over the declaration it projects, and discarded with the
+comparison. It is a view of the one representation, not a second one -- the
+same standing as any detector's local index -- and `CanonicalEntity`'s
+*persisted* shape stays exactly the cross-backend canonicalized facts named
+above. `tests/test_semantic_ir_projection_not_persisted.py` states both
+halves as properties over generated function/variable pairs: the encoded
+document carries none of those facts, and live and round-tripped snapshots
+compare identically. The "Landed (2026-10-04)" entries below describe the
+detector cut-over, which stands; their v57/version-3 storage claims are
+superseded by this paragraph.
+
+**Backend-collection reader consolidation (2026-10-05).** That baseline went
+from 22 sites / 43 reads / 16 modules to **2 sites / 2 reads / 1 module**.
+The 22 sites split into (i) evidence-tier checks -- "did this side carry debug
+info / any layout content?" (`analysis_assurance*`, `confidence`,
+`depth_projection`, `surface_graph`, `edge_query`, `diff_platform`'s support
+gate, `diff_types`/`diff_symbols`/schema-staleness stripped-binary checks,
+`diff_helpers`' typedef-qualification check) -- which now ask one model-owned
+fact, `model/debug_evidence.py`'s `debug_info_evidence(snap)` (basic and
+advanced channels kept separate, plus `layout_content`); and (ii) identity-less
+layout readers (`diff_platform._diff_dwarf`, `checker._diff_advanced_dwarf`,
+`debug_type_join`, `diff_long_double`, `internal_leak`, the
+`diff_helpers`/`diff_filtering` canonical-name scans, and depth projection's
+in-place layout narrowing), which now read `compare/debug_layout_view.py`'s
+backend-neutral `DebugLayoutView` (records/enums/base-type sizes plus the two
+channel payloads the layout detector families diff whole) and
+`restrict_debug_layout`. That module is the only remaining baseline entry,
+by design: the layout collections are still the extraction output every debug
+carrier lands in. **What remains** for criterion (4): fold the layout payload
+itself into SemanticIR at extraction so the owner reads the IR, at which point
+the baseline empties. No finding changed.
+
+**Criterion (4) closed (2026-10-05): the debug layout is IR-owned.** The
+layout payload every debug carrier reduces to (DWARF directly; BTF/CTF/PDB
+via `to_dwarf_metadata`) now lives in the IR's declaration store, under
+backend-neutral names: `semantic_ir.declarations.debug_layout`
+(`DwarfMetadata`: record/enum layouts, base-type sizes, ODR conflicts) and
+`.debug_advanced` (`AdvancedDwarfMetadata`). It is filled at extraction by the
+same mechanism Phase 10 uses for declarations: `AbiSnapshot`'s `dwarf=`/
+`dwarf_advanced=` are builder inputs (`InitVar`s, defaulting to a `NOT_GIVEN`
+sentinel so an explicit `None` still means "no debug info" and clears), not
+attributes -- reading or assigning `AbiSnapshot.dwarf` raises and names the
+store attribute (`model/declaration_store.py`'s `DEBUG_LAYOUT_KINDS`/
+`STORE_ATTRIBUTE`). Placement follows this plan's design rules: the layout is
+identity-less per-occurrence payload, so it belongs in the declaration store,
+not in `CanonicalEntity` (which keeps only cross-backend canonicalized facts),
+and there is exactly one representation -- no snapshot field beside it.
+`compare/debug_layout_view.py` and `model/debug_evidence.py` read the store;
+the `semantic-ir-cutover` gate's `KNOWN_BACKEND_DECLARATION_READERS` baseline
+is deleted and any checker read of `dwarf`/`dwarf_advanced` is now an error
+with no allowlist (`tests/test_backend_declaration_readers.py`). Persistence is
+unchanged: the codec writes the store's debug kinds under the historical
+`dwarf`/`dwarf_advanced` keys at their historical position
+(`storage/snapshot_encode._DECLARATION_KEY_ANCHORS`), so documents and every
+digest over them are byte-identical and no schema bump was needed (v57 stays
+unused; the next real bump is still v58). No finding changed.
+
 **2B consumer sweep (2026-09-29).** A repository-wide inventory of
 cross-snapshot and finding-to-record lookups still keyed by bare
 `RecordType.name` (or the bare `typedefs` map) moved every one that decides

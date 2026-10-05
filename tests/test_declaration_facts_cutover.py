@@ -15,6 +15,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from _semantic_ir_persisted import persisted_view
 from hypothesis import given, settings, strategies as st
 
 from abicheck.checker import ChangeKind, compare
@@ -194,7 +195,9 @@ def test_end_to_end_compare_and_codec_round_trip() -> None:
     new = _snap(_var("gone", AccessLevel.PUBLIC, 64), with_ir=True)
     kinds = {c.kind for c in compare(old, new).changes}
     assert {ChangeKind.VAR_DEPRECATED_ADDED, ChangeKind.VAR_ALIGNMENT_CHANGED} <= kinds
-    assert snapshot_from_dict(snapshot_to_dict(new)).canonical_ir == new.canonical_ir
+    reloaded = snapshot_from_dict(snapshot_to_dict(new))
+    assert reloaded.canonical_ir == persisted_view(new.canonical_ir)
+    assert {c.kind for c in compare(old, reloaded).changes} == kinds
 
 
 class TestCutoverGate:

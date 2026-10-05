@@ -336,8 +336,8 @@ def test_hybrid_headers_recover_case64_ms_abi_from_gcc_debug_build(
     new_snap = dump(new_so, [new_header], compiler="cc", header_backend="hybrid")
     # GCC records only the default DWARF convention on both sides; the
     # ms_abi delta must therefore come from the header AST, not ELF/DWARF.
-    assert old_snap.dwarf_advanced.calling_conventions == {"api": "normal"}
-    assert new_snap.dwarf_advanced.calling_conventions == {"api": "normal"}
+    assert old_snap.declarations.debug_advanced.calling_conventions == {"api": "normal"}
+    assert new_snap.declarations.debug_advanced.calling_conventions == {"api": "normal"}
 
     result = compare(old_snap, new_snap)
 

@@ -151,7 +151,7 @@ class TestVectorAbiSerializationRoundTrip:
 
         snap = _snap({"-mveclibabi=svml"})
         restored = snapshot_from_dict(snapshot_to_dict(snap))
-        assert restored.dwarf_advanced.toolchain.vector_abi_flags == {
+        assert restored.declarations.debug_advanced.toolchain.vector_abi_flags == {
             "-mveclibabi=svml"
         }
 

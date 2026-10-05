@@ -198,7 +198,9 @@ def _structural_facts_are_dwarf_confirmed(snap: AbiSnapshot) -> bool:
     wider, unvalidated heuristic; a real PDB-aware extension is
     separately-justified future work too.
     """
-    return snap.dwarf is not None and snap.dwarf.has_dwarf and not snap.from_headers
+    from ..model.debug_evidence import debug_info_evidence
+
+    return debug_info_evidence(snap).basic and not snap.from_headers
 
 
 def _exported_symbol_names(snap: AbiSnapshot) -> frozenset[str] | None:
@@ -400,17 +402,9 @@ def _strip_header_and_above_evidence(
         # (triggered because its own scope derivation now sees empty
         # `types`/`enums` on both sides) falls back to a pool that was
         # already reduced, not the raw, unscoped DWARF universe.
-        if snap.dwarf is not None:
-            if dwarf_struct_scope is not None:
-                snap.dwarf.structs = {
-                    k: v
-                    for k, v in snap.dwarf.structs.items()
-                    if k in dwarf_struct_scope
-                }
-            if dwarf_enum_scope is not None:
-                snap.dwarf.enums = {
-                    k: v for k, v in snap.dwarf.enums.items() if k in dwarf_enum_scope
-                }
+        from ..compare.debug_layout_view import restrict_debug_layout
+
+        restrict_debug_layout(snap, dwarf_struct_scope, dwarf_enum_scope)
 
     snap.declarations.constants = {}
     # Sidecar keyed exactly like `constants` (same docstring as above) --

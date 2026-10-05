@@ -81,7 +81,7 @@ def _snap(
         ],
         from_headers=True,
     )
-    snap.dwarf_advanced = AdvancedDwarfMetadata(
+    snap.declarations.debug_advanced = AdvancedDwarfMetadata(
         has_dwarf=True,
         target_arch="x86_64",
         toolchain=ToolchainInfo(

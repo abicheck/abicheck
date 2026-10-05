@@ -498,17 +498,18 @@ concepts:
     # 2026-09-30 (6B closure): raised to self/authoritative. Since Phase 10's
     # declaration-field row the snapshot's declarations live inside its
     # SemanticIR and the legacy AbiSnapshot collections no longer exist, so
-    # every detector reads IR-owned data. Not `retired`: the debug-format
-    # side (`dwarf`/`dwarf_advanced`) is still read by a shrink-only baseline
-    # of checker sites (scripts/semantic_ir_cutover.py).
+    # every detector reads IR-owned data, including the debug layout
+    # (declarations.debug_layout/debug_advanced, criterion 4 closed
+    # 2026-10-05; scripts/semantic_ir_cutover.py forbids any backend read).
     authority: self
     lifecycle: authoritative
     removal_gate: >-
       CLOSED 2026-09-30 (6B closure, see the plan's "6B closure" note): the
       declaration store is the IR's per-occurrence payload and the checker's
       only declaration source; CanonicalEntity carries the cross-backend
-      canonicalized facts. Remaining, shrink-only: checker reads of
-      AbiSnapshot.dwarf/dwarf_advanced (KNOWN_BACKEND_DECLARATION_READERS).
+      canonicalized facts. The debug layout moved into the declaration store
+      (2026-10-05); no checker reads AbiSnapshot.dwarf/dwarf_advanced, and the
+      gate has no allowlist.
       History follows. Phase 6B (semantic-ir-checker-cutover), three cohorts landed so far.
       Third cohort (2026-09-30): RECORD LAYOUT -- TYPE_SIZE_CHANGED/
       TYPE_ALIGNMENT_CHANGED read CanonicalEntity.size_bits/alignment_bits
