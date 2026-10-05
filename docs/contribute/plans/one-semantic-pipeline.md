@@ -247,6 +247,38 @@ the identity-less DWARF-layout detector) in `KNOWN_BACKEND_DECLARATION_READERS`,
 a shrink-only baseline: a new reader fails, and a stale entry must be lowered
 (`tests/test_backend_declaration_readers.py`).
 
+**6B closure follow-up (2026-10-05, maintainer decision, option (a)): the
+function/parameter/variable projection is not a second representation, and
+its persisted shape was reverted.** abicheck/abicheck#1486 added ~30
+function-signature, qualifier, parameter and declaration facts to
+`CanonicalEntity` (`model/semantic_ir_function_signature.py`,
+`semantic_ir_declaration_facts.py`, `semantic_ir_variable_payload.py`) and
+persisted them (snapshot schema v57, `semantic_ir` document version 3,
+`ProjectSnapshot` section v3). Once its review fixes landed, nothing read the
+persisted copies: `compare/function_signature.py` and `compare/variables.py`
+re-project every paired declaration over its occurrence, so the comparison
+always derived those facts from the declaration store. Storing them anyway
+*was* the second representation the paragraph above rules out -- a stored
+copy that can disagree with the declaration it was copied from. The
+persistence is therefore reverted: the codec never writes or reads those
+fields (`storage/semantic_ir_codec.PROJECTION_FACTS`, and a document carrying
+one is refused), the snapshot schema is back to v56, the IR document to
+version 2, the section to v2 with the v2->v3 migration removed. No release
+carried v57; a v57 document is refused as newer than this build (re-dump it),
+and the next real bump uses v58 so 57 is never reused for a different shape.
+What remains is an **in-memory, comparison-time projection**: derived only
+from the declaration store by one formula, never persisted, never an
+authority over the declaration it projects, and discarded with the
+comparison. It is a view of the one representation, not a second one -- the
+same standing as any detector's local index -- and `CanonicalEntity`'s
+*persisted* shape stays exactly the cross-backend canonicalized facts named
+above. `tests/test_semantic_ir_projection_not_persisted.py` states both
+halves as properties over generated function/variable pairs: the encoded
+document carries none of those facts, and live and round-tripped snapshots
+compare identically. The "Landed (2026-10-04)" entries below describe the
+detector cut-over, which stands; their v57/version-3 storage claims are
+superseded by this paragraph.
+
 **2B consumer sweep (2026-09-29).** A repository-wide inventory of
 cross-snapshot and finding-to-record lookups still keyed by bare
 `RecordType.name` (or the bare `typedefs` map) moved every one that decides

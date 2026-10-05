@@ -20,14 +20,15 @@
 
 **What the IR carries.** ``CanonicalEntity.return_type_spelling``/
 ``parameter_type_spellings``/``parameter_kinds``/``ref_qualifier``/
-``is_variadic`` (semantic_ir document version 3, snapshot schema v57). The
+``is_variadic`` -- an in-memory, comparison-time projection that is never
+persisted (``storage/semantic_ir_codec.PROJECTION_FACTS``). The
 spellings are the producer's own rather than canonicalized, because the cv-
 and scalar-equivalence predicates below decide on raw spellings; storing a
 canonical form would change what they decide. A paired declaration is
 re-projected over its occurrence at comparison time
-(``model/semantic_ir_function_signature.with_declaration_signature``), so an
-occurrence written before version 3, or edited after load, reaches this
-module with the declaration's own facts.
+(``model/semantic_ir_function_signature.with_declaration_signature``), so a
+loaded occurrence (which carries none of these facts), or one edited after
+load, reaches this module with the declaration's own facts.
 
 **Authority, per side** (the T3 rule the record-layout and variable cohorts
 follow): a function is read from its side's ``SemanticIR`` occurrence for

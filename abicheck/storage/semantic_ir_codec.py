@@ -58,10 +58,7 @@ from ..model.identity import EntityKind
 from ..model.occurrence import OccurrenceId, canonical_key
 from ..model.semantic_ir import CanonicalEntity, SemanticIR
 from ..model.semantic_ir_declaration_facts import DECLARATION_FIELDS
-from ..model.semantic_ir_function_signature import (
-    LEGACY_SIGNATURE_DIAGNOSTIC,
-    SIGNATURE_FIELDS,
-)
+from ..model.semantic_ir_function_signature import SIGNATURE_FIELDS
 from ..model.semantic_ir_record_layout import LEGACY_LAYOUT_DIAGNOSTIC
 from .entity_ids import domain_entity_id_from_dto, domain_entity_id_to_dto
 from .guards import (
@@ -88,8 +85,18 @@ __all__ = [
 #: left unrequired here. The writer emits all of them, so a document short of
 #: one is truncated: letting the dataclass default fill it in would turn
 #: missing persisted evidence into a valid `NOT_COLLECTED` availability claim.
+#: The comparison-time projection facts (ADR-063 6B function-signature,
+#: parameter, qualifier and declaration cohorts). Never persisted: the
+#: comparison re-derives every one of them from the declaration store
+#: (``compare/function_signature.py``, ``compare/variables.py``), so a stored
+#: copy would be a second representation nothing reads (the plan's "6B
+#: closure"). A document carrying one is refused rather than ignored.
+PROJECTION_FACTS = frozenset((*SIGNATURE_FIELDS, *DECLARATION_FIELDS))
+
 _FACT_FIELDS = tuple(
-    f.name for f in fields(CanonicalEntity) if f.name not in ("producer",)
+    f.name
+    for f in fields(CanonicalEntity)
+    if f.name != "producer" and f.name not in PROJECTION_FACTS
 )
 
 #: The layout facts (ADR-063 6B, record-layout cohort). Written only for a
@@ -103,57 +110,14 @@ _LAYOUT_FACTS = ("size_bits", "alignment_bits")
 #: ``NOT_COLLECTED`` carrying ``LEGACY_LAYOUT_DIAGNOSTIC`` (the load path then
 #: fills them from the snapshot's own records). A newer version is refused,
 #: never read as if it were this one.
-IR_DOCUMENT_VERSION = 3
-_INT_VALUED_FACTS = (
-    *_LAYOUT_FACTS,
-    "vtable_index",
-    "declared_alignment_bits",
-    "return_pointer_depth",
-)
-#: Tuple-valued facts whose elements are integers, or strings that may be
-#: ``null`` (a parameter with no default), rather than plain strings.
-_INT_TUPLE_FACTS = ("parameter_pointer_depths",)
-_NULLABLE_STR_TUPLE_FACTS = ("parameter_defaults",)
-
-#: The function-signature facts (ADR-063 6B, function-signature cohort).
-#: Written only for a ``FUNCTION`` occurrence, from document version 3 on; an
-#: older document decodes them as ``NOT_COLLECTED`` carrying
-#: ``LEGACY_SIGNATURE_DIAGNOSTIC`` and the load path fills them from the
-#: snapshot's own functions (``model/semantic_ir_function_signature.py``).
-_SIGNATURE_FACTS = SIGNATURE_FIELDS
-#: Written for ``FUNCTION`` and ``VARIABLE`` occurrences from version 3 on
-#: (``model/semantic_ir_declaration_facts.py``).
-_DECLARATION_FACTS = DECLARATION_FIELDS
-_BOOL_VALUED_FACTS = (
-    "is_variadic",
-    "is_extern_c",
-    "is_noexcept",
-    "is_virtual",
-    "is_explicit",
-    "is_hidden_friend",
-    "is_override",
-    "is_inline",
-    "is_deleted",
-    "deleted_from_dwarf",
-)
+IR_DOCUMENT_VERSION = 2
+_INT_VALUED_FACTS = _LAYOUT_FACTS
 
 #: The ``CanonicalEntity`` fields carrying a tuple-valued ``Fact``. JSON has
 #: no tuple, so these come back as lists and are re-tupled on load — without
 #: this, a saved-then-loaded IR would compare unequal to the one that was
 #: written, for no semantic reason.
-_TUPLE_VALUED_FACTS = (
-    "template_arguments",
-    "cv_qualification",
-    "parameter_type_spellings",
-    "parameter_kinds",
-    "contract_attributes",
-    "deprecated",
-    "parameter_names",
-    "parameter_defaults",
-    "parameter_pointer_depths",
-    "parameter_restrict",
-    "parameter_va_list",
-)
+_TUPLE_VALUED_FACTS = ("template_arguments", "cv_qualification")
 
 
 def _mapping(raw: Any, field_name: str) -> Mapping[str, Any]:
@@ -189,12 +153,7 @@ def _fact_to_dict(fact: Fact[Any]) -> dict[str, Any]:
 
 
 def _fact_value(
-    raw: Any,
-    field_name: str,
-    *,
-    as_tuple: bool,
-    as_int: bool = False,
-    as_bool: bool = False,
+    raw: Any, field_name: str, *, as_tuple: bool, as_int: bool = False
 ) -> Any:
     """One semantic fact's value, checked against the shape its field
     declares rather than admitted as whatever the document holds.
@@ -210,10 +169,6 @@ def _fact_value(
     """
     if raw is None:
         return None
-    if as_bool:
-        if not isinstance(raw, bool):
-            raise ValueError(f"semantic_ir {field_name} value must be a boolean")
-        return raw
     if as_int:
         # `bool` is an `int` subclass: a JSON `true` is not a size.
         if isinstance(raw, bool) or not isinstance(raw, int):
@@ -222,29 +177,14 @@ def _fact_value(
     if not as_tuple:
         return identity_text(raw, f"semantic_ir {field_name} value")
     entries = row_sequence(raw, f"semantic_ir {field_name} value")
-    if field_name in _INT_TUPLE_FACTS:
-        for index, entry in enumerate(entries):
-            if isinstance(entry, bool) or not isinstance(entry, int):
-                raise ValueError(
-                    f"semantic_ir {field_name} value[{index}] must be an integer"
-                )
-        return tuple(entries)
-    nullable = field_name in _NULLABLE_STR_TUPLE_FACTS
     return tuple(
-        None
-        if nullable and entry is None
-        else identity_text(entry, f"semantic_ir {field_name} value[{index}]")
+        identity_text(entry, f"semantic_ir {field_name} value[{index}]")
         for index, entry in enumerate(entries)
     )
 
 
 def _fact_from_dict(
-    raw: Any,
-    *,
-    as_tuple: bool,
-    field_name: str,
-    as_int: bool = False,
-    as_bool: bool = False,
+    raw: Any, *, as_tuple: bool, field_name: str, as_int: bool = False
 ) -> Fact[Any]:
     data = _mapping(raw, "semantic_ir fact")
     return Fact(
@@ -260,7 +200,6 @@ def _fact_from_dict(
             field_name,
             as_tuple=as_tuple,
             as_int=as_int,
-            as_bool=as_bool,
         ),
         # diagnostics_from, never bare tuple(): a string is a Sequence, so
         # ``"diagnostics": "parse error"`` would decode to eleven
@@ -290,13 +229,7 @@ def _fact_from_dict(
     )
 
 
-def _entity_to_dict(
-    entity: CanonicalEntity,
-    *,
-    is_record: bool,
-    is_function: bool = False,
-    is_variable: bool = False,
-) -> dict[str, Any]:
+def _entity_to_dict(entity: CanonicalEntity, *, is_record: bool) -> dict[str, Any]:
     """One ``CanonicalEntity``'s wire form: every ``Fact`` field (the layout
     pair only for a record), plus ``producer`` when the entity names one
     (sparse, like every other only-present-when-meaningful key in this
@@ -304,27 +237,24 @@ def _entity_to_dict(
     document: dict[str, Any] = {
         name: _fact_to_dict(fact)
         for name, fact in entity.fact_items()
-        if (is_record or name not in _LAYOUT_FACTS)
-        and (is_function or name not in _SIGNATURE_FACTS)
-        and (is_function or is_variable or name not in _DECLARATION_FACTS)
+        if name not in PROJECTION_FACTS and (is_record or name not in _LAYOUT_FACTS)
     }
     if entity.producer:
         document["producer"] = entity.producer
     return document
 
 
-def _entity_from_dict(
-    raw: Any,
-    *,
-    is_record: bool,
-    version: int,
-    is_function: bool = False,
-    is_variable: bool = False,
-) -> CanonicalEntity:
+def _entity_from_dict(raw: Any, *, is_record: bool, version: int) -> CanonicalEntity:
     """Rebuild a ``CanonicalEntity``, requiring every fact field the writer
     emits — see :data:`_FACT_FIELDS` and :data:`_LAYOUT_FACTS`."""
     data = _mapping(raw, "semantic_ir entity")
     facts: dict[str, Any] = {}
+    stray = sorted(PROJECTION_FACTS.intersection(data))
+    if stray:
+        raise ValueError(
+            f"semantic_ir entity carries {stray[0]!r}, a comparison-time "
+            "projection fact that is never persisted"
+        )
     for name in _FACT_FIELDS:
         if name in _LAYOUT_FACTS and not (is_record and version >= 2):
             if name in data:
@@ -338,36 +268,10 @@ def _entity_from_dict(
                 else Fact.not_collected()
             )
             continue
-        carries_declaration = (is_function or is_variable) and version >= 3
-        if name in _DECLARATION_FACTS and not carries_declaration:
-            if name in data:
-                raise ValueError(
-                    f"semantic_ir entity carries {name!r}, which this document "
-                    "version does not write for this kind"
-                )
-            facts[name] = (
-                Fact.not_collected(LEGACY_SIGNATURE_DIAGNOSTIC)
-                if is_function or is_variable
-                else Fact.not_collected()
-            )
-            continue
-        if name in _SIGNATURE_FACTS and not (is_function and version >= 3):
-            if name in data:
-                raise ValueError(
-                    f"semantic_ir entity carries {name!r}, which this document "
-                    "version does not write for this kind"
-                )
-            facts[name] = (
-                Fact.not_collected(LEGACY_SIGNATURE_DIAGNOSTIC)
-                if is_function
-                else Fact.not_collected()
-            )
-            continue
         facts[name] = _fact_from_dict(
             required_field(data, name, "semantic_ir entity"),
             as_tuple=name in _TUPLE_VALUED_FACTS,
             as_int=name in _INT_VALUED_FACTS,
-            as_bool=name in _BOOL_VALUED_FACTS,
             field_name=name,
         )
     producer = data.get("producer", "")
@@ -424,10 +328,7 @@ def semantic_ir_to_document(
                         "disambiguator": occ_id.disambiguator,
                     },
                     "entity": _entity_to_dict(
-                        entity,
-                        is_record=occ_id.entity_id.kind is EntityKind.TYPE,
-                        is_function=occ_id.entity_id.kind is EntityKind.FUNCTION,
-                        is_variable=occ_id.entity_id.kind is EntityKind.VARIABLE,
+                        entity, is_record=occ_id.entity_id.kind is EntityKind.TYPE
                     ),
                 }
                 # Sorted, never the mapping's incidental insertion order: two
@@ -530,8 +431,6 @@ def semantic_ir_from_document(
         occurrences[occ_id] = _entity_from_dict(
             entry.get("entity"),
             is_record=occ_id.entity_id.kind is EntityKind.TYPE,
-            is_function=occ_id.entity_id.kind is EntityKind.FUNCTION,
-            is_variable=occ_id.entity_id.kind is EntityKind.VARIABLE,
             version=version,
         )
     return SemanticIR(occurrences=occurrences), conflicts

@@ -25,8 +25,9 @@ formula from a parsed ``Function`` to those facts: the normalizer
 (:func:`with_declaration_signature`) all use it, so no two paths read the
 same declaration differently.
 
-There is no load-time fill. A document written before ``semantic_ir``
-version 3 carries none of these facts, and the comparison indexes project a
+These facts are a comparison-time projection, never persisted
+(``storage/semantic_ir_codec.PROJECTION_FACTS``): a loaded ``SemanticIR``
+carries none of them, and there is no load-time fill. The comparison indexes project a
 function the IR cannot speak for through the legacy adapter -- and re-project
 every paired declaration over its occurrence anyway, so a persisted copy is
 never the authority over the declaration it was copied from.
@@ -48,7 +49,6 @@ from .semantic_ir_declaration_facts import (
 )
 
 __all__ = [
-    "LEGACY_SIGNATURE_DIAGNOSTIC",
     "overlay_established_facts",
     "SIGNATURE_FIELDS",
     "function_signature_entity",
@@ -63,7 +63,7 @@ SIGNATURE_FIELDS = (
     "parameter_kinds",
     "ref_qualifier",
     "is_variadic",
-    # The function-qualifier cohort (same document version, same fill).
+    # The function-qualifier cohort (same projection formula).
     "is_extern_c",
     "is_noexcept",
     "is_virtual",
@@ -84,11 +84,6 @@ SIGNATURE_FIELDS = (
     "parameter_restrict",
     "parameter_va_list",
     "return_pointer_depth",
-)
-
-#: Stamped on a signature fact decoded from a pre-v3 ``semantic_ir`` document.
-LEGACY_SIGNATURE_DIAGNOSTIC = (
-    "function signature not recorded before semantic_ir document version 3"
 )
 
 
