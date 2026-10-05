@@ -237,3 +237,89 @@ def test_a_two_pass_driver_routes_the_host_request_to_the_selector(monkeypatch):
         False,
         True,
     )
+
+
+# ── memoized parameter trait, undecodable parameter, load-time strip ───────
+
+
+def test_param_trait_computes_once_per_referenced_type(monkeypatch):
+    from abicheck import dwarf_advanced as da
+
+    calls: list[object] = []
+
+    def trait(die, cu, cache=None):
+        calls.append(die)
+        return "nontrivial"
+
+    monkeypatch.setattr(da, "_value_abi_trait_for_typed_die", trait)
+    cu = SimpleNamespace(cu_offset=0x10)
+
+    def param():
+        return SimpleNamespace(
+            attributes={"DW_AT_type": SimpleNamespace(form="DW_FORM_ref4", value=8)}
+        )
+
+    cache = da._DwarfTypeCache()
+    assert da._param_trait(param(), cu, cache) == "nontrivial"
+    assert da._param_trait(param(), cu, cache) == "nontrivial"
+    assert len(calls) == 1
+    assert cache.param_trait == {0x18: "nontrivial"}
+
+
+def test_an_undecodable_parameter_is_built_and_parented(monkeypatch):
+    built: list[object] = []
+
+    class Child:
+        def __init__(self, offset):
+            self.offset = offset
+            self.parent = None
+
+        def set_parent(self, parent):
+            self.parent = parent
+
+    class CU:
+        def _get_cached_DIE(self, offset):
+            child = Child(offset)
+            built.append(child)
+            return child
+
+    steps = {10: (12, "DW_TAG_formal_parameter"), 12: (14, "DW_TAG_formal_parameter")}
+    index = SimpleNamespace(
+        abbrev_table=object(),
+        step_over=lambda off: steps.get(off),
+        type_ref=lambda off: dsi.NOT_DECODABLE if off == 10 else 0x40,
+    )
+    monkeypatch.setattr(dsi, "_index_for", lambda _cu: index)
+    die = SimpleNamespace(has_children=True, offset=8, size=2, cu=CU())
+    got = list(dsi.iter_formal_parameter_type_refs(die))
+    assert got == [(None, built[0]), (0x40, None)]
+    assert built[0].offset == 10 and built[0].parent is die
+
+
+def _raw_marker_snapshot():
+    from abicheck.model import AbiSnapshot, RecordType
+
+    raw = "W<(lambda at /checkout/a/foo.h:4:37)>"
+    return AbiSnapshot(
+        library="l",
+        version="1",
+        types=[RecordType(name=raw, kind="struct", qualified_name=raw, size_bits=8)],
+    )
+
+
+def test_load_strips_a_raw_location_before_renumbering():
+    from abicheck.storage.snapshot_load_normalization import (
+        normalize_and_renumber_closure_identities_on_load,
+        normalize_anonymous_type_spellings_on_load,
+    )
+
+    snap = normalize_and_renumber_closure_identities_on_load(_raw_marker_snapshot())
+    assert snap.declarations.types[0].qualified_name == "W<(lambda:foo.h#1)>"
+    stripped = normalize_anonymous_type_spellings_on_load(_raw_marker_snapshot())
+    assert stripped.declarations.types[0].qualified_name == "W<(lambda:foo.h:4:37)>"
+
+
+def test_empty_qualified_name_has_no_segments():
+    from abicheck.compare.qualified_name_normalization import segments
+
+    assert segments("") == []
