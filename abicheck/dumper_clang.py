@@ -154,6 +154,7 @@ from .model import (
     Visibility,
 )
 from .model.declaration_headers import attributed
+from .model.execution_cache import memoized
 from .model.identity import (
     EntityId,
     ScopePath,
@@ -324,9 +325,46 @@ def _resolve_dpcpp_acquisition(
         gcc_option_tokens
     )
     direct_host = (
-        multi and frontend_context == "host" and "-fsycl-device-only" not in tokens
+        multi
+        and frontend_context == "host"
+        and "-fsycl-device-only" not in tokens
+        and _driver_host_only_is_single_pass(clang_bin, tuple(tokens))
     )
     return multi and not direct_host, direct_host
+
+
+def _driver_host_only_is_single_pass(clang_bin: str, tokens: tuple[str, ...]) -> bool:
+    """Whether ``-fsycl -fsycl-host-only`` really yields one host ``-cc1``.
+
+    The direct host request assumes it does, and older oneAPI drivers agree.
+    ``icpx`` 2026.1.1 (conda-forge ``dpcpp_linux-64``) does not: it still runs
+    the ``spir64`` device ``-cc1`` beside the host one, so the AST stream
+    holds two documents and the single-document parse fails every SYCL dump.
+    The driver says what it will run under ``-###``; when that is more than a
+    host pass, the multi-document selector (``-v`` correlation, host chosen
+    by ``-fsycl-is-host``) is used instead. Memoized per executable revision.
+    """
+    from .dumper_toolchain import _tool_identity
+
+    return _host_only_single_pass(clang_bin, _tool_identity(clang_bin), tokens)
+
+
+@memoized(maxsize=64)
+def _host_only_single_pass(
+    clang_bin: str, identity: str, tokens: tuple[str, ...]
+) -> bool:
+    del identity  # keys the memo on the executable's content
+    import subprocess
+
+    from .deadline import run_bounded
+
+    cmd = [clang_bin, *tokens, "-fsycl", "-fsycl-host-only", "-###"]
+    cmd += ["-fsyntax-only", "-x", "c++", "-"]
+    try:
+        proc = run_bounded(cmd, timeout=30, capture_output=True, text=True, input="")
+    except (OSError, subprocess.TimeoutExpired):
+        return True  # cannot ask: keep the documented host-only behaviour
+    return "-fsycl-is-device" not in proc.stderr
 
 
 def _needs_sycl_host_only(cc_bin: str, tokens: list[str]) -> bool:
