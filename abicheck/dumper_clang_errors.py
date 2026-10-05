@@ -365,7 +365,7 @@ def run_clang_to_ast_file(
         os.fdopen(fd, "wb") as out,
         tempfile.TemporaryDirectory(prefix="abicheck-sycl-") as scratch,
     ):
-        from .dumper_clang import sycl_host_replay_jobs
+        from .buildsource.dpcpp_jobs import sycl_host_replay_jobs
 
         replay = sycl_host_replay_jobs(cmd, Path(scratch))
         if replay is not None:

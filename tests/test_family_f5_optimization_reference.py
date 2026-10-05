@@ -115,7 +115,7 @@ COVERAGE: dict[str, str] = {
     "abicheck.model.type_identifiers::memoized::_type_identifiers_cached": R,
     "abicheck.compare.template_surface::memoized::mask_operator_symbols": B,
     "abicheck.compare.template_surface::memoized::strip_template_args": B,
-    "abicheck.dumper_clang::memoized::_host_only_single_pass": "UNCOVERED: DPC++ driver pass probe; needs an icx/icpx compiler",
+    "abicheck.buildsource.dpcpp_jobs::memoized::_host_only_single_pass": "UNCOVERED: DPC++ driver pass probe; needs an icx/icpx compiler",
     "abicheck.compare.qualified_name_normalization::memoized::_segments_cached": B,
     "abicheck.diff_namespaces::memoized::_scope_path_of": "UNCOVERED: reached only for a removed experimental-namespace declaration with a signature; no cell fixture has one",
     "abicheck.policy.classification::memoized::policy_kind_sets": R,

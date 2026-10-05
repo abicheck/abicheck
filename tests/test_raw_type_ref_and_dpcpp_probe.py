@@ -18,6 +18,7 @@ from types import SimpleNamespace
 import pytest
 
 from abicheck import dumper_clang
+from abicheck.buildsource import dpcpp_jobs as dumper_dpcpp_jobs
 from abicheck.extract import dwarf_subtree_index as dsi
 
 
@@ -187,13 +188,14 @@ _HOST_JOB = (
 def probe(monkeypatch):
     """Run the probe against a scripted driver; returns the argv it saw."""
     import abicheck.deadline as deadline
-    import abicheck.dumper_toolchain as toolchain
 
     seen: list[list[str]] = []
     # A process-unique identity per call, so the per-executable memo never
     # answers -- a per-test counter would repeat across tests and serve one
     # test the previous test's probe result.
-    monkeypatch.setattr(toolchain, "_tool_identity", lambda b: f"id-{uuid.uuid4()}")
+    monkeypatch.setattr(
+        dumper_dpcpp_jobs, "executable_revision", lambda b: f"id-{uuid.uuid4()}"
+    )
 
     def install(stderr: str | None = None, exc: BaseException | None = None):
         def fake(cmd, **_kw):
@@ -244,7 +246,7 @@ def test_replay_strips_the_device_dump_and_relocates_the_integration_files(
     install, _ = probe
     install(stderr=_DEVICE_JOB + "\n" + _HOST_JOB)
     cmd = ["icpx", "-fsycl", "-fsycl-host-only", "-Xclang", "-ast-dump=json", "a"]
-    device, host = dumper_clang.sycl_host_replay_jobs(cmd, tmp_path)
+    device, host = dumper_dpcpp_jobs.sycl_host_replay_jobs(cmd, tmp_path)
     assert "-ast-dump=json" not in device
     assert f"-fsycl-int-header={tmp_path}/agg-header.h" in device
     assert "-ast-dump=json" in host
@@ -253,7 +255,10 @@ def test_replay_strips_the_device_dump_and_relocates_the_integration_files(
 
 
 def test_no_replay_for_a_request_that_is_not_host_only(tmp_path):
-    assert dumper_clang.sycl_host_replay_jobs(["clang", "-x", "c++"], tmp_path) is None
+    assert (
+        dumper_dpcpp_jobs.sycl_host_replay_jobs(["clang", "-x", "c++"], tmp_path)
+        is None
+    )
 
 
 def test_ast_run_executes_device_then_host_and_returns_the_host_result(
