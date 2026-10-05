@@ -505,7 +505,10 @@ def qualified_name_lookup(snap: AbiSnapshot) -> Callable[[Function | Variable], 
     """
     table = qualified_name_table(snap) if comparison_memo_active() else {}
 
-    def lookup(decl: Function | Variable) -> str:
+    def lookup(decl: Function | Variable, _pin: AbiSnapshot = snap) -> str:
+        # *_pin* keeps *snap* -- and so every declaration the table keys by
+        # ``id`` -- alive as long as this reader, so a recycled ``id`` can
+        # never be served another declaration's name.
         hit = table.get(id(decl))
         return (
             hit

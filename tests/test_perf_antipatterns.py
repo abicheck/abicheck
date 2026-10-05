@@ -289,6 +289,39 @@ def test_exempted_shapes_are_quiet(src: str) -> None:
             """,
             "str-concat-in-loop",
         ),
+        # pragma-like text inside a string literal is data, not a pragma
+        (
+            """
+            def f(lines):
+                for line in lines:
+                    json.loads(line + "# perf-ok: expected parsing work")
+            """,
+            "parse-or-copy-in-loop",
+        ),
+        # an own-line pragma does not reach past a blank line
+        (
+            """
+            def f(lines):
+                for line in lines:
+                    # perf-ok: JSON-lines input, one parse per record
+
+                    json.loads(line)
+            """,
+            "parse-or-copy-in-loop",
+        ),
+        # a reset a `continue` can bypass does not make the string fresh
+        (
+            """
+            def f(items):
+                s = ""
+                for x in items:
+                    if x:
+                        s += x
+                        continue
+                    s = ""
+            """,
+            "str-concat-in-loop",
+        ),
         # a comprehension inside a function runs per call
         (
             """

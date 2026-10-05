@@ -68,6 +68,7 @@ __all__ = [
     "AmbiguousTypeNames",
     "ambiguous_type_spellings",
     "attribute_scoped_types",
+    "qualified_type_label",
     "disambiguate_type_symbols",
     "qualified_spelling",
     "function_scope",
@@ -160,6 +161,30 @@ def _relabel(text: str, bare: str, qualified: str) -> str:
     return re.sub(rf"(?<![\w:]){re.escape(bare)}(?!\w)", qualified, text)
 
 
+def _relabelled(symbol: str, bare: str, qualified: str) -> str | None:
+    """*symbol* with its leading *bare* segment replaced by *qualified*, or
+    ``None`` when *symbol* is not ``bare`` / ``bare::member``."""
+    parts = split_top_level_scopes(symbol)
+    if not parts or parts[0] != bare:
+        return None
+    return "::".join([qualified, *parts[1:]])
+
+
+def qualified_type_label(change: object) -> str | None:
+    """The label :func:`disambiguate_type_symbols` would give *change* if its
+    bare name were ambiguous: its ``entity_id``'s qualified spelling in place
+    of the bare leaf. ``None`` for a non-type finding, one without a
+    spellable identity, or one whose label already differs from the leaf."""
+    eid = getattr(change, "entity_id", None)
+    if eid is None or eid.kind not in _TYPE_KINDS:
+        return None
+    qualified = qualified_spelling(eid)
+    if qualified is None:
+        return None
+    label = _relabelled(getattr(change, "symbol", "") or "", eid.leaf_name, qualified)
+    return None if label == getattr(change, "symbol", None) else label
+
+
 def disambiguate_type_symbols(
     changes: Iterable[object], names: AmbiguousTypeNames
 ) -> int:
@@ -182,11 +207,9 @@ def disambiguate_type_symbols(
         if qualified is None:
             continue
         bare = eid.leaf_name
-        symbol = c.symbol  # type: ignore[attr-defined]
-        parts = split_top_level_scopes(symbol)
-        if not parts or parts[0] != bare:
+        new_symbol = _relabelled(c.symbol, bare, qualified)  # type: ignore[attr-defined]
+        if new_symbol is None:
             continue
-        new_symbol = "::".join([qualified, *parts[1:]])
         c.symbol = new_symbol  # type: ignore[attr-defined]
         if getattr(c, "qualified_name", None) is None:
             c.qualified_name = qualified  # type: ignore[attr-defined]
@@ -198,7 +221,11 @@ def disambiguate_type_symbols(
 
 
 def resolve_in_scope(
-    name: str, scope: Iterable[str], names: AmbiguousTypeNames
+    name: str,
+    scope: Iterable[str],
+    names: AmbiguousTypeNames,
+    *,
+    absolute: bool = False,
 ) -> str | None:
     """The qualified spelling C++ unqualified lookup would find for *name*
     (bare, or partially qualified like ``m0::Ctx``) from inside *scope*
@@ -210,12 +237,13 @@ def resolve_in_scope(
     scope -- from ``lib::m0::Svc``, ``Ctx`` is ``lib::m0::Svc::Ctx`` if that
     exists, else ``lib::m0::Ctx``, else ``lib::Ctx``, else ``Ctx``. Using
     declarations and ADL are not modelled; a name brought in that way
-    resolves to nothing rather than to a wrong declaration.
+    resolves to nothing rather than to a wrong declaration. An *absolute*
+    name (spelled ``::m1::Ctx``) is looked up from the global scope only.
     """
     candidates = names.spellings.get(name.rsplit("::", 1)[-1])
     if not candidates:
         return None
-    segments = list(scope)
+    segments = [] if absolute else list(scope)
     for depth in range(len(segments), -1, -1):
         spelled = "::".join([*segments[:depth], name])
         if spelled in candidates:
@@ -232,11 +260,12 @@ def scoped_type_mentions(
         return set()
     segments = tuple(scope)
     out: set[str] = set()
-    for token in IDENT_RE.findall(spelling):
-        token = token.rstrip(":")
+    for match in IDENT_RE.finditer(spelling):
+        token = match.group(0).rstrip(":")
         if token.rsplit("::", 1)[-1] not in names.spellings:
             continue
-        resolved = resolve_in_scope(token, segments, names)
+        absolute = spelling[max(match.start() - 2, 0) : match.start()] == "::"
+        resolved = resolve_in_scope(token, segments, names, absolute=absolute)
         if resolved is not None:
             out.add(resolved)
     return out
@@ -312,11 +341,15 @@ def attribute_scoped_types(
         scope = function_scope(func.name, func.mangled)
         refs = [func.return_type, *(p.type for p in func.params)]
         for ref in refs:
-            for key in scoped_type_mentions(ref, scope, names) & scoped:
+            # Every ambiguous mention, not only the affected ones: an
+            # ambiguous *embedding parent* is recorded qualified below, and
+            # the ancestor walk reads its users from these same maps.
+            for key in scoped_type_mentions(ref, scope, names):
                 type_to_funcs.setdefault(key, set()).add(func.name)
                 type_to_mangled.setdefault(key, set()).add(func.mangled)
     for t in old.declarations.types:
         scope = record_scope(t)
+        parent = "::".join(scope) if t.name in names.spellings else t.name
         for fld in t.fields:
             for key in scoped_type_mentions(fld.type, scope, names) & scoped:
-                type_embeds.setdefault(key, set()).add(t.name)
+                type_embeds.setdefault(key, set()).add(parent)

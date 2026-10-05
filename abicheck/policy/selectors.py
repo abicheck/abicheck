@@ -371,12 +371,33 @@ def _matches_symbol(
     compiled_pattern: re.Pattern[str] | None,
     change: SelectorMatchable,
 ) -> bool:
-    """Return True if *change.symbol* satisfies the symbol/symbol_pattern selector."""
+    """Return True if *change.symbol* satisfies the symbol/symbol_pattern selector.
+
+    A type finding also answers to its qualified label (``lib::m0::Ctx`` for a
+    bare ``Ctx``): suppression runs before ambiguous bare labels are
+    qualified (``compare.type_symbol_disambiguation``), and a rule copied from
+    the report's qualified label must still match the finding it names. The
+    bare label keeps matching exactly as before.
+    """
+    if symbol is None and compiled_pattern is None:
+        return True
+    labels = [change.symbol]
+    qualified = _qualified_type_label(change)
+    if qualified is not None:
+        labels.append(qualified)
     if symbol is not None:
-        return change.symbol == symbol
-    if compiled_pattern is not None:
-        return bool(compiled_pattern.fullmatch(change.symbol))
-    return True
+        return symbol in labels
+    assert compiled_pattern is not None
+    return any(compiled_pattern.fullmatch(label) for label in labels)
+
+
+def _qualified_type_label(change: SelectorMatchable) -> str | None:
+    """The qualified spelling of a type finding's label, from its own
+    ``entity_id``, when the label is that entity's bare name (or
+    ``name::member``); ``None`` otherwise."""
+    from ..compare.type_symbol_disambiguation import qualified_type_label
+
+    return qualified_type_label(change)
 
 
 # (date, [start, end) epoch-second window it is "today" for, the local

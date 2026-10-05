@@ -96,6 +96,7 @@ def audit_repeated_calls(
     *,
     include: Callable[[str], bool] | None = None,
     repeat_seconds: dict[str, float] | None = None,
+    site_calls: dict[str, int] | None = None,
 ) -> list[RepeatedCall]:
     """Run *thunk*; return every first-party call repeated with identical
     argument fingerprints, most repeated first.
@@ -112,6 +113,9 @@ def audit_repeated_calls(
     cost of the cache hits, not an average that includes the miss.
     Generator/coroutine frames are counted but not timed (their frames
     return on every ``yield``).
+
+    *site_calls*, when given, is filled with every site's total call count,
+    unique-argument calls included -- the denominator a repeated share needs.
     """
     seen: Counter[tuple[str, tuple]] = Counter()
     labels: dict[tuple[str, tuple], str] = {}
@@ -171,6 +175,8 @@ def audit_repeated_calls(
                 f"{n}={type(v).__name__}" for n, v in zip(names, values, strict=True)
             )
         seen[key] += 1
+        if site_calls is not None:
+            site_calls[site] = site_calls.get(site, 0) + 1
         if (
             repeat_seconds is not None
             and seen[key] > 1
@@ -407,14 +413,18 @@ def cost_weighted_repeats(
     """
     old, new = build("cost_audit_")
     seconds: dict[str, float] = {}
-    rows = audit_repeated_calls(lambda: run(old, new), repeat_seconds=seconds)
-    by_site: dict[str, tuple[str, int, int]] = {}
+    totals: dict[str, int] = {}
+    rows = audit_repeated_calls(
+        lambda: run(old, new), repeat_seconds=seconds, site_calls=totals
+    )
+    repeats_by_site: dict[str, int] = {}
     for row in rows:
-        name, repeats, calls = by_site.get(row.function, (row.function, 0, 0))
-        by_site[row.function] = (name, repeats + row.wasted, calls + row.calls)
+        repeats_by_site[row.function] = (
+            repeats_by_site.get(row.function, 0) + row.wasted
+        )
     out = [
-        CostedRepeat(name, repeats, calls, seconds.get(site, 0.0))
-        for site, (name, repeats, calls) in by_site.items()
+        CostedRepeat(site, repeats, totals.get(site, repeats), seconds.get(site, 0.0))
+        for site, repeats in repeats_by_site.items()
     ]
     return sorted(out, key=lambda r: -r.wasted_seconds)
 

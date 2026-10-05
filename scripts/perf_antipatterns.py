@@ -79,9 +79,11 @@ from __future__ import annotations
 
 import argparse
 import ast
+import io
 import json
 import re
 import sys
+import tokenize
 from collections import Counter
 from collections.abc import Iterator
 from dataclasses import dataclass
@@ -300,15 +302,25 @@ def _rebound_in(body: list[ast.stmt]) -> set[str]:
     return out
 
 
-def _fresh_each_iteration(body: list[ast.stmt]) -> set[str]:
-    """Names a top-level statement of *body* rebinds on every iteration."""
-    out: set[str] = set()
+def _fresh_each_iteration(body: list[ast.stmt]) -> dict[str, int]:
+    """Names a top-level statement of *body* rebinds on every iteration,
+    mapped to the line of the *first* such rebinding.
+
+    Only a rebinding that comes *before* a concatenation makes that
+    concatenation fresh: top-level statements run in order, so every path
+    reaching a later ``+=`` passed through it, while a ``continue`` taken
+    before a later reset would carry the string into the next iteration.
+    """
+    out: dict[str, int] = {}
     for stmt in body:
+        names: list[str] = []
         if isinstance(stmt, ast.Assign) and not _grows_itself(stmt):
-            out.update(t.id for t in stmt.targets if isinstance(t, ast.Name))
+            names = [t.id for t in stmt.targets if isinstance(t, ast.Name)]
         elif isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name):
             if stmt.value is not None:
-                out.add(stmt.target.id)
+                names = [stmt.target.id]
+        for name in names:
+            out.setdefault(name, stmt.lineno)
     return out
 
 
@@ -323,11 +335,19 @@ def _exempted_lines(source: str, tree: ast.AST) -> set[int]:
     contain it (a formatter may move it to a wrapped statement's last line);
     a pragma on a comment line of its own covers the next statement.
     """
-    pragmas = [
-        (lineno, line.lstrip().startswith("#"))
-        for lineno, line in enumerate(source.splitlines(), start=1)
-        if _PRAGMA.search(line)
-    ]
+    pragmas: list[tuple[int, bool]] = []
+    lines = source.splitlines()
+    try:
+        tokens = list(tokenize.generate_tokens(io.StringIO(source).readline))
+    except (tokenize.TokenError, SyntaxError):
+        tokens = []
+    for tok in tokens:
+        # Comment tokens only: pragma-like text inside a string literal is
+        # data, not an exemption.
+        if tok.type == tokenize.COMMENT and _PRAGMA.search(tok.string):
+            lineno = tok.start[0]
+            own_line = lines[lineno - 1].lstrip().startswith("#")
+            pragmas.append((lineno, own_line))
     if not pragmas:
         return set()
     spans = sorted(
@@ -338,8 +358,13 @@ def _exempted_lines(source: str, tree: ast.AST) -> set[int]:
     out: set[int] = set()
     for lineno, own_line in pragmas:
         if own_line:
-            following = [span for span in spans if span[0] > lineno]
-            span = min(following) if following else None
+            # The statement directly below, past nothing but further comment
+            # lines -- never a later statement across blank lines or code.
+            nxt = lineno + 1
+            while nxt <= len(lines) and lines[nxt - 1].lstrip().startswith("#"):
+                nxt += 1
+            starting = [span for span in spans if span[0] == nxt]
+            span = max(starting, key=lambda sp: sp[1] - sp[0]) if starting else None
         else:
             containing = [sp for sp in spans if sp[0] <= lineno <= sp[1]]
             span = min(containing, key=lambda sp: sp[1] - sp[0]) if containing else None
@@ -367,7 +392,7 @@ class _Visitor(ast.NodeVisitor):
         self.raise_depth = 0
         # Per enclosing loop: names a top-level statement of its body rebinds
         # every iteration (empty for a comprehension).
-        self.fresh: list[set[str]] = []
+        self.fresh: list[dict[str, int]] = []
         # Function bodies and statement loops entered; with both at zero a
         # comprehension runs once, at import.
         self.function_depth = 0
@@ -430,7 +455,7 @@ class _Visitor(ast.NodeVisitor):
         self.visit(first.iter)  # the outermost iterable is evaluated once
         self.loop_depth += 1
         self.varying.append(None)
-        self.fresh.append(set())
+        self.fresh.append({})
         self.visit(first.target)
         for cond in first.ifs:
             self.visit(cond)
@@ -539,7 +564,10 @@ class _Visitor(ast.NodeVisitor):
             and isinstance(node.op, ast.Add)
             and isinstance(node.target, ast.Name)
             and node.target.id in self.str_names[-1]
-            and not (self.fresh and node.target.id in self.fresh[-1])
+            and not (
+                self.fresh
+                and self.fresh[-1].get(node.target.id, node.lineno) < node.lineno
+            )
         ):
             self._hit(node, "str-concat-in-loop")
         self.generic_visit(node)

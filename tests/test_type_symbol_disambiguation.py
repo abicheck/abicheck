@@ -166,6 +166,7 @@ def test_ambiguity_counts_both_sides_together() -> None:
         ("m1::Ctx", ("lib", "m0"), "lib::m1::Ctx"),  # partially qualified
         ("lib::m1::Ctx", (), "lib::m1::Ctx"),  # fully qualified
         ("m9::Ctx", ("lib",), None),  # no such declaration
+        ("lib::m1::Ctx", ("lib", "m0"), "lib::m1::Ctx"),
         ("Unrelated", ("lib",), None),
     ],
 )
@@ -204,3 +205,106 @@ def test_mentions_ignore_a_namesake_inside_a_longer_identifier() -> None:
 )
 def test_function_scope(name, mangled, expected) -> None:
     assert function_scope(name, mangled) == expected
+
+
+def test_an_absolute_spelling_is_looked_up_from_the_global_scope_only() -> None:
+    from abicheck.compare.type_symbol_disambiguation import AmbiguousTypeNames
+
+    names = AmbiguousTypeNames(
+        spellings={"Ctx": frozenset({"m1::Ctx", "lib::m0::m1::Ctx"})}, by_entity={}
+    )
+    assert scoped_type_mentions("::m1::Ctx*", ("lib", "m0"), names) == {"m1::Ctx"}
+    assert scoped_type_mentions("m1::Ctx*", ("lib", "m0"), names) == {
+        "lib::m0::m1::Ctx"
+    }
+
+
+def test_a_rule_written_against_the_qualified_label_suppresses_it() -> None:
+    """The report shows ``lib::m1::Ctx``; a rule copied from it must match,
+    although suppression runs while the finding is still labelled ``Ctx``.
+    The bare rule keeps matching too."""
+    from abicheck.suppression import Suppression, SuppressionList
+
+    for symbol in ("lib::m1::Ctx", "Ctx"):
+        old = _snapshot("1", ["m0", "m1"], set(), unique=False)
+        new = _snapshot("2", ["m0", "m1"], {"m1"}, unique=False)
+        rules = SuppressionList(
+            suppressions=[Suppression(symbol=symbol, reason="test")]
+        )
+        result = compare(old, new, suppression=rules)
+        assert not [c for c in result.changes if c.kind.value == "type_size_changed"]
+
+
+def test_a_mismatched_qualified_rule_suppresses_nothing() -> None:
+    from abicheck.suppression import Suppression, SuppressionList
+
+    old = _snapshot("1", ["m0", "m1"], set(), unique=False)
+    new = _snapshot("2", ["m0", "m1"], {"m1"}, unique=False)
+    rules = SuppressionList(
+        suppressions=[Suppression(symbol="lib::m0::Ctx", reason="test")]
+    )
+    result = compare(old, new, suppression=rules)
+    assert [
+        c.symbol for c in result.changes if c.kind.value == "type_size_changed"
+    ] == ["lib::m1::Ctx"]
+
+
+def test_ambiguous_enums_that_change_alike_both_survive() -> None:
+    from abicheck.model.entities import EnumMember, EnumType
+    from abicheck.model.identity import entity_id_for_enum
+
+    def snap(version: str, value: int) -> AbiSnapshot:
+        enums = [
+            EnumType(
+                name="Mode",
+                members=[
+                    EnumMember(name="a", value=0),
+                    EnumMember(name="b", value=value),
+                ],
+                qualified_name=f"lib::{ns}::Mode",
+                entity_id=entity_id_for_enum((Namespace("lib"), Namespace(ns)), "Mode"),
+            )
+            for ns in ("m0", "m1")
+        ]
+        return AbiSnapshot(library="lib.so", version=version, enums=enums)
+
+    result = compare(snap("1", 1), snap("2", 2))
+    changed = sorted(
+        c.symbol
+        for c in [*result.changes, *(result.redundant_changes or [])]
+        if c.entity_id is not None
+        and c.entity_id.leaf_name == "Mode"
+        and "value" in c.kind.value
+    )
+    assert len({s.split("::")[1] for s in changed if "::" in s}) == 2, changed
+
+
+def test_an_ambiguous_embedding_parent_attributes_only_its_own_users() -> None:
+    """``m0::Holder`` embeds ``m0::Ctx``; an unrelated ``m1::Holder`` exists.
+    A change to ``m0::Ctx`` reaches the users of ``m0::Holder`` only."""
+
+    def holder(ns: str, embeds: bool) -> RecordType:
+        fields = [TypeField(name="c", type="Ctx", offset_bits=0)] if embeds else []
+        fields.append(TypeField(name="x", type="int", offset_bits=64))
+        return RecordType(
+            name="Holder",
+            kind="struct",
+            size_bits=128,
+            fields=fields,
+            qualified_name=f"lib::{ns}::Holder",
+            entity_id=entity_id_for_type((Namespace("lib"), Namespace(ns)), "Holder"),
+        )
+
+    def snap(version: str, grown: set[str]) -> AbiSnapshot:
+        types = [_record(ns, "Ctx", 64 if ns in grown else 32) for ns in ("m0", "m1")]
+        types += [holder("m0", True), holder("m1", False)]
+        functions = [_func(ns, f"hold_{ns}", "Holder") for ns in ("m0", "m1")]
+        return AbiSnapshot(
+            library="lib.so", version=version, functions=functions, types=types
+        )
+
+    result = compare(snap("1", set()), snap("2", {"m0"}))
+    (finding,) = [c for c in result.changes if c.kind.value == "type_size_changed"]
+    assert finding.symbol == "lib::m0::Ctx"
+    users = {a for a in finding.affected_symbols or [] if a.startswith("hold_")}
+    assert users == {"hold_m0"}

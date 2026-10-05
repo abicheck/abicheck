@@ -1454,17 +1454,27 @@ def _dedup_exact(
     return result
 
 
-def _dedup_enum_same_kind(changes: list[Change]) -> list[Change]:
+def _dedup_enum_same_kind(
+    changes: list[Change], ambiguous: Mapping[EntityId, str] | None = None
+) -> list[Change]:
     """Pass 2: for enum change kinds, keep the best entry per (kind, symbol).
 
     Prefers entries with populated ``old_value``/``new_value`` fields,
-    using longer description as tiebreaker.
+    using longer description as tiebreaker. Like :func:`_dedup_exact`, an
+    enum whose bare name is *ambiguous* is keyed by its qualified identity
+    too, so two namespaced enums sharing a bare name never collapse.
     """
-    best_enum: dict[tuple[str, str], Change] = {}
+    ambiguous = ambiguous or {}
+
+    def _key(c: Change) -> tuple[str, str, str | None]:
+        eid = c.entity_id
+        return (c.kind.value, c.symbol, ambiguous.get(eid) if eid else None)
+
+    best_enum: dict[tuple[str, str, str | None], Change] = {}
     for c in changes:
         if c.kind not in _ENUM_DEDUP_KINDS:
             continue
-        key = (c.kind.value, c.symbol)
+        key = _key(c)
         if key not in best_enum:
             best_enum[key] = c
         else:
@@ -1481,8 +1491,7 @@ def _dedup_enum_same_kind(changes: list[Change]) -> list[Change]:
     result: list[Change] = []
     for c in changes:
         if c.kind in _ENUM_DEDUP_KINDS:
-            key = (c.kind.value, c.symbol)
-            if best_enum.get(key) is not c:
+            if best_enum.get(_key(c)) is not c:
                 continue  # not the winner — drop
         result.append(c)
     return result
@@ -1590,8 +1599,9 @@ def _deduplicate_ast_dwarf(
     """
     from .compare.type_symbol_disambiguation import ambiguous_type_spellings
 
-    stage1 = _dedup_exact(changes, ambiguous_type_spellings(old, new).by_entity)
-    stage2 = _dedup_enum_same_kind(stage1)
+    ambiguous = ambiguous_type_spellings(old, new).by_entity
+    stage1 = _dedup_exact(changes, ambiguous)
+    stage2 = _dedup_enum_same_kind(stage1, ambiguous)
     record_names = {**record_canonical_names(old), **record_canonical_names(new)}
     return _dedup_cross_kind(stage2, record_names)
 
@@ -1679,10 +1689,22 @@ def _deduplicate_cross_detector(
     # into `Change.qualified_name` -- bridge it here instead (a caller with
     # no `old`/`new` degrades to a missed dedup, never an incorrect one).
     if old is not None or new is not None:
+        from .compare.type_symbol_disambiguation import (
+            ambiguous_type_spellings,
+            qualified_type_label,
+        )
+
         old_enum_names = _enum_canonical_names(old)
         new_enum_names = _enum_canonical_names(new)
+        ambiguous = ambiguous_type_spellings(old, new).by_entity
         for c in changes:
             if c.kind in _ENUM_QUALIFICATION_KINDS and not c.qualified_name:
+                # The bridge below maps a bare name to *one* qualified name,
+                # so two namesake enums would share an identity and the
+                # second finding be dropped; their own entity says which.
+                if c.entity_id is not None and c.entity_id in ambiguous:
+                    c.qualified_name = qualified_type_label(c)
+                    continue
                 qual = _canonicalize_enum_symbol(
                     c.symbol, old_enum_names
                 ) or _canonicalize_enum_symbol(c.symbol, new_enum_names)
