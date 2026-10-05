@@ -676,4 +676,36 @@ REPORT_BUG_CLASSES: tuple[BugClass, ...] = (
             ),
         ),
     ),
+    BugClass(
+        id="report.cross_producer_disagreement_on_one_symbol",
+        invariant=(
+            "Two findings about one export read one per-export decision, so "
+            "they never contradict each other, and an export event is "
+            "reported once: the hygiene twin folds into the existence "
+            "finding and the verdict does not change (oneCCL/oneDNN)."
+        ),
+        fixed_by=(1492,),
+        seed_tests=("tests/test_export_existence_reconciliation.py",),
+        public_surfaces=("python-api",),
+        axes={"presence": ("old", "new", "both", "none")},
+    ),
+    BugClass(
+        id="config.location_dependent_fingerprint",
+        invariant=(
+            "Recorded ownership rules depend on relative layout only, not on "
+            "where each side's tree sits or whether a config supplied a "
+            "project root."
+        ),
+        fixed_by=(1492,),
+        seed_tests=("tests/test_ownership_operand_anchor.py",),
+        axes={
+            "config": (
+                "none",
+                "no_roots",
+                "dependency",
+                "private_headers",
+                "config_public_dir",
+            )
+        },
+    ),
 )
