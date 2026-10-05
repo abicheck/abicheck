@@ -119,7 +119,7 @@ class TestReleaseEffectiveConfigCarriesRealPolicy:
         assert code == 0, out  # demoted to risk -> COMPATIBLE_WITH_RISK
         data = json.loads(out)
         fields = data["effective_config_fields"]
-        assert fields["_tier"] == "baseline"
+        assert fields["_tier"] == "contract"  # evaluation is always on
         assert fields["policy.base"] != ""
         assert fields["policy.overrides"] != ""
         assert "func_removed=" in fields["policy.overrides"]

@@ -28,7 +28,7 @@ A fully-specified comparison request — the single input to ``run_compare``.
 | `debuginfod_url` | `str \| None` | `None` |
 | `env_matrix` | `EnvironmentMatrix \| None` | `None` |
 | `diagnostic_comparison` | `bool` | `False` |
-| `contract_evaluation` | `bool` | `False` |
+| `contract_evaluation` | `bool` | `True` |
 | `contract_mode` | `str \| None` | `None` |
 | `depth` | `str \| None` | `None` |
 | `budget_s` | `float \| None` | `None` |
@@ -291,7 +291,7 @@ Classify two already-resolved snapshots — the Tier-2 snapshot verb.
 | `public_surface_allowlist` | `set[str] \| None` | `None` |
 | `env_matrix` | `EnvironmentMatrix \| None` | `None` |
 | `diagnostic_comparison` | `bool` | `False` |
-| `contract_evaluation` | `bool` | `False` |
+| `contract_evaluation` | `bool` | `True` |
 | `contract_mode` | `str \| None` | `None` |
 | `acknowledgments` | `AcknowledgmentList \| None` | `None` |
 | `acknowledgment_policy` | `AcknowledgmentPolicy \| None` | `None` |
@@ -437,7 +437,7 @@ Compare two ABI inputs and return the classified diff result.
 | `public_surface_allowlist` | `set[str] \| None` | `None` |
 | `debuginfod_url` | `str \| None` | `None` |
 | `diagnostic_comparison` | `bool` | `False` |
-| `contract_evaluation` | `bool` | `False` |
+| `contract_evaluation` | `bool` | `True` |
 | `include_dependencies` | `bool` | `False` |
 | `contract_mode` | `str \| None` | `None` |
 | `pack_policy_overrides` | `dict[Any, Any] \| None` | `None` |

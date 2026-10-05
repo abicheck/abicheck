@@ -324,13 +324,11 @@ class TestReleaseNoPackStillResolvesProjectBackedConfig:
         diff = TestReleaseFanOutStampsResolvedConfig()._run_compare_pair_with(
             application, tmp_path
         )
-        # F2 route parity: a plain (no --pack, no --contract) member stays on
-        # the baseline digest tier, exactly like the identical single-pair
-        # `compare` and typed-API run; the project override still reaches
-        # that tier through the scoring policy file (end to end:
-        # test_cli_compare_release_policy_provenance.py's per-library
-        # receipt test), and the release-level resolution above keeps it.
-        assert diff.evaluation_config is None
+        # F2 route parity: a plain (no --pack, no --contract) member is
+        # evaluated like the identical single-pair `compare` and typed-API
+        # run (ADR-049 Phase 7: evaluation is always on), and carries the
+        # config it was scored under.
+        assert diff.evaluation_config is not None
         assert application.resolved_config is not None
 
 
@@ -620,10 +618,9 @@ class TestReleaseFanOutAcceptsContractUnresolvedPack:
     isolation.
     """
 
-    def test_rejected_without_contract(self, tmp_path: Path) -> None:
-        """No ``--contract`` on this release: still rejected as decorative,
-        the same ``CONTRACT_EVALUATION_ONLY_FIELDS`` check the single-pair
-        path applies -- nothing would read the field."""
+    def test_accepted_without_contract(self, tmp_path: Path) -> None:
+        """No ``--contract`` on this release: accepted, since evaluation is
+        always on (ADR-049 Phase 7) and the field therefore has a consumer."""
         from click.testing import CliRunner
 
         from abicheck.cli import main
@@ -641,9 +638,8 @@ class TestReleaseFanOutAcceptsContractUnresolvedPack:
         result = CliRunner().invoke(
             main, ["compare", str(old_dir), str(new_dir), "--pack", str(pack)]
         )
-        assert result.exit_code == 64, result.output
-        assert "contract.unresolved" in result.output
-        assert "needs --contract" in result.output
+        assert result.exit_code != 64, result.output
+        assert "needs --contract" not in result.output
 
     def test_now_applies_with_contract(self, tmp_path: Path) -> None:
         """With ``--contract``: now resolves instead of raising

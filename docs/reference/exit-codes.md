@@ -39,7 +39,7 @@ independently-orthogonal axis below (missing evidence contributing its own
 exit `1`), not from relevance itself; that's what stops missing evidence
 from being the cheapest way to pass.
 
-**Without `--contract` the domain is evidence-adaptive** (ADR-049 Phase 7):
+**Without `--contract` the domain is evidence-adaptive**:
 `public` when every compared side carries public-header evidence, otherwise
 `exports` when every side carries an observed export table, otherwise `all`.
 Under that unstated `public` default, a finding the headers make no

@@ -328,8 +328,7 @@ class TestReevaluateFromEvidence:
         """A decision resting on an overlay root names that overlay.
 
         Citing ``public_header`` for a declaration retained solely by
-        ``scope.public_symbols`` names evidence the decision never used (Codex
-        review, fresh evidence).
+        ``scope.public_symbols`` names evidence the decision never used.
         """
         hidden = Function(
             name="hidden",
@@ -343,6 +342,7 @@ class TestReevaluateFromEvidence:
         result = compare(
             old,
             new,
+            contract_evaluation=True,
             contract_mode="public",
             force_public_symbols={"hidden"},
         )

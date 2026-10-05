@@ -937,7 +937,6 @@ class TestPhase1Gate:
             tmp_path,
             cli_kwargs={
                 "policy": "sdk_vendor",
-                "scope_public_headers": True,
                 "contract_mode": "exports",
                 "public_symbols": ("sym_a", "sym_b"),
             },
