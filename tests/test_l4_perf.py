@@ -23,15 +23,29 @@ from abicheck.buildsource.source_extractors.base import SourceExtractionError
 
 
 # ── worker-count clamp (#5: oversubscription guard) ───────────────────────────
-def test_l4_jobs_clamps_oversubscription(monkeypatch, caplog) -> None:
-    monkeypatch.setenv("ABICHECK_L4_JOBS", "64")
+# The clamp's expected value is derived here independently of the code under
+# test (``max(8, 2 * cpus)``, the documented ceiling) and swept over host sizes
+# on both sides of the requested value. The original single-host version
+# asserted ``jobs == _l4_jobs_ceiling()`` against the *real* CPU count, which
+# only held where the ceiling sat below the request (<= 32 CPUs): on a
+# 224-core host the ceiling is 448, the explicit 64 is correctly honoured, and
+# the test failed. A test whose expectation depends on the machine it runs on
+# must pin that machine, or it gates on the runner instead of the code.
+@pytest.mark.parametrize("cpus", [1, 2, 4, 8, 16, 32, 33, 64, 224, 1024])
+@pytest.mark.parametrize("requested", [1, 7, 8, 64, 100, 449, 10_000])
+def test_l4_jobs_explicit_request_clamped_to_ceiling(
+    monkeypatch, caplog, cpus: int, requested: int
+) -> None:
+    monkeypatch.setenv("ABICHECK_L4_JOBS", str(requested))
+    monkeypatch.setattr(sr.os, "cpu_count", lambda: cpus)
+    monkeypatch.setattr(sr.process_resources.os, "cpu_count", lambda: cpus)
     monkeypatch.setattr(sr, "_l4_available_mem_gib", lambda: None)  # isolate CPU clamp
-    ceiling = sr._l4_jobs_ceiling()
+    oracle_ceiling = max(8, 2 * cpus)
     with caplog.at_level(logging.WARNING):
         jobs = sr._l4_jobs(100)
-    assert jobs == ceiling
-    assert jobs <= 64
-    assert any("oversubscription" in r.message for r in caplog.records)
+    assert jobs == min(requested, oracle_ceiling)
+    warned = any("oversubscription" in r.message for r in caplog.records)
+    assert warned == (requested > oracle_ceiling)
 
 
 def test_l4_jobs_explicit_within_ceiling_is_honoured(monkeypatch) -> None:

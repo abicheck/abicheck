@@ -81,12 +81,12 @@ def surface_from_snapshot(
     would silently read as "this product promises nothing".
     """
     from ..buildsource.cross_source_checks import (
-        _candidate_symbols,
         _has_export_obligation,
         _origin_resolvable,
         _var_has_export_obligation,
         inline_declared_symbols,
     )
+    from ..buildsource.export_account_decision import _candidate_symbols
     from ..compare.ownership_relations import contract_relations
     from ..model.vocabulary import ScopeOrigin
 

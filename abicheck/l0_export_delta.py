@@ -52,8 +52,12 @@ against).
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from .checker_types import Change
+
+if TYPE_CHECKING:
+    from .model import AbiSnapshot
 
 
 def _elf_symbol_identities(snapshot: object) -> frozenset[tuple[object, ...]] | None:
@@ -95,6 +99,92 @@ def elf_exports_cannot_lose_symbol(old: object, new: object) -> bool:
     return old_ids <= new_ids
 
 
+def symbols_only_view(snapshot: object, lang: str) -> AbiSnapshot | None:
+    """The symbols-only snapshot a re-resolve of *snapshot*'s binary builds,
+    assembled from the ELF table *snapshot* already carries.
+
+    A symbols-only ELF resolve reads exactly two things from the file: the
+    dynamic symbol table (which ``_elf_classify_symbols`` rebuilds from
+    ``ElfMetadata.symbols`` whenever that list is captured) and a cheap
+    debug-presence probe that no ``func_removed_elf_only`` fact depends on.
+    So for a snapshot whose ELF table was captured -- and whose binary the
+    caller has already identity-checked -- re-reading the file buys nothing:
+    on a real oneCCL comparison it was 1.1 s (13% of the run) and found
+    nothing the in-memory tables could not.
+
+    ``None`` when there is no captured ELF table to build from (a PE/Mach-O
+    snapshot, a parse failure, a table that is legitimately empty); the
+    caller then re-resolves from the path, as before.
+    """
+    from .dumper_elf_fallback import _build_symbol_only_snapshot
+    from .dumper_elf_symbols import _elf_classify_symbols
+    from .extract.header_ast_backend import lang_to_profile
+    from .model.dwarf_facts import AdvancedDwarfMetadata, DwarfMetadata
+
+    elf = getattr(snapshot, "elf", None)
+    source_path = getattr(snapshot, "source_path", None)
+    if (
+        elf is None
+        or not getattr(elf, "symbols", None)
+        or not getattr(elf, "machine", "")
+        or not source_path
+    ):
+        return None
+    path = Path(source_path)
+    _, funcs, objects, tls = _elf_classify_symbols(elf, set(), library_name=path.name)
+    return _build_symbol_only_snapshot(
+        path,
+        "",
+        elf,
+        DwarfMetadata(),
+        AdvancedDwarfMetadata(),
+        funcs,
+        objects,
+        tls,
+        [],
+        lang_to_profile(lang),
+    )
+
+
+def collect_l0_export_delta_from_snapshots(
+    old: object, new: object, lang: str
+) -> tuple[Change, ...]:
+    """:func:`collect_l0_export_delta` for two already-resolved snapshots.
+
+    Builds each side's symbols-only view from its own captured ELF table
+    (:func:`symbols_only_view`) and re-reads a binary only for a side that
+    has none. The caller owns the precondition that each snapshot still
+    describes the file at its ``source_path``.
+    """
+    old_view = symbols_only_view(old, lang)
+    new_view = symbols_only_view(new, lang)
+    if old_view is None or new_view is None:
+        return collect_l0_export_delta(
+            Path(getattr(old, "source_path", "")),
+            Path(getattr(new, "source_path", "")),
+            lang,
+        )
+    return _hard_removals(old_view, new_view)
+
+
+def _hard_removals(l0_old: AbiSnapshot, l0_new: AbiSnapshot) -> tuple[Change, ...]:
+    from .errors import AbicheckError
+    from .workflows.compare_policy import compare_snapshots
+
+    try:
+        l0_diff = compare_snapshots(
+            l0_old, l0_new, extra_changes=[], scope_to_public_surface=False
+        )
+    except AbicheckError:
+        return ()
+    return tuple(
+        change
+        for change in getattr(l0_diff, "breaking", ())
+        if getattr(getattr(change, "kind", None), "value", None)
+        == "func_removed_elf_only"
+    )
+
+
 def collect_l0_export_delta(
     old_path: Path, new_path: Path, lang: str
 ) -> tuple[Change, ...]:
@@ -112,7 +202,6 @@ def collect_l0_export_delta(
     # workflows-classified, so importing service.py directly here would
     # widen that workflows -> frontends edge instead of letting it close.
     from .errors import AbicheckError
-    from .workflows.compare_policy import compare_snapshots
     from .workflows.input_resolution import resolve_input
 
     # This deliberately re-resolves both sides with no headers -- the point
@@ -139,19 +228,11 @@ def collect_l0_export_delta(
             symbols_only=True,
             notify=lambda _msg: None,
         )
-        # compare_snapshots is a thin wrapper over checker.compare -- a
-        # failure there is just as much a "this best-effort probe didn't
-        # pan out" case as a resolve_input failure, so it must not escape
-        # this guard (Codex/CodeRabbit review, carried over from the
-        # original compare-side implementation).
-        l0_diff = compare_snapshots(
-            l0_old, l0_new, extra_changes=[], scope_to_public_surface=False
-        )
     except AbicheckError:
         return ()
-    return tuple(
-        change
-        for change in getattr(l0_diff, "breaking", ())
-        if getattr(getattr(change, "kind", None), "value", None)
-        == "func_removed_elf_only"
-    )
+    # compare_snapshots is a thin wrapper over checker.compare -- a failure
+    # there is just as much a "this best-effort probe didn't pan out" case as
+    # a resolve_input failure, so `_hard_removals` swallows it too
+    # (Codex/CodeRabbit review, carried over from the original compare-side
+    # implementation).
+    return _hard_removals(l0_old, l0_new)

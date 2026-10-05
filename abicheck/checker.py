@@ -225,10 +225,12 @@ def _verdict_scored_population(
     kept: list[Change], verdict_redundant: list[Change]
 ) -> list[Change]:
     """The population every verdict computation in this module must score
-    (Codex review, PR #1172, round 13): *kept* minus any
-    ``CrossSourceEvolution.RESOLVED`` finding (plan F-9 -- it stays fully
-    visible in the report but must never drive the verdict), plus
-    *verdict_redundant*.
+    (Codex review, PR #1172, round 13): *kept* plus *verdict_redundant*,
+    minus any ``CrossSourceEvolution.RESOLVED`` finding (plan F-9 -- it stays
+    fully visible in the report but must never drive the verdict). Filtered
+    over both lists: a RESOLVED hygiene finding folded into the existence
+    finding for the same export lands in the redundant list, not out of
+    the population.
 
     A single shared helper, not a filter re-applied ad hoc at each call
     site: the first ``all_unsuppressed`` computation applied this exclusion,
@@ -240,7 +242,7 @@ def _verdict_scored_population(
     (see that deleted module's ``verdict_scored_changes``, its sibling for the same
     plan-F-9 obligation at a different chokepoint).
     """
-    return [c for c in kept if not is_cross_source_resolved(c)] + verdict_redundant
+    return [c for c in (*kept, *verdict_redundant) if not is_cross_source_resolved(c)]
 
 
 def _filter_suppressed_changes(
@@ -1127,16 +1129,9 @@ def compare(
 
     # ADR-068 D3 / plan P2 -- first cross-source check migrated onto compare().
     if cross_source_checks:
-        from .workflows.cross_source_evolution import (
-            compute_candidate_cross_source_findings,
-            compute_cross_source_evolution,
-        )
+        from .workflows.cross_source_evolution import cross_source_findings
 
-        changes.extend(
-            compute_cross_source_evolution(old, new)
-            if old is not None
-            else compute_candidate_cross_source_findings(new)
-        )
+        changes.extend(cross_source_findings(old, new, changes))
 
     # ADR-067 C-S1: one conserved policy-disposition ledger per comparison,
     # built before the first disposition can be applied and threaded into every

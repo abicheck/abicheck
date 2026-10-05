@@ -49,6 +49,7 @@ from ..model.mangled_name_template_args import skip_substitution, skip_template_
 from .export_accounting import _entity_owner_is_internal
 
 __all__ = [
+    "has_internal_linkage",
     "inline_declared_symbols",
     "is_static_member_symbol",
     "owner_in_internal_namespace",
@@ -98,6 +99,26 @@ def _itanium_nested_has_internal_linkage(rest: str) -> bool:
         else:
             i += 1
     return False
+
+
+def has_internal_linkage(mangled: str) -> bool:
+    """Whether an Itanium *mangled* name carries the internal-linkage marker.
+
+    ``_ZL3kVal`` (file scope) or ``_ZN2nsL3kValE`` (namespace scope): an
+    object or function every including TU gets its own copy of, so no
+    export is owed. ``False`` for an unmangled name -- there is no marker to
+    read -- and for an MSVC one, whose mangling does not encode it this way.
+    """
+    rest = _itanium_encoding(mangled)
+    if rest is None:
+        return False
+    if rest[:1] == "L":
+        return True
+    if rest[:1] != "N":
+        return False
+    return _itanium_nested_has_internal_linkage(
+        _NESTED_QUALIFIERS_RE.sub("", rest[1:], count=1)
+    )
 
 
 def is_static_member_symbol(mangled: str) -> bool:

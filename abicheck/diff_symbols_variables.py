@@ -95,6 +95,41 @@ def _var_removed(mangled: str, v_old: Variable) -> list[Change]:
     ]
 
 
+def _unexported_shape(decl: Function | Variable) -> str | None:
+    """Why a declaration legitimately has no exported symbol, or ``None``.
+
+    The answer comes from the declaration itself, never from the export
+    table's silence alone: an inline function (explicit, ``constexpr``, or
+    defined in its class) and an internal-linkage constant are emitted in
+    each consumer's own object file; a pure virtual or deleted function has
+    no definition to export at all. Anything else that is declared but not
+    exported is *not* header-only -- it is declared without a definition the
+    library ships.
+    """
+    if isinstance(decl, Function):
+        if decl.is_pure_virtual:
+            return "pure virtual"
+        if decl.is_deleted:
+            return "deleted"
+        if decl.is_inline:
+            return "header-only"
+        return None
+    from .buildsource.export_obligation_linkage import (
+        has_internal_linkage,
+        is_static_member_symbol,
+    )
+
+    mangled = decl.mangled or ""
+    # Internal linkage is read from the mangling's own marker. A bare
+    # `is_static` says it only when the name is not a class member: a static
+    # data member owes an out-of-line definition and is not header-only.
+    if has_internal_linkage(mangled) or (
+        decl.is_static and not is_static_member_symbol(mangled)
+    ):
+        return "header-only"
+    return None
+
+
 def addition_evidence(decl: Function | Variable, noun: str) -> dict[str, Any]:
     """``description``/``surface_facts`` for a ``FUNC_ADDED``/``VAR_ADDED``.
 
@@ -106,16 +141,35 @@ def addition_evidence(decl: Function | Variable, noun: str) -> dict[str, Any]:
     the same (it is still a compatible addition consumers can use), but the
     finding must not read as an added exported symbol: the description says
     so, and ``surface_facts`` records ``binary_exported: false``.
+
+    The description states only what the declaration shows. It used to say
+    "public header-only" for every confirmed-absent export, which was false
+    twice over for a ``private:`` member declared without an inline body
+    (oneCCL): the member is not consumer-callable, and nothing about it is
+    header-only -- its definition simply is not exported. Access other than
+    ``public`` is named, and "header-only" is said only for a shape that is
+    (:func:`_unexported_shape`).
     """
-    header_only = is_export_confirmed_absent(decl)
-    return {
-        "description": (
-            f"New public header-only {noun} (no exported symbol): {decl.name}"
-            if header_only
-            else f"New public {noun}: {decl.name}"
-        ),
-        "surface_facts": surface_fact_summary(decl),
-    }
+    access = getattr(decl, "access", AccessLevel.PUBLIC)
+    where = (
+        "public"
+        if access == AccessLevel.PUBLIC
+        else f"{getattr(access, 'value', access)} member"
+    )
+    if not is_export_confirmed_absent(decl):
+        description = f"New {where} {noun}: {decl.name}"
+    else:
+        shape = _unexported_shape(decl)
+        if shape is None:
+            description = (
+                f"New {where} {noun} declared without an exported symbol "
+                f"(not inline, so its definition is not shipped): {decl.name}"
+            )
+        else:
+            description = (
+                f"New {where} {shape} {noun} (no exported symbol): {decl.name}"
+            )
+    return {"description": description, "surface_facts": surface_fact_summary(decl)}
 
 
 def _var_added(mangled: str, v_new: Variable) -> list[Change]:

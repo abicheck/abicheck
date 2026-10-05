@@ -355,4 +355,17 @@ TEST_HARNESS_BUG_CLASSES: tuple[BugClass, ...] = (
         public_surfaces=(),
         axes={"scope": ("commit", "tag")},
     ),
+    BugClass(
+        id="tests.host_dependent_expectation",
+        invariant=(
+            "A test whose expected value depends on the machine (CPU count, "
+            "RAM) pins that machine and derives the expectation from an "
+            "independent oracle swept across host sizes. "
+            "`test_l4_jobs_clamps_oversubscription` asserted the clamp equal "
+            "to the live ceiling, true only on <=32 CPUs."
+        ),
+        fixed_by=(1492,),
+        seed_tests=("tests/test_l4_perf.py",),
+        axes={"cpus": ("1", "2", "4", "8", "16", "32", "33", "64", "224", "1024")},
+    ),
 )
