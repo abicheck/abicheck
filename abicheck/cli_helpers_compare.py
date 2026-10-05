@@ -583,7 +583,10 @@ def fold_l0_hard_removals(
     ):
         return extra_changes
 
-    from .l0_export_delta import collect_l0_export_delta, elf_exports_cannot_lose_symbol
+    from .l0_export_delta import (
+        collect_l0_export_delta_from_snapshots,
+        elf_exports_cannot_lose_symbol,
+    )
 
     # Both snapshots were identity-checked against the binaries above, so
     # their own ELF tables are the tables a symbols-only re-resolve would
@@ -593,7 +596,9 @@ def fold_l0_hard_removals(
     if elf_exports_cannot_lose_symbol(old, new):
         return extra_changes
 
-    l0_hard_removals = collect_l0_export_delta(Path(old_path), Path(new_path), lang)
+    # The same identity check is what lets each side's symbols-only view be
+    # built from its own ELF table rather than by re-reading the binary.
+    l0_hard_removals = collect_l0_export_delta_from_snapshots(old, new, lang)
     return [*(extra_changes or []), *l0_hard_removals]
 
 

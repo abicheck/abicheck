@@ -145,7 +145,18 @@ class OwnershipRequest:
     *project_root* is only where the recorded form is made relative to, so a
     baseline dumped on one machine fingerprints like a CI dump on another;
     ``None`` (no project config) records absolute roots.
+
+    *operand_roots* are the target roots this run's *operand* contributed
+    (its ``-H`` entries and ``public_header_dirs``), absolute, and
+    *operand_anchor* the directory those -- and only those -- are recorded
+    relative to. The two sides of a comparison name their own header roots
+    (``-H old=v1/include -H new=v2/include``), so recording them against the
+    project root made the same rule fingerprint differently on each side
+    whenever a project config was in play -- even one that stated no root at
+    all. A root the config itself states stays project-relative.
     """
 
     rules: OwnershipRules = OwnershipRules()
     project_root: str | None = None
+    operand_roots: tuple[str, ...] = ()
+    operand_anchor: str | None = None

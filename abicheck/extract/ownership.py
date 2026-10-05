@@ -124,10 +124,20 @@ def _segments(path: str, base: str) -> tuple[str, ...]:
 
 
 def resolve_ownership_rules(
-    rules: OwnershipRules, project_root: Path | str
+    rules: OwnershipRules,
+    project_root: Path | str,
+    *,
+    labels: OwnershipRules | None = None,
 ) -> ResolvedOwnershipRules:
     """Make every root absolute against *project_root* and reject a root that
-    two entries claim -- the one contradiction precedence cannot resolve."""
+    two entries claim -- the one contradiction precedence cannot resolve.
+
+    *labels*, when given, is *rules* in another spelling with the same shape
+    (the recorded form): each root is still *located* by its spelling in
+    *rules*, but its rule id names the root as *labels* spells it. That is
+    what lets a dump match against absolute roots while every decision's
+    rule id reads exactly as the snapshot records the root.
+    """
     base = os.path.abspath(str(project_root))
     roots: list[_Root] = []
     claimed: dict[tuple[str, ...], str] = {}
@@ -142,14 +152,17 @@ def resolve_ownership_rules(
         claimed[segments] = owner
         roots.append(_Root(segments, owner, rule_id))
 
-    for spelling in rules.target_roots:
-        add(spelling, OWNER_TARGET, f"target_root:{spelling}")
-    for dep in rules.dependencies:
-        for spelling in dep.header_roots:
+    shown = labels or rules
+    for spelling, label in zip(rules.target_roots, shown.target_roots, strict=True):
+        add(spelling, OWNER_TARGET, f"target_root:{label}")
+    for dep, dep_label in zip(rules.dependencies, shown.dependencies, strict=True):
+        for spelling, label in zip(
+            dep.header_roots, dep_label.header_roots, strict=True
+        ):
             add(
                 spelling,
                 dependency_owner(dep.name),
-                f"dependency:{dep.name}:{spelling}",
+                f"dependency:{dep.name}:{label}",
             )
     return ResolvedOwnershipRules(
         project_root=base,

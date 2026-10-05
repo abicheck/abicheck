@@ -95,6 +95,63 @@ def _var_removed(mangled: str, v_old: Variable) -> list[Change]:
     ]
 
 
+def _has_internal_linkage(mangled: str) -> bool:
+    """An Itanium ``L`` (internal-linkage) marker on the entity name --
+    ``_ZL3kVal`` or ``_ZN2nsL3kValE``: a namespace-scope ``const``/``static``
+    object every including TU gets its own copy of, so no export is owed.
+    ``False`` for any shape it does not model (substitutions, templates)."""
+    if mangled.startswith("_ZL"):
+        return True
+    if not mangled.startswith("_ZN"):
+        return False
+    i, n = 3, len(mangled)
+    while i < n and mangled[i] in "rVKRO":
+        i += 1
+    while i < n:
+        if mangled[i] == "L":
+            return True
+        if not mangled[i].isdigit():
+            return False
+        j = i
+        while j < n and mangled[j].isdigit():
+            j += 1
+        if j - i > 6:  # an untrusted digit run no real source name needs
+            return False
+        i = j + int(mangled[i:j])
+    return False
+
+
+def _unexported_shape(decl: Function | Variable) -> str | None:
+    """Why a declaration legitimately has no exported symbol, or ``None``.
+
+    The answer comes from the declaration itself, never from the export
+    table's silence alone: an inline function (explicit, ``constexpr``, or
+    defined in its class) and an internal-linkage constant are emitted in
+    each consumer's own object file; a pure virtual or deleted function has
+    no definition to export at all. Anything else that is declared but not
+    exported is *not* header-only -- it is declared without a definition the
+    library ships.
+    """
+    if isinstance(decl, Function):
+        if decl.is_pure_virtual:
+            return "pure virtual"
+        if decl.is_deleted:
+            return "deleted"
+        if decl.is_inline:
+            return "header-only"
+        return None
+    mangled = decl.mangled or ""
+    # Internal linkage is read from the Itanium marker for a C++ name. A bare
+    # `is_static` says it only for an unmangled (C) name: on a mangled one it
+    # may be a class's static data member, which owes an out-of-line
+    # definition and is not header-only at all.
+    if _has_internal_linkage(mangled) or (
+        decl.is_static and not mangled.startswith("_Z")
+    ):
+        return "header-only"
+    return None
+
+
 def addition_evidence(decl: Function | Variable, noun: str) -> dict[str, Any]:
     """``description``/``surface_facts`` for a ``FUNC_ADDED``/``VAR_ADDED``.
 
@@ -106,16 +163,35 @@ def addition_evidence(decl: Function | Variable, noun: str) -> dict[str, Any]:
     the same (it is still a compatible addition consumers can use), but the
     finding must not read as an added exported symbol: the description says
     so, and ``surface_facts`` records ``binary_exported: false``.
+
+    The description states only what the declaration shows. It used to say
+    "public header-only" for every confirmed-absent export, which was false
+    twice over for a ``private:`` member declared without an inline body
+    (oneCCL): the member is not consumer-callable, and nothing about it is
+    header-only -- its definition simply is not exported. Access other than
+    ``public`` is named, and "header-only" is said only for a shape that is
+    (:func:`_unexported_shape`).
     """
-    header_only = is_export_confirmed_absent(decl)
-    return {
-        "description": (
-            f"New public header-only {noun} (no exported symbol): {decl.name}"
-            if header_only
-            else f"New public {noun}: {decl.name}"
-        ),
-        "surface_facts": surface_fact_summary(decl),
-    }
+    access = getattr(decl, "access", AccessLevel.PUBLIC)
+    where = (
+        "public"
+        if access == AccessLevel.PUBLIC
+        else f"{getattr(access, 'value', access)} member"
+    )
+    if not is_export_confirmed_absent(decl):
+        description = f"New {where} {noun}: {decl.name}"
+    else:
+        shape = _unexported_shape(decl)
+        if shape is None:
+            description = (
+                f"New {where} {noun} declared without an exported symbol "
+                f"(not inline, so its definition is not shipped): {decl.name}"
+            )
+        else:
+            description = (
+                f"New {where} {shape} {noun} (no exported symbol): {decl.name}"
+            )
+    return {"description": description, "surface_facts": surface_fact_summary(decl)}
 
 
 def _var_added(mangled: str, v_new: Variable) -> list[Change]:

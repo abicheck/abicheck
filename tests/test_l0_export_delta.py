@@ -226,3 +226,92 @@ def test_fast_path_never_skips_a_removal_the_real_probe_finds(tmp_path):
                 new_set,
             )
     assert skipped >= len(subsets)  # vacuity guard
+
+
+def _build_mixed_lib(tmp_path, names: tuple[str, ...], tag: str):
+    """Functions *and* data exports, so the view must classify both classes."""
+    src = tmp_path / f"{tag}.c"
+    src.write_text(
+        "".join(f"int {n}(void) {{ return 0; }}\nint {n}_data = 1;\n" for n in names)
+        + "int keep(void) { return 1; }\n"
+    )
+    out = tmp_path / f"lib{tag}.so"
+    subprocess.run(["gcc", "-shared", "-fPIC", "-o", str(out), str(src)], check=True)
+    return out
+
+
+def _removed_symbols(changes) -> set[str]:
+    return {c.symbol for c in changes}
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(shutil.which("gcc") is None, reason="needs gcc")
+@pytest.mark.skipif(
+    not sys.platform.startswith("linux"),
+    reason="the in-memory view reads ELF tables; gcc emits PE/Mach-O elsewhere",
+)
+def test_in_memory_view_matches_the_rereading_probe_on_every_pair(
+    tmp_path, monkeypatch
+):
+    """Oracle: the original path-based probe, which re-reads both binaries.
+
+    Over every (old, new) pair of subsets of a small function+data export set,
+    the view built from each already-resolved snapshot's own ELF table must
+    report exactly the removals the re-reading probe reports -- and must not
+    open either binary to do it."""
+    from abicheck.l0_export_delta import collect_l0_export_delta_from_snapshots
+    from abicheck.workflows.input_resolution import resolve_input
+
+    subsets = [
+        c for r in range(len(_FUNCS) + 1) for c in itertools.combinations(_FUNCS, r)
+    ]
+    libs = {
+        s: _build_mixed_lib(tmp_path, s, "m" + "".join(x[0] for x in s))
+        for s in subsets
+    }
+    snaps = {
+        s: resolve_input(p, [], [], version="", lang="c", notify=lambda _m: None)
+        for s, p in libs.items()
+    }
+    expected = {
+        (o, n): _removed_symbols(collect_l0_export_delta(libs[o], libs[n], "c"))
+        for o, n in itertools.product(subsets, repeat=2)
+    }
+
+    import abicheck.dumper_elf_symbols as elf_symbols
+    import abicheck.elf_metadata as elf_metadata
+
+    def _no_reread(*_a, **_kw):
+        raise AssertionError("the in-memory view must not re-read the binary")
+
+    monkeypatch.setattr(elf_symbols, "_pyelftools_exported_symbols", _no_reread)
+    monkeypatch.setattr(elf_metadata, "parse_elf_metadata", _no_reread)
+    nonempty = 0
+    for (o, n), want in expected.items():
+        got = _removed_symbols(
+            collect_l0_export_delta_from_snapshots(snaps[o], snaps[n], "c")
+        )
+        assert got == want, (o, n)
+        assert got == {f for f in o if f not in n}, (o, n)
+        nonempty += bool(got)
+    assert nonempty > 0  # vacuity guard: the sweep exercised real removals
+
+
+def test_view_declines_without_a_captured_elf_table():
+    """No table, no machine, or no path is 'cannot build a view' -- the caller
+    then falls back to re-reading, never to 'nothing was removed'."""
+    from abicheck.l0_export_delta import symbols_only_view
+    from abicheck.model.elf_facts import ElfMetadata
+
+    for snap in (
+        SimpleNamespace(elf=None, source_path="/x.so"),
+        SimpleNamespace(elf=ElfMetadata(), source_path="/x.so"),
+        SimpleNamespace(
+            elf=ElfMetadata(machine="EM_X86_64", symbols=[]), source_path="/x.so"
+        ),
+        SimpleNamespace(
+            elf=ElfMetadata(machine="EM_X86_64", symbols=[ElfSymbol(name="f")]),
+            source_path=None,
+        ),
+    ):
+        assert symbols_only_view(snap, "c") is None

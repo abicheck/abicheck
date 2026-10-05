@@ -158,6 +158,12 @@ def with_target_roots(
     roots = [str(Path(h).resolve()) for h in headers if Path(h).exists()]
     roots += [str(Path(d).resolve()) for d in public_header_dirs]
     base = request or _PROJECT_OWNERSHIP.get() or OwnershipRequest()
+    # A root the project config itself states is the config's, recorded
+    # against the project root; every other root is this operand's own.
+    stated = {os.path.normpath(r) for r in base.rules.target_roots}
+    operand = tuple(
+        dict.fromkeys(r for r in roots if os.path.normpath(r) not in stated)
+    )
     project_root = base.project_root
     if project_root is None:
         # With no project config the roots were recorded absolute, so the two
@@ -166,9 +172,15 @@ def with_target_roots(
         # fingerprinted as "different ownership rules". Each side is anchored
         # at its own header roots instead, so the same layout is one rule.
         project_root = operand_anchor([*base.rules.target_roots, *roots])
+    # The operand's roots are anchored at the operand whether or not a config
+    # supplied a project root. Recording them against the config's directory
+    # made `--config ci.yml` -- even one stating only `compile.std` -- turn
+    # `-H old=inst-1/include -H new=inst-2/include` into two different rules.
     return replace(
         base,
         project_root=project_root,
+        operand_roots=operand,
+        operand_anchor=operand_anchor(operand),
         rules=replace(
             base.rules,
             target_roots=tuple(dict.fromkeys([*base.rules.target_roots, *roots])),

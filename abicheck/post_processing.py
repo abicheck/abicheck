@@ -27,6 +27,7 @@ from collections.abc import Iterable, Sequence
 from typing import TYPE_CHECKING, Protocol
 
 from .policy.disposition_ledger import Disposition, record_suppressed_change
+from .policy.export_existence_fold import FoldExportHygieneIntoExistence
 
 # Split out when this module reached the 2000-line hard cap (see each new
 # module's own docstring). `PipelineContext` is re-exported rather than
@@ -1859,6 +1860,7 @@ DEFAULT_PIPELINE = PostProcessingPipeline(
         MarkReachability(),
         ApplySuppression(),
         SuppressRenamedPairs(),
+        FoldExportHygieneIntoExistence(),  # one finding per export event
         # Runs immediately after suppression settles `changes` so it sees
         # the final post-suppression set -- see its own docstring for why a
         # suppression targeting only the covering TYPE_VTABLE_CHANGED would

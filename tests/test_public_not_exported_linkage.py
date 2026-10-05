@@ -476,7 +476,7 @@ def test_header_only_additions_do_not_read_as_added_exports() -> None:
     }
     assert header_only | {"_ZN2ns3newEv"} <= set(added)
     for sym in header_only:
-        assert "header-only" in added[sym].description, added[sym].description
+        assert "(no exported symbol)" in added[sym].description, added[sym].description
         assert added[sym].surface_facts["binary_exported"] == "false"
     exported = added["_ZN2ns3newEv"]
     assert "header-only" not in exported.description

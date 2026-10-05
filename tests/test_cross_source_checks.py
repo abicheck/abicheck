@@ -520,7 +520,7 @@ def test_exported_not_public_leaked_dependency_rtti_is_external_not_artifact():
     ],
 )
 def test_external_dependency_origin_owner_based(symbol, expected):
-    from abicheck.buildsource.cross_source_checks import _external_dependency_origin
+    from abicheck.buildsource.export_accounting import _external_dependency_origin
 
     assert _external_dependency_origin(symbol, ["libstdc++.so.6"]) == expected
 
@@ -599,7 +599,7 @@ def test_external_dependency_origin_owner_based(symbol, expected):
 def test_external_dependency_origin_runtime_and_covariant_thunk(
     symbol, needed, expected
 ):
-    from abicheck.buildsource.cross_source_checks import _external_dependency_origin
+    from abicheck.buildsource.export_accounting import _external_dependency_origin
 
     assert _external_dependency_origin(symbol, needed) == expected
 
@@ -608,7 +608,7 @@ def test_linked_library_names_across_platforms():
     # The linked-library list is gathered from whichever binary format the snapshot
     # carries (ELF DT_NEEDED / Mach-O LC_LOAD_DYLIB / PE imports) so the C++-runtime
     # picker can name the real dependency on each platform.
-    from abicheck.buildsource.cross_source_checks import _linked_library_names
+    from abicheck.buildsource.export_accounting import _linked_library_names
 
     elf_snap = _snap(elf=ElfMetadata(symbols=[], needed=["libstdc++.so.6"]))
     assert _linked_library_names(elf_snap) == ["libstdc++.so.6"]
@@ -626,7 +626,7 @@ def test_external_dependency_origin_ignores_audited_library_own_namespace():
     # Auditing a vendored library itself (libfmt): its own ``fmt::detail`` symbols
     # are native, not a leaked dependency — the vendored-namespace fallback is gated
     # on the audited library's identity (Codex review).
-    from abicheck.buildsource.cross_source_checks import (
+    from abicheck.buildsource.export_accounting import (
         _external_dependency_origin,
         _library_self_names,
     )
@@ -772,7 +772,7 @@ def test_external_dependency_origin_ignores_audited_library_own_namespace():
     ],
 )
 def test_external_dependency_origin_msvc_scopes(symbol, self_names, expected):
-    from abicheck.buildsource.cross_source_checks import _external_dependency_origin
+    from abicheck.buildsource.export_accounting import _external_dependency_origin
 
     assert _external_dependency_origin(symbol, [], self_names) == expected
 
@@ -849,7 +849,7 @@ def test_nested_component(symbol, index, expected):
     ],
 )
 def test_account_undocumented_export_categories(symbol, expected):
-    from abicheck.buildsource.cross_source_checks import _account_undocumented_export
+    from abicheck.buildsource.export_accounting import _account_undocumented_export
 
     assert _account_undocumented_export(symbol) == expected
 
