@@ -19,3 +19,7 @@
   every binary: `ABICHECK_DWARF_LOW_MEMORY_MB` defaults to `0` instead of
   `32`. Measured faster and lower-peak at every size tried; set it to `-1`
   to keep the old retain-everything behaviour.
+- Closure-identity renumbering descends `SemanticIR.occurrences` entry by
+  entry instead of rewriting the whole mapping whenever any occurrence holds
+  a closure marker: the rewrite step on a 60-module clang dump fell from
+  2.0 M walked nodes / 1.6 s to ~21 k nodes / 0.15 s, byte-identical output.
