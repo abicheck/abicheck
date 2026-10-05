@@ -67,6 +67,7 @@ from ..model.semantic_ir_legacy_adapter import (
     legacy_function_signature_entity,
     semantic_ir_covers_kind,
 )
+from ..model.type_indirection import unresolved_pair_verdict
 from ..name_classification import (
     canonicalize_type_name,
     cv_qualifiers_only_differ,
@@ -89,13 +90,6 @@ __all__ = [
     "hidden_friend_changes",
     "signature_of",
 ]
-
-_UNKNOWN_TYPE = "?"
-
-
-def _type_unknown(type_name: str | None) -> bool:
-    """An unresolved spelling -- a stripped side's placeholder (RD2-5)."""
-    return type_name is None or type_name.strip() == _UNKNOWN_TYPE
 
 
 @dataclass(frozen=True)
@@ -296,6 +290,23 @@ def _format_params(types: tuple[str, ...]) -> str:
     return ", ".join(types) if types else "(none)"
 
 
+def _return_spellings_differ(r_old: str, r_new: str, is_llp64: bool) -> bool:
+    """Whether two fully-resolved return spellings differ in an ABI-relevant
+    way."""
+    if canonicalize_type_name(r_old) == canonicalize_type_name(r_new):
+        return False
+    # A pointee/by-value cv change (``char *`` -> ``const char *``) keeps the
+    # return register and calling convention (ISSUE-29/52).
+    if cv_qualifiers_only_differ(r_old, r_new):
+        return False
+    # A top-level by-value cv change is absent from the mangled name entirely
+    # (Codex review, PR #582).
+    if func_signature_cv_only_differ(r_old, r_new):
+        return False
+    # ABI-equivalent integer spellings (long -> long long on LP64).
+    return not _abi_equivalent_scalar(r_old, r_new, is_llp64)
+
+
 def _return_changes(
     mangled: str,
     name: str,
@@ -309,21 +320,12 @@ def _return_changes(
         # Not established on a side: declined, not a confirmed "unchanged".
         _decline(mangled, "return type", r_old is None and r_new is None)
         return []
-    # RD2-5: a stripped side reports "?"; that is unknown, not a change.
-    if _type_unknown(r_old) or _type_unknown(r_new):
+    # RD2-5: a stripped side reports "?"; that is unknown, not a change --
+    # unless the resolved structure around it already proves one.
+    verdict = unresolved_pair_verdict(r_old, r_new, decay_arrays=False)
+    if verdict is False:
         return []
-    if canonicalize_type_name(r_old) == canonicalize_type_name(r_new):
-        return []
-    # A pointee/by-value cv change (``char *`` -> ``const char *``) keeps the
-    # return register and calling convention (ISSUE-29/52).
-    if cv_qualifiers_only_differ(r_old, r_new):
-        return []
-    # A top-level by-value cv change is absent from the mangled name entirely
-    # (Codex review, PR #582).
-    if func_signature_cv_only_differ(r_old, r_new):
-        return []
-    # ABI-equivalent integer spellings (long -> long long on LP64).
-    if _abi_equivalent_scalar(r_old, r_new, is_llp64):
+    if verdict is None and not _return_spellings_differ(r_old, r_new, is_llp64):
         return []
     return [
         make_change(
@@ -345,8 +347,9 @@ def _param_differs(
     is "not established", see ``semantic_ir_function_signature``); the
     spelling comparison still catches a real kind change otherwise, since a
     pointer/reference is rendered in the spelling itself."""
-    if _type_unknown(t_old) or _type_unknown(t_new):
-        return False
+    verdict = unresolved_pair_verdict(t_old, t_new, decay_arrays=True)
+    if verdict is not None:
+        return verdict
     if k_old and k_new and k_old != k_new:
         return True
     if canonicalize_type_name(t_old) == canonicalize_type_name(t_new):

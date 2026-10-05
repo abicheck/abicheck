@@ -97,9 +97,20 @@ def _snap(variables: list[Variable], *, with_ir: bool) -> AbiSnapshot:
     )
 
 
+#: Builtin, non-pointer spellings: a known-exact "no indirection" shape.
+_EXACT_NON_POINTER = frozenset(
+    {"int", "const int", "int const", "long", "volatile int"}
+)
+
+
 def _oracle(old: str, new: str) -> list[ChangeKind]:
     a, b = _MEANING[old], _MEANING[new]
     if a is None or b is None:
+        # An unresolved pointee still proves a change when the other side is
+        # exactly a non-pointer and this one is a pointer to *something*
+        # (the reviewer's ``int -> ?*``); anything else stays unknown.
+        if "?*" in (old, new) and {old, new} & _EXACT_NON_POINTER:
+            return [ChangeKind.VAR_TYPE_CHANGED]
         return []
     if a[0] != b[0]:
         return [ChangeKind.VAR_TYPE_CHANGED]
@@ -201,11 +212,32 @@ def test_an_unnamed_variable_on_an_ir_side_is_projected() -> None:
     assert variable_type_facts(index.entity_for(unnamed))[1] is True
 
 
-def test_unresolved_spelling_is_not_a_change_on_either_path() -> None:
+@pytest.mark.parametrize(
+    ("old_t", "new_t", "expected"),
+    [
+        # Non-pointer -> pointer to an unresolved pointee: provable.
+        ("int", "?*", [ChangeKind.VAR_TYPE_CHANGED]),
+        ("?*", "int", [ChangeKind.VAR_TYPE_CHANGED]),
+        ("int &", "?*", [ChangeKind.VAR_TYPE_CHANGED]),
+        ("int", "?**", [ChangeKind.VAR_TYPE_CHANGED]),
+        ("?&", "?*", [ChangeKind.VAR_TYPE_CHANGED]),
+        # Compatible structure: the ``?`` may be what makes them equal.
+        ("int *", "?*", []),
+        ("int **", "?*", []),
+        ("?*", "?*", []),
+        ("?**", "?*", []),
+        ("std::vector<int>", "?*", []),
+        ("int", "const ?", []),
+        ("int", "?", []),
+    ],
+)
+def test_unresolved_spelling_reports_only_a_provable_change(
+    old_t, new_t, expected
+) -> None:
     for with_ir in (True, False):
-        old = _snap([_var("?*")], with_ir=with_ir)
-        new = _snap([_var("int")], with_ir=with_ir)
-        assert _run(old, new) == []
+        old = _snap([_var(old_t)], with_ir=with_ir)
+        new = _snap([_var(new_t)], with_ir=with_ir)
+        assert _run(old, new) == expected
 
 
 def test_unreliable_cv_suppresses_a_cv_only_difference() -> None:
@@ -372,7 +404,9 @@ class TestDeclinedComparisonNotes:
 
     def test_reaches_the_run_assurance_end_to_end(self) -> None:
         old = _snap([_var("?*")], with_ir=True)
-        new = _snap([_var("int")], with_ir=True)
+        # Compatible structure (the ``?`` may be ``int``): a decline, not a
+        # finding.
+        new = _snap([_var("int *")], with_ir=True)
         notes = compare(old, new).analysis_assurance.notes
         assert any("'variables' declined 1 comparison" in n for n in notes)
 
