@@ -51,10 +51,6 @@ from dataclasses import dataclass
 from ..model import AbiSnapshot, Function
 from ..model.identity import (
     EntityId,
-    EntityKind,
-    InlineNamespace,
-    Namespace,
-    Record,
 )
 from ..model.qualified_name_split import split_top_level_scopes
 from ..model.synthetic_key import (
@@ -63,6 +59,12 @@ from ..model.synthetic_key import (
     is_synthetic_dtor_key,
 )
 from ..model.type_identifiers import IDENT_RE
+from ..model.type_label import (
+    TYPE_ENTITY_KINDS,
+    qualified_spelling,
+    qualified_type_label,
+    relabelled,
+)
 
 __all__ = [
     "AmbiguousTypeNames",
@@ -76,23 +78,6 @@ __all__ = [
     "resolve_in_scope",
     "scoped_type_mentions",
 ]
-
-_TYPE_KINDS = frozenset({EntityKind.TYPE, EntityKind.ENUM, EntityKind.TYPEDEF})
-
-
-def qualified_spelling(entity_id: EntityId | None) -> str | None:
-    """``ns::Outer::Leaf`` for *entity_id*, or ``None`` when a scope segment
-    has no spelling a reader could use (anonymous, function-local)."""
-    if entity_id is None:
-        return None
-    parts: list[str] = []
-    for seg in entity_id.scope:
-        if isinstance(seg, (Namespace, Record, InlineNamespace)) and seg.name:
-            parts.append(seg.name)
-        else:
-            return None
-    parts.append(entity_id.leaf_name)
-    return "::".join(parts)
 
 
 @dataclass(frozen=True)
@@ -161,30 +146,6 @@ def _relabel(text: str, bare: str, qualified: str) -> str:
     return re.sub(rf"(?<![\w:]){re.escape(bare)}(?!\w)", qualified, text)
 
 
-def _relabelled(symbol: str, bare: str, qualified: str) -> str | None:
-    """*symbol* with its leading *bare* segment replaced by *qualified*, or
-    ``None`` when *symbol* is not ``bare`` / ``bare::member``."""
-    parts = split_top_level_scopes(symbol)
-    if not parts or parts[0] != bare:
-        return None
-    return "::".join([qualified, *parts[1:]])
-
-
-def qualified_type_label(change: object) -> str | None:
-    """The label :func:`disambiguate_type_symbols` would give *change* if its
-    bare name were ambiguous: its ``entity_id``'s qualified spelling in place
-    of the bare leaf. ``None`` for a non-type finding, one without a
-    spellable identity, or one whose label already differs from the leaf."""
-    eid = getattr(change, "entity_id", None)
-    if eid is None or eid.kind not in _TYPE_KINDS:
-        return None
-    qualified = qualified_spelling(eid)
-    if qualified is None:
-        return None
-    label = _relabelled(getattr(change, "symbol", "") or "", eid.leaf_name, qualified)
-    return None if label == getattr(change, "symbol", None) else label
-
-
 def disambiguate_type_symbols(
     changes: Iterable[object], names: AmbiguousTypeNames
 ) -> int:
@@ -198,16 +159,16 @@ def disambiguate_type_symbols(
     """
     if not names:
         return 0
-    relabelled = 0
+    count = 0
     for c in changes:
         eid = getattr(c, "entity_id", None)
-        if eid is None or eid.kind not in _TYPE_KINDS:
+        if eid is None or eid.kind not in TYPE_ENTITY_KINDS:
             continue
         qualified = names.by_entity.get(eid)
         if qualified is None:
             continue
         bare = eid.leaf_name
-        new_symbol = _relabelled(c.symbol, bare, qualified)  # type: ignore[attr-defined]
+        new_symbol = relabelled(c.symbol, bare, qualified)  # type: ignore[attr-defined]
         if new_symbol is None:
             continue
         c.symbol = new_symbol  # type: ignore[attr-defined]
@@ -216,8 +177,8 @@ def disambiguate_type_symbols(
         description = getattr(c, "description", None)
         if description:
             c.description = _relabel(description, bare, qualified)  # type: ignore[attr-defined]
-        relabelled += 1
-    return relabelled
+        count += 1
+    return count
 
 
 def resolve_in_scope(

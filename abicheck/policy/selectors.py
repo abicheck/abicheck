@@ -395,7 +395,7 @@ def _qualified_type_label(change: SelectorMatchable) -> str | None:
     """The qualified spelling of a type finding's label, from its own
     ``entity_id``, when the label is that entity's bare name (or
     ``name::member``); ``None`` otherwise."""
-    from ..compare.type_symbol_disambiguation import qualified_type_label
+    from ..model.type_label import qualified_type_label
 
     return qualified_type_label(change)
 
