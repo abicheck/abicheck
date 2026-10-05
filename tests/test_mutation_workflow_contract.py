@@ -634,7 +634,9 @@ _ACCEPTED_KILL_LOSS = {
     # Re-entrant `abicheck` subprocess from a scratch cwd (see its pyproject
     # --ignore comment); reaches name_classification only through the
     # package root's `model` initialization (abicheck/__init__.py).
-    "tests/test_publish_baseline_upload_step.py": frozenset({"abicheck.name_classification"}),
+    "tests/test_publish_baseline_upload_step.py": frozenset(
+        {"abicheck.name_classification"}
+    ),
     # Its producer/consumer (subprocess-spawning) tests run `python -m abicheck.frontends.action.cli`
     # as a real subprocess, which re-enters the mutated tree with no mutmut
     # config -- the same class as the entries above. Surfaced by PR #1356.
