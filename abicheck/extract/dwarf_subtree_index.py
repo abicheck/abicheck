@@ -67,6 +67,7 @@ __all__ = [
     "drop_index",
     "install_subtree_index",
     "iter_children_tagged",
+    "iter_formal_parameter_type_refs",
     "iter_formal_parameters",
     "open_indexed_dwarf_info",
     "subtree_ends",
@@ -277,12 +278,16 @@ class _CuIndex:
     """
 
     __slots__ = (
+        "abbrev_table",
         "address_size",
+        "cu_offset",
         "data",
         "ends",
+        "little_endian",
         "offset_size",
         "plans",
         "start",
+        "type_ref_plans",
         "version",
     )
 
@@ -295,7 +300,15 @@ class _CuIndex:
         address_size: int,
         offset_size: int,
         version: int,
+        *,
+        abbrev_table: Any = None,
+        cu_offset: int = 0,
+        little_endian: bool = True,
     ) -> None:
+        self.abbrev_table = abbrev_table
+        self.cu_offset = cu_offset
+        self.little_endian = little_endian
+        self.type_ref_plans: dict[int, tuple[tuple[int, ...], str] | None] = {}
         self.start = start
         self.data = data
         self.plans = plans
@@ -324,6 +337,89 @@ class _CuIndex:
                     data, pos, step, self.address_size, self.offset_size, self.version
                 )
         return self.start + pos, tag
+
+    def type_ref(self, offset: int) -> int | None | _NotDecodable:
+        """The section-absolute offset the DIE at *offset*'s ``DW_AT_type``
+        names, read from the raw bytes; ``None`` when the DIE has no
+        ``DW_AT_type``; :data:`NOT_DECODABLE` when its form is not a plain
+        reference (the caller then decodes the DIE the ordinary way).
+
+        Matches ``dwarf_utils.resolve_die_ref``'s arithmetic exactly:
+        ``DW_FORM_ref_addr`` is already absolute, every CU-relative form is
+        offset by the unit's ``cu_offset``.
+        """
+        data = self.data
+        pos = offset - self.start
+        code, pos = _read_uleb(data, pos)
+        if code == 0:
+            return None
+        plan = self.type_ref_plans.get(code, _MISSING_PLAN)
+        if plan is _MISSING_PLAN:
+            plan = self.type_ref_plans[code] = self._type_ref_plan(code)
+        if plan is None:
+            return None
+        if plan is _UNDECODABLE_PLAN:
+            return NOT_DECODABLE
+        steps, form = plan  # type: ignore[misc]
+        for step in steps:
+            if step >= 0:
+                pos += step
+            else:
+                pos = _skip_value(
+                    data, pos, step, self.address_size, self.offset_size, self.version
+                )
+        if form == "DW_FORM_ref_udata":
+            value, _ = _read_uleb(data, pos)
+            return value + self.cu_offset
+        width = _REF_WIDTHS.get(form)
+        if width is None:  # DW_FORM_ref_addr
+            width = self.address_size if self.version <= 2 else self.offset_size
+        value = int.from_bytes(
+            data[pos : pos + width], "little" if self.little_endian else "big"
+        )
+        return value if form == "DW_FORM_ref_addr" else value + self.cu_offset
+
+    def _type_ref_plan(self, code: int) -> Any:
+        """``(steps before DW_AT_type, its form)``, ``None`` when the
+        abbreviation has no ``DW_AT_type``, or :data:`_UNDECODABLE_PLAN`."""
+        abbrev = self.abbrev_table.get_abbrev(code)
+        steps: list[int] = []
+        for spec in abbrev["attr_spec"]:
+            if spec.name == "DW_AT_type":
+                if spec.form not in _REF_WIDTHS and spec.form not in (
+                    "DW_FORM_ref_udata",
+                    "DW_FORM_ref_addr",
+                ):
+                    return _UNDECODABLE_PLAN
+                return tuple(steps), spec.form
+            step = _form_step(
+                spec.form, self.address_size, self.offset_size, self.version
+            )
+            if step == 0:
+                continue
+            if step > 0 and steps and steps[-1] > 0:
+                steps[-1] += step
+            else:
+                steps.append(step)
+        return None
+
+
+class _NotDecodable:
+    """Marker type for :data:`NOT_DECODABLE`."""
+
+    __slots__ = ()
+
+
+#: :meth:`_CuIndex.type_ref`'s answer for a ``DW_AT_type`` it cannot read raw.
+NOT_DECODABLE = _NotDecodable()
+_MISSING_PLAN: Any = object()
+_UNDECODABLE_PLAN: Any = object()
+_REF_WIDTHS: dict[str, int] = {
+    "DW_FORM_ref1": 1,
+    "DW_FORM_ref2": 2,
+    "DW_FORM_ref4": 4,
+    "DW_FORM_ref8": 8,
+}
 
 
 def _index_for(CU: Any) -> _CuIndex | None:
@@ -426,7 +522,18 @@ def _scan(CU: Any) -> _CuIndex | None:
         # Ran past the unit, or a subtree never closed: this is not a scan
         # the table can be trusted from.
         return None
-    return _CuIndex(start, data, plans, ends, address_size, offset_size, version)
+    return _CuIndex(
+        start,
+        data,
+        plans,
+        ends,
+        address_size,
+        offset_size,
+        version,
+        abbrev_table=table,
+        cu_offset=int(CU.cu_offset),
+        little_endian=bool(CU.dwarfinfo.config.little_endian),
+    )
 
 
 def _indexed_iter_DIE_children(self: Any, die: Any) -> Any:
@@ -497,6 +604,39 @@ def iter_formal_parameters(die: Any) -> Iterator[Any]:
     """*die*'s ``DW_TAG_formal_parameter`` children, the rest of its body
     (locals, lexical blocks, call sites, inlined calls) left undecoded."""
     return iter_children_tagged(die, FORMAL_PARAMETER_TAGS)
+
+
+def iter_formal_parameter_type_refs(die: Any) -> Iterator[tuple[Any, Any]]:
+    """For each of *die*'s ``DW_TAG_formal_parameter`` children, in order,
+    ``(type_ref, None)`` -- the absolute offset its ``DW_AT_type`` names
+    (``None`` when it has none), read without building the parameter's DIE
+    -- or ``(None, child)`` with the decoded DIE when the unit is not
+    indexable or the attribute's form is not a plain reference.
+    """
+    CU: Any = getattr(die, "cu", None)
+    real = hasattr(die, "has_children") and hasattr(CU, "_get_cached_DIE")
+    if real and not die.has_children:
+        return
+    index = _index_for(CU) if real else None
+    if index is None or index.abbrev_table is None:
+        for child in iter_formal_parameters(die):
+            yield None, child
+        return
+    offset = die.offset + die.size
+    while True:
+        stepped = index.step_over(offset)
+        if stepped is None:
+            return
+        next_offset, tag = stepped
+        if tag in FORMAL_PARAMETER_TAGS:
+            ref = index.type_ref(offset)
+            if ref is NOT_DECODABLE:
+                child = CU._get_cached_DIE(offset)
+                child.set_parent(die)
+                yield None, child
+            else:
+                yield ref, None
+        offset = next_offset
 
 
 def _stock_children_from(CU: Any, die: Any, current: Any) -> Any:

@@ -72,6 +72,18 @@ _SRC = """
     }
 """
 
+#: A second translation unit, so the library has a compile unit at a
+#: non-zero ``.debug_info`` offset: a CU-relative reference read without its
+#: unit's offset is only wrong there.
+_SRC2 = """
+    #include <string>
+    namespace api2 {
+    struct Rec { long a; std::string s; };
+    int second(Rec r, const Rec& q, int n) { return static_cast<int>(r.a + q.a) + n; }
+    Rec make(int a) { return Rec{a, "x"}; }
+    }
+"""
+
 #: (compiler, extra flags) -- each a distinct DWARF shape the index must size.
 _BUILDS = [
     ("clang++", ["-O2", "-gdwarf-5"]),
@@ -99,9 +111,11 @@ def _build(tmp_path: Path, compiler: str, flags: list[str]) -> Path:
         pytest.skip(f"{compiler} not found in PATH")
     src = tmp_path / "t.cpp"
     src.write_text(textwrap.dedent(_SRC), encoding="utf-8")
+    src2 = tmp_path / "t2.cpp"
+    src2.write_text(textwrap.dedent(_SRC2), encoding="utf-8")
     out = tmp_path / "libt.so"
     r = subprocess.run(  # noqa: S603 - fixed argv, never shell=True
-        [compiler, "-shared", "-fPIC", *flags, "-o", str(out), str(src)],
+        [compiler, "-shared", "-fPIC", *flags, "-o", str(out), str(src), str(src2)],
         capture_output=True,
         text=True,
         check=False,
@@ -178,6 +192,43 @@ class TestAgainstStockPyelftools:
                     ]
                     got = [c.offset for c in dsi.iter_children_tagged(die, tags)]
                     assert got == expected, f"DIE 0x{die.offset:x}"
+
+    def test_raw_parameter_type_refs_equal_the_decoded_attribute(
+        self, binary: Path
+    ) -> None:
+        """Every formal parameter's raw-read ``DW_AT_type`` target is the one
+        ``dwarf_utils.resolve_die_ref`` computes from the decoded DIE; a
+        parameter handed back undecoded is one whose form was not a plain
+        reference."""
+        from abicheck.dwarf_utils import resolve_die_ref
+
+        with binary.open("rb") as fh:
+            dwarf = ELFFile(fh).get_dwarf_info()
+            raw_read = 0
+            for CU in dwarf.iter_CUs():
+                for die in _all_dies(CU):
+                    if not die.has_children:
+                        continue
+                    params = [
+                        c
+                        for c in _stock_children(CU, die)
+                        if c.tag in dsi.FORMAL_PARAMETER_TAGS
+                    ]
+                    got = list(dsi.iter_formal_parameter_type_refs(die))
+                    assert len(got) == len(params), f"DIE 0x{die.offset:x}"
+                    for (ref, child), param in zip(got, params):
+                        if child is not None:
+                            assert child.offset == param.offset
+                            continue
+                        raw_read += 1
+                        expected = (
+                            resolve_die_ref(param, "DW_AT_type", CU).offset
+                            if "DW_AT_type" in param.attributes
+                            else None
+                        )
+                        assert ref == expected, f"param 0x{param.offset:x}"
+            assert raw_read > 10  # vacuity: the raw path actually ran
+            assert len(list(dwarf.iter_CUs())) > 1  # a unit at a non-zero offset
 
 
 def test_clang_output_actually_takes_the_indexed_path(tmp_path: Path) -> None:

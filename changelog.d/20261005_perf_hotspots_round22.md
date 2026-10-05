@@ -10,3 +10,12 @@
   reusing the closure marking instead of re-walking every string field.
 - `policy_kind_sets` is memoized per policy name, and `resolve_kind_sets`
   no longer copies the four kind sets on every call.
+- DWARF calling-convention extraction reads each formal parameter's
+  `DW_AT_type` straight from the raw `.debug_info` bytes instead of building
+  a pyelftools DIE per parameter, and memoizes the by-value trait per
+  referenced type (the advanced DWARF pass: 3.8 s -> 2.3 s on a 60-module C++
+  fixture; output identical on GCC DWARF 4/5 and clang DWARF 5).
+- DWARF low-memory mode (free each CU's DIE cache after use) is now on for
+  every binary: `ABICHECK_DWARF_LOW_MEMORY_MB` defaults to `0` instead of
+  `32`. Measured faster and lower-peak at every size tried; set it to `-1`
+  to keep the old retain-everything behaviour.

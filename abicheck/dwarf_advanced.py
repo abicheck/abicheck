@@ -265,6 +265,13 @@ class _DwarfTypeCache:
 
     unwrap: dict[int, Any] = field(default_factory=dict)  # die.offset → unwrapped DIE
     nontrivial: dict[int, bool] = field(default_factory=dict)  # die.offset → bool
+    #: Referenced type offset → by-value trait (``_value_abi_trait_for_typed_die``).
+    param_trait: dict[int, str | None] = field(default_factory=dict)
+    #: Referenced type offset → (trait, aggregate byte size, has unaligned member)
+    #: for a return type.
+    ret_facts: dict[int, tuple[str | None, int | None, bool]] = field(
+        default_factory=dict
+    )
 
 
 def _is_nontrivial_aggregate(
@@ -410,7 +417,14 @@ def _value_abi_trait_for_typed_die(
     Fingerprint contains only ABI-relevant triviality, not type name.
     Type renames don't affect calling convention — including tname causes false positives.
     """
-    t0 = _resolve_type_die(die, CU)
+    return _value_abi_trait_for_type(_resolve_type_die(die, CU), CU, cache)
+
+
+def _value_abi_trait_for_type(
+    t0: Any, CU: Any, cache: _DwarfTypeCache | None = None
+) -> str | None:
+    """:func:`_value_abi_trait_for_typed_die` from the already-resolved type
+    DIE *t0* (``None`` when the declaration names no type)."""
     if t0 is None:
         return None
 
@@ -545,6 +559,85 @@ def _aggregate_has_unaligned_member(
     return _type_unaligned_at(t, CU, 0, cache)
 
 
+def _type_ref_offset(die: Any, CU: Any) -> int | None:
+    """Absolute ``.debug_info`` offset *die*'s ``DW_AT_type`` names, read from
+    the raw attribute without constructing the target DIE; ``None`` when it
+    has none.
+
+    Every by-value fact :func:`_extract_calling_convention` derives from a
+    parameter or return type reads only that reference (resolved within the
+    current *CU*, whose cache this keys), so it is a function of this offset.
+    """
+    attr = die.attributes.get("DW_AT_type")
+    if attr is None:
+        return None
+    raw = attr.value
+    if not isinstance(raw, int):
+        return None
+    return raw if attr.form == "DW_FORM_ref_addr" else raw + CU.cu_offset
+
+
+def _param_trait(die: Any, CU: Any, cache: _DwarfTypeCache | None) -> str | None:
+    """:func:`_value_abi_trait_for_typed_die`, memoized per referenced type."""
+    ref = _type_ref_offset(die, CU) if cache is not None else None
+    if ref is None:
+        return _value_abi_trait_for_typed_die(die, CU, cache=cache)
+    assert cache is not None
+    try:
+        return cache.param_trait[ref]
+    except KeyError:
+        trait = cache.param_trait[ref] = _value_abi_trait_for_typed_die(
+            die, CU, cache=cache
+        )
+        return trait
+
+
+def _param_trait_for_ref(
+    ref: int | None, CU: Any, cache: _DwarfTypeCache | None
+) -> str | None:
+    """:func:`_param_trait` for a parameter known only by its ``DW_AT_type``
+    target offset *ref* (``None``: the parameter names no type)."""
+    if ref is None:
+        return None
+    if cache is not None and ref in cache.param_trait:
+        return cache.param_trait[ref]
+    try:
+        t0 = CU.get_DIE_from_refaddr(ref)
+    except Exception:  # noqa: BLE001 -- same tolerance as resolve_type_die
+        t0 = None
+    trait = _value_abi_trait_for_type(t0, CU, cache)
+    if cache is not None:
+        cache.param_trait[ref] = trait
+    return trait
+
+
+
+def _return_facts(
+    die: Any, CU: Any, cache: _DwarfTypeCache | None
+) -> tuple[str | None, int | None, bool]:
+    """``(trait, aggregate size, unaligned)`` for *die*'s return type, the
+    size and unaligned flag only computed for a by-value aggregate; memoized
+    per referenced type."""
+    ref = _type_ref_offset(die, CU) if cache is not None else None
+    if ref is not None:
+        assert cache is not None
+        hit = cache.ret_facts.get(ref)
+        if hit is not None:
+            return hit
+    trait = _value_abi_trait_for_typed_die(die, CU, cache=cache)
+    facts: tuple[str | None, int | None, bool] = (trait, None, False)
+    if trait is not None:
+        facts = (
+            trait,
+            _aggregate_byte_size_for_typed_die(die, CU, cache=cache),
+            _aggregate_has_unaligned_member(die, CU, cache=cache),
+        )
+    if ref is not None:
+        assert cache is not None
+        cache.ret_facts[ref] = facts
+    return facts
+
+
 def _extract_calling_convention(
     die: Any, meta: AdvancedDwarfMetadata, CU: Any, cache: _DwarfTypeCache | None = None
 ) -> None:
@@ -584,17 +677,22 @@ def _extract_calling_convention(
 
     # Fallback value-ABI trait (for platforms where DW_AT_calling_convention is omitted)
     parts: list[str] = []
-    ret_trait = _value_abi_trait_for_typed_die(die, CU, cache=cache)
+    ret_trait, ret_size, ret_unaligned = _return_facts(die, CU, cache)
     if ret_trait is not None:
         parts.append(f"ret:{ret_trait}")
-        ret_size = _aggregate_byte_size_for_typed_die(die, CU, cache=cache)
         if ret_size is not None:
             meta.return_value_sizes[key] = ret_size
-        if _aggregate_has_unaligned_member(die, CU, cache=cache):
+        if ret_unaligned:
             meta.return_memory_classified.add(key)
     pidx = 0
-    for ch in _dsi.iter_formal_parameters(die):  # body undecoded
-        ptrait = _value_abi_trait_for_typed_die(ch, CU, cache=cache)
+    # Parameters are read for their DW_AT_type alone, straight from the raw
+    # bytes where the unit allows it -- no DIE is built for them.
+    for ref, ch in _dsi.iter_formal_parameter_type_refs(die):
+        ptrait = (
+            _param_trait(ch, CU, cache)
+            if ch is not None
+            else _param_trait_for_ref(ref, CU, cache)
+        )
         if ptrait is not None:
             parts.append(f"p{pidx}:{ptrait}")
         pidx += 1

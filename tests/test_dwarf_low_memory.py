@@ -148,10 +148,14 @@ class _FakeDwarfInfo:
 
 
 class TestDwarfLowMemoryMode:
-    def test_small_binary_below_default_threshold(self, monkeypatch) -> None:
+    def test_any_debug_info_is_low_memory_by_default(self, monkeypatch) -> None:
         monkeypatch.delenv("ABICHECK_DWARF_LOW_MEMORY_MB", raising=False)
-        small = _FakeDwarfInfo(1024 * 1024)  # 1 MiB
-        assert dwarf_low_memory_mode(small) is False
+        assert dwarf_low_memory_mode(_FakeDwarfInfo(1024)) is True  # 1 KiB
+        assert dwarf_low_memory_mode(_FakeDwarfInfo(1024 * 1024)) is True
+
+    def test_empty_debug_info_is_never_low_memory(self, monkeypatch) -> None:
+        monkeypatch.delenv("ABICHECK_DWARF_LOW_MEMORY_MB", raising=False)
+        assert dwarf_low_memory_mode(_FakeDwarfInfo(0)) is False
 
     def test_large_binary_above_default_threshold(self, monkeypatch) -> None:
         monkeypatch.delenv("ABICHECK_DWARF_LOW_MEMORY_MB", raising=False)
@@ -197,8 +201,7 @@ class TestDwarfLowMemoryMode:
 
     def test_invalid_env_override_falls_back_to_default(self, monkeypatch) -> None:
         monkeypatch.setenv("ABICHECK_DWARF_LOW_MEMORY_MB", "not-a-number")
-        small = _FakeDwarfInfo(1024 * 1024)  # 1 MiB, below default threshold
-        assert dwarf_low_memory_mode(small) is False
+        assert dwarf_low_memory_mode(_FakeDwarfInfo(0)) is False
         big_mb = DEFAULT_DWARF_LOW_MEMORY_THRESHOLD_MB + 10
         big = _FakeDwarfInfo(int(big_mb * 1024 * 1024))
         assert dwarf_low_memory_mode(big) is True
@@ -224,7 +227,7 @@ class TestLowMemoryModeIsOutputNeutral:
 
         so = _compile_so(tmp_path, "liblowmem1", _SRC)
 
-        monkeypatch.delenv("ABICHECK_DWARF_LOW_MEMORY_MB", raising=False)
+        monkeypatch.setenv("ABICHECK_DWARF_LOW_MEMORY_MB", "-1")  # cache retained
         meta_normal, adv_normal = parse_dwarf(so)
 
         monkeypatch.setenv("ABICHECK_DWARF_LOW_MEMORY_MB", "0")
@@ -253,7 +256,7 @@ class TestLowMemoryModeIsOutputNeutral:
         so = _compile_so(tmp_path, "liblowmem2", _SRC)
         elf_meta = parse_elf_metadata(so)
 
-        monkeypatch.delenv("ABICHECK_DWARF_LOW_MEMORY_MB", raising=False)
+        monkeypatch.setenv("ABICHECK_DWARF_LOW_MEMORY_MB", "-1")  # cache retained
         sess_a = open_dwarf_session(so)
         assert sess_a is not None
         try:
@@ -300,7 +303,7 @@ class TestLowMemoryModeIsOutputNeutral:
         so = _compile_so(tmp_path, "liblowmem3", _SRC)
         elf_meta = parse_elf_metadata(so)
 
-        monkeypatch.delenv("ABICHECK_DWARF_LOW_MEMORY_MB", raising=False)
+        monkeypatch.setenv("ABICHECK_DWARF_LOW_MEMORY_MB", "-1")  # cache retained
         meta_a, adv_a = parse_dwarf(so)
         snap_a = build_snapshot_from_dwarf(so, elf_meta, meta_a, adv_a, version="t")
 
