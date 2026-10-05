@@ -201,6 +201,10 @@ BUDGETED_FUNCTIONS: tuple[str, ...] = (
     "build_contract_stage",
     "build_public_use_index",
     "build_surface_graph",
+    # The construction behind build_surface_graph's scope-shared memo: the
+    # wrapper may repeat (a cache hit under ``--pattern-verdicts`` plus
+    # ``--surface-metrics``), the build may not.
+    "_build_surface_graph",
     "compute_export_surface",
     "demangle_batch",
     "detect_antipatterns",

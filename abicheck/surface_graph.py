@@ -30,7 +30,8 @@ metric is reproducible and cache-keyable.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -44,6 +45,8 @@ from .model import (
     resolved_fact_value,
 )
 from .model.dwarf_facts import debug_info_present
+from .model.execution_cache import request_key
+from .model.execution_cache_scoped import ScopedCache
 from .model.surface_facts import in_public_surface, is_binary_exported
 from .model.type_identifiers import type_identifiers as _type_identifiers
 
@@ -240,6 +243,34 @@ def _build_by_header(snap: AbiSnapshot) -> dict[str, set[str]]:
     return by_header
 
 
+_GRAPHS = ScopedCache("abicheck.surface_graph.shared")
+
+
+@contextmanager
+def shared_surface_graphs() -> Iterator[None]:
+    """Share one :class:`SurfaceGraph` per (snapshot, public-id set) between
+    the consumers that run inside this scope.
+
+    ``compare()`` runs two opt-in stages that each build a graph per side
+    -- ``--surface-metrics`` (:func:`compute_surface_metrics`) and
+    ``--pattern-verdicts`` (``pattern_verdicts.apply_pattern_verdicts``) --
+    over the same snapshots with the same resolved public-id sets, so with
+    both enabled every graph was built twice. A per-comparison memo was the
+    wrong owner: it would keep the graphs resident for the whole comparison
+    even when only one stage asks (the comparison memo's own docstring
+    records the ~5 MiB that cost on the memory gate). ``compare()`` instead
+    opens this scope around exactly those two stages, so the graphs live
+    from the first stage's build to the end of the second and no longer.
+
+    Outside a scope :func:`build_surface_graph` builds afresh, exactly as
+    before. A graph is a frozen, read-only view, and the snapshots are
+    read-only while ``compare()`` runs, so sharing one cannot change what
+    either stage observes.
+    """
+    with _GRAPHS.scope():
+        yield
+
+
 def build_surface_graph(
     snap: AbiSnapshot, *, public_entity_ids: frozenset[EntityId] | None = None
 ) -> SurfaceGraph:
@@ -251,7 +282,20 @@ def build_surface_graph(
     two-snapshot comparison, instead of re-deriving ``Visibility.PUBLIC``
     from *snap* alone. ``None`` (every call site outside ``compare()``'s
     own pipeline) preserves the exact pre-Phase-3 behavior.
+
+    Inside :func:`shared_surface_graphs` the graph for the same *snap*
+    object and the same public-id set (compared by value) is built once.
     """
+    return _GRAPHS.get_or_compute(
+        request_key(snapshot=id(snap), public_entity_ids=public_entity_ids),
+        lambda: _build_surface_graph(snap, public_entity_ids=public_entity_ids),
+        pin=snap,
+    )
+
+
+def _build_surface_graph(
+    snap: AbiSnapshot, *, public_entity_ids: frozenset[EntityId] | None
+) -> SurfaceGraph:
     functions_by_name = _build_functions_by_name(snap)
     types_by_name = _build_types_by_name(snap)
     type_refs = _build_type_refs(snap)
