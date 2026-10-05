@@ -361,7 +361,29 @@ def run_clang_to_ast_file(
     fd, name = tempfile.mkstemp(prefix="abicheck-l2-ast-", suffix=".json")
     path = Path(name)
     on_created(path)
-    with os.fdopen(fd, "wb") as out:
+    with (
+        os.fdopen(fd, "wb") as out,
+        tempfile.TemporaryDirectory(prefix="abicheck-sycl-") as scratch,
+    ):
+        from .dumper_clang import sycl_host_replay_jobs
+
+        replay = sycl_host_replay_jobs(cmd, Path(scratch))
+        if replay is not None:
+            # A host-only DPC++ request whose driver still runs a device
+            # pass: run that pass for its integration header only, then the
+            # host pass alone -- one AST document on stdout.
+            device_job, cmd = replay
+            device = deadline.run_bounded(
+                device_job,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=timeout,
+            )
+            if device.returncode != 0:
+                return subprocess.CompletedProcess(
+                    cmd, device.returncode, "", device.stderr
+                )
         return deadline.run_bounded(
             cmd,
             stdout=out,

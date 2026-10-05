@@ -334,15 +334,16 @@ def _resolve_dpcpp_acquisition(
 
 
 def _driver_host_only_is_single_pass(clang_bin: str, tokens: tuple[str, ...]) -> bool:
-    """Whether ``-fsycl -fsycl-host-only`` really yields one host ``-cc1``.
+    """Whether a ``-fsycl -fsycl-host-only`` request yields one host AST
+    document -- natively, or through :func:`sycl_host_replay_jobs`.
 
-    The direct host request assumes it does, and older oneAPI drivers agree.
+    The direct host request assumes one ``-cc1``; older oneAPI drivers agree.
     ``icpx`` 2026.1.1 (conda-forge ``dpcpp_linux-64``) does not: it still runs
-    the ``spir64`` device ``-cc1`` beside the host one, so the AST stream
-    holds two documents and the single-document parse fails every SYCL dump.
-    The driver says what it will run under ``-###``; when that is more than a
-    host pass, the multi-document selector (``-v`` correlation, host chosen
-    by ``-fsycl-is-host``) is used instead. Memoized per executable revision.
+    the ``spir64`` device ``-cc1`` (which writes the integration header the
+    host pass includes) beside the host one, so its AST stream holds two
+    documents. That shape is still served directly, by replaying the two
+    jobs with the device AST dump removed; anything else the driver plans
+    falls back to the multi-document selector. Memoized per executable.
     """
     from .dumper_toolchain import _tool_identity
 
@@ -354,17 +355,86 @@ def _host_only_single_pass(
     clang_bin: str, identity: str, tokens: tuple[str, ...]
 ) -> bool:
     del identity  # keys the memo on the executable's content
+    cmd = [clang_bin, *tokens, "-fsycl", "-fsycl-host-only"]
+    cmd += ["-fsyntax-only", "-x", "c++", "-"]
+    jobs = _driver_jobs(cmd)
+    if jobs is None:
+        return True  # cannot ask: keep the documented host-only behaviour
+    return _split_device_host(jobs) is not None or not any(
+        "-fsycl-is-device" in job for job in jobs
+    )
+
+
+def _driver_jobs(cmd: list[str]) -> list[list[str]] | None:
+    """The jobs *cmd* would run (``-###``), each as an argv; ``None`` when
+    the driver cannot be asked."""
+    import shlex
     import subprocess
 
     from .deadline import run_bounded
 
-    cmd = [clang_bin, *tokens, "-fsycl", "-fsycl-host-only", "-###"]
-    cmd += ["-fsyntax-only", "-x", "c++", "-"]
     try:
-        proc = run_bounded(cmd, timeout=30, capture_output=True, text=True, input="")
+        proc = run_bounded(
+            [*cmd, "-###"], timeout=30, capture_output=True, text=True, input=""
+        )
     except (OSError, subprocess.TimeoutExpired):
-        return True  # cannot ask: keep the documented host-only behaviour
-    return "-fsycl-is-device" not in proc.stderr
+        return None
+    return [
+        shlex.split(line) for line in proc.stderr.splitlines() if line.startswith(' "')
+    ]
+
+
+def _split_device_host(
+    jobs: list[list[str]],
+) -> tuple[list[str], list[str]] | None:
+    """``(device, host)`` when *jobs* are exactly one SYCL device and one
+    host ``-cc1``, else ``None``."""
+    device = [j for j in jobs if "-fsycl-is-device" in j]
+    host = [j for j in jobs if "-fsycl-is-host" in j]
+    if len(jobs) != 2 or len(device) != 1 or len(host) != 1:
+        return None
+    return device[0], host[0]
+
+
+def sycl_host_replay_jobs(
+    cmd: list[str], scratch: Path
+) -> tuple[list[str], list[str]] | None:
+    """The two jobs a host-only DPC++ request runs, ready to execute: the
+    device ``-cc1`` without its AST dump (it is still needed for the
+    integration header/footer the host pass includes) and the host ``-cc1``
+    unchanged, both writing those files under *scratch* instead of a driver
+    temp directory ``-###`` only names. ``None`` when the request is not a
+    two-pass device+host plan (the ordinary single-pass case included).
+
+    Serves the direct host request on a driver whose ``-fsycl-host-only``
+    still runs a device pass: one host document instead of a ~2x stream the
+    multi-document selector would scan, and the streaming AST path applies.
+    """
+    if "-fsycl-host-only" not in cmd:
+        return None
+    jobs = _driver_jobs(cmd)
+    split = _split_device_host(jobs) if jobs is not None else None
+    if split is None:
+        return None
+    device, host = split
+    temp_dirs = {
+        str(Path(tok.split("=", 1)[1]).parent)
+        for tok in device
+        if tok.startswith(("-fsycl-int-header=", "-fsycl-int-footer="))
+    }
+
+    def relocate(job: list[str]) -> list[str]:
+        out = []
+        for tok in job:
+            for d in temp_dirs:
+                tok = tok.replace(d, str(scratch))
+            out.append(tok)
+        return out
+
+    return (
+        [t for t in relocate(device) if t != "-ast-dump=json"],
+        relocate(host),
+    )
 
 
 def _needs_sycl_host_only(cc_bin: str, tokens: list[str]) -> bool:

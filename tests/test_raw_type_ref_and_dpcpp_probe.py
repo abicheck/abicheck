@@ -160,16 +160,27 @@ def test_type_ref_offset_reads_forms_without_decoding_the_target():
 # ── icpx host-pass probe ───────────────────────────────────────────────────
 
 
-#: What the probe appends after the caller's own flags.
+#: What the probe asks the driver, after the caller's own flags.
 _PROBE_TAIL = [
     "-fsycl",
     "-fsycl-host-only",
-    "-###",
     "-fsyntax-only",
     "-x",
     "c++",
     "-",
+    "-###",
 ]
+
+_DEVICE_JOB = (
+    ' "/opt/clang" "-cc1" "-triple" "spir64" "-fsycl-is-device"'
+    ' "-fsycl-int-header=/tmp/icpx-1/agg-header.h"'
+    ' "-fsycl-int-footer=/tmp/icpx-1/agg-footer.h" "-ast-dump=json" "agg.hpp"'
+)
+_HOST_JOB = (
+    ' "/opt/clang" "-cc1" "-triple" "x86_64" "-fsycl-is-host"'
+    ' "-include-internal-header" "/tmp/icpx-1/agg-header.h"'
+    ' "-include-internal-footer" "/tmp/icpx-1/agg-footer.h" "-ast-dump=json" "agg.hpp"'
+)
 
 
 @pytest.fixture
@@ -196,18 +207,23 @@ def probe(monkeypatch):
     return install, seen
 
 
-def test_probe_reports_a_device_pass(probe):
+def test_probe_accepts_a_replayable_device_plus_host_plan(probe):
     install, seen = probe
-    install(
-        stderr='"-cc1" "-triple" "spir64" "-fsycl-is-device"\n"-cc1" "-fsycl-is-host"'
-    )
-    assert dumper_clang._driver_host_only_is_single_pass("icpx", ("-O0",)) is False
+    install(stderr="clang version x\n" + _DEVICE_JOB + "\n" + _HOST_JOB + "\n")
+    assert dumper_clang._driver_host_only_is_single_pass("icpx", ("-O0",)) is True
     assert seen == [["icpx", "-O0", *_PROBE_TAIL]]
+
+
+def test_probe_rejects_a_device_plan_it_cannot_replay(probe):
+    install, _ = probe
+    second_device = _DEVICE_JOB.replace("spir64", "spir64_gen")
+    install(stderr="\n".join([_DEVICE_JOB, second_device, _HOST_JOB]))
+    assert dumper_clang._driver_host_only_is_single_pass("icpx", ()) is False
 
 
 def test_probe_reports_a_single_host_pass(probe):
     install, seen = probe
-    install(stderr='"-cc1" "-triple" "x86_64" "-fsycl-is-host"')
+    install(stderr=_HOST_JOB)
     assert dumper_clang._driver_host_only_is_single_pass("icpx", ()) is True
     assert seen == [["icpx", *_PROBE_TAIL]]
 
@@ -220,6 +236,82 @@ def test_probe_that_cannot_run_keeps_the_host_only_request(probe, exc):
     install(exc=exc)
     assert dumper_clang._driver_host_only_is_single_pass("icpx", ()) is True
     assert seen == [["icpx", *_PROBE_TAIL]]
+
+
+def test_replay_strips_the_device_dump_and_relocates_the_integration_files(
+    probe, tmp_path
+):
+    install, _ = probe
+    install(stderr=_DEVICE_JOB + "\n" + _HOST_JOB)
+    cmd = ["icpx", "-fsycl", "-fsycl-host-only", "-Xclang", "-ast-dump=json", "a"]
+    device, host = dumper_clang.sycl_host_replay_jobs(cmd, tmp_path)
+    assert "-ast-dump=json" not in device
+    assert f"-fsycl-int-header={tmp_path}/agg-header.h" in device
+    assert "-ast-dump=json" in host
+    assert f"{tmp_path}/agg-footer.h" in host
+    assert not any("/tmp/icpx-1" in t for t in [*device, *host])
+
+
+def test_no_replay_for_a_request_that_is_not_host_only(tmp_path):
+    assert dumper_clang.sycl_host_replay_jobs(["clang", "-x", "c++"], tmp_path) is None
+
+
+def test_ast_run_executes_device_then_host_and_returns_the_host_result(
+    probe, monkeypatch
+):
+    import abicheck.deadline as deadline
+    from abicheck.dumper_clang_errors import run_clang_to_ast_file
+
+    install, _ = probe
+    install(stderr=_DEVICE_JOB + "\n" + _HOST_JOB)
+    planner = deadline.run_bounded
+    ran: list[str] = []
+
+    def run(cmd, **kw):
+        if cmd[-1] == "-###":
+            return planner(cmd, **kw)
+        ran.append("device" if "-fsycl-is-device" in cmd else "host")
+        return subprocess.CompletedProcess(cmd, 0, None, "")
+
+    monkeypatch.setattr(deadline, "run_bounded", run)
+    created: list[object] = []
+    result = run_clang_to_ast_file(
+        ["icpx", "-fsycl", "-fsycl-host-only", "a.hpp"],
+        timeout=5,
+        on_created=created.append,
+    )
+    assert ran == ["device", "host"]
+    assert "-fsycl-is-host" in result.args
+    for p in created:
+        p.unlink()
+
+
+def test_a_failed_device_pass_is_reported_without_running_the_host(probe, monkeypatch):
+    import abicheck.deadline as deadline
+    from abicheck.dumper_clang_errors import run_clang_to_ast_file
+
+    install, _ = probe
+    install(stderr=_DEVICE_JOB + "\n" + _HOST_JOB)
+    planner = deadline.run_bounded
+    ran: list[str] = []
+
+    def run(cmd, **kw):
+        if cmd[-1] == "-###":
+            return planner(cmd, **kw)
+        ran.append("device" if "-fsycl-is-device" in cmd else "host")
+        return subprocess.CompletedProcess(cmd, 1, None, "device error")
+
+    monkeypatch.setattr(deadline, "run_bounded", run)
+    created: list[object] = []
+    result = run_clang_to_ast_file(
+        ["icpx", "-fsycl", "-fsycl-host-only", "a.hpp"],
+        timeout=5,
+        on_created=created.append,
+    )
+    assert ran == ["device"]
+    assert (result.returncode, result.stderr) == (1, "device error")
+    for p in created:
+        p.unlink()
 
 
 def test_a_two_pass_driver_routes_the_host_request_to_the_selector(monkeypatch):
