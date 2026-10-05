@@ -402,6 +402,22 @@ def _plausible_rename(old_name: str, new_name: str) -> bool:
     return sig_match and _shared_affix_len(base_a, base_b) >= _RENAME_MIN_SHARED_AFFIX
 
 
+def _plausible_rename_keys(name: str) -> tuple[tuple[object, ...], ...]:
+    """Blocking keys for :func:`_plausible_rename`: it accepts a pair only
+    when their key sets intersect (``match_renamed_functions``' contract).
+
+    Every accepting path of ``_plausible_rename`` either has equal names, or
+    passes the ctor/dtor gate -- which means both names have the *same*
+    structor variant (``None`` included) -- and then needs either an equal
+    leaf (the ``_Z``/operator/destructor exact-leaf paths and the same-leaf
+    path) or an equal parameter signature *and* return type (the affix
+    path's ``sig_match``). So: the name itself, ``(variant, leaf)`` and
+    ``(variant, params, return)``.
+    """
+    variant, leaf, params, ret = _rename_name_parse(name)
+    return (("name", name), ("leaf", variant, leaf), ("sig", variant, params, ret))
+
+
 def _fingerprints_from_elf(snap: AbiSnapshot) -> dict[str, FunctionFingerprint]:
     """Build FunctionFingerprint dict from ELF metadata.
 
@@ -503,7 +519,10 @@ def _diff_fingerprint_renames(old: AbiSnapshot, new: AbiSnapshot) -> list[Change
     # P11: one batched c++filt warm so the rename gate's demangle() hits cache, not per-symbol forks.
     demangle_batch([n for n in (*old_fps, *new_fps) if n.startswith("_Z")])
     candidates = match_renamed_functions(
-        old_fps, new_fps, name_filter=_plausible_rename
+        old_fps,
+        new_fps,
+        name_filter=_plausible_rename,
+        name_keys=_plausible_rename_keys,
     )
     for c in candidates:
         conf_pct = int(c.confidence * 100)

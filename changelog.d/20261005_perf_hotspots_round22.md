@@ -23,3 +23,9 @@
   entry instead of rewriting the whole mapping whenever any occurrence holds
   a closure marker: the rewrite step on a 60-module clang dump fell from
   2.0 M walked nodes / 1.6 s to ~21 k nodes / 0.15 s, byte-identical output.
+- Fingerprint rename matching indexes each size bucket by name-blocking keys
+  (structor variant + leaf, structor variant + signature) so the rename
+  predicate only runs on partners it could accept, instead of on every
+  same-size (removed, added) pair: the L0 export probe's compare fell from
+  9.0 s to 3.8 s on a 60-module C++ library (4.4 M predicate calls), same
+  findings.
