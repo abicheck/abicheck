@@ -308,3 +308,152 @@ def test_an_ambiguous_embedding_parent_attributes_only_its_own_users() -> None:
     assert finding.symbol == "lib::m0::Ctx"
     users = {a for a in finding.affected_symbols or [] if a.startswith("hold_")}
     assert users == {"hold_m0"}
+
+
+# -- primitive edge cases ----------------------------------------------------
+
+from abicheck.checker_types import Change  # noqa: E402
+from abicheck.compare.type_symbol_disambiguation import (  # noqa: E402
+    AmbiguousTypeNames,
+    disambiguate_type_symbols,
+)
+from abicheck.model.change_catalog.kinds import ChangeKind  # noqa: E402
+from abicheck.model.identity import (  # noqa: E402
+    Anonymous,
+    InlineNamespace,
+    Record,
+    entity_id_for_function,
+)
+from abicheck.model.type_label import (  # noqa: E402
+    qualified_spelling,
+    qualified_type_label,
+    relabelled,
+)
+
+
+def _eid(*scope, leaf="Ctx"):
+    return entity_id_for_type(tuple(scope), leaf)
+
+
+@pytest.mark.parametrize(
+    ("eid", "expected"),
+    [
+        (None, None),
+        (_eid(), "Ctx"),
+        (_eid(Namespace("a"), Record("R"), InlineNamespace("v1")), "a::R::v1::Ctx"),
+        (_eid(Namespace("a"), Anonymous("namespace", 0)), None),
+        (_eid(Namespace("")), None),
+    ],
+)
+def test_qualified_spelling(eid, expected) -> None:
+    assert qualified_spelling(eid) == expected
+
+
+@pytest.mark.parametrize(
+    ("symbol", "expected"),
+    [
+        ("Ctx", "a::Ctx"),
+        ("Ctx::field", "a::Ctx::field"),
+        ("CtxX", None),
+        ("Other::Ctx", None),
+        ("", None),
+    ],
+)
+def test_relabelled(symbol, expected) -> None:
+    assert relabelled(symbol, "Ctx", "a::Ctx") == expected
+
+
+def _type_change(symbol="Ctx", eid=None, **kw) -> Change:
+    return Change(
+        kind=kw.pop("kind", ChangeKind.TYPE_SIZE_CHANGED),
+        symbol=symbol,
+        description=kw.pop("description", f"Size changed: {symbol}"),
+        entity_id=eid,
+        **kw,
+    )
+
+
+def test_qualified_type_label_answers_only_for_a_relabellable_type_finding() -> None:
+    a_ctx = _eid(Namespace("a"))
+    assert qualified_type_label(_type_change(eid=a_ctx)) == "a::Ctx"
+    assert qualified_type_label(_type_change("Ctx::f", eid=a_ctx)) == "a::Ctx::f"
+    assert qualified_type_label(_type_change(eid=None)) is None
+    func = entity_id_for_function((Namespace("a"),), "Ctx", mangled_name="_ZN1a3CtxEv")
+    assert qualified_type_label(_type_change(eid=func)) is None
+    assert (
+        qualified_type_label(_type_change(eid=_eid(Anonymous("namespace", 0)))) is None
+    )
+    # global-scope type: the label would not change
+    assert qualified_type_label(_type_change(eid=_eid())) is None
+    # a symbol that is not the entity's leaf
+    assert qualified_type_label(_type_change("Other", eid=a_ctx)) is None
+
+
+def test_disambiguate_touches_only_findings_it_can_name() -> None:
+    a_ctx, b_ctx = _eid(Namespace("a")), _eid(Namespace("b"))
+    names = AmbiguousTypeNames(
+        spellings={"Ctx": frozenset({"a::Ctx", "b::Ctx"})},
+        by_entity={a_ctx: "a::Ctx", b_ctx: "b::Ctx"},
+    )
+    relabel = _type_change(
+        eid=a_ctx, description="Size changed: Ctx (Ctx2 and x::Ctx untouched)"
+    )
+    preset = _type_change(eid=b_ctx, qualified_name="kept")
+    unknown = _type_change(eid=_eid(Namespace("c")))
+    no_eid = _type_change()
+    other_symbol = _type_change("Something", eid=a_ctx)
+    func = _type_change(
+        eid=entity_id_for_function((Namespace("a"),), "Ctx", mangled_name="_ZN1a3CtxEv")
+    )
+    changes = [relabel, preset, unknown, no_eid, other_symbol, func]
+
+    assert disambiguate_type_symbols(changes, names) == 2
+    assert relabel.symbol == "a::Ctx"
+    assert relabel.qualified_name == "a::Ctx"
+    assert relabel.description == "Size changed: a::Ctx (Ctx2 and x::Ctx untouched)"
+    assert preset.symbol == "b::Ctx" and preset.qualified_name == "kept"
+    assert [c.symbol for c in (unknown, no_eid, other_symbol, func)] == [
+        "Ctx",
+        "Ctx",
+        "Something",
+        "Ctx",
+    ]
+    assert (
+        disambiguate_type_symbols([_type_change(eid=a_ctx)], AmbiguousTypeNames({}, {}))
+        == 0
+    )
+
+
+def test_ambiguity_ignores_baked_names_and_unspellable_declarations() -> None:
+    baked = RecordType(name="ns::Ctx", kind="struct", size_bits=32)
+    anonymous = RecordType(
+        name="Ctx",
+        kind="struct",
+        size_bits=32,
+        entity_id=_eid(Anonymous("namespace", 0)),
+    )
+    by_name_only = RecordType(
+        name="Ctx", kind="struct", size_bits=32, qualified_name="q::Ctx"
+    )
+    real = _record("m0", "Ctx", 32)
+    snap = AbiSnapshot(
+        library="l", version="1", types=[baked, anonymous, by_name_only, real]
+    )
+    names = ambiguous_type_spellings(snap, None)
+    assert names.spellings == {"Ctx": frozenset({"q::Ctx", "lib::m0::Ctx"})}
+    # only the declaration with a spellable identity is relabellable by entity
+    assert set(names.by_entity.values()) == {"lib::m0::Ctx"}
+
+
+def test_a_symbol_pattern_rule_matches_the_qualified_label() -> None:
+    from abicheck.suppression import Suppression, SuppressionList
+
+    old = _snapshot("1", ["m0", "m1"], set(), unique=False)
+    new = _snapshot("2", ["m0", "m1"], {"m0", "m1"}, unique=False)
+    rules = SuppressionList(
+        suppressions=[Suppression(symbol_pattern=r"lib::m1::.*", reason="test")]
+    )
+    result = compare(old, new, suppression=rules)
+    assert [
+        c.symbol for c in result.changes if c.kind.value == "type_size_changed"
+    ] == ["lib::m0::Ctx"]
