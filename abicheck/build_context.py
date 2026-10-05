@@ -1349,7 +1349,7 @@ def _pick_best_standard(contexts: list[BuildContext]) -> tuple[str | None, list[
     if not standards:
         return None, standards
     cpp_stds = [s for s in standards if "c++" in s or "gnu++" in s]
-    c_stds = [s for s in standards if s not in cpp_stds]
+    c_stds = [s for s in standards if not ("c++" in s or "gnu++" in s)]
     if cpp_stds:
         return max(cpp_stds, key=_std_sort_key), standards
     return max(c_stds, key=_std_sort_key), standards

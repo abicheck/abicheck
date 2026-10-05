@@ -373,25 +373,52 @@ def finditer_allow_nested(pattern: re.Pattern[str], text: str) -> list[re.Match[
     before ``pos``.)
 
     Iterative: no recursion however deeply spellings nest.
+
+    **Why the next probe jumps to a token break.** A shorter candidate is
+    valid only if it ends at the end of the text or before a character that
+    cannot continue a token -- so every candidate ending *between* such
+    breaks is invalid, whichever spellings are registered. The probe after a
+    match therefore lowers ``endpos`` straight to the last break before that
+    match's end, rather than to one character before it and re-checking each
+    rejected candidate. The earlier step-by-one form did one extra match
+    *and* one rejected boundary check for every registered spelling that is
+    a prefix of a longer token (``Data1`` inside ``Data17``), so its cost
+    grew with how much the vocabulary's names overlap -- the shape of the
+    unexplained ``_is_boundary_char`` growth on the macOS call-count gate.
+    With the jump, each offset costs one match per *accepted* occurrence
+    plus one, and every candidate the pattern returns is accepted: one ending
+    exactly at the lowered ``endpos`` sits before a break by construction.
+    The result is identical (same occurrences, same order).
     """
     end = len(text)
     matches: list[re.Match[str]] = []
+    prev_break: list[int] | None = None
     for i in range(end):
-        limit = end
-        while limit > i:
-            m = pattern.match(text, i, limit)
-            if m is None:
-                break
+        m = pattern.match(text, i)
+        while m is not None:
+            matches.append(m)
             stop = m.end()
-            # The pattern's own lookarounds read the real text everywhere
-            # except at a *lowered* ``endpos``: only a candidate ending
-            # exactly there needs its right boundary re-checked.
-            if limit == end or stop < limit or not _is_boundary_char(text[stop]):
-                matches.append(m)
             if stop <= i:
                 break
-            limit = stop - 1
+            if prev_break is None:
+                prev_break = _previous_breaks(text)
+            limit = prev_break[stop - 1]
+            if limit <= i:
+                break
+            m = pattern.match(text, i, limit)
     return matches
+
+
+def _previous_breaks(text: str) -> list[int]:
+    """``out[k]``: the largest ``j <= k`` whose character cannot continue a
+    token (a valid match may end at ``j``), or ``-1``."""
+    out: list[int] = []
+    last = -1
+    for j, ch in enumerate(text):
+        if not _is_boundary_char(ch):
+            last = j
+        out.append(last)
+    return out
 
 
 def _is_boundary_char(ch: str) -> bool:

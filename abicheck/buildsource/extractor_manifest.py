@@ -652,7 +652,7 @@ class ExternalCliExtractor:
             if not path.is_file():
                 errors.append(f"declared output missing: {path}")
                 continue
-            try:
+            try:  # perf-ok: that each declared output parses is the check itself
                 json.loads(path.read_text(encoding="utf-8"))
             except (OSError, ValueError) as exc:
                 errors.append(f"output is not valid JSON ({path}): {exc}")

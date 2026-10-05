@@ -489,17 +489,14 @@ def resolved_override_keys(
     ``ctx.vtable_slot_root`` and ``ctx.vtable_slot_extra_roots`` are
     consulted per id.
     """
-    resolved: list[int | str] = []
+    resolved: dict[int | str, None] = {}  # insertion-ordered set
     for oid in overrides_id.split():
-        candidates: list[int | str] = []
         primary = ctx.vtable_slot_root.get(oid)
         if primary is not None:
-            candidates.append(primary)
-        candidates.extend(ctx.vtable_slot_extra_roots.get(oid, ()))
-        for candidate in candidates:
-            if candidate not in resolved:
-                resolved.append(candidate)
-    return resolved
+            resolved.setdefault(primary)
+        for candidate in ctx.vtable_slot_extra_roots.get(oid, ()):
+            resolved.setdefault(candidate)
+    return list(resolved)
 
 
 def vtable_slot_key(

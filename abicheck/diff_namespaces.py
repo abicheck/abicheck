@@ -132,7 +132,8 @@ def _split_experimental(
             _segments(q), experimental_namespaces=experimental_namespaces
         )
     ]
-    stable = [q for q in qnames if q not in exp]
+    exp_set = set(exp)
+    stable = [q for q in qnames if q not in exp_set]
     return exp, stable
 
 

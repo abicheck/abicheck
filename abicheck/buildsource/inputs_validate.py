@@ -150,6 +150,7 @@ def _fact_set_recipe_issues(tus: list[SourceAbiTu]) -> list[str]:
     """
     fact_sets: list[dict[str, Any]] = []
     for tu in tus:
+        # perf-ok: fact_set dicts are unhashable; a pack carries a handful of distinct sets
         if tu.fact_set and tu.fact_set not in fact_sets:
             fact_sets.append(dict(tu.fact_set))
     if len(fact_sets) < 2:

@@ -247,3 +247,38 @@ def test_a_candidate_ending_at_a_lowered_endpos_is_rechecked(
     the token, so it must be rejected."""
     got = _spans(finditer_allow_nested(compile_spelling_pattern(vocab), text))
     assert got == expected == _oracle(vocab, text)
+
+
+class _CountingPattern:
+    """``pattern.match`` with a call counter -- the only method the scan uses."""
+
+    def __init__(self, pattern):
+        self._pattern = pattern
+        self.calls = 0
+
+    def match(self, *args):
+        self.calls += 1
+        return self._pattern.match(*args)
+
+
+_overlapping_vocab = st.integers(min_value=1, max_value=400).map(
+    lambda n: frozenset(f"Data{i}" for i in range(1, n + 1))
+)
+
+
+@given(
+    vocab=_overlapping_vocab,
+    picks=st.lists(st.integers(min_value=1, max_value=400), min_size=1, max_size=6),
+    sep=st.sampled_from([" ", "*", ", ", "<", "&"]),
+)
+@settings(deadline=None, max_examples=60)
+def test_cost_does_not_grow_with_prefix_overlap(vocab, picks, sep) -> None:
+    """At most one ``match`` per offset plus one per accepted occurrence,
+    however many registered spellings are prefixes of a longer token
+    (``Data1``, ``Data17``, ``Data177``): rejected prefix candidates are never
+    probed. The occurrences are still exactly the oracle's."""
+    text = sep.join(f"Data{p}" for p in picks)
+    counting = _CountingPattern(compile_spelling_pattern(vocab))
+    found = finditer_allow_nested(counting, text)
+    assert [(m.start(), m.end(), m.group(0)) for m in found] == _oracle(vocab, text)
+    assert counting.calls <= len(text) + len(found)

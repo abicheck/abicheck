@@ -68,11 +68,10 @@ def contract_findings(value: object) -> list[str]:
             "contract.overlays must be a mapping of overlay kind -> document "
             f"path, got {type(overlays).__name__}: {overlays!r}",
         ]
+    known = ", ".join(sorted(OVERLAY_KINDS))
     for kind, path in overlays.items():
         if kind not in OVERLAY_KINDS:
-            findings.append(
-                f"unknown contract overlay {kind!r} (known: {', '.join(sorted(OVERLAY_KINDS))})"
-            )
+            findings.append(f"unknown contract overlay {kind!r} (known: {known})")
         elif not isinstance(path, str) or not path.strip():
             findings.append(f"contract.overlays.{kind} must be a non-empty path string")
     return findings

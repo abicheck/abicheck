@@ -921,6 +921,7 @@ def _render_json(
     )
 
     _require = bool(assurance_decision and assurance_decision.require_complete)
+    # perf-ok: to_json is the canonical per-library serializer; one round trip per library
     libraries = {
         diff.library: json.loads(to_json(diff, require_complete_analysis=_require))
         for diff in result.per_library

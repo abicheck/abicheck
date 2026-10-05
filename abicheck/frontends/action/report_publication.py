@@ -585,6 +585,7 @@ def read_comments(raw: str) -> list[ExistingComment]:
         if not line:
             continue
         try:
+            # perf-ok: JSON-lines input: one parse per record is the work
             record = json.loads(line)
         except json.JSONDecodeError:
             continue

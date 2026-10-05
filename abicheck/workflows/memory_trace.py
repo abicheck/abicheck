@@ -306,20 +306,20 @@ def _proc_tree_pids() -> list[int]:
     benchmark harness samples repeatedly rather than once.
     """
     parents: dict[int, list[int]] | None = None
-    seen: list[int] = []
+    seen: dict[int, None] = {}  # insertion-ordered set
     pending = [os.getpid()]
     while pending:
         pid = pending.pop()
         if pid in seen:
             continue
-        seen.append(pid)
+        seen[pid] = None
         kids = _child_pids(pid) if parents is None else None
         if kids is None:
             if parents is None:
                 parents = _parent_map()
             kids = parents.get(pid, [])
         pending.extend(kids)
-    return seen
+    return list(seen)
 
 
 def _smaps_rollup(pid: int) -> tuple[int | None, int | None]:
@@ -592,6 +592,7 @@ def read_samples(path: str | os.PathLike[str]) -> list[Mapping[str, Any]]:
             if not line:
                 continue
             try:
+                # perf-ok: JSON-lines trace: one parse per sample is the work
                 out.append(json.loads(line))
             except ValueError:
                 continue

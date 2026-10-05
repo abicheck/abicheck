@@ -319,17 +319,19 @@ def validate_precaptured_baseline_set(
             "asset that resolves nothing."
         )
     libraries: list[str] = []
+    seen_libraries: set[str | None] = set()
     for artifact in manifest.artifacts:
         library = artifact.library or "<unnamed>"
         if not artifact.library:
             errors.append("an artifacts[] row declares no library name.")
         elif manifest.artifact_count_for(artifact.library) > 1:
-            if artifact.library not in libraries:
+            if artifact.library not in seen_libraries:
                 errors.append(
                     f"library {artifact.library!r} is declared by more than "
                     "one artifacts[] row."
                 )
         libraries.append(artifact.library)
+        seen_libraries.add(artifact.library)
 
         issue = _path_issue("snapshot", library, artifact.snapshot, root)
         if issue:

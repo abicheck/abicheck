@@ -219,11 +219,7 @@ def dedup_segments(
     seg_lists: list[tuple[str, ...]],
 ) -> list[tuple[str, ...]]:
     """Non-empty segment tuples, de-duplicated, in first-seen order."""
-    out: list[tuple[str, ...]] = []
-    for seg in seg_lists:
-        if seg and seg not in out:
-            out.append(seg)
-    return out
+    return list(dict.fromkeys(seg for seg in seg_lists if seg))
 
 
 def absolutize_include_roots(roots: list[Path]) -> list[Path]:
@@ -290,14 +286,12 @@ def public_root_alias_segments(root: Path | str) -> list[tuple[str, ...]]:
     meet without resolving anything unconditionally.
     """
     raw = str(root)
-    spellings = [raw]
-    absolutized = str(absolutize_header_root(raw))
-    if absolutized not in spellings:
-        spellings.append(absolutized)
+    spellings: dict[str, None] = dict.fromkeys(
+        (raw, str(absolutize_header_root(raw)))
+    )  # insertion-ordered set
     for spelling in tuple(spellings):
         for alias in path_alias_spellings(spelling):
-            if alias not in spellings:
-                spellings.append(alias)
+            spellings.setdefault(alias)
     return dedup_segments([segments(s) for s in spellings])
 
 

@@ -1085,6 +1085,27 @@ class ClearOrphanedVtableGapCorrelation:
         return changes
 
 
+class DisambiguateTypeSymbols:
+    """Relabel type findings whose bare name several declarations share.
+
+    Runs after suppression, so a rule written against the bare label keeps
+    matching exactly what it matched before, and before the root-type
+    grouping and impact attribution that key on the label. See
+    :mod:`abicheck.compare.type_symbol_disambiguation`.
+    """
+
+    name = "disambiguate_type_symbols"
+
+    def run(self, changes: list[Change], ctx: PipelineContext) -> list[Change]:
+        from .compare.type_symbol_disambiguation import (
+            ambiguous_type_spellings,
+            disambiguate_type_symbols,
+        )
+
+        disambiguate_type_symbols(changes, ambiguous_type_spellings(ctx.old, ctx.new))
+        return changes
+
+
 class FilterRedundant:
     """Split changes into kept + redundant (derived from root type changes)."""
 
@@ -1108,7 +1129,7 @@ class EnrichAffectedSymbols:
     def run(self, changes: list[Change], ctx: PipelineContext) -> list[Change]:
         from .diff_filtering import _enrich_affected_symbols
 
-        _enrich_affected_symbols(changes, ctx.baseline_or_empty)
+        _enrich_affected_symbols(changes, ctx.baseline_or_empty, ctx.new)
         return changes
 
 
@@ -1843,6 +1864,7 @@ DEFAULT_PIPELINE = PostProcessingPipeline(
         # suppression targeting only the covering TYPE_VTABLE_CHANGED would
         # otherwise leave the earlier annotation dangling.
         ClearOrphanedVtableGapCorrelation(),
+        DisambiguateTypeSymbols(),
         FilterRedundant(),
         EnrichAffectedSymbols(),
         AttributeStdlibEmbedding(),
