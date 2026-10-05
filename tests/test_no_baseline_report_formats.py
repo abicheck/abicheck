@@ -658,17 +658,15 @@ def test_a_coverage_gated_audit_publishes_the_ledger_that_gated_it() -> None:
     )
 
 
-def test_a_run_without_a_contract_omits_the_ledger_entirely() -> None:
-    """The complement: no selected domain is not an empty one.
-
-    `[]` means "the domain closed with nothing missing". A run that selected
-    no domain has nothing to be short of, and must not claim otherwise.
-    """
+def test_a_run_without_an_explicit_contract_still_carries_the_ledger() -> None:
+    """Contract evaluation is on by default (ADR-049 Phase 7): an audit with
+    no `--contract` selects an evidence-adaptive domain, so the ledger is a
+    real list rather than an omitted key."""
     result = _result("case143_audit_accidental_export")
     doc = compute_no_baseline_document(result)
-    assert doc.contract_selected is False
+    assert doc.contract_selected is True
     payload, _ = render_no_baseline(result, "json")
-    assert "contract_coverage_failures" not in json.loads(payload)
+    assert isinstance(json.loads(payload)["contract_coverage_failures"], list)
 
 
 def test_the_two_axis_tables_cover_the_same_axes() -> None:

@@ -552,9 +552,7 @@ class TestReportValidatesAgainstSchema:
                 RecordType(name="InternalCache", kind="struct", size_bits=128),
             ],
         )
-        result = compare(
-            old, new, scope_to_public_surface=True, contract_evaluation=True
-        )
+        result = compare(old, new, contract_mode="public", contract_evaluation=True)
         assert result.out_of_surface_count >= 1
         demoted = [
             c for c in result.out_of_surface_changes if c.symbol == "InternalCache"
@@ -767,6 +765,7 @@ class TestReportValidatesAgainstSchema:
             new,
             public_surface_allowlist={"pp_foo"},
             contract_evaluation=True,
+            contract_mode="public",
         )
         committed = [c for c in result.changes if c.symbol == "pp_foo"]
         assert committed, "fixture must produce a kept, committed pp_foo finding"

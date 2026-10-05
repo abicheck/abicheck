@@ -584,49 +584,17 @@ class TestUnresolvedBehaviourAcceptsIncompleteCoverage:
         assert report["contract_coverage_failures"], report
         assert report["contract_coverage_exit_contribution"] == 0
 
-    @pytest.mark.parametrize("command", ["compare"])
-    def test_it_is_rejected_without_contract_evaluation(
-        self, tmp_path: Path, command: str
-    ) -> None:
-        """A pack whose only assignment has no consumer in *this invocation*
-        is the decorative pack `pack_application` exists to prevent, one
-        level in: the field is applied by this build, but nothing computes
-        coverage unless a domain was selected, so the value would be recorded
-        as active configuration and read back as nothing (Codex review).
-
-        Rejected rather than silently accepted.
-        """
+    def test_it_is_accepted_without_an_explicit_contract(self, tmp_path: Path) -> None:
+        """Contract evaluation is on by default (ADR-049 Phase 7), so a pack
+        stating `contract.unresolved` always has a consumer -- it is no
+        longer the decorative pack this used to reject."""
         old_p, new_p = _write(tmp_path, *_compatible_pair())
         pack = str(self._warn_pack(tmp_path))
-        argv = ["compare", str(old_p), str(new_p), "--pack", pack]
-        result = CliRunner().invoke(main, argv)
-        assert result.exit_code == 64, result.output
-        assert "contract.unresolved" in result.output
-        assert "--contract" in result.output
-
-    def test_the_dry_run_rejects_it_too(self, tmp_path: Path) -> None:
-        """`--dry-run` must not approve a plan the identical real run rejects.
-
-        Answerable that early because no layer other than a pack can state
-        `contract.unresolved` -- its resolver candidate list is empty -- so
-        there is no shadowing case in which the raw manifest would
-        over-reject (Codex review, the same dry-run divergence raised twice
-        before for manifest validity and inert values).
-        """
-        old_p, new_p = _write(tmp_path, *_compatible_pair())
-        result = CliRunner().invoke(
-            main,
-            [
-                "compare",
-                str(old_p),
-                str(new_p),
-                "--dry-run",
-                "--pack",
-                str(self._warn_pack(tmp_path)),
-            ],
-        )
-        assert result.exit_code == 64, result.output
-        assert "contract.unresolved" in result.output
+        for extra in ([], ["--dry-run"]):
+            result = CliRunner().invoke(
+                main, ["compare", str(old_p), str(new_p), "--pack", pack, *extra]
+            )
+            assert result.exit_code != 64, result.output
 
     def test_warn_still_says_coverage_was_incomplete(self, tmp_path: Path) -> None:
         """Accepting is not hiding — and for markdown/review/sarif/junit the

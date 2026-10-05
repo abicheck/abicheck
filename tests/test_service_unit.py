@@ -3353,9 +3353,11 @@ class TestContractEvaluationThreading:
         save_snapshot(_snap("2.0", "long"), new_p)
         return old_p, new_p
 
-    def test_compare_snapshots_default_leaves_contract_relevance_unset(self, tmp_path):
+    def test_compare_snapshots_opt_out_leaves_contract_relevance_unset(self, tmp_path):
         old_p, new_p = self._changed_pair(tmp_path)
-        result = compare_snapshots(load_snapshot(old_p), load_snapshot(new_p))
+        result = compare_snapshots(
+            load_snapshot(old_p), load_snapshot(new_p), contract_evaluation=False
+        )
         assert result.changes
         assert all(c.contract_relevance is None for c in result.changes)
 

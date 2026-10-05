@@ -24,7 +24,6 @@ produced it, and credit only sources that really contributed.
 
 from __future__ import annotations
 
-import dataclasses
 import hashlib
 
 from _compat_eval_fixtures import (
@@ -436,18 +435,13 @@ class TestReceiptMetadataIsCompared:
         # The genuine cross-front-end case the normalization exists for.
         policy = tmp_path / "policy.yml"
         policy.write_text("base_policy: sdk_vendor\n")
-        # A typed request has no "unset" for scope_public, so the equivalent
-        # CLI-front-end input has to state the legacy alias too. The CLI has
-        # had no spelling for it since one-comparison-product Phase 9b, so it
-        # is stated on the resolver input directly.
+        # A typed request's default `scope_public=True` states nothing (ADR-049
+        # Phase 7), matching a CLI run that names no scope at all.
         cli = _resolve(
             front_end=FrontEnd.CLI,
-            explicit=dataclasses.replace(
-                compare_cli_inputs(
-                    {"policy_file_path": policy, "policy": "strict_abi"},
-                    explicit_parameters={"policy"},
-                ),
-                scope_public_headers=True,
+            explicit=compare_cli_inputs(
+                {"policy_file_path": policy, "policy": "strict_abi"},
+                explicit_parameters={"policy"},
             ),
         )
         api = compatibility_config_from_compare_request(

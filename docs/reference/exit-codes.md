@@ -18,7 +18,7 @@ generated: false
 
 ## Contract relevance decides what the gate sees
 
-Under `--contract`, each finding's contract relevance is classified
+On every `compare`, each finding's contract relevance is classified
 **before** compatibility policy runs, and policy then scores only the
 `EVALUATED` findings — those whose relevance is `IN_CONTRACT` or
 `NOT_APPLICABLE`. A `PROVEN_OUT_OF_CONTRACT`, `UNKNOWN_UNPROVEN` or
@@ -39,13 +39,18 @@ independently-orthogonal axis below (missing evidence contributing its own
 exit `1`), not from relevance itself; that's what stops missing evidence
 from being the cheapest way to pass.
 
-**Without `--contract` no finding carries a relevance**, so every
-finding is scored exactly as before and every exit code below is unchanged.
+**Without `--contract` the domain is evidence-adaptive**:
+`public` when every compared side carries public-header evidence, otherwise
+`exports` when every side carries an observed export table, otherwise `all`.
+Under that unstated `public` default, a finding the headers make no
+commitment about (an undeclared export's removal, say) is judged by the
+export domain instead, so it still gates. `--contract all` scores every
+finding exactly as before the flip.
 
 ## Contract-coverage contribution
 
 `compare` carries an **orthogonal contract-coverage axis**
-under `--contract` (the retired `scan --against` carried the same one). Complete coverage of the mode-selected evidence
+(the retired `scan --against` carried the same one). Complete coverage of the mode-selected evidence
 domain contributes `0`; missing, partial, stale, failed, contradictory, or
 identity-incomplete **required domain evidence** is recorded as a
 `CoverageFailure` in the run-level `contract_coverage_failures` ledger and
@@ -127,8 +132,8 @@ release genuinely ships fewer components on purpose, that is what
 `--support-promise declared` reports as a finding
 (`support_promise_component_retired`) rather than as a bare exit code.
 
-**Without `--contract` there is no selected domain, so the
-contribution is always `0`** and every other exit code below is unchanged.
+**Without `--contract` the evidence-adaptive default selects a domain the
+run's own evidence closes**, so the contribution is normally `0`.
 
 Ordinary change suppressions cannot clear a provider/domain coverage failure —
 a coverage failure is not a finding, so the suppression machinery structurally

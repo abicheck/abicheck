@@ -83,7 +83,7 @@ class ReleaseMemberCompareRequest:
     scope_to_public_surface: bool = True
     pattern_verdicts: bool = True
     include_dependencies: bool = False
-    contract_evaluation: bool = False
+    contract_evaluation: bool = True
     contract_mode: str | None = None
     pack_policy_overrides: dict[Any, Any] | None = None
     pack_internal_namespaces: tuple[str, ...] | None = None

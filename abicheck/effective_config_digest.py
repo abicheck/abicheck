@@ -402,6 +402,24 @@ def _severity_field(severity: SeverityConfig | None, category: str) -> str:
     return getattr(level, "value", str(level)) if level is not None else ""
 
 
+def _configured_contract_mode(resolved_config: Any, contract: Any) -> str:
+    """``contract.mode`` as *configured*: ``auto`` when no layer stated it.
+
+    The digest fingerprints the resolved configuration, so two runs under the
+    same configuration must agree. Since ADR-049 Phase 7 an unstated mode is
+    decided per comparison from that comparison's evidence (``public``,
+    ``exports`` or ``all``); recording the decision here would make the
+    digest vary with the binaries, not the configuration, and a release
+    whose members decided differently would have no single value to state.
+    The decided mode stays in the persisted contract context.
+    """
+    from .policy.contract_default_mode import mode_is_built_in_default
+
+    if mode_is_built_in_default(resolved_config):
+        return "auto"
+    return _enum_value(getattr(contract, "mode", None))
+
+
 def effective_config_fields_from_full_config(
     resolved_config: Any,
     *,
@@ -526,7 +544,7 @@ def effective_config_fields_from_full_config(
         "surface.scope_to_public_surface_requested": str(
             bool(getattr(result, "scope_to_public_surface_requested", True))
         ),
-        "contract.mode": _enum_value(getattr(contract, "mode", None)),
+        "contract.mode": _configured_contract_mode(resolved_config, contract),
         "contract.unresolved": str(getattr(contract, "unresolved", "") or ""),
         "contract.overlays": _namespaces_str(getattr(contract, "overlays", ())),
         "gate.exit_code_scheme": str(gate.exit_code_scheme or ""),
@@ -746,3 +764,21 @@ def effective_config_fields_from_raw(
         scope=scoped_gate_selection_from_result(result),
     )
     return effective_config_fields(result, gate=gate)
+
+
+def release_summary_fields(
+    resolved_config: Any, result: Any, *, policy_file: Any, gate: EffectiveGate
+) -> dict[str, str]:
+    """The field dict for a release-level summary document.
+
+    Contract evaluation runs on every release member (ADR-049 Phase 7), so
+    the summary states the same contract tier a member's report does, from
+    the one release-wide *resolved_config*; *result* is the summary's own
+    stand-in for the checker-level facts. The baseline tier is the fallback
+    when no resolved configuration exists.
+    """
+    if resolved_config is None:
+        return effective_config_fields(result, gate=gate)
+    return effective_config_fields_from_full_config(
+        resolved_config, result=result, policy_file=policy_file, gate=gate
+    )

@@ -2087,13 +2087,13 @@ def run_compare(
     from .workflows.gate import effective_gate_for_resolved_compare_config
 
     report_severity = effective_gate_for_resolved_compare_config(resolved_cfg).severity
-    # One Semantic Pipeline plan, 4B: use evaluation_config's resolved
-    # contract.mode -- but only under contract_evaluation itself, since a
-    # --pack-only run resolves a non-None config with a concrete mode too.
-    resolved_contract_mode = (
-        evaluation_config.contract.mode
-        if evaluation_config is not None and contract_evaluation
-        else contract_mode
+    # One Semantic Pipeline plan, 4B: the evaluation config's resolved
+    # contract.mode, unless only the built-in default chose it (ADR-049
+    # Phase 7: that default depends on evidence the comparison decides).
+    from .workflows.compare_policy import stated_contract_mode
+
+    resolved_contract_mode = stated_contract_mode(
+        evaluation_config, contract_mode, contract_evaluation=contract_evaluation
     )
     from .service import compare_snapshots
 

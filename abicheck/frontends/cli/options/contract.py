@@ -114,9 +114,11 @@ def contract_options(f: F) -> F:
         "contract_mode",
         type=click.Choice(["public", "exports", "all", "auto"]),
         default=None,
-        help="Which evidence domain each finding is judged against"
-        ", and the flag that turns the contract "
-        "evaluator on -- omit it and nothing about the run changes. "
+        help="Which evidence domain each finding is judged against. "
+        "Omitted (or 'auto'): .abicheck.yml's scope.public decides, else "
+        "the built-in default -- 'public' when every compared side carries "
+        "public-header evidence, 'exports' otherwise, so a bare "
+        "binary-to-binary comparison still gates on removed exports. "
         "'public': the header-derived declared surface. 'exports': the "
         "binary's own export table (ELF .dynsym / PE export directory / "
         "Mach-O export trie) plus the raw type closure reachable from it "
@@ -124,8 +126,7 @@ def contract_options(f: F) -> F:
         "this contract, an unexported public-header declaration is not. "
         "'all': every entity, no root or closure evidence required "
         "(replaces the removed --no-scope-public-headers). "
-        "'auto': evaluate, but let .abicheck.yml's scope.public choose "
-        "the domain (public when unset). "
+        "'auto': the same as omitting the flag. "
         "Each finding is stamped with a contract_relevance (IN_CONTRACT/"
         "PROVEN_OUT_OF_CONTRACT/UNKNOWN_UNPROVEN/UNKNOWN_UNRESOLVED/"
         "NOT_APPLICABLE), a contract_reason_code and -- when resolved -- "
@@ -175,32 +176,22 @@ def contract_options(f: F) -> F:
 
 
 def resolve_contract_evaluation(contract_mode: str | None) -> bool:
-    """``--contract VALUE`` is what enables the ADR-049 evaluator on the CLI.
+    """Whether the ADR-049 contract evaluator runs: always, since Phase 7.
 
-    There used to be a separate ``--contract-evaluation`` switch, and
-    ``--contract`` without it was a hard `UsageError` (exit 64). That was
-    first loosened into an implication (naming a domain is enough to ask for
-    a decision against it), which left two ways to request one thing; the
-    standalone switch is now gone, so the flag *is* the request.
+    It used to run only when ``--contract`` was given, so "omit it and
+    nothing about the run changes" held. The default flip made contract
+    relevance part of every comparison: omitting ``--contract`` now means
+    "no domain stated", which the built-in default answers from the run's
+    own evidence (``public`` with public-header evidence on every side,
+    ``exports`` otherwise -- ``compatibility_evaluation_wiring.
+    evidence_adaptive_contract_mode``). ``--contract all`` is the exact
+    rollback to judging every entity.
 
-    Deliberately CLI-only. The typed Python API (`api_types.CompareRequest.
-    validation_errors`) and the Tier-2 entry (`service._validate_contract_mode`)
-    keep requiring an explicit `contract_evaluation=True` alongside a
-    *contract_mode* -- both are documented public-API contracts (CLAUDE.md:
-    changing them is a breaking Python API change, coordinated separately from
-    a CLI ergonomics fix) and this resolver runs strictly before either is ever
-    constructed, so the value it derives is indistinguishable from an
-    explicitly-passed one to them.
-
-    The former domain-less evaluation (``--contract-evaluation`` with no
-    ``--contract``, whose domain fell through to the D7 chain below an
-    explicit CLI value) is spelled ``--contract auto``:
-    :func:`resolve_contract_domain` maps it back to ``None``, which is exactly
-    the state that lets `.abicheck.yml`'s ``scope.public`` (the legacy
-    alias's only CLI-reachable spelling since one-comparison-product Phase
-    9b), and then the built-in default, decide the domain.
+    *contract_mode* is kept as a parameter so both callers stay a single
+    call, and so a future opt-out spelling has one place to land.
     """
-    return contract_mode is not None
+    del contract_mode
+    return True
 
 
 def resolve_contract_domain(

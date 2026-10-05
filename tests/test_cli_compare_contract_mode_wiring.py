@@ -200,5 +200,8 @@ class TestResolvedContractModeWiring:
         )
 
         assert result.exit_code == 0, result.output
-        assert captured["contract_evaluation"] is False
+        # Evaluation is on by default (ADR-049 Phase 7); a mode only the
+        # built-in default chose is still not forwarded -- the comparison
+        # decides it from its evidence.
+        assert captured["contract_evaluation"] is True
         assert captured["contract_mode"] is None

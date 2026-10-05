@@ -909,7 +909,9 @@ class TestOverlayAttribution:
         from abicheck.checker import compare
 
         old, new = self._pair()
-        result = compare(old, new, contract_evaluation=True, **compare_kwargs)
+        result = compare(
+            old, new, contract_evaluation=True, contract_mode="public", **compare_kwargs
+        )
         return {
             c.symbol: tuple(c.contract_evidence_refs or ())
             for c in result.changes + result.out_of_surface_changes

@@ -316,7 +316,9 @@ class TestReportIntegration:
         report = self._report(tmp_path, "public")
         assert "contract_coverage_failures" in report
 
-    def test_no_ledger_at_all_without_contract_evaluation(self, tmp_path: Path) -> None:
+    def test_ledger_present_by_default(self, tmp_path: Path) -> None:
+        """Contract evaluation is on by default (ADR-049 Phase 7), so the
+        ledger is always emitted -- a list, never an omitted key."""
         old, new = _pair_without_export_table()
         old_p = tmp_path / "old.json"
         new_p = tmp_path / "new.json"
@@ -329,7 +331,7 @@ class TestReportIntegration:
         )
         assert res.exit_code == 4, res.output
         report = json.loads(out.read_text(encoding="utf-8"))
-        assert "contract_coverage_failures" not in report
+        assert isinstance(report["contract_coverage_failures"], list)
 
     def test_the_ledger_does_not_rewrite_a_finding_or_its_verdict(
         self, tmp_path: Path

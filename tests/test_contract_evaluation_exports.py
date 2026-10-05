@@ -790,7 +790,9 @@ class TestCompareRequestContractModeValidation:
         )
 
     def test_a_mode_without_evaluation_is_a_validation_error(self) -> None:
-        errors = self._request(contract_mode="exports").validation_errors()
+        errors = self._request(
+            contract_mode="exports", contract_evaluation=False
+        ).validation_errors()
         assert any("contract_mode requires contract_evaluation" in e for e in errors)
 
     def test_an_unsupported_mode_is_a_validation_error(self) -> None:
@@ -929,7 +931,9 @@ class TestCompareSnapshotsContractModeValidation:
 
         old, new = self._snaps()
         with pytest.raises(ValidationError, match="requires contract_evaluation"):
-            compare_snapshots(old, new, contract_mode="exports")
+            compare_snapshots(
+                old, new, contract_mode="exports", contract_evaluation=False
+            )
 
     def test_an_unsupported_mode_raises(self) -> None:
         from abicheck.errors import ValidationError

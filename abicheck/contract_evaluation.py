@@ -289,8 +289,34 @@ _NOT_APPLICABLE_KINDS: frozenset[ChangeKind] = frozenset(
     }
 )
 
+
+def _analysis_entity_kind_slugs() -> frozenset[str]:
+    """Every kind the change catalog files under the ``analysis`` entity.
+
+    Such a finding is about the analysis itself -- asymmetric evidence
+    layers, a required evidence layer missing, a suppression that would hide
+    a break -- never about a contract entity, so relevance is not its
+    question. Derived from the catalog's mandatory per-kind ``entity`` field
+    rather than listed by hand: the curated set above is deliberately
+    incomplete, and once contract evaluation became the default (ADR-049
+    Phase 7) every non-entity kind it missed read ``UNKNOWN_UNRESOLVED`` and
+    raised the coverage exit of an otherwise clean run
+    (``layer_coverage_asymmetric`` on a manifest-vs-``-H`` comparison).
+    """
+    from .change_registry import REGISTRY
+    from .model.change_catalog.dimensions import ChangeEntity
+
+    return frozenset(
+        k.value
+        for k in ChangeKind
+        if getattr(REGISTRY.get(k.value), "entity", None) is ChangeEntity.ANALYSIS
+    )
+
+
 _NOT_APPLICABLE_KIND_SLUGS: frozenset[str] = (
-    frozenset(k.value for k in _NOT_APPLICABLE_KINDS) | SURFACE_METRIC_KIND_SLUGS
+    frozenset(k.value for k in _NOT_APPLICABLE_KINDS)
+    | SURFACE_METRIC_KIND_SLUGS
+    | _analysis_entity_kind_slugs()
 )
 
 
@@ -1132,6 +1158,13 @@ def _exports_mode_decision(
 
     if _symbol_matches(change, auth.export_symbols, allow_tail_fallback=False):
         return _export_root_decision()
+    # An observed export no declaration accounted for is still an exported
+    # root -- this domain is defined by the export table, not by which
+    # entries the headers happen to explain. Without this, removing an
+    # undeclared export (an accidental one a consumer reaches via `dlsym`)
+    # was `UNKNOWN_UNRESOLVED` in the very domain whose evidence observed it.
+    if (change.symbol or "") in auth.unmatched_exports:
+        return _export_root_decision()
 
     # Closure membership answers a *type-level* question only. A symbol-level
     # finding (`FUNC_RETURN_CHANGED` on an unexported helper, say) often
@@ -1219,6 +1252,17 @@ def _mode_dispatch_decision(
     when none applies and the PUBLIC path continues.
     """
     if change.kind.value in _NOT_APPLICABLE_KIND_SLUGS:
+        return _not_applicable_decision()
+    # A cross-source hygiene finding (`exported_not_public`,
+    # `private_header_leak`, ...; `workflows.cross_source_evolution`) states
+    # how one build's evidence sources agree, not that a contract entity
+    # changed between OLD and NEW -- its evolution stamp is what says so.
+    # Relevance is therefore not the question for it: `NOT_APPLICABLE` keeps
+    # it scored by policy exactly as it was before contract evaluation became
+    # the default (ADR-049 Phase 7), advisory where ADR-035 D1 says it is,
+    # instead of letting an `UNKNOWN_UNRESOLVED` decision about a hygiene
+    # observation raise the contract-coverage exit of every audit.
+    if getattr(change, "cross_source_evolution", None) is not None:
         return _not_applicable_decision()
 
     # `--post-manifest`'s own exclusion reason is an explicit-evidence

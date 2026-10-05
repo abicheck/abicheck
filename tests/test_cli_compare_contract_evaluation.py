@@ -113,7 +113,8 @@ class TestFlagForwarded:
         assert result.exit_code == 0
         assert captured["contract_evaluation"] is True
 
-    def test_contract_evaluation_defaults_to_false(self, tmp_path, monkeypatch):
+    def test_contract_evaluation_is_on_by_default(self, tmp_path, monkeypatch):
+        """ADR-049 Phase 7: no --contract leaves the domain unstated."""
         old_p, new_p = _write_pair(tmp_path)
 
         captured: dict[str, object] = {}
@@ -133,7 +134,7 @@ class TestFlagForwarded:
 
         result = CliRunner().invoke(main, ["compare", str(old_p), str(new_p)])
         assert result.exit_code == 0
-        assert captured["contract_evaluation"] is False
+        assert captured["contract_evaluation"] is True
 
 
 class TestEndToEndJsonReport:
@@ -284,7 +285,9 @@ class TestEndToEndJsonReport:
             assert entry["finding_id"] in receipt
             assert receipt[entry["finding_id"]] == entry["contract_relevance"]
 
-    def test_omitted_by_default(self, tmp_path):
+    def test_stamped_by_default_with_the_evidence_adaptive_domain(self, tmp_path):
+        """No --contract: hand-built snapshots carry no contract evidence, so
+        the evidence-adaptive default is `all` and the break still gates."""
         old_p, new_p = _write_pair(tmp_path)
         result = CliRunner().invoke(
             main,
@@ -292,12 +295,15 @@ class TestEndToEndJsonReport:
         )
         assert result.exit_code == 4, result.output
         payload = json.loads(result.output)
-        assert "contract_context" not in payload
+        evaluation = payload["contract_context"]["evaluation_context"]
+        assert evaluation["resolved_config"]["contract"]["mode"] == "all"
+        provenance = evaluation["field_provenance"]["contract.mode"]
+        assert provenance["layer"] == "built_in_default"
+        assert provenance["source_kind"] == "evidence_adaptive"
+        assert provenance["reference"] == "no_contract_evidence"
+        assert payload["changes"]
         for c in payload["changes"]:
-            assert "contract_relevance" not in c
-            assert "contract_reason_code" not in c
-            assert "contract_assurance" not in c
-            assert "contract_evidence_refs" not in c
+            assert "contract_relevance" in c
 
     def test_persisted_gate_is_the_one_the_run_was_scored_with(self, tmp_path):
         """``checker.compare`` never sees the gate -- the front end resolves it
@@ -506,7 +512,7 @@ class TestShowFilteredAuditLedger:
         assert "InternalCache" in result.output
         assert "[contract: PROVEN_OUT_OF_CONTRACT" in result.output
 
-    def test_omits_contract_tag_by_default(self, tmp_path):
+    def test_renders_contract_tag_by_default(self, tmp_path):
         from abicheck.model import RecordType
 
         old = AbiSnapshot(
@@ -543,7 +549,7 @@ class TestShowFilteredAuditLedger:
             ],
         )
         assert "InternalCache" in result.output
-        assert "[contract:" not in result.output
+        assert "[contract:" in result.output
 
 
 class TestReleaseFanOutContractParity:
@@ -592,9 +598,8 @@ class TestReleaseFanOutContractParity:
         stamped = [c for c in lib_report["changes"] if "contract_relevance" in c]
         assert stamped, "per-library report must carry ADR-049 contract fields"
 
-    def test_contract_evaluation_off_by_default(self, tmp_path):
-        # No --contract: every pre-existing directory/package
-        # report is unaffected -- library JSON carries no contract fields.
+    def test_contract_evaluation_on_by_default(self, tmp_path):
+        # The fan-out evaluates every library like a single pair (Phase 7).
         old_dir = tmp_path / "old"
         new_dir = tmp_path / "new"
         old_dir.mkdir()
@@ -618,9 +623,9 @@ class TestReleaseFanOutContractParity:
         )
         assert result.exit_code == 4, result.output
         summary = json.loads(result.stdout)
-        assert "contract_coverage_exit_contribution" not in summary
+        assert summary["contract_coverage_exit_contribution"] == 0
         lib_report = json.loads((out_dir / "libfoo.json").read_text())
-        assert not any("contract_relevance" in c for c in lib_report["changes"])
+        assert all("contract_relevance" in c for c in lib_report["changes"])
 
     def test_contract_alone_implies_contract_evaluation_on_directory_inputs(
         self, tmp_path
@@ -819,9 +824,7 @@ class TestUsedByScopingStampsExplicitEvidence:
                 "explicit_consumer_or_required_symbol_evidence"
             )
 
-    def test_used_by_missing_symbol_omits_contract_fields_by_default(
-        self, tmp_path, monkeypatch
-    ):
+    def test_used_by_missing_symbol_is_stamped_by_default(self, tmp_path, monkeypatch):
         from abicheck.appcompat import AppCompatResult
 
         app, old, new = self._setup(tmp_path, monkeypatch)
@@ -836,27 +839,17 @@ class TestUsedByScopingStampsExplicitEvidence:
         )
         self._patch_scope(monkeypatch, scoped)
 
-        result = CliRunner().invoke(
-            main,
-            [
-                "compare",
-                str(old),
-                str(new),
-                "--used-by",
-                str(app),
-                "-o",
-                "json=-",
-            ],
-        )
+        argv = ["compare", str(old), str(new), "--used-by", str(app)]
+        result = CliRunner().invoke(main, [*argv, "-o", "json=-"])
         assert result.exit_code == 0, result.output
-        payload = json.loads(result.stdout)
-        missing_entries = [
-            c for c in payload["changes"] if c["kind"] == "used_by_missing_symbol"
-        ]
-        assert missing_entries
-        for c in missing_entries:
-            assert "contract_relevance" not in c
-            assert "contract_reason_code" not in c
+        changes = json.loads(result.stdout)["changes"]
+        missing = [c for c in changes if c["kind"] == "used_by_missing_symbol"]
+        assert missing
+        # A consumer's requirement is explicit contract evidence (section 4.3).
+        reason = "explicit_consumer_or_required_symbol_evidence"
+        assert {
+            (c["contract_relevance"], c["contract_reason_code"]) for c in missing
+        } == {("IN_CONTRACT", reason)}
 
     def test_used_by_scoped_only_change_gets_contract_evaluation(
         self, tmp_path, monkeypatch
@@ -1023,7 +1016,7 @@ class TestUsedByScopingStampsExplicitEvidence:
         assert "Additional scoped-gate findings" in result.output
         assert "[contract: IN_CONTRACT" in result.output
 
-    def test_used_by_missing_symbol_omits_contract_tag_in_markdown_by_default(
+    def test_used_by_missing_symbol_tags_the_contract_in_markdown_by_default(
         self, tmp_path, monkeypatch
     ):
         from abicheck.appcompat import AppCompatResult
@@ -1046,7 +1039,7 @@ class TestUsedByScopingStampsExplicitEvidence:
         )
         assert result.exit_code == 0, result.output
         assert "Additional scoped-gate findings" in result.output
-        assert "[contract:" not in result.output
+        assert "[contract: IN_CONTRACT" in result.output
 
     def test_used_by_missing_symbol_gets_contract_evaluation_in_root_cause_mode(
         self, tmp_path, monkeypatch
@@ -1090,7 +1083,7 @@ class TestUsedByScopingStampsExplicitEvidence:
         assert "[contract: IN_CONTRACT" in result.output
         assert "assurance:" in result.output
 
-    def test_used_by_missing_symbol_omits_contract_tag_in_root_cause_mode_by_default(
+    def test_used_by_missing_symbol_tags_the_contract_in_root_cause_mode_by_default(
         self, tmp_path, monkeypatch
     ):
         from abicheck.appcompat import AppCompatResult
@@ -1121,7 +1114,7 @@ class TestUsedByScopingStampsExplicitEvidence:
         )
         assert result.exit_code == 0, result.output
         assert "Root Causes" in result.output
-        assert "[contract:" not in result.output
+        assert "[contract: IN_CONTRACT" in result.output
 
 
 class TestContractFlagResolvers:
@@ -1136,12 +1129,11 @@ class TestContractFlagResolvers:
     a by-product of two callers (AGENTS.md's primitive-level guidance).
     """
 
-    def test_any_domain_asks_for_evaluation_and_absence_does_not(self) -> None:
+    def test_evaluation_is_requested_with_or_without_a_domain(self) -> None:
         from abicheck.cli_options import resolve_contract_evaluation
 
-        for mode in ("public", "exports", "all", "auto"):
+        for mode in ("public", "exports", "all", "auto", None):
             assert resolve_contract_evaluation(mode) is True, mode
-        assert resolve_contract_evaluation(None) is False
 
     def test_only_auto_is_mapped_away(self) -> None:
         from abicheck.cli_options import resolve_contract_domain

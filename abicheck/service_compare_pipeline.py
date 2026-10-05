@@ -829,7 +829,7 @@ def run_compare(
     public_surface_allowlist: set[str] | None = None,
     debuginfod_url: str | None = None,
     diagnostic_comparison: bool = False,
-    contract_evaluation: bool = False,
+    contract_evaluation: bool = True,
     # `False` matches the CLI flag and every other typed surface; this one
     # matters most, since it is written into *both* `InputSpec`s below and so
     # overrides their own field default (Codex review, PR #1258).

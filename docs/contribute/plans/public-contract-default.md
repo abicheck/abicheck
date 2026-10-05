@@ -4078,6 +4078,15 @@ to `public`, `strict_abi`, and `not_checkable`. Keep `contract=all` and
 `--no-scope-public-headers` as the exact forensic rollback. Do not make a
 `public_contract` enum/preset permanent.
 
+**Updated (2026-10-05): the default flip landed.** Contract evaluation is on
+for every front end (CLI, `CompareRequest`, Action). With no domain stated,
+the domain is evidence-adaptive rather than a fixed `public`: `public` when
+the `public_header` provider closes on every compared side, else `exports`
+when the `export_table` provider does, else `all` — so a bare binary
+comparison is never failed for header evidence it was never given
+(`policy/contract_default_mode.py`, recorded with `source_kind:
+evidence_adaptive` provenance). `--contract all` is the exact rollback.
+
 **Updated (2026-08-03): the coverage-exit slice landed; the default flip and
 the authoritative evaluator have not.** The maintainer directed a full flip
 and stated explicitly that **no migration window was run** — recorded here
