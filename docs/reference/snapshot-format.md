@@ -608,8 +608,8 @@ unknown.
 | `elf` | object \| null | ELF metadata: SONAME, `DT_NEEDED`, version defs/reqs, symbols, imports, hardening flags. |
 | `pe` | object \| null | PE/COFF metadata (Windows DLL exports, machine, characteristics). |
 | `macho` | object \| null | Mach-O metadata (dylib exports, CPU slices, install name). |
-| `dwarf` | object \| null | DWARF struct/enum layout (v51: plus ODR conflicts, see above). |
-| `dwarf_advanced` | object \| null | Toolchain, calling conventions, value-ABI traits. |
+| `dwarf` | object \| null | Debug struct/enum layout (v51: plus ODR conflicts, see above) — from DWARF, or BTF/CTF/PDB reduced to the same shape. In memory this is the IR store's `declarations.debug_layout`; the key keeps its historical name. |
+| `dwarf_advanced` | object \| null | Toolchain, calling conventions, value-ABI traits (in memory: `declarations.debug_advanced`). |
 | `sycl` | object \| null | SYCL plugin-interface metadata. |
 | `dependency_info` | object \| null | Resolved dependency graph (nodes, edges, unresolved). |
 | `build_mode` | object \| null | Normalized compiler/stdlib/standard capture (ADR build-mode work). No dump path writes it today; it is read back only from a document that carries one (see `known-gaps.md`). |

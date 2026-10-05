@@ -31,7 +31,7 @@ from abicheck.serialization import (
 
 def _snap(adv: AdvancedDwarfMetadata | None) -> AbiSnapshot:
     s = AbiSnapshot(library="libx.so", version="v")
-    s.dwarf_advanced = adv  # type: ignore[attr-defined]
+    s.declarations.debug_advanced = adv
     return s
 
 
@@ -200,7 +200,7 @@ def test_return_trait_flip_mixed_arch_falls_back_to_generic() -> None:
 def test_target_arch_round_trips_through_serialization() -> None:
     snap = _snap(_adv(target_arch="aarch64", value_traits={"foo": "ret:v(trivial)"}))
     restored = snapshot_from_dict(snapshot_to_dict(snap))
-    assert restored.dwarf_advanced.target_arch == "aarch64"  # type: ignore[attr-defined]
+    assert restored.declarations.debug_advanced.target_arch == "aarch64"  # type: ignore[attr-defined]
 
 
 def test_value_abi_trait_unchanged_no_change() -> None:
@@ -372,10 +372,10 @@ def test_serialization_roundtrip_set_values() -> None:
     )
     d = snapshot_to_dict(snap)
     snap2 = snapshot_from_dict(d)
-    assert snap2.dwarf_advanced is not None
-    assert snap2.dwarf_advanced.calling_conventions == {"foo": "program"}
-    assert snap2.dwarf_advanced.packed_structs == {"A", "B"}
-    assert snap2.dwarf_advanced.toolchain.abi_flags == {"-fshort-enums"}
+    assert snap2.declarations.debug_advanced is not None
+    assert snap2.declarations.debug_advanced.calling_conventions == {"foo": "program"}
+    assert snap2.declarations.debug_advanced.packed_structs == {"A", "B"}
+    assert snap2.declarations.debug_advanced.toolchain.abi_flags == {"-fshort-enums"}
 
 
 def test_serialization_empty_sets_roundtrip() -> None:

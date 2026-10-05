@@ -159,8 +159,8 @@ def _dump_pe(
         if scoped is not None:
             # Preserve any PDB debug info alongside the header-scoped surface.
             if dwarf_meta is not None:
-                scoped.dwarf = dwarf_meta
-                scoped.dwarf_advanced = dwarf_adv
+                scoped.declarations.debug_layout = dwarf_meta
+                scoped.declarations.debug_advanced = dwarf_adv
             return scoped
 
     funcs = [

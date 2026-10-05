@@ -1222,9 +1222,9 @@ def scope_snapshot_excluding_dependencies(
         variables=kept_variables,
         types=kept_types,
         enums=kept_enums,
-        dwarf=_scoped_dwarf(snap.dwarf, dwarf_ids),
+        dwarf=_scoped_dwarf(snap.declarations.debug_layout, dwarf_ids),
         dwarf_advanced=_scoped_dwarf_advanced(
-            snap.dwarf_advanced, dwarf_ids, excluded_symbols
+            snap.declarations.debug_advanced, dwarf_ids, excluded_symbols
         ),
         # ADR-063 Phase 6 (second slice, Codex review, PR #1001): without
         # this, dataclasses.replace() below carries snap.semantic_ir/

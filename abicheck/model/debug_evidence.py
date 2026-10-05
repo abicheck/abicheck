@@ -6,9 +6,9 @@ collection").
 
 Evidence-tier questions -- "did this side carry usable debug info?", "did it
 carry any debug *layout* content?" -- used to be answered by each checker
-reaching into the backend collections ``AbiSnapshot.dwarf`` /
-``AbiSnapshot.dwarf_advanced`` itself. This module is the one owner of those
-answers, so checkers ask a backend-neutral question instead. Both collections
+reaching into the snapshot's debug layout itself (now the IR store's
+``declarations.debug_layout``/``debug_advanced``). This module is the one owner
+of those answers, so checkers ask a backend-neutral question instead. Both
 are what every debug carrier reduces to (DWARF directly; BTF, CTF and PDB via
 their ``to_dwarf_metadata`` reductions), so the facts below name no format.
 
@@ -64,8 +64,9 @@ def debug_info_evidence(snap: AbiSnapshot | None) -> DebugInfoEvidence:
     """The :class:`DebugInfoEvidence` *snap* carries (none for ``None``)."""
     if snap is None:
         return NO_DEBUG_INFO_EVIDENCE
-    basic = getattr(snap, "dwarf", None)
-    advanced = getattr(snap, "dwarf_advanced", None)
+    store = snap.declarations
+    basic = store.debug_layout
+    advanced = store.debug_advanced
     return DebugInfoEvidence(
         basic=debug_info_present(basic),
         advanced=debug_info_present(advanced),

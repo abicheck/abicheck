@@ -45,7 +45,7 @@ def _snap(
         typedefs=typedefs or {},
     )
     if dwarf_advanced is not None:
-        s.dwarf_advanced = dwarf_advanced  # type: ignore[attr-defined]
+        s.declarations.debug_advanced = dwarf_advanced
     return s
 
 

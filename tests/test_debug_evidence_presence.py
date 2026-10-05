@@ -26,7 +26,7 @@ dataclasses with no ``__bool__``, so **every instance is truthy**, and every
 ELF dump attaches one unconditionally -- including the symbols-only fallback
 that logs "no DWARF debug info" while attaching it, and
 ``cheap_dwarf_presence_metadata``, which returns that same empty shape on any
-extraction exception. So ``bool(snap.dwarf)`` and ``snap.dwarf is not None``
+extraction exception. So ``bool(snap.declarations.debug_layout)`` and ``snap.declarations.debug_layout is not None``
 answer "was an object attached", which is always yes, and never "was debug
 info collected". Four sites read the container that way; each is enumerated
 below against its own real consumer, so a regression at any one of them fails
@@ -308,10 +308,15 @@ def test_real_library_l1_row_matches_its_actual_debug_info(
 
     rows = {row.layer: row for row in intrinsic_coverage(snap)}
     assert (rows["L1"].status is CoverageStatus.PRESENT) is expect_evidence
-    assert debug_info_present(snap.dwarf, snap.dwarf_advanced) is expect_evidence
+    assert (
+        debug_info_present(
+            snap.declarations.debug_layout, snap.declarations.debug_advanced
+        )
+        is expect_evidence
+    )
     # The production dump attaches a metadata object either way -- the precise
     # condition that made the original predicate wrong.
-    assert snap.dwarf is not None
+    assert snap.declarations.debug_layout is not None
 
 
 @_NEEDS_GPP

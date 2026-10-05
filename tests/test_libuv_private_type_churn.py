@@ -92,8 +92,12 @@ def test_private_struct_field_pointee_const_change_is_neutral():
     )
     old = AbiSnapshot(library="libuv.so.1", version="1")
     new = AbiSnapshot(library="libuv.so.1", version="2")
-    old.dwarf = DwarfMetadata(has_dwarf=True, structs={"uv_cpu_info_s": old_s})  # type: ignore[attr-defined]
-    new.dwarf = DwarfMetadata(has_dwarf=True, structs={"uv_cpu_info_s": new_s})  # type: ignore[attr-defined]
+    old.declarations.debug_layout = DwarfMetadata(
+        has_dwarf=True, structs={"uv_cpu_info_s": old_s}
+    )
+    new.declarations.debug_layout = DwarfMetadata(
+        has_dwarf=True, structs={"uv_cpu_info_s": new_s}
+    )
     r = compare(old, new)
     assert ChangeKind.STRUCT_FIELD_TYPE_CHANGED not in {c.kind for c in r.changes}
     assert r.verdict in (Verdict.NO_CHANGE, Verdict.COMPATIBLE)

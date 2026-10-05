@@ -842,7 +842,7 @@ class TestScopedCompareNoFalsePositives:
             functions=[_fn("api", ret="Result *")],
             types=[_rec("Result"), _rec("api")],
         )
-        old.dwarf_advanced = AdvancedDwarfMetadata(
+        old.declarations.debug_advanced = AdvancedDwarfMetadata(
             has_dwarf=True,
             value_abi_traits={"api": "p0:trivial"},
         )
@@ -852,7 +852,7 @@ class TestScopedCompareNoFalsePositives:
             functions=[_fn("api", ret="Result *")],
             types=[_rec("Result"), _rec("api")],
         )
-        new.dwarf_advanced = AdvancedDwarfMetadata(
+        new.declarations.debug_advanced = AdvancedDwarfMetadata(
             has_dwarf=True,
             value_abi_traits={"api": "p0:nontrivial"},
         )

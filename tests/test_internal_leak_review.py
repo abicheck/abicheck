@@ -15,7 +15,7 @@
 """Regression tests for the DWARF-only fallback path in the leak detector.
 
 CodeRabbit PR #256 finding: on the DWARF-only fallback path (snap.types is
-empty, snap.dwarf.structs provides the type map) _seed_queue_from_public_types
+empty, snap.declarations.debug_layout.structs provides the type map) _seed_queue_from_public_types
 was unconditionally seeding every non-internal type as a BFS root, including
 private implementation types that have no real public entry point.  That
 produced spurious INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API findings.
@@ -60,7 +60,7 @@ def _dwarf_snap(
     structs: dict[str, StructLayout] | None = None,
     functions: list[Function] | None = None,
 ) -> AbiSnapshot:
-    """Return a snapshot with empty snap.types but a populated snap.dwarf."""
+    """Return a snapshot with empty snap.types but a populated snap.declarations.debug_layout."""
     dwarf = DwarfMetadata(
         structs=dict(structs or {}),
         has_dwarf=True,
@@ -211,7 +211,7 @@ class TestSeedQueueSkipsOnDwarfFallback:
 class TestDwarfFallbackNoSpuriousLeak:
     """Regression scenario from the CodeRabbit finding.
 
-    snap.types is empty; snap.dwarf.structs contains a private
+    snap.types is empty; snap.declarations.debug_layout.structs contains a private
     ``ns::detail::PrivateImpl`` type.  A public function returns ``int``
     (not the internal type).  Before the fix, _seed_queue_from_public_types
     would enqueue every DWARF-synthesised non-internal record as a BFS root

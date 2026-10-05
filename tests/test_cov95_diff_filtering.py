@@ -132,6 +132,8 @@ def test_enrich_source_locations_skips_none_and_unindexable():
         functions = []
         variables = []
         enums = []
+        debug_layout = None
+        debug_advanced = None
         declarations = property(lambda self: self)
 
         def index(self):

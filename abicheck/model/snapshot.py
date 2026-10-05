@@ -27,6 +27,7 @@ from dataclasses import InitVar, dataclass, field
 from typing import TYPE_CHECKING
 
 from .declaration_store import (
+    NOT_GIVEN,
     Declarations,
     attach_declarations as _attach_declarations,
     guard_assignment as _guard_assignment,
@@ -83,10 +84,13 @@ class AbiSnapshot:
     )  # ELF dynamic/symbol metadata (Sprint 2)
     pe: PeMetadata | None = field(default=None)  # PE/COFF metadata (Windows DLL)
     macho: MachoMetadata | None = field(default=None)  # Mach-O metadata (macOS dylib)
-    dwarf: DwarfMetadata | None = field(
-        default=None
-    )  # DWARF layout metadata (Sprint 3)
-    dwarf_advanced: AdvancedDwarfMetadata | None = field(default=None)  # Sprint 4
+    # Debug-layout builder inputs (ADR-063 criterion 4): any debug carrier's
+    # layout payload (DWARF, or BTF/CTF/PDB reduced to it) fills the IR store's
+    # backend-neutral ``declarations.debug_layout``/``debug_advanced``.
+    # ``NOT_GIVEN`` (not ``None``) by default: an explicit ``None`` means "no
+    # debug info" and must clear, not fall back to a given IR's store.
+    dwarf: InitVar[DwarfMetadata | None] = NOT_GIVEN
+    dwarf_advanced: InitVar[AdvancedDwarfMetadata | None] = NOT_GIVEN
     sycl: SyclMetadata | None = field(
         default=None
     )  # SYCL PI plugin metadata (ADR-020b)

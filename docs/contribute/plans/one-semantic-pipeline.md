@@ -300,6 +300,31 @@ carrier lands in. **What remains** for criterion (4): fold the layout payload
 itself into SemanticIR at extraction so the owner reads the IR, at which point
 the baseline empties. No finding changed.
 
+**Criterion (4) closed (2026-10-05): the debug layout is IR-owned.** The
+layout payload every debug carrier reduces to (DWARF directly; BTF/CTF/PDB
+via `to_dwarf_metadata`) now lives in the IR's declaration store, under
+backend-neutral names: `semantic_ir.declarations.debug_layout`
+(`DwarfMetadata`: record/enum layouts, base-type sizes, ODR conflicts) and
+`.debug_advanced` (`AdvancedDwarfMetadata`). It is filled at extraction by the
+same mechanism Phase 10 uses for declarations: `AbiSnapshot`'s `dwarf=`/
+`dwarf_advanced=` are builder inputs (`InitVar`s, defaulting to a `NOT_GIVEN`
+sentinel so an explicit `None` still means "no debug info" and clears), not
+attributes -- reading or assigning `AbiSnapshot.dwarf` raises and names the
+store attribute (`model/declaration_store.py`'s `DEBUG_LAYOUT_KINDS`/
+`STORE_ATTRIBUTE`). Placement follows this plan's design rules: the layout is
+identity-less per-occurrence payload, so it belongs in the declaration store,
+not in `CanonicalEntity` (which keeps only cross-backend canonicalized facts),
+and there is exactly one representation -- no snapshot field beside it.
+`compare/debug_layout_view.py` and `model/debug_evidence.py` read the store;
+the `semantic-ir-cutover` gate's `KNOWN_BACKEND_DECLARATION_READERS` baseline
+is deleted and any checker read of `dwarf`/`dwarf_advanced` is now an error
+with no allowlist (`tests/test_backend_declaration_readers.py`). Persistence is
+unchanged: the codec writes the store's debug kinds under the historical
+`dwarf`/`dwarf_advanced` keys at their historical position
+(`storage/snapshot_encode._DECLARATION_KEY_ANCHORS`), so documents and every
+digest over them are byte-identical and no schema bump was needed (v57 stays
+unused; the next real bump is still v58). No finding changed.
+
 **2B consumer sweep (2026-09-29).** A repository-wide inventory of
 cross-snapshot and finding-to-record lookups still keyed by bare
 `RecordType.name` (or the bare `typedefs` map) moved every one that decides

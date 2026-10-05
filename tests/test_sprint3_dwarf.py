@@ -24,7 +24,7 @@ from abicheck.model import AbiSnapshot
 
 def _snap(dwarf: DwarfMetadata | None) -> AbiSnapshot:
     snap = AbiSnapshot(library="libtest.so", version="v1")
-    snap.dwarf = dwarf  # type: ignore[attr-defined]
+    snap.declarations.debug_layout = dwarf
     return snap
 
 
@@ -261,8 +261,12 @@ def test_stdlib_struct_layout_kept_when_target_is_cxx_runtime() -> None:
     )
     old = AbiSnapshot(library="libstdc++.so.6", version="v1")
     new = AbiSnapshot(library="libstdc++.so.6", version="v2")
-    old.dwarf = _meta(structs={"std::__cxx11::basic_string<char>": old_s})  # type: ignore[attr-defined]
-    new.dwarf = _meta(structs={"std::__cxx11::basic_string<char>": new_s})  # type: ignore[attr-defined]
+    old.declarations.debug_layout = _meta(
+        structs={"std::__cxx11::basic_string<char>": old_s}
+    )
+    new.declarations.debug_layout = _meta(
+        structs={"std::__cxx11::basic_string<char>": new_s}
+    )
     result = compare(old, new)
     kinds = {c.kind for c in result.changes}
     assert ChangeKind.STRUCT_FIELD_REMOVED in kinds
@@ -275,7 +279,7 @@ def test_anonymous_dwarf_types_filtered_even_for_cxx_runtime() -> None:
     just with std:: preserved)."""
     old = AbiSnapshot(library="libstdc++.so.6", version="v1")
     new = AbiSnapshot(library="libstdc++.so.6", version="v2")
-    old.dwarf = _meta(
+    old.declarations.debug_layout = _meta(
         structs={  # type: ignore[attr-defined]
             "std::vector<int>": _struct(
                 "std::vector<int>", 24, fields=[_field("_M_start", "int*", 0, 8)]
@@ -285,7 +289,7 @@ def test_anonymous_dwarf_types_filtered_even_for_cxx_runtime() -> None:
             ),
         }
     )
-    new.dwarf = _meta(
+    new.declarations.debug_layout = _meta(
         structs={  # type: ignore[attr-defined]
             # std:: kept and unchanged; the lambda closure type "lost" its field.
             "std::vector<int>": _struct(
@@ -474,12 +478,12 @@ def test_full_snapshot_pipeline_dwarf_only() -> None:
     from abicheck.model import AbiSnapshot
 
     old_snap = AbiSnapshot(library="libfoo.so", version="1.0")
-    old_snap.dwarf = _meta(
+    old_snap.declarations.debug_layout = _meta(
         structs={"Ctx": _struct("Ctx", 8, fields=[_field("n", "int", 0, 4)])}
     )  # type: ignore[attr-defined]
 
     new_snap = AbiSnapshot(library="libfoo.so", version="2.0")
-    new_snap.dwarf = _meta(
+    new_snap.declarations.debug_layout = _meta(
         structs={"Ctx": _struct("Ctx", 16, fields=[_field("n", "long", 0, 8)])}
     )  # type: ignore[attr-defined]
 

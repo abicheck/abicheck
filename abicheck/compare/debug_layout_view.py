@@ -4,15 +4,16 @@
 """The one checker-side reader of the debug layout collections (ADR-063,
 "no backend-specific collection").
 
-``AbiSnapshot.dwarf`` / ``AbiSnapshot.dwarf_advanced`` are what every debug
-carrier reduces to -- DWARF directly, BTF/CTF/PDB through their
-``to_dwarf_metadata`` reductions -- but their field names still spell the
-first backend. Detectors read a :class:`DebugLayoutView` instead: a
+The debug layout lives in the snapshot's IR store
+(``semantic_ir.declarations.debug_layout``/``debug_advanced``,
+``model/declaration_store.py``) -- what every debug carrier reduces to at
+extraction: DWARF directly, BTF/CTF/PDB through their ``to_dwarf_metadata``
+reductions. Detectors read a :class:`DebugLayoutView` over it: a
 read-only view of one side's identity-less debug layout (record and enum
 layouts keyed by their debug spelling, base-type sizes) plus the two channel
 payloads the layout detector families diff whole.
-``scripts/semantic_ir_cutover.py``'s ``KNOWN_BACKEND_DECLARATION_READERS``
-lists this module as the only remaining checker-side reader.
+No checker reads a backend-named snapshot collection
+(``scripts/semantic_ir_cutover.py``'s backend-declaration rule, no baseline).
 
 Evidence-tier questions ("was there debug info at all?") are not layout
 questions; they live in :mod:`abicheck.model.debug_evidence`.
@@ -62,15 +63,14 @@ class DebugLayoutView:
 
 
 def _layout_channel(snap: AbiSnapshot) -> DwarfMetadata | None:
-    """The raw layout-channel payload: the single read of ``AbiSnapshot.dwarf``
-    this module (and so the whole checker) performs."""
-    return getattr(snap, "dwarf", None)
+    """The raw layout-channel payload, read from the IR's declaration store."""
+    return snap.declarations.debug_layout
 
 
 def debug_layout_view(snap: AbiSnapshot) -> DebugLayoutView:
     """*snap*'s :class:`DebugLayoutView`."""
     basic = _layout_channel(snap)
-    advanced = getattr(snap, "dwarf_advanced", None)
+    advanced = snap.declarations.debug_advanced
     layout = basic or DwarfMetadata()
     return DebugLayoutView(
         present=debug_info_present(basic),

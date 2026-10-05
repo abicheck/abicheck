@@ -33,6 +33,7 @@ from dataclasses import fields as dataclass_fields, is_dataclass
 from typing import Any
 
 from ..model import AbiSnapshot, FactStatus
+from ..model.declaration_store import STORE_ATTRIBUTE
 from ..model.snapshot_reliability import FACT_FAMILIES, flag_name
 from .acyclic_json import gc_paused
 from .entity_id_codec import encode_entity_ids, encode_sidecar_entity_ids
@@ -314,6 +315,7 @@ def _drop_unobserved_odr_conflicts(d: dict[str, Any]) -> None:
 #: digest over it -- is unchanged by the move.
 _DECLARATION_KEY_ANCHORS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("version", ("functions", "variables", "types")),
+    ("macho", ("dwarf", "dwarf_advanced")),
     ("numpy_capi", ("enums", "typedefs", "constants")),
     (
         "dependency_scope",
@@ -370,7 +372,7 @@ def _with_declarations(
     for key, value in d.items():
         out[key] = value
         for kind in after.get(key, ()):
-            out[kind] = encode(getattr(decls, kind))
+            out[kind] = encode(getattr(decls, STORE_ATTRIBUTE[kind]))
     return out
 
 

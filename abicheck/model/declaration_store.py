@@ -27,6 +27,15 @@ snapshot incrementally (filtering, backfilling, appending), and a frozen store
 would force every such step to rebuild the whole IR; the IR itself stays
 frozen as a binding, and the canonical per-occurrence facts
 (``SemanticIR.occurrences``) stay immutable.
+
+The store also owns the snapshot's **debug layout** (ADR-063 criterion 4, "no
+backend-specific collection"): the identity-less record/enum layouts, base-type
+sizes and advanced toolchain facts every debug carrier reduces to -- DWARF
+directly, BTF/CTF/PDB through their ``to_dwarf_metadata`` reductions. They are
+held under backend-neutral names (``debug_layout``/``debug_advanced``); the
+snapshot builder inputs and the persisted keys keep their historical spelling
+(``dwarf=``/``dwarf_advanced=``), so a producer and a stored document are
+unchanged, but no ``AbiSnapshot.dwarf`` attribute exists to read.
 """
 
 from __future__ import annotations
@@ -38,10 +47,18 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .declarations import Function, Variable
+from .dwarf_facts import AdvancedDwarfMetadata, DwarfMetadata
 from .entities import EnumType, RecordType
 from .identity import EntityId
 
-__all__ = ["DECLARATION_KINDS", "Declarations"]
+__all__ = [
+    "BUILDER_INPUTS",
+    "DEBUG_LAYOUT_KINDS",
+    "DECLARATION_KINDS",
+    "NOT_GIVEN",
+    "STORE_ATTRIBUTE",
+    "Declarations",
+]
 
 #: Every field of :class:`Declarations`, in constructor order. The
 #: ``AbiSnapshot`` builder inputs share these exact names.
@@ -57,6 +74,23 @@ DECLARATION_KINDS = (
     "constant_entity_ids",
 )
 
+#: The debug-layout kinds: builder input / persisted key -> the store's
+#: backend-neutral attribute. ``None`` (not an empty payload) means the side
+#: carried no debug info on that channel.
+DEBUG_LAYOUT_KINDS: dict[str, str] = {
+    "dwarf": "debug_layout",
+    "dwarf_advanced": "debug_advanced",
+}
+
+#: Every ``AbiSnapshot`` builder input -> the store attribute it fills.
+STORE_ATTRIBUTE: dict[str, str] = {
+    **{kind: kind for kind in DECLARATION_KINDS},
+    **DEBUG_LAYOUT_KINDS,
+}
+
+#: Every ``AbiSnapshot`` builder input name (also its persisted key).
+BUILDER_INPUTS: tuple[str, ...] = tuple(STORE_ATTRIBUTE)
+
 
 @dataclass
 class Declarations:
@@ -71,6 +105,10 @@ class Declarations:
     constants: dict[str, str] = field(default_factory=dict)
     typedef_entity_ids: dict[str, EntityId] = field(default_factory=dict)
     constant_entity_ids: dict[str, EntityId] = field(default_factory=dict)
+    #: Identity-less debug layout (records/enums/base types), any debug format.
+    debug_layout: DwarfMetadata | None = None
+    #: Advanced debug facts (calling convention, packing, toolchain).
+    debug_advanced: AdvancedDwarfMetadata | None = None
 
     def copy(self) -> Declarations:
         """A shallow copy: new containers, the same declaration objects --
@@ -85,7 +123,14 @@ class Declarations:
             constants=dict(self.constants),
             typedef_entity_ids=dict(self.typedef_entity_ids),
             constant_entity_ids=dict(self.constant_entity_ids),
+            debug_layout=self.debug_layout,
+            debug_advanced=self.debug_advanced,
         )
+
+    def builder_inputs(self) -> dict[str, Any]:
+        """Every kind under its ``AbiSnapshot`` builder-input name -- what a
+        caller passes to ``dataclasses.replace`` to restate this store."""
+        return {name: getattr(self, attr) for name, attr in STORE_ATTRIBUTE.items()}
 
 
 #: The order ``AbiSnapshot.__post_init__`` receives its builder inputs in:
@@ -94,6 +139,8 @@ _BUILDER_INPUT_ORDER = (
     "functions",
     "variables",
     "types",
+    "dwarf",
+    "dwarf_advanced",
     "enums",
     "typedefs",
     "constants",
@@ -121,7 +168,10 @@ def attach_declarations(
     if ir is None:
         ir = empty_ir()
     base = ir.declarations
-    values = {kind: _resolve(given[kind], base, kind) for kind in DECLARATION_KINDS}
+    values = {
+        attr: _resolve(given[name], base, attr)
+        for name, attr in STORE_ATTRIBUTE.items()
+    }
     store = Declarations(**values)
     object.__setattr__(snapshot, "semantic_ir", ir.attached(store))
 
@@ -134,9 +184,31 @@ def _resolve(value: object, base: Any, kind: str) -> Any:
     IR's store, else empty."""
     if isinstance(value, _Forwarded):
         return getattr(base, kind) if base is not None else value.value
-    if value is not None:
+    if value is not None and value is not NOT_GIVEN:
         return value
+    if value is None and kind in _DEBUG_ATTRIBUTES:
+        # ``None`` is a real debug-layout value ("no debug info on this
+        # channel"), so an explicit ``dwarf=None`` clears it rather than
+        # falling back to the given IR's store.
+        return None
     return getattr(base, kind) if base is not None else _empty(kind)
+
+
+class _NotGiven:
+    """The debug-layout builder inputs' default: distinguishes "not passed"
+    from an explicit ``None``."""
+
+    __slots__ = ()
+
+    def __repr__(self) -> str:
+        return "NOT_GIVEN"
+
+    def __reduce__(self) -> str:
+        return "NOT_GIVEN"
+
+
+#: Default of the ``dwarf=``/``dwarf_advanced=`` builder inputs.
+NOT_GIVEN: Any = _NotGiven()
 
 
 @dataclass(frozen=True)
@@ -147,7 +219,12 @@ class _Forwarded:
     value: Any
 
 
+_DEBUG_ATTRIBUTES = frozenset(DEBUG_LAYOUT_KINDS.values())
+
+
 def _empty(kind: str) -> Any:
+    if kind in _DEBUG_ATTRIBUTES:
+        return None
     return [] if kind in ("functions", "variables", "types", "enums") else {}
 
 
@@ -167,10 +244,10 @@ def guard_assignment(snapshot: Any, name: str, value: Any) -> Any:
     snapshot attribute (ADR-063 Phase 10): assigning one would silently
     create a stray instance attribute nothing reads, so it is refused.
     Assigning ``semantic_ir`` keeps the snapshot's store attached."""
-    if name in DECLARATION_KINDS:
+    if name in STORE_ATTRIBUTE:
         raise AttributeError(
             f"AbiSnapshot.{name} was removed; "
-            f"assign snapshot.declarations.{name} instead"
+            f"assign snapshot.declarations.{STORE_ATTRIBUTE[name]} instead"
         )
     current = snapshot.__dict__.get("semantic_ir")
     if name == "semantic_ir" and current is not None:
@@ -191,7 +268,8 @@ class _RemovedDeclarationField:
     field that no longer exists."""
 
     def __init__(self, kind: str) -> None:
-        self._kind = kind
+        self._kind = STORE_ATTRIBUTE[kind]
+        self._name = kind
 
     def __get__(self, obj: Any, objtype: type | None = None) -> Any:
         if obj is None:
@@ -204,11 +282,11 @@ class _RemovedDeclarationField:
             # over it (and a store-less one still keeps it).
             return _Forwarded(getattr(obj.declarations, self._kind))
         raise AttributeError(
-            f"AbiSnapshot.{self._kind} was removed; "
+            f"AbiSnapshot.{self._name} was removed; "
             f"read snapshot.declarations.{self._kind} instead"
         )
 
 
 def install_removed_declaration_fields(cls: type) -> None:
-    for kind in DECLARATION_KINDS:
+    for kind in BUILDER_INPUTS:
         setattr(cls, kind, _RemovedDeclarationField(kind))
