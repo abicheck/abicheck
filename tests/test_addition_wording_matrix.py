@@ -131,14 +131,13 @@ def test_variable_addition_wording(
         ("_ZN2ns3subL1xE", True),
         ("_ZNK2ns1xE", False),
         ("_ZN2ns1xE", False),
-        ("_ZN2nsS_1xE", False),  # substitution: not modelled, never guessed
+        ("_ZN3BoxIiEL1xE", True),  # template args skipped structurally
+        ("_ZN3BoxIL1xEE1yE", False),  # an `L` inside the args is not the marker
         ("_ZN" + "9" * 40 + "x", False),  # hostile length: bounded, no claim
-        ("_ZN5shortL", True),
-        ("_ZN50short", False),  # a length past the end of the name
         ("x", False),
     ],
 )
 def test_internal_linkage_marker(mangled: str, internal: bool) -> None:
-    from abicheck.diff_symbols_variables import _has_internal_linkage
+    from abicheck.buildsource.export_obligation_linkage import has_internal_linkage
 
-    assert _has_internal_linkage(mangled) is internal
+    assert has_internal_linkage(mangled) is internal

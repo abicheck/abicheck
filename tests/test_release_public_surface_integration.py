@@ -284,9 +284,14 @@ class TestUndocumentedExportAttribution:
     def test_exactly_one_finding_on_the_exporting_member(
         self, product: tuple[Path, Path], tmp_path: Path
     ) -> None:
+        """One finding for the one event, on the member that exports it: the
+        addition. Its `exported_not_public` twin is folded into it
+        (`policy.export_existence_fold`), not reported beside it."""
         report = _compare(tmp_path, *product)
-        assert _kinds(report, "libB.so").count("exported_not_public") == 1
-        assert "exported_not_public" not in _kinds(report, "libA.so")
+        undocumented = ("func_added_elf_only", "exported_not_public")
+        libb = [k for k in _kinds(report, "libB.so") if k in undocumented]
+        assert libb == ["func_added_elf_only"]
+        assert not [k for k in _kinds(report, "libA.so") if k in undocumented]
 
     def test_the_release_accounting_attributes_it_to_that_member(
         self, product: tuple[Path, Path], tmp_path: Path

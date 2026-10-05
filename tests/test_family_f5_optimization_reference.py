@@ -151,6 +151,7 @@ COVERAGE: dict[str, str] = {
     # ---- request-scoped and instance memos ----
     "abicheck.buildsource.type_graph::scoped_cache::_AST_DERIVED": H,
     "abicheck.comparability_fields::scoped_cache::_PATH_MEMO": H,
+    "abicheck.buildsource.export_account_decision::scoped_cache::_CONTEXTS": H,
     "abicheck.compare.detection_memo::scoped_cache::_MEMO": R,
     "abicheck.model.comparison_memo::scoped_cache::_MEMO": R,
     "abicheck.surface_graph::scoped_cache::_GRAPHS": "UNCOVERED: shared only under --pattern-verdicts plus --surface-metrics; tests/test_surface_graph_sharing.py states its contract",

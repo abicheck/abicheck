@@ -95,32 +95,6 @@ def _var_removed(mangled: str, v_old: Variable) -> list[Change]:
     ]
 
 
-def _has_internal_linkage(mangled: str) -> bool:
-    """An Itanium ``L`` (internal-linkage) marker on the entity name --
-    ``_ZL3kVal`` or ``_ZN2nsL3kValE``: a namespace-scope ``const``/``static``
-    object every including TU gets its own copy of, so no export is owed.
-    ``False`` for any shape it does not model (substitutions, templates)."""
-    if mangled.startswith("_ZL"):
-        return True
-    if not mangled.startswith("_ZN"):
-        return False
-    i, n = 3, len(mangled)
-    while i < n and mangled[i] in "rVKRO":
-        i += 1
-    while i < n:
-        if mangled[i] == "L":
-            return True
-        if not mangled[i].isdigit():
-            return False
-        j = i
-        while j < n and mangled[j].isdigit():
-            j += 1
-        if j - i > 6:  # an untrusted digit run no real source name needs
-            return False
-        i = j + int(mangled[i:j])
-    return False
-
-
 def _unexported_shape(decl: Function | Variable) -> str | None:
     """Why a declaration legitimately has no exported symbol, or ``None``.
 
@@ -140,13 +114,17 @@ def _unexported_shape(decl: Function | Variable) -> str | None:
         if decl.is_inline:
             return "header-only"
         return None
+    from .buildsource.export_obligation_linkage import (
+        has_internal_linkage,
+        is_static_member_symbol,
+    )
+
     mangled = decl.mangled or ""
-    # Internal linkage is read from the Itanium marker for a C++ name. A bare
-    # `is_static` says it only for an unmangled (C) name: on a mangled one it
-    # may be a class's static data member, which owes an out-of-line
-    # definition and is not header-only at all.
-    if _has_internal_linkage(mangled) or (
-        decl.is_static and not mangled.startswith("_Z")
+    # Internal linkage is read from the mangling's own marker. A bare
+    # `is_static` says it only when the name is not a class member: a static
+    # data member owes an out-of-line definition and is not header-only.
+    if has_internal_linkage(mangled) or (
+        decl.is_static and not is_static_member_symbol(mangled)
     ):
         return "header-only"
     return None
