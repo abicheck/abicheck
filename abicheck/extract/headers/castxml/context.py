@@ -182,18 +182,20 @@ class CastxmlParserContext:
         same chain the same way.
         """
         chain: list[str] = []
+        on_chain: set[str] = set()
         ctx_id = el.get("context", "") or ""
         answer = False
         while ctx_id:
             if ctx_id in memo:
                 answer = memo[ctx_id]
                 break
-            if ctx_id in chain:
+            if ctx_id in on_chain:
                 break
             parent = self.id_map.get(ctx_id)
             if parent is None:
                 break
             chain.append(ctx_id)
+            on_chain.add(ctx_id)
             if parent.tag in FUNCTION_TAGS:
                 answer = True
                 break

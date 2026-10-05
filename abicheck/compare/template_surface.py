@@ -27,7 +27,7 @@ of in a detector module already at its debt baseline.
 from __future__ import annotations
 
 import re
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 if TYPE_CHECKING:
@@ -39,6 +39,7 @@ from ..elf_symbol_filter import (
     exported_symbol_names,
 )
 from ..model import Function
+from ..model.comparison_memo import comparison_memo_active, comparison_memoized
 from ..model.execution_cache import memoized
 from ..model.surface_facts import in_public_surface, is_abi_visible
 from .surface_reconcile import (
@@ -118,6 +119,8 @@ def template_angle_depth(text: str) -> int:
 
 
 __all__ = [
+    "qualified_name_lookup",
+    "qualified_name_table",
     "mask_operator_symbols",
     "strip_template_args",
     "template_angle_depth",
@@ -461,6 +464,59 @@ def qualified_declaration_name(name: str, mangled: str) -> str:
         demangled = demangle_one_batched(mangled)
         return name if demangled is None else demangled
     return name
+
+
+def qualified_name_table(snap: AbiSnapshot) -> dict[int, str]:
+    """Every function's and variable's :func:`qualified_declaration_name`
+    in *snap*, keyed by declaration identity, computed once per comparison.
+
+    Five template detectors and the default-template-argument detector each
+    walked the same reconciled lists and re-derived the same qualified name
+    per declaration -- with the reconciliation joins, ~13 derivations per
+    declaration on the ``add_remove`` workload. Held in the comparison memo
+    (:mod:`abicheck.model.comparison_memo`), which pins *snap* and so every
+    declaration whose ``id`` the table keys on. The names themselves are
+    already resident in the demangle cache; the table adds one dict entry
+    per declaration for the comparison's lifetime.
+    """
+
+    def build() -> dict[int, str]:
+        decls = snap.declarations
+        return {
+            id(d): qualified_declaration_name(d.name, d.mangled)
+            for group in (decls.functions, decls.variables)
+            for d in group
+        }
+
+    return comparison_memoized("template_surface.qualified_name_table", snap, build)
+
+
+def qualified_name_lookup(snap: AbiSnapshot) -> Callable[[Function | Variable], str]:
+    """A ``decl -> qualified name`` reader over *snap*'s
+    :func:`qualified_name_table`, fetched once for the caller's whole loop.
+
+    Fetch it once per loop, not per declaration: the comparison-memo lookup
+    costs more than the demangle-cache hit it replaces. Outside a comparison
+    memo scope there is nowhere to keep the table, so the reader computes
+    each name directly rather than building a table nobody keeps. A
+    declaration that is not one of *snap*'s own (a synthesized or foreign
+    object) falls back to computing it too, so the answer never depends on
+    whether the table covers *decl*.
+    """
+    table = qualified_name_table(snap) if comparison_memo_active() else {}
+
+    def lookup(decl: Function | Variable, _pin: AbiSnapshot = snap) -> str:
+        # *_pin* keeps *snap* -- and so every declaration the table keys by
+        # ``id`` -- alive as long as this reader, so a recycled ``id`` can
+        # never be served another declaration's name.
+        hit = table.get(id(decl))
+        return (
+            hit
+            if hit is not None
+            else qualified_declaration_name(decl.name, decl.mangled)
+        )
+
+    return lookup
 
 
 def cpo_identity(

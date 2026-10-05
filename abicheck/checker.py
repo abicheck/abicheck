@@ -1317,49 +1317,52 @@ def compare(
     # verdict would hide that (Codex review).
     scope_active = scope_to_public_surface or public_surface_allowlist is not None
 
-    # ADR-027 A1/D1.2: aggregate surface-metric drift (opt-in --surface-metrics).
-    # COMPATIBLE informational roll-ups; suppressible like any finding and never
-    # breaking, so they leave the verdict unchanged unless NO_CHANGE flips to COMPATIBLE.
-    if surface_metrics and old is not None:
-        kept, verdict = _apply_surface_metrics(
-            old,
-            new,
-            kept,
-            verdict_redundant,
-            suppressed,
-            suppression,
-            policy,
-            policy_file,
-            verdict,
-            stage,
-            old_public_entity_ids=old_public_entity_ids,
-            new_public_entity_ids=new_public_entity_ids,
-            ledger=ledger,
-        )
+    from .surface_graph import shared_surface_graphs
 
-    # ADR-027 A4: pattern-aware verdict modulation. Runs after post-processing
-    # and before the (recomputed) verdict so a demotion/raise reaches both the
-    # reported findings and the exit code. Off by default (opt-in via
-    # --pattern-verdicts); a no-op that leaves `kept`/`verdict` untouched
-    # otherwise.
-    pattern_modulations: list[dict[str, object]] = []
-    if pattern_verdicts and old is not None:
-        kept, verdict, pattern_modulations = _apply_pattern_verdicts_step(
-            old,
-            new,
-            kept,
-            verdict_redundant,
-            suppressed,
-            suppression,
-            policy,
-            policy_file,
-            evidence_tier,
-            verdict,
-            stage,
-            old_public_entity_ids=old_public_entity_ids,
-            new_public_entity_ids=new_public_entity_ids,
-            ledger=ledger,
-        )
+    with shared_surface_graphs():  # one graph per side for both opt-in stages
+        # ADR-027 A1/D1.2: aggregate surface-metric drift (opt-in --surface-metrics).
+        # COMPATIBLE informational roll-ups; suppressible like any finding and never
+        # breaking, so they leave the verdict unchanged unless NO_CHANGE flips to COMPATIBLE.
+        if surface_metrics and old is not None:
+            kept, verdict = _apply_surface_metrics(
+                old,
+                new,
+                kept,
+                verdict_redundant,
+                suppressed,
+                suppression,
+                policy,
+                policy_file,
+                verdict,
+                stage,
+                old_public_entity_ids=old_public_entity_ids,
+                new_public_entity_ids=new_public_entity_ids,
+                ledger=ledger,
+            )
+
+        # ADR-027 A4: pattern-aware verdict modulation. Runs after post-processing
+        # and before the (recomputed) verdict so a demotion/raise reaches both the
+        # reported findings and the exit code. Off by default (opt-in via
+        # --pattern-verdicts); a no-op that leaves `kept`/`verdict` untouched
+        # otherwise.
+        pattern_modulations: list[dict[str, object]] = []
+        if pattern_verdicts and old is not None:
+            kept, verdict, pattern_modulations = _apply_pattern_verdicts_step(
+                old,
+                new,
+                kept,
+                verdict_redundant,
+                suppressed,
+                suppression,
+                policy,
+                policy_file,
+                evidence_tier,
+                verdict,
+                stage,
+                old_public_entity_ids=old_public_entity_ids,
+                new_public_entity_ids=new_public_entity_ids,
+                ledger=ledger,
+            )
 
     # ADR-049 D9's closing half: relevance was already decided above; here we
     # (a) classify the audit ledgers -- findings that never reach `kept` but

@@ -167,7 +167,7 @@ def _name_parts(qualified: str) -> tuple[str, ...]:
     outside template arguments."""
     parts: list[str] = []
     depth = 0
-    current = ""
+    start = 0
     i = 0
     while i < len(qualified):
         ch = qualified[i]
@@ -176,13 +176,12 @@ def _name_parts(qualified: str) -> tuple[str, ...]:
         elif ch == ">":
             depth = max(depth - 1, 0)
         if depth == 0 and qualified.startswith("::", i):
-            parts.append(current)
-            current = ""
+            parts.append(qualified[start:i])
             i += 2
+            start = i
             continue
-        current += ch
         i += 1
-    parts.append(current)
+    parts.append(qualified[start:])
     return tuple(p.strip() for p in parts if p.strip())
 
 

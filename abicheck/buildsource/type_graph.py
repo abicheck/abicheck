@@ -829,10 +829,11 @@ def _resolve_type_name(
     matching = [c for c in candidates if c == lookup or c.endswith(suffix)]
     if not matching:
         return raw, RESOLUTION_UNRESOLVED
+    matching_set = set(matching)
     for k in range(len(scope), -1, -1):
         prefix = "::".join(scope[:k])
         target = f"{prefix}::{lookup}" if prefix else lookup
-        if target in matching:
+        if target in matching_set:
             return target, RESOLUTION_SCOPE
     if len(matching) == 1:
         return matching[0], RESOLUTION_UNIQUE_CANDIDATE

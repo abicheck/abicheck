@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import re
 from collections import deque
+from collections.abc import Mapping
 
 from .checker_types import SYMBOL_VERSION_ALIAS_NOT_RETAINED_MARKER, Change
 from .compare.dedup_key import hashable_value
@@ -43,7 +44,9 @@ from .diff_symbols import _public_functions
 from .finding_identity import resolve_change_identity
 from .model import AbiSnapshot, Function
 from .model.change_catalog.kinds import ChangeKind
+from .model.identity import EntityId
 from .model.name_heuristics import NameHeuristicEffect, register_name_heuristic
+from .model.qualified_name_split import split_top_level_scopes
 from .model.surface_facts import is_abi_visible
 
 # Back-compat aliases: the ADR-063 Phase 2/10 migrations moved the
@@ -589,6 +592,7 @@ def _assign_affected_symbols_to_changes(
 def _enrich_affected_symbols(
     changes: list[Change],
     old: AbiSnapshot,
+    new: AbiSnapshot | None = None,
 ) -> None:
     """For type/enum changes, find exported functions that use the affected type."""
     # Only compute if there are type-related changes
@@ -616,6 +620,11 @@ def _enrich_affected_symbols(
 
     # Also check if types are embedded in struct fields used by functions (Container has a Leaf field → functions taking Container* are affected).
     type_embeds = _build_type_embed_index(affected_types, old, matcher)
+    from .compare.type_symbol_disambiguation import attribute_scoped_types
+
+    attribute_scoped_types(
+        affected_types, old, new, old_pub, type_to_funcs, type_to_mangled, type_embeds
+    )
 
     # Compute transitive closure: if Leaf is in Container is in Wrapper,
     # functions using Wrapper are also affected by Leaf changes.
@@ -849,7 +858,18 @@ def _root_type_name(c: Change) -> str:
     ``::field`` component.  For all other changes (including namespaced
     types like ``ns::MyType``), keep the full symbol to avoid collapsing
     distinct types in the same namespace.
+
+    A finding that carries its type's own ``qualified_name`` and whose symbol
+    is that name (or that name plus ``::member``) is answered from it: a
+    field-level kind is labelled with the bare type on some paths and with
+    ``Type::field`` on others, so stripping the last component of
+    ``ns::Type`` would otherwise yield the namespace ``ns``.
     """
+    qualified = c.qualified_name
+    if qualified:
+        q_parts = split_top_level_scopes(qualified)
+        if split_top_level_scopes(c.symbol)[: len(q_parts)] == q_parts:
+            return qualified
     if "::" in c.symbol and c.kind in _FIELD_LEVEL_KINDS:
         return c.symbol.rsplit("::", 1)[0]
     return c.symbol
@@ -884,12 +904,16 @@ def _collect_root_types(changes: list[Change]) -> dict[str, Change]:
     return root_types
 
 
+def _root_pattern(name: str) -> re.Pattern[str]:
+    """The word-boundary pattern for one root type name. Deliberately not
+    memoised process-wide: a cross-comparison cache makes a second run look
+    cheaper than the first, which the call-count gates read as growth."""
+    return re.compile(r"(?<![A-Za-z0-9_])" + re.escape(name) + r"(?![A-Za-z0-9_])")
+
+
 def _compile_root_patterns(root_types: dict[str, Change]) -> dict[str, re.Pattern[str]]:
     """Pre-compile word-boundary regex patterns for each root type name."""
-    return {
-        name: re.compile(r"(?<![A-Za-z0-9_])" + re.escape(name) + r"(?![A-Za-z0-9_])")
-        for name in root_types
-    }
+    return {name: _root_pattern(name) for name in root_types}
 
 
 def _classify_root_pass(
@@ -1004,13 +1028,10 @@ def _match_root_type(
     When *compiled_patterns* is provided, uses pre-compiled regex objects
     instead of recompiling per call (performance optimisation).
     """
+    if compiled_patterns is None:
+        compiled_patterns = _compile_root_patterns(root_types)
     for type_name in root_types:
-        if compiled_patterns is not None and type_name in compiled_patterns:
-            pat = compiled_patterns[type_name]
-        else:
-            pat = re.compile(
-                r"(?<![A-Za-z0-9_])" + re.escape(type_name) + r"(?![A-Za-z0-9_])"
-            )
+        pat = compiled_patterns.get(type_name) or _root_pattern(type_name)
         if c.old_value and c.new_value:
             if pat.search(c.old_value) and pat.search(c.new_value):
                 return type_name
@@ -1157,7 +1178,7 @@ ROOT_TYPE_REFERENCE = register_name_heuristic(
         "is folded into that root change"
     ),
     matcher=_match_root_type,
-    helpers=(_compile_root_patterns,),
+    helpers=(_compile_root_patterns, _root_pattern),
 )
 OPAQUE_HANDLE_USAGE = register_name_heuristic(
     "opaque_handle_usage",
@@ -1369,7 +1390,9 @@ _OCCURRENCE_AWARE_KINDS = frozenset(
 )
 
 
-def _dedup_exact(changes: list[Change]) -> list[Change]:
+def _dedup_exact(
+    changes: list[Change], ambiguous: Mapping[EntityId, str] | None = None
+) -> list[Change]:
     """Pass 1: collapse entries with the same (kind, description, symbol,
     old_value, new_value), plus (entity_id, disambiguator) for
     :data:`_OCCURRENCE_AWARE_KINDS`.
@@ -1397,9 +1420,19 @@ def _dedup_exact(changes: list[Change]) -> list[Change]:
     **Scoped to `_OCCURRENCE_AWARE_KINDS`, not every kind** (Codex review,
     PR #1078, twenty-first round): see that constant's own docstring --
     unlike `disambiguator`, `entity_id` predates this PR and is already
-    asymmetrically populated across evidence tiers for other kinds."""
+    asymmetrically populated across evidence tiers for other kinds.
+
+    **Plus the qualified identity for a type whose bare name is ambiguous**
+    (*ambiguous*: ``type_symbol_disambiguation.AmbiguousTypeNames.by_entity``).
+    The header backends label type findings with the bare name, so two
+    namesakes in different namespaces that change identically (both
+    ``Ctx``es grow by one ``int``) render byte-identical findings, and this
+    pass dropped the second -- a lost break, not a duplicate. Keyed only for
+    those entities, so every other finding's key, and the cross-tier
+    asymmetry above, is untouched."""
     result: list[Change] = []
     seen: set[tuple[object, ...]] = set()
+    ambiguous = ambiguous or {}
     for c in changes:
         key: tuple[object, ...] = (
             c.kind.value,
@@ -1413,6 +1446,8 @@ def _dedup_exact(changes: list[Change]) -> list[Change]:
                 c.entity_id.key if c.entity_id is not None else None,
                 c.disambiguator,
             )
+        elif c.entity_id is not None and c.entity_id in ambiguous:
+            key = key + (ambiguous[c.entity_id],)
         if key in seen:
             continue
         seen.add(key)
@@ -1420,17 +1455,27 @@ def _dedup_exact(changes: list[Change]) -> list[Change]:
     return result
 
 
-def _dedup_enum_same_kind(changes: list[Change]) -> list[Change]:
+def _dedup_enum_same_kind(
+    changes: list[Change], ambiguous: Mapping[EntityId, str] | None = None
+) -> list[Change]:
     """Pass 2: for enum change kinds, keep the best entry per (kind, symbol).
 
     Prefers entries with populated ``old_value``/``new_value`` fields,
-    using longer description as tiebreaker.
+    using longer description as tiebreaker. Like :func:`_dedup_exact`, an
+    enum whose bare name is *ambiguous* is keyed by its qualified identity
+    too, so two namespaced enums sharing a bare name never collapse.
     """
-    best_enum: dict[tuple[str, str], Change] = {}
+    ambiguous = ambiguous or {}
+
+    def _key(c: Change) -> tuple[str, str, str | None]:
+        eid = c.entity_id
+        return (c.kind.value, c.symbol, ambiguous.get(eid) if eid else None)
+
+    best_enum: dict[tuple[str, str, str | None], Change] = {}
     for c in changes:
         if c.kind not in _ENUM_DEDUP_KINDS:
             continue
-        key = (c.kind.value, c.symbol)
+        key = _key(c)
         if key not in best_enum:
             best_enum[key] = c
         else:
@@ -1447,8 +1492,7 @@ def _dedup_enum_same_kind(changes: list[Change]) -> list[Change]:
     result: list[Change] = []
     for c in changes:
         if c.kind in _ENUM_DEDUP_KINDS:
-            key = (c.kind.value, c.symbol)
-            if best_enum.get(key) is not c:
+            if best_enum.get(_key(c)) is not c:
                 continue  # not the winner — drop
         result.append(c)
     return result
@@ -1554,8 +1598,11 @@ def _deduplicate_ast_dwarf(
     bridging a bare-vs-qualified spelling mismatch via *old*/*new* first
     (see :func:`_dedup_cross_kind`).
     """
-    stage1 = _dedup_exact(changes)
-    stage2 = _dedup_enum_same_kind(stage1)
+    from .compare.type_symbol_disambiguation import ambiguous_type_spellings
+
+    ambiguous = ambiguous_type_spellings(old, new).by_entity
+    stage1 = _dedup_exact(changes, ambiguous)
+    stage2 = _dedup_enum_same_kind(stage1, ambiguous)
     record_names = {**record_canonical_names(old), **record_canonical_names(new)}
     return _dedup_cross_kind(stage2, record_names)
 
@@ -1643,10 +1690,22 @@ def _deduplicate_cross_detector(
     # into `Change.qualified_name` -- bridge it here instead (a caller with
     # no `old`/`new` degrades to a missed dedup, never an incorrect one).
     if old is not None or new is not None:
+        from .compare.type_symbol_disambiguation import (
+            ambiguous_type_spellings,
+            qualified_type_label,
+        )
+
         old_enum_names = _enum_canonical_names(old)
         new_enum_names = _enum_canonical_names(new)
+        ambiguous = ambiguous_type_spellings(old, new).by_entity
         for c in changes:
             if c.kind in _ENUM_QUALIFICATION_KINDS and not c.qualified_name:
+                # The bridge below maps a bare name to *one* qualified name,
+                # so two namesake enums would share an identity and the
+                # second finding be dropped; their own entity says which.
+                if c.entity_id is not None and c.entity_id in ambiguous:
+                    c.qualified_name = qualified_type_label(c)
+                    continue
                 qual = _canonicalize_enum_symbol(
                     c.symbol, old_enum_names
                 ) or _canonicalize_enum_symbol(c.symbol, new_enum_names)

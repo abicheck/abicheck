@@ -778,9 +778,10 @@ class BundleDiffResult:
             Verdict.API_BREAK,
             Verdict.BREAKING,
         ]
+        rank = {v: i for i, v in enumerate(order)}
         worst = Verdict.NO_CHANGE
         for r in self.per_library:
-            if order.index(r.verdict) > order.index(worst):
+            if rank[r.verdict] > rank[worst]:
                 worst = r.verdict
         return worst
 

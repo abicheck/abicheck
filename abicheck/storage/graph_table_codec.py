@@ -313,6 +313,7 @@ class _Reader:
             value = flat[position + 1]
             if type(value) is list and len(value) == 1:
                 literal = value[0]
+                # perf-ok: decoding: a nested literal is copied once so entities never share it
                 out[key] = (
                     literal if type(literal) in _SCALARS else copy.deepcopy(literal)
                 )
@@ -429,6 +430,7 @@ def _decode_entities(
             rows = [fact_row(i, where) for i in entry]
         else:
             rows = [fact_row(entry, where)]
+        # perf-ok: decoding: a nested row is copied once per citing entity (flat rows are shared)
         return [
             GraphFact(
                 producer=producer,

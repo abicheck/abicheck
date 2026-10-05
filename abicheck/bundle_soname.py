@@ -137,11 +137,10 @@ def filesystem_alias_basenames(path: Path) -> tuple[str, ...]:
     ``extra_aliases`` parameter). Best-effort: an unreadable/missing path
     yields no aliases.
     """
-    aliases: list[str] = []
+    aliases: dict[str, None] = {}  # insertion-ordered set
     resolved_name = resolved_basename(path)
     if resolved_name != path.name:
-        aliases.append(resolved_name)
+        aliases[resolved_name] = None
     for alias in hard_link_alias_basenames(path):
-        if alias not in aliases:
-            aliases.append(alias)
+        aliases.setdefault(alias)
     return tuple(aliases)

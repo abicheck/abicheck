@@ -398,10 +398,11 @@ def _make_help_callback(
         panel_flags: set[str] = set()
         for panel in OPTION_GROUPS.get(f"* {command_label}", []):
             panel_flags.update(panel.get("options", ()))  # type: ignore[arg-type]
+        common_ids = {id(p) for p in common}
         recoverable_via_help_all = [
             p
             for p in original_params
-            if p not in common
+            if id(p) not in common_ids
             and (not getattr(p, "hidden", False) or set(p.opts) & panel_flags)
         ]
         hidden_count = len(recoverable_via_help_all)

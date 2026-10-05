@@ -418,6 +418,7 @@ def _snapshot_diff_result(result: DiffResult) -> DiffResult:
             value, (str, int, float, bool, bytes, Enum)
         ):
             try:
+                # perf-ok: report isolation: each mutable field is copied once
                 setattr(snapshot, name, copy.deepcopy(value))
             except TypeError:
                 pass
@@ -523,6 +524,7 @@ def _snapshot_abi_snapshot(snapshot: AbiSnapshot) -> AbiSnapshot:
         dep = copy.copy(result.dependency_info)
         for name, value in vars(dep).items():
             if isinstance(value, list):
+                # perf-ok: report isolation: each list element is copied once
                 setattr(dep, name, [copy.deepcopy(v) for v in value])
             elif isinstance(value, dict):
                 setattr(dep, name, dict(value))

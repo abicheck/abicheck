@@ -409,6 +409,7 @@ def _select_from_document_stream(
                 )
             assert doc_text is not None
             try:
+                # perf-ok: a multi-document stream: one parse per document is the work
                 doc = json.loads(doc_text)
             except json.JSONDecodeError as exc:
                 raise SnapshotError(
@@ -426,6 +427,7 @@ def _select_from_document_stream(
             # less-specific count-mismatch check below).
             assert doc_text is not None
             try:
+                # perf-ok: a multi-document stream: one parse per document is the work
                 json.loads(doc_text)
             except json.JSONDecodeError as exc:
                 raise SnapshotError(

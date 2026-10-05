@@ -192,3 +192,145 @@ def test_committed_baseline_matches_the_tree() -> None:
     sites = list(scan_tree())
     assert compare_to_baseline(sites, load_baseline()) == ([], [])
     assert site_counts(sites) == load_baseline()
+
+
+# -- exemptions --------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "src",
+    [
+        # trailing pragma with a reason
+        """
+        def f(lines):
+            for line in lines:
+                json.loads(line)  # perf-ok: JSON-lines input, one parse per record
+        """,
+        # own-line pragma covers the next statement, however it is wrapped
+        """
+        def f(lines):
+            for line in lines:
+                # perf-ok: JSON-lines input, one parse per record
+                out = json.loads(
+                    line
+                )
+        """,
+        # trailing pragma a formatter moved to a wrapped statement's last line
+        """
+        def f(lines):
+            for line in lines:
+                out = json.loads(
+                    line
+                )  # perf-ok: JSON-lines input, one parse per record
+        """,
+        # a string the loop body rebinds unconditionally each iteration
+        """
+        def f(items):
+            out = []
+            for item in items:
+                line = f"{item}"
+                if item:
+                    line += "!"
+                out.append(line)
+        """,
+        # module-scope comprehension: runs once, at import
+        """
+        PATTERNS = tuple(re.compile(k) for k in ("a", "b"))
+        """,
+    ],
+)
+def test_exempted_shapes_are_quiet(src: str) -> None:
+    assert _rules(src) == []
+
+
+@pytest.mark.parametrize(
+    ("src", "rule"),
+    [
+        # a pragma with no reason exempts nothing
+        (
+            """
+            def f(lines):
+                for line in lines:
+                    json.loads(line)  # perf-ok:
+            """,
+            "parse-or-copy-in-loop",
+        ),
+        # an own-line pragma covers only the next statement
+        (
+            """
+            def f(lines):
+                for line in lines:
+                    # perf-ok: JSON-lines input, one parse per record
+                    a = json.loads(line)
+                    b = json.loads(line)
+            """,
+            "parse-or-copy-in-loop",
+        ),
+        # rebinding only on some iterations: the string still accumulates
+        (
+            """
+            def f(text):
+                current = ""
+                for ch in text:
+                    if ch == ":":
+                        current = ""
+                    current += ch
+            """,
+            "str-concat-in-loop",
+        ),
+        # rebinding in an *outer* loop: the inner loop accumulates
+        (
+            """
+            def f(rows):
+                for row in rows:
+                    line = ""
+                    for cell in row:
+                        line += cell
+            """,
+            "str-concat-in-loop",
+        ),
+        # pragma-like text inside a string literal is data, not a pragma
+        (
+            """
+            def f(lines):
+                for line in lines:
+                    json.loads(line + "# perf-ok: expected parsing work")
+            """,
+            "parse-or-copy-in-loop",
+        ),
+        # an own-line pragma does not reach past a blank line
+        (
+            """
+            def f(lines):
+                for line in lines:
+                    # perf-ok: JSON-lines input, one parse per record
+
+                    json.loads(line)
+            """,
+            "parse-or-copy-in-loop",
+        ),
+        # a reset a `continue` can bypass does not make the string fresh
+        (
+            """
+            def f(items):
+                s = ""
+                for x in items:
+                    if x:
+                        s += x
+                        continue
+                    s = ""
+            """,
+            "str-concat-in-loop",
+        ),
+        # a comprehension inside a function runs per call
+        (
+            """
+            def f(names):
+                return [re.compile(n) for n in names]
+            """,
+            "regex-compile-in-loop",
+        ),
+    ],
+)
+def test_exemptions_are_narrow(src: str, rule: str) -> None:
+    assert _rules(src) == [rule]

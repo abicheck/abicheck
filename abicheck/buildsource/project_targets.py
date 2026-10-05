@@ -1707,6 +1707,7 @@ def _bundle_issues(config: ProjectTargetsConfig, bundle: BundleSpec) -> list[str
                 f"{referenced.bundle!r}, not {bundle.id!r} — a target's own "
                 "bundle: field and its membership here must agree."
             )
+    bundle_depths = sorted(BUNDLE_CHECK_DEPTHS)
     for i, check in enumerate(bundle.checks):
         if check.depth not in BUNDLE_CHECK_DEPTHS and check.depth in CHECK_DEPTHS:
             # A depth outside CHECK_DEPTHS entirely is already reported by
@@ -1715,7 +1716,7 @@ def _bundle_issues(config: ProjectTargetsConfig, bundle: BundleSpec) -> list[str
             issues.append(
                 f"bundle {bundle.id!r}.checks[{i}]: depth {check.depth!r} is not "
                 f"supported for a bundle check -- use one of "
-                f"{sorted(BUNDLE_CHECK_DEPTHS)} (actions/check-target/"
+                f"{bundle_depths} (actions/check-target/"
                 "validate-inputs.sh rejects build/source for kind: bundle, "
                 "which always compares directories)."
             )

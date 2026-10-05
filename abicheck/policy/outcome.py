@@ -660,7 +660,7 @@ def worst_real_verdict(candidates: Iterable[object]) -> Verdict | None:
     (below) and legacy-release-backfill callers instead of each re-deriving
     "worst real verdict, sentinels excluded".
     """
-    order = list(Verdict)
+    rank_of = {v: i for i, v in enumerate(Verdict)}
     worst: Verdict | None = None
     worst_rank = -1
     for c in candidates:
@@ -670,7 +670,7 @@ def worst_real_verdict(candidates: Iterable[object]) -> Verdict | None:
             v = Verdict(c)
         except ValueError:
             continue
-        rank = order.index(v)
+        rank = rank_of[v]
         if rank >= worst_rank:
             worst_rank = rank
             worst = v

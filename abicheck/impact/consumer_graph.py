@@ -239,8 +239,10 @@ def join_consumer_graph(
     """
     joined = copy.deepcopy(library_graph)
     for node in consumer.nodes:
+        # perf-ok: the joined graph must own copies of the consumer's nodes
         joined.add_node(copy.deepcopy(node))
     for edge in consumer.edges:
+        # perf-ok: the joined graph must own copies of the consumer's edges
         joined.add_edge(copy.deepcopy(edge))
     return joined
 

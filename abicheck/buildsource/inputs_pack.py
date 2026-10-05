@@ -420,6 +420,7 @@ def _parse_tu_records(
         if not line:
             continue
         try:
+            # perf-ok: JSON-lines input: one parse per record is the work
             obj = json.loads(line)
         except ValueError as exc:
             diagnostics.append(
@@ -531,7 +532,8 @@ def read_source_facts(
     if not prior_files:
         return read_source_fact_files(files, diagnostics=sink)
 
-    fresh_files = [f for f in files if f not in prior_files]
+    prior_set = set(prior_files)
+    fresh_files = [f for f in files if f not in prior_set]
     # A fresh file that fails to read/parse degrades to a diagnostic (Codex
     # review above) rather than aborting, but its tu_id is then unknown --
     # meaning fresh_ids cannot be trusted to be *complete*. If some prior

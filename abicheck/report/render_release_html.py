@@ -137,18 +137,16 @@ def _members(d: Mapping[str, Any]) -> str:
         if rows
         else "<p class='rel-note'>No member reached a completed comparison.</p>"
     )
-    unmatched = ""
-    for key, label in (
-        ("unmatched_old", "Only in OLD"),
-        ("unmatched_new", "Only in NEW"),
-    ):
-        names = d.get(key) or ()
-        if names:
-            unmatched += (
-                f"<p class='rel-note'><strong>{label}:</strong> "
-                + ", ".join(f"<code>{_h(n)}</code>" for n in names)
-                + "</p>"
-            )
+    unmatched = "".join(
+        f"<p class='rel-note'><strong>{label}:</strong> "
+        + ", ".join(f"<code>{_h(n)}</code>" for n in names)
+        + "</p>"
+        for key, label in (
+            ("unmatched_old", "Only in OLD"),
+            ("unmatched_new", "Only in NEW"),
+        )
+        if (names := d.get(key) or ())
+    )
     return f"<div class='section' id='members'><h3>Members ({len(rows)} compared)</h3>{body}{unmatched}</div>"
 
 

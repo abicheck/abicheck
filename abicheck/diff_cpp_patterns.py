@@ -61,7 +61,7 @@ from .compare.naming_conventions import (  # noqa: F401 -- re-exported
 )
 from .compare.record_qualified_name import qualify_record_name
 from .compare.template_surface import (
-    qualified_declaration_name as _qualified_function_name,
+    qualified_name_lookup,
     reconciled_abi_visible_functions,
     strip_template_args as _callable_stem,  # noqa: F401
 )
@@ -704,7 +704,7 @@ def detect_default_template_arg_changed(
     up to the differing arg) matches and the function unqualified name
     matches one-for-one.
 
-    Uses :func:`_qualified_function_name` (demangles when ``Function.name``
+    Uses :func:`~abicheck.compare.template_surface.qualified_name_lookup` (demangles when ``Function.name``
     itself carries no template args) rather than the raw ``name`` field: the
     header/castxml backend populates ``.name`` from the bare AST method name
     only, so a real templated method name (e.g. ``dimension``) never shows
@@ -730,19 +730,21 @@ def detect_default_template_arg_changed(
     # positives — only different instantiations of the SAME callable get
     # paired.
     added_by_entity: dict[str, list[Function]] = defaultdict(list)
+    old_name_of = qualified_name_lookup(old)
+    new_name_of = qualified_name_lookup(new)
     for fn in new_funcs:
-        qname = _qualified_function_name(fn.name, fn.mangled)
+        qname = new_name_of(fn)
         added_by_entity[_callable_stem(qname)].append(fn)
     findings: list[Change] = []
     seen_pairs: set[tuple[str, str]] = set()
     for fn in removed:
-        old_qname = _qualified_function_name(fn.name, fn.mangled)
+        old_qname = old_name_of(fn)
         old_args = _extract_template_args(old_qname)
         if old_args is None:
             continue
         entity = _callable_stem(old_qname)
         for cand in added_by_entity.get(entity, []):
-            new_qname = _qualified_function_name(cand.name, cand.mangled)
+            new_qname = new_name_of(cand)
             new_args = _extract_template_args(new_qname)
             if new_args is None or new_args == old_args:
                 continue

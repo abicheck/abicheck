@@ -580,6 +580,7 @@ def read_bundle_facts_archive(
                 # A deep enough value can still blow deepcopy's own
                 # recursion budget even after snapshot_from_dict() succeeds.
                 try:
+                    # perf-ok: each library gets its own copy of a cached snapshot, once
                     per_library_snapshots[name] = copy.deepcopy(cached_snapshot)
                 except RecursionError as exc:
                     raise SnapshotError(

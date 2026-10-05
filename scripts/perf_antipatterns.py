@@ -57,17 +57,33 @@ count is a warning to shrink it (the debt went down). Re-record with
 ``python scripts/perf_antipatterns.py --write-baseline``. Registered in
 ``check_ai_readiness.py`` as ``perf-antipatterns``.
 
-A rule is a heuristic, not proof: a list that stays tiny is harmless. When
-a new site is genuinely fine, record it in the baseline in the same PR and
-say why.
+A rule is a heuristic, not proof: a list that stays tiny is harmless, and
+some shapes are the work itself (parsing a JSON-lines file record by record,
+``deepcopy`` inside ``__deepcopy__``). Such a site is exempted where it
+stands, with its reason: a ``# perf-ok: <reason>`` comment trailing the
+flagged statement, or on its own line directly above it. A pragma with no
+reason text does not exempt anything. Prefer that to a baseline entry -- the reason then lives
+next to the code it excuses and moves with it; the baseline is for debt
+nobody has triaged yet.
+
+Two shapes are not flagged at all, because neither repeats work per call:
+
+* ``s += ...`` on a string the same loop body rebinds unconditionally (a
+  top-level ``s = ...`` statement of that body) -- each iteration builds a
+  fresh, bounded string; nothing accumulates across iterations;
+* anything in a comprehension evaluated at module or class scope outside
+  every statement loop -- it runs once, at import.
 """
 
 from __future__ import annotations
 
 import argparse
 import ast
+import io
 import json
+import re
 import sys
+import tokenize
 from collections import Counter
 from collections.abc import Iterator
 from dataclasses import dataclass
@@ -286,6 +302,77 @@ def _rebound_in(body: list[ast.stmt]) -> set[str]:
     return out
 
 
+def _fresh_each_iteration(body: list[ast.stmt]) -> dict[str, int]:
+    """Names a top-level statement of *body* rebinds on every iteration,
+    mapped to the line of the *first* such rebinding.
+
+    Only a rebinding that comes *before* a concatenation makes that
+    concatenation fresh: top-level statements run in order, so every path
+    reaching a later ``+=`` passed through it, while a ``continue`` taken
+    before a later reset would carry the string into the next iteration.
+    """
+    out: dict[str, int] = {}
+    for stmt in body:
+        names: list[str] = []
+        if isinstance(stmt, ast.Assign) and not _grows_itself(stmt):
+            names = [t.id for t in stmt.targets if isinstance(t, ast.Name)]
+        elif isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name):
+            if stmt.value is not None:
+                names = [stmt.target.id]
+        for name in names:
+            out.setdefault(name, stmt.lineno)
+    return out
+
+
+#: ``# perf-ok: <reason>`` -- the reason must say something.
+_PRAGMA = re.compile(r"#\s*perf-ok:\s*\S.{3,}")
+
+
+def _exempted_lines(source: str, tree: ast.AST) -> set[int]:
+    """Line numbers a ``# perf-ok:`` pragma covers.
+
+    A pragma trailing code covers the innermost statement whose lines
+    contain it (a formatter may move it to a wrapped statement's last line);
+    a pragma on a comment line of its own covers the next statement.
+    """
+    pragmas: list[tuple[int, bool]] = []
+    lines = source.splitlines()
+    try:
+        tokens = list(tokenize.generate_tokens(io.StringIO(source).readline))
+    except (tokenize.TokenError, SyntaxError):
+        tokens = []
+    for tok in tokens:
+        # Comment tokens only: pragma-like text inside a string literal is
+        # data, not an exemption.
+        if tok.type == tokenize.COMMENT and _PRAGMA.search(tok.string):
+            lineno = tok.start[0]
+            own_line = lines[lineno - 1].lstrip().startswith("#")
+            pragmas.append((lineno, own_line))
+    if not pragmas:
+        return set()
+    spans = sorted(
+        (node.lineno, node.end_lineno or node.lineno)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.stmt)
+    )
+    out: set[int] = set()
+    for lineno, own_line in pragmas:
+        if own_line:
+            # The statement directly below, past nothing but further comment
+            # lines -- never a later statement across blank lines or code.
+            nxt = lineno + 1
+            while nxt <= len(lines) and lines[nxt - 1].lstrip().startswith("#"):
+                nxt += 1
+            starting = [span for span in spans if span[0] == nxt]
+            span = max(starting, key=lambda sp: sp[1] - sp[0]) if starting else None
+        else:
+            containing = [sp for sp in spans if sp[0] <= lineno <= sp[1]]
+            span = min(containing, key=lambda sp: sp[1] - sp[0]) if containing else None
+        if span is not None:
+            out.update(range(span[0], span[1] + 1))
+    return out
+
+
 class _Visitor(ast.NodeVisitor):
     def __init__(self, path: str) -> None:
         self.path = path
@@ -303,6 +390,13 @@ class _Visitor(ast.NodeVisitor):
         # Inside a ``raise``: an error path runs at most once, so nothing in
         # it can repeat per iteration (``sorted(ALLOWED_KEYS)`` in a message).
         self.raise_depth = 0
+        # Per enclosing loop: names a top-level statement of its body rebinds
+        # every iteration (empty for a comprehension).
+        self.fresh: list[dict[str, int]] = []
+        # Function bodies and statement loops entered; with both at zero a
+        # comprehension runs once, at import.
+        self.function_depth = 0
+        self.stmt_loop_depth = 0
         self.sites: list[Site] = []
 
     # -- scopes ---------------------------------------------------------
@@ -314,7 +408,9 @@ class _Visitor(ast.NodeVisitor):
             self.loop_depth,
             0,
         )  # a nested def runs when called, not per iteration
+        self.function_depth += 1
         self.generic_visit(node)
+        self.function_depth -= 1
         self.loop_depth = saved
         self.list_names.pop()
         self.str_names.pop()
@@ -336,12 +432,16 @@ class _Visitor(ast.NodeVisitor):
             self.visit(node.iter)  # evaluated once
             self.visit(node.target)
         self.loop_depth += 1
+        self.stmt_loop_depth += 1
         self.rebound.append(_rebound_in(node.body))
+        self.fresh.append(_fresh_each_iteration(node.body))
         self.varying.append(_varying_in(node))
         for stmt in [*node.body, *node.orelse]:
             self.visit(stmt)
         self.varying.pop()
+        self.fresh.pop()
         self.rebound.pop()
+        self.stmt_loop_depth -= 1
         self.loop_depth -= 1
 
     visit_For = _loop
@@ -355,6 +455,7 @@ class _Visitor(ast.NodeVisitor):
         self.visit(first.iter)  # the outermost iterable is evaluated once
         self.loop_depth += 1
         self.varying.append(None)
+        self.fresh.append({})
         self.visit(first.target)
         for cond in first.ifs:
             self.visit(cond)
@@ -365,6 +466,7 @@ class _Visitor(ast.NodeVisitor):
             self.visit(node.value)
         else:
             self.visit(node.elt)
+        self.fresh.pop()
         self.varying.pop()
         self.loop_depth -= 1
 
@@ -382,6 +484,8 @@ class _Visitor(ast.NodeVisitor):
     def _hit(self, node: ast.AST, rule: str) -> None:
         if self.raise_depth:
             return
+        if not self.function_depth and not self.stmt_loop_depth:
+            return  # a module/class-scope comprehension: runs once, at import
         self.sites.append(
             Site(
                 self.path,
@@ -460,6 +564,10 @@ class _Visitor(ast.NodeVisitor):
             and isinstance(node.op, ast.Add)
             and isinstance(node.target, ast.Name)
             and node.target.id in self.str_names[-1]
+            and not (
+                self.fresh
+                and self.fresh[-1].get(node.target.id, node.lineno) < node.lineno
+            )
         ):
             self._hit(node, "str-concat-in-loop")
         self.generic_visit(node)
@@ -474,8 +582,10 @@ class _Visitor(ast.NodeVisitor):
 
 def scan_source(source: str, path: str) -> list[Site]:
     visitor = _Visitor(path)
-    visitor.visit(ast.parse(source, filename=path))
-    return visitor.sites
+    tree = ast.parse(source, filename=path)
+    visitor.visit(tree)
+    exempt = _exempted_lines(source, tree)
+    return [site for site in visitor.sites if site.line not in exempt]
 
 
 def scan_tree(root: Path = PACKAGE) -> Iterator[Site]:

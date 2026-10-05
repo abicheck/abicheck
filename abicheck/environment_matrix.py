@@ -622,8 +622,10 @@ class EnvironmentMatrix:
             value = getattr(self, f.name)
             copied: Any
             if isinstance(value, FrozenStrDict):
+                # perf-ok: this is __deepcopy__: one copy per field is the contract
                 copied = FrozenStrDict(copy.deepcopy(dict(value), memo))
             else:
+                # perf-ok: this is __deepcopy__: one copy per field is the contract
                 copied = copy.deepcopy(value, memo)
             object.__setattr__(new, f.name, copied)
         return new

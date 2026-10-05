@@ -862,13 +862,12 @@ def _default_archive_search_roots(merged: BuildEvidence) -> tuple[Path, ...]:
     with no absolute-path-carrying target graph to lean on instead); every
     other adapter's own ``LinkUnit.inputs``/``output`` are already absolute.
     """
-    roots: list[Path] = []
-    for cu in merged.compile_units:
-        if cu.directory and Path(cu.directory) not in roots:
-            roots.append(Path(cu.directory))
-    for link in merged.link_units:
-        if link.directory and Path(link.directory) not in roots:
-            roots.append(Path(link.directory))
+    roots: dict[Path, None] = {}  # insertion-ordered set
+    directories = [cu.directory for cu in merged.compile_units]
+    directories += [link.directory for link in merged.link_units]
+    for directory in directories:
+        if directory:
+            roots.setdefault(Path(directory))
     return tuple(roots)
 
 
