@@ -168,3 +168,16 @@ def test_a_root_the_config_states_stays_project_relative(tmp_path: Path) -> None
     (project / "cfgpub").mkdir(parents=True)
     rules = _recorded(project, "config_public_dir", [project / "cfgpub"])
     assert rules.target_roots == ("cfgpub",)
+
+
+def test_a_config_root_and_an_operand_root_never_share_a_label(tmp_path: Path) -> None:
+    """The config states the project directory itself; the operand names one
+    other tree. Both would read "." -- they must stay two rules."""
+    project = tmp_path / "project"
+    project.mkdir()
+    cfg = SimpleNamespace(ownership=None, public_header_dirs=(".",))
+    (operand,) = _tree(tmp_path / "elsewhere", ("include",))
+    request = ownership_request_from_config(cfg, project)
+    rules = recorded_rules(with_target_roots(request, [operand], ()))
+    assert len(set(rules.target_roots)) == 2, rules.target_roots
+    assert "." in rules.target_roots

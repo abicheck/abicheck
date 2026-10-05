@@ -686,7 +686,6 @@ REPORT_BUG_CLASSES: tuple[BugClass, ...] = (
         ),
         fixed_by=(1492,),
         seed_tests=("tests/test_export_existence_reconciliation.py",),
-        public_surfaces=("python-api",),
         axes={"presence": ("old", "new", "both", "none")},
     ),
     BugClass(

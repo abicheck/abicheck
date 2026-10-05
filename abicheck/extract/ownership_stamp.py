@@ -72,9 +72,22 @@ def recorded_rules(request: OwnershipRequest) -> OwnershipRules:
     anchor = request.operand_anchor
     operand = {os.path.normpath(os.path.abspath(r)) for r in request.operand_roots}
 
+    # When the config states target roots of its own, an operand root's
+    # anchor-relative label could equal a config root's project-relative one
+    # (both "." for the project directory and a lone operand root), and the
+    # canonical rule set would drop one. Mark operand labels then; with no
+    # config-stated root there is nothing to collide with, and the recorded
+    # form stays exactly the unconfigured one.
+    stated = any(
+        os.path.normpath(os.path.abspath(r)) not in operand for r in rules.target_roots
+    )
+
     def target(r: str) -> str:
         if anchor is not None and os.path.normpath(os.path.abspath(r)) in operand:
-            return _record_root(r, anchor)
+            label = _record_root(r, anchor)
+            if stated:
+                return "@operand" if label == "." else f"@operand/{label}"
+            return label
         return _record_root(r, root)
 
     return OwnershipRules(

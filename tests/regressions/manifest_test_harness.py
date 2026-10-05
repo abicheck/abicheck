@@ -366,6 +366,6 @@ TEST_HARNESS_BUG_CLASSES: tuple[BugClass, ...] = (
         ),
         fixed_by=(1492,),
         seed_tests=("tests/test_l4_perf.py",),
-        axes={"cpus": ("1", "32", "33", "224", "1024")},
+        axes={"cpus": ("1", "2", "4", "8", "16", "32", "33", "64", "224", "1024")},
     ),
 )
