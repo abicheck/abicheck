@@ -133,13 +133,13 @@ def sycl_host_replay_jobs(
         if tok.startswith(("-fsycl-int-header=", "-fsycl-int-footer="))
     }
 
+    def relocate_token(token: str) -> str:
+        for temp_dir in temp_dirs:
+            token = token.replace(temp_dir, str(scratch))
+        return token
+
     def relocate(job: list[str]) -> list[str]:
-        out = []
-        for tok in job:
-            for d in temp_dirs:
-                tok = tok.replace(d, str(scratch))
-            out.append(tok)
-        return out
+        return [relocate_token(tok) for tok in job]
 
     return (
         [t for t in relocate(device) if t != "-ast-dump=json"],
