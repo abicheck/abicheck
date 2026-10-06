@@ -372,6 +372,7 @@ ENVIRONMENT_CELLS: tuple[str, ...] = (
     "abicheck.workflows.aggregate.reconcile:resolve_cross_abi_identity",
     "abicheck.compare.template_surface:alias_identity",
     "abicheck.compare.template_surface:cpo_identity",
+    "abicheck.extract.ownership_stamp:recorded_rules",
 )
 
 

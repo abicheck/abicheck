@@ -173,6 +173,7 @@ _F1 = (
     "evidence.optional_layer_prerequisite_for_a_stated_fact",
 )
 _F2 = (
+    "report.cross_producer_disagreement_on_one_symbol",
     "serialization.persisted_field_not_decoded",
     "cardinality.member_request_drops_scalar_field",
     "config.front_end_default_divergence",
@@ -199,6 +200,7 @@ _F2 = (
     "evidence.compare_dump_inline_routing_parity",
 )
 _F3 = (
+    "config.location_dependent_fingerprint",
     "extract.aggregate_layout_header_attribution",
     "identity.environment_taint",
     "identity.name_and_referent_compared_as_one",
@@ -282,6 +284,7 @@ _F7 = (
     "tests.dead_harness_reads_as_a_passing_control",
     "tests.fixture_fabricates_a_state_the_types_forbid",
     "tests.locale_dependent_repo_text_read",
+    "tests.host_dependent_expectation",
 )
 #: id -> reason it belongs to no shared family.
 OTHER_REASONS: dict[str, str] = {

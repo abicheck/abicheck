@@ -275,6 +275,48 @@ def test_cell_read_elf_identity(tmp_path: Path) -> None:
     assert read_elf_identity(tmp_path / "not_elf") is None
 
 
+def test_cell_recorded_rules(tmp_path: Path) -> None:
+    """Manifest class ``config.location_dependent_fingerprint`` (#1492): the
+    ownership rules a side records are a function of its header tree's
+    *relative* layout, never of where the tree sits. The same layout under
+    the project, nested deeper, outside it, behind a symlinked root or under
+    a directory with a space records one rule set; a different layout does
+    not (negative control)."""
+    from types import SimpleNamespace
+
+    from abicheck.extract.ownership_stamp import recorded_rules
+    from abicheck.workflows.ownership_request import (
+        ownership_request_from_config,
+        with_target_roots,
+    )
+
+    project = tmp_path / "project"
+    project.mkdir()
+    config = SimpleNamespace(ownership=None, public_header_dirs=())
+    layout = ("include", "include/oneapi/ccl")
+
+    def record(base: Path, rels: tuple[str, ...] = layout) -> object:
+        roots = [base / r for r in rels]
+        for r in roots:
+            r.mkdir(parents=True, exist_ok=True)
+        request = ownership_request_from_config(config, project)
+        return recorded_rules(with_target_roots(request, roots, ()))
+
+    reference = record(project / "inst-2021.14")
+    link = tmp_path / "link"
+    link.symlink_to(project / "inst-2021.14", target_is_directory=True)
+    spellings = {
+        "sibling release": project / "inst-2021.15",
+        "nested deeper": project / "nested" / "deeper" / "v2",
+        "outside the project": tmp_path / "outside" / "release",
+        "space in path": tmp_path / "my checkout" / "release b",
+        "symlinked root": link,
+    }
+    for name, base in spellings.items():
+        assert record(base) == reference, name
+    assert record(project / "flat", ("include",)) != reference
+
+
 def test_cell_build_side_identity(tmp_path: Path) -> None:
     """A release side's acquisition key names *which* files are parsed, so
     it is spelling-invariant over one tree (``./``, ``..``, a symlinked
