@@ -1,0 +1,1 @@
+Adapted from https://github.com/mattpocock/skills (`skills/engineering/diagnosing-bugs`, MIT License, Copyright (c) 2026 Matt Pocock). The "In this repository" section and the codebase-reading pointer are local.

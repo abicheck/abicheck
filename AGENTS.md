@@ -231,6 +231,8 @@ Follow the pointer whose trigger matches your task:
 | [`tests/regressions/manifest.py`](tests/regressions/manifest.py) | writing a regression test — reuse a matching `BugClass` first |
 | [`docs/contribute/adr/index.md`](docs/contribute/adr/index.md) | a change touches a default, schema, exit code or public interface |
 
+**Repository skills** (`.claude/skills/`): `diagnosing-bugs` (load for a bug report, failing behavior or perf regression), `writing-for-agents` (load before editing any `AGENTS.md`/`CLAUDE.md`/skill), and the user-invoked `/handoff` and `/retro`.
+
 ## Key types
 
 - `AbiSnapshot` (`model/snapshot.py`) — serializable snapshot of a library's ABI surface
