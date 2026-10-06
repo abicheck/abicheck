@@ -127,40 +127,6 @@ contract and temporary no-growth inventory live in `architecture/`; run
 `python scripts/check_architecture.py` for the focused gate. See
 [ADR-061](docs/contribute/adr/061-responsibility-package-architecture.md).
 
-## Task routing and dependency direction
-
-ADR-061 makes these responsibility owners authoritative for new code. During
-the incremental migration, route new behavior to the target owner rather than
-extending a flat root prefix family.
-
-| Change | Owner |
-|---|---|
-| Read a binary, debug, header, build, or source fact | `extract/` |
-| Add an ABI entity/value shared across stages | `model/` |
-| Match old/new entities or identify a raw change | `compare/` |
-| Decide relevance, suppression, classification, severity, or gating | `policy/` |
-| Coordinate dump, compare, scan, release, aggregate, project, or dependency behavior | `workflows/` |
-| Serialize snapshots/baselines, own their schemas/migrations, or manage caches | `storage/` |
-| Add a report field, report schema, or output format | `report/` |
-| Add a CLI flag, Python adapter, or ABICC translation | `frontends/` |
-
-Imports point inward: `storage -> model`; `extract -> model, storage`;
-`compare -> model`; `policy -> model, compare`; `workflows -> model, storage,
-extract, compare, policy`; `report -> model, compare, policy, workflows`; and
-`frontends -> model, workflows, report`. New internal code imports canonical
-implementation modules, never legacy `cli`/`service` facades. A
-delegation-only facade preserving a historical import path is **not** a
-durable outcome pre-1.0: twelve of them were deleted outright rather than
-kept (ADR-061's 2026-09-13 amendment), so retire the old path and name its
-owner in a changelog fragment instead of adding a re-export. The exception
-is a facade that exists for a real dependency-direction constraint rather
-than compatibility -- `checker_policy`/`contract_gating`/`reclassify`,
-which `model`-owned `checker_types.py` imports because `model` cannot
-depend on `policy`. The executable
-contract and temporary no-growth inventory live in `architecture/`; run
-`python scripts/check_architecture.py` for the focused gate. See
-[ADR-061](docs/contribute/adr/061-responsibility-package-architecture.md).
-
 ## Quick reference
 
 ```bash
