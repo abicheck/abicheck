@@ -1,0 +1,1 @@
+Adapted from https://github.com/mattpocock/skills (`skills/engineering/retro`, MIT License, Copyright (c) 2026 Matt Pocock). The multi-session/cloud source collection, the measurement step and the repository map are local.

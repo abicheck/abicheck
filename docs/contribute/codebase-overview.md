@@ -6,6 +6,12 @@ findings from the original 2026-03 review have been retired from this page; open
 work now lives in [Backlog](backlog.md), [Use-Case Coverage Evaluation](usecase-coverage-evaluation.md),
 and the [implementation plans](plans/index.md).
 
+> **Agent guide.** Reference disclosed out of the root `AGENTS.md` for coding agents:
+> [module map](agent-guide/module-map.md), [quality gates](agent-guide/quality-gates.md),
+> [performance investigation](agent-guide/performance.md),
+> [CLI commands and exit codes](agent-guide/cli-and-exit-codes.md),
+> [decision principles](agent-guide/decision-principles.md).
+
 > **Working documents.** The roadmap artifacts linked above — the backlog, the
 > per-goal implementation plans (`development/plans/`), the coverage/scenario
 > audits, and archived status notes — live in the repository but are kept out of
