@@ -7,9 +7,11 @@
 Entry points:
 - `abicheck/cli.py` — Click CLI **root only**: the root group, its
   `--version`/SIGTERM wiring, and the side-effect registration imports.
-  ~120 lines, no product logic — ADR-061 Phase 4 moved every command body,
-  shared runtime helper, and process-exit decision to
-  `abicheck/frontends/cli/`. Add a command there, not here. It carried a
+  ~120 lines, no product logic — ADR-061 Phase 4 moved shared runtime
+  helpers and process-exit decisions to `abicheck/frontends/cli/`. Command
+  callbacks live in their owning modules (`abicheck/frontends/cli/`, plus
+  sibling `abicheck/cli_aggregate.py`, `cli_project.py`, `cli_stack.py`).
+  Add a command to its owner, not here. It carried a
   lazy `__getattr__` alias table (`frontends/cli/moved.py`) keeping ~80
   private helpers importable from `abicheck.cli` after they moved; every
   caller now imports from the owner, so the table, the resolver and the

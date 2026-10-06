@@ -16,12 +16,11 @@
   triggered it. Trace it to its root cause, and implement a generalized
   fix — one that closes the whole class of failure, not just the observed
   case — plus generalized tests that state the underlying primitive's or
-  detector's contract as invariants (property-style tests, per this
-  file's own "Primitive-level property tests" guidance below), not only a
+  detector's contract as invariants (property-style tests, per the
+  "Primitive-level property tests" guidance in [quality-gates.md](quality-gates.md)), not only a
   regression test pinned to the original repro — a fixed-example test only
   forecloses the one input it names. If a genuinely general fix isn't
-  feasible in one pass, say so explicitly and record the gap (see "Known
-  gaps" below) rather than quietly shipping a narrow patch as if it were
+  feasible in one pass, say so explicitly and record the gap (see [known-gaps.md](../known-gaps.md)) rather than quietly shipping a narrow patch as if it were
   the complete fix.
 - **A bug fix's regression test targets the bug *class*, not the one
   reported input.** This sharpens the previous bullet into a concrete,

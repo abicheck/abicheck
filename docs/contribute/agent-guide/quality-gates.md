@@ -337,15 +337,15 @@ gate Linux-scoped — **do not lower the global 95% floor** to make another plat
 
 ## `scripts/verify.py` — full contract (M0-3)
 
-The four commands above are the everyday inner loop, but they are **not**
+The `fast` profile is the everyday inner loop, but it is **not**
 the definition of "ready for PR" — the canonical CI unit lane runs golden
-tests and enforces a 95% coverage floor that the fast command above
+tests and enforces a 95% coverage floor that the `fast` profile
 deliberately skips. `scripts/verify.py` is the single executable
 orchestrator every consumer (pixi, pre-commit, CI, this file) calls through,
 so the local and CI definitions of done cannot silently diverge again:
 
 ```bash
-python scripts/verify.py --profile fast   # the four commands above, bundled
+python scripts/verify.py --profile fast   # everyday inner loop (lint, format, mypy, fast unit tests)
 python scripts/verify.py --profile pr     # exact CI-equivalent PR gate (incl. golden + coverage floor + ai-readiness)
 python scripts/verify.py --profile full   # + external-tool/parity/performance lanes, skipped where the environment lacks the tool
 
@@ -355,7 +355,7 @@ python scripts/verify.py --profile pr --json receipt.json     # machine-readable
 ```
 
 **Before opening a PR, run `--profile pr` (or `pixi run check`, which calls
-the identical command) — not just the fast command above.**
+the identical command) — not just the `fast` profile.**
 `tests/test_verify_profiles.py` asserts that `pixi run check`,
 `.pre-commit-config.yaml`, and `.github/workflows/ci.yml` all route through
 `scripts/verify.py`'s step catalog rather than keeping independent copies of

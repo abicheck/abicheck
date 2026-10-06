@@ -12,7 +12,7 @@ The user has asked for a **retrospective**. You are suggesting improvements to t
 1. Call the Skill tool with `writing-for-agents` for the writing style guide.
 
 2. **Collect the primary sources** for the session(s) the user named. Default to the current session if none is named. Read the transcript itself, not a summary, and note each session's id so findings can cite it.
-   - **Current session**: your own context.
+   - **Current session**: your own context, only if it still holds the full transcript (a compacted context is a summary). Otherwise retrieve the transcript (`list_events` with `get_session`'s id) or list the session as unreadable with the reason.
    - **Other cloud sessions** (claude.ai/code): use the `claude-code-remote` MCP tools. `list_sessions` (with `mine: true`) finds them, `get_session` gives status and model, and `list_events` with `kinds: ["user", "assistant", "result"]` gives the conversation without stream noise. Page with `before_id`/`after_id` until `has_more` is false.
    - **Linked PRs**: review threads, CI failures and fix-up commits on the session's PR (GitHub MCP tools) show what slipped through.
    - **Local sessions**: transcripts under `~/.claude/projects/<project-dir>/*.jsonl`.

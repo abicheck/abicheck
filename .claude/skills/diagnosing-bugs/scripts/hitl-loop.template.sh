@@ -35,7 +35,7 @@ step "Open the app at http://localhost:3000 and sign in."
 
 capture ERRORED "Click the 'Export' button. Did it throw an error? (y/n)"
 
-capture ERROR_MSG "Paste the error message (or 'none'):"
+capture ERROR_MSG "Paste a redacted excerpt of the error (only the diagnostic lines; replace tokens/secrets with <REDACTED>), or 'none':"
 
 # --- edit above ---------------------------------------------------------
 

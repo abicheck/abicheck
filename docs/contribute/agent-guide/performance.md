@@ -18,7 +18,7 @@ you touch a hot path, when a gate fails, or when a user reports "slow".**
 
 Manual-only investigation tools (never gates):
 
-- **Missed memoization:** `python scripts/audit_repeated_calls.py --mode {default,contract,patterns_and_metrics} --n 200 --top 30`
+- **Missed memoization:** `python scripts/audit_repeated_calls.py --mode <mode> --n 200 --top 30`, once per mode (`default`, `contract`, `patterns_and_metrics`)
   lists functions called repeatedly with the *same* arguments inside one
   `compare()`. Read it with judgement: a cheap string helper hit 400 times on
   `"int"` is the synthetic workload's repetitiveness, not waste; a
