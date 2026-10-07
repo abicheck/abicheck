@@ -252,6 +252,7 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
         seed_tests=(
             "tests/test_dump_extraction_scope.py",
             "tests/test_dependency_exclusion_scope.py",
+            "tests/test_family_f2_route_parity.py",
         ),
         public_surfaces=("python-api",),
         axes={

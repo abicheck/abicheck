@@ -887,3 +887,72 @@ def test_stored_snapshot_keeps_dependency_origin_findings(
     leaked = {s for k, s in live if k == "symbol_leaked_from_dependency_changed"}
     expected = {s for s, o in (("gone", old_origin), ("added", new_origin)) if o}
     assert leaked == expected
+
+
+# --------------------------------------------------------------------------
+# Hybrid dump routes: `service.run_dump` and `dumper.dump` legs see one scope
+# --------------------------------------------------------------------------
+
+
+def test_hybrid_dump_routes_parse_their_legs_alike(tmp_path: Path) -> None:
+    """Bug class ``extraction.recorded_scope_matches_parse_skip``: the CLI's
+    hybrid route (``service.run_dump``) and ``dumper.dump``'s hybrid route
+    must hand their two backend legs the same parse-time state under the same
+    scoped request. The CLI route once kept the enclosing dependency skip
+    that ``dumper.dump``'s route turned off."""
+    from unittest.mock import patch
+
+    from abicheck import dumper_hybrid
+    from abicheck.dumper_clang_streaming import streaming_prune_suppressed
+    from abicheck.extract.dependency_exclusion import (
+        active_dependency_predicate,
+        dependency_exclusion_scope,
+    )
+    from abicheck.model import AbiSnapshot
+
+    def _state() -> tuple[bool, bool]:
+        return (active_dependency_predicate() is None, streaming_prune_suppressed())
+
+    so = tmp_path / "lib.so"
+    so.write_bytes(b"\x7fELF" + b"\x00" * 100)
+    header = tmp_path / "api.h"
+    header.write_text("int f(void);\n", encoding="utf-8")
+
+    cli_legs: dict[str, tuple[bool, bool]] = {}
+
+    def _fake_dump_elf(*_a: Any, **kwargs: Any) -> AbiSnapshot:
+        frontend = kwargs["compile"].frontend
+        cli_legs[frontend] = _state()
+        return AbiSnapshot(
+            library="l", version="1", from_headers=True, ast_producer=frontend
+        )
+
+    with (
+        patch("abicheck.service_dump_native._dump_elf", side_effect=_fake_dump_elf),
+        patch(
+            "abicheck.service_dump_native._attach_header_graph",
+            side_effect=lambda snap, *_a, **_k: snap,
+        ),
+    ):
+        service_mod.run_dump(
+            so, "elf", headers=[header], header_backend="hybrid"
+        )  # the default, scoped request
+
+    dumper_legs: dict[str, tuple[bool, bool]] = {}
+
+    def _fake_leg(_so: Path, _headers: list[Path], *, header_backend: str) -> Any:
+        dumper_legs[header_backend] = (active_dependency_predicate() is None, True)
+        return AbiSnapshot(library="l", version="1")
+
+    with (
+        patch.object(dumper_hybrid, "merge_snapshots", lambda a, _b: a),
+        dependency_exclusion_scope([str(tmp_path)]),
+    ):
+        dumper_hybrid.run_hybrid_dump(_fake_leg, so, [header])
+
+    assert set(cli_legs) == set(dumper_legs) == {"castxml", "clang"}
+    for backend in cli_legs:
+        # Same oracle on both routes: no dependency skip reaches either leg.
+        assert cli_legs[backend][0] is dumper_legs[backend][0] is True, backend
+    # The CLI legs are full-surface requests, so the streaming pruner is off.
+    assert all(prune_off for _skip_off, prune_off in cli_legs.values())
