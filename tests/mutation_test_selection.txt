@@ -630,6 +630,7 @@ tests/test_str_enum_downcast_walk.py
 tests/test_stripped_degradation.py
 tests/test_struct_cross_tier_dedup.py
 tests/test_suppression.py
+tests/test_suppression_audit_dates_and_boundaries.py
 tests/test_suppression_edge_cases.py
 tests/test_suppression_lifecycle.py
 tests/test_suppression_matrix.py
