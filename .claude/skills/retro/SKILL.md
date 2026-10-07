@@ -13,14 +13,14 @@ The user has asked for a **retrospective**. You are suggesting improvements to t
 
 2. **Collect the primary sources** for the session(s) the user named. Default to the current session if none is named. Read the transcript itself, not a summary, and note each session's id so findings can cite it.
    - **Current session**: your own context, only if it still holds the full transcript (a compacted context is a summary). Otherwise retrieve the transcript (`list_events` with `get_session`'s id) or list the session as unreadable with the reason.
-   - **Other cloud sessions** (claude.ai/code): use the `claude-code-remote` MCP tools. `list_sessions` (with `mine: true`) finds them, `get_session` gives status and model, and `list_events` with `kinds: ["user", "assistant", "result"]` gives the conversation without stream noise. Page with `before_id`/`after_id` until `has_more` is false.
+   - **Other cloud sessions** (claude.ai/code): use the `claude-code-remote` MCP tools. With no session named, take the last 7 days. `list_sessions` (with `mine: true`) mixes every repository the account works in and its output overflows to a file: parse the ids from that file, then keep only sessions whose `get_session` sources include `abicheck/abicheck`. Read each kept transcript with `list_events` and `kinds: ["user", "assistant", "result"]`, paging with `before_id`/`after_id` until `has_more` is false. Pages overflow too, so hand each one or two sessions to a reader subagent that returns the step 3 metrics with event-id citations, and keep the transcripts out of your own context.
    - **Linked PRs**: review threads, CI failures and fix-up commits on the session's PR (GitHub MCP tools) show what slipped through.
    - **Local sessions**: transcripts under `~/.claude/projects/<project-dir>/*.jsonl`.
    - **Shared session archive**: <!-- TODO: location to be provided by the maintainer --> not configured yet. If the user names a location, read it from there.
 
    This step is done when every requested session has been read end to end, or listed as unreadable with the reason.
 
-3. **Measure before judging.** For each session, record: turns; tool calls by type; files and docs read (and how many reads were re-reads or dead ends); the largest tool outputs; full test-suite runs and their durations; failed pushes or CI rounds; and the moments the user had to correct the agent. These numbers rank the findings.
+3. **Measure before judging.** For each session, record: turns; tool calls by type; files and docs read (and how many reads were re-reads or dead ends); the largest tool outputs; full test-suite runs and their durations; failed pushes or CI rounds; notification or stop-hook wake-ups that ended with no action, and the session's `cost_usd`; and the moments the user had to correct the agent. These numbers rank the findings.
 
 4. Look for candidates for improvement in these categories:
 
@@ -32,6 +32,8 @@ The user has asked for a **retrospective**. You are suggesting improvements to t
 - **Environment**: the cloud setup itself (`.claude/hooks/session-start.sh`, `scripts/setup_dev_env.sh`, network policy, missing tools, slow installs). _Use when_ time went to setup, a missing tool, or a blocked host.
 - **No-ops**: steering text that changes no behavior, or restates what a gate already enforces. _Use when_ steering files are large and unwieldy.
 - **Information access**: was a crucial piece of information unavailable (CI logs, a stored baseline, a toolchain)? _Use when_ the agent had to guess.
+
+Before you present a session's open question or blocker, check the current `main` (`git log origin/main`, merged PRs) for whether a later session already settled it; report a settled one as settled.
 
 5. **Present the candidates** to the user, ordered by severity. Weigh how often the problem recurs across the sessions read against its cost per occurrence. For each candidate give the evidence (session id, the turn or tool call, its cost), the proposed change (the file and the wording or check), and which of the two loads it spends (context or cognitive). Make the changes only after the user picks which ones to apply.
 
