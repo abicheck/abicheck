@@ -275,7 +275,13 @@ same standing as any detector's local index -- and `CanonicalEntity`'s
 above. `tests/test_semantic_ir_projection_not_persisted.py` states both
 halves as properties over generated function/variable pairs: the encoded
 document carries none of those facts, and live and round-tripped snapshots
-compare identically. The "Landed (2026-10-04)" entries below describe the
+compare identically. `tests/test_semantic_ir_projection_reads_declarations.py`
+pins the rest of the rollback: a snapshot loaded and then edited in its
+declaration store compares exactly like a freshly built one with the same
+edit (the projection reads the declarations, never a stored or cached
+copy), a v57 snapshot is refused as newer than this build, an IR document
+version 3 is refused, and an IR entity carrying any projection fact is
+refused. The "Landed (2026-10-04)" entries below describe the
 detector cut-over, which stands; their v57/version-3 storage claims are
 superseded by this paragraph.
 
