@@ -41,6 +41,36 @@
 
 Run locally: `python scripts/check_ai_readiness.py`. Errors fail; warnings print and pass.
 
+## Usage ratchet (test-only code, cross-module clones)
+
+The 95% line-coverage floor counts a test as a caller, so a function whose
+last production caller was deleted stays covered -- and green -- by its own
+unit test. `scripts/check_usage_ratchet.py` (`verify.py`'s `usage-ratchet`
+step, `pr` profile, CI `ai-readiness` job) reads the tree statically (stdlib
+`ast`; no import, no recording) and reports three finding families as stable
+keys:
+
+| Key family | Shape | Meaning |
+|---|---|---|
+| `test_only_functions` | `abicheck.mod#Class.method` | Defined in `abicheck/`, named by `tests/`, with no live production reference. The rule is `production_references.py`'s (`docs/contribute/plans/dead-code-and-single-owner.md`): production is `abicheck/`, `scripts/`, `action/`, `actions/`, `.github/`, `pyproject.toml`; a reference inside another dead function's body does not count; documented API and functions an ADR/plan names are roots; dunders, registered and framework-called methods are never reported |
+| `test_only_modules` | `abicheck.mod` | A non-package module `tests/` import but no live production module imports or names (import statements, `"abicheck.x"` strings, entry points, workflow text; docstrings excluded). A module imported only by test-only modules is one too |
+| `cross_module_exact_clones` | `a#f = b#g` | Functions in different modules whose AST (docstring dropped, positions and the function's own name ignored) is identical and at least 40 nodes large |
+
+Keys carry no line numbers. `scripts/usage_ratchet_baseline.json` only
+shrinks: a finding missing from it fails (new debt), and a baselined key no
+longer found fails too until `python scripts/check_usage_ratchet.py --update`
+removes it. With `--base REF` (default `$ARCHITECTURE_BASE`, which CI sets)
+a baseline key the base revision's baseline lacks fails, so a branch cannot
+baseline its own new finding. A finding that is legitimately test-only or
+duplicated (public Python API for library users, an entry point loaded by
+name from outside the repo) goes in `scripts/usage_exceptions.yaml` with a
+`reason`; an exception that matches nothing fails as stale.
+
+When it fails on your change: wire the function into its production
+consumer, delete it (and its test), or merge the clone into one owner --
+in that order of preference. `--json` prints every current finding.
+`scripts/usecase_paths.py` remains the dynamic, report-only counterpart.
+
 ## Test-quality gates (beyond line coverage)
 
 Line coverage measures *reach*, not whether a test actually checks the result.

@@ -378,6 +378,16 @@ STEPS: tuple[Step, ...] = (
         description="ADR-061 responsibility packages, dependency direction, and debt no-growth gate",
     ),
     Step(
+        # Static, deterministic: code only tests keep alive (the 95% coverage
+        # floor counts a test as a caller) and cross-module exact clones,
+        # against a shrink-only baseline. Reads $ARCHITECTURE_BASE like the
+        # step above, so CI rejects a baseline that grew on this branch.
+        "usage-ratchet",
+        _pyscript("scripts/check_usage_ratchet.py"),
+        frozenset({PR, FULL}),
+        description="Usage ratchet: test-only functions/modules and cross-module exact clones (shrink-only baseline)",
+    ),
+    Step(
         "repo-scan-tests",
         _py(
             "pytest",

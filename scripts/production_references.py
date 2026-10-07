@@ -66,6 +66,13 @@ from typing import NamedTuple
 PACKAGE = "abicheck"
 PRODUCTION_DIRS = ("abicheck", "scripts", "action", "actions", ".github")
 PRODUCTION_FILES = ("pyproject.toml",)
+# Files under a production directory that only *list* names and are not
+# uses: the usage ratchet's own baseline and exceptions (a baselined key
+# would otherwise keep the very function it records alive).
+NOT_REFERENCES = (
+    "scripts/usage_ratchet_baseline.json",
+    "scripts/usage_exceptions.yaml",
+)
 TEXT_SUFFIXES = (".yml", ".yaml", ".sh", ".toml", ".cfg", ".ini", ".json")
 USER_DOC_DIRS = ("docs/use", "docs/reference", "docs/learn")
 DECISION_DOC_DIRS = ("docs/contribute/adr", "docs/contribute/plans")
@@ -384,6 +391,7 @@ def _production_files(root: Path) -> list[Path]:
                 if p.is_file()
                 and (p.suffix == ".py" or p.suffix in TEXT_SUFFIXES)
                 and "__pycache__" not in p.parts
+                and p.relative_to(root).as_posix() not in NOT_REFERENCES
             ]
     files += [root / f for f in PRODUCTION_FILES if (root / f).is_file()]
     return files
