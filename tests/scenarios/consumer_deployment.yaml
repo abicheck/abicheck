@@ -33,6 +33,8 @@ scenarios:
       - abicheck compare libfoo.so.1 libfoo.so.2 -H include/ --used-by ./myapp
     expected:
       exit_code: 4
+    surfaces:
+      - cli: compare --used-by --header
     validates: UC-WF-appcompat
     automated: false
     status: planned
@@ -51,6 +53,8 @@ scenarios:
       - abicheck deps compare usr/bin/myapp --old-root old-root/ --new-root new-root/
     expected:
       exit_code: 4
+    surfaces:
+      - cli: deps compare
     validates: UC-WF-stack-deps
     automated: false
     status: planned
