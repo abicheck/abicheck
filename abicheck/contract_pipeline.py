@@ -179,6 +179,7 @@ class ContractEvaluationStage:
             directly_referenced_stdlib_new=self.directly_referenced_stdlib_new,
         )
         decisions = self._observed_export_fallback(fresh, decisions)
+        decisions = self._unresolved_default_fallback(fresh, decisions)
         for change, decision in zip(fresh, decisions, strict=True):
             change.contract_relevance = decision.relevance
             change.contract_reason_code = decision.reason_code
@@ -235,6 +236,43 @@ class ContractEvaluationStage:
         out = list(decisions)
         for i, d in zip(idx, redone, strict=True):
             if d.relevance is ContractRelevance.IN_CONTRACT:
+                out[i] = d
+        return out
+
+    def _unresolved_default_fallback(
+        self, changes: list[Change], decisions: list[Any]
+    ) -> list[Any]:
+        """Re-judge, under ``all``, each finding an evidence-adaptive default
+        still leaves ``UNKNOWN_UNRESOLVED`` (see
+        :func:`~abicheck.policy.contract_default_mode.unresolved_default_fallback_applies`).
+        Only an evaluated (``IN_CONTRACT``/``NOT_APPLICABLE``) decision
+        replaces the unresolved one."""
+        from .contract_evaluation import evaluate_snapshot_pair_contract_relevance
+        from .policy.contract_default_mode import unresolved_default_fallback_applies
+
+        idx = [
+            i
+            for i, d in enumerate(decisions)
+            if unresolved_default_fallback_applies(
+                self.mode, self.mode_provenance, d.relevance
+            )
+        ]
+        if not idx:
+            return decisions
+        redone = evaluate_snapshot_pair_contract_relevance(
+            [changes[i] for i in idx],
+            self.surf_old,
+            self.surf_new,
+            mode=ContractMode.ALL,
+            exports_old=self.exports_old,
+            exports_new=self.exports_new,
+        )
+        out = list(decisions)
+        for i, d in zip(idx, redone, strict=True):
+            if d.relevance in (
+                ContractRelevance.IN_CONTRACT,
+                ContractRelevance.NOT_APPLICABLE,
+            ):
                 out[i] = d
         return out
 
