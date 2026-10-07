@@ -308,6 +308,30 @@ def test_exceptions_require_reason(tmp_path: Path) -> None:
         ur.load_exceptions(path)
 
 
+@pytest.mark.parametrize(
+    "body",
+    [
+        "test_only_functions: a#f\n",
+        "test_only_functions: {key: a#f, reason: r}\n",
+        "cross_module_exact_clones: 3\n",
+    ],
+)
+def test_exceptions_category_must_be_list(tmp_path: Path, body: str) -> None:
+    path = tmp_path / "e.yaml"
+    path.write_text(body, encoding="utf-8")
+    with pytest.raises(ValueError, match="must be a list"):
+        ur.load_exceptions(path)
+    assert ur.main(["--root", str(tmp_path), "--exceptions", str(path)]) == 2
+
+
+def test_exceptions_null_category_is_empty(tmp_path: Path) -> None:
+    path = tmp_path / "e.yaml"
+    path.write_text(
+        "test_only_functions:\ncross_module_exact_clones: []\n", encoding="utf-8"
+    )
+    assert ur.load_exceptions(path) == {c: set() for c in ur.CATEGORIES}
+
+
 def _git(root: Path, *args: str) -> None:
     subprocess.run(
         ["git", "-C", str(root), "-c", "user.email=t@t", "-c", "user.name=t", *args],

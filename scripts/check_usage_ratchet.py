@@ -331,7 +331,13 @@ def load_exceptions(path: Path) -> dict[str, set[str]]:
     if not isinstance(data, dict) or set(data) - set(CATEGORIES):
         raise ValueError(f"exception categories must be a subset of {list(CATEGORIES)}")
     for cat, entries in data.items():
-        for entry in entries or []:
+        if entries is None:
+            continue
+        if not isinstance(entries, list):
+            raise ValueError(
+                f"exception category {cat!r} must be a list, got {type(entries).__name__}"
+            )
+        for entry in entries:
             if (
                 not isinstance(entry, dict)
                 or not isinstance(entry.get("key"), str)
