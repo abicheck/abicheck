@@ -4,7 +4,7 @@
 
 ## AI-readiness gate
 
-`scripts/check_ai_readiness.py` runs in CI as a fast structural gate. It checks:
+`scripts/check_ai_readiness.py` runs in CI as a fast structural gate (every gate script's full description: [`scripts-inventory.md`](scripts-inventory.md)). It checks:
 
 | Check | Severity | What it enforces |
 |-------|----------|------------------|
