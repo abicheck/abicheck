@@ -211,7 +211,7 @@
     "abicheck/model/owner_recovery.py(itanium_special_name_owner_scope_components)": 326,
     "abicheck/model/qualified_name_split.py(version_suffix)": 256,
     "abicheck/model/root_relative_path.py(RootRelativePath.from_project_layout)": 774,
-    "abicheck/model/semantic_ir.py(SemanticIR.canonical_entities)": 339,
+    "abicheck/model/semantic_ir.py(SemanticIR.canonical_entities)": 27,
     "abicheck/model/semantic_ir.py(_fact_field_names)": 210,
     "abicheck/model/semantic_ir.py(canonical_cv_qualification)": 159,
     "abicheck/model/semantic_ir_declaration_facts.py(_access_value)": 609,
@@ -291,5 +291,5 @@
   },
   "mode": "default",
   "n": 40,
-  "total": 236900
+  "total": 236588
 }

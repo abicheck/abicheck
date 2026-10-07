@@ -392,3 +392,37 @@ def test_the_trusted_projection_always_passes_validation(
     trusted = legacy_function_signature_entity(fn)
     validated = CanonicalEntity(**dict(trusted.fact_items()), producer=trusted.producer)
     assert validated == trusted
+
+
+def test_signature_index_shares_one_ir_facade_per_scope(monkeypatch) -> None:
+    """Every index over one IR in a compare() scope reuses one
+    ``SemanticIRIndex`` (whose construction ranks the whole IR); distinct IRs
+    and calls outside a scope still get their own."""
+    from abicheck.compare import function_signature as fs
+    from abicheck.compare.detection_memo import detection_memo_scope
+    from abicheck.model.semantic_ir import SemanticIR
+
+    built: list[object] = []
+    real = fs.SemanticIRIndex
+
+    def counting(ir):  # type: ignore[no-untyped-def]
+        built.append(ir)
+        return real(ir)
+
+    monkeypatch.setattr(fs, "SemanticIRIndex", counting)
+    # Treat the two IRs as function-covered so each keeps its own identity
+    # rather than collapsing onto the shared empty IR; None still falls back.
+    monkeypatch.setattr(fs, "semantic_ir_covers_kind", lambda ir, kind: True)
+    irs = [SemanticIR(), SemanticIR(), None]
+    with detection_memo_scope():
+        firsts = [fs.function_signature_index(ir, []).index for ir in irs]
+        for _ in range(5):
+            again = [fs.function_signature_index(ir, []).index for ir in irs]
+            assert all(a is b for a, b in zip(again, firsts, strict=True))
+    # Distinct IRs get distinct indexes, each built exactly once.
+    assert len({id(i) for i in firsts}) == 3
+    assert len(built) == 3 and [i.ir for i in firsts] == built
+    built.clear()
+    fs.function_signature_index(None, [])
+    fs.function_signature_index(None, [])
+    assert len(built) == 2

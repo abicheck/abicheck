@@ -41,13 +41,18 @@ class TestPythonParallelism:
         )
 
     @pytest.mark.parametrize("cpus", [1, 2, 4, 64, 224])
-    def test_free_threaded_interpreter_scales_with_cpus(
+    def test_free_threaded_interpreter_scales_with_cpus_up_to_the_cap(
         self, monkeypatch: pytest.MonkeyPatch, cpus: int
     ) -> None:
+        # Oracle: never more members than CPUs, never more than the measured
+        # contention knee, and a many-core host must not plan one per core.
         monkeypatch.delenv(process_resources.MEMBER_JOBS_ENV_VAR, raising=False)
         monkeypatch.setattr(process_resources.os, "cpu_count", lambda: cpus)
         monkeypatch.setattr(process_resources, "gil_enabled", lambda: False)
-        assert process_resources.python_parallelism() == cpus
+        got = process_resources.python_parallelism()
+        assert 1 <= got <= cpus
+        assert got <= process_resources.FREE_THREADED_MEMBER_PARALLELISM
+        assert got == min(cpus, process_resources.FREE_THREADED_MEMBER_PARALLELISM)
 
     @pytest.mark.parametrize("gil", [True, False])
     @pytest.mark.parametrize("raw", ["1", "3", "100000"])
