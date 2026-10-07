@@ -61,6 +61,9 @@ from abicheck.cli import main
 from abicheck.service import CompareRequest, InputSpec
 
 from _family_f2_routes import (  # isort: skip
+    UNDECLARED_ADDED,
+    UNDECLARED_PERSISTENT,
+    UNDECLARED_REMOVED,
     AXES,
     AXES_BY_NAME,
     CORPUS,
@@ -532,6 +535,73 @@ def test_corpus_spans_verdicts(tmp_path: Path) -> None:
         for c in CORPUS
     }
     assert {"NO_CHANGE", "COMPATIBLE", "BREAKING"} <= verdicts, verdicts
+
+
+_EXISTENCE_KINDS = {
+    "func_added_elf_only": "added",
+    "func_removed_elf_only": "removed",
+    "var_added_elf_only": "added",
+    "var_removed_elf_only": "removed",
+}
+
+
+def export_event_violations(out: Outcome) -> list[str]:
+    """Manifest class ``report.cross_producer_disagreement_on_one_symbol``:
+    on every route, an undeclared export that appeared or disappeared is ONE
+    existence finding in the right direction, and its ``exported_not_public``
+    twin is not reported beside it. The oracle is the corpus construction
+    (which symbol was added/removed/kept), not the shared fold under test."""
+    expected = {
+        UNDECLARED_ADDED: "added",
+        UNDECLARED_REMOVED: "removed",
+    }
+    changes = out.report.get("changes", [])
+    v: list[str] = []
+    for sym, direction in expected.items():
+        existence = [
+            c
+            for c in changes
+            if c.get("symbol") == sym and c.get("kind") in _EXISTENCE_KINDS
+        ]
+        if [_EXISTENCE_KINDS[c["kind"]] for c in existence] != [direction]:
+            v.append(f"{out.route}: {sym} existence findings {existence!r}")
+        if any(
+            c.get("symbol") == sym and c.get("kind") == "exported_not_public"
+            for c in changes
+        ):
+            v.append(f"{out.route}: {sym} reported twice (hygiene twin kept)")
+    if any(
+        c.get("symbol") == UNDECLARED_PERSISTENT and c.get("kind") in _EXISTENCE_KINDS
+        for c in changes
+    ):
+        v.append(
+            f"{out.route}: persistent export {UNDECLARED_PERSISTENT} read as an event"
+        )
+    return v
+
+
+@pytest.mark.parametrize("axis", [a.name for a in AXES])
+def test_undeclared_export_event_is_one_finding_on_every_route(
+    axis: str, tmp_path: Path
+) -> None:
+    outs = _run_all("undeclared_export_churn", AXES_BY_NAME[axis], tmp_path)
+    assert {"cli", "api", "release"} & set(outs), outs.keys()
+    violations = [v for out in outs.values() for v in export_event_violations(out)]
+    assert not violations, "\n".join(violations)
+
+
+def test_mutant_unfolded_hygiene_twin_is_caught(tmp_path: Path) -> None:
+    """Seeded mutant: a report carrying the hygiene twin beside the existence
+    finding (the pre-#1492 double report) must be flagged."""
+    out = _run_all(
+        "undeclared_export_churn", AXES_BY_NAME["default"], tmp_path, {"cli": run_cli}
+    )["cli"]
+    assert export_event_violations(out) == []
+    twin = {"kind": "exported_not_public", "symbol": UNDECLARED_ADDED}
+    doubled = dataclasses.replace(
+        out, report={**out.report, "changes": [*out.report["changes"], twin]}
+    )
+    assert export_event_violations(doubled) != []
 
 
 @pytest.mark.parametrize(
