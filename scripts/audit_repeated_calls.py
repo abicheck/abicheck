@@ -451,8 +451,13 @@ def measure_repeat_audit_subprocess(n: int = REPEAT_AUDIT_N) -> dict[str, int]:
         capture_output=True,
         text=True,
         cwd=REPO,
-        check=True,
+        check=False,
+        timeout=600,
     )
+    if proc.returncode != 0:
+        raise RuntimeError(
+            f"repeat audit subprocess failed (exit {proc.returncode})\n{proc.stderr[-4000:]}"
+        )
     return json.loads(proc.stdout.splitlines()[-1])
 
 

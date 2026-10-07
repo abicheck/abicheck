@@ -249,13 +249,19 @@ class Result:
 
 
 def run_case(case: Case) -> Result:
-    proc = subprocess.run(
-        [sys.executable, str(Path(__file__).resolve()), "--worker", case.name],
-        capture_output=True,
-        text=True,
-        cwd=REPO,
-        check=False,
-    )
+    try:
+        proc = subprocess.run(
+            [sys.executable, str(Path(__file__).resolve()), "--worker", case.name],
+            capture_output=True,
+            text=True,
+            cwd=REPO,
+            check=False,
+            timeout=300,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(
+            f"{case.name}: worker timed out after {exc.timeout}s"
+        ) from exc
     if proc.returncode != 0:
         raise RuntimeError(f"{case.name}: worker failed\n{proc.stderr[-4000:]}")
     seconds = {int(k): v for k, v in json.loads(proc.stdout.splitlines()[-1]).items()}

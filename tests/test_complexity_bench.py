@@ -56,6 +56,7 @@ def test_every_case_has_a_preparer_doubling_sizes_and_a_subquadratic_ceiling() -
         assert 1.0 < case.max_exponent < 2.0, case.name
 
 
+@pytest.mark.slow
 def test_cli_reports_json_and_strict_fails_on_an_exceeded_ceiling(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

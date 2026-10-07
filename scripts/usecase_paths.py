@@ -949,9 +949,13 @@ def cmd_adr_reach(args: argparse.Namespace) -> int:
     )
 
     root = Path(args.root).resolve()
-    rows = adr_reach(
-        load_recording(args.recording), adr_files(root), load_registry_use_cases(root)
-    )
+    doc = load_recording(args.recording)
+    if doc.get("failures"):
+        print(
+            f"recording has failed runs ({len(doc['failures'])}); its ADR reach is not trustworthy"
+        )
+        return 1
+    rows = adr_reach(doc, adr_files(root), load_registry_use_cases(root))
     if args.json:
         Path(args.json).write_text(
             json.dumps([asdict(r) for r in rows], indent=1) + "\n", encoding="utf-8"

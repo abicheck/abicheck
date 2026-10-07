@@ -159,6 +159,18 @@ def test_ratchet_cli_refuses_a_recording_with_failed_runs(tmp_path: Path) -> Non
     assert up.main(["ratchet", str(path), "--baseline", str(tmp_path / "b.json")]) == 1
 
 
+def test_adr_reach_cli_refuses_a_recording_with_failed_runs(tmp_path: Path) -> None:
+    path = tmp_path / "rec.json"
+    path.write_text(json.dumps(_recording({})))
+    assert up.main(["adr-reach", str(path)]) == 0
+    rec = _recording({})
+    rec["failures"] = {"SC-X": "boom"}
+    path.write_text(json.dumps(rec))
+    out = tmp_path / "rows.json"
+    assert up.main(["adr-reach", str(path), "--json", str(out)]) == 1
+    assert not out.exists()
+
+
 def test_committed_unreached_baseline_is_well_formed() -> None:
     doc = ar.load_unreached_baseline()
     assert doc["sources"] == ["scenarios"]

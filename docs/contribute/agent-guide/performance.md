@@ -54,10 +54,10 @@ When a gate fails:
   snapshot identity and dies with the pass). **Budget below** — an
   improvement: re-record with `python scripts/audit_repeated_calls.py --write-budgets`
   (the whole-package ratchet: `--write-repeat-baseline`).
+  Raising a budget needs its reason in the PR.
 - **Exponent above its ceiling** (`complexity-bench`) -- rerun the one case
   (`--case NAME`) to rule out runner noise, then profile it at its largest
   size; fix the algorithm, never raise `max_exponent` to pass.
-  Raising a budget needs its reason in the PR.
 - **New anti-pattern site** — fix it, or, if the shape is the work itself
   (or the collection provably stays tiny), exempt it in place with a
   `# perf-ok: <reason>` comment. Don't grow the (empty) baseline. Moving a memoized helper into a nested function
