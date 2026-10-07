@@ -46,6 +46,8 @@ scenarios:
       - abicheck compare old.json new.json   # exit code is the gate
     expected:
       exit_codes: {NO_CHANGE: 0, API_BREAK: 2, BREAKING: 4}
+    surfaces:
+      - cli: compare
     validates: UC-WF-compare
     automated: true
     test: test_sc_exit_contract
@@ -64,6 +66,8 @@ scenarios:
     expected:
       exit_code: 0
       default_exit_code: 4
+    surfaces:
+      - cli: compare --config
     validates: UC-WF-compare
     automated: true
     test: test_sc_ci_severity_gate

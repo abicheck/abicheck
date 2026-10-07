@@ -32,7 +32,7 @@
 | `mkdocs-nav-coverage` | WARN | Every `docs/**/*.md` is in `mkdocs.yml` nav or linked from another doc |
 | `adr-index-nav-sync` | ERROR | Every `docs/contribute/adr/*.md` is linked from `adr/index.md`, and the ADR index page itself (not each individual ADR — relaxed, since that overloaded top-level nav with 50+ flat entries for no reader benefit) is listed in `mkdocs.yml`'s nav, so every ADR stays reachable from published navigation (this is what originally caught ADR-041 going missing from nav despite being accepted). Also requires every ADR to carry a Status metadata line/heading, and an ADR whose status leads with "Superseded" to link to its replacement |
 | `adr-status-sync` | ERROR on contradiction / bad receipt, WARN on staleness | An ADR's own `**Status:**` line and its row in `adr/index.md` may not *contradict* each other — one claiming nothing is implemented while the other claims something is (how ADR-056's row went stale), or disagreeing on the decision word. Paraphrase is explicitly allowed: the index cell is an abridgement, and a stricter prototype flagged 15 of 56 ADRs, nearly all false positives. Separately validates the optional `**Verified:** <ref>@<sha> on <YYYY-MM-DD>` receipt (see `adr/index.md`'s convention section): exactly one per ADR, well-formed, a real non-future date, and naming a commit reachable from the default branch — a receipt anchored to the branch that adds it vanishes on merge and then fails this required job on `main` permanently. It then WARNs when commits after that sha touched a first-party file the Status paragraph names, which is the only mechanism here that catches *document-vs-code* drift (ADR-049's status claimed its evaluator was unwired for five merged PRs after it wasn't). **A file is watched only when the Status names it by full repo-relative path** (any `FIRST_PARTY_PY_ROOTS` tree, not just `abicheck/`); a bare `x.py` is accepted only when it resolves to `abicheck/x.py`, and family shorthand (`_resolver.py`) is deliberately not guessed at — see `adr/index.md` for why. Lives in `scripts/adr_status_sync.py`, a sibling leaf module, since `check_ai_readiness.py` is already past the 2000-line hard cap |
-| `perf-antipatterns` | ERROR on growth, WARN on a stale baseline | No *new* performance anti-pattern inside a loop or comprehension under `abicheck/`: membership/`index`/`count` on a function-local list, `re.compile`, `json.loads`/`deepcopy`, self-copying accumulation (`acc = acc + [...]`, `[*acc, x]`, `{**acc, ...}`), a `subprocess` call, re-sorting or copying a loop-invariant collection, or `str +=` concatenation (error paths inside `raise` are exempt). Every site in the tree has been triaged: fixed, or exempted where it stands by a `# perf-ok: <reason>` comment (trailing the statement, or on its own line above it; no reason, no exemption) -- for shapes that are the work itself, such as one `json.loads` per JSON-lines record or `deepcopy` inside `__deepcopy__`. A string a loop body rebinds unconditionally each iteration, and a module-scope comprehension (runs once, at import), are not flagged. `scripts/perf_antipatterns_baseline.json` (per-(file, function, rule) counts) is empty and stays the ratchet for untriaged debt: a count above it is an error, one below a warning to shrink it. Lives in `scripts/perf_antipatterns.py` |
+| `perf-antipatterns` | ERROR on growth, WARN on a stale baseline | No *new* performance anti-pattern inside a loop or comprehension under `abicheck/`: membership/`index`/`count` on a function-local list, `re.compile`, `json.loads`/`deepcopy`, self-copying accumulation (`acc = acc + [...]`, `[*acc, x]`, `{**acc, ...}`), a `subprocess` call, re-sorting or copying a loop-invariant collection, `str +=` concatenation, quadratic self-dedup (`[x for i, x in enumerate(s) if s.index(x) == i]`, `x not in s[:i]`; `s` a name or attribute chain such as `self.s`), `pickle.loads`/`model_copy(deep=True)` per item, or blocking network I/O / `time.sleep` per iteration (error paths inside `raise` are exempt). Every site in the tree has been triaged: fixed, or exempted where it stands by a `# perf-ok: <reason>` comment (trailing the statement, or on its own line above it; no reason, no exemption) -- for shapes that are the work itself, such as one `json.loads` per JSON-lines record or `deepcopy` inside `__deepcopy__`. A string a loop body rebinds unconditionally each iteration, and a module-scope comprehension (runs once, at import), are not flagged. `scripts/perf_antipatterns_baseline.json` (per-(file, function, rule) counts) is empty and stays the ratchet for untriaged debt: a count above it is an error, one below a warning to shrink it. Lives in `scripts/perf_antipatterns.py` |
 | `banned-imports` | ERROR | No `print(...)` outside CLI/reporter modules; no `subprocess(..., shell=True)` |
 | `project-snapshot-dto-no-asdict` | ERROR | No `dataclasses.asdict()`/`asdict()` call in a `ProjectSnapshot` DTO file (`abicheck/storage/dto.py`, `abicheck/storage/import_v1.py`, `abicheck/project_snapshot_store.py`, `abicheck/storage/semantic_ir_codec.py`) — ADR-063 Phase 8's D8 constraint, made mechanical |
 | `test-change-symbol-typed` | ERROR | No `Change(..., symbol=None)` or `make_change(symbol=None)` anywhere under `tests/`. `mypy` runs over `abicheck/` only, so a fixture could construct a `Change` in a state its own annotation (`symbol: str`) forbids and nothing would say so — which is how a `known-gaps.md` entry came to record a production defect that did not exist, from a `None` a test had fabricated. Typechecking the (unannotated) suite is not an available alternative; this is the narrow structural stand-in |
@@ -382,6 +382,12 @@ prints an explicit `WARNING: this pr-profile run is INCOMPLETE` line and
 sets `"complete": false` in the `--json` receipt — don't treat a
 skip-containing run as equivalent to a clean CI pass.
 
+The `pr` profile also runs `complexity-bench` (`scripts/complexity_bench.py
+--strict`): an empirical time-exponent ceiling per hot path, run in CI's
+`ai-readiness` job. A failure there, or in the unit lane's whole-package
+repeat-call ratchet (`tests/test_compare_repeat_audit.py`), is triaged as
+described in [`performance.md`](performance.md).
+
 [pixi](https://pixi.sh) is also supported (`pixi install && pixi run test`,
 `pixi run check`) and additionally manages the `castxml`/compiler/`libabigail`/
 `abi-compliance-checker` system tools for the `integration`/`libabigail`/`abicc`
@@ -398,3 +404,30 @@ CI runs `mypy abicheck/` as a required gate. The baseline is currently **0 error
 
 **Your responsibility**: run `mypy abicheck/` after your changes and ensure it stays clean. If a new third-party suppression is needed, extend the existing `disable_error_code` override for that module rather than scattering ad-hoc `# type: ignore` comments. If you legitimately reduce a real error to zero, leave `MYPY_ERROR_BASELINE = 0` in `scripts/check_ai_readiness.py` — it now warns on drift in either direction.
 
+
+## ADR surface traceability (`adr-surfaces`)
+
+[ADR-076](../adr/076-adr-use-case-surface-traceability.md):
+`scripts/check_adr_surfaces.py` (a `verify.py` `pr` step, CI `ai-readiness`
+job) keeps `docs/contribute/adr/adr-surface-registry.yaml` honest. Update it
+in the same PR when you:
+
+- **add an ADR** — add its entry (`surfaced`/`partial`/`gap` with `missing`,
+  or `internal` with `reason`), and the `use_cases` it serves;
+- **add, rename or remove a CLI flag, Action input, API symbol or report
+  field an ADR cites** — the gate resolves every surface against the code and
+  fails where a cited one no longer exists;
+- **change a use case** — each UC carries `user_task:` (`pr_review`,
+  `local_check`, `release`, `audit`) and `adrs:`, which must mirror the
+  registry;
+- **add a scenario** — declare the `surfaces:` its `flow` command actually
+  exercises (checked against that command line) and, for a use case reachable
+  from cli+api+action, a shared `family:`.
+
+The gate ratchets against `docs/contribute/adr/adr_surface_baseline.json`: a
+disposition downgrade, a lost surface or use case, a newly untraced ADR
+surface, or a newly uncovered multi-channel use case fails. If the change is
+deliberate, run `python scripts/check_adr_surfaces.py --write-baseline` and
+commit the rewritten baseline in the same PR so review sees it. The generated
+coverage report is `docs/contribute/generated/adr-surface-coverage.md`
+(`--write-report`).

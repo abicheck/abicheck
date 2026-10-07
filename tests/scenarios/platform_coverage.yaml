@@ -39,6 +39,8 @@ scenarios:
     expected:
       exit_code: 4
       verdict: BREAKING
+    surfaces:
+      - cli: compare --debug-info
     validates: UC-PLAT-windows-pe
     automated: false
     status: planned

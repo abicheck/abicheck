@@ -447,6 +447,7 @@ def test_ci_ai_readiness_job_calls_verify_py() -> None:
         "fp-rate",
         "tier-accuracy",
         "usecase-docs-sync",
+        "adr-surfaces",
         "docs-contract",
         "learning-ladder",
         "agent-skills-generated",

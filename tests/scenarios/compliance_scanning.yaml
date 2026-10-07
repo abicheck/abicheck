@@ -62,6 +62,8 @@ scenarios:
       - abicheck compare old.json new.json --suppress suppressions.yaml
     expected:
       exit_code: 0
+    surfaces:
+      - cli: compare --suppress
     validates: UC-WF-compare
     automated: true
     test: test_sc_accept_known_break
@@ -95,6 +97,8 @@ scenarios:
     expected:
       exit_code: 0
       strict_exit_code: 2
+    surfaces:
+      - cli: compare --policy
     validates: UC-WF-compare
     automated: true
     test: test_sc_policy_profile
