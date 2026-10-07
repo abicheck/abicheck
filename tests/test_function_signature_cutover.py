@@ -410,14 +410,18 @@ def test_signature_index_shares_one_ir_facade_per_scope(monkeypatch) -> None:
         return real(ir)
 
     monkeypatch.setattr(fs, "SemanticIRIndex", counting)
+    # Treat the two IRs as function-covered so each keeps its own identity
+    # rather than collapsing onto the shared empty IR; None still falls back.
+    monkeypatch.setattr(fs, "semantic_ir_covers_kind", lambda ir, kind: True)
     irs = [SemanticIR(), SemanticIR(), None]
     with detection_memo_scope():
         firsts = [fs.function_signature_index(ir, []).index for ir in irs]
         for _ in range(5):
             again = [fs.function_signature_index(ir, []).index for ir in irs]
             assert all(a is b for a, b in zip(again, firsts, strict=True))
-    # None and uncovered IRs both fall back to the shared empty IR.
-    assert len(built) == len({id(i) for i in built})
+    # Distinct IRs get distinct indexes, each built exactly once.
+    assert len({id(i) for i in firsts}) == 3
+    assert len(built) == 3 and [i.ir for i in firsts] == built
     built.clear()
     fs.function_signature_index(None, [])
     fs.function_signature_index(None, [])

@@ -46,8 +46,9 @@ cache warm, identical reports in every run:
   Output order never depends on which thread finishes first.
 - **No new tuning.** abicheck detects the interpreter
   (`sys._is_gil_enabled()`): under the GIL it runs 2 libraries at once (more
-  only costs memory); free-threaded it runs one per CPU, still bounded by the
-  memory admission gate.
+  only costs memory); free-threaded it runs one per CPU up to 4 (wall time was
+  flat beyond that while CPU and memory grew), still bounded by the memory
+  admission gate.
 
 Single-library `compare` and `dump` gain less, since only the old/new sides,
 the per-TU header parses, and (under the default castxml frontend) the header
