@@ -425,3 +425,68 @@ def test_empty_qualified_name_has_no_segments():
     from abicheck.compare.qualified_name_normalization import segments
 
     assert segments("") == []
+
+
+#: (path as the driver spells it, its directory spelled the same way). The
+#: oracle is the spelling itself, not ``pathlib`` -- whose host-dependent
+#: normalisation (``/tmp/x`` -> ``\tmp\x`` on Windows) is the bug.
+_SPELLED_PARENTS = [
+    ("/run/user/1000/icpx-1/agg-header.h", "/run/user/1000/icpx-1"),
+    ("/var/folders/a b/T/icpx-9/agg-footer.h", "/var/folders/a b/T/icpx-9"),
+    (
+        "C:/Users/dev/AppData/Local/Temp/icpx-3/agg-header.h",
+        "C:/Users/dev/AppData/Local/Temp/icpx-3",
+    ),
+    (
+        "C:\\Users\\dev\\AppData\\Local\\Temp\\icpx-3\\agg-header.h",
+        "C:\\Users\\dev\\AppData\\Local\\Temp\\icpx-3",
+    ),
+    ("D:\\a\\_temp/icpx-4/agg-header.h", "D:\\a\\_temp/icpx-4"),
+    ("agg-header.h", ""),
+]
+
+
+@pytest.mark.parametrize(("path", "parent"), _SPELLED_PARENTS)
+def test_spelled_parent_keeps_the_drivers_spelling(path: str, parent: str) -> None:
+    assert dumper_dpcpp_jobs.spelled_parent(path) == parent
+    # Re-joining with the same separator gives the input back.
+    if parent:
+        assert path.startswith(parent) and path[len(parent)] in "/\\"
+
+
+_TEMP_DIR_SPELLINGS = [
+    "/run/user/1000/icpx-1",
+    "/var/folders/a b/T/icpx-9",
+    "C:/Users/dev/AppData/Local/Temp/icpx-3",
+    "C:\\Users\\dev\\AppData\\Local\\Temp\\icpx-3",
+]
+
+
+@pytest.mark.parametrize("temp_dir", _TEMP_DIR_SPELLINGS)
+def test_replay_relocates_whatever_the_temp_dir_spelling_on_any_host(
+    probe, tmp_path, temp_dir: str
+) -> None:
+    """Bug class: the relocation is a textual replace over the driver's own
+    tokens, so the temp directory it searches for must be spelled as the
+    driver spelled it. Derived through ``pathlib`` it matched on Linux and
+    silently matched nothing on Windows (the integration files stayed in the
+    driver's temp dir). Every spelling here runs on every host."""
+    install, _ = probe
+    sep = "\\" if "\\" in temp_dir else "/"
+    header, footer = f"{temp_dir}{sep}agg-header.h", f"{temp_dir}{sep}agg-footer.h"
+    device_job = (
+        ' "/opt/clang" "-cc1" "-triple" "spir64" "-fsycl-is-device"'
+        f' "-fsycl-int-header={header}" "-fsycl-int-footer={footer}"'
+        ' "-ast-dump=json" "agg.hpp"'
+    )
+    host_job = (
+        ' "/opt/clang" "-cc1" "-triple" "x86_64" "-fsycl-is-host"'
+        f' "-include-internal-header" "{header}"'
+        f' "-include-internal-footer" "{footer}" "-ast-dump=json" "agg.hpp"'
+    )
+    install(stderr=device_job + "\n" + host_job)
+    cmd = ["icpx", "-fsycl", "-fsycl-host-only", "-Xclang", "-ast-dump=json", "a"]
+    device, host = dumper_dpcpp_jobs.sycl_host_replay_jobs(cmd, tmp_path)
+    assert f"-fsycl-int-header={tmp_path}{sep}agg-header.h" in device
+    assert f"{tmp_path}{sep}agg-footer.h" in host
+    assert not any(temp_dir in t for t in [*device, *host])

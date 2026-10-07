@@ -1,8 +1,8 @@
-# Scripts inventory (full)
+# Agent guide: `scripts/` full inventory
 
-The detailed per-script reference for `scripts/`: purpose, design notes and
-what triggers each script. `scripts/CLAUDE.md` carries the one-line index
-and points here; read the row for a script before changing it or its wiring.
+> Moved verbatim out of `scripts/CLAUDE.md` (progressive disclosure: that file loads whenever an agent works in its tree; this full table loads only when its pointer fires). `scripts/CLAUDE.md` keeps a one-line row per entry and remains the primary contract.
+
+## Inventory
 
 | Script | Purpose | Triggered by |
 |--------|---------|--------------|

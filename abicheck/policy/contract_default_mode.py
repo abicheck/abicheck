@@ -38,6 +38,7 @@ __all__ = [
     "evidence_adaptive_contract_mode",
     "is_evidence_adaptive",
     "observed_export_fallback_applies",
+    "unresolved_default_fallback_applies",
     "mode_is_built_in_default",
 ]
 
@@ -139,5 +140,49 @@ def observed_export_fallback_applies(
     return (
         mode is ContractMode.PUBLIC
         and is_evidence_adaptive(provenance)
-        and reason_code == "closed_domain_no_commitment"
+        and reason_code in _HEADER_SILENT_REASON_CODES
+    )
+
+
+#: Header-domain decisions that record the headers making *no* commitment
+#: either way. A completely searched domain with no commitment is one; a
+#: domain the headers could not close (``required_evidence_incomplete``) or an
+#: entity whose identity the headers could not pin (``identity_ambiguous``)
+#: are the other two -- weaker header evidence, which must narrow the
+#: conclusion to what the export table shows rather than leave the finding
+#: unscored (a lost ``_ZTI``/``_ZTV`` for a public class read NO_CHANGE with
+#: headers and BREAKING without). An authoritative exclusion is a commitment
+#: and stays out.
+_HEADER_SILENT_REASON_CODES = frozenset(
+    {
+        "closed_domain_no_commitment",
+        "required_evidence_incomplete",
+        "identity_ambiguous",
+    }
+)
+
+
+def unresolved_default_fallback_applies(
+    mode: ContractMode, provenance: ValueProvenance | None, relevance: Any
+) -> bool:
+    """Whether an evidence-adaptive default must score a finding no domain
+    could place.
+
+    The adaptive default narrows the scored set only by what a domain
+    *proves*: a finding the selected domain (and, under ``public``, the
+    observed-export fallback) leaves ``UNKNOWN_UNRESOLVED`` -- an L3 build
+    option, an L4/L5 source fact, a header-graph rename, judged by an
+    ``exports`` domain that has no universe for them -- is judged as
+    ``contract=all`` judges it, which is how every finding was scored before
+    contract evaluation became the default. Weaker evidence narrows a
+    conclusion; it never turns an observed change into ``NO_CHANGE``. A
+    stated domain (``--contract public|exports``) is the user's promise and
+    keeps its ``UNKNOWN_UNRESOLVED`` and coverage failure.
+    """
+    from ..contract_relevance_types import ContractRelevance
+
+    return (
+        mode is not ContractMode.ALL
+        and is_evidence_adaptive(provenance)
+        and relevance is ContractRelevance.UNKNOWN_UNRESOLVED
     )
