@@ -685,7 +685,10 @@ REPORT_BUG_CLASSES: tuple[BugClass, ...] = (
             "finding and the verdict does not change (oneCCL/oneDNN)."
         ),
         fixed_by=(1492,),
-        seed_tests=("tests/test_export_existence_reconciliation.py",),
+        seed_tests=(
+            "tests/test_export_existence_reconciliation.py",
+            "tests/test_family_f2_route_parity.py",
+        ),
         axes={"presence": ("old", "new", "both", "none")},
     ),
     BugClass(
@@ -696,7 +699,11 @@ REPORT_BUG_CLASSES: tuple[BugClass, ...] = (
             "project root."
         ),
         fixed_by=(1492,),
-        seed_tests=("tests/test_ownership_operand_anchor.py",),
+        seed_tests=(
+            "tests/test_ownership_operand_anchor.py",
+            "tests/test_family_f3_identity.py",
+            "tests/test_family_f3_identity_cells.py",
+        ),
         axes={
             "config": (
                 "none",
