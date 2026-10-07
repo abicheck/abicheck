@@ -380,3 +380,36 @@ def test_main_end_to_end_with_base(
     assert ur.main(["--root", str(root), "--update"]) == 0
     assert ur.main(argv) == 0
     assert ur.main(["--root", str(root), "--base", "no-such-ref"]) == 2
+
+
+def test_exceptions_invalid_yaml_exits_2(tmp_path: Path, capsys) -> None:
+    path = tmp_path / "exc.yaml"
+    path.write_text("test_only_functions: [unclosed\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="not valid YAML"):
+        ur.load_exceptions(path)
+    assert ur.main(["--root", str(tmp_path), "--exceptions", str(path)]) == 2
+    assert "not valid YAML" in capsys.readouterr().err
+
+
+def test_exceptions_without_pyyaml_exits_2(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "exc.yaml"
+    path.write_text("test_only_functions: []\n", encoding="utf-8")
+    monkeypatch.setitem(sys.modules, "yaml", None)  # import yaml -> ImportError
+    with pytest.raises(ValueError, match="PyYAML is required"):
+        ur.load_exceptions(path)
+    assert ur.main(["--root", str(tmp_path), "--exceptions", str(path)]) == 2
+
+
+def test_unresolvable_base_reports_git_stderr(tmp_path: Path) -> None:
+    # Not a repository: git prints a diagnostic, which must reach the user.
+    with pytest.raises(ValueError, match="does not resolve") as info:
+        ur.base_baseline(tmp_path, "HEAD")
+    assert "not a git repository" in str(info.value)
+
+
+def test_unresolvable_base_without_stderr(tmp_path: Path) -> None:
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    with pytest.raises(ValueError, match=r"'no-such-ref' does not resolve$"):
+        ur.base_baseline(tmp_path, "no-such-ref")

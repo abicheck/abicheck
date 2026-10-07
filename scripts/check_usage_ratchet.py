@@ -116,18 +116,8 @@ def _read(path: Path) -> str | None:
 
 
 def test_only_functions(root: Path) -> set[str]:
-    package_classes = pr._package_class_names(root)
-    fids: set[str] = set()
-    for path in _package_files(root):
-        text = _read(path)
-        if text is None:
-            continue
-        rel = path.relative_to(root).as_posix()
-        try:
-            fids.update(i.fid for i in pr.function_infos(text, rel, package_classes))
-        except SyntaxError:
-            continue
-    report = pr.dead_report(root, fids)
+    infos = pr.package_function_infos(root)
+    report = pr.dead_report(root, set(infos), infos)
     return {function_key(fid) for fid in report.dead if fid in report.tests}
 
 
@@ -325,9 +315,16 @@ def load_exceptions(path: Path) -> dict[str, set[str]]:
     out: dict[str, set[str]] = {c: set() for c in CATEGORIES}
     if not path.is_file():
         return out
-    import yaml
-
-    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    try:
+        import yaml
+    except ImportError as exc:
+        raise ValueError(
+            f"PyYAML is required to read {path} (pip install pyyaml)"
+        ) from exc
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except yaml.YAMLError as exc:
+        raise ValueError(f"{path} is not valid YAML: {exc}") from exc
     if not isinstance(data, dict) or set(data) - set(CATEGORIES):
         raise ValueError(f"exception categories must be a subset of {list(CATEGORIES)}")
     for cat, entries in data.items():
@@ -359,7 +356,11 @@ def base_baseline(root: Path, base: str) -> dict[str, set[str]] | None:
         text=True,
     )
     if ok.returncode != 0:
-        raise ValueError(f"base revision {base!r} does not resolve")
+        detail = ok.stderr.strip()
+        raise ValueError(
+            f"base revision {base!r} does not resolve"
+            + (f": {detail}" if detail else "")
+        )
     shown = subprocess.run(
         ["git", "-C", str(root), "show", f"{base}:{BASELINE_REL}"],
         capture_output=True,

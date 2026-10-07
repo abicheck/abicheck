@@ -496,8 +496,9 @@ def _mentions(
     return {n: sorted(p) for n, p in hits.items()}
 
 
-def dead_report(root: Path, unreached: set[str]) -> DeadReport:
-    """Classify the *unreached* function ids of a recording."""
+def package_function_infos(root: Path) -> dict[str, FunctionInfo]:
+    """Every :class:`FunctionInfo` under the package, keyed by function id.
+    Unparsable or undecodable files are skipped."""
     package_classes = _package_class_names(root)
     infos: dict[str, FunctionInfo] = {}
     for path in sorted((root / PACKAGE).rglob("*.py")):
@@ -509,6 +510,18 @@ def dead_report(root: Path, unreached: set[str]) -> DeadReport:
                 infos[info.fid] = info
         except (SyntaxError, UnicodeDecodeError):
             continue
+    return infos
+
+
+def dead_report(
+    root: Path,
+    unreached: set[str],
+    infos: dict[str, FunctionInfo] | None = None,
+) -> DeadReport:
+    """Classify the *unreached* function ids of a recording. *infos* (from
+    :func:`package_function_infos`) skips re-parsing the package."""
+    if infos is None:
+        infos = package_function_infos(root)
     report = DeadReport()
     candidates: set[str] = set()
     for fid in unreached:
