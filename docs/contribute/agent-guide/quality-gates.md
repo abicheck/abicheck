@@ -398,3 +398,30 @@ CI runs `mypy abicheck/` as a required gate. The baseline is currently **0 error
 
 **Your responsibility**: run `mypy abicheck/` after your changes and ensure it stays clean. If a new third-party suppression is needed, extend the existing `disable_error_code` override for that module rather than scattering ad-hoc `# type: ignore` comments. If you legitimately reduce a real error to zero, leave `MYPY_ERROR_BASELINE = 0` in `scripts/check_ai_readiness.py` — it now warns on drift in either direction.
 
+
+## ADR surface traceability (`adr-surfaces`)
+
+[ADR-076](../adr/076-adr-use-case-surface-traceability.md):
+`scripts/check_adr_surfaces.py` (a `verify.py` `pr` step, CI `ai-readiness`
+job) keeps `docs/contribute/adr/adr-surface-registry.yaml` honest. Update it
+in the same PR when you:
+
+- **add an ADR** — add its entry (`surfaced`/`partial`/`gap` with `missing`,
+  or `internal` with `reason`), and the `use_cases` it serves;
+- **add, rename or remove a CLI flag, Action input, API symbol or report
+  field an ADR cites** — the gate resolves every surface against the code and
+  fails where a cited one no longer exists;
+- **change a use case** — each UC carries `user_task:` (`pr_review`,
+  `local_check`, `release`, `audit`) and `adrs:`, which must mirror the
+  registry;
+- **add a scenario** — declare the `surfaces:` its `flow` command actually
+  exercises (checked against that command line) and, for a use case reachable
+  from cli+api+action, a shared `family:`.
+
+The gate ratchets against `docs/contribute/adr/adr_surface_baseline.json`: a
+disposition downgrade, a lost surface or use case, a newly untraced ADR
+surface, or a newly uncovered multi-channel use case fails. If the change is
+deliberate, run `python scripts/check_adr_surfaces.py --write-baseline` and
+commit the rewritten baseline in the same PR so review sees it. The generated
+coverage report is `docs/contribute/generated/adr-surface-coverage.md`
+(`--write-report`).

@@ -196,6 +196,7 @@ Follow the pointer whose trigger matches your task:
 | [`docs/contribute/known-gaps.md`](docs/contribute/known-gaps.md) | about to fix something in an area with a known gap or a reverted fix — read it **before** re-attempting |
 | [`tests/regressions/manifest.py`](tests/regressions/manifest.py) | writing a regression test — reuse a matching `BugClass` first |
 | [`docs/contribute/adr/index.md`](docs/contribute/adr/index.md) | a change touches a default, schema, exit code or public interface |
+| [`agent-guide/quality-gates.md` § ADR surface traceability](docs/contribute/agent-guide/quality-gates.md#adr-surface-traceability-adr-surfaces) | adding an ADR, or adding/renaming/removing a CLI flag, Action input, API symbol, report field, use case or scenario |
 
 **Repository skills** (`.claude/skills/`): `diagnosing-bugs` (load for a bug report, failing behavior or perf regression), `writing-for-agents` (load before editing any `AGENTS.md`/`CLAUDE.md`/skill), and the user-invoked `/handoff` and `/retro`.
 

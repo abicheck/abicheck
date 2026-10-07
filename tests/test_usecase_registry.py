@@ -127,3 +127,40 @@ def test_eval_doc_links_to_registry() -> None:
     assert "usecase-registry.yaml" in _EVAL_DOC.read_text(encoding="utf-8"), (
         "the evaluation doc must point readers at the machine-readable registry"
     )
+
+
+_USER_TASKS = {"pr_review", "local_check", "release", "audit"}
+_ADR_ID_RE = re.compile(r"^ADR-\d{3}[a-z]?$")
+
+
+class TestTraceabilityFields:
+    """ADR-076: every use case names its vision.md user task(s) and its ADRs.
+
+    The ``adrs:`` list must also mirror docs/contribute/adr/adr-surface-
+    registry.yaml exactly; scripts/check_adr_surfaces.py (and
+    tests/test_adr_surfaces.py) own that cross-file check.
+    """
+
+    @pytest.mark.parametrize("case", _load(), ids=lambda c: c["id"])
+    def test_user_task_is_a_known_nonempty_list(self, case: dict) -> None:
+        tasks = case.get("user_task")
+        assert isinstance(tasks, list) and tasks, (
+            f"{case['id']}: needs user_task: [...]"
+        )
+        assert set(tasks) <= _USER_TASKS, (
+            f"{case['id']}: unknown user_task {set(tasks) - _USER_TASKS}"
+        )
+        assert len(tasks) == len(set(tasks)), f"{case['id']}: duplicate user_task"
+
+    @pytest.mark.parametrize("case", _load(), ids=lambda c: c["id"])
+    def test_adrs_is_a_list_of_adr_ids(self, case: dict) -> None:
+        adrs = case.get("adrs")
+        assert isinstance(adrs, list), f"{case['id']}: needs adrs: [...] (may be empty)"
+        for adr in adrs:
+            assert _ADR_ID_RE.match(adr), f"{case['id']}: malformed ADR id {adr!r}"
+
+    def test_every_user_task_has_a_use_case(self) -> None:
+        covered = {t for c in _load() for t in c.get("user_task") or []}
+        assert covered == _USER_TASKS, (
+            f"user tasks with no use case: {_USER_TASKS - covered}"
+        )
