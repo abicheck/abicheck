@@ -1045,7 +1045,7 @@ def test_detector_uses_init_symbol_when_module_name_absent() -> None:
 
 
 def test_service_attach_hook_sets_metadata() -> None:
-    from abicheck.service import _try_attach_python_ext_metadata
+    from abicheck.service_metadata_attach import _try_attach_python_ext_metadata
 
     snap = AbiSnapshot(
         library="foo.abi3.so",
@@ -1064,7 +1064,7 @@ def test_service_attach_hook_sets_metadata() -> None:
 
 
 def test_service_attach_hook_noop_for_plain_library() -> None:
-    from abicheck.service import _try_attach_python_ext_metadata
+    from abicheck.service_metadata_attach import _try_attach_python_ext_metadata
 
     snap = AbiSnapshot(library="libfoo.so", version="1.0", elf=ElfMetadata())
     _try_attach_python_ext_metadata(snap)

@@ -4932,7 +4932,7 @@ class TestTryAttachNumpyCapiSurface:
         # library -- the INFO log must not fire for every such library
         # (CodeRabbit review).
         from abicheck.numpy_capi import NumPyCapiSurface
-        from abicheck.service import _try_attach_numpy_capi_surface
+        from abicheck.service_metadata_attach import _try_attach_numpy_capi_surface
 
         snap = AbiSnapshot(library="lib.so", version="1.0")
         not_consuming = NumPyCapiSurface(
@@ -4957,7 +4957,7 @@ class TestTryAttachNumpyCapiSurface:
         # removing either one from _try_attach_numpy_capi_surface's guard
         # would fail this test (CodeRabbit review).
         from abicheck.numpy_capi import NumPyCapiSurface
-        from abicheck.service import _try_attach_numpy_capi_surface
+        from abicheck.service_metadata_attach import _try_attach_numpy_capi_surface
 
         snap = AbiSnapshot(library="lib.so", version="1.0")
         consuming = NumPyCapiSurface(

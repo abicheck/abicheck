@@ -172,35 +172,10 @@ from .service_dump_native import (  # noqa: E402,F401
 # every front end (CLI, typed Python) builds a request for. ──────────────────
 from .service_dump_pipeline import run_dump_request  # noqa: E402,F401
 
-# ── Opportunistic per-ecosystem metadata attachment (leaf module
-# service_metadata_attach; re-exported verbatim, same as before this split,
-# so ``from abicheck.service import _try_attach_python_api_surface`` and its
-# three siblings keep resolving unchanged -- service_dump_native.py imports
-# these same four names directly from the same source for its own internal
-# calls, so this is a second, independent binding of the identical function
-# objects rather than a re-export chain). ──────────────────────────────────
-from .service_metadata_attach import (  # noqa: E402,F401
-    _try_attach_numpy_capi_surface,
-    _try_attach_python_api_surface,
-    _try_attach_python_ext_metadata,
-    _try_attach_sycl_metadata,
-)
-
-# ── Output rendering: service_render.py is `frontends`-classified (ADR-061)
-# but `service.py` is `workflows`-legacy-classified (a real, checked edge:
-# `service.py` is named in `workflows`'s own `legacy_paths`, so
-# `check_architecture.py`'s dependency-direction check inspects it), so this
-# is a real, checked `workflows -> frontends` edge -- static and visible now,
-# not hidden behind `importlib.import_module` the way the retired
-# `workflows/render.py` bridged it. It is recorded as a reviewed exception in
-# `architecture/debt.yaml`'s `dependency_direction_exceptions` (ADR-061 gap
-# A) rather than left as an unresolved-but-invisible bridge: closing it for
-# real means `service.py` itself stopping being `workflows`-classified for
-# this one responsibility (this ADR's own "composition at the outer
-# boundary" language), a separate migration slice -- see that debt.yaml
-# entry's own rationale for why it doesn't fit in this pass.
-# `service_render.py` is a leaf: it does not import `abicheck.service` (see
-# its own docstring), so this introduces no real circular import either.
+# ── Output rendering: `service_render.py` is `frontends`-classified, and so
+# is this facade (ADR-061 "composition at the outer boundary"), so this is
+# an ordinary `frontends -> frontends` import. `service_render.py` is a
+# leaf: it does not import `abicheck.service`, so there is no cycle.
 from .service_render import (  # noqa: E402,F401
     _render_deps_section_md,
     render_output,

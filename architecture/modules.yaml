@@ -342,7 +342,6 @@
         "abicheck/l0_export_delta.py",
         "abicheck/post_manifest.py",
         "abicheck/resolver.py",
-        "abicheck/service.py",
         "abicheck/service_compare_evidence.py",
         "abicheck/service_compare_pipeline.py",
         "abicheck/service_dump_cache.py",
@@ -431,6 +430,7 @@
         "abicheck/dry_run.py",
         "abicheck/config_paths.py",
         "abicheck/__main__.py",
+        "abicheck/service.py",
         "abicheck/service_render.py"
       ]
     }
