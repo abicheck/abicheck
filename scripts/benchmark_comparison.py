@@ -2870,7 +2870,7 @@ def _run_l3l5_case(name: str, entry: dict[str, Any]) -> ToolResult:
         old = json.loads((case_dir / "old.json").read_text())
         new = json.loads((case_dir / "new.json").read_text())
         tier = entry.get("min_evidence")
-        from abicheck.checker_policy import compute_verdict  # noqa: PLC0415
+        from abicheck.policy.classification import compute_verdict  # noqa: PLC0415
 
         if tier == "L3":
             from abicheck.buildsource.build_diff import (

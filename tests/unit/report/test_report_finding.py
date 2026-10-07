@@ -25,8 +25,8 @@ import pytest
 
 from abicheck.checker import Change, ChangeKind, DiffResult, Verdict
 from abicheck.junit_report import _is_failure, to_junit_xml
+from abicheck.policy.reclassify import effective_verdict_for_change
 from abicheck.policy.severity import classify_effective_change
-from abicheck.reclassify import effective_verdict_for_change
 from abicheck.report.finding import (
     build_report_findings,
     findings_by_change_id,

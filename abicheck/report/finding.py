@@ -34,7 +34,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date
 
-from ..checker_types import Change, DiffResult
+from ..checker_types import DiffResult
+from ..model.change import Change
 from ..policy.severity import (
     IssueCategory,
     KindSets,

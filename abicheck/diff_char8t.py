@@ -25,11 +25,11 @@ from __future__ import annotations
 
 import re
 
-from .checker_types import Change
 from .detector_registry import registry
 from .diff_helpers import make_change
 from .diff_type_spellings import iter_type_slot_changes
 from .model import AbiSnapshot
+from .model.change import Change
 from .model.change_catalog.kinds import ChangeKind
 
 # Match char8_t as a whole word (avoid matching a substring of another ident).

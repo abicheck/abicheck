@@ -248,7 +248,7 @@ def _reject_unsupported_frontends(
     ``build_info`` never feeds L4, so neither is rejected. Mirrors ``cli.py``'s
     own ``--depth source`` + ``--ast-frontend hybrid`` ``UsageError``.
 
-    The ``hybrid`` half is :func:`~abicheck.service_input_resolution.reject_hybrid_source_frontend`,
+    The ``hybrid`` half is :func:`~abicheck.workflows.artifact.resolve.reject_hybrid_source_frontend`,
     shared with ``dump``'s own typed path; the ``android`` half names
     ``run_compare_request`` in its message and stays here.
     """

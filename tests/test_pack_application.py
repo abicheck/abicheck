@@ -1231,7 +1231,7 @@ class TestNoPackChangesNothing:
         computed fresh from `severity_active`)."""
         from abicheck.cli_helpers_compare import resolve_compare_config
         from abicheck.pack_application import PackApplication, apply_to_compare_config
-        from abicheck.severity import SeverityLevel
+        from abicheck.policy.severity import SeverityLevel
 
         resolved = resolve_compare_config(
             None,

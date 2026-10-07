@@ -192,9 +192,9 @@ from ..buildsource.cross_source_checks import (
     CrosscheckConfig,
     run_crosschecks,
 )
-from ..checker_types import Change
 from ..model import AbiSnapshot
-from ..policy.evidence_status import CrossSourceEvolution
+from ..model.change import Change
+from ..model.evidence_status import CrossSourceEvolution
 from .crosscheck_ownership import member_owned_checks
 
 
@@ -317,7 +317,7 @@ def compute_candidate_cross_source_findings(new: AbiSnapshot) -> list[Change]:
     candidate-side evidence, and every finding it produces is a
     full-confidence observation about *this build*.
 
-    Every finding is stamped :attr:`~abicheck.policy.evidence_status.
+    Every finding is stamped :attr:`~abicheck.model.evidence_status.
     CrossSourceEvolution.NOT_EVALUATED`, unconditionally. That is the whole
     point of this function existing rather than
     ``compute_cross_source_evolution(new, new)``: the two axes an audit must

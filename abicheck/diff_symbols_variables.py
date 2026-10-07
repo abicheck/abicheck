@@ -25,7 +25,6 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Any
 
-from .checker_types import Change
 from .compare import export_transition as _export_transition
 from .compare.declaration_facts import alignment_changes
 from .compare.edge_query import ObservedExportTable, observed_export_table
@@ -44,6 +43,7 @@ from .elf_symbol_filter import (
     is_abi_relevant_elf_symbol,
 )
 from .model import AbiSnapshot, AccessLevel, Function, Variable
+from .model.change import Change
 from .model.change_catalog.kinds import ChangeKind
 from .model.semantic_ir_variable_payload import variable_canonical_entity
 from .model.surface_facts import (

@@ -50,13 +50,13 @@ import pytest
 from hypothesis import HealthCheck, assume, given, settings, strategies as st
 
 from abicheck.checker_policy import ChangeKind
-from abicheck.checker_types import Change
 from abicheck.finding_identity import (
     resolve_change_identity,
     resolve_function_identity,
     resolve_variable_identity,
 )
 from abicheck.model import Function, Param, Variable
+from abicheck.model.change import Change
 
 pytestmark = pytest.mark.slow
 

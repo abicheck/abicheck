@@ -724,7 +724,7 @@ class TestShowOnlyInReporters:
         claim "no exit impact" for a category that still fails the gate.
         `--show-only compatible` hides the breaking FUNC_REMOVED, but the
         default severity preset still exits nonzero on it."""
-        from abicheck.severity import PRESET_DEFAULT
+        from abicheck.policy.severity import PRESET_DEFAULT
 
         result = _make_result(
             changes=[
@@ -747,7 +747,7 @@ class TestShowOnlyInReporters:
         claim is unchanged because that table is built the same way there
         (``build_root_cause_document`` -> ``compute_severity_summary`` with
         ``all_changes=list(result.changes)``)."""
-        from abicheck.severity import PRESET_DEFAULT
+        from abicheck.policy.severity import PRESET_DEFAULT
 
         result = _make_result(
             changes=[

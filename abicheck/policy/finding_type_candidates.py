@@ -27,7 +27,7 @@ per-kind symbol shapes from here too.
 
 from __future__ import annotations
 
-from ..checker_types import Change
+from ..model.change import Change
 from ..model.change_catalog.kinds import ChangeKind
 from ..model.type_identifiers import type_identifiers as _type_identifiers
 from ..surface import _MEMBER_LEVEL_TYPE_KIND_NAMES, _TYPE_LEVEL_KIND_NAMES

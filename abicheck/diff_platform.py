@@ -18,7 +18,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, TypeVar
 
-from .checker_types import SYMBOL_VERSION_ALIAS_NOT_RETAINED_MARKER, Change
 from .compare.debug_type_scope import debug_layout_scope
 from .compare.edge_query import export_table_covered
 from .compare.enum_sentinel import is_confirmed_enum_sentinel
@@ -74,6 +73,7 @@ from .model import (
     stdlib_namespaces_excluded,
 )
 from .model.binary_naming import strip_vendor_hash
+from .model.change import SYMBOL_VERSION_ALIAS_NOT_RETAINED_MARKER, Change
 from .model.change_catalog.kinds import ChangeKind
 from .model.elf_facts import SymbolType
 from .model.surface_facts import is_binary_exported, is_export_confirmed_absent

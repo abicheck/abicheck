@@ -49,10 +49,10 @@ import pytest
 
 from abicheck.checker import compare
 from abicheck.checker_policy import ChangeKind
-from abicheck.checker_types import Change
 from abicheck.diff_filtering import _deduplicate_ast_dwarf
 from abicheck.diff_helpers import cross_tier_transition
 from abicheck.model import AbiSnapshot
+from abicheck.model.change import Change
 from abicheck.model.python_facts import PythonExtMetadata
 
 

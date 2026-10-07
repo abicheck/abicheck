@@ -23,7 +23,7 @@ these kinds explain and localize it.
 
 from __future__ import annotations
 
-from ..checker_types import Change
+from ..model.change import Change
 from ..model.change_catalog.kinds import ChangeKind
 from .build_evidence import BuildEvidence
 

@@ -28,7 +28,7 @@ from typing import TYPE_CHECKING
 from .model import CoverageStatus, DataLayer, LayerCoverage
 
 if TYPE_CHECKING:
-    from ..checker_types import Change
+    from ..model.change import Change
     from ..policy_file import PolicyFile
     from .pack import BuildSourcePack
 
@@ -103,7 +103,7 @@ def require_evidence_findings(
     """
     if policy_file is None or not policy_file.require_evidence:
         return []
-    from ..checker_types import Change
+    from ..model.change import Change
     from ..model.change_catalog.kinds import ChangeKind
 
     findings: list[Change] = []

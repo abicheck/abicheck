@@ -27,7 +27,7 @@ from __future__ import annotations
 
 from abicheck.buildsource import cross_source_checks as _crosschecks
 from abicheck.checker_policy import ChangeKind, CrossSourceEvolution, Verdict
-from abicheck.checker_types import Change
+from abicheck.model.change import Change
 from abicheck.policy.persistent_hygiene import drop_persistent_hygiene
 from abicheck.policy_file import PolicyFile
 

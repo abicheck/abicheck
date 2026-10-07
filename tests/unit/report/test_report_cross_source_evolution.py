@@ -8,7 +8,8 @@ from __future__ import annotations
 import json
 
 from abicheck.checker_policy import ChangeKind, CrossSourceEvolution
-from abicheck.checker_types import Change, DiffResult
+from abicheck.checker_types import DiffResult
+from abicheck.model.change import Change
 from abicheck.report.cross_source_evolution import (
     compute_cross_source_evolution_summary,
     render_cross_source_evolution_json,

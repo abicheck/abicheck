@@ -60,7 +60,7 @@ Nothing here decides an exit code. It stamps relevance, the resulting
 :class:`~abicheck.contract_relevance_types.CompatibilityEvaluationStatus`,
 and (once the policy has run) the per-finding compatibility decision;
 ``severity.py`` and ``checker.py`` read those through the shared predicate in
-:mod:`abicheck.contract_gating`. Not a resolver either: the contract *mode*
+:mod:`abicheck.model.contract_finding_relevance`. Not a resolver either: the contract *mode*
 arrives already resolved from the front end's
 ``CompatibilityEvaluationConfig``, and the legacy-alias fallback is Phase 1's
 own wiring rather than a second copy of D7's precedence.
@@ -80,11 +80,11 @@ from .contract_relevance_types import (
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
 
-    from .checker_types import Change
     from .compatibility_evaluation_config import ValueProvenance
     from .contract_evidence import ContractEvidenceBlock, PersistedContractContext
     from .export_surface import ExportSurface
     from .model import AbiSnapshot
+    from .model.change import Change
     from .model.contract_conflicts import ContractSourceConflict
     from .policy_file import PolicyFile
     from .post_processing import PipelineContext
@@ -297,8 +297,8 @@ class ContractEvaluationStage:
         recorded decision cannot disagree with the category the gate put the
         finding in.
         """
-        from .policy.contract_finding_relevance import is_evaluated
-        from .severity import effective_verdict_for_change
+        from .model.contract_finding_relevance import is_evaluated
+        from .policy.severity import effective_verdict_for_change
 
         for change in changes:
             if not is_evaluated(change):
@@ -657,14 +657,14 @@ def build_contract_stage(
 def evaluated_for_policy(changes: Sequence[Change]) -> list[Change]:
     """The findings compatibility policy scores, per ADR-049 D1.
 
-    The :func:`abicheck.contract_gating.is_evaluated` predicate applied over
+    The :func:`abicheck.model.contract_finding_relevance.is_evaluated` predicate applied over
     a ``Change`` sequence, so ``checker.py`` states the rule in the vocabulary
     of this stage rather than reaching into the leaf module for a predicate
     whose default (unstamped == evaluated) matters to read correctly. The
     leaf module deliberately exports the predicate and not a list helper --
     each consumer needs the filter in its own element type.
     """
-    from .policy.contract_finding_relevance import is_evaluated
+    from .model.contract_finding_relevance import is_evaluated
 
     return [c for c in changes if is_evaluated(c)]
 

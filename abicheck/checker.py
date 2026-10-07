@@ -25,12 +25,13 @@ from . import (
     diff_char8t,  # noqa: F401 — triggers detector registration
     diff_integer_model,  # noqa: F401 — triggers detector registration
 )
-from .checker_types import (  # noqa: F401
-    Change,
-    DetectorSpec,
-    DiffResult,
-    LibraryMetadata,
+from .change_registry import (
+    API_BREAK_KINDS as _API_BREAK_KINDS,
+    BREAKING_KINDS as _BREAKING_KINDS,
+    COMPATIBLE_KINDS as _COMPATIBLE_KINDS,
+    RISK_KINDS as _RISK_KINDS,
 )
+from .checker_types import DiffResult
 from .comparability import check_contracts_comparable, comparability_outcome
 from .compare.debug_layout_view import debug_layout_view as _debug_layout_view
 from .compare.edge_query import edge_coverage_report
@@ -125,24 +126,18 @@ from .dwarf_advanced import (
     diff_advanced_dwarf,  # noqa: F401 — re-export for monkeypatching
 )
 from .model import AbiSnapshot
+from .model.change import Change, DetectorSpec, LibraryMetadata
 from .model.change_catalog.kinds import ChangeKind
+from .model.evidence_status import EvidenceTier, is_cross_source_resolved
 from .model.extraction_scope import snapshot_scope_identity
 from .model.header_exclusion_record import comparison_exclusion_identity
 from .model.surface_facts import is_abi_visible
-from .policy.classification import (
-    API_BREAK_KINDS as _API_BREAK_KINDS,
-    BREAKING_KINDS as _BREAKING_KINDS,
-    COMPATIBLE_KINDS as _COMPATIBLE_KINDS,
-    RISK_KINDS as _RISK_KINDS,
-    Verdict,
-    compute_verdict,
-)
+from .policy.classification import Verdict, compute_verdict
 from .policy.disposition_close import finalize_ledger
 from .policy.disposition_ledger import (
     DispositionLedger,
     record_suppressed_change,
 )
-from .policy.evidence_status import EvidenceTier, is_cross_source_resolved
 from .policy.persistent_hygiene import drop_persistent_hygiene
 from .policy.policy_file_namespaces import (
     experimental_namespaces as _experimental_namespaces,
@@ -943,7 +938,7 @@ def compare(
       the candidate;
     * the cross-source hygiene checks and the pattern/preprocessor pre-scan
       *do* run, against the candidate's own evidence, and every finding
-      they produce is stamped :attr:`~abicheck.policy.evidence_status.
+      they produce is stamped :attr:`~abicheck.model.evidence_status.
       CrossSourceEvolution.NOT_EVALUATED`. Confidence in the observation is
       unchanged (the check ran, on real evidence); what is unavailable is
       the ability to establish history, and that is what the evolution

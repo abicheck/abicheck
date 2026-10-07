@@ -33,9 +33,9 @@ from __future__ import annotations
 
 from collections.abc import Container
 
-from ..checker_types import Change
 from ..diff_helpers import make_change
 from ..model import Function, Variable
+from ..model.change import Change
 from ..model.change_catalog.kinds import ChangeKind
 from ..model.edge_coverage import EdgeAnswer
 from ..model.surface_facts import (

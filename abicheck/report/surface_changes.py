@@ -51,7 +51,8 @@ from .change_operation import entity_for_change, operation_for_kind
 from .finding import ReportFinding, build_report_findings, report_findings_for
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
-    from ..checker_types import Change, DiffResult
+    from ..checker_types import DiffResult
+    from ..model.change import Change
 
 
 @dataclass(frozen=True, slots=True)

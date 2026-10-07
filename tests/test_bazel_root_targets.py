@@ -441,7 +441,7 @@ def test_embed_side_build_source_forwards_build_targets(monkeypatch, tmp_path: P
     from abicheck.model import AbiSnapshot
     from abicheck.service import InputSpec
     from abicheck.service_compare_evidence import SideEvidence
-    from abicheck.service_input_resolution import embed_side_build_source
+    from abicheck.workflows.artifact.execute import embed_side_build_source
 
     captured: dict = {}
 

@@ -49,7 +49,8 @@ from .disposition_ledger import (
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from datetime import date
 
-    from ..checker_types import Change, DiffResult
+    from ..checker_types import DiffResult
+    from ..model.change import Change
 
 
 def record_kept_change(

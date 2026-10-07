@@ -509,7 +509,7 @@ class TestTheResolvedPolicyDocumentReachesReleaseScoring:
             self.overrides = overrides
 
     def _stage(self):
-        from abicheck.checker_types import Change
+        from abicheck.model.change import Change
 
         return self._Stage(
             [

@@ -15,13 +15,13 @@ import re
 import pytest
 from hypothesis import given, settings, strategies as st
 
-from abicheck.checker_types import Change
 from abicheck.diff_filtering import (
     _compile_root_patterns,
     _match_root_type,
     _root_pattern,
     _root_type_name,
 )
+from abicheck.model.change import Change
 from abicheck.model.change_catalog.kinds import ChangeKind
 
 _IDENT_CHARS = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_")

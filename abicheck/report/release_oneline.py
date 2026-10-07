@@ -42,7 +42,7 @@ from .render_text import format_stat_line
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
-    from ..checker_types import Change
+    from ..model.change import Change
 
 __all__ = ["format_release_oneline", "release_global_counts"]
 

@@ -49,7 +49,7 @@ from ..model.change_catalog.kinds import ChangeKind
 from ..model.type_indirection import unresolved_pair_verdict
 
 if TYPE_CHECKING:
-    from ..checker_types import Change
+    from ..model.change import Change
     from ..model.identity import EntityId
     from ..model.semantic_ir import CanonicalEntity
 

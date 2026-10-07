@@ -75,7 +75,6 @@ from abicheck.model.source_graph_query import (
     looks_like_system_name,
 )
 
-from ..checker_types import Change
 from ..compare.ownership_relations import contract_relations
 from ..evidence_depth import resolve_l5_source_graph
 from ..model import (
@@ -85,11 +84,12 @@ from ..model import (
     ScopeOrigin,
     Variable,
 )
+from ..model.change import Change
 from ..model.change_catalog.kinds import ChangeKind
 from ..model.cxx_artifact_symbols import is_cxx_class_artifact_symbol
+from ..model.evidence_status import Confidence
 from ..model.graph_facts import GraphNode
 from ..model.source_graph import DEPENDENCY_EDGE_KINDS, SourceGraphSummary
-from ..policy.evidence_status import Confidence
 
 # Export accounting (ADR-035 D4) lives in a sibling module (crosscheck hit the
 # 2000-line file cap). Re-exported so ``_check_exported_not_public`` and the tests

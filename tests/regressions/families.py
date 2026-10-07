@@ -174,6 +174,9 @@ _F1 = (
 )
 _F2 = (
     "report.cross_producer_disagreement_on_one_symbol",
+    # The CLI and `dumper.dump` hybrid routes disagreed on the parse-time
+    # dependency skip.
+    "extraction.recorded_scope_matches_parse_skip",
     "serialization.persisted_field_not_decoded",
     "cardinality.member_request_drops_scalar_field",
     "config.front_end_default_divergence",

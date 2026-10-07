@@ -351,7 +351,8 @@ def test_consumer_overlay_suppression_records_into_the_same_ledger() -> None:
     """The fourth application point (``appcompat``), whose input shape is a
     raw ``missing_symbols`` string rather than a detected change."""
     from abicheck.appcompat import AppRequirements
-    from abicheck.checker_types import Change, DiffResult
+    from abicheck.checker_types import DiffResult
+    from abicheck.model.change import Change
 
     result = DiffResult(old_version="1.0", new_version="2.0", library="libfoo")
     ledger = finalize_ledger(DispositionLedger(), result)
@@ -401,7 +402,8 @@ def test_two_distinct_changes_are_never_collapsed_into_one_record() -> None:
     naive value-based ledger would use — must stay two records, or the
     conservation identity would be satisfiable by collapsing everything.
     """
-    from abicheck.checker_types import Change, DiffResult
+    from abicheck.checker_types import DiffResult
+    from abicheck.model.change import Change
 
     def _change() -> Change:
         return Change(kind=ChangeKind.FUNC_REMOVED, symbol="dup", description="removed")
@@ -485,8 +487,9 @@ def test_every_contract_relevance_maps_to_its_own_disposition(
     the mapping is exactly the kind of value-spelling comparison that fails
     silently for the *other* members when written against one of them.
     """
-    from abicheck.checker_types import Change, DiffResult
+    from abicheck.checker_types import DiffResult
     from abicheck.contract_relevance_types import ContractRelevance
+    from abicheck.model.change import Change
 
     change = Change(kind=ChangeKind.FUNC_REMOVED, symbol="gone", description="removed")
     change.contract_relevance = ContractRelevance[relevance]
@@ -502,7 +505,8 @@ def test_every_contract_relevance_maps_to_its_own_disposition(
 def test_ledger_for_a_hand_built_result_still_reconciles() -> None:
     """Every consumer must be able to state the counts unconditionally, even
     for a ``DiffResult`` no ``compare()`` produced."""
-    from abicheck.checker_types import Change, DiffResult
+    from abicheck.checker_types import DiffResult
+    from abicheck.model.change import Change
 
     result = DiffResult(
         old_version="1.0",
@@ -602,7 +606,7 @@ def test_early_deduplication_is_counted_not_dropped() -> None:
     through a hand-called step, and asserted against the *step's own* output
     length, which is an oracle independent of the ledger.
     """
-    from abicheck.checker_types import Change
+    from abicheck.model.change import Change
     from abicheck.post_processing import DEFAULT_PIPELINE
 
     duplicates = [
@@ -624,7 +628,7 @@ def test_a_pipeline_step_can_never_drop_a_finding_unrecorded() -> None:
     default pipeline, a finding that leaves `changes` without landing in one
     of the context's own buckets is recorded, so the ledger plus the buckets
     always account for every input change."""
-    from abicheck.checker_types import Change
+    from abicheck.model.change import Change
     from abicheck.post_processing import DEFAULT_PIPELINE
 
     inputs = [
@@ -653,7 +657,8 @@ def test_opaque_downgrades_are_not_labelled_deduplicated() -> None:
     `redundant_count`. An opaque-handle downgrade was excluded from the
     verdict on its own merits — calling it `deduplicated` would claim it was
     folded into a finding that does not exist."""
-    from abicheck.checker_types import Change, DiffResult
+    from abicheck.checker_types import DiffResult
+    from abicheck.model.change import Change
 
     collapsed = Change(kind=ChangeKind.FUNC_REMOVED, symbol="a", description="")
     opaque = Change(kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="H", description="")
@@ -678,7 +683,7 @@ def test_a_grouped_child_is_deduplicated_not_suppressed() -> None:
     user suppression. Labelling them `suppressed` would make an ordinary
     ISA-tier grouping look like a waived major break.
     """
-    from abicheck.checker_types import Change
+    from abicheck.model.change import Change
     from abicheck.post_processing import DetectCppPatterns, PipelineContext
 
     old, new = _snapshots()
@@ -706,7 +711,8 @@ def test_grouping_children_does_not_recommend_a_major_release() -> None:
     release recommendation reads *suppressed-and-gating* records, so a
     grouped child mislabelled `suppressed` would turn a PATCH into
     MAJOR/REVIEW."""
-    from abicheck.checker_types import Change, DiffResult
+    from abicheck.checker_types import DiffResult
+    from abicheck.model.change import Change
     from abicheck.post_processing import DetectCppPatterns, PipelineContext
     from abicheck.semver import recommend_release
 
@@ -738,7 +744,7 @@ def test_a_late_duplicate_finding_is_conserved_with_and_without_a_rule() -> None
     in both branches, or adding a rule would change the detected total
     instead of moving the finding between dispositions.
     """
-    from abicheck.checker_types import Change
+    from abicheck.model.change import Change
     from abicheck.post_processing import (
         PipelineContext,
         _merge_findings_respecting_suppression,
@@ -778,7 +784,8 @@ def test_a_versioned_symbol_collapse_is_deduplicated_not_suppressed() -> None:
     the release recommendation contradict the option's whole purpose (the
     pair is *reclassified as compatible*).
     """
-    from abicheck.checker_types import Change, DiffResult
+    from abicheck.checker_types import DiffResult
+    from abicheck.model.change import Change
     from abicheck.post_processing import PipelineContext, _record_collapsed_findings
     from abicheck.semver import recommend_release
 
@@ -819,7 +826,7 @@ def test_every_rule_less_suppressed_bucket_write_is_recorded() -> None:
     finding in `ctx.suppressed` is labelled `suppressed` without a rule
     attributed — which is exactly what made `recommend_release` misread them.
     """
-    from abicheck.checker_types import Change
+    from abicheck.model.change import Change
     from abicheck.post_processing import DEFAULT_PIPELINE
 
     old, new = _snapshots()
@@ -848,7 +855,7 @@ def test_a_substituting_step_records_one_observation_not_two() -> None:
     where one was observed — the audit's whole job is to make that number
     trustworthy.
     """
-    from abicheck.checker_types import Change
+    from abicheck.model.change import Change
     from abicheck.post_processing import (
         DowngradeOpaqueStructChanges,
         PipelineContext,
@@ -896,7 +903,7 @@ def test_a_steps_declared_drop_meaning_is_what_gets_recorded(
     before/after lists, so each step declares its own and this asserts the
     declaration is honoured rather than one step's happening to work.
     """
-    from abicheck.checker_types import Change
+    from abicheck.model.change import Change
     from abicheck.post_processing import PipelineContext, _record_dropped_duplicates
 
     old, new = _snapshots()
@@ -990,7 +997,7 @@ def test_synthesized_scoped_findings_join_the_audit() -> None:
     """A missing entrypoint or a retargeted PE ordinal is a real detected
     consumer finding that never reaches `result.changes`. Recording it is
     what lets a scoped view state counts the audit agrees with."""
-    from abicheck.checker_types import Change
+    from abicheck.model.change import Change
     from abicheck.policy.disposition_close import close_consumer_scope
 
     old, new = _snapshots(removed=1)
@@ -1025,7 +1032,8 @@ class TestALateProducerClosesTheLedgerAgain:
         """Left unresolved, a suppressed consumer-breaking removal is
         invisible to `recommend_release`'s conserved-delta check — it looks
         for *gating* suppressed records, and `None` is not one."""
-        from abicheck.checker_types import Change, DiffResult
+        from abicheck.checker_types import DiffResult
+        from abicheck.model.change import Change
         from abicheck.policy.disposition_close import close_consumer_scope
         from abicheck.semver import recommend_release
 
@@ -1103,8 +1111,9 @@ def test_a_suppressed_out_of_contract_finding_does_not_force_a_bump() -> None:
     otherwise the suppressed exclusion recommends MAJOR/REVIEW while the
     identical *unsuppressed* exclusion correctly recommends no bump.
     """
-    from abicheck.checker_types import Change, DiffResult
+    from abicheck.checker_types import DiffResult
     from abicheck.contract_relevance_types import ContractRelevance
+    from abicheck.model.change import Change
     from abicheck.semver import recommend_release
 
     excluded = Change(

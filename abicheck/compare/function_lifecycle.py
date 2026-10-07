@@ -39,7 +39,7 @@ from ..diff_helpers import make_change
 from ..model.change_catalog.kinds import ChangeKind
 
 if TYPE_CHECKING:
-    from ..checker_types import Change
+    from ..model.change import Change
     from ..model.identity import EntityId
     from ..model.semantic_ir import CanonicalEntity
 

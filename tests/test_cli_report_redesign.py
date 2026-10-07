@@ -50,7 +50,8 @@ def test_typed_terminal_renderer_uses_the_same_finalized_document() -> None:
 
 def test_terminal_human_default_demangles_without_markdown_pipe_escaping() -> None:
     from abicheck.checker_policy import ChangeKind, Verdict
-    from abicheck.checker_types import Change, DiffResult
+    from abicheck.checker_types import DiffResult
+    from abicheck.model.change import Change
 
     old = AbiSnapshot(library="libx.so", version="1")
     new = AbiSnapshot(library="libx.so", version="2")
@@ -170,7 +171,8 @@ def test_one_member_release_carries_scalar_group_and_count_semantics(tmp_path) -
 @pytest.mark.slow
 def test_terminal_is_bounded_for_ten_thousand_findings_but_json_is_complete() -> None:
     from abicheck.checker_policy import ChangeKind
-    from abicheck.checker_types import Change, DiffResult
+    from abicheck.checker_types import DiffResult
+    from abicheck.model.change import Change
 
     old = AbiSnapshot(library="large.so", version="1")
     new = AbiSnapshot(library="large.so", version="2")

@@ -51,7 +51,6 @@ import importlib as _importlib
 import logging
 from typing import TYPE_CHECKING, Any
 
-from ..checker_types import LibraryMetadata
 from ..compile_context import CompileContext
 from ..errors import SnapshotError, ValidationError
 from ..extract.header_exclusions import (
@@ -59,6 +58,7 @@ from ..extract.header_exclusions import (
     reject_exclusions_against_a_manifest,
 )
 from ..model import AbiSnapshot, Function
+from ..model.change import LibraryMetadata
 from ..serialization import load_snapshot
 from ..service_dump_cache import cached_run_dump
 from .header_exclusion_audit import record_achieved_header_exclusions

@@ -41,11 +41,11 @@ def test_resolve_side_snapshot_folds_compiler_option_include_dirs(
     ``public_include_search_dirs`` -- a directory reached only through such
     an operand stayed ``PRIVATE_HEADER`` even though the caller named it
     explicitly, just not via ``InputSpec.includes``."""
-    from abicheck import service_input_resolution as sir
     from abicheck.dry_run_estimate import CompileContext
     from abicheck.model import AbiSnapshot
     from abicheck.service import InputSpec
     from abicheck.service_compare_evidence import SideEvidence
+    from abicheck.workflows.artifact import execute as sir
 
     so = tmp_path / "lib.so"
     so.write_bytes(b"\x7fELF" + b"\x00" * 100)
@@ -90,11 +90,11 @@ def test_resolve_side_snapshot_suppresses_public_include_search_dirs_for_manifes
     `dump()`'s own manifest mutual-exclusivity check, turning a previously-
     working `dump_manifest` + explicit compile-context combination into a
     usage error. Must be suppressed (`None`) whenever a manifest is given."""
-    from abicheck import service_input_resolution as sir
     from abicheck.dry_run_estimate import CompileContext
     from abicheck.model import AbiSnapshot
     from abicheck.service import InputSpec
     from abicheck.service_compare_evidence import SideEvidence
+    from abicheck.workflows.artifact import execute as sir
 
     so = tmp_path / "lib.so"
     so.write_bytes(b"\x7fELF" + b"\x00" * 100)

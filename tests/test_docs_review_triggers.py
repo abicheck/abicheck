@@ -187,7 +187,7 @@ def test_main_never_fails_on_diff_error(
             "abicheck/policy/coverage_ledger.py",
             "docs/learn/contract-aware-compatibility.md",
         ),
-        ("abicheck/policy/evidence_status.py", "docs/learn/verdicts.md"),
+        ("abicheck/model/evidence_status.py", "docs/learn/verdicts.md"),
         ("abicheck/policy/reclassify.py", "docs/use/policies.md"),
         ("abicheck/workflows/contracts.py", "docs/use/python-api.md"),
         ("abicheck/workflows/request_inputs.py", "docs/use/python-api.md"),

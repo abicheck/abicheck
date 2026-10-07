@@ -78,7 +78,7 @@ from .detection_memo import memoized
 from .parameter_facts import ParameterView, parameter_view
 
 if TYPE_CHECKING:
-    from ..checker_types import Change
+    from ..model.change import Change
     from ..model.declarations import Function
     from ..model.identity import EntityId
 
@@ -266,9 +266,11 @@ def function_signature_index(
     views: dict[int, list[Any]] = memoized(
         "function_signature_views", ir_used, None, dict
     )
-    return FunctionSignatureIndex(
-        index=SemanticIRIndex(ir_used), projected=projected, views=views
+    # One facade per IR per scope: building one ranks the whole IR.
+    index = memoized(
+        "function_signature_ir_index", ir_used, None, partial(SemanticIRIndex, ir_used)
     )
+    return FunctionSignatureIndex(index=index, projected=projected, views=views)
 
 
 def _decline(mangled: str, what: str, both: bool) -> None:

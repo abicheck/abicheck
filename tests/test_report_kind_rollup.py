@@ -14,7 +14,7 @@ from __future__ import annotations
 import pytest
 
 from abicheck.checker_policy import ChangeKind, CrossSourceEvolution, Verdict
-from abicheck.checker_types import Change
+from abicheck.model.change import Change
 from abicheck.report.kind_rollup import (
     KIND_ROLLUP_SAMPLES,
     KIND_ROLLUP_THRESHOLD,
@@ -228,7 +228,7 @@ class TestAGatingSectionIsNeverRolledUp:
     def test_the_markdown_report_itemises_a_gating_section(self):
         """Through the real report builder, not the helper: the defect was
         that the *call sites* never passed a level."""
-        from abicheck.severity import SeverityConfig
+        from abicheck.policy.severity import SeverityConfig
 
         config = SeverityConfig()
         if not hasattr(config, "quality_issues"):

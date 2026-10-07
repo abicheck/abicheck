@@ -36,7 +36,7 @@ from abicheck.compatibility_evaluation_config import (
 from abicheck.contract_context import build_persisted_context, with_resolved_gate
 from abicheck.contract_evidence import ContractEvidenceBlock, PersistedContractContext
 from abicheck.contract_relevance_types import ContractMode, SelectorLayer
-from abicheck.severity import SeverityConfig, SeverityLevel
+from abicheck.policy.severity import SeverityConfig, SeverityLevel
 
 
 def _base_context(

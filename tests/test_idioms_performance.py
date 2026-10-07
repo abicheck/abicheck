@@ -49,9 +49,9 @@ from abicheck.model import (
     TypeField,
     Visibility,
 )
+from abicheck.model.evidence_status import EvidenceTier
 from abicheck.model.surface_facts import in_public_surface
 from abicheck.policy import public_use_index, type_spelling
-from abicheck.policy.evidence_status import EvidenceTier
 from abicheck.surface_graph import SurfaceGraph, build_surface_graph
 
 # --------------------------------------------------------------------------

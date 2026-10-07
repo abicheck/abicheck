@@ -25,7 +25,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from .checker_types import Change
 from .compare.naming_conventions import (  # noqa: F401 -- re-exported
     _INTERNAL_NAME_PATTERNS as _INTERNAL_NAME_PATTERNS,
     ELF_INTERNAL_SYMBOL_NAME,
@@ -36,6 +35,7 @@ from .diff_symbols import _should_filter_transitive_runtime_symbols
 from .elf_symbol_filter import is_abi_relevant_elf_symbol
 from .model import AbiSnapshot
 from .model.binary_naming import strip_vendor_hash
+from .model.change import Change
 from .model.change_catalog.kinds import ChangeKind
 from .model.surface_facts import is_export_table_only_record
 

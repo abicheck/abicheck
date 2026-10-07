@@ -30,9 +30,10 @@ import xml.etree.ElementTree as ET
 import pytest
 
 from abicheck.checker_policy import ChangeKind
-from abicheck.checker_types import Change, DiffResult
+from abicheck.checker_types import DiffResult
 from abicheck.junit_report import to_junit_xml, to_junit_xml_multi
 from abicheck.model import AbiSnapshot, EnumType, Function, RecordType, Variable
+from abicheck.model.change import Change
 from abicheck.model.symbol_inventory import SymbolInventory, build_symbol_inventory
 from abicheck.report.junit_inventory import coerce_junit_inventory
 

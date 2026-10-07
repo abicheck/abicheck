@@ -38,7 +38,8 @@ from .disposition_types import Disposition
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from datetime import date
 
-    from ..checker_types import Change, DiffResult
+    from ..checker_types import DiffResult
+    from ..model.change import Change
     from .disposition_types import DispositionRecord
 
 
@@ -95,7 +96,7 @@ def _kept_disposition(
     reads ``non_gating`` for a break the run lets through.
     """
     from ..contract_relevance_types import ContractRelevance
-    from .contract_finding_relevance import contract_relevance_of, is_evaluated
+    from ..model.contract_finding_relevance import contract_relevance_of, is_evaluated
 
     if not is_evaluated(change):
         # Compared against the enum members themselves, never a spelling of

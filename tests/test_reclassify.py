@@ -1,4 +1,4 @@
-"""Tests for A: selector-scoped reclassification (abicheck/reclassify.py)
+"""Tests for A: selector-scoped reclassification (abicheck/policy/reclassify.py)
 and its policy_file.py `reclassify:` wiring.
 
 Covers the third policy-file primitive: same selector grammar as
@@ -12,17 +12,17 @@ from pathlib import Path
 import pytest
 
 from abicheck.checker_policy import ChangeKind, Verdict
-from abicheck.checker_types import Change
 from abicheck.errors import PolicyError
-from abicheck.policy_file import PolicyFile
-from abicheck.reclassify import ReclassifyRule, first_matching_reclassify_verdict
-from abicheck.severity import (
+from abicheck.model.change import Change
+from abicheck.policy.reclassify import ReclassifyRule, first_matching_reclassify_verdict
+from abicheck.policy.severity import (
     PRESET_DEFAULT,
     IssueCategory,
     classify_effective_change,
     compute_exit_code,
     effective_verdict_for_change,
 )
+from abicheck.policy_file import PolicyFile
 
 
 def _change(kind: ChangeKind, symbol: str, **kwargs) -> Change:
@@ -548,7 +548,7 @@ def test_reclassified_finding_is_identified_via_classify_effective_change(
     deleted with the `scan` command, ADR-068 Phase 6; `classify_effective_change`
     itself has no `scan`-specific behavior and is unaffected."""
     from abicheck.checker_types import DiffResult
-    from abicheck.severity import IssueCategory, classify_effective_change
+    from abicheck.policy.severity import IssueCategory, classify_effective_change
 
     p = tmp_path / "policy.yaml"
     p.write_text(
@@ -623,7 +623,7 @@ def test_reclassify_wins_addition_bucket_over_a_kind_global_override(
     review: `func_added` overridden to `break` globally, with a scoped
     `reclassify:` rule bringing one specific symbol back to `ignore` --
     `quality_issues=error`/`addition=info` must exit 0, not 1)."""
-    from abicheck.severity import (
+    from abicheck.policy.severity import (
         PRESET_DEFAULT,
         IssueCategory,
         SeverityConfig,
@@ -680,7 +680,7 @@ def test_reclassify_addition_bucket_ignores_a_shadowed_rule(tmp_path: Path) -> N
     must not still grant ADDITION leniency: an addition kind globally
     overridden to `break`, with effective_verdict=COMPATIBLE set by an
     unrelated mechanism, stays QUALITY_ISSUES."""
-    from abicheck.severity import IssueCategory, classify_effective_change
+    from abicheck.policy.severity import IssueCategory, classify_effective_change
 
     p = tmp_path / "policy.yaml"
     p.write_text(
@@ -957,7 +957,7 @@ def test_expired_reclassify_rule_absent_from_sarif_report(tmp_path: Path) -> Non
 def test_active_reclassify_rules_filters_expired() -> None:
     from datetime import date
 
-    from abicheck.reclassify import active_reclassify_rules
+    from abicheck.policy.reclassify import active_reclassify_rules
 
     active = ReclassifyRule(to_verdict=Verdict.COMPATIBLE, to="ignore", symbol="a")
     expired = ReclassifyRule(
@@ -1270,7 +1270,7 @@ def test_effective_verdict_for_change_honors_custom_base_policy_with_no_match(
     final fallback line, surfaced by SuppressionList.audit()'s new
     policy_file=-only call path (this PR) since no earlier caller passed
     policy_file without also passing a matching kind_sets/policy."""
-    from abicheck.severity import effective_verdict_for_change
+    from abicheck.policy.severity import effective_verdict_for_change
 
     p = tmp_path / "policy.yaml"
     p.write_text("base_policy: plugin_abi\n", encoding="utf-8")
@@ -1313,7 +1313,7 @@ def test_audit_honors_custom_base_policy_for_a_non_matching_finding(
 
 
 def test_reclassify_rule_for_change_returns_the_deciding_rule(tmp_path: Path) -> None:
-    from abicheck.severity import reclassify_rule_for_change
+    from abicheck.policy.severity import reclassify_rule_for_change
 
     p = tmp_path / "policy.yaml"
     p.write_text(
@@ -1340,7 +1340,7 @@ def test_reclassify_rule_for_change_none_for_a_no_op_rule(tmp_path: Path) -> Non
     stamping `reclassified_by` for it would make the PR comment falsely
     report a downgrade that never happened. Verified by deliberately
     reverting the no-op check and confirming this test fails."""
-    from abicheck.severity import reclassify_rule_for_change
+    from abicheck.policy.severity import reclassify_rule_for_change
 
     p = tmp_path / "policy.yaml"
     p.write_text(
@@ -1363,7 +1363,7 @@ def test_reclassify_rule_for_change_none_for_a_no_op_rule_restating_an_override(
     """The no-op comparison is against whichever verdict would apply next in
     precedence -- a same-kind `overrides:` entry when one exists, not always
     the base policy's own verdict."""
-    from abicheck.severity import reclassify_rule_for_change
+    from abicheck.policy.severity import reclassify_rule_for_change
 
     p = tmp_path / "policy.yaml"
     p.write_text(
@@ -1388,7 +1388,7 @@ def test_reclassify_rule_for_change_not_none_when_it_actually_changes_the_verdic
     """Sanity check alongside the two no-op tests above: a rule that *does*
     change the verdict from what the override/base-policy path would
     produce is still correctly recognized as deciding."""
-    from abicheck.severity import reclassify_rule_for_change
+    from abicheck.policy.severity import reclassify_rule_for_change
 
     p = tmp_path / "policy.yaml"
     p.write_text(
@@ -1422,7 +1422,7 @@ def test_reclassify_rule_for_change_no_op_against_a_floor_clamped_override(
     override value (COMPATIBLE) differs from `to: break`. Verified by
     deliberately comparing against the raw override instead of the
     floor-clamped one and confirming this test fails."""
-    from abicheck.severity import reclassify_rule_for_change
+    from abicheck.policy.severity import reclassify_rule_for_change
 
     p = tmp_path / "policy.yaml"
     p.write_text(
@@ -1460,7 +1460,7 @@ def test_reclassify_rule_for_change_attributes_a_blocked_rule_that_still_changed
     for, and must still be attributed. Verified by deliberately reverting
     to the previous "blocked == always no-op" logic and confirming this
     test fails."""
-    from abicheck.severity import reclassify_rule_for_change
+    from abicheck.policy.severity import reclassify_rule_for_change
 
     p = tmp_path / "policy.yaml"
     p.write_text(
@@ -1486,7 +1486,7 @@ reclassify:
 
 
 def test_reclassify_rule_for_change_none_when_no_rule_matches(tmp_path: Path) -> None:
-    from abicheck.severity import reclassify_rule_for_change
+    from abicheck.policy.severity import reclassify_rule_for_change
 
     p = tmp_path / "policy.yaml"
     p.write_text(
@@ -1504,7 +1504,7 @@ reclassify:
 
 
 def test_reclassify_rule_for_change_none_without_a_policy_file() -> None:
-    from abicheck.severity import reclassify_rule_for_change
+    from abicheck.policy.severity import reclassify_rule_for_change
 
     change = _change(ChangeKind.FUNC_REMOVED, "foo")
     assert reclassify_rule_for_change(change, None) is None
@@ -1516,7 +1516,7 @@ def test_reclassify_rule_for_change_shadowed_by_effective_verdict(
     """A matching rule that's shadowed by a higher-priority pipeline
     effective_verdict didn't actually decide the change's verdict, so it
     isn't "the reclassifying rule" for disclosure purposes."""
-    from abicheck.severity import reclassify_rule_for_change
+    from abicheck.policy.severity import reclassify_rule_for_change
 
     p = tmp_path / "policy.yaml"
     p.write_text(
@@ -1539,7 +1539,7 @@ def test_reclassify_rule_for_change_blocked_by_frozen_namespace_floor(
     """A matching rule blocked by the frozen-namespace verdict floor didn't
     actually decide the change's verdict either -- verified by deliberately
     reverting the frozen-namespace guard and confirming this test fails."""
-    from abicheck.severity import reclassify_rule_for_change
+    from abicheck.policy.severity import reclassify_rule_for_change
 
     p = tmp_path / "policy.yaml"
     p.write_text(

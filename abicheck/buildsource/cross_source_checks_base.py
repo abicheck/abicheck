@@ -30,11 +30,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from ..checker_policy import ChangeKind, Confidence
-from ..checker_types import Change
 from ..compare.edge_query import export_table_covered
 from ..elf_symbol_filter import is_linker_reserved_symbol
 from ..model import AbiSnapshot
+from ..model.change import Change
+from ..model.change_catalog.kinds import ChangeKind
+from ..model.evidence_status import Confidence
 from ..model.export_index import (
     build_raw_export_index,
     default_versioned_names,

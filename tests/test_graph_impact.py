@@ -27,7 +27,7 @@ from abicheck.buildsource.graph_impact import (
 )
 from abicheck.buildsource.source_graph import GraphEdge, GraphNode, SourceGraphSummary
 from abicheck.checker_policy import ChangeKind
-from abicheck.checker_types import Change
+from abicheck.model.change import Change
 
 
 def _graph() -> SourceGraphSummary:

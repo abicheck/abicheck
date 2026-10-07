@@ -43,8 +43,8 @@ from dataclasses import dataclass, field
 
 from _family_f4_inventory import _module_name, scanned_files
 
+from abicheck.change_registry import API_BREAK_KINDS, BREAKING_KINDS
 from abicheck.model.name_heuristics import NameHeuristic, SeverityRaisingNameHeuristic
-from abicheck.policy.classification import API_BREAK_KINDS, BREAKING_KINDS
 
 _RAISING_KINDS = frozenset(k.name for k in BREAKING_KINDS | API_BREAK_KINDS)
 _HANDLE_CALLS = frozenset({"matches", "apply", "confirmed"})

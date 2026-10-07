@@ -79,7 +79,8 @@ from .rule_provenance import (
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from datetime import date
 
-    from ..checker_types import Change, DiffResult
+    from ..checker_types import DiffResult
+    from ..model.change import Change
     from ..suppression import Suppression
 
 
@@ -503,8 +504,8 @@ class DispositionLedger:
         and it is what makes ``suppressed_gating_records`` (hence
         ``semver.recommend_release``'s conserved delta) answerable at all.
         """
-        from .contract_finding_relevance import is_evaluated
-        from .evidence_status import is_cross_source_resolved
+        from ..model.contract_finding_relevance import is_evaluated
+        from ..model.evidence_status import is_cross_source_resolved
         from .reclassify import effective_verdict_for_change
 
         if not callable(getattr(result, "_effective_verdict_for_change", None)):
@@ -569,7 +570,7 @@ class DispositionLedger:
         precedence (``rule.label or rule.reason or rule.to_verdict.value``)
         without importing that ``frontends``-adjacent helper (``policy/``
         may not depend on it); both read
-        :func:`abicheck.reclassify.reclassify_rule_for_change`, so they
+        :func:`abicheck.policy.reclassify.reclassify_rule_for_change`, so they
         cannot disagree on *which* rule decided a change. Every record is a
         candidate, not only ``gating``/``non_gating`` ones: reclassification
         is an overlay attribute (D2), independent of the terminal
@@ -611,7 +612,7 @@ class DispositionLedger:
         nonzero while the audit reports ``effective_total: 0``.
 
         **Keyed on the promoter's own stamp, not on the finding currently
-        reading as evaluated.** ``contract_gating.is_evaluated`` answers
+        reading as evaluated.** ``contract_finding_relevance.is_evaluated`` answers
         ``True`` for an *unstamped* finding by design (an unstamped finding is
         evaluated -- that is what keeps every run without ``--contract``
         unchanged), so "is evaluated now" cannot distinguish *became*

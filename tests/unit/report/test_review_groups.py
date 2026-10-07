@@ -1,5 +1,5 @@
 from abicheck.checker_policy import ChangeKind, Verdict
-from abicheck.checker_types import Change
+from abicheck.model.change import Change
 from abicheck.policy.severity import IssueCategory
 from abicheck.report.finding import ReportFinding
 from abicheck.report.review_groups import build_review_groups

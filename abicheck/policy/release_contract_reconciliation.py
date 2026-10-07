@@ -70,12 +70,12 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 
 from ..buildsource.cross_source_checks_base import _change
-from ..checker_types import Change
 from ..compare.bundle_export_index import BundleExportIndex
 from ..compare.ownership_relations import provider_relations
+from ..model.change import Change
 from ..model.change_catalog.kinds import ChangeKind
+from ..model.evidence_status import Confidence, CrossSourceEvolution
 from ..model.release_surface import PublicObligation, ReleasePublicSurface
-from .evidence_status import Confidence, CrossSourceEvolution
 
 
 @dataclass(frozen=True)

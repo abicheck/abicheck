@@ -32,8 +32,8 @@ import pytest
 
 from abicheck.change_registry import REGISTRY
 from abicheck.checker_policy import ChangeKind
-from abicheck.checker_types import Change
 from abicheck.diff_helpers import TEMPLATE_VOCAB, make_change
+from abicheck.model.change import Change
 
 
 def _template_fields(template: str) -> set[str]:

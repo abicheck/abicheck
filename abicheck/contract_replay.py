@@ -59,7 +59,6 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 
-from .checker_types import Change
 from .contract_context import finding_key
 from .contract_evidence import (
     EvidenceSearchRecord,
@@ -75,6 +74,7 @@ from .contract_relevance_types import (
     EvidenceProviderStatus,
     coerce_contract_mode,
 )
+from .model.change import Change
 from .policy import contract_graph_encoding as _enc
 
 

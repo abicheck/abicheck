@@ -515,7 +515,7 @@ def _suppress_lockstep_soname_findings(
     """
     if worst_verdict != "BREAKING":
         return 0
-    from .checker_policy import ChangeKind
+    from .model.change_catalog.kinds import ChangeKind
 
     suppressed = 0
     for entry in library_results:

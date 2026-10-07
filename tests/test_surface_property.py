@@ -30,7 +30,6 @@ import pytest
 from hypothesis import given, settings, strategies as st
 
 from abicheck.checker import compare
-from abicheck.checker_types import Change
 from abicheck.model import (
     AbiSnapshot,
     Function,
@@ -39,6 +38,7 @@ from abicheck.model import (
     TypeField,
     Visibility,
 )
+from abicheck.model.change import Change
 from abicheck.policy.public_surface_closure import resolve_public_surface
 
 pytestmark = pytest.mark.slow

@@ -1609,24 +1609,24 @@
     },
     {
       "path": "tests/test_bundle_facts.py",
-      "baseline_lines": 1544,
+      "baseline_lines": 1545,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",
       "category": "legacy_oversized_test_module",
       "owner": "abicheck maintainers",
-      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration. +2 lines (this subtractive-cleanup batch): the delegation-only facades `abicheck.api_types`/`abicheck.bundle_facts` were deleted, so each of this file's imports through them was migrated to the real owner -- and a single facade import whose names live in two owner modules necessarily becomes two import statements. Import-statement growth only; no test body, assertion or statement was added. The same migration deleted 659 lines of facade modules outright, which this baseline's per-file rule cannot offset against.",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration. +2 lines (this subtractive-cleanup batch): the delegation-only facades `abicheck.api_types`/`abicheck.bundle_facts` were deleted, so each of this file's imports through them was migrated to the real owner -- and a single facade import whose names live in two owner modules necessarily becomes two import statements. Import-statement growth only; no test body, assertion or statement was added. The same migration deleted 659 lines of facade modules outright, which this baseline's per-file rule cannot offset against. Raised by 1 (architecture-deepening plan, Phase 1): `from abicheck.checker_types import Change, DiffResult` became two owner imports when the finding record `Change` moved to `abicheck.model.change` (model) while `DiffResult` stayed in `checker_types` -- one line where one stood before, since the two names now genuinely live in different modules. No smaller diff.",
       "review_by": "2026-11-30"
     },
     {
       "path": "tests/test_bundle_signature_evidence.py",
-      "baseline_lines": 1336,
+      "baseline_lines": 1337,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",
       "category": "legacy_oversized_test_module",
       "owner": "abicheck maintainers",
-      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration. Raised by 1 (architecture-deepening plan, Phase 1): `from abicheck.checker_types import Change, DiffResult` became two owner imports when the finding record `Change` moved to `abicheck.model.change` (model) while `DiffResult` stayed in `checker_types` -- one line where one stood before, since the two names now genuinely live in different modules. No smaller diff.",
       "review_by": "2026-11-30"
     },
     {
@@ -2806,6 +2806,26 @@
       "owner": "abicheck maintainers",
       "rationale": "ADR-061 gap A: abicheck.service.render_output is a documented public Python-API path (service.py's own __all__) whose implementation (service_render.py) genuinely needs report.py, so it is frontends-classified -- workflows may not import frontends. Previously bridged via workflows/render.py resolving importlib.import_module(\"..service_render\", __package__) inside each function body specifically so the workflows -> frontends edge stayed invisible to check_architecture.py's direction check (and, combined with the already-allowed frontends -> report -> workflows edges, a dependency cycle). workflows/render.py has been retired and service.py now imports service_render directly and statically -- the edge is real, visible, and unchanged in shape; only its invisibility is gone. Closing it for real means service.py itself stopping being workflows-classified for this responsibility (the ADR's own \"composition at the outer boundary\" language). The gap A text's own named follow-up (migrate abicheck/l0_export_delta.py, abicheck/appcompat.py, abicheck/service_scan.py off the abicheck.service facade onto their real workflows owners first) is done: service_scan.py was independently renamed/retired to dry_run_estimate.py during ADR-068 Phase 4 and never imported abicheck.service at all; l0_export_delta.py and appcompat.py now import resolve_input/compare_snapshots/detect_binary_format/run_dump directly from workflows.input_resolution/workflows.compare_policy/service_dump_native. A repo-wide re-measurement (this ADR's own \"re-measure rather than trust the list\" lesson) found the original three undercounted the real blast radius: abicheck/stack_checker.py, abicheck/bundle_side_input.py, and abicheck/service_dump_pipeline.py (a service.py's own re-exported module) also imported the flat abicheck.service facade from workflows-classified code -- all three are migrated too, same pattern. abicheck/service_compare_pipeline.py (another service.py re-export target) had two internal `from . import service` bridges of its own (resolve_compare_request/classify_compare_pair reaching back into the facade that re-exports them) -- also migrated onto the same real owners. With every currently-real workflows-classified importer of the facade closed, `python scripts/check_architecture.py` confirms exactly one dependency-direction finding remains once this exception is removed: abicheck/service.py:220 (the render_output re-export itself) -- no other edge appeared anywhere in abicheck/. Reclassifying service.py to frontends to close that last edge is still not safe in one pass, though, for a reason gap A's own text never named: service.py also has a *module-level*, static `from .service_header_graph_attach import ...`/`from .service_metadata_attach import ...` block, and service_metadata_attach.py is extract-classified (not workflows) -- moving service.py to frontends would turn that existing, currently-legal workflows->extract edge into a new, illegal frontends->extract one (frontends may reach extract only through workflows), a distinct problem from the render_output edge this exception was opened for. Closing it needs the same wrapper-relocation treatment service_metadata_attach.py's own callers got here, which is untried and unverified in this pass. Tracked as an accepted, reviewed exception, narrowed to its one remaining real edge rather than left dynamic and unlisted.",
       "review_by": "2026-12-31"
+    },
+    {
+      "path": "abicheck/checker_types.py",
+      "target": "abicheck.policy.classification",
+      "source_layer": "model",
+      "target_layer": "policy",
+      "rule": "dependency-direction",
+      "owner": "abicheck maintainers",
+      "review_by": "2026-12-31",
+      "rationale": "Architecture-deepening plan, Phase 1: model-owned checker_types.DiffResult's verdict buckets (breaking/source_breaks/compatible/risk) ask policy for each finding's effective verdict under the active policy and policy file -- the kind sets with policy-file overrides applied (DiffResult._effective_kind_sets). This edge already existed; it was routed through the flat checker_policy/reclassify/contract_gating facades, which the direction check could not see because the facades were deliberately left unclassified. Those facades are retired (contract_gating's predicates were model-pure and moved to model/contract_finding_relevance.py; the finding record and its vocabulary moved to model/change.py and model/evidence_status.py, so compare-layer detectors no longer need policy at all), and the remaining edge is imported directly at call time: real, visible, and unchanged in shape. Closing it for real means DiffResult's verdict buckets stop being methods on a model type -- a public Python API decision (docs/use/python-api.md lists DiffResult as a public result type), so it is recorded here rather than made in a refactor."
+    },
+    {
+      "path": "abicheck/checker_types.py",
+      "target": "abicheck.policy.reclassify",
+      "source_layer": "model",
+      "target_layer": "policy",
+      "rule": "dependency-direction",
+      "owner": "abicheck maintainers",
+      "review_by": "2026-12-31",
+      "rationale": "Architecture-deepening plan, Phase 1: model-owned checker_types.DiffResult's verdict buckets (breaking/source_breaks/compatible/risk) ask policy for each finding's effective verdict under the active policy and policy file -- the per-finding effective verdict, including selector reclassification and frozen-namespace guards (DiffResult._effective_verdict_for_change). This edge already existed; it was routed through the flat checker_policy/reclassify/contract_gating facades, which the direction check could not see because the facades were deliberately left unclassified. Those facades are retired (contract_gating's predicates were model-pure and moved to model/contract_finding_relevance.py; the finding record and its vocabulary moved to model/change.py and model/evidence_status.py, so compare-layer detectors no longer need policy at all), and the remaining edge is imported directly at call time: real, visible, and unchanged in shape. Closing it for real means DiffResult's verdict buckets stop being methods on a model type -- a public Python API decision (docs/use/python-api.md lists DiffResult as a public result type), so it is recorded here rather than made in a refactor."
     }
   ]
 }

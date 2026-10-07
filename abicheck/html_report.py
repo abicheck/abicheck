@@ -86,7 +86,7 @@ if TYPE_CHECKING:
     from datetime import date
 
     from .checker import DiffResult
-    from .severity import SeverityConfig
+    from .policy.severity import SeverityConfig
 
 
 def compute_full_change_rows(
@@ -566,7 +566,7 @@ def build_html_document(
     # effective verdict rendered it under the red "Changed Symbols (1)"
     # heading on a page whose banner reads NO_CHANGE (Codex review). It
     # gets its own section below instead. Empty without `--contract`.
-    from .policy.contract_finding_relevance import contract_relevance_of, is_evaluated
+    from .model.contract_finding_relevance import contract_relevance_of, is_evaluated
 
     not_evaluated = [ch for ch in display_changes if not is_evaluated(ch)]
     scored_changes = [ch for ch in display_changes if is_evaluated(ch)]
@@ -835,7 +835,7 @@ def compute_not_evaluated_section(
     """Collect the rows of the ADR-049 D1 "Not Evaluated (Contract)" table.
 
     Resolving each finding's contract relevance is the caller's own predicate
-    (``contract_gating.contract_relevance_of``), threaded in rather than
+    (``contract_finding_relevance.contract_relevance_of``), threaded in rather than
     imported here so this stays a plain projection of already-decided facts.
     """
     rows = []

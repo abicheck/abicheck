@@ -25,11 +25,11 @@ detector in ``diff_platform``.
 
 from __future__ import annotations
 
-from .checker_types import Change
 from .compare.template_surface import reconciled_public_function_maps
 from .detector_registry import registry
 from .diff_helpers import make_change
 from .model import AbiSnapshot, Function
+from .model.change import Change
 from .model.change_catalog.kinds import ChangeKind
 
 # Canonical integer-width buckets. A change that moves a spelling from one

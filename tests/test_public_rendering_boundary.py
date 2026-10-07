@@ -513,7 +513,8 @@ class TestTheDispositionLedgersWarmTheirOwnDemangleCache:
     def test_building_the_blocks_prewarms_once(self, monkeypatch):
         from abicheck import reporter
         from abicheck.change_registry_types import Verdict
-        from abicheck.checker_types import Change, DiffResult
+        from abicheck.checker_types import DiffResult
+        from abicheck.model.change import Change
 
         calls = []
         monkeypatch.setattr(
@@ -639,8 +640,9 @@ class TestDemanglingIsIdempotentAndReachesEveryHumanPath:
 
     def test_the_native_markdown_path_demangles_exactly_once(self):
         from abicheck.change_registry_types import Verdict
-        from abicheck.checker_types import Change, DiffResult
+        from abicheck.checker_types import DiffResult
         from abicheck.model import AbiSnapshot
+        from abicheck.model.change import Change
         from abicheck.service import render_output
 
         result = DiffResult(
@@ -694,7 +696,8 @@ class TestThePatternModulationLedgerRendersWhatTheProducerWrites:
     def _report(self, modulation):
         from abicheck.change_registry_types import Verdict
         from abicheck.checker_policy import ChangeKind
-        from abicheck.checker_types import Change, DiffResult
+        from abicheck.checker_types import DiffResult
+        from abicheck.model.change import Change
         from abicheck.report.dispatch_markdown import to_markdown
 
         result = DiffResult(
@@ -760,7 +763,8 @@ def _result_with_a_finding():
     """
     from abicheck.change_registry_types import Verdict
     from abicheck.checker_policy import ChangeKind
-    from abicheck.checker_types import Change, DiffResult
+    from abicheck.checker_types import DiffResult
+    from abicheck.model.change import Change
 
     return DiffResult(
         old_version="1.0",

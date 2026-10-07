@@ -27,7 +27,7 @@ def _make_result(
 def test_result_evidence_status_artifact_proven_with_binary_evidence() -> None:
     # A real ELF-observed removal stamps symbol_binding from the snapshot's
     # own symbol table -- the per-finding half of the ADR-068 finding C fix
-    # (checker_policy.evidence_status_for_result) needs that stamp on an
+    # (checker_model.evidence_status_for_result) needs that stamp on an
     # "elf"-tiered comparison to keep claiming artifact_proven for this
     # specific finding.
     change = Change(

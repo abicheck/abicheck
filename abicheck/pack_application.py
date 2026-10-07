@@ -22,7 +22,7 @@ and the wiring that folds a selected pack into one resolved
 (``compatibility_evaluation_wiring.py``). What none of that does is *apply* the
 result: a resolved configuration is a receipt, and the comparison itself is
 scored from a :class:`~abicheck.policy_file.PolicyFile` and a
-:class:`~abicheck.severity.SeverityConfig` that nothing was folding a pack into.
+:class:`~abicheck.policy.severity.SeverityConfig` that nothing was folding a pack into.
 
 A ``--pack`` flag was written and removed once before merge for exactly that
 reason (recorded in the plan's Phase 5 section): it reached the receipt and
@@ -229,7 +229,7 @@ class PackApplication:
     #: ``surface.internal_namespaces`` when a contract pack supplied it.
     internal_namespaces: tuple[str, ...] | None = None
     #: ``gate.severity.<category>`` levels a gate pack supplied, keyed by the
-    #: :class:`~abicheck.severity.SeverityConfig` field name. No
+    #: :class:`~abicheck.policy.severity.SeverityConfig` field name. No
     #: ``exit_code_scheme`` field here any more (CLI cleanup phase two PR
     #: G2): a gate pack can no longer assign the manual algorithm selector
     #: at all, since it was deleted everywhere -- see

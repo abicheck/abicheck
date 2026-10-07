@@ -1231,7 +1231,7 @@ def test_derive_l2_include_dirs_corrupt_build_info_pack_degrades_to_empty(
 def test_seeded_compile_context_noop_without_sources(tmp_path: Path) -> None:
     from abicheck.service import InputSpec
     from abicheck.service_compare_evidence import SideEvidence
-    from abicheck.service_input_resolution import _seeded_includes_and_compile_context
+    from abicheck.workflows.artifact.resolve import _seeded_includes_and_compile_context
 
     side = InputSpec(path=tmp_path / "lib.so", headers=(tmp_path / "h.h",))
     evidence = SideEvidence(
@@ -1260,7 +1260,7 @@ def test_seeded_includes_and_compile_context_preserves_none_on_no_op_fold(
     from abicheck.compile_context import CompileContext
     from abicheck.service import InputSpec
     from abicheck.service_compare_evidence import SideEvidence
-    from abicheck.service_input_resolution import _seeded_includes_and_compile_context
+    from abicheck.workflows.artifact.resolve import _seeded_includes_and_compile_context
 
     def _fake_seed(*, pending_cleanups, **kwargs):
         # Mirrors the real primitive's own no-op-fold return shape: a fresh,
@@ -1290,10 +1290,10 @@ def test_resolve_side_snapshot_stamps_parsed_with_build_context(
 ) -> None:
     """Wiring test: derived L3 context reaches ``service.resolve_input`` and
     ``AbiSnapshot.parsed_with_build_context`` is stamped when it does."""
-    from abicheck import service_input_resolution as sir
     from abicheck.model import AbiSnapshot
     from abicheck.service import InputSpec
     from abicheck.service_compare_evidence import SideEvidence
+    from abicheck.workflows.artifact import execute as sir
 
     header = tmp_path / "widget.h"
     header.write_text("struct Widget { int x; };\n", encoding="utf-8")
@@ -1346,10 +1346,10 @@ def test_resolve_side_snapshot_forwards_only_explicit_includes_as_public_include
     shared by `compare`'s implicit-dump operand and `dump`'s typed
     `DumpRequest`/`run_dump_request` API, so the gap reached both.
     """
-    from abicheck import service_input_resolution as sir
     from abicheck.model import AbiSnapshot
     from abicheck.service import InputSpec
     from abicheck.service_compare_evidence import SideEvidence
+    from abicheck.workflows.artifact import execute as sir
 
     so = tmp_path / "lib.so"
     so.write_bytes(b"\x7fELF" + b"\x00" * 100)
@@ -1395,10 +1395,10 @@ def test_resolve_side_snapshot_omits_conflicting_c_standard_when_cxx_forced(
     invocation rejects (see the module-level docstring in
     ``header_compile_context._context_flags`` for the confirmed repro).
     """
-    from abicheck import service_input_resolution as sir
     from abicheck.model import AbiSnapshot
     from abicheck.service import InputSpec
     from abicheck.service_compare_evidence import SideEvidence
+    from abicheck.workflows.artifact import execute as sir
 
     header = tmp_path / "widget.h"
     header.write_text("struct Widget { int x; };\n", encoding="utf-8")
@@ -1444,10 +1444,10 @@ def test_resolve_side_snapshot_omits_conflicting_c_standard_when_cxx_forced(
 def test_resolve_side_snapshot_does_not_stamp_when_unmatched(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from abicheck import service_input_resolution as sir
     from abicheck.model import AbiSnapshot
     from abicheck.service import InputSpec
     from abicheck.service_compare_evidence import SideEvidence
+    from abicheck.workflows.artifact import execute as sir
 
     header = tmp_path / "widget.h"
     header.write_text("struct Widget { int x; };\n", encoding="utf-8")
@@ -1484,10 +1484,10 @@ def test_resolve_side_snapshot_does_not_stamp_when_unmatched(
 def test_resolve_side_snapshot_propagates_ambiguous_error(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from abicheck import service_input_resolution as sir
     from abicheck.model import AbiSnapshot
     from abicheck.service import InputSpec
     from abicheck.service_compare_evidence import SideEvidence
+    from abicheck.workflows.artifact import execute as sir
 
     header = tmp_path / "widget.h"
     header.write_text("struct Widget { int x; };\n", encoding="utf-8")

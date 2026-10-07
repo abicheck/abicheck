@@ -29,9 +29,9 @@ from __future__ import annotations
 from dataclasses import replace
 
 from abicheck.checker import ChangeKind, compare
-from abicheck.checker_types import Change
 from abicheck.finding_identity import IDENTITY_TIER_CANONICAL, resolve_change_identity
 from abicheck.model import AbiSnapshot, Function, Param, Visibility
+from abicheck.model.change import Change
 from abicheck.model.identity import (
     Namespace,
     entity_id_for_constant,

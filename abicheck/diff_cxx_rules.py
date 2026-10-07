@@ -23,13 +23,13 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 
-from .checker_types import Change
 from .compare.vtable_evidence import (
     vtable_fact_declined,
     vtable_transition_is_evidenced,
 )
 from .diff_helpers import make_change
 from .model import Fact, Function, RecordType
+from .model.change import Change
 from .model.change_catalog.kinds import ChangeKind
 from .model.evidence_merge import is_completed_read
 

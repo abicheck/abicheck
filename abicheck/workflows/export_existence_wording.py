@@ -52,8 +52,8 @@ from ..buildsource.export_accounting import (
     ACCOUNT_PUBLIC_TEMPLATE,
     ACCOUNT_TEMPLATE_INST,
 )
-from ..checker_types import Change
 from ..model import AbiSnapshot
+from ..model.change import Change
 from ..model.change_catalog.kinds import ChangeKind
 
 __all__ = ["EXISTENCE_KINDS", "describe_export_existence", "existence_description"]

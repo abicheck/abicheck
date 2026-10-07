@@ -40,13 +40,13 @@ from collections.abc import Callable, ItemsView, Iterable, Iterator, Mapping, Va
 from typing import Any, Protocol, TypeVar, cast
 
 from .change_registry import REGISTRY
-from .checker_types import Change
 from .compare.dedup_key import hashable_value
 from .compare.qualified_name_normalization import strip_inline_abi_namespaces
 from .fact_provenance import (
     same_producer_backed_fact_qualified,
 )
 from .model import AbiSnapshot
+from .model.change import Change
 from .model.change_catalog.kinds import ChangeKind
 
 # Imported directly from the canonical model-layer location (ADR-061 D9's

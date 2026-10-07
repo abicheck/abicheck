@@ -153,7 +153,8 @@ def _surface_state_kinds() -> frozenset[str]:
     registry already owns. Everything else -- breaking, API-break and addition
     alike -- is a manufactured difference on an identical pair.
     """
-    from abicheck.checker_policy import QUALITY_KINDS, RISK_KINDS
+    from abicheck.change_registry import RISK_KINDS
+    from abicheck.policy.classification import QUALITY_KINDS
 
     return frozenset(k.value for k in (*RISK_KINDS, *QUALITY_KINDS))
 

@@ -29,9 +29,10 @@ from __future__ import annotations
 from defusedxml.ElementTree import fromstring as xml_fromstring
 
 from abicheck.checker_policy import ChangeKind, Verdict
-from abicheck.checker_types import Change, DiffResult
+from abicheck.checker_types import DiffResult
 from abicheck.junit_report import to_junit_xml, to_junit_xml_multi
 from abicheck.model import AbiSnapshot
+from abicheck.model.change import Change
 
 
 def _make_result(

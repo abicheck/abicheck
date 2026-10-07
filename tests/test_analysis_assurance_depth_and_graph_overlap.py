@@ -278,7 +278,7 @@ class TestRequestedDepthPropagationSharedPipeline:
         ``EVIDENCE_DEPTH_VALUES`` spelling -- most visibly,
         ``validate_evidence_depth()`` (every JSON reporter) raised
         ``ValueError`` outright. This must fail against the pre-fix code."""
-        from abicheck.checker_types import validate_evidence_depth
+        from abicheck.model.change import validate_evidence_depth
         from abicheck.reporter import to_json
         from abicheck.service import CompareRequest, InputSpec, run_compare_request
 

@@ -29,14 +29,14 @@ from .checker import (
     DiffResult,
 )
 from .model.change_catalog.kinds import ChangeKind
+from .model.contract_finding_relevance import is_evaluated
 from .policy.classification import Verdict
-from .policy.contract_finding_relevance import is_evaluated
 
 if TYPE_CHECKING:
     from datetime import date
 
     from .finding_identity import MissingContractFinding
-    from .severity import IssueCategory, KindSets, SeverityConfig
+    from .policy.severity import IssueCategory, KindSets, SeverityConfig
 
 
 # GitHub has undocumented limits on annotation message length.
@@ -129,7 +129,7 @@ def _category_for_change_severity(
     policy_file: object | None = None,
     today: date | None = None,
 ) -> IssueCategory:
-    """Return the severity-aware :class:`~abicheck.severity.IssueCategory` for *change*.
+    """Return the severity-aware :class:`~abicheck.policy.severity.IssueCategory` for *change*.
 
     *policy_file* must be threaded through (not just the pre-baked
     *kind_sets*) so a frozen-namespace-tagged finding's floor is honoured the
@@ -143,7 +143,7 @@ def _category_for_change_severity(
     forwarded there too, keeps this agreeing with an already-frozen
     ``ReportEnvelope`` (Codex review, fresh evidence).
     """
-    from .severity import classify_effective_change
+    from .policy.severity import classify_effective_change
 
     return classify_effective_change(
         change,
@@ -167,7 +167,7 @@ def _legacy_level_for_category(
     pattern-verdict modulation) is respected even when no SeverityConfig is
     in play.
     """
-    from .severity import IssueCategory as _IssueCategory
+    from .policy.severity import IssueCategory as _IssueCategory
 
     if category == _IssueCategory.ABI_BREAKING:
         return "error"
@@ -196,7 +196,7 @@ def _annotation_level_for_category(
     *annotate_additions* opts into the noisier informational annotations —
     matching the pre-existing opt-in behaviour for additions.
     """
-    from .severity import SeverityLevel
+    from .policy.severity import SeverityLevel
 
     level = severity_config.level_for(category)
     if level == SeverityLevel.ERROR:
@@ -241,7 +241,7 @@ def _title_for_change(
     """
     kind_label = kind.value
     if category is not None:
-        from .severity import IssueCategory as _IssueCategory
+        from .policy.severity import IssueCategory as _IssueCategory
 
         if category == _IssueCategory.ABI_BREAKING:
             return f"ABI Break: {kind_label}"
@@ -361,7 +361,7 @@ def _collect_annotations_detailed(
     legacy scheme, or gated on ``severity.missing_contract_exit_code``
     under a severity scheme.
     """
-    from .severity import effective_verdict_for_change
+    from .policy.severity import effective_verdict_for_change
 
     kind_sets = diff_result._effective_kind_sets()
     breaking_set, api_break_set, compatible_set, risk_set = kind_sets
@@ -452,7 +452,7 @@ def _collect_annotations_detailed(
     gate_scope = getattr(diff_result, "gate_scope", None)
     if gate_scope is not None:
         from .finding_identity import missing_contract_finding, missing_contract_kind
-        from .severity import SeverityLevel
+        from .policy.severity import SeverityLevel
 
         # A missing contract member is the same failure class as
         # `abi_breaking` (see `severity.missing_contract_exit_code`'s own

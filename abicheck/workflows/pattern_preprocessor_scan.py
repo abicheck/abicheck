@@ -116,7 +116,7 @@ from ..buildsource.source_inputs import (
     SourceReadLicence,
 )
 from ..model import AbiSnapshot, ScopeOrigin
-from ..policy.evidence_status import CrossSourceEvolution
+from ..model.evidence_status import CrossSourceEvolution
 
 #: The licence a snapshot's *embedded build pack* gets when nothing establishes
 #: that its compile units were collected in this run (see

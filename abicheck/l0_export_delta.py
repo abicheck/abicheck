@@ -54,7 +54,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from .checker_types import Change
+from .model.change import Change
 
 if TYPE_CHECKING:
     from .model import AbiSnapshot

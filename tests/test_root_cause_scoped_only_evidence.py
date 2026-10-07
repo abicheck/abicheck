@@ -29,7 +29,8 @@ module (Codex review, fresh evidence).
 from __future__ import annotations
 
 from abicheck.checker_policy import ChangeKind, Verdict
-from abicheck.checker_types import Change, DiffResult
+from abicheck.checker_types import DiffResult
+from abicheck.model.change import Change
 from abicheck.reporter import to_markdown
 
 

@@ -24,7 +24,6 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
-from .checker_types import Change
 from .compare.function_signature import (
     FunctionSignature,
     FunctionSignatureIndex,
@@ -33,6 +32,7 @@ from .compare.function_signature import (
 )
 from .diff_helpers import make_change
 from .model import Function
+from .model.change import Change
 from .model.change_catalog.kinds import ChangeKind
 
 

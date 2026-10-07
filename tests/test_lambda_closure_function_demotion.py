@@ -73,7 +73,7 @@ class TestDemotesWhenConfirmedAbsentFromBothExportTables:
         # function's real display name ("process") appears anywhere in
         # either side's exported symbol table -- genuinely, unambiguously
         # never exported under any accepted spelling.
-        from abicheck.checker_types import Change
+        from abicheck.model.change import Change
 
         change = Change(
             kind=ChangeKind.TEMPLATE_PARAM_TYPE_CHANGED,
@@ -94,7 +94,7 @@ class TestDemotesWhenConfirmedAbsentFromBothExportTables:
 
 class TestGenuinelyExportedSymbolStaysBreaking:
     def test_symbol_exported_on_old_side_is_not_demoted(self) -> None:
-        from abicheck.checker_types import Change
+        from abicheck.model.change import Change
 
         change = Change(
             kind=ChangeKind.TEMPLATE_PARAM_TYPE_CHANGED,
@@ -116,7 +116,7 @@ class TestGenuinelyExportedSymbolStaysBreaking:
     def test_no_elf_evidence_at_all_is_not_demoted(self) -> None:
         """Fail closed: without a real dynsym table on BOTH sides, "not
         found" cannot be told apart from "we never checked"."""
-        from abicheck.checker_types import Change
+        from abicheck.model.change import Change
 
         change = Change(
             kind=ChangeKind.TEMPLATE_PARAM_TYPE_CHANGED,
@@ -143,7 +143,7 @@ class TestGenuinelyExportedSymbolStaysBreaking:
         "process" spelling, so the finding must stay exactly as severe as
         the detector made it.
         """
-        from abicheck.checker_types import Change
+        from abicheck.model.change import Change
 
         change = Change(
             kind=ChangeKind.TEMPLATE_PARAM_TYPE_CHANGED,
@@ -194,7 +194,7 @@ class TestSyntheticCtorDtorKeysDemotedWhenTemplateNeverExported:
     to export zero symbols under any instantiation)."""
 
     def test_synthetic_dtor_key_is_demoted_when_template_never_exported(self) -> None:
-        from abicheck.checker_types import Change
+        from abicheck.model.change import Change
 
         symbol = f"~raii_guard<{_OLD_PARAM[len('raii_guard') :]}"  # "~raii_guard<(lambda:...)>"
         change = Change(
@@ -212,7 +212,7 @@ class TestSyntheticCtorDtorKeysDemotedWhenTemplateNeverExported:
         assert change.modulation_rule == "lambda_closure_never_exported"
 
     def test_synthetic_ctor_key_is_demoted_when_template_never_exported(self) -> None:
-        from abicheck.checker_types import Change
+        from abicheck.model.change import Change
 
         symbol = f"__abicheck_ctor__raii_guard<{_OLD_PARAM[len('raii_guard<') :]}()"
         change = Change(
@@ -240,7 +240,7 @@ class TestSyntheticCtorDtorKeysNotDemotedWhenTemplateIsExported:
     def test_synthetic_ctor_key_untouched_when_another_instantiation_is_exported(
         self,
     ) -> None:
-        from abicheck.checker_types import Change
+        from abicheck.model.change import Change
 
         symbol = f"__abicheck_ctor__raii_guard<{_OLD_PARAM[len('raii_guard<') :]}()"
         change = Change(
@@ -266,7 +266,7 @@ class TestSyntheticCtorDtorKeysNotDemotedWhenTemplateIsExported:
     def test_synthetic_dtor_key_untouched_when_another_instantiation_is_exported(
         self,
     ) -> None:
-        from abicheck.checker_types import Change
+        from abicheck.model.change import Change
 
         symbol = f"~raii_guard<{_OLD_PARAM[len('raii_guard') :]}"
         change = Change(
@@ -290,8 +290,8 @@ class TestSyntheticCtorDtorKeysNotDemotedWhenTemplateIsExported:
         """``synthetic_ctor_scope`` returns ``None`` for a key with no
         recoverable ``(params)`` suffix -- fails closed, same as any other
         evidence gap in this function."""
-        from abicheck.checker_types import Change
         from abicheck.dumper_castxml import SYNTHETIC_CTOR_KEY_PREFIX
+        from abicheck.model.change import Change
 
         symbol = f"{SYNTHETIC_CTOR_KEY_PREFIX}Foo"  # missing "(params)" suffix
         change = Change(
@@ -390,7 +390,7 @@ class TestSyntheticDtorKeyReportedThroughComparePipeline:
 
 class TestNonLambdaFindingsAreNeverTouched:
     def test_ordinary_param_change_with_no_lambda_marker_is_untouched(self) -> None:
-        from abicheck.checker_types import Change
+        from abicheck.model.change import Change
 
         change = Change(
             kind=ChangeKind.TEMPLATE_PARAM_TYPE_CHANGED,
@@ -467,8 +467,8 @@ class TestItaniumSourceNameTokenUsesEncodedByteLength:
         non-ASCII class must still be recognized as exported when the real
         mangled symbol (using the correct UTF-8 byte-length encoding) is
         present -- proving the fix, not just the helper in isolation."""
-        from abicheck.checker_types import Change
         from abicheck.dumper_castxml import SYNTHETIC_CTOR_KEY_PREFIX
+        from abicheck.model.change import Change
 
         symbol = f"{SYNTHETIC_CTOR_KEY_PREFIX}Café<(lambda:f.h:1:1)>()"
         change = Change(
@@ -550,8 +550,8 @@ class TestStdAllocatorSyntheticKeyNotFalselyDemoted:
     def test_allocator_ctor_not_demoted_when_another_instantiation_is_exported(
         self,
     ) -> None:
-        from abicheck.checker_types import Change
         from abicheck.dumper_castxml import SYNTHETIC_CTOR_KEY_PREFIX
+        from abicheck.model.change import Change
 
         symbol = f"{SYNTHETIC_CTOR_KEY_PREFIX}std::allocator<(lambda:f.h:1:1)>()"
         change = Change(
@@ -570,8 +570,8 @@ class TestStdAllocatorSyntheticKeyNotFalselyDemoted:
         assert change.modulation_rule is None
 
     def test_allocator_ctor_still_demoted_when_genuinely_unexported(self) -> None:
-        from abicheck.checker_types import Change
         from abicheck.dumper_castxml import SYNTHETIC_CTOR_KEY_PREFIX
+        from abicheck.model.change import Change
 
         symbol = f"{SYNTHETIC_CTOR_KEY_PREFIX}std::allocator<(lambda:f.h:1:1)>()"
         change = Change(

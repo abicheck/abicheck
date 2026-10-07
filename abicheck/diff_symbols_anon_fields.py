@@ -48,8 +48,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from .checker_types import Change
 from .diff_helpers import make_change
+from .model.change import Change
 from .model.change_catalog.kinds import ChangeKind
 from .model.identity import EntityId
 from .model.name_heuristics import NameHeuristicEffect, register_name_heuristic

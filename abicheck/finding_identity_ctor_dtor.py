@@ -220,8 +220,8 @@ from .name_classification import canonicalize_type_name
 from .type_reachability import _bare_type_name
 
 if TYPE_CHECKING:
-    from .checker_types import Change
     from .model import Function
+    from .model.change import Change
 
 _logger = logging.getLogger(__name__)
 

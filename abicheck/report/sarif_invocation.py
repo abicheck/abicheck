@@ -63,7 +63,7 @@ def compute_sarif_invocation_exit(
     ``--used-by``/``--required-symbol`` consumer's own assessment is appended
     to the description as informational text only.
     """
-    from ..contract_coverage_exit import coverage_exit_floor
+    from ..policy.contract_coverage_exit import coverage_exit_floor
     from ..policy.severity import Verdict
 
     coverage_floor = coverage_exit_floor(result)

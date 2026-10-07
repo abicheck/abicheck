@@ -40,7 +40,7 @@ was only ever reachable because the audit was implemented as a self-diff
 -- the candidate compared against a copy of itself, so every check fired
 on "both" sides and the fold called the result present-on-both. It claimed
 history nobody observed. With the baseline genuinely absent, ``compare()``
-stamps :attr:`~abicheck.policy.evidence_status.CrossSourceEvolution.
+stamps :attr:`~abicheck.model.evidence_status.CrossSourceEvolution.
 NOT_EVALUATED` on every candidate-side finding by construction
 (``workflows.cross_source_evolution.
 compute_candidate_cross_source_findings``), so there is no second set of
@@ -68,7 +68,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
 
-    from ..checker_types import Change
+    from ..model.change import Change
 
 __all__ = [
     "NoBaselineFindingPartition",

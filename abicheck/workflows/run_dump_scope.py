@@ -26,19 +26,52 @@ from __future__ import annotations
 
 import functools
 import inspect
-from collections.abc import Callable
+from collections.abc import Callable, Iterator, Sequence
+from contextlib import contextmanager
+from pathlib import Path
 from typing import Any
 
 from ..dumper_clang_streaming import suppress_streaming_prune
-from ..extract.dependency_exclusion import dependency_exclusion_scope
+from ..extract.dependency_exclusion import (
+    dependency_exclusion_scope,
+    suppress_dependency_exclusion,
+)
 from ..extract.dump_manifest_roots import dump_manifest_header_roots
 from ..model import AbiSnapshot
 from .snapshot_factory import DependencyScopeInputs, SnapshotFinish, finish_snapshot
 
 __all__ = [
     "apply_dependency_scope_to_run_dump_result",
+    "extraction_scope",
     "wrap_run_dump_with_dependency_scope",
 ]
+
+
+@contextmanager
+def extraction_scope(
+    include_dependencies: bool, header_roots: Sequence[Path | str]
+) -> Iterator[None]:
+    """Decide, once, what a dump's extraction may skip given its scope.
+
+    The ``dependency_scope`` a dump records and the parse that produced its
+    declarations must agree. Two mechanisms can drop dependency declarations
+    during the parse (the opt-in streaming pruner and the parse-time
+    dependency skip); both are driven from here so neither can disagree with
+    the scope the result is stamped with.
+
+    ``include_dependencies=True`` (a full surface): nothing may be skipped,
+    even when an enclosing dump declared a scope -- a ``hybrid`` leg, or any
+    nested ``run_dump``. Without this, the enclosing scope's skip predicate
+    reached the inner parse, and a filtered surface was stamped ``"full"``.
+    ``False``: the parse may skip exactly what scoping with *header_roots*
+    drops afterwards.
+    """
+    if include_dependencies:
+        with suppress_streaming_prune(), suppress_dependency_exclusion():
+            yield
+    else:
+        with dependency_exclusion_scope(header_roots):
+            yield
 
 
 def apply_dependency_scope_to_run_dump_result(
@@ -140,22 +173,10 @@ def wrap_run_dump_with_dependency_scope(
         *args: object, include_dependencies: bool = False, **kwargs: object
     ) -> AbiSnapshot:
         # Default matches the CLI flag and `InputSpec`; see that field's note.
-        # A `True` request wants the full, unscoped declaration set -- the
-        # opt-in streaming pruner (dumper_clang_streaming.py) has no
-        # visibility into this parameter at all (it prunes deep inside the
-        # clang AST parse, long before this wrapper's post-hoc filter would
-        # run), so without this it could silently drop dependency-header
-        # functions/variables even though the caller explicitly asked to
-        # keep them -- a real correctness bug (Codex review, PR #840), not
-        # just a missing "auto-enable from this flag" convenience. `False`
-        # needs no suppression: the pruner can never be more aggressive than
-        # this wrapper's own filter is about to apply anyway.
-        bound = sig.bind_partial(*args, **kwargs)  # extract.dependency_exclusion
-        with (
-            suppress_streaming_prune()
-            if include_dependencies
-            else dependency_exclusion_scope(_run_dump_header_roots(bound))
-        ):
+        # The parse-time skip rules come from `extraction_scope`, the one
+        # place that maps this request's scope onto what the parse may drop.
+        bound = sig.bind_partial(*args, **kwargs)
+        with extraction_scope(include_dependencies, _run_dump_header_roots(bound)):
             snap = uncached_fn(*args, **kwargs)
         return apply_dependency_scope_to_run_dump_result(
             snap, include_dependencies, bound

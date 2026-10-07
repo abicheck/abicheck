@@ -352,6 +352,8 @@ One asymmetry worth knowing about, not a bug to work around:
 - **`DiffResult`** (`abicheck.checker_types`) — the comparison result. Key
   fields: `verdict` (a `Verdict`), `changes` (`list[Change]`), and
   `suppressed_changes` (the suppression audit trail).
+- **`Change`** (`abicheck.model.change`) — one finding: its `kind`, `symbol`,
+  `description` and the evidence and decisions recorded on it.
 - **`Verdict`** (`abicheck.change_registry_types`) — one of `NO_CHANGE`,
   `COMPATIBLE`, `COMPATIBLE_WITH_RISK`, `API_BREAK`, `BREAKING`. See
   [Verdicts](../learn/verdicts.md) and, for the CLI mapping,
@@ -361,5 +363,5 @@ One asymmetry worth knowing about, not a bug to work around:
 
 The complete list of exported names, with full signatures/dataclass fields, is
 the generated [Python API Reference](../reference/python-api-reference.md).
-Public types live in `model.py`, `checker_types.py`, and `checker_policy.py`;
+Public types live in `model/`, `checker_types.py`, and `checker_policy.py`;
 treat changes to their surface as breaking changes to this API.

@@ -30,11 +30,11 @@ from __future__ import annotations
 
 import re
 
-from .checker_types import Change
 from .compare.template_surface import reconciled_public_functions
 from .detector_registry import registry
 from .diff_helpers import make_change
 from .model import AbiSnapshot, Function
+from .model.change import Change
 from .model.change_catalog.kinds import ChangeKind
 
 # Itanium ABI tag component: 'B' followed by a <source-name> = <length><chars>.

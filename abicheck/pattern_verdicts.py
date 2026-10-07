@@ -50,7 +50,6 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from .checker_types import Change
 from .idioms import (
     AntiPattern,
     Idiom,
@@ -59,9 +58,10 @@ from .idioms import (
     recognise_idioms,
 )
 from .model import AbiSnapshot
+from .model.change import Change
 from .model.change_catalog.kinds import ChangeKind
+from .model.evidence_status import EvidenceTier, ReachabilityState
 from .policy.classification import Verdict
-from .policy.evidence_status import EvidenceTier, ReachabilityState
 from .policy.public_use_index import (
     PublicUseIndex,
     build_public_use_index,

@@ -312,11 +312,11 @@ def test_an_ambiguous_embedding_parent_attributes_only_its_own_users() -> None:
 
 # -- primitive edge cases ----------------------------------------------------
 
-from abicheck.checker_types import Change  # noqa: E402
 from abicheck.compare.type_symbol_disambiguation import (  # noqa: E402
     AmbiguousTypeNames,
     disambiguate_type_symbols,
 )
+from abicheck.model.change import Change  # noqa: E402
 from abicheck.model.change_catalog.kinds import ChangeKind  # noqa: E402
 from abicheck.model.identity import (  # noqa: E402
     Anonymous,

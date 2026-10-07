@@ -58,8 +58,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from ..checker_types import Change
     from ..environment_matrix import EnvironmentMatrix
+    from ..model.change import Change
 
 __all__ = ["env_matrix_candidate_findings", "fold"]
 

@@ -43,6 +43,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from .model.change_catalog.build import BUILD_ENTRIES
+from .model.change_catalog.kinds import ChangeKind
 from .model.change_catalog.platform import PLATFORM_ENTRIES
 from .model.change_catalog.registry import (  # noqa: F401
     ChangeEntity as ChangeEntity,
@@ -67,6 +68,21 @@ REGISTRY = ChangeKindRegistry(
         *SOURCE_ENTRIES,
     ]
 )
+
+
+def _default_kinds(verdict: Verdict) -> frozenset[ChangeKind]:
+    """Every ``ChangeKind`` whose registry ``default_verdict`` is *verdict*."""
+    return frozenset(ChangeKind(v) for v in REGISTRY.kinds_for_verdict(verdict))
+
+
+#: Kinds grouped by their registry ``default_verdict``. These are catalog
+#: facts, not policy decisions: a detector may ask "is this kind breaking by
+#: default?" without depending on ``policy``. ``policy.classification``
+#: builds the policy-aware sets on top of these.
+BREAKING_KINDS: frozenset[ChangeKind] = _default_kinds(Verdict.BREAKING)
+COMPATIBLE_KINDS: frozenset[ChangeKind] = _default_kinds(Verdict.COMPATIBLE)
+RISK_KINDS: frozenset[ChangeKind] = _default_kinds(Verdict.COMPATIBLE_WITH_RISK)
+API_BREAK_KINDS: frozenset[ChangeKind] = _default_kinds(Verdict.API_BREAK)
 
 
 def unanimous_entity_for(kind_values: Iterable[str]) -> str | None:

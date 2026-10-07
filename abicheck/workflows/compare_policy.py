@@ -62,9 +62,9 @@ from ..policy_file import (
 )
 
 if TYPE_CHECKING:
-    from ..checker_types import Change
     from ..environment_matrix import EnvironmentMatrix
     from ..model.acknowledgment_policy import AcknowledgmentPolicy
+    from ..model.change import Change
     from ..policy.acknowledgment import AcknowledgmentList
     from ..policy_file import PolicyFile
     from ..suppression import SuppressionList

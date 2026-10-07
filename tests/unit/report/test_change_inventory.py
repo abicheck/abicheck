@@ -17,7 +17,7 @@ import itertools
 import pytest
 
 from abicheck.checker_policy import ChangeKind, CrossSourceEvolution, Verdict
-from abicheck.checker_types import Change
+from abicheck.model.change import Change
 from abicheck.report.change_inventory import (
     compute_change_inventory,
     render_change_inventory_json,

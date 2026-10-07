@@ -44,10 +44,10 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from ..model.change_catalog.kinds import ChangeKind
-from .evidence_status import CrossSourceEvolution
+from ..model.evidence_status import CrossSourceEvolution
 
 if TYPE_CHECKING:
-    from ..checker_types import Change
+    from ..model.change import Change
 
 __all__ = ["CAUSED_BY_PREFIX", "FoldExportHygieneIntoExistence", "fold_partner"]
 

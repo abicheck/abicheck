@@ -648,13 +648,13 @@ def check_future_annotations(f: Findings) -> None:
 
 def check_changekind_partition(f: Findings) -> None:
     try:
-        from abicheck.checker_policy import (
+        from abicheck.change_registry import (
             API_BREAK_KINDS,
             BREAKING_KINDS,
             COMPATIBLE_KINDS,
             RISK_KINDS,
-            ChangeKind,
         )
+        from abicheck.model.change_catalog.kinds import ChangeKind
     except Exception as e:  # noqa: BLE001 — surface ANY import failure
         f.err("changekind-partition", f"failed to import ChangeKind: {e}")
         return
@@ -726,7 +726,7 @@ def check_changekind_detector_crossref(f: Findings) -> None:
     anywhere in the package outside the definition file itself).
     """
     try:
-        from abicheck.checker_policy import ChangeKind
+        from abicheck.model.change_catalog.kinds import ChangeKind
     except Exception:
         return  # already reported by partition check
 
@@ -765,7 +765,7 @@ def check_changekind_detector_crossref(f: Findings) -> None:
 
 def check_changekind_docs(f: Findings) -> None:
     try:
-        from abicheck.checker_policy import ChangeKind
+        from abicheck.model.change_catalog.kinds import ChangeKind
     except Exception:
         return
 
@@ -828,7 +828,7 @@ def check_doc_count_sync(f: Findings) -> None:
             MIN_CASTXML,
             MIN_CASTXML_CLANG_MAJOR,
         )
-        from abicheck.checker_policy import ChangeKind
+        from abicheck.model.change_catalog.kinds import ChangeKind
     except ModuleNotFoundError:
         # Package not importable (e.g. pre-install lane) — skip silently, like
         # the other ChangeKind checks. Deliberately *only* this: a broken
@@ -1552,7 +1552,6 @@ IMPORT_CYCLE_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
                 # cluster, so this adds no new *runtime* edge and no init
                 # deadlock; the package still imports cleanly.
                 "service_header_graph_attach",
-                "service_input_resolution",
                 "dry_run_estimate",
                 # `service_dump_native` joins the same SCC on exactly the terms
                 # `service_header_graph_attach` above was signed off under -- a
@@ -2787,7 +2786,7 @@ _TIER1_TARGETS: tuple[tuple[str, frozenset[str], str], ...] = (
     (
         "service",
         frozenset({"resolve_input"}),
-        "route through `service_input_resolution.resolve_side_snapshot` "
+        "route through `workflows.artifact.execute.resolve_side_snapshot` "
         "(or `cli_resolve._resolve_input`, its CLI-side wrapper)",
     ),
 )

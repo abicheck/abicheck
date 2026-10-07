@@ -4,7 +4,7 @@
 """Change-versus-inventory split: what this release *did* vs. what it *has*.
 
 A cross-source hygiene finding stamped
-:attr:`~abicheck.policy.evidence_status.CrossSourceEvolution.PERSISTENT`
+:attr:`~abicheck.model.evidence_status.CrossSourceEvolution.PERSISTENT`
 states that OLD and NEW carry the *identical* problem -- it is standing
 inventory, not something the comparison observed changing. ``checker``
 already refuses to charge such a finding to the verdict
@@ -33,10 +33,10 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from ..policy.evidence_status import CrossSourceEvolution
+from ..model.evidence_status import CrossSourceEvolution
 
 if TYPE_CHECKING:
-    from ..checker_types import Change
+    from ..model.change import Change
     from ..policy.classification import Verdict
 
 __all__ = [

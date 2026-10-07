@@ -34,13 +34,9 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
+from .change_registry import API_BREAK_KINDS, BREAKING_KINDS, RISK_KINDS
 from .model.change_catalog.kinds import ChangeKind
-from .policy.classification import (
-    ADDITION_KINDS,
-    API_BREAK_KINDS,
-    BREAKING_KINDS,
-    RISK_KINDS,
-)
+from .policy.classification import ADDITION_KINDS
 from .report.change_summary import ChangeSummary
 from .report.evidence_summary import EvidenceSummary
 

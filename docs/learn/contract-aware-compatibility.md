@@ -13,7 +13,7 @@ depends_on:
   - abicheck/contract_pipeline.py
   - abicheck/policy/coverage_ledger.py
   - abicheck/policy/coverage_ledger.py
-  - abicheck/contract_coverage_exit.py
+  - abicheck/policy/contract_coverage_exit.py
 lifecycle: active
 generated: false
 ---

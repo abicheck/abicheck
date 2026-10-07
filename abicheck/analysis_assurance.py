@@ -138,6 +138,7 @@ from .evidence_depth import (
 )
 from .model import AbiSnapshot
 from .model.change_catalog.kinds import ChangeKind
+from .model.evidence_status import EvidenceTier
 from .policy.analysis_assurance_declined import declined_comparison_notes
 from .policy.analysis_assurance_l0_context import (
     l0_context_status as _l0_context_status,
@@ -145,7 +146,6 @@ from .policy.analysis_assurance_l0_context import (
 from .policy.analysis_assurance_schema_staleness import (
     schema_staleness_status as _schema_staleness_status,
 )
-from .policy.evidence_status import EvidenceTier
 
 if TYPE_CHECKING:
     from .buildsource.pack import BuildSourcePack

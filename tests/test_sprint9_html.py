@@ -528,7 +528,7 @@ def test_gate_card_fails_for_addition_promoted_to_error() -> None:
     reads COMPATIBLE — the CI Gate card must surface that, unlike the
     Compatibility banner alone (verified defect: P0 finding 4)."""
     from abicheck.checker import Change, ChangeKind, DiffResult, Verdict
-    from abicheck.severity import resolve_severity_config
+    from abicheck.policy.severity import resolve_severity_config
 
     c = Change(ChangeKind.FUNC_ADDED, "_Z3newv", "new public function")
     result = DiffResult(
@@ -550,7 +550,7 @@ def test_gate_card_names_blocking_category_for_addition() -> None:
     here), not just show an undifferentiated FAIL — same category-naming
     already added to the sticky PR comment and the Action's Job Summary."""
     from abicheck.checker import Change, ChangeKind, DiffResult, Verdict
-    from abicheck.severity import resolve_severity_config
+    from abicheck.policy.severity import resolve_severity_config
 
     c = Change(ChangeKind.FUNC_ADDED, "_Z3newv", "new public function")
     result = DiffResult(
@@ -568,7 +568,7 @@ def test_gate_card_names_blocking_category_for_addition() -> None:
 
 def test_gate_card_omits_blocking_categories_when_passing() -> None:
     from abicheck.checker import Change, ChangeKind, DiffResult, Verdict
-    from abicheck.severity import resolve_severity_config
+    from abicheck.policy.severity import resolve_severity_config
 
     c = Change(ChangeKind.FUNC_ADDED, "_Z3newv", "new public function")
     result = DiffResult(
@@ -598,7 +598,7 @@ def test_gate_card_always_names_the_full_library_blocking_categories() -> None:
     error-promoted addition, so "Blocked by: addition" is correct and
     expected."""
     from abicheck.checker import Change, ChangeKind, DiffResult, Verdict
-    from abicheck.severity import resolve_severity_config
+    from abicheck.policy.severity import resolve_severity_config
 
     c = Change(ChangeKind.FUNC_ADDED, "_Z3newv", "new public function")
     result = DiffResult(
@@ -623,7 +623,7 @@ def test_gate_card_always_names_the_full_library_blocking_categories() -> None:
 
 def test_gate_card_passes_when_no_error_level_findings() -> None:
     from abicheck.checker import Change, ChangeKind, DiffResult, Verdict
-    from abicheck.severity import resolve_severity_config
+    from abicheck.policy.severity import resolve_severity_config
 
     c = Change(ChangeKind.FUNC_ADDED, "_Z3newv", "new public function")
     result = DiffResult(
@@ -653,7 +653,7 @@ def test_gate_card_always_reflects_the_full_library_gate() -> None:
     the informational Consumer-scoped verdict box, and never produces a
     "CI Gate (scoped)" card."""
     from abicheck.checker import Change, ChangeKind, DiffResult, Verdict
-    from abicheck.severity import resolve_severity_config
+    from abicheck.policy.severity import resolve_severity_config
 
     c = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed: foo")
     result = DiffResult(

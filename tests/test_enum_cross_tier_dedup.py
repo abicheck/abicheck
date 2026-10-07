@@ -38,7 +38,6 @@ from __future__ import annotations
 
 from abicheck.checker import compare
 from abicheck.checker_policy import ChangeKind
-from abicheck.checker_types import Change
 from abicheck.diff_filtering import (
     _canonicalize_enum_symbol,
     _deduplicate_cross_detector,
@@ -48,6 +47,7 @@ from abicheck.diff_filtering import (
 from abicheck.dwarf_metadata import DwarfMetadata, EnumInfo
 from abicheck.finding_identity import resolve_change_identity
 from abicheck.model import AbiSnapshot, EnumMember, EnumType
+from abicheck.model.change import Change
 
 
 def _enum_type(name: str, qualified: str, members: list[tuple[str, int]]) -> EnumType:

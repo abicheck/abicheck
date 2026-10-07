@@ -37,11 +37,11 @@ from hypothesis import given, strategies as st
 
 from abicheck.checker import compare
 from abicheck.checker_policy import ChangeKind
-from abicheck.checker_types import Change
 from abicheck.diff_filtering import _dedup_cross_kind, _deduplicate_ast_dwarf
 from abicheck.diff_helpers import canonicalize_record_symbol, record_canonical_names
 from abicheck.dwarf_metadata import DwarfMetadata, FieldInfo, StructLayout
 from abicheck.model import AbiSnapshot, RecordType, TypeField
+from abicheck.model.change import Change
 
 
 def _rec(name: str, qualified: str, size_bits: int) -> RecordType:

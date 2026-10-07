@@ -40,9 +40,10 @@ from abicheck.analysis_assurance import (
     compute_analysis_assurance,
 )
 from abicheck.checker_policy import ChangeKind
-from abicheck.checker_types import Change, DiffResult
+from abicheck.checker_types import DiffResult
 from abicheck.cli import main
 from abicheck.model import AbiSnapshot, Function, Visibility
+from abicheck.model.change import Change
 from abicheck.serialization import snapshot_to_json
 
 

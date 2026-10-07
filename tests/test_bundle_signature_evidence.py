@@ -27,9 +27,10 @@ from abicheck.bundle import _compute_resolution_graph
 from abicheck.bundle_models import BundleSnapshot
 from abicheck.bundle_signature_evidence import find_unverified_signature_findings
 from abicheck.checker_policy import ChangeKind, Verdict
-from abicheck.checker_types import Change, DiffResult
+from abicheck.checker_types import DiffResult
 from abicheck.elf_metadata import ElfMetadata, ElfSymbol
 from abicheck.model import AbiSnapshot, Function, Param, Variable, Visibility
+from abicheck.model.change import Change
 
 # ---------------------------------------------------------------------------
 # Fixtures (mirrors tests/test_bundle.py's own in-memory-ElfMetadata style)

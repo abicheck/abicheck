@@ -21,11 +21,11 @@ file-size soft cap. Re-exported from ``diff_platform`` for back-compat with
 
 from __future__ import annotations
 
-from .checker_types import Change
 from .detector_registry import registry
 from .diff_helpers import make_change
 from .diff_symbols import _reconciled_function_surfaces
 from .model import AbiSnapshot
+from .model.change import Change
 from .model.change_catalog.kinds import ChangeKind
 
 

@@ -206,7 +206,7 @@ class TestStackToJson:
 
     def test_binding_changes_in_json(self):
         from abicheck.checker_policy import ChangeKind
-        from abicheck.checker_types import Change
+        from abicheck.model.change import Change
 
         change = Change(
             kind=ChangeKind.RUNTIME_SYMBOL_PROVIDER_CHANGED,
@@ -249,7 +249,7 @@ class TestStackToMarkdown:
 
     def test_binding_changes_section(self):
         from abicheck.checker_policy import ChangeKind
-        from abicheck.checker_types import Change
+        from abicheck.model.change import Change
 
         change = Change(
             kind=ChangeKind.RUNTIME_WEAK_RESOLUTION_CHANGED,

@@ -513,13 +513,13 @@ def release_findings_verdict(
     :func:`release_surface_verdict`'s core, taken over findings rather than
     a stage.
     """
+    from ..model.evidence_status import is_cross_source_resolved
     from ..policy.classification import (
         apply_policy_file_overrides,
         compute_verdict,
         excluded_from_verdict_as_persistent_hygiene,
         policy_kind_sets,
     )
-    from ..policy.evidence_status import is_cross_source_resolved
 
     if not findings:
         return "NO_CHANGE"

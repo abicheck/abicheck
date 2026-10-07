@@ -28,7 +28,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from .binder import SymbolBinding
-from .checker_types import Change
+from .model.change import Change
 from .report.render_json import render_json
 from .report.stack import (
     DEFAULTED_ROOT_NOTE,

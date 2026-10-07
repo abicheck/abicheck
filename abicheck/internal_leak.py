@@ -51,7 +51,6 @@ from .buildsource.call_graph import (
     RESOLUTION_OVERAPPROX,
 )
 from .change_registry import unanimous_entity_for
-from .checker_types import Change
 from .compare.internal_namespaces import (
     DEFAULT_INTERNAL_NAMESPACES,
     TEMPLATE_ARG_RE,
@@ -60,7 +59,9 @@ from .compare.internal_namespaces import (
     strip_template_args as _strip_template_args,
 )
 from .impact.engine import assess_change
+from .model.change import Change
 from .model.change_catalog.kinds import ChangeKind
+from .model.evidence_status import ReachabilityState
 from .model.graph_facts import CONF_HIGH, CONF_REDUCED, CONF_UNKNOWN
 from .model.name_heuristics import (
     NameHeuristicEffect,
@@ -68,7 +69,6 @@ from .model.name_heuristics import (
     register_name_heuristic,
     register_severity_raising_heuristic,
 )
-from .policy.evidence_status import ReachabilityState
 from .policy.layout_visibility import layout_proven_invisible
 
 if TYPE_CHECKING:
@@ -1484,7 +1484,7 @@ def detect_call_graph_leaks(
     Requires an embedded L5 graph on at least one snapshot (see
     :func:`compute_call_graph_leak_paths`); returns ``[]`` otherwise.
     """
-    from .policy.classification import BREAKING_KINDS
+    from .change_registry import BREAKING_KINDS
 
     internal_set = tuple(internal_namespaces)
     triggering_kinds = BREAKING_KINDS

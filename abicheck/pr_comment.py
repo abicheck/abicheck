@@ -560,7 +560,7 @@ def _reclassified_count(report: dict[str, object]) -> int:
 
     Counts each matching change once even if both mechanisms could apply --
     a change carrying ``reclassified_by`` was, by construction, decided by
-    the ``reclassify:`` rule (:func:`abicheck.severity.
+    the ``reclassify:`` rule (:func:`abicheck.policy.severity.
     reclassify_rule_for_change` is consulted ahead of ``overrides:``, same
     precedence as the run's own verdict), so it isn't double-counted against
     ``policy_overrides`` too even when its kind also appears there (Codex

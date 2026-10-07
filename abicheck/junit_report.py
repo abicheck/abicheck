@@ -45,11 +45,12 @@ import xml.etree.ElementTree as ET
 from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
-from .checker_types import Change, DiffResult
+from .checker_types import DiffResult
 from .junit_coverage_warnings import append_coverage_warnings_suite
+from .model.change import Change
+from .model.contract_finding_relevance import is_evaluated
 from .model.symbol_inventory import SymbolInventory
 from .policy.classification import Verdict
-from .policy.contract_finding_relevance import is_evaluated
 from .report.envelope import resolved_document as _resolved_document
 from .report.junit_disposition import (
     # ADR-061: moved to report/ (its historical private name is kept here
@@ -71,11 +72,10 @@ if TYPE_CHECKING:
     from datetime import date
 
     from .model import AbiSnapshot
-    from .policy.severity import IssueCategory
+    from .policy.severity import IssueCategory, KindSets, SeverityConfig
     from .report.document import ReportDocument
     from .report.envelope import ReportEnvelope
     from .report.finding import ReportFinding
-    from .severity import KindSets, SeverityConfig
 
 
 # ---------------------------------------------------------------------------
@@ -140,7 +140,7 @@ def _resolved_verdict(
     direct resolver call every caller used before ``findings_by_id``."""
     if finding is not None:
         return finding.verdict
-    from .severity import effective_verdict_for_change
+    from .policy.severity import effective_verdict_for_change
 
     return effective_verdict_for_change(
         change,
@@ -159,7 +159,7 @@ def _resolved_category(
     """Category counterpart of :func:`_resolved_verdict`."""
     if finding is not None:
         return finding.category
-    from .severity import classify_effective_change
+    from .policy.severity import classify_effective_change
 
     return classify_effective_change(
         change,
@@ -190,7 +190,7 @@ def _is_failure(
     When *severity_config* is given (from ``--severity-preset`` or
     ``severity:`` config overrides), it is the sole source of truth — a finding
     fails only when its effective category's configured level is
-    ``"error"`` — mirroring :func:`abicheck.severity.compute_exit_code`
+    ``"error"`` — mirroring :func:`abicheck.policy.severity.compute_exit_code`
     exactly, so the JUnit file can never disagree with the severity-aware
     exit code. A demoted preset (e.g. ``--severity-preset info-only``) must
     make even a BREAKING/API_BREAK verdict pass here, just as it does for
@@ -222,7 +222,7 @@ def _is_failure(
         return False
     finding = findings_by_id.get(id(change)) if findings_by_id is not None else None
     if severity_config is not None:
-        from .severity import SeverityLevel
+        from .policy.severity import SeverityLevel
 
         cat = _resolved_category(change, result, kind_sets, finding)
         return severity_config.level_for(cat) == SeverityLevel.ERROR
@@ -269,7 +269,7 @@ def _failure_type(
     """
     finding = findings_by_id.get(id(change)) if findings_by_id is not None else None
     if severity_config is not None:
-        from .severity import IssueCategory
+        from .policy.severity import IssueCategory
 
         category = _resolved_category(change, result, kind_sets, finding)
         if category == IssueCategory.POTENTIAL_BREAKING:
@@ -653,7 +653,7 @@ def _build_testsuite(
     # (Codex review).
     missing_blocks = severity_config is None
     if severity_config is not None:
-        from .severity import missing_contract_exit_code
+        from .policy.severity import missing_contract_exit_code
 
         missing_blocks = missing_contract_exit_code(severity_config) != 0
     # A missing-contract label has no backing Change/ChangeKind, so it can't

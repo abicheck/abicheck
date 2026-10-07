@@ -168,7 +168,7 @@ def test_typed_api_raises_snapshot_error_for_a_bad_config(
     """
     from abicheck.service import InputSpec
     from abicheck.service_compare_evidence import SideEvidence
-    from abicheck.service_input_resolution import embed_side_build_source
+    from abicheck.workflows.artifact.execute import embed_side_build_source
 
     old, _ = snaps
     with pytest.raises(SnapshotError) as excinfo:

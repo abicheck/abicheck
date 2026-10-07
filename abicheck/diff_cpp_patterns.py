@@ -47,7 +47,6 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from .checker_types import Change
 from .compare.internal_namespaces import DEFAULT_INTERNAL_NAMESPACES
 from .compare.naming_conventions import (  # noqa: F401 -- re-exported
     BUNDLE_SONAME_COHORT,
@@ -89,13 +88,14 @@ from .diff_templates import (  # noqa: F401
     detect_missing_instantiations,
 )
 from .model import AccessLevel, resolved_fact_value
+from .model.change import Change
 from .model.change_catalog.kinds import ChangeKind
+from .model.evidence_status import ReachabilityState
 from .model.export_index import (
     all_export_names,
     build_raw_export_index,
     pe_export_ids_with_ordinal_placeholder as _pe_export_ids,
 )
-from .policy.evidence_status import ReachabilityState
 
 if TYPE_CHECKING:
     from .model import AbiSnapshot, Function, RecordType

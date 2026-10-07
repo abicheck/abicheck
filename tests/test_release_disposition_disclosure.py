@@ -48,7 +48,8 @@ class TestTheReleaseLedgersCarryEveryDisposition:
     def _reconciled_result(self):
         from abicheck.change_registry_types import Verdict
         from abicheck.checker_policy import ChangeKind
-        from abicheck.checker_types import Change, DiffResult
+        from abicheck.checker_types import DiffResult
+        from abicheck.model.change import Change
 
         result = DiffResult(
             old_version="1.0",
@@ -151,7 +152,7 @@ class TestTheReleaseLedgersCarryEveryDisposition:
 
     def _result_with_all_three_dispositions(self):
         from abicheck.checker_policy import ChangeKind
-        from abicheck.checker_types import Change
+        from abicheck.model.change import Change
 
         result = self._reconciled_result()
         result.suppressed_changes = [

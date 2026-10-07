@@ -18,8 +18,8 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from ..checker_types import Change
-from ..policy.evidence_status import CrossSourceEvolution
+from ..model.change import Change
+from ..model.evidence_status import CrossSourceEvolution
 
 
 @dataclass(frozen=True, slots=True)

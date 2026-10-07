@@ -21,7 +21,6 @@ import functools
 from collections.abc import Callable, Container, Iterator, Mapping
 from typing import Any
 
-from .checker_types import Change
 from .compare import export_transition as _export_transition
 from .compare.constants import constant_index_pair, diff_constants
 from .compare.declaration_facts import access_changes, deprecation_changes
@@ -147,6 +146,7 @@ from .model import (
     is_abi_surface_type_name,
     stdlib_namespaces_excluded,
 )
+from .model.change import Change
 
 # Real home is model/cc_attributes.py (ADR-061 D1): a pure membership test
 # with no I/O, living in model so extract's tu_merge.py can use it too

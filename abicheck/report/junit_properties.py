@@ -32,8 +32,9 @@ from typing import TYPE_CHECKING, cast
 if TYPE_CHECKING:
     from datetime import date
 
-    from ..checker_types import Change, DiffResult
-    from ..severity import SeverityConfig
+    from ..checker_types import DiffResult
+    from ..model.change import Change
+    from ..policy.severity import SeverityConfig
 
 
 def testcase_properties(tc: ET.Element) -> ET.Element:
@@ -163,11 +164,11 @@ def add_contract_properties(
     this keeps every pre-existing JUnit report byte-for-byte unchanged.
     """
     from ..contract_relevance_types import CompatibilityEvaluationStatus
-    from ..policy.contract_finding_relevance import (
+    from ..model.contract_finding_relevance import (
         contract_relevance_of,
         evaluation_status_of,
     )
-    from ..severity import gate_contribution_for_change
+    from ..policy.severity import gate_contribution_for_change
 
     relevance = contract_relevance_of(change)
     if relevance is None:

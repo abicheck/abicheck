@@ -313,7 +313,7 @@ def _matches_finding_id(finding_id: str, canonical_finding_id: str | None) -> bo
     ``Suppression._selector_match``) computes
     that value once and passes it in here; ``None`` (no value was computed
     for this change, or the caller never bothers because its own selector
-    grammar has no ``finding_id`` field, as :class:`~abicheck.reclassify.
+    grammar has no ``finding_id`` field, as :class:`~abicheck.policy.reclassify.
     ReclassifyRule` doesn't) never matches.
     """
     return canonical_finding_id is not None and canonical_finding_id == finding_id
@@ -443,7 +443,7 @@ def _current_date() -> date:
 @dataclass
 class SelectorSet:
     """The shared selector grammar :class:`~abicheck.suppression.Suppression`
-    and :class:`~abicheck.reclassify.ReclassifyRule` each validate and match
+    and :class:`~abicheck.policy.reclassify.ReclassifyRule` each validate and match
     through — see the module docstring for why this exists and what it
     deliberately excludes (``reachability``/``allow_public_break``/
     ``allow_unknown_reachability``, ``to``/``to_verdict``, ``reason``,
@@ -587,7 +587,7 @@ class SelectorSet:
         ``report_canonical_finding_id(change)`` — see the module docstring
         for why this leaf never computes that value itself. Pass ``None``
         when the caller's own selector grammar has no ``finding_id`` field
-        (:class:`~abicheck.reclassify.ReclassifyRule`) or didn't bother
+        (:class:`~abicheck.policy.reclassify.ReclassifyRule`) or didn't bother
         computing it; a selector set with ``finding_id`` set never matches
         in that case.
         """

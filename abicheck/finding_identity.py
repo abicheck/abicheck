@@ -84,8 +84,8 @@ from .model.signature_normalization import canonicalize_function_signature_param
 from .name_classification import canonicalize_type_name
 
 if TYPE_CHECKING:
-    from .checker_types import Change
     from .model import Function, Variable
+    from .model.change import Change
 
 #: The declaration type a :class:`SymbolIdentityIndex` holds (``Function`` or
 #: ``Variable`` in this codebase; the index itself needs nothing from either

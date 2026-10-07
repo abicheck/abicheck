@@ -51,7 +51,7 @@ except ImportError:  # pragma: no cover - rich-click is a declared dependency
 # Both are defined in `checker_types` (the model ring); `checker` merely
 # re-exports them, and reaching for them there was a `frontends -> compare`
 # import for two value types.
-from ...checker_types import DiffResult, LibraryMetadata
+from ...checker_types import DiffResult
 from ...cli_audit import echo_filtered_surface, echo_reconciled
 from ...cli_helpers_compare import (  # noqa: F401  — re-exported to keep cli import sites stable
     _canonical_library_key as _canonical_library_key,
@@ -66,13 +66,14 @@ from ...cli_resolve import (
     _sniff_text_format,
 )
 from ...frontends.cli import help as cli_help
+from ...model.change import LibraryMetadata
 from .options.export import ExportSet
 from .options.params import (
     _load_suppression_and_policy as _load_suppression_and_policy,  # noqa: F401  — re-exported to keep cli import sites (test suite) stable
 )
 
 if TYPE_CHECKING:
-    from ...checker_types import Change
+    from ...model.change import Change
     from ...workflows.extraction import DebugArtifact
     from ...workflows.gate import EffectiveGate, SeverityConfig
 

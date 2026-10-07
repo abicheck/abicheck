@@ -29,8 +29,8 @@ from abicheck.model import (
     Visibility,
     stdlib_namespaces_excluded,
 )
+from abicheck.policy.severity import effective_verdict_for_change
 from abicheck.policy_file import PolicyFile
-from abicheck.severity import effective_verdict_for_change
 
 
 def _snap(

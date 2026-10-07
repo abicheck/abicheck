@@ -20,12 +20,12 @@ from __future__ import annotations
 import hashlib
 
 from abicheck.checker_policy import ChangeKind
-from abicheck.checker_types import Change
 from abicheck.impact.correlation import (
     EVIDENCE_LEVEL_BY_KIND,
     RootCauseGroup,
     correlate_root_causes,
 )
+from abicheck.model.change import Change
 
 
 def _change(**overrides: object) -> Change:

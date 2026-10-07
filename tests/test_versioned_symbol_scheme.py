@@ -103,7 +103,8 @@ def test_identical_versioned_surface_is_no_change():
 
 
 def _ch(kind_value: str, symbol: str):
-    from abicheck.checker_types import Change, ChangeKind
+    from abicheck.model.change import Change
+    from abicheck.model.change_catalog.kinds import ChangeKind
 
     return Change(kind=ChangeKind(kind_value), symbol=symbol, description="")
 
@@ -190,7 +191,8 @@ def test_collapse_preset_reclassifies_versioned_pairs():
 
 def _cpp_changes(removed_added):
     """Build Change rows from (kind_value, mangled_symbol) tuples."""
-    from abicheck.checker_types import Change, ChangeKind
+    from abicheck.model.change import Change
+    from abicheck.model.change_catalog.kinds import ChangeKind
 
     return [
         Change(kind=ChangeKind(k), symbol=s, description="") for k, s in removed_added
@@ -251,7 +253,8 @@ def test_variables_participate_in_scheme():
 
 def test_likely_renamed_versioned_pairs_collapse():
     """func_likely_renamed whose old→new differ only by a version token are matched."""
-    from abicheck.checker_types import Change, ChangeKind
+    from abicheck.model.change import Change
+    from abicheck.model.change_catalog.kinds import ChangeKind
     from abicheck.versioned_symbol_scheme import analyze_versioned_scheme
 
     rows = [
@@ -282,7 +285,8 @@ def _scheme_from_demangle_map(monkeypatch, dem, removed, added):
 
     monkeypatch.setattr(vs, "demangle", lambda s: dem.get(s))
     monkeypatch.setattr(vs, "demangle_batch", lambda names: {})
-    from abicheck.checker_types import Change, ChangeKind
+    from abicheck.model.change import Change
+    from abicheck.model.change_catalog.kinds import ChangeKind
 
     rows = [
         Change(kind=ChangeKind.FUNC_REMOVED, symbol=s, description="") for s in removed

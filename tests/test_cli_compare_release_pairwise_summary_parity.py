@@ -39,13 +39,14 @@ from pathlib import Path
 from unittest.mock import patch
 
 from abicheck.checker_policy import ChangeKind
-from abicheck.checker_types import Change, DiffResult
+from abicheck.checker_types import DiffResult
 from abicheck.cli_compare_release_pairwise import (
     ReleaseMemberContext,
     _compare_one_library,
     release_parent_request,
 )
 from abicheck.model import AbiSnapshot
+from abicheck.model.change import Change
 from abicheck.report_summary import build_summary
 from abicheck.service import CompareResult
 

@@ -16,8 +16,8 @@ import pytest
 
 from abicheck.checker import compare
 from abicheck.checker_policy import ChangeKind, Verdict
-from abicheck.checker_types import Change
 from abicheck.model import AbiSnapshot, Function, Param, Visibility
+from abicheck.model.change import Change
 from abicheck.policy.effective_gate import EffectiveGate
 from abicheck.policy_file import PolicyFile
 from abicheck.post_processing import (
@@ -275,7 +275,7 @@ class TestFrozenNamespaceBlocksDowngrade:
     def test_severity_exit_code_honors_frozen_downgrade_guard(self) -> None:
         """Severity-aware CI exits must preserve the same frozen-namespace
         downgrade guard as the legacy verdict path."""
-        from abicheck.severity import PRESET_DEFAULT, compute_exit_code
+        from abicheck.policy.severity import PRESET_DEFAULT, compute_exit_code
 
         old = _snap(
             "1.0",
@@ -332,7 +332,7 @@ class TestFrozenNamespaceBlocksDowngrade:
 
     def test_severity_exit_code_still_allows_non_frozen_downgrade(self) -> None:
         """The per-change guard must not make all overrides ineffective."""
-        from abicheck.severity import PRESET_DEFAULT, compute_exit_code
+        from abicheck.policy.severity import PRESET_DEFAULT, compute_exit_code
 
         old = _snap(
             "1.0",

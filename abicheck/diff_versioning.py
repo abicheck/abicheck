@@ -22,14 +22,16 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
-from .checker_policy import API_BREAK_KINDS, BREAKING_KINDS, ChangeKind, Verdict
-from .checker_types import Change
+from .change_registry import API_BREAK_KINDS, BREAKING_KINDS
 from .compare.naming_conventions import (
     INTERNAL_VERSION_NODE,
     is_internal_version_node as is_internal_version_node,
 )
 from .diff_helpers import make_change
 from .model.binary_naming import strip_vendor_hash
+from .model.change import Change
+from .model.change_catalog.kinds import ChangeKind
+from .model.change_catalog.registry import Verdict
 from .model.dotted_version import parse_dotted_numeric_version
 from .model.elf_facts import ElfMetadata
 

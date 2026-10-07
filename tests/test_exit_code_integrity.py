@@ -32,7 +32,7 @@ from abicheck.checker import compare
 from abicheck.checker_policy import Verdict
 from abicheck.model import AbiSnapshot, Function, Visibility
 from abicheck.policy.effective_gate import EffectiveGate
-from abicheck.severity import legacy_exit_code
+from abicheck.policy.severity import legacy_exit_code
 
 
 def _fn(name: str) -> Function:

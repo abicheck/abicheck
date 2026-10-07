@@ -98,7 +98,7 @@ __all__ = [
 
 
 class ReclassifyRuleProtocol(Protocol):
-    """Structural surface of :class:`abicheck.reclassify.ReclassifyRule`.
+    """Structural surface of :class:`abicheck.policy.reclassify.ReclassifyRule`.
 
     Five members — matching every real consumer of a rule read off a
     ``policy_file.reclassify`` sequence (``reporter.py``,

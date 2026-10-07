@@ -287,7 +287,7 @@ class TestCompareReleaseErrorPaths:
     @staticmethod
     def _matrix_change():
         from abicheck.checker_policy import ChangeKind
-        from abicheck.checker_types import Change
+        from abicheck.model.change import Change
 
         return Change(
             kind=ChangeKind.CXX_STANDARD_FLOOR_RAISED,

@@ -21,16 +21,17 @@ import pytest
 
 from abicheck.checker import LibraryMetadata, Verdict
 from abicheck.checker_policy import ChangeKind, Confidence
-from abicheck.checker_types import Change, DiffResult
+from abicheck.checker_types import DiffResult
 from abicheck.contract_relevance_types import (
     CompatibilityEvaluationStatus,
     ContractAssurance,
     ContractRelevance,
 )
 from abicheck.html_report import generate_html_report
+from abicheck.model.change import Change
+from abicheck.policy.reclassify import ReclassifyRule
+from abicheck.policy.severity import SeverityConfig
 from abicheck.policy_file import PolicyFile
-from abicheck.reclassify import ReclassifyRule
-from abicheck.severity import SeverityConfig
 from abicheck.stack_checker import StackCheckResult, StackVerdict
 from abicheck.stack_html import stack_to_html
 

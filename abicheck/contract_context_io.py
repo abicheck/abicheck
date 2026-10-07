@@ -81,7 +81,7 @@ from .contract_relevance_types import (
     SelectorLayer,
 )
 from .model.ownership_rules import OwnershipRules
-from .severity import SeverityConfig, SeverityLevel
+from .policy.severity import SeverityConfig, SeverityLevel
 
 
 def _require_mapping(value: object, *, what: str) -> Mapping[str, Any]:

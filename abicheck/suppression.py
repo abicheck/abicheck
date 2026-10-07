@@ -19,7 +19,7 @@ The selector grammar itself (``symbol``/``symbol_pattern``/``type_pattern``/
 ``source_location``/``change_kind``/``binding``/``finding_id``/``expires``)
 lives in :mod:`abicheck.policy.selectors` (ADR-063 D10, implementation plan
 Phase 9) — a dependency-free leaf module shared with
-:mod:`abicheck.reclassify`'s ``ReclassifyRule``, so the two selector-scoped
+:mod:`abicheck.policy.reclassify`'s ``ReclassifyRule``, so the two selector-scoped
 rule forms can no longer drift out of sync the way two independent copies of
 the same fnmatch/regex/namespace-glob machinery once could. ``Suppression``
 constructs one :class:`~abicheck.policy.selectors.SelectorSet` from its own
@@ -39,10 +39,11 @@ from pathlib import Path
 
 import yaml
 
-from .checker_types import Change
+from .change_registry import API_BREAK_KINDS, BREAKING_KINDS
+from .model.change import Change
 from .model.change_catalog.kinds import ChangeKind
-from .policy.classification import API_BREAK_KINDS, BREAKING_KINDS, Verdict
-from .policy.evidence_status import ReachabilityState
+from .model.evidence_status import ReachabilityState
+from .policy.classification import Verdict
 from .policy.rule_identity import rule_identity
 from .policy.selectors import SelectorSet
 from .suppression_yaml import parse_finding_id, raw_finding_ids_by_index
@@ -364,7 +365,7 @@ class Suppression:
 
         Delegates to :meth:`~abicheck.policy.selectors.SelectorSet.
         matches_selectors` (ADR-063 D10) — the shared grammar this class and
-        :class:`~abicheck.reclassify.ReclassifyRule` both build on. This
+        :class:`~abicheck.policy.reclassify.ReclassifyRule` both build on. This
         method's own job is narrow: compute
         ``finding_identity.report_canonical_finding_id(change)`` when (and
         only when) this rule actually has a ``finding_id`` selector to check
@@ -373,13 +374,14 @@ class Suppression:
         module's own docstring), so the caller that already imports it
         computes the value instead.
         """
-        canonical_finding_id: str | None = None
-        if self.finding_id is not None:
-            from .finding_identity import report_canonical_finding_id
+        if self.finding_id is None:
+            return self._selector.matches_selectors(change, today=today)
+        from .finding_identity import report_canonical_finding_id
 
-            canonical_finding_id = report_canonical_finding_id(change)
         return self._selector.matches_selectors(
-            change, today=today, canonical_finding_id=canonical_finding_id
+            change,
+            today=today,
+            canonical_finding_id=report_canonical_finding_id(change),
         )
 
     def _passes_reachability_gate(self, change: Change) -> bool:
@@ -839,7 +841,7 @@ class SuppressionList:
         - ``high_risk_matches``: suppressions that matched a change classified
           as ``BREAKING`` -- via *breaking_kinds* membership, or, when
           *policy_file* is given, via the same per-finding resolver
-          (:func:`abicheck.severity.effective_verdict_for_change`) the
+          (:func:`abicheck.policy.severity.effective_verdict_for_change`) the
           comparison's own verdict/severity/exit-code already went through
           (see below)
         - ``expired_rules``: rules past their expiry date
@@ -855,7 +857,7 @@ class SuppressionList:
         behavior for every existing caller that doesn't pass it, using
         *breaking_kinds* alone). When given, each change's "high risk"
         classification is instead decided by
-        :func:`abicheck.severity.effective_verdict_for_change` -- the same
+        :func:`abicheck.policy.severity.effective_verdict_for_change` -- the same
         resolver ``PolicyFile.compute_verdict``/``classify_effective_change``
         already use -- rather than *breaking_kinds* membership. A bare
         kind-wide set cannot express what that resolver's own precedence
@@ -896,7 +898,7 @@ class SuppressionList:
                 # classify_effective_change means this audit's "high risk"
                 # classification can never disagree with the verdict the
                 # comparison itself actually produced.
-                from .severity import effective_verdict_for_change
+                from .policy.severity import effective_verdict_for_change
 
                 is_breaking = (
                     effective_verdict_for_change(

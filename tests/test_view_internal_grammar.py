@@ -592,7 +592,8 @@ class TestDemanglingIsPrewarmedOnEveryProjection:
 
     def _result_with_mangled_findings(self, count: int):
         from abicheck.checker import Verdict
-        from abicheck.checker_types import Change, DiffResult
+        from abicheck.checker_types import DiffResult
+        from abicheck.model.change import Change
 
         changes = [
             Change(ChangeKind.FUNC_REMOVED, f"_ZN3lib4gone{i}Ev", "removed")
@@ -698,8 +699,9 @@ class TestJunitCarriesBothNames:
 
     def _xml(self):
         from abicheck.checker import Verdict
-        from abicheck.checker_types import Change, DiffResult
+        from abicheck.checker_types import DiffResult
         from abicheck.junit_report import to_junit_xml
+        from abicheck.model.change import Change
 
         change = Change(ChangeKind.FUNC_REMOVED, _GONE_MANGLED, "removed")
         return to_junit_xml(
@@ -857,8 +859,9 @@ class TestTheTypedApiDemanglesAutomaticallyToo:
 
     def _render(self, fmt, **kwargs):
         from abicheck.checker import Verdict
-        from abicheck.checker_types import Change, DiffResult
+        from abicheck.checker_types import DiffResult
         from abicheck.model import AbiSnapshot
+        from abicheck.model.change import Change
         from abicheck.service_render import render_output
 
         result = DiffResult(
@@ -970,8 +973,9 @@ class TestOneEnvelopeProjectsCorrectlyIntoEveryFormat:
 
     def _envelope(self):
         from abicheck.change_registry_types import Verdict
-        from abicheck.checker_types import Change, DiffResult
+        from abicheck.checker_types import DiffResult
         from abicheck.model import AbiSnapshot
+        from abicheck.model.change import Change
         from abicheck.model.change_catalog.kinds import ChangeKind
         from abicheck.report.build import build_report_envelope
         from abicheck.report.envelope import RenderOptions
@@ -1075,7 +1079,8 @@ class TestEveryCollectionThatSerializesIsPrewarmed:
 
     def _result_with_a_distinct_symbol_per_collection(self):
         from abicheck.change_registry_types import Verdict
-        from abicheck.checker_types import Change, DiffResult
+        from abicheck.checker_types import DiffResult
+        from abicheck.model.change import Change
         from abicheck.model.change_catalog.kinds import ChangeKind as CK
 
         result = DiffResult(

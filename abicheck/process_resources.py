@@ -274,6 +274,15 @@ MEMBER_JOBS_ENV_VAR = "ABICHECK_MEMBER_JOBS"
 #: no speedup).
 GIL_MEMBER_PARALLELISM = 2
 
+#: Level-1 default on a free-threaded interpreter, as a ceiling on the CPU
+#: count. Not the CPU count itself: members share caches, the include memo
+#: and the AST acquisition table, and contend on them. Measured on a
+#: 28-member release on a 224-core host (python3.14t), wall time was flat
+#: from 4 to 96 members (17:12 / 17:58 / 18:14) while CPU seconds grew 6.5x
+#: (5 191 -> 33 869) and peak RSS 4-7x -- past ~4 the extra members only
+#: contend. Still 2.9x faster than the GIL default on that release.
+FREE_THREADED_MEMBER_PARALLELISM = 4
+
 
 def gil_enabled() -> bool:
     """Whether this interpreter serializes Python bytecode on a GIL.
@@ -295,8 +304,9 @@ def python_parallelism() -> int:
 
     ``ABICHECK_MEMBER_JOBS`` when set to a positive integer (clamped to
     :func:`jobs_ceiling`, like every other override); otherwise
-    :data:`GIL_MEMBER_PARALLELISM` under the GIL and the CPU count on a
-    free-threaded interpreter. Memory is *not* considered here -- the caller's
+    :data:`GIL_MEMBER_PARALLELISM` under the GIL and, on a free-threaded
+    interpreter, the CPU count capped at
+    :data:`FREE_THREADED_MEMBER_PARALLELISM`. Memory is *not* considered here -- the caller's
     memory admission is what bounds a level-1 pool by RAM; this bounds it by
     what can actually execute. An unparsable override falls back to that
     default silently, as every other sizing variable here does.
@@ -311,7 +321,7 @@ def python_parallelism() -> int:
             return max(1, min(requested, jobs_ceiling()))
     if gil_enabled():
         return GIL_MEMBER_PARALLELISM
-    return max(1, os.cpu_count() or 1)
+    return max(1, min(os.cpu_count() or 1, FREE_THREADED_MEMBER_PARALLELISM))
 
 
 # ---------------------------------------------------------------------------

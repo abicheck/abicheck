@@ -32,7 +32,7 @@ Hierarchy (5-tier)::
     COMPATIBLE_KINDS    = ADDITION_KINDS | QUALITY_KINDS
 
 This is the real owner of what used to be ``abicheck/checker_policy.py``'s
-verdict/kind-set half (see :mod:`abicheck.policy.evidence_status` for the
+verdict/kind-set half (see :mod:`abicheck.model.evidence_status` for the
 epistemic-status/evolution half, split out purely to keep each module under
 the 800-line new-file ceiling). ``abicheck/checker_policy.py`` is now a thin
 compatibility facade re-exporting both modules' public surface unchanged —
@@ -48,15 +48,22 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
-from ..change_registry import REGISTRY as _REGISTRY, Verdict as Verdict
+from ..change_registry import (
+    API_BREAK_KINDS,
+    BREAKING_KINDS,
+    COMPATIBLE_KINDS,
+    REGISTRY as _REGISTRY,
+    RISK_KINDS,
+    Verdict as Verdict,
+)
 from ..model.change_catalog.kinds import ChangeKind as ChangeKind, HasKind as HasKind
 from ..model.change_catalog.registry import VALID_BASE_POLICIES as VALID_BASE_POLICIES
-from ..model.execution_cache import memoized
-from .evidence_status import (
+from ..model.evidence_status import (
     EvidenceStatus,
     has_binary_evidence,
     is_cross_source_persistent,
 )
+from ..model.execution_cache import memoized
 
 # ---------------------------------------------------------------------------
 # Classification sets — DERIVED from change_registry.py (single source of truth)
@@ -65,19 +72,9 @@ from .evidence_status import (
 # add ONE entry in change_registry.py — these sets update automatically.
 
 
-def _kinds_for(verdict_val: str) -> set[ChangeKind]:
-    """Map registry verdict string values back to ChangeKind enum members."""
-    raw = _REGISTRY.kinds_for_verdict(getattr(Verdict, verdict_val))
-    return {ChangeKind(v) for v in raw}
-
-
-BREAKING_KINDS: frozenset[ChangeKind] = frozenset(_kinds_for("BREAKING"))
-
-COMPATIBLE_KINDS: frozenset[ChangeKind] = frozenset(_kinds_for("COMPATIBLE"))
-
-RISK_KINDS: frozenset[ChangeKind] = frozenset(_kinds_for("COMPATIBLE_WITH_RISK"))
-
-API_BREAK_KINDS: frozenset[ChangeKind] = frozenset(_kinds_for("API_BREAK"))
+# The four default-verdict sets are catalog facts owned by
+# ``change_registry`` (model); this module builds the policy-aware sets below
+# on top of them.
 
 # ---------------------------------------------------------------------------
 # Compatible sub-categories: additions vs quality/behavioral issues
@@ -243,7 +240,7 @@ def policy_for(kind: ChangeKind) -> PolicyEntry:
 #: ``BREAKING_KINDS`` impact strings assert an unconditional consequence
 #: ("dynamic linker will refuse to load or crash", "heap/stack corruption")
 #: that is only true when the run's evidence actually backs the finding
-#: (see :func:`abicheck.policy.evidence_status.evidence_status_for_result`).
+#: (see :func:`abicheck.model.evidence_status.evidence_status_for_result`).
 #: ``UNATTRIBUTED`` covers two distinct, evidence-type-varying cases -- an
 #: ``"elf"``-tiered run that examined a real symbol table but found no
 #: matching entry for *this* finding, and a run with no binary evidence at
@@ -450,7 +447,7 @@ def excluded_from_verdict_as_persistent_hygiene(
     Two conditions, both required, and the second is what keeps this safe:
 
     1. The finding is a cross-source hygiene finding stamped
-       :attr:`~abicheck.policy.evidence_status.CrossSourceEvolution.PERSISTENT`
+       :attr:`~abicheck.model.evidence_status.CrossSourceEvolution.PERSISTENT`
        -- the identical problem is present on OLD and on NEW, so this
        release changed nothing about it.
     2. It resolves, **under the active policy and including any per-finding

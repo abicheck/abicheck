@@ -1240,7 +1240,11 @@ class TestLayoutUnverifiableCorrelatedWithVtableChanged:
         ``abi_breaking=info`` / ``potential_breaking=error`` severity
         configuration still sees LAYOUT_UNVERIFIABLE's own error-level
         contribution regardless of how TYPE_VTABLE_CHANGED is configured."""
-        from abicheck.severity import SeverityConfig, SeverityLevel, compute_exit_code
+        from abicheck.policy.severity import (
+            SeverityConfig,
+            SeverityLevel,
+            compute_exit_code,
+        )
 
         old = _snap(
             types=[

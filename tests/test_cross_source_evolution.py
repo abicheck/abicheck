@@ -39,9 +39,9 @@ from abicheck.buildsource.pack import BuildSourcePack
 from abicheck.buildsource.source_graph import GraphEdge, GraphNode, SourceGraphSummary
 from abicheck.checker import compare
 from abicheck.checker_policy import ChangeKind, CrossSourceEvolution
-from abicheck.checker_types import Change
 from abicheck.elf_metadata import ElfMetadata, ElfSymbol
 from abicheck.model import AbiSnapshot, Function, RecordType, ScopeOrigin
+from abicheck.model.change import Change
 from abicheck.workflows.cross_source_evolution import compute_cross_source_evolution
 
 

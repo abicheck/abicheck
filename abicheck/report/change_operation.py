@@ -158,7 +158,7 @@ def operation_for_change(change: object, kind_val: str) -> str:
     because nothing about the kind says whether the problem is new. That made
     every such finding read ``operation: modified`` -- including one present,
     identically, on both sides. When ``compare()`` stamped the finding's
-    :class:`~abicheck.policy.evidence_status.CrossSourceEvolution`, that state
+    :class:`~abicheck.model.evidence_status.CrossSourceEvolution`, that state
     is the answer: ``introduced`` -> ``added``, ``resolved`` -> ``removed``,
     ``persistent`` -> ``unchanged``. ``not_evaluated`` (one side lacked the
     evidence) states nothing either way, so the kind's declared operation
