@@ -92,7 +92,7 @@ All controls are environment variables.
 
 | Variable | Controls | Default |
 |---|---|---|
-| `ABICHECK_MEMBER_JOBS` | Libraries compared at once in a release | 2 with the GIL, CPU count free-threaded |
+| `ABICHECK_MEMBER_JOBS` | Libraries compared at once in a release | 2 with the GIL; free-threaded, the CPU count capped at 4 |
 | `ABICHECK_MAX_THREADS` | Total worker threads across every abicheck pool | unlimited |
 | `ABICHECK_RELEASE_JOB_MEM_GIB` | Memory budget per library (can lower the above) | depth-dependent |
 | `ABICHECK_INCLUDE_MAP_JOBS` | Concurrent `clang -M` include probes (and the probe pool's size) | CPU count, memory-capped |
