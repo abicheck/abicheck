@@ -55,6 +55,7 @@ from typing import TYPE_CHECKING, Any
 from ..policy.audit_gate_exit import (
     audit_gate_enabled_for_severity_preset as audit_gate_enabled_for_severity_preset,
 )
+from ..policy.evaluate import effective_kind_sets
 from ..policy.outcome import OperationalStatus, PolicyGateDecision, RunOutcome
 from ..policy.scope_completeness import resolve_scope_decision
 from .comparison_scope import build_comparison_scope_section
@@ -245,7 +246,7 @@ def _finding_resolver(
 ) -> Callable[[Sequence[Change]], tuple[ReportFinding, ...]]:
     """A resolver bound to *diff*'s policy, for any list of its findings.
 
-    One place reads ``DiffResult._effective_kind_sets()`` -- the report layer
+    One place reads ``policy.evaluate.effective_kind_sets(DiffResult)`` -- the report layer
     has no public accessor for it, and every renderer in this package reaches
     for it the same way -- so the reported and suppressed halves are resolved
     against provably identical policy inputs rather than by two call sites
@@ -256,7 +257,7 @@ def _finding_resolver(
         return build_report_findings(
             changes,
             policy=diff.policy,
-            kind_sets=diff._effective_kind_sets(),  # noqa: SLF001
+            kind_sets=effective_kind_sets(diff),  # noqa: SLF001
             policy_file=diff.policy_file,
         )
 

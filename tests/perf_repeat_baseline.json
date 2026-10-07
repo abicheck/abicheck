@@ -10,7 +10,7 @@
     "abicheck/buildsource/source_inputs.py(SourceInputSet.insufficiency_reason)": 28,
     "abicheck/buildsource/source_inputs.py(SourceInputSet.sufficient)": 56,
     "abicheck/buildsource/source_inputs.py(SourceReadLicence.to_dict)": 14,
-    "abicheck/checker_types.py(DiffResult._effective_kind_sets)": 28,
+    "abicheck/policy/evaluate.py(effective_kind_sets)": 28,
     "abicheck/comparability_profile.py(_toolchain_identity_status)": 14,
     "abicheck/compare/debug_layout_view.py(_layout_channel)": 98,
     "abicheck/compare/debug_layout_view.py(debug_layout_view)": 98,

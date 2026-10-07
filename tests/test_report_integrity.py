@@ -38,6 +38,7 @@ from abicheck.checker_policy import Verdict
 from abicheck.junit_report import _is_failure
 from abicheck.model import AbiSnapshot, Function, Visibility
 from abicheck.model.change import Change
+from abicheck.policy.evaluate import effective_kind_sets, effective_verdict
 from abicheck.report_model import (
     UNKNOWN_SEVERITY_LABEL,
     VERDICT_PRESENTATION,
@@ -155,7 +156,7 @@ def test_native_channels_agree_on_breaking_boundary() -> None:
     model = ReportModel.from_result(result)
     assert model.changes, "expected at least one change to classify"
 
-    kind_sets = result._effective_kind_sets()
+    kind_sets = effective_kind_sets(result)
 
     for ch in model.changes:
         breaking = _on_breaking_side(model, ch)
@@ -197,11 +198,7 @@ def test_a4_override_propagates_across_channels() -> None:
     # exact divergence the unification prevents.
     result = _result()
     breaking = next(
-        (
-            c
-            for c in result.changes
-            if result._effective_verdict_for_change(c) == Verdict.BREAKING
-        ),
+        (c for c in result.changes if effective_verdict(result, c) == Verdict.BREAKING),
         None,
     )
     assert breaking is not None, "fixture must produce a breaking change"
@@ -218,7 +215,7 @@ def test_a4_override_propagates_across_channels() -> None:
     assert _on_breaking_side(model, demoted) is False
     # Override propagates to every native channel: not error, not failure.
     assert sarif_severity(demoted, result) == "note"
-    kind_sets = result._effective_kind_sets()
+    kind_sets = effective_kind_sets(result)
     assert _is_failure(demoted, result, kind_sets) is False
 
 
@@ -234,11 +231,7 @@ def test_policy_file_override_propagates_across_channels() -> None:
 
     result = _result()
     breaking = next(
-        (
-            c
-            for c in result.changes
-            if result._effective_verdict_for_change(c) == Verdict.BREAKING
-        ),
+        (c for c in result.changes if effective_verdict(result, c) == Verdict.BREAKING),
         None,
     )
     assert breaking is not None, "fixture must produce a breaking change"
@@ -251,7 +244,7 @@ def test_policy_file_override_propagates_across_channels() -> None:
         (
             c
             for c in result.changes
-            if result._effective_verdict_for_change(c) == Verdict.COMPATIBLE
+            if effective_verdict(result, c) == Verdict.COMPATIBLE
         ),
         None,
     )
@@ -264,7 +257,7 @@ def test_policy_file_override_propagates_across_channels() -> None:
     assert model.verdict_of(breaking) == Verdict.COMPATIBLE
     assert _on_breaking_side(model, breaking) is False
     assert sarif_severity(breaking, result) == "note"
-    kind_sets = result._effective_kind_sets()
+    kind_sets = effective_kind_sets(result)
     assert _is_failure(breaking, result, kind_sets) is False
 
     # Escalate: a compatible finding overridden up to BREAKING.
@@ -273,7 +266,7 @@ def test_policy_file_override_propagates_across_channels() -> None:
     assert model.verdict_of(compatible) == Verdict.BREAKING
     assert _on_breaking_side(model, compatible) is True
     assert sarif_severity(compatible, result) == "error"
-    kind_sets = result._effective_kind_sets()
+    kind_sets = effective_kind_sets(result)
     assert _is_failure(compatible, result, kind_sets) is True
 
 
@@ -294,7 +287,7 @@ def test_named_base_policy_downgrade_propagates_to_sarif() -> None:
     result.policy = "plugin_abi"
     result.changes = [change]
 
-    assert result._effective_verdict_for_change(change) == Verdict.COMPATIBLE
+    assert effective_verdict(result, change) == Verdict.COMPATIBLE
     assert sarif_severity(change, result) == "note"
-    kind_sets = result._effective_kind_sets()
+    kind_sets = effective_kind_sets(result)
     assert _is_failure(change, result, kind_sets) is False

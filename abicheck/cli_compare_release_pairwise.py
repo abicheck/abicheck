@@ -284,13 +284,15 @@ def _compare_one_library(
         # (`cli_compare_receipt.release_disposition_audit_block`) has
         # something to read per library.
         from .report.release_member_summary import add_member_review_summary
+        from .workflows.gate import evaluate
 
+        classified = evaluate(result)
         entry: dict[str, object] = {
             "library": old_path.name,
             "verdict": v,
-            "breaking": len(result.breaking),
-            "source_breaks": len(result.source_breaks),
-            "risk_changes": len(result.risk),
+            "breaking": len(classified.breaking),
+            "source_breaks": len(classified.source_breaks),
+            "risk_changes": len(classified.risk),
             "compatible_additions": _summary.compatible_additions,
             "quality_issues": n_quality,
             "_diff_result": result,
@@ -587,11 +589,13 @@ def _suppress_lockstep_soname_findings(
         # Recompute the cached per-library counts via `build_summary`,
         # same as above (Codex review, findings-fixes round 10/11).
         from .report_summary import build_summary
+        from .workflows.gate import evaluate
 
         _summary = build_summary(result)
-        entry["breaking"] = len(result.breaking)
-        entry["source_breaks"] = len(result.source_breaks)
-        entry["risk_changes"] = len(result.risk)
+        classified = evaluate(result)
+        entry["breaking"] = len(classified.breaking)
+        entry["source_breaks"] = len(classified.source_breaks)
+        entry["risk_changes"] = len(classified.risk)
         entry["compatible_additions"] = _summary.compatible_additions
         entry["quality_issues"] = _summary.quality_issues
         if output_dir is not None:

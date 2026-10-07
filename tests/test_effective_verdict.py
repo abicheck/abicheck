@@ -29,6 +29,7 @@ from abicheck.checker_policy import (
 )
 from abicheck.checker_types import DiffResult
 from abicheck.model.change import Change
+from abicheck.policy.evaluate import evaluate
 
 
 def _change(kind: ChangeKind, **kw: object) -> Change:
@@ -77,9 +78,9 @@ def test_diffresult_properties_honor_override() -> None:
     )
     # The demoted finding moves out of `breaking` into `compatible`; the real
     # break stays in `breaking`.
-    assert demoted not in dr.breaking
-    assert demoted in dr.compatible
-    assert breaking_kept in dr.breaking
+    assert demoted not in evaluate(dr).breaking
+    assert demoted in evaluate(dr).compatible
+    assert breaking_kept in evaluate(dr).breaking
 
 
 def test_compute_verdict_empty_is_no_change() -> None:

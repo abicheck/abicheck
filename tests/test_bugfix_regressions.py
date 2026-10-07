@@ -25,6 +25,7 @@ from abicheck.model import (
     Variable,
     Visibility,
 )
+from abicheck.policy.evaluate import evaluate
 from abicheck.report_summary import build_summary, compatibility_metrics
 
 # ── Shared helpers ────────────────────────────────────────────────────────────
@@ -267,9 +268,9 @@ class TestBug4PolicyOverrideProperties:
             policy_file=pf,
         )
         # Without override, FUNC_REMOVED is BREAKING
-        assert len(result.breaking) == 0
-        assert len(result.compatible) == 1
-        assert result.compatible[0].kind == ChangeKind.FUNC_REMOVED
+        assert len(evaluate(result).breaking) == 0
+        assert len(evaluate(result).compatible) == 1
+        assert evaluate(result).compatible[0].kind == ChangeKind.FUNC_REMOVED
 
     def test_override_moves_kind_to_risk(self):
         from abicheck.policy_file import PolicyFile
@@ -287,8 +288,8 @@ class TestBug4PolicyOverrideProperties:
             policy="strict_abi",
             policy_file=pf,
         )
-        assert len(result.risk) == 1
-        assert len(result.compatible) == 0
+        assert len(evaluate(result).risk) == 1
+        assert len(evaluate(result).compatible) == 0
 
     def test_no_policy_file_uses_base_policy(self):
         """Without policy_file, properties use base policy sets directly."""
@@ -300,8 +301,8 @@ class TestBug4PolicyOverrideProperties:
             verdict=Verdict.BREAKING,
             policy="strict_abi",
         )
-        assert len(result.breaking) == 1
-        assert len(result.compatible) == 0
+        assert len(evaluate(result).breaking) == 1
+        assert len(evaluate(result).compatible) == 0
 
     def test_override_from_yaml(self, tmp_path):
         from abicheck.policy_file import PolicyFile
@@ -327,8 +328,8 @@ class TestBug4PolicyOverrideProperties:
             policy=pf.base_policy,
             policy_file=pf,
         )
-        assert len(result.breaking) == 0
-        assert len(result.compatible) == 1
+        assert len(evaluate(result).breaking) == 0
+        assert len(evaluate(result).compatible) == 1
 
 
 # ── Bug 5: Safe output file writing with parent dir creation ─────────────────

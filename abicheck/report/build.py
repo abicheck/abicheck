@@ -51,6 +51,7 @@ from typing import TYPE_CHECKING
 
 from ..model.change import Change
 from ..model.plain_copy import plain_deepcopy
+from ..policy.evaluate import effective_kind_sets
 from .document import ReportDocument
 from .envelope import RenderOptions, ReportEnvelope
 from .finding import build_report_findings
@@ -156,7 +157,7 @@ def build_report_document(
             changes,
             show_only,
             policy=result.policy,
-            kind_sets=result._effective_kind_sets(),
+            kind_sets=effective_kind_sets(result),
             policy_file=result.policy_file,
         )
         changes = _suppress_dangling_correlation_notes(changes)
@@ -166,7 +167,7 @@ def build_report_document(
     _add_evidence_fields(d, result)
     effective_policy = result.policy or "strict_abi"
     d["policy"] = effective_policy
-    eff_sets = result._effective_kind_sets()
+    eff_sets = effective_kind_sets(result)
 
     if show_only:
         _add_show_only_filter(d, result, changes, show_only)
@@ -581,7 +582,7 @@ def build_report_envelope(
     opts = options if options is not None else RenderOptions()
     today = date.today()
     gate = gate_decision_for_result(result, severity_config, today=today)
-    kind_sets = result._effective_kind_sets()
+    kind_sets = effective_kind_sets(result)
     findings = build_report_findings(
         result.changes,
         policy=result.policy,

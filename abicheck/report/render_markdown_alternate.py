@@ -65,6 +65,7 @@ from collections.abc import Mapping
 from dataclasses import asdict
 from typing import Any
 
+from ..policy.evaluate import effective_kind_sets
 from .disposition_audit import (
     DispositionAudit,
     compute_disposition_audit,
@@ -284,7 +285,7 @@ def build_root_cause_document(
                     severity_config,
                     all_changes=list(result.changes),
                     policy=result.policy,
-                    kind_sets=result._effective_kind_sets(),
+                    kind_sets=effective_kind_sets(result),
                     policy_file=result.policy_file,
                     scoped_counts=getattr(result, "scoped_severity_counts", None),
                     scoped_blocking_categories=getattr(

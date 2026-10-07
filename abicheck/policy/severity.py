@@ -136,7 +136,7 @@ def classify_change(
 
     Uses the canonical kind sets from ``checker_policy`` by default.
 
-    When *kind_sets* is provided (e.g. from ``DiffResult._effective_kind_sets()``),
+    When *kind_sets* is provided (e.g. from ``policy.evaluate.effective_kind_sets(DiffResult)``),
     those sets are used directly, which includes PolicyFile overrides.
 
     When only *policy* is provided, uses the built-in policy-adjusted sets.
@@ -170,7 +170,7 @@ def _reclassify_resolved_to_compatible(
 
     Used only to widen the ADDITION-vs-QUALITY_ISSUES gate below (Codex
     review): ``sets[2]`` there is whatever *kind-global* ``kind_sets`` the
-    caller supplied (typically ``DiffResult._effective_kind_sets()``, which
+    caller supplied (typically ``policy.evaluate.effective_kind_sets(DiffResult)``, which
     bakes in ``overrides:`` but has no notion of a selector-scoped rule at
     all). A `reclassify:` rule reclassifying one specific addition-kind
     finding to `ignore` -- even under a kind-global `overrides:
@@ -518,7 +518,7 @@ def compute_exit_code(
     - at least one finding, AND
     - severity configured as ``error``.
 
-    *kind_sets* (from ``DiffResult._effective_kind_sets()``) includes
+    *kind_sets* (from ``policy.evaluate.effective_kind_sets(DiffResult)``) includes
     PolicyFile overrides and takes precedence over *policy*. When
     *policy_file* is provided, frozen-namespace downgrade guards are applied
     per change before classifying severity.

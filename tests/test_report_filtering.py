@@ -21,6 +21,7 @@ from abicheck.diff_filtering import (
     _filter_reserved_field_renames,
     _root_type_name,
 )
+from abicheck.policy.evaluate import effective_kind_sets
 from abicheck.reporter import (
     ShowOnlyFilter,
     apply_show_only,
@@ -374,7 +375,7 @@ class TestApplyShowOnly:
         # Threading the effective kind_sets/policy_file (as every report
         # renderer now does) makes --show-only agree with the effective
         # verdict the rest of the report uses.
-        kind_sets = result._effective_kind_sets()
+        kind_sets = effective_kind_sets(result)
         assert (
             apply_show_only(
                 [c],

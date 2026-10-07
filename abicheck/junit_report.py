@@ -51,6 +51,7 @@ from .model.change import Change
 from .model.contract_finding_relevance import is_evaluated
 from .model.symbol_inventory import SymbolInventory
 from .policy.classification import Verdict
+from .policy.evaluate import effective_kind_sets
 from .report.envelope import resolved_document as _resolved_document
 from .report.junit_disposition import (
     # ADR-061: moved to report/ (its historical private name is kept here
@@ -180,7 +181,7 @@ def _is_failure(
 ) -> bool:
     """Return True if the change should be a JUnit ``<failure>``.
 
-    Routes through ``DiffResult._effective_verdict_for_change`` — the single
+    Routes through ``policy.evaluate.effective_verdict`` — the single
     canonical per-finding verdict, which honours PolicyFile overrides, the
     A4 per-finding ``effective_verdict`` (ADR-027), and frozen-namespace
     escalation guards — so the JUnit file can never disagree with the JSON
@@ -582,7 +583,7 @@ def _build_testsuite(
     (no unchanged snapshot symbols) so the test count matches the filter.
     *envelope* (ADR-061 gap C) is the completed ``ReportEnvelope`` this render projects: it supplies the shared document :func:`_add_disposition_audit_properties` reads and every per-finding verdict/category below, so JUnit resolves neither for itself.
     """
-    kind_sets = result._effective_kind_sets()
+    kind_sets = effective_kind_sets(result)
     resolved_today = None if envelope is None else envelope.resolved_today
 
     changes = list(result.changes)
@@ -599,7 +600,7 @@ def _build_testsuite(
             changes,
             show_only,
             policy=result.policy,
-            kind_sets=result._effective_kind_sets(),
+            kind_sets=effective_kind_sets(result),
             policy_file=result.policy_file,
             today=resolved_today,
         )

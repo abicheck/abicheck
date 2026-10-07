@@ -14,6 +14,7 @@ import pytest
 from abicheck.checker_policy import ChangeKind, Verdict
 from abicheck.errors import PolicyError
 from abicheck.model.change import Change
+from abicheck.policy.evaluate import effective_kind_sets, evaluate
 from abicheck.policy.reclassify import ReclassifyRule, first_matching_reclassify_verdict
 from abicheck.policy.severity import (
     PRESET_DEFAULT,
@@ -571,28 +572,27 @@ reclassify:
     )
 
     # The reclassify rule already correctly moves it into `.compatible`
-    # (DiffResult._effective_verdict_for_change already passes policy_file).
-    assert diff.compatible == [reclassified]
+    # (policy.evaluate.effective_verdict already passes policy_file).
+    assert evaluate(diff).compatible == [reclassified]
 
     # Without policy_file, classify_effective_change can't see the
     # selector-scoped rule and falls back to the raw kind category.
     assert (
-        classify_effective_change(reclassified, kind_sets=diff._effective_kind_sets())
+        classify_effective_change(reclassified, kind_sets=effective_kind_sets(diff))
         == IssueCategory.ABI_BREAKING
     )
     # With it, the reclassification is honored.
     assert (
         classify_effective_change(
-            reclassified, kind_sets=diff._effective_kind_sets(), policy_file=pf
+            reclassified, kind_sets=effective_kind_sets(diff), policy_file=pf
         )
         == IssueCategory.QUALITY_ISSUES
     )
 
 
 def _override_adjusted_kind_sets(pf: PolicyFile, *changes):
-    """The real, override-adjusted kind sets a production caller
-    (sarif.py's ``_severity()``) actually passes as *kind_sets* --
-    ``DiffResult._effective_kind_sets()``. A bare
+    """The real, override-adjusted kind sets sarif.py's ``_severity()``
+    passes as *kind_sets* -- ``policy.evaluate.effective_kind_sets``. A bare
     ``classify_effective_change(change, policy_file=pf)`` call with no
     explicit *kind_sets* falls back to the canonical, override-*unaware*
     default set instead, which never actually exercises "a kind-global
@@ -610,7 +610,7 @@ def _override_adjusted_kind_sets(pf: PolicyFile, *changes):
         library="l",
         policy_file=pf,
     )
-    return diff._effective_kind_sets()
+    return effective_kind_sets(diff)
 
 
 def test_reclassify_wins_addition_bucket_over_a_kind_global_override(

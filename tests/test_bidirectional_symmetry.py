@@ -24,6 +24,7 @@ from abicheck.model import (
     Variable,
     Visibility,
 )
+from abicheck.policy.evaluate import evaluate
 
 
 def _snap(
@@ -606,7 +607,7 @@ class TestAccessLevelSymmetry:
 
         rev = compare(_snap(functions=[f_v1]), _snap(functions=[f_v2]))
         # Widening is not a break — either no change or compatible
-        assert not rev.breaking
+        assert not evaluate(rev).breaking
 
     def test_field_access_narrowed(self):
         """Narrowing field access (public → private) is detected."""
@@ -642,7 +643,7 @@ class TestAccessLevelSymmetry:
         )
 
         rev = compare(_snap(types=[t_v1]), _snap(types=[t_v2]))
-        assert not rev.breaking
+        assert not evaluate(rev).breaking
 
 
 # ── Var const symmetry ────────────────────────────────────────────────────

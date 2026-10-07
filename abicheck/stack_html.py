@@ -29,6 +29,7 @@ if TYPE_CHECKING:
 
 # Shared page chrome (document frame, embedded stylesheet, footer).
 from .html_template import render_document, render_footer
+from .policy.evaluate import evaluate
 from .report.stack import DEFAULTED_ROOT_NOTE, show_environment_section
 
 _STACK_VERDICT_STYLE = {
@@ -179,7 +180,7 @@ def stack_to_html(result: StackCheckResult) -> str:
                 abi_info = "\u2014"
             else:
                 abi_verdict = sc.abi_diff.verdict.value if sc.abi_diff else "unknown"
-                abi_breaking = len(sc.abi_diff.breaking) if sc.abi_diff else 0
+                abi_breaking = len(evaluate(sc.abi_diff).breaking) if sc.abi_diff else 0
                 abi_total = len(sc.abi_diff.changes) if sc.abi_diff else 0
                 icon_sc = (
                     "\u274c"

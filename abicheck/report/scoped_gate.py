@@ -83,6 +83,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from ..policy.evaluate import effective_kind_sets
+
 if TYPE_CHECKING:
     from datetime import date
 
@@ -277,7 +279,7 @@ def _fold_findings_into_changes(
     _root_cause_key_and_display = helpers.root_cause_key_and_display
     root_cause_for_change = helpers.root_cause_for_change
 
-    eff_sets = result._effective_kind_sets()
+    eff_sets = effective_kind_sets(result)
     scoped_only, missing_labels, blocks, missing_kind = _scoped_gate_findings(
         result, severity_config, show_only, helpers
     )
@@ -502,7 +504,7 @@ def _fold_findings_into_stat_summary(
         result, severity_config, show_only, helpers
     )
     if scoped_only or missing_labels:
-        eff_sets = result._effective_kind_sets()
+        eff_sets = effective_kind_sets(result)
         added_counts = {
             "breaking": 0,
             "source_breaks": 0,

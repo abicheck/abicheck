@@ -27,6 +27,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from .policy.evaluate import effective_kind_sets
 from .report.change_operation import (
     ACTION_TOKEN_OPERATIONS as ACTION_TOKEN_OPERATIONS,
     ELEMENT_TOKEN_ENTITIES as ELEMENT_TOKEN_ENTITIES,
@@ -149,7 +150,7 @@ def to_stat(
             result.changes,
             severity_config,
             policy=result.policy,
-            kind_sets=result._effective_kind_sets(),
+            kind_sets=effective_kind_sets(result),
             policy_file=result.policy_file,
         )
         d["severity"] = {"exit_code": exit_code}
@@ -214,7 +215,7 @@ class ShowOnlyFilter:
         """Return True if *change* matches the severity filter.
 
         Resolves through ``severity.effective_verdict_for_change`` — the same
-        canonical resolver ``DiffResult._effective_verdict_for_change`` uses —
+        canonical resolver ``policy.evaluate.effective_verdict`` uses —
         so both an A4 per-finding ``effective_verdict`` override (ADR-027) and
         a kind-level ``PolicyFile.overrides`` entry are honoured. Without this,
         `--show-only` could disagree with the JSON severity field and
@@ -394,7 +395,7 @@ def apply_show_only(
     """Filter changes according to a --show-only token string.
 
     *kind_sets* / *policy_file*, when supplied by the caller (typically
-    ``result._effective_kind_sets()`` / ``result.policy_file``), let the
+    ``policy.evaluate.effective_kind_sets(result)`` / ``result.policy_file``), let the
     severity dimension resolve through the same effective-verdict logic as
     the rest of the report — including kind-level ``PolicyFile.overrides``
     and per-finding ``effective_verdict`` — so the filter never disagrees
@@ -501,7 +502,7 @@ def release_matrix_changes_for_view(
         matrix_result.changes,
         show_only,
         policy=matrix_result.policy or "strict_abi",
-        kind_sets=matrix_result._effective_kind_sets(),
+        kind_sets=effective_kind_sets(matrix_result),
         policy_file=matrix_result.policy_file,
     )
 
@@ -780,7 +781,7 @@ def _resolve_scoped_gate_findings(
     from .policy.severity import missing_contract_exit_code
 
     existing_ids = {_finding_id(c) for c in result.changes}
-    eff_sets = result._effective_kind_sets()
+    eff_sets = effective_kind_sets(result)
     scoped_only = list(getattr(result, "scoped_only_changes", ()) or ())
     if show_only and scoped_only:
         scoped_only = apply_show_only(
@@ -1448,7 +1449,7 @@ def _severity_merge_effect(
     """
     from .policy.severity import compute_exit_code
 
-    eff_sets = result._effective_kind_sets()
+    eff_sets = effective_kind_sets(result)
     exit_code = compute_exit_code(
         result.changes,
         severity_config,
@@ -1534,7 +1535,7 @@ def compute_review_digest(
     rec = recommend_release_for_report(result)
 
     # Top impacted symbols (breaking + API), capped for readability. Filters
-    # by each change's *effective* verdict (DiffResult._effective_verdict_for_change)
+    # by each change's *effective* verdict (policy.evaluate.effective_verdict)
     # rather than raw kind-set membership, so a per-finding override (A4
     # pattern-verdict modulation, frozen-namespace guard) is reflected here
     # the same way it already is in the counts table and merge-effect phrase
@@ -1636,16 +1637,19 @@ def compute_headline_table(
     count that reconciles them rather than an apparent contradiction. The
     row is absent for every run that did not opt in, where it is always 0.
     """
+    from .policy.evaluate import evaluate
+
+    classified = evaluate(result)
     return _rmd.HeadlineTable(
         library=result.library,
         old_version=result.old_version,
         new_version=result.new_version,
         verdict_emoji=emoji,
         verdict_label=label,
-        breaking=len(result.breaking),
-        source_breaks=len(result.source_breaks),
-        risk=len(result.risk),
-        compatible=len(result.compatible),
+        breaking=len(classified.breaking),
+        source_breaks=len(classified.source_breaks),
+        risk=len(classified.risk),
+        compatible=len(classified.compatible),
         not_evaluated=len(result.not_evaluated),
     )
 

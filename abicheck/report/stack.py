@@ -25,6 +25,8 @@ no user-visible change).
 from __future__ import annotations
 
 from ..binder import SymbolBinding
+from ..checker_types import DiffResult
+from ..policy.evaluate import evaluate
 from ..resolver import DependencyGraph
 from ..stack_checker import StackCheckResult
 from .document import ReportDocument
@@ -37,7 +39,7 @@ from .document import ReportDocument
 MAX_STACK_FINDINGS_PER_LIBRARY = 10
 
 
-def stack_finding_dicts(diff: object) -> list[dict[str, object]]:
+def stack_finding_dicts(diff: DiffResult) -> list[dict[str, object]]:
     """Project a library's gating findings (breaking/api_break/risk) into
     small, capped dicts -- same shape as the retired `cli_scan_baseline._baseline_finding_dicts`.
 
@@ -45,10 +47,11 @@ def stack_finding_dicts(diff: object) -> list[dict[str, object]]:
     builds more dicts than the cap can ever keep.
     """
     findings: list[dict[str, object]] = []
+    classified = evaluate(diff)
     for bucket_name, bucket_changes in (
-        ("breaking", getattr(diff, "breaking", [])),
-        ("api_break", getattr(diff, "source_breaks", [])),
-        ("risk", getattr(diff, "risk", [])),
+        ("breaking", classified.breaking),
+        ("api_break", classified.source_breaks),
+        ("risk", classified.risk),
     ):
         remaining = MAX_STACK_FINDINGS_PER_LIBRARY - len(findings)
         if remaining <= 0:
@@ -196,7 +199,9 @@ def compute_stack_report_mapping(result: StackCheckResult) -> dict[str, object]:
                 "library": sc.library,
                 "change_type": sc.change_type,
                 "abi_verdict": sc.abi_diff.verdict.value if sc.abi_diff else None,
-                "abi_breaking": len(sc.abi_diff.breaking) if sc.abi_diff else 0,
+                "abi_breaking": len(evaluate(sc.abi_diff).breaking)
+                if sc.abi_diff
+                else 0,
                 "abi_changes": len(sc.abi_diff.changes) if sc.abi_diff else 0,
             }
             # ADR-050 D2 -- distinguishes "the gate rejected this pair" from
@@ -210,8 +215,11 @@ def compute_stack_report_mapping(result: StackCheckResult) -> dict[str, object]:
                 # location), not just their counts -- a stack check used to
                 # report e.g. "abi_breaking: 3" for a library with no way to
                 # tell which symbols broke without a separate `compare` run.
+                classified = evaluate(diff)
                 total_gating = (
-                    len(diff.breaking) + len(diff.source_breaks) + len(diff.risk)
+                    len(classified.breaking)
+                    + len(classified.source_breaks)
+                    + len(classified.risk)
                 )
                 stack_findings = stack_finding_dicts(diff)
                 if stack_findings:

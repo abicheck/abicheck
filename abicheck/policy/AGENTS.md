@@ -25,9 +25,9 @@ stays until that surface is retired. Internal code imports the owners
 (`classification.py`, `model/evidence_status.py`, `reclassify.py`). The
 former `contract_gating.py`/`reclassify.py` facades are gone: the relevance
 predicates are model-pure (`model/contract_finding_relevance.py`), and
-`checker_types.DiffResult`'s call into `classification.py`/`reclassify.py`
-is a reviewed `dependency_direction_exceptions` entry in
-`architecture/debt.yaml`.
+`checker_types.DiffResult` is pure data -- classifying its findings is
+`evaluate.py`'s job (`evaluate`, `effective_kind_sets`, `effective_verdict`,
+`evaluated_changes`); frontends reach it through `workflows/gate.py`.
 
 ## Permitted imports
 

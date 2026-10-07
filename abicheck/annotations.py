@@ -31,6 +31,7 @@ from .checker import (
 from .model.change_catalog.kinds import ChangeKind
 from .model.contract_finding_relevance import is_evaluated
 from .policy.classification import Verdict
+from .policy.evaluate import effective_kind_sets
 
 if TYPE_CHECKING:
     from datetime import date
@@ -222,7 +223,7 @@ def _title_for_change(
 
     *category*, when given (the severity-aware path), is consulted *before*
     kind-set membership (CodeRabbit review on #549). ``breaking_set``/etc.
-    are pre-baked from ``DiffResult._effective_kind_sets()``, which already
+    are pre-baked from ``policy.evaluate.effective_kind_sets(DiffResult)``, which already
     applies *kind-level* policy-file overrides — so a policy-demoted
     ``FUNC_REMOVED`` reads as being "in" ``compatible_set``. But a
     *per-change* frozen-namespace clamp can keep that one finding's
@@ -352,7 +353,7 @@ def _collect_annotations_detailed(
     backing ``Change``/``ChangeKind`` at all
     (``finding_identity.missing_contract_finding`` converts it to a
     ``MissingContractFinding``, a different shape this loop's
-    ``ChangeKind``-based classification — ``_effective_kind_sets``,
+    ``ChangeKind``-based classification — ``effective_kind_sets``,
     ``_category_for_change_severity``, ``is_evaluated`` — cannot consume
     directly), so it is classified the same way every other consumer of
     ``scoped_missing_labels`` already does
@@ -363,7 +364,7 @@ def _collect_annotations_detailed(
     """
     from .policy.severity import effective_verdict_for_change
 
-    kind_sets = diff_result._effective_kind_sets()
+    kind_sets = effective_kind_sets(diff_result)
     breaking_set, api_break_set, compatible_set, risk_set = kind_sets
 
     annotations: list[tuple[int, str, bool]] = []
