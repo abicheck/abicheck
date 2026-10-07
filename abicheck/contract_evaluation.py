@@ -147,6 +147,24 @@ _NOT_APPLICABLE_KINDS: frozenset[ChangeKind] = frozenset(
         # variable/type (Codex review, fresh evidence).
         ChangeKind.LIBRARY_VERSION_DOWNGRADED,
         ChangeKind.VERSION_SCRIPT_MISSING,
+        # ELF symbol-versioning metadata whose subject is a version *node*
+        # (`diff_platform_elf_symbols`/`diff_versioning`'s own `symbol=ver`/
+        # `symbol=node`; `versioned_symbol_scheme`'s `symbol="<library>"`),
+        # never a function/variable/type: neither the header nor the export
+        # domain can place `WIDGET_2.0`, so once contract evaluation became
+        # the default (ADR-049 Phase 7) a removed version node read
+        # `UNKNOWN_UNRESOLVED` and stopped gating -- the loader's
+        # "version `WIDGET_2.0' not found" scored COMPATIBLE_WITH_RISK.
+        # Kinds that carry a real symbol (`symbol_moved_version_node`,
+        # `symbol_version_alias_changed`, `unversioned_exported_symbol`) stay
+        # on the ordinary entity path.
+        ChangeKind.SYMBOL_VERSION_DEFINED_REMOVED,
+        ChangeKind.SYMBOL_VERSION_DEFINED_ADDED,
+        ChangeKind.SYMBOL_VERSION_REQUIRED_ADDED,
+        ChangeKind.SYMBOL_VERSION_REQUIRED_ADDED_COMPAT,
+        ChangeKind.SYMBOL_VERSION_REQUIRED_REMOVED,
+        ChangeKind.SYMBOL_VERSION_NODE_REMOVED,
+        ChangeKind.VERSIONED_SYMBOL_SCHEME_DETECTED,
         # DT_NEEDED loader dependency list -- which *other* shared libraries
         # this one requires, not a function/variable/type consumer code
         # references. Falling through the ordinary path made these

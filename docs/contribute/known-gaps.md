@@ -92,6 +92,22 @@ value is stopping a re-attempt.
 
 ## Known gaps — acknowledged remaining work
 
+- **The evidence-adaptive `exports` default leaves `--build-info`/`--sources`
+  findings ungated (2026-10-07).** Comparing stored snapshots without header
+  evidence selects `contract.mode=exports`; L3/L4/L5 findings supplied by
+  overlays (`enum_size_flag_changed`, `struct_packing_mode_changed`,
+  `lto_mode_changed`, `char_signedness_changed`, `target_dependency_added`,
+  `public_macro_removed`, `inline_function_removed`, `public_typedef_removed`,
+  `public_api_internal_dependency_added`, `exported_symbol_source_owner_changed`)
+  cannot be placed in the export table and read `UNKNOWN_UNRESOLVED`, so the
+  verdict drops them and the coverage axis exits 1. Fifteen special-CLI catalog
+  cases (case152–158, 160–162, 190, 194–197) fail `examples-validation.yml`.
+  Not fixed here because the choice is an ADR-049 product decision: count
+  overlay evidence in `evidence_adaptive_contract_mode`, extend the `exports`
+  domain's trusted-by-construction set, or accept the new verdicts and change
+  `catalog/ground_truth.json`. Bug class
+  `evidence.silent_degradation_to_clean_verdict`.
+
 - **A `kind: bundle` check still cannot run at `depth: headers`: only the
   *baseline* half of per-member header staging is wired (2026-09-12).**
   `abicheck/buildsource/bundle_member_snapshots.py` now resolves and stages

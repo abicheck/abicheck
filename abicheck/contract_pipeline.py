@@ -215,7 +215,7 @@ class ContractEvaluationStage:
             i
             for i, d in enumerate(decisions)
             if observed_export_fallback_applies(
-                self.mode, self.mode_provenance, d.reason_code
+                self.mode, self.mode_provenance, d.reason_code, d.relevance
             )
         ]
         if (

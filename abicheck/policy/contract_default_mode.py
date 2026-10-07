@@ -30,7 +30,7 @@ from __future__ import annotations
 from typing import Any
 
 from ..compatibility_evaluation_config import ValueProvenance
-from ..contract_relevance_types import ContractMode, SelectorLayer
+from ..contract_relevance_types import ContractMode, ContractRelevance, SelectorLayer
 
 __all__ = [
     "CONTRACT_MODE_FIELD",
@@ -122,7 +122,10 @@ def is_evidence_adaptive(provenance: ValueProvenance | None) -> bool:
 
 
 def observed_export_fallback_applies(
-    mode: ContractMode, provenance: ValueProvenance | None, reason_code: str | None
+    mode: ContractMode,
+    provenance: ValueProvenance | None,
+    reason_code: str | None,
+    relevance: ContractRelevance | None = None,
 ) -> bool:
     """Whether an unstated ``public`` default must consult observed exports.
 
@@ -135,9 +138,19 @@ def observed_export_fallback_applies(
     public headers *plus* what the binary observably exports, never less
     than either; it can only keep a finding scored that a stated ``public``
     would not.
+
+    The same holds where the header domain could not decide at all
+    (``UNKNOWN_UNRESOLVED``/``UNKNOWN_UNPROVEN``): an undeclared ABI-support
+    export (``_ZTV``/``_ZTI``/``_ZTS``) has no header declaration to place,
+    yet the export table observed it. Restricting the fallback to an explicit
+    non-commitment let ``-H`` turn a binary-only BREAKING into a passing run
+    -- headers subtracting a break, which "weaker evidence narrows
+    conclusions" forbids. An authoritative header *exclusion* (private
+    header, POST manifest) is evidence, not a gap, and is not re-judged.
     """
-    return (
-        mode is ContractMode.PUBLIC
-        and is_evidence_adaptive(provenance)
-        and reason_code == "closed_domain_no_commitment"
+    if mode is not ContractMode.PUBLIC or not is_evidence_adaptive(provenance):
+        return False
+    return reason_code == "closed_domain_no_commitment" or relevance in (
+        ContractRelevance.UNKNOWN_UNRESOLVED,
+        ContractRelevance.UNKNOWN_UNPROVEN,
     )

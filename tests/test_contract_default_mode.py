@@ -77,9 +77,11 @@ _REASONS = (
 )
 
 
-def test_export_fallback_applies_only_to_an_unstated_public_no_commitment() -> None:
+def test_export_fallback_applies_only_to_an_unstated_public_non_decision() -> None:
     """Exhaustive over mode x provenance x reason: a stated domain is never
-    second-guessed, and only a header non-commitment is re-judged."""
+    second-guessed, and only a header non-commitment is re-judged by reason
+    alone (an UNKNOWN relevance is covered in
+    ``test_contract_adaptive_default_monotone.py``)."""
     for mode, prov_key, reason in itertools.product(
         ContractMode, _PROVENANCES, _REASONS
     ):
