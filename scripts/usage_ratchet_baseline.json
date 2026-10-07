@@ -4,8 +4,7 @@
     "abicheck.buildsource.providers",
     "abicheck.comparability_profile",
     "abicheck.policy.name_heuristics",
-    "abicheck.service_header_scoped",
-    "abicheck.service_input_resolution"
+    "abicheck.service_header_scoped"
   ],
   "cross_module_exact_clones": [
     "abicheck.buildsource.adapters.bazel#_as_text = abicheck.buildsource.adapters.make#_as_text",
