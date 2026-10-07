@@ -374,13 +374,14 @@ class Suppression:
         module's own docstring), so the caller that already imports it
         computes the value instead.
         """
-        canonical_finding_id: str | None = None
-        if self.finding_id is not None:
-            from .finding_identity import report_canonical_finding_id
+        if self.finding_id is None:
+            return self._selector.matches_selectors(change, today=today)
+        from .finding_identity import report_canonical_finding_id
 
-            canonical_finding_id = report_canonical_finding_id(change)
         return self._selector.matches_selectors(
-            change, today=today, canonical_finding_id=canonical_finding_id
+            change,
+            today=today,
+            canonical_finding_id=report_canonical_finding_id(change),
         )
 
     def _passes_reachability_gate(self, change: Change) -> bool:
