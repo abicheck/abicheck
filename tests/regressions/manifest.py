@@ -708,6 +708,7 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
         seed_tests=(
             "tests/test_fact_conservation_properties.py",
             "tests/test_bundle_side_input.py",
+            "tests/test_contract_adaptive_default_fallback.py",
         ),
         known_gaps=(
             KnownGap(

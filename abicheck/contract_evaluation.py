@@ -286,6 +286,22 @@ _NOT_APPLICABLE_KINDS: frozenset[ChangeKind] = frozenset(
         ChangeKind.MACOS_DEPLOYMENT_TARGET_RAISED,
         ChangeKind.X86_ISA_BASELINE_RAISED,
         ChangeKind.OS_DEPLOYMENT_FLOOR_RAISED,
+        # ELF version *definitions* and *requirements*: each finding's
+        # `symbol` is the version tag itself (`diff_platform_elf_symbols.
+        # _diff_elf_symbol_versioning` / `diff_versioning`'s node-removal pass
+        # build `symbol=ver` / `symbol=node`), and the scheme detector's is
+        # `"<library>"` -- a property of the binary's version script or its
+        # runtime floor, never a declaration the headers could commit to.
+        # Without these, a removed version node under the evidence-adaptive
+        # default read UNKNOWN_UNRESOLVED and a "version `X' not found" break
+        # scored COMPATIBLE_WITH_RISK.
+        ChangeKind.SYMBOL_VERSION_NODE_REMOVED,
+        ChangeKind.SYMBOL_VERSION_DEFINED_ADDED,
+        ChangeKind.SYMBOL_VERSION_DEFINED_REMOVED,
+        ChangeKind.SYMBOL_VERSION_REQUIRED_ADDED,
+        ChangeKind.SYMBOL_VERSION_REQUIRED_ADDED_COMPAT,
+        ChangeKind.SYMBOL_VERSION_REQUIRED_REMOVED,
+        ChangeKind.VERSIONED_SYMBOL_SCHEME_DETECTED,
     }
 )
 
