@@ -39,6 +39,10 @@ person can choose. The gate built on it
 (``tests/test_compare_call_complexity.py``) pins zero repeats for a short,
 reviewed list of expensive functions only.
 
+The whole-package ratchet (``--write-repeat-baseline``, gated by
+``tests/test_compare_repeat_audit.py``) counts every first-party function
+except dunders and the memo machinery, keyed by ``path(qualname)``.
+
 Usage::
 
     python scripts/audit_repeated_calls.py                 # every workload, n=200
@@ -376,6 +380,137 @@ def write_budgets() -> None:
     )
 
 
+# -- whole-package repeat audit (test-time ratchet) --------------------------
+
+#: Where the whole-package audit's ratchet lives. Unlike
+#: :data:`BUDGET_FILE` (a reviewed list of expensive functions), this covers
+#: *every* first-party function, so it sees a newly-introduced repeat in a
+#: helper nobody thought to list.
+REPEAT_BASELINE_FILE = REPO / "tests" / "perf_repeat_baseline.json"
+REPEAT_AUDIT_N = 40
+REPEAT_AUDIT_MODE = "default"
+
+#: Code whose repeats are not recomputation: the memo machinery itself (a
+#: repeat there *is* a cache hit) is excluded. Dunders (``__init__``,
+#: ``__eq__``, ``__hash__``, ``__getattr__``) are construction/protocol hooks,
+#: not pure functions of their arguments, and are excluded too.
+_REPEAT_AUDIT_EXCLUDED_FILES = ("abicheck/model/execution_cache.py",)
+
+
+def repeat_site_key(site: str) -> str:
+    """``path:line(qualname)`` -> ``path(qualname)``: line numbers move on
+    any unrelated edit, so the ratchet keys on the function, not its line."""
+    path, _, rest = site.partition(":")
+    return f"{path}({rest.split('(', 1)[1]}" if "(" in rest else site
+
+
+def _repeat_audit_includes(site: str) -> bool:
+    if site.startswith(_REPEAT_AUDIT_EXCLUDED_FILES):
+        return False
+    qualname = site.rsplit("(", 1)[1].rstrip(")")
+    leaf = qualname.rsplit(".", 1)[-1]
+    return not (leaf.startswith("__") and leaf.endswith("__"))
+
+
+def measure_repeat_audit(n: int = REPEAT_AUDIT_N, tag: str = "ra_") -> dict[str, int]:
+    """Same-argument repeat calls per first-party function, summed over every
+    synthetic workload at size *n* (one ``compare()`` each).
+
+    Deterministic only in a **fresh process**: process-wide caches (the
+    demangler's, canonical-spelling memos) warmed by an earlier caller remove
+    repeats a cold run makes. :func:`measure_repeat_audit_subprocess` is what
+    the gate calls.
+    """
+    from abicheck.checker import compare
+
+    out: dict[str, int] = {}
+    kwargs = MODES[REPEAT_AUDIT_MODE]
+    for workload, build in sorted(_workloads().items()):
+        old, new = build(n, f"{tag}{workload}_")
+        for row in audit_repeated_calls(
+            lambda: compare(old, new, **kwargs), include=_repeat_audit_includes
+        ):
+            key = repeat_site_key(row.function)
+            out[key] = out.get(key, 0) + row.wasted
+    return dict(sorted(out.items()))
+
+
+def measure_repeat_audit_subprocess(n: int = REPEAT_AUDIT_N) -> dict[str, int]:
+    """:func:`measure_repeat_audit` in a cold child interpreter."""
+    import json
+    import subprocess
+
+    proc = subprocess.run(
+        [
+            sys.executable,
+            str(Path(__file__).resolve()),
+            "--repeat-audit-json",
+            "--n",
+            str(n),
+        ],
+        capture_output=True,
+        text=True,
+        cwd=REPO,
+        check=True,
+    )
+    return json.loads(proc.stdout.splitlines()[-1])
+
+
+def compare_repeat_audit(
+    measured: dict[str, int], baseline: dict[str, object]
+) -> tuple[list[str], list[str]]:
+    """``(errors, improvements)`` of *measured* against *baseline*.
+
+    Errors: the total above the recorded total, or any function above its
+    own recorded figure (a function absent from the baseline is recorded at
+    0, so a new repeating function is an error even when the total fell).
+    Improvements: a total below the recorded one -- the ratchet must be
+    re-recorded so the slack cannot be spent by the next regression.
+    """
+    functions = baseline.get("functions", {})
+    assert isinstance(functions, dict)
+    recorded_total = int(baseline.get("total", 0))  # type: ignore[arg-type]
+    errors = [
+        f"{fn}: {count} same-argument repeat call(s), baseline {functions.get(fn, 0)}"
+        for fn, count in sorted(measured.items())
+        if count > int(functions.get(fn, 0))
+    ]
+    total = sum(measured.values())
+    if total > recorded_total:
+        errors.insert(
+            0, f"total: {total} same-argument repeat calls, baseline {recorded_total}"
+        )
+    improvements = (
+        [f"total: {total} same-argument repeat calls, baseline {recorded_total}"]
+        if total < recorded_total
+        else []
+    )
+    return errors, improvements
+
+
+def write_repeat_baseline() -> dict[str, object]:
+    import json
+
+    measured = measure_repeat_audit_subprocess()
+    payload: dict[str, object] = {
+        "_comment": (
+            "Generated by scripts/audit_repeated_calls.py --write-repeat-baseline "
+            "and checked by tests/test_compare_repeat_audit.py: same-argument "
+            "repeat calls of every first-party function over one cold compare() "
+            "per synthetic workload. Lowering a number is the point; raising one "
+            "needs its reason in the PR."
+        ),
+        "n": REPEAT_AUDIT_N,
+        "mode": REPEAT_AUDIT_MODE,
+        "total": sum(measured.values()),
+        "functions": measured,
+    }
+    REPEAT_BASELINE_FILE.write_text(
+        json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    return payload
+
+
 @dataclass(frozen=True)
 class CostedRepeat:
     """A function's same-argument repeats, weighted by what they cost."""
@@ -461,7 +596,29 @@ def _main(argv: list[str] | None = None) -> int:
         action="store_true",
         help=f"re-measure and rewrite {BUDGET_FILE.relative_to(REPO)} (a reviewed change: commit it with its reason)",
     )
+    parser.add_argument(
+        "--repeat-audit-json",
+        action="store_true",
+        help="print the whole-package same-argument repeat figures (one JSON line) and exit",
+    )
+    parser.add_argument(
+        "--write-repeat-baseline",
+        action="store_true",
+        help=f"re-measure and rewrite {REPEAT_BASELINE_FILE.relative_to(REPO)} in a cold child process",
+    )
     args = parser.parse_args(argv)
+
+    if args.repeat_audit_json:
+        import json
+
+        print(json.dumps(measure_repeat_audit(args.n)))
+        return 0
+    if args.write_repeat_baseline:
+        payload = write_repeat_baseline()
+        print(
+            f"wrote {REPEAT_BASELINE_FILE.relative_to(REPO)} (total {payload['total']})"
+        )
+        return 0
 
     if args.write_budgets:
         write_budgets()

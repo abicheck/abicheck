@@ -13,7 +13,9 @@ you touch a hot path, when a gate fails, or when a user reports "slow".**
 |---|---|---|
 | Call-count complexity (`compare()`, serialization, reports, release by member count, history by release count) | unit lane | `pytest tests/test_compare_call_complexity.py tests/test_pipeline_call_complexity.py tests/test_history_scaling.py -q -n 4` |
 | Cost budgets: same-argument repeats of expensive functions, child processes per `compare()` (`tests/perf_call_budgets.json`) | unit lane | `pytest tests/test_compare_cost_budgets.py -q -n 4` |
-| `perf-antipatterns` lint (list membership / `re.compile` / `json.loads` / `deepcopy` / self-copying accumulation / `subprocess` inside loops) | `ai-readiness` | `python scripts/perf_antipatterns.py` (`--all` lists every site) |
+| Whole-package repeat ratchet: same-argument repeats of *every* first-party function per `compare()`, per function and in total (`tests/perf_repeat_baseline.json`) | unit lane | `pytest tests/test_compare_repeat_audit.py -q` |
+| Empirical time exponents of hot paths (compare by symbols/types, add/remove, rename matching, policy classification, history) against per-case ceilings | PR lane (`complexity-bench`) | `python scripts/complexity_bench.py --strict` (`--case`, `--json`) |
+| `perf-antipatterns` lint (list membership / `re.compile` / `json.loads` / `deepcopy` / `pickle.loads` / `model_copy(deep=True)` / self-copying accumulation / quadratic self-dedup / `subprocess` / blocking network I/O or `time.sleep` inside loops) | `ai-readiness` | `python scripts/perf_antipatterns.py` (`--all` lists every site) |
 | Wall-clock exponents per workload shape, history over 50 releases | `slow` | `pytest tests/test_compare_scaling_shapes.py tests/test_history_scaling.py -m slow -q` |
 
 Manual-only investigation tools (never gates):
@@ -33,6 +35,14 @@ Manual-only investigation tools (never gates):
   for a flame graph (installed ad hoc, not a dependency). Memory:
   `docs/contribute/memory.md` / `ABICHECK_MEMORY_TRACE`.
 
+Use-case reach (weekly `usecase-paths.yml`, never on a PR):
+`python scripts/usecase_paths.py ratchet REC --strict` fails when a function
+no scenario reached before is still unreached in the baseline's eyes -- i.e.
+newly unreached (`--write` re-records `scripts/usecase_unreached_baseline.json`
+from a `record --source scenarios` run); `usecase_paths.py adr-reach REC`
+classifies each ADR's named `abicheck/` files as reached / reached-elsewhere
+/ not-reached / untraced / no-code-refs.
+
 When a gate fails:
 
 - **Superlinear call site** — fix the algorithm (build the index once, hoist
@@ -42,7 +52,11 @@ When a gate fails:
 - **Budget above** — remove the repeat, usually with a memo under an
   existing scope with a sound lifetime (`compare.detection_memo` keys on
   snapshot identity and dies with the pass). **Budget below** — an
-  improvement: re-record with `python scripts/audit_repeated_calls.py --write-budgets`.
+  improvement: re-record with `python scripts/audit_repeated_calls.py --write-budgets`
+  (the whole-package ratchet: `--write-repeat-baseline`).
+- **Exponent above its ceiling** (`complexity-bench`) -- rerun the one case
+  (`--case NAME`) to rule out runner noise, then profile it at its largest
+  size; fix the algorithm, never raise `max_exponent` to pass.
   Raising a budget needs its reason in the PR.
 - **New anti-pattern site** — fix it, or, if the shape is the work itself
   (or the collection provably stays tiny), exempt it in place with a

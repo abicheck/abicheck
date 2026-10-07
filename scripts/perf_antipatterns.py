@@ -38,11 +38,23 @@ work per item, when it sits inside a loop or comprehension:
   iteration. Sort it once before the loop. (Sorting a small per-item value
   for deterministic output -- ``", ".join(sorted(item.names))`` -- is not
   this shape and is not flagged.)
+* ``quadratic-dedup`` -- a comprehension that tests each element against
+  the very sequence it iterates: ``[x for i, x in enumerate(seq) if
+  seq.index(x) == i]``, ``[x for x in seq if seq.count(x) == 1]``,
+  ``[x for i, x in enumerate(seq) if x not in seq[:i]]``. Each element
+  rescans the input -- O(n^2) where ``dict.fromkeys(seq)`` (order-keeping)
+  or a ``seen`` set is O(n). Fires whatever ``seq`` is bound to (a
+  parameter included), since the shape itself is the quadratic one.
+* ``blocking-io-in-loop`` -- a network round trip (``urlopen``,
+  ``requests.get``/``post``/..., ``http.client`` / ``socket`` connections)
+  or ``time.sleep`` per iteration: sequential blocking I/O. Batch the
+  requests or issue them concurrently. Local file reads are not flagged.
 * ``str-concat-in-loop`` -- ``s += ...`` on a name the function bound to a
   string: each step copies the whole string so far. Collect parts and
   ``"".join`` them.
 
-``parse-or-copy-in-loop`` also covers ``copy.copy`` and
+``parse-or-copy-in-loop`` also covers ``pickle.loads``/``marshal.loads`` and
+a pydantic-style ``x.model_copy(deep=True)`` per iteration, and ``copy.copy`` and
 ``dataclasses.replace`` -- but only of a loop-invariant name (the same object
 copied every iteration), since copying each item once is linear.
 
@@ -97,6 +109,30 @@ CHECK_NAME = "perf-antipatterns"
 
 _LIST_BUILDERS = {"list", "sorted"}
 _SUBPROCESS_CALLS = {"run", "Popen", "check_output", "check_call", "call"}
+_PARSE_OR_COPY_CALLS = {
+    "json.loads",
+    "copy.deepcopy",
+    "deepcopy",
+    "pickle.loads",
+    "marshal.loads",
+}
+#: Calls that block on the network (or on purpose) -- one round trip per
+#: iteration, serialised. Local file reads are deliberately not listed:
+#: reading each of N inputs once is the work.
+_BLOCKING_IO_CALLS = {
+    "urlopen",
+    "urllib.request.urlopen",
+    "request.urlopen",
+    "requests.get",
+    "requests.post",
+    "requests.put",
+    "requests.head",
+    "requests.request",
+    "http.client.HTTPConnection",
+    "http.client.HTTPSConnection",
+    "socket.create_connection",
+    "time.sleep",
+}
 
 
 class Findings(Protocol):
@@ -123,6 +159,18 @@ def _dotted(node: ast.AST) -> str | None:
         base = _dotted(node.value)
         return f"{base}.{node.attr}" if base else None
     return None
+
+
+def _iterated_name(node: ast.AST) -> str | None:
+    """The plain name a comprehension iterates: ``seq`` or ``enumerate(seq)``."""
+    if (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "enumerate"
+        and node.args
+    ):
+        node = node.args[0]
+    return node.id if isinstance(node, ast.Name) else None
 
 
 def _is_list_value(node: ast.AST) -> bool:
@@ -397,6 +445,9 @@ class _Visitor(ast.NodeVisitor):
         # comprehension runs once, at import.
         self.function_depth = 0
         self.stmt_loop_depth = 0
+        # Per enclosing comprehension: the name its outermost iterable reads
+        # (``x for x in seq`` / ``for i, x in enumerate(seq)``), or None.
+        self.comp_sources: list[str | None] = []
         self.sites: list[Site] = []
 
     # -- scopes ---------------------------------------------------------
@@ -453,6 +504,7 @@ class _Visitor(ast.NodeVisitor):
     ) -> None:
         first, *rest = node.generators
         self.visit(first.iter)  # the outermost iterable is evaluated once
+        self.comp_sources.append(_iterated_name(first.iter))
         self.loop_depth += 1
         self.varying.append(None)
         self.fresh.append({})
@@ -469,6 +521,7 @@ class _Visitor(ast.NodeVisitor):
         self.fresh.pop()
         self.varying.pop()
         self.loop_depth -= 1
+        self.comp_sources.pop()
 
     visit_ListComp = _comprehension
     visit_SetComp = _comprehension
@@ -495,10 +548,24 @@ class _Visitor(ast.NodeVisitor):
             )
         )
 
+    def _is_comprehension_source(self, node: ast.AST) -> bool:
+        """*node* reads the enclosing comprehension's own iterable (``seq``
+        or a slice ``seq[:i]`` of it)."""
+        source = self.comp_sources[-1] if self.comp_sources else None
+        if source is None:
+            return False
+        if isinstance(node, ast.Subscript):
+            node = node.value
+        return isinstance(node, ast.Name) and node.id == source
+
     def visit_Compare(self, node: ast.Compare) -> None:
         if self.loop_depth:
             for op, right in zip(node.ops, node.comparators, strict=True):
-                if (
+                if isinstance(
+                    op, (ast.In, ast.NotIn)
+                ) and self._is_comprehension_source(right):
+                    self._hit(node, "quadratic-dedup")
+                elif (
                     isinstance(op, (ast.In, ast.NotIn))
                     and isinstance(right, ast.Name)
                     and right.id in self.list_names[-1]
@@ -512,17 +579,38 @@ class _Visitor(ast.NodeVisitor):
             if (
                 isinstance(node.func, ast.Attribute)
                 and node.func.attr in {"index", "count"}
+                and self._is_comprehension_source(node.func.value)
+            ):
+                self._hit(node, "quadratic-dedup")
+            elif (
+                isinstance(node.func, ast.Attribute)
+                and node.func.attr in {"index", "count"}
                 and isinstance(node.func.value, ast.Name)
                 and node.func.value.id in self.list_names[-1]
             ):
                 self._hit(node, "list-membership-in-loop")
             elif name == "re.compile":
                 self._hit(node, "regex-compile-in-loop")
-            elif name in {"json.loads", "copy.deepcopy", "deepcopy"} or (
-                name in {"copy.copy", "dataclasses.replace"}
-                and self._loop_invariant_first_arg(node)
+            elif (
+                name in _PARSE_OR_COPY_CALLS
+                or (
+                    isinstance(node.func, ast.Attribute)
+                    and node.func.attr == "model_copy"
+                    and any(
+                        kw.arg == "deep"
+                        and isinstance(kw.value, ast.Constant)
+                        and kw.value.value is True
+                        for kw in node.keywords
+                    )
+                )
+                or (
+                    name in {"copy.copy", "dataclasses.replace"}
+                    and self._loop_invariant_first_arg(node)
+                )
             ):
                 self._hit(node, "parse-or-copy-in-loop")
+            elif name in _BLOCKING_IO_CALLS:
+                self._hit(node, "blocking-io-in-loop")
             elif (
                 name.startswith("subprocess.")
                 and name.split(".", 1)[1] in _SUBPROCESS_CALLS
