@@ -10,8 +10,13 @@ name: Use-case paths
 #               functions no use case reaches any more.
 #   full     -- weekly and on demand: adds the real-binary flows
 #               (scripts/usecase_flows.yaml, real compiled catalog cases and
-#               castxml) and publishes the importance ranking and the
-#               dead-code candidate list.
+#               castxml) and publishes the importance ranking, the
+#               dead-code candidate list and the ADR-reach report. It also
+#               runs the one gating step here: the unreached-function
+#               ratchet (`usecase_paths.py ratchet --strict`) over a
+#               scenarios-only recording against
+#               scripts/usecase_unreached_baseline.json. Weekly, never on a
+#               PR -- the PR lane stays report-only.
 
 on:
   pull_request:
@@ -21,6 +26,8 @@ on:
       - 'tests/scenarios/**'
       - 'tests/test_scenarios.py'
       - 'scripts/usecase_paths.py'
+      - 'scripts/usecase_adr_reach.py'
+      - 'scripts/usecase_unreached_baseline.json'
       - 'scripts/usecase_flows.yaml'
       - 'scripts/production_references.py'
       - '.github/workflows/usecase-paths.yml'
@@ -123,10 +130,28 @@ jobs:
           python scripts/usecase_paths.py dead usecase-paths.json --json usecase-dead.json \
             | tee -a "$GITHUB_STEP_SUMMARY"
 
+      # Which ADRs' named abicheck/ code the use cases execute: reached /
+      # reached-elsewhere / not-reached / untraced / no-code-refs.
+      - name: ADR reach
+        run: |
+          python scripts/usecase_paths.py adr-reach usecase-paths.json \
+            --json usecase-adr-reach.json --step-summary
+
+      # The baseline is recorded from the compiler-free scenarios alone, so
+      # the ratchet re-records exactly that source: the flows' set depends
+      # on which toolchains this runner has.
+      - name: Unreached-function ratchet
+        run: |
+          python scripts/usecase_paths.py record --source scenarios --out usecase-paths-scenarios.json
+          python scripts/usecase_paths.py ratchet usecase-paths-scenarios.json --strict --step-summary
+
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        if: success() || failure()
         with:
           name: usecase-paths
           path: |
             usecase-paths.json
+            usecase-paths-scenarios.json
             usecase-rank.json
             usecase-dead.json
+            usecase-adr-reach.json

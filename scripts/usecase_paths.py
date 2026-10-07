@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Which code each use case runs, and what changed about it.
 
-Four subcommands share one recorded artifact:
+Six subcommands share one recorded artifact:
 
 ``record``
     Runs the use-case sources under coverage, each run tagged with its id,
@@ -45,6 +45,18 @@ Four subcommands share one recorded artifact:
     dead code, to a fixpoint), documented API, ADR/plan-named, still
     referenced, or not checkable by name. A review list for
     ``docs/contribute/plans/dead-code-and-single-owner.md``.
+
+``ratchet``
+    The recording's unreached set against the committed
+    ``usecase_unreached_baseline.json`` (same sources only): newly
+    unreached functions are growth (``--strict`` exits 1), ones reached
+    again are an improvement to lock in with ``--write``.
+
+``adr-reach``
+    Joins the recording with the ``abicheck/`` files each ADR names and
+    the use cases citing each ADR in the registry: every ADR is
+    ``reached`` / ``reached-elsewhere`` / ``not-reached`` / ``untraced`` /
+    ``no-code-refs`` (``usecase_adr_reach.py`` defines each).
 
 Being unreached is never a verdict that code is dead: platform readers for
 PE/Mach-O are unreached on Linux because no such toolchain runs there, and
@@ -884,6 +896,74 @@ def cmd_dead(args: argparse.Namespace) -> int:
     return 0
 
 
+def _summary(text: str, step_summary: bool) -> None:
+    print(text)
+    target = os.environ.get("GITHUB_STEP_SUMMARY")
+    if step_summary and target:
+        with open(target, "a", encoding="utf-8") as fh:
+            fh.write(text + "\n")
+
+
+def cmd_ratchet(args: argparse.Namespace) -> int:
+    from usecase_adr_reach import (
+        load_unreached_baseline,
+        ratchet_unreached,
+        render_ratchet_markdown,
+        unreached_baseline_payload,
+    )
+
+    doc = load_recording(args.recording)
+    unreached = unreached_functions(doc)
+    sources = list(doc.get("sources") or [])
+    if doc.get("failures"):
+        print(
+            f"recording has failed runs ({len(doc['failures'])}); its unreached set is not trustworthy"
+        )
+        return 1
+    if args.write:
+        payload = unreached_baseline_payload(unreached, sources, doc.get("revision"))
+        Path(args.baseline).write_text(
+            json.dumps(payload, indent=1) + "\n", encoding="utf-8"
+        )
+        print(f"wrote {args.baseline} ({len(unreached)} unreached)")
+        return 0
+    try:
+        result = ratchet_unreached(
+            unreached, load_unreached_baseline(args.baseline), sources
+        )
+    except ValueError as exc:
+        print(f"ratchet: {exc}")
+        return 1
+    _summary(render_ratchet_markdown(result, limit=args.top), args.step_summary)
+    return 1 if args.strict and not result.ok else 0
+
+
+def cmd_adr_reach(args: argparse.Namespace) -> int:
+    from dataclasses import asdict
+
+    from usecase_adr_reach import (
+        adr_files,
+        adr_reach,
+        load_registry_use_cases,
+        render_adr_reach_markdown,
+    )
+
+    root = Path(args.root).resolve()
+    doc = load_recording(args.recording)
+    if doc.get("failures"):
+        print(
+            f"recording has failed runs ({len(doc['failures'])}); its ADR reach is not trustworthy"
+        )
+        return 1
+    rows = adr_reach(doc, adr_files(root), load_registry_use_cases(root))
+    if args.json:
+        Path(args.json).write_text(
+            json.dumps([asdict(r) for r in rows], indent=1) + "\n", encoding="utf-8"
+        )
+    _summary(render_adr_reach_markdown(rows, limit=args.top), args.step_summary)
+    return 0
+
+
 # ── CLI ─────────────────────────────────────────────────────────────────────
 
 
@@ -953,6 +1033,39 @@ def main(argv: list[str] | None = None) -> int:
     dd.add_argument("--top", type=int, default=None,
                     help="list at most this many per section (default: all)")  # fmt: skip
     dd.set_defaults(func=cmd_dead)
+
+    from usecase_adr_reach import UNREACHED_BASELINE
+
+    rt = sub.add_parser(
+        "ratchet", help="unreached functions against the committed baseline"
+    )
+    rt.add_argument("recording", type=Path)
+    rt.add_argument("--baseline", default=str(UNREACHED_BASELINE))
+    rt.add_argument(
+        "--write",
+        action="store_true",
+        help="re-record the baseline from this recording",
+    )
+    rt.add_argument(
+        "--strict", action="store_true", help="exit 1 on newly unreached functions"
+    )
+    rt.add_argument("--step-summary", action="store_true",
+                    help="also append the report to $GITHUB_STEP_SUMMARY")  # fmt: skip
+    rt.add_argument("--top", type=int, default=50)
+    rt.set_defaults(func=cmd_ratchet)
+
+    ar = sub.add_parser(
+        "adr-reach", help="which ADRs' named code the use cases execute"
+    )
+    ar.add_argument("recording", type=Path)
+    ar.add_argument(
+        "--root", default=str(ROOT), help="checkout holding the ADRs and registry"
+    )
+    ar.add_argument("--json", help="write every ADR's classification here")
+    ar.add_argument("--step-summary", action="store_true",
+                    help="also append the report to $GITHUB_STEP_SUMMARY")  # fmt: skip
+    ar.add_argument("--top", type=int, default=None)
+    ar.set_defaults(func=cmd_adr_reach)
 
     args = parser.parse_args(argv)
     if args.cmd == "record" and not args.source:
