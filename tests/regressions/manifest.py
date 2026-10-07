@@ -709,6 +709,13 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
             "tests/test_fact_conservation_properties.py",
             "tests/test_bundle_side_input.py",
             "tests/test_contract_adaptive_default_fallback.py",
+            # ADR-049 Phase 7's evidence-adaptive default: a finding no
+            # domain could place (an ELF version node; an undeclared
+            # `_ZTV`/`_ZTI` export under `-H`; a `--sources`/`--build-info`
+            # finding under an `exports` default) read UNKNOWN_UNRESOLVED
+            # and stopped gating.
+            "tests/test_contract_adaptive_default_monotone.py",
+            "tests/test_export_reconciliation_and_obligations.py",
         ),
         known_gaps=(
             KnownGap(
