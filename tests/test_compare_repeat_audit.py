@@ -63,7 +63,15 @@ def test_whole_package_repeat_calls_do_not_exceed_baseline() -> None:
         + "\n  ".join(errors[:40])
         + f"\nfix the repeat (a memo with a sound lifetime), or {_HINT}"
     )
-    assert not improvements, f"{improvements[0]} -- an improvement; lock it in: {_HINT}"
+    # The baseline is recorded on Linux (the canonical CI platform). Other
+    # OSes skip platform-specific paths and can legitimately count fewer
+    # repeats (windows-latest measured 13 fewer, main run 37645089922), so
+    # the lock-in-an-improvement direction is only enforced on Linux;
+    # growth is enforced everywhere.
+    if sys.platform.startswith("linux"):
+        assert not improvements, (
+            f"{improvements[0]} -- an improvement; lock it in: {_HINT}"
+        )
 
 
 def test_comparison_flags_a_new_function_and_a_grown_total() -> None:
