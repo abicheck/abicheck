@@ -77,7 +77,7 @@ def test_synthetic_new_field_reaches_every_member(
         seen.append(kwargs)
         raise RuntimeError("stop after capture")
 
-    import abicheck.service as service
+    import abicheck.workflows.member_compare as service
 
     monkeypatch.setattr(service, "run_compare", fake_run_compare)
     monkeypatch.setattr(pairwise, "_normalize_binary_input", lambda p: (p, None))

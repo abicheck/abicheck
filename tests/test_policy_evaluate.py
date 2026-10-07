@@ -1,3 +1,6 @@
+# Copyright 2026 Nikolay Petrov
+# SPDX-License-Identifier: Apache-2.0
+
 """``policy.evaluate`` classifies hand-built ``DiffResult`` facts.
 
 No comparison runs here: every ``DiffResult`` is constructed directly, so a

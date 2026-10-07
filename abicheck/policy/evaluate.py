@@ -1,3 +1,6 @@
+# Copyright 2026 Nikolay Petrov
+# SPDX-License-Identifier: Apache-2.0
+
 """The one policy entry that classifies a comparison's findings.
 
 :func:`evaluate` turns a :class:`~abicheck.checker_types.DiffResult` -- pure

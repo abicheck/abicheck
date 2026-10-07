@@ -48,7 +48,6 @@ from typing import TYPE_CHECKING, Any
 import click
 
 from .checker import DiffResult
-from .cli_compare_receipt import record_release_resolved_config
 from .cli_compare_release_helpers import _RELEASE_VERDICT_ORDER
 from .cli_resolve import _normalize_binary_input
 from .frontends.cli.release_member_errors import (
@@ -65,11 +64,11 @@ from .workflows.crosscheck_ownership import (
     release_owned_checks_scope,
 )
 from .workflows.keyed_thread_pool import run_keyed_in_threads
+from .workflows.member_compare import compare_member
 from .workflows.release_member_request import (
     MemberDelta,
     ReleaseMemberCompareRequest,
     member_request,
-    run_compare_kwargs,
 )
 from .workflows.release_snapshot_retention import release_junit_pairs
 
@@ -135,28 +134,13 @@ def _run_compare_pair(
     request: ReleaseMemberCompareRequest,
     pack_application: PackApplication | None = None,
 ) -> CompareResult:
-    """Run compare for one member's *request* and return its result.
+    """Normalize one member's operands and compare them.
 
-    Routes through the single Tier-2 chokepoint (:func:`service.run_compare`,
-    ADR-037 D1) rather than calling ``checker.compare`` directly, so a
-    library gets the same verdict from a directory/package ``compare`` as
-    from a single-pair one. *request* is the release's parent request with
-    this member's :class:`MemberDelta` applied
-    (:mod:`abicheck.workflows.release_member_request`); every one of its
-    fields is forwarded by :func:`run_compare_kwargs`, so no setting the
-    release resolved can be dropped here. That forwarding used to be a
-    hand-written keyword list, and each historical gap in it
-    (``include_dependencies``, the contract flags, ``--pack``, the compile
-    context, ``--depth``, ``scope.public_header_dirs``, ``--exclude-header``,
-    ``lang_explicit``, the deployment matrix) was a release member silently
-    disagreeing with the identical single-pair comparison.
-
-    *pack_application* is the release's resolved ``--pack`` contribution; its
-    overrides are already on *request*. It is passed separately only for the
-    rich-tier config record below.
+    Follows GNU ld linker scripts (with the CLI's stderr note), then hands the
+    request to :func:`~abicheck.workflows.member_compare.compare_member`, the
+    per-member primitive a directory/package ``compare`` shares with the
+    single-pair path's ``run_compare_request``.
     """
-    from . import service
-
     # Follow GNU ld linker scripts up front so metadata/dependency analysis use
     # the resolved DSO, not the text script.
     assert request.old_input is not None and request.new_input is not None
@@ -165,23 +149,7 @@ def _run_compare_pair(
         old_input=_normalize_binary_input(request.old_input)[0],
         new_input=_normalize_binary_input(request.new_input)[0],
     )
-    result = service.run_compare(**run_compare_kwargs(request))
-    # The rich-tier config is recorded under exactly the condition the
-    # single-pair CLI (`resolve_and_apply`) and the typed API
-    # (`install_resolved_gate_receipt`) record one: a contract evaluation, or
-    # a pack that contributed. A plain member run stays on the documented
-    # baseline tier -- stamping the no-pack application's always-resolved
-    # config here made every release member report a different
-    # `effective_config_digest` than the identical single-pair `compare`
-    # (F2 route parity). A `.abicheck.yml` override still reaches the
-    # baseline tier's `policy.overrides`, read off the scoring policy file.
-    resolved_config = getattr(pack_application, "resolved_config", None)
-    if not request.contract_evaluation and (
-        pack_application is None or pack_application.is_empty()
-    ):
-        resolved_config = None
-    record_release_resolved_config(result.diff, resolved_config)
-    return result
+    return compare_member(request, pack_application)
 
 
 def _compare_one_library(
