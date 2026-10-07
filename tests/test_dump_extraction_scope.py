@@ -37,11 +37,13 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+from _dump_format_fakes import fake_format_adapter
 
 from abicheck.dumper_clang_streaming import streaming_prune_suppressed
 from abicheck.extract.dependency_exclusion import active_dependency_predicate
 from abicheck.model import AbiSnapshot
 from abicheck.service import run_dump
+from abicheck.workflows.dump.formats import NativeExtractRequest
 from abicheck.workflows.run_dump_scope import wrap_run_dump_with_dependency_scope
 
 _PROJECT_ROOT = "/proj/include"
@@ -121,15 +123,16 @@ class TestCliHybridLegsKeepTheFullSurface:
         header.write_text("int f(void);\n", encoding="utf-8")
         legs: list[tuple[str, tuple[bool, bool | None, bool | None]]] = []
 
-        def _fake_dump_elf(*_args: object, **kwargs: object) -> AbiSnapshot:
-            frontend = kwargs["compile"].frontend  # type: ignore[union-attr]
+        def _fake_dump_elf(request: NativeExtractRequest) -> AbiSnapshot:
+            assert request.compile is not None
+            frontend = request.compile.frontend
             legs.append((frontend, _observed()))
             return AbiSnapshot(
                 library="lib", version="1", from_headers=True, ast_producer=frontend
             )
 
         with (
-            patch("abicheck.service_dump_native._dump_elf", side_effect=_fake_dump_elf),
+            fake_format_adapter("elf", side_effect=_fake_dump_elf),
             patch(
                 "abicheck.service_dump_native._attach_header_graph",
                 side_effect=lambda snap, *_a, **_k: snap,

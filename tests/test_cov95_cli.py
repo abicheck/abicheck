@@ -63,6 +63,7 @@ from abicheck.frontends.cli.runtime import (
 from abicheck.model import AbiSnapshot, Function, Visibility
 from abicheck.policy.effective_gate import EffectiveGate
 from abicheck.serialization import snapshot_to_json
+from tests._dump_format_fakes import fake_format_adapter
 from tests.schema_validation import validate_instance
 
 # ── snapshot helpers (mirror tests/test_compare_release.py) ───────────────────
@@ -414,8 +415,8 @@ class TestSmallHelpers:
         #
         # ADR-063 Phase 1: the real PE/Mach-O run now executes through
         # `execute_dump_request`, not the retired `handle_non_elf_dump` --
-        # patch `abicheck.service_dump_native._dump_macho` instead, and
-        # assert on the `compile` CompileContext it receives. Phase 7
+        # fake the Mach-O format adapter instead, and
+        # assert on the `compile` CompileContext its request carries. Phase 7
         # removed --compiler-option from dump entirely: compile.options in
         # .abicheck.yml is its only spelling now.
         import struct
@@ -428,14 +429,14 @@ class TestSmallHelpers:
         cfg.write_text("compile:\n  options: [-DX]\n", encoding="utf-8")
         captured: dict[str, object] = {}
 
-        def _fake_dump_macho(*args: object, **kwargs: object) -> AbiSnapshot:
-            captured.update(kwargs)
+        def _fake_dump_macho(request: object) -> AbiSnapshot:
+            captured.update(vars(request))
             return AbiSnapshot(library="fake.dylib", version="1.0")
 
-        monkeypatch.setattr(
-            "abicheck.service_dump_native._dump_macho", _fake_dump_macho
-        )
-        result = CliRunner().invoke(main, ["dump", str(dylib), "--config", str(cfg)])
+        with fake_format_adapter("macho", side_effect=_fake_dump_macho):
+            result = CliRunner().invoke(
+                main, ["dump", str(dylib), "--config", str(cfg)]
+            )
         assert result.exit_code == 0, result.output
         assert "will be ignored" not in result.output
         assert getattr(captured["compile"], "gcc_option_tokens") == ("-DX",)
@@ -452,8 +453,7 @@ class TestSmallHelpers:
         into it.
 
         ADR-063 Phase 1: the real PE/Mach-O run now executes through
-        `execute_dump_request` -- patch `abicheck.service_dump_native.
-        _dump_macho` (see the sibling test above) and assert on the folded
+        `execute_dump_request` -- fake the Mach-O format adapter (see the sibling test above) and assert on the folded
         `compile` context it receives, the same signal `compile_context`
         carried before this migration.
         """
@@ -484,16 +484,14 @@ class TestSmallHelpers:
 
         captured: dict[str, object] = {}
 
-        def _fake_dump_macho(*args: object, **kwargs: object) -> AbiSnapshot:
-            captured.update(kwargs)
+        def _fake_dump_macho(request: object) -> AbiSnapshot:
+            captured.update(vars(request))
             return AbiSnapshot(library="fake.dylib", version="1.0")
 
-        monkeypatch.setattr(
-            "abicheck.service_dump_native._dump_macho", _fake_dump_macho
-        )
-        result = CliRunner().invoke(
-            main, ["dump", str(dylib), "-H", str(header), "--build-info", str(db)]
-        )
+        with fake_format_adapter("macho", side_effect=_fake_dump_macho):
+            result = CliRunner().invoke(
+                main, ["dump", str(dylib), "-H", str(header), "--build-info", str(db)]
+            )
         assert result.exit_code == 0, result.output
         gcc_option_tokens = getattr(captured["compile"], "gcc_option_tokens")
         assert "-std=c++17" in gcc_option_tokens

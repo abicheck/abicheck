@@ -62,9 +62,9 @@ _PRODUCERS = frozenset(
         "run_dump",
         "cached_run_dump",
         "build_header_only_snapshot",
-        "_dump_elf",
-        "_dump_pe",
-        "_dump_macho",
+        "extract_elf",
+        "extract_pe",
+        "extract_macho",
         "run_hybrid_dump",
     }
 )
@@ -78,10 +78,12 @@ _INVENTORY: dict[tuple[str, str, str], str] = {
     ("abicheck/stack_checker.py", "_run_abi_diff", "run_dump"): "no headers: binary-only, nothing to own",
     ("abicheck/probe_harness.py", "_snapshot_object_file", "dump"): "no headers (dwarf_only probe)",
     ("abicheck/service_dump_cache.py", "_dump_uncached", "run_dump"): "inner layer of resolve_input",
-    ("abicheck/service_dump_native.py", "_dump_elf", "dump"): "inner layer of run_dump",
-    ("abicheck/service_dump_native.py", "_run_dump_uncached", "_dump_elf"): "inner layer of run_dump",
-    ("abicheck/service_dump_native.py", "_run_dump_uncached", "_dump_pe"): "inner layer of run_dump",
-    ("abicheck/service_dump_native.py", "_run_dump_uncached", "_dump_macho"): "inner layer of run_dump",
+    ("abicheck/service_dump_native.py", "extract_elf", "dump"): "inner layer of run_dump",
+    # The format adapters' ``extract`` -- reached from ``_run_dump_uncached``
+    # through ``FORMAT_ADAPTERS[fmt].extract(request)``.
+    ("abicheck/service_dump_native.py", "extract", "extract_elf"): "inner layer of run_dump (ELF adapter)",
+    ("abicheck/workflows/dump/formats.py", "extract", "extract_pe"): "inner layer of run_dump (PE adapter)",
+    ("abicheck/workflows/dump/formats.py", "extract", "extract_macho"): "inner layer of run_dump (Mach-O adapter)",
     ("abicheck/service_dump_native.py", "_leg", "run_dump"): "inner layer of run_dump",
     ("abicheck/service_dump_native.py", "_run_dump_uncached", "run_hybrid_dump"): "inner layer of run_dump",
     ("abicheck/dumper.py", "dump", "run_hybrid_dump"): "inner layer of dumper.dump",

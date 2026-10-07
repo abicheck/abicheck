@@ -221,7 +221,7 @@ def test_scan_frontend_context_device_reaches_dumper_dump(tmp_path):
 
     `scan_engine.run_scan_core` resolves its ELF input via
     `service.resolve_input(..., is_elf=True, compile=...)`, which reaches
-    `abicheck.dumper.dump` through `service._dump_elf`; mocking `dump` itself
+    `abicheck.dumper.dump` through `service_dump_native.extract_elf`; mocking `dump` itself
     (the same technique `test_service_unit.py::test_elf_forwards_provenance_
     to_dumper` uses for `public_headers`/`public_header_dirs`) lets this test
     assert the kwarg reaches that exact call, without needing a real DPC++
@@ -257,12 +257,12 @@ def test_dump_cli_elf_path_forwards_frontend_context_to_dumper_dump(tmp_path, ru
     request or failing.
 
     CLI cleanup phase two, PR C: the real ELF run now executes through
-    `execute_dump_request` -> `service.resolve_input` -> `service._dump_elf`,
+    `execute_dump_request` -> `service.resolve_input` -> `service_dump_native.extract_elf`,
     the same path `scan`/`compare` already used, which is exactly what
     closes this gap for good rather than needing its own forwarding fix --
     see `test_scan_frontend_context_device_reaches_dumper_dump` above, whose
     identical patch target this test now shares. `dump` is looked up fresh
-    from `abicheck.dumper` at call time inside `service_dump_native._dump_elf`
+    from `abicheck.dumper` at call time inside `service_dump_native.extract_elf`
     (a function-local import), so patching `abicheck.dumper.dump` reaches it,
     same as it already does for `scan`/`compare`.
 

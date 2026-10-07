@@ -40,6 +40,7 @@ from pathlib import Path
 
 import click
 import pytest
+from _dump_format_fakes import fake_format_adapter
 from click.testing import CliRunner
 
 from abicheck.cli import main
@@ -118,9 +119,9 @@ def test_input_spec_carries_compile_context() -> None:
 def test_dump_elf_threads_compile_context_to_dumper(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """``service._dump_elf`` unpacks the CompileContext into ``dumper.dump``."""
+    """``service_dump_native.extract_elf`` unpacks the CompileContext into ``dumper.dump``."""
     import abicheck.dumper as dumper_mod
-    from abicheck import service
+    from abicheck import service_dump_native
 
     header = tmp_path / "foo.h"
     header.write_text("int foo(void);\n")
@@ -145,7 +146,7 @@ def test_dump_elf_threads_compile_context_to_dumper(
         sysroot=tmp_path,
         nostdinc=True,
     )
-    service._dump_elf(
+    service_dump_native.extract_elf(
         tmp_path / "libfoo.so",
         [header],
         [],
@@ -174,7 +175,7 @@ def test_dump_elf_default_compile_context_is_inert(
 ) -> None:
     """No CompileContext → the dumper sees the unchanged defaults (no regression)."""
     import abicheck.dumper as dumper_mod
-    from abicheck import service
+    from abicheck import service_dump_native
 
     header = tmp_path / "foo.h"
     header.write_text("int foo(void);\n")
@@ -185,7 +186,7 @@ def test_dump_elf_default_compile_context_is_inert(
         return type("_S", (), {"parsed_with_build_context": False})()
 
     monkeypatch.setattr(dumper_mod, "dump", _fake_dump)
-    service._dump_elf(tmp_path / "libfoo.so", [header], [], "1.0", "c++")
+    service_dump_native.extract_elf(tmp_path / "libfoo.so", [header], [], "1.0", "c++")
     assert captured["gcc_path"] is None
     assert captured["gcc_options"] is None
     assert captured["nostdinc"] is False
@@ -1439,9 +1440,9 @@ def test_compare_config_include_dirs_survive_per_side_include(
     assert cfg_inc in new_inc
 
 
-def _capture_dump_pe(captured: dict[str, object], **kwargs: object) -> AbiSnapshot:
-    """Shared fake for `abicheck.service_dump_native._dump_pe` (ADR-063 Phase 1)."""
-    captured.update(kwargs)
+def _capture_dump_pe(captured: dict[str, object], request: object) -> AbiSnapshot:
+    """Shared fake PE format adapter side effect (ADR-063 Phase 1)."""
+    captured.update(vars(request))
     return AbiSnapshot(library="foo.dll", version="1.0")
 
 
@@ -1459,13 +1460,12 @@ def test_dump_pe_threads_compile_context(
     cfg.write_text("compile:\n  std: c++20\n  frontend: clang\n", encoding="utf-8")
 
     captured: dict[str, object] = {}
-    monkeypatch.setattr(
-        "abicheck.service_dump_native._dump_pe",
-        lambda *a, **k: _capture_dump_pe(captured, **k),
-    )
-    result = CliRunner().invoke(
-        main, ["dump", str(pe), "-H", str(header), "--config", str(cfg)]
-    )
+    with fake_format_adapter(
+        "pe", side_effect=lambda req: _capture_dump_pe(captured, req)
+    ):
+        result = CliRunner().invoke(
+            main, ["dump", str(pe), "-H", str(header), "--config", str(cfg)]
+        )
     assert result.exit_code == 0, result.output
     cc = captured["compile"]
     assert cc is not None
@@ -1490,13 +1490,12 @@ def test_dump_pe_explicit_gcc_options_no_longer_warns(
     cfg.write_text("compile:\n  options: [-DPE=1]\n", encoding="utf-8")
 
     captured: dict[str, object] = {}
-    monkeypatch.setattr(
-        "abicheck.service_dump_native._dump_pe",
-        lambda *a, **k: _capture_dump_pe(captured, **k),
-    )
-    result = CliRunner().invoke(
-        main, ["dump", str(pe), "-H", str(header), "--config", str(cfg)]
-    )
+    with fake_format_adapter(
+        "pe", side_effect=lambda req: _capture_dump_pe(captured, req)
+    ):
+        result = CliRunner().invoke(
+            main, ["dump", str(pe), "-H", str(header), "--config", str(cfg)]
+        )
     assert result.exit_code == 0, result.output
     assert "will be ignored" not in result.output
     assert getattr(captured["compile"], "gcc_option_tokens") == ("-DPE=1",)

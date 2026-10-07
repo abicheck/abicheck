@@ -790,7 +790,7 @@ class TestAndroidFrontendIsNotAHeaderBackend:
 
     It is in ``SUPPORTED_FRONTENDS`` but not ``HEADER_AST_FRONTENDS``: source-ABI
     only, no header-AST path. Both pipelines already map the bare
-    ``header_backend`` to ``"auto"`` for it — but ``service._run_dump_uncached``
+    ``header_backend`` to ``"auto"`` for it — but ``service_dump_native._run_dump_uncached``
     gives an explicit ``compile.frontend`` *precedence* over that argument, and
     ``dumper._resolve_header_backend`` raises for anything outside
     castxml/clang/hybrid/auto. So a resolved context still carrying "android"
