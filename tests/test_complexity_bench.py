@@ -83,7 +83,10 @@ def test_the_bench_sees_an_injected_quadratic(monkeypatch: pytest.MonkeyPatch) -
         items = list(range(n))
         return lambda: [x for x in items if x in items]
 
-    case = cb.Case("quad", "injected", (500, 1000, 2000), 1.5)
+    # Sizes large enough that per-size CPU time dwarfs scheduler/timer
+    # noise on fast runners: at (500, 1000, 2000) macOS arm64 measured
+    # k = 1.50 under xdist contention (main run 37645089922).
+    case = cb.Case("quad", "injected", (1000, 2000, 4000), 1.5)
     monkeypatch.setitem(cb.PREPARERS, "quad", quadratic)
     k = cb.fit_exponent(cb.measure_in_process(case))
     assert k > 1.6
