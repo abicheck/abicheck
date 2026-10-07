@@ -48,7 +48,8 @@ class TestStoredBundleMarkdownDemanglesLikeEveryOtherHumanRenderer:
         from abicheck.bundle_models import BundleDiffResult
         from abicheck.change_registry_types import Verdict
         from abicheck.checker_policy import ChangeKind
-        from abicheck.checker_types import Change, DiffResult
+        from abicheck.checker_types import DiffResult
+        from abicheck.model.change import Change
 
         diff = DiffResult(
             old_version="old",
@@ -189,7 +190,7 @@ class TestTheHumanLedgersDemangleToo:
 
     def _change(self, symbol: str):
         from abicheck.checker_policy import ChangeKind
-        from abicheck.checker_types import Change
+        from abicheck.model.change import Change
 
         return Change(kind=ChangeKind.FUNC_REMOVED, symbol=symbol, description="d")
 

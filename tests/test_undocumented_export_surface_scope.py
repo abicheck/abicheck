@@ -49,11 +49,11 @@ import pytest
 from click.testing import CliRunner
 
 from abicheck.checker_policy import ChangeKind
-from abicheck.checker_types import Change
 from abicheck.cli import main
 from abicheck.elf_metadata import ElfMetadata
 from abicheck.macho_metadata import MachoMetadata
 from abicheck.model import AbiSnapshot, Function
+from abicheck.model.change import Change
 from abicheck.model.elf_facts import ElfSymbol, SymbolType
 from abicheck.model.macho_facts import MachoExport
 from abicheck.model.vocabulary import ScopeOrigin

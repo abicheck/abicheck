@@ -36,8 +36,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..checker_types import Change
 from ..model import AbiSnapshot
+from ..model.change import Change
 from ..model.change_catalog.kinds import ChangeKind
 from .cross_source_checks_base import (
     PROVIDER_BINARY_EXPORTS,

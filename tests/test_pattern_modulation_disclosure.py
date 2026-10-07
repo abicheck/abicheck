@@ -52,7 +52,8 @@ class TestEveryHumanMarkdownModeDisclosesAModulation:
     def _result(self):
         from abicheck.change_registry_types import Verdict
         from abicheck.checker_policy import ChangeKind
-        from abicheck.checker_types import Change, DiffResult
+        from abicheck.checker_types import DiffResult
+        from abicheck.model.change import Change
         from abicheck.pattern_verdicts import PatternModulation
 
         result = DiffResult(

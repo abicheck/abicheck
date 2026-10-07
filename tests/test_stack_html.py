@@ -81,7 +81,7 @@ def test_html_contains_root_binary() -> None:
 
 def test_html_renders_binding_changes() -> None:
     from abicheck.checker_policy import ChangeKind
-    from abicheck.checker_types import Change
+    from abicheck.model.change import Change
 
     change = Change(
         kind=ChangeKind.RUNTIME_SYMBOL_PROVIDER_CHANGED,

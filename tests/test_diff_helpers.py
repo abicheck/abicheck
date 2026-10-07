@@ -17,7 +17,6 @@
 from __future__ import annotations
 
 from abicheck.checker_policy import ChangeKind
-from abicheck.checker_types import Change
 from abicheck.diff_helpers import (
     bool_transition,
     build_type_map,
@@ -28,6 +27,7 @@ from abicheck.diff_helpers import (
 )
 from abicheck.fact_provenance import resolved_fact_producer
 from abicheck.model import AbiSnapshot, RecordType
+from abicheck.model.change import Change
 
 ADDED = (ChangeKind.FUNC_VIRTUAL_ADDED, "added")
 REMOVED = (ChangeKind.FUNC_VIRTUAL_REMOVED, "removed")

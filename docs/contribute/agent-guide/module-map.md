@@ -404,7 +404,7 @@ Core pipeline (in order of data flow):
      `compatibility_decision` (JSON `null` for a `NOT_EVALUATED` finding —
      "policy did not run", not a sixth verdict) and Phase 4's persisted
      context over every finding the stage saw, ledgers included. Decides no
-     exit code itself; `contract_gating.py` is the leaf predicate
+     exit code itself; `model/contract_finding_relevance.py` is the leaf predicate
      `checker._compute_verdict_for` and `severity.compute_exit_code`/
      `compute_gate_decision` share so the verdict and the gate cannot exclude
      different sets. An **unstamped** finding is evaluated (a direct

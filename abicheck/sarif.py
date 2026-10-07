@@ -35,18 +35,19 @@ from abicheck.checker import Change, ChangeKind, DiffResult
 from abicheck.contract_relevance_types import CompatibilityEvaluationStatus
 from abicheck.finding_identity import missing_contract_kind
 from abicheck.impact import assess_change
+from abicheck.model.contract_finding_relevance import (
+    contract_relevance_of,
+    evaluation_status_of,
+    is_evaluated,
+)
+from abicheck.model.evidence_status import EvidenceStatus, ReachabilityState
 from abicheck.policy.classification import (
     evidence_status_for_result,
     impact_caveat_for,
     impact_for,
     policy_for,
 )
-from abicheck.policy.contract_finding_relevance import (
-    contract_relevance_of,
-    evaluation_status_of,
-    is_evaluated,
-)
-from abicheck.policy.evidence_status import EvidenceStatus, ReachabilityState
+from abicheck.policy.severity import missing_contract_exit_code
 from abicheck.report.disposition_audit import disposition_audit_dict_reusing_document
 from abicheck.report.envelope import ReportEnvelope, resolved_document, resolved_gate
 from abicheck.report.render_json import render_mapping_as_json
@@ -64,13 +65,12 @@ from abicheck.reporter_markdown import (
     root_cause_lookup_for_changes,
     show_only_matches_severity_label,
 )
-from abicheck.severity import missing_contract_exit_code
 
 if TYPE_CHECKING:
     from datetime import date
 
+    from abicheck.policy.severity import GateDecision, SeverityConfig
     from abicheck.report.finding import ReportFinding
-    from abicheck.severity import GateDecision, SeverityConfig
 
 # ---------------------------------------------------------------------------
 # Severity mapping
@@ -109,7 +109,7 @@ def _severity(
 
     When *severity_config* is given, the result level follows the configured
     severity for this change's effective issue category
-    (:func:`abicheck.severity.classify_effective_change`) — the same
+    (:func:`abicheck.policy.severity.classify_effective_change`) — the same
     classification the exit code and ``severityGate`` properties block use —
     so a SARIF consumer keying off ``level`` never disagrees with the
     configured gate (e.g. ``severity.addition: error`` must show additions
@@ -142,7 +142,7 @@ def _severity(
         if finding is not None:
             category = finding.category
         else:
-            from abicheck.severity import classify_effective_change
+            from abicheck.policy.severity import classify_effective_change
 
             category = classify_effective_change(
                 change,
@@ -346,7 +346,7 @@ def _contract_properties(
     props["compatibilityEvaluationStatus"] = status.value
     decision = getattr(change, "compatibility_decision", None)
     props["compatibilityDecision"] = getattr(decision, "value", None)
-    from abicheck.severity import gate_contribution_for_change
+    from abicheck.policy.severity import gate_contribution_for_change
 
     props["gateContribution"] = gate_contribution_for_change(
         change,
@@ -580,7 +580,7 @@ def _missing_contract_result(
     finding (CLI-audit P1).
 
     ``blocksGate``/``relevantToGate`` describe this consumer's *own* scoped
-    assessment (:func:`abicheck.severity.missing_contract_exit_code`) -- they
+    assessment (:func:`abicheck.policy.severity.missing_contract_exit_code`) -- they
     are informational, same as the whole ``scopedGate`` block this result's
     caller attaches (workstream D-S1): this document's own top-level
     ``exitCode`` no longer follows them, only the full-library

@@ -46,13 +46,13 @@ from abicheck.model import (
     TypeField,
     Visibility,
 )
+from abicheck.policy.severity import SeverityConfig
 from abicheck.schemas import (
     AGGREGATE_REPORT_SCHEMA_PATH,
     COMPARE_REPORT_SCHEMA_PATH,
     REPORT_SCHEMA_VERSION,
     load_compare_report_schema,
 )
-from abicheck.severity import SeverityConfig
 
 try:
     import jsonschema
@@ -610,7 +610,7 @@ class TestReportValidatesAgainstSchema:
         # redundant bucket too, a restored finding rendered with none of the
         # promised contract fields regardless of contract_evaluation=True.
         from abicheck.checker_policy import ChangeKind
-        from abicheck.checker_types import Change
+        from abicheck.model.change import Change
 
         old = AbiSnapshot(library="lib", version="1")
         new = AbiSnapshot(library="lib", version="2")
@@ -649,7 +649,7 @@ class TestReportValidatesAgainstSchema:
         # never reached `kept` and its ledger entry silently lost the
         # contract decision it would otherwise carry.
         from abicheck.checker_policy import ChangeKind
-        from abicheck.checker_types import Change
+        from abicheck.model.change import Change
 
         old = AbiSnapshot(library="lib", version="1")
         new = AbiSnapshot(library="lib", version="2")
@@ -880,16 +880,13 @@ class TestEvidenceDepthValidator:
     delegate to."""
 
     def test_accepts_every_public_depth(self):
-        from abicheck.checker_types import (
-            EVIDENCE_DEPTH_VALUES,
-            validate_evidence_depth,
-        )
+        from abicheck.model.change import EVIDENCE_DEPTH_VALUES, validate_evidence_depth
 
         for depth in EVIDENCE_DEPTH_VALUES:
             validate_evidence_depth("requested_depth", depth)  # must not raise
 
     def test_rejects_unknown_depth_with_field_name_in_message(self):
-        from abicheck.checker_types import validate_evidence_depth
+        from abicheck.model.change import validate_evidence_depth
 
         with pytest.raises(ValueError, match="effective_depth"):
             validate_evidence_depth("effective_depth", "bogus")

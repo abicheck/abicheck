@@ -549,7 +549,7 @@ class TestAnnotationReportEntries:
         always visible (Codex review, fresh evidence: an earlier revision
         used a bare blocks/doesn't-block binary that silently demoted this
         case to a notice a plain `annotate: true` run would never show)."""
-        from abicheck.severity import SeverityConfig, SeverityLevel
+        from abicheck.policy.severity import SeverityConfig, SeverityLevel
 
         cfg = SeverityConfig(
             abi_breaking=SeverityLevel.WARNING,
@@ -571,7 +571,7 @@ class TestAnnotationReportEntries:
         decision: a severity scheme that doesn't even warn on abi_breaking
         must not paint this red -- it becomes an opt-in notice, gated on
         annotate_additions like any other info-level finding."""
-        from abicheck.severity import SeverityConfig, SeverityLevel
+        from abicheck.policy.severity import SeverityConfig, SeverityLevel
 
         cfg = SeverityConfig(
             abi_breaking=SeverityLevel.INFO,
@@ -601,7 +601,7 @@ class TestSeverityConfigAwareAnnotations:
     def test_addition_configured_as_error_gets_error_annotation(self):
         """An addition that severity config promotes to `error` must not be
         silently absent — the build fails on it, so the annotation must too."""
-        from abicheck.severity import resolve_severity_config
+        from abicheck.policy.severity import resolve_severity_config
 
         c = Change(ChangeKind.FUNC_ADDED, "_Z3newv", "new public function")
         result = _result(Verdict.COMPATIBLE, [c])
@@ -619,7 +619,7 @@ class TestSeverityConfigAwareAnnotations:
     def test_breaking_demoted_to_info_does_not_emit_error(self):
         """A breaking kind that severity config demotes below `error` must not
         emit `::error` — that would misreport a non-blocking finding as fatal."""
-        from abicheck.severity import resolve_severity_config
+        from abicheck.policy.severity import resolve_severity_config
 
         c = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed: foo")
         result = _result(Verdict.BREAKING, [c])
@@ -644,7 +644,7 @@ class TestSeverityConfigAwareAnnotations:
         soname_bump_unnecessary) surfaced by severity_config (the default
         preset sets quality_issues=warning, no annotate_additions needed)
         must not be titled "ABI Addition" — it isn't one."""
-        from abicheck.severity import resolve_severity_config
+        from abicheck.policy.severity import resolve_severity_config
 
         c = Change(
             ChangeKind.SONAME_BUMP_UNNECESSARY,
@@ -662,7 +662,7 @@ class TestSeverityConfigAwareAnnotations:
         assert "ABI Addition" not in line
 
     def test_genuine_addition_still_labeled_as_addition(self):
-        from abicheck.severity import resolve_severity_config
+        from abicheck.policy.severity import resolve_severity_config
 
         c = Change(ChangeKind.FUNC_ADDED, "_Z3newv", "new public function")
         result = _result(Verdict.COMPATIBLE, [c])
@@ -679,7 +679,7 @@ class TestSeverityConfigAwareAnnotations:
         Break" title, not "Deployment Risk" — the label raw kind-set
         membership alone would produce, contradicting the override
         (CodeRabbit review, PR #557)."""
-        from abicheck.severity import resolve_severity_config
+        from abicheck.policy.severity import resolve_severity_config
 
         c = Change(
             ChangeKind.SYMBOL_VERSION_REQUIRED_ADDED,
@@ -704,8 +704,8 @@ class TestSeverityConfigAwareAnnotations:
         must too, or a build that still fails CI would get no ::error at all.
         """
         from abicheck.checker_policy import Verdict as _Verdict
+        from abicheck.policy.severity import compute_exit_code, resolve_severity_config
         from abicheck.policy_file import PolicyFile
-        from abicheck.severity import compute_exit_code, resolve_severity_config
 
         c = Change(
             ChangeKind.FUNC_REMOVED,

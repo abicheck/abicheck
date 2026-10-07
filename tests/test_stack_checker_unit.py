@@ -11,7 +11,7 @@ import pytest
 from abicheck.binder import BindingStatus, SymbolBinding
 from abicheck.checker import DiffResult
 from abicheck.checker_policy import ChangeKind, Verdict
-from abicheck.checker_types import Change
+from abicheck.model.change import Change
 from abicheck.policy.exit_decision import ExitReason
 from abicheck.resolver import DependencyGraph, ResolvedDSO
 from abicheck.stack_checker import (

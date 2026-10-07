@@ -32,8 +32,9 @@ from abicheck.bundle import (  # noqa: E402
     load_manifest,
 )
 from abicheck.checker_policy import ChangeKind, Verdict  # noqa: E402
-from abicheck.checker_types import Change, DiffResult  # noqa: E402
+from abicheck.checker_types import DiffResult  # noqa: E402
 from abicheck.elf_metadata import ElfImport, ElfMetadata, ElfSymbol  # noqa: E402
+from abicheck.model.change import Change  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Fixtures

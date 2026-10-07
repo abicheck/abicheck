@@ -28,12 +28,13 @@ from types import SimpleNamespace
 import pytest
 
 from abicheck.checker_policy import ChangeKind, Verdict
-from abicheck.checker_types import Change, DiffResult
+from abicheck.checker_types import DiffResult
 from abicheck.errors import AbicheckError
 from abicheck.l0_export_delta import (
     collect_l0_export_delta,
     elf_exports_cannot_lose_symbol,
 )
+from abicheck.model.change import Change
 from abicheck.model.elf_facts import ElfSymbol, SymbolType
 
 

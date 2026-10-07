@@ -46,8 +46,8 @@ from ..model.export_entity_name import (
 from .export_owner_resolution import special_member_export_coverage
 
 if TYPE_CHECKING:
-    from ..checker_types import Change
     from ..model import AbiSnapshot
+    from ..model.change import Change
 
 
 @registry.detector("undeclared_exports")

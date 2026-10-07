@@ -147,7 +147,7 @@ class TestTheCoverageExitIsApplied:
         in exactly the runs whose ledger fails. The fold is where the claim
         lives, and it holds for any base the compatibility axis hands it.
         """
-        from abicheck.contract_coverage_exit import coverage_exit_floor
+        from abicheck.policy.contract_coverage_exit import coverage_exit_floor
         from abicheck.policy.exit_decision import resolve_exit_decision
 
         result = _compare_result(_compatible_pair(), contract_mode="exports")
@@ -495,7 +495,7 @@ class TestTheProgrammaticApiStaysQuiet:
     briefly lived inside the fold."""
 
     def test_folding_writes_nothing(self, tmp_path: Path, capsys) -> None:
-        from abicheck.contract_coverage_exit import coverage_exit_floor
+        from abicheck.policy.contract_coverage_exit import coverage_exit_floor
 
         class _Ctx:
             pass
@@ -508,7 +508,7 @@ class TestTheProgrammaticApiStaysQuiet:
     def test_the_module_does_not_import_click_at_module_scope(self) -> None:
         """The import is function-local inside the announcer, so importing
         this module from a library context pulls in no CLI machinery."""
-        import abicheck.contract_coverage_exit as module
+        import abicheck.policy.contract_coverage_exit as module
 
         source = Path(module.__file__).read_text(encoding="utf-8")
         module_level = [

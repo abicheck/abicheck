@@ -35,7 +35,6 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from .checker_policy import EvidenceTier
 from .model import (
     AbiSnapshot,
     Function,
@@ -45,6 +44,7 @@ from .model import (
     resolved_fact_value,
 )
 from .model.debug_evidence import debug_info_evidence
+from .model.evidence_status import EvidenceTier
 from .model.execution_cache import request_key
 from .model.execution_cache_scoped import ScopedCache
 from .model.surface_facts import in_public_surface, is_binary_exported

@@ -29,7 +29,6 @@ from __future__ import annotations
 
 from abicheck.checker import compare
 from abicheck.checker_policy import ChangeKind, Verdict
-from abicheck.checker_types import Change
 from abicheck.diff_versioning import (
     demote_internal_version_node_findings,
     internal_versioned_symbols,
@@ -37,6 +36,7 @@ from abicheck.diff_versioning import (
 )
 from abicheck.elf_metadata import ElfMetadata, ElfSymbol
 from abicheck.model import AbiSnapshot, Function, Visibility
+from abicheck.model.change import Change
 
 
 # --------------------------------------------------------------------------- #

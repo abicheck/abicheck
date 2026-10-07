@@ -26,7 +26,7 @@ precedence code exists here. That is the remainder of Phase 1 (plan Section
 Two existing, already-shipped types are reused rather than duplicated:
 :class:`~abicheck.change_registry_types.Verdict` for
 :attr:`CompatibilityPolicyConfig.overrides` (ADR-049 D8's per-``ChangeKind``
-override), and :class:`~abicheck.severity.SeverityConfig` for
+override), and :class:`~abicheck.policy.severity.SeverityConfig` for
 :attr:`GateConfig.severity` (the existing four-category severity resolution
 ADR-049 D6 calls ``gate.severity_overrides``) -- this module composes both
 instead of inventing second copies.
@@ -48,11 +48,11 @@ from .change_registry_types import Verdict
 from .contract_relevance_types import ContractMode, SelectorLayer
 from .model.change_catalog.kinds import ChangeKind
 from .model.ownership_rules import OwnershipRules
+from .policy.severity import SeverityConfig
 from .policy.versioning_policy import (
     VersioningPolicy,
     built_in_default_versioning_policy,
 )
-from .severity import SeverityConfig
 
 _T = TypeVar("_T")
 
@@ -860,7 +860,7 @@ class ScopedGateSelection:
 class GateConfig:
     """What blocks CI (ADR-049 D8) -- ``NOT_APPLICABLE`` to contract membership.
 
-    ``severity`` reuses the existing :class:`~abicheck.severity.SeverityConfig`
+    ``severity`` reuses the existing :class:`~abicheck.policy.severity.SeverityConfig`
     four-category model rather than inventing a second severity vocabulary.
 
     ``exit_code_scheme`` validates against ``{"legacy", "severity"}`` --

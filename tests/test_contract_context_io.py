@@ -63,7 +63,7 @@ from abicheck.model import (
     Visibility,
 )
 from abicheck.policy.public_surface_closure import resolve_public_surface
-from abicheck.severity import SeverityConfig, SeverityLevel
+from abicheck.policy.severity import SeverityConfig, SeverityLevel
 
 
 def _pair() -> tuple[AbiSnapshot, AbiSnapshot]:

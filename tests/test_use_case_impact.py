@@ -36,7 +36,6 @@ from abicheck.buildsource.source_graph import (
     SourceGraphSummary,
 )
 from abicheck.checker_policy import ChangeKind
-from abicheck.checker_types import Change
 from abicheck.cli import main
 from abicheck.impact.use_case_impact import (
     UseCaseImpact,
@@ -44,6 +43,7 @@ from abicheck.impact.use_case_impact import (
 )
 from abicheck.impact.use_cases import UseCaseDefinition, UseCaseResolution
 from abicheck.model import AbiSnapshot
+from abicheck.model.change import Change
 
 
 def _graph(*entries: str) -> SourceGraphSummary:

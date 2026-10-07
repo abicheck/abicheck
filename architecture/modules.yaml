@@ -27,6 +27,7 @@
         "abicheck/environment_matrix.py",
         "abicheck/evidence_depth.py",
         "abicheck/fact_provenance.py",
+        "abicheck/impact/model.py",
         "abicheck/name_classification.py",
         "abicheck/report_side_facts.py",
         "abicheck/stable_abi.py",
@@ -279,10 +280,8 @@
         "abicheck/buildsource/analysis_assurance_gate.py",
         "abicheck/compatibility_evaluation_config.py",
         "abicheck/compatibility_evaluation_packs.py",
-        "abicheck/contract_coverage_exit.py",
         "abicheck/contract_evaluation.py",
         "abicheck/contract_evidence_collect.py",
-        "abicheck/exit_decision.py",
         "abicheck/export_surface.py",
         "abicheck/idioms.py",
         "abicheck/pattern_verdicts.py",
@@ -294,7 +293,6 @@
         "abicheck/post_processing_context.py",
         "abicheck/post_processing_reachability.py",
         "abicheck/semver.py",
-        "abicheck/severity.py",
         "abicheck/suppression.py",
         "abicheck/suppression_yaml.py",
         "abicheck/surface.py"
@@ -355,7 +353,6 @@
         "abicheck/service_dump_pipeline.py",
         "abicheck/service_header_graph_attach.py",
         "abicheck/service_header_scoped.py",
-        "abicheck/service_input_resolution.py",
         "abicheck/dry_run_estimate.py",
         "abicheck/stack_checker.py"
       ]
@@ -441,16 +438,12 @@
   "public_root_surfaces": [
     "abicheck.checker_policy",
     "abicheck.contract_evidence",
-    "abicheck.contract_gating",
     "abicheck.header_only_dump",
-    "abicheck.reclassify",
     "abicheck.schemas",
     "abicheck.serialization"
   ],
   "facades": [
-    "abicheck.checker_policy",
-    "abicheck.contract_gating",
-    "abicheck.reclassify"
+    "abicheck.checker_policy"
   ],
   "frozen_root_families": {
     "cli_": [
@@ -488,7 +481,6 @@
       "service_dump_pipeline.py",
       "service_header_graph_attach.py",
       "service_header_scoped.py",
-      "service_input_resolution.py",
       "service_metadata_attach.py",
       "service_render.py",
       "dry_run_estimate.py"
@@ -688,11 +680,9 @@
     "config_paths.py",
     "contract_context.py",
     "contract_context_io.py",
-    "contract_coverage_exit.py",
     "contract_evaluation.py",
     "contract_evidence.py",
     "contract_evidence_collect.py",
-    "contract_gating.py",
     "contract_pipeline.py",
     "contract_relevance_types.py",
     "contract_replay.py",
@@ -788,7 +778,6 @@
     "elf_metadata.py",
     "elf_symbol_filter.py",
     "environment_matrix.py",
-    "exit_decision.py",
     "export_surface.py",
     "fact_provenance.py",
     "finding_identity.py",
@@ -830,7 +819,6 @@
     "python_api.py",
     "python_ext.py",
     "qualified_name_segments_walk.py",
-    "reclassify.py",
     "report_classifications.py",
     "report_correlation.py",
     "report_model.py",
@@ -852,11 +840,9 @@
     "service_dump_pipeline.py",
     "service_header_graph_attach.py",
     "service_header_scoped.py",
-    "service_input_resolution.py",
     "service_metadata_attach.py",
     "service_render.py",
     "dry_run_estimate.py",
-    "severity.py",
     "snapshot_cache.py",
     "snapshot_io.py",
     "snapshot_platform_blocks.py",

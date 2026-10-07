@@ -55,7 +55,7 @@ from collections.abc import Iterator
 
 from abicheck import finding_identity
 from abicheck.checker_policy import ChangeKind
-from abicheck.checker_types import Change
+from abicheck.model.change import Change
 from abicheck.model.identity import EntityId, EntityKind
 from abicheck.reporter import _change_to_dict
 from abicheck.workflows.aggregate.reconcile import (

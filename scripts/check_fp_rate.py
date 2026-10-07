@@ -52,7 +52,6 @@ from abicheck.buildsource.source_graph import (  # noqa: E402
     SourceGraphSummary,
 )
 from abicheck.checker import Verdict, compare  # noqa: E402
-from abicheck.checker_policy import ChangeKind  # noqa: E402
 from abicheck.elf_metadata import ElfMetadata, ElfSymbol  # noqa: E402
 from abicheck.model import (  # noqa: E402
     AbiSnapshot,
@@ -67,6 +66,7 @@ from abicheck.model import (  # noqa: E402
     Variable,
     Visibility,
 )
+from abicheck.model.change_catalog.kinds import ChangeKind  # noqa: E402
 
 # Verdicts that mean "this is a public-ABI break".
 _BREAKING_VERDICTS = {Verdict.API_BREAK, Verdict.BREAKING}

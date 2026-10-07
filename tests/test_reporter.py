@@ -80,7 +80,7 @@ class TestReviewDigestSeverityAware:
     independent decisions). These guard the fix."""
 
     def test_compatible_addition_configured_as_error_is_not_safe_to_merge(self):
-        from abicheck.severity import resolve_severity_config
+        from abicheck.policy.severity import resolve_severity_config
 
         c = Change(ChangeKind.FUNC_ADDED, "_Z3newv", "new public function")
         result = _result(Verdict.COMPATIBLE, changes=[c])
@@ -95,7 +95,7 @@ class TestReviewDigestSeverityAware:
         assert "blocked by severity policy" in out
 
     def test_breaking_demoted_to_non_error_is_not_reported_as_blocking(self):
-        from abicheck.severity import resolve_severity_config
+        from abicheck.policy.severity import resolve_severity_config
 
         c = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed: foo")
         result = _result(Verdict.BREAKING, changes=[c])
@@ -110,7 +110,7 @@ class TestReviewDigestSeverityAware:
         assert "safe to merge" in out
 
     def test_severity_config_confirms_a_real_block(self):
-        from abicheck.severity import resolve_severity_config
+        from abicheck.policy.severity import resolve_severity_config
 
         c = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed: foo")
         result = _result(Verdict.BREAKING, changes=[c])
@@ -204,7 +204,7 @@ class TestAnalysisAssuranceExitContributionPersistence:
         before forwarding severity_config to to_stat_json, so a caller going
         through to_json directly (not service.render_output) silently lost
         the severity block/exit code in stat JSON output."""
-        from abicheck.severity import PRESET_DEFAULT
+        from abicheck.policy.severity import PRESET_DEFAULT
 
         c = Change(ChangeKind.FUNC_ADDED, "_Z3newv", "new public function")
         r = _result(Verdict.COMPATIBLE, changes=[c])
@@ -519,7 +519,7 @@ class TestEvidenceStatusInJson:
         assert d["changes"][0]["finding_id"] != d["changes"][1]["finding_id"]
 
     def test_severity_blocking_fields_present_when_configured(self):
-        from abicheck.severity import resolve_severity_config
+        from abicheck.policy.severity import resolve_severity_config
 
         c = Change(ChangeKind.FUNC_ADDED, "s", "added")
         r = _result(Verdict.COMPATIBLE, changes=[c])
@@ -529,7 +529,7 @@ class TestEvidenceStatusInJson:
         assert d["severity"]["blocking_categories"] == ["addition"]
 
     def test_severity_blocking_false_when_no_error_level_findings(self):
-        from abicheck.severity import resolve_severity_config
+        from abicheck.policy.severity import resolve_severity_config
 
         c = Change(ChangeKind.FUNC_ADDED, "s", "added")
         r = _result(Verdict.COMPATIBLE, changes=[c])
@@ -545,7 +545,7 @@ class TestEvidenceStatusInJson:
         that's actually blocking the build via --show-only must not make
         blocking_categories silently empty out from under a still-nonzero
         exit_code/blocking=true."""
-        from abicheck.severity import resolve_severity_config
+        from abicheck.policy.severity import resolve_severity_config
 
         addition = Change(ChangeKind.FUNC_ADDED, "s1", "added")
         breaking = Change(ChangeKind.FUNC_REMOVED, "s2", "removed")
@@ -617,8 +617,8 @@ class TestEvidenceStatusInJson:
         leaf_changes — the top-level `severity` block already honours
         policy_file (via _build_severity_json), so leaf_changes reading
         "compatible" for the same finding would be a direct contradiction."""
+        from abicheck.policy.severity import PRESET_DEFAULT
         from abicheck.policy_file import PolicyFile
-        from abicheck.severity import PRESET_DEFAULT
 
         c = Change(
             ChangeKind.TYPE_SIZE_CHANGED,
@@ -643,8 +643,8 @@ class TestEvidenceStatusInJson:
         frozen_namespace_violation, read "compatible" in non_type_changes
         (and the backward-compat changes union) while the top-level severity
         block correctly reported exit_code=4 for the same finding."""
+        from abicheck.policy.severity import PRESET_DEFAULT
         from abicheck.policy_file import PolicyFile
-        from abicheck.severity import PRESET_DEFAULT
 
         c = Change(
             ChangeKind.FUNC_REMOVED,
@@ -666,7 +666,7 @@ class TestEvidenceStatusInJson:
         """report_mode="root-cause" returned before the severity block was ever
         built, so a caller passing severity_config silently got no severity
         information at all — unlike full-mode JSON."""
-        from abicheck.severity import PRESET_DEFAULT
+        from abicheck.policy.severity import PRESET_DEFAULT
 
         c = Change(ChangeKind.FUNC_ADDED, "_Z3newv", "new public function")
         r = _result(Verdict.COMPATIBLE, changes=[c])
@@ -811,7 +811,7 @@ class TestRootCauseReporter:
         assert d["changes"][0]["symbol"] == "ns::internal::helper"
 
     def test_carries_severity_block(self):
-        from abicheck.severity import PRESET_DEFAULT
+        from abicheck.policy.severity import PRESET_DEFAULT
 
         c = Change(ChangeKind.FUNC_ADDED, "_Z3newv", "new public function")
         r = _result(Verdict.COMPATIBLE, changes=[c])
@@ -1147,7 +1147,7 @@ class TestRootCauseMarkdown:
         assert "byte-identical" in to_markdown(r, report_mode=mode)
 
     def test_carries_severity_summary(self):
-        from abicheck.severity import PRESET_DEFAULT
+        from abicheck.policy.severity import PRESET_DEFAULT
 
         c = Change(ChangeKind.FUNC_ADDED, "_Z3newv", "new public function")
         r = _result(Verdict.COMPATIBLE, changes=[c])
@@ -1532,7 +1532,7 @@ class TestSeverityMarkdown:
 
     def test_severity_badges_shown_when_config_provided(self):
         """Section header for breaking changes includes ERROR badge."""
-        from abicheck.severity import PRESET_DEFAULT
+        from abicheck.policy.severity import PRESET_DEFAULT
 
         c = Change(
             ChangeKind.FUNC_REMOVED,
@@ -1561,7 +1561,7 @@ class TestSeverityMarkdown:
 
     def test_severity_summary_table_in_markdown(self):
         """Markdown includes a severity configuration table when config is provided."""
-        from abicheck.severity import PRESET_STRICT
+        from abicheck.policy.severity import PRESET_STRICT
 
         c = Change(ChangeKind.FUNC_ADDED, "_Z6newapiv", "New public function: new_api")
         md = to_markdown(
@@ -1580,7 +1580,7 @@ class TestSeverityMarkdown:
 
     def test_quality_section_with_severity_label(self):
         """Quality section header includes WARNING badge."""
-        from abicheck.severity import PRESET_DEFAULT
+        from abicheck.policy.severity import PRESET_DEFAULT
 
         c = Change(
             ChangeKind.FUNC_NOEXCEPT_ADDED, "_Z4swapv", "noexcept specifier added: swap"
@@ -1593,7 +1593,7 @@ class TestSeverityMarkdown:
 
     def test_additions_section_with_severity_label(self):
         """Additions section header includes INFO badge."""
-        from abicheck.severity import PRESET_DEFAULT
+        from abicheck.policy.severity import PRESET_DEFAULT
 
         c = Change(ChangeKind.FUNC_ADDED, "_Z6newapiv", "New public function: new_api")
         md = to_markdown(
@@ -1608,7 +1608,7 @@ class TestSeverityJson:
 
     def test_severity_section_in_json(self):
         """JSON output includes severity section when config is provided."""
-        from abicheck.severity import PRESET_DEFAULT
+        from abicheck.policy.severity import PRESET_DEFAULT
 
         c = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "Public function removed: foo")
         r = _result(Verdict.BREAKING, changes=[c])
@@ -1630,7 +1630,7 @@ class TestSeverityJson:
 
     def test_severity_exit_code_in_json(self):
         """JSON severity section includes computed exit_code."""
-        from abicheck.severity import PRESET_STRICT
+        from abicheck.policy.severity import PRESET_STRICT
 
         c = Change(ChangeKind.FUNC_ADDED, "_Z6newapiv", "New public function: new_api")
         r = _result(Verdict.COMPATIBLE, changes=[c])
@@ -1639,7 +1639,7 @@ class TestSeverityJson:
 
     def test_severity_category_counts(self):
         """JSON severity categories have correct counts for mixed changes."""
-        from abicheck.severity import PRESET_DEFAULT
+        from abicheck.policy.severity import PRESET_DEFAULT
 
         changes = [
             Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed: foo"),

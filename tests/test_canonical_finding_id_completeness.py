@@ -37,8 +37,8 @@ from canonical_identity_contract import (
 )
 
 from abicheck.checker_policy import ChangeKind
-from abicheck.checker_types import Change
 from abicheck.finding_identity import report_canonical_finding_id
+from abicheck.model.change import Change
 
 ALL_KIND_VALUES = frozenset(k.value for k in ChangeKind)
 

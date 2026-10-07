@@ -364,7 +364,7 @@ def _parse_reclassify(raw: Any, path: Path) -> list[ReclassifyRule]:
     Unlike ``overrides:`` (keyed by ``ChangeKind`` alone), each entry here
     carries the same selector grammar :mod:`abicheck.suppression` already
     implements, plus a required ``to:`` severity -- see
-    ``abicheck/reclassify.py``'s module docstring.
+    ``abicheck/policy/reclassify.py``'s module docstring.
     """
     from .policy.reclassify import RECLASSIFY_KNOWN_KEYS, ReclassifyRule
 
@@ -496,7 +496,7 @@ def _resolve_change_verdict(
        selectors match this change (frozen-namespace floor still applied).
        Consulted ahead of the kind-global ``overrides:`` entry for the same
        kind since a rule scoped to a selector is strictly more specific than
-       one scoped to a bare kind (see ``abicheck/reclassify.py``).
+       one scoped to a bare kind (see ``abicheck/policy/reclassify.py``).
     3. ``overrides[kind]`` — per-kind policy override (frozen-namespace floor
        still applied; downgrades on frozen symbols are silently rejected).
     4. Base policy verdict.
@@ -567,7 +567,7 @@ class PolicyFile:
 
     base_policy: str = "strict_abi"
     overrides: dict[ChangeKind, Verdict] = field(default_factory=dict)
-    # A: selector-scoped reclassification (abicheck/reclassify.py) — the
+    # A: selector-scoped reclassification (abicheck/policy/reclassify.py) — the
     # third policy-file primitive, between overrides: (kind-global, no
     # selector) and suppress: (selector-scoped, but deletes the finding).
     # Consulted ahead of `overrides[kind]` for the same kind in

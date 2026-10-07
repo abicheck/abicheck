@@ -35,7 +35,8 @@ removal or addition, so the completeness axis does not double-report it.
 
 from __future__ import annotations
 
-from ..checker_types import Change, DiffResult
+from ..checker_types import DiffResult
+from ..model.change import Change
 from ..model.scope_acquisition import ScopeAcquisitionRecord
 from ..policy.support_promise import support_promise_changes
 

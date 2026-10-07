@@ -39,8 +39,8 @@ from ..model.identity import EntityId
 from .opaque_struct_types import find_opaque_struct_types
 
 if TYPE_CHECKING:
-    from ..checker_types import Change
     from ..model import AbiSnapshot
+    from ..model.change import Change
 
 __all__ = [
     "OPAQUE_DOWNGRADEABLE_KINDS",

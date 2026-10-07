@@ -11,7 +11,6 @@ from _legacy_scope import no_scope_config_args
 
 from abicheck.checker import compare
 from abicheck.checker_policy import ChangeKind, Verdict
-from abicheck.checker_types import Change
 from abicheck.dwarf_advanced import AdvancedDwarfMetadata
 from abicheck.model import (
     AbiSnapshot,
@@ -24,6 +23,7 @@ from abicheck.model import (
     TypeField,
     Visibility,
 )
+from abicheck.model.change import Change
 from abicheck.policy.public_surface_closure import resolve_public_surface
 from abicheck.surface import (
     REASON_NON_PUBLIC_TYPE,

@@ -21,7 +21,7 @@ from dataclasses import dataclass
 import pytest
 
 from abicheck.checker_policy import ChangeKind
-from abicheck.severity import (
+from abicheck.policy.severity import (
     PRESET_DEFAULT,
     PRESET_INFO_ONLY,
     PRESET_STRICT,
@@ -417,7 +417,7 @@ class TestInfoOnlyAlias:
     """The info_only alias resolves to the same preset as info-only."""
 
     def test_alias_resolves(self) -> None:
-        from abicheck.severity import SEVERITY_PRESETS
+        from abicheck.policy.severity import SEVERITY_PRESETS
 
         assert SEVERITY_PRESETS["info_only"] is SEVERITY_PRESETS["info-only"]
 
@@ -430,14 +430,17 @@ class TestInfoOnlyAlias:
 class TestCompatibilityDecision:
     def test_is_verdict(self) -> None:
         from abicheck.checker import Verdict
-        from abicheck.severity import CompatibilityDecision
+        from abicheck.policy.severity import CompatibilityDecision
 
         assert CompatibilityDecision is Verdict
 
 
 class TestComputeGateDecision:
     def test_severity_scheme_addition_promoted_to_error(self) -> None:
-        from abicheck.severity import compute_gate_decision, resolve_severity_config
+        from abicheck.policy.severity import (
+            compute_gate_decision,
+            resolve_severity_config,
+        )
 
         cfg = resolve_severity_config("default", addition="error")
         changes = [_FakeChange(ChangeKind.FUNC_ADDED)]
@@ -448,7 +451,7 @@ class TestComputeGateDecision:
         assert decision.exit_code != 0
 
     def test_severity_scheme_no_error_level_findings(self) -> None:
-        from abicheck.severity import PRESET_DEFAULT, compute_gate_decision
+        from abicheck.policy.severity import PRESET_DEFAULT, compute_gate_decision
 
         changes = [_FakeChange(ChangeKind.FUNC_ADDED)]
         decision = compute_gate_decision(changes, PRESET_DEFAULT)
@@ -461,7 +464,7 @@ class TestComputeGateDecision:
         """The gate decision's exit_code must never disagree with the
         standalone compute_exit_code for the same inputs — it's derived
         from it, not a parallel reimplementation."""
-        from abicheck.severity import (
+        from abicheck.policy.severity import (
             PRESET_STRICT,
             compute_exit_code,
             compute_gate_decision,
@@ -476,7 +479,7 @@ class TestComputeGateDecision:
         assert decision.exit_code == compute_exit_code(changes, PRESET_STRICT)
 
     def test_multiple_blocking_categories(self) -> None:
-        from abicheck.severity import PRESET_STRICT, compute_gate_decision
+        from abicheck.policy.severity import PRESET_STRICT, compute_gate_decision
 
         changes = [
             _FakeChange(ChangeKind.FUNC_REMOVED),
@@ -492,7 +495,10 @@ class TestComputeGateDecision:
         call sites computing exit_code and blocking_categories from two
         different change sets, e.g. one --show-only-filtered and one not,
         and disagreeing as a result)."""
-        from abicheck.severity import compute_gate_decision, resolve_severity_config
+        from abicheck.policy.severity import (
+            compute_gate_decision,
+            resolve_severity_config,
+        )
 
         cfg = resolve_severity_config("default", addition="error")
         changes = [
@@ -516,8 +522,8 @@ def test_classify_effective_change_verdict_shortcut_is_honored() -> None:
     to prove the shortcut is actually used, not merely accepted and
     ignored."""
     from abicheck.checker_policy import Verdict
-    from abicheck.checker_types import Change
-    from abicheck.severity import classify_effective_change
+    from abicheck.model.change import Change
+    from abicheck.policy.severity import classify_effective_change
 
     change = Change(ChangeKind.FUNC_ADDED, "_Z3newv", "new public function")
     # The real (default-policy) resolution is COMPATIBLE/ADDITION.

@@ -47,10 +47,10 @@ from abicheck.effective_config_digest import (
     effective_config_digest,
     effective_config_fields_from_raw,
 )
+from abicheck.policy.reclassify import ReclassifyRule
+from abicheck.policy.severity import resolve_severity_config
 from abicheck.policy_file import PolicyFile
-from abicheck.reclassify import ReclassifyRule
 from abicheck.reporter import to_json
-from abicheck.severity import resolve_severity_config
 
 
 def _identity(

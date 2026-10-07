@@ -38,7 +38,7 @@ from .demangle import demangle, demangle_batch
 from .model.change_catalog.kinds import ChangeKind
 
 if TYPE_CHECKING:
-    from .checker_types import Change
+    from .model.change import Change
 
 #: Collapse every digit run to a placeholder so two names that differ only by a
 #: version number share a normalized form (``u_strlen_75`` ~ ``u_strlen_78``).
@@ -195,7 +195,7 @@ def _match_version_renames(
 
 def _build_scheme_advisory(pairs: int, eligible: int) -> Change:
     """Build the single ``versioned_symbol_scheme_detected`` advisory finding."""
-    from .checker_types import Change
+    from .model.change import Change
 
     return Change(
         kind=ChangeKind.VERSIONED_SYMBOL_SCHEME_DETECTED,

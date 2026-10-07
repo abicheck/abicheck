@@ -42,7 +42,6 @@ from click.testing import CliRunner
 
 from abicheck.checker import compare
 from abicheck.checker_policy import ChangeKind, Verdict
-from abicheck.checker_types import Change
 from abicheck.cli import main
 from abicheck.contract_relevance_types import (
     CompatibilityEvaluationStatus,
@@ -55,6 +54,15 @@ from abicheck.model import (
     ScopeOrigin,
     TypeField,
     Visibility,
+)
+from abicheck.model.change import Change
+from abicheck.policy.severity import (
+    SeverityConfig,
+    SeverityLevel,
+    compute_exit_code,
+    compute_gate_decision,
+    gate_contribution_for_change,
+    legacy_exit_code,
 )
 from abicheck.serialization import snapshot_to_json
 
@@ -150,7 +158,7 @@ class TestRelevanceRunsBeforePolicy:
         """The other half of the sentence above: not a break, not green
         either. Anything else would make missing evidence the cheapest way to
         pass."""
-        from abicheck.contract_coverage_exit import coverage_exit_floor
+        from abicheck.policy.contract_coverage_exit import coverage_exit_floor
 
         result = compare(
             *_removal_pair(), contract_evaluation=True, contract_mode="exports"
@@ -224,7 +232,10 @@ class TestTheCanonicalPerFindingShape:
         """The compatibility guarantee, stated at the predicate every
         consumer reads: no opt-in means no relevance, and no relevance means
         the legacy answer."""
-        from abicheck.contract_gating import evaluation_status_of, is_evaluated
+        from abicheck.model.contract_finding_relevance import (
+            evaluation_status_of,
+            is_evaluated,
+        )
 
         change = Change(ChangeKind.FUNC_REMOVED, "pub", "removed")
         assert change.contract_relevance is None
@@ -234,12 +245,6 @@ class TestTheCanonicalPerFindingShape:
 
 class TestTheGateFollowsTheDecision:
     def test_a_not_evaluated_finding_contributes_nothing_to_the_gate(self) -> None:
-        from abicheck.severity import (
-            SeverityConfig,
-            SeverityLevel,
-            compute_exit_code,
-            gate_contribution_for_change,
-        )
 
         config = SeverityConfig(abi_breaking=SeverityLevel.ERROR)
         result = _compare(
@@ -252,12 +257,6 @@ class TestTheGateFollowsTheDecision:
         assert compute_exit_code(result.changes, config) == 0
 
     def test_the_identical_finding_gates_when_it_is_in_contract(self) -> None:
-        from abicheck.severity import (
-            SeverityConfig,
-            SeverityLevel,
-            compute_exit_code,
-            gate_contribution_for_change,
-        )
 
         config = SeverityConfig(abi_breaking=SeverityLevel.ERROR)
         result = _compare(
@@ -273,11 +272,6 @@ class TestTheGateFollowsTheDecision:
         """`compute_gate_decision` exists so these two cannot disagree; the
         exclusion has to be applied to both or it reintroduces exactly that
         bug."""
-        from abicheck.severity import (
-            SeverityConfig,
-            SeverityLevel,
-            compute_gate_decision,
-        )
 
         config = SeverityConfig(abi_breaking=SeverityLevel.ERROR)
         result = _compare(
@@ -292,7 +286,6 @@ class TestTheGateFollowsTheDecision:
     def test_a_legacy_scheme_contribution_folds_to_the_legacy_exit(self) -> None:
         """The per-finding number must be the one the run exits on, under the
         scheme that has no severity config to read."""
-        from abicheck.severity import gate_contribution_for_change, legacy_exit_code
 
         result = _compare(
             _unreached_public_type_pair(),
@@ -1059,7 +1052,6 @@ class TestTheReleaseRecommendationDoesNotOverclaim:
         """`Exit Impact` is a claim about the gate, so it has to be
         classified over the set the gate scores — not over every change."""
         from abicheck.reporter_markdown import to_markdown
-        from abicheck.severity import SeverityConfig, compute_exit_code
 
         config = SeverityConfig()
         result = _compare(
@@ -1198,7 +1190,6 @@ class TestEveryReportModeStatesTheSameGateContribution:
         self, report_mode: str
     ) -> None:
         from abicheck import reporter
-        from abicheck.severity import SeverityConfig
 
         result = _compare(
             self._reachable_type_pair(),
@@ -1253,9 +1244,9 @@ class TestExplicitConsumerEvidencePromotesAFinding:
         return change
 
     def test_promotion_carries_status_and_decision(self) -> None:
-        from abicheck.contract_gating import is_evaluated
         from abicheck.contract_scoped_promotion import stamp_scoped_result_findings
         from abicheck.finding_identity import report_finding_id
+        from abicheck.model.contract_finding_relevance import is_evaluated
 
         change = self._unresolved_removal()
         assert change.contract_relevance is ContractRelevance.UNKNOWN_UNRESOLVED

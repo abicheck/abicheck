@@ -43,6 +43,7 @@ from abicheck.buildsource.export_declaration_evidence import (
 from abicheck.checker_policy import ChangeKind, Confidence
 from abicheck.elf_metadata import ElfMetadata, ElfSymbol
 from abicheck.model import AbiSnapshot, Function, RecordType, ScopeOrigin
+from abicheck.model.evidence_status import CrossSourceEvolution
 from abicheck.model.export_entity_name import (
     PublicTemplateScopes,
     entity_name_components,
@@ -50,7 +51,6 @@ from abicheck.model.export_entity_name import (
     public_template_scopes,
 )
 from abicheck.model.mangled_name_template_args import skip_template_args
-from abicheck.policy.evidence_status import CrossSourceEvolution
 from abicheck.report.change_operation import operation_for_change
 
 # --------------------------------------------------------------------------- #

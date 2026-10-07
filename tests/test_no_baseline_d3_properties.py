@@ -46,9 +46,9 @@ from __future__ import annotations
 from hypothesis import HealthCheck, given, settings, strategies as st
 
 from abicheck.checker_policy import ChangeKind, CrossSourceEvolution
-from abicheck.checker_types import Change
 from abicheck.elf_metadata import ElfMetadata, ElfSymbol
 from abicheck.model import AbiSnapshot, Function, RecordType, ScopeOrigin, Variable
+from abicheck.model.change import Change
 from abicheck.policy.no_baseline_findings import (
     NoBaselineInvariantError,
     is_one_sided_finding,

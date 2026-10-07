@@ -45,13 +45,6 @@
       "review_by": "2026-12-15"
     },
     {
-      "path": "abicheck/contract_gating.py",
-      "disposition": "retain",
-      "supported_reason": "ADR-061 gap B moved the real implementation this record's trial run targeted: ADR-049 D1's shared verdict/gate leaf predicate (the same one checker._compute_verdict_for and severity.compute_exit_code/compute_gate_decision share) now lives in policy/contract_finding_relevance.py. What remains is a 45-line pure re-export facade preserving every existing `from abicheck.contract_gating import ...` path. It stays unclassified rather than moving into `model` or `policy` because the direction conflict this record's trial run measured is unchanged: `model`-classified checker_types.py and frontends' cli_scan_baseline.py both still import the facade module directly, and model -> policy is still forbidden (model.may_import is empty) -- classifying the facade itself into either layer would reproduce the violation the real implementation's move was meant to resolve.",
-      "owner": "abicheck maintainers",
-      "review_by": "2027-03-01"
-    },
-    {
       "path": "abicheck/deadline.py",
       "disposition": "accept",
       "reason": "Scan-wide deadline propagation and process-group-safe subprocess execution, genuinely reached directly today from storage (dumper_cache.py), extract, frontends (cli.py, cli_compare_helpers.py), and workflows alike. D1 explicitly forbids `model` -- the only layer every one of those callers may reach without a new violation -- from owning subprocess execution, and no other single layer's may_import list can admit all four real caller layers at once (trial classification into `extract` measured 5 new violations, including a new extract <-> storage responsibility cycle, since storage may only import model). This is a genuine cross-cutting infrastructure primitive, not a business-logic module any one responsibility package should claim; it is retained as an unclassified root leaf, the same way this repository already treats config-location and error-type leaves.",
@@ -112,13 +105,6 @@
       "rationale": "frontends imports this module directly across dozens of call sites (cli_compare_receipt.py alone three times, plus cli_compare_release*.py and cli_scan_*.py). Trial classification into `policy` measured 41 new frontends -> policy violations -- by far the largest of any module in this ledger. Needs those call sites routed through workflows first, mirroring gap A's own cli_dump_helpers.py precedent, before this file can move.",
       "owner": "abicheck maintainers",
       "review_by": "2026-12-15"
-    },
-    {
-      "path": "abicheck/reclassify.py",
-      "disposition": "retain",
-      "supported_reason": "ADR-061 gap B moved the real implementation this record's trial run targeted: 'the third policy-file primitive', alongside its sibling policy-classified policy_file.py/suppression.py, now lives in policy/reclassify.py. What remains is a 53-line pure re-export facade preserving every existing `from abicheck.reclassify import ...` path. It stays unclassified rather than moving into `model` or `policy` because the direction conflict this record's trial run measured is unchanged -- model-classified checker_types.py still imports the facade module directly, and model -> policy is still forbidden -- and checker_policy.py, the sibling record this one was blocked on, closed the same way (its own real implementation moved, its facade stayed unclassified for the identical reason), not by both facades' classification changing.",
-      "owner": "abicheck maintainers",
-      "review_by": "2027-03-01"
     },
     {
       "path": "abicheck/serialization.py",

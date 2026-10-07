@@ -41,10 +41,10 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
-from .checker_types import Change
 from .diff_helpers import make_change
 from .diff_versioning import _parse_dotted_numeric_version, _version_le
 from .model.binary_naming import strip_vendor_hash
+from .model.change import Change
 from .model.change_catalog.kinds import ChangeKind
 from .model.elf_facts import ElfMetadata
 from .model.macho_facts import MachoMetadata

@@ -1030,8 +1030,8 @@ class TestFindingIdentityIsCheckoutPathInvariant:
         )
 
         from abicheck.checker_policy import ChangeKind
-        from abicheck.checker_types import Change
         from abicheck.finding_identity import report_canonical_finding_id
+        from abicheck.model.change import Change
 
         def _template_param_change(spelling: str) -> Change:
             return Change(

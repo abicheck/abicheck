@@ -283,7 +283,7 @@ class TestCompareRequestContractContextGateReceipt:
         result = self._run(old, new)
         cfg = result.diff.contract_context.evaluation_context.resolved_config
         assert cfg.gate.exit_code_scheme == "legacy"
-        from abicheck.severity import SeverityConfig
+        from abicheck.policy.severity import SeverityConfig
 
         assert isinstance(cfg.gate.severity, SeverityConfig)
 

@@ -19,21 +19,14 @@
 :class:`CrossSourceEvolution`, plus :func:`is_cross_source_resolved` and
 :func:`has_binary_evidence`.
 
-ADR-061 gap B (`abicheck/checker_policy.py`'s own split): this module is a
-genuinely dependency-free leaf (zero ``abicheck`` imports, deliberately) —
-the pair of functions that actually *derive* an :class:`EvidenceStatus` from
-a finding's ``ChangeKind`` (:func:`~abicheck.policy.classification.
-evidence_status_for_change`/:func:`~abicheck.policy.classification.
-evidence_status_for_result`) need :mod:`abicheck.policy.classification`'s
-kind-set data, so they live there instead — keeping them here would close an
-import cycle (``classification`` already needs this module's
-:class:`EvidenceStatus` for :func:`~abicheck.policy.classification.
-impact_for`). Both modules are re-exported, unchanged, from the flat
-``abicheck/checker_policy.py`` compatibility facade, which is the module
-`model`-layer code (via the `model`-owned, legacy ``checker_types.
-DiffResult``) continues to import — see that facade's own module docstring
-for why it stays a flat, unclassified root module rather than a
-`legacy_paths` entry under this package.
+These are finding *vocabulary*: field types of ``Change`` and its
+aggregates, so the model owns them (ADR-061 gap B moved them out of
+``checker_policy.py``; the architecture-deepening plan moved them from
+``policy`` to ``model`` so lower layers stop reaching into ``policy`` for
+them). The module stays a dependency-free leaf with zero ``abicheck``
+imports. The functions that *derive* an :class:`EvidenceStatus` from a
+finding's ``ChangeKind`` need :mod:`abicheck.policy.classification`'s
+kind-set data, so they live there.
 """
 
 from __future__ import annotations

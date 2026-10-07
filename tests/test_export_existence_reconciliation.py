@@ -45,10 +45,10 @@ from abicheck.buildsource.export_declaration_evidence import (
 )
 from abicheck.checker import compare
 from abicheck.checker_policy import ChangeKind
-from abicheck.checker_types import Change
 from abicheck.elf_metadata import ElfMetadata, ElfSymbol, SymbolType
 from abicheck.model import AbiSnapshot, Function, ScopeOrigin
-from abicheck.policy.evidence_status import CrossSourceEvolution
+from abicheck.model.change import Change
+from abicheck.model.evidence_status import CrossSourceEvolution
 from abicheck.policy.export_existence_fold import CAUSED_BY_PREFIX, fold_partner
 from abicheck.workflows.export_existence_wording import (
     existence_description,

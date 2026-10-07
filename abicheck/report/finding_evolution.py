@@ -52,10 +52,11 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from ..policy.evidence_status import FindingEvolution
+from ..model.evidence_status import FindingEvolution
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
-    from ..checker_types import Change, DiffResult
+    from ..checker_types import DiffResult
+    from ..model.change import Change
 
 
 @dataclass(frozen=True)

@@ -64,19 +64,16 @@ from enum import Enum
 
 from ..errors import PolicyError as PolicyError
 from ..model.change_catalog.kinds import ChangeKind as ChangeKind, HasKind as HasKind
-from .classification import (
-    ADDITION_KINDS as ADDITION_KINDS,
-    Verdict as Verdict,
-)
-from .contract_finding_relevance import is_evaluated as is_evaluated
-from .evidence_status import is_cross_source_resolved as is_cross_source_resolved
+from ..model.contract_finding_relevance import is_evaluated as is_evaluated
+from ..model.evidence_status import is_cross_source_resolved as is_cross_source_resolved
+from .classification import ADDITION_KINDS as ADDITION_KINDS, Verdict as Verdict
 
 # ADR-061 Phase 2: the per-change effective-verdict resolver, its disclosure
 # sibling, and the kind-set alias/resolver they share now live in
 # ``reclassify.py`` -- the leaf ``checker_types.DiffResult`` (``compare``) and
 # this module (``policy``) may both depend on, since the dependency contract
 # forbids the first importing the second. Re-exported through the redundant-
-# alias form so ``abicheck.severity.effective_verdict_for_change`` /
+# alias form so ``abicheck.policy.severity.effective_verdict_for_change`` /
 # ``reclassify_rule_for_change`` / ``KindSets`` keep working unchanged for
 # every existing caller; see ``reclassify.py``'s docstring for the reasoning.
 from .reclassify import (

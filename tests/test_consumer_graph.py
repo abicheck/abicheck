@@ -41,7 +41,7 @@ from abicheck.buildsource.source_graph import (
     _symbol_node_id,
 )
 from abicheck.checker_policy import ChangeKind, Verdict
-from abicheck.checker_types import Change, DiffResult
+from abicheck.checker_types import DiffResult
 from abicheck.elf_metadata import ElfMetadata, ElfSymbol
 from abicheck.impact.consumer_graph import (
     CONSUMER_EDGE_KINDS,
@@ -54,6 +54,7 @@ from abicheck.impact.consumer_graph import (
     symbol_node_id,
 )
 from abicheck.model import AbiSnapshot
+from abicheck.model.change import Change
 
 _DISPATCHER = "_ZN6detail21train_ops_dispatcherEv"
 

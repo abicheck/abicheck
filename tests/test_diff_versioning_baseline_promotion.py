@@ -41,12 +41,12 @@ from __future__ import annotations
 import pytest
 
 from abicheck.checker import ChangeKind, Verdict, compare
-from abicheck.checker_types import Change
 from abicheck.diff_helpers import make_change
 from abicheck.diff_versioning import promote_baseline_violation_findings
 from abicheck.elf_metadata import ElfMetadata
 from abicheck.environment_matrix import EnvironmentMatrix
 from abicheck.model import AbiSnapshot
+from abicheck.model.change import Change
 
 
 def _elf(**kwargs) -> ElfMetadata:

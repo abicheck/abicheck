@@ -140,7 +140,7 @@ def _compare_case(workload: str) -> Callable[[int, str], Callable[[], object]]:
 
 def _policy_prepare(n: int, tag: str) -> Callable[[], object]:
     from abicheck.checker_policy import ChangeKind
-    from abicheck.checker_types import Change
+    from abicheck.model.change import Change
     from abicheck.policy.classification import (
         compute_verdict,
         effective_category,

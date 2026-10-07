@@ -20,7 +20,6 @@ import re
 from collections import deque
 from collections.abc import Mapping
 
-from .checker_types import SYMBOL_VERSION_ALIAS_NOT_RETAINED_MARKER, Change
 from .compare.dedup_key import hashable_value
 from .compare.opaque_struct_downgrade import (
     OPAQUE_DOWNGRADEABLE_KINDS,
@@ -43,6 +42,7 @@ from .diff_helpers import (
 from .diff_symbols import _public_functions
 from .finding_identity import resolve_change_identity
 from .model import AbiSnapshot, Function
+from .model.change import SYMBOL_VERSION_ALIAS_NOT_RETAINED_MARKER, Change
 from .model.change_catalog.kinds import ChangeKind
 from .model.identity import EntityId
 from .model.name_heuristics import NameHeuristicEffect, register_name_heuristic

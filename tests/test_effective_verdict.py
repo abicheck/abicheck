@@ -27,7 +27,8 @@ from abicheck.checker_policy import (
     has_binary_evidence,
     policy_kind_sets,
 )
-from abicheck.checker_types import Change, DiffResult
+from abicheck.checker_types import DiffResult
+from abicheck.model.change import Change
 
 
 def _change(kind: ChangeKind, **kw: object) -> Change:

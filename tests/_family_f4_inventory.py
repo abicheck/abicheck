@@ -64,6 +64,8 @@ SCAN_GLOBS = (
     "export_surface*.py",
     # Owner of the internal-namespace vocabulary every one of those reads.
     "model/symbol_ownership.py",
+    # The finding record (moved out of the scanned checker_types.py).
+    "model/change.py",
 )
 
 _VOCAB_NAME = re.compile(

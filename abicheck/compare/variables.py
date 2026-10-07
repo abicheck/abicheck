@@ -78,7 +78,7 @@ from .declined_comparisons import record_declined
 from .detection_memo import memoized
 
 if TYPE_CHECKING:
-    from ..checker_types import Change
+    from ..model.change import Change
     from ..model.declarations import Variable
     from ..model.identity import EntityId
 

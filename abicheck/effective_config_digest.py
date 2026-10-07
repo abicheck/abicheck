@@ -100,7 +100,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from .policy.effective_gate import EffectiveGate
-    from .severity import SeverityConfig
+    from .policy.severity import SeverityConfig
 
 #: Stable, ordered key set the digest is hashed over. Extending this tuple
 #: is additive (a new field just starts contributing to future digests);

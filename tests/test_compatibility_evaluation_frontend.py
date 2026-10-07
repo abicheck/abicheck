@@ -69,9 +69,9 @@ from abicheck.compatibility_evaluation_resolver import (
 from abicheck.compatibility_evaluation_wiring import resolve_pack_field_assignments
 from abicheck.contract_relevance_types import ContractMode, SelectorLayer
 from abicheck.errors import PackManifestError
+from abicheck.policy.severity import SeverityLevel, resolve_severity_config
 from abicheck.policy_file import PolicyFile
 from abicheck.service import CompareRequest, InputSpec
-from abicheck.severity import SeverityLevel, resolve_severity_config
 
 
 class TestDefaults:

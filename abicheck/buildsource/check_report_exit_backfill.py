@@ -92,7 +92,7 @@ def backfill_exit_block_fields(out: dict[str, Any]) -> None:
     elif "exit" not in diff and "reason" in diff:
         # Pre-1.22 NOT_COMPARABLE scan diff -- no `exit` key existed at all
         # (Codex review, fresh evidence).
-        from ..exit_decision import resolve_scan_exit_decision
+        from ..policy.exit_decision_precedence import resolve_scan_exit_decision
 
         not_comparable_decision = resolve_scan_exit_decision(not_comparable=True)
         if not_comparable_decision is not None:

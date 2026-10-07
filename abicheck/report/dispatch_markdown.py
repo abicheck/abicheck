@@ -50,7 +50,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from ..checker_types import DiffResult
-    from ..severity import SeverityConfig
+    from ..policy.severity import SeverityConfig
     from .envelope import ReportEnvelope
 
 

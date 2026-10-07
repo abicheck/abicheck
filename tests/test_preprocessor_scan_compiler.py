@@ -31,8 +31,8 @@ from abicheck.model import AbiSnapshot
 from abicheck.serialization import load_snapshot, save_snapshot
 from abicheck.service import InputSpec
 from abicheck.service_compare_evidence import SideEvidence
-from abicheck.service_input_resolution import embed_side_build_source
 from abicheck.workflows import pattern_preprocessor_scan as scan_mod
+from abicheck.workflows.artifact.execute import embed_side_build_source
 
 _ON_PATH_PREFIX = "aarch64-linux-gnu-"
 _COMPILERS = (

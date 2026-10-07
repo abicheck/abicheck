@@ -23,9 +23,10 @@ from abicheck.report.render_review import (
 
 def test_direct_severity_digest_reports_the_computed_gate() -> None:
     from abicheck.checker_policy import ChangeKind, Verdict
-    from abicheck.checker_types import Change, DiffResult
+    from abicheck.checker_types import DiffResult
+    from abicheck.model.change import Change
+    from abicheck.policy.severity import resolve_severity_config
     from abicheck.reporter import to_review_digest
-    from abicheck.severity import resolve_severity_config
 
     result = DiffResult(
         "1",
@@ -48,7 +49,8 @@ def test_show_only_copies_still_build_review_groups_in_json_and_markdown() -> No
     import json
 
     from abicheck.checker_policy import ChangeKind, Verdict
-    from abicheck.checker_types import Change, DiffResult
+    from abicheck.checker_types import DiffResult
+    from abicheck.model.change import Change
     from abicheck.reporter import to_json, to_markdown
 
     layout = Change(

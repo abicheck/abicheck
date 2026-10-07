@@ -20,8 +20,8 @@ import itertools
 import pytest
 
 from abicheck.checker_policy import ChangeKind
-from abicheck.checker_types import Change
 from abicheck.model import AbiSnapshot
+from abicheck.model.change import Change
 from abicheck.post_processing import (
     DemoteUnreachableInternalChurn,
     EscalateFrozenNamespaceViolations,

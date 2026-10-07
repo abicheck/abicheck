@@ -475,13 +475,13 @@ REQUIREMENTS: tuple[Requirement, ...] = (
             # checker_policy.py's other gap-B owner: has_binary_evidence()/
             # is_cross_source_resolved() feed policy.classification's/
             # severity.py's own gate decisions.
-            "policy/evidence_status",
+            "model/evidence_status",
             "severity",
             "contract_gating",
             # ADR-061 gap B: contract_gating.py's real logic moved to
-            # policy/contract_finding_relevance.py; contract_gating.py is now
+            # model/contract_finding_relevance.py; contract_gating.py is now
             # a re-export facade.
-            "policy/contract_finding_relevance",
+            "model/contract_finding_relevance",
             "exit",
         ),
     ),

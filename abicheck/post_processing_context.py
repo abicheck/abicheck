@@ -36,8 +36,8 @@ from typing import TYPE_CHECKING
 from .model.change_catalog.kinds import ChangeKind
 
 if TYPE_CHECKING:
-    from .checker_types import Change
     from .model import AbiSnapshot
+    from .model.change import Change
     from .policy.disposition_ledger import DispositionLedger
     from .suppression import SuppressionList
     from .surface import PublicSurface

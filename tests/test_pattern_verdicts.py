@@ -28,7 +28,6 @@ import pytest
 
 from abicheck import checker
 from abicheck.checker_policy import ChangeKind, EvidenceTier, Verdict
-from abicheck.checker_types import Change
 from abicheck.model import (
     AbiSnapshot,
     AccessLevel,
@@ -38,6 +37,7 @@ from abicheck.model import (
     TypeField,
     Visibility,
 )
+from abicheck.model.change import Change
 from abicheck.pattern_verdicts import apply_pattern_verdicts
 from abicheck.suppression import Suppression, SuppressionList
 
@@ -783,9 +783,9 @@ def test_cli_no_modulations_is_quiet(tmp_path) -> None:
 
 def test_cross_output_completeness_for_demoted_finding() -> None:
     from abicheck.junit_report import to_junit_xml
+    from abicheck.policy.severity import PRESET_DEFAULT, compute_exit_code
     from abicheck.reporter import to_json
     from abicheck.sarif import to_sarif_str
-    from abicheck.severity import PRESET_DEFAULT, compute_exit_code
 
     old = _opaque_snapshot(opaque=True, size=None)
     new = _opaque_snapshot(opaque=True, size=None)

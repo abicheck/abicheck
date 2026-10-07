@@ -86,7 +86,7 @@ from .no_baseline_document import (
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
 
-    from ..checker_types import Change
+    from ..model.change import Change
     from ..policy.scope_completeness import ScopeDecision
     from ..workflows.no_baseline_compare import NoBaselineCompareResult
     from .finding import ReportFinding

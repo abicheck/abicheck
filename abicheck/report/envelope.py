@@ -81,8 +81,9 @@ from typing import TYPE_CHECKING
 from .finding import ReportFinding, build_report_findings
 
 if TYPE_CHECKING:
-    from ..checker_types import Change, DiffResult
+    from ..checker_types import DiffResult
     from ..model import AbiSnapshot
+    from ..model.change import Change
     from ..policy.severity import GateDecision, SeverityConfig
     from .document import ReportDocument
 

@@ -1260,7 +1260,7 @@ def test_seeded_includes_never_forwards_build_query_without_explicit_permission(
     permission question. Lives here rather than in test_header_compile_
     context.py (which sits at its 2000-line hard cap)."""
     from abicheck.service_compare_evidence import SideEvidence
-    from abicheck.service_input_resolution import _seeded_includes_and_compile_context
+    from abicheck.workflows.artifact.resolve import _seeded_includes_and_compile_context
 
     captured: dict[str, object] = {}
 
@@ -1429,10 +1429,8 @@ class TestSharedPipelineReachesADR039BuildContextCollector:
         self, monkeypatch, tmp_path: Path
     ) -> None:
         import abicheck.workflows.input_resolution as _input_resolution
-        from abicheck import (
-            service_input_resolution as sir,
-        )
         from abicheck.service_compare_evidence import SideEvidence
+        from abicheck.workflows.artifact import execute as sir
 
         hdr = tmp_path / "widget.h"
         hdr.write_text(
@@ -1484,10 +1482,8 @@ class TestSharedPipelineReachesADR039BuildContextCollector:
         for the raw linker-script text) while the resolved snapshot is a
         real ELF one."""
         import abicheck.workflows.input_resolution as _input_resolution
-        from abicheck import (
-            service_input_resolution as sir,
-        )
         from abicheck.service_compare_evidence import SideEvidence
+        from abicheck.workflows.artifact import execute as sir
 
         hdr = tmp_path / "widget.h"
         hdr.write_text(
@@ -1533,10 +1529,8 @@ class TestSharedPipelineReachesADR039BuildContextCollector:
         skipped by ``collect_build_context``, leaving ``conditional_fields``
         empty for the common directory-``-H`` case)."""
         import abicheck.workflows.input_resolution as _input_resolution
-        from abicheck import (
-            service_input_resolution as sir,
-        )
         from abicheck.service_compare_evidence import SideEvidence
+        from abicheck.workflows.artifact import execute as sir
 
         include_dir = tmp_path / "include"
         include_dir.mkdir()
@@ -1587,11 +1581,9 @@ class TestSharedPipelineReachesADR039BuildContextCollector:
         internally -- else a build-derived define would be unioned
         snapshot-wide (the ninth finding in AGENTS.md's L3->L2-fold entry)."""
         import abicheck.workflows.input_resolution as _input_resolution
-        from abicheck import (
-            header_conditionals as _hc,
-            service_input_resolution as sir,
-        )
+        from abicheck import header_conditionals as _hc
         from abicheck.service_compare_evidence import SideEvidence
+        from abicheck.workflows.artifact import execute as sir
 
         hdr = tmp_path / "widget.h"
         hdr.write_text("struct Widget { int x; };\n", encoding="utf-8")
@@ -1655,11 +1647,9 @@ class TestSharedPipelineReachesADR039BuildContextCollector:
         """No ``build_info`` at all: the collector must not run (and must not
         raise) -- a plain context-free dump is still the common case."""
         import abicheck.workflows.input_resolution as _input_resolution
-        from abicheck import (
-            header_conditionals as _hc,
-            service_input_resolution as sir,
-        )
+        from abicheck import header_conditionals as _hc
         from abicheck.service_compare_evidence import SideEvidence
+        from abicheck.workflows.artifact import execute as sir
 
         hdr = tmp_path / "widget.h"
         hdr.write_text("struct Widget { int x; };\n", encoding="utf-8")
@@ -1703,11 +1693,9 @@ class TestSharedPipelineReachesADR039BuildContextCollector:
         Mach-O snapshot, or it would silently disagree with the native
         PE/Mach-O dump path."""
         import abicheck.workflows.input_resolution as _input_resolution
-        from abicheck import (
-            header_conditionals as _hc,
-            service_input_resolution as sir,
-        )
+        from abicheck import header_conditionals as _hc
         from abicheck.service_compare_evidence import SideEvidence
+        from abicheck.workflows.artifact import execute as sir
 
         hdr = tmp_path / "widget.h"
         hdr.write_text("struct Widget { int x; };\n", encoding="utf-8")
@@ -1755,11 +1743,9 @@ class TestSharedPipelineReachesADR039BuildContextCollector:
         unfiltered ``source_filter=None`` for a real compile database +
         headers, rather than raising or narrowing."""
         import abicheck.workflows.input_resolution as _input_resolution
-        from abicheck import (
-            header_conditionals as _hc,
-            service_input_resolution as sir,
-        )
+        from abicheck import header_conditionals as _hc
         from abicheck.service_compare_evidence import SideEvidence
+        from abicheck.workflows.artifact import execute as sir
 
         hdr = tmp_path / "widget.h"
         hdr.write_text("struct Widget { int x; };\n", encoding="utf-8")
@@ -1813,11 +1799,9 @@ class TestSharedPipelineReachesADR039BuildContextCollector:
         unrelated data -- ``side.path`` here is a JSON file, not an ELF
         binary or a followed linker script, so the collector must not run."""
         import abicheck.workflows.input_resolution as _input_resolution
-        from abicheck import (
-            header_conditionals as _hc,
-            service_input_resolution as sir,
-        )
+        from abicheck import header_conditionals as _hc
         from abicheck.service_compare_evidence import SideEvidence
+        from abicheck.workflows.artifact import execute as sir
 
         hdr = tmp_path / "widget.h"
         hdr.write_text("struct Widget { int x; };\n", encoding="utf-8")

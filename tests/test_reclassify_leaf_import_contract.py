@@ -29,7 +29,7 @@ from __future__ import annotations
 import ast
 import inspect
 
-import abicheck.reclassify as reclassify_module
+import abicheck.policy.reclassify as reclassify_module
 
 
 class TestNoImportlibWorkaround:

@@ -45,7 +45,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from ..checker_types import Change
+from ..model.change import Change
 from .kind_rollup import KindRollup
 
 

@@ -16,7 +16,6 @@ import pytest
 
 from abicheck.checker import compare
 from abicheck.checker_policy import ChangeKind
-from abicheck.checker_types import Change
 from abicheck.model import (
     AbiSnapshot,
     EnumType,
@@ -26,6 +25,7 @@ from abicheck.model import (
     ScopeOrigin,
     Visibility,
 )
+from abicheck.model.change import Change
 from abicheck.policy.public_surface_closure import resolve_public_surface
 from abicheck.reporter import to_json
 from abicheck.sarif import to_sarif

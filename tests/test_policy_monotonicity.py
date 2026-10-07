@@ -29,7 +29,7 @@ from abicheck.checker_policy import (
     Verdict,
     compute_verdict,
 )
-from abicheck.checker_types import Change
+from abicheck.model.change import Change
 
 # Severity ladder (low → high). compute_verdict must never move a set down it.
 _SEVERITY = {

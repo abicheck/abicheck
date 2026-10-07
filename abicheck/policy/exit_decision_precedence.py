@@ -18,13 +18,8 @@
 Split out of :mod:`abicheck.policy.exit_decision` (Codex review: the
 combined module grew to 824 lines against this package's 800-line
 production cap -- `abicheck/policy/AGENTS.md`'s own "Conventions" section).
-New module, not a moved flat-path shim -- there is no legacy
-``abicheck.exit_decision_precedence`` to preserve, since these functions
-did not exist before ADR-064 -- but its own public names (``resolve_scan_
-exit_decision``, ``resolve_release_exit_decision``) still reach
-``abicheck.exit_decision``'s flat shim via a re-export, per that module's
-"re-export the moved module's full public surface" contract, since the two
-functions moved *out of* the module the shim mirrors.
+New module, not a moved flat-path one: these functions did not exist
+before ADR-064, so callers import them from here directly.
 
 See ``exit_decision.py``'s own module docstring for what ADR-064 is and
 what stage this additive work belongs to; this module implements the same

@@ -80,7 +80,7 @@ import yaml
 from .selectors import SelectorSet
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
-    from ..checker_types import Change
+    from ..model.change import Change
 
 #: Keys an acknowledgment entry may carry. Deliberately excludes every
 #: *broad*-shaped suppression selector (``symbol_pattern``, ``type_pattern``,

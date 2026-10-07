@@ -105,7 +105,7 @@ from abicheck.checker_policy import (  # noqa: E402
     policy_for,
     policy_kind_sets,
 )
-from abicheck.checker_types import Change  # noqa: E402
+from abicheck.model.change import Change  # noqa: E402
 
 
 def _change(kind: ChangeKind) -> Change:

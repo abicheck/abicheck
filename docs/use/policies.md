@@ -10,7 +10,6 @@ depends_on:
   - abicheck/policy_file.py
   - abicheck/checker_policy.py
   - abicheck/policy/classification.py
-  - abicheck/reclassify.py
   - abicheck/policy/reclassify.py
 lifecycle: active
 generated: false

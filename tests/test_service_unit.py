@@ -2435,7 +2435,7 @@ class TestCompareRequestAdr055Evidence:
         silently produce an ordinary artifact-only compatible verdict."""
         import abicheck.workflows.compare_policy as compare_policy_mod
         from abicheck.checker_policy import ChangeKind
-        from abicheck.checker_types import Change
+        from abicheck.model.change import Change
 
         old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
         new_p = self._make_snap_file(tmp_path, "libtest", "2.0")

@@ -12,8 +12,8 @@ import pytest
 
 from abicheck.checker import DiffResult, Verdict
 from abicheck.effective_config_digest import effective_config_fields_from_raw
+from abicheck.policy.severity import resolve_severity_config
 from abicheck.reporter_contract_blocks import add_effective_config_digest
-from abicheck.severity import resolve_severity_config
 
 
 def _result() -> DiffResult:

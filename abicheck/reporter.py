@@ -24,12 +24,13 @@ from typing import TYPE_CHECKING, Any, cast
 if TYPE_CHECKING:
     from datetime import date
 
-    from .severity import GateDecision, KindSets, SeverityConfig
+    from .policy.severity import GateDecision, KindSets, SeverityConfig
 from . import reporter_contract_blocks as _reporter_contract_blocks
 from .checker import Change, DiffResult, Verdict
-from .checker_types import validate_check_id, validate_evidence_depth
 from .impact import assess_change
+from .model.change import validate_check_id, validate_evidence_depth
 from .model.change_catalog.kinds import ChangeKind, HasKind
+from .model.evidence_status import EvidenceStatus
 from .policy.classification import (
     evidence_status_for_result,
     impact_for,
@@ -37,7 +38,6 @@ from .policy.classification import (
 )
 from .policy.disposition_close import ledger_for
 from .policy.disposition_ledger import RuleProvenance
-from .policy.evidence_status import EvidenceStatus
 from .policy.gate_decision import gate_decision_for_result
 from .report.change_annotations import (
     change_annotation_fields as _change_annotation_fields,
@@ -704,7 +704,7 @@ def _add_show_only_filter(
     finding). ``total_changes`` stays inclusive, matching the main summary's
     own rule: it counts what the filter *displays*, not what gated.
     """
-    from .policy.contract_finding_relevance import is_evaluated
+    from .model.contract_finding_relevance import is_evaluated
 
     d["show_only_filter"] = show_only
     scored = [c for c in changes if is_evaluated(c)]
@@ -1113,7 +1113,7 @@ def _recommended_action_for_change(
     - ``COMPATIBLE`` additions → ``no_action_required``
     - ``COMPATIBLE`` non-additions (quality issues) → ``review_recommended``
     """
-    from .severity import (
+    from .policy.severity import (
         IssueCategory,
         classify_effective_change,
         effective_verdict_for_change,
@@ -1181,7 +1181,7 @@ def _reviewer_action_for_change(
     Returns ``None`` for every non-addition finding, since those already
     have reviewer-actionable guidance via ``recommended_action`` itself.
     """
-    from .severity import IssueCategory, classify_effective_change
+    from .policy.severity import IssueCategory, classify_effective_change
 
     category = classify_effective_change(
         cast(HasKind, c),
@@ -1245,7 +1245,7 @@ def _reclassified_by_for_change(
     *today*, forwarded there, keeps this agreeing with an already-frozen
     ``ReportEnvelope`` (Codex review, fresh evidence).
     """
-    from .severity import reclassify_rule_for_change
+    from .policy.severity import reclassify_rule_for_change
 
     rule = reclassify_rule_for_change(cast(HasKind, c), policy_file, today)
     if rule is None:
@@ -1429,7 +1429,7 @@ def _change_to_dict(
 
     ``severity_config`` is the run's resolved gate configuration, when it has
     one — it decides ADR-049's per-finding ``gate_contribution`` (see the call
-    to :func:`~abicheck.severity.gate_contribution_for_change` below). ``None``
+    to :func:`~abicheck.policy.severity.gate_contribution_for_change` below). ``None``
     means the legacy verdict-based scheme, not "no gate".
 
     ``today``, forwarded to every date-sensitive resolution below (verdict,
@@ -1440,7 +1440,7 @@ def _change_to_dict(
     kind = getattr(c, "kind", None)
     reclassified_by: str | None = None
     if isinstance(kind, ChangeKind) and kind_sets:
-        from .severity import effective_verdict_for_change
+        from .policy.severity import effective_verdict_for_change
 
         verdict = effective_verdict_for_change(
             cast(HasKind, c),
@@ -1537,7 +1537,7 @@ def _change_to_dict(
     # `severity.gate_contribution_for_change`. `severity_config` is None on
     # the legacy scheme, where the contribution is the finding's own
     # verdict-to-exit mapping.
-    from .severity import gate_contribution_for_change
+    from .policy.severity import gate_contribution_for_change
 
     _add_contract_evaluation_fields(
         d,
@@ -1579,7 +1579,7 @@ def _build_severity_json(
     *today*, forwarded to :func:`categorize_changes`, keeps this agreeing
     with an already-frozen ``ReportEnvelope`` (Codex review, fresh evidence).
     """
-    from .severity import SeverityLevel, categorize_changes
+    from .policy.severity import SeverityLevel, categorize_changes
 
     categorized = categorize_changes(
         changes,

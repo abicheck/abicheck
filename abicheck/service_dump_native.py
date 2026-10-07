@@ -233,7 +233,7 @@ def _run_dump_uncached(
         from dataclasses import replace as _dc_replace
 
         from .compile_context import CompileContext
-        from .dumper_hybrid import merge_snapshots
+        from .dumper_hybrid import run_hybrid_dump
 
         def _forced_compile(frontend: str) -> CompileContext:
             return (
@@ -273,44 +273,28 @@ def _run_dump_uncached(
             "include_labels": include_labels,
             "dump_manifest": dump_manifest,
         }
-        # In-process AST memoization (G31 Phase C) is only worthwhile inside
-        # this scope: the _attach_header_graph call below is a real
-        # downstream consumer, unlike a direct dumper.dump() caller with no
-        # such follow-up (Codex review) -- see dumper_cache.ast_memoize_scope.
-        #
-        # defer_closure_identity_renumbering (Codex review): this recursion
-        # is the same shape dumper_hybrid.run_hybrid_dump merges, and
-        # without it reproduces the bug that fix closed -- each recursive
-        # run_dump() independently renumbers its own closure markers before
-        # the merge, desynchronizing the two backends' ordinals for one
-        # closure. Suppressed here, renumbered once on the merged result.
-        with (
-            dumper_cache.ast_memoize_scope(),
-            closure_identity.defer_closure_identity_renumbering(),
-        ):
-            # NOT redundant: each sub-dump must keep its FULL surface so the
-            # outer wrapper scopes the merged result once. Filtering here is
-            # unrecoverable -- see PR #1258 (a filtered surface labelled
-            # `dependency_scope="full"`).
-            castxml_snap = run_dump(
+
+        def _leg(
+            _so_path: Path, _headers_arg: list[Path], *, header_backend: str
+        ) -> AbiSnapshot:
+            # Each leg keeps its FULL surface so the outer wrapper scopes the
+            # merged result once; `include_dependencies=True` also clears any
+            # parse-time skip the outer scope declared (`extraction_scope`).
+            return run_dump(
                 path,
                 binary_fmt,
-                header_backend="castxml",
-                compile=_forced_compile("castxml"),
+                header_backend=header_backend,
+                compile=_forced_compile(header_backend),
                 include_dependencies=True,
                 **common_kwargs,
             )
-            clang_snap = run_dump(
-                path,
-                binary_fmt,
-                header_backend="clang",
-                compile=_forced_compile("clang"),
-                include_dependencies=True,
-                **common_kwargs,
-            )
-        merged = closure_identity.renumber_anonymous_closure_identities(
-            merge_snapshots(castxml_snap, clang_snap)
-        )
+
+        # `run_hybrid_dump` owns the leg/merge/closure-renumbering sequence
+        # for both hybrid entry points (this one and `dumper.dump`'s). AST
+        # memoization (G31 Phase C) is only worthwhile here: the
+        # `_attach_header_graph` call below is a real downstream consumer.
+        with dumper_cache.ast_memoize_scope():
+            merged = run_hybrid_dump(_leg, path, _headers)
         # No attach_clang_layout call here: clang_snap's own recursive call
         # above already got it (the ELF/PE/Mach-O tail below always calls it),
         # so re-running it on merged would backfill nothing (review finding).

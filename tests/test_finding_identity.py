@@ -18,7 +18,6 @@
 from __future__ import annotations
 
 from abicheck.checker_policy import ChangeKind
-from abicheck.checker_types import Change
 from abicheck.finding_identity import (
     IDENTITY_TIER_CANONICAL,
     IDENTITY_TIER_NORMALIZED,
@@ -36,6 +35,7 @@ from abicheck.finding_identity import (
     resolve_variable_identity,
 )
 from abicheck.model import Function, Param, Variable
+from abicheck.model.change import Change
 from abicheck.model.root_relative_path import RootRelativePath
 
 _ITANIUM_MANGLED = "_Z3fooi"  # foo(int)

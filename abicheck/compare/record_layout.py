@@ -60,7 +60,7 @@ from ..model.semantic_ir_record_layout import entity_layout
 from .declined_comparisons import record_declined
 
 if TYPE_CHECKING:
-    from ..checker_types import Change
+    from ..model.change import Change
     from ..model.entities import RecordType
 
 __all__ = ["RecordLayoutIndex", "record_layout_changes", "record_layout_index"]

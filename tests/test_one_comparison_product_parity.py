@@ -47,7 +47,7 @@ import example_catalog  # noqa: E402
 from abicheck.checker import compare  # noqa: E402
 from abicheck.cli import main  # noqa: E402
 from abicheck.model import AbiSnapshot  # noqa: E402
-from abicheck.policy.evidence_status import CrossSourceEvolution  # noqa: E402
+from abicheck.model.evidence_status import CrossSourceEvolution  # noqa: E402
 from abicheck.serialization import load_snapshot, snapshot_to_json  # noqa: E402
 
 
@@ -656,7 +656,7 @@ class TestOnelineIncludesReleaseGlobalFindings:
         through a staged bundle: what regressed is the fold, and a
         `BundleDiffResult` fixture would test the bundle analyser instead."""
         from abicheck.checker import Verdict
-        from abicheck.checker_types import Change
+        from abicheck.model.change import Change
         from abicheck.model.change_catalog.kinds import ChangeKind
         from abicheck.report.release_oneline import (
             format_release_oneline,

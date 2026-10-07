@@ -44,7 +44,8 @@ from .policy.classification import Verdict
 from .report_summary import ReportSummary, build_summary
 
 if TYPE_CHECKING:
-    from .checker_types import Change, DiffResult
+    from .checker_types import DiffResult
+    from .model.change import Change
 
 
 # ── Canonical cross-axis presentation mapping (ADR-036) ──────────────────────
@@ -172,7 +173,7 @@ class ReportModel:
         :attr:`_verdict_overrides`'s own docstring for why that can
         disagree).
         """
-        from .policy.contract_finding_relevance import is_evaluated
+        from .model.contract_finding_relevance import is_evaluated
 
         def ev(c: Change) -> Verdict:
             override = verdict_overrides.get(id(c)) if verdict_overrides else None
@@ -192,7 +193,7 @@ class ReportModel:
     @staticmethod
     def classify_not_evaluated(changes: list[Change]) -> list[Change]:
         """The complement of :meth:`classify` — the unscored findings."""
-        from .policy.contract_finding_relevance import is_evaluated
+        from .model.contract_finding_relevance import is_evaluated
 
         return [c for c in changes if not is_evaluated(c)]
 

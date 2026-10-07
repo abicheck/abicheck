@@ -78,7 +78,7 @@ from .detection_memo import memoized
 from .parameter_facts import ParameterView, parameter_view
 
 if TYPE_CHECKING:
-    from ..checker_types import Change
+    from ..model.change import Change
     from ..model.declarations import Function
     from ..model.identity import EntityId
 

@@ -41,8 +41,8 @@ from abicheck.cli_options import (
 )
 from abicheck.frontends.cli.options.rulings import OptionRuling
 from abicheck.model import AbiSnapshot, Function, Param, Visibility
+from abicheck.policy.severity import SeverityLevel
 from abicheck.serialization import snapshot_to_json
-from abicheck.severity import SeverityLevel
 
 
 def _write_snap(path: Path, snap: AbiSnapshot) -> Path:

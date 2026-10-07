@@ -19,17 +19,15 @@ enforces that a debt-tracked file's path cannot change within the same PR
 that would also need to renew its baseline, so it stays flat until a PR
 whose only job is that move does so deliberately.
 
-Three flat facades are classified nowhere by design, not by oversight:
-`checker_policy.py`, `contract_gating.py`, `reclassify.py` (ADR-061 gap B).
-Each one's real implementation already moved to a real `policy` module
-(`classification.py`/`evidence_status.py`, `contract_finding_relevance.py`,
-`reclassify.py`); every migrated caller here (and `workflows`/`report`/
-`compare`) imports that owner directly. Only the flat facade stays
-unclassified, because `checker_types.py` (the `model`-owned, legacy
-`DiffResult`) imports it directly and `model` cannot statically depend on
-`policy` — giving the facade a layer would turn that into a real direction
-violation, so `public_root_surfaces` carries it instead (ADR D3). See
-`checker_policy.py`'s own docstring for the full reasoning.
+`checker_policy.py` is the one flat re-export left over this package: the
+public Python API documentation (`docs/use/python-api.md`) names it, so it
+stays until that surface is retired. Internal code imports the owners
+(`classification.py`, `model/evidence_status.py`, `reclassify.py`). The
+former `contract_gating.py`/`reclassify.py` facades are gone: the relevance
+predicates are model-pure (`model/contract_finding_relevance.py`), and
+`checker_types.DiffResult`'s call into `classification.py`/`reclassify.py`
+is a reviewed `dependency_direction_exceptions` entry in
+`architecture/debt.yaml`.
 
 ## Permitted imports
 
@@ -43,15 +41,11 @@ or a CLI flag directly is in the wrong layer.
 
 - `severity.py` — severity/gate configuration and the change-gate exit-code
   computation (`compute_exit_code`, `compute_gate_decision`,
-  `SeverityConfig`, `SeverityLevel`, ...). Moved here from
-  `abicheck/severity.py` (ADR-061 physical migration); the flat path is now
-  a thin, lazily-resolving back-compat shim — see its own module docstring.
+  `SeverityConfig`, `SeverityLevel`, ...).
 - `exit_decision.py` — `ExitDecision`/`ExitReason`, the orthogonal-axis
-  exit-code fold shared by `compare`/`scan`. Moved from
-  `abicheck/exit_decision.py`; same shim treatment.
+  exit-code fold shared by `compare`/`scan`.
 - `contract_coverage_exit.py` — ADR-049 Phase 7's contract-coverage exit
-  contribution. Moved from `abicheck/contract_coverage_exit.py`; same shim
-  treatment.
+  contribution.
 - `gate_decision.py` — ADR-061 Phase 2's `gate_decision_for_result`: the one
   call site that turns a `DiffResult` + optional `SeverityConfig` into a
   `GateDecision`, so `reporter.py`/`sarif.py`/`html_report.py` each call one

@@ -37,8 +37,9 @@ from abicheck.junit_report import to_junit_xml
 from abicheck.model import AbiSnapshot, DependencyInfo, Function
 from abicheck.policy.disposition_close import finalize_ledger
 from abicheck.policy.disposition_ledger import DispositionLedger
+from abicheck.policy.reclassify import ReclassifyRule
+from abicheck.policy.severity import SeverityConfig, SeverityLevel
 from abicheck.policy_file import PolicyFile
-from abicheck.reclassify import ReclassifyRule
 from abicheck.report.build import (
     _snapshot_change,
     build_report_document,
@@ -51,7 +52,6 @@ from abicheck.report.render_json import render_json
 from abicheck.reporter import to_json
 from abicheck.sarif import to_sarif, to_sarif_str
 from abicheck.service_render import render_envelope, render_output
-from abicheck.severity import SeverityConfig, SeverityLevel
 
 
 def _import_attr(dotted: str) -> object:
@@ -778,13 +778,12 @@ class TestRendererOrderIndependence:
         assert envelope.gate is not None
         assert envelope.gate.blocking
 
-        # `_severity_merge_effect` does `from .severity import
-        # compute_exit_code` as a function-local (call-time) import, so the
-        # name it resolves is `abicheck.severity`'s own re-export -- not
-        # `abicheck.policy.severity`'s origin function, which `abicheck.
-        # severity` already copied a static reference to at its own import
-        # time (patching the origin wouldn't touch that copy).
-        with mock.patch("abicheck.severity.compute_exit_code") as compute_exit_code_spy:
+        # `_severity_merge_effect` imports `compute_exit_code` from
+        # `abicheck.policy.severity` as a function-local (call-time) import,
+        # so patching that module's attribute is what the call would see.
+        with mock.patch(
+            "abicheck.policy.severity.compute_exit_code"
+        ) as compute_exit_code_spy:
             digest = render_envelope("review", envelope)
 
         compute_exit_code_spy.assert_not_called()
@@ -998,7 +997,7 @@ class TestRendererOrderIndependence:
         assert envelope.findings[0].verdict == Verdict.COMPATIBLE
 
         with mock.patch(
-            "abicheck.reclassify.effective_verdict_for_change",
+            "abicheck.policy.reclassify.effective_verdict_for_change",
             return_value=Verdict.BREAKING,
         ):
             markdown_out = render_envelope("markdown", envelope)
@@ -1141,7 +1140,7 @@ class TestRendererOrderIndependence:
         assert envelope.findings[0].verdict == Verdict.COMPATIBLE
 
         with mock.patch(
-            "abicheck.reclassify.effective_verdict_for_change",
+            "abicheck.policy.reclassify.effective_verdict_for_change",
             return_value=Verdict.BREAKING,
         ):
             digest_out = render_envelope("review", envelope)

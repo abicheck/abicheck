@@ -19,7 +19,7 @@ the ``compare`` command's rendered report text.
 Size-split from :mod:`abicheck.cli_compare_helpers` (AI-readiness file-size
 cap). These functions only reach leaf report-formatting modules
 (:mod:`abicheck.reporter`, :mod:`abicheck.reporter_markdown`,
-:mod:`abicheck.severity`, :mod:`abicheck.checker_policy`) -- none of them
+:mod:`abicheck.policy.severity`, :mod:`abicheck.checker_policy`) -- none of them
 touch ``cli_dump_helpers``/``cli_buildsource_helpers``, so this module does
 not join the CLI-registration import-cycle SCC those do (CLAUDE.md "What NOT
 to do": extending ``IMPORT_CYCLE_ALLOWLIST`` needs an ADR, so the split

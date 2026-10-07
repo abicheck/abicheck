@@ -986,7 +986,7 @@ def _run_demote(old_snap, new_snap, changes):
 
 
 def _c(kind: ChangeKind, symbol: str):
-    from abicheck.checker_types import Change
+    from abicheck.model.change import Change
 
     return Change(kind=kind, symbol=symbol, description="x")
 

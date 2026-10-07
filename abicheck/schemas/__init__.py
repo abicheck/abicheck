@@ -386,7 +386,7 @@ _ARTIFACT_NAMES = frozenset(
 #:       impact_group_id's own precedent), and never affects ``verdict``,
 #:       ``severity``, or any exit code.
 #: 2.30 — new optional ``policy_reclassify`` array (A: selector-scoped
-#:       reclassification, ``abicheck/reclassify.py``): when the active
+#:       reclassification, ``abicheck/policy/reclassify.py``): when the active
 #:       policy file carries one or more ``reclassify:`` rules, each is
 #:       listed (``kind``, whichever selector fields it set, ``to``,
 #:       ``reason``, ``label``, ``expires``) alongside the existing
@@ -406,7 +406,7 @@ _ARTIFACT_NAMES = frozenset(
 #:       ``reclassify:`` rule's ``label``/``reason``/``to`` spelling, first
 #:       one set) when a selector-scoped rule -- not a kind-global
 #:       ``overrides:`` entry -- actually decided its effective verdict
-#:       (:func:`abicheck.severity.reclassify_rule_for_change`). Motivated by
+#:       (:func:`abicheck.policy.severity.reclassify_rule_for_change`). Motivated by
 #:       ``cli_pr_comment``: its ``_reclassified_count()`` only recognized
 #:       ``policy_overrides``' kind-keyed map, so a finding downgraded by a
 #:       selector-scoped rule silently bypassed the PR comment's "🔀 N

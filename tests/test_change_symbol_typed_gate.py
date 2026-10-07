@@ -29,8 +29,8 @@ from pathlib import Path
 
 import pytest
 
-from abicheck.checker_types import Change
 from abicheck.diff_helpers import make_change
+from abicheck.model.change import Change
 
 # Mutation-verified: mis-indexing the positional slot (`node.args[1]` ->
 # `[0]`) fails 6 cases here. Two other mutations survive and were checked

@@ -40,7 +40,7 @@ from abicheck.compatibility_evaluation_config import (
     ValueProvenance,
 )
 from abicheck.contract_relevance_types import ContractMode, SelectorLayer
-from abicheck.severity import SeverityConfig, SeverityLevel
+from abicheck.policy.severity import SeverityConfig, SeverityLevel
 
 
 def _identity(

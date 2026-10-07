@@ -33,7 +33,6 @@ from __future__ import annotations
 import pytest
 
 from abicheck.checker_policy import ChangeKind
-from abicheck.checker_types import Change
 from abicheck.diff_cpp_patterns import (
     BundleMember,
     _extract_soname_major,
@@ -61,6 +60,7 @@ from abicheck.model import (
     Variable,
     Visibility,
 )
+from abicheck.model.change import Change
 
 # ---------------------------------------------------------------------------
 # Helpers — synthetic snapshot construction

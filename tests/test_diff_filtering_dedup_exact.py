@@ -36,8 +36,8 @@ detector as a known, then-unaddressed concern.
 from __future__ import annotations
 
 from abicheck.checker_policy import ChangeKind
-from abicheck.checker_types import Change
 from abicheck.diff_filtering import _dedup_exact
+from abicheck.model.change import Change
 from abicheck.model.identity import Namespace, entity_id_for_typedef
 
 

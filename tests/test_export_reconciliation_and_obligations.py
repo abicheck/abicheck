@@ -644,7 +644,7 @@ def test_a_declared_symbol_is_left_to_the_declaration_aware_diff() -> None:
 
 
 def _removal_change(kind_value: str, symbol: str):
-    from abicheck.checker_types import Change
+    from abicheck.model.change import Change
     from abicheck.model.change_catalog.kinds import ChangeKind as _CK
 
     return Change(

@@ -35,9 +35,9 @@ import pytest
 
 from abicheck.checker import compare
 from abicheck.checker_policy import Verdict
-from abicheck.checker_types import Change
 from abicheck.junit_report import _is_failure
 from abicheck.model import AbiSnapshot, Function, Visibility
+from abicheck.model.change import Change
 from abicheck.report_model import (
     UNKNOWN_SEVERITY_LABEL,
     VERDICT_PRESENTATION,

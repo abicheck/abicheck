@@ -50,10 +50,14 @@ from click.testing import CliRunner
 from abicheck.checker import DiffResult, compare
 from abicheck.checker_policy import Verdict
 from abicheck.cli import main
-from abicheck.exit_decision import ExitDecision, ExitReason, resolve_exit_decision
 from abicheck.model import AbiSnapshot, Function, Visibility
 from abicheck.policy.effective_gate import EffectiveGate
-from abicheck.policy.exit_decision import resolve_compare_exit_decision
+from abicheck.policy.exit_decision import (
+    ExitDecision,
+    ExitReason,
+    resolve_compare_exit_decision,
+    resolve_exit_decision,
+)
 from abicheck.policy.exit_decision_precedence import (
     resolve_compare_exit_decision_with_abort_axes,
     resolve_release_exit_decision,

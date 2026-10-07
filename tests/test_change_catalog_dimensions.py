@@ -234,7 +234,7 @@ class TestAPolymorphicKindTakesItsEntityFromTheFinding:
         no `Change` has resolves to `None` on every production finding."""
         import dataclasses
 
-        from abicheck.checker_types import Change
+        from abicheck.model.change import Change
 
         fields = {f.name for f in dataclasses.fields(Change)}
         for kind in self.POLYMORPHIC:
@@ -302,7 +302,7 @@ class TestAPolymorphicKindTakesItsEntityFromTheFinding:
         """A hand-built `Change` states none; an unresolvable dimension would
         drop it from every element filter, which is worse than a coarse
         one."""
-        from abicheck.checker_types import Change
+        from abicheck.model.change import Change
         from abicheck.model.change_catalog.kinds import ChangeKind as CK
 
         for kind in self.POLYMORPHIC:
@@ -779,7 +779,7 @@ class TestPolymorphicKindsRealDetectorCoverage:
     def test_every_polymorphic_kind_names_a_real_change_field(self):
         import dataclasses
 
-        from abicheck.checker_types import Change
+        from abicheck.model.change import Change
 
         fields = {f.name for f in dataclasses.fields(Change)}
         for kind in ChangeKind:
@@ -790,7 +790,7 @@ class TestPolymorphicKindsRealDetectorCoverage:
     def test_every_polymorphic_kind_falls_back_rather_than_vanishing(self):
         """A finding that states nothing keeps the declared entity, so it is
         never dropped from every element filter."""
-        from abicheck.checker_types import Change
+        from abicheck.model.change import Change
 
         for kind in ChangeKind:
             if REGISTRY.entity_from_field_for(kind.value) is None:

@@ -294,7 +294,8 @@ def test_a_suppression_diagnostic_is_not_a_second_detection() -> None:
     second detection. It keeps whatever gate contribution it independently
     has, which is what the second half asserts.
     """
-    from abicheck.checker_types import Change, DiffResult
+    from abicheck.checker_types import DiffResult
+    from abicheck.model.change import Change
     from abicheck.policy.disposition_close import finalize_ledger
 
     def _result(with_diagnostic: bool):

@@ -41,8 +41,9 @@ from .workflows.extraction import (
 )
 
 if TYPE_CHECKING:
-    from .checker_types import Change, DiffResult
+    from .checker_types import DiffResult
     from .model import AbiSnapshot
+    from .model.change import Change
     from .workflows.policy_file import PolicyFile
 
 

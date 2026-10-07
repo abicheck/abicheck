@@ -31,10 +31,10 @@ BREAKING, an artifact diff still proves any real shipped break).
 
 from __future__ import annotations
 
-from .checker_types import Change
 from .detector_registry import registry
 from .diff_helpers import make_change
 from .model import AbiSnapshot
+from .model.change import Change
 from .model.change_catalog.kinds import ChangeKind
 
 

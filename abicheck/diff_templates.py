@@ -48,8 +48,6 @@ from collections import defaultdict
 from functools import partial
 from typing import TYPE_CHECKING
 
-from .checker_policy import ChangeKind, ReachabilityState
-from .checker_types import Change
 from .compare.naming_conventions import (
     _INTERNAL_TEMPLATE_NAMESPACES as _INTERNAL_TEMPLATE_NAMESPACES,
     INTERNAL_TEMPLATE_LEAK,
@@ -65,6 +63,9 @@ from .compare.template_surface import (
     template_angle_depth,
 )
 from .diff_helpers import make_change
+from .model.change import Change
+from .model.change_catalog.kinds import ChangeKind
+from .model.evidence_status import ReachabilityState
 from .model.execution_cache import memoized
 from .model.graph_identity import _normalize_graph_identity
 from .model.name_heuristics import LazyFactInput
@@ -1343,7 +1344,7 @@ def demote_lambda_closure_unexported_findings(
     missing ELF evidence on either side fails closed. Mutates and returns
     ``changes``.
     """
-    from .checker_policy import API_BREAK_KINDS, BREAKING_KINDS, Verdict
+    from .change_registry import API_BREAK_KINDS, BREAKING_KINDS
     from .diff_symbols import _reconciled_function_surfaces
     from .dumper_castxml import is_synthetic_ctor_key, is_synthetic_dtor_key
     from .elf_symbol_filter import FUNCTION_SYMBOL_TYPES, exported_symbol_names
@@ -1352,6 +1353,7 @@ def demote_lambda_closure_unexported_findings(
         itanium_standard_substitution_token,
         synthetic_ctor_dtor_template_base_name,
     )
+    from .model.change_catalog.registry import Verdict
 
     old_elf = getattr(old, "elf", None)
     new_elf = getattr(new, "elf", None)

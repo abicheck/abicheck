@@ -38,7 +38,8 @@ from typing import TYPE_CHECKING, Any
 from ..model.acknowledgment_policy import AcknowledgmentPolicy
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
-    from ..checker_types import Change, DiffResult
+    from ..checker_types import DiffResult
+    from ..model.change import Change
     from .acknowledgment import AcknowledgmentList
 
 

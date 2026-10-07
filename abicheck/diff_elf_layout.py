@@ -75,12 +75,13 @@ from __future__ import annotations
 
 import re
 
-from .checker_policy import ChangeKind, Confidence
-from .checker_types import Change
 from .demangle import demangle
 from .detector_registry import registry
 from .diff_helpers import make_change
 from .model import AbiSnapshot, stdlib_namespaces_excluded
+from .model.change import Change
+from .model.change_catalog.kinds import ChangeKind
+from .model.evidence_status import Confidence
 from .name_classification import STDLIB_RTTI_PREFIXES as _RUNTIME_RTTI_PREFIXES
 
 

@@ -322,7 +322,7 @@ def test_anon_marker_scan_matches_the_character_loop(parts):
 # --- reclassify kind buckets ---------------------------------------------------
 
 from abicheck.checker_policy import Verdict  # noqa: E402
-from abicheck.checker_types import Change  # noqa: E402
+from abicheck.model.change import Change  # noqa: E402
 from abicheck.policy import reclassify  # noqa: E402
 
 _KINDS = [ChangeKind.FUNC_REMOVED, ChangeKind.FUNC_ADDED, ChangeKind.TYPE_SIZE_CHANGED]

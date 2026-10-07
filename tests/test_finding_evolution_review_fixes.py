@@ -27,9 +27,10 @@ from hypothesis import given, settings, strategies as st
 
 from abicheck.checker import compare
 from abicheck.checker_policy import ChangeKind
-from abicheck.checker_types import Change, DiffResult
+from abicheck.checker_types import DiffResult
 from abicheck.model import AbiSnapshot, Function, Visibility
-from abicheck.policy.evidence_status import CrossSourceEvolution
+from abicheck.model.change import Change
+from abicheck.model.evidence_status import CrossSourceEvolution
 from abicheck.policy.finding_evolution import apply_finding_evolution
 from abicheck.report.change_operation import (
     ACTION_TOKEN_OPERATIONS,

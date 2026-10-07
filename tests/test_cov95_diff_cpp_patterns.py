@@ -24,7 +24,6 @@ Pure Python, no external tools — part of the default fast lane.
 from __future__ import annotations
 
 from abicheck.checker_policy import ChangeKind
-from abicheck.checker_types import Change
 from abicheck.diff_cpp_patterns import (
     BundleMember,
     _cohort_key,
@@ -50,6 +49,7 @@ from abicheck.model import (
     RecordType,
     TypeField,
 )
+from abicheck.model.change import Change
 
 # ---------------------------------------------------------------------------
 # Helpers

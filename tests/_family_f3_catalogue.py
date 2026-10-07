@@ -289,7 +289,7 @@ def _report_entry(path: str) -> dict[str, Any]:
 
 
 def _path_probes() -> dict[str, Callable[[str], str]]:
-    from abicheck.checker_types import Change
+    from abicheck.model.change import Change
     from abicheck.model.change_catalog.kinds import ChangeKind
     from abicheck.model.entity_identity import (
         resolve_identity_for_node,

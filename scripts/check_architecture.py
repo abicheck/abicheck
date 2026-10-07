@@ -79,7 +79,7 @@ _SELECTOR_LEAF_DENYLIST: tuple[str, ...] = (
     "abicheck.policy_file",
     "abicheck.checker_types",
     "abicheck.suppression",
-    "abicheck.reclassify",
+    "abicheck.policy.reclassify",
     "abicheck.finding_identity",
 )
 

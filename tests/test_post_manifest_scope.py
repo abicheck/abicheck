@@ -18,7 +18,6 @@ from click.testing import CliRunner
 
 from abicheck.checker import compare
 from abicheck.checker_policy import ChangeKind, Verdict
-from abicheck.checker_types import Change
 from abicheck.cli import main
 from abicheck.model import (
     AbiSnapshot,
@@ -28,6 +27,7 @@ from abicheck.model import (
     TypeField,
     Visibility,
 )
+from abicheck.model.change import Change
 from abicheck.serialization import snapshot_to_json
 from abicheck.surface import is_symbol_level_finding
 

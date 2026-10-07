@@ -30,13 +30,14 @@ import _yaml_fast
 import pytest
 
 from abicheck.checker_policy import ChangeKind
-from abicheck.checker_types import Change, DiffResult
+from abicheck.checker_types import DiffResult
 from abicheck.diff_helpers import make_change
 from abicheck.finding_identity import (
     report_canonical_finding_id,
     report_finding_id,
     resolve_change_identity,
 )
+from abicheck.model.change import Change
 from abicheck.reporter import to_json
 from abicheck.suppression import Suppression, SuppressionList
 
