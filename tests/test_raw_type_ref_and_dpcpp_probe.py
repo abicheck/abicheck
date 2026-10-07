@@ -431,7 +431,7 @@ def test_empty_qualified_name_has_no_segments():
 #: oracle is the spelling itself, not ``pathlib`` -- whose host-dependent
 #: normalisation (``/tmp/x`` -> ``\tmp\x`` on Windows) is the bug.
 _SPELLED_PARENTS = [
-    ("/tmp/icpx-1/agg-header.h", "/tmp/icpx-1"),
+    ("/run/user/1000/icpx-1/agg-header.h", "/run/user/1000/icpx-1"),
     ("/var/folders/a b/T/icpx-9/agg-footer.h", "/var/folders/a b/T/icpx-9"),
     (
         "C:/Users/dev/AppData/Local/Temp/icpx-3/agg-header.h",
@@ -455,7 +455,7 @@ def test_spelled_parent_keeps_the_drivers_spelling(path: str, parent: str) -> No
 
 
 _TEMP_DIR_SPELLINGS = [
-    "/tmp/icpx-1",
+    "/run/user/1000/icpx-1",
     "/var/folders/a b/T/icpx-9",
     "C:/Users/dev/AppData/Local/Temp/icpx-3",
     "C:\\Users\\dev\\AppData\\Local\\Temp\\icpx-3",
