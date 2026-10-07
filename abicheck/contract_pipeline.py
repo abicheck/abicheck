@@ -136,10 +136,6 @@ class ContractEvaluationStage:
     #: own closure. See ``policy/contract_conflicts.py``.
     conflicts: tuple[ContractSourceConflict, ...] = ()
     changes: list[Change] = field(default_factory=list)
-    #: Whether every compared side carries ``--sources``/``--build-info``
-    #: evidence (``AbiSnapshot.build_source``); see
-    #: :func:`~abicheck.policy.contract_default_mode.build_source_fallback_applies`.
-    build_source_evidence: bool = False
     #: ``id()`` of every already-classified finding. Identity, not equality:
     #: two findings can compare equal (``Change`` is a plain dataclass) while
     #: being distinct facts about distinct entities, and stamping one of them
@@ -183,6 +179,7 @@ class ContractEvaluationStage:
             directly_referenced_stdlib_new=self.directly_referenced_stdlib_new,
         )
         decisions = self._observed_export_fallback(fresh, decisions)
+        decisions = self._unresolved_default_fallback(fresh, decisions)
         for change, decision in zip(fresh, decisions, strict=True):
             change.contract_relevance = decision.relevance
             change.contract_reason_code = decision.reason_code
@@ -215,46 +212,49 @@ class ContractEvaluationStage:
         from .contract_evaluation import evaluate_snapshot_pair_contract_relevance
         from .policy.contract_default_mode import observed_export_fallback_applies
 
-        out = list(decisions)
         idx = [
             i
-            for i, d in enumerate(out)
+            for i, d in enumerate(decisions)
             if observed_export_fallback_applies(
-                self.mode, self.mode_provenance, d.reason_code, d.relevance
+                self.mode, self.mode_provenance, d.reason_code
             )
         ]
-        if idx and self.exports_old.resolvable and self.exports_new.resolvable:
-            redone = evaluate_snapshot_pair_contract_relevance(
-                [changes[i] for i in idx],
-                self.surf_old,
-                self.surf_new,
-                mode=ContractMode.EXPORTS,
-                exports_old=self.exports_old,
-                exports_new=self.exports_new,
-            )
-            for i, d in zip(idx, redone, strict=True):
-                if d.relevance is ContractRelevance.IN_CONTRACT:
-                    out[i] = d
-        return self._build_source_fallback(changes, out)
+        if (
+            not idx
+            or not self.exports_old.resolvable
+            or not self.exports_new.resolvable
+        ):
+            return decisions
+        redone = evaluate_snapshot_pair_contract_relevance(
+            [changes[i] for i in idx],
+            self.surf_old,
+            self.surf_new,
+            mode=ContractMode.EXPORTS,
+            exports_old=self.exports_old,
+            exports_new=self.exports_new,
+        )
+        out = list(decisions)
+        for i, d in zip(idx, redone, strict=True):
+            if d.relevance is ContractRelevance.IN_CONTRACT:
+                out[i] = d
+        return out
 
-    def _build_source_fallback(
+    def _unresolved_default_fallback(
         self, changes: list[Change], decisions: list[Any]
     ) -> list[Any]:
-        """Judge on ``all`` each finding the evidence-adaptive default still
-        left undecided when the run carries build/source evidence on every
-        side (see
-        :func:`~abicheck.policy.contract_default_mode.build_source_fallback_applies`)."""
+        """Re-judge, under ``all``, each finding an evidence-adaptive default
+        still leaves ``UNKNOWN_UNRESOLVED`` (see
+        :func:`~abicheck.policy.contract_default_mode.unresolved_default_fallback_applies`).
+        Only an evaluated (``IN_CONTRACT``/``NOT_APPLICABLE``) decision
+        replaces the unresolved one."""
         from .contract_evaluation import evaluate_snapshot_pair_contract_relevance
-        from .policy.contract_default_mode import build_source_fallback_applies
+        from .policy.contract_default_mode import unresolved_default_fallback_applies
 
         idx = [
             i
             for i, d in enumerate(decisions)
-            if build_source_fallback_applies(
-                self.mode,
-                self.mode_provenance,
-                d.relevance,
-                build_source_evidence=self.build_source_evidence,
+            if unresolved_default_fallback_applies(
+                self.mode, self.mode_provenance, d.relevance
             )
         ]
         if not idx:
@@ -269,7 +269,10 @@ class ContractEvaluationStage:
         )
         out = list(decisions)
         for i, d in zip(idx, redone, strict=True):
-            if d.relevance is ContractRelevance.IN_CONTRACT:
+            if d.relevance in (
+                ContractRelevance.IN_CONTRACT,
+                ContractRelevance.NOT_APPLICABLE,
+            ):
                 out[i] = d
         return out
 
@@ -636,10 +639,6 @@ def build_contract_stage(
     return ContractEvaluationStage(
         mode=mode,
         mode_provenance=mode_provenance,
-        build_source_evidence=(
-            new.build_source is not None
-            and (old is None or old.build_source is not None)
-        ),
         surf_old=surf_old,
         surf_new=surf_new,
         exports_old=exports_old,

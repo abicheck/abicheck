@@ -27,6 +27,14 @@ cd "${CLAUDE_PROJECT_DIR:-.}"
 
 bash scripts/setup_dev_env.sh
 
+# The cloud clone is shallow, and check_ai_readiness's ADR "Verified" receipt
+# check needs the cited commits reachable from origin/main: on a shallow
+# clone it reports them unreachable and reads as a real failure. Best-effort
+# so an offline start still completes.
+if [ "$(git rev-parse --is-shallow-repository 2>/dev/null)" = "true" ]; then
+  git fetch --quiet --unshallow origin || echo "==> warning: git fetch --unshallow failed; ADR receipt checks may misreport"
+fi
+
 # Put the dev venv ahead of ~/.local/bin so the pinned pytest/ruff/mypy
 # setup_dev_env.sh just installed win over the pre-existing uv-tool
 # shadow described above.

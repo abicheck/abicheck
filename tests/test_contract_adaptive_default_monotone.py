@@ -15,8 +15,9 @@
 
 """ADR-049 Phase 7's default contract must never make a break stop gating.
 
-Bug class ``evidence.silent_degradation_to_clean_verdict``. Two mechanisms
-reached it after contract evaluation became the default (#1493):
+Bug class ``evidence.silent_degradation_to_clean_verdict``. Three mechanisms
+reached it after contract evaluation became the default (#1493); #1500 fixed
+them, and this module pins the class:
 
 * ELF version-node findings (``symbol_version_node_removed`` and siblings)
   carry a version *name* (``WIDGET_2.0``) as their subject. No contract
@@ -26,11 +27,15 @@ reached it after contract evaluation became the default (#1493):
   for an explicit header non-commitment, not for a finding the headers could
   not decide at all -- so adding ``-H`` turned a lost ``_ZTV``/``_ZTI``
   export from BREAKING into a passing run.
+* An ``exports`` default has no universe for ``--sources``/``--build-info``
+  (L3-L5) findings, so build-option flips and removed macros/typedefs read
+  ``UNKNOWN_UNRESOLVED`` and the run read NO_CHANGE.
 
 The oracle for the first is the producers' own source (which kinds they
 build with a version-name subject), not the evaluator's kind sets; the CLI
 oracle for the second is
-``test_export_reconciliation_and_obligations.test_public_object_loss_survives_adding_headers``.
+``test_export_reconciliation_and_obligations.test_public_object_loss_survives_adding_headers``;
+for the third, the catalog's pre-flip ground truth through the real CLI.
 """
 
 from __future__ import annotations
@@ -53,7 +58,10 @@ from abicheck.contract_relevance_types import (
 from abicheck.elf_metadata import ElfMetadata, ElfSymbol
 from abicheck.export_surface import compute_export_surface
 from abicheck.model import AbiSnapshot
-from abicheck.policy.contract_default_mode import observed_export_fallback_applies
+from abicheck.policy.contract_default_mode import (
+    observed_export_fallback_applies,
+    unresolved_default_fallback_applies,
+)
 from abicheck.surface import PublicSurface
 
 _ROOT = Path(__file__).resolve().parent.parent / "abicheck"
@@ -154,55 +162,56 @@ _STATED = ValueProvenance(
 )
 
 
-def test_adaptive_public_consults_exports_whenever_headers_did_not_place_it() -> None:
-    """Exhaustive over mode x provenance x reason x relevance. The oracle is
-    the stated rule ("public headers plus observed exports, never less than
-    either"): an adaptive ``public`` default re-asks the export domain for
-    every header answer that is not a decision -- an explicit non-commitment
-    or either UNKNOWN -- and never for an authoritative one."""
-    reasons = (
+def test_adaptive_public_consults_exports_whenever_headers_did_not_commit() -> None:
+    """Exhaustive over mode x provenance x reason. Oracle: ADR-049's revised
+    rule -- an adaptive ``public`` default re-asks the export table for every
+    header answer that records no commitment (searched-and-silent, domain not
+    closed, identity not pinned) and never for a commitment or a stated
+    domain."""
+    silent = {
         "closed_domain_no_commitment",
         "required_evidence_incomplete",
+        "identity_ambiguous",
+    }
+    reasons = (
+        *silent,
         "terminal_authoritative_exclusion",
         "public_root_membership",
+        "private_header_exclusion",
         None,
     )
-    for mode, prov, reason, rel in itertools.product(
-        ContractMode, (_ADAPTIVE, _STATED, None), reasons, (*ContractRelevance, None)
-    ):
-        undecided = reason == "closed_domain_no_commitment" or rel in _UNKNOWN
-        expected = mode is ContractMode.PUBLIC and prov is _ADAPTIVE and undecided
-        got = observed_export_fallback_applies(mode, prov, reason, rel)
-        assert got is expected, (mode, prov, reason, rel)
-
-
-# --------------------------------------------------------------------------
-# The `--sources`/`--build-info` axis: L3-L5 evidence closes no narrower
-# domain, so what it alone can place is judged on `all`.
-# --------------------------------------------------------------------------
-
-
-def test_build_source_fallback_is_exhaustively_monotone() -> None:
-    """Exhaustive over mode x provenance x relevance x evidence. Oracle: the
-    ADR-049 revision's stated rule -- only an adaptive, not-already-`all`
-    domain, only an UNKNOWN answer, and only with build/source evidence on
-    every side. A stated domain and every decided answer are left alone."""
-    from abicheck.policy.contract_default_mode import build_source_fallback_applies
-
-    for mode, prov, rel, ev in itertools.product(
-        ContractMode,
-        (_ADAPTIVE, _STATED, None),
-        (*ContractRelevance, None),
-        (True, False),
+    for mode, prov, reason in itertools.product(
+        ContractMode, (_ADAPTIVE, _STATED, None), reasons
     ):
         expected = (
-            ev
-            and prov is _ADAPTIVE
-            and mode is not ContractMode.ALL
-            and rel in _UNKNOWN
+            mode is ContractMode.PUBLIC and prov is _ADAPTIVE and reason in silent
         )
-        got = build_source_fallback_applies(mode, prov, rel, build_source_evidence=ev)
-        assert got is expected, (mode, prov, rel, ev)
+        got = observed_export_fallback_applies(mode, prov, reason)
+        assert got is expected, (mode, prov, reason)
+
+
+# --------------------------------------------------------------------------
+# The last resort: what no adaptive domain could place -- including every
+# `--sources`/`--build-info` (L3-L5) finding under an `exports` default --
+# is scored as `all` scores it.
+# --------------------------------------------------------------------------
+
+
+def test_unresolved_default_fallback_is_exhaustively_monotone() -> None:
+    """Exhaustive over mode x provenance x relevance. Oracle: only an
+    adaptive, not-already-`all` domain and only an UNKNOWN_UNRESOLVED answer
+    are re-judged; a stated domain and every decided answer are left alone,
+    so the fallback can only add findings to the verdict."""
+    for mode, prov, rel in itertools.product(
+        ContractMode, (_ADAPTIVE, _STATED, None), (*ContractRelevance, None)
+    ):
+        expected = (
+            prov is _ADAPTIVE
+            and mode is not ContractMode.ALL
+            and rel is ContractRelevance.UNKNOWN_UNRESOLVED
+        )
+        got = unresolved_default_fallback_applies(mode, prov, rel)
+        assert got is expected, (mode, prov, rel)
 
 
 #: Every catalog case whose finding exists only in `--sources`/`--build-info`
@@ -252,6 +261,9 @@ def test_overlay_catalog_cases_keep_their_ground_truth_through_the_cli(
         cwd=repo,
         env={**os.environ, "PYTHONPATH": str(repo)},
         timeout=1200,
+    )
+    assert ran.returncode == 0, (
+        f"runner exited {ran.returncode}\nstdout:\n{ran.stdout}\nstderr:\n{ran.stderr}"
     )
     payload = json.loads(ran.stdout)
     statuses = {r["case_id"].split("_")[0]: r["status"] for r in payload["results"]}

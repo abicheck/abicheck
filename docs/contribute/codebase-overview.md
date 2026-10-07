@@ -10,7 +10,9 @@ and the [implementation plans](plans/index.md).
 > [module map](agent-guide/module-map.md), [quality gates](agent-guide/quality-gates.md),
 > [performance investigation](agent-guide/performance.md),
 > [CLI commands and exit codes](agent-guide/cli-and-exit-codes.md),
-> [decision principles](agent-guide/decision-principles.md).
+> [decision principles](agent-guide/decision-principles.md),
+> [`scripts/` inventory](agent-guide/scripts-inventory.md),
+> [`buildsource/` module map](agent-guide/buildsource-module-map.md).
 
 > **Working documents.** The roadmap artifacts linked above — the backlog, the
 > per-goal implementation plans (`development/plans/`), the coverage/scenario

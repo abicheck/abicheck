@@ -35,6 +35,21 @@ whole file. Several big commands have already been split into sibling
 `cli_<name>.py` / `diff_*` modules (see [module-map.md](module-map.md)); prefer extending a
 split-out module over growing the parent toward the cap.
 
+### Retiring a command or flag
+
+Ask the maintainer how it leaves, before deleting it. The answer depends on
+who still calls it:
+
+- **Delete outright**: the command, its tests, docs and hints all go, and
+  the CLI answers with its ordinary "no such command". A changelog fragment
+  names the replacement. The `compat` removal took this path.
+- **Tombstone for one release**: a stub that exits 64 with a pointer to the
+  replacement, removed in the next release. `scan` took this path.
+
+Pre-1.0 either is acceptable and the maintainer picks per case. Once
+abicheck promises backward compatibility, a retirement follows its ADR's
+deprecation window instead.
+
 ### Adding a new top-level command
 
 **First, ask whether it should be a *root* command at all (ADR-043/ADR-054).**

@@ -30,15 +30,15 @@ from __future__ import annotations
 from typing import Any
 
 from ..compatibility_evaluation_config import ValueProvenance
-from ..contract_relevance_types import ContractMode, ContractRelevance, SelectorLayer
+from ..contract_relevance_types import ContractMode, SelectorLayer
 
 __all__ = [
     "CONTRACT_MODE_FIELD",
     "adopt_evidence_adaptive_mode",
     "evidence_adaptive_contract_mode",
     "is_evidence_adaptive",
-    "build_source_fallback_applies",
     "observed_export_fallback_applies",
+    "unresolved_default_fallback_applies",
     "mode_is_built_in_default",
 ]
 
@@ -123,10 +123,7 @@ def is_evidence_adaptive(provenance: ValueProvenance | None) -> bool:
 
 
 def observed_export_fallback_applies(
-    mode: ContractMode,
-    provenance: ValueProvenance | None,
-    reason_code: str | None,
-    relevance: ContractRelevance | None = None,
+    mode: ContractMode, provenance: ValueProvenance | None, reason_code: str | None
 ) -> bool:
     """Whether an unstated ``public`` default must consult observed exports.
 
@@ -139,50 +136,53 @@ def observed_export_fallback_applies(
     public headers *plus* what the binary observably exports, never less
     than either; it can only keep a finding scored that a stated ``public``
     would not.
-
-    The same holds where the header domain could not decide at all
-    (``UNKNOWN_UNRESOLVED``/``UNKNOWN_UNPROVEN``): an undeclared ABI-support
-    export (``_ZTV``/``_ZTI``/``_ZTS``) has no header declaration to place,
-    yet the export table observed it. Restricting the fallback to an explicit
-    non-commitment let ``-H`` turn a binary-only BREAKING into a passing run
-    -- headers subtracting a break, which "weaker evidence narrows
-    conclusions" forbids. An authoritative header *exclusion* (private
-    header, POST manifest) is evidence, not a gap, and is not re-judged.
     """
-    if mode is not ContractMode.PUBLIC or not is_evidence_adaptive(provenance):
-        return False
-    return reason_code == "closed_domain_no_commitment" or relevance in (
-        ContractRelevance.UNKNOWN_UNRESOLVED,
-        ContractRelevance.UNKNOWN_UNPROVEN,
+    return (
+        mode is ContractMode.PUBLIC
+        and is_evidence_adaptive(provenance)
+        and reason_code in _HEADER_SILENT_REASON_CODES
     )
 
 
-def build_source_fallback_applies(
-    mode: ContractMode,
-    provenance: ValueProvenance | None,
-    relevance: ContractRelevance | None,
-    *,
-    build_source_evidence: bool,
-) -> bool:
-    """Whether an evidence-adaptive default must judge a finding on ``all``.
+#: Header-domain decisions that record the headers making *no* commitment
+#: either way. A completely searched domain with no commitment is one; a
+#: domain the headers could not close (``required_evidence_incomplete``) or an
+#: entity whose identity the headers could not pin (``identity_ambiguous``)
+#: are the other two -- weaker header evidence, which must narrow the
+#: conclusion to what the export table shows rather than leave the finding
+#: unscored (a lost ``_ZTI``/``_ZTV`` for a public class read NO_CHANGE with
+#: headers and BREAKING without). An authoritative exclusion is a commitment
+#: and stays out.
+_HEADER_SILENT_REASON_CODES = frozenset(
+    {
+        "closed_domain_no_commitment",
+        "required_evidence_incomplete",
+        "identity_ambiguous",
+    }
+)
 
-    ``--sources``/``--build-info`` evidence (L3-L5, ``AbiSnapshot.
-    build_source``) describes the whole artifact: a compile-flag flip, a
-    removed public macro, inline function or typedef, a new internal
-    dependency. It closes no narrower domain -- neither the export table nor
-    a header surface can place ``build-option:enum_size`` or a macro name --
-    so a finding the selected domain (and the observed-export fallback) left
-    ``UNKNOWN_*`` is judged on ``all``, the domain that evidence speaks to.
-    Applies only when every compared side carries that evidence and nobody
-    stated a domain; a stated ``--contract`` is never second-guessed. Like
-    the export fallback it can only keep a finding scored, never drop one:
-    supplying optional evidence never makes a verdict cleaner (ADR-049
-    Phase 7, "never less than either").
+
+def unresolved_default_fallback_applies(
+    mode: ContractMode, provenance: ValueProvenance | None, relevance: Any
+) -> bool:
+    """Whether an evidence-adaptive default must score a finding no domain
+    could place.
+
+    The adaptive default narrows the scored set only by what a domain
+    *proves*: a finding the selected domain (and, under ``public``, the
+    observed-export fallback) leaves ``UNKNOWN_UNRESOLVED`` -- an L3 build
+    option, an L4/L5 source fact, a header-graph rename, judged by an
+    ``exports`` domain that has no universe for them -- is judged as
+    ``contract=all`` judges it, which is how every finding was scored before
+    contract evaluation became the default. Weaker evidence narrows a
+    conclusion; it never turns an observed change into ``NO_CHANGE``. A
+    stated domain (``--contract public|exports``) is the user's promise and
+    keeps its ``UNKNOWN_UNRESOLVED`` and coverage failure.
     """
+    from ..contract_relevance_types import ContractRelevance
+
     return (
-        build_source_evidence
+        mode is not ContractMode.ALL
         and is_evidence_adaptive(provenance)
-        and mode is not ContractMode.ALL
-        and relevance
-        in (ContractRelevance.UNKNOWN_UNRESOLVED, ContractRelevance.UNKNOWN_UNPROVEN)
+        and relevance is ContractRelevance.UNKNOWN_UNRESOLVED
     )

@@ -17,6 +17,8 @@ scenarios:
     expected:
       exit_code: 4
       sarif: true
+    surfaces:
+      - cli: compare --output
     validates: UC-REP-sarif
     automated: true
     test: test_sc_scan_sarif

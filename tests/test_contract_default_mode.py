@@ -71,24 +71,35 @@ _PROVENANCES = {
 }
 _REASONS = (
     "closed_domain_no_commitment",
+    "required_evidence_incomplete",
+    "identity_ambiguous",
     "public_root_membership",
     "terminal_authoritative_exclusion",
     None,
 )
 
 
-def test_export_fallback_applies_only_to_an_unstated_public_non_decision() -> None:
+#: Header decisions that commit to nothing either way (written from the rule's
+#: statement, not imported from the module under test).
+_HEADER_SILENT = {
+    "closed_domain_no_commitment",
+    "required_evidence_incomplete",
+    "identity_ambiguous",
+}
+
+
+def test_export_fallback_applies_only_to_an_unstated_public_no_commitment() -> None:
     """Exhaustive over mode x provenance x reason: a stated domain is never
-    second-guessed, and only a header non-commitment is re-judged by reason
-    alone (an UNKNOWN relevance is covered in
-    ``test_contract_adaptive_default_monotone.py``)."""
+    second-guessed, and only a header decision that commits to nothing --
+    no commitment found, an unclosable domain, an unpinned identity -- is
+    re-judged; an authoritative exclusion or a membership is not."""
     for mode, prov_key, reason in itertools.product(
         ContractMode, _PROVENANCES, _REASONS
     ):
         expected = (
             mode is ContractMode.PUBLIC
             and prov_key == "adaptive"
-            and reason == "closed_domain_no_commitment"
+            and reason in _HEADER_SILENT
         )
         got = observed_export_fallback_applies(mode, _PROVENANCES[prov_key], reason)
         assert got is expected, (mode, prov_key, reason)
