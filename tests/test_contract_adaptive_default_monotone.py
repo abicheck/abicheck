@@ -47,7 +47,6 @@ from pathlib import Path
 import pytest
 
 from abicheck.checker_policy import ChangeKind
-from abicheck.checker_types import Change
 from abicheck.compatibility_evaluation_config import ValueProvenance
 from abicheck.contract_evaluation import evaluate_snapshot_pair_contract_relevance
 from abicheck.contract_relevance_types import (
@@ -58,6 +57,7 @@ from abicheck.contract_relevance_types import (
 from abicheck.elf_metadata import ElfMetadata, ElfSymbol
 from abicheck.export_surface import compute_export_surface
 from abicheck.model import AbiSnapshot
+from abicheck.model.change import Change
 from abicheck.policy.contract_default_mode import (
     observed_export_fallback_applies,
     unresolved_default_fallback_applies,
