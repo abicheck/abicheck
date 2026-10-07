@@ -169,7 +169,6 @@ tests/test_compare_budget_boundary.py
 tests/test_compare_call_complexity.py
 tests/test_compare_changed_path_and_abi3.py
 tests/test_compare_config_public_header_dirs.py
-tests/test_compare_cost_budgets.py
 tests/test_compare_dispatch.py
 tests/test_compare_dry_run_compile_db.py
 tests/test_compare_env_matrix_digest_formats.py

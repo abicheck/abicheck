@@ -621,6 +621,32 @@ def _reached_mutated_modules(path: Path, mutated: set[str]) -> frozenset[str]:
 #: gate, which may report a survivor that one of these tests would in fact
 #: have killed.
 _ACCEPTED_KILL_LOSS = {
+    # Call-count budgets (same-argument repeats per named function): under
+    # mutmut each mutated function runs through a trampoline under another
+    # name, so the counter measures the instrumentation, not compare(). See
+    # its pyproject --ignore comment. Surfaced by PR #1505.
+    "tests/test_compare_cost_budgets.py": frozenset(
+        {
+            "abicheck.diff_filtering",
+            "abicheck.diff_platform",
+            "abicheck.diff_symbols",
+            "abicheck.diff_types",
+            "abicheck.diff_vtable_layout",
+            "abicheck.finding_identity",
+            "abicheck.idioms",
+            "abicheck.model.evidence_status",
+            "abicheck.name_classification",
+            "abicheck.pattern_verdicts",
+            "abicheck.policy.classification",
+            "abicheck.policy.selectors",
+            "abicheck.policy.selectors_namespace_glob",
+            "abicheck.snapshot_io",
+            "abicheck.storage.snapshot_encode",
+            "abicheck.storage.snapshot_schema_versions",
+            "abicheck.suppression",
+            "abicheck.surface_graph",
+        }
+    ),
     # tracemalloc peak assertions: under mutmut the trampoline's own
     # bookkeeping is traced too (a 1.1 GB first-call peak aborted the stats
     # run), so it measures the instrumentation, not snapshot_io. The
