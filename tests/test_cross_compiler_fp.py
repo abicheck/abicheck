@@ -19,6 +19,7 @@ from pathlib import Path
 import pytest
 
 from abicheck.checker import Verdict
+from abicheck.policy.evaluate import evaluate
 
 # ── Test sources ──────────────────────────────────────────────────────────
 
@@ -233,7 +234,7 @@ class TestCCrossFP:
         _compile_so(C_SRC, clang_so, "clang", "c")
 
         r = _dump_and_compare(gcc_so, clang_so, C_HDR, "c", tmp_path)
-        assert not r.breaking, (
+        assert not evaluate(r).breaking, (
             f"gcc vs clang on identical C source should not be BREAKING; "
             f"changes: {[(c.kind.value, c.symbol) for c in r.changes]}"
         )
@@ -249,7 +250,7 @@ class TestCCrossFP:
         _compile_so(C_SRC, clang_so, "clang", "c")
 
         r = _dump_and_compare(gcc_so, clang_so, None, "c", tmp_path)
-        assert not r.breaking
+        assert not evaluate(r).breaking
 
 
 @pytest.mark.integration
@@ -290,7 +291,7 @@ class TestCppCrossFP:
         _compile_so(C_SRC, clang_so, "clang++", "c")
 
         r = _dump_and_compare(gcc_so, clang_so, C_HDR, "c", tmp_path)
-        assert not r.breaking
+        assert not evaluate(r).breaking
 
 
 @pytest.mark.integration
@@ -321,7 +322,7 @@ class TestOptimizationLevelFP:
             _run_compile_or_skip(cmd)
 
         r = _dump_and_compare(o0_so, o2_so, C_HDR, "c", tmp_path)
-        assert not r.breaking, (
+        assert not evaluate(r).breaking, (
             f"-O0 vs -O2 should not produce BREAKING changes; "
             f"changes: {[(c.kind.value, c.symbol) for c in r.changes]}"
         )
@@ -356,7 +357,7 @@ class TestOptimizationLevelFP:
             _run_compile_or_skip(cmd)
 
         r = _dump_and_compare(o0_so, o2_so, CPP_HDR, "cpp", tmp_path)
-        assert not r.breaking, [(c.kind.value, c.symbol) for c in r.changes]
+        assert not evaluate(r).breaking, [(c.kind.value, c.symbol) for c in r.changes]
 
     @pytest.mark.integration
     @pytest.mark.skipif(
@@ -471,7 +472,7 @@ class TestStrippedVsUnstrippedFP:
         result = compare(snap_debug, snap_stripped)
 
         # Should NOT be BREAKING (same source code!)
-        assert not result.breaking, (
+        assert not evaluate(result).breaking, (
             f"Debug vs stripped should not be BREAKING; "
             f"changes: {[(c.kind.value, c.symbol) for c in result.changes]}"
         )

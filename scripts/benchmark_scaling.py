@@ -97,6 +97,8 @@ import sys
 import time
 import tracemalloc
 
+from abicheck.policy.evaluate import evaluate
+
 try:
     # Unix-only (Linux/macOS CI lanes); absent on Windows. Used for peak RSS,
     # which — unlike tracemalloc — also counts native allocations (pyelftools
@@ -1219,7 +1221,7 @@ def _run_compare_verify_scoped_non_breaking(
             "onedal_packaging_noise must not classify as BREAKING: removed "
             "exports here are all Visibility.ELF_ONLY (bundled dependency "
             "symbols), and public-surface scoping should demote them — "
-            f"got {len(result.breaking)} breaking change(s)"
+            f"got {len(evaluate(result).breaking)} breaking change(s)"
         )
     return len(result.changes)
 
@@ -1242,7 +1244,7 @@ def _run_compare_verify_breaking(prepared: tuple[AbiSnapshot, AbiSnapshot]) -> i
             "onedal_mass_removal must classify as BREAKING: removed exports "
             "here are all Visibility.PUBLIC (genuine API removals), so "
             f"public-surface scoping must not suppress them — got verdict "
-            f"{result.verdict!r} with {len(result.breaking)} breaking change(s)"
+            f"{result.verdict!r} with {len(evaluate(result).breaking)} breaking change(s)"
         )
     return len(result.changes)
 

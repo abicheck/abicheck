@@ -23,6 +23,7 @@ from pathlib import Path
 import pytest
 
 from abicheck.checker import ChangeKind, Verdict
+from abicheck.policy.evaluate import evaluate
 
 
 def _require_tool(name: str) -> None:
@@ -382,7 +383,7 @@ class TestRealWorldCompatibleRelease:
             f"Expected {expected.value} for additive release; got {r.verdict}. "
             f"Changes: {[(c.kind.value, c.symbol) for c in r.changes]}"
         )
-        assert not r.breaking
+        assert not evaluate(r).breaking
 
         kinds = {c.kind for c in r.changes}
         assert ChangeKind.ENUM_MEMBER_ADDED in kinds, (
@@ -428,7 +429,7 @@ class TestRealWorldBreakingRelease:
         assert r.verdict == Verdict.BREAKING, (
             f"Expected BREAKING for major release; got {r.verdict}"
         )
-        assert r.breaking
+        assert evaluate(r).breaking
 
         kinds = {c.kind for c in r.changes}
         # compress_bound was removed
