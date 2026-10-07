@@ -74,7 +74,7 @@ from .cli_resolve import (
     resolve_directory_compile_context,
 )
 from .contract_scoped_promotion import stamp_scoped_result_findings
-from .errors import PolicyError, ProfileMismatchError, ScopeMismatchError
+from .errors import PolicyError, ProfileMismatchError, ScopeMismatchError, SnapshotError
 from .frontends.cli import compare_enrichment as _enrichment
 from .frontends.cli.acknowledgment_config import (
     compare_acknowledgments_for,
@@ -2034,26 +2034,29 @@ def run_compare(
 
     # Build-info + source facts (ADR-028/033): the helper times inline diffing
     # for the D6/D9 metrics and returns coverage/metrics to attach post-compare.
-    from .cli_buildsource import prepare_embedded_build_source
+    # ADR-068 D3 (Phase 2d): the candidate-only --abi3 audit rides the same extra_changes channel every other externally-produced finding uses, so policy/suppression/verdict score it (security review of PR #1123).
+    # Both folds run through the evidence fold every compare route shares.
+    from .cli_buildsource_helpers import _echo as _evidence_echo
+    from .workflows.pair_evidence import fold_pair_evidence
 
-    extra_changes, layer_coverage_rows, evidence_metrics, _ev_changes = (
-        prepare_embedded_build_source(
+    try:
+        folded = fold_pair_evidence(
             old,
             new,
-            collect_mode,
-            extra_changes,
-            None,
-            None,
-            None,
-            None,
+            collect_mode=collect_mode,
+            extra_changes=extra_changes,
             policy_file=pf,
+            abi3_floor=_enrich.abi3_floor,
+            candidate_name=new_input.name,
+            on_output=_evidence_echo,
         )
+    except SnapshotError as exc:
+        raise click.ClickException(str(exc)) from exc
+    extra_changes, layer_coverage_rows = (
+        folded.extra_changes,
+        folded.layer_coverage_rows,
     )
-
-    # ADR-068 D3 (Phase 2d): the candidate-only --abi3 audit rides the same extra_changes channel every other externally-produced finding uses, so policy/suppression/verdict score it (security review of PR #1123).
-    extra_changes, _abi3_failure = _enrichment.fold_abi3_into_extra_changes(
-        extra_changes, new, _enrich.abi3_floor, new_input.name
-    )
+    evidence_metrics, _abi3_failure = folded.evidence_metrics, folded.abi3_failure
 
     # contract.overlays.post_manifest: scope the comparison to the POST
     # manifest's committed `pp_*`/ufunc-loop surface. Narrowing, so only an

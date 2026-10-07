@@ -11237,7 +11237,9 @@ no scalar input to exercise them:
 Also still scalar-only: `cli_compare_helpers.run_compare` resolves its own
 inputs (strict suppressions, packs via `resolve_and_apply`, probe matrix,
 `--build-info`, force-public allowlist, `stated_contract_mode`) and calls
-`compare_snapshots` directly rather than `run_compare_request`. Unifying the
+`compare_snapshots` directly rather than `run_compare_request`. The evidence
+fold between resolution and classification (build-source diff, abi3 audit) is
+already shared: `workflows/pair_evidence.fold_pair_evidence`. Unifying the
 fold means generalizing the release fold so N=1 reduces to the scalar one;
 any exit-code difference that exposes at N=1 must be decided before it
 changes (ADR-064). Owner: ADR-063/065, lane A stage A2(b).

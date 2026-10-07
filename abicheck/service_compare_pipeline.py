@@ -532,15 +532,13 @@ def classify_compare_pair(
     ``resolve_compare_config``) and there is nothing left to load here.
     """
     from . import deadline
-    from .buildsource.evidence_report import (
-        attach_evidence_metrics,
-        prepare_embedded_build_source,
-    )
+    from .buildsource.evidence_report import attach_evidence_metrics
     from .workflows.compare_policy import compare_snapshots, load_suppression_and_policy
     from .workflows.input_resolution import (
         collect_metadata,
         sniff_text_format,
     )
+    from .workflows.pair_evidence import fold_pair_evidence
 
     # Same classify-stage boundary check as `resolve_compare_request`'s own
     # (Codex review, fresh evidence, PR #1178): `compare_snapshots` below can
@@ -581,26 +579,21 @@ def classify_compare_pair(
     policy_inputs = resolve_request_policy_inputs(request, suppression, pf)
     suppression, pf = policy_inputs.suppression, policy_inputs.policy_file
     evaluation_config = policy_inputs.evaluation_config
-    # The four Nones are the out-of-band pack-override params -- reusing the
-    # raw sources/build_info paths would make `_resolve_side_pack` try (and
-    # fail) to reload them as packs; None uses the embedded facts.
-    (
-        extra_changes,
-        layer_coverage_rows,
-        evidence_metrics,
-        _ev_changes,
-    ) = prepare_embedded_build_source(
+    # The shared fold diffs the *embedded* build/source facts (never raw
+    # sources/build_info paths, which `_resolve_side_pack` would try and fail
+    # to reload as packs) and folds the abi3 audit.
+    folded = fold_pair_evidence(
         old,
         new,
-        pair.old_evidence.collect_mode,
-        None,
-        None,
-        None,
-        None,
-        None,
+        collect_mode=pair.old_evidence.collect_mode,
+        extra_changes=None,
         policy_file=pf,
+        abi3_floor=request.abi3_floor,
     )
-    extra_changes, _fail = abi3_audit.fold(extra_changes, new, request.abi3_floor)
+    extra_changes, layer_coverage_rows = (
+        folded.extra_changes,
+        folded.layer_coverage_rows,
+    )
     result = compare_snapshots(
         old,
         new,
@@ -638,6 +631,7 @@ def classify_compare_pair(
         contract_evaluation=request.contract_evaluation,
         contract_mode=request.contract_mode,
     )
+    evidence_metrics, _fail = folded.evidence_metrics, folded.abi3_failure
     if layer_coverage_rows:
         result.layer_coverage = layer_coverage_rows
     attach_evidence_metrics(result, evidence_metrics, extra_changes or [])
