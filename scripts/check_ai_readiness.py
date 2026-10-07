@@ -193,7 +193,6 @@ LARGE_FILE_ALLOWLIST: frozenset[str] = frozenset(
         "scripts/check_ai_readiness.py",
         "tests/test_type_graph.py",
         "tests/test_l3l4l5_new_kinds.py",
-        "tests/test_appcompat.py",
         "tests/test_dumper_clang.py",
         "tests/test_source_abi.py",
         "tests/test_bundle.py",

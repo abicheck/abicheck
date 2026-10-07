@@ -15,5 +15,9 @@
 #     - key: abicheck.module#Class.method
 #       reason: documented extension hook, called by third-party plugins
 test_only_functions: []
-test_only_modules: []
+test_only_modules:
+  - key: abicheck.appcompat
+    reason: public Python API path named in docs/use/python-api.md (abicheck.appcompat.scope_diff_to_app); a delegation-only facade internal code never imports, like checker_policy
+  - key: abicheck.workflows.consumer_scope_standalone
+    reason: implements the public check_appcompat/check_plugin_host_contract entry points re-exported by abicheck.appcompat for library users; the CLI uses the pre-computed-diff path instead
 cross_module_exact_clones: []

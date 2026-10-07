@@ -241,7 +241,7 @@ class TestCliExitCodeInvariantToConsumerScope:
                 ),
             ),
             patch(
-                "abicheck.appcompat.scope_diff_to_app",
+                "abicheck.workflows.consumer_scope.scope_diff_to_app",
                 lambda *a, **k: consumer_result,
             ),
         ):
@@ -302,7 +302,9 @@ class TestConsumerImpactSummary:
 
             return results_by_app[str(as_consumer_spec(app).path)]
 
-        monkeypatch.setattr("abicheck.appcompat.scope_diff_to_app", _fake_scope)
+        monkeypatch.setattr(
+            "abicheck.workflows.consumer_scope.scope_diff_to_app", _fake_scope
+        )
         monkeypatch.setattr(
             "abicheck.dumper.dump",
             MagicMock(side_effect=[_snap("1.0"), _snap("2.0")]),

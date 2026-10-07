@@ -390,8 +390,8 @@ class TestEveryOwnershipSourceAndEntryPointAgrees:
         so there is no second place where ownership could be decided
         differently. A second call site is the thing this guards against,
         which a per-format behavioural test could not see."""
-        import abicheck.appcompat as appcompat
         import abicheck.dumper as dumper
+        import abicheck.workflows.consumer_scope_standalone as appcompat
         from abicheck import provenance
         from abicheck.buildsource import header_graph
 

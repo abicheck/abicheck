@@ -777,7 +777,7 @@ class TestUsedByScopingStampsExplicitEvidence:
         return app, old, new
 
     def _patch_scope(self, monkeypatch, result):
-        import abicheck.appcompat as appcompat_mod
+        import abicheck.workflows.consumer_scope as appcompat_mod
 
         monkeypatch.setattr(appcompat_mod, "scope_diff_to_app", lambda *a, **k: result)
 

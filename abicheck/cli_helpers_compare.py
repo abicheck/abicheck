@@ -785,7 +785,7 @@ def _scoped_severity_summary(
     Change) is excluded via ``uncovered_missing_symbols`` -- otherwise that
     single ABI break would be counted twice (Codex review follow-up).
     """
-    from .appcompat import uncovered_missing_symbols
+    from .workflows.consumer_scope import uncovered_missing_symbols
     from .workflows.gate import (
         IssueCategory,
         SeverityLevel,
@@ -883,8 +883,8 @@ def _apply_used_by_scoping(
     ``result.changes``, so without this they would be unsuppressible even by
     an exact rule.
     """
-    from .appcompat import scope_diff_to_app
     from .service import detect_binary_format
+    from .workflows.consumer_scope import scope_diff_to_app
     from .workflows.disposition import close_consumer_scope, ledger_for
 
     old_lib = old_input if detect_binary_format(old_input) is not None else old_snapshot
@@ -892,8 +892,8 @@ def _apply_used_by_scoping(
 
     _require_used_by_binary_evidence(old_lib, new_lib, old_input, new_input)
 
-    from .appcompat import uncovered_missing_symbols
     from .reporter import _finding_id
+    from .workflows.consumer_scope import uncovered_missing_symbols
 
     summaries = []
     worst_exit = 0
@@ -1058,8 +1058,11 @@ def _apply_required_symbol_scoping(
     pass already ran over ``result.changes``, so without this it would be
     unsuppressible even by an exact rule.
     """
-    from .appcompat import scope_diff_to_required_symbols, uncovered_missing_symbols
     from .reporter import _finding_id
+    from .workflows.consumer_scope import (
+        scope_diff_to_required_symbols,
+        uncovered_missing_symbols,
+    )
     from .workflows.disposition import close_consumer_scope, ledger_for
 
     scoped = scope_diff_to_required_symbols(
