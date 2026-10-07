@@ -37,6 +37,7 @@ __all__ = [
     "adopt_evidence_adaptive_mode",
     "evidence_adaptive_contract_mode",
     "is_evidence_adaptive",
+    "build_source_fallback_applies",
     "observed_export_fallback_applies",
     "mode_is_built_in_default",
 ]
@@ -153,4 +154,35 @@ def observed_export_fallback_applies(
     return reason_code == "closed_domain_no_commitment" or relevance in (
         ContractRelevance.UNKNOWN_UNRESOLVED,
         ContractRelevance.UNKNOWN_UNPROVEN,
+    )
+
+
+def build_source_fallback_applies(
+    mode: ContractMode,
+    provenance: ValueProvenance | None,
+    relevance: ContractRelevance | None,
+    *,
+    build_source_evidence: bool,
+) -> bool:
+    """Whether an evidence-adaptive default must judge a finding on ``all``.
+
+    ``--sources``/``--build-info`` evidence (L3-L5, ``AbiSnapshot.
+    build_source``) describes the whole artifact: a compile-flag flip, a
+    removed public macro, inline function or typedef, a new internal
+    dependency. It closes no narrower domain -- neither the export table nor
+    a header surface can place ``build-option:enum_size`` or a macro name --
+    so a finding the selected domain (and the observed-export fallback) left
+    ``UNKNOWN_*`` is judged on ``all``, the domain that evidence speaks to.
+    Applies only when every compared side carries that evidence and nobody
+    stated a domain; a stated ``--contract`` is never second-guessed. Like
+    the export fallback it can only keep a finding scored, never drop one:
+    supplying optional evidence never makes a verdict cleaner (ADR-049
+    Phase 7, "never less than either").
+    """
+    return (
+        build_source_evidence
+        and is_evidence_adaptive(provenance)
+        and mode is not ContractMode.ALL
+        and relevance
+        in (ContractRelevance.UNKNOWN_UNRESOLVED, ContractRelevance.UNKNOWN_UNPROVEN)
     )

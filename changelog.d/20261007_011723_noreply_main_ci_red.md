@@ -9,3 +9,8 @@
   findings are now `NOT_APPLICABLE` (scored by policy, like `SONAME`), and the
   evidence-adaptive `public` default re-asks the observed export table for every
   finding the headers could not decide, not only an explicit non-commitment.
+  When every compared side carries `--sources`/`--build-info` evidence, a
+  finding the adaptive default still cannot place (build-option flips, removed
+  public macros/inline functions/typedefs, new internal dependencies) is judged
+  on `all` instead of being dropped as unresolved. Supplying optional evidence
+  never makes a verdict cleaner (ADR-049 revision 2026-10-07).

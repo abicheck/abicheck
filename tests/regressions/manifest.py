@@ -711,7 +711,8 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
             # ADR-049 Phase 7's evidence-adaptive default: a finding no
             # contract domain could place (an ELF version node; an
             # undeclared `_ZTV`/`_ZTI` export under `-H`) read
-            # UNKNOWN_UNRESOLVED and stopped gating.
+            # UNKNOWN_UNRESOLVED and stopped gating; so did `--sources`/
+            # `--build-info` findings under the `exports` default.
             "tests/test_contract_adaptive_default_monotone.py",
             "tests/test_export_reconciliation_and_obligations.py",
         ),
@@ -743,22 +744,6 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
                     "production fix fails this test)."
                 ),
                 reference="docs/contribute/plans/bug-class-regression-testing.md#phase-9",
-            ),
-            KnownGap(
-                description=(
-                    "Under the evidence-adaptive `exports` default (a stored "
-                    "snapshot without header evidence), L3/L4/L5 findings "
-                    "supplied by `--build-info`/`--sources` (build-option "
-                    "flips, public macro/inline/typedef removal, internal "
-                    "dependency added) cannot be placed in the export table, "
-                    "read UNKNOWN_UNRESOLVED and stop gating: 15 special-CLI "
-                    "catalog cases (case152-158, 160-162, 190, 194-197) "
-                    "report NO_CHANGE/exit 1. Whether the adaptive rule "
-                    "should count overlay evidence, the exports domain "
-                    "should trust these kinds, or the ground truth should "
-                    "change is an open ADR-049 product decision."
-                ),
-                reference="docs/contribute/adr/049-contract-relevance-and-compatibility-configuration.md",
             ),
         ),
     ),

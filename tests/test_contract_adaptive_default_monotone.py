@@ -174,3 +174,91 @@ def test_adaptive_public_consults_exports_whenever_headers_did_not_place_it() ->
         expected = mode is ContractMode.PUBLIC and prov is _ADAPTIVE and undecided
         got = observed_export_fallback_applies(mode, prov, reason, rel)
         assert got is expected, (mode, prov, reason, rel)
+
+
+# --------------------------------------------------------------------------
+# The `--sources`/`--build-info` axis: L3-L5 evidence closes no narrower
+# domain, so what it alone can place is judged on `all`.
+# --------------------------------------------------------------------------
+
+
+def test_build_source_fallback_is_exhaustively_monotone() -> None:
+    """Exhaustive over mode x provenance x relevance x evidence. Oracle: the
+    ADR-049 revision's stated rule -- only an adaptive, not-already-`all`
+    domain, only an UNKNOWN answer, and only with build/source evidence on
+    every side. A stated domain and every decided answer are left alone."""
+    from abicheck.policy.contract_default_mode import build_source_fallback_applies
+
+    for mode, prov, rel, ev in itertools.product(
+        ContractMode,
+        (_ADAPTIVE, _STATED, None),
+        (*ContractRelevance, None),
+        (True, False),
+    ):
+        expected = (
+            ev
+            and prov is _ADAPTIVE
+            and mode is not ContractMode.ALL
+            and rel in _UNKNOWN
+        )
+        got = build_source_fallback_applies(mode, prov, rel, build_source_evidence=ev)
+        assert got is expected, (mode, prov, rel, ev)
+
+
+#: Every catalog case whose finding exists only in `--sources`/`--build-info`
+#: evidence layered over a stored header-less snapshot pair (the adaptive
+#: default picks `exports` there), plus case170 whose finding is a version
+#: node. Their ground truth predates the default flip and is the oracle.
+_OVERLAY_CASES = (
+    "case152",
+    "case153",
+    "case154",
+    "case155",
+    "case156",
+    "case157",
+    "case158",
+    "case160",
+    "case161",
+    "case162",
+    "case170",
+    "case190",
+    "case194",
+    "case195",
+    "case196",
+    "case197",
+)
+
+
+@pytest.mark.integration
+def test_overlay_catalog_cases_keep_their_ground_truth_through_the_cli(
+    tmp_path: Path,
+) -> None:
+    """Public-surface proof: the real special-CLI runner (subprocess
+    `abicheck compare` per case) reproduces each case's catalog verdict, exit
+    code and kinds -- verdict and exit are checked independently by it."""
+    import json
+    import os
+    import subprocess
+    import sys
+
+    repo = _ROOT.parent
+    script = (
+        repo / "skills-src/evaluation/validation/scripts/run_special_cli_examples.py"
+    )
+    ran = subprocess.run(
+        [sys.executable, str(script), *_OVERLAY_CASES, "--json"],
+        capture_output=True,
+        text=True,
+        cwd=repo,
+        env={**os.environ, "PYTHONPATH": str(repo)},
+        timeout=1200,
+    )
+    payload = json.loads(ran.stdout)
+    statuses = {r["case_id"].split("_")[0]: r["status"] for r in payload["results"]}
+    assert set(statuses) == set(_OVERLAY_CASES), statuses
+    failed = {
+        r["case_id"]: r.get("message")
+        for r in payload["results"]
+        if r["status"] != "PASS"
+    }
+    assert not failed, failed

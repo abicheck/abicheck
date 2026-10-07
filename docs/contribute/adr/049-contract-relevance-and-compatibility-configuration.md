@@ -6,7 +6,11 @@ default flip landed 2026-10-05: contract evaluation runs on every
 comparison; with no `--contract` (or `auto`, with no `scope.public` legacy
 alias) the domain is evidence-adaptive — `public` when header evidence
 closes on every compared side, else `exports` when the export table does,
-else `all` (`abicheck/policy/contract_default_mode.py`). Phase 0's vocabulary (`abicheck/contract_relevance_types.py`)
+else `all` (`abicheck/policy/contract_default_mode.py`). The default is
+monotone in evidence — public headers *plus* observed exports *plus*, when
+every side carries `--sources`/`--build-info` evidence, `all` for what that
+evidence alone can place — so supplying optional evidence never makes a
+verdict cleaner (see Revision history, 2026-10-07). Phase 0's vocabulary (`abicheck/contract_relevance_types.py`)
 and Phase 1's typed config, precedence resolver, pack manifests, and
 per-field front-end wiring (`abicheck/compatibility_evaluation_config.py`,
 `abicheck/compatibility_evaluation_resolver.py`,
@@ -932,3 +936,22 @@ is unaffected: it still ranks a real consumer's imports above a
 header/export-derived relevance conclusion when `--contract` is given, and
 still operates on `DiffResult.changes` before this ADR's own D9
 policy-scoring pipeline runs.
+
+## Revision history
+
+- **2026-10-07 — evidence-adaptive default is monotone in evidence.** The
+  default's per-finding fallbacks were completed so the domain is the union
+  of what each supplied evidence source closes. (1) Under an adaptive
+  `public` default, any header answer that is not a decision
+  (`closed_domain_no_commitment`, `UNKNOWN_UNRESOLVED`, `UNKNOWN_UNPROVEN`)
+  is re-asked of the observed export table; previously only the first was,
+  so `-H` could turn a lost undeclared `_ZTV`/`_ZTI` export from BREAKING
+  into a passing run. (2) When every compared side carries build/source
+  evidence (`AbiSnapshot.build_source`), a finding the adaptive domain still
+  leaves `UNKNOWN_*` is judged on `all`: L3–L5 facts (build-option flips,
+  macro/inline/typedef removal, internal dependencies) describe the whole
+  artifact and close no narrower domain. (3) ELF version-node findings,
+  whose subject is a version name no domain can place, are
+  `NOT_APPLICABLE` like other linker metadata. A stated `--contract` is
+  never re-judged. Rule owner: `abicheck/policy/contract_default_mode.py`;
+  class test: `tests/test_contract_adaptive_default_monotone.py`.
