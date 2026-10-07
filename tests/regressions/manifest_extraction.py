@@ -236,4 +236,28 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
             ),
         ),
     ),
+    BugClass(
+        id="extraction.recorded_scope_matches_parse_skip",
+        invariant=(
+            "A dump's recorded `dependency_scope` agrees with what its parse "
+            "was allowed to drop, however dumps nest: a full-surface request "
+            "(`include_dependencies=True`) parses with no streaming prune and "
+            "no parse-time dependency skip even inside an enclosing scoped "
+            "dump, and a scoped request may skip only what scoping with its "
+            "own header roots drops afterwards. Both hybrid entry points "
+            "(`service.run_dump` and `dumper.dump`) therefore parse both legs "
+            "unscoped and scope the merged result once."
+        ),
+        fixed_by=(1258, 1505),
+        seed_tests=(
+            "tests/test_dump_extraction_scope.py",
+            "tests/test_dependency_exclusion_scope.py",
+        ),
+        public_surfaces=("python-api",),
+        axes={
+            "outer_scope": ("none", "scoped", "full"),
+            "inner_scope": ("scoped", "full"),
+            "header_backend": ("hybrid",),
+        },
+    ),
 )

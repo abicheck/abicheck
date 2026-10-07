@@ -1582,8 +1582,8 @@ class TestSharedPipelineReachesADR039BuildContextCollector:
         snapshot-wide (the ninth finding in AGENTS.md's L3->L2-fold entry)."""
         import abicheck.workflows.input_resolution as _input_resolution
         from abicheck import header_conditionals as _hc
-        from abicheck.workflows.artifact import execute as sir
         from abicheck.service_compare_evidence import SideEvidence
+        from abicheck.workflows.artifact import execute as sir
 
         hdr = tmp_path / "widget.h"
         hdr.write_text("struct Widget { int x; };\n", encoding="utf-8")
@@ -1648,8 +1648,8 @@ class TestSharedPipelineReachesADR039BuildContextCollector:
         raise) -- a plain context-free dump is still the common case."""
         import abicheck.workflows.input_resolution as _input_resolution
         from abicheck import header_conditionals as _hc
-        from abicheck.workflows.artifact import execute as sir
         from abicheck.service_compare_evidence import SideEvidence
+        from abicheck.workflows.artifact import execute as sir
 
         hdr = tmp_path / "widget.h"
         hdr.write_text("struct Widget { int x; };\n", encoding="utf-8")
@@ -1694,8 +1694,8 @@ class TestSharedPipelineReachesADR039BuildContextCollector:
         PE/Mach-O dump path."""
         import abicheck.workflows.input_resolution as _input_resolution
         from abicheck import header_conditionals as _hc
-        from abicheck.workflows.artifact import execute as sir
         from abicheck.service_compare_evidence import SideEvidence
+        from abicheck.workflows.artifact import execute as sir
 
         hdr = tmp_path / "widget.h"
         hdr.write_text("struct Widget { int x; };\n", encoding="utf-8")
@@ -1744,8 +1744,8 @@ class TestSharedPipelineReachesADR039BuildContextCollector:
         headers, rather than raising or narrowing."""
         import abicheck.workflows.input_resolution as _input_resolution
         from abicheck import header_conditionals as _hc
-        from abicheck.workflows.artifact import execute as sir
         from abicheck.service_compare_evidence import SideEvidence
+        from abicheck.workflows.artifact import execute as sir
 
         hdr = tmp_path / "widget.h"
         hdr.write_text("struct Widget { int x; };\n", encoding="utf-8")
@@ -1800,8 +1800,8 @@ class TestSharedPipelineReachesADR039BuildContextCollector:
         binary or a followed linker script, so the collector must not run."""
         import abicheck.workflows.input_resolution as _input_resolution
         from abicheck import header_conditionals as _hc
-        from abicheck.workflows.artifact import execute as sir
         from abicheck.service_compare_evidence import SideEvidence
+        from abicheck.workflows.artifact import execute as sir
 
         hdr = tmp_path / "widget.h"
         hdr.write_text("struct Widget { int x; };\n", encoding="utf-8")

@@ -1,6 +1,7 @@
 # Architecture deepening: from shallow modules to fewer, deeper owners
 
-Status: Proposed 2026-10-07. Not started. No new ADR: each phase finishes
+Status: Phases 1 and 2 landed 2026-10-07 (see each phase's "Landed"
+note); Phases 3-5 proposed. No new ADR: each phase finishes
 work [ADR-061](../adr/061-responsibility-package-architecture.md) already
 decided (D8 facades, gap B dependency direction, the `service_*`/`cli_*`/
 `diff_*` target owners). Effort: L overall, delivered as independent
@@ -83,6 +84,29 @@ over a `DiffResult` fixture, with no model import cycle.
 - `checker_types` is imported by about 190 modules. Step 2 must keep
   every field and must not change serialization.
 
+**Landed (2026-10-07).** Step 1 as written. Steps 2-3 landed in a
+different shape once the code was traced:
+
+- The vocabulary `Change` is built from (`Confidence`, `EvidenceTier`,
+  `ReachabilityState`, `FindingEvolution`, `CrossSourceEvolution`,
+  `EvidenceStatus`) was a dependency-free leaf misfiled under `policy`. It
+  moved to `model/evidence_status.py`. The default-verdict kind sets moved to
+  `change_registry`. With both moved, the compare-layer detectors that used
+  `checker_policy` need no `policy` import at all.
+- `Change` and its pure-data siblings moved to `model/change.py`.
+  `checker_types.py` keeps only `DiffResult`.
+- `contract_gating`'s predicates only read a stamped field, so they moved to
+  `model/contract_finding_relevance.py`, and the facade was deleted.
+- `DiffResult` stays in `model`. Moving it to `policy` would have made every
+  frontend that annotates a result break the direction rule. Its single real
+  policy call (effective verdict and kind sets) is now a call-time import
+  recorded as two `dependency_direction_exceptions` in
+  `architecture/debt.yaml`. The `reclassify` facade was deleted. Closing
+  that exception means taking the verdict buckets off `DiffResult`, which is
+  a public Python API decision.
+- `checker_policy` stays only because `docs/use/python-api.md` documents it.
+  No `abicheck` module imports it.
+
 **Tests.** A parity test over the `examples/` catalog: for every case,
 the effective verdict from the new policy function equals the old
 method's verdict (the oracle is the pre-change method, captured before
@@ -129,6 +153,26 @@ workflow.
 × header set) combinations that checks the invariant against an
 independent recount of declaration origins. Golden snapshots must not
 change.
+
+**Landed (2026-10-07), narrower than proposed.** The trace found a live bug of
+exactly this class. `dumper.dump`'s hybrid path turned off the parse-time
+dependency skip for both legs. The CLI's own hybrid path in
+`service_dump_native.py` was a hand-copied recursion that did not, so under
+`compare`'s default scoped run the clang leg skipped declarations the
+castxml leg kept, and each leg was stamped `dependency_scope="full"` over a
+filtered surface. The fix:
+
+- `workflows.run_dump_scope.extraction_scope` is the one place that maps a
+  dump's dependency scope onto both parse-time mechanisms (the streaming
+  pruner and the dependency skip).
+- The CLI hybrid path delegates to `dumper_hybrid.run_hybrid_dump`.
+- `tests/test_dump_extraction_scope.py` checks every nesting of outer scope
+  (none, scoped, full) around inner scope (scoped, full), plus both legs of a
+  real `service.run_dump` hybrid call, against a table derived from the
+  request. Bug class: `extraction.recorded_scope_matches_parse_skip`.
+
+Still proposed: consolidating the four `service_dump_*` modules under one
+`workflows/dump` owner (the ELF/PE/Mach-O tails and the cache as adapters).
 
 ### Phase 3: CLI compare helpers keep only adapter work. Strong (re-scoped)
 
