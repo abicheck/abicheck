@@ -17,10 +17,6 @@
 from __future__ import annotations
 
 from abicheck.checker_policy import ChangeKind, Confidence, EvidenceTier
-from abicheck.checker_types import (
-    SYMBOL_VERSION_ALIAS_NOT_RETAINED_MARKER,
-    Change,
-)
 from abicheck.confidence import _compute_confidence, _determine_confidence_level
 from abicheck.detectors import DetectorResult
 from abicheck.diff_filtering import (
@@ -45,6 +41,7 @@ from abicheck.model import (
     Variable,
     Visibility,
 )
+from abicheck.model.change import SYMBOL_VERSION_ALIAS_NOT_RETAINED_MARKER, Change
 
 
 def _snap(**kw) -> AbiSnapshot:

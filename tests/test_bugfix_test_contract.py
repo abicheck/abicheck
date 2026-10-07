@@ -806,8 +806,8 @@ class TestConditionalRequirements:
             ("abicheck/checker_policy.py", "verdict-gate-exit"),
             ("abicheck/severity.py", "verdict-gate-exit"),
             ("abicheck/policy/classification.py", "verdict-gate-exit"),
-            ("abicheck/policy/evidence_status.py", "verdict-gate-exit"),
-            ("abicheck/policy/contract_finding_relevance.py", "verdict-gate-exit"),
+            ("abicheck/model/evidence_status.py", "verdict-gate-exit"),
+            ("abicheck/model/contract_finding_relevance.py", "verdict-gate-exit"),
             # The root manifest is the published Action; it shares the
             # action/ trust boundary and must ask the same question.
             ("action.yml", "malicious-fixture"),

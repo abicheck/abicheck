@@ -51,7 +51,7 @@ from .declined_comparisons import record_declined
 from .fact_comparison import compare_facts
 
 if TYPE_CHECKING:
-    from ..checker_types import Change
+    from ..model.change import Change
     from ..model.identity import EntityId
     from ..model.semantic_ir import CanonicalEntity
 

@@ -44,7 +44,7 @@ candidate, every candidate-side finding therefore came back ``persistent``
 explicitly told does not exist. ``old=None`` separates the two axes the
 self-diff conflated: the finding is a full-confidence observation about
 this build (the check ran, on real candidate evidence), and its historical
-evolution is :attr:`~abicheck.policy.evidence_status.CrossSourceEvolution.
+evolution is :attr:`~abicheck.model.evidence_status.CrossSourceEvolution.
 NOT_EVALUATED`, because no history was observable. That is now a
 *structural* property of the run rather than a rule about it -- which is
 why ADR-068 D3's permitted-state allowlist, a second rule set that existed
@@ -91,10 +91,11 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
-    from ..checker_types import Change, DiffResult
+    from ..checker_types import DiffResult
     from ..compile_context import CompileContext
     from ..environment_matrix import EnvironmentMatrix
     from ..model import AbiSnapshot
+    from ..model.change import Change
     from ..policy_file import PolicyFile
     from ..suppression import SuppressionList
 

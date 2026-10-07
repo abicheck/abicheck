@@ -26,7 +26,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..policy.evidence_status import Confidence, ReachabilityState
+from ..model.evidence_status import Confidence, ReachabilityState
 from .model import FindingDecision, GraphProofPath, ImpactAssessment, ProofStep
 
 

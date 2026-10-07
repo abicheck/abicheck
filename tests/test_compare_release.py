@@ -1676,7 +1676,7 @@ def test_release_json_emits_severity_block() -> None:
     """compare-release JSON carries a severity config block when --severity-* is
     active, so the PR-comment renderer can mirror the gate (issue #342 follow-up).
     """
-    from abicheck.severity import resolve_severity_config
+    from abicheck.policy.severity import resolve_severity_config
 
     cfg = resolve_severity_config("default", addition="error")
     out = _format_release_json(

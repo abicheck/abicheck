@@ -46,8 +46,6 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import TYPE_CHECKING, NamedTuple
 
-from .checker_policy import ChangeKind, ReachabilityState
-from .checker_types import Change
 from .compare.namespace_shape_detectors import (  # noqa: F401 -- re-exported
     _batch_demangle_public,
     _build_std_reexport_change,
@@ -64,6 +62,9 @@ from .compare.qualified_name_normalization import (
 )
 from .diff_helpers import make_change
 from .diff_templates import _strip_param_signature
+from .model.change import Change
+from .model.change_catalog.kinds import ChangeKind
+from .model.evidence_status import ReachabilityState
 from .model.execution_cache import memoized
 from .model.name_heuristics import (
     NameHeuristicEffect,

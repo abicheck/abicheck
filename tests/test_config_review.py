@@ -796,7 +796,7 @@ class TestReleaseSeverityPolicyAndGlobal:
         JUnit file would disagree with the release's severity-aware exit."""
         from abicheck.checker import Change, ChangeKind, DiffResult, Verdict
         from abicheck.cli_compare_release_helpers import _format_release_junit
-        from abicheck.severity import resolve_severity_config
+        from abicheck.policy.severity import resolve_severity_config
 
         c = Change(ChangeKind.FUNC_ADDED, "_Z3newv", "new public function")
         diff = DiffResult(
@@ -874,8 +874,8 @@ class TestReleaseSeverityPolicyAndGlobal:
         import types
 
         from abicheck.checker_policy import ChangeKind
-        from abicheck.checker_types import Change
         from abicheck.cli_compare_release import _fold_release_global_severity
+        from abicheck.model.change import Change
 
         change = Change(
             kind=ChangeKind.CALLING_CONVENTION_CHANGED,
@@ -911,8 +911,8 @@ class TestReleaseSeverityPolicyAndGlobal:
         import types
 
         from abicheck.checker_policy import ChangeKind, Verdict
-        from abicheck.checker_types import Change
         from abicheck.cli_compare_release import _fold_release_global_severity
+        from abicheck.model.change import Change
         from abicheck.policy_file import PolicyFile
 
         change = Change(

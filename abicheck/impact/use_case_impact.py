@@ -47,8 +47,8 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from ..checker_types import Change
     from ..model import AbiSnapshot
+    from ..model.change import Change
     from .use_cases import UseCaseDefinition, UseCaseResolution
 
 

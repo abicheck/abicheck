@@ -26,9 +26,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from .checker_types import Change
 from .diff_helpers import make_change
 from .model import AbiSnapshot
+from .model.change import Change
 from .model.change_catalog.kinds import ChangeKind
 from .surface_graph import SurfaceMetrics, compute_surface_metrics
 

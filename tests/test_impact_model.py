@@ -21,9 +21,10 @@ import json
 
 from abicheck import reporter
 from abicheck.checker_policy import ChangeKind, Confidence, ReachabilityState, Verdict
-from abicheck.checker_types import Change, DiffResult
+from abicheck.checker_types import DiffResult
 from abicheck.impact import FindingDecision, GraphProofPath, ImpactAssessment, ProofStep
 from abicheck.impact.engine import assess_change
+from abicheck.model.change import Change
 
 
 def _change(**overrides: object) -> Change:

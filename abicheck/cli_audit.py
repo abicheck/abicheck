@@ -29,7 +29,8 @@ from typing import TYPE_CHECKING
 import click
 
 if TYPE_CHECKING:
-    from .checker_types import Change, DiffResult
+    from .checker_types import DiffResult
+    from .model.change import Change
 
 
 def _contract_tag(c: Change, contract_evaluation: bool) -> str:

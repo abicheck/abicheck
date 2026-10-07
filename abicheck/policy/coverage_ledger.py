@@ -18,11 +18,8 @@
 ADR-061 gap B: the real owner behind the flat
 ``abicheck.contract_coverage_ledger`` compatibility facade, which every
 existing caller keeps importing unchanged; canonical internal callers
-(``policy/*``, ``report/*``) import this module directly instead. Unlike
-``checker_policy``/``contract_gating``/``reclassify``, nothing in `model`
-needs this module, so there is no structural reason it must stay
-unclassified — it is a real `policy`-owned module, not another "no single
-layer" leaf.
+(``policy/*``, ``report/*``) import this module directly instead. Nothing
+in `model` needs this module; it is a real `policy`-owned module.
 
 The plan states the rule twice and from both directions. Section 6.1's
 report shape carries a ``contract_coverage_failures`` array beside the

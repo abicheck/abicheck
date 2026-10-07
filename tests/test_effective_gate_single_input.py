@@ -35,7 +35,7 @@ from abicheck.checker_policy import (
     RISK_KINDS,
     compute_verdict,
 )
-from abicheck.checker_types import Change
+from abicheck.model.change import Change
 from abicheck.policy.effective_gate import EffectiveGate
 from abicheck.policy.severity import SEVERITY_PRESETS
 

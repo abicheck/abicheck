@@ -24,7 +24,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from abicheck.service_input_resolution import _gated_build_query_inputs
+from abicheck.workflows.artifact.resolve import _gated_build_query_inputs
 
 
 class TestGatedBuildQueryInputs:

@@ -165,8 +165,7 @@ class TestAnOverlayKindTakesItsEntityFromWhatTriggeredIt:
         """The oracle is the catalog itself, swept over every kind that can
         actually trigger this detector -- so the helper cannot drift from
         what the registry says about those same kinds."""
-        from abicheck.change_registry import REGISTRY
-        from abicheck.policy.classification import BREAKING_KINDS
+        from abicheck.change_registry import BREAKING_KINDS, REGISTRY
 
         disagreeing = {}
         for kind in BREAKING_KINDS:
@@ -178,7 +177,7 @@ class TestAnOverlayKindTakesItsEntityFromWhatTriggeredIt:
         assert not disagreeing, disagreeing
 
     def test_the_sweep_is_not_vacuous(self):
-        from abicheck.policy.classification import BREAKING_KINDS
+        from abicheck.change_registry import BREAKING_KINDS
 
         assert len(BREAKING_KINDS) > 50
 
@@ -202,8 +201,8 @@ class TestJUnitClassnamesComeFromTheCatalog:
 
     def _classname(self, kind_value, **kw):
         from abicheck.checker_policy import ChangeKind
-        from abicheck.checker_types import Change
         from abicheck.junit_report import _classname_for
+        from abicheck.model.change import Change
 
         return _classname_for(
             Change(kind=ChangeKind(kind_value), symbol="s", description="d", **kw)
@@ -409,7 +408,7 @@ class TestASharedSlotIteratorKeepsEachFindingsOwner:
 
     def test_a_function_slot_finding_reaches_the_functions_filter(self):
         from abicheck.checker_policy import ChangeKind
-        from abicheck.checker_types import Change
+        from abicheck.model.change import Change
 
         finding = Change(
             kind=ChangeKind.ATOMIC_QUALIFIER_CHANGED,
@@ -423,7 +422,7 @@ class TestASharedSlotIteratorKeepsEachFindingsOwner:
     def test_a_record_slot_finding_still_reaches_the_types_filter(self):
         """The other half: the fix must not move the record case."""
         from abicheck.checker_policy import ChangeKind
-        from abicheck.checker_types import Change
+        from abicheck.model.change import Change
 
         finding = Change(
             kind=ChangeKind.ATOMIC_QUALIFIER_CHANGED,
@@ -553,7 +552,7 @@ class TestAnInlineBodyChangeIsAFunctionFinding:
 
     def test_it_reaches_the_functions_filter(self):
         from abicheck.checker_policy import ChangeKind
-        from abicheck.checker_types import Change
+        from abicheck.model.change import Change
 
         finding = Change(
             kind=ChangeKind.INLINE_BODY_CHANGED,

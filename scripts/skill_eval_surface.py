@@ -73,8 +73,8 @@ SURFACE_ROOTS: tuple[Path, ...] = (
     Path("abicheck/policy/classification.py"),
     # checker_policy.py's evidence-status half (evidence_status_for_result,
     # among others detector-spec generation and reporting both read) moved
-    # to policy/evidence_status.py alongside classification.py.
-    Path("abicheck/policy/evidence_status.py"),
+    # to model/evidence_status.py alongside classification.py.
+    Path("abicheck/model/evidence_status.py"),
 )
 
 

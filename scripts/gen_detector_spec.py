@@ -110,7 +110,8 @@ def build_spec() -> list[dict[str, str]]:
     from evidence_tiers import EVIDENCE_TIER_BY_KIND  # type: ignore[import-not-found]
 
     from abicheck import checker_policy as policy
-    from abicheck.checker_policy import ChangeKind, policy_for
+    from abicheck.model.change_catalog.kinds import ChangeKind
+    from abicheck.policy.classification import policy_for
 
     examples = _examples_by_kind()
     rows: list[dict[str, str]] = []

@@ -34,9 +34,10 @@ import pytest
 
 from abicheck.bundle_side_input import compare_release_against_bundle_facts
 from abicheck.checker_policy import ChangeKind, Verdict
-from abicheck.checker_types import Change, DiffResult
+from abicheck.checker_types import DiffResult
 from abicheck.elf_metadata import ElfImport, ElfMetadata, ElfSymbol
 from abicheck.model import AbiSnapshot, Function, Visibility
+from abicheck.model.change import Change
 from abicheck.serialization import save_bundle_facts
 from abicheck.workflows.bundle_facts_capture import capture_bundle_facts
 

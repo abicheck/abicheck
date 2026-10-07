@@ -191,12 +191,12 @@ from abicheck.model import (  # noqa: E402
     Visibility,
 )
 from abicheck.pe_metadata import PeExport, PeMetadata  # noqa: E402
+from abicheck.policy.severity import categorize_changes  # noqa: E402
 from abicheck.sarif import to_sarif_str  # noqa: E402
 from abicheck.serialization import (  # noqa: E402
     snapshot_from_dict,
     snapshot_to_json,
 )
-from abicheck.severity import categorize_changes  # noqa: E402
 from abicheck.suppression import Suppression, SuppressionList  # noqa: E402
 
 DEFAULT_SIZES = (500, 1000, 2000, 4000)

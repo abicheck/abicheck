@@ -191,7 +191,7 @@ _SEED_SCRIPT = (
     "from abicheck.compatibility_evaluation_frontend import "
     "builtin_policy_identity as p, severity_preset_identity as s\n"
     "from abicheck.checker_policy import VALID_BASE_POLICIES\n"
-    "from abicheck.severity import SEVERITY_PRESETS\n"
+    "from abicheck.policy.severity import SEVERITY_PRESETS\n"
     "print(sorted((n, p(n).sha256) for n in VALID_BASE_POLICIES))\n"
     "print(sorted((n, s(n).sha256) for n in SEVERITY_PRESETS))\n"
 )

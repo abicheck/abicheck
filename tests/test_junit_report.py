@@ -13,13 +13,14 @@ from click.testing import CliRunner
 from defusedxml.ElementTree import fromstring as xml_fromstring
 
 from abicheck.checker_policy import ChangeKind, Verdict
-from abicheck.checker_types import Change, DiffResult
+from abicheck.checker_types import DiffResult
 from abicheck.junit_report import (
     to_junit_xml,
     to_junit_xml_multi,
     to_junit_xml_not_comparable,
 )
 from abicheck.model import AbiSnapshot, EnumType, Function, RecordType, Variable
+from abicheck.model.change import Change
 from abicheck.serialization import snapshot_to_json
 
 # ---------------------------------------------------------------------------
@@ -267,7 +268,7 @@ class TestCompatibleWithRisk:
         all "warning" by construction); only a SeverityConfig can escalate
         them to a JUnit failure without changing the finding's verdict.
         """
-        from abicheck.severity import SeverityConfig, SeverityLevel
+        from abicheck.policy.severity import SeverityConfig, SeverityLevel
 
         changes = [
             Change(
@@ -857,7 +858,7 @@ class TestSeverityConfig:
     def test_severity_config_escalates_addition_to_failure(self) -> None:
         """When severity_config marks additions as 'error', they become
         failures in JUnit."""
-        from abicheck.severity import SeverityConfig, SeverityLevel
+        from abicheck.policy.severity import SeverityConfig, SeverityLevel
 
         config = SeverityConfig(
             abi_breaking=SeverityLevel.ERROR,
@@ -885,7 +886,7 @@ class TestSeverityConfig:
         severity-aware exit code (classify_effective_change → QUALITY_ISSUES →
         error). Otherwise CI consuming the JUnit file misses the failure that
         the exit status reports."""
-        from abicheck.severity import PRESET_STRICT
+        from abicheck.policy.severity import PRESET_STRICT
 
         demoted = Change(
             kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="Ctx", description="size"
@@ -929,7 +930,7 @@ class TestSeverityConfig:
         the sole source of truth once given. Fixed by consulting
         `severity_config` first, unconditionally, matching
         `compute_exit_code`'s own logic."""
-        from abicheck.severity import PRESET_INFO_ONLY
+        from abicheck.policy.severity import PRESET_INFO_ONLY
 
         changes = [
             Change(kind=ChangeKind.FUNC_REMOVED, symbol="f", description="removed"),
@@ -949,7 +950,7 @@ class TestSeverityConfig:
         addition promoted to `error` therefore both failed and reported
         `type="COMPATIBLE"` — self-contradictory. The type must instead name
         the category (ADDITION) that made it fail."""
-        from abicheck.severity import resolve_severity_config
+        from abicheck.policy.severity import resolve_severity_config
 
         changes = [
             Change(kind=ChangeKind.FUNC_ADDED, symbol="f", description="added"),
@@ -969,7 +970,7 @@ class TestSeverityConfig:
         type= must still distinguish them (matching the legacy, no-severity-
         config type mapping) rather than collapsing both to one generic
         label."""
-        from abicheck.severity import resolve_severity_config
+        from abicheck.policy.severity import resolve_severity_config
 
         api_break = Change(
             kind=ChangeKind.ENUM_MEMBER_RENAMED,
@@ -1003,7 +1004,7 @@ class TestSeverityConfig:
         verdict, not from raw kind-set membership, so it doesn't fall back
         to a generic label that contradicts the override's own intent
         (CodeRabbit review, PR #557)."""
-        from abicheck.severity import resolve_severity_config
+        from abicheck.policy.severity import resolve_severity_config
 
         c = Change(kind=ChangeKind.FUNC_REMOVED, symbol="f", description="removed")
         c.effective_verdict = Verdict.COMPATIBLE_WITH_RISK
@@ -1019,7 +1020,7 @@ class TestSeverityConfig:
         type="API_BREAK", not "COMPATIBLE_WITH_RISK" — the type it would get
         from raw kind-set membership alone, which would contradict the
         override (CodeRabbit review, PR #557)."""
-        from abicheck.severity import resolve_severity_config
+        from abicheck.policy.severity import resolve_severity_config
 
         c = Change(
             kind=ChangeKind.SYMBOL_VERSION_REQUIRED_ADDED,
@@ -1609,7 +1610,7 @@ class TestScopedProperties:
         # is floored at 0 by missing_contract_exit_code -- the synthetic
         # testcase must not fail in that case, or a JUnit-consuming CI would
         # mark the run failed even though the gate itself passed.
-        from abicheck.severity import SeverityConfig, SeverityLevel
+        from abicheck.policy.severity import SeverityConfig, SeverityLevel
 
         demoted = SeverityConfig(abi_breaking=SeverityLevel.WARNING)
         r = _make_result([], verdict=Verdict.COMPATIBLE)

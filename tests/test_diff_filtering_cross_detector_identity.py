@@ -28,8 +28,8 @@ special case (independent of this dedup key) is unaffected.
 from __future__ import annotations
 
 from abicheck.checker_policy import ChangeKind
-from abicheck.checker_types import SYMBOL_VERSION_ALIAS_NOT_RETAINED_MARKER, Change
 from abicheck.diff_filtering import _deduplicate_cross_detector
+from abicheck.model.change import SYMBOL_VERSION_ALIAS_NOT_RETAINED_MARKER, Change
 
 
 def _change(kind: ChangeKind, symbol: str, description: str = "") -> Change:

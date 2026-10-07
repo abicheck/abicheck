@@ -41,7 +41,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from ..checker_types import Change
+    from ..model.change import Change
 
 #: A kind contributing more findings than this to one non-gating section is
 #: summarised rather than itemised in the Markdown report.

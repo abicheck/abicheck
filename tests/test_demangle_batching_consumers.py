@@ -106,7 +106,7 @@ def test_first_need_batch_runs_once_and_only_when_needed(monkeypatch) -> None:
     # scoping pass is exercised on a dumped Mach-O-spelled library in
     # `test_extract_call_complexity.py`, the only input that reaches it.)
     import abicheck.surface as surface
-    from abicheck.checker_types import Change
+    from abicheck.model.change import Change
     from abicheck.model.change_catalog.kinds import ChangeKind
 
     batches: list[list[str]] = []

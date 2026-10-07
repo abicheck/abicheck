@@ -34,7 +34,6 @@ from __future__ import annotations
 
 from collections import defaultdict
 
-from .checker_types import Change
 from .compare.template_surface import reconciled_abi_visible_functions
 from .detector_registry import registry
 from .diff_helpers import (
@@ -49,6 +48,7 @@ from .diff_types_surface import (
     _is_abi_surface_type,
 )
 from .model import AbiSnapshot, Function, TypeField, stdlib_namespaces_excluded
+from .model.change import Change
 from .model.change_catalog.kinds import ChangeKind
 
 

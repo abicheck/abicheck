@@ -438,7 +438,7 @@ def _release_compatibility_base_exit(
         return 16
     if severity_exit_code is not None:
         return max(severity_exit_code, 4 if worst_verdict == "ERROR" else 0)
-    from .checker_policy import Verdict
+    from .model.change_catalog.registry import Verdict
     from .workflows.gate import legacy_exit_code
 
     if worst_verdict in Verdict.__members__:

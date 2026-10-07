@@ -116,7 +116,7 @@ class TestDiffDwarfLayoutCoherenceViaCompare:
         """The coherence finding is RISK-tier; it must not itself downgrade
         or override a real, independently-proven BREAKING verdict from
         another detector — it just rides alongside it."""
-        from abicheck.checker_types import Change
+        from abicheck.model.change import Change
 
         old = _snap(
             dwarf_layout_coherence="mismatch",

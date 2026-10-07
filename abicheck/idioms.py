@@ -38,8 +38,8 @@ from enum import Enum
 
 from .model import ParamKind, RecordType, ScopeOrigin, resolved_fact_value
 from .model.change_catalog.kinds import ChangeKind
+from .model.evidence_status import Confidence
 from .model.surface_facts import in_public_surface
-from .policy.evidence_status import Confidence
 from .policy.public_use_index import (
     PublicUseIndex,
     build_public_use_index,

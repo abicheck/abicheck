@@ -33,9 +33,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, NamedTuple
 
-from .checker_types import Change
 from .compare.enum_sentinel import identifier_tokens, is_confirmed_enum_sentinel
 from .diff_helpers import make_change
+from .model.change import Change
 from .model.change_catalog.kinds import ChangeKind
 from .model.name_heuristics import StructuralFact, register_severity_raising_heuristic
 

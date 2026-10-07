@@ -15,12 +15,12 @@ from __future__ import annotations
 from datetime import date, timedelta
 
 from abicheck.checker import ChangeKind, Verdict, compare
-from abicheck.checker_types import Change
 from abicheck.model import (
     AbiSnapshot,
     Function,
     Visibility,
 )
+from abicheck.model.change import Change
 from abicheck.suppression import Suppression, SuppressionList
 
 

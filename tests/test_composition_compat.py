@@ -553,7 +553,7 @@ class TestRuntimeBindingDiff:
 
 class TestComputeAbiRiskWithBindingChanges:
     def test_risk_binding_change_warns(self):
-        from abicheck.checker_types import Change
+        from abicheck.model.change import Change
 
         change = Change(
             kind=ChangeKind.RUNTIME_SYMBOL_PROVIDER_CHANGED,

@@ -13,9 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""ADR-049 D1: which findings compatibility policy and the change gate see
-(ADR-061 gap B — the real owner behind the ``abicheck.contract_gating``
-compatibility facade).
+"""ADR-049 D1: which findings compatibility policy and the change gate see.
 
 :mod:`abicheck.contract_relevance_types` answers this for a
 :class:`~abicheck.contract_relevance_types.ContractRelevance` *value*; this
@@ -50,12 +48,10 @@ Leaf module by construction: it imports only the reserved Phase 0
 vocabulary, so ``policy.severity`` (which nearly everything imports) can
 depend on it without growing the import graph.
 
-**Why the flat ``abicheck/contract_gating.py`` module stays a thin,
-unclassified facade rather than a `legacy_paths` entry pointing here.**
-``abicheck/checker_types.py`` (the `model`-owned, legacy ``DiffResult``)
-imports the flat facade directly, the same way it imports
-``checker_policy``/``reclassify`` — see ``checker_policy.py``'s own module
-docstring for the full reasoning, which applies identically here.
+**Why this lives in ``model``.** The predicates only read a relevance the
+contract stage already stamped on the finding; they decide nothing. That
+makes them model vocabulary, so ``model``-owned ``checker_types.DiffResult``
+and every ``policy`` consumer import them from here directly.
 """
 
 from __future__ import annotations

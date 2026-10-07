@@ -825,7 +825,7 @@ def test_selector_leaf_purity_rejects_each_denylisted_module(tmp_path: Path) -> 
         "abicheck.policy_file",
         "abicheck.checker_types",
         "abicheck.suppression",
-        "abicheck.reclassify",
+        "abicheck.policy.reclassify",
         "abicheck.finding_identity",
     ):
         root = _tree(tmp_path / denied)
@@ -872,7 +872,7 @@ def test_selector_leaf_purity_covers_the_namespace_glob_sibling_too(
     _write(root / "abicheck/policy/selectors.py", "")
     _write(
         root / "abicheck/policy/selectors_namespace_glob.py",
-        "from abicheck.reclassify import ReclassifyRule\n",
+        "from abicheck.policy.reclassify import ReclassifyRule\n",
     )
 
     findings = check_repository(root)
@@ -881,7 +881,7 @@ def test_selector_leaf_purity_covers_the_namespace_glob_sibling_too(
     assert selector_findings
     assert any(
         "selectors_namespace_glob.py" in f.message
-        and "abicheck.reclassify" in f.message
+        and "abicheck.policy.reclassify" in f.message
         for f in selector_findings
     )
 

@@ -85,9 +85,9 @@ topics:
       - abicheck/change_registry.py
       - abicheck/checker_policy.py
       - abicheck/policy/classification.py
-      - abicheck/policy/evidence_status.py
-      - abicheck/severity.py
-      - abicheck/exit_decision.py
+      - abicheck/model/evidence_status.py
+      - abicheck/policy/severity.py
+      - abicheck/policy/exit_decision.py
     reference_page: reference/exit-codes.md
     task_pages:
       - use/ci-gating.md
@@ -333,7 +333,6 @@ topics:
       - abicheck/policy_file.py
       - abicheck/checker_policy.py
       - abicheck/policy/classification.py
-      - abicheck/reclassify.py
       - abicheck/policy/reclassify.py
       # ADR-069 D4: the two namespace-convention keys this page documents,
       # `internal_namespaces:` and `experimental_namespaces:`. The parser and
@@ -380,7 +379,7 @@ topics:
       - abicheck/contract_pipeline.py
       - abicheck/policy/coverage_ledger.py
       - abicheck/policy/coverage_ledger.py
-      - abicheck/contract_coverage_exit.py
+      - abicheck/policy/contract_coverage_exit.py
     reference_page: reference/compatibility-evaluation-config.md
     task_pages:
       - use/contract-evaluation.md

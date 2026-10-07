@@ -76,8 +76,8 @@ from .policy.public_surface import PublicSurface as PublicSurface
 from .policy.public_surface_query import PublicSurfaceQuery
 
 if TYPE_CHECKING:
-    from .checker_types import Change
     from .model import AbiSnapshot
+    from .model.change import Change
 
 # Findings whose whole purpose is to surface a *private* entity leaking into
 # the public ABI. Scoping must never filter these (ADR-024 §D5.2).

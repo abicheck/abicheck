@@ -19,7 +19,7 @@ import itertools
 import pytest
 
 from abicheck.checker_policy import ChangeKind
-from abicheck.checker_types import Change
+from abicheck.model.change import Change
 from abicheck.policy.disposition_ledger import Disposition, DispositionLedger
 from abicheck.policy.rule_provenance import RuleProvenance
 

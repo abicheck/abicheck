@@ -44,13 +44,13 @@ from abicheck.compare.bundle_export_index import (
 )
 from abicheck.elf_metadata import ElfMetadata, ElfSymbol
 from abicheck.model.change_catalog.kinds import ChangeKind
+from abicheck.model.evidence_status import CrossSourceEvolution
 from abicheck.model.release_surface import (
     PublicObligation,
     ReleasePublicSurface,
     SurfaceAcquisitionIdentity,
     unresolved_surface,
 )
-from abicheck.policy.evidence_status import CrossSourceEvolution
 from abicheck.policy.release_contract_reconciliation import (
     reconcile_release,
     reconcile_side,

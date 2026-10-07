@@ -33,7 +33,8 @@ disagree: a ``COMPATIBLE`` finding whose raw kind is not a genuine addition.
 from __future__ import annotations
 
 from abicheck.checker_policy import ChangeKind
-from abicheck.checker_types import Change, DiffResult
+from abicheck.checker_types import DiffResult
+from abicheck.model.change import Change
 from abicheck.report.finding import report_findings_for
 from abicheck.report_summary import build_summary
 

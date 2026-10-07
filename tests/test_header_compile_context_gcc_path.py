@@ -819,10 +819,10 @@ def test_resolve_side_snapshot_seeds_clang_cl_gcc_path_end_to_end(
     clang-cl gcc_path reaches the actual CompileContext passed to
     service.resolve_input, not just the intermediate
     resolve_header_compile_context result."""
-    from abicheck import service_input_resolution as sir
     from abicheck.model import AbiSnapshot
     from abicheck.service import InputSpec
     from abicheck.service_compare_evidence import SideEvidence
+    from abicheck.workflows.artifact import execute as sir
 
     header = tmp_path / "widget.h"
     header.write_text("struct Widget { int x; };\n", encoding="utf-8")

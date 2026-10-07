@@ -34,8 +34,8 @@ from __future__ import annotations
 import abicheck.frontends.cli.runtime as runtime_mod
 from abicheck.change_registry_types import Verdict
 from abicheck.checker_policy import ChangeKind
-from abicheck.checker_types import Change
 from abicheck.cli_compare_release_matrix import _collect_matrix_result
+from abicheck.model.change import Change
 
 
 def test_project_config_policy_override_reaches_matrix_findings(

@@ -54,7 +54,6 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 
 from .change_registry_types import Verdict
-from .checker_types import Change
 from .compatibility_evaluation_config import (
     AssuranceConfig,
     CompatibilityEvaluationConfig,
@@ -89,8 +88,9 @@ from .contract_relevance_types import (
     SelectorLayer,
     coerce_contract_mode,
 )
+from .model.change import Change
 from .policy.contract_graph_encoding import closure_from_graph, graph_node_index
-from .severity import SeverityConfig
+from .policy.severity import SeverityConfig
 
 _API_REQUEST_REFERENCE = "checker.compare"
 

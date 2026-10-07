@@ -145,7 +145,7 @@ def stamp_explicit_scope_contract_evaluation(c: Any) -> None:
     # ADR-049 D1: relevance decides whether compatibility policy runs, so a
     # promotion to IN_CONTRACT must carry the status with it. Leaving a
     # stale NOT_EVALUATED behind would be worse than not stamping at all --
-    # `contract_gating.is_evaluated` reads the stamped status first, so the
+    # `contract_finding_relevance.is_evaluated` reads the stamped status first, so the
     # gate would keep excluding a finding this call just proved a real
     # consumer depends on.
     from .contract_relevance_types import CompatibilityEvaluationStatus
@@ -189,8 +189,8 @@ def recompute_verdict_after_promotion(
     promoted onto the axis, and for every run that never opted into contract
     evaluation.
     """
+    from .model.contract_finding_relevance import is_evaluated
     from .policy.classification import compute_verdict
-    from .policy.contract_finding_relevance import is_evaluated
     from .policy.reclassify import _VERDICT_ORDER
 
     changes = getattr(result, "changes", None)
@@ -285,8 +285,8 @@ def _record_scoped_compatibility_decisions(
     """
     if not promoted:
         return
-    from .policy.contract_finding_relevance import is_evaluated
-    from .severity import effective_verdict_for_change
+    from .model.contract_finding_relevance import is_evaluated
+    from .policy.severity import effective_verdict_for_change
 
     for change in promoted:
         if isinstance(change, dict) or getattr(change, "kind", None) is None:
@@ -309,7 +309,7 @@ def missing_contract_gate_contribution(severity_config: Any, blocks: bool) -> in
     same ``4`` that scheme maps ``BREAKING`` to. ``0`` when the resolved gate
     does not block on it at all (e.g. ``--severity-preset info-only``).
     """
-    from .severity import missing_contract_exit_code
+    from .policy.severity import missing_contract_exit_code
 
     if not blocks:
         return 0

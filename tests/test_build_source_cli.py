@@ -1181,8 +1181,9 @@ def test_evidence_metrics_helpers_edge_branches(capsys):
         evidence_metrics_lines,
     )
     from abicheck.buildsource.model import CoverageStatus, DataLayer, LayerCoverage
-    from abicheck.checker_types import DiffResult, Verdict
+    from abicheck.checker_types import DiffResult
     from abicheck.cli_buildsource import attach_evidence_metrics
+    from abicheck.model.change_catalog.registry import Verdict
 
     # Unknown layer → not_collected fallback (no rows for L5).
     rows = [

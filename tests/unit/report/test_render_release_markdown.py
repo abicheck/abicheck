@@ -37,7 +37,8 @@ from pathlib import Path
 
 from abicheck.bundle_models import BundleDiffResult, BundleFinding
 from abicheck.checker_policy import ChangeKind
-from abicheck.checker_types import Change, DiffResult
+from abicheck.checker_types import DiffResult
+from abicheck.model.change import Change
 from abicheck.report.render_release_markdown import (
     _release_md_bundle_findings,
     _release_md_matrix_findings,

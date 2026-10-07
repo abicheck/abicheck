@@ -426,7 +426,7 @@ describes.
 
 The assurance *engine* already exists (`analysis_assurance`, the assurance
 exit contribution, an effective-configuration digest in the native report —
-see `abicheck/contract_coverage_exit.py`, `abicheck/contract_context.py` and
+see `abicheck/policy/contract_coverage_exit.py`, `abicheck/contract_context.py` and
 neighbors, and `cli-cleanup-phase-two.md`'s `--require-complete-analysis`
 section for the CLI-level work already done). What's missing is a clean
 *project*-level declaration:

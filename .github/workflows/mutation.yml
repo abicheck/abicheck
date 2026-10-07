@@ -123,7 +123,7 @@ jobs:
               - 'abicheck/diff_vtable_layout.py'
               - 'abicheck/diff_filtering.py'
               - 'abicheck/policy/classification.py'
-              - 'abicheck/policy/evidence_status.py'
+              - 'abicheck/model/evidence_status.py'
               - 'abicheck/idioms.py'
               - 'abicheck/pattern_verdicts.py'
               - 'abicheck/surface_graph.py'

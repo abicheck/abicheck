@@ -30,9 +30,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from .checker_policy import Confidence, EvidenceTier
 from .detectors import DetectorResult
 from .model import AbiSnapshot
+from .model.evidence_status import Confidence, EvidenceTier
 from .model.extraction_scope import extraction_scope_notes
 from .model.header_exclusion_record import exclusions_are_symmetric
 

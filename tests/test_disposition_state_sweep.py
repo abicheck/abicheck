@@ -43,11 +43,11 @@ import pytest
 from _disposition_invariants import conservation_holds
 
 from abicheck.checker_policy import ChangeKind
-from abicheck.checker_types import Change
 from abicheck.contract_relevance_types import ContractRelevance
 from abicheck.contract_scoped_promotion import (
     stamp_explicit_scope_contract_evaluation,
 )
+from abicheck.model.change import Change
 from abicheck.policy.disposition_close import (
     close_consumer_scope,
 )
@@ -175,7 +175,7 @@ def test_the_whole_state_space_holds_four_invariants(
        policy never scored carries no verdict class, so it cannot reach
        `recommend_release` as a waived break.
     """
-    from abicheck.contract_gating import is_evaluated
+    from abicheck.model.contract_finding_relevance import is_evaluated
     from abicheck.policy.severity import SeverityConfig, SeverityLevel
 
     result, change, ledger, sev = _sweep_case(

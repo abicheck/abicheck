@@ -25,10 +25,10 @@ where the finding must not claim the declaration is absent.
 
 from __future__ import annotations
 
-from ..checker_types import Change
 from ..model import Function, Variable
+from ..model.change import Change
 from ..model.change_catalog.kinds import ChangeKind
-from ..policy.evidence_status import Confidence
+from ..model.evidence_status import Confidence
 from .cross_source_checks_base import _change
 from .export_accounting import (
     ACCOUNT_EXTERNAL_DEP,

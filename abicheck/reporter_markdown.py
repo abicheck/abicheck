@@ -41,9 +41,8 @@ if TYPE_CHECKING:
     from datetime import date
 
     from .bundle_models import BundleDiffResult
-    from .policy.severity import GateDecision
+    from .policy.severity import GateDecision, KindSets, SeverityConfig
     from .report.finding import ReportFinding
-    from .severity import KindSets, SeverityConfig
 
 from .checker import (
     Change,
@@ -54,12 +53,9 @@ from .checker import (
 from .finding_identity import missing_contract_kind, report_finding_id
 from .impact.use_case_impact import use_cases_by_finding_for as use_cases_by_finding_for
 from .model.change_catalog.kinds import HasKind
-from .policy.classification import (
-    evidence_status_for_result,
-    impact_for,
-)
-from .policy.contract_finding_relevance import is_evaluated
-from .policy.evidence_status import EvidenceStatus
+from .model.contract_finding_relevance import is_evaluated
+from .model.evidence_status import EvidenceStatus
+from .policy.classification import evidence_status_for_result, impact_for
 from .report import (
     contract_conflicts_markdown as _ccm,
     render_markdown as _rmd,
@@ -147,7 +143,7 @@ def to_stat(
     if (_dig := getattr(result, "env_matrix_source_sha256", None)) is not None:
         d["env_matrix_source_sha256"] = _dig
     if severity_config is not None:
-        from .severity import compute_exit_code
+        from .policy.severity import compute_exit_code
 
         exit_code = compute_exit_code(
             result.changes,
@@ -229,7 +225,7 @@ class ShowOnlyFilter:
         """
         if not self.severities:
             return True
-        from .severity import effective_verdict_for_change
+        from .policy.severity import effective_verdict_for_change
 
         eff = effective_verdict_for_change(
             change,
@@ -781,7 +777,7 @@ def _resolve_scoped_gate_findings(
 
     Returns ``(scoped_only_changes, missing_labels, blocks, missing_kind)``.
     """
-    from .severity import missing_contract_exit_code
+    from .policy.severity import missing_contract_exit_code
 
     existing_ids = {_finding_id(c) for c in result.changes}
     eff_sets = result._effective_kind_sets()
@@ -1029,7 +1025,7 @@ def _hygiene_evolution_counts_line(hygiene: list[Change]) -> str:
     CrossSourceEvolutionSummary`` (JSON's own per-state counts), so a
     reader can see the split without counting bullet points (ADR-068
     finding A)."""
-    from .policy.evidence_status import CrossSourceEvolution
+    from .model.evidence_status import CrossSourceEvolution
 
     counts = dict.fromkeys(CrossSourceEvolution, 0)
     for c in hygiene:
@@ -1113,7 +1109,7 @@ def compute_severity_summary(
     finding. *today*: an envelope's own ``resolved_today`` (ADR-061 gap C,
     Codex, fresh evidence).
     """
-    from .severity import (
+    from .policy.severity import (
         SeverityLevel,
         categorize_changes,
         gate_eligible_changes,
@@ -1450,7 +1446,7 @@ def _severity_merge_effect(
     gate SARIF's/HTML's gate blocks do, rather than a second, independent
     ``compute_exit_code`` call that happens to agree.
     """
-    from .severity import compute_exit_code
+    from .policy.severity import compute_exit_code
 
     eff_sets = result._effective_kind_sets()
     exit_code = compute_exit_code(

@@ -31,8 +31,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from .checker_types import Change, DiffResult
+from .checker_types import DiffResult
+from .model.change import Change
 from .model.change_catalog.kinds import ChangeKind
+from .model.contract_finding_relevance import is_evaluated
 from .model.elf_facts import ElfMetadata, SymbolBinding
 from .model.scope_acquisition import ScopeAcquisitionRecord
 
@@ -45,7 +47,6 @@ from .model.symbol_signature_status import (
     symbol_signature_status as symbol_signature_status,
 )
 from .policy.classification import Verdict, compute_verdict, effective_category
-from .policy.contract_finding_relevance import is_evaluated
 
 if TYPE_CHECKING:
     from .policy_file import PolicyFile

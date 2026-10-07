@@ -480,7 +480,7 @@ def test_reconcile_disabled_by_default():
 def test_non_presence_findings_are_untouched():
     """A non-reconcilable kind (e.g. a size change) passes straight through even
     with build evidence."""
-    from abicheck.checker_types import Change
+    from abicheck.model.change import Change
 
     old, new = _fp_pair()
     size = Change(kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="S", description="x")
@@ -491,7 +491,7 @@ def test_non_presence_findings_are_untouched():
 def test_finding_on_type_absent_from_snapshot_is_kept():
     """A presence finding whose type is not present in both snapshots is left
     untouched (defensive branch)."""
-    from abicheck.checker_types import Change
+    from abicheck.model.change import Change
 
     old, new = _fp_pair()
     ghost = Change(kind=ChangeKind.TYPE_FIELD_REMOVED, symbol="Ghost", description="x")
@@ -502,7 +502,7 @@ def test_finding_on_type_absent_from_snapshot_is_kept():
 def test_finding_on_type_without_guards_is_kept():
     """Build evidence exists for one type but the finding is on another type with
     no conditional fields → kept."""
-    from abicheck.checker_types import Change
+    from abicheck.model.change import Change
 
     old = _snap("1", [_tf("a"), _tf("b")], conditional={"Other": {"x": _guarded()}})
     new = _snap("2", [_tf("a")], conditional={"Other": {"x": _guarded()}})

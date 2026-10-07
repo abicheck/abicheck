@@ -47,6 +47,7 @@ from .model.consumer_spec import (
     as_consumer_spec,
     verify_digest,
 )
+from .model.evidence_status import ReachabilityState, is_cross_source_resolved
 from .model.name_decoration import elf_version
 from .model.surface_facts import is_binary_exported
 from .policy.classification import Verdict, compute_verdict
@@ -55,7 +56,6 @@ from .policy.disposition_close import (
     ledger_for,
     record_and_maybe_suppress_overlay,
 )
-from .policy.evidence_status import ReachabilityState, is_cross_source_resolved
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -980,7 +980,7 @@ def _promote_scoped_contract(
         recompute_verdict_after_promotion,
         stamp_scoped_changes,
     )
-    from .policy.contract_finding_relevance import is_evaluated
+    from .model.contract_finding_relevance import is_evaluated
 
     already_classified = [
         c for c in changes if getattr(c, "contract_relevance", None) is not None

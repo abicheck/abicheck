@@ -17,10 +17,10 @@ from __future__ import annotations
 import pytest
 
 from abicheck.checker_policy import ChangeKind
-from abicheck.checker_types import Change
 from abicheck.compare.undeclared_exports import _diff_undeclared_exports
 from abicheck.elf_metadata import ElfMetadata, ElfSymbol
 from abicheck.model import AbiSnapshot, Function
+from abicheck.model.change import Change
 
 
 def _snap(

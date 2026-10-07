@@ -25,9 +25,9 @@ from .model.change_catalog.kinds import HasKind
 from .report.change_inventory import ChangeInventorySplit, compute_change_inventory
 
 if TYPE_CHECKING:
-    from .checker_types import Change
+    from .model.change import Change
+    from .policy.severity import KindSets
     from .report.finding import ReportFinding
-    from .severity import KindSets
 
 # Re-exported under its historical name; the implementation (and the prefix
 # tables it relies on) now lives in the canonical name_classification module.
@@ -212,7 +212,7 @@ def compatibility_metrics(
         breaking_count = sum(1 for v in effective_verdicts if v == _Verdict.BREAKING)
     elif policy is not None or kind_sets is not None or policy_file is not None:
         from .policy.classification import Verdict as _Verdict
-        from .severity import effective_verdict_for_change
+        from .policy.severity import effective_verdict_for_change
 
         breaking_count = sum(
             1
@@ -263,7 +263,7 @@ def build_summary(
     ``None`` keeps the prior, independently-resolved behaviour.
     """
     from .policy.classification import Verdict
-    from .severity import IssueCategory, classify_effective_change
+    from .policy.severity import IssueCategory, classify_effective_change
 
     evaluated = result._evaluated_changes()
     finding_by_id: dict[int, ReportFinding] = (

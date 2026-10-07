@@ -28,8 +28,8 @@ import pytest
 from hypothesis import given, strategies as st
 
 from abicheck.checker_policy import ChangeKind
-from abicheck.checker_types import Change
 from abicheck.model import AbiSnapshot, Function, RecordType, ScopeOrigin
+from abicheck.model.change import Change
 from abicheck.policy.public_surface_closure import (
     _record_exact_identities,
     _record_is_confirmed_public_seed,

@@ -41,7 +41,6 @@ from .binary_fingerprint import (
     FunctionFingerprint,
     match_renamed_functions,
 )
-from .checker_types import Change
 from .compare.namespace_move import (  # noqa: F401  (public-surface re-exports)
     emit_namespace_move_batches as emit_namespace_move_batches,
     find_namespace_move_groups as find_namespace_move_groups,
@@ -52,6 +51,7 @@ from .detector_registry import registry
 from .diff_helpers import make_change
 from .elf_symbol_filter import is_abi_relevant_elf_symbol
 from .model import AbiSnapshot, Function, is_cxx_runtime_library
+from .model.change import Change
 from .model.change_catalog.kinds import ChangeKind
 from .model.elf_facts import SymbolType
 from .model.execution_cache import memoized
@@ -662,7 +662,7 @@ def emit_prefix_batch_rename(
     if len(rename_pairs) > 5:
         pair_desc += f", ... ({len(rename_pairs)} total)"
     # Only truthiness of `symbol_binding` is ever consulted
-    # (`checker_policy.evidence_status_for_result`) -- the specific binding
+    # (`checker_model.evidence_status_for_result`) -- the specific binding
     # kind (global/weak/...) has no meaning at batch granularity, since
     # constituents can legitimately differ.
     binding = (

@@ -62,8 +62,9 @@ from .model import CoverageStatus, DataLayer, LayerConfidence, LayerCoverage
 from .pack import BuildSourcePack
 
 if TYPE_CHECKING:
-    from ..checker_types import Change, DiffResult
+    from ..checker_types import DiffResult
     from ..model import AbiSnapshot
+    from ..model.change import Change
     from ..model.source_graph import SourceGraphSummary
     from ..policy_file import PolicyFile
 
@@ -330,7 +331,7 @@ def detect_coverage_asymmetry(
     the base had). A target that is *richer* than the base does not undermine
     the comparison, so it is not flagged here.
     """
-    from ..checker_types import Change
+    from ..model.change import Change
     from ..model.change_catalog.kinds import ChangeKind
 
     old_present = layer_presence(old_snap, old_pack)

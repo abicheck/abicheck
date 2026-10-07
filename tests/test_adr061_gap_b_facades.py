@@ -87,7 +87,7 @@ _MOVED_FACADES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ),
     (
         "abicheck.checker_policy",
-        "abicheck.policy.evidence_status",
+        "abicheck.model.evidence_status",
         (
             "Confidence",
             "EvidenceTier",
@@ -98,25 +98,6 @@ _MOVED_FACADES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
             "BINARY_EVIDENCE_TIERS",
             "has_binary_evidence",
             "is_cross_source_resolved",
-        ),
-    ),
-    (
-        "abicheck.contract_gating",
-        "abicheck.policy.contract_finding_relevance",
-        ("contract_relevance_of", "evaluation_status_of", "is_evaluated"),
-    ),
-    (
-        "abicheck.reclassify",
-        "abicheck.policy.reclassify",
-        (
-            "RECLASSIFY_KNOWN_KEYS",
-            "KindSets",
-            "ReclassifyRule",
-            "active_reclassify_rules",
-            "effective_verdict_for_change",
-            "first_matching_reclassify_verdict",
-            "reclassify_rule_for_change",
-            "resolve_kind_sets",
         ),
     ),
 )
@@ -148,53 +129,15 @@ def test_facade_delegates_to_owner(
         )
 
 
-# ---------------------------------------------------------------------------
-# Three facades that stay deliberately unclassified (the "no single layer"
-# leaves) -- their own owning-layer module still exists; only the flat
-# facade's *classification* is intentionally absent, not its delegation.
-# ---------------------------------------------------------------------------
-_UNCLASSIFIED_FACADES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
-    (
-        "abicheck.contract_gating",
-        "abicheck.policy.contract_finding_relevance",
-        ("contract_relevance_of", "evaluation_status_of", "is_evaluated"),
-    ),
-)
-
-
-@pytest.mark.parametrize(
-    "facade_name,owner_name,public_names",
-    _UNCLASSIFIED_FACADES,
-    ids=[f"{f}->{o}" for f, o, _ in _UNCLASSIFIED_FACADES],
-)
-def test_unclassified_facade_still_delegates(
-    facade_name: str, owner_name: str, public_names: tuple[str, ...]
-) -> None:
-    """Same delegation proof as above, named separately for the facades this
-    PR keeps off every layer's ``legacy_paths`` on purpose (``model``-owned
-    ``checker_types.DiffResult`` depends on them directly, and ``model``
-    cannot statically depend on ``policy``). Staying unclassified must not
-    mean staying undelegated -- the real implementation still moved out.
+def test_diffresult_evaluates_through_the_policy_owner() -> None:
+    """``DiffResult`` is a ``policy``-layer type: its effective-verdict
+    properties call ``abicheck.policy.reclassify`` directly, with no flat
+    facade in between (the ``contract_gating``/``reclassify`` facades existed
+    only while ``DiffResult`` was classified ``model``; both were retired
+    when the finding record moved to :mod:`abicheck.model.change`).
     """
-    facade = importlib.import_module(facade_name)
-    owner = importlib.import_module(owner_name)
-    for name in public_names:
-        assert getattr(facade, name) is getattr(owner, name)
-
-
-def test_checker_types_diffresult_reaches_reclassify_through_the_flat_facade() -> None:
-    """The one documented reason ``reclassify``/``contract_gating``/
-    ``checker_policy`` stay flat, unclassified facades: ``model``-owned
-    ``checker_types.DiffResult`` imports them directly and must keep
-    resolving through the *flat* path, not a `policy`-classified one.
-
-    This fails loudly if a future change moves ``effective_verdict_for_change``
-    so the flat ``abicheck.reclassify`` facade no longer carries it --
-    exactly the regression that would silently break
-    ``DiffResult.effective_verdict_for_change`` description in
-    ``checker_policy.py``'s/``reclassify.py``'s own module docstrings.
-    """
-    from abicheck.checker_types import Change, DiffResult
+    from abicheck.checker_types import DiffResult
+    from abicheck.model.change import Change
     from abicheck.model.change_catalog.kinds import ChangeKind
     from abicheck.policy.reclassify import effective_verdict_for_change
 
@@ -204,9 +147,7 @@ def test_checker_types_diffresult_reaches_reclassify_through_the_flat_facade() -
     result = DiffResult(
         old_version="1.0", new_version="1.1", library="libx", changes=[change]
     )
-    # DiffResult's own method delegates to the same function the owner module
-    # exports -- proving the flat-facade boundary this PR preserves actually
-    # still connects `model`'s legacy DiffResult to `policy`'s real owner.
+    # DiffResult's own method delegates to the same function the owner exports.
     expected = effective_verdict_for_change(change)
     assert result._effective_verdict_for_change(change) == expected
 
@@ -248,9 +189,7 @@ def test_public_root_surfaces_matches_the_reviewed_exception_set() -> None:
     assert set(modules_yaml["public_root_surfaces"]) == {
         "abicheck.checker_policy",
         "abicheck.contract_evidence",
-        "abicheck.contract_gating",
         "abicheck.header_only_dump",
-        "abicheck.reclassify",
         "abicheck.schemas",
         "abicheck.serialization",
     }

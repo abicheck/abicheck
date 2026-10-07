@@ -1037,8 +1037,8 @@ def test_env_matrix_diagnostics_stay_beside_their_own_check(monkeypatch):
     import abicheck.diff_wheel_deployment as dw
     from abicheck.checker import _env_matrix_contract_changes
     from abicheck.checker_policy import ChangeKind
-    from abicheck.checker_types import Change
     from abicheck.model import AbiSnapshot
+    from abicheck.model.change import Change
     from abicheck.suppression import SuppressionOutcome
 
     names = ["floor", "musl", "macos", "arch", "rpath", "closure"]

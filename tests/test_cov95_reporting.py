@@ -34,7 +34,7 @@ from pathlib import Path
 from abicheck.binder import BindingStatus, SymbolBinding
 from abicheck.checker import Verdict
 from abicheck.checker_policy import ChangeKind, Confidence, EvidenceTier
-from abicheck.checker_types import Change, DiffResult, LibraryMetadata
+from abicheck.checker_types import DiffResult
 from abicheck.model import (
     AbiSnapshot,
     Function,
@@ -44,6 +44,7 @@ from abicheck.model import (
     Variable,
     Visibility,
 )
+from abicheck.model.change import Change, LibraryMetadata
 from abicheck.resolver import DependencyGraph, ResolvedDSO
 from abicheck.stack_checker import StackChange, StackCheckResult, StackVerdict
 from abicheck.suppression import SuppressionOutcome
@@ -190,8 +191,8 @@ class TestReporterStat:
         # reporter_markdown.to_stat's severity_config branch, and
         # render_stat_document's non-zero exit_code -> "[gate: FAIL ...]"
         # branch -- both previously unexercised by any test.
+        from abicheck.policy.severity import PRESET_STRICT
         from abicheck.reporter import to_stat
-        from abicheck.severity import PRESET_STRICT
 
         changes = [_change(ChangeKind.FUNC_REMOVED, "rm")]
         result = _diff_result(changes, verdict=Verdict.BREAKING)
@@ -200,8 +201,8 @@ class TestReporterStat:
 
     def test_to_stat_with_severity_config_pass(self) -> None:
         # render_stat_document's exit_code == 0 -> "[gate: PASS]" branch.
+        from abicheck.policy.severity import PRESET_INFO_ONLY
         from abicheck.reporter import to_stat
-        from abicheck.severity import PRESET_INFO_ONLY
 
         changes = [_change(ChangeKind.FUNC_REMOVED, "rm")]
         result = _diff_result(changes, verdict=Verdict.BREAKING)

@@ -26,7 +26,6 @@ from typing import Any
 import pytest
 
 from abicheck.checker_policy import ChangeKind
-from abicheck.checker_types import Change
 from abicheck.model import (
     AbiSnapshot,
     EnumMember,
@@ -37,6 +36,7 @@ from abicheck.model import (
     ScopeOrigin,
     TypeField,
 )
+from abicheck.model.change import Change
 from abicheck.policy.public_surface_closure import resolve_public_surface
 from abicheck.surface import (
     REASON_HEADER_ORIGIN_UNKNOWN,

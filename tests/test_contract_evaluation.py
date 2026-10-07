@@ -31,7 +31,6 @@ from __future__ import annotations
 import pytest
 
 from abicheck.checker_policy import ChangeKind
-from abicheck.checker_types import Change
 from abicheck.contract_evaluation import (
     ContractEvaluationDecision,
     evaluate_change_contract_relevance,
@@ -51,6 +50,7 @@ from abicheck.model import (
     TypeField,
     Visibility,
 )
+from abicheck.model.change import Change
 from abicheck.policy.public_surface_closure import resolve_public_surface
 from abicheck.surface import (
     REASON_NO_PROVENANCE,

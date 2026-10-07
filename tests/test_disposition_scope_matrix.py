@@ -50,12 +50,12 @@ from _disposition_invariants import conservation_holds
 
 from abicheck.checker import compare
 from abicheck.checker_policy import ChangeKind
-from abicheck.checker_types import Change
 from abicheck.contract_relevance_types import ContractRelevance
 from abicheck.contract_scoped_promotion import (
     stamp_explicit_scope_contract_evaluation,
 )
 from abicheck.model import AbiSnapshot
+from abicheck.model.change import Change
 from abicheck.policy.disposition_close import (
     close_consumer_scope,
     ledger_for,
@@ -858,7 +858,7 @@ def test_a_dropped_compatibility_finding_survives_a_strict_severity_config() -> 
 def test_an_unstamped_out_of_surface_finding_is_not_a_promotion() -> None:
     """Round 12's regression from round 11's own fix, as a standing control.
 
-    `contract_gating.is_evaluated` answers `True` for an *unstamped* finding
+    `contract_finding_relevance.is_evaluated` answers `True` for an *unstamped* finding
     by design — that is what keeps every run without `--contract` bit-for-bit
     unchanged — so "reads as evaluated now" cannot distinguish *became*
     evaluated from *always was*. Keying the refresh on it relabelled every
@@ -869,7 +869,7 @@ def test_an_unstamped_out_of_surface_finding_is_not_a_promotion() -> None:
     out-of-surface bucket, never stamped by anything, in a run with no
     `--contract` at all.
     """
-    from abicheck.contract_gating import is_evaluated
+    from abicheck.model.contract_finding_relevance import is_evaluated
     from abicheck.policy.disposition_close import finalize_ledger
 
     result, change, _ = _result_with_one_breaking_finding_in("out_of_surface_changes")

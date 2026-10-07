@@ -652,7 +652,7 @@ _ACCEPTED_KILL_LOSS = {
             "abicheck.name_classification",
             "abicheck.pattern_verdicts",
             "abicheck.policy.classification",
-            "abicheck.policy.evidence_status",
+            "abicheck.model.evidence_status",
             "abicheck.policy.selectors",
             "abicheck.policy.selectors_namespace_glob",
             "abicheck.serialization",
@@ -672,22 +672,20 @@ _ACCEPTED_KILL_LOSS = {
     # abicheck.aggregate -> abicheck.checker_policy's own facade import.
     # Drives `actions/collect-facts`'s scripts the same way, and hits the same
     # subprocess re-entry.
+    # Narrowed by the architecture-deepening plan's Phase 1: the finding
+    # record and its vocabulary moved to `model`, so collect-facts no longer
+    # reaches `policy.classification`/`policy.selectors` at all.
     "tests/test_action_collect_facts.py": frozenset(
         {
-            "abicheck.policy.classification",
-            "abicheck.policy.evidence_status",
+            "abicheck.model.evidence_status",
             "abicheck.name_classification",
-            "abicheck.policy.selectors",
-            "abicheck.policy.selectors_namespace_glob",
-            # Newly reached (transitively) after PR #1383's import changes;
-            # same subprocess re-entry cost as the modules above.
             "abicheck.snapshot_io",
         }
     ),
     "tests/test_action_check_target.py": frozenset(
         {
             "abicheck.policy.classification",
-            "abicheck.policy.evidence_status",
+            "abicheck.model.evidence_status",
             "abicheck.finding_identity",
             "abicheck.name_classification",
             "abicheck.policy.selectors",
@@ -761,7 +759,7 @@ _ACCEPTED_KILL_LOSS = {
     "tests/test_reusable_workflows_project_evidence.py": frozenset(
         {
             "abicheck.policy.classification",
-            "abicheck.policy.evidence_status",
+            "abicheck.model.evidence_status",
             "abicheck.finding_identity",
             "abicheck.name_classification",
             "abicheck.policy.selectors",

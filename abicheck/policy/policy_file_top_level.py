@@ -95,8 +95,8 @@ def parse_base_policy(raw: dict[str, Any]) -> str:
     unknown-top-level-key check without growing past its own
     ``architecture/debt.yaml`` baseline.
     """
-    from ..checker_policy import VALID_BASE_POLICIES
     from ..errors import PolicyError
+    from ..model.change_catalog.registry import VALID_BASE_POLICIES
 
     base_policy = raw.get("base_policy", "strict_abi")
     if not isinstance(base_policy, str):

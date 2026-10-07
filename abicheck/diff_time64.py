@@ -31,11 +31,11 @@ from __future__ import annotations
 
 import re
 
-from .checker_types import Change
 from .detector_registry import registry
 from .diff_helpers import make_change
 from .diff_integer_model import _int_width_bucket
 from .model import AbiSnapshot, RecordType, resolved_fact_value
+from .model.change import Change
 from .model.change_catalog.kinds import ChangeKind
 from .model.surface_facts import is_abi_visible
 

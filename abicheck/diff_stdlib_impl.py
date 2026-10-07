@@ -51,10 +51,10 @@ import re
 from typing import TYPE_CHECKING
 
 from .build_mode import build_mode_from_signals
-from .checker_types import Change
 from .detector_registry import registry
 from .diff_helpers import make_change
 from .model.build_mode_facts import StdlibFamily
+from .model.change import Change
 from .model.change_catalog.kinds import ChangeKind
 from .model.surface_facts import in_public_surface
 from .policy.classification import Verdict

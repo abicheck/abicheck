@@ -36,7 +36,6 @@ from __future__ import annotations
 import pytest
 
 from abicheck.checker_policy import ChangeKind
-from abicheck.checker_types import Change
 from abicheck.model import (
     AbiSnapshot,
     Function as _Function,
@@ -45,6 +44,7 @@ from abicheck.model import (
     ScopeOrigin,
     Visibility,
 )
+from abicheck.model.change import Change
 from abicheck.model.owner_recovery import (
     itanium_special_name_owner_identifiers,
     itanium_special_name_owner_scope_components,

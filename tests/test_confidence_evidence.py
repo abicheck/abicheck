@@ -517,7 +517,7 @@ class TestNoteIfSameBinaryCompared:
 
     def _result(self, old_sha=None, new_sha=None, evidence_tiers=None):
         from abicheck.checker import DiffResult
-        from abicheck.checker_types import LibraryMetadata
+        from abicheck.model.change import LibraryMetadata
 
         result = DiffResult(old_version="1.0", new_version="2.0", library="lib")
         if old_sha is not None:
@@ -591,8 +591,8 @@ class TestNoteIfSameBinaryCompared:
         contradicts "cannot detect a change" regardless of which tier
         produced it."""
         from abicheck.checker_policy import ChangeKind
-        from abicheck.checker_types import Change
         from abicheck.confidence import note_if_same_binary_compared
+        from abicheck.model.change import Change
 
         result = self._result(
             old_sha="a" * 64, new_sha="a" * 64, evidence_tiers=["elf", "dwarf"]
@@ -1131,8 +1131,8 @@ class TestNotEvaluatedDoesNotChangeConfidence:
 
     @staticmethod
     def _levels(name, *, has_dwarf):
-        from abicheck.checker_types import DetectorResult
         from abicheck.confidence import _determine_confidence_level
+        from abicheck.detectors import DetectorResult
 
         levels = []
         for not_evaluated in (False, True):
@@ -1182,8 +1182,8 @@ class TestNotEvaluatedDoesNotChangeConfidence:
         """The branch is narrowed, not deleted: a `dwarf` detector that was
         supported and disabled anyway means evidence that really was
         expected and really is missing."""
-        from abicheck.checker_types import DetectorResult
         from abicheck.confidence import _determine_confidence_level
+        from abicheck.detectors import DetectorResult
 
         assert (
             _determine_confidence_level(

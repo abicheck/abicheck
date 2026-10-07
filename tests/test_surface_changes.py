@@ -108,7 +108,8 @@ def test_compute_surface_changes_groups_by_review_action() -> None:
 def test_catalog_operation_not_kind_suffix_or_severity_controls_surface() -> None:
     """ELF-only public removal is a removal; an import is not public API."""
     from abicheck.checker_policy import ChangeKind, Verdict
-    from abicheck.checker_types import Change, DiffResult
+    from abicheck.checker_types import DiffResult
+    from abicheck.model.change import Change
 
     changes = [
         Change(ChangeKind.FUNC_REMOVED_ELF_ONLY, "_Z3foov", "export disappeared"),
@@ -128,7 +129,8 @@ def test_catalog_operation_not_kind_suffix_or_severity_controls_surface() -> Non
 
 def test_compact_surface_list_is_bounded_and_discloses_omissions() -> None:
     from abicheck.checker_policy import ChangeKind
-    from abicheck.checker_types import Change, DiffResult
+    from abicheck.checker_types import DiffResult
+    from abicheck.model.change import Change
 
     result = DiffResult(
         old_version="1",

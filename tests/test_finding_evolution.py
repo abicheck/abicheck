@@ -33,9 +33,10 @@ from hypothesis import given, strategies as st
 
 from abicheck.checker import compare
 from abicheck.checker_policy import ChangeKind, FindingEvolution
-from abicheck.checker_types import Change, DiffResult
+from abicheck.checker_types import DiffResult
 from abicheck.finding_identity import report_finding_id
 from abicheck.model import AbiSnapshot, Function, Visibility
+from abicheck.model.change import Change
 from abicheck.policy.finding_evolution import (
     apply_finding_evolution,
     compute_finding_evolution,
@@ -297,7 +298,7 @@ class TestFindingEvolutionSummary:
 # population, with nothing in the report saying so).
 # ---------------------------------------------------------------------------
 
-from abicheck.policy.evidence_status import CrossSourceEvolution  # noqa: E402
+from abicheck.model.evidence_status import CrossSourceEvolution  # noqa: E402
 
 _cross_states = st.one_of(st.none(), st.sampled_from(list(CrossSourceEvolution)))
 _chain_states = st.sampled_from(

@@ -298,7 +298,7 @@ class TestChangeSymbolBindingStamp:
 
 class TestSuppressionBindingSelector:
     def _make_change(self, binding: str | None) -> object:
-        from abicheck.checker_types import Change
+        from abicheck.model.change import Change
 
         return Change(
             kind=ChangeKind.FUNC_REMOVED,
@@ -385,7 +385,7 @@ class TestReportSerialization:
     """
 
     def _change(self, binding: str | None) -> object:
-        from abicheck.checker_types import Change
+        from abicheck.model.change import Change
 
         return Change(
             kind=ChangeKind.FUNC_REMOVED,

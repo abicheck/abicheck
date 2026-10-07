@@ -24,7 +24,7 @@ without them, which is exactly why the MCP ``abi_dump`` tool accepted five
 arguments where ``abicheck dump`` accepts thirty.
 
 :func:`run_dump_request` is those steps, over the same per-input primitives
-``compare`` resolves through (:mod:`abicheck.service_input_resolution`). It is
+``compare`` resolves through (:mod:`abicheck.workflows.artifact`). It is
 the ``dump``-shaped sibling of
 :func:`abicheck.service_compare_pipeline.resolve_compare_request`, not a second
 implementation of it.
@@ -117,7 +117,7 @@ class DumpResult:
     ``effective_includes``/``effective_compile_context`` (PR 3A, dump/scan
     resolver convergence) are the P0.3 L3→L2 fold's own resolved values —
     computed inside :func:`execute_dump_request`'s call to
-    :func:`~abicheck.service_input_resolution._resolve_side_snapshot_impl`
+    :func:`~abicheck.workflows.artifact.execute._resolve_side_snapshot_impl`
     but, before this addition, never surfaced. A CLI-side caller with a
     post-processing hook that must agree with the primary parse (the ELF
     ``dump`` path's ADR-039 build-context collector and header-graph second
@@ -139,7 +139,7 @@ class DumpResult:
     ``effective_compile_context`` from is deleted by the time this object is
     returned — cleanup runs, deliberately, right after the primary parse has
     consumed it (see
-    :func:`~abicheck.service_input_resolution._resolve_side_snapshot_impl`'s
+    :func:`~abicheck.workflows.artifact.execute._resolve_side_snapshot_impl`'s
     own docstring). These fields are therefore safe to use for *identity or
     comparison* (exactly how the retired ``scan_engine``'s pair-aware
     baseline-context-reuse decision used its equivalent locals — see

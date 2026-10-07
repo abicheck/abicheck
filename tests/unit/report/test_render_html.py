@@ -68,13 +68,13 @@ from abicheck.html_report import (
 )
 from abicheck.model import AbiSnapshot
 from abicheck.policy.gate_decision import gate_decision_for_result
+from abicheck.policy.reclassify import ReclassifyRule
+from abicheck.policy.severity import SeverityConfig, SeverityLevel
 from abicheck.policy_file import PolicyFile
-from abicheck.reclassify import ReclassifyRule
 from abicheck.report.build import build_report_envelope
 from abicheck.report.document import ReportDocument
 from abicheck.report.envelope import RenderOptions
 from abicheck.report.render_html_document import render_html_document
-from abicheck.severity import SeverityConfig, SeverityLevel
 
 # One marker per injectable field, all distinct, each shaped like a real
 # injection attempt rather than a bare "<" so a partial escape still fails.
@@ -777,7 +777,7 @@ def test_html_compatibility_metrics_reuse_the_envelope_s_findings() -> None:
     envelope = build_report_envelope(result, old, new)
     assert envelope.findings[0].verdict == Verdict.COMPATIBLE
 
-    with patch("abicheck.severity.effective_verdict_for_change") as spy:
+    with patch("abicheck.policy.severity.effective_verdict_for_change") as spy:
         html_out = generate_html_report(result, envelope=envelope)
 
     spy.assert_not_called()

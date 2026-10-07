@@ -628,7 +628,7 @@ class TestSeverityGate:
         assert "severityGate" not in props
 
     def test_compatible_addition_configured_as_error_fails_invocation(self) -> None:
-        from abicheck.severity import resolve_severity_config
+        from abicheck.policy.severity import resolve_severity_config
 
         cfg = resolve_severity_config("default", addition="error")
         r = _make_result([_compatible_change()], verdict=Verdict.COMPATIBLE)
@@ -646,7 +646,7 @@ class TestSeverityGate:
         assert gate["config"]["addition"] == "error"
 
     def test_breaking_demoted_to_info_passes_invocation(self) -> None:
-        from abicheck.severity import resolve_severity_config
+        from abicheck.policy.severity import resolve_severity_config
 
         cfg = resolve_severity_config("default", abi_breaking="info")
         r = _make_result([_breaking_change()], verdict=Verdict.BREAKING)
@@ -661,7 +661,7 @@ class TestSeverityGate:
         assert gate["blockingCategories"] == []
 
     def test_to_sarif_str_forwards_severity_config(self) -> None:
-        from abicheck.severity import resolve_severity_config
+        from abicheck.policy.severity import resolve_severity_config
 
         cfg = resolve_severity_config("default", addition="error")
         r = _make_result([_compatible_change()], verdict=Verdict.COMPATIBLE)
@@ -675,7 +675,7 @@ class TestSeverityGate:
         a `severity.addition: error` config blocks the build (exitCode=1) but the
         added-symbol result kept `level: warning` — a code-scanning UI reading
         result levels would disagree with the configured gate."""
-        from abicheck.severity import resolve_severity_config
+        from abicheck.policy.severity import resolve_severity_config
 
         cfg = resolve_severity_config("default", addition="error")
         r = _make_result([_compatible_change()], verdict=Verdict.COMPATIBLE)
@@ -686,7 +686,7 @@ class TestSeverityGate:
         """Same fix, the inverse direction: `--severity-abi-breaking info` lets
         the invocation pass (exitCode=0) but the removed-symbol result kept
         `level: error` under the legacy mapping."""
-        from abicheck.severity import resolve_severity_config
+        from abicheck.policy.severity import resolve_severity_config
 
         cfg = resolve_severity_config("default", abi_breaking="info")
         r = _make_result([_breaking_change()], verdict=Verdict.BREAKING)
@@ -851,7 +851,7 @@ class TestScopedGate:
         # missing_contract_exit_code -- the synthetic result must not read
         # as "error" in that case, or a code-scanning consumer would flag/
         # block a finding the gate itself passed.
-        from abicheck.severity import SeverityConfig, SeverityLevel
+        from abicheck.policy.severity import SeverityConfig, SeverityLevel
 
         demoted = SeverityConfig(abi_breaking=SeverityLevel.WARNING)
         r = _make_result([], verdict=Verdict.COMPATIBLE)

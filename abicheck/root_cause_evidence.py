@@ -37,7 +37,8 @@ from .reporter_markdown import (
 )
 
 if TYPE_CHECKING:
-    from .checker_types import Change, DiffResult
+    from .checker_types import DiffResult
+    from .model.change import Change
 
 
 def scoped_only_changes_filtered(

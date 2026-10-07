@@ -55,8 +55,8 @@ from .compare.declined_comparisons import declined_scope
 from .detectors import DetectorResult
 
 if TYPE_CHECKING:
-    from .checker_types import Change
     from .model import AbiSnapshot
+    from .model.change import Change
 
     DetectorFn = Callable[[AbiSnapshot, AbiSnapshot], list[Change]]
     SupportFn = Callable[[AbiSnapshot, AbiSnapshot], tuple[bool, str | None]]

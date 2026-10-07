@@ -77,8 +77,8 @@ from .naming_conventions import (
 )
 
 if TYPE_CHECKING:
-    from ..checker_types import Change
     from ..model import AbiSnapshot
+    from ..model.change import Change
 
 __all__ = ["diff_typedefs", "is_version_stamped_typedef", "typedef_index_pair"]
 

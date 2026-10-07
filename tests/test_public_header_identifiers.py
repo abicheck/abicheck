@@ -37,7 +37,6 @@ import pytest
 from hypothesis import given, strategies as st
 
 from abicheck.checker_policy import ChangeKind
-from abicheck.checker_types import Change
 from abicheck.contract_evaluation import evaluate_change_contract_relevance
 from abicheck.contract_evidence_collect import public_header_evidence
 from abicheck.contract_relevance_types import ContractMode, ContractRelevance
@@ -47,6 +46,7 @@ from abicheck.extract.public_header_identifiers import (
     scan_public_header_identifiers,
 )
 from abicheck.model import AbiSnapshot, Function
+from abicheck.model.change import Change
 from abicheck.model.elf_facts import ElfSymbol, SymbolType
 from abicheck.model.fact import Fact, FactStatus
 from abicheck.model.symbol_leaf import symbol_leaf_identifier

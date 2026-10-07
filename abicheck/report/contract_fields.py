@@ -49,7 +49,7 @@ def add_contract_evaluation_fields(
     It defaults to ``0`` -- the true answer for every audit ledger this
     helper serializes, since none of those findings reach a gate. Only the
     ``changes`` path passes a computed value, from
-    :func:`~abicheck.severity.gate_contribution_for_change`.
+    :func:`~abicheck.policy.severity.gate_contribution_for_change`.
     """
     # The audit-ledger serializers (`_out_of_surface_entry`,
     # `_suppressed_change_entry`, `_add_reconciled`, `_filtered_internal_entry`)
@@ -84,7 +84,7 @@ def add_contract_evaluation_fields(
     # compatibility policy never ran, which is a different statement from any
     # verdict -- including COMPATIBLE -- that a renderer might be tempted to
     # fill in.
-    from ..policy.contract_finding_relevance import evaluation_status_of
+    from ..model.contract_finding_relevance import evaluation_status_of
 
     status = evaluation_status_of(c)
     if status is not None:

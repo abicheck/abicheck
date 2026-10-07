@@ -119,11 +119,11 @@ from .model.execution_cache import memoized
 from .model.ownership_rules import OwnershipRules
 from .policy.classification import policy_kind_sets
 from .policy.gate_pack_fold import gate_exit_code_scheme
+from .policy.severity import SEVERITY_PRESETS, SeverityConfig, SeverityLevel
 from .policy.versioning_policy import (
     VersioningPolicy,
     built_in_default_versioning_policy,
 )
-from .severity import SEVERITY_PRESETS, SeverityConfig, SeverityLevel
 from .workflows.ownership_contract_inputs import (
     header_dir_spellings,
     project_ownership_inputs,
@@ -274,7 +274,7 @@ def severity_preset_identity(name: str) -> ImmutableIdentity:
     the digest is taken over the four category levels it resolves to.
     The CLI spelling ``info-only`` and its programmatic alias ``info_only``
     (``SEVERITY_PRESETS`` carries both keys for the same
-    :class:`~abicheck.severity.SeverityConfig`) normalize to one canonical id,
+    :class:`~abicheck.policy.severity.SeverityConfig`) normalize to one canonical id,
     so two equivalent semantic inputs resolve to an equal object (D7) instead
     of to two identities that differ only in punctuation.
     """

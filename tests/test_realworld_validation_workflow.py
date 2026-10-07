@@ -98,8 +98,8 @@ class TestPullRequestPathsCoverTheSubsystemsThisLaneExercises:
         # above only matches the flat facades, not their policy/-nested
         # owners, and this lane's own real-package --contract step
         # exercises all three.
-        assert "abicheck/policy/evidence_status.py" in paths
-        assert "abicheck/policy/contract_finding_relevance.py" in paths
+        assert "abicheck/model/evidence_status.py" in paths
+        assert "abicheck/model/contract_finding_relevance.py" in paths
         assert "abicheck/policy/coverage_ledger.py" in paths
 
     def test_the_workflow_file_itself_is_covered(self) -> None:

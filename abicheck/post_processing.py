@@ -40,8 +40,8 @@ from .post_processing_context import (
 from .post_processing_reachability import MarkReachability as MarkReachability
 
 if TYPE_CHECKING:
-    from .checker_types import Change
     from .model import AbiSnapshot
+    from .model.change import Change
     from .policy.disposition_ledger import DispositionLedger
     from .suppression import Suppression, SuppressionList
 
@@ -659,7 +659,7 @@ def _build_suppression_overreach_change(change: Change, rule: Suppression) -> Ch
     ADR-044 D4. *rule* is the suppression whose selectors matched *change* but
     whose reachability/``allow_public_break`` gate withheld the match.
     """
-    from .checker_types import Change
+    from .model.change import Change
     from .model.change_catalog.kinds import ChangeKind
 
     # would_withhold() only ever returns True for a *broad* rule (namespace/
@@ -706,7 +706,7 @@ def _build_suppression_unknown_reachability_change(
     ``"proven-unreachable-only"``, but whose graph coverage could not prove
     *change* unreachable (``Change.reachability_state`` is ``UNKNOWN``).
     """
-    from .checker_types import Change
+    from .model.change import Change
     from .model.change_catalog.kinds import ChangeKind
 
     selector = (

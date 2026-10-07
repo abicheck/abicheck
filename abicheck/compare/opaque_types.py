@@ -60,8 +60,8 @@ from ..model.qualified_name_split import (
 from ..model.surface_facts import is_abi_visible
 
 if TYPE_CHECKING:
-    from ..checker_types import Change
     from ..model import AbiSnapshot, RecordType
+    from ..model.change import Change
 
 __all__ = [
     "OpaqueTypeIndex",

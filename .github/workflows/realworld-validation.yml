@@ -61,8 +61,8 @@ on:
       # flat facades, not their policy/-nested owners). A prior round of
       # this same fix added policy/classification.py but missed these
       # three (Codex review, fresh evidence).
-      - "abicheck/policy/evidence_status.py"
-      - "abicheck/policy/contract_finding_relevance.py"
+      - "abicheck/model/evidence_status.py"
+      - "abicheck/model/contract_finding_relevance.py"
       - "abicheck/policy/coverage_ledger.py"
 
 concurrency:

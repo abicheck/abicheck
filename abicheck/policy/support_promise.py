@@ -53,7 +53,7 @@ reviewer can check *what* proved the absence without re-deriving it.
 
 from __future__ import annotations
 
-from ..checker_types import Change
+from ..model.change import Change
 from ..model.change_catalog.kinds import ChangeKind
 from ..model.scope_acquisition import ScopeAcquisitionRecord
 

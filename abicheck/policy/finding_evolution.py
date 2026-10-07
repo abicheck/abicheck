@@ -56,9 +56,10 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from ..checker_types import Change, DiffResult
+from ..checker_types import DiffResult
 from ..finding_identity import report_finding_id
-from .evidence_status import FindingEvolution
+from ..model.change import Change
+from ..model.evidence_status import FindingEvolution
 
 
 def _identity(change: Change) -> str:

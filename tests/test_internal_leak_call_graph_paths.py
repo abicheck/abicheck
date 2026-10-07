@@ -20,8 +20,8 @@
 from __future__ import annotations
 
 from abicheck.checker_policy import ChangeKind
-from abicheck.checker_types import Change
 from abicheck.internal_leak import _build_call_graph_leak_change
+from abicheck.model.change import Change
 
 
 class TestBuildCallGraphLeakChangePreferredPath:

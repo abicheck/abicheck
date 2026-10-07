@@ -26,9 +26,9 @@ task-routing table says new behavior should route away from). Moved here;
 
 from __future__ import annotations
 
-from ..checker_types import Change
 from ..diff_helpers import make_change
 from ..model import RecordType
+from ..model.change import Change
 from ..model.change_catalog.kinds import ChangeKind
 from .fact_comparison import compare_facts
 

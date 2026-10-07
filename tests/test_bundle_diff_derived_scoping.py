@@ -38,8 +38,9 @@ from pathlib import Path
 
 from abicheck.bundle import BundleSnapshot, _compute_resolution_graph, compare_bundle
 from abicheck.checker_policy import ChangeKind, Verdict
-from abicheck.checker_types import Change, DiffResult
+from abicheck.checker_types import DiffResult
 from abicheck.elf_metadata import ElfImport, ElfMetadata, ElfSymbol
+from abicheck.model.change import Change
 
 
 def _meta(

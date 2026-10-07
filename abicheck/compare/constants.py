@@ -63,8 +63,8 @@ from ..model.semantic_ir_legacy_adapter import (
 )
 
 if TYPE_CHECKING:
-    from ..checker_types import Change
     from ..model import AbiSnapshot
+    from ..model.change import Change
 
 __all__ = ["constant_index_pair", "diff_constants"]
 

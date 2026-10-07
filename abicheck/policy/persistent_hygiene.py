@@ -54,7 +54,7 @@ from .classification import (
 from .reclassify import reclassify_rules_for_kind
 
 if TYPE_CHECKING:
-    from ..checker_types import Change
+    from ..model.change import Change
     from ..policy_file import PolicyFile
 
 

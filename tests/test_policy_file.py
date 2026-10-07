@@ -7,14 +7,14 @@ import pytest
 
 from abicheck.checker_policy import ChangeKind, Verdict, policy_kind_sets
 from abicheck.checker_types import DiffResult
-from abicheck.policy_file import PolicyFile
-from abicheck.severity import (
+from abicheck.policy.severity import (
     PRESET_DEFAULT,
     IssueCategory,
     classify_effective_change,
     compute_exit_code,
     effective_verdict_for_change,
 )
+from abicheck.policy_file import PolicyFile
 
 
 def _change(kind: ChangeKind):

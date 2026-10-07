@@ -42,7 +42,7 @@ from ..policy.outcome import (
 
 if TYPE_CHECKING:
     from ..checker_types import DiffResult
-    from ..severity import GateDecision, SeverityConfig
+    from ..policy.severity import GateDecision, SeverityConfig
 
 __all__ = ["run_outcome_dict_for_diff_result"]
 
@@ -75,7 +75,7 @@ def run_outcome_dict_for_diff_result(
     no ``aggregate`` target-lifecycle concept, so ``operational``/
     ``lifecycle`` stay at their fixed defaults here.
     """
-    from ..severity import legacy_exit_code
+    from ..policy.severity import legacy_exit_code
 
     exit_code = gate.exit_code if gate is not None else legacy_exit_code(result.verdict)
     outcome = RunOutcome(

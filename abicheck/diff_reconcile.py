@@ -72,8 +72,8 @@ from .compare.record_lookup import RecordLookup
 from .model.change_catalog.kinds import ChangeKind
 
 if TYPE_CHECKING:
-    from .checker_types import Change
     from .model import AbiSnapshot, RecordType
+    from .model.change import Change
 
 # Only field-*presence* findings are reconcilable. Whole-record layout findings
 # (size / offset) are deliberately excluded: build defines prove presence, not

@@ -35,9 +35,10 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
     from datetime import date
 
-    from .checker_types import Change, DiffResult
+    from .checker_types import DiffResult
+    from .model.change import Change
+    from .policy.severity import GateDecision, SeverityConfig
     from .report.scoped_gate import ScopedGateChangeHelpers
-    from .severity import GateDecision, SeverityConfig
 
 
 def add_env_matrix_digest(d: dict[str, Any], result: DiffResult) -> None:
@@ -183,7 +184,7 @@ def add_contract_context(
     # enforce. Emitted as `[]` rather than omitted when there are none: an
     # empty ledger is the real, checkable answer "this domain closed", which
     # an absent key could not distinguish from "not computed".
-    from .contract_coverage_exit import coverage_exit_for_context
+    from .policy.contract_coverage_exit import coverage_exit_for_context
     from .policy.coverage_ledger import coverage_failures_for_context
 
     failures = coverage_failures_for_context(ctx)

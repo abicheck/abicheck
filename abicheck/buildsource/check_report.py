@@ -60,8 +60,8 @@ import re
 from collections.abc import Mapping
 from typing import Any
 
-from ..checker_types import validate_check_id, validate_evidence_depth
 from ..evidence_depth import DEPTH_RANK, weaker_depth
+from ..model.change import validate_check_id, validate_evidence_depth
 from ..policy.outcome import OperationalStatus, PolicyGateDecision, TargetLifecycle
 from ..schemas import REPORT_SCHEMA_VERSION
 from . import check_report_no_baseline as _no_baseline
@@ -378,7 +378,7 @@ def _neutralize_gate(report: dict[str, Any]) -> None:
         # review, fresh evidence, two rounds).
         old_exit = node.get("exit")
         if isinstance(old_exit, Mapping):
-            from ..exit_decision import resolve_exit_decision
+            from ..policy.exit_decision import resolve_exit_decision
 
             def _int_or_zero(key: str) -> int:
                 value = old_exit.get(key, 0)

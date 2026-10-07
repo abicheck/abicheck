@@ -44,7 +44,7 @@ from ..contract_relevance_types import ContractAssurance, ContractRelevance
 from ..model.symbol_leaf import symbol_leaf_identifier
 
 if TYPE_CHECKING:
-    from ..checker_types import Change
+    from ..model.change import Change
     from .public_surface import PublicSurface
 
 

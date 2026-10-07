@@ -55,7 +55,7 @@ from abicheck.diff_cxx_rules import itanium_qualified_name, msvc_qualified_name
 from abicheck.finding_identity import FindingIdentity, resolve_change_identity
 
 if TYPE_CHECKING:
-    from abicheck.checker_types import Change
+    from abicheck.model.change import Change
     from abicheck.model.identity import EntityId
 
 #: :attr:`FindingMatrixEntry.scope` values — how one logical finding is

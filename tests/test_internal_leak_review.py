@@ -31,7 +31,6 @@ from __future__ import annotations
 import pytest
 
 from abicheck.checker_policy import ChangeKind
-from abicheck.checker_types import Change
 from abicheck.dwarf_metadata import DwarfMetadata, FieldInfo, StructLayout
 from abicheck.internal_leak import (
     _build_qualified_index,
@@ -48,6 +47,7 @@ from abicheck.model import (
     TypeField,
     Visibility,
 )
+from abicheck.model.change import Change
 from abicheck.model.vocabulary import ScopeOrigin
 
 # ---------------------------------------------------------------------------

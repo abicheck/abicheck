@@ -38,7 +38,8 @@ from typing import Any, cast
 
 from ..bundle import render_bundle_findings_markdown
 from ..bundle_models import BundleDiffResult
-from ..checker_types import Change, DiffResult
+from ..checker_types import DiffResult
+from ..model.change import Change
 from .release_change_inventory import release_inventory_counters
 from .render_text import format_hygiene_note
 

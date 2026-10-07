@@ -14,15 +14,6 @@
 
 """Selector-scoped reclassification — the third policy-file primitive.
 
-ADR-061 gap B: this is the real owner behind the flat
-``abicheck.reclassify`` compatibility facade. The facade stays a thin,
-unclassified re-export (not a `policy`-package `legacy_paths` entry)
-because ``abicheck/checker_types.py`` (the `model`-owned, legacy
-``DiffResult``) imports it directly, and `model` cannot statically depend
-on `policy` — see ``checker_policy.py``'s own module docstring for the full
-reasoning, which applies identically here. Every physically-migrated
-internal caller (``policy/*``) imports this module directly instead.
-
 Two rule forms already exist for steering a verdict, each half-right for a
 project that needs the other half:
 
@@ -117,11 +108,9 @@ during ADR-061 Phase 2. Two reasons, one architectural and one local:
   ``severity.py``'s severity/gating layer both need that resolver, and
   ADR-061 classifies those two callers into *different* responsibility
   layers (`model` and `policy`) whose dependency contract forbids the
-  first importing the second. This module is the real `policy` owner both
-  reach -- ``checker_types.py`` through the flat, deliberately-unclassified
-  ``abicheck.reclassify`` facade (the "leaf both sides can depend on"
-  pattern ADR-061 names for exactly this class of blocker), ``policy/*``
-  modules directly.
+  first importing the second. ``checker_types.py`` imports this module at
+  call time as a reviewed ``model -> policy`` exception
+  (``architecture/debt.yaml``); ``policy/*`` modules import it directly.
 - Local: the resolver's precedence chain is built *around* the selector
   rules defined here, and :func:`reclassify_rule_for_change` has to mirror
   that chain step for step. Three separate review rounds have already
@@ -143,11 +132,7 @@ from typing import Any, TypeVar, cast
 from ..model.change_catalog.kinds import ChangeKind, HasKind
 from ..model.execution_cache import MemoryCache, request_key
 from ..model.policy_file_protocol import ReclassifyRuleProtocol
-from .classification import (
-    Verdict,
-    effective_category,
-    policy_kind_sets,
-)
+from .classification import Verdict, effective_category, policy_kind_sets
 from .selectors import SelectorSet
 
 #: The four verdicts a `to:` value is allowed to resolve to -- the exact set

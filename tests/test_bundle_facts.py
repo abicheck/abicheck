@@ -25,7 +25,7 @@ from abicheck.bundle_manifest import (
 )
 from abicheck.bundle_models import BundleSnapshot
 from abicheck.checker_policy import ChangeKind, Verdict
-from abicheck.checker_types import Change, DiffResult
+from abicheck.checker_types import DiffResult
 from abicheck.elf_metadata import ElfImport, ElfMetadata, ElfSymbol
 from abicheck.model import AbiSnapshot, Function, Visibility
 from abicheck.model.bundle_facts import (
@@ -33,6 +33,7 @@ from abicheck.model.bundle_facts import (
     BUNDLE_FACTS_SCHEMA_VERSION,
     BundleFacts,
 )
+from abicheck.model.change import Change
 from abicheck.serialization import (
     bundle_facts_from_dict,
     bundle_facts_to_dict,

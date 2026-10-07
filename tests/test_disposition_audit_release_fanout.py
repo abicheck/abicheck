@@ -32,9 +32,10 @@ import json
 from pathlib import Path
 
 from abicheck.checker_policy import ChangeKind
-from abicheck.checker_types import Change, DiffResult
+from abicheck.checker_types import DiffResult
 from abicheck.cli_compare_receipt import release_disposition_audit_block
 from abicheck.cli_compare_release_helpers import _format_release_json
+from abicheck.model.change import Change
 from abicheck.report.disposition_audit import DispositionAudit
 from abicheck.suppression import Suppression, SuppressionList
 

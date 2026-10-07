@@ -629,7 +629,7 @@ def _route_str_tuple(value: Hashable, field_name: str, source: str) -> Hashable:
 
 
 def _route_severity_level(value: Hashable, field_name: str, source: str) -> Hashable:
-    from .severity import SeverityLevel
+    from .policy.severity import SeverityLevel
 
     allowed = {level.value for level in SeverityLevel}
     if not isinstance(value, str) or value not in allowed:

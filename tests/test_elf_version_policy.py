@@ -12,10 +12,6 @@ Covers:
 from __future__ import annotations
 
 from abicheck.checker_policy import ChangeKind, Verdict
-from abicheck.checker_types import (
-    SYMBOL_VERSION_ALIAS_NOT_RETAINED_MARKER,
-    Change,
-)
 from abicheck.diff_versioning import (
     _build_version_node_map,
     check_soname_bump_policy,
@@ -23,6 +19,7 @@ from abicheck.diff_versioning import (
     detect_version_script_missing,
 )
 from abicheck.elf_metadata import ElfMetadata, ElfSymbol, SymbolBinding, SymbolType
+from abicheck.model.change import SYMBOL_VERSION_ALIAS_NOT_RETAINED_MARKER, Change
 
 # ---------------------------------------------------------------------------
 # Helpers

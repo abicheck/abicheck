@@ -27,7 +27,6 @@ non-ABI-surface toolchain internals (see
 from __future__ import annotations
 
 from abicheck.checker_policy import ChangeKind
-from abicheck.checker_types import Change
 from abicheck.contract_evaluation import evaluate_change_contract_relevance
 from abicheck.contract_relevance_types import ContractMode, ContractRelevance
 from abicheck.model import (
@@ -38,6 +37,7 @@ from abicheck.model import (
     ScopeOrigin,
     Visibility,
 )
+from abicheck.model.change import Change
 from abicheck.policy.public_surface_closure import resolve_public_surface
 from abicheck.type_reachability import directly_referenced_stdlib_type_spellings
 

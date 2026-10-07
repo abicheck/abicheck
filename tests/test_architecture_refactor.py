@@ -1109,8 +1109,8 @@ class TestPostProcessingPipeline:
     def test_pipeline_with_changes(self):
         """Pipeline processes changes through all steps."""
         from abicheck.checker_policy import ChangeKind
-        from abicheck.checker_types import Change
         from abicheck.model import AbiSnapshot, Function, Visibility
+        from abicheck.model.change import Change
         from abicheck.post_processing import DEFAULT_PIPELINE
 
         old = AbiSnapshot(
@@ -1153,8 +1153,8 @@ class TestPostProcessingPipeline:
         import pytest
 
         from abicheck.checker_policy import ChangeKind
-        from abicheck.checker_types import Change
         from abicheck.model import AbiSnapshot
+        from abicheck.model.change import Change
         from abicheck.post_processing import FilterRedundant, PostProcessingPipeline
 
         class _ReboundStep:
@@ -1181,8 +1181,8 @@ class TestPostProcessingPipeline:
         return value — proving the ``ctx.kept`` alias survives every
         intervening step (DetectInternalLeaks, EnrichAffectedSymbols, etc.)."""
         from abicheck.checker_policy import ChangeKind
-        from abicheck.checker_types import Change
         from abicheck.model import AbiSnapshot
+        from abicheck.model.change import Change
         from abicheck.post_processing import DEFAULT_PIPELINE
 
         old = AbiSnapshot(library="test", version="1.0")

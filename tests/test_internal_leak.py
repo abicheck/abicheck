@@ -19,7 +19,6 @@ import pytest
 
 from abicheck.checker import compare
 from abicheck.checker_policy import ChangeKind, ReachabilityState
-from abicheck.checker_types import Change
 from abicheck.compare.internal_namespaces import name_segments as _name_segments
 from abicheck.internal_leak import (
     _build_suffix_index,
@@ -41,6 +40,7 @@ from abicheck.model import (
     Variable,
     Visibility,
 )
+from abicheck.model.change import Change
 
 # ---------------------------------------------------------------------------
 # is_internal_type / segment helpers

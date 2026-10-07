@@ -34,7 +34,6 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
-from ..checker_types import Change
 from ..diff_cxx_rules import (
     component_embeds_template_args,
     itanium_scope_components_with_template_positions,
@@ -44,6 +43,7 @@ from ..diff_cxx_rules import (
 )
 from ..diff_helpers import make_change
 from ..model import Function
+from ..model.change import Change
 from ..model.change_catalog.kinds import ChangeKind
 from ..model.synthetic_key import (
     SYNTHETIC_CTOR_KEY_PREFIX,
@@ -539,7 +539,7 @@ def emit_namespace_move_batches(
         if len(pairs) > 5:
             pair_desc += f", ... ({len(pairs)} total)"
         # Only truthiness of `symbol_binding` is ever consulted
-        # (`checker_policy.evidence_status_for_result`) -- the specific
+        # (`checker_model.evidence_status_for_result`) -- the specific
         # binding kind (global/weak/...) has no meaning at batch
         # granularity, since constituents can legitimately differ.
         binding = (

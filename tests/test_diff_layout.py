@@ -553,8 +553,8 @@ class TestStdlibEmbeddingAttribution:
     def test_attribution_helper_idempotent_and_tolerates_missing_type(self) -> None:
         # Direct-call coverage for the dedup branch (clause appended once) and the
         # "owner type absent from the new snapshot" guard.
-        from abicheck.checker_types import Change
         from abicheck.diff_filtering import _attribute_stdlib_embedding
+        from abicheck.model.change import Change
 
         new = _snap(
             "2",
@@ -590,8 +590,8 @@ class TestStdlibEmbeddingAttribution:
         # distinct (neither borrows the other's members, nor a plain record
         # any) -- whatever order the findings arrive in. Oracle: each record's
         # own field list, computed here, not via _embedded_stdlib_fields.
-        from abicheck.checker_types import Change
         from abicheck.diff_filtering import _attribute_stdlib_embedding
+        from abicheck.model.change import Change
 
         specs = {
             "A": [(f"a{i}", "std::string") for i in range(width)],

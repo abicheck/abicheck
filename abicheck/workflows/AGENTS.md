@@ -32,8 +32,7 @@ achieved. Keeping "decide" runnable without "do" is what lets `dump --dry-run`
 render the same resolved plan a real run consumes -- a preview computed by a
 second resolver looks authoritative while being connected to nothing, which is
 worse than two implementations kept in sync by hand, because nothing fails
-when they drift. `abicheck/service_input_resolution.py` remains as a
-delegating facade; import the owners.
+when they drift.
 
 Six narrow re-export surfaces exist so a frontend can reach an operation
 without importing a ring it may not (`frontends` may import only `model`,

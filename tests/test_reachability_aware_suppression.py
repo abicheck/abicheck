@@ -28,7 +28,6 @@ from __future__ import annotations
 import pytest
 
 from abicheck.checker_policy import ChangeKind, Verdict
-from abicheck.checker_types import Change
 from abicheck.model import (
     AbiSnapshot,
     EnumMember,
@@ -40,6 +39,7 @@ from abicheck.model import (
     Variable,
     Visibility,
 )
+from abicheck.model.change import Change
 from abicheck.post_processing import DEFAULT_PIPELINE
 from abicheck.suppression import Suppression, SuppressionList
 

@@ -37,9 +37,9 @@ from pathlib import Path
 
 from abicheck.checker import ChangeKind, Verdict, compare
 from abicheck.checker_policy import BREAKING_KINDS
-from abicheck.checker_types import Change
 from abicheck.elf_metadata import ElfMetadata, ElfSymbol, SymbolBinding, SymbolType
 from abicheck.model import AbiSnapshot, Variable
+from abicheck.model.change import Change
 from abicheck.policy_file import PolicyFile
 
 

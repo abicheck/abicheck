@@ -1,5 +1,5 @@
 from abicheck.checker_policy import ChangeKind, CrossSourceEvolution, Verdict
-from abicheck.checker_types import Change
+from abicheck.model.change import Change
 from abicheck.policy.disposition_ledger import Disposition
 from abicheck.policy.severity import IssueCategory
 from abicheck.report.disposition_audit import DispositionAudit
