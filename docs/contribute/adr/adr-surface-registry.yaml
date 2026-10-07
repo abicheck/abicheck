@@ -1,0 +1,638 @@
+# ADR surface registry — which use cases each ADR serves and which public
+# surface (CLI command/flag, typed Python API symbol, GitHub Action input,
+# report schema field or output format) reaches it. Contract: ADR-076.
+#
+# Validated by scripts/check_adr_surfaces.py (and tests/test_adr_surfaces.py):
+#   - every ADR file under docs/contribute/adr/ has exactly one entry;
+#   - every surface resolves against the code (CLI introspection, import,
+#     action.yml inputs, abicheck/schemas/*.schema.json properties);
+#   - an ADR whose index Status reads fully "implemented" must be `surfaced`
+#     or `internal`; a retired (Deprecated/Superseded) ADR must be `internal`;
+#   - `partial`/`gap` carry `missing`, `internal` carries `reason`;
+#   - use_cases name real UC-* ids, and each UC's `adrs:` in
+#     docs/contribute/usecase-registry.yaml mirrors this file exactly;
+#   - nothing becomes less reachable than adr_surface_baseline.json records
+#     unless the baseline is rewritten in the same PR (--write-baseline).
+#
+# disposition: surfaced | partial | gap | internal
+# surface kinds:
+#   {cli: "<command path> [--flag ...]"}       e.g. "compare --used-by", "deps tree"
+#   {api: "<dotted.importable.symbol>"}
+#   {action: "<root input>"} | {action: "actions/<name>"} | {action: "actions/<name>:<input>"}
+#   {report: "<schema>.<top-level field>"} | {report: "format:<compare -o value>"}
+
+schema_version: 1
+
+adrs:
+  - id: ADR-001
+    file: 001-technology-stack.md
+    disposition: internal
+    reason: Implementation-language and parser-library choice; no user-addressable surface.
+    use_cases: []
+
+  - id: ADR-002
+    file: 002-multi-binary-release-compare.md
+    disposition: surfaced
+    use_cases: [UC-WF-compare]
+    surfaces:
+      - cli: compare --select
+      - report: compare_report.comparison_scope
+
+  - id: ADR-003
+    file: 003-data-source-architecture.md
+    disposition: internal
+    reason: Extractor/data-source layering inside extract/; users reach it only through dump/compare.
+    use_cases: []
+
+  - id: ADR-004
+    file: 004-report-filtering-and-deduplication.md
+    disposition: surfaced
+    use_cases: [UC-REP-json]
+    surfaces:
+      - report: compare_report.root_causes
+      - report: compare_report.redundant_count
+      - report: compare_report.filtered_summary
+
+  - id: ADR-005
+    file: 005-application-compat-check.md
+    disposition: surfaced
+    use_cases: [UC-WF-appcompat]
+    surfaces:
+      - cli: compare --used-by
+      - cli: compare --required-symbol
+      - api: abicheck.appcompat.check_appcompat
+      - action: used-by
+      - report: compare_report.used_by
+
+  - id: ADR-006
+    file: 006-package-level-comparison.md
+    disposition: surfaced
+    use_cases: [UC-WF-compare]
+    surfaces:
+      - cli: compare
+      - action: devel-pkg1
+
+  - id: ADR-007
+    file: 007-btf-ctf-debug-formats.md
+    disposition: surfaced
+    use_cases: [UC-ARCH-kernel-btf]
+    surfaces:
+      - cli: dump --debug-info
+      - api: abicheck.btf_metadata
+
+  - id: ADR-008
+    file: 008-full-stack-dependency-validation.md
+    disposition: surfaced
+    use_cases: [UC-WF-stack-deps]
+    surfaces:
+      - cli: deps tree
+      - cli: deps compare
+      - cli: compare --follow-deps
+      - action: follow-deps
+
+  - id: ADR-009
+    file: 009-verdict-system-and-exit-codes.md
+    disposition: surfaced
+    use_cases: [UC-WF-compare, UC-WF-cli-contract]
+    surfaces:
+      - cli: compare
+      - report: compare_report.verdict
+      - report: compare_report.exit
+
+  - id: ADR-010
+    file: 010-policy-profile-system.md
+    disposition: surfaced
+    use_cases: [UC-CHANGE-taxonomy]
+    surfaces:
+      - cli: compare --policy
+      - action: policy
+      - report: compare_report.policy
+
+  - id: ADR-011
+    file: 011-change-classification-taxonomy.md
+    disposition: surfaced
+    use_cases: [UC-CHANGE-taxonomy]
+    surfaces:
+      - api: abicheck.checker_policy.ChangeKind
+      - report: compare_report.changes
+
+  - id: ADR-012
+    file: 012-abicc-compatibility-layer.md
+    disposition: internal
+    reason: Deprecated — the `compat` command was removed; no surface remains by design.
+    use_cases: []
+
+  - id: ADR-013
+    file: 013-suppression-system.md
+    disposition: surfaced
+    use_cases: [UC-WF-compare]
+    surfaces:
+      - cli: compare --suppress
+      - action: suppress
+      - report: compare_report.suppression
+
+  - id: ADR-014
+    file: 014-output-format-strategy.md
+    disposition: surfaced
+    use_cases: [UC-REP-json, UC-REP-sarif, UC-REP-junit, UC-REP-markdown-html]
+    surfaces:
+      - cli: compare --output
+      - action: format
+      - report: format:json
+      - report: format:sarif
+      - report: format:junit
+      - report: format:markdown
+      - report: format:html
+
+  - id: ADR-015
+    file: 015-snapshot-serialization.md
+    disposition: surfaced
+    use_cases: [UC-WF-baseline]
+    surfaces:
+      - cli: dump --output
+      - api: abicheck.serialization
+
+  - id: ADR-016
+    file: 016-visibility-model.md
+    disposition: internal
+    reason: Visibility tiers are a classification input inside extract/policy; users reach them through compare's scope, owned by ADR-024.
+    use_cases: []
+
+  - id: ADR-017
+    file: 017-github-action.md
+    disposition: surfaced
+    use_cases: [UC-WF-compare]
+    surfaces:
+      - action: mode
+      - action: upload-sarif
+      - action: pr-comment
+
+  - id: ADR-018
+    file: 018-cross-platform-support.md
+    disposition: surfaced
+    use_cases: [UC-PLAT-linux-elf, UC-PLAT-windows-pe, UC-PLAT-macos-macho]
+    surfaces:
+      - cli: compare
+      - cli: dump
+
+  - id: ADR-019
+    file: 019-testing-strategy.md
+    disposition: internal
+    reason: Repository testing and parity-validation strategy; not a product surface.
+    use_cases: []
+
+  - id: ADR-020a
+    file: 020-build-context-capture.md
+    disposition: surfaced
+    use_cases: [UC-TC-flag-drift]
+    surfaces:
+      - cli: dump --build-info
+      - action: compile-db
+
+  - id: ADR-020b
+    file: 020-sycl-and-heterogeneous-stack-support.md
+    disposition: surfaced
+    use_cases: [UC-ARCH-sycl]
+    surfaces:
+      - cli: dump
+      - api: abicheck.sycl_metadata
+
+  - id: ADR-021a
+    file: 021-debug-artifact-resolution.md
+    disposition: surfaced
+    use_cases: []
+    surfaces:
+      - cli: dump --debug-info
+      - cli: compare --debug-info
+      - action: debug-info1
+      - api: abicheck.debug_resolver
+
+  - id: ADR-021b
+    file: 021-mcp-security-model.md
+    disposition: internal
+    reason: Deprecated — the MCP interface was removed.
+    use_cases: []
+
+  - id: ADR-022
+    file: 022-baseline-registry.md
+    disposition: internal
+    reason: Superseded by ADR-043 D4; recreating a registry is an explicit non-goal.
+    use_cases: []
+
+  - id: ADR-023
+    file: 023-bundle-aware-multi-binary-analysis.md
+    disposition: surfaced
+    use_cases: [UC-WF-bundle]
+    surfaces:
+      - cli: compare --bundle-facts-out
+      - cli: compare --variant
+
+  - id: ADR-024
+    file: 024-public-abi-surface-resolution.md
+    disposition: surfaced
+    use_cases: [UC-TC-header-scope-robustness]
+    surfaces:
+      - cli: compare --header --exclude-header
+      - action: public-header-dir
+      - report: compare_report.scope
+
+  - id: ADR-025
+    file: 025-pr-diff-source-evaluation.md
+    disposition: partial
+    use_cases: [UC-WORKFLOW-pr-source-tier]
+    surfaces:
+      - cli: compare --changed-path
+      - action: changed-path
+    missing: D4 (source diff as a localizer beyond the ADR-033/035 absorption) is future work.
+
+  - id: ADR-026
+    file: 026-source-only-undetectable-changes.md
+    disposition: internal
+    reason: Substantially superseded by ADR-028/030/035/038, which own the surviving surfaces.
+    use_cases: []
+
+  - id: ADR-027
+    file: 027-api-surface-intelligence.md
+    disposition: partial
+    use_cases: []
+    surfaces:
+      - api: abicheck.pattern_verdicts
+    missing: >-
+      No first-class CLI or Action switch reaches pattern-aware verdicts; the
+      default-on flip is deferred pending FP-rate/parity validation.
+
+  - id: ADR-028
+    file: 028-source-build-evidence-pack.md
+    disposition: surfaced
+    use_cases: [UC-WORKFLOW-pr-source-tier, UC-TC-build-emitted-facts]
+    surfaces:
+      - cli: compare --sources --pack
+      - cli: dump --sources
+      - action: sources
+
+  - id: ADR-029
+    file: 029-build-graph-toolchain-context-capture.md
+    disposition: surfaced
+    use_cases: [UC-TC-bazel-build-evidence, UC-TC-make-auto-query]
+    surfaces:
+      - cli: dump --build-info
+      - action: build-info
+
+  - id: ADR-030
+    file: 030-source-abi-replay-and-linked-source-surface.md
+    disposition: surfaced
+    use_cases: [UC-WORKFLOW-pr-source-tier]
+    surfaces:
+      - cli: compare --sources --depth
+
+  - id: ADR-031
+    file: 031-source-implementation-graph-augmentation.md
+    disposition: surfaced
+    use_cases: []
+    surfaces:
+      - cli: compare --depth
+      - report: compare_report.edge_coverage
+
+  - id: ADR-032
+    file: 032-evidence-extractor-plugin-interface.md
+    disposition: internal
+    reason: In-repo extractor plugin interface and security model; no user-registered plugin surface.
+    use_cases: []
+
+  - id: ADR-033
+    file: 033-ci-rollout-performance-and-validation.md
+    disposition: surfaced
+    use_cases: [UC-REPORTING-dry-run-cost-preview]
+    surfaces:
+      - cli: compare --performance-profile --budget
+      - action: budget
+
+  - id: ADR-034
+    file: 034-managed-runtime-and-non-c-abi-frontends.md
+    disposition: partial
+    use_cases: [UC-ARCH-python-api]
+    surfaces:
+      - api: abicheck.python_api
+    missing: Proposed; managed-runtime frontends beyond the Python-level API diff are not implemented.
+
+  - id: ADR-035
+    file: 035-pr-tier-source-intelligence-and-crosscheck.md
+    disposition: surfaced
+    use_cases: [UC-WORKFLOW-pr-source-tier, UC-CHANGE-crosscheck-hygiene]
+    surfaces:
+      - cli: compare --depth
+      - action: crosscheck
+      - report: compare_report.cross_source_evolution
+
+  - id: ADR-036
+    file: 036-report-view-model.md
+    disposition: internal
+    reason: Report view-model inside report/; users see its effect through the rendered formats owned by ADR-014.
+    use_cases: []
+
+  - id: ADR-037
+    file: 037-cli-interface-contract.md
+    disposition: surfaced
+    use_cases: [UC-WF-cli-contract]
+    surfaces:
+      - cli: compare --help-all --config
+
+  - id: ADR-038
+    file: 038-build-integrated-fact-collection-variants.md
+    disposition: surfaced
+    use_cases: [UC-TC-build-emitted-facts]
+    surfaces:
+      - cli: project capture-variants
+      - action: actions/collect-facts
+
+  - id: ADR-039
+    file: 039-build-context-reconciliation.md
+    disposition: internal
+    reason: Diff-layer reconciler applied automatically; no switch or field of its own.
+    use_cases: []
+
+  - id: ADR-040
+    file: 040-compare-surface-reduction.md
+    disposition: surfaced
+    use_cases: [UC-WF-cli-contract]
+    surfaces:
+      - cli: compare --config
+
+  - id: ADR-041
+    file: 041-compiler-facts-semantic-impact-graph.md
+    disposition: partial
+    use_cases: []
+    surfaces:
+      - cli: compare --depth
+    missing: Remainder of the roadmap beyond P0 slices 1-4 and P1 items 1-5 is not a shipping commitment.
+
+  - id: ADR-042
+    file: 042-compatibility-and-gate-decision-separation.md
+    disposition: surfaced
+    use_cases: [UC-WF-compare]
+    surfaces:
+      - report: compare_report.compatibility_verdict
+      - report: compare_report.policy_gate_decision
+
+  - id: ADR-043
+    file: 043-cli-pre-1.0-surface-reset.md
+    disposition: surfaced
+    use_cases: [UC-WF-cli-contract, UC-REPORTING-dry-run-cost-preview]
+    surfaces:
+      - cli: compare --dry-run
+      - cli: dump --dry-run
+
+  - id: ADR-044
+    file: 044-reachability-aware-suppression.md
+    disposition: surfaced
+    use_cases: []
+    surfaces:
+      - cli: compare --suppress
+      - report: compare_report.suppression_audit
+
+  - id: ADR-045
+    file: 045-identity-based-old-new-entity-matching.md
+    disposition: internal
+    reason: Old/new matching inside compare/; observable only as fewer remove+add pairs.
+    use_cases: []
+
+  - id: ADR-046
+    file: 046-source-graph-identity-v2-and-evidence-merge.md
+    disposition: internal
+    reason: Source-graph identity and merge inside extract/; no switch or field of its own.
+    use_cases: []
+
+  - id: ADR-047
+    file: 047-github-actions-integration-model.md
+    disposition: partial
+    use_cases: [UC-WF-baseline]
+    surfaces:
+      - action: actions/baseline
+      - action: actions/check-target
+      - action: actions/aggregate
+      - cli: aggregate
+    missing: P2 of the lifecycle model is only partially implemented (see the ADR).
+
+  - id: ADR-048
+    file: 048-canonical-entity-identity-and-graph-reconciliation.md
+    disposition: internal
+    reason: Canonical entity identity in model/; no user-addressable surface.
+    use_cases: []
+
+  - id: ADR-049
+    file: 049-contract-relevance-and-compatibility-configuration.md
+    disposition: surfaced
+    use_cases: [UC-WF-compare]
+    surfaces:
+      - cli: compare --contract
+      - report: compare_report.contract_coverage
+      - report: compare_report.contract_context
+
+  - id: ADR-050
+    file: 050-comparability-contract-and-multi-tu-manifest.md
+    disposition: surfaced
+    use_cases: []
+    surfaces:
+      - cli: compare --dump-manifest
+      - report: compare_report.comparability_assurance
+
+  - id: ADR-051
+    file: 051-documentation-operational-model.md
+    disposition: internal
+    reason: Repository documentation governance; not a product surface.
+    use_cases: []
+
+  - id: ADR-052
+    file: 052-unified-impact-assessment-model.md
+    disposition: surfaced
+    use_cases: [UC-WF-appcompat]
+    surfaces:
+      - cli: compare --used-by-manifest
+      - report: compare_report.consumer_impact_summary
+
+  - id: ADR-053
+    file: 053-tu-link-unit-dso-attribution.md
+    disposition: partial
+    use_cases: []
+    surfaces: []
+    missing: Core algorithm and validator only; CLI/Action pipeline wiring is deferred (D5).
+
+  - id: ADR-054
+    file: 054-cli-project-integration-surface-consolidation.md
+    disposition: surfaced
+    use_cases: [UC-WF-cli-contract]
+    surfaces:
+      - cli: project plan
+      - cli: project validate
+
+  - id: ADR-055
+    file: 055-typed-request-result-completeness-and-schema-registry.md
+    disposition: surfaced
+    use_cases: [UC-WF-compare]
+    surfaces:
+      - api: abicheck.workflows.contracts.CompareRequest
+      - api: abicheck.workflows.contracts.DumpRequest
+      - report: compare_report.report_schema_version
+
+  - id: ADR-056
+    file: 056-multi-artifact-library-set-scan.md
+    disposition: internal
+    reason: Superseded by ADR-068; the `scan` command it extended was deleted.
+    use_cases: []
+
+  - id: ADR-057
+    file: 057-consumer-graph-and-impact-join.md
+    disposition: partial
+    use_cases: [UC-WF-appcompat]
+    surfaces:
+      - cli: compare --use-cases --used-by
+      - report: compare_report.use_case_impact
+    missing: Later slices of the consumer graph beyond slice 1 and the slice-2 manifest remain open.
+
+  - id: ADR-058
+    file: 058-native-compatibility-agent-skills.md
+    disposition: partial
+    use_cases: []
+    surfaces: []
+    missing: >-
+      Agent skills ship as repository content, not a CLI/API/Action/report
+      surface; P0.4/P0.5 product-surface items and most of P1 remain.
+
+  - id: ADR-059
+    file: 059-compressed-snapshot-storage.md
+    disposition: surfaced
+    use_cases: [UC-WF-baseline]
+    surfaces:
+      - cli: dump --compression
+      - action: snapshot-compression
+
+  - id: ADR-060
+    file: 060-synthetic-consumer-compile-probe-deferral.md
+    disposition: gap
+    use_cases: []
+    surfaces: []
+    missing: Decision to defer; no synthetic-consumer compile probe exists and none is scheduled.
+
+  - id: ADR-061
+    file: 061-responsibility-package-architecture.md
+    disposition: internal
+    reason: Internal package architecture and import direction.
+    use_cases: []
+
+  - id: ADR-062
+    file: 062-project-snapshot-storage-v2.md
+    disposition: partial
+    use_cases: [UC-WF-baseline]
+    surfaces:
+      - api: abicheck.storage
+    missing: Proposed; only Phase 0 primitives and the default single-artifact format are wired.
+
+  - id: ADR-063
+    file: 063-one-semantic-pipeline.md
+    disposition: partial
+    use_cases: []
+    surfaces:
+      - cli: compare
+    missing: Roadmap ADR; Phase 10 accounting remains open.
+
+  - id: ADR-064
+    file: 064-canonical-gate-algorithm-and-exit-decision.md
+    disposition: surfaced
+    use_cases: [UC-WF-compare]
+    surfaces:
+      - cli: compare --severity-preset
+      - report: compare_report.exit
+      - action: severity-preset
+
+  - id: ADR-065
+    file: 065-comparison-scope-selection-and-completeness.md
+    disposition: surfaced
+    use_cases: [UC-WF-compare]
+    surfaces:
+      - cli: compare --select --select-required --dry-run
+      - report: compare_report.comparison_scope
+      - report: compare_report.run_outcome
+
+  - id: ADR-066
+    file: 066-longitudinal-history-and-versioning-policy.md
+    disposition: partial
+    use_cases: [UC-CHANGE-semver-recommendation]
+    surfaces:
+      - cli: project history --policy
+      - api: abicheck.workflows.history.build_longitudinal_history
+    missing: Proposed; only S1 and S2 are implemented.
+
+  - id: ADR-067
+    file: 067-change-intent-acknowledgment-and-disposition-audit.md
+    disposition: partial
+    use_cases: [UC-WF-compare]
+    surfaces:
+      - cli: compare --suppress
+      - report: compare_report.disposition_audit
+    missing: S4 is not implemented.
+
+  - id: ADR-068
+    file: 068-one-comparison-product-and-scan-retirement.md
+    disposition: surfaced
+    use_cases: [UC-WF-compare, UC-WF-cli-contract]
+    surfaces:
+      - cli: compare --no-baseline
+
+  - id: ADR-069
+    file: 069-name-shape-is-not-contract-membership.md
+    disposition: internal
+    reason: Product rule applied inside policy/; no switch or field of its own.
+    use_cases: []
+
+  - id: ADR-070
+    file: 070-action-layer-does-not-encode-cli-semantics.md
+    disposition: partial
+    use_cases: []
+    surfaces:
+      - action: extra-args
+    missing: Only D3 is implemented; D1, D2 and D4 remain.
+
+  - id: ADR-071
+    file: 071-release-analysis-assurance-fold.md
+    disposition: surfaced
+    use_cases: [UC-WF-compare]
+    surfaces:
+      - action: require-complete-analysis
+      - report: compare_report.analysis_assurance
+
+  - id: ADR-072
+    file: 072-pr-comment-reporting-fidelity.md
+    disposition: surfaced
+    use_cases: [UC-REP-markdown-html]
+    surfaces:
+      - action: pr-comment-detail
+      - report: format:review
+
+  - id: ADR-073
+    file: 073-report-only-publication-and-the-trusted-reporter-boundary.md
+    disposition: surfaced
+    use_cases: []
+    surfaces:
+      - action: actions/report
+      - action: actions/verify-source-run
+
+  - id: ADR-074
+    file: 074-logical-macro-definitions-on-the-cli.md
+    disposition: surfaced
+    use_cases: [UC-TC-header-scope-robustness]
+    surfaces:
+      - cli: compare --define
+      - cli: dump --define
+
+  - id: ADR-075
+    file: 075-target-ownership-and-extraction-scope.md
+    disposition: gap
+    use_cases: []
+    surfaces: []
+    missing: Accepted, not yet implemented; no ownership/extraction-scope surface exists.
+
+  - id: ADR-076
+    file: 076-adr-use-case-surface-traceability.md
+    disposition: internal
+    reason: Repository traceability contract and gate; not a product surface.
+    use_cases: []

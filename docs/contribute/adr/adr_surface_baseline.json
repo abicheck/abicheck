@@ -1,0 +1,800 @@
+{
+  "adrs": {
+    "ADR-001": {
+      "disposition": "internal",
+      "surfaces": [],
+      "use_cases": []
+    },
+    "ADR-002": {
+      "disposition": "surfaced",
+      "surfaces": [
+        "cli: compare --select",
+        "report: compare_report.comparison_scope"
+      ],
+      "use_cases": [
+        "UC-WF-compare"
+      ]
+    },
+    "ADR-003": {
+      "disposition": "internal",
+      "surfaces": [],
+      "use_cases": []
+    },
+    "ADR-004": {
+      "disposition": "surfaced",
+      "surfaces": [
+        "report: compare_report.filtered_summary",
+        "report: compare_report.redundant_count",
+        "report: compare_report.root_causes"
+      ],
+      "use_cases": [
+        "UC-REP-json"
+      ]
+    },
+    "ADR-005": {
+      "disposition": "surfaced",
+      "surfaces": [
+        "action: used-by",
+        "api: abicheck.appcompat.check_appcompat",
+        "cli: compare --required-symbol",
+        "cli: compare --used-by",
+        "report: compare_report.used_by"
+      ],
+      "use_cases": [
+        "UC-WF-appcompat"
+      ]
+    },
+    "ADR-006": {
+      "disposition": "surfaced",
+      "surfaces": [
+        "action: devel-pkg1",
+        "cli: compare"
+      ],
+      "use_cases": [
+        "UC-WF-compare"
+      ]
+    },
+    "ADR-007": {
+      "disposition": "surfaced",
+      "surfaces": [
+        "api: abicheck.btf_metadata",
+        "cli: dump --debug-info"
+      ],
+      "use_cases": [
+        "UC-ARCH-kernel-btf"
+      ]
+    },
+    "ADR-008": {
+      "disposition": "surfaced",
+      "surfaces": [
+        "action: follow-deps",
+        "cli: compare --follow-deps",
+        "cli: deps compare",
+        "cli: deps tree"
+      ],
+      "use_cases": [
+        "UC-WF-stack-deps"
+      ]
+    },
+    "ADR-009": {
+      "disposition": "surfaced",
+      "surfaces": [
+        "cli: compare",
+        "report: compare_report.exit",
+        "report: compare_report.verdict"
+      ],
+      "use_cases": [
+        "UC-WF-cli-contract",
+        "UC-WF-compare"
+      ]
+    },
+    "ADR-010": {
+      "disposition": "surfaced",
+      "surfaces": [
+        "action: policy",
+        "cli: compare --policy",
+        "report: compare_report.policy"
+      ],
+      "use_cases": [
+        "UC-CHANGE-taxonomy"
+      ]
+    },
+    "ADR-011": {
+      "disposition": "surfaced",
+      "surfaces": [
+        "api: abicheck.checker_policy.ChangeKind",
+        "report: compare_report.changes"
+      ],
+      "use_cases": [
+        "UC-CHANGE-taxonomy"
+      ]
+    },
+    "ADR-012": {
+      "disposition": "internal",
+      "surfaces": [],
+      "use_cases": []
+    },
+    "ADR-013": {
+      "disposition": "surfaced",
+      "surfaces": [
+        "action: suppress",
+        "cli: compare --suppress",
+        "report: compare_report.suppression"
+      ],
+      "use_cases": [
+        "UC-WF-compare"
+      ]
+    },
+    "ADR-014": {
+      "disposition": "surfaced",
+      "surfaces": [
+        "action: format",
+        "cli: compare --output",
+        "report: format:html",
+        "report: format:json",
+        "report: format:junit",
+        "report: format:markdown",
+        "report: format:sarif"
+      ],
+      "use_cases": [
+        "UC-REP-json",
+        "UC-REP-junit",
+        "UC-REP-markdown-html",
+        "UC-REP-sarif"
+      ]
+    },
+    "ADR-015": {
+      "disposition": "surfaced",
+      "surfaces": [
+        "api: abicheck.serialization",
+        "cli: dump --output"
+      ],
+      "use_cases": [
+        "UC-WF-baseline"
+      ]
+    },
+    "ADR-016": {
+      "disposition": "internal",
+      "surfaces": [],
+      "use_cases": []
+    },
+    "ADR-017": {
+      "disposition": "surfaced",
+      "surfaces": [
+        "action: mode",
+        "action: pr-comment",
+        "action: upload-sarif"
+      ],
+      "use_cases": [
+        "UC-WF-compare"
+      ]
+    },
+    "ADR-018": {
+      "disposition": "surfaced",
+      "surfaces": [
+        "cli: compare",
+        "cli: dump"
+      ],
+      "use_cases": [
+        "UC-PLAT-linux-elf",
+        "UC-PLAT-macos-macho",
+        "UC-PLAT-windows-pe"
+      ]
+    },
+    "ADR-019": {
+      "disposition": "internal",
+      "surfaces": [],
+      "use_cases": []
+    },
+    "ADR-020a": {
+      "disposition": "surfaced",
+      "surfaces": [
+        "action: compile-db",
+        "cli: dump --build-info"
+      ],
+      "use_cases": [
+        "UC-TC-flag-drift"
+      ]
+    },
+    "ADR-020b": {
+      "disposition": "surfaced",
+      "surfaces": [
+        "api: abicheck.sycl_metadata",
+        "cli: dump"
+      ],
+      "use_cases": [
+        "UC-ARCH-sycl"
+      ]
+    },
+    "ADR-021a": {
+      "disposition": "surfaced",
+      "surfaces": [
+        "action: debug-info1",
+        "api: abicheck.debug_resolver",
+        "cli: compare --debug-info",
+        "cli: dump --debug-info"
+      ],
+      "use_cases": []
+    },
+    "ADR-021b": {
+      "disposition": "internal",
+      "surfaces": [],
+      "use_cases": []
+    },
+    "ADR-022": {
+      "disposition": "internal",
+      "surfaces": [],
+      "use_cases": []
+    },
+    "ADR-023": {
+      "disposition": "surfaced",
+      "surfaces": [
+        "cli: compare --bundle-facts-out",
+        "cli: compare --variant"
+      ],
+      "use_cases": [
+        "UC-WF-bundle"
+      ]
+    },
+    "ADR-024": {
+      "disposition": "surfaced",
+      "surfaces": [
+        "action: public-header-dir",
+        "cli: compare --header --exclude-header",
+        "report: compare_report.scope"
+      ],
+      "use_cases": [
+        "UC-TC-header-scope-robustness"
+      ]
+    },
+    "ADR-025": {
+      "disposition": "partial",
+      "surfaces": [
+        "action: changed-path",
+        "cli: compare --changed-path"
+      ],
+      "use_cases": [
+        "UC-WORKFLOW-pr-source-tier"
+      ]
+    },
+    "ADR-026": {
+      "disposition": "internal",
+      "surfaces": [],
+      "use_cases": []
+    },
+    "ADR-027": {
+      "disposition": "partial",
+      "surfaces": [
+        "api: abicheck.pattern_verdicts"
+      ],
+      "use_cases": []
+    },
+    "ADR-028": {
+      "disposition": "surfaced",
+      "surfaces": [
+        "action: sources",
+        "cli: compare --sources --pack",
+        "cli: dump --sources"
+      ],
+      "use_cases": [
+        "UC-TC-build-emitted-facts",
+        "UC-WORKFLOW-pr-source-tier"
+      ]
+    },
+    "ADR-029": {
+      "disposition": "surfaced",
+      "surfaces": [
+        "action: build-info",
+        "cli: dump --build-info"
+      ],
+      "use_cases": [
+        "UC-TC-bazel-build-evidence",
+        "UC-TC-make-auto-query"
+      ]
+    },
+    "ADR-030": {
+      "disposition": "surfaced",
+      "surfaces": [
+        "cli: compare --sources --depth"
+      ],
+      "use_cases": [
+        "UC-WORKFLOW-pr-source-tier"
+      ]
+    },
+    "ADR-031": {
+      "disposition": "surfaced",
+      "surfaces": [
+        "cli: compare --depth",
+        "report: compare_report.edge_coverage"
+      ],
+      "use_cases": []
+    },
+    "ADR-032": {
+      "disposition": "internal",
+      "surfaces": [],
+      "use_cases": []
+    },
+    "ADR-033": {
+      "disposition": "surfaced",
+      "surfaces": [
+        "action: budget",
+        "cli: compare --performance-profile --budget"
+      ],
+      "use_cases": [
+        "UC-REPORTING-dry-run-cost-preview"
+      ]
+    },
+    "ADR-034": {
+      "disposition": "partial",
+      "surfaces": [
+        "api: abicheck.python_api"
+      ],
+      "use_cases": [
+        "UC-ARCH-python-api"
+      ]
+    },
+    "ADR-035": {
+      "disposition": "surfaced",
+      "surfaces": [
+        "action: crosscheck",
+        "cli: compare --depth",
+        "report: compare_report.cross_source_evolution"
+      ],
+      "use_cases": [
+        "UC-CHANGE-crosscheck-hygiene",
+        "UC-WORKFLOW-pr-source-tier"
+      ]
+    },
+    "ADR-036": {
+      "disposition": "internal",
+      "surfaces": [],
+      "use_cases": []
+    },
+    "ADR-037": {
+      "disposition": "surfaced",
+      "surfaces": [
+        "cli: compare --help-all --config"
+      ],
+      "use_cases": [
+        "UC-WF-cli-contract"
+      ]
+    },
+    "ADR-038": {
+      "disposition": "surfaced",
+      "surfaces": [
+        "action: actions/collect-facts",
+        "cli: project capture-variants"
+      ],
+      "use_cases": [
+        "UC-TC-build-emitted-facts"
+      ]
+    },
+    "ADR-039": {
+      "disposition": "internal",
+      "surfaces": [],
+      "use_cases": []
+    },
+    "ADR-040": {
+      "disposition": "surfaced",
+      "surfaces": [
+        "cli: compare --config"
+      ],
+      "use_cases": [
+        "UC-WF-cli-contract"
+      ]
+    },
+    "ADR-041": {
+      "disposition": "partial",
+      "surfaces": [
+        "cli: compare --depth"
+      ],
+      "use_cases": []
+    },
+    "ADR-042": {
+      "disposition": "surfaced",
+      "surfaces": [
+        "report: compare_report.compatibility_verdict",
+        "report: compare_report.policy_gate_decision"
+      ],
+      "use_cases": [
+        "UC-WF-compare"
+      ]
+    },
+    "ADR-043": {
+      "disposition": "surfaced",
+      "surfaces": [
+        "cli: compare --dry-run",
+        "cli: dump --dry-run"
+      ],
+      "use_cases": [
+        "UC-REPORTING-dry-run-cost-preview",
+        "UC-WF-cli-contract"
+      ]
+    },
+    "ADR-044": {
+      "disposition": "surfaced",
+      "surfaces": [
+        "cli: compare --suppress",
+        "report: compare_report.suppression_audit"
+      ],
+      "use_cases": []
+    },
+    "ADR-045": {
+      "disposition": "internal",
+      "surfaces": [],
+      "use_cases": []
+    },
+    "ADR-046": {
+      "disposition": "internal",
+      "surfaces": [],
+      "use_cases": []
+    },
+    "ADR-047": {
+      "disposition": "partial",
+      "surfaces": [
+        "action: actions/aggregate",
+        "action: actions/baseline",
+        "action: actions/check-target",
+        "cli: aggregate"
+      ],
+      "use_cases": [
+        "UC-WF-baseline"
+      ]
+    },
+    "ADR-048": {
+      "disposition": "internal",
+      "surfaces": [],
+      "use_cases": []
+    },
+    "ADR-049": {
+      "disposition": "surfaced",
+      "surfaces": [
+        "cli: compare --contract",
+        "report: compare_report.contract_context",
+        "report: compare_report.contract_coverage"
+      ],
+      "use_cases": [
+        "UC-WF-compare"
+      ]
+    },
+    "ADR-050": {
+      "disposition": "surfaced",
+      "surfaces": [
+        "cli: compare --dump-manifest",
+        "report: compare_report.comparability_assurance"
+      ],
+      "use_cases": []
+    },
+    "ADR-051": {
+      "disposition": "internal",
+      "surfaces": [],
+      "use_cases": []
+    },
+    "ADR-052": {
+      "disposition": "surfaced",
+      "surfaces": [
+        "cli: compare --used-by-manifest",
+        "report: compare_report.consumer_impact_summary"
+      ],
+      "use_cases": [
+        "UC-WF-appcompat"
+      ]
+    },
+    "ADR-053": {
+      "disposition": "partial",
+      "surfaces": [],
+      "use_cases": []
+    },
+    "ADR-054": {
+      "disposition": "surfaced",
+      "surfaces": [
+        "cli: project plan",
+        "cli: project validate"
+      ],
+      "use_cases": [
+        "UC-WF-cli-contract"
+      ]
+    },
+    "ADR-055": {
+      "disposition": "surfaced",
+      "surfaces": [
+        "api: abicheck.workflows.contracts.CompareRequest",
+        "api: abicheck.workflows.contracts.DumpRequest",
+        "report: compare_report.report_schema_version"
+      ],
+      "use_cases": [
+        "UC-WF-compare"
+      ]
+    },
+    "ADR-056": {
+      "disposition": "internal",
+      "surfaces": [],
+      "use_cases": []
+    },
+    "ADR-057": {
+      "disposition": "partial",
+      "surfaces": [
+        "cli: compare --use-cases --used-by",
+        "report: compare_report.use_case_impact"
+      ],
+      "use_cases": [
+        "UC-WF-appcompat"
+      ]
+    },
+    "ADR-058": {
+      "disposition": "partial",
+      "surfaces": [],
+      "use_cases": []
+    },
+    "ADR-059": {
+      "disposition": "surfaced",
+      "surfaces": [
+        "action: snapshot-compression",
+        "cli: dump --compression"
+      ],
+      "use_cases": [
+        "UC-WF-baseline"
+      ]
+    },
+    "ADR-060": {
+      "disposition": "gap",
+      "surfaces": [],
+      "use_cases": []
+    },
+    "ADR-061": {
+      "disposition": "internal",
+      "surfaces": [],
+      "use_cases": []
+    },
+    "ADR-062": {
+      "disposition": "partial",
+      "surfaces": [
+        "api: abicheck.storage"
+      ],
+      "use_cases": [
+        "UC-WF-baseline"
+      ]
+    },
+    "ADR-063": {
+      "disposition": "partial",
+      "surfaces": [
+        "cli: compare"
+      ],
+      "use_cases": []
+    },
+    "ADR-064": {
+      "disposition": "surfaced",
+      "surfaces": [
+        "action: severity-preset",
+        "cli: compare --severity-preset",
+        "report: compare_report.exit"
+      ],
+      "use_cases": [
+        "UC-WF-compare"
+      ]
+    },
+    "ADR-065": {
+      "disposition": "surfaced",
+      "surfaces": [
+        "cli: compare --select --select-required --dry-run",
+        "report: compare_report.comparison_scope",
+        "report: compare_report.run_outcome"
+      ],
+      "use_cases": [
+        "UC-WF-compare"
+      ]
+    },
+    "ADR-066": {
+      "disposition": "partial",
+      "surfaces": [
+        "api: abicheck.workflows.history.build_longitudinal_history",
+        "cli: project history --policy"
+      ],
+      "use_cases": [
+        "UC-CHANGE-semver-recommendation"
+      ]
+    },
+    "ADR-067": {
+      "disposition": "partial",
+      "surfaces": [
+        "cli: compare --suppress",
+        "report: compare_report.disposition_audit"
+      ],
+      "use_cases": [
+        "UC-WF-compare"
+      ]
+    },
+    "ADR-068": {
+      "disposition": "surfaced",
+      "surfaces": [
+        "cli: compare --no-baseline"
+      ],
+      "use_cases": [
+        "UC-WF-cli-contract",
+        "UC-WF-compare"
+      ]
+    },
+    "ADR-069": {
+      "disposition": "internal",
+      "surfaces": [],
+      "use_cases": []
+    },
+    "ADR-070": {
+      "disposition": "partial",
+      "surfaces": [
+        "action: extra-args"
+      ],
+      "use_cases": []
+    },
+    "ADR-071": {
+      "disposition": "surfaced",
+      "surfaces": [
+        "action: require-complete-analysis",
+        "report: compare_report.analysis_assurance"
+      ],
+      "use_cases": [
+        "UC-WF-compare"
+      ]
+    },
+    "ADR-072": {
+      "disposition": "surfaced",
+      "surfaces": [
+        "action: pr-comment-detail",
+        "report: format:review"
+      ],
+      "use_cases": [
+        "UC-REP-markdown-html"
+      ]
+    },
+    "ADR-073": {
+      "disposition": "surfaced",
+      "surfaces": [
+        "action: actions/report",
+        "action: actions/verify-source-run"
+      ],
+      "use_cases": []
+    },
+    "ADR-074": {
+      "disposition": "surfaced",
+      "surfaces": [
+        "cli: compare --define",
+        "cli: dump --define"
+      ],
+      "use_cases": [
+        "UC-TC-header-scope-robustness"
+      ]
+    },
+    "ADR-075": {
+      "disposition": "gap",
+      "surfaces": [],
+      "use_cases": []
+    },
+    "ADR-076": {
+      "disposition": "internal",
+      "surfaces": [],
+      "use_cases": []
+    }
+  },
+  "multichannel_without_family": [
+    "UC-CHANGE-taxonomy",
+    "UC-WF-appcompat",
+    "UC-WF-baseline",
+    "UC-WF-compare"
+  ],
+  "schema_version": 1,
+  "untraced_surfaces": [
+    "ADR-002 cli: compare --select",
+    "ADR-002 report: compare_report.comparison_scope",
+    "ADR-004 report: compare_report.filtered_summary",
+    "ADR-004 report: compare_report.redundant_count",
+    "ADR-004 report: compare_report.root_causes",
+    "ADR-005 action: used-by",
+    "ADR-005 api: abicheck.appcompat.check_appcompat",
+    "ADR-005 cli: compare --required-symbol",
+    "ADR-005 report: compare_report.used_by",
+    "ADR-006 action: devel-pkg1",
+    "ADR-007 api: abicheck.btf_metadata",
+    "ADR-007 cli: dump --debug-info",
+    "ADR-008 action: follow-deps",
+    "ADR-008 cli: compare --follow-deps",
+    "ADR-008 cli: deps tree",
+    "ADR-009 report: compare_report.exit",
+    "ADR-009 report: compare_report.verdict",
+    "ADR-010 action: policy",
+    "ADR-010 report: compare_report.policy",
+    "ADR-011 api: abicheck.checker_policy.ChangeKind",
+    "ADR-011 report: compare_report.changes",
+    "ADR-013 action: suppress",
+    "ADR-013 report: compare_report.suppression",
+    "ADR-014 action: format",
+    "ADR-014 report: format:html",
+    "ADR-014 report: format:json",
+    "ADR-014 report: format:junit",
+    "ADR-014 report: format:markdown",
+    "ADR-014 report: format:sarif",
+    "ADR-015 api: abicheck.serialization",
+    "ADR-015 cli: dump --output",
+    "ADR-017 action: mode",
+    "ADR-017 action: pr-comment",
+    "ADR-017 action: upload-sarif",
+    "ADR-018 cli: dump",
+    "ADR-020a action: compile-db",
+    "ADR-020a cli: dump --build-info",
+    "ADR-020b api: abicheck.sycl_metadata",
+    "ADR-020b cli: dump",
+    "ADR-021a action: debug-info1",
+    "ADR-021a api: abicheck.debug_resolver",
+    "ADR-021a cli: dump --debug-info",
+    "ADR-023 cli: compare --bundle-facts-out",
+    "ADR-023 cli: compare --variant",
+    "ADR-024 action: public-header-dir",
+    "ADR-024 cli: compare --header --exclude-header",
+    "ADR-024 report: compare_report.scope",
+    "ADR-025 action: changed-path",
+    "ADR-025 cli: compare --changed-path",
+    "ADR-027 api: abicheck.pattern_verdicts",
+    "ADR-028 action: sources",
+    "ADR-028 cli: compare --sources --pack",
+    "ADR-028 cli: dump --sources",
+    "ADR-029 action: build-info",
+    "ADR-029 cli: dump --build-info",
+    "ADR-030 cli: compare --sources --depth",
+    "ADR-031 cli: compare --depth",
+    "ADR-031 report: compare_report.edge_coverage",
+    "ADR-033 action: budget",
+    "ADR-033 cli: compare --performance-profile --budget",
+    "ADR-034 api: abicheck.python_api",
+    "ADR-035 action: crosscheck",
+    "ADR-035 cli: compare --depth",
+    "ADR-035 report: compare_report.cross_source_evolution",
+    "ADR-037 cli: compare --help-all --config",
+    "ADR-038 action: actions/collect-facts",
+    "ADR-038 cli: project capture-variants",
+    "ADR-041 cli: compare --depth",
+    "ADR-042 report: compare_report.compatibility_verdict",
+    "ADR-042 report: compare_report.policy_gate_decision",
+    "ADR-043 cli: compare --dry-run",
+    "ADR-043 cli: dump --dry-run",
+    "ADR-044 report: compare_report.suppression_audit",
+    "ADR-047 action: actions/aggregate",
+    "ADR-047 action: actions/baseline",
+    "ADR-047 action: actions/check-target",
+    "ADR-047 cli: aggregate",
+    "ADR-049 cli: compare --contract",
+    "ADR-049 report: compare_report.contract_context",
+    "ADR-049 report: compare_report.contract_coverage",
+    "ADR-050 cli: compare --dump-manifest",
+    "ADR-050 report: compare_report.comparability_assurance",
+    "ADR-052 cli: compare --used-by-manifest",
+    "ADR-052 report: compare_report.consumer_impact_summary",
+    "ADR-054 cli: project plan",
+    "ADR-054 cli: project validate",
+    "ADR-055 api: abicheck.workflows.contracts.CompareRequest",
+    "ADR-055 api: abicheck.workflows.contracts.DumpRequest",
+    "ADR-055 report: compare_report.report_schema_version",
+    "ADR-057 cli: compare --use-cases --used-by",
+    "ADR-057 report: compare_report.use_case_impact",
+    "ADR-059 action: snapshot-compression",
+    "ADR-059 cli: dump --compression",
+    "ADR-062 api: abicheck.storage",
+    "ADR-064 action: severity-preset",
+    "ADR-064 cli: compare --severity-preset",
+    "ADR-064 report: compare_report.exit",
+    "ADR-065 cli: compare --select --select-required --dry-run",
+    "ADR-065 report: compare_report.comparison_scope",
+    "ADR-065 report: compare_report.run_outcome",
+    "ADR-066 api: abicheck.workflows.history.build_longitudinal_history",
+    "ADR-066 cli: project history --policy",
+    "ADR-067 report: compare_report.disposition_audit",
+    "ADR-068 cli: compare --no-baseline",
+    "ADR-070 action: extra-args",
+    "ADR-071 action: require-complete-analysis",
+    "ADR-071 report: compare_report.analysis_assurance",
+    "ADR-072 action: pr-comment-detail",
+    "ADR-072 report: format:review",
+    "ADR-073 action: actions/report",
+    "ADR-073 action: actions/verify-source-run",
+    "ADR-074 cli: compare --define",
+    "ADR-074 cli: dump --define"
+  ]
+}

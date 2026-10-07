@@ -48,6 +48,10 @@ scenarios:
     automated: true             # has an end-to-end test
     test: test_sc_something      # function in tests/test_scenarios.py
     # issue: 235                # optional: the issue that surfaced this flow
+    # surfaces:                 # optional (ADR-076): public surfaces this flow exercises;
+    #   - cli: compare --suppress #   a `cli` entry must be used by one of the `flow` commands
+    # family: compare-gate        # optional: groups scenarios exercising one use case across
+    #                             #   cli / api / action channels
 ```
 
 Planned (not yet automatable) scenarios set `automated: false`,
