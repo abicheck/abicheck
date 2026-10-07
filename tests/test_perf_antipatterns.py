@@ -130,6 +130,14 @@ def _rules(src: str) -> list[str]:
             "quadratic-dedup",
         ),
         (
+            "class C:\n    def m(self):\n        return [x for i, x in enumerate(self.seq) if self.seq.index(x) == i]\n",
+            "quadratic-dedup",
+        ),
+        (
+            "def f(obj):\n    return [x for i, x in enumerate(obj.seq) if x not in obj.seq[:i]]\n",
+            "quadratic-dedup",
+        ),
+        (
             "import pickle\ndef f(blobs):\n    return [pickle.loads(b) for b in blobs]\n",
             "parse-or-copy-in-loop",
         ),
@@ -200,6 +208,9 @@ def test_rule_fires_on_its_shape(src: str, rule: str) -> None:
         "def f(seq):\n    return list(dict.fromkeys(seq))\n",
         # membership against a *different* parameter is not self-dedup
         "def f(seq, other):\n    return [x for x in seq if x in other]\n",
+        # a different attribute (or the same attribute of another object) is not self-dedup
+        "def f(obj):\n    return [x for x in obj.seq if x in obj.other]\n",
+        "def f(a, b):\n    return [x for x in a.seq if b.seq.count(x) == 1]\n",
         # a shallow model_copy per item is linear
         "def f(xs):\n    return [x.model_copy() for x in xs]\n",
         # reading each local file once is the work, not blocking network I/O

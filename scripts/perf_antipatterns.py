@@ -43,8 +43,12 @@ work per item, when it sits inside a loop or comprehension:
   seq.index(x) == i]``, ``[x for x in seq if seq.count(x) == 1]``,
   ``[x for i, x in enumerate(seq) if x not in seq[:i]]``. Each element
   rescans the input -- O(n^2) where ``dict.fromkeys(seq)`` (order-keeping)
-  or a ``seen`` set is O(n). Fires whatever ``seq`` is bound to (a
-  parameter included), since the shape itself is the quadratic one.
+  or a ``seen`` set is O(n). Detected only when the comprehension's first
+  iterable is a plain name or attribute chain (``seq``, ``self.seq``,
+  ``obj.seq``), directly or via ``enumerate(...)``, and the test reads that
+  same expression (or a slice of it) through ``in``/``not in``,
+  ``.index`` or ``.count``. Fires whatever it is bound to (a parameter
+  included); calls such as ``f(seq)`` or nested loops are not tracked.
 * ``blocking-io-in-loop`` -- a network round trip (``urlopen``,
   ``requests.get``/``post``/..., ``http.client`` / ``socket`` connections)
   or ``time.sleep`` per iteration: sequential blocking I/O. Batch the
@@ -54,9 +58,10 @@ work per item, when it sits inside a loop or comprehension:
   ``"".join`` them.
 
 ``parse-or-copy-in-loop`` also covers ``pickle.loads``/``marshal.loads`` and
-a pydantic-style ``x.model_copy(deep=True)`` per iteration, and ``copy.copy`` and
-``dataclasses.replace`` -- but only of a loop-invariant name (the same object
-copied every iteration), since copying each item once is linear.
+a pydantic-style ``x.model_copy(deep=True)`` per iteration. It flags
+``copy.copy`` and ``dataclasses.replace`` only when their argument is a
+loop-invariant name (the same object copied every iteration), since copying
+each item once is linear.
 
 A comprehension counts as a loop for everything evaluated per element; its
 first iterable is evaluated once and does not.
@@ -162,7 +167,8 @@ def _dotted(node: ast.AST) -> str | None:
 
 
 def _iterated_name(node: ast.AST) -> str | None:
-    """The plain name a comprehension iterates: ``seq`` or ``enumerate(seq)``."""
+    """The name or attribute chain a comprehension iterates: ``seq``,
+    ``self.seq`` or ``obj.seq``, directly or through ``enumerate(...)``."""
     if (
         isinstance(node, ast.Call)
         and isinstance(node.func, ast.Name)
@@ -170,7 +176,7 @@ def _iterated_name(node: ast.AST) -> str | None:
         and node.args
     ):
         node = node.args[0]
-    return node.id if isinstance(node, ast.Name) else None
+    return _dotted(node)
 
 
 def _is_list_value(node: ast.AST) -> bool:
@@ -549,14 +555,14 @@ class _Visitor(ast.NodeVisitor):
         )
 
     def _is_comprehension_source(self, node: ast.AST) -> bool:
-        """*node* reads the enclosing comprehension's own iterable (``seq``
-        or a slice ``seq[:i]`` of it)."""
+        """*node* reads the enclosing comprehension's own iterable (``seq``,
+        ``self.seq``, or a slice ``seq[:i]`` of it)."""
         source = self.comp_sources[-1] if self.comp_sources else None
         if source is None:
             return False
         if isinstance(node, ast.Subscript):
             node = node.value
-        return isinstance(node, ast.Name) and node.id == source
+        return _dotted(node) == source
 
     def visit_Compare(self, node: ast.Compare) -> None:
         if self.loop_depth:

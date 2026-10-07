@@ -168,10 +168,22 @@ def test_committed_unreached_baseline_is_well_formed() -> None:
 
 
 def test_the_ratchet_runs_weekly_and_never_on_a_pull_request() -> None:
-    text = (ROOT / ".github/workflows/usecase-paths.yml").read_text(encoding="utf-8")
-    pr_job, full_job = text.split("\n  full:\n")
-    assert "ratchet" not in pr_job.split("\njobs:\n", 1)[1]
-    assert "github.event_name != 'pull_request'" in full_job
-    assert "ratchet usecase-paths-scenarios.json --strict --step-summary" in full_job
-    assert "record --source scenarios --out usecase-paths-scenarios.json" in full_job
-    assert "adr-reach usecase-paths.json" in full_job
+    import yaml
+
+    wf = yaml.safe_load(
+        (ROOT / ".github/workflows/usecase-paths.yml").read_text(encoding="utf-8")
+    )
+    jobs = wf["jobs"]
+    full = jobs["full"]
+
+    def runs(job: dict) -> str:
+        return "\n".join(str(step.get("run", "")) for step in job.get("steps", []))
+
+    for name, job in jobs.items():
+        if name != "full":
+            assert "ratchet" not in runs(job), name
+    assert "github.event_name != 'pull_request'" in str(full.get("if", ""))
+    full_runs = runs(full)
+    assert "ratchet usecase-paths-scenarios.json --strict --step-summary" in full_runs
+    assert "record --source scenarios --out usecase-paths-scenarios.json" in full_runs
+    assert "adr-reach usecase-paths.json" in full_runs

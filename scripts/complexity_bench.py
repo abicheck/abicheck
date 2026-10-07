@@ -152,9 +152,11 @@ def _policy_prepare(n: int, tag: str) -> Callable[[], object]:
         Change(kind=kinds[i % len(kinds)], symbol=f"{tag}s{i}", description="d")
         for i in range(n)
     ]
+    # Resolved once, outside the timed region: the bench measures the
+    # per-change classification, not the (cached) policy lookup.
+    sets = policy_kind_sets("strict_abi")
 
     def run() -> object:
-        sets = policy_kind_sets("strict_abi")
         for c in changes:
             effective_category(c, *sets)
         return compute_verdict(changes)
