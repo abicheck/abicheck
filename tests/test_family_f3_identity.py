@@ -524,6 +524,9 @@ _EXTRA_REGISTERED = {
     "abicheck.model.name_decoration.pe_x86:decode_c_name",
     "abicheck.model.name_decoration.elf_version:unversioned_name",
     "abicheck.model.symbol_leaf:symbol_leaf_identifier",
+    # Not named *identity*, but its result keys the "classified under
+    # different ownership rules" comparability check (#1492).
+    "abicheck.extract.ownership_stamp:recorded_rules",
 }
 
 _U = "UNCOVERED: "
@@ -568,6 +571,7 @@ COVERAGE: dict[str, str] = {
     "abicheck.model.header_exclusion_record:comparison_exclusion_identity": "cell: sides",
     "abicheck.model.header_exclusion_record:release_exclusion_identity": "cell: member order",
     "abicheck.policy.rule_identity:rule_identity": "cell: prose / separator forgery",
+    "abicheck.extract.ownership_stamp:recorded_rules": "cell: tree relocation / symlinked root / space in path",
     "abicheck.compatibility_evaluation_frontend:builtin_policy_identity": "cell: PYTHONHASHSEED",
     "abicheck.compatibility_evaluation_frontend:severity_preset_identity": "cell: PYTHONHASHSEED / alias",
     "abicheck.frontends.action.library_selection:read_elf_identity": "cell: path with space / symlinked root",

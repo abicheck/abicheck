@@ -43,7 +43,15 @@ from click.testing import CliRunner
 
 from abicheck.cli import main
 from abicheck.comparability import _MISMATCH_ERRORS
-from abicheck.model import AbiSnapshot, Function, Param, Variable, Visibility
+from abicheck.elf_metadata import ElfMetadata, ElfSymbol, SymbolBinding, SymbolType
+from abicheck.model import (
+    AbiSnapshot,
+    Function,
+    Param,
+    ScopeOrigin,
+    Variable,
+    Visibility,
+)
 from abicheck.reporter import to_json
 from abicheck.serialization import snapshot_to_json
 from abicheck.service import CompareRequest, InputSpec
@@ -114,6 +122,38 @@ def _snap(
     )
 
 
+#: Exports no public header declares (manifest class
+#: ``report.cross_producer_disagreement_on_one_symbol``): one appears, one
+#: disappears, one persists. Each export event must reach a report as ONE
+#: existence finding on every route, with the hygiene twin folded into it.
+UNDECLARED_INIT = "_ZN3foo2v14initEv"
+UNDECLARED_ADDED = "_ZN3foo2v15leakyEv"
+UNDECLARED_REMOVED = "_ZN3foo6detail6helperEv"
+UNDECLARED_PERSISTENT = "_ZN3foo6detail4keepEv"
+
+
+def _undeclared_side(version: str, exports: tuple[str, ...]) -> AbiSnapshot:
+    init = Function(
+        name="init",
+        mangled=UNDECLARED_INIT,
+        return_type="void",
+        visibility=Visibility.PUBLIC,
+        origin=ScopeOrigin.PUBLIC_HEADER,
+        source_header="include/foo.h",
+    )
+    snap = AbiSnapshot(
+        library=LIB, version=version, from_headers=True, functions=[init]
+    )
+    snap.elf = ElfMetadata(
+        machine="EM_X86_64",
+        symbols=[
+            ElfSymbol(name=n, binding=SymbolBinding.GLOBAL, sym_type=SymbolType.FUNC)
+            for n in (UNDECLARED_INIT, *exports)
+        ],
+    )
+    return snap
+
+
 def _corpus() -> dict[str, tuple[AbiSnapshot, AbiSnapshot]]:
     base = [_fn("foo"), _fn("bar", params=("int",))]
     return {
@@ -130,6 +170,10 @@ def _corpus() -> dict[str, tuple[AbiSnapshot, AbiSnapshot]]:
         "variable_removed": (
             _snap("1.0", base, [_var("gv"), _var("keep")]),
             _snap("2.0", base, [_var("keep")]),
+        ),
+        "undeclared_export_churn": (
+            _undeclared_side("1.0", (UNDECLARED_REMOVED, UNDECLARED_PERSISTENT)),
+            _undeclared_side("2.0", (UNDECLARED_ADDED, UNDECLARED_PERSISTENT)),
         ),
         # Not comparable (filtered vs full dependency scope): exercises the
         # comparability gate and --diagnostic-comparison's escape hatch.

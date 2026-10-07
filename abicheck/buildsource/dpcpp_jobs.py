@@ -106,6 +106,20 @@ def _split_device_host(
     return device[0], host[0]
 
 
+def spelled_parent(path: str) -> str:
+    """The directory part of *path*, spelled exactly as the driver spelled it.
+
+    The relocation below is a textual replace over the driver's own job
+    tokens, so the directory must keep the token's spelling. ``Path(...)
+    .parent`` does not: on Windows it rewrites ``/tmp/icpx-1`` to
+    ``\\tmp\\icpx-1``, which no token contains, and the integration files were
+    silently left in the driver's temp directory. Split at the last ``/`` or
+    ``\\`` instead, whichever the driver used, on any host.
+    """
+    cut = max(path.rfind("/"), path.rfind("\\"))
+    return path[:cut] if cut > 0 else ""
+
+
 def sycl_host_replay_jobs(
     cmd: list[str], scratch: Path
 ) -> tuple[list[str], list[str]] | None:
@@ -128,10 +142,11 @@ def sycl_host_replay_jobs(
         return None
     device, host = split
     temp_dirs = {
-        str(Path(tok.split("=", 1)[1]).parent)
+        spelled_parent(tok.split("=", 1)[1])
         for tok in device
         if tok.startswith(("-fsycl-int-header=", "-fsycl-int-footer="))
     }
+    temp_dirs.discard("")
 
     def relocate_token(token: str) -> str:
         for temp_dir in temp_dirs:
