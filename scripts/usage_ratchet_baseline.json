@@ -1,0 +1,23 @@
+{
+  "test_only_functions": [],
+  "test_only_modules": [
+    "abicheck.buildsource.providers",
+    "abicheck.comparability_profile",
+    "abicheck.policy.name_heuristics",
+    "abicheck.service_header_scoped"
+  ],
+  "cross_module_exact_clones": [
+    "abicheck.buildsource.adapters.bazel#_as_text = abicheck.buildsource.adapters.make#_as_text",
+    "abicheck.buildsource.call_graph#_node_file = abicheck.buildsource.type_graph#_node_file",
+    "abicheck.buildsource.extractor_manifest#_file_sha256 = abicheck.buildsource.pack_io#_file_sha256 = abicheck.buildsource.source_replay#_digest_file",
+    "abicheck.buildsource.source_extractors.clang#_typedef_underlying = abicheck.dumper_clang#_typedef_underlying",
+    "abicheck.buildsource.source_extractors.clang_nodes#_node_file = abicheck.dumper_clang#_node_file",
+    "abicheck.buildsource.toolchain_probe#_pad = abicheck.diff_versioning#_padded_version_cmp",
+    "abicheck.castxml_policy#parse_castxml_version_output = abicheck.dumper_castxml_probe#_parse_castxml_version",
+    "abicheck.compare.constants#_attribute_residuals = abicheck.compare.typedefs#_attribute_residuals",
+    "abicheck.effective_config_digest#_sha256_of = abicheck.workflows.resolved_execution_context#_sha256_of",
+    "abicheck.storage.dto#_unfreeze = abicheck.storage.sparse_section_codec#_unfreeze",
+    "abicheck.storage.graph_section_codec#_freeze = abicheck.storage.types_section_codec#_freeze",
+    "abicheck.storage.graph_section_codec#_unfreeze = abicheck.storage.types_section_codec#_unfreeze"
+  ]
+}

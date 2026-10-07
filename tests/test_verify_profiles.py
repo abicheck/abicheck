@@ -444,6 +444,7 @@ def test_ci_ai_readiness_job_calls_verify_py() -> None:
     expected = {
         "ai-readiness",
         "architecture",
+        "usage-ratchet",
         "fp-rate",
         "tier-accuracy",
         "usecase-docs-sync",
