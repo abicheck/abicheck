@@ -167,6 +167,20 @@ step exits 2 (skip) locally unless `BUGFIX_CONTRACT_BODY_FILE` points at the
 PR description. To change a check, change it in `verify.py` and let
 `tests/test_verify_profiles.py` say what else must follow.
 
+**Long runs.** The `pr` profile and the full fast suite take 13–25 min, past
+the 10-min foreground tool limit. Start them once with the Bash tool's
+`run_in_background` and let its completion notification wake you; a shell
+wait loop (`until … sleep`, `pgrep -f`, `pkill -f`) matches its own command
+line and hangs or kills itself. Keep the tree still while a run is live —
+`test_code_identity` hashes the source tree, so a commit mid-run fails it —
+and push once the run is green; an "unpushed changes" stop-hook nag is
+answered by the running verify, not by an early push.
+
+**PR body.** Write the description to a file and run
+`BUGFIX_CONTRACT_BODY_FILE=<file> python scripts/check_bugfix_test_contract.py`
+before every `create_pull_request`/`update_pull_request`; CI's test-contract
+check parses the same rows.
+
 ## Test markers
 
 | Marker | Needs | Run when |
@@ -196,6 +210,7 @@ Follow the pointer whose trigger matches your task:
 | [`docs/contribute/known-gaps.md`](docs/contribute/known-gaps.md) | about to fix something in an area with a known gap or a reverted fix — read it **before** re-attempting |
 | [`tests/regressions/manifest.py`](tests/regressions/manifest.py) | writing a regression test — reuse a matching `BugClass` first |
 | [`docs/contribute/adr/index.md`](docs/contribute/adr/index.md) | a change touches a default, schema, exit code or public interface |
+| [`agent-guide/quality-gates.md` § ADR surface traceability](docs/contribute/agent-guide/quality-gates.md#adr-surface-traceability-adr-surfaces) | adding an ADR, or adding/renaming/removing a CLI flag, Action input, API symbol, report field, use case or scenario |
 
 **Repository skills** (`.claude/skills/`): `diagnosing-bugs` (load for a bug report, failing behavior or perf regression), `writing-for-agents` (load before editing any `AGENTS.md`/`CLAUDE.md`/skill), and the user-invoked `/handoff` and `/retro`.
 

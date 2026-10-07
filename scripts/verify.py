@@ -469,6 +469,12 @@ STEPS: tuple[Step, ...] = (
         description="Use-case registry vs. human docs drift gate",
     ),
     Step(
+        "adr-surfaces",
+        _pyscript("scripts/check_adr_surfaces.py"),
+        frozenset({PR, FULL}),
+        description="ADR-076 ADR <-> use case <-> public surface <-> scenario traceability + ratchet",
+    ),
+    Step(
         # `action/validate-inputs.sh` runs before abicheck is installed (by
         # design -- fail fast), so it is the one Action shell that cannot query
         # the CLI for its choice sets and is permitted a committed generated
