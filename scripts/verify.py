@@ -388,6 +388,18 @@ STEPS: tuple[Step, ...] = (
         description="Usage ratchet: test-only functions/modules and cross-module exact clones (shrink-only baseline)",
     ),
     Step(
+        # Empirical time exponents of the hot paths (compare by symbol/type
+        # count, add/remove and rename matching, policy classification,
+        # history by release count): each case in its own subprocess, fastest
+        # CPU-time sample per doubling size, log-log slope against a per-case
+        # ceiling. ~15 s, so it belongs in the PR lane; the call-count gates
+        # cannot see a function whose *body* turned quadratic.
+        "complexity-bench",
+        _pyscript("scripts/complexity_bench.py", "--strict"),
+        frozenset({PR, FULL}),
+        description="Empirical complexity exponents of hot paths (scripts/complexity_bench.py --strict)",
+    ),
+    Step(
         "repo-scan-tests",
         _py(
             "pytest",

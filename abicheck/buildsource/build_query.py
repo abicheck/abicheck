@@ -212,7 +212,7 @@ def _claim_inferred_build_dir(
                     return Path(
                         tempfile.mkdtemp(prefix=f"{base.name}-", dir=base.parent)
                     ), _noop_release
-                time.sleep(_BUILD_DIR_LOCK_POLL_S)
+                time.sleep(_BUILD_DIR_LOCK_POLL_S)  # perf-ok: bounded lock poll
                 waited += _BUILD_DIR_LOCK_POLL_S
                 continue
 

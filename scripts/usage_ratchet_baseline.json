@@ -1,7 +1,5 @@
 {
-  "test_only_functions": [
-    "abicheck.model.semantic_ir_legacy_adapter#legacy_function_signature_occurrences"
-  ],
+  "test_only_functions": [],
   "test_only_modules": [
     "abicheck.buildsource.providers",
     "abicheck.comparability_profile",

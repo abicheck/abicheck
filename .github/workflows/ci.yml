@@ -138,8 +138,8 @@ jobs:
       # definition of done. Skill-eval pack/freshness are G37 Phase 0
       # (deterministic re-derivations, no model -- G37 D2); harbor-tasks is
       # the ADR-058 Harbor battery's freshness half.
-      - name: Structural gates (ai-readiness, architecture, usage ratchet, FP-rate, tier-accuracy, docs contract, agent skills, repo facts, skill-eval, harbor tasks)
-        run: python scripts/verify.py --profile pr --only ai-readiness,architecture,usage-ratchet,fp-rate,tier-accuracy,usecase-docs-sync,adr-surfaces,docs-contract,learning-ladder,agent-skills-generated,repo-facts,action-cli-surface,skill-eval-pack,skill-eval-freshness,harbor-tasks
+      - name: Structural gates (ai-readiness, architecture, usage ratchet, FP-rate, tier-accuracy, docs contract, agent skills, repo facts, skill-eval, harbor tasks, complexity exponents)
+        run: python scripts/verify.py --profile pr --only ai-readiness,architecture,usage-ratchet,fp-rate,tier-accuracy,usecase-docs-sync,adr-surfaces,docs-contract,learning-ladder,agent-skills-generated,repo-facts,action-cli-surface,skill-eval-pack,skill-eval-freshness,harbor-tasks,complexity-bench
       # Tests marked `repo_scan`: structural gates that read or parse the
       # whole repository tree. Their result depends on the committed tree
       # only -- not on the OS and not on coverage -- so they run exactly

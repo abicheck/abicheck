@@ -6,7 +6,11 @@ default flip landed 2026-10-05: contract evaluation runs on every
 comparison; with no `--contract` (or `auto`, with no `scope.public` legacy
 alias) the domain is evidence-adaptive — `public` when header evidence
 closes on every compared side, else `exports` when the export table does,
-else `all` (`abicheck/policy/contract_default_mode.py`). Phase 0's vocabulary (`abicheck/contract_relevance_types.py`)
+else `all` (`abicheck/policy/contract_default_mode.py`). The default never
+drops what it cannot place: header silence falls back to the observed export
+table, and a finding still `UNKNOWN_UNRESOLVED` is scored as `all` scores it,
+so less evidence narrows a conclusion but never turns an observed change into
+`NO_CHANGE` (see Revision history, 2026-10-07). Phase 0's vocabulary (`abicheck/contract_relevance_types.py`)
 and Phase 1's typed config, precedence resolver, pack manifests, and
 per-field front-end wiring (`abicheck/compatibility_evaluation_config.py`,
 `abicheck/compatibility_evaluation_resolver.py`,
@@ -932,3 +936,32 @@ is unaffected: it still ranks a real consumer's imports above a
 header/export-derived relevance conclusion when `--contract` is given, and
 still operates on `DiffResult.changes` before this ADR's own D9
 policy-scoring pipeline runs.
+
+## Revision history
+
+- **2026-10-07 — the evidence-adaptive default never drops a finding it
+  cannot place** (implemented by #1500; recorded here by #1502). A stated
+  `--contract public|exports` is unchanged: it is the user's promise and
+  keeps its `UNKNOWN_UNRESOLVED` findings and coverage failure. With no
+  stated domain:
+  1. Under an adaptive `public` default, every header answer that records
+     no commitment — `closed_domain_no_commitment`,
+     `required_evidence_incomplete`, `identity_ambiguous` — is re-asked of the
+     observed export table. An authoritative exclusion is a commitment and
+     is not re-asked. Before this, `-H` could turn a lost undeclared
+     `_ZTV`/`_ZTI` export from BREAKING into a passing run.
+  2. A finding the adaptive domain (and that fallback) still leaves
+     `UNKNOWN_UNRESOLVED` is judged as `contract=all` judges it, which is how
+     every finding was scored before the default flip. This covers L3
+     build-option flips and L4/L5 source findings supplied by
+     `--build-info`/`--sources` under an `exports` default, which has no
+     universe for them.
+  3. ELF version definitions and requirements (whose subject is a version tag
+     or `<library>`) are `NOT_APPLICABLE` in every domain, like other linker
+     metadata.
+
+  The default is therefore monotone in evidence: supplying optional evidence
+  never makes a verdict cleaner. Rule owner:
+  `abicheck/policy/contract_default_mode.py`. Class tests:
+  `tests/test_contract_adaptive_default_fallback.py` and
+  `tests/test_contract_adaptive_default_monotone.py`.
