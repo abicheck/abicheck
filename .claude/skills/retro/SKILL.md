@@ -33,6 +33,8 @@ The user has asked for a **retrospective**. You are suggesting improvements to t
 - **No-ops**: steering text that changes no behavior, or restates what a gate already enforces. _Use when_ steering files are large and unwieldy.
 - **Information access**: was a crucial piece of information unavailable (CI logs, a stored baseline, a toolchain)? _Use when_ the agent had to guess.
 
+Before you present a session's open question or blocker, check the current `main` (`git log origin/main`, merged PRs) for whether a later session already settled it; report a settled one as settled.
+
 5. **Present the candidates** to the user, ordered by severity. Weigh how often the problem recurs across the sessions read against its cost per occurrence. For each candidate give the evidence (session id, the turn or tool call, its cost), the proposed change (the file and the wording or check), and which of the two loads it spends (context or cognitive). Make the changes only after the user picks which ones to apply.
 
 ## Reference
