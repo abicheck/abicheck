@@ -108,3 +108,31 @@ def test_settings_on_accept_a_valid_file(tmp_path: Path) -> None:
         tmp_path / "api", sup, strict_suppressions=True, require_justification=True
     )
     assert result.diff is not None
+
+
+@pytest.mark.parametrize(
+    ("selector", "expected"),
+    [
+        ("symbol_pattern: 'foo*'", 'symbol_pattern="foo*"'),
+        ("symbol: foo", 'symbol="foo"'),
+        ("type_pattern: 'Bar*'", 'type_pattern="Bar*"'),
+        ("finding_id: '0123456789abcdef'", 'finding_id="0123456789abcdef"'),
+        ("source_location: 'foo.h:1'", 'source_location="foo.h:1"'),
+    ],
+)
+def test_expired_message_names_each_selector_kind(
+    selector: str, expected: str, tmp_path: Path
+) -> None:
+    """Every selector kind a rule can carry is named in the error, never "?"."""
+    from abicheck.workflows.compare_policy import expired_suppressions_message
+    from abicheck.workflows.suppression import SuppressionList
+
+    sup = tmp_path / "sup.yaml"
+    sup.write_text(
+        f"version: 1\nsuppressions:\n  - {selector}\n    reason: r\n"
+        "    expires: 2001-01-01\n",
+        encoding="utf-8",
+    )
+    expired = SuppressionList.load(sup).check_expired_strict()
+    message = expired_suppressions_message(expired, sup)
+    assert f"Rule 1: {expected} expired on 2001-01-01" in message
