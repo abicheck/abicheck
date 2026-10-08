@@ -273,7 +273,7 @@ def test_traced_clang_output_path_is_classified(
 ) -> None:
     if not shutil.which("clang++"):
         pytest.skip("clang++ not on PATH")
-    import abicheck.dumper as dumper
+    from abicheck.extract.headers.clang import backend as clang_backend
 
     _isolated_cache(monkeypatch, tmp_path)
     headers = []
@@ -304,14 +304,16 @@ def test_traced_clang_output_path_is_classified(
         return wrapped
 
     monkeypatch.setattr(
-        dumper, "_parse_clang_ast_result", traced(dumper._parse_clang_ast_result)
+        clang_backend,
+        "_parse_clang_ast_result",
+        traced(clang_backend._parse_clang_ast_result),
     )
     monkeypatch.setattr(
-        dumper,
+        clang_backend,
         "retry_excluding_error_headers",
-        traced(dumper.retry_excluding_error_headers),
+        traced(clang_backend.retry_excluding_error_headers),
     )
-    dumper._clang_header_dump(headers, [], "clang++", lang="c++", memoize=False)
+    clang_backend.clang_header_dump(headers, [], "clang++", lang="c++", memoize=False)
 
     assert "abicheck.dumper_clang_errors" in seen, (
         "the trace did not observe the output path at all"
@@ -366,23 +368,22 @@ class TestRealDumpsMissOnGeneratedInputChange:
     def test_clang(self, tmp_path, monkeypatch) -> None:
         if not shutil.which("clang++"):
             pytest.skip("clang++ not on PATH")
-        import abicheck.dumper as dumper
+        from abicheck import dumper_clang_errors
+        from abicheck.extract.headers.clang import backend as clang_backend
 
         _isolated_cache(monkeypatch, tmp_path)
         header = tmp_path / "api.hpp"
         header.write_text("struct S { int a; };\nint f(S*);\n")
         calls: list[int] = []
-        real = dumper.run_clang_to_ast_file
+        real = dumper_clang_errors.run_clang_ast
 
         def spy(*a, **k):
             calls.append(1)
             return real(*a, **k)
 
-        monkeypatch.setattr(dumper, "run_clang_to_ast_file", spy)
-
         def dump() -> None:
-            dumper._clang_header_dump(
-                [header], [], "clang++", lang="c++", memoize=False
+            clang_backend.clang_header_dump(
+                [header], [], "clang++", lang="c++", memoize=False, run_ast=spy
             )
 
         dump()
@@ -400,7 +401,9 @@ class TestRealDumpsMissOnGeneratedInputChange:
             _appending(cfg._build_clang_header_command, "-DABICHECK_NEW_FLAG"),
         )
         monkeypatch.setattr(
-            dumper, "_build_clang_header_command", cfg._build_clang_header_command
+            clang_backend,
+            "_build_clang_header_command",
+            cfg._build_clang_header_command,
         )
         dump()
         assert len(calls) == 3, "a changed generated command line must re-run clang"

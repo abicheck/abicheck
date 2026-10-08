@@ -303,7 +303,7 @@ class TestResolveInput:
         """Codex review: ``_dump_elf`` normalizes ``lang`` to only ever force
         "c" explicitly (letting auto-detection run for the default "c++"),
         before calling ``dumper.dump()`` -- ``_attach_header_graph``'s own
-        ``_clang_header_dump`` call must be given that identical normalized
+        ``extract.headers.clang.backend.clang_header_dump`` call must be given that identical normalized
         value, or it hashes a different cache key than the main pass just
         used and permanently misses the new AST reuse memo for the default,
         by far the most common, ELF dump shape."""
@@ -4131,7 +4131,8 @@ class TestRunDumpHeaderGraph:
         with (
             fake_format_adapter("pe", result=snap),
             patch(
-                "abicheck.dumper._clang_header_dump", return_value=(ast, None, False)
+                "abicheck.extract.headers.clang.backend.clang_header_dump",
+                return_value=(ast, None, False),
             ) as mock_ast,
         ):
             result = run_dump(p, "pe", [header], [], "1.0", "c++")
@@ -4181,7 +4182,8 @@ class TestRunDumpHeaderGraph:
         with (
             fake_format_adapter("pe", result=snap),
             patch(
-                "abicheck.dumper._clang_header_dump", return_value=(ast, None, False)
+                "abicheck.extract.headers.clang.backend.clang_header_dump",
+                return_value=(ast, None, False),
             ) as mock_ast,
         ):
             run_dump(p, "pe", [header], [], "1.0", "c++", compile=cc)
@@ -4200,7 +4202,10 @@ class TestRunDumpHeaderGraph:
 
         with (
             fake_format_adapter("pe", result=snap),
-            patch("abicheck.dumper._clang_header_dump", side_effect=_raise) as mock_ast,
+            patch(
+                "abicheck.extract.headers.clang.backend.clang_header_dump",
+                side_effect=_raise,
+            ) as mock_ast,
         ):
             result = run_dump(p, "pe", [header], [], "1.0", "c++")
         mock_ast.assert_called_once()
@@ -4226,7 +4231,8 @@ class TestRunDumpHeaderGraph:
         with (
             fake_format_adapter("pe", result=snap),
             patch(
-                "abicheck.dumper._clang_header_dump", return_value=(ast, None, False)
+                "abicheck.extract.headers.clang.backend.clang_header_dump",
+                return_value=(ast, None, False),
             ) as mock_ast,
         ):
             result = run_dump(p, "pe", [hdr_dir], [], "1.0", "c++")
@@ -4253,7 +4259,8 @@ class TestRunDumpHeaderGraph:
         with (
             fake_format_adapter("pe", result=snap),
             patch(
-                "abicheck.dumper._clang_header_dump", return_value=(ast, None, False)
+                "abicheck.extract.headers.clang.backend.clang_header_dump",
+                return_value=(ast, None, False),
             ),
             patch(
                 "abicheck.buildsource.include_graph.shutil.which",
@@ -4299,7 +4306,8 @@ class TestRunDumpHeaderGraph:
         with (
             fake_format_adapter("pe", result=snap),
             patch(
-                "abicheck.dumper._clang_header_dump", return_value=(ast, None, False)
+                "abicheck.extract.headers.clang.backend.clang_header_dump",
+                return_value=(ast, None, False),
             ),
             patch(
                 "abicheck.buildsource.include_graph.shutil.which",
@@ -4359,7 +4367,8 @@ class TestRunDumpHeaderGraph:
         with (
             fake_format_adapter("pe", result=snap),
             patch(
-                "abicheck.dumper._clang_header_dump", return_value=(ast, None, False)
+                "abicheck.extract.headers.clang.backend.clang_header_dump",
+                return_value=(ast, None, False),
             ),
             patch(
                 "abicheck.buildsource.include_graph.shutil.which",
@@ -4692,7 +4701,7 @@ class TestAttachHeaderGraphDeviceContext:
 
     def test_streaming_prune_is_suppressed_for_this_call(self, tmp_path, monkeypatch):
         """Codex review, PR #840: `_attach_header_graph`'s own
-        `_clang_header_dump` call is a real downstream consumer of the raw
+        `clang_header_dump` call is a real downstream consumer of the raw
         AST dict (`buildsource.call_graph.parse_clang_ast_calls` walks it
         directly for call-graph edges), so the opt-in streaming pruner must
         be force-disabled for this call regardless of the env var --
@@ -4713,7 +4722,8 @@ class TestAttachHeaderGraphDeviceContext:
             return {"kind": "TranslationUnitDecl", "inner": []}, None, False
 
         monkeypatch.setattr(
-            "abicheck.dumper._clang_header_dump", _stub_clang_header_dump
+            "abicheck.extract.headers.clang.backend.clang_header_dump",
+            _stub_clang_header_dump,
         )
         assert not streaming_prune_suppressed()  # not leaked before the call
         _attach_header_graph(
@@ -4760,7 +4770,7 @@ class TestAttachHeaderGraphDeviceContext:
 
 class TestAttachHeaderGraphCompilerSelection:
     """Codex review (P2): _attach_header_graph's own compiler selection for
-    its _clang_header_dump call must match whichever main pass it's paired
+    its clang_header_dump call must match whichever main pass it's paired
     with -- case-insensitively, since PE/Mach-O's own main pass
     (service_header_scoped._try_header_scoped_dump) treats "C" the same as
     "c". The compiler string is part of the AST cache key, so a mismatch
@@ -4774,7 +4784,8 @@ class TestAttachHeaderGraphCompilerSelection:
         snap = AbiSnapshot(library="lib", version="1.0")
         ast = {"kind": "TranslationUnitDecl", "inner": []}
         with patch(
-            "abicheck.dumper._clang_header_dump", return_value=(ast, None, False)
+            "abicheck.extract.headers.clang.backend.clang_header_dump",
+            return_value=(ast, None, False),
         ) as mock_ast:
             _attach_header_graph(
                 snap,
@@ -4797,7 +4808,8 @@ class TestAttachHeaderGraphCompilerSelection:
         snap = AbiSnapshot(library="lib", version="1.0")
         ast = {"kind": "TranslationUnitDecl", "inner": []}
         with patch(
-            "abicheck.dumper._clang_header_dump", return_value=(ast, None, False)
+            "abicheck.extract.headers.clang.backend.clang_header_dump",
+            return_value=(ast, None, False),
         ) as mock_ast:
             _attach_header_graph(
                 snap,
@@ -4829,7 +4841,8 @@ class TestAttachHeaderGraphCompilerSelection:
         ast = {"kind": "TranslationUnitDecl", "inner": []}
         with (
             patch(
-                "abicheck.dumper._clang_header_dump", return_value=(ast, None, False)
+                "abicheck.extract.headers.clang.backend.clang_header_dump",
+                return_value=(ast, None, False),
             ),
             patch(
                 "abicheck.dumper._resolve_clang_bin", return_value="/opt/llvm/clang"
@@ -4857,7 +4870,7 @@ class TestAttachHeaderGraphCompilerSelection:
 
 class TestAttachHeaderGraphHashesIncludeSearchTokens:
     """Codex review, PR #782: _attach_header_graph's own independent second
-    _clang_header_dump call has its own AST cache key, but its extra_hash_dirs
+    clang_header_dump call has its own AST cache key, but its extra_hash_dirs
     computation only covered resolve_inferred_header_roots's own deferred
     roots -- never any include-search directory riding in
     compile.gcc_option_tokens itself (an explicit --gcc-options/
@@ -4878,7 +4891,8 @@ class TestAttachHeaderGraphHashesIncludeSearchTokens:
         snap = AbiSnapshot(library="lib", version="1.0")
         ast = {"kind": "TranslationUnitDecl", "inner": []}
         with patch(
-            "abicheck.dumper._clang_header_dump", return_value=(ast, None, False)
+            "abicheck.extract.headers.clang.backend.clang_header_dump",
+            return_value=(ast, None, False),
         ) as mock_ast:
             _attach_header_graph(
                 snap,
@@ -4901,7 +4915,8 @@ class TestAttachHeaderGraphHashesIncludeSearchTokens:
         snap = AbiSnapshot(library="lib", version="1.0")
         ast = {"kind": "TranslationUnitDecl", "inner": []}
         with patch(
-            "abicheck.dumper._clang_header_dump", return_value=(ast, None, False)
+            "abicheck.extract.headers.clang.backend.clang_header_dump",
+            return_value=(ast, None, False),
         ) as mock_ast:
             _attach_header_graph(
                 snap,
@@ -4917,7 +4932,7 @@ class TestAttachHeaderGraphHashesIncludeSearchTokens:
         assert mock_ast.call_args.kwargs["extra_hash_dirs"] == ()
 
 
-# ── _try_attach_numpy_capi_surface() ────────────────────────────────────────
+# ── try_attach_numpy_capi_surface() ────────────────────────────────────────
 
 
 class TestTryAttachNumpyCapiSurface:
@@ -4926,8 +4941,8 @@ class TestTryAttachNumpyCapiSurface:
         # False flags for an ordinary, successfully-scanned non-NumPy
         # library -- the INFO log must not fire for every such library
         # (CodeRabbit review).
+        from abicheck.extract.metadata_attach import try_attach_numpy_capi_surface
         from abicheck.numpy_capi import NumPyCapiSurface
-        from abicheck.service_metadata_attach import _try_attach_numpy_capi_surface
 
         snap = AbiSnapshot(library="lib.so", version="1.0")
         not_consuming = NumPyCapiSurface(
@@ -4937,7 +4952,7 @@ class TestTryAttachNumpyCapiSurface:
             "abicheck.numpy_capi.extract_numpy_capi_surface", lambda _p: not_consuming
         )
         with caplog.at_level("INFO", logger="abicheck.service"):
-            _try_attach_numpy_capi_surface(snap, tmp_path / "lib.so")
+            try_attach_numpy_capi_surface(snap, tmp_path / "lib.so")
         assert snap.numpy_capi is not_consuming
         assert "NumPy C-API consumption detected" not in caplog.text
 
@@ -4949,10 +4964,10 @@ class TestTryAttachNumpyCapiSurface:
         self, tmp_path, monkeypatch, caplog, consumes_array_api, consumes_ufunc_api
     ):
         # Parametrized over each side of the production OR condition, so
-        # removing either one from _try_attach_numpy_capi_surface's guard
+        # removing either one from try_attach_numpy_capi_surface's guard
         # would fail this test (CodeRabbit review).
+        from abicheck.extract.metadata_attach import try_attach_numpy_capi_surface
         from abicheck.numpy_capi import NumPyCapiSurface
-        from abicheck.service_metadata_attach import _try_attach_numpy_capi_surface
 
         snap = AbiSnapshot(library="lib.so", version="1.0")
         consuming = NumPyCapiSurface(
@@ -4963,7 +4978,7 @@ class TestTryAttachNumpyCapiSurface:
             "abicheck.numpy_capi.extract_numpy_capi_surface", lambda _p: consuming
         )
         with caplog.at_level("INFO", logger="abicheck.service"):
-            _try_attach_numpy_capi_surface(snap, tmp_path / "lib.so")
+            try_attach_numpy_capi_surface(snap, tmp_path / "lib.so")
         assert snap.numpy_capi is consuming
         assert "NumPy C-API consumption detected" in caplog.text
 
@@ -5037,7 +5052,7 @@ class TestMetadataAttachFailuresAreSwallowed:
     """Each enrichment step must never fail a dump (ADR-037).
 
     The three ``except Exception`` handlers went untested while the block
-    lived in ``service.py``; extracting it to ``service_metadata_attach``
+    lived in ``service.py``; extracting it to ``extract.metadata_attach``
     surfaced that as uncovered new lines, so they are pinned here.
     """
 
@@ -5062,7 +5077,7 @@ class TestMetadataAttachFailuresAreSwallowed:
         # that is what this pins.
         import logging
 
-        from abicheck.service_metadata_attach import _try_attach_sycl_metadata
+        from abicheck.extract.metadata_attach import try_attach_sycl_metadata
 
         class _UnresolvablePath:
             def resolve(self):
@@ -5070,7 +5085,7 @@ class TestMetadataAttachFailuresAreSwallowed:
 
         snap = self._snap()
         with caplog.at_level(logging.DEBUG, logger="abicheck.service"):
-            _try_attach_sycl_metadata(snap, _UnresolvablePath())
+            try_attach_sycl_metadata(snap, _UnresolvablePath())
         assert snap.sycl is None
         assert "SYCL metadata extraction skipped" in caplog.text
 
@@ -5078,7 +5093,7 @@ class TestMetadataAttachFailuresAreSwallowed:
         self, monkeypatch, caplog
     ) -> None:
         import abicheck.python_ext as python_ext_mod
-        from abicheck.service_metadata_attach import _try_attach_python_ext_metadata
+        from abicheck.extract.metadata_attach import try_attach_python_ext_metadata
 
         monkeypatch.setattr(
             python_ext_mod,
@@ -5087,7 +5102,7 @@ class TestMetadataAttachFailuresAreSwallowed:
         )
         snap = self._snap()
         with caplog.at_level("DEBUG", logger="abicheck.service"):
-            _try_attach_python_ext_metadata(snap)
+            try_attach_python_ext_metadata(snap)
         assert snap.python_ext is None
         assert "Python extension detection skipped" in caplog.text
 
@@ -5095,7 +5110,7 @@ class TestMetadataAttachFailuresAreSwallowed:
         self, tmp_path, monkeypatch, caplog
     ) -> None:
         import abicheck.numpy_capi as numpy_capi_mod
-        from abicheck.service_metadata_attach import _try_attach_numpy_capi_surface
+        from abicheck.extract.metadata_attach import try_attach_numpy_capi_surface
 
         monkeypatch.setattr(
             numpy_capi_mod,
@@ -5104,7 +5119,7 @@ class TestMetadataAttachFailuresAreSwallowed:
         )
         snap = self._snap()
         with caplog.at_level("DEBUG", logger="abicheck.service"):
-            _try_attach_numpy_capi_surface(snap, tmp_path / "libfoo.so")
+            try_attach_numpy_capi_surface(snap, tmp_path / "libfoo.so")
         assert snap.numpy_capi is None
         assert "NumPy C-API surface extraction skipped" in caplog.text
 
@@ -5112,7 +5127,7 @@ class TestMetadataAttachFailuresAreSwallowed:
         self, monkeypatch, caplog
     ) -> None:
         import abicheck.python_api as python_api_mod
-        from abicheck.service_metadata_attach import _try_attach_python_api_surface
+        from abicheck.extract.metadata_attach import try_attach_python_api_surface
 
         monkeypatch.setattr(
             python_api_mod,
@@ -5121,7 +5136,7 @@ class TestMetadataAttachFailuresAreSwallowed:
         )
         snap = self._snap()
         with caplog.at_level("DEBUG", logger="abicheck.service"):
-            _try_attach_python_api_surface(snap)
+            try_attach_python_api_surface(snap)
         assert snap.python_api is None
         assert "Python API surface recovery skipped" in caplog.text
 
@@ -5129,13 +5144,13 @@ class TestMetadataAttachFailuresAreSwallowed:
         self, tmp_path, monkeypatch, caplog
     ) -> None:
         import abicheck.sycl_metadata as sycl_mod
-        from abicheck.service_metadata_attach import _try_attach_sycl_metadata
+        from abicheck.extract.metadata_attach import try_attach_sycl_metadata
 
         detected = sycl_mod.SyclMetadata(implementation="dpcpp")
         monkeypatch.setattr(sycl_mod, "parse_sycl_metadata", lambda _dir: detected)
         snap = self._snap()
         with caplog.at_level("INFO", logger="abicheck.service"):
-            _try_attach_sycl_metadata(snap, tmp_path / "libfoo.so")
+            try_attach_sycl_metadata(snap, tmp_path / "libfoo.so")
         assert snap.sycl is detected
         assert "SYCL metadata attached" in caplog.text
 
@@ -5143,7 +5158,7 @@ class TestMetadataAttachFailuresAreSwallowed:
         self, tmp_path, monkeypatch, caplog
     ) -> None:
         import abicheck.sycl_metadata as sycl_mod
-        from abicheck.service_metadata_attach import _try_attach_sycl_metadata
+        from abicheck.extract.metadata_attach import try_attach_sycl_metadata
 
         monkeypatch.setattr(
             sycl_mod,
@@ -5152,7 +5167,7 @@ class TestMetadataAttachFailuresAreSwallowed:
         )
         snap = self._snap()
         with caplog.at_level("DEBUG", logger="abicheck.service"):
-            _try_attach_sycl_metadata(snap, tmp_path / "libfoo.so")
+            try_attach_sycl_metadata(snap, tmp_path / "libfoo.so")
         assert snap.sycl is None
         assert "SYCL metadata extraction skipped" in caplog.text
 
@@ -5160,24 +5175,24 @@ class TestMetadataAttachFailuresAreSwallowed:
         self, tmp_path, monkeypatch
     ) -> None:
         import abicheck.sycl_metadata as sycl_mod
-        from abicheck.service_metadata_attach import _try_attach_sycl_metadata
+        from abicheck.extract.metadata_attach import try_attach_sycl_metadata
 
         monkeypatch.setattr(sycl_mod, "parse_sycl_metadata", lambda _dir: None)
         snap = self._snap()
-        _try_attach_sycl_metadata(snap, tmp_path / "libfoo.so")
+        try_attach_sycl_metadata(snap, tmp_path / "libfoo.so")
         assert snap.sycl is None
 
     def test_a_library_with_no_numpy_capi_attaches_nothing(
         self, tmp_path, monkeypatch
     ) -> None:
         import abicheck.numpy_capi as numpy_capi_mod
-        from abicheck.service_metadata_attach import _try_attach_numpy_capi_surface
+        from abicheck.extract.metadata_attach import try_attach_numpy_capi_surface
 
         monkeypatch.setattr(
             numpy_capi_mod, "extract_numpy_capi_surface", lambda _path: None
         )
         snap = self._snap()
-        _try_attach_numpy_capi_surface(snap, tmp_path / "libfoo.so")
+        try_attach_numpy_capi_surface(snap, tmp_path / "libfoo.so")
         assert snap.numpy_capi is None
 
 

@@ -48,6 +48,12 @@ from .errors import (
     UnsupportedArtifactError,
     ValidationError,
 )
+from .extract.metadata_attach import (
+    try_attach_numpy_capi_surface,
+    try_attach_python_api_surface,
+    try_attach_python_ext_metadata,
+    try_attach_sycl_metadata,
+)
 from .header_utils import (
     cache_relevant_operand_paths,
     deferred_token_dirs,
@@ -61,12 +67,6 @@ from .service_header_graph_attach import (
     prefetch_graph_if_useful,
     prefetch_settled_on_failure,
 )
-from .service_metadata_attach import (
-    _try_attach_numpy_capi_surface,
-    _try_attach_python_api_surface,
-    _try_attach_python_ext_metadata,
-    _try_attach_sycl_metadata,
-)
 from .storage import closure_identity
 from .workflows.dump.formats import (
     DEFAULT_ADAPTERS,
@@ -74,7 +74,11 @@ from .workflows.dump.formats import (
     NativeExtractRequest,
     emit_notice,
 )
-from .workflows.run_dump_scope import wrap_run_dump_with_dependency_scope
+from .workflows.dump.hybrid import compose_hybrid
+from .workflows.run_dump_scope import (
+    run_dump_header_roots,
+    wrap_run_dump_with_dependency_scope,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -109,21 +113,11 @@ def _run_dump_uncached(
     header_backend: str = "auto",
     compile: CompileContext | None = None,
     notify: Callable[[str], None] | None = None,
-    _skip_header_graph_attach: bool = False,
     include_labels: dict[Path, str] | None = None,
     dump_manifest: DumpManifest | None = None,
     public_include_search_dirs: list[Path] | None = None,
 ) -> AbiSnapshot:
     """Extract an ABI snapshot from a native binary (ELF, PE, or Mach-O).
-
-    ``_skip_header_graph_attach`` is a private, internal-only knob (not
-    public API, not CLI-reachable) used solely by this function's own
-    ``header_backend="hybrid"`` recursion below: each single-backend
-    sub-dump would otherwise redundantly attach its own header-only graph
-    (seeded from only that one backend's declarations) before the merge
-    throws it away, wasting a whole extra clang AST pass per sub-dump. The
-    graph is instead attached exactly once, after the merge, to the union of
-    both backends' declarations.
 
     ``public_headers`` / ``public_header_dirs`` tag declaration provenance
     (ADR-024 Phase 1) on all three formats: ELF threads them into
@@ -167,7 +161,6 @@ def _run_dump_uncached(
             f"dump_manifest is not yet supported for {binary_fmt.upper()} "
             "binaries; use a single-header dump for this format."
         )
-    from . import dumper_cache
 
     _headers = headers or []
     _includes = includes or []
@@ -181,7 +174,7 @@ def _run_dump_uncached(
     # Every format's own main pass normalizes `lang` to only ever force a
     # language explicitly requested, letting auto-detection run otherwise
     # (including for the default "c++") -- `_cache_key` hashes the raw
-    # `lang` value, so `_attach_header_graph`'s own _clang_header_dump call
+    # `lang` value, so `_attach_header_graph`'s own clang_header_dump call
     # must pass this identical normalized value, or it hashes a different
     # key than the main pass just used, permanently missing the AST memo
     # for the default (non-explicit-"c") workload (Codex review). ELF does
@@ -221,99 +214,6 @@ def _run_dump_uncached(
 
     from .dumper import _resolve_header_backend
 
-    if _resolve_header_backend(eff_backend) == "hybrid":
-        # G28 Phase 3: the real Tier-2 hybrid entry point the CLI routes
-        # through (dumper.dump() has its own, simpler recursion for direct
-        # Python-API callers) — recurse into run_dump() once per real
-        # backend, forcing frontend via a *replaced* CompileContext (frozen
-        # dataclass) so it wins eff_backend's precedence check regardless of
-        # header_backend, then merge; only the merge step is new.
-        from dataclasses import replace as _dc_replace
-
-        from .compile_context import CompileContext
-        from .dumper_hybrid import run_hybrid_dump
-
-        def _forced_compile(frontend: str) -> CompileContext:
-            return (
-                _dc_replace(compile, frontend=frontend)
-                if compile is not None
-                else CompileContext(frontend=frontend)
-            )
-
-        common_kwargs: dict[str, Any] = {
-            "headers": headers,
-            "includes": includes,
-            "version": version,
-            "lang": lang,
-            "lang_explicit": lang_explicit,
-            "pdb_path": pdb_path,
-            "dwarf_only": dwarf_only,
-            "debug_roots": debug_roots,
-            "enable_debuginfod": enable_debuginfod,
-            "debuginfod_url": debuginfod_url,
-            "debug_format": debug_format,
-            "symbols_only": symbols_only,
-            "debug_presence_only": debug_presence_only,
-            "public_headers": public_headers,
-            "public_header_dirs": public_header_dirs,
-            "public_include_search_dirs": public_include_search_dirs,
-            # The header-graph attach is deliberately SKIPPED on either
-            # recursive sub-dump below (each would otherwise attach its OWN
-            # graph, seeded from only ITS OWN backend's declarations, before
-            # the merge throws it away) — attached once, after the merge, to
-            # the union of both backends' declarations instead (see the
-            # _attach_header_graph call below; Codex review; G29 Phase A:
-            # ``_skip_header_graph_attach`` replaces the old "just don't
-            # forward header_graph=True" mechanism now that the attach is
-            # unconditional rather than flag-gated).
-            "notify": notify,
-            "_skip_header_graph_attach": True,
-            "include_labels": include_labels,
-            "dump_manifest": dump_manifest,
-        }
-
-        def _leg(
-            _so_path: Path, _headers_arg: list[Path], *, header_backend: str
-        ) -> AbiSnapshot:
-            # Each leg keeps its FULL surface so the outer wrapper scopes the
-            # merged result once; `include_dependencies=True` also clears any
-            # parse-time skip the outer scope declared (`extraction_scope`).
-            return run_dump(
-                path,
-                binary_fmt,
-                header_backend=header_backend,
-                compile=_forced_compile(header_backend),
-                include_dependencies=True,
-                **common_kwargs,
-            )
-
-        # `run_hybrid_dump` owns the leg/merge/closure-renumbering sequence
-        # for both hybrid entry points (this one and `dumper.dump`'s). AST
-        # memoization (G31 Phase C) is only worthwhile here: the
-        # `_attach_header_graph` call below is a real downstream consumer.
-        with dumper_cache.ast_memoize_scope():
-            merged = run_hybrid_dump(_leg, path, _headers)
-        # No attach_clang_layout call here: clang_snap's own recursive call
-        # above already got it (the ELF/PE/Mach-O tail below always calls it),
-        # so re-running it on merged would backfill nothing (review finding).
-        # dwarf_only/symbols_only mean "ignore headers entirely", same as the
-        # ELF tail's own _attach_header_graph call below (Codex review).
-        return _attach_header_graph(
-            merged,
-            _HEADER_GRAPH_ENABLED and not dwarf_only and not symbols_only,
-            _HEADER_GRAPH_INCLUDES_ENABLED and not dwarf_only and not symbols_only,
-            _headers,
-            _includes,
-            _header_graph_lang,
-            compile,
-            public_headers,
-            public_header_dirs,
-            include_search_dirs=_public_include_search_dirs,
-        )
-
-    adapter = FORMAT_ADAPTERS.get(binary_fmt)
-    if adapter is None:
-        raise UnsupportedArtifactError(f"Unsupported binary format: {binary_fmt}")
     request = NativeExtractRequest(
         path=path,
         version=version,
@@ -338,6 +238,82 @@ def _run_dump_uncached(
         dump_manifest=dump_manifest,
         notify=notify,
     )
+    if _resolve_header_backend(eff_backend) == "hybrid":
+        # G28 Phase 3: the Tier-2 hybrid entry point the CLI routes through
+        # (dumper.dump() has its own path for direct Python-API callers):
+        # one castxml leg and one clang leg of the same request, merged.
+        # Each leg skips the header-only graph -- it would be seeded from
+        # only that backend's declarations -- and the graph is attached once
+        # below, to the union. No attach_clang_layout here: each leg's own
+        # tail already ran it, so re-running it on the merge backfills
+        # nothing.
+        merged = compose_hybrid(
+            functools.partial(
+                _extract_and_finish,
+                binary_fmt,
+                header_graph_lang=_header_graph_lang,
+                skip_header_graph_attach=True,
+            ),
+            request,
+            header_roots=run_dump_header_roots(
+                headers, dump_manifest, public_headers, public_header_dirs
+            ),
+        )
+        # dwarf_only/symbols_only mean "ignore headers entirely", same as the
+        # ELF tail's own _attach_header_graph call (Codex review).
+        return _attach_header_graph(
+            merged,
+            _HEADER_GRAPH_ENABLED and not dwarf_only and not symbols_only,
+            _HEADER_GRAPH_INCLUDES_ENABLED and not dwarf_only and not symbols_only,
+            _headers,
+            _includes,
+            _header_graph_lang,
+            compile,
+            public_headers,
+            public_header_dirs,
+            include_search_dirs=_public_include_search_dirs,
+        )
+
+    return _extract_and_finish(
+        binary_fmt,
+        request,
+        header_graph_lang=_header_graph_lang,
+        skip_header_graph_attach=False,
+    )
+
+
+def _extract_and_finish(
+    binary_fmt: str,
+    request: NativeExtractRequest,
+    *,
+    header_graph_lang: str | None,
+    skip_header_graph_attach: bool,
+) -> AbiSnapshot:
+    """One single-backend dump: the format's adapter, then its tail.
+
+    The ELF tail attaches SYCL/Python/NumPy metadata, the header-only graph
+    and the clang layout; PE and Mach-O share :func:`_finish_native_snapshot`.
+    Both renumber anonymous closure identities exactly once, at the end.
+    """
+    from . import dumper_cache
+    from .dumper import _resolve_header_backend
+
+    adapter = FORMAT_ADAPTERS.get(binary_fmt)
+    if adapter is None:
+        raise UnsupportedArtifactError(f"Unsupported binary format: {binary_fmt}")
+    path = request.path
+    _headers = request.headers
+    _includes = request.includes
+    lang = request.lang
+    compile = request.compile
+    public_headers = request.public_headers
+    public_header_dirs = request.public_header_dirs
+    _public_include_search_dirs = request.public_include_search_dirs
+    dwarf_only = request.dwarf_only
+    symbols_only = request.symbols_only
+    eff_backend = request.header_backend
+    _header_graph_lang = header_graph_lang
+    _skip_header_graph_attach = skip_header_graph_attach
     if binary_fmt == "elf":
         _graph_wanted = not (_skip_header_graph_attach or dwarf_only or symbols_only)
         _prefetched_graph = prefetch_graph_if_useful(
@@ -375,10 +351,10 @@ def _run_dump_uncached(
             prefetch_settled_on_failure(_prefetched_graph),
         ):
             snap = adapter.extract(request)
-        _try_attach_sycl_metadata(snap, path)
-        _try_attach_python_ext_metadata(snap)
-        _try_attach_python_api_surface(snap)
-        _try_attach_numpy_capi_surface(snap, path)
+        try_attach_sycl_metadata(snap, path)
+        try_attach_python_ext_metadata(snap)
+        try_attach_python_api_surface(snap)
+        try_attach_numpy_capi_surface(snap, path)
         # dwarf_only/symbols_only mean "ignore headers entirely" -- extract_elf
         # above already honors both, so the header-graph attach must not
         # silently re-parse those headers and attach L2 build_source evidence
@@ -461,7 +437,7 @@ def _finish_native_snapshot(
     offset lands under the same ordinal ``bases`` gets, not disagreeing.
 
     ``skip_header_graph`` folds the caller's own reasons to suppress the graph
-    (the ``hybrid`` recursion's ``_skip_header_graph_attach``, ``symbols_only``)
+    (a ``hybrid`` leg's ``skip_header_graph_attach``, ``symbols_only``)
     into one flag; the global enablement switches stay this function's business.
 
     ``public_include_search_dirs`` (see ``_run_dump_uncached``'s own docstring):
@@ -479,9 +455,9 @@ def _finish_native_snapshot(
     snap = _apply_native_provenance(
         snap, public_headers, public_header_dirs, _public_dirs
     )
-    _try_attach_python_ext_metadata(snap)
-    _try_attach_python_api_surface(snap)
-    _try_attach_numpy_capi_surface(snap, path)
+    try_attach_python_ext_metadata(snap)
+    try_attach_python_api_surface(snap)
+    try_attach_numpy_capi_surface(snap, path)
     snap = _attach_header_graph(
         snap,
         _HEADER_GRAPH_ENABLED and not skip_header_graph,
