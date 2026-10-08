@@ -89,7 +89,7 @@ def _stub_elf_parse(
     monkeypatch, snap: AbiSnapshot, capture: dict[str, Any] | None = None
 ):
     """Stub ``dumper.dump`` -- the ELF header/binary parse the CLI reaches
-    through ``service.resolve_input`` -> ``service_dump_native._dump_elf``."""
+    through ``service.resolve_input`` -> ``service_dump_native.extract_elf``."""
     import abicheck.dumper as dumper
 
     def _fake_dump(**kwargs: Any) -> AbiSnapshot:
@@ -428,7 +428,7 @@ def test_dump_inferred_header_root_ranks_below_the_compile_context(
     On the retired path this was an ordering the caller had to maintain by
     hand (excluding ``deferred`` from the "explicit" side of the L3 merge and
     appending it back afterwards). The shared pipeline makes it structural:
-    ``service_dump_native._dump_elf`` derives the inferred roots *after* the
+    ``service_dump_native.extract_elf`` derives the inferred roots *after* the
     compile context is resolved and appends them (``eff_tokens =
     cc.gcc_option_tokens + tuple(deferred)``), so no caller can invert it.
     Asserted here over several independently-supplied context directories,

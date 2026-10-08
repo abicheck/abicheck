@@ -24,8 +24,8 @@ is its only source now, exactly as it has been for ``dump`` since Phase 7c
 (ADR-037 D8.1: the two commands share one debug context and must not
 drift). Unlike ``dump``, ``compare`` has two operands: the flag's per-side
 ``old=``/``new=`` scoping has no config spelling and is not reinvented as
-one. Only PE binaries ever consult a PDB (``service_dump_native_pe.py``'s
-own ``_extract_pdb_debug``) -- a stored JSON snapshot, an ELF/Mach-O
+one. Only PE binaries ever consult a PDB (``workflows/dump/pe.py``'s
+``extract_pdb_debug``) -- a stored JSON snapshot, an ELF/Mach-O
 binary, or a non-PE live extraction never reads ``pdb_path`` at all -- so a
 configured value only risks sharing one file across two *different*
 binaries when **both** operands are live PE inputs. Rejected outright in

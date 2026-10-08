@@ -1569,7 +1569,7 @@ IMPORT_CYCLE_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
                 # edges land on already-member modules, and `service` imports
                 # this module back at its own tail -- so this closes the same
                 # cluster of cycles through already-member modules, not a new
-                # one. `service_dump_native_pe` (the PE/Mach-O half of the
+                # one. `workflows.dump.pe`/`.macho` (formerly `service_dump_native_pe`, the PE/Mach-O half of the
                 # same original block, split out purely to keep this new
                 # module under the 800-line production cap a genuinely new
                 # file gets no debt-ledger baseline to grow into) reaches

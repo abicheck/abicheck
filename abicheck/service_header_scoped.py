@@ -21,8 +21,8 @@ relocation -- both functions keep their prior behavior for every existing
 caller -- plus ADR-050 D1's own ``include_labels`` parameter/threading added
 in the same commit, re-exported from ``service.py`` so
 ``service._try_header_scoped_dump`` / ``service._has_matched_public_surface``
-(the bare names ``service._dump_pe``/``_dump_macho`` call, and what every
-test monkeypatches via
+(the PE/Mach-O extractors in ``workflows.dump.pe``/``.macho`` call it through
+``workflows.dump.scoped``; tests monkeypatch it via
 ``monkeypatch.setattr(service, "_try_header_scoped_dump", ...)``) keep
 working unchanged.
 

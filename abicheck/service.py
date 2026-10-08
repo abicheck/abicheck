@@ -91,7 +91,7 @@ from .workflows.request_inputs import InputSpec
 # `ast.ImportFrom` node, so it is invisible to that gate's static AST walk (the
 # same escape hatch `cli_buildsource.py`'s own back-compat re-export shim
 # documents) while still binding real module-level names here, so
-# `service._dump_pe`/`_dump_macho`'s own bare-name calls, `from abicheck.service
+# `from abicheck.service
 # import _try_header_scoped_dump`, and every test's
 # `monkeypatch.setattr(service, "_try_header_scoped_dump", ...)` all keep
 # working exactly as before this module existed.
@@ -110,21 +110,10 @@ del _service_header_scoped
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-# ── Binary dumping (extracted to leaf module ``service_dump_native`` to stay
-# under the AI-readiness size cap, the same pattern
-# ``service_metadata_attach``/``service_header_graph_attach``/
-# ``service_header_scoped``/``service_render``/``dry_run_estimate``/
-# ``service_compare_pipeline``/``service_dump_pipeline`` already follow;
-# re-exported verbatim below so ``from abicheck.service import run_dump``
-# and the several ``_dump_elf``/``_dump_pe``/``_dump_macho``/
-# ``_run_dump_uncached`` names existing tests patch/import directly keep
-# resolving unchanged -- see that module's own docstring for the test-patch
-# gotcha this split carries: a caller substituting one of these names for a
-# call made *inside* ``service_dump_native.py`` (e.g. patching ``_dump_elf``
-# to observe ``run_dump``) must patch
-# ``abicheck.service_dump_native.<name>``, not ``abicheck.service.<name>`` --
-# only a caller that imports the name fresh from ``abicheck.service`` itself
-# (there is none inside ``service_dump_native.py``) would see the latter). ──
+# ── Binary dumping: ``run_dump`` lives in ``service_dump_native``; each
+# format's primary extraction is a ``workflows.dump.formats`` adapter. To
+# substitute an extractor, replace its entry in
+# ``service_dump_native.FORMAT_ADAPTERS`` rather than patching a private name.
 # run_compare_request/run_compare moved to service_compare_pipeline.py (CLI
 # cleanup phase two, PR B slice 1) to stay under the AI-readiness file-size
 # cap once run_compare gained pack_policy_overrides/pack_internal_namespaces
@@ -158,13 +147,7 @@ from .service_compare_pipeline import (  # noqa: E402,F401
     run_compare,
     run_compare_request,
 )
-from .service_dump_native import (  # noqa: E402,F401
-    _dump_elf,
-    _dump_macho,
-    _dump_pe,
-    _run_dump_uncached,
-    run_dump,
-)
+from .service_dump_native import run_dump  # noqa: E402,F401
 
 # ── Dump pipeline (G33 Phase 5): ``dump``'s counterpart to the above, in the
 # leaf module ``service_dump_pipeline``. Re-exported for the same reason:

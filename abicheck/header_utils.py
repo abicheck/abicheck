@@ -399,7 +399,7 @@ def resolve_inferred_header_roots(
       build's own lowest include bucket (``/external:I`` / ``/imsvc`` / ``/I``)
       so the root never shadows the build's system dirs (#454).
 
-    Shared by the ELF parse (``service_dump_native._dump_elf``, which ``dump``
+    Shared by the ELF parse (``service_dump_native.extract_elf``, which ``dump``
     reaches directly now ``perform_elf_dump`` retired) and every other path.
     """
     # Tokenize the pass-through flags once, then reuse for every check below.
@@ -559,7 +559,7 @@ def drop_include_tokens_duplicating_paths(
     *already_covered* (a raw token list, in the same shape as *toks*).
 
     ``dump``'s ELF and PE/Mach-O paths (:func:`abicheck.service_dump_native.
-    _dump_elf`/:func:`abicheck.service_header_scoped._try_header_
+    extract_elf`/:func:`abicheck.service_header_scoped._try_header_
     scoped_dump`) both render the L3->L2 fold's merged compile context into
     ``gcc_option_tokens`` via ``header_compile_context._context_flags`` —
     which independently renders the *same* matched compile unit's

@@ -61,6 +61,7 @@ from ..model import AbiSnapshot, Function
 from ..model.change import LibraryMetadata
 from ..serialization import load_snapshot
 from ..service_dump_cache import cached_run_dump
+from .dump.formats import emit_notice
 from .header_exclusion_audit import record_achieved_header_exclusions
 from .project_package_input import resolve_project_package
 from .snapshot_factory import (
@@ -93,7 +94,6 @@ _service_dump_native = _importlib.import_module(".service_dump_native", "abichec
 # Explicitly typed (not left as the `Any` importlib.import_module's attribute
 # access would otherwise infer) so a caller still gets a real return-type
 # check instead of a silent `no-any-return`.
-_emit: Callable[[Callable[[str], None] | None, str], None] = _service_dump_native._emit
 run_dump: Callable[..., AbiSnapshot] = _service_dump_native.run_dump
 del _service_dump_native
 
@@ -632,7 +632,7 @@ def _resolve_input_impl(
         target, is_ld_script = resolve_linker_script(path)
         if is_ld_script:
             if target is not None and target.resolve() != path.resolve():
-                _emit(
+                emit_notice(
                     notify,
                     f"Note: '{path}' is a GNU ld linker script; following its "
                     f"INPUT()/GROUP() directive to '{target}'.",

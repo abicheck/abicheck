@@ -528,15 +528,15 @@ class TestParsePdbEndToEnd:
 
 
 class TestDumpPeFallbackBuildsPdbTypes:
-    """service._dump_pe recovers PDB-derived model types (with provenance) on
+    """workflows.dump.pe.extract_pe recovers PDB-derived model types (with provenance) on
     the header-scoping fallback branch (ADR-024 Phase 1, PE path)."""
 
     def test_pdb_types_built_on_mangling_fallback(self, tmp_path, monkeypatch):
         import types as _t
         import warnings as _w
 
-        from abicheck import service, service_dump_native_pe
         from abicheck.model import ScopeOrigin as _SO
+        from abicheck.workflows.dump import pe as pe_extract
 
         hdr = tmp_path / "api.h"
         hdr.write_text("struct Widget { int x; };\n")
@@ -552,23 +552,19 @@ class TestDumpPeFallbackBuildsPdbTypes:
         meta.structs["Widget"] = StructLayout(
             name="Widget", byte_size=4, decl_file="api.h"
         )
-        # `service._dump_pe` (called below via the still-valid `service.`
-        # re-export) resolves both of these names against
-        # `service_dump_native_pe`'s own module globals, not `service`'s --
-        # see that module's own "test-patch note" docstring.
-        monkeypatch.setattr(
-            service_dump_native_pe, "_extract_pdb_debug", lambda p, pp: (meta, None)
-        )
+        # `extract_pe` (called below) resolves both of these names against
+        # `abicheck.workflows.dump.pe`'s own module globals.
+        monkeypatch.setattr(pe_extract, "extract_pdb_debug", lambda p, pp: (meta, None))
         # Header scoping falls back (castxml/mangling gap).
         monkeypatch.setattr(
-            service_dump_native_pe,
-            "_try_header_scoped_dump",
+            pe_extract,
+            "try_header_scoped_dump",
             lambda *a, **k: (None, "mangling-fallback"),
         )
 
         with _w.catch_warnings():
             _w.simplefilter("ignore")
-            snap = service._dump_pe(
+            snap = pe_extract.extract_pe(
                 tmp_path / "lib.dll", "1", headers=[hdr], includes=[], lang="c++"
             )
         # PDB type recovered into the model with its source header, and the
