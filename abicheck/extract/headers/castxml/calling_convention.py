@@ -1,0 +1,139 @@
+"""Calling-convention attributes CastXML leaves out of its ``attributes``.
+
+CastXML 0.7 reports only a few x86-32 conventions in a function's compound
+``attributes`` string; a GNU x86-64 selection such as
+``__attribute__((ms_abi))`` or ``__attribute__((sysv_abi))`` is dropped
+entirely. Without it a header-only comparison of a function that switched to
+``ms_abi`` read ``NO_CHANGE`` -- the GCC catalog lane of
+``case64_calling_convention_changed`` -- because GCC does not emit
+``DW_AT_calling_convention`` either, while the same artifacts compared through
+the clang AST backend reported the break.
+
+This module recovers the convention from the declaration CastXML itself
+located (``file``/``line``), reading only that declaration's own text: the
+specifiers before the function's name and the tail after its parameter list,
+never the parameter list itself (a callback parameter's ``ms_abi`` belongs to
+the parameter's type, not to the function). A convention spelled through a
+macro is not expanded here; that remains the clang backend's job.
+"""
+
+from __future__ import annotations
+
+import re
+from pathlib import Path
+from xml.etree.ElementTree import Element
+
+from ....model.cc_attributes import CC_ATTRIBUTE_BASES
+from .context import CastxmlParserContext
+
+#: How far above the reported line a declaration's specifiers may start.
+_LOOKBACK_LINES = 8
+#: How far below it the parameter list and trailing attributes may run.
+_LOOKAHEAD_LINES = 12
+
+_BLOCK_COMMENT_RE = re.compile(r"/\*.*?\*/", re.DOTALL)
+_LINE_COMMENT_RE = re.compile(r"//[^\n]*")
+_GNU_ATTRIBUTE_RE = re.compile(r"__attribute__\s*\(")
+_STD_ATTRIBUTE_RE = re.compile(r"\[\[(?P<body>.*?)\]\]", re.DOTALL)
+#: MSVC-style keywords (also accepted by GCC/Clang on x86).
+_KEYWORD_RE = re.compile(r"\b__(cdecl|stdcall|fastcall|thiscall|vectorcall)\b")
+
+
+def _attribute_bases(body: str) -> set[str]:
+    found: set[str] = set()
+    for raw in body.split(","):
+        token = raw.strip()
+        for prefix in ("gnu::", "gnu:"):
+            if token.startswith(prefix):
+                token = token[len(prefix) :]
+        base = token.split("(", 1)[0].strip().strip("_")
+        if base in CC_ATTRIBUTE_BASES:
+            found.add(token.strip("_") if "(" not in token else token)
+    return found
+
+
+def calling_conventions_in(text: str) -> set[str]:
+    """Calling-convention tokens spelled in *text* (comments ignored)."""
+    text = _LINE_COMMENT_RE.sub(" ", _BLOCK_COMMENT_RE.sub(" ", text))
+    found: set[str] = set()
+    for m in _GNU_ATTRIBUTE_RE.finditer(text):
+        close = _matching_paren(text, m.end() - 1)
+        if close != -1:
+            # ``__attribute__((a, b(1)))``: the outer pair wraps one more pair.
+            inner = text[m.end() : close].strip()
+            if inner.startswith("(") and inner.endswith(")"):
+                inner = inner[1:-1]
+            found |= _attribute_bases(inner)
+    for m in _STD_ATTRIBUTE_RE.finditer(text):
+        found |= _attribute_bases(m.group("body"))
+    found |= {m.group(1) for m in _KEYWORD_RE.finditer(text)}
+    return found
+
+
+def _matching_paren(text: str, open_at: int) -> int:
+    depth = 0
+    for i in range(open_at, len(text)):
+        if text[i] == "(":
+            depth += 1
+        elif text[i] == ")":
+            depth -= 1
+            if depth == 0:
+                return i
+    return -1
+
+
+def _declaration_outside_params(window: str, name: str, name_at: int) -> str:
+    """The declaration's text around its parameter list, without it."""
+    prefix = window[:name_at]
+    boundary = max(prefix.rfind(";"), prefix.rfind("{"), prefix.rfind("}"))
+    head = prefix[boundary + 1 :]
+    rest = window[name_at + len(name) :]
+    open_at = rest.find("(")
+    if open_at == -1:
+        return head
+    close_at = _matching_paren(rest, open_at)
+    if close_at == -1:
+        return head
+    tail = rest[close_at + 1 :]
+    stop = min((i for i in (tail.find(";"), tail.find("{")) if i != -1), default=-1)
+    return head + " " + (tail[:stop] if stop != -1 else tail)
+
+
+def source_calling_conventions(
+    ctx: CastxmlParserContext, el: Element, name: str
+) -> set[str]:
+    """Calling conventions the declaration *el* spells in its own text.
+
+    Empty when the location is unknown, the file is unreadable or the name
+    cannot be found at the reported line.
+    """
+    file_el = ctx.id_map.get(el.get("file", ""))
+    line_raw = el.get("line", "")
+    if file_el is None or not line_raw.isdigit() or not name:
+        return set()
+    fname = file_el.get("name", "")
+    if not fname:
+        return set()
+    lines = ctx.source_lines_cache.get(fname)
+    if lines is None:
+        try:
+            lines = Path(fname).read_text(encoding="utf-8").splitlines()
+        except (OSError, UnicodeDecodeError):
+            return set()
+        ctx.source_lines_cache[fname] = lines
+    line_no = int(line_raw)
+    if not 1 <= line_no <= len(lines):
+        return set()
+    start = max(0, line_no - 1 - _LOOKBACK_LINES)
+    before = "\n".join(lines[start : line_no - 1])
+    here_and_after = "\n".join(lines[line_no - 1 : line_no - 1 + _LOOKAHEAD_LINES])
+    window = _LINE_COMMENT_RE.sub(
+        " ", _BLOCK_COMMENT_RE.sub(" ", before + "\n" + here_and_after)
+    )
+    offset = len(_LINE_COMMENT_RE.sub(" ", _BLOCK_COMMENT_RE.sub(" ", before))) + 1
+    match = re.compile(rf"(?<![\w:]){re.escape(name)}\s*\(").search(window, offset)
+    if match is None:
+        return set()
+    return calling_conventions_in(
+        _declaration_outside_params(window, name, match.start())
+    )

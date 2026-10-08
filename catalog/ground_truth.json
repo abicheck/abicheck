@@ -2977,14 +2977,10 @@
    ],
    "bad_practice": false,
    "category": "breaking",
-   "description": "Function calling convention changed from default System V to ms_abi \u2014 parameters passed in wrong registers (CALLING_CONVENTION_CHANGED)",
+   "description": "Function calling convention changed from default System V to ms_abi \u2014 parameters passed in wrong registers (CALLING_CONVENTION_CHANGED). Detected under both producers: from Clang's DW_AT_calling_convention, and for GCC (which emits none) from the public header, where the CastXML extractor recovers the __attribute__((ms_abi)) CastXML itself drops (extract/headers/castxml/calling_convention.py).",
    "expected": "BREAKING",
    "expected_kinds": [
     "calling_convention_changed"
-   ],
-   "known_gap": "GCC does not emit DW_AT_calling_convention for __attribute__((ms_abi)); detection requires Clang",
-   "known_gap_toolchains": [
-    "gcc"
    ],
    "min_evidence": "L1",
    "platforms": [

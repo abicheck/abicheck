@@ -331,6 +331,9 @@ _PTR_TO_MEMBER_DATA_RE = re.compile(
 )
 
 
+_BIT_INT_WIDTH_RE = re.compile(r"\b_BitInt\s*\(\s*\d+\s*\)")
+
+
 def _resolve_nested_type_names(raw: str) -> list[str]:
     """Every type name reachable from one (possibly callback-shaped)
     type spelling: its own base name, its own template arguments
@@ -356,6 +359,11 @@ def _resolve_nested_type_names(raw: str) -> list[str]:
                 names.append(base)
                 names.extend(_template_arg_types(base))
         return names
+    # ``_BitInt(N)``'s parenthesised width is part of a builtin type's name,
+    # not a parameter list: without this the width ``N`` was read back as a
+    # referenced type (``type://128``), and a width change surfaced as a
+    # bogus graph rename ``64`` -> ``128``.
+    raw = _BIT_INT_WIDTH_RE.sub("_BitInt", raw)
     paren = _top_level_paren_index(raw)
     ret_raw = raw[:paren] if paren != -1 else raw
     names = []

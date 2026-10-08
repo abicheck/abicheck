@@ -64,6 +64,7 @@ from .dwarf_utils import (
     BASE_PRUNE_TAGS,
     attr_bool as _attr_bool,  # noqa: F401
     attr_int as _attr_int,
+    base_type_name as _base_type_name,
     attr_str as _attr_str,
     decode_member_location as _decode_member_location,
     has_real_dwarf_info,
@@ -553,7 +554,7 @@ def _compute_type_info(
 
     if tag == "DW_TAG_base_type":
         return (
-            _attr_str(die, "DW_AT_name") or "base",
+            _base_type_name(die),
             _attr_int(die, "DW_AT_byte_size"),
         )
 
