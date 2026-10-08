@@ -101,3 +101,117 @@ def test_regparm_keeps_its_argument() -> None:
     assert calling_conventions_in("__attribute__((regparm(3))) int f(int);") == {
         "regparm(3)"
     }
+
+
+@pytest.mark.parametrize("cc", ["ms_abi", "sysv_abi"])
+@pytest.mark.parametrize(
+    "decoy",
+    [
+        # A string literal spelling the name and an open paren (Codex
+        # security review, PR #1519): a first-match search stopped there.
+        'static const char *k = "target(";',
+        "static const char k = '(';  static const char *n = \"target (x)\";",
+        # A comment that opens a paren after the name.
+        "/* target( */",
+        # An expression calling a same-named macro-like token first.
+        "enum { E = sizeof(int) }; int target_count(int);",
+        # Another, attribute-free declaration of the name earlier on the line.
+        "int target(int);",
+    ],
+)
+def test_earlier_decoy_on_the_line_cannot_shadow_the_declaration(
+    tmp_path: Path, cc: str, decoy: str
+) -> None:
+    hdr = tmp_path / "h.h"
+    hdr.write_text(f"{decoy} int target(int a) __attribute__(({cc}));\n")
+    assert source_calling_conventions(_ctx(hdr), _el(1), "target") == {cc}
+
+
+def test_attribute_inside_a_string_is_not_a_convention(tmp_path: Path) -> None:
+    hdr = tmp_path / "h.h"
+    hdr.write_text(
+        'int target(const char *s); const char *d = "__attribute__((ms_abi))";\n'
+    )
+    assert source_calling_conventions(_ctx(hdr), _el(1), "target") == set()
+
+
+def test_neighbouring_declaration_attribute_is_not_borrowed(tmp_path: Path) -> None:
+    hdr = tmp_path / "h.h"
+    hdr.write_text("int target(int); int other(int) __attribute__((ms_abi));\n")
+    assert source_calling_conventions(_ctx(hdr), _el(1), "target") == set()
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        # Name never followed by a parameter list on the reported line.
+        "int target;\n",
+        # Unterminated parameter list: nothing past it can be attributed.
+        "int target(int a,\n",
+    ],
+)
+def test_malformed_or_non_function_line_yields_nothing(
+    tmp_path: Path, text: str
+) -> None:
+    hdr = tmp_path / "h.h"
+    hdr.write_text(text)
+    assert source_calling_conventions(_ctx(hdr), _el(1), "target") == set()
+
+
+def test_location_edge_cases_yield_nothing(tmp_path: Path) -> None:
+    hdr = tmp_path / "h.h"
+    hdr.write_text("int target(int) __attribute__((ms_abi));\n")
+    ctx = _ctx(hdr)
+    # Line past the end of the file, line 0, a non-numeric line, no name.
+    for line in ("9", "0", "x"):
+        el = Element("Function", {"file": "f1", "line": line})
+        assert source_calling_conventions(ctx, el, "target") == set()
+    assert source_calling_conventions(ctx, _el(1), "") == set()
+    # Unknown file id, and a File element without a name.
+    assert (
+        source_calling_conventions(
+            ctx, Element("Function", {"file": "f9", "line": "1"}), "target"
+        )
+        == set()
+    )
+    ctx.id_map["f2"] = Element("File", {"id": "f2"})
+    assert (
+        source_calling_conventions(
+            ctx, Element("Function", {"file": "f2", "line": "1"}), "target"
+        )
+        == set()
+    )
+    # A non-UTF-8 file is unreadable, not a crash.
+    bad = tmp_path / "bad.h"
+    bad.write_bytes(b"\xff\xfe int target(int);\n")
+    assert source_calling_conventions(_ctx(bad), _el(1), "target") == set()
+
+
+def test_cached_lines_are_reused(tmp_path: Path) -> None:
+    hdr = tmp_path / "h.h"
+    hdr.write_text("int target(int) __attribute__((ms_abi));\n")
+    ctx = _ctx(hdr)
+    assert source_calling_conventions(ctx, _el(1), "target") == {"ms_abi"}
+    hdr.unlink()  # a second lookup must not re-read the file
+    assert source_calling_conventions(ctx, _el(1), "target") == {"ms_abi"}
+
+
+def test_castxml_reported_convention_is_not_second_guessed(tmp_path: Path) -> None:
+    from abicheck.extract.headers.castxml.functions import (
+        _contract_attributes_with_source_cc,
+    )
+
+    hdr = tmp_path / "h.h"
+    hdr.write_text("int __stdcall target(int) __attribute__((ms_abi));\n")
+    ctx = _ctx(hdr)
+    # CastXML reported __stdcall__: kept as is, the source is not read.
+    el = Element("Function", {"file": "f1", "line": "1", "attributes": "__stdcall__"})
+    reported = _contract_attributes_with_source_cc(ctx, el, "target")
+    assert "ms_abi" not in reported and any("stdcall" in a for a in reported)
+    # CastXML reported nothing: the declaration's own convention is added.
+    el = Element("Function", {"file": "f1", "line": "1", "attributes": ""})
+    assert "ms_abi" in _contract_attributes_with_source_cc(ctx, el, "target")
+    # Nothing in the source either: attributes unchanged.
+    plain = tmp_path / "p.h"
+    plain.write_text("int target(int);\n")
+    assert _contract_attributes_with_source_cc(_ctx(plain), el, "target") == []

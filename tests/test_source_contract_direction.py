@@ -26,6 +26,7 @@ import pytest
 
 from abicheck.checker import ChangeKind, Verdict, compare
 from abicheck.checker_policy import API_BREAK_KINDS, BREAKING_KINDS, RISK_KINDS
+from abicheck.compare.parameter_facts import _qualifier_levels
 from abicheck.extract.surface_fact_producers import header_ast_surface_facts
 from abicheck.model import (
     AbiSnapshot,
@@ -314,3 +315,46 @@ def test_pointee_const_added_overall_verdict_is_risk() -> None:
         ),
     )
     assert result.verdict == Verdict.COMPATIBLE_WITH_RISK
+
+
+# --- qualifier-level reading of a canonical spelling ------------------------
+
+
+@pytest.mark.parametrize(
+    ("spelling", "expected"),
+    [
+        # No indirection: a top-level qualifier is not part of the type.
+        ("const int", None),
+        ("int", None),
+        # Level 0 is the innermost pointee; a top-level qualifier is dropped.
+        ("const char *", (frozenset({("const", 0)}), 1)),
+        ("char * const", (frozenset(), 1)),
+        ("const char * const *", (frozenset({("const", 0), ("const", 1)}), 2)),
+        ("volatile int &", (frozenset({("volatile", 0)}), 1)),
+        # Template arguments are opaque: their qualifiers belong to the
+        # argument, never to this parameter's own levels.
+        ("std::vector<const int> *", (frozenset(), 1)),
+        ("std::map<const char *, int> const *", (frozenset({("const", 0)}), 1)),
+    ],
+)
+def test_qualifier_levels(spelling: str, expected: object) -> None:
+    assert _qualifier_levels(spelling) == expected
+
+
+@pytest.mark.parametrize(
+    ("old", "new"),
+    [
+        # Same qualifiers, different spelling order: no change.
+        ("const char *", "char const *"),
+        # Only a top-level (by-value) qualifier differs: not a pointee change.
+        ("char *", "char * const"),
+    ],
+)
+def test_no_pointee_change_without_a_pointee_difference(old: str, new: str) -> None:
+    result = compare(
+        _snap(functions=[_fn([Param(name="p", type=old)])]),
+        _snap(functions=[_fn([Param(name="p", type=new)])]),
+    )
+    kinds = _kinds(result)
+    assert ChangeKind.PARAM_POINTEE_QUALIFIER_ADDED not in kinds
+    assert ChangeKind.PARAM_POINTEE_QUALIFIER_CHANGED not in kinds

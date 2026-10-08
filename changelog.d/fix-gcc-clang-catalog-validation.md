@@ -40,7 +40,10 @@
 - CastXML drops GNU x86-64 `ms_abi`/`sysv_abi` from its output; the
   calling convention is now recovered from the declaration it locates, so a
   GCC-built library (no `DW_AT_calling_convention`) reports
-  `calling_convention_changed` when headers are supplied.
+  `calling_convention_changed` when headers are supplied. Comments and string
+  literals are skipped and every spelling of the name on the declaration's
+  line is read, so an earlier decoy on that line (a string containing
+  `name(`) cannot hide the real declaration's attribute.
 - C23 `_BitInt(N)`: Clang's DWARF names every width just `_BitInt`, and
   CastXML 0.7 emits it untyped. DWARF base types now keep the width
   (`_BitInt(N)` from `DW_AT_bit_size`, else the storage width),

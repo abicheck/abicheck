@@ -136,3 +136,74 @@ def test_debug_layout_reports_bit_int_width_change(
 def test_same_storage_width_is_not_a_bit_int_change() -> None:
     result = compare(_snap("1", 64), _snap("2", 64))
     assert not any(c.kind == ChangeKind.BIT_INT_WIDTH_CHANGED for c in result.changes)
+
+
+def _layout(name: str, field_type: str, nbytes: int) -> StructLayout:
+    return StructLayout(
+        name=name,
+        byte_size=nbytes,
+        fields=[
+            FieldInfo(name="acc", type_name=field_type, byte_offset=0, byte_size=nbytes)
+        ],
+    )
+
+
+def _hits(result: object) -> list:
+    return [c for c in result.changes if c.kind == ChangeKind.BIT_INT_WIDTH_CHANGED]  # type: ignore[attr-defined]
+
+
+def test_header_and_debug_views_of_one_slot_report_once() -> None:
+    """The header AST and the debug layout both see the field: one finding."""
+
+    def snap(version: str, bits: int) -> AbiSnapshot:
+        record = RecordType(
+            name="Accumulator",
+            kind="struct",
+            size_bits=bits,
+            fields=[TypeField(name="acc", type=f"_BitInt({bits})")],
+            origin=ScopeOrigin.PUBLIC_HEADER,
+        )
+        return AbiSnapshot(
+            library="lib",
+            version=version,
+            types=[record],
+            from_headers=True,
+            dwarf=DwarfMetadata(
+                has_dwarf=True,
+                structs={
+                    "Accumulator": _layout("Accumulator", f"_BitInt({bits})", bits // 8)
+                },
+            ),
+        )
+
+    assert len(_hits(compare(snap("1", 64), snap("2", 128)))) == 1
+
+
+def test_debug_only_struct_outside_the_public_scope_is_not_reported() -> None:
+    """A width change on a struct no public header declares stays out."""
+    old, new = _snap("1", 64), _snap("2", 64)
+    old.declarations.debug_layout.structs["Internal"] = _layout(
+        "Internal", "_BitInt[64-bit storage]", 8
+    )
+    new.declarations.debug_layout.structs["Internal"] = _layout(
+        "Internal", "_BitInt[128-bit storage]", 16
+    )
+    assert not any(h.symbol == "Internal" for h in _hits(compare(old, new)))
+
+
+def test_struct_missing_on_the_new_side_is_not_a_width_change() -> None:
+    old, new = _snap("1", 64), _snap("2", 64)
+    old.declarations.debug_layout.structs["Gone"] = _layout(
+        "Gone", "_BitInt[64-bit storage]", 8
+    )
+    assert not any(h.symbol == "Gone" for h in _hits(compare(old, new)))
+
+
+def test_mutating_the_debug_layout_reaches_the_detector() -> None:
+    """Positive control for the two negatives above: the same mutation on
+    the public struct is reported."""
+    old, new = _snap("1", 64), _snap("2", 64)
+    new.declarations.debug_layout.structs["Accumulator"] = _layout(
+        "Accumulator", "_BitInt[128-bit storage]", 16
+    )
+    assert [h.symbol for h in _hits(compare(old, new))] == ["Accumulator"]

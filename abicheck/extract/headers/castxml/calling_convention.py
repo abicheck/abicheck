@@ -33,6 +33,22 @@ _LOOKAHEAD_LINES = 12
 
 _BLOCK_COMMENT_RE = re.compile(r"/\*.*?\*/", re.DOTALL)
 _LINE_COMMENT_RE = re.compile(r"//[^\n]*")
+#: Comments and string/character literals, in one pass so a quote inside a
+#: comment (or ``//`` inside a string) is read the way the compiler reads it.
+_NON_CODE_RE = re.compile(
+    r"/\*.*?\*/|//[^\n]*|\"(?:\\.|[^\"\\\n])*\"|'(?:\\.|[^'\\\n])*'", re.DOTALL
+)
+
+
+def _blank_non_code(text: str) -> str:
+    """*text* with comments and string/char literals replaced by spaces of the
+    same length (newlines kept), so offsets and line numbers still line up
+    and nothing inside them can be mistaken for the declaration."""
+    return _NON_CODE_RE.sub(
+        lambda m: "".join("\n" if c == "\n" else " " for c in m.group(0)), text
+    )
+
+
 _GNU_ATTRIBUTE_RE = re.compile(r"__attribute__\s*\(")
 _STD_ATTRIBUTE_RE = re.compile(r"\[\[(?P<body>.*?)\]\]", re.DOTALL)
 #: MSVC-style keywords (also accepted by GCC/Clang on x86).
@@ -127,13 +143,19 @@ def source_calling_conventions(
     start = max(0, line_no - 1 - _LOOKBACK_LINES)
     before = "\n".join(lines[start : line_no - 1])
     here_and_after = "\n".join(lines[line_no - 1 : line_no - 1 + _LOOKAHEAD_LINES])
-    window = _LINE_COMMENT_RE.sub(
-        " ", _BLOCK_COMMENT_RE.sub(" ", before + "\n" + here_and_after)
-    )
-    offset = len(_LINE_COMMENT_RE.sub(" ", _BLOCK_COMMENT_RE.sub(" ", before))) + 1
-    match = re.compile(rf"(?<![\w:]){re.escape(name)}\s*\(").search(window, offset)
-    if match is None:
-        return set()
-    return calling_conventions_in(
-        _declaration_outside_params(window, name, match.start())
-    )
+    window = _blank_non_code(before + "\n" + here_and_after)
+    line_start = len(before) + 1
+    line_end = window.find("\n", line_start)
+    line_end = len(window) if line_end == -1 else line_end
+    # Every spelling of ``name(`` on the reported line, not the first: the
+    # line may also carry an expression or another declaration naming it,
+    # and a first-match search would let that shadow the real declaration
+    # (and its attribute). A tail stops at the next ``;``/``{``, so another
+    # declaration's attributes are never read as this one's.
+    found: set[str] = set()
+    pattern = re.compile(rf"(?<![\w:]){re.escape(name)}\s*\(")
+    for match in pattern.finditer(window, line_start, line_end):
+        found |= calling_conventions_in(
+            _declaration_outside_params(window, name, match.start())
+        )
+    return found
