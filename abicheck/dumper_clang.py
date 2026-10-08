@@ -70,7 +70,7 @@ parsing in :mod:`abicheck.extract.headers.clang.records`, and
 template-specialization parsing (``_index_template_param_kinds``/
 ``_index_template_param_defaults``/``_index_template_param_names``/
 ``_specialization_spelling``/``build_specialization_index``, imported
-below from their new home rather than from ``dumper_clang_vtable.py``
+below from their new home rather than from ``extract/headers/clang/vtable.py``
 directly) in :mod:`abicheck.extract.headers.clang.templates` — this
 closes Phase 5 item 1's parser-split work on this backend. Every name
 below with a counterpart there is a thin delegating wrapper, kept so every
@@ -1338,7 +1338,7 @@ class _ClangAstParser:
     def _record_index(self) -> dict[str, dict[str, Any]]:
         """See ``extract.headers.clang.context.RecordVtableIndex.record_index``
         (the canonical implementation this delegates to) for the full
-        contract, and ``dumper_clang_vtable.build_vtable``'s base-lookup
+        contract, and ``extract.headers.clang.vtable.build_vtable``'s base-lookup
         recursion.
 
         A forward declaration (``struct A;``) and its later complete

@@ -126,7 +126,7 @@ def test_bundle_equals_the_three_independent_builders(template_ast):
 
 
 def test_specialization_index_unchanged_by_builder_order(template_ast):
-    from abicheck.dumper_clang_vtable import is_record_definition
+    from abicheck.extract.headers.clang.vtable import is_record_definition
 
     fresh = build_specialization_index(
         template_ast, is_record_definition=is_record_definition
