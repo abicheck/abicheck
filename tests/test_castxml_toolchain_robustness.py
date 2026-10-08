@@ -625,10 +625,13 @@ class TestG16ClangFallbackRespectsConfiguredDriver:
             ),
             patch("abicheck.dumper.shutil.which", side_effect=fake_which),
             patch(
-                "abicheck.dumper._clang_header_dump",
+                "abicheck.extract.headers.clang.backend.clang_header_dump",
                 return_value=(MagicMock(), None, False),
             ),
-            patch("abicheck.dumper._ClangAstParser", return_value=sentinel),
+            patch(
+                "abicheck.extract.headers.clang.backend._ClangAstParser",
+                return_value=sentinel,
+            ),
         ):
             result = _header_ast_parser(
                 [header],
@@ -669,10 +672,13 @@ class TestG16ClangFallbackRespectsConfiguredDriver:
             ),
             patch("abicheck.dumper.shutil.which", return_value="/usr/bin/clang++"),
             patch(
-                "abicheck.dumper._clang_header_dump",
+                "abicheck.extract.headers.clang.backend.clang_header_dump",
                 return_value=(MagicMock(), None, False),
             ),
-            patch("abicheck.dumper._ClangAstParser", return_value=sentinel),
+            patch(
+                "abicheck.extract.headers.clang.backend._ClangAstParser",
+                return_value=sentinel,
+            ),
         ):
             result = _header_ast_parser(
                 [header],

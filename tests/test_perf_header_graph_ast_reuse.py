@@ -45,7 +45,8 @@ from pathlib import Path
 
 import pytest
 
-from abicheck import dumper, dumper_cache
+from abicheck import dumper_cache
+from abicheck.extract.headers.clang import backend as clang_backend
 
 pytestmark = [
     pytest.mark.integration,
@@ -93,8 +94,8 @@ def test_header_graph_attach_reuse_faster_than_disk_reparse(
     header = tmp_path / "big.h"
     header.write_text(_gen_large_header(1500), encoding="utf-8")
     cache_path = tmp_path / "ast_cache.json"
-    monkeypatch.setattr(dumper, "_cache_path", lambda *a, **k: cache_path)
-    # Every _clang_header_dump call -- memo hit or not -- first resolves the
+    monkeypatch.setattr(clang_backend, "_cache_path", lambda *a, **k: cache_path)
+    # Every clang_header_dump call -- memo hit or not -- first resolves the
     # host system-include dirs via a real, uncached ``cc -E -v``-style probe
     # (dumper_sysinc._resolve_clang_system_includes, called twice for C mode)
     # *before* it even checks the memo. That probe's cost is identical on
@@ -108,7 +109,7 @@ def test_header_graph_attach_reuse_faster_than_disk_reparse(
     # Prime the disk cache with one real clang parse -- not timed (mirrors
     # the main snapshot pass that already ran before _attach_header_graph
     # follows it).
-    root0, _, _ = dumper._clang_header_dump(
+    root0, _, _ = clang_backend.clang_header_dump(
         [header], [], compiler="c", lang="c", memoize=False
     )
     assert cache_path.exists()
@@ -123,7 +124,7 @@ def test_header_graph_attach_reuse_faster_than_disk_reparse(
 
     # "No reuse": disk-cache hit, no in-process memo.
     t0 = time.perf_counter()
-    root1, _, _ = dumper._clang_header_dump(
+    root1, _, _ = clang_backend.clang_header_dump(
         [header], [], compiler="c", lang="c", memoize=False
     )
     no_reuse_elapsed = max(time.perf_counter() - t0, 1e-6)
@@ -133,9 +134,9 @@ def test_header_graph_attach_reuse_faster_than_disk_reparse(
     # active), then pop it (mirrors _attach_header_graph's own
     # memoize=False consumer call).
     with dumper_cache.ast_memoize_scope():
-        dumper._clang_header_dump([header], [], compiler="c", lang="c")
+        clang_backend.clang_header_dump([header], [], compiler="c", lang="c")
         t1 = time.perf_counter()
-        root2, _, _ = dumper._clang_header_dump(
+        root2, _, _ = clang_backend.clang_header_dump(
             [header], [], compiler="c", lang="c", memoize=False
         )
         reuse_elapsed = max(time.perf_counter() - t1, 1e-6)

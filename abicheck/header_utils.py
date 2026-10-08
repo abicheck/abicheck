@@ -797,7 +797,7 @@ def include_operand_dirs(tokens: Sequence[str]) -> tuple[Path, ...]:
     (for the P0.3 L3->L2 fold's own derived dirs specifically); moved here,
     a leaf module both ``l2_seed.py`` and ``service.py`` already import
     from, once ``service._attach_header_graph``'s own independent second
-    ``_clang_header_dump`` pass needed the identical extraction for the
+    ``clang_header_dump`` pass needed the identical extraction for the
     *same* ``gcc_option_tokens`` the fold merges into (Codex review) --
     this closes the gap generically for any include-search token the merged
     context carries, not just an L3-derived one.

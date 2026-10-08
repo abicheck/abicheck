@@ -40,7 +40,6 @@ from abicheck import (
 from abicheck.dumper import (
     _auto_system_includes_enabled,
     _build_clang_header_command,
-    _clang_header_dump,
     _configured_target_triple,
     _header_ast_parser,
     _needs_sycl_host_only,
@@ -62,7 +61,10 @@ from abicheck.dumper_clang import (
 )
 from abicheck.dumper_clang_errors import _parse_clang_ast_result
 from abicheck.errors import SnapshotError
+from abicheck.extract.headers.clang import backend as clang_backend
+from abicheck.extract.headers.clang.backend import ClangBackend, clang_header_dump
 from abicheck.model import AccessLevel, Visibility
+from tests._clang_runner_fakes import _as_runner, _fake_proc, _write_stdout_file
 
 
 def _tu(*inner: dict) -> dict:
@@ -3323,82 +3325,14 @@ def test_parse_clang_ast_result_rejects_concatenated_json_documents(
 def test_clang_header_dump_missing_clang_raises(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    from abicheck.dumper import _clang_header_dump
     from abicheck.errors import SnapshotError
+    from abicheck.extract.headers.clang.backend import clang_header_dump
 
     monkeypatch.setattr("abicheck.dumper_clang._clang_available", lambda *a, **k: False)
     header = tmp_path / "foo.h"
     header.write_text("int foo(void);\n")
     with pytest.raises(SnapshotError, match="not found in PATH"):
-        _clang_header_dump([header], [])
-
-
-def _stub_clang_self_heal(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Make _clang_header_dump fail once on a missing <cstddef> then succeed.
-
-    Mocks the clang availability/system-include probe and subprocess so the
-    C→C++ self-heal branch runs without a real compiler: the first parse exits
-    nonzero with a missing C++ stdlib header, the C++ retry returns a minimal AST.
-    """
-    import subprocess as _sp
-
-    monkeypatch.setattr("abicheck.dumper_clang._clang_available", lambda *a, **k: True)
-    monkeypatch.setattr(
-        "abicheck.dumper._resolve_clang_system_includes", lambda *a, **k: ()
-    )
-    fail = _sp.CompletedProcess(
-        args=[], returncode=1, stdout="", stderr="fatal error: 'cstddef' file not found"
-    )
-    ok = _sp.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
-    calls = {"n": 0}
-
-    def _run(*a: object, **k: object) -> _sp.CompletedProcess[str]:
-        calls["n"] += 1
-        if calls["n"] == 1:
-            return fail
-        _write_stdout_file(k, '{"kind": "TranslationUnitDecl", "inner": []}')
-        return ok
-
-    monkeypatch.setattr("abicheck.dumper.deadline.run_bounded", _run)
-
-
-def test_clang_self_heal_explicit_c_warns(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog
-) -> None:
-    # Explicit --lang c that self-heals to C++ overrides the user's request, so
-    # it stays a visible warning (Codex review).
-    import logging
-
-    _stub_clang_self_heal(monkeypatch)
-    header = tmp_path / "umbrella.h"
-    header.write_text("int foo(void);\n")
-    with caplog.at_level(logging.DEBUG, logger="abicheck.dumper"):
-        root, _resolved_kind, _ = _clang_header_dump([header], [], lang="c")
-    assert root["kind"] == "TranslationUnitDecl"
-    warns = [r for r in caplog.records if r.levelno == logging.WARNING]
-    assert any("asked for C" in r.message for r in warns), [r.message for r in warns]
-
-
-def test_clang_self_heal_auto_detected_is_debug(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog
-) -> None:
-    # Auto-detected C (lang=None, no inline C++ syntax) self-healing to C++ is
-    # just noise → demoted to debug, no warning (the P6 fix this guards).
-    import logging
-
-    _stub_clang_self_heal(monkeypatch)
-    header = tmp_path / "umbrella.h"
-    header.write_text("int foo(void);\n")
-    with caplog.at_level(logging.DEBUG, logger="abicheck.dumper"):
-        root, _resolved_kind, _ = _clang_header_dump(
-            [header], []
-        )  # lang=None → auto-detect
-    assert root["kind"] == "TranslationUnitDecl"
-    assert not any(r.levelno == logging.WARNING for r in caplog.records)
-    assert any(
-        r.levelno == logging.DEBUG and "self-healed to C++" in r.message
-        for r in caplog.records
-    )
+        clang_header_dump([header], [])
 
 
 # ── parse_variables / constants edge branches ────────────────────────────────
@@ -3749,29 +3683,6 @@ def test_node_file_falls_back_to_expansion_loc() -> None:
 # ── backend factory + clang dump driver ──────────────────────────────────────
 
 
-def _fake_proc(stdout: str = "", stderr: str = "", returncode: int = 0):
-    class _P:
-        pass
-
-    p = _P()
-    p.stdout = stdout
-    p.stderr = stderr
-    p.returncode = returncode
-    return p
-
-
-def _write_stdout_file(kwargs: dict, text: str) -> None:
-    """Write *text* to a mocked ``deadline.run_bounded(..., stdout=<file>)``
-    call's file object, mirroring what a real clang subprocess (its stdout
-    redirected to a temp file by dumper.py's L2 streaming, see
-    _clang_header_dump._run_clang) would have written. A no-op if the mock
-    wasn't invoked with a real file (e.g. a test that intentionally leaves the
-    AST empty to exercise the "no AST" error path)."""
-    fobj = kwargs.get("stdout")
-    if fobj is not None:
-        fobj.write(text.encode("utf-8"))
-
-
 def test_header_ast_parser_clang_branch(monkeypatch: pytest.MonkeyPatch) -> None:
     ast = _tu(
         {
@@ -3783,7 +3694,7 @@ def test_header_ast_parser_clang_branch(monkeypatch: pytest.MonkeyPatch) -> None
         }
     )
     monkeypatch.setattr(
-        dumper, "_clang_header_dump", lambda *a, **k: (ast, None, False)
+        clang_backend, "clang_header_dump", lambda *a, **k: (ast, None, False)
     )
     parser = _header_ast_parser(
         [],
@@ -3808,12 +3719,14 @@ def test_header_ast_parser_clang_branch(monkeypatch: pytest.MonkeyPatch) -> None
 def test_header_ast_parser_clang_branch_records_resolved_lang_mode(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Codex review, fresh evidence: the third ``_clang_header_dump`` return
+    """Codex review, fresh evidence: the third ``clang_header_dump`` return
     value (the actual, possibly post-self-heal language mode) must be
     stamped onto ``ast_toolchain["resolved_lang_mode"]`` so the provenance
     probe uses it instead of re-deriving a stale guess."""
     ast = _tu({"kind": "TranslationUnitDecl", "inner": []})
-    monkeypatch.setattr(dumper, "_clang_header_dump", lambda *a, **k: (ast, None, True))
+    monkeypatch.setattr(
+        clang_backend, "clang_header_dump", lambda *a, **k: (ast, None, True)
+    )
     parser = _header_ast_parser(
         [],
         [],
@@ -3846,7 +3759,7 @@ def test_header_ast_parser_passes_explicit_target_to_clang_parser(
         }
     )
     monkeypatch.setattr(
-        dumper, "_clang_header_dump", lambda *a, **k: (ast, None, False)
+        clang_backend, "clang_header_dump", lambda *a, **k: (ast, None, False)
     )
     parser = _header_ast_parser(
         [],
@@ -3883,7 +3796,7 @@ def test_header_ast_parser_clang_branch_records_abi_dialect(
         }
     )
     monkeypatch.setattr(
-        dumper, "_clang_header_dump", lambda *a, **k: (ast, None, False)
+        clang_backend, "clang_header_dump", lambda *a, **k: (ast, None, False)
     )
     parser = _header_ast_parser(
         [],
@@ -3917,10 +3830,10 @@ def test_header_ast_parser_clang_branch_records_msvc_abi_dialect(
         }
     )
     monkeypatch.setattr(
-        dumper, "_clang_header_dump", lambda *a, **k: (ast, None, False)
+        clang_backend, "clang_header_dump", lambda *a, **k: (ast, None, False)
     )
     monkeypatch.setattr(
-        dumper, "_resolve_clang_bin", lambda *a, **k: "/opt/llvm/bin/cl.exe"
+        clang_backend, "_resolve_clang_bin", lambda *a, **k: "/opt/llvm/bin/cl.exe"
     )
     parser = _header_ast_parser(
         [],
@@ -4141,39 +4054,6 @@ def test_header_ast_parser_stamps_castxml_unsupported(
     assert "castxml_version_below_minimum" in parser._abicheck_ast_unsupported_reasons
 
 
-def test_clang_header_dump_success_and_cache(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    header = tmp_path / "foo.h"
-    header.write_text("int foo(void);\n")
-    cache = tmp_path / "cache.json"
-    ast_json = '{"kind": "TranslationUnitDecl", "inner": []}'
-
-    monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
-    monkeypatch.setattr(dumper, "_cache_path", lambda *a, **k: cache)
-    # Isolate the single clang AST-dump call: disable the castxml↔clang
-    # system-include probe (itself a separate, best-effort subprocess).
-    monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "0")
-    calls = {"n": 0}
-
-    def _run(cmd, **kwargs):
-        calls["n"] += 1
-        _write_stdout_file(kwargs, ast_json)
-        return _fake_proc()
-
-    monkeypatch.setattr(dumper.deadline, "run_bounded", _run)
-
-    root, resolved_kind, _ = _clang_header_dump([header], [])
-    assert root == {"kind": "TranslationUnitDecl", "inner": []}
-    assert resolved_kind is None
-    assert cache.exists()  # result was cached
-    # Second call hits the cache — subprocess is not invoked again.
-    root2, resolved_kind2, _ = _clang_header_dump([header], [])
-    assert root2 == root
-    assert resolved_kind2 is None
-    assert calls["n"] == 1
-
-
 def test_header_graph_attach_reuses_primary_snapshot_ast(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -4195,7 +4075,7 @@ def test_header_graph_attach_reuses_primary_snapshot_ast(
     header.write_text("int f(void);\n")
     cache = tmp_path / "cache.json"
     monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
-    monkeypatch.setattr(dumper, "_cache_path", lambda *a, **k: cache)
+    monkeypatch.setattr(clang_backend, "_cache_path", lambda *a, **k: cache)
     monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "0")
     calls = {"n": 0}
 
@@ -4204,14 +4084,27 @@ def test_header_graph_attach_reuses_primary_snapshot_ast(
         _write_stdout_file(kwargs, '{"kind": "TranslationUnitDecl", "inner": []}')
         return _fake_proc()
 
-    monkeypatch.setattr(dumper.deadline, "run_bounded", _run)
+    # Step 1's clang process is injected through the dump's clang backend.
+    monkeypatch.setitem(
+        dumper.HEADER_AST_BACKENDS, "clang", ClangBackend(runner=_as_runner(_run))
+    )
+
+    # Step 2 (``service._attach_header_graph``) calls ``clang_header_dump``
+    # with its default runner, which no caller-side injection reaches; any
+    # clang run there goes through ``run_clang_to_ast_file``, so a tripwire
+    # there counts it against the same budget instead of spawning clang.
+    def _graph_pass_run(cmd: list[str], **kwargs: Any) -> Any:
+        calls["n"] += 1
+        raise AssertionError("header-graph attach re-ran the clang pass")
+
+    monkeypatch.setattr(dumper_clang_errors, "run_clang_to_ast_file", _graph_pass_run)
 
     # Step 1: the main snapshot pass's own parser construction (mirrors
     # dumper._header_ast_parser's `_run_clang()` inner call for
     # `--ast-frontend clang`) -- the exact path a real ELF/PE/Mach-O
     # clang-frontend dump takes. Wrapped in ast_memoize_scope() -- the same
     # scope service.run_dump's own format branches open around their
-    # primary dump call -- since without it _clang_header_dump's memoize
+    # primary dump call -- since without it clang_header_dump's memoize
     # resolves to False and step 2 below would only prove disk-cache reuse
     # (pre-existing behaviour), not the new in-process AST memo this test
     # is meant to guard (CodeRabbit review).
@@ -4258,81 +4151,6 @@ def test_header_graph_attach_reuses_primary_snapshot_ast(
     assert calls["n"] == 1  # unchanged: reused the in-process AST memo
 
 
-def test_clang_header_dump_skips_memo_write_on_toolchain_change(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """CodeRabbit review: a compiler-identity change mid-parse already skips
-    the on-disk cache write (``cache_write=identities_stable``) -- the
-    in-process memo write must honor the same safeguard, or a result
-    produced by the replacement toolchain could be served back under the
-    original tool's cache key on a later same-process call."""
-    header = tmp_path / "foo.h"
-    header.write_text("int foo(void);\n")
-    cache = tmp_path / "cache.json"
-    monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
-    monkeypatch.setattr(dumper, "_cache_path", lambda *a, **k: cache)
-    monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "0")
-    # First call (frontend_identity) returns "v1"; every later call (the
-    # post-parse identities_stable check, plus this same probe on the second
-    # _clang_header_dump call below) returns "v2" -- simulating the
-    # toolchain changing under us mid-execution.
-    identities = iter(["v1"])
-    monkeypatch.setattr(
-        dumper, "_tool_identity", lambda *a, **k: next(identities, "v2")
-    )
-    calls = {"n": 0}
-
-    def _run(cmd: list[str], **kwargs: Any) -> Any:
-        calls["n"] += 1
-        _write_stdout_file(kwargs, '{"kind": "TranslationUnitDecl", "inner": []}')
-        return _fake_proc()
-
-    monkeypatch.setattr(dumper.deadline, "run_bounded", _run)
-
-    _clang_header_dump([header], [])
-    assert not cache.exists()  # disk write skipped, as before this PR
-
-    # A second call must NOT hit the memo either -- it should re-invoke the
-    # subprocess rather than serve the unstable-toolchain result back.
-    _clang_header_dump([header], [])
-    assert calls["n"] == 2
-
-
-def test_clang_header_dump_memoize_false_never_writes_the_memo(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """Codex review: ``_attach_header_graph`` is the *final* consumer of its
-    own ``_clang_header_dump`` call when the primary snapshot pass used
-    castxml (never wrote a memo entry of its own) -- passing
-    ``memoize=False`` there must mean neither a disk-cache hit nor a fresh
-    parse populates the in-process memo, since no further same-process
-    reader will ever pop it. Otherwise a long-lived process (the MCP
-    server, ``scan`` over many libraries) accumulates dead, potentially
-    multi-GB entries with no consumer."""
-    header = tmp_path / "foo.h"
-    header.write_text("int foo(void);\n")
-    cache = tmp_path / "cache.json"
-    monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
-    monkeypatch.setattr(dumper, "_cache_path", lambda *a, **k: cache)
-    monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "0")
-
-    def _run(cmd: list[str], **kwargs: Any) -> Any:
-        _write_stdout_file(kwargs, '{"kind": "TranslationUnitDecl", "inner": []}')
-        return _fake_proc()
-
-    monkeypatch.setattr(dumper.deadline, "run_bounded", _run)
-
-    # Fresh-parse path: memoize=False must leave this thread's slot unset.
-    _clang_header_dump([header], [], memoize=False)
-    assert cache.exists()  # the disk cache is still populated, as always
-    assert dumper_cache._ast_memo_slot.get() is None
-
-    # Disk-cache-hit path: a second memoize=False call reads the file this
-    # test just warmed on disk, and must still leave the slot unset.
-    _clang_header_dump([header], [], memoize=False)
-    assert dumper_cache._ast_memo_slot.get() is None
-
-
 def test_ast_memo_slot_overwrites_previous_pending_value() -> None:
     """CodeRabbit/Codex review: the memo is a single-consumption, per-thread
     handoff, not a general keyed cache -- there is at most one legitimate
@@ -4342,92 +4160,6 @@ def test_ast_memo_slot_overwrites_previous_pending_value() -> None:
     dumper_cache.store_cached_ast("k1", "clang", {"n": 1})
     dumper_cache.store_cached_ast("k2", "clang", {"n": 2})
     assert dumper_cache._ast_memo_slot.get() == ("clang", "k2", {"n": 2})
-
-
-def test_clang_header_dump_direct_caller_never_memoizes(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """Codex review: a direct ``_clang_header_dump`` caller with no
-    ``service.run_dump``-style downstream ``_attach_header_graph`` consumer
-    (``appcompat.check_app_compatibility``, a direct Python-API/MCP caller
-    selecting the clang backend) must not populate the in-process memo at
-    all -- outside ``dumper_cache.ast_memoize_scope()``, ``memoize=None``
-    (the default every such caller uses) resolves to ``False``, so the
-    entry is dead weight nothing will ever pop."""
-    header = tmp_path / "foo.h"
-    header.write_text("int foo(void);\n")
-    cache = tmp_path / "cache.json"
-    monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
-    monkeypatch.setattr(dumper, "_cache_path", lambda *a, **k: cache)
-    monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "0")
-
-    def _run(cmd: list[str], **kwargs: Any) -> Any:
-        _write_stdout_file(kwargs, '{"kind": "TranslationUnitDecl", "inner": []}')
-        return _fake_proc()
-
-    monkeypatch.setattr(dumper.deadline, "run_bounded", _run)
-
-    assert not dumper_cache.ast_memoize_active()
-    _clang_header_dump([header], [])  # no ast_memoize_scope() active
-    assert cache.exists()  # the disk cache is still populated, as always
-    assert dumper_cache._ast_memo_slot.get() is None
-
-
-def test_clang_header_dump_memoizes_inside_ast_memoize_scope(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """The other half: a caller inside ``service.run_dump``'s
-    ``ast_memoize_scope()`` (its primary-dump call) does get the memo
-    write, exactly the handoff ``_attach_header_graph`` then consumes."""
-    header = tmp_path / "foo.h"
-    header.write_text("int foo(void);\n")
-    cache = tmp_path / "cache.json"
-    monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
-    monkeypatch.setattr(dumper, "_cache_path", lambda *a, **k: cache)
-    monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "0")
-
-    def _run(cmd: list[str], **kwargs: Any) -> Any:
-        _write_stdout_file(kwargs, '{"kind": "TranslationUnitDecl", "inner": []}')
-        return _fake_proc()
-
-    monkeypatch.setattr(dumper.deadline, "run_bounded", _run)
-
-    with dumper_cache.ast_memoize_scope():
-        _clang_header_dump([header], [])
-        assert dumper_cache._ast_memo_slot.get() is not None  # written
-    # The scope exiting doesn't itself clear the slot -- only a subsequent
-    # pop (the header-graph attach step) does; still present right after.
-    assert dumper_cache._ast_memo_slot.get() is not None
-
-
-def test_ast_memoize_scope_cleans_up_its_own_writes_on_exception(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """Codex review: a primary dump that successfully parses/memoizes an AST
-    but then fails *later* in the same scoped call (e.g. snapshot
-    construction raises after the AST parse succeeded) never reaches
-    _attach_header_graph to pop that entry -- ast_memoize_scope must clear
-    this thread's slot when the scoped operation raises, or it sits set
-    for however long this thread lives afterward in a long-lived process."""
-    header = tmp_path / "foo.h"
-    header.write_text("int foo(void);\n")
-    cache = tmp_path / "cache.json"
-    monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
-    monkeypatch.setattr(dumper, "_cache_path", lambda *a, **k: cache)
-    monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "0")
-
-    def _run(cmd: list[str], **kwargs: Any) -> Any:
-        _write_stdout_file(kwargs, '{"kind": "TranslationUnitDecl", "inner": []}')
-        return _fake_proc()
-
-    monkeypatch.setattr(dumper.deadline, "run_bounded", _run)
-
-    with pytest.raises(RuntimeError, match="snapshot construction failed"):
-        with dumper_cache.ast_memoize_scope():
-            _clang_header_dump([header], [])
-            assert dumper_cache._ast_memo_slot.get() is not None  # written
-            raise RuntimeError("snapshot construction failed")
-    assert dumper_cache._ast_memo_slot.get() is None  # cleaned up on the way out
 
 
 def test_ast_memo_slot_is_per_thread_not_shared(
@@ -4468,102 +4200,6 @@ def test_ast_memo_slot_is_per_thread_not_shared(
         "shared-key",
         {"side": "main"},
     )
-
-
-def test_clang_only_dump_does_not_require_gxx_identity(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    header = tmp_path / "foo.h"
-    header.write_text("int foo(void);\n")
-    cache = tmp_path / "cache.json"
-    monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
-    monkeypatch.setattr(dumper, "_cache_path", lambda *a, **k: cache)
-    monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "0")
-    monkeypatch.setattr(
-        dumper,
-        "_resolve_compiler_binary",
-        lambda *_a, **_k: pytest.fail("clang-only dump resolved g++"),
-    )
-
-    def _run(cmd, **kwargs):
-        _write_stdout_file(kwargs, '{"kind": "TranslationUnitDecl", "inner": []}')
-        return _fake_proc()
-
-    monkeypatch.setattr(dumper.deadline, "run_bounded", _run)
-    root, resolved_kind, _ = _clang_header_dump([header], [])
-    assert root == {"kind": "TranslationUnitDecl", "inner": []}
-    assert resolved_kind is None
-
-
-def test_clang_header_dump_rechecks_deadline_on_cache_hit(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """Codex review (PR #591): a warm AST cache hit still costs real time
-    reading/parsing a potentially huge cached AST — deadline.check() must
-    fire on that path too, not just on the cache-miss subprocess path."""
-    header = tmp_path / "foo.h"
-    header.write_text("int foo(void);\n")
-    cache = tmp_path / "cache.json"
-    monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
-    monkeypatch.setattr(dumper, "_cache_path", lambda *a, **k: cache)
-    monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "0")
-    calls = {"n": 0}
-
-    def _run(cmd, **kwargs):
-        calls["n"] += 1
-        _write_stdout_file(kwargs, '{"kind": "TranslationUnitDecl", "inner": []}')
-        return _fake_proc()
-
-    monkeypatch.setattr(dumper.deadline, "run_bounded", _run)
-    _clang_header_dump([header], [])  # warms the cache
-    assert cache.exists() and calls["n"] == 1
-
-    with dumper.deadline.deadline_scope(-1):  # already expired
-        with pytest.raises(dumper.deadline.DeadlineExceeded):
-            _clang_header_dump([header], [])
-    assert calls["n"] == 1  # never reached the subprocess path — cache hit
-
-
-def test_clang_header_dump_rechecks_deadline_after_cache_load(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """Codex review (PR #591, round 3): json.loads() on a warm cache hit can
-    itself consume the rest of the budget for a huge cached AST -- the
-    existing pre-load deadline.check() doesn't catch that; must re-check
-    again after the load before handing the root to the AST walker."""
-    header = tmp_path / "foo.h"
-    header.write_text("int foo(void);\n")
-    cache = tmp_path / "cache.json"
-    monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
-    monkeypatch.setattr(dumper, "_cache_path", lambda *a, **k: cache)
-    monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "0")
-
-    def _run(cmd, **kwargs):
-        _write_stdout_file(kwargs, '{"kind": "TranslationUnitDecl", "inner": []}')
-        return _fake_proc()
-
-    monkeypatch.setattr(dumper.deadline, "run_bounded", _run)
-    _clang_header_dump([header], [])  # warms the cache
-    assert cache.exists()
-    # Force the second call past the in-process AST memo (G31 Phase C reuse)
-    # onto the on-disk read this test is actually about -- a memo hit would
-    # skip json.loads (and the slow-patched cost below) entirely, which is
-    # exactly the intended optimization but not what this test exercises.
-    dumper_cache._ast_memo_slot.set(None)
-
-    # The disk-cache read (json.loads) now lives in dumper_cache.py, not
-    # dumper.py itself (G31 Phase C AST reuse split the read into
-    # dumper_cache.load_cached_ast) -- patch the module that actually calls it.
-    real_json_loads = dumper_cache.json.loads
-
-    def _slow_loads(text: str) -> Any:
-        time.sleep(0.05)
-        return real_json_loads(text)
-
-    monkeypatch.setattr(dumper_cache.json, "loads", _slow_loads)
-    with dumper.deadline.deadline_scope(0.03):
-        with pytest.raises(dumper.deadline.DeadlineExceeded):
-            _clang_header_dump([header], [])
 
 
 def test_parse_clang_ast_result_missing_ast_file_reports_no_ast(tmp_path: Path) -> None:
@@ -4655,7 +4291,9 @@ def test_clang_header_dump_streams_stdout_to_file_not_memory(
     header = tmp_path / "foo.h"
     header.write_text("int foo(void);\n")
     monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
-    monkeypatch.setattr(dumper, "_cache_path", lambda *a, **k: tmp_path / "c.json")
+    monkeypatch.setattr(
+        clang_backend, "_cache_path", lambda *a, **k: tmp_path / "c.json"
+    )
     # Isolate the single clang AST-dump call from the (also run_bounded-based,
     # Codex review follow-up) system-include probe — otherwise its capture_
     # output=True call leaks into `seen` alongside the AST-dump call's kwargs.
@@ -4668,79 +4306,12 @@ def test_clang_header_dump_streams_stdout_to_file_not_memory(
         return _fake_proc()
 
     monkeypatch.setattr(dumper.deadline, "run_bounded", _run)
-    _clang_header_dump([header], [])
+    clang_header_dump([header], [])
     assert seen.get("capture_output") is not True
     assert hasattr(seen.get("stdout"), "write"), (
         "stdout must be a real writable file object, not None/PIPE — a "
         "pathological header's AST dump must never be buffered in memory"
     )
-
-
-def test_clang_header_dump_no_output_raises(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    header = tmp_path / "foo.h"
-    header.write_text("int foo(void);\n")
-    monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
-    monkeypatch.setattr(dumper, "_cache_path", lambda *a, **k: tmp_path / "c.json")
-    # Exit 0 but empty stdout → the "no AST" path (a nonzero exit is the
-    # earlier branch, covered by test_clang_header_dump_nonzero_exit_raises).
-    monkeypatch.setattr(
-        dumper.deadline,
-        "run_bounded",
-        lambda *a, **k: _fake_proc(stdout="", stderr="boom", returncode=0),
-    )
-    with pytest.raises(SnapshotError, match="no AST"):
-        _clang_header_dump([header], [])
-
-
-def test_clang_header_dump_rechecks_deadline_before_loading_ast(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """Codex review (PR #591): a --budget that expires exactly as clang exits
-    successfully must not silently let the (potentially huge) AST JSON load +
-    walk run well past it. deadline.check() must fire again right after the
-    subprocess returns, before json.load — not just once before it was
-    spawned."""
-    header = tmp_path / "foo.h"
-    header.write_text("int foo(void);\n")
-    monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
-    monkeypatch.setattr(dumper, "_cache_path", lambda *a, **k: tmp_path / "c.json")
-    # Isolate the single clang AST-dump call from the setup/prep work leading
-    # up to it (same as test_clang_header_dump_success_and_cache): disable the
-    # castxml↔clang system-include probe, a separate best-effort subprocess
-    # whose own variable cost would otherwise eat into the tight budget below
-    # before the call under test even starts.
-    monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "0")
-
-    def _run(cmd, **kwargs):
-        # Simulate the budget running out while clang was still parsing: by
-        # the time it exits successfully, the deadline has already passed.
-        time.sleep(0.05)
-        _write_stdout_file(kwargs, '{"kind": "TranslationUnitDecl", "inner": []}')
-        return _fake_proc()
-
-    monkeypatch.setattr(dumper.deadline, "run_bounded", _run)
-    with dumper.deadline.deadline_scope(0.03):
-        with pytest.raises(dumper.deadline.DeadlineExceeded):
-            _clang_header_dump([header], [])
-
-
-def test_clang_header_dump_bad_json_raises(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    header = tmp_path / "foo.h"
-    header.write_text("int foo(void);\n")
-    monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
-    monkeypatch.setattr(dumper, "_cache_path", lambda *a, **k: tmp_path / "c.json")
-
-    def _run(*a, **k):
-        _write_stdout_file(k, "not json")
-        return _fake_proc(returncode=0)
-
-    monkeypatch.setattr(dumper.deadline, "run_bounded", _run)
-    with pytest.raises(SnapshotError, match="not valid JSON"):
-        _clang_header_dump([header], [])
 
 
 @pytest.mark.parametrize(
@@ -4770,241 +4341,7 @@ def test_clang_header_dump_bad_json_raises(
     ],
 )
 def test_is_missing_cpp_stdlib_header_error(stderr: str, expected: bool) -> None:
-    assert dumper._is_missing_cpp_stdlib_header_error(stderr) is expected
-
-
-def test_clang_header_dump_retries_cpp_on_missing_cpp_stdlib_header(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    # A pure-#include umbrella header has no inline C++ syntax, so it is parsed in
-    # C mode first; the missing-<cstddef> failure must trigger one C++-mode retry
-    # (with -x c++ in the rebuilt command) rather than hard-failing.
-    header = tmp_path / "umbrella.h"
-    header.write_text('#include "detail/impl.h"\n')
-    monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
-    monkeypatch.setattr(dumper, "_cache_path", lambda *a, **k: tmp_path / "c.json")
-    monkeypatch.setattr(dumper, "_detect_cpp_headers", lambda *a, **k: False)
-    monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "0")
-    ast_json = '{"kind": "TranslationUnitDecl", "inner": []}'
-    cmds: list[list[str]] = []
-
-    def _run(cmd, **kwargs):
-        cmds.append(list(cmd))
-        if len(cmds) == 1:
-            return _fake_proc(
-                stderr="fatal error: 'cstddef' file not found", returncode=1
-            )
-        _write_stdout_file(kwargs, ast_json)
-        return _fake_proc(returncode=0)
-
-    monkeypatch.setattr(dumper.deadline, "run_bounded", _run)
-    root, _resolved_kind, resolved_force_cpp = _clang_header_dump([header], [])
-    assert root == {"kind": "TranslationUnitDecl", "inner": []}
-    assert len(cmds) == 2  # one C attempt + one C++ retry
-    assert "c" in cmds[0] and cmds[0][cmds[0].index("-x") + 1] == "c"
-    assert cmds[1][cmds[1].index("-x") + 1] == "c++"
-    # Codex review, fresh evidence: the self-heal's real, post-retry language
-    # mode must be reported back, not the pre-retry "c" guess -- this is what
-    # the provenance probe (dumper_toolchain._ast_compile_provenance) relies
-    # on instead of silently re-deriving a stale answer.
-    assert resolved_force_cpp is True
-
-
-def test_clang_header_dump_no_retry_on_other_error(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    # A non-"missing C++ stdlib header" failure must NOT retry — it surfaces as-is.
-    header = tmp_path / "foo.h"
-    header.write_text("int foo(void);\n")
-    monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
-    monkeypatch.setattr(dumper, "_cache_path", lambda *a, **k: tmp_path / "c.json")
-    monkeypatch.setattr(dumper, "_detect_cpp_headers", lambda *a, **k: False)
-    monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "0")
-    calls = {"n": 0}
-
-    def _run(cmd, **kwargs):
-        calls["n"] += 1
-        return _fake_proc(stderr="error: undeclared identifier 'x'", returncode=1)
-
-    monkeypatch.setattr(dumper.deadline, "run_bounded", _run)
-    with pytest.raises(SnapshotError, match="failed to parse"):
-        _clang_header_dump([header], [])
-    assert calls["n"] == 1  # no retry
-
-
-# ── ADR-050 D5 (G32 Phase D): SYCL/DPC++ host/device context wiring ─────────
-
-
-_G32_DPCPP_DIR = Path(__file__).parent / "fixtures" / "g32" / "dpcpp"
-
-
-def _dpcpp_fixture_texts() -> tuple[str, str]:
-    """Real captured (stdout, stderr) pair from ``icpx -fsycl`` (Phase 0's
-    fixture, see ``tests/fixtures/g32/README.md``) -- not synthesized."""
-    stdout = (_G32_DPCPP_DIR / "ast_dump.json").read_text(encoding="utf-8")
-    stderr = (_G32_DPCPP_DIR / "compiler_invocation.log").read_text(encoding="utf-8")
-    return stdout, stderr
-
-
-def test_clang_header_dump_device_context_selects_real_fixture(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """End-to-end wiring: a DPC++-capable clang_bin + frontend_context="device"
-    decodes the real two-document capture and selects the spir64 device AST,
-    proving sycl_context.py is actually reached from _clang_header_dump, not
-    just exercised in isolation (Codex P1 review)."""
-    header = tmp_path / "foo.h"
-    header.write_text("struct Point { int x, y; };\nint add(int, int);\n")
-    stdout_text, stderr_text = _dpcpp_fixture_texts()
-    monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
-    monkeypatch.setattr(dumper, "_cache_path", lambda *a, **k: tmp_path / "c.json")
-    monkeypatch.setattr(dumper, "_resolve_clang_bin", lambda *a, **k: "/opt/intel/icpx")
-    monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "0")
-
-    def _run(cmd, **kwargs):
-        _write_stdout_file(kwargs, stdout_text)
-        return _fake_proc(stderr=stderr_text, returncode=0)
-
-    monkeypatch.setattr(dumper.deadline, "run_bounded", _run)
-    root, resolved_kind, _ = _clang_header_dump([header], [], frontend_context="device")
-    assert resolved_kind == "device"
-    assert root["kind"] == "TranslationUnitDecl"
-
-
-def test_clang_header_dump_host_context_selects_real_fixture(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """Companion to the device-selection test above: the same DPC++-capable
-    invocation with the default frontend_context="host" selects the OTHER
-    (x86_64) document from the identical real capture."""
-    header = tmp_path / "foo.h"
-    header.write_text("struct Point { int x, y; };\nint add(int, int);\n")
-    stdout_text, stderr_text = _dpcpp_fixture_texts()
-    monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
-    monkeypatch.setattr(dumper, "_cache_path", lambda *a, **k: tmp_path / "c.json")
-    monkeypatch.setattr(dumper, "_resolve_dpcpp_acquisition", lambda *a: (True, False))
-    monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "0")
-
-    def _run(cmd, **kwargs):
-        _write_stdout_file(kwargs, stdout_text)
-        return _fake_proc(stderr=stderr_text, returncode=0)
-
-    monkeypatch.setattr(dumper.deadline, "run_bounded", _run)
-    root, resolved_kind, _ = _clang_header_dump([header], [])
-    assert resolved_kind == "host"
-    assert root["kind"] == "TranslationUnitDecl"
-
-
-def test_clang_header_dump_dpcpp_empty_stream_raises_ast_context_missing(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """Fallback-gating (ADR-050 D5 acceptance criterion): a DPC++-capable
-    invocation whose decoded stream comes back empty (broken toolchain
-    invocation, truncated output) must raise AstContextMissingError -- never
-    silently degrade to a single-context path, which is reserved for an
-    invocation that was never positively identified as DPC++-capable at all."""
-    from abicheck.errors import AstContextMissingError
-
-    header = tmp_path / "foo.h"
-    header.write_text("int foo(void);\n")
-    monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
-    monkeypatch.setattr(dumper, "_cache_path", lambda *a, **k: tmp_path / "c.json")
-    monkeypatch.setattr(dumper, "_resolve_clang_bin", lambda *a, **k: "/opt/intel/icpx")
-    monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "0")
-
-    def _run(cmd, **kwargs):
-        # No document-boundary markers at all -- an empty/malformed stream,
-        # not "this wasn't a multi-document invocation."
-        _write_stdout_file(kwargs, "")
-        return _fake_proc(stderr="", returncode=0)
-
-    monkeypatch.setattr(dumper.deadline, "run_bounded", _run)
-    with pytest.raises((AstContextMissingError, SnapshotError)):
-        _clang_header_dump([header], [], frontend_context="device")
-
-
-def test_clang_header_dump_fno_sycl_skips_multi_context(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """Codex review (P2): an explicit ``-fno-sycl`` in gcc_options on a
-    DPC++-capable compiler must not be silently overridden by
-    dpcpp_multi_context's unconditional ``-fsycl`` append -- the actual
-    clang invocation must not re-enable SYCL, and the decode falls back to
-    the ordinary single-document path (resolved_kind is None)."""
-    header = tmp_path / "foo.h"
-    header.write_text("int foo(void);\n")
-    monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
-    monkeypatch.setattr(dumper, "_cache_path", lambda *a, **k: tmp_path / "c.json")
-    monkeypatch.setattr(dumper, "_resolve_clang_bin", lambda *a, **k: "/opt/intel/icpx")
-    monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "0")
-    captured_cmds: list[list[str]] = []
-
-    def _run(cmd, **kwargs):
-        captured_cmds.append(cmd)
-        _write_stdout_file(kwargs, '{"kind": "TranslationUnitDecl", "inner": []}')
-        return _fake_proc()
-
-    monkeypatch.setattr(dumper.deadline, "run_bounded", _run)
-    root, resolved_kind, _ = _clang_header_dump([header], [], gcc_options="-fno-sycl")
-    assert resolved_kind is None
-    assert root["kind"] == "TranslationUnitDecl"
-    assert captured_cmds and all("-fsycl" not in cmd for cmd in captured_cmds)
-
-
-def test_clang_header_dump_device_context_with_fno_sycl_raises(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """Companion: requesting --frontend-context device while gcc_options
-    explicitly disables SYCL is a contradictory combination that must fail
-    fast with AstContextMissingError -- never silently re-enable SYCL to
-    honor frontend_context, nor silently ignore -fno-sycl (Codex review,
-    P2)."""
-    from abicheck.errors import AstContextMissingError
-
-    header = tmp_path / "foo.h"
-    header.write_text("int foo(void);\n")
-    monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
-    monkeypatch.setattr(dumper, "_resolve_clang_bin", lambda *a, **k: "/opt/intel/icpx")
-    calls = {"n": 0}
-
-    def _run(cmd, **kwargs):
-        calls["n"] += 1
-        return _fake_proc(returncode=0)
-
-    monkeypatch.setattr(dumper.deadline, "run_bounded", _run)
-    with pytest.raises(AstContextMissingError, match="-fno-sycl"):
-        _clang_header_dump(
-            [header], [], gcc_options="-fno-sycl", frontend_context="device"
-        )
-    assert calls["n"] == 0  # fails before any subprocess is invoked
-
-
-def test_clang_header_dump_non_host_on_plain_frontend_raises_immediately(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """A non-"host" frontend_context against a plain, non-DPC++-capable
-    clang_bin fails immediately with AstContextMissingError, before any
-    subprocess is invoked -- a user who explicitly requests "device" on a
-    frontend that cannot produce one must get a clear failure, never the
-    ordinary single-context host AST silently standing in for it."""
-    from abicheck.errors import AstContextMissingError
-
-    header = tmp_path / "foo.h"
-    header.write_text("int foo(void);\n")
-    monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
-    monkeypatch.setattr(
-        dumper, "_resolve_clang_bin", lambda *a, **k: "/usr/bin/clang++"
-    )
-    calls = {"n": 0}
-
-    def _run(cmd, **kwargs):
-        calls["n"] += 1
-        return _fake_proc(returncode=0)
-
-    monkeypatch.setattr(dumper.deadline, "run_bounded", _run)
-    with pytest.raises(AstContextMissingError):
-        _clang_header_dump([header], [], frontend_context="device")
-    assert calls["n"] == 0  # never spent a subprocess invocation on it
+    assert clang_backend._is_missing_cpp_stdlib_header_error(stderr) is expected
 
 
 def test_resolve_header_backend_neither_tool_defaults_castxml(
@@ -5569,26 +4906,6 @@ def test_default_argument_non_literal_fingerprint_and_marker_fallback() -> None:
     assert fn.params[1].default == "default"
 
 
-def test_clang_header_dump_nonzero_exit_raises(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    # A hard parse error (nonzero exit) must fail, even if clang emitted some
-    # JSON — the L2 header AST must be complete to be authoritative.
-    header = tmp_path / "foo.h"
-    header.write_text("int foo(void);\n")
-    monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
-    monkeypatch.setattr(dumper, "_cache_path", lambda *a, **k: tmp_path / "c.json")
-
-    class _P:
-        stdout = '{"kind": "TranslationUnitDecl", "inner": []}'
-        stderr = "error: use of undeclared identifier"
-        returncode = 1
-
-    monkeypatch.setattr(dumper.deadline, "run_bounded", lambda *a, **k: _P())
-    with pytest.raises(SnapshotError, match="failed to parse"):
-        _clang_header_dump([header], [])
-
-
 @pytest.mark.parametrize(
     "path,expected",
     [
@@ -5611,7 +4928,7 @@ def test_is_clang_family_binary(path: str, expected: bool) -> None:
     """Pure-function unit test for the --compiler clang-family classifier,
     directly exercising both the "clang" substring branch and the vendor
     alias-set branch (icx/icpx/dpcpp/dpcpp-cl) in isolation from the larger
-    _clang_header_dump/_resolve_clang_bin call chain the tests below cover."""
+    clang_header_dump/_resolve_clang_bin call chain the tests below cover."""
     assert _is_clang_family_binary(path) is expected
 
 
@@ -5653,7 +4970,7 @@ def test_clang_header_dump_gcc_path_not_used_as_clang(
 
     monkeypatch.setattr(dumper_clang, "_clang_available", _avail)
     with pytest.raises(SnapshotError):
-        _clang_header_dump([header], [], gcc_path="/usr/bin/g++")
+        clang_header_dump([header], [], gcc_path="/usr/bin/g++")
     # Fell back to a clang driver, NOT the supplied g++ binary.
     assert seen["bin"] != "/usr/bin/g++"
     assert "clang" in seen["bin"]
@@ -5672,7 +4989,7 @@ def test_clang_header_dump_explicit_clang_path_honored(
 
     monkeypatch.setattr(dumper_clang, "_clang_available", _avail)
     with pytest.raises(SnapshotError):
-        _clang_header_dump([header], [], gcc_path="/opt/llvm/bin/clang-18")
+        clang_header_dump([header], [], gcc_path="/opt/llvm/bin/clang-18")
     assert seen["bin"] == "/opt/llvm/bin/clang-18"
 
 
@@ -5703,7 +5020,7 @@ def test_clang_header_dump_gcc_path_recognizes_icx_family(
 
     monkeypatch.setattr(dumper_clang, "_clang_available", _avail)
     with pytest.raises(SnapshotError):
-        _clang_header_dump([header], [], gcc_path=gcc_path)
+        clang_header_dump([header], [], gcc_path=gcc_path)
     assert seen["bin"] == gcc_path
 
 
@@ -5721,7 +5038,7 @@ def test_clang_header_dump_gcc_path_gcc_binary_not_mistaken_for_icx(
 
     monkeypatch.setattr(dumper_clang, "_clang_available", _avail)
     with pytest.raises(SnapshotError):
-        _clang_header_dump([header], [], gcc_path="/usr/bin/x86_64-linux-gnu-gcc-13")
+        clang_header_dump([header], [], gcc_path="/usr/bin/x86_64-linux-gnu-gcc-13")
     assert seen["bin"] != "/usr/bin/x86_64-linux-gnu-gcc-13"
     assert "clang" in seen["bin"]
 
@@ -5739,9 +5056,7 @@ def test_clang_header_dump_gcc_prefix_maps_to_prefixed_clang(
 
     monkeypatch.setattr(dumper_clang, "_clang_available", _avail)
     with pytest.raises(SnapshotError):
-        _clang_header_dump(
-            [header], [], gcc_prefix="aarch64-linux-gnu-", compiler="c++"
-        )
+        clang_header_dump([header], [], gcc_prefix="aarch64-linux-gnu-", compiler="c++")
     assert seen["bin"] == "aarch64-linux-gnu-clang++"
 
 
@@ -5850,46 +5165,6 @@ def test_owned_tag_id_nested_and_non_dict() -> None:
     node = {"inner": ["x", {"inner": [{"ownedTagDecl": {"id": "0xABC"}}]}]}
     assert _owned_tag_id(node) == "0xABC"
     assert _owned_tag_id({"inner": [123]}) == ""
-
-
-def test_clang_header_dump_timeout_raises(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    import subprocess as _sp
-
-    header = tmp_path / "foo.h"
-    header.write_text("int foo(void);\n")
-    monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
-    monkeypatch.setattr(dumper, "_cache_path", lambda *a, **k: tmp_path / "c.json")
-
-    def _boom(*a, **k):
-        raise _sp.TimeoutExpired(cmd="clang", timeout=120)
-
-    monkeypatch.setattr(dumper.deadline, "run_bounded", _boom)
-    with pytest.raises(SnapshotError, match="timed out"):
-        _clang_header_dump([header], [])
-
-
-def test_clang_header_dump_corrupt_cache_is_discarded(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    header = tmp_path / "foo.h"
-    header.write_text("int foo(void);\n")
-    cache = tmp_path / "c.json"
-    cache.write_text("{ this is not valid json")  # corrupt prior cache entry
-    ast = '{"kind": "TranslationUnitDecl", "inner": []}'
-
-    monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
-    monkeypatch.setattr(dumper, "_cache_path", lambda *a, **k: cache)
-
-    def _run(*a, **k):
-        _write_stdout_file(k, ast)
-        return _fake_proc(returncode=0)
-
-    monkeypatch.setattr(dumper.deadline, "run_bounded", _run)
-    # The corrupt cache is unlinked and the fresh clang run repopulates it.
-    root, _resolved_kind, _ = _clang_header_dump([header], [])
-    assert root == {"kind": "TranslationUnitDecl", "inner": []}
 
 
 # ── castxml↔clang system-include auto-detection (parity fix) ─────────────────

@@ -339,6 +339,22 @@ def _is_direct_include_guard_failure(stderr: str) -> bool:
     return "error" in stderr.lower() and bool(_DIRECT_INCLUDE_GUARD_RE.search(stderr))
 
 
+def run_clang_ast(
+    cmd: list[str],
+    *,
+    timeout: float,
+    on_created: Callable[[Path], None],
+) -> subprocess.CompletedProcess[str]:
+    """The clang header backend's default runner: check the scan deadline,
+    then :func:`run_clang_to_ast_file`.
+
+    ``DeadlineExceeded`` propagates uncaught; ``run_scan_core`` maps it to
+    ``_BudgetOverflow``.
+    """
+    deadline.check()
+    return run_clang_to_ast_file(cmd, timeout=timeout, on_created=on_created)
+
+
 def run_clang_to_ast_file(
     cmd: list[str],
     *,
@@ -531,7 +547,7 @@ def _parse_clang_ast_result(
     for the same reason — it streams the *selected* document straight into
     the cache file rather than building one big ``json.dumps(...).encode()``
     blob first. The cache then stores only the *selected* single document
-    (keyed by *frontend_context*, see ``dumper._clang_header_dump``'s cache
+    (keyed by *frontend_context*, see ``extract.headers.clang.backend.clang_header_dump``'s cache
     key), not the whole raw stream, so the cache-hit read-back path (a bare
     ``json.loads``) needs no changes for either case.
     """

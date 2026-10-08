@@ -174,7 +174,7 @@ def _run_dump_uncached(
     # Every format's own main pass normalizes `lang` to only ever force a
     # language explicitly requested, letting auto-detection run otherwise
     # (including for the default "c++") -- `_cache_key` hashes the raw
-    # `lang` value, so `_attach_header_graph`'s own _clang_header_dump call
+    # `lang` value, so `_attach_header_graph`'s own clang_header_dump call
     # must pass this identical normalized value, or it hashes a different
     # key than the main pass just used, permanently missing the AST memo
     # for the default (non-explicit-"c") workload (Codex review). ELF does

@@ -374,7 +374,7 @@ def seed_ast_graph(
     augment_graph_with_calls(graph, call_edges)
     # A header-only pass is a single parse over the whole header aggregate —
     # never narrowed/scoped like a per-compile-unit build-integrated pass, and
-    # ``_clang_header_dump`` raises on a failed/empty parse rather than
+    # ``clang_header_dump`` raises on a failed/empty parse rather than
     # returning a degraded partial result (ADR-028 D3 "never abort collection"
     # lives one layer up, in the caller's try/except around the clang
     # invocation) — so reaching this line means the whole pass ran cleanly.
