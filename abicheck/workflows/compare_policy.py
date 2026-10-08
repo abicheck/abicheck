@@ -86,8 +86,15 @@ def load_suppression_and_policy(
     suppress: Path | None,
     policy: str = "strict_abi",
     policy_file_path: Path | None = None,
+    *,
+    strict_suppressions: bool = False,
+    require_justification: bool = False,
 ) -> tuple[SuppressionList | None, PolicyFile | None]:
     """Load suppression list and policy file from paths.
+
+    *require_justification* rejects a rule with no ``reason``;
+    *strict_suppressions* rejects a file holding any expired rule
+    (:func:`expired_suppressions_message` names them).
 
     Raises:
         ValidationError: If the suppression or policy file is invalid.
@@ -98,9 +105,15 @@ def load_suppression_and_policy(
     suppression: _SuppressionList | None = None
     if suppress is not None:
         try:
-            suppression = _SuppressionList.load(suppress)
+            suppression = _SuppressionList.load(
+                suppress, require_justification=require_justification
+            )
         except (ValueError, OSError) as e:
             raise ValidationError(f"Invalid suppression file: {e}") from e
+        if strict_suppressions:
+            expired = suppression.check_expired_strict()
+            if expired:
+                raise ValidationError(expired_suppressions_message(expired, suppress))
 
     pf: _PolicyFile | None = None
     if policy_file_path is not None:
@@ -129,6 +142,34 @@ def load_suppression_and_policy(
         for warning in _pending_validate_overrides_warnings(pf):
             _logger.warning("%s", warning)
     return suppression, pf
+
+
+def expired_suppressions_message(expired: list[tuple[int, Any]], path: Path) -> str:
+    """The error a strict-suppressions run reports for *expired* rules in *path*.
+
+    One spelling for every front end: the CLI and the typed API name each
+    expired rule by its first selector, and the rule's 1-based position.
+    """
+    parts = [f"ERROR: {len(expired)} expired suppression rule(s) found in {path}:"]
+    for idx, rule in expired:
+        target = (
+            rule.symbol_pattern
+            and f'symbol_pattern="{rule.symbol_pattern}"'
+            or rule.symbol
+            and f'symbol="{rule.symbol}"'
+            or rule.type_pattern
+            and f'type_pattern="{rule.type_pattern}"'
+            # Canonical (backend-independent) identity selector (PR #753): a
+            # finding_id-only rule would otherwise render as the bare "?".
+            or rule.finding_id
+            and f'finding_id="{rule.finding_id}"'
+            or rule.source_location
+            and f'source_location="{rule.source_location}"'
+            or "?"
+        )
+        parts.append(f"  Rule {idx + 1}: {target} expired on {rule.expires}")
+    parts.append("Remove or renew expired rules before proceeding.")
+    return "\n".join(parts)
 
 
 def _validate_contract_mode(

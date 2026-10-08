@@ -15,12 +15,12 @@ from abicheck.checker_policy import ChangeKind, Verdict
 from abicheck.checker_types import DiffResult
 from abicheck.cli_helpers_compare import (
     _pair_wide_dialect_override,
-    fold_l0_hard_removals,
     load_required_symbols,
 )
 from abicheck.config_paths import discover_project_config
 from abicheck.dry_run_estimate import CompileContext
 from abicheck.errors import AbicheckError
+from abicheck.l0_export_delta import fold_l0_hard_removals
 from abicheck.model import AbiSnapshot
 from abicheck.model.change import Change
 

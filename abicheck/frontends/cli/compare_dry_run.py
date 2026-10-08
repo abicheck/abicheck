@@ -311,8 +311,8 @@ def build_compare_dry_run_result(
             result, old_input, new_input, old_kind, new_kind, select, select_required
         )
     if used_by_apps:
-        from ...appcompat import parse_app_requirements
         from ...model.consumer_spec import as_consumer_spec
+        from ...workflows.consumer_scope import parse_app_requirements
 
         for app in used_by_apps:
             app_label = as_consumer_spec(app).path

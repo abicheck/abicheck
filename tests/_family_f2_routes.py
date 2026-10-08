@@ -246,6 +246,18 @@ def _suppress_file(tmp: Path) -> Path:
     return p
 
 
+def _strict_suppression_args(tmp: Path) -> list[str]:
+    """``--suppress`` plus a config turning on ``suppression.strict`` and
+    ``suppression.require_justification`` (every rule above has a reason and
+    no expiry, so both are satisfied and the findings must be identical)."""
+    cfg = tmp / "strict-suppression.abicheck.yml"
+    cfg.write_text(
+        "suppression:\n  strict: true\n  require_justification: true\n",
+        encoding="utf-8",
+    )
+    return ["--suppress", str(_suppress_file(tmp)), "--config", str(cfg)]
+
+
 def _policy_file(tmp: Path) -> Path:
     p = tmp / "policy.yaml"
     p.write_text(
@@ -277,6 +289,18 @@ AXES: tuple[Axis, ...] = (
         lambda t: {"suppress": _suppress_file(t)},
         ("suppress",),
         ("suppress",),
+    ),
+    Axis(
+        "suppress_strict",
+        _strict_suppression_args,
+        lambda t: {
+            "suppress": _suppress_file(t),
+            "strict_suppressions": True,
+            "require_justification": True,
+        },
+        ("suppress",),
+        ("suppress", "strict_suppressions", "require_justification"),
+        config_keys=("suppression.strict", "suppression.require_justification"),
     ),
     Axis(
         "no_scope_public",

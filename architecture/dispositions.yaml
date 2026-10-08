@@ -2,6 +2,13 @@
   "schema_version": 1,
   "modules": [
     {
+      "path": "abicheck/appcompat.py",
+      "disposition": "retain",
+      "supported_reason": "Lane C split (ADR-061): the implementation moved to its owners -- consumer import reading to `extract/consumer_imports.py`, library export facts to `extract/library_export_facts.py`, the fact types to `model/consumer_requirements.py`, pure requirements-vs-exports evaluation to `policy/consumer_requirements.py`, and the scoping/overlay/ledger glue to `workflows/consumer_scope.py`/`workflows/consumer_scope_standalone.py`. What remains is a delegation-only re-export facade, kept for the same reason as `checker_policy.py`: `docs/use/python-api.md` names `abicheck.appcompat.scope_diff_to_app` as the public consumer-scoping entry point. No internal module imports it. Retiring it means changing that documented path, which needs its own public-API review.",
+      "owner": "abicheck maintainers",
+      "review_by": "2027-03-01"
+    },
+    {
       "path": "abicheck/build_context.py",
       "disposition": "migrate",
       "target_layer": "extract",
