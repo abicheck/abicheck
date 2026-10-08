@@ -663,7 +663,7 @@ class TestHybridMergeDefersRenumbering:
     """
 
     def test_shared_closure_merges_despite_differing_lambda_counts(self) -> None:
-        from abicheck.dumper_hybrid import run_hybrid_dump
+        from abicheck.workflows.dump.hybrid import run_hybrid_dump
 
         shared = _closure("widget.h", 20, 5)
         owner_castxml = f"Foo<{shared}>"

@@ -111,7 +111,7 @@ class FactRow:
     field: str  # the dataclass field name
     castxml: Capability
     clang: Capability
-    #: True when ``dumper_hybrid.py`` explicitly backfills this field from the
+    #: True when ``workflows/dump/hybrid_merge.py`` explicitly backfills this field from the
     #: clang side of a merge. A hybrid snapshot is castxml-based, so a field
     #: NOT on that list keeps castxml's answer even when clang knows better —
     #: which is a real, documented consequence, not an oversight to paper over
@@ -155,7 +155,7 @@ class FactRow:
 def hybrid_capability(row: FactRow) -> Capability:
     """The ``--ast-frontend hybrid`` column, derived from the other two.
 
-    ``dumper_hybrid.merge_snapshots`` is castxml-based by construction: it
+    ``workflows.dump.hybrid_merge.merge_snapshots`` is castxml-based by construction: it
     walks castxml's declarations and takes clang's value only for the specific
     facts its backfill lists name (``_backfill_function_facts``,
     ``_merge_variable``, ``_merge_field``, ``_merge_record_type``'s
@@ -212,7 +212,7 @@ FACT_ROWS: tuple[FactRow, ...] = (
             "castxml cannot always recover a real mangled name for a "
             "constructor/destructor and synthesizes a placeholder key; a "
             "hybrid merge reconciles those against clang's real Itanium name "
-            "(`dumper_hybrid._match_synthetic_ctor_dtor`)."
+            "(`workflows.dump.hybrid_identity._match_synthetic_ctor_dtor`)."
         ),
     ),
     FactRow("Function", "return_type", _FULL, _FULL),

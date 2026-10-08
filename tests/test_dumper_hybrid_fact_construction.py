@@ -25,8 +25,8 @@ somewhere to live without growing that one further.
 
 from __future__ import annotations
 
-from abicheck.dumper_hybrid import merge_snapshots
 from abicheck.model import AbiSnapshot, Fact, RecordType
+from abicheck.workflows.dump.hybrid_merge import merge_snapshots
 
 
 def _snap(types=None, **kwargs):

@@ -4,12 +4,12 @@ clang leg handed `merge_snapshots` two legs that disagree)."""
 
 from __future__ import annotations
 
-from abicheck import dumper_hybrid
 from abicheck.extract.dependency_exclusion import (
     active_dependency_predicate,
     dependency_exclusion_scope,
     suppress_dependency_exclusion,
 )
+from abicheck.workflows.dump import hybrid as dumper_hybrid
 
 
 def test_scope_installs_and_restores():

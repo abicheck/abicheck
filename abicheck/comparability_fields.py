@@ -82,6 +82,24 @@ class IncludeDir:
 _PATH_MEMO = ScopedCache("abicheck.comparability_fields.path_memo")
 
 
+# Named sub-components hashed into profile_fingerprint / scope_fingerprint,
+# also stored verbatim in ExtractionContract.profile_fields/scope_fields so a
+# mismatch can be attributed to a specific field instead of an opaque hash.
+PROFILE_FIELD_KEYS = (
+    "compiler_family",
+    "compiler_version",
+    "abi_dialect",
+    "language_standard",
+    "target_triple",
+    "pointer_width",
+    "endianness",
+    "macro_ops",
+    "pass_through_flags",
+    "include_sequence",
+    "header_sequence",
+)
+
+
 def _resolve_with_ancestors(path: Path) -> tuple[Path, frozenset[Path]]:
     resolved = path.resolve()
     return resolved, frozenset((resolved, *resolved.parents))

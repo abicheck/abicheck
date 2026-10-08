@@ -1768,7 +1768,7 @@ class TestFieldDefaultHybridProducerMismatchDeclines:
         snapshot alone). Two positively known, DIFFERENT per-field
         producers for what IS a real removal -- currently declined, not
         detected."""
-        from abicheck.dumper_hybrid import merge_snapshots
+        from abicheck.workflows.dump.hybrid_merge import merge_snapshots
 
         def _type(default):
             return RecordType(
@@ -1825,7 +1825,7 @@ class TestFieldDefaultHybridProducerMismatchDeclines:
         genuinely dual-confirmed case above. Confirmed empirically that
         the resulting snapshot cannot distinguish the two from provenance
         alone."""
-        from abicheck.dumper_hybrid import merge_snapshots
+        from abicheck.workflows.dump.hybrid_merge import merge_snapshots
 
         castxml_new = AbiSnapshot(
             library="libtest.so.1",

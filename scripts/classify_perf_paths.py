@@ -266,7 +266,7 @@ PERF_SENSITIVE_PATTERNS: tuple[str, ...] = (
     # directory name: `dumper.py` imports `extract.export_symbol_identity`,
     # `extract.header_ast_backend` and `extract.header_ast_fields` at module
     # scope, and resolves `dumper_manifest.resolve_header_ast_result` and
-    # `dumper_hybrid.run_hybrid_dump` lazily on the dump path.
+    # `workflows.dump.hybrid.run_hybrid_dump` lazily on the dump path.
     "abicheck/extract/**",
     # Every `dumper_*` sibling `dumper.py` actually imports. Six of these were
     # missing and were found by deriving the set from `dumper.py`'s own imports in
@@ -275,7 +275,6 @@ PERF_SENSITIVE_PATTERNS: tuple[str, ...] = (
     # That test now fails if `dumper.py` starts importing a sibling no pattern
     # here covers.
     "abicheck/dumper_manifest.py",
-    "abicheck/dumper_hybrid.py",
     "abicheck/dumper_castxml_probe.py",
     "abicheck/dumper_contract.py",
     "abicheck/dumper_debug.py",

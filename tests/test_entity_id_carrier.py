@@ -55,8 +55,7 @@ from xml.etree.ElementTree import parse as parse_xml
 import pytest
 from test_dumper_hybrid import _snap as _hybrid_snap
 
-from abicheck import dumper_hybrid as _hybrid
-from abicheck.dumper_castxml import _CastxmlParser
+from abicheck.dumper_castxml import SYNTHETIC_CTOR_KEY_PREFIX, _CastxmlParser
 from abicheck.dumper_clang import _ClangAstParser
 from abicheck.model import (
     AbiSnapshot,
@@ -81,6 +80,7 @@ from abicheck.model.identity import (
     entity_id_for_variable,
 )
 from abicheck.serialization import snapshot_from_dict, snapshot_to_dict
+from abicheck.workflows.dump import hybrid_merge as _hybrid
 from tests.snapshot_fields import field_of
 
 _ABICHECK_ROOT = Path(__file__).resolve().parent.parent / "abicheck"
@@ -1055,7 +1055,7 @@ def test_reconciled_constructor_adopts_clangs_entity_id() -> None:
     ``entity_id`` (rather than ``mangled``) would fragment this one real
     declaration into two identities across a comparison.
     """
-    synthetic = f"{_hybrid.SYNTHETIC_CTOR_KEY_PREFIX}ns::Widget(int)"
+    synthetic = f"{SYNTHETIC_CTOR_KEY_PREFIX}ns::Widget(int)"
     castxml_ctor = Function(
         name="Widget",
         mangled=synthetic,
@@ -1196,5 +1196,5 @@ class TestMangledRewritesKeepTheCarrierInSync:
         # list passes just as happily against a scanner that matches
         # nothing. These are the real rewrites the audit found.
         found = {path for path, _line, _sync in _mangled_rewrite_sites()}
-        assert "abicheck/dumper_hybrid.py" in found, found
+        assert "abicheck/workflows/dump/hybrid_merge.py" in found, found
         assert len(_mangled_rewrite_sites()) >= 3, _mangled_rewrite_sites()

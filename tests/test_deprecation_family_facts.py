@@ -495,7 +495,7 @@ class TestFactSiblingsSurviveMerge:
     """
 
     def test_hybrid_variable_merge_keeps_the_backfilled_value(self) -> None:
-        from abicheck.dumper_hybrid import _merge_variable
+        from abicheck.workflows.dump.hybrid_merge import _merge_variable
 
         base = Variable(name="g", mangled="g", type="int", deprecated=None)
         clang = Variable(name="g", mangled="g", type="int", deprecated="use h()")
@@ -508,7 +508,7 @@ class TestFactSiblingsSurviveMerge:
         # `replace(e, **updates)`, so no field name appears in the source and
         # the first sweep of this bug class missed it. Both attrs it merges
         # (`is_scoped`, `deprecated`) are Fact[...]-bridged since this batch.
-        from abicheck.dumper_hybrid import _merge_enum_type
+        from abicheck.workflows.dump.hybrid_merge import _merge_enum_type
 
         merged = _merge_enum_type(
             EnumType(name="E"),

@@ -59,7 +59,7 @@ Core pipeline (in order of data flow):
    parse_header_ast_fields` choke point, `dumper.py`'s `_dump_pe`/
    `_dump_macho` too — every header-AST platform now populates
    `semantic_ir`, including through `--ast-frontend hybrid`'s
-   reconciliation (`dumper_hybrid.py`'s own Mach-O mangled-name and
+   reconciliation (`workflows/dump/hybrid_merge.py`'s own Mach-O mangled-name and
    ctor/dtor synthetic-key identity rewrites are propagated into
    `semantic_ir` via `_rewrite_semantic_ir_entity_ids`, so a hybrid merge
    never leaves one representation keyed under a retired identity another

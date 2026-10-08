@@ -415,7 +415,7 @@ class TestL2ExtractionPathsAreClassified:
             "abicheck/extract/header_ast_backend.py",
             "abicheck/extract/export_symbol_identity.py",
             "abicheck/dumper_manifest.py",
-            "abicheck/dumper_hybrid.py",
+            "abicheck/workflows/dump/hybrid_merge.py",
         ],
     )
     def test_an_l2_extraction_module_is_perf_sensitive(self, path):

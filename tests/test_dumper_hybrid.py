@@ -11,7 +11,6 @@ from dataclasses import replace
 from unittest.mock import patch
 
 from abicheck.dumper_castxml import SYNTHETIC_CTOR_KEY_PREFIX
-from abicheck.dumper_hybrid import merge_snapshots
 from abicheck.fact_provenance import (
     enum_fact_key,
     fact_producer,
@@ -30,6 +29,7 @@ from abicheck.model import (
     TypeField,
     Variable,
 )
+from abicheck.workflows.dump.hybrid_merge import merge_snapshots
 
 
 def _castxml_backed(snap, key: str) -> bool:
@@ -1714,7 +1714,8 @@ class TestDumpHybridDispatch:
             return sentinel
 
         with patch(
-            "abicheck.dumper_hybrid.run_hybrid_dump", side_effect=fake_run_hybrid_dump
+            "abicheck.workflows.dump.hybrid.run_hybrid_dump",
+            side_effect=fake_run_hybrid_dump,
         ):
             result = dump(p, [], header_backend="hybrid")
 
@@ -1743,7 +1744,8 @@ class TestDumpHybridDispatch:
             return sentinel
 
         with patch(
-            "abicheck.dumper_hybrid.run_hybrid_dump", side_effect=fake_run_hybrid_dump
+            "abicheck.workflows.dump.hybrid.run_hybrid_dump",
+            side_effect=fake_run_hybrid_dump,
         ):
             result = dump(
                 p,
@@ -1768,7 +1770,7 @@ class TestDumpHybridDispatch:
         sentinel = AbiSnapshot(library="test", version="1.0", ast_producer="hybrid")
 
         with patch(
-            "abicheck.dumper_hybrid.run_hybrid_dump", return_value=sentinel
+            "abicheck.workflows.dump.hybrid.run_hybrid_dump", return_value=sentinel
         ) as mock_run:
             result = dump(p, [], header_backend="HYBRID")
 

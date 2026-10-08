@@ -517,7 +517,7 @@ def dump(
         dump_manifest_given=dump_manifest is not None,
         frontend_context=frontend_context,
     ):
-        from .dumper_hybrid import run_hybrid_dump
+        from .workflows.dump.hybrid import run_hybrid_dump
 
         return run_hybrid_dump(
             dump,
