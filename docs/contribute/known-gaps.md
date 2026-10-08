@@ -11271,3 +11271,18 @@ already shared: `workflows/pair_evidence.fold_pair_evidence`. Unifying the
 fold means generalizing the release fold so N=1 reduces to the scalar one;
 any exit-code difference that exposes at N=1 must be decided before it
 changes (ADR-064). Owner: ADR-063/065, lane A stage A2(b).
+
+## A record's triviality change is invisible without DWARF (2026-10-08)
+
+A trivially-copyable struct that gains a user-provided destructor or copy
+operation changes how it is passed by value (registers → hidden pointer on
+Itanium x86-64). abicheck reports that as `value_abi_trait_changed` from DWARF
+only. The header-side `trivially_copyable_lost` detector exists, but CastXML
+never fills `RecordType.is_trivially_copyable`, so a stripped binary plus
+headers reads `case69_trivial_to_nontrivial` as `API_BREAK`. Its earlier
+stripped `BREAKING` came from a spurious binary `func_removed` for the
+implicit copy constructor, which PR #1519 corrected to
+`inline_function_removed`. A sound header-side fix needs the trait proven on
+the *old* side (no user-declared special members, trivially-copyable bases and
+members), not just "a user destructor appeared". Owner: CastXML record
+extraction (`extract/headers/castxml/records.py`).

@@ -98,10 +98,10 @@ Commands below use `PYTHONPATH=.`.
 |---|---|---|---:|---|---|
 | Build/autodiscovery | `python -m pytest tests/test_example_autodiscovery.py -v --tb=short -m integration` | CI Linux, gcc/clang | 209 integration items | gcc: 149 passed / 55 skipped / 5 xfailed; clang: 149 passed / 54 skipped / 6 xfailed | Green default single-library build lane. `case115_bit_int_width_changed` needs a `_BitInt`-capable CastXML-bundled Clang; a sandbox with an older bundled Clang (unrelated to the fix in this catalog) sees it fail there instead of building — see `docs/contribute/examples-validation-runbook.md` |
 | Full example proof matrix | `skills-src/evaluation/validation/scripts/collect_full_example_matrix.py` over CI artifacts + dedicated bundle/G20/L3-L5/BTF proofs | CI aggregation | 208 catalog cases | 208/208 COVERED; 207 direct; 0 FAILED / 0 UNRESOLVED | Canonical full-catalog status; a lane-local `SKIP` is accepted only when a dedicated proof covers that case |
-| Default/debug verdicts | `ABICHECK_TRUSTED_SOURCE_SMOKE_RUN=1 PYTHONPATH=. python tests/validate_examples.py --toolchain {gcc,clang} --json` | CI Linux, gcc/clang | 208 catalog cases | gcc: 164 PASS / 5 XFAIL / 39 SKIP; clang: 164 PASS / 6 XFAIL / 38 SKIP | Green default/debug verdict lane. Without the env var, 7 `source_smoke: {mode: run}` cases SKIP instead of running. clang moved one case PASS -> XFAIL in PR #1283: under clang `case180_symbol_binding_lost_unique` has no `STB_GNU_UNIQUE` signal to detect at all (its own `known_gap` says so), and the `COMPATIBLE_WITH_RISK` it used to reach came from a persistent cross-source hygiene finding that #1283 deliberately stopped counting toward the verdict -- so the case was passing for an unrelated reason, and the XFAIL is the honest result rather than a detection regression |
-| Runtime smoke | `PYTHONPATH=. python skills-src/evaluation/validation/scripts/run_example_runtime_smoke.py --json` | Linux proof run | 208 catalog cases | 90 DEMONSTRATED / 78 NO_RUNTIME_SIGNAL / 1 BASELINE_SIGNAL / 39 SKIP | Passing; no BUILD_ERROR. The runner now compares each app's baseline exit code against a per-case `runtime_baseline_exit` in `ground_truth.json` (default 0) instead of hardcoding zero, so apps that deliberately return a computed value (e.g. case111's `ets(42).local()` returning `42`) are no longer misread as a broken baseline. `case06_visibility` is the one remaining, intentionally-unwhitelisted case — see "Known validation gaps" below |
-| Release headers | `ABICHECK_TRUSTED_SOURCE_SMOKE_RUN=1 python tests/validate_examples.py --artifact-variant release-headers --json` | CI Linux artifact | 208 catalog cases | 164 PASS / 5 XFAIL / 39 SKIP | Informational; the false-risk regression on `case61_var_added` (`exported_object_alignment_reduced`) is fixed — CastXML now resolves a variable's natural type alignment as declared-alignment corroboration even without an explicit `alignas` override. Without the env var, the same 7 cases SKIP instead |
-| Stripped headers | `ABICHECK_TRUSTED_SOURCE_SMOKE_RUN=1 python tests/validate_examples.py --artifact-variant stripped-headers --json` | CI Linux artifact | 208 catalog cases | 160 PASS / 4 FAIL / 5 XFAIL / 39 SKIP | Informational; reduced-evidence signal-loss backlog (below). Without the env var, the same 7 cases SKIP instead |
+| Default/debug verdicts | `ABICHECK_TRUSTED_SOURCE_SMOKE_RUN=1 PYTHONPATH=. python tests/validate_examples.py --toolchain {gcc,clang} --json` | CI Linux, gcc/clang | 208 catalog cases | gcc: 165 PASS / 4 XFAIL / 39 SKIP; clang: 164 PASS / 5 XFAIL / 1 NOT_APPLICABLE / 38 SKIP | Green default/debug verdict lane. Without the env var, 7 `source_smoke: {mode: run}` cases SKIP instead of running. Under clang `case180_symbol_binding_lost_unique` is `NOT_APPLICABLE`: clang never emits `STB_GNU_UNIQUE`, so its v1/v2 are the same transition-free pair, and the lane checks the `NO_CHANGE` that pair warrants (`not_applicable_expected`) instead of excusing a miss as XFAIL |
+| Runtime smoke | `PYTHONPATH=. python skills-src/evaluation/validation/scripts/run_example_runtime_smoke.py --json` | Linux proof run | 208 catalog cases | 95 DEMONSTRATED / 74 NO_RUNTIME_SIGNAL / 39 SKIP | Passing; no BUILD_ERROR. The runner now compares each app's baseline exit code against a per-case `runtime_baseline_exit` in `ground_truth.json` (default 0) instead of hardcoding zero, so apps that deliberately return a computed value (e.g. case111's `ets(42).local()` returning `42`) are no longer misread as a broken baseline. No case shows a signal against its own baseline library (`BASELINE_SIGNAL`), so every DEMONSTRATED is a v2-only effect — see "Known validation gaps" below for case06's rewrite |
+| Release headers | `ABICHECK_TRUSTED_SOURCE_SMOKE_RUN=1 python tests/validate_examples.py --artifact-variant release-headers --json` | CI Linux artifact | 208 catalog cases | 165 PASS / 4 XFAIL / 39 SKIP | Informational; the false-risk regression on `case61_var_added` (`exported_object_alignment_reduced`) is fixed — CastXML now resolves a variable's natural type alignment as declared-alignment corroboration even without an explicit `alignas` override. Without the env var, the same 7 cases SKIP instead |
+| Stripped headers | `ABICHECK_TRUSTED_SOURCE_SMOKE_RUN=1 python tests/validate_examples.py --artifact-variant stripped-headers --json` | CI Linux artifact | 208 catalog cases | 160 PASS / 5 FAIL / 4 XFAIL / 39 SKIP | Informational; reduced-evidence signal-loss backlog (below). Without the env var, the same 7 cases SKIP instead |
 | Build/source proof | `ABICHECK_TRUSTED_SOURCE_SMOKE_RUN=1 python tests/validate_examples.py case01 case04 case98 case105 case122 case129 case130 case131 case132 case133 --artifact-variant build-source --json` | CI Linux artifact | 10 representative cases | 10 PASS | Required release proof; includes L3 C++ floor and L4 concept/template regressions. Not full L3-L5 catalog coverage — see "Known validation gaps" |
 
 Counts above are from the most recent full catalog run this table was refreshed against; re-run
@@ -224,8 +224,13 @@ success means one `COVERED` row per current ground-truth entry, with no
 `ABICHECK_TRUSTED_SOURCE_SMOKE_RUN=1` opt-in documented there.
 
 Current stripped-header signal-loss cases: `case103_toolchain_flag_drift`,
-`case117_no_unique_address`, `case129_struct_return_convention`, and
-`case60_base_class_position_changed`. `case89_inline_accessor_renamed_pimpl_member`
+`case117_no_unique_address`, `case129_struct_return_convention`,
+`case60_base_class_position_changed`, and `case69_trivial_to_nontrivial`.
+case69's break is `value_abi_trait_changed`, a DWARF (`L1`) fact; its earlier
+stripped `BREAKING` came only from a spurious binary `func_removed` for the
+struct's implicit copy constructor (no exported symbol), which is now
+`inline_function_removed`. Recovering it without DWARF needs the
+trivially-copyable trait from headers, which CastXML does not report. `case89_inline_accessor_renamed_pimpl_member`
 left this list when the pimpl inline-body detector stopped depending on DWARF
 for the record's namespace (#1470); it is `BREAKING` without debug info now.
 
@@ -246,13 +251,14 @@ Recent build/source and ABI-mode examples:
 
 Current mode-specific backlog: stripped headers under-classifies
 `case103_toolchain_flag_drift`, `case117_no_unique_address`,
-`case129_struct_return_convention`, and `case60_base_class_position_changed`;
+`case129_struct_return_convention`, `case60_base_class_position_changed`, and
+`case69_trivial_to_nontrivial`;
 default/debug and release-header modes classify those catalog cases correctly.
 
 Expected non-pass buckets are already represented in `ground_truth.json`:
 
-- XFAIL: `case105`, `case111`, `case122`, `case64`, `case98` (gcc); additionally
-  `case103`, `case180` (clang only) — each carries a `known_gap` explaining why
+- XFAIL: `case105`, `case111`, `case122`, `case98` (gcc); additionally
+  `case103` (clang only) — each carries a `known_gap` explaining why
   debug-headers can't reach the canonical verdict. case105/case122/case98 are
   the catalog's flagship examples of a *higher* evidence tier (L3/L4) closing
   the gap; case111 is the flagship example of the opposite case — a scenario
