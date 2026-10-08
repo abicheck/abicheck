@@ -68,7 +68,7 @@ from .workflows.contracts import (
 # directly off `abicheck.service` (some) and off
 # `abicheck.workflows.input_resolution` (the ones that need to influence a
 # call made *inside* `resolve_input`'s own body, same rule
-# `service_dump_native.py`'s own re-export block documents above). ────────
+# `workflows/dump/native.py`'s own re-export block documents above). ────────
 from .workflows.input_resolution import (
     _resolve_symvers as _resolve_symvers,
     _typeinfo_functions as _typeinfo_functions,
@@ -91,7 +91,7 @@ from .workflows.request_inputs import InputSpec
 # `ast.ImportFrom` node, so it is invisible to that gate's static AST walk (the
 # same escape hatch `cli_buildsource.py`'s own back-compat re-export shim
 # documents) while still binding real module-level names here, so
-# `service._dump_pe`/`_dump_macho`'s own bare-name calls, `from abicheck.service
+# `from abicheck.service
 # import _try_header_scoped_dump`, and every test's
 # `monkeypatch.setattr(service, "_try_header_scoped_dump", ...)` all keep
 # working exactly as before this module existed.
@@ -110,21 +110,10 @@ del _service_header_scoped
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-# ── Binary dumping (extracted to leaf module ``service_dump_native`` to stay
-# under the AI-readiness size cap, the same pattern
-# ``service_metadata_attach``/``service_header_graph_attach``/
-# ``service_header_scoped``/``service_render``/``dry_run_estimate``/
-# ``service_compare_pipeline``/``service_dump_pipeline`` already follow;
-# re-exported verbatim below so ``from abicheck.service import run_dump``
-# and the several ``_dump_elf``/``_dump_pe``/``_dump_macho``/
-# ``_run_dump_uncached`` names existing tests patch/import directly keep
-# resolving unchanged -- see that module's own docstring for the test-patch
-# gotcha this split carries: a caller substituting one of these names for a
-# call made *inside* ``service_dump_native.py`` (e.g. patching ``_dump_elf``
-# to observe ``run_dump``) must patch
-# ``abicheck.service_dump_native.<name>``, not ``abicheck.service.<name>`` --
-# only a caller that imports the name fresh from ``abicheck.service`` itself
-# (there is none inside ``service_dump_native.py``) would see the latter). ──
+# ── Binary dumping: ``run_dump`` lives in ``workflows.dump.native``; each
+# format's primary extraction is a ``workflows.dump.formats`` adapter. To
+# substitute an extractor, replace its entry in
+# ``workflows.dump.native.FORMAT_ADAPTERS`` rather than patching a private name.
 # run_compare_request/run_compare moved to service_compare_pipeline.py (CLI
 # cleanup phase two, PR B slice 1) to stay under the AI-readiness file-size
 # cap once run_compare gained pack_policy_overrides/pack_internal_namespaces
@@ -158,13 +147,6 @@ from .service_compare_pipeline import (  # noqa: E402,F401
     run_compare,
     run_compare_request,
 )
-from .service_dump_native import (  # noqa: E402,F401
-    _dump_elf,
-    _dump_macho,
-    _dump_pe,
-    _run_dump_uncached,
-    run_dump,
-)
 
 # ── Dump pipeline (G33 Phase 5): ``dump``'s counterpart to the above, in the
 # leaf module ``service_dump_pipeline``. Re-exported for the same reason:
@@ -172,35 +154,10 @@ from .service_dump_native import (  # noqa: E402,F401
 # every front end (CLI, typed Python) builds a request for. ──────────────────
 from .service_dump_pipeline import run_dump_request  # noqa: E402,F401
 
-# ── Opportunistic per-ecosystem metadata attachment (leaf module
-# service_metadata_attach; re-exported verbatim, same as before this split,
-# so ``from abicheck.service import _try_attach_python_api_surface`` and its
-# three siblings keep resolving unchanged -- service_dump_native.py imports
-# these same four names directly from the same source for its own internal
-# calls, so this is a second, independent binding of the identical function
-# objects rather than a re-export chain). ──────────────────────────────────
-from .service_metadata_attach import (  # noqa: E402,F401
-    _try_attach_numpy_capi_surface,
-    _try_attach_python_api_surface,
-    _try_attach_python_ext_metadata,
-    _try_attach_sycl_metadata,
-)
-
-# ── Output rendering: service_render.py is `frontends`-classified (ADR-061)
-# but `service.py` is `workflows`-legacy-classified (a real, checked edge:
-# `service.py` is named in `workflows`'s own `legacy_paths`, so
-# `check_architecture.py`'s dependency-direction check inspects it), so this
-# is a real, checked `workflows -> frontends` edge -- static and visible now,
-# not hidden behind `importlib.import_module` the way the retired
-# `workflows/render.py` bridged it. It is recorded as a reviewed exception in
-# `architecture/debt.yaml`'s `dependency_direction_exceptions` (ADR-061 gap
-# A) rather than left as an unresolved-but-invisible bridge: closing it for
-# real means `service.py` itself stopping being `workflows`-classified for
-# this one responsibility (this ADR's own "composition at the outer
-# boundary" language), a separate migration slice -- see that debt.yaml
-# entry's own rationale for why it doesn't fit in this pass.
-# `service_render.py` is a leaf: it does not import `abicheck.service` (see
-# its own docstring), so this introduces no real circular import either.
+# ── Output rendering: `service_render.py` is `frontends`-classified, and so
+# is this facade (ADR-061 "composition at the outer boundary"), so this is
+# an ordinary `frontends -> frontends` import. `service_render.py` is a
+# leaf: it does not import `abicheck.service`, so there is no cycle.
 from .service_render import (  # noqa: E402,F401
     _render_deps_section_md,
     render_output,
@@ -233,6 +190,7 @@ from .workflows.compare_policy import (  # noqa: E402,F401
     dedup_policy_override_warnings,
     load_suppression_and_policy,
 )
+from .workflows.dump.native import run_dump  # noqa: E402,F401
 
 # ADR-061 gap D, closed: the directory/package release fan-out's
 # pre-execution resolution is one typed request/plan pair, reachable from

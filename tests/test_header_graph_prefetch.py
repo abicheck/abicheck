@@ -16,11 +16,9 @@ from pathlib import Path
 
 import pytest
 
-from abicheck import (
-    service_dump_native as native,
-    service_header_graph_attach as attach,
-)
+from abicheck import service_header_graph_attach as attach
 from abicheck.serialization import snapshot_to_dict
+from abicheck.workflows.dump import native
 
 _HEADER = """\
 #pragma once

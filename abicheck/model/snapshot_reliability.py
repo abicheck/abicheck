@@ -127,7 +127,7 @@ __all__ = [
 # True when this snapshot's RecordType.vtable/vptr_offset_bits facts are
 # known-reliable when its own ``ast_producer`` is ``"clang"`` -- G31
 # Phase C (schema v21) wired real virtual-method-table reconstruction
-# into the direct-clang backend (``dumper_clang_vtable.py``), previously
+# into the direct-clang backend (``extract/headers/clang/vtable.py``), previously
 # unconditionally ``vtable=[]``/``vptr_offset_bits=None`` for EVERY
 # record regardless of whether it was actually polymorphic. Same
 # "real but WRONG data" shape as ``clang_field_initializer_facts_reliable``

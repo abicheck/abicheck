@@ -96,7 +96,7 @@ _SNAPSHOT_CACHE_VERSION: str = "35"
 # semantic_ir=None forever for identical cache-key inputs.
 # v29: PDB record/enum types now get a real entity_id and populate
 # AbiSnapshot.semantic_ir (ADR-063 Phase 6, PDB slice) via the PE
-# header-scoping fallback path in service_dump_native_pe.py. That path is
+# header-scoping fallback path in workflows/dump/pe.py. That path is
 # cacheable, so a snapshot cached by an older abicheck build for the
 # identical cache-key inputs (headers/includes/version/lang/``extra``)
 # would otherwise keep serving PDB model types with no entity_id and

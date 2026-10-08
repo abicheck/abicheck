@@ -539,7 +539,7 @@ def parse_functions(
         # plain-C declaration down the C++/mangled-identity path, breaking
         # self-comparison of an unchanged plain-C header (a spurious
         # FUNC_LANGUAGE_LINKAGE_CHANGED). `is_cxx` -- `dumper.
-        # _clang_header_dump`'s own `resolved_force_cpp`, the mode that
+        # clang_header_dump`'s own `resolved_force_cpp`, the mode that
         # ACTUALLY produced this AST -- is the disambiguator: only in C++
         # mode does an asm label's spelling carry that implication.
         has_asm_label = _has_explicit_asm_label(node)
@@ -626,7 +626,7 @@ def parse_functions(
                 # bool(node.get("virtual")) alone misses a signature-
                 # matched override with neither `virtual` nor `override`
                 # written -- clang's JSON gives no direct signal for that
-                # case at all (see dumper_clang_vtable.py's own
+                # case at all (see extract/headers/clang/vtable.py's own
                 # docstring). `virtual_mangled_names` recovers it from
                 # the reconstructed vtables, which already do this
                 # matching; only ever widens False -> True.

@@ -80,8 +80,8 @@ def check_appcompat(
     # it close (ADR-061 gap A). Lazy import avoids a
     # workflows.input_resolution→cli→appcompat import cycle.
     from ..errors import ValidationError
-    from ..service_dump_native import run_dump
     from .compare_policy import compare_snapshots
+    from .dump.native import run_dump
     from .input_resolution import detect_binary_format
 
     # Resolve per-side headers: old_headers/new_headers override shared headers

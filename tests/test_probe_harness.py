@@ -13,15 +13,14 @@ from __future__ import annotations
 
 import pytest
 
-from abicheck.probe_harness import (
+from abicheck.model.probe_matrix import (
     MatrixSnapshot,
     Probe,
     ProbeConfiguration,
     ProbeResult,
     ProbeSpec,
-    _parse_cxx_std,
-    parse_probe_spec,
 )
+from abicheck.probe_harness import _parse_cxx_std, parse_probe_spec
 
 
 class TestParseCxxStd:

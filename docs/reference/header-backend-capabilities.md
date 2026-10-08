@@ -105,7 +105,7 @@ Across the 157 fields of the 6 declaration types the two header-AST backends bui
 | `is_virtual` | ✅ Yes | ✅ Yes | ✅ Yes | — |
 | `is_noexcept` | ✅ Yes | ✅ Yes | ✅ Yes | — |
 | `is_extern_c` | ✅ Yes | ✅ Yes | ✅ Yes | — |
-| `vtable_index` | ✅ Yes | ❌ No | ✅ Yes | castxml numbers each virtual's slot; the clang backend passes `None` even though it reconstructs the vtable itself (`dumper_clang_vtable.py`), so slot-order findings need castxml. |
+| `vtable_index` | ✅ Yes | ❌ No | ✅ Yes | castxml numbers each virtual's slot; the clang backend passes `None` even though it reconstructs the vtable itself (`extract/headers/clang/vtable.py`), so slot-order findings need castxml. |
 | `source_location` | ✅ Yes | ✅ Yes | ✅ Yes | — |
 | `is_static` | ✅ Yes | ✅ Yes | ✅ Yes | — |
 | `is_const` | ✅ Yes | ✅ Yes | ✅ Yes | — |
@@ -214,7 +214,7 @@ Across the 157 fields of the 6 declaration types the two header-AST backends bui
 | `bases_fact` | ✅ Yes | ✅ Yes | ✅ Yes | `Fact[list[str]]` sibling of `bases`. Both backends construct it directly (`model.record_layout_facts()`) alongside `bases` itself, opaque records included. |
 | `virtual_bases` | ✅ Yes | ✅ Yes | ✅ Yes | — |
 | `virtual_bases_fact` | ✅ Yes | ✅ Yes | ✅ Yes | `Fact[list[str]]` sibling of `virtual_bases` — see `bases_fact`. |
-| `vtable` | ✅ Yes | ✅ Yes | ✅ Yes | clang's is a reconstruction over the AST (`dumper_clang_vtable.py`, G31 Phase C, schema v21) rather than a compiler-emitted table; castxml's comes from its own bundled compiler. Both are transitively inherited across bases. |
+| `vtable` | ✅ Yes | ✅ Yes | ✅ Yes | clang's is a reconstruction over the AST (`extract/headers/clang/vtable.py`, G31 Phase C, schema v21) rather than a compiler-emitted table; castxml's comes from its own bundled compiler. Both are transitively inherited across bases. |
 | `vtable_fact` | ✅ Yes | ✅ Yes | ✅ Yes | `Fact[list[str]]` sibling of `vtable` — see `bases_fact`. |
 | `source_location` | ✅ Yes | ✅ Yes | ✅ Yes | — |
 | `is_union` | ✅ Yes | ✅ Yes | ✅ Yes | — |

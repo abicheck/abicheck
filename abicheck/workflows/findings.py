@@ -47,7 +47,7 @@ from ..finding_identity import (
     report_canonical_finding_id,
     report_finding_id,
 )
-from ..probe_harness import MatrixSnapshot, ProbeResult
+from ..model.probe_matrix import MatrixSnapshot, ProbeResult
 from ..serialization import snapshot_from_dict, snapshot_to_dict
 
 

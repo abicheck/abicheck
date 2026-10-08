@@ -110,8 +110,8 @@ def test_preflight_matches_resolution_rules(
 def test_real_dump_agrees_on_castxml_missing(monkeypatch):
     """Oracle from the real code path: the dump's own castxml resolution
     raises exactly when the preflight blocks."""
-    from abicheck.dumper import _resolve_gated_castxml_bin
     from abicheck.errors import SnapshotError
+    from abicheck.extract.headers.castxml.backend import _resolve_gated_castxml_bin
 
     monkeypatch.delenv("ABICHECK_AST_FRONTEND", raising=False)
     monkeypatch.delenv("ABICHECK_ALLOW_AST_FALLBACK", raising=False)

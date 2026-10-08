@@ -13,29 +13,22 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Native-binary dump orchestration: ``service.run_dump`` and its ELF tail.
+"""Native-binary dump orchestration: ``service.run_dump`` and the ELF extractor.
 
-Split out of ``service.py`` (ADR-061 "make service.py a thin facade" pass)
-as a leaf module, the pattern ``service_metadata_attach``/
-``service_header_graph_attach``/``service_header_scoped``/``service_render``/
-``dry_run_estimate``/``service_compare_pipeline``/``service_dump_pipeline``
-already follow. The PE/Mach-O half of the same original block
-(``_dump_pe``/``_dump_macho``/``_extract_pdb_debug``) lives one file
-further out, in ``service_dump_native_pe`` (imported/re-exported below) —
-this module alone, pre-split, was already over the 800-line production cap
-a genuinely new file gets no debt-ledger baseline to grow into.
-``service.py`` re-exports every public name from both modules, so
-``from abicheck.service import run_dump`` (and the several
-``_dump_elf``/``_dump_pe``/``_dump_macho``/``_run_dump_uncached`` names
-tests patch directly) keep resolving unchanged.
+``_run_dump_uncached`` resolves the header backend, runs the hybrid
+two-backend path when selected, and otherwise dispatches the primary
+extraction through the binary-format seam in
+:mod:`abicheck.workflows.dump.formats` (ELF/PE/Mach-O adapters) before
+running the shared post-extraction tail (metadata attach, header-only
+graph, clang layout, closure-identity renumbering).
 
-**Test-patch note** (mirrors ``workflows/extraction.py``'s own documented
-gotcha): a call from one function below to another resolves against *this
-module's* globals, not whatever ``abicheck.service`` re-exports. A test
-substituting ``_dump_elf``/``_run_dump_uncached``/``_attach_header_graph``
-for a caller defined here must patch ``abicheck.service_dump_native.<name>``,
-not ``abicheck.service.<name>``. Same rule one module over for
-``_dump_pe``/``_dump_macho`` — see ``service_dump_native_pe.py``.
+:func:`extract_elf` is the ELF adapter's extractor. It stays here, in a flat
+legacy module, until ``dumper.py`` has an owning layer: a migrated
+``workflows`` module may not import an unclassified one. PE and Mach-O
+extraction live in :mod:`abicheck.workflows.dump.pe`/``.macho``.
+
+To substitute an extractor, replace its entry in :data:`FORMAT_ADAPTERS`
+rather than patching a name in this module.
 """
 
 from __future__ import annotations
@@ -46,46 +39,55 @@ from contextlib import nullcontext
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from .buildsource.source_inputs import granting_live_source_licence
-from .clang_layout_tool import attach_clang_layout
-from .errors import (
+from ...buildsource.source_inputs import granting_live_source_licence
+from ...clang_layout_tool import attach_clang_layout
+from ...dry_run_estimate import expand_header_inputs
+from ...errors import (
     AbicheckError,
     SnapshotError,
     UnsupportedArtifactError,
     ValidationError,
 )
-from .header_utils import (
+from ...extract.metadata_attach import (
+    try_attach_numpy_capi_surface,
+    try_attach_python_api_surface,
+    try_attach_python_ext_metadata,
+    try_attach_sycl_metadata,
+)
+from ...header_utils import (
     cache_relevant_operand_paths,
     deferred_token_dirs,
     resolve_inferred_header_roots,
 )
-from .model import AbiSnapshot
-from .service_header_graph_attach import (
+from ...model import AbiSnapshot
+from ...service_header_graph_attach import (
     _HEADER_GRAPH_ENABLED,
     _HEADER_GRAPH_INCLUDES_ENABLED,
     _attach_header_graph,
     prefetch_graph_if_useful,
     prefetch_settled_on_failure,
 )
-from .service_metadata_attach import (
-    _try_attach_numpy_capi_surface,
-    _try_attach_python_api_surface,
-    _try_attach_python_ext_metadata,
-    _try_attach_sycl_metadata,
+from ...storage import closure_identity
+from ...workflows.dump.formats import (
+    DEFAULT_ADAPTERS,
+    BinaryFormatAdapter,
+    NativeExtractRequest,
+    emit_notice,
 )
-from .storage import closure_identity
-from .workflows.run_dump_scope import wrap_run_dump_with_dependency_scope
+from ...workflows.dump.hybrid import compose_hybrid
+from ...workflows.run_dump_scope import (
+    run_dump_header_roots,
+    wrap_run_dump_with_dependency_scope,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from .compile_context import CompileContext
-    from .dump_manifest import DumpManifest
+    from ...compile_context import CompileContext
+    from ...dump_manifest import DumpManifest
 
-# Deliberately the *parent* module's logger name, not this module's: these
-# functions logged under "abicheck.service" before the split, and callers
-# (and tests capturing caplog) rely on that name — same convention
-# ``service_metadata_attach.py`` already documents for the identical reason.
+
+# The facade's logger name, kept from before the split.
 _logger = logging.getLogger("abicheck.service")
 
 
@@ -111,21 +113,11 @@ def _run_dump_uncached(
     header_backend: str = "auto",
     compile: CompileContext | None = None,
     notify: Callable[[str], None] | None = None,
-    _skip_header_graph_attach: bool = False,
     include_labels: dict[Path, str] | None = None,
     dump_manifest: DumpManifest | None = None,
     public_include_search_dirs: list[Path] | None = None,
 ) -> AbiSnapshot:
     """Extract an ABI snapshot from a native binary (ELF, PE, or Mach-O).
-
-    ``_skip_header_graph_attach`` is a private, internal-only knob (not
-    public API, not CLI-reachable) used solely by this function's own
-    ``header_backend="hybrid"`` recursion below: each single-backend
-    sub-dump would otherwise redundantly attach its own header-only graph
-    (seeded from only that one backend's declarations) before the merge
-    throws it away, wasting a whole extra clang AST pass per sub-dump. The
-    graph is instead attached exactly once, after the merge, to the union of
-    both backends' declarations.
 
     ``public_headers`` / ``public_header_dirs`` tag declaration provenance
     (ADR-024 Phase 1) on all three formats: ELF threads them into
@@ -169,7 +161,6 @@ def _run_dump_uncached(
             f"dump_manifest is not yet supported for {binary_fmt.upper()} "
             "binaries; use a single-header dump for this format."
         )
-    from . import dumper_cache
 
     _headers = headers or []
     _includes = includes or []
@@ -183,11 +174,11 @@ def _run_dump_uncached(
     # Every format's own main pass normalizes `lang` to only ever force a
     # language explicitly requested, letting auto-detection run otherwise
     # (including for the default "c++") -- `_cache_key` hashes the raw
-    # `lang` value, so `_attach_header_graph`'s own _clang_header_dump call
+    # `lang` value, so `_attach_header_graph`'s own clang_header_dump call
     # must pass this identical normalized value, or it hashes a different
     # key than the main pass just used, permanently missing the AST memo
     # for the default (non-explicit-"c") workload (Codex review). ELF does
-    # this in `_dump_elf` below (case-sensitive `lang == "c"`); PE/Mach-O do
+    # this in `extract_elf` below (case-sensitive `lang == "c"`); PE/Mach-O do
     # it in `service_header_scoped._try_header_scoped_dump` -- reached
     # whenever headers are given, the only case this graph attach does
     # anything at all -- with a case-*insensitive* `lang.lower() == "c"`,
@@ -198,7 +189,7 @@ def _run_dump_uncached(
     # `CompareRequest.lang_explicit`) widens the "force" condition beyond a
     # bare `lang == "c"` -- a genuinely explicit request forces whatever
     # language the caller named (not just "c"), on both this graph pass and
-    # `_dump_elf`/`_try_header_scoped_dump`'s own primary pass below, so the
+    # `extract_elf`/`_try_header_scoped_dump`'s own primary pass below, so the
     # two can never silently disagree about which language mode parsed the
     # library's own headers (AGENTS.md "dump --lang c++ is silently
     # discarded ..." known gap). `False` (the default) is a no-op: identical
@@ -221,85 +212,55 @@ def _run_dump_uncached(
         else header_backend
     )
 
-    from .dumper import _resolve_header_backend
+    from ...extract.header_ast_backend import _resolve_header_backend
 
+    request = NativeExtractRequest(
+        path=path,
+        version=version,
+        headers=_headers,
+        includes=_includes,
+        lang=lang,
+        lang_explicit=lang_explicit,
+        header_backend=eff_backend,
+        compile=compile,
+        public_headers=public_headers,
+        public_header_dirs=public_header_dirs,
+        public_include_search_dirs=_public_include_search_dirs,
+        include_labels=include_labels,
+        pdb_path=pdb_path,
+        dwarf_only=dwarf_only,
+        debug_roots=debug_roots,
+        enable_debuginfod=enable_debuginfod,
+        debuginfod_url=debuginfod_url,
+        debug_format=debug_format,
+        symbols_only=symbols_only,
+        debug_presence_only=debug_presence_only,
+        dump_manifest=dump_manifest,
+        notify=notify,
+    )
     if _resolve_header_backend(eff_backend) == "hybrid":
-        # G28 Phase 3: the real Tier-2 hybrid entry point the CLI routes
-        # through (dumper.dump() has its own, simpler recursion for direct
-        # Python-API callers) — recurse into run_dump() once per real
-        # backend, forcing frontend via a *replaced* CompileContext (frozen
-        # dataclass) so it wins eff_backend's precedence check regardless of
-        # header_backend, then merge; only the merge step is new.
-        from dataclasses import replace as _dc_replace
-
-        from .compile_context import CompileContext
-        from .dumper_hybrid import run_hybrid_dump
-
-        def _forced_compile(frontend: str) -> CompileContext:
-            return (
-                _dc_replace(compile, frontend=frontend)
-                if compile is not None
-                else CompileContext(frontend=frontend)
-            )
-
-        common_kwargs: dict[str, Any] = {
-            "headers": headers,
-            "includes": includes,
-            "version": version,
-            "lang": lang,
-            "lang_explicit": lang_explicit,
-            "pdb_path": pdb_path,
-            "dwarf_only": dwarf_only,
-            "debug_roots": debug_roots,
-            "enable_debuginfod": enable_debuginfod,
-            "debuginfod_url": debuginfod_url,
-            "debug_format": debug_format,
-            "symbols_only": symbols_only,
-            "debug_presence_only": debug_presence_only,
-            "public_headers": public_headers,
-            "public_header_dirs": public_header_dirs,
-            "public_include_search_dirs": public_include_search_dirs,
-            # The header-graph attach is deliberately SKIPPED on either
-            # recursive sub-dump below (each would otherwise attach its OWN
-            # graph, seeded from only ITS OWN backend's declarations, before
-            # the merge throws it away) — attached once, after the merge, to
-            # the union of both backends' declarations instead (see the
-            # _attach_header_graph call below; Codex review; G29 Phase A:
-            # ``_skip_header_graph_attach`` replaces the old "just don't
-            # forward header_graph=True" mechanism now that the attach is
-            # unconditional rather than flag-gated).
-            "notify": notify,
-            "_skip_header_graph_attach": True,
-            "include_labels": include_labels,
-            "dump_manifest": dump_manifest,
-        }
-
-        def _leg(
-            _so_path: Path, _headers_arg: list[Path], *, header_backend: str
-        ) -> AbiSnapshot:
-            # Each leg keeps its FULL surface so the outer wrapper scopes the
-            # merged result once; `include_dependencies=True` also clears any
-            # parse-time skip the outer scope declared (`extraction_scope`).
-            return run_dump(
-                path,
+        # G28 Phase 3: the Tier-2 hybrid entry point the CLI routes through
+        # (dumper.dump() has its own path for direct Python-API callers):
+        # one castxml leg and one clang leg of the same request, merged.
+        # Each leg skips the header-only graph -- it would be seeded from
+        # only that backend's declarations -- and the graph is attached once
+        # below, to the union. No attach_clang_layout here: each leg's own
+        # tail already ran it, so re-running it on the merge backfills
+        # nothing.
+        merged = compose_hybrid(
+            functools.partial(
+                _extract_and_finish,
                 binary_fmt,
-                header_backend=header_backend,
-                compile=_forced_compile(header_backend),
-                include_dependencies=True,
-                **common_kwargs,
-            )
-
-        # `run_hybrid_dump` owns the leg/merge/closure-renumbering sequence
-        # for both hybrid entry points (this one and `dumper.dump`'s). AST
-        # memoization (G31 Phase C) is only worthwhile here: the
-        # `_attach_header_graph` call below is a real downstream consumer.
-        with dumper_cache.ast_memoize_scope():
-            merged = run_hybrid_dump(_leg, path, _headers)
-        # No attach_clang_layout call here: clang_snap's own recursive call
-        # above already got it (the ELF/PE/Mach-O tail below always calls it),
-        # so re-running it on merged would backfill nothing (review finding).
+                header_graph_lang=_header_graph_lang,
+                skip_header_graph_attach=True,
+            ),
+            request,
+            header_roots=run_dump_header_roots(
+                headers, dump_manifest, public_headers, public_header_dirs
+            ),
+        )
         # dwarf_only/symbols_only mean "ignore headers entirely", same as the
-        # ELF tail's own _attach_header_graph call below (Codex review).
+        # ELF tail's own _attach_header_graph call (Codex review).
         return _attach_header_graph(
             merged,
             _HEADER_GRAPH_ENABLED and not dwarf_only and not symbols_only,
@@ -313,6 +274,46 @@ def _run_dump_uncached(
             include_search_dirs=_public_include_search_dirs,
         )
 
+    return _extract_and_finish(
+        binary_fmt,
+        request,
+        header_graph_lang=_header_graph_lang,
+        skip_header_graph_attach=False,
+    )
+
+
+def _extract_and_finish(
+    binary_fmt: str,
+    request: NativeExtractRequest,
+    *,
+    header_graph_lang: str | None,
+    skip_header_graph_attach: bool,
+) -> AbiSnapshot:
+    """One single-backend dump: the format's adapter, then its tail.
+
+    The ELF tail attaches SYCL/Python/NumPy metadata, the header-only graph
+    and the clang layout; PE and Mach-O share :func:`_finish_native_snapshot`.
+    Both renumber anonymous closure identities exactly once, at the end.
+    """
+    from ...dumper_cache import ast_memoize_scope
+    from ...extract.header_ast_backend import _resolve_header_backend
+
+    adapter = FORMAT_ADAPTERS.get(binary_fmt)
+    if adapter is None:
+        raise UnsupportedArtifactError(f"Unsupported binary format: {binary_fmt}")
+    path = request.path
+    _headers = request.headers
+    _includes = request.includes
+    lang = request.lang
+    compile = request.compile
+    public_headers = request.public_headers
+    public_header_dirs = request.public_header_dirs
+    _public_include_search_dirs = request.public_include_search_dirs
+    dwarf_only = request.dwarf_only
+    symbols_only = request.symbols_only
+    eff_backend = request.header_backend
+    _header_graph_lang = header_graph_lang
+    _skip_header_graph_attach = skip_header_graph_attach
     if binary_fmt == "elf":
         _graph_wanted = not (_skip_header_graph_attach or dwarf_only or symbols_only)
         _prefetched_graph = prefetch_graph_if_useful(
@@ -335,48 +336,22 @@ def _run_dump_uncached(
         # defer_closure_identity_renumbering (Codex review, fresh evidence):
         # attach_clang_layout below independently derives a base's name from
         # clang's still-`:line:col`-form spelling, so pre-renumbering here
-        # (as _dump_elf's own dump() otherwise would) leaves `base_offsets`
+        # (as extract_elf's own dump() otherwise would) leaves `base_offsets`
         # keyed differently than the already-`#N` `bases` -- and renumbering
         # twice isn't safe either, since a second pass only sees the surviving
         # raw markers and assigns them ordinals from that narrower view.
         # Suppressed for this whole branch, renumbered once at the end.
         with (
-            (
-                dumper_cache.ast_memoize_scope()
-                if _headers and _graph_wanted
-                else nullcontext()
-            ),
+            ast_memoize_scope() if _headers and _graph_wanted else nullcontext(),
             closure_identity.defer_closure_identity_renumbering(),
             prefetch_settled_on_failure(_prefetched_graph),
         ):
-            snap = _dump_elf(
-                path,
-                _headers,
-                _includes,
-                version,
-                lang,
-                lang_explicit=lang_explicit,
-                dwarf_only=dwarf_only,
-                debug_roots=debug_roots,
-                enable_debuginfod=enable_debuginfod,
-                debuginfod_url=debuginfod_url,
-                debug_format=debug_format,
-                symbols_only=symbols_only,
-                debug_presence_only=debug_presence_only,
-                header_backend=eff_backend,
-                compile=compile,
-                public_headers=public_headers,
-                public_header_dirs=public_header_dirs,
-                notify=notify,
-                include_labels=include_labels,
-                dump_manifest=dump_manifest,
-                public_include_search_dirs=_public_include_search_dirs,
-            )
-        _try_attach_sycl_metadata(snap, path)
-        _try_attach_python_ext_metadata(snap)
-        _try_attach_python_api_surface(snap)
-        _try_attach_numpy_capi_surface(snap, path)
-        # dwarf_only/symbols_only mean "ignore headers entirely" -- _dump_elf
+            snap = adapter.extract(request)
+        try_attach_sycl_metadata(snap, path)
+        try_attach_python_ext_metadata(snap)
+        try_attach_python_api_surface(snap)
+        try_attach_numpy_capi_surface(snap, path)
+        # dwarf_only/symbols_only mean "ignore headers entirely" -- extract_elf
         # above already honors both, so the header-graph attach must not
         # silently re-parse those headers and attach L2 build_source evidence
         # to what the caller explicitly requested as DWARF-only/symbols-only
@@ -404,73 +379,27 @@ def _run_dump_uncached(
             snap, _headers, _includes, lang=lang, compile=compile
         )
         return closure_identity.renumber_anonymous_closure_identities(snap)
-    if binary_fmt == "pe":
-        # See the ELF branch's comment above -- same base_offsets/bases
-        # spelling mismatch, since _dump_pe already renumbers too early.
-        with (
-            dumper_cache.ast_memoize_scope(),
-            closure_identity.defer_closure_identity_renumbering(),
-        ):
-            snap = _dump_pe(
-                path,
-                version,
-                headers=_headers,
-                includes=_includes,
-                lang=lang,
-                lang_explicit=lang_explicit,
-                pdb_path=pdb_path,
-                header_backend=eff_backend,
-                compile=compile,
-                public_headers=public_headers,
-                public_header_dirs=public_header_dirs,
-                include_labels=include_labels,
-            )
-        return _finish_native_snapshot(
-            snap,
-            path=path,
-            headers=_headers,
-            includes=_includes,
-            lang=lang,
-            header_graph_lang=_header_graph_lang,
-            compile=compile,
-            public_headers=public_headers,
-            public_header_dirs=public_header_dirs,
-            skip_header_graph=_skip_header_graph_attach or symbols_only,
-            public_include_search_dirs=_public_include_search_dirs,
-        )
-    if binary_fmt == "macho":
-        # See the ELF/PE branches' own comments above -- same mismatch.
-        with (
-            dumper_cache.ast_memoize_scope(),
-            closure_identity.defer_closure_identity_renumbering(),
-        ):
-            snap = _dump_macho(
-                path,
-                version,
-                headers=_headers,
-                includes=_includes,
-                header_backend=eff_backend,
-                lang=lang,
-                lang_explicit=lang_explicit,
-                compile=compile,
-                public_headers=public_headers,
-                public_header_dirs=public_header_dirs,
-                include_labels=include_labels,
-            )
-        return _finish_native_snapshot(
-            snap,
-            path=path,
-            headers=_headers,
-            includes=_includes,
-            lang=lang,
-            header_graph_lang=_header_graph_lang,
-            compile=compile,
-            public_headers=public_headers,
-            public_header_dirs=public_header_dirs,
-            skip_header_graph=_skip_header_graph_attach or symbols_only,
-            public_include_search_dirs=_public_include_search_dirs,
-        )
-    raise UnsupportedArtifactError(f"Unsupported binary format: {binary_fmt}")
+    # PE and Mach-O: see the ELF branch's comment above -- the same
+    # base_offsets/bases spelling mismatch, since both extractors already
+    # renumber too early.
+    with (
+        ast_memoize_scope(),
+        closure_identity.defer_closure_identity_renumbering(),
+    ):
+        snap = adapter.extract(request)
+    return _finish_native_snapshot(
+        snap,
+        path=path,
+        headers=_headers,
+        includes=_includes,
+        lang=lang,
+        header_graph_lang=_header_graph_lang,
+        compile=compile,
+        public_headers=public_headers,
+        public_header_dirs=public_header_dirs,
+        skip_header_graph=_skip_header_graph_attach or symbols_only,
+        public_include_search_dirs=_public_include_search_dirs,
+    )
 
 
 def _finish_native_snapshot(
@@ -504,7 +433,7 @@ def _finish_native_snapshot(
     offset lands under the same ordinal ``bases`` gets, not disagreeing.
 
     ``skip_header_graph`` folds the caller's own reasons to suppress the graph
-    (the ``hybrid`` recursion's ``_skip_header_graph_attach``, ``symbols_only``)
+    (a ``hybrid`` leg's ``skip_header_graph_attach``, ``symbols_only``)
     into one flag; the global enablement switches stay this function's business.
 
     ``public_include_search_dirs`` (see ``_run_dump_uncached``'s own docstring):
@@ -522,9 +451,9 @@ def _finish_native_snapshot(
     snap = _apply_native_provenance(
         snap, public_headers, public_header_dirs, _public_dirs
     )
-    _try_attach_python_ext_metadata(snap)
-    _try_attach_python_api_surface(snap)
-    _try_attach_numpy_capi_surface(snap, path)
+    try_attach_python_ext_metadata(snap)
+    try_attach_python_api_surface(snap)
+    try_attach_numpy_capi_surface(snap, path)
     snap = _attach_header_graph(
         snap,
         _HEADER_GRAPH_ENABLED and not skip_header_graph,
@@ -572,7 +501,7 @@ def _apply_native_provenance(
     surface — the exact false-clean result the ELF fix closed, left open on
     these two formats (Codex review, fresh evidence).
     """
-    from .workflows.snapshot_factory import finish_provenance
+    from ...workflows.snapshot_factory import finish_provenance
 
     return finish_provenance(
         snap,
@@ -582,15 +511,7 @@ def _apply_native_provenance(
     )
 
 
-def _emit(notify: Callable[[str], None] | None, message: str) -> None:
-    """Send a user-facing progress note to *notify*, or the logger if unset."""
-    if notify is not None:
-        notify(message)
-    else:
-        _logger.warning(message)
-
-
-def _dump_elf(
+def extract_elf(
     path: Path,
     headers: list[Path],
     includes: list[Path],
@@ -634,7 +555,7 @@ def _dump_elf(
     uses a build-derived directory. Falls back to ``list(includes)`` when
     omitted (unchanged prior behavior).
     """
-    from .dumper import dump
+    from ...dumper import dump
 
     # P1.1 (ADR-021a): a resolved detached debug artifact (--debug-root /
     # --debuginfod) was previously only used for a CLI log line -- the
@@ -647,7 +568,7 @@ def _dump_elf(
         and not debug_presence_only
         and (debug_roots or enable_debuginfod)
     ):
-        from .debug_resolver import resolve_debug_info
+        from ...debug_resolver import resolve_debug_info
 
         artifact = resolve_debug_info(
             path,
@@ -665,18 +586,18 @@ def _dump_elf(
                 else:
                     _logger.info(message)
 
-    from .compile_context import CompileContext
+    from ...compile_context import CompileContext
 
     cc = compile if compile is not None else CompileContext()
     resolved_headers = expand_header_inputs(headers) if headers else []
     if not resolved_headers and symbols_only and dump_manifest is None:
-        _emit(
+        emit_notice(
             notify,
             f"Warning: '{path}' — no headers provided. "
             "Using exported symbols only for binary-depth scan.",
         )
     elif not resolved_headers and not dwarf_only and dump_manifest is None:
-        _emit(
+        emit_notice(
             notify,
             f"Warning: '{path}' — no headers provided. "
             "Will use DWARF debug info if available, else symbols-only mode.",
@@ -688,7 +609,7 @@ def _dump_elf(
                     f"Include directory not found or not a directory: {inc}"
                 )
     elif includes and not dwarf_only and dump_manifest is None:
-        _emit(notify, "Warning: --include paths are ignored without headers.")
+        emit_notice(notify, "Warning: --include paths are ignored without headers.")
 
     # P3: auto-add the public-header roots to the search path. Same bucket
     # selection as the dump CLI path (resolve_inferred_header_roots): plain
@@ -770,24 +691,46 @@ def _dump_elf(
         raise SnapshotError(f"Failed to dump '{path}': {exc}") from exc
 
 
-# PE/Mach-O dump (``_dump_pe``/``_dump_macho``) and the PDB-debug helper they
-# share (``_extract_pdb_debug``) live in the sibling module
-# ``service_dump_native_pe`` -- split out purely to stay under the
-# AI-readiness 800-line production cap for a *new* file (which, unlike this
-# already-baselined module's own predecessor in ``service.py``, has no
-# debt-ledger entry to grow into). Re-exported here so
-# ``_run_dump_uncached``'s own bare-name calls below keep resolving, and so
-# ``from abicheck.service_dump_native import _dump_pe`` (and, via
-# ``service.py``'s own re-export, ``from abicheck.service import
-# _dump_pe``) keep working unchanged.
-# expand_header_inputs is the scan-engine's own header expansion helper,
-# re-exported through ``dry_run_estimate`` -- imported lazily below to avoid a
-# module-load-time cycle (``dry_run_estimate`` -> ... -> this module's own
-# siblings), matching how ``service.py`` itself deferred this before the
-# split.
-from .dry_run_estimate import expand_header_inputs  # noqa: E402
-from .service_dump_native_pe import (  # noqa: E402
-    _dump_macho as _dump_macho,
-    _dump_pe as _dump_pe,
-    _extract_pdb_debug as _extract_pdb_debug,
-)
+class ElfAdapter:
+    """The ELF :class:`~abicheck.workflows.dump.formats.BinaryFormatAdapter`.
+
+    Defined here, beside :func:`extract_elf`, rather than in ``formats``:
+    ``formats`` importing this module back would close an import cycle.
+    """
+
+    format = "elf"
+
+    def extract(self, request: NativeExtractRequest) -> AbiSnapshot:
+        r = request
+        return extract_elf(
+            r.path,
+            r.headers,
+            r.includes,
+            r.version,
+            r.lang,
+            lang_explicit=r.lang_explicit,
+            dwarf_only=r.dwarf_only,
+            debug_roots=r.debug_roots,
+            enable_debuginfod=r.enable_debuginfod,
+            debuginfod_url=r.debuginfod_url,
+            debug_format=r.debug_format,
+            symbols_only=r.symbols_only,
+            debug_presence_only=r.debug_presence_only,
+            header_backend=r.header_backend,
+            compile=r.compile,
+            public_headers=r.public_headers,
+            public_header_dirs=r.public_header_dirs,
+            notify=r.notify,
+            include_labels=r.include_labels,
+            dump_manifest=r.dump_manifest,
+            public_include_search_dirs=r.public_include_search_dirs,
+        )
+
+
+#: The binary-format registry ``run_dump`` dispatches through, keyed by
+#: ``detect_binary_format``'s spelling. Replace an entry to substitute an
+#: extractor (``tests/_dump_format_fakes.py`` does so for one ``with`` block).
+FORMAT_ADAPTERS: dict[str, BinaryFormatAdapter] = {
+    **DEFAULT_ADAPTERS,
+    "elf": ElfAdapter(),
+}

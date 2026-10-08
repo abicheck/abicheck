@@ -227,7 +227,7 @@ def compile_context_cache_field(compile: object | None) -> str:
 def effective_header_backend(header_backend: str, compile: object | None) -> str:
     """The backend request ``run_dump`` honours: an explicit (non-``auto``)
     ``compile.frontend`` wins over the bare ``header_backend`` argument
-    (``service_dump_native._run_dump_uncached``)."""
+    (``workflows.dump.native._run_dump_uncached``)."""
     cc = _normalized_compile_context(compile)
     if cc is not None and cc.frontend != "auto":
         return str(cc.frontend)
@@ -514,7 +514,7 @@ def _dump_cache_extra_key(
             compiler_identity = f"compiler-unavailable:{type(exc).__name__}:{exc}"
 
     # G29 Phase A's header-graph attach (service._attach_header_graph) always
-    # runs its own internal clang AST pass (_clang_header_dump) to build the
+    # runs its own internal clang AST pass (clang_header_dump) to build the
     # L2 semantic graph -- unconditionally, regardless of which backend
     # `resolved_backend` above is (a plain castxml dump still gets one). That
     # pass resolves clang with the compile context's gcc_path/gcc_prefix

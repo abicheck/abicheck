@@ -25,7 +25,7 @@ two different PE binaries could silently read the same PDB and report a
 false clean result. ``run_compare`` rejects ``debug.pdb_path`` for a
 two-operand compare -- but only when **both** sides are genuinely live PE
 inputs (a PDB is only ever consulted while extracting a PE binary,
-``service_dump_native_pe.py``'s own ``_extract_pdb_debug``): a second,
+``abicheck.workflows.dump.pe.extract_pdb_debug``): a second,
 later Codex round ("Allow PDB config when only one operand is live") found
 the first version rejected unconditionally, breaking the common
 stored-baseline-vs-live-candidate shape (``compare old.json new.dll

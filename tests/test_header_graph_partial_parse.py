@@ -134,7 +134,7 @@ def test_merge_is_order_independent_up_to_first_wins_and_dedups() -> None:
 def test_attach_keeps_edges_of_headers_that_parse(monkeypatch, tmp_path: Path) -> None:
     """Through the real acquisition entry point: the batch parse fails, the
     bisection recovers the good header, and the failure stays recorded."""
-    import abicheck.dumper as dumper
+    import abicheck.extract.headers.clang.backend as clang_backend
     from abicheck.errors import SnapshotError
     from abicheck.service_header_graph_attach import acquire_header_graph_ast
 
@@ -165,7 +165,7 @@ def test_attach_keeps_edges_of_headers_that_parse(monkeypatch, tmp_path: Path) -
             False,
         )
 
-    monkeypatch.setattr(dumper, "_clang_header_dump", fake_dump)
+    monkeypatch.setattr(clang_backend, "clang_header_dump", fake_dump)
     got = acquire_header_graph_ast([good, bad], [], "c++", None)
     assert got.projection is not None
     assert "Good" in got.projection.type_files
@@ -175,7 +175,7 @@ def test_attach_keeps_edges_of_headers_that_parse(monkeypatch, tmp_path: Path) -
 def test_attach_reports_every_failed_header_when_none_recover(
     monkeypatch, tmp_path: Path
 ) -> None:
-    import abicheck.dumper as dumper
+    import abicheck.extract.headers.clang.backend as clang_backend
     from abicheck.errors import SnapshotError
     from abicheck.service_header_graph_attach import acquire_header_graph_ast
 
@@ -186,7 +186,7 @@ def test_attach_reports_every_failed_header_when_none_recover(
     def always_fail(headers, *_a, **_k):
         raise SnapshotError("boom")
 
-    monkeypatch.setattr(dumper, "_clang_header_dump", always_fail)
+    monkeypatch.setattr(clang_backend, "clang_header_dump", always_fail)
     got = acquire_header_graph_ast(paths, [], "c++", None)
     assert got.projection is None
     assert got.ast_failure is not None
@@ -199,7 +199,7 @@ def test_attach_reports_every_failed_header_when_none_recover(
 def test_recovery_parses_run_with_streaming_prune_suppressed(
     monkeypatch, tmp_path: Path
 ) -> None:
-    import abicheck.dumper as dumper
+    import abicheck.extract.headers.clang.backend as clang_backend
     from abicheck.dumper_clang_streaming import streaming_prune_suppressed
     from abicheck.errors import SnapshotError
     from abicheck.service_header_graph_attach import acquire_header_graph_ast
@@ -216,7 +216,7 @@ def test_recovery_parses_run_with_streaming_prune_suppressed(
             raise SnapshotError("bad")
         return {"kind": "TranslationUnitDecl", "inner": []}, "c++", False
 
-    monkeypatch.setattr(dumper, "_clang_header_dump", fake_dump)
+    monkeypatch.setattr(clang_backend, "clang_header_dump", fake_dump)
     acquire_header_graph_ast([good, bad], [], "c++", None)
     assert len(prune_seen) == 3  # batch + two halves
     assert all(prune_seen)

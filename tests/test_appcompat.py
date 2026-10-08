@@ -157,7 +157,7 @@ def _boundary(diff, scoped=None, fmt="elf"):
         patch(
             "abicheck.workflows.input_resolution.detect_binary_format", return_value=fmt
         ),
-        patch("abicheck.service_dump_native.run_dump", return_value=MagicMock()),
+        patch("abicheck.workflows.dump.native.run_dump", return_value=MagicMock()),
         patch("abicheck.workflows.compare_policy.compare_snapshots", return_value=diff),
         patch(
             f"{_STANDALONE}.scope_diff_to_app",

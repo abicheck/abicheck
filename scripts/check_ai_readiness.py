@@ -1552,7 +1552,7 @@ IMPORT_CYCLE_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
                 # deadlock; the package still imports cleanly.
                 "service_header_graph_attach",
                 "dry_run_estimate",
-                # `service_dump_native` joins the same SCC on exactly the terms
+                # `workflows.dump.native` (formerly `service_dump_native`) joins the same SCC on exactly the terms
                 # `service_header_graph_attach` above was signed off under -- a
                 # *split* of an existing member (ADR-061 "make service.py a
                 # thin facade" pass), not a new dependency direction.
@@ -1568,7 +1568,7 @@ IMPORT_CYCLE_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
                 # edges land on already-member modules, and `service` imports
                 # this module back at its own tail -- so this closes the same
                 # cluster of cycles through already-member modules, not a new
-                # one. `service_dump_native_pe` (the PE/Mach-O half of the
+                # one. `workflows.dump.pe`/`.macho` (formerly `service_dump_native_pe`, the PE/Mach-O half of the
                 # same original block, split out purely to keep this new
                 # module under the 800-line production cap a genuinely new
                 # file gets no debt-ledger baseline to grow into) reaches
@@ -1577,7 +1577,7 @@ IMPORT_CYCLE_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
                 # docstring already documents as invisible to this check's
                 # static AST walk -- it carries no static edge into this
                 # cluster and is deliberately not listed here.
-                "service_dump_native",
+                "workflows.dump.native",
                 # ADR-061 Phase 3 split `service_input_resolution` (already a
                 # member, two entries up) into `workflows.artifact.resolve` and
                 # `workflows.artifact.execute`, leaving the old path as a

@@ -2,17 +2,6 @@
   "schema_version": 1,
   "files": [
     {
-      "path": "abicheck/service_dump_native.py",
-      "baseline_lines": 816,
-      "target": "workflows (the hybrid two-backend sub-dump and merge is a dump-orchestration concern; extracting it would take this file back under the cap)",
-      "rule": "no_growth",
-      "disposition": "migrate",
-      "category": "adr062_new_capability_growth",
-      "owner": "abicheck maintainers",
-      "rationale": "New entry, 800 -> 806. This file sat at exactly the 800-line production maximum, so any addition crosses it. The addition is a correctness fix, not new capability: the hybrid header backend recursively calls `run_dump` twice and merges the results, and it relied on `run_dump`'s own `include_dependencies` default being `True` to keep each sub-dump's full surface for the outer wrapper to scope once. Aligning that default to `False` (PR #1258, matching `dump --include-system-declarations`) made both sub-dumps filter, and the wrapper cannot restore dropped declarations -- so `include_dependencies=True` with `header_backend=\"hybrid\"` returned a filtered surface still labelled `dependency_scope=\"full\"` (measured: 10 functions instead of 7,682, on a real one-header C++ library). A snapshot that lies about its own scope compares \"successfully\" against a genuinely full one and can license a false compatibility conclusion, which is worse than the front-end divergence that PR set out to fix. Two lines are the fix itself (one explicit `include_dependencies=True` on each recursive call, deliberately not routed through `common_kwargs` so the sub-dumps are independent of whatever the default becomes); four are the comment recording why they are NOT redundant, which is the minimum that stops a future reader deleting them as dead weight and silently reintroducing the defect -- the full account lives in that PR and its commit message rather than here. The comment was cut from sixteen lines to four for exactly this reason before opening the entry. Nothing smaller exists: the keywords cannot be omitted without reintroducing the bug, and extracting the sub-dump/merge block to `workflows` is the real fix (recorded as this entry's target) but is a behaviour-preserving refactor of its own rather than part of a review-fix round. Baseline raised 806 -> 816 by the one-time `ruff format` pass that made `fmt-check` a real CI gate (see docs/contribute/known-gaps.md). No responsibility was added or moved: the formatter only rewrapped call sites and expanded magic trailing commas, and the file's parsed statement count is byte-for-byte unchanged (verified by comparing `ast.dump` of this file before and after). This is the one bump that \"move responsibility instead of raising the baseline\" cannot be answered by moving anything; physical line counts are formatter-stable from here, because `fmt-check` now gates them. Raised 876 -> 884 (PR #1283, Codex review round 7): `extend_records`, the one API a merge of several comparisons' ledgers needs. A multi-library `compat check` dropped every per-library ledger, so a release whose policy demonstrably acted reported an empty policy trail -- ADR-067's \"every disposition keeps its rule and reason\" lost at the aggregation step. `record()` cannot serve the merge: it is keyed on the live `Change` object a disposition was applied to, and a merge holds the records rather than the objects behind them. The merge itself, and all of its reasoning, lives in the new `policy/disposition_merge.py`; what is here is the seven-line accessor into this class's own private list, which cannot live anywhere else without a cross-module private access. The alternative considered and rejected was a parallel merged-ledger type in the new module, which would have had to duplicate this class's whole query surface (`records`/`__len__`/`__iter__`/`detected_total`/`scope_reasons`/`suppressed_gating_records`) to be usable by the same reporters -- strictly more duplication than eight lines.",
-      "review_by": "2026-11-30"
-    },
-    {
       "path": "abicheck/analysis_assurance.py",
       "baseline_lines": 1586,
       "target": "see ADR-061 ownership map",
@@ -773,7 +762,7 @@
     },
     {
       "path": "abicheck/dumper.py",
-      "baseline_lines": 2060,
+      "baseline_lines": 1264,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -807,17 +796,6 @@
     {
       "path": "abicheck/dumper_clang.py",
       "baseline_lines": 1961,
-      "target": "see ADR-061 ownership map",
-      "rule": "no_growth",
-      "disposition": "migrate",
-      "category": "legacy_oversized_module",
-      "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
-      "review_by": "2026-11-30"
-    },
-    {
-      "path": "abicheck/dumper_clang_vtable.py",
-      "baseline_lines": 1273,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -1653,7 +1631,7 @@
     },
     {
       "path": "tests/test_clang_header_backend_integration.py",
-      "baseline_lines": 1624,
+      "baseline_lines": 1563,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -1917,7 +1895,7 @@
     },
     {
       "path": "tests/test_dumper_clang.py",
-      "baseline_lines": 6350,
+      "baseline_lines": 5621,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -2763,16 +2741,5 @@
       "review_by": "2026-11-30"
     }
   ],
-  "dependency_direction_exceptions": [
-    {
-      "path": "abicheck/service.py",
-      "target": "abicheck.service_render",
-      "source_layer": "workflows",
-      "target_layer": "frontends",
-      "rule": "dependency-direction",
-      "owner": "abicheck maintainers",
-      "rationale": "ADR-061 gap A: abicheck.service.render_output is a documented public Python-API path (service.py's own __all__) whose implementation (service_render.py) genuinely needs report.py, so it is frontends-classified -- workflows may not import frontends. Previously bridged via workflows/render.py resolving importlib.import_module(\"..service_render\", __package__) inside each function body specifically so the workflows -> frontends edge stayed invisible to check_architecture.py's direction check (and, combined with the already-allowed frontends -> report -> workflows edges, a dependency cycle). workflows/render.py has been retired and service.py now imports service_render directly and statically -- the edge is real, visible, and unchanged in shape; only its invisibility is gone. Closing it for real means service.py itself stopping being workflows-classified for this responsibility (the ADR's own \"composition at the outer boundary\" language). The gap A text's own named follow-up (migrate abicheck/l0_export_delta.py, abicheck/appcompat.py, abicheck/service_scan.py off the abicheck.service facade onto their real workflows owners first) is done: service_scan.py was independently renamed/retired to dry_run_estimate.py during ADR-068 Phase 4 and never imported abicheck.service at all; l0_export_delta.py and appcompat.py now import resolve_input/compare_snapshots/detect_binary_format/run_dump directly from workflows.input_resolution/workflows.compare_policy/service_dump_native. A repo-wide re-measurement (this ADR's own \"re-measure rather than trust the list\" lesson) found the original three undercounted the real blast radius: abicheck/stack_checker.py, abicheck/bundle_side_input.py, and abicheck/service_dump_pipeline.py (a service.py's own re-exported module) also imported the flat abicheck.service facade from workflows-classified code -- all three are migrated too, same pattern. abicheck/service_compare_pipeline.py (another service.py re-export target) had two internal `from . import service` bridges of its own (resolve_compare_request/classify_compare_pair reaching back into the facade that re-exports them) -- also migrated onto the same real owners. With every currently-real workflows-classified importer of the facade closed, `python scripts/check_architecture.py` confirms exactly one dependency-direction finding remains once this exception is removed: abicheck/service.py:220 (the render_output re-export itself) -- no other edge appeared anywhere in abicheck/. Reclassifying service.py to frontends to close that last edge is still not safe in one pass, though, for a reason gap A's own text never named: service.py also has a *module-level*, static `from .service_header_graph_attach import ...`/`from .service_metadata_attach import ...` block, and service_metadata_attach.py is extract-classified (not workflows) -- moving service.py to frontends would turn that existing, currently-legal workflows->extract edge into a new, illegal frontends->extract one (frontends may reach extract only through workflows), a distinct problem from the render_output edge this exception was opened for. Closing it needs the same wrapper-relocation treatment service_metadata_attach.py's own callers got here, which is untried and unverified in this pass. Tracked as an accepted, reviewed exception, narrowed to its one remaining real edge rather than left dynamic and unlisted.",
-      "review_by": "2026-12-31"
-    }
-  ]
+  "dependency_direction_exceptions": []
 }

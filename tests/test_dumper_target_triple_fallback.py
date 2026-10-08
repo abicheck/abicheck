@@ -23,8 +23,10 @@ Split out of ``test_dumper_clang.py`` (already at its ADR-061 file-size debt
 cap, see ``architecture/debt.yaml``) rather than added there.
 ``_compiler_options.explicit_target_triple`` itself (the pure recovery
 helper) has its own dedicated coverage in ``test_compiler_options.py``; this
-module covers only the one thing that lives in ``dumper.py`` -- that the
-``_run_clang()`` call site actually wires the fallback in, end to end.
+module covers only the call-site wiring -- that ``dumper._header_ast_parser``'s
+clang branch (via ``abicheck.extract.headers.clang.backend.ClangBackend.parse``,
+which now owns the clang header pass and its triple fallback) actually wires
+the fallback in, end to end.
 """
 
 from __future__ import annotations
@@ -34,7 +36,6 @@ import sys
 
 import pytest
 
-from abicheck import dumper
 from abicheck.dumper import _header_ast_parser
 from abicheck.dumper_clang import (
     _ClangAstParser,
@@ -42,6 +43,7 @@ from abicheck.dumper_clang import (
     _is_default_clang_bin,
     clang_bin_is_explicitly_configured,
 )
+from abicheck.extract.headers.clang import backend as clang_backend
 
 
 def _tu(*inner: dict) -> dict:
@@ -146,12 +148,14 @@ def test_probe_failure_recovers_explicit_target_triple(
     so the explicit request must survive a probe failure intact."""
     ast = _tu({"kind": "TranslationUnitDecl", "inner": []})
     monkeypatch.setattr(
-        dumper, "_clang_header_dump", lambda *a, **k: (ast, None, False)
+        clang_backend, "clang_header_dump", lambda *a, **k: (ast, None, False)
     )
     # Simulates a failed `-print-target-triple` probe (compiler resolution
     # mismatch, a sandboxed/restricted CI runner, ...) without needing a
     # real subprocess failure.
-    monkeypatch.setattr(dumper, "_configured_target_triple", lambda *a, **k: None)
+    monkeypatch.setattr(
+        clang_backend, "_configured_target_triple", lambda *a, **k: None
+    )
 
     parser = _header_ast_parser(
         [],
@@ -186,9 +190,11 @@ def test_probe_failure_with_no_explicit_target_falls_back_to_sys_platform(
     site, which knows a probe was genuinely attempted, earns the guess."""
     ast = _tu({"kind": "TranslationUnitDecl", "inner": []})
     monkeypatch.setattr(
-        dumper, "_clang_header_dump", lambda *a, **k: (ast, None, False)
+        clang_backend, "clang_header_dump", lambda *a, **k: (ast, None, False)
     )
-    monkeypatch.setattr(dumper, "_configured_target_triple", lambda *a, **k: None)
+    monkeypatch.setattr(
+        clang_backend, "_configured_target_triple", lambda *a, **k: None
+    )
 
     parser = _header_ast_parser(
         [],
@@ -221,10 +227,12 @@ def test_probe_failure_with_a_response_file_does_not_guess_sys_platform(
     easily be wrong (Codex review, eleventh round, fresh evidence)."""
     ast = _tu({"kind": "TranslationUnitDecl", "inner": []})
     monkeypatch.setattr(
-        dumper, "_clang_header_dump", lambda *a, **k: (ast, None, False)
+        clang_backend, "clang_header_dump", lambda *a, **k: (ast, None, False)
     )
-    monkeypatch.setattr(dumper, "_configured_target_triple", lambda *a, **k: None)
-    monkeypatch.setattr(dumper, "_resolve_clang_bin", lambda *a, **k: "clang++")
+    monkeypatch.setattr(
+        clang_backend, "_configured_target_triple", lambda *a, **k: None
+    )
+    monkeypatch.setattr(clang_backend, "_resolve_clang_bin", lambda *a, **k: "clang++")
     monkeypatch.setattr(sys, "platform", "darwin")
 
     parser = _header_ast_parser(
@@ -263,10 +271,12 @@ def test_probe_failure_with_a_response_file_alongside_a_target_does_not_recover_
     case is no longer "still recovered", it is unknown like any other."""
     ast = _tu({"kind": "TranslationUnitDecl", "inner": []})
     monkeypatch.setattr(
-        dumper, "_clang_header_dump", lambda *a, **k: (ast, None, False)
+        clang_backend, "clang_header_dump", lambda *a, **k: (ast, None, False)
     )
-    monkeypatch.setattr(dumper, "_configured_target_triple", lambda *a, **k: None)
-    monkeypatch.setattr(dumper, "_resolve_clang_bin", lambda *a, **k: "clang++")
+    monkeypatch.setattr(
+        clang_backend, "_configured_target_triple", lambda *a, **k: None
+    )
+    monkeypatch.setattr(clang_backend, "_resolve_clang_bin", lambda *a, **k: "clang++")
 
     parser = _header_ast_parser(
         [],
@@ -312,11 +322,13 @@ def test_probe_failure_with_an_explicit_absolute_path_no_longer_guesses(
     assert resolved_native_clang is not None
     ast = _tu({"kind": "TranslationUnitDecl", "inner": []})
     monkeypatch.setattr(
-        dumper, "_clang_header_dump", lambda *a, **k: (ast, None, False)
+        clang_backend, "clang_header_dump", lambda *a, **k: (ast, None, False)
     )
-    monkeypatch.setattr(dumper, "_configured_target_triple", lambda *a, **k: None)
     monkeypatch.setattr(
-        dumper, "_resolve_clang_bin", lambda *a, **k: resolved_native_clang
+        clang_backend, "_configured_target_triple", lambda *a, **k: None
+    )
+    monkeypatch.setattr(
+        clang_backend, "_resolve_clang_bin", lambda *a, **k: resolved_native_clang
     )
     monkeypatch.setattr(sys, "platform", "darwin")
 
@@ -355,11 +367,15 @@ def test_probe_failure_with_a_resolved_cross_compiler_does_not_guess_sys_platfor
     for."""
     ast = _tu({"kind": "TranslationUnitDecl", "inner": []})
     monkeypatch.setattr(
-        dumper, "_clang_header_dump", lambda *a, **k: (ast, None, False)
+        clang_backend, "clang_header_dump", lambda *a, **k: (ast, None, False)
     )
-    monkeypatch.setattr(dumper, "_configured_target_triple", lambda *a, **k: None)
     monkeypatch.setattr(
-        dumper, "_resolve_clang_bin", lambda *a, **k: "aarch64-apple-darwin-clang++"
+        clang_backend, "_configured_target_triple", lambda *a, **k: None
+    )
+    monkeypatch.setattr(
+        clang_backend,
+        "_resolve_clang_bin",
+        lambda *a, **k: "aarch64-apple-darwin-clang++",
     )
     monkeypatch.setattr(sys, "platform", "darwin")
 
@@ -392,11 +408,15 @@ def test_probe_failure_with_a_resolved_cross_compiler_still_recovers_explicit_ta
     recovered regardless of whether a cross-compiler is also configured."""
     ast = _tu({"kind": "TranslationUnitDecl", "inner": []})
     monkeypatch.setattr(
-        dumper, "_clang_header_dump", lambda *a, **k: (ast, None, False)
+        clang_backend, "clang_header_dump", lambda *a, **k: (ast, None, False)
     )
-    monkeypatch.setattr(dumper, "_configured_target_triple", lambda *a, **k: None)
     monkeypatch.setattr(
-        dumper, "_resolve_clang_bin", lambda *a, **k: "aarch64-apple-darwin-clang++"
+        clang_backend, "_configured_target_triple", lambda *a, **k: None
+    )
+    monkeypatch.setattr(
+        clang_backend,
+        "_resolve_clang_bin",
+        lambda *a, **k: "aarch64-apple-darwin-clang++",
     )
 
     parser = _header_ast_parser(
@@ -431,10 +451,12 @@ def test_probe_failure_with_an_explicit_config_file_does_not_guess_sys_platform(
     evidence)."""
     ast = _tu({"kind": "TranslationUnitDecl", "inner": []})
     monkeypatch.setattr(
-        dumper, "_clang_header_dump", lambda *a, **k: (ast, None, False)
+        clang_backend, "clang_header_dump", lambda *a, **k: (ast, None, False)
     )
-    monkeypatch.setattr(dumper, "_configured_target_triple", lambda *a, **k: None)
-    monkeypatch.setattr(dumper, "_resolve_clang_bin", lambda *a, **k: "clang++")
+    monkeypatch.setattr(
+        clang_backend, "_configured_target_triple", lambda *a, **k: None
+    )
+    monkeypatch.setattr(clang_backend, "_resolve_clang_bin", lambda *a, **k: "clang++")
     monkeypatch.setattr(sys, "platform", "darwin")
 
     parser = _header_ast_parser(
@@ -474,7 +496,7 @@ def test_probe_failure_with_a_custom_renamed_compiler_recovers_via_bare_reprobe(
     of guessing from the name."""
     ast = _tu({"kind": "TranslationUnitDecl", "inner": []})
     monkeypatch.setattr(
-        dumper, "_clang_header_dump", lambda *a, **k: (ast, None, False)
+        clang_backend, "clang_header_dump", lambda *a, **k: (ast, None, False)
     )
 
     def _fake_configured_target_triple(
@@ -487,9 +509,11 @@ def test_probe_failure_with_a_custom_renamed_compiler_recovers_via_bare_reprobe(
         return None
 
     monkeypatch.setattr(
-        dumper, "_configured_target_triple", _fake_configured_target_triple
+        clang_backend, "_configured_target_triple", _fake_configured_target_triple
     )
-    monkeypatch.setattr(dumper, "_resolve_clang_bin", lambda *a, **k: "company-clang")
+    monkeypatch.setattr(
+        clang_backend, "_resolve_clang_bin", lambda *a, **k: "company-clang"
+    )
 
     parser = _header_ast_parser(
         [],
@@ -522,10 +546,14 @@ def test_probe_failure_with_a_custom_renamed_compiler_falls_back_when_bare_repro
     for a name it cannot positively identify as the plain default."""
     ast = _tu({"kind": "TranslationUnitDecl", "inner": []})
     monkeypatch.setattr(
-        dumper, "_clang_header_dump", lambda *a, **k: (ast, None, False)
+        clang_backend, "clang_header_dump", lambda *a, **k: (ast, None, False)
     )
-    monkeypatch.setattr(dumper, "_configured_target_triple", lambda *a, **k: None)
-    monkeypatch.setattr(dumper, "_resolve_clang_bin", lambda *a, **k: "company-clang")
+    monkeypatch.setattr(
+        clang_backend, "_configured_target_triple", lambda *a, **k: None
+    )
+    monkeypatch.setattr(
+        clang_backend, "_resolve_clang_bin", lambda *a, **k: "company-clang"
+    )
     monkeypatch.setattr(sys, "platform", "linux")
 
     parser = _header_ast_parser(
@@ -561,12 +589,14 @@ def test_probe_failure_with_a_gcc_path_resolve_ignores_still_guesses_sys_platfor
     compiler, so its target genuinely is approximated by `sys.platform`."""
     ast = _tu({"kind": "TranslationUnitDecl", "inner": []})
     monkeypatch.setattr(
-        dumper, "_clang_header_dump", lambda *a, **k: (ast, None, False)
+        clang_backend, "clang_header_dump", lambda *a, **k: (ast, None, False)
     )
-    monkeypatch.setattr(dumper, "_configured_target_triple", lambda *a, **k: None)
+    monkeypatch.setattr(
+        clang_backend, "_configured_target_triple", lambda *a, **k: None
+    )
     # Simulates _resolve_clang_bin ignoring a non-clang-family gcc_path and
     # falling back to the plain default, exactly as the real function does.
-    monkeypatch.setattr(dumper, "_resolve_clang_bin", lambda *a, **k: "clang++")
+    monkeypatch.setattr(clang_backend, "_resolve_clang_bin", lambda *a, **k: "clang++")
     monkeypatch.setattr(sys, "platform", "darwin")
 
     parser = _header_ast_parser(
@@ -599,10 +629,12 @@ def test_successful_probe_is_never_overridden_by_explicit_target(
     resolved an alias or a default sysroot-implied target)."""
     ast = _tu({"kind": "TranslationUnitDecl", "inner": []})
     monkeypatch.setattr(
-        dumper, "_clang_header_dump", lambda *a, **k: (ast, None, False)
+        clang_backend, "clang_header_dump", lambda *a, **k: (ast, None, False)
     )
     monkeypatch.setattr(
-        dumper, "_configured_target_triple", lambda *a, **k: "aarch64-apple-macos11"
+        clang_backend,
+        "_configured_target_triple",
+        lambda *a, **k: "aarch64-apple-macos11",
     )
 
     parser = _header_ast_parser(
@@ -638,10 +670,12 @@ def test_probe_failure_under_a_cl_style_driver_recovers_the_honored_spelling(
     ignored spellings (below) and the sys.platform guess stay suppressed."""
     ast = _tu({"kind": "TranslationUnitDecl", "inner": []})
     monkeypatch.setattr(
-        dumper, "_clang_header_dump", lambda *a, **k: (ast, None, False)
+        clang_backend, "clang_header_dump", lambda *a, **k: (ast, None, False)
     )
-    monkeypatch.setattr(dumper, "_configured_target_triple", lambda *a, **k: None)
-    monkeypatch.setattr(dumper, "_resolve_clang_bin", lambda *a, **k: "clang-cl")
+    monkeypatch.setattr(
+        clang_backend, "_configured_target_triple", lambda *a, **k: None
+    )
+    monkeypatch.setattr(clang_backend, "_resolve_clang_bin", lambda *a, **k: "clang-cl")
     monkeypatch.setattr(sys, "platform", "darwin")
 
     parser = _header_ast_parser(
@@ -677,10 +711,12 @@ def test_probe_failure_under_a_cl_style_driver_recovers_the_separate_short_spell
     recovers it, same as the attached double-dash spelling."""
     ast = _tu({"kind": "TranslationUnitDecl", "inner": []})
     monkeypatch.setattr(
-        dumper, "_clang_header_dump", lambda *a, **k: (ast, None, False)
+        clang_backend, "clang_header_dump", lambda *a, **k: (ast, None, False)
     )
-    monkeypatch.setattr(dumper, "_configured_target_triple", lambda *a, **k: None)
-    monkeypatch.setattr(dumper, "_resolve_clang_bin", lambda *a, **k: "clang-cl")
+    monkeypatch.setattr(
+        clang_backend, "_configured_target_triple", lambda *a, **k: None
+    )
+    monkeypatch.setattr(clang_backend, "_resolve_clang_bin", lambda *a, **k: "clang-cl")
     monkeypatch.setattr(sys, "platform", "darwin")
 
     parser = _header_ast_parser(
@@ -727,10 +763,12 @@ def test_probe_failure_under_a_cl_style_driver_ignores_unhonored_spellings(
     for."""
     ast = _tu({"kind": "TranslationUnitDecl", "inner": []})
     monkeypatch.setattr(
-        dumper, "_clang_header_dump", lambda *a, **k: (ast, None, False)
+        clang_backend, "clang_header_dump", lambda *a, **k: (ast, None, False)
     )
-    monkeypatch.setattr(dumper, "_configured_target_triple", lambda *a, **k: None)
-    monkeypatch.setattr(dumper, "_resolve_clang_bin", lambda *a, **k: "clang-cl")
+    monkeypatch.setattr(
+        clang_backend, "_configured_target_triple", lambda *a, **k: None
+    )
+    monkeypatch.setattr(clang_backend, "_resolve_clang_bin", lambda *a, **k: "clang-cl")
     monkeypatch.setattr(sys, "platform", "darwin")
 
     parser = _header_ast_parser(
@@ -768,7 +806,7 @@ def test_probe_failure_under_a_cl_style_driver_recovers_via_bare_reprobe(
     ``None`` and leaving a genuinely Darwin-decorated name unstripped."""
     ast = _tu({"kind": "TranslationUnitDecl", "inner": []})
     monkeypatch.setattr(
-        dumper, "_clang_header_dump", lambda *a, **k: (ast, None, False)
+        clang_backend, "clang_header_dump", lambda *a, **k: (ast, None, False)
     )
 
     def _fake_configured_target_triple(
@@ -781,10 +819,12 @@ def test_probe_failure_under_a_cl_style_driver_recovers_via_bare_reprobe(
         return None
 
     monkeypatch.setattr(
-        dumper, "_configured_target_triple", _fake_configured_target_triple
+        clang_backend, "_configured_target_triple", _fake_configured_target_triple
     )
     monkeypatch.setattr(
-        dumper, "_resolve_clang_bin", lambda *a, **k: "aarch64-apple-darwin-clang-cl"
+        clang_backend,
+        "_resolve_clang_bin",
+        lambda *a, **k: "aarch64-apple-darwin-clang-cl",
     )
 
     parser = _header_ast_parser(
@@ -818,7 +858,7 @@ def test_successful_probe_skips_the_bare_reprobe_entirely(
     primary probe must short-circuit it away entirely."""
     ast = _tu({"kind": "TranslationUnitDecl", "inner": []})
     monkeypatch.setattr(
-        dumper, "_clang_header_dump", lambda *a, **k: (ast, None, False)
+        clang_backend, "clang_header_dump", lambda *a, **k: (ast, None, False)
     )
     calls: list[tuple[str | None, tuple[str, ...]]] = []
 
@@ -829,9 +869,9 @@ def test_successful_probe_skips_the_bare_reprobe_entirely(
         return "x86_64-pc-linux-gnu"
 
     monkeypatch.setattr(
-        dumper, "_configured_target_triple", _fake_configured_target_triple
+        clang_backend, "_configured_target_triple", _fake_configured_target_triple
     )
-    monkeypatch.setattr(dumper, "_resolve_clang_bin", lambda *a, **k: "clang")
+    monkeypatch.setattr(clang_backend, "_resolve_clang_bin", lambda *a, **k: "clang")
 
     parser = _header_ast_parser(
         [],
@@ -864,12 +904,14 @@ def test_successful_probe_still_honored_for_a_cl_style_driver(
     output) is still trusted outright, same as for any other driver."""
     ast = _tu({"kind": "TranslationUnitDecl", "inner": []})
     monkeypatch.setattr(
-        dumper, "_clang_header_dump", lambda *a, **k: (ast, None, False)
+        clang_backend, "clang_header_dump", lambda *a, **k: (ast, None, False)
     )
     monkeypatch.setattr(
-        dumper, "_configured_target_triple", lambda *a, **k: "x86_64-pc-windows-msvc"
+        clang_backend,
+        "_configured_target_triple",
+        lambda *a, **k: "x86_64-pc-windows-msvc",
     )
-    monkeypatch.setattr(dumper, "_resolve_clang_bin", lambda *a, **k: "clang-cl")
+    monkeypatch.setattr(clang_backend, "_resolve_clang_bin", lambda *a, **k: "clang-cl")
 
     parser = _header_ast_parser(
         [],
@@ -902,10 +944,12 @@ def test_probe_failure_under_a_cl_style_driver_recovers_clang_forwarded_spelling
     failure recovers it too, same as the two spellings above."""
     ast = _tu({"kind": "TranslationUnitDecl", "inner": []})
     monkeypatch.setattr(
-        dumper, "_clang_header_dump", lambda *a, **k: (ast, None, False)
+        clang_backend, "clang_header_dump", lambda *a, **k: (ast, None, False)
     )
-    monkeypatch.setattr(dumper, "_configured_target_triple", lambda *a, **k: None)
-    monkeypatch.setattr(dumper, "_resolve_clang_bin", lambda *a, **k: "clang-cl")
+    monkeypatch.setattr(
+        clang_backend, "_configured_target_triple", lambda *a, **k: None
+    )
+    monkeypatch.setattr(clang_backend, "_resolve_clang_bin", lambda *a, **k: "clang-cl")
     monkeypatch.setattr(sys, "platform", "darwin")
 
     parser = _header_ast_parser(
@@ -940,10 +984,12 @@ def test_a_cl_style_name_explicitly_overridden_to_gnu_mode_is_not_cl_style(
     the narrowed CL-style one -- the reverse of the name-only default."""
     ast = _tu({"kind": "TranslationUnitDecl", "inner": []})
     monkeypatch.setattr(
-        dumper, "_clang_header_dump", lambda *a, **k: (ast, None, False)
+        clang_backend, "clang_header_dump", lambda *a, **k: (ast, None, False)
     )
-    monkeypatch.setattr(dumper, "_configured_target_triple", lambda *a, **k: None)
-    monkeypatch.setattr(dumper, "_resolve_clang_bin", lambda *a, **k: "clang-cl")
+    monkeypatch.setattr(
+        clang_backend, "_configured_target_triple", lambda *a, **k: None
+    )
+    monkeypatch.setattr(clang_backend, "_resolve_clang_bin", lambda *a, **k: "clang-cl")
 
     parser = _header_ast_parser(
         [],
@@ -978,7 +1024,7 @@ def test_probe_failure_bare_reprobe_preserves_the_driver_mode_override(
     the binary's own name-based default."""
     ast = _tu({"kind": "TranslationUnitDecl", "inner": []})
     monkeypatch.setattr(
-        dumper, "_clang_header_dump", lambda *a, **k: (ast, None, False)
+        clang_backend, "clang_header_dump", lambda *a, **k: (ast, None, False)
     )
 
     def _fake_configured_target_triple(
@@ -989,9 +1035,9 @@ def test_probe_failure_bare_reprobe_preserves_the_driver_mode_override(
         return None
 
     monkeypatch.setattr(
-        dumper, "_configured_target_triple", _fake_configured_target_triple
+        clang_backend, "_configured_target_triple", _fake_configured_target_triple
     )
-    monkeypatch.setattr(dumper, "_resolve_clang_bin", lambda *a, **k: "clang-cl")
+    monkeypatch.setattr(clang_backend, "_resolve_clang_bin", lambda *a, **k: "clang-cl")
 
     parser = _header_ast_parser(
         [],
@@ -1023,10 +1069,12 @@ def test_probe_failure_with_a_config_user_dir_does_not_guess_sys_platform(
     just as opaque as a response file or an explicit config file."""
     ast = _tu({"kind": "TranslationUnitDecl", "inner": []})
     monkeypatch.setattr(
-        dumper, "_clang_header_dump", lambda *a, **k: (ast, None, False)
+        clang_backend, "clang_header_dump", lambda *a, **k: (ast, None, False)
     )
-    monkeypatch.setattr(dumper, "_configured_target_triple", lambda *a, **k: None)
-    monkeypatch.setattr(dumper, "_resolve_clang_bin", lambda *a, **k: "clang++")
+    monkeypatch.setattr(
+        clang_backend, "_configured_target_triple", lambda *a, **k: None
+    )
+    monkeypatch.setattr(clang_backend, "_resolve_clang_bin", lambda *a, **k: "clang++")
     monkeypatch.setattr(sys, "platform", "darwin")
 
     parser = _header_ast_parser(
@@ -1064,11 +1112,13 @@ def test_probe_failure_with_an_explicitly_configured_wrapper_does_not_guess(
     host would be recorded as `linux`."""
     ast = _tu({"kind": "TranslationUnitDecl", "inner": []})
     monkeypatch.setattr(
-        dumper, "_clang_header_dump", lambda *a, **k: (ast, None, False)
+        clang_backend, "clang_header_dump", lambda *a, **k: (ast, None, False)
     )
-    monkeypatch.setattr(dumper, "_configured_target_triple", lambda *a, **k: None)
     monkeypatch.setattr(
-        dumper, "_resolve_clang_bin", lambda *a, **k: "/opt/wrapper/clang"
+        clang_backend, "_configured_target_triple", lambda *a, **k: None
+    )
+    monkeypatch.setattr(
+        clang_backend, "_resolve_clang_bin", lambda *a, **k: "/opt/wrapper/clang"
     )
     monkeypatch.setattr(sys, "platform", "linux")
 
@@ -1107,10 +1157,12 @@ def test_probe_failure_with_option_selected_cl_mode_recovers_the_honored_spellin
     fresh evidence)."""
     ast = _tu({"kind": "TranslationUnitDecl", "inner": []})
     monkeypatch.setattr(
-        dumper, "_clang_header_dump", lambda *a, **k: (ast, None, False)
+        clang_backend, "clang_header_dump", lambda *a, **k: (ast, None, False)
     )
-    monkeypatch.setattr(dumper, "_configured_target_triple", lambda *a, **k: None)
-    monkeypatch.setattr(dumper, "_resolve_clang_bin", lambda *a, **k: "clang")
+    monkeypatch.setattr(
+        clang_backend, "_configured_target_triple", lambda *a, **k: None
+    )
+    monkeypatch.setattr(clang_backend, "_resolve_clang_bin", lambda *a, **k: "clang")
     monkeypatch.setattr(sys, "platform", "darwin")
 
     parser = _header_ast_parser(

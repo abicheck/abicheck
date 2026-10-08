@@ -1344,7 +1344,12 @@ the real workflow owner first — reclassifying `service.py` today would
 just move today's invisible-bridge problem into three *new*, real
 `workflows -> frontends` edges at those call sites instead of closing it.
 That migration is recorded as the accepted exception's own stated
-follow-up, not attempted in this pass. The `cli_dump_helpers.py ->
+follow-up, not attempted in this pass. *Closed (2026-10-07, lane B
+stage B1a):* with those callers migrated and the four extract-owned
+`_try_attach_*` re-exports dropped from the facade, `service.py` is now
+`frontends`-classified and the `service.py -> service_render` exception
+is deleted from `architecture/debt.yaml`; the public names in
+`docs/use/python-api.md` are unchanged. The `cli_dump_helpers.py ->
 header_conditionals.py` edge has the same shape: closing it for real needs
 a `workflows`-owned wrapper `cli.py`'s and `frontends/cli/commands/
 dump.py`'s call sites route through instead of naming the `extract`-owned

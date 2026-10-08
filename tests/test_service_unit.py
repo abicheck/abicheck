@@ -31,6 +31,7 @@ from abicheck.service import (
     run_dump,
     sniff_text_format,
 )
+from tests._dump_format_fakes import fake_format_adapter
 from tests._header_graph_coverage import coverage_for as _coverage_for
 
 # ── detect_binary_format() ──────────────────────────────────────────────────
@@ -302,7 +303,7 @@ class TestResolveInput:
         """Codex review: ``_dump_elf`` normalizes ``lang`` to only ever force
         "c" explicitly (letting auto-detection run for the default "c++"),
         before calling ``dumper.dump()`` -- ``_attach_header_graph``'s own
-        ``_clang_header_dump`` call must be given that identical normalized
+        ``extract.headers.clang.backend.clang_header_dump`` call must be given that identical normalized
         value, or it hashes a different cache key than the main pass just
         used and permanently misses the new AST reuse memo for the default,
         by far the most common, ELF dump shape."""
@@ -312,9 +313,9 @@ class TestResolveInput:
         header.write_text("void f();\n")
         snap = AbiSnapshot(library="test", version="1.0")
         with (
-            patch("abicheck.service_dump_native._dump_elf", return_value=snap),
+            fake_format_adapter("elf", result=snap),
             patch(
-                "abicheck.service_dump_native._attach_header_graph", return_value=snap
+                "abicheck.workflows.dump.native._attach_header_graph", return_value=snap
             ) as mock_attach,
         ):
             run_dump(p, "elf", headers=[header], includes=[], lang="c++")
@@ -332,9 +333,9 @@ class TestResolveInput:
         header.write_text("void f(void);\n")
         snap = AbiSnapshot(library="test", version="1.0")
         with (
-            patch("abicheck.service_dump_native._dump_elf", return_value=snap),
+            fake_format_adapter("elf", result=snap),
             patch(
-                "abicheck.service_dump_native._attach_header_graph", return_value=snap
+                "abicheck.workflows.dump.native._attach_header_graph", return_value=snap
             ) as mock_attach,
         ):
             run_dump(p, "elf", headers=[header], includes=[], lang="c")
@@ -347,7 +348,7 @@ class TestResolveInput:
         """Codex review, fresh evidence: `_run_dump_uncached()` computed
         `_public_include_search_dirs` (falling back to the possibly-widened
         `_includes` only when the caller didn't distinguish the two) but
-        never forwarded it into its own `_dump_elf()` call, which
+        never forwarded it into its own `extract_elf()` call, which
         independently re-derived provenance widening from its own
         `includes` parameter -- silently reintroducing the exact
         already-widened-includes regression this whole parameter exists to
@@ -360,11 +361,9 @@ class TestResolveInput:
         explicit_dir = tmp_path / "explicit"
         snap = AbiSnapshot(library="test", version="1.0")
         with (
+            fake_format_adapter("elf", result=snap) as mock_dump_elf,
             patch(
-                "abicheck.service_dump_native._dump_elf", return_value=snap
-            ) as mock_dump_elf,
-            patch(
-                "abicheck.service_dump_native._attach_header_graph", return_value=snap
+                "abicheck.workflows.dump.native._attach_header_graph", return_value=snap
             ),
         ):
             run_dump(
@@ -375,7 +374,7 @@ class TestResolveInput:
                 lang="c++",
                 public_include_search_dirs=[explicit_dir],
             )
-        passed = mock_dump_elf.call_args.kwargs["public_include_search_dirs"]
+        passed = mock_dump_elf.last.public_include_search_dirs
         assert passed == [explicit_dir]
         assert widened_dir not in passed
 
@@ -395,9 +394,9 @@ class TestResolveInput:
         explicit_dir = tmp_path / "explicit"
         snap = AbiSnapshot(library="test", version="1.0")
         with (
-            patch("abicheck.service_dump_native._dump_elf", return_value=snap),
+            fake_format_adapter("elf", result=snap),
             patch(
-                "abicheck.service_dump_native._attach_header_graph", return_value=snap
+                "abicheck.workflows.dump.native._attach_header_graph", return_value=snap
             ) as mock_attach,
         ):
             run_dump(
@@ -426,9 +425,9 @@ class TestResolveInput:
         header.write_text("void f();\n")
         snap = AbiSnapshot(library="test", version="1.0")
         with (
-            patch("abicheck.service_dump_native._dump_pe", return_value=snap),
+            fake_format_adapter("pe", result=snap),
             patch(
-                "abicheck.service_dump_native._attach_header_graph", return_value=snap
+                "abicheck.workflows.dump.native._attach_header_graph", return_value=snap
             ) as mock_attach,
         ):
             run_dump(p, "pe", headers=[header], includes=[], lang="c++")
@@ -445,9 +444,9 @@ class TestResolveInput:
         header.write_text("void f(void);\n")
         snap = AbiSnapshot(library="test", version="1.0")
         with (
-            patch("abicheck.service_dump_native._dump_pe", return_value=snap),
+            fake_format_adapter("pe", result=snap),
             patch(
-                "abicheck.service_dump_native._attach_header_graph", return_value=snap
+                "abicheck.workflows.dump.native._attach_header_graph", return_value=snap
             ) as mock_attach,
         ):
             run_dump(p, "pe", headers=[header], includes=[], lang="C")
@@ -580,7 +579,7 @@ class TestRunDump:
         p = tmp_path / "lib.so"
         p.write_bytes(b"\x7fELF" + b"\x00" * 100)
         snap = AbiSnapshot(library="test", version="1.0")
-        with patch("abicheck.service_dump_native._dump_elf", return_value=snap):
+        with fake_format_adapter("elf", result=snap):
             result = run_dump(p, "elf")
         assert result is snap
 
@@ -588,7 +587,7 @@ class TestRunDump:
         p = tmp_path / "lib.dll"
         p.write_bytes(b"MZ" + b"\x00" * 100)
         snap = AbiSnapshot(library="test", version="1.0")
-        with patch("abicheck.service_dump_native._dump_pe", return_value=snap):
+        with fake_format_adapter("pe", result=snap):
             result = run_dump(p, "pe")
         assert result is snap
 
@@ -596,7 +595,7 @@ class TestRunDump:
         p = tmp_path / "lib.dylib"
         p.write_bytes(b"\xfe\xed\xfa\xce" + b"\x00" * 100)
         snap = AbiSnapshot(library="test", version="1.0")
-        with patch("abicheck.service_dump_native._dump_macho", return_value=snap):
+        with fake_format_adapter("macho", result=snap):
             result = run_dump(p, "macho")
         assert result is snap
 
@@ -610,8 +609,8 @@ class TestRunDumpHybridNormalization:
     """
 
     def _fake_dump_elf(self, castxml_snap, clang_snap):
-        def _fake(*args, **kwargs):
-            compile_ctx = kwargs.get("compile")
+        def _fake(request):
+            compile_ctx = request.compile
             if compile_ctx is not None and compile_ctx.frontend == "clang":
                 return clang_snap
             return castxml_snap
@@ -627,8 +626,8 @@ class TestRunDumpHybridNormalization:
         clang_snap = AbiSnapshot(
             library="test", version="1.0", from_headers=True, ast_producer="clang"
         )
-        with patch(
-            "abicheck.service_dump_native._dump_elf",
+        with fake_format_adapter(
+            "elf",
             side_effect=self._fake_dump_elf(castxml_snap, clang_snap),
         ):
             result = run_dump(p, "elf", header_backend="HYBRID")
@@ -644,8 +643,8 @@ class TestRunDumpHybridNormalization:
         clang_snap = AbiSnapshot(
             library="test", version="1.0", from_headers=True, ast_producer="clang"
         )
-        with patch(
-            "abicheck.service_dump_native._dump_elf",
+        with fake_format_adapter(
+            "elf",
             side_effect=self._fake_dump_elf(castxml_snap, clang_snap),
         ):
             result = run_dump(p, "elf")  # header_backend defaults to "auto"
@@ -665,8 +664,8 @@ class TestRunDumpHybridHeaderGraphAttachedOnce:
     ever invoked with the graph *enabled* once, on the merged snapshot."""
 
     def _fake_dump_elf(self, castxml_snap, clang_snap):
-        def _fake(*args, **kwargs):
-            compile_ctx = kwargs.get("compile")
+        def _fake(request):
+            compile_ctx = request.compile
             if compile_ctx is not None and compile_ctx.frontend == "clang":
                 return clang_snap
             return castxml_snap
@@ -689,12 +688,12 @@ class TestRunDumpHybridHeaderGraphAttachedOnce:
             return snap
 
         with (
-            patch(
-                "abicheck.service_dump_native._dump_elf",
+            fake_format_adapter(
+                "elf",
                 side_effect=self._fake_dump_elf(castxml_snap, clang_snap),
             ),
             patch(
-                "abicheck.service_dump_native._attach_header_graph",
+                "abicheck.workflows.dump.native._attach_header_graph",
                 side_effect=_fake_attach,
             ),
         ):
@@ -725,8 +724,8 @@ class TestRunDumpHybridDoesNotDoubleEnrichLayout:
     (apply_layout_facts backfills nothing new the second time)."""
 
     def _fake_dump_elf(self, castxml_snap, clang_snap):
-        def _fake(*args, **kwargs):
-            compile_ctx = kwargs.get("compile")
+        def _fake(request):
+            compile_ctx = request.compile
             if compile_ctx is not None and compile_ctx.frontend == "clang":
                 return clang_snap
             return castxml_snap
@@ -749,12 +748,12 @@ class TestRunDumpHybridDoesNotDoubleEnrichLayout:
             return snap
 
         with (
-            patch(
-                "abicheck.service_dump_native._dump_elf",
+            fake_format_adapter(
+                "elf",
                 side_effect=self._fake_dump_elf(castxml_snap, clang_snap),
             ),
             patch(
-                "abicheck.service_dump_native.attach_clang_layout",
+                "abicheck.workflows.dump.native.attach_clang_layout",
                 side_effect=_fake_attach,
             ),
         ):
@@ -1109,14 +1108,14 @@ class TestResolveInferredHeaderRoots:
         assert inc == [] and str(root) in toks
 
 
-# ── _dump_elf() ─────────────────────────────────────────────────────────────
+# ── extract_elf() ─────────────────────────────────────────────────────────────
 
 
 class TestDumpElf:
     def test_implicit_header_root_passed_to_dumper(self, tmp_path):
         # P3 regression: a -H umbrella nested under include/ must reach the
         # frontend with the include root on extra_includes, with no explicit -I.
-        from abicheck.service import _dump_elf
+        from abicheck.workflows.dump.native import extract_elf
 
         p = tmp_path / "lib.so"
         p.write_bytes(b"\x7fELF" + b"\x00" * 100)
@@ -1126,7 +1125,7 @@ class TestDumpElf:
         umb.write_text("// umbrella")
         snap = AbiSnapshot(library="t", version="1.0")
         with patch("abicheck.dumper.dump", return_value=snap) as mock:
-            _dump_elf(p, [umb], [], "1.0", "c++")
+            extract_elf(p, [umb], [], "1.0", "c++")
         passed = mock.call_args.kwargs["extra_includes"]
         assert root in passed  # the include root was auto-added (plain -I)
 
@@ -1143,7 +1142,7 @@ class TestDumpElf:
         -- reusing a stale cached AST here while the header-graph pass
         correctly reparsed."""
         from abicheck.dry_run_estimate import CompileContext
-        from abicheck.service import _dump_elf
+        from abicheck.workflows.dump.native import extract_elf
 
         p = tmp_path / "lib.so"
         p.write_bytes(b"\x7fELF" + b"\x00" * 100)
@@ -1154,7 +1153,7 @@ class TestDumpElf:
         snap = AbiSnapshot(library="t", version="1.0")
         cc = CompileContext(gcc_option_tokens=("-I", str(build_inc)))
         with patch("abicheck.dumper.dump", return_value=snap) as mock:
-            _dump_elf(p, [header], [], "1.0", "c++", compile=cc)
+            extract_elf(p, [header], [], "1.0", "c++", compile=cc)
         assert build_inc in mock.call_args.kwargs["extra_hash_dirs"]
 
     def test_public_include_search_dirs_used_over_widened_includes(self, tmp_path):
@@ -1168,7 +1167,7 @@ class TestDumpElf:
         to PUBLIC_HEADER. A caller that threads the genuinely explicit list
         separately via `public_include_search_dirs` must have THAT list
         reach dump(), not the (possibly wider) `includes`."""
-        from abicheck.service import _dump_elf
+        from abicheck.workflows.dump.native import extract_elf
 
         p = tmp_path / "lib.so"
         p.write_bytes(b"\x7fELF" + b"\x00" * 100)
@@ -1180,7 +1179,7 @@ class TestDumpElf:
         explicit_dir.mkdir()
         snap = AbiSnapshot(library="t", version="1.0")
         with patch("abicheck.dumper.dump", return_value=snap) as mock:
-            _dump_elf(
+            extract_elf(
                 p,
                 [header],
                 [widened_dir],
@@ -1198,7 +1197,7 @@ class TestDumpElf:
         """Backward-compatible default (Codex review): a caller that hasn't
         been updated to distinguish the two still gets today's unchanged
         behavior -- `includes` itself is used."""
-        from abicheck.service import _dump_elf
+        from abicheck.workflows.dump.native import extract_elf
 
         p = tmp_path / "lib.so"
         p.write_bytes(b"\x7fELF" + b"\x00" * 100)
@@ -1208,7 +1207,7 @@ class TestDumpElf:
         inc.mkdir()
         snap = AbiSnapshot(library="t", version="1.0")
         with patch("abicheck.dumper.dump", return_value=snap) as mock:
-            _dump_elf(p, [header], [inc], "1.0", "c++")
+            extract_elf(p, [header], [inc], "1.0", "c++")
         assert mock.call_args.kwargs["public_include_search_dirs"] == [inc]
 
     def test_implicit_root_defers_to_isystem_build_context(self, tmp_path):
@@ -1217,7 +1216,7 @@ class TestDumpElf:
         # *after* the build's (build's is emitted first, so it wins), not jumping
         # ahead as -I. -isystem also keeps it above the standard system dirs.
         from abicheck.dry_run_estimate import CompileContext
-        from abicheck.service import _dump_elf
+        from abicheck.workflows.dump.native import extract_elf
 
         p = tmp_path / "lib.so"
         p.write_bytes(b"\x7fELF" + b"\x00" * 100)
@@ -1229,7 +1228,7 @@ class TestDumpElf:
         snap = AbiSnapshot(library="t", version="1.0")
         cc = CompileContext(gcc_option_tokens=("-isystem", gen))
         with patch("abicheck.dumper.dump", return_value=snap) as mock:
-            _dump_elf(p, [umb], [], "1.0", "c++", compile=cc)
+            extract_elf(p, [umb], [], "1.0", "c++", compile=cc)
         kwargs = mock.call_args.kwargs
         assert root not in kwargs["extra_includes"]  # not promoted to -I
         toks = list(kwargs["gcc_option_tokens"])
@@ -1239,20 +1238,20 @@ class TestDumpElf:
         assert toks.index(gen) < toks.index(str(root))
 
     def test_no_headers_warning(self, tmp_path):
-        from abicheck.service import _dump_elf
+        from abicheck.workflows.dump.native import extract_elf
 
         p = tmp_path / "lib.so"
         p.write_bytes(b"\x7fELF" + b"\x00" * 100)
         snap = AbiSnapshot(library="test", version="1.0")
         with patch(
-            "abicheck.service_dump_native.expand_header_inputs", return_value=[]
+            "abicheck.workflows.dump.native.expand_header_inputs", return_value=[]
         ):
             with patch("abicheck.dumper.dump", return_value=snap):
-                result = _dump_elf(p, [], [], "1.0", "c++")
+                result = extract_elf(p, [], [], "1.0", "c++")
         assert result is snap
 
     def test_invalid_include_dir_raises(self, tmp_path):
-        from abicheck.service import _dump_elf
+        from abicheck.workflows.dump.native import extract_elf
 
         p = tmp_path / "lib.so"
         p.write_bytes(b"\x7fELF" + b"\x00" * 100)
@@ -1260,25 +1259,25 @@ class TestDumpElf:
         h.write_text("")
         bad_inc = tmp_path / "nonexistent"
         with patch(
-            "abicheck.service_dump_native.expand_header_inputs", return_value=[h]
+            "abicheck.workflows.dump.native.expand_header_inputs", return_value=[h]
         ):
             with pytest.raises(ValidationError, match="Include directory"):
-                _dump_elf(p, [h], [bad_inc], "1.0", "c++")
+                extract_elf(p, [h], [bad_inc], "1.0", "c++")
 
     def test_dump_error_wraps(self, tmp_path):
-        from abicheck.service import _dump_elf
+        from abicheck.workflows.dump.native import extract_elf
 
         p = tmp_path / "lib.so"
         p.write_bytes(b"\x00" * 10)
         with patch(
-            "abicheck.service_dump_native.expand_header_inputs", return_value=[]
+            "abicheck.workflows.dump.native.expand_header_inputs", return_value=[]
         ):
             with patch("abicheck.dumper.dump", side_effect=RuntimeError("bad elf")):
                 with pytest.raises(SnapshotError, match="Failed to dump"):
-                    _dump_elf(p, [], [], "1.0", "c++")
+                    extract_elf(p, [], [], "1.0", "c++")
 
     def test_includes_without_headers_warns(self, tmp_path):
-        from abicheck.service import _dump_elf
+        from abicheck.workflows.dump.native import extract_elf
 
         p = tmp_path / "lib.so"
         p.write_bytes(b"\x7fELF" + b"\x00" * 100)
@@ -1286,23 +1285,23 @@ class TestDumpElf:
         inc.mkdir()
         snap = AbiSnapshot(library="test", version="1.0")
         with patch(
-            "abicheck.service_dump_native.expand_header_inputs", return_value=[]
+            "abicheck.workflows.dump.native.expand_header_inputs", return_value=[]
         ):
             with patch("abicheck.dumper.dump", return_value=snap):
-                result = _dump_elf(p, [], [inc], "1.0", "c++")
+                result = extract_elf(p, [], [inc], "1.0", "c++")
         assert result is snap
 
     def test_lang_c_sets_compiler(self, tmp_path):
-        from abicheck.service import _dump_elf
+        from abicheck.workflows.dump.native import extract_elf
 
         p = tmp_path / "lib.so"
         p.write_bytes(b"\x7fELF" + b"\x00" * 100)
         snap = AbiSnapshot(library="test", version="1.0")
         with patch(
-            "abicheck.service_dump_native.expand_header_inputs", return_value=[]
+            "abicheck.workflows.dump.native.expand_header_inputs", return_value=[]
         ):
             with patch("abicheck.dumper.dump", return_value=snap) as mock_dump:
-                _dump_elf(p, [], [], "1.0", "c")
+                extract_elf(p, [], [], "1.0", "c")
         call_kwargs = mock_dump.call_args
         assert (
             call_kwargs.kwargs.get("compiler") == "cc"
@@ -1312,19 +1311,21 @@ class TestDumpElf:
     def test_debuginfod_url_reaches_resolve_debug_info(self, tmp_path):
         # Codex (PR #551): a custom --debuginfod-url must reach the resolver's
         # debuginfod_urls kwarg, not just gate enable_debuginfod on/off.
-        from abicheck.service import _dump_elf
+        from abicheck.workflows.dump.native import extract_elf
 
         p = tmp_path / "lib.so"
         p.write_bytes(b"\x7fELF" + b"\x00" * 100)
         snap = AbiSnapshot(library="test", version="1.0")
         with (
-            patch("abicheck.service_dump_native.expand_header_inputs", return_value=[]),
+            patch(
+                "abicheck.workflows.dump.native.expand_header_inputs", return_value=[]
+            ),
             patch(
                 "abicheck.debug_resolver.resolve_debug_info", return_value=None
             ) as mock_resolve,
             patch("abicheck.dumper.dump", return_value=snap),
         ):
-            _dump_elf(
+            extract_elf(
                 p,
                 [],
                 [],
@@ -1338,23 +1339,25 @@ class TestDumpElf:
         ]
 
     def test_no_debuginfod_url_passes_none(self, tmp_path):
-        from abicheck.service import _dump_elf
+        from abicheck.workflows.dump.native import extract_elf
 
         p = tmp_path / "lib.so"
         p.write_bytes(b"\x7fELF" + b"\x00" * 100)
         snap = AbiSnapshot(library="test", version="1.0")
         with (
-            patch("abicheck.service_dump_native.expand_header_inputs", return_value=[]),
+            patch(
+                "abicheck.workflows.dump.native.expand_header_inputs", return_value=[]
+            ),
             patch(
                 "abicheck.debug_resolver.resolve_debug_info", return_value=None
             ) as mock_resolve,
             patch("abicheck.dumper.dump", return_value=snap),
         ):
-            _dump_elf(p, [], [], "1.0", "c++", enable_debuginfod=True)
+            extract_elf(p, [], [], "1.0", "c++", enable_debuginfod=True)
         assert mock_resolve.call_args.kwargs["debuginfod_urls"] is None
 
 
-# ── _dump_pe() ──────────────────────────────────────────────────────────────
+# ── extract_pe() ──────────────────────────────────────────────────────────────
 
 
 class TestHeaderScopedInferredRoots:
@@ -1582,7 +1585,7 @@ class TestHeaderScopedInferredRoots:
 
 class TestDumpPe:
     def test_no_machine_raises(self, tmp_path):
-        from abicheck.service import _dump_pe
+        from abicheck.workflows.dump.pe import extract_pe
 
         p = tmp_path / "lib.dll"
         p.write_bytes(b"MZ" + b"\x00" * 100)
@@ -1591,10 +1594,10 @@ class TestDumpPe:
         pe_meta.exports = []
         with patch("abicheck.pe_metadata.parse_pe_metadata", return_value=pe_meta):
             with pytest.raises(SnapshotError, match="Failed to extract PE metadata"):
-                _dump_pe(p, "1.0")
+                extract_pe(p, "1.0")
 
     def test_no_exports_raises(self, tmp_path):
-        from abicheck.service import _dump_pe
+        from abicheck.workflows.dump.pe import extract_pe
 
         p = tmp_path / "lib.dll"
         p.write_bytes(b"MZ" + b"\x00" * 100)
@@ -1603,10 +1606,10 @@ class TestDumpPe:
         pe_meta.exports = []
         with patch("abicheck.pe_metadata.parse_pe_metadata", return_value=pe_meta):
             with pytest.raises(ValidationError, match="no exports"):
-                _dump_pe(p, "1.0")
+                extract_pe(p, "1.0")
 
     def test_successful_pe_dump(self, tmp_path):
-        from abicheck.service import _dump_pe
+        from abicheck.workflows.dump.pe import extract_pe
 
         p = tmp_path / "lib.dll"
         p.write_bytes(b"MZ" + b"\x00" * 100)
@@ -1618,13 +1621,13 @@ class TestDumpPe:
         pe_meta.exports = [export]
         with patch("abicheck.pe_metadata.parse_pe_metadata", return_value=pe_meta):
             with patch("abicheck.pdb_utils.locate_pdb", return_value=None):
-                result = _dump_pe(p, "1.0")
+                result = extract_pe(p, "1.0")
         assert result.platform == "pe"
         assert len(result.declarations.functions) == 1
         assert result.declarations.functions[0].name == "MyFunc"
 
     def test_pe_import_error(self, tmp_path):
-        from abicheck.service import _dump_pe
+        from abicheck.workflows.dump.pe import extract_pe
 
         p = tmp_path / "lib.dll"
         p.write_bytes(b"MZ" + b"\x00" * 100)
@@ -1633,10 +1636,10 @@ class TestDumpPe:
             side_effect=ImportError("no pefile"),
         ):
             with pytest.raises(SnapshotError, match="no pefile"):
-                _dump_pe(p, "1.0")
+                extract_pe(p, "1.0")
 
     def test_pe_runtime_error(self, tmp_path):
-        from abicheck.service import _dump_pe
+        from abicheck.workflows.dump.pe import extract_pe
 
         p = tmp_path / "lib.dll"
         p.write_bytes(b"MZ" + b"\x00" * 100)
@@ -1645,10 +1648,10 @@ class TestDumpPe:
             side_effect=RuntimeError("corrupt"),
         ):
             with pytest.raises(SnapshotError, match="Failed to parse PE"):
-                _dump_pe(p, "1.0")
+                extract_pe(p, "1.0")
 
     def test_ordinal_export(self, tmp_path):
-        from abicheck.service import _dump_pe
+        from abicheck.workflows.dump.pe import extract_pe
 
         p = tmp_path / "lib.dll"
         p.write_bytes(b"MZ" + b"\x00" * 100)
@@ -1660,11 +1663,11 @@ class TestDumpPe:
         pe_meta.exports = [export]
         with patch("abicheck.pe_metadata.parse_pe_metadata", return_value=pe_meta):
             with patch("abicheck.pdb_utils.locate_pdb", return_value=None):
-                result = _dump_pe(p, "1.0")
+                result = extract_pe(p, "1.0")
         assert result.declarations.functions[0].name == "ordinal:42"
 
     def test_pdb_found_and_parsed(self, tmp_path):
-        from abicheck.service import _dump_pe
+        from abicheck.workflows.dump.pe import extract_pe
 
         p = tmp_path / "lib.dll"
         p.write_bytes(b"MZ" + b"\x00" * 100)
@@ -1682,12 +1685,12 @@ class TestDumpPe:
                     "abicheck.pdb_metadata.parse_pdb_debug_info",
                     return_value=(mock_dwarf, mock_adv),
                 ):
-                    result = _dump_pe(p, "1.0")
+                    result = extract_pe(p, "1.0")
         assert result.declarations.debug_layout is mock_dwarf
         assert result.declarations.debug_advanced is mock_adv
 
     def test_pdb_parsing_exception_handled(self, tmp_path):
-        from abicheck.service import _dump_pe
+        from abicheck.workflows.dump.pe import extract_pe
 
         p = tmp_path / "lib.dll"
         p.write_bytes(b"MZ" + b"\x00" * 100)
@@ -1701,11 +1704,11 @@ class TestDumpPe:
             with patch(
                 "abicheck.pdb_utils.locate_pdb", side_effect=RuntimeError("pdb error")
             ):
-                result = _dump_pe(p, "1.0")
+                result = extract_pe(p, "1.0")
         assert result.declarations.debug_layout is None
 
     def test_cpp_name_not_extern_c(self, tmp_path):
-        from abicheck.service import _dump_pe
+        from abicheck.workflows.dump.pe import extract_pe
 
         p = tmp_path / "lib.dll"
         p.write_bytes(b"MZ" + b"\x00" * 100)
@@ -1717,16 +1720,16 @@ class TestDumpPe:
         pe_meta.exports = [export]
         with patch("abicheck.pe_metadata.parse_pe_metadata", return_value=pe_meta):
             with patch("abicheck.pdb_utils.locate_pdb", return_value=None):
-                result = _dump_pe(p, "1.0")
+                result = extract_pe(p, "1.0")
         assert result.declarations.functions[0].is_extern_c is False
 
 
-# ── _dump_macho() ───────────────────────────────────────────────────────────
+# ── extract_macho() ───────────────────────────────────────────────────────────
 
 
 class TestDumpMacho:
     def test_successful_macho_dump(self, tmp_path):
-        from abicheck.service import _dump_macho
+        from abicheck.workflows.dump.macho import extract_macho
 
         p = tmp_path / "lib.dylib"
         p.write_bytes(b"\xfe\xed\xfa\xce" + b"\x00" * 100)
@@ -1739,12 +1742,12 @@ class TestDumpMacho:
         with patch(
             "abicheck.macho_metadata.parse_macho_metadata", return_value=macho_meta
         ):
-            result = _dump_macho(p, "1.0")
+            result = extract_macho(p, "1.0")
         assert result.platform == "macho"
         assert len(result.declarations.functions) == 1
 
     def test_no_exports_no_metadata_raises(self, tmp_path):
-        from abicheck.service import _dump_macho
+        from abicheck.workflows.dump.macho import extract_macho
 
         p = tmp_path / "lib.dylib"
         p.write_bytes(b"\x00" * 100)
@@ -1756,10 +1759,10 @@ class TestDumpMacho:
             "abicheck.macho_metadata.parse_macho_metadata", return_value=macho_meta
         ):
             with pytest.raises(SnapshotError, match="no exports"):
-                _dump_macho(p, "1.0")
+                extract_macho(p, "1.0")
 
     def test_parse_error(self, tmp_path):
-        from abicheck.service import _dump_macho
+        from abicheck.workflows.dump.macho import extract_macho
 
         p = tmp_path / "lib.dylib"
         p.write_bytes(b"\x00" * 100)
@@ -1768,10 +1771,10 @@ class TestDumpMacho:
             side_effect=RuntimeError("bad macho"),
         ):
             with pytest.raises(SnapshotError, match="Failed to parse Mach-O"):
-                _dump_macho(p, "1.0")
+                extract_macho(p, "1.0")
 
     def test_export_without_name_skipped(self, tmp_path):
-        from abicheck.service import _dump_macho
+        from abicheck.workflows.dump.macho import extract_macho
 
         p = tmp_path / "lib.dylib"
         p.write_bytes(b"\x00" * 100)
@@ -1786,11 +1789,11 @@ class TestDumpMacho:
         with patch(
             "abicheck.macho_metadata.parse_macho_metadata", return_value=macho_meta
         ):
-            result = _dump_macho(p, "1.0")
+            result = extract_macho(p, "1.0")
         assert len(result.declarations.functions) == 1
 
     def test_cpp_symbol_not_extern_c(self, tmp_path):
-        from abicheck.service import _dump_macho
+        from abicheck.workflows.dump.macho import extract_macho
 
         p = tmp_path / "lib.dylib"
         p.write_bytes(b"\x00" * 100)
@@ -1803,7 +1806,7 @@ class TestDumpMacho:
         with patch(
             "abicheck.macho_metadata.parse_macho_metadata", return_value=macho_meta
         ):
-            result = _dump_macho(p, "1.0")
+            result = extract_macho(p, "1.0")
         assert result.declarations.functions[0].is_extern_c is False
 
 
@@ -3824,7 +3827,7 @@ class TestPeHeaderScoping:
     """Issue #235: --header/--include must scope the PE ABI surface."""
 
     def test_headers_route_to_castxml_scoped_dump(self, tmp_path):
-        from abicheck.service import _dump_pe
+        from abicheck.workflows.dump.pe import extract_pe
 
         p = tmp_path / "lib.dll"
         p.write_bytes(b"MZ" + b"\x00" * 100)
@@ -3838,7 +3841,7 @@ class TestPeHeaderScoping:
             patch("abicheck.pdb_utils.locate_pdb", return_value=None),
             patch("abicheck.dumper._dump_pe", return_value=scoped) as mock_dump,
         ):
-            result = _dump_pe(
+            result = extract_pe(
                 p, "1.0", headers=[_mk_header(tmp_path)], includes=[Path("inc")]
             )
 
@@ -3856,7 +3859,7 @@ class TestPeHeaderScoping:
     def test_private_export_absent_from_headers_not_compared(self, tmp_path):
         """An exported-but-private symbol removed in 'new' must not surface."""
         from abicheck.checker import compare
-        from abicheck.service import _dump_pe
+        from abicheck.workflows.dump.pe import extract_pe
 
         old_p = tmp_path / "old.dll"
         new_p = tmp_path / "new.dll"
@@ -3873,12 +3876,12 @@ class TestPeHeaderScoping:
                 patch("abicheck.pe_metadata.parse_pe_metadata", return_value=old_pe),
                 patch("abicheck.dumper._dump_pe", return_value=old_scoped),
             ):
-                old_snap = _dump_pe(old_p, "1.0", headers=[_mk_header(tmp_path)])
+                old_snap = extract_pe(old_p, "1.0", headers=[_mk_header(tmp_path)])
             with (
                 patch("abicheck.pe_metadata.parse_pe_metadata", return_value=new_pe),
                 patch("abicheck.dumper._dump_pe", return_value=new_scoped),
             ):
-                new_snap = _dump_pe(new_p, "2.0", headers=[_mk_header(tmp_path)])
+                new_snap = extract_pe(new_p, "2.0", headers=[_mk_header(tmp_path)])
 
         result = compare(old_snap, new_snap)
         removed = [
@@ -3888,7 +3891,7 @@ class TestPeHeaderScoping:
 
     def test_fallback_when_no_header_match(self, tmp_path):
         """MSVC-mangled C++ exports won't match Itanium names → warn + fallback."""
-        from abicheck.service import _dump_pe
+        from abicheck.workflows.dump.pe import extract_pe
 
         p = tmp_path / "lib.dll"
         p.write_bytes(b"MZ" + b"\x00" * 100)
@@ -3904,14 +3907,14 @@ class TestPeHeaderScoping:
             with pytest.warns(
                 UserWarning, match="None of the provided headers matched"
             ):
-                result = _dump_pe(p, "1.0", headers=[_mk_header(tmp_path)])
+                result = extract_pe(p, "1.0", headers=[_mk_header(tmp_path)])
 
         # Fell back to the full export table.
         names = [f.name for f in result.declarations.functions]
         assert "?realFunc@@YAHXZ" in names
 
     def test_fallback_when_castxml_unavailable(self, tmp_path):
-        from abicheck.service import _dump_pe
+        from abicheck.workflows.dump.pe import extract_pe
 
         p = tmp_path / "lib.dll"
         p.write_bytes(b"MZ" + b"\x00" * 100)
@@ -3928,14 +3931,14 @@ class TestPeHeaderScoping:
             with pytest.warns(
                 UserWarning, match="Header-based ABI scoping unavailable"
             ):
-                result = _dump_pe(p, "1.0", headers=[_mk_header(tmp_path)])
+                result = extract_pe(p, "1.0", headers=[_mk_header(tmp_path)])
 
         names = [f.name for f in result.declarations.functions]
         assert "PublicApiFunc" in names
 
     def test_no_headers_uses_export_table(self, tmp_path):
         """Without headers, behaviour is unchanged: full export table, PUBLIC."""
-        from abicheck.service import _dump_pe
+        from abicheck.workflows.dump.pe import extract_pe
 
         p = tmp_path / "lib.dll"
         p.write_bytes(b"MZ" + b"\x00" * 100)
@@ -3946,7 +3949,7 @@ class TestPeHeaderScoping:
             patch("abicheck.pdb_utils.locate_pdb", return_value=None),
             patch("abicheck.dumper._dump_pe") as mock_dump,
         ):
-            funcs = _dump_pe(p, "1.0").declarations.functions
+            funcs = extract_pe(p, "1.0").declarations.functions
 
         assert not mock_dump.called  # castxml path never taken
         names = {f.name for f in funcs}
@@ -3954,7 +3957,7 @@ class TestPeHeaderScoping:
         assert all(f.visibility == Visibility.PUBLIC for f in funcs)
 
     def test_pdb_debug_preserved_on_scoped_snapshot(self, tmp_path):
-        from abicheck.service import _dump_pe
+        from abicheck.workflows.dump.pe import extract_pe
 
         p = tmp_path / "lib.dll"
         p.write_bytes(b"MZ" + b"\x00" * 100)
@@ -3967,18 +3970,18 @@ class TestPeHeaderScoping:
             patch("abicheck.pe_metadata.parse_pe_metadata", return_value=pe_meta),
             patch("abicheck.dumper._dump_pe", return_value=scoped),
             patch(
-                "abicheck.service_dump_native_pe._extract_pdb_debug",
+                "abicheck.workflows.dump.pe.extract_pdb_debug",
                 return_value=(dwarf_meta, dwarf_adv),
             ),
         ):
-            result = _dump_pe(p, "1.0", headers=[_mk_header(tmp_path)])
+            result = extract_pe(p, "1.0", headers=[_mk_header(tmp_path)])
 
         assert result.declarations.debug_layout is dwarf_meta
         assert result.declarations.debug_advanced is dwarf_adv
 
     def test_header_directory_is_expanded(self, tmp_path):
         """`--header <dir>` must expand to files, not feed a dir to castxml."""
-        from abicheck.service import _dump_pe
+        from abicheck.workflows.dump.pe import extract_pe
 
         p = tmp_path / "lib.dll"
         p.write_bytes(b"MZ" + b"\x00" * 100)
@@ -3994,7 +3997,7 @@ class TestPeHeaderScoping:
             patch("abicheck.pdb_utils.locate_pdb", return_value=None),
             patch("abicheck.dumper._dump_pe", return_value=scoped) as mock_dump,
         ):
-            _dump_pe(p, "1.0", headers=[hdr_dir])
+            extract_pe(p, "1.0", headers=[hdr_dir])
 
         # The dumper received the individual header files, not the directory.
         called_headers = mock_dump.call_args.args[1]
@@ -4003,7 +4006,7 @@ class TestPeHeaderScoping:
 
     def test_bad_header_path_raises_not_silent_fallback(self, tmp_path):
         """A nonexistent header must raise, not silently fall back to exports."""
-        from abicheck.service import _dump_pe
+        from abicheck.workflows.dump.pe import extract_pe
 
         p = tmp_path / "lib.dll"
         p.write_bytes(b"MZ" + b"\x00" * 100)
@@ -4014,12 +4017,12 @@ class TestPeHeaderScoping:
             patch("abicheck.pdb_utils.locate_pdb", return_value=None),
         ):
             with pytest.raises(ValidationError, match="not found"):
-                _dump_pe(p, "1.0", headers=[tmp_path / "missing.h"])
+                extract_pe(p, "1.0", headers=[tmp_path / "missing.h"])
 
 
 class TestMachoHeaderScoping:
     def test_headers_route_to_castxml_scoped_dump(self, tmp_path):
-        from abicheck.service import _dump_macho
+        from abicheck.workflows.dump.macho import extract_macho
 
         p = tmp_path / "lib.dylib"
         p.write_bytes(b"\xfe\xed\xfa\xce" + b"\x00" * 100)
@@ -4037,13 +4040,13 @@ class TestMachoHeaderScoping:
             ),
             patch("abicheck.dumper._dump_macho", return_value=scoped) as mock_dump,
         ):
-            result = _dump_macho(p, "1.0", headers=[_mk_header(tmp_path)])
+            result = extract_macho(p, "1.0", headers=[_mk_header(tmp_path)])
 
         assert mock_dump.called
         assert [f.name for f in result.declarations.functions] == ["publicFn"]
 
     def test_fallback_when_no_header_match(self, tmp_path):
-        from abicheck.service import _dump_macho
+        from abicheck.workflows.dump.macho import extract_macho
 
         p = tmp_path / "lib.dylib"
         p.write_bytes(b"\xfe\xed\xfa\xce" + b"\x00" * 100)
@@ -4064,7 +4067,7 @@ class TestMachoHeaderScoping:
             with pytest.warns(
                 UserWarning, match="None of the provided headers matched"
             ):
-                result = _dump_macho(p, "1.0", headers=[_mk_header(tmp_path)])
+                result = extract_macho(p, "1.0", headers=[_mk_header(tmp_path)])
 
         assert [f.name for f in result.declarations.functions] == ["_publicFn"]
 
@@ -4076,22 +4079,18 @@ class TestRunDumpHeaderWiring:
         p = tmp_path / "lib.dll"
         p.write_bytes(b"MZ" + b"\x00" * 100)
         snap = AbiSnapshot(library="lib", version="1.0", platform="pe")
-        with patch(
-            "abicheck.service_dump_native._dump_pe", return_value=snap
-        ) as mock_pe:
+        with fake_format_adapter("pe", result=snap) as mock_pe:
             run_dump(p, "pe", [Path("api.h")], [Path("inc")], "1.0", "c++")
-        assert mock_pe.call_args.kwargs["headers"] == [Path("api.h")]
-        assert mock_pe.call_args.kwargs["includes"] == [Path("inc")]
+        assert mock_pe.last.headers == [Path("api.h")]
+        assert mock_pe.last.includes == [Path("inc")]
 
     def test_run_dump_macho_forwards_headers(self, tmp_path):
         p = tmp_path / "lib.dylib"
         p.write_bytes(b"\xfe\xed\xfa\xce" + b"\x00" * 100)
         snap = AbiSnapshot(library="lib", version="1.0", platform="macho")
-        with patch(
-            "abicheck.service_dump_native._dump_macho", return_value=snap
-        ) as mock_macho:
+        with fake_format_adapter("macho", result=snap) as mock_macho:
             run_dump(p, "macho", [Path("api.h")], [], "1.0", "c++")
-        assert mock_macho.call_args.kwargs["headers"] == [Path("api.h")]
+        assert mock_macho.last.headers == [Path("api.h")]
 
 
 class TestRunDumpHeaderGraph:
@@ -4109,7 +4108,7 @@ class TestRunDumpHeaderGraph:
         p = tmp_path / "lib.dll"
         p.write_bytes(b"MZ" + b"\x00" * 100)
         snap = AbiSnapshot(library="lib", version="1.0", platform="pe")
-        with patch("abicheck.service_dump_native._dump_pe", return_value=snap):
+        with fake_format_adapter("pe", result=snap):
             result = run_dump(p, "pe", [Path("api.h")], [], "1.0", "c++")
         assert result.surface_graph is not None
 
@@ -4117,7 +4116,7 @@ class TestRunDumpHeaderGraph:
         p = tmp_path / "lib.dll"
         p.write_bytes(b"MZ" + b"\x00" * 100)
         snap = AbiSnapshot(library="lib", version="1.0", platform="pe")
-        with patch("abicheck.service_dump_native._dump_pe", return_value=snap):
+        with fake_format_adapter("pe", result=snap):
             result = run_dump(p, "pe", [], [], "1.0", "c++")
         assert result.build_source is None
 
@@ -4134,9 +4133,10 @@ class TestRunDumpHeaderGraph:
         )
         ast = {"kind": "TranslationUnitDecl", "inner": []}
         with (
-            patch("abicheck.service_dump_native._dump_pe", return_value=snap),
+            fake_format_adapter("pe", result=snap),
             patch(
-                "abicheck.dumper._clang_header_dump", return_value=(ast, None, False)
+                "abicheck.extract.headers.clang.backend.clang_header_dump",
+                return_value=(ast, None, False),
             ) as mock_ast,
         ):
             result = run_dump(p, "pe", [header], [], "1.0", "c++")
@@ -4184,9 +4184,10 @@ class TestRunDumpHeaderGraph:
         ast = {"kind": "TranslationUnitDecl", "inner": []}
         cc = CompileContext(frontend_context="device")
         with (
-            patch("abicheck.service_dump_native._dump_pe", return_value=snap),
+            fake_format_adapter("pe", result=snap),
             patch(
-                "abicheck.dumper._clang_header_dump", return_value=(ast, None, False)
+                "abicheck.extract.headers.clang.backend.clang_header_dump",
+                return_value=(ast, None, False),
             ) as mock_ast,
         ):
             run_dump(p, "pe", [header], [], "1.0", "c++", compile=cc)
@@ -4204,8 +4205,11 @@ class TestRunDumpHeaderGraph:
             raise SnapshotError("clang not found")
 
         with (
-            patch("abicheck.service_dump_native._dump_pe", return_value=snap),
-            patch("abicheck.dumper._clang_header_dump", side_effect=_raise) as mock_ast,
+            fake_format_adapter("pe", result=snap),
+            patch(
+                "abicheck.extract.headers.clang.backend.clang_header_dump",
+                side_effect=_raise,
+            ) as mock_ast,
         ):
             result = run_dump(p, "pe", [header], [], "1.0", "c++")
         mock_ast.assert_called_once()
@@ -4229,9 +4233,10 @@ class TestRunDumpHeaderGraph:
         snap = AbiSnapshot(library="lib", version="1.0", platform="pe")
         ast = {"kind": "TranslationUnitDecl", "inner": []}
         with (
-            patch("abicheck.service_dump_native._dump_pe", return_value=snap),
+            fake_format_adapter("pe", result=snap),
             patch(
-                "abicheck.dumper._clang_header_dump", return_value=(ast, None, False)
+                "abicheck.extract.headers.clang.backend.clang_header_dump",
+                return_value=(ast, None, False),
             ) as mock_ast,
         ):
             result = run_dump(p, "pe", [hdr_dir], [], "1.0", "c++")
@@ -4256,9 +4261,10 @@ class TestRunDumpHeaderGraph:
             stderr = ""
 
         with (
-            patch("abicheck.service_dump_native._dump_pe", return_value=snap),
+            fake_format_adapter("pe", result=snap),
             patch(
-                "abicheck.dumper._clang_header_dump", return_value=(ast, None, False)
+                "abicheck.extract.headers.clang.backend.clang_header_dump",
+                return_value=(ast, None, False),
             ),
             patch(
                 "abicheck.buildsource.include_graph.shutil.which",
@@ -4302,9 +4308,10 @@ class TestRunDumpHeaderGraph:
             returncode = 0
 
         with (
-            patch("abicheck.service_dump_native._dump_pe", return_value=snap),
+            fake_format_adapter("pe", result=snap),
             patch(
-                "abicheck.dumper._clang_header_dump", return_value=(ast, None, False)
+                "abicheck.extract.headers.clang.backend.clang_header_dump",
+                return_value=(ast, None, False),
             ),
             patch(
                 "abicheck.buildsource.include_graph.shutil.which",
@@ -4362,9 +4369,10 @@ class TestRunDumpHeaderGraph:
             return _OkProc() if str(good) in cmd else _FailProc()
 
         with (
-            patch("abicheck.service_dump_native._dump_pe", return_value=snap),
+            fake_format_adapter("pe", result=snap),
             patch(
-                "abicheck.dumper._clang_header_dump", return_value=(ast, None, False)
+                "abicheck.extract.headers.clang.backend.clang_header_dump",
+                return_value=(ast, None, False),
             ),
             patch(
                 "abicheck.buildsource.include_graph.shutil.which",
@@ -4405,7 +4413,7 @@ class TestRunDumpHeaderGraph:
         # test used to check is gone; see
         # test_header_graph_includes_folds_include_edges above for the
         # include-edge content check).
-        with patch("abicheck.service_dump_native._dump_pe", return_value=snap):
+        with fake_format_adapter("pe", result=snap):
             result = run_dump(p, "pe", [header], [], "1.0", "c++")
         assert result.surface_graph is not None
 
@@ -4432,13 +4440,13 @@ class TestRunDumpHeaderGraphSkippedForDwarfOnly:
             return _snap
 
         with (
-            patch("abicheck.service_dump_native._dump_elf", return_value=snap),
+            fake_format_adapter("elf", result=snap),
             patch(
-                "abicheck.service_dump_native._attach_header_graph",
+                "abicheck.workflows.dump.native._attach_header_graph",
                 side_effect=_fake_attach,
             ),
             patch(
-                "abicheck.service_dump_native.attach_clang_layout",
+                "abicheck.workflows.dump.native.attach_clang_layout",
                 side_effect=lambda s, *a, **k: s,
             ),
         ):
@@ -4460,13 +4468,13 @@ class TestRunDumpHeaderGraphSkippedForDwarfOnly:
             return _snap
 
         with (
-            patch("abicheck.service_dump_native._dump_elf", return_value=snap),
+            fake_format_adapter("elf", result=snap),
             patch(
-                "abicheck.service_dump_native._attach_header_graph",
+                "abicheck.workflows.dump.native._attach_header_graph",
                 side_effect=_fake_attach,
             ),
             patch(
-                "abicheck.service_dump_native.attach_clang_layout",
+                "abicheck.workflows.dump.native.attach_clang_layout",
                 side_effect=lambda s, *a, **k: s,
             ),
         ):
@@ -4485,8 +4493,8 @@ class TestRunDumpHeaderGraphSkippedForDwarfOnly:
         )
         calls: list[tuple[bool, bool]] = []
 
-        def _fake_dump_elf(*args, **kwargs):
-            compile_ctx = kwargs.get("compile")
+        def _fake_dump_elf(request):
+            compile_ctx = request.compile
             if compile_ctx is not None and compile_ctx.frontend == "clang":
                 return clang_snap
             return castxml_snap
@@ -4496,9 +4504,9 @@ class TestRunDumpHeaderGraphSkippedForDwarfOnly:
             return _snap
 
         with (
-            patch("abicheck.service_dump_native._dump_elf", side_effect=_fake_dump_elf),
+            fake_format_adapter("elf", side_effect=_fake_dump_elf),
             patch(
-                "abicheck.service_dump_native._attach_header_graph",
+                "abicheck.workflows.dump.native._attach_header_graph",
                 side_effect=_fake_attach,
             ),
         ):
@@ -4528,13 +4536,13 @@ class TestRunDumpHeaderGraphSkippedForDwarfOnly:
             return _snap
 
         with (
-            patch("abicheck.service_dump_native._dump_elf", return_value=snap),
+            fake_format_adapter("elf", result=snap),
             patch(
-                "abicheck.service_dump_native._attach_header_graph",
+                "abicheck.workflows.dump.native._attach_header_graph",
                 side_effect=_fake_attach,
             ),
             patch(
-                "abicheck.service_dump_native.attach_clang_layout",
+                "abicheck.workflows.dump.native.attach_clang_layout",
                 side_effect=lambda s, *a, **k: s,
             ),
         ):
@@ -4559,14 +4567,14 @@ class TestRunDumpHeaderGraphSkippedForDwarfOnly:
         snap = AbiSnapshot(library="lib", version="1.0", from_headers=False)
         seen_active: dict[str, bool] = {}
 
-        def _fake_dump_elf(*_a, **_k):
+        def _fake_dump_elf(_request):
             seen_active["active"] = dumper_cache.ast_memoize_active()
             return snap
 
         with (
-            patch("abicheck.service_dump_native._dump_elf", side_effect=_fake_dump_elf),
+            fake_format_adapter("elf", side_effect=_fake_dump_elf),
             patch(
-                "abicheck.service_dump_native.attach_clang_layout",
+                "abicheck.workflows.dump.native.attach_clang_layout",
                 side_effect=lambda s, *a, **k: s,
             ),
         ):
@@ -4593,13 +4601,13 @@ class TestRunDumpHeaderGraphSkippedForDwarfOnly:
             return _snap
 
         with (
-            patch("abicheck.service_dump_native._dump_pe", return_value=snap),
+            fake_format_adapter("pe", result=snap),
             patch(
-                "abicheck.service_dump_native._attach_header_graph",
+                "abicheck.workflows.dump.native._attach_header_graph",
                 side_effect=_fake_attach,
             ),
             patch(
-                "abicheck.service_dump_native.attach_clang_layout",
+                "abicheck.workflows.dump.native.attach_clang_layout",
                 side_effect=lambda s, *a, **k: s,
             ),
         ):
@@ -4622,13 +4630,13 @@ class TestRunDumpHeaderGraphSkippedForDwarfOnly:
             return _snap
 
         with (
-            patch("abicheck.service_dump_native._dump_macho", return_value=snap),
+            fake_format_adapter("macho", result=snap),
             patch(
-                "abicheck.service_dump_native._attach_header_graph",
+                "abicheck.workflows.dump.native._attach_header_graph",
                 side_effect=_fake_attach,
             ),
             patch(
-                "abicheck.service_dump_native.attach_clang_layout",
+                "abicheck.workflows.dump.native.attach_clang_layout",
                 side_effect=lambda s, *a, **k: s,
             ),
         ):
@@ -4697,7 +4705,7 @@ class TestAttachHeaderGraphDeviceContext:
 
     def test_streaming_prune_is_suppressed_for_this_call(self, tmp_path, monkeypatch):
         """Codex review, PR #840: `_attach_header_graph`'s own
-        `_clang_header_dump` call is a real downstream consumer of the raw
+        `clang_header_dump` call is a real downstream consumer of the raw
         AST dict (`buildsource.call_graph.parse_clang_ast_calls` walks it
         directly for call-graph edges), so the opt-in streaming pruner must
         be force-disabled for this call regardless of the env var --
@@ -4718,7 +4726,8 @@ class TestAttachHeaderGraphDeviceContext:
             return {"kind": "TranslationUnitDecl", "inner": []}, None, False
 
         monkeypatch.setattr(
-            "abicheck.dumper._clang_header_dump", _stub_clang_header_dump
+            "abicheck.extract.headers.clang.backend.clang_header_dump",
+            _stub_clang_header_dump,
         )
         assert not streaming_prune_suppressed()  # not leaked before the call
         _attach_header_graph(
@@ -4765,7 +4774,7 @@ class TestAttachHeaderGraphDeviceContext:
 
 class TestAttachHeaderGraphCompilerSelection:
     """Codex review (P2): _attach_header_graph's own compiler selection for
-    its _clang_header_dump call must match whichever main pass it's paired
+    its clang_header_dump call must match whichever main pass it's paired
     with -- case-insensitively, since PE/Mach-O's own main pass
     (service_header_scoped._try_header_scoped_dump) treats "C" the same as
     "c". The compiler string is part of the AST cache key, so a mismatch
@@ -4779,7 +4788,8 @@ class TestAttachHeaderGraphCompilerSelection:
         snap = AbiSnapshot(library="lib", version="1.0")
         ast = {"kind": "TranslationUnitDecl", "inner": []}
         with patch(
-            "abicheck.dumper._clang_header_dump", return_value=(ast, None, False)
+            "abicheck.extract.headers.clang.backend.clang_header_dump",
+            return_value=(ast, None, False),
         ) as mock_ast:
             _attach_header_graph(
                 snap,
@@ -4802,7 +4812,8 @@ class TestAttachHeaderGraphCompilerSelection:
         snap = AbiSnapshot(library="lib", version="1.0")
         ast = {"kind": "TranslationUnitDecl", "inner": []}
         with patch(
-            "abicheck.dumper._clang_header_dump", return_value=(ast, None, False)
+            "abicheck.extract.headers.clang.backend.clang_header_dump",
+            return_value=(ast, None, False),
         ) as mock_ast:
             _attach_header_graph(
                 snap,
@@ -4834,7 +4845,8 @@ class TestAttachHeaderGraphCompilerSelection:
         ast = {"kind": "TranslationUnitDecl", "inner": []}
         with (
             patch(
-                "abicheck.dumper._clang_header_dump", return_value=(ast, None, False)
+                "abicheck.extract.headers.clang.backend.clang_header_dump",
+                return_value=(ast, None, False),
             ),
             patch(
                 "abicheck.dumper._resolve_clang_bin", return_value="/opt/llvm/clang"
@@ -4862,7 +4874,7 @@ class TestAttachHeaderGraphCompilerSelection:
 
 class TestAttachHeaderGraphHashesIncludeSearchTokens:
     """Codex review, PR #782: _attach_header_graph's own independent second
-    _clang_header_dump call has its own AST cache key, but its extra_hash_dirs
+    clang_header_dump call has its own AST cache key, but its extra_hash_dirs
     computation only covered resolve_inferred_header_roots's own deferred
     roots -- never any include-search directory riding in
     compile.gcc_option_tokens itself (an explicit --gcc-options/
@@ -4883,7 +4895,8 @@ class TestAttachHeaderGraphHashesIncludeSearchTokens:
         snap = AbiSnapshot(library="lib", version="1.0")
         ast = {"kind": "TranslationUnitDecl", "inner": []}
         with patch(
-            "abicheck.dumper._clang_header_dump", return_value=(ast, None, False)
+            "abicheck.extract.headers.clang.backend.clang_header_dump",
+            return_value=(ast, None, False),
         ) as mock_ast:
             _attach_header_graph(
                 snap,
@@ -4906,7 +4919,8 @@ class TestAttachHeaderGraphHashesIncludeSearchTokens:
         snap = AbiSnapshot(library="lib", version="1.0")
         ast = {"kind": "TranslationUnitDecl", "inner": []}
         with patch(
-            "abicheck.dumper._clang_header_dump", return_value=(ast, None, False)
+            "abicheck.extract.headers.clang.backend.clang_header_dump",
+            return_value=(ast, None, False),
         ) as mock_ast:
             _attach_header_graph(
                 snap,
@@ -4922,7 +4936,7 @@ class TestAttachHeaderGraphHashesIncludeSearchTokens:
         assert mock_ast.call_args.kwargs["extra_hash_dirs"] == ()
 
 
-# ── _try_attach_numpy_capi_surface() ────────────────────────────────────────
+# ── try_attach_numpy_capi_surface() ────────────────────────────────────────
 
 
 class TestTryAttachNumpyCapiSurface:
@@ -4931,8 +4945,8 @@ class TestTryAttachNumpyCapiSurface:
         # False flags for an ordinary, successfully-scanned non-NumPy
         # library -- the INFO log must not fire for every such library
         # (CodeRabbit review).
+        from abicheck.extract.metadata_attach import try_attach_numpy_capi_surface
         from abicheck.numpy_capi import NumPyCapiSurface
-        from abicheck.service import _try_attach_numpy_capi_surface
 
         snap = AbiSnapshot(library="lib.so", version="1.0")
         not_consuming = NumPyCapiSurface(
@@ -4942,7 +4956,7 @@ class TestTryAttachNumpyCapiSurface:
             "abicheck.numpy_capi.extract_numpy_capi_surface", lambda _p: not_consuming
         )
         with caplog.at_level("INFO", logger="abicheck.service"):
-            _try_attach_numpy_capi_surface(snap, tmp_path / "lib.so")
+            try_attach_numpy_capi_surface(snap, tmp_path / "lib.so")
         assert snap.numpy_capi is not_consuming
         assert "NumPy C-API consumption detected" not in caplog.text
 
@@ -4954,10 +4968,10 @@ class TestTryAttachNumpyCapiSurface:
         self, tmp_path, monkeypatch, caplog, consumes_array_api, consumes_ufunc_api
     ):
         # Parametrized over each side of the production OR condition, so
-        # removing either one from _try_attach_numpy_capi_surface's guard
+        # removing either one from try_attach_numpy_capi_surface's guard
         # would fail this test (CodeRabbit review).
+        from abicheck.extract.metadata_attach import try_attach_numpy_capi_surface
         from abicheck.numpy_capi import NumPyCapiSurface
-        from abicheck.service import _try_attach_numpy_capi_surface
 
         snap = AbiSnapshot(library="lib.so", version="1.0")
         consuming = NumPyCapiSurface(
@@ -4968,7 +4982,7 @@ class TestTryAttachNumpyCapiSurface:
             "abicheck.numpy_capi.extract_numpy_capi_surface", lambda _p: consuming
         )
         with caplog.at_level("INFO", logger="abicheck.service"):
-            _try_attach_numpy_capi_surface(snap, tmp_path / "lib.so")
+            try_attach_numpy_capi_surface(snap, tmp_path / "lib.so")
         assert snap.numpy_capi is consuming
         assert "NumPy C-API consumption detected" in caplog.text
 
@@ -4997,7 +5011,7 @@ class TestRunDumpDependencyScope:
         elf_path.write_bytes(b"\x7fELF" + b"\x00" * 100)
         fake_snap = AbiSnapshot(library="lib.so", version="1.0", from_headers=True)
         with patch(
-            "abicheck.service_dump_native._run_dump_uncached", return_value=fake_snap
+            "abicheck.workflows.dump.native._run_dump_uncached", return_value=fake_snap
         ):
             result = run_dump(elf_path, "elf")
         assert result.dependency_scope == "filtered"
@@ -5007,7 +5021,7 @@ class TestRunDumpDependencyScope:
         elf_path.write_bytes(b"\x7fELF" + b"\x00" * 100)
         fake_snap = AbiSnapshot(library="lib.so", version="1.0", from_headers=True)
         with patch(
-            "abicheck.service_dump_native._run_dump_uncached", return_value=fake_snap
+            "abicheck.workflows.dump.native._run_dump_uncached", return_value=fake_snap
         ):
             result = run_dump(elf_path, "elf", include_dependencies=True)
         assert result.dependency_scope == "full"
@@ -5017,7 +5031,7 @@ class TestRunDumpDependencyScope:
         elf_path.write_bytes(b"\x7fELF" + b"\x00" * 100)
         fake_snap = AbiSnapshot(library="lib.so", version="1.0", from_headers=True)
         with patch(
-            "abicheck.service_dump_native._run_dump_uncached", return_value=fake_snap
+            "abicheck.workflows.dump.native._run_dump_uncached", return_value=fake_snap
         ):
             result = run_dump(elf_path, "elf", include_dependencies=False)
         assert result.dependency_scope == "filtered"
@@ -5042,7 +5056,7 @@ class TestMetadataAttachFailuresAreSwallowed:
     """Each enrichment step must never fail a dump (ADR-037).
 
     The three ``except Exception`` handlers went untested while the block
-    lived in ``service.py``; extracting it to ``service_metadata_attach``
+    lived in ``service.py``; extracting it to ``extract.metadata_attach``
     surfaced that as uncovered new lines, so they are pinned here.
     """
 
@@ -5067,7 +5081,7 @@ class TestMetadataAttachFailuresAreSwallowed:
         # that is what this pins.
         import logging
 
-        from abicheck.service_metadata_attach import _try_attach_sycl_metadata
+        from abicheck.extract.metadata_attach import try_attach_sycl_metadata
 
         class _UnresolvablePath:
             def resolve(self):
@@ -5075,7 +5089,7 @@ class TestMetadataAttachFailuresAreSwallowed:
 
         snap = self._snap()
         with caplog.at_level(logging.DEBUG, logger="abicheck.service"):
-            _try_attach_sycl_metadata(snap, _UnresolvablePath())
+            try_attach_sycl_metadata(snap, _UnresolvablePath())
         assert snap.sycl is None
         assert "SYCL metadata extraction skipped" in caplog.text
 
@@ -5083,7 +5097,7 @@ class TestMetadataAttachFailuresAreSwallowed:
         self, monkeypatch, caplog
     ) -> None:
         import abicheck.python_ext as python_ext_mod
-        from abicheck.service_metadata_attach import _try_attach_python_ext_metadata
+        from abicheck.extract.metadata_attach import try_attach_python_ext_metadata
 
         monkeypatch.setattr(
             python_ext_mod,
@@ -5092,7 +5106,7 @@ class TestMetadataAttachFailuresAreSwallowed:
         )
         snap = self._snap()
         with caplog.at_level("DEBUG", logger="abicheck.service"):
-            _try_attach_python_ext_metadata(snap)
+            try_attach_python_ext_metadata(snap)
         assert snap.python_ext is None
         assert "Python extension detection skipped" in caplog.text
 
@@ -5100,7 +5114,7 @@ class TestMetadataAttachFailuresAreSwallowed:
         self, tmp_path, monkeypatch, caplog
     ) -> None:
         import abicheck.numpy_capi as numpy_capi_mod
-        from abicheck.service_metadata_attach import _try_attach_numpy_capi_surface
+        from abicheck.extract.metadata_attach import try_attach_numpy_capi_surface
 
         monkeypatch.setattr(
             numpy_capi_mod,
@@ -5109,7 +5123,7 @@ class TestMetadataAttachFailuresAreSwallowed:
         )
         snap = self._snap()
         with caplog.at_level("DEBUG", logger="abicheck.service"):
-            _try_attach_numpy_capi_surface(snap, tmp_path / "libfoo.so")
+            try_attach_numpy_capi_surface(snap, tmp_path / "libfoo.so")
         assert snap.numpy_capi is None
         assert "NumPy C-API surface extraction skipped" in caplog.text
 
@@ -5117,7 +5131,7 @@ class TestMetadataAttachFailuresAreSwallowed:
         self, monkeypatch, caplog
     ) -> None:
         import abicheck.python_api as python_api_mod
-        from abicheck.service_metadata_attach import _try_attach_python_api_surface
+        from abicheck.extract.metadata_attach import try_attach_python_api_surface
 
         monkeypatch.setattr(
             python_api_mod,
@@ -5126,7 +5140,7 @@ class TestMetadataAttachFailuresAreSwallowed:
         )
         snap = self._snap()
         with caplog.at_level("DEBUG", logger="abicheck.service"):
-            _try_attach_python_api_surface(snap)
+            try_attach_python_api_surface(snap)
         assert snap.python_api is None
         assert "Python API surface recovery skipped" in caplog.text
 
@@ -5134,13 +5148,13 @@ class TestMetadataAttachFailuresAreSwallowed:
         self, tmp_path, monkeypatch, caplog
     ) -> None:
         import abicheck.sycl_metadata as sycl_mod
-        from abicheck.service_metadata_attach import _try_attach_sycl_metadata
+        from abicheck.extract.metadata_attach import try_attach_sycl_metadata
 
         detected = sycl_mod.SyclMetadata(implementation="dpcpp")
         monkeypatch.setattr(sycl_mod, "parse_sycl_metadata", lambda _dir: detected)
         snap = self._snap()
         with caplog.at_level("INFO", logger="abicheck.service"):
-            _try_attach_sycl_metadata(snap, tmp_path / "libfoo.so")
+            try_attach_sycl_metadata(snap, tmp_path / "libfoo.so")
         assert snap.sycl is detected
         assert "SYCL metadata attached" in caplog.text
 
@@ -5148,7 +5162,7 @@ class TestMetadataAttachFailuresAreSwallowed:
         self, tmp_path, monkeypatch, caplog
     ) -> None:
         import abicheck.sycl_metadata as sycl_mod
-        from abicheck.service_metadata_attach import _try_attach_sycl_metadata
+        from abicheck.extract.metadata_attach import try_attach_sycl_metadata
 
         monkeypatch.setattr(
             sycl_mod,
@@ -5157,7 +5171,7 @@ class TestMetadataAttachFailuresAreSwallowed:
         )
         snap = self._snap()
         with caplog.at_level("DEBUG", logger="abicheck.service"):
-            _try_attach_sycl_metadata(snap, tmp_path / "libfoo.so")
+            try_attach_sycl_metadata(snap, tmp_path / "libfoo.so")
         assert snap.sycl is None
         assert "SYCL metadata extraction skipped" in caplog.text
 
@@ -5165,24 +5179,24 @@ class TestMetadataAttachFailuresAreSwallowed:
         self, tmp_path, monkeypatch
     ) -> None:
         import abicheck.sycl_metadata as sycl_mod
-        from abicheck.service_metadata_attach import _try_attach_sycl_metadata
+        from abicheck.extract.metadata_attach import try_attach_sycl_metadata
 
         monkeypatch.setattr(sycl_mod, "parse_sycl_metadata", lambda _dir: None)
         snap = self._snap()
-        _try_attach_sycl_metadata(snap, tmp_path / "libfoo.so")
+        try_attach_sycl_metadata(snap, tmp_path / "libfoo.so")
         assert snap.sycl is None
 
     def test_a_library_with_no_numpy_capi_attaches_nothing(
         self, tmp_path, monkeypatch
     ) -> None:
         import abicheck.numpy_capi as numpy_capi_mod
-        from abicheck.service_metadata_attach import _try_attach_numpy_capi_surface
+        from abicheck.extract.metadata_attach import try_attach_numpy_capi_surface
 
         monkeypatch.setattr(
             numpy_capi_mod, "extract_numpy_capi_surface", lambda _path: None
         )
         snap = self._snap()
-        _try_attach_numpy_capi_surface(snap, tmp_path / "libfoo.so")
+        try_attach_numpy_capi_surface(snap, tmp_path / "libfoo.so")
         assert snap.numpy_capi is None
 
 

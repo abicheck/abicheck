@@ -45,8 +45,8 @@ from _clang_ast_cache_isolation import (
 )
 
 from abicheck.checker import ChangeKind, Verdict, compare
-from abicheck.dumper import _clang_header_dump, dump
-from abicheck.dumper_clang import _ClangAstParser
+from abicheck.dumper import dump
+from abicheck.extract.headers.clang.backend import clang_header_dump
 from abicheck.model import Visibility
 
 # Scoped to **Linux/ELF** — the clang L2 backend's target (P1: clang-only Linux
@@ -99,67 +99,6 @@ void scale(Point* p, double factor) { p->x = int(p->x * factor); }
 int Widget::value() const { return hidden_; }
 }  // namespace lib
 """
-
-
-def test_clang_ast_does_not_assign_returned_callback_abi_to_factory(
-    tmp_path: Path,
-) -> None:
-    """Use Clang's real normalized AST spelling, not a hand-written fixture."""
-    if shutil.which("clang") is None or platform.machine().lower() not in {
-        "x86_64",
-        "amd64",
-    }:
-        pytest.skip("requires an x86-64 clang frontend")
-    header = tmp_path / "api.h"
-    header.write_text(
-        "void (__attribute__((ms_abi)) *factory(void))(int);\n", encoding="utf-8"
-    )
-
-    root, _, _ = _clang_header_dump([header], [], compiler="clang", lang="C")
-    (factory,) = _ClangAstParser(root, {"factory"}, set()).parse_functions()
-
-    assert factory.contract_attributes == []
-
-
-def test_clang_ast_strips_lambda_location_from_instantiated_param_type(
-    tmp_path: Path,
-) -> None:
-    """Use Clang's real ``qualType`` spelling for a lambda closure type, not a
-    hand-written fixture -- confirms the fix at `dumper_clang._qualtype`
-    against real Clang 18 output, not a guessed AST shape.
-
-    A function template instantiated with a lambda argument prints that
-    instantiation's own parameter `type.qualType` as ``"(lambda at
-    <path>:<line>:<col>)"`` (confirmed empirically: unlike a `decltype(...)`-
-    or typedef-sugared spelling, which clang keeps sugared in `qualType` and
-    only desugars into this form in the separate `desugaredQualType` key, a
-    template parameter substituted directly with the deduced lambda type has
-    no sugar to keep). The absolute header path leaking into a parameter's
-    own recorded type would make two checkouts of the identical, unchanged
-    declaration disagree.
-    """
-    if shutil.which("clang") is None or platform.machine().lower() not in {
-        "x86_64",
-        "amd64",
-    }:
-        pytest.skip("requires an x86-64 clang frontend")
-    header = tmp_path / "call_with.h"
-    header.write_text(
-        "template <typename F>\n"
-        "inline void call_with(F f) {}\n"
-        "inline void invoke() { call_with([]{}); }\n",
-        encoding="utf-8",
-    )
-
-    root, _, _ = _clang_header_dump(
-        [header], [], compiler="clang", lang="c++", gcc_options="-std=c++20"
-    )
-    funcs = _ClangAstParser(root, {"invoke"}, set()).parse_functions()
-    (specialization,) = [
-        f for f in funcs if f.name == "call_with" and f.mangled != "call_with"
-    ]
-    assert str(tmp_path) not in specialization.params[0].type
-    assert specialization.params[0].type.startswith("(lambda")
 
 
 def _have(tool: str) -> bool:
@@ -1548,7 +1487,7 @@ def test_streaming_pruner_reports_a_nonzero_prune_count_on_the_raw_ast(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """Direct, lower-level check on ``_clang_header_dump`` -- proves the
+    """Direct, lower-level check on ``clang_header_dump`` -- proves the
     pruner actually engaged on a real clang AST, not just that the higher-
     level ``dump()`` model happened to look the same either way."""
     from abicheck.dumper_clang_streaming import (
@@ -1559,7 +1498,7 @@ def test_streaming_pruner_reports_a_nonzero_prune_count_on_the_raw_ast(
     so, header = stream_prune_lib
     monkeypatch.setenv(_STREAM_PRUNE_ENV_VAR, "1")
     _isolate_ast_cache(monkeypatch, tmp_path)
-    root, _, _ = _clang_header_dump(
+    root, _, _ = clang_header_dump(
         [header], [], compiler="clang", lang="c++", memoize=False
     )
 
@@ -1604,14 +1543,14 @@ def test_streaming_pruner_never_prunes_a_method_shaped_node_end_to_end(
 
     monkeypatch.delenv(_STREAM_PRUNE_ENV_VAR, raising=False)
     _isolate_ast_cache(monkeypatch, tmp_path, "xdg-cache-unpruned")
-    unpruned_root, _, _ = _clang_header_dump(
+    unpruned_root, _, _ = clang_header_dump(
         [header], [], compiler="clang", lang="c++", memoize=False
     )
     assert spy.calls == 0
 
     monkeypatch.setenv(_STREAM_PRUNE_ENV_VAR, "1")
     _isolate_ast_cache(monkeypatch, tmp_path, "xdg-cache-pruned")
-    pruned_root, _, _ = _clang_header_dump(
+    pruned_root, _, _ = clang_header_dump(
         [header], [], compiler="clang", lang="c++", memoize=False
     )
     # Without this the method-count equality below is vacuously true.

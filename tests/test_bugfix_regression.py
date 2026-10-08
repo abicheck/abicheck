@@ -466,45 +466,59 @@ class TestBug8CppHintOnCFailure:
     def test_lang_c_with_cpp_header_shows_hint(self, tmp_path: Path):
         with (
             patch(
-                "abicheck.dumper._resolve_selected_tool", return_value="/mock/castxml"
+                "abicheck.extract.headers.castxml.backend._resolve_selected_tool",
+                return_value="/mock/castxml",
             ),
             patch(
-                "abicheck.dumper.deadline.run_bounded",
-                return_value=self._failed_process(
-                    "error: use of undeclared identifier 'class'"
-                ),
-            ),
-            patch(
-                "abicheck.dumper._cache_path", return_value=tmp_path / "nonexistent.xml"
+                "abicheck.extract.headers.castxml.backend._cache_path",
+                return_value=tmp_path / "nonexistent.xml",
             ),
         ):
-            from abicheck.dumper import _castxml_dump
+            from abicheck.extract.headers.castxml.backend import (
+                castxml_dump as _castxml_dump,
+            )
 
             header = tmp_path / "test.h"
             # Header with C++ syntax that _detect_cpp_headers will catch
             header.write_text("class Foo { int x; };", encoding="utf-8")
             with pytest.raises(RuntimeError, match="Hint.*C\\+\\+ syntax"):
-                _castxml_dump([header], [], lang="c")
+                _castxml_dump(
+                    [header],
+                    [],
+                    run=MagicMock(
+                        return_value=self._failed_process(
+                            "error: use of undeclared identifier 'class'"
+                        )
+                    ),
+                    lang="c",
+                )
 
     def test_lang_c_with_pure_c_header_no_hint(self, tmp_path: Path):
         with (
             patch(
-                "abicheck.dumper._resolve_selected_tool", return_value="/mock/castxml"
+                "abicheck.extract.headers.castxml.backend._resolve_selected_tool",
+                return_value="/mock/castxml",
             ),
             patch(
-                "abicheck.dumper.deadline.run_bounded",
-                return_value=self._failed_process("error: something else"),
-            ),
-            patch(
-                "abicheck.dumper._cache_path", return_value=tmp_path / "nonexistent.xml"
+                "abicheck.extract.headers.castxml.backend._cache_path",
+                return_value=tmp_path / "nonexistent.xml",
             ),
         ):
-            from abicheck.dumper import _castxml_dump
+            from abicheck.extract.headers.castxml.backend import (
+                castxml_dump as _castxml_dump,
+            )
 
             header = tmp_path / "test.h"
             header.write_text("int foo(void);", encoding="utf-8")
             with pytest.raises(RuntimeError, match="castxml failed") as exc_info:
-                _castxml_dump([header], [], lang="c")
+                _castxml_dump(
+                    [header],
+                    [],
+                    run=MagicMock(
+                        return_value=self._failed_process("error: something else")
+                    ),
+                    lang="c",
+                )
             assert "Hint" not in str(exc_info.value)
 
     @staticmethod
@@ -528,37 +542,43 @@ class TestBug9CastxmlTimeout:
         timeout_exc = subprocess.TimeoutExpired(cmd=["castxml"], timeout=120)
         with (
             patch(
-                "abicheck.dumper._resolve_selected_tool", return_value="/mock/castxml"
+                "abicheck.extract.headers.castxml.backend._resolve_selected_tool",
+                return_value="/mock/castxml",
             ),
-            patch("abicheck.dumper.deadline.run_bounded", side_effect=timeout_exc),
             patch(
-                "abicheck.dumper._cache_path", return_value=tmp_path / "nonexistent.xml"
+                "abicheck.extract.headers.castxml.backend._cache_path",
+                return_value=tmp_path / "nonexistent.xml",
             ),
         ):
-            from abicheck.dumper import _castxml_dump
+            from abicheck.extract.headers.castxml.backend import (
+                castxml_dump as _castxml_dump,
+            )
 
             header = tmp_path / "test.h"
             header.write_text("int x;", encoding="utf-8")
             with pytest.raises(RuntimeError, match="timed out"):
-                _castxml_dump([header], [])
+                _castxml_dump([header], [], run=MagicMock(side_effect=timeout_exc))
 
     def test_timeout_message_mentions_120_seconds(self, tmp_path: Path):
         timeout_exc = subprocess.TimeoutExpired(cmd=["castxml"], timeout=120)
         with (
             patch(
-                "abicheck.dumper._resolve_selected_tool", return_value="/mock/castxml"
+                "abicheck.extract.headers.castxml.backend._resolve_selected_tool",
+                return_value="/mock/castxml",
             ),
-            patch("abicheck.dumper.deadline.run_bounded", side_effect=timeout_exc),
             patch(
-                "abicheck.dumper._cache_path", return_value=tmp_path / "nonexistent.xml"
+                "abicheck.extract.headers.castxml.backend._cache_path",
+                return_value=tmp_path / "nonexistent.xml",
             ),
         ):
-            from abicheck.dumper import _castxml_dump
+            from abicheck.extract.headers.castxml.backend import (
+                castxml_dump as _castxml_dump,
+            )
 
             header = tmp_path / "test.h"
             header.write_text("int x;", encoding="utf-8")
             with pytest.raises(RuntimeError, match="120 seconds"):
-                _castxml_dump([header], [])
+                _castxml_dump([header], [], run=MagicMock(side_effect=timeout_exc))
 
     def test_timeout_with_partial_stderr(self, tmp_path: Path):
         timeout_exc = subprocess.TimeoutExpired(
@@ -568,38 +588,44 @@ class TestBug9CastxmlTimeout:
         )
         with (
             patch(
-                "abicheck.dumper._resolve_selected_tool", return_value="/mock/castxml"
+                "abicheck.extract.headers.castxml.backend._resolve_selected_tool",
+                return_value="/mock/castxml",
             ),
-            patch("abicheck.dumper.deadline.run_bounded", side_effect=timeout_exc),
             patch(
-                "abicheck.dumper._cache_path", return_value=tmp_path / "nonexistent.xml"
+                "abicheck.extract.headers.castxml.backend._cache_path",
+                return_value=tmp_path / "nonexistent.xml",
             ),
         ):
-            from abicheck.dumper import _castxml_dump
+            from abicheck.extract.headers.castxml.backend import (
+                castxml_dump as _castxml_dump,
+            )
 
             header = tmp_path / "test.h"
             header.write_text("int x;", encoding="utf-8")
             with pytest.raises(RuntimeError, match="partial output here"):
-                _castxml_dump([header], [])
+                _castxml_dump([header], [], run=MagicMock(side_effect=timeout_exc))
 
     def test_timeout_cleanup(self, tmp_path: Path):
         """Temp files are cleaned up even after timeout."""
         timeout_exc = subprocess.TimeoutExpired(cmd=["castxml"], timeout=120)
         with (
             patch(
-                "abicheck.dumper._resolve_selected_tool", return_value="/mock/castxml"
+                "abicheck.extract.headers.castxml.backend._resolve_selected_tool",
+                return_value="/mock/castxml",
             ),
-            patch("abicheck.dumper.deadline.run_bounded", side_effect=timeout_exc),
             patch(
-                "abicheck.dumper._cache_path", return_value=tmp_path / "nonexistent.xml"
+                "abicheck.extract.headers.castxml.backend._cache_path",
+                return_value=tmp_path / "nonexistent.xml",
             ),
         ):
-            from abicheck.dumper import _castxml_dump
+            from abicheck.extract.headers.castxml.backend import (
+                castxml_dump as _castxml_dump,
+            )
 
             header = tmp_path / "test.h"
             header.write_text("int x;", encoding="utf-8")
             with pytest.raises(RuntimeError):
-                _castxml_dump([header], [])
+                _castxml_dump([header], [], run=MagicMock(side_effect=timeout_exc))
         # No stale temp files left behind
         leftover = list(tmp_path.glob("tmp*"))
         assert len(leftover) == 0 or all(f.name == "test.h" for f in leftover)
@@ -626,17 +652,24 @@ def test_castxml_rechecks_deadline_before_parsing_xml(tmp_path: Path) -> None:
         return proc
 
     with (
-        patch("abicheck.dumper._resolve_selected_tool", return_value="/mock/castxml"),
-        patch("abicheck.dumper.deadline.run_bounded", side_effect=_fake_run),
-        patch("abicheck.dumper._cache_path", return_value=tmp_path / "nonexistent.xml"),
+        patch(
+            "abicheck.extract.headers.castxml.backend._resolve_selected_tool",
+            return_value="/mock/castxml",
+        ),
+        patch(
+            "abicheck.extract.headers.castxml.backend._cache_path",
+            return_value=tmp_path / "nonexistent.xml",
+        ),
     ):
-        from abicheck.dumper import _castxml_dump
+        from abicheck.extract.headers.castxml.backend import (
+            castxml_dump as _castxml_dump,
+        )
 
         header = tmp_path / "test.h"
         header.write_text("int x;", encoding="utf-8")
         with deadline.deadline_scope(0.01):
             with pytest.raises(deadline.DeadlineExceeded):
-                _castxml_dump([header], [])
+                _castxml_dump([header], [], run=_fake_run)
 
 
 def test_validate_castxml_output_rechecks_deadline_after_parse(

@@ -60,8 +60,8 @@ from pathlib import Path
 
 import pytest
 
-from abicheck.dumper import _castxml_dump
 from abicheck.errors import HeaderToolchainError, SnapshotError
+from abicheck.extract.headers.castxml.backend import castxml_dump as _castxml_dump
 
 pytestmark = pytest.mark.integration
 

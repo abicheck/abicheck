@@ -69,7 +69,7 @@ NON_SHAPING_MODULES: dict[str, str] = {
     # The failing-header retry calls back into the run to rebuild clang's
     # input for the reduced header set. That input comes from the same
     # builders the key's invocation digest calls, so it is keyed already.
-    "abicheck.dumper": "rebuilds the aggregate for a retry (`clang_aggregate_text`, keyed)",
+    "abicheck.extract.headers.clang.backend": "rebuilds the aggregate for a retry (`clang_aggregate_text`, keyed)",
     "abicheck.dumper_ast_config": "rebuilds the command line for a retry (keyed builder)",
     "abicheck.dumper_clang": "command-line helpers of that keyed builder",
     "abicheck._compiler_options": "command-line helpers of that keyed builder",

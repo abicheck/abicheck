@@ -44,7 +44,7 @@ from .model.change_catalog.kinds import ChangeKind
 from .model.surface_facts import in_public_surface
 
 if TYPE_CHECKING:
-    from .probe_harness import MatrixSnapshot
+    from .model.probe_matrix import MatrixSnapshot
 
 
 # ---------------------------------------------------------------------------

@@ -862,30 +862,30 @@ class TestSyclMetadataExtraction:
 
 class TestServiceSyclAutoAttach:
     def test_try_attach_sycl_no_sycl(self, tmp_path):
+        from abicheck.extract.metadata_attach import try_attach_sycl_metadata
         from abicheck.model import AbiSnapshot
-        from abicheck.service import _try_attach_sycl_metadata
 
         snap = AbiSnapshot(library="libfoo.so", version="1.0")
         lib = tmp_path / "libfoo.so"
         lib.touch()
-        _try_attach_sycl_metadata(snap, lib)
+        try_attach_sycl_metadata(snap, lib)
         assert snap.sycl is None
 
     def test_try_attach_sycl_dpcpp(self, tmp_path):
+        from abicheck.extract.metadata_attach import try_attach_sycl_metadata
         from abicheck.model import AbiSnapshot
-        from abicheck.service import _try_attach_sycl_metadata
 
         (tmp_path / "libsycl.so").touch()
         snap = AbiSnapshot(library="libsycl.so", version="1.0")
         lib = tmp_path / "libsycl.so"
-        _try_attach_sycl_metadata(snap, lib)
+        try_attach_sycl_metadata(snap, lib)
         assert snap.sycl is not None
         assert snap.sycl.implementation == "dpcpp"
 
     def test_try_attach_sycl_exception_handled(self, tmp_path, monkeypatch):
         """Extraction errors are caught and logged, not raised."""
+        from abicheck.extract.metadata_attach import try_attach_sycl_metadata
         from abicheck.model import AbiSnapshot
-        from abicheck.service import _try_attach_sycl_metadata
 
         def boom(*a, **kw):
             raise RuntimeError("test error")
@@ -897,7 +897,7 @@ class TestServiceSyclAutoAttach:
         snap = AbiSnapshot(library="libsycl.so", version="1.0")
         lib = tmp_path / "libsycl.so"
         lib.touch()
-        _try_attach_sycl_metadata(snap, lib)
+        try_attach_sycl_metadata(snap, lib)
         assert snap.sycl is None  # error was caught
 
 

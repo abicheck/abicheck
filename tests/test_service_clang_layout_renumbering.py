@@ -41,14 +41,17 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
+from _dump_format_fakes import fake_format_adapter
+
 from abicheck.model import AbiSnapshot, RecordType
 from abicheck.service import run_dump
 from abicheck.storage.closure_identity import renumber_anonymous_closure_identities
+from abicheck.workflows.dump.formats import NativeExtractRequest
 
 _RAW_BASE = "Base<(lambda:x.h:1:2)>"
 
 
-def _fake_dump(*_args, **_kwargs) -> AbiSnapshot:
+def _fake_dump(_request: NativeExtractRequest) -> AbiSnapshot:
     """Mirrors dumper.dump()'s own final renumbering call -- a no-op when
     deferred (the fix), a real premature renumbering when not (the bug)."""
     snap = AbiSnapshot(
@@ -74,13 +77,13 @@ class TestRunDumpRenumbersAfterClangLayoutAttach:
         p.write_bytes(b"\x7fELF" + b"\x00" * 100)
 
         with (
-            patch("abicheck.service_dump_native._dump_elf", side_effect=_fake_dump),
+            fake_format_adapter("elf", side_effect=_fake_dump),
             patch(
-                "abicheck.service_dump_native._attach_header_graph",
+                "abicheck.workflows.dump.native._attach_header_graph",
                 side_effect=lambda s, *_a, **_k: s,
             ),
             patch(
-                "abicheck.service_dump_native.attach_clang_layout",
+                "abicheck.workflows.dump.native.attach_clang_layout",
                 side_effect=_fake_attach_clang_layout,
             ),
         ):
@@ -97,13 +100,13 @@ class TestRunDumpRenumbersAfterClangLayoutAttach:
         p.write_bytes(b"MZ" + b"\x00" * 100)
 
         with (
-            patch("abicheck.service_dump_native._dump_pe", side_effect=_fake_dump),
+            fake_format_adapter("pe", side_effect=_fake_dump),
             patch(
-                "abicheck.service_dump_native._attach_header_graph",
+                "abicheck.workflows.dump.native._attach_header_graph",
                 side_effect=lambda s, *_a, **_k: s,
             ),
             patch(
-                "abicheck.service_dump_native.attach_clang_layout",
+                "abicheck.workflows.dump.native.attach_clang_layout",
                 side_effect=_fake_attach_clang_layout,
             ),
         ):
@@ -120,13 +123,13 @@ class TestRunDumpRenumbersAfterClangLayoutAttach:
         p.write_bytes(b"\xcf\xfa\xed\xfe" + b"\x00" * 100)
 
         with (
-            patch("abicheck.service_dump_native._dump_macho", side_effect=_fake_dump),
+            fake_format_adapter("macho", side_effect=_fake_dump),
             patch(
-                "abicheck.service_dump_native._attach_header_graph",
+                "abicheck.workflows.dump.native._attach_header_graph",
                 side_effect=lambda s, *_a, **_k: s,
             ),
             patch(
-                "abicheck.service_dump_native.attach_clang_layout",
+                "abicheck.workflows.dump.native.attach_clang_layout",
                 side_effect=_fake_attach_clang_layout,
             ),
         ):

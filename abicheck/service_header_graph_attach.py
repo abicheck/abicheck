@@ -71,7 +71,7 @@ _log = logging.getLogger(__name__)
 # TODO(header-graph-phase-D): ``header_graph_includes`` runs one extra
 # ``clang -M`` pass per top-level header on every dump/compare with no
 # caching of its own (only the aggregate AST pass is disk-cached via
-# ``_clang_header_dump``) — bounded by header count, fails soft when clang is
+# ``clang_header_dump``) — bounded by header count, fails soft when clang is
 # unavailable, but not yet cheap. Caching this pass is deferred to Phase D.
 _HEADER_GRAPH_ENABLED = True
 _HEADER_GRAPH_INCLUDES_ENABLED = True
@@ -93,7 +93,7 @@ def _attach_header_graph(
     """Build and embed the header-only (L2) semantic graph (ADR-041 addendum).
 
     A no-op when ``header_graph`` was not requested or no headers were parsed.
-    Calls the same ``dumper._clang_header_dump`` the main clang-frontend
+    Calls the same ``extract.headers.clang.backend.clang_header_dump`` the main clang-frontend
     snapshot pass already used — reused directly (private only by
     convention; ``dumper.py`` sits at its 2000-line hard cap, so a public
     wrapper is not added there) rather than threading the parser's
@@ -104,14 +104,14 @@ def _attach_header_graph(
     returns the already-parsed dict straight away, skipping a second disk
     read/JSON re-parse. It stays a genuine second ``clang`` invocation only
     when the main pass used ``castxml`` (the default backend), which never
-    calls ``_clang_header_dump`` at all. Mirrors ``_dump_elf``'s own header-expansion
+    calls ``clang_header_dump`` at all. Mirrors ``_dump_elf``'s own header-expansion
     (``expand_header_inputs`` — a ``headers`` entry may be a directory) and
     inferred-include-root derivation (``resolve_inferred_header_roots`` — an
     umbrella header's relative ``#include``s need the same auto-added ``-I``/
     ``-isystem`` search dirs the main dump computes) so this second pass sees
     the identical resolved input the main dump already parsed successfully,
     rather than the raw, unexpanded arguments (Codex review: without this, a
-    header *directory* input made ``_clang_header_dump`` write an invalid
+    header *directory* input made ``clang_header_dump`` write an invalid
     ``#include`` of the directory path itself and raise, and even a single
     umbrella header with relative includes into a sibling directory could
     fail to resolve, both silently degrading to the declaration-only graph).
@@ -138,7 +138,7 @@ def _attach_header_graph(
     # closed here, so its peak is attributed to `dump.primary:done` and the
     # stages below start from a fresh window. It lives at the top of this
     # function rather than at the `_dump_elf` call site because `dumper.py`
-    # and `service_dump_native.py` are both at their debt-ledger line caps.
+    # and `workflows/dump/native.py` are both at their debt-ledger line caps.
     memory_trace.mark("dump.primary:done")
     if not header_graph or not headers:
         return snap
@@ -204,7 +204,7 @@ def _attach_header_graph(
         # confidently wrong -- the same host/device tradeoff already made for
         # DWARF layout backfill (dumper._dump_elf) and the clang layout tool.
         #
-        # Resolve the same clang driver `_clang_header_dump` above used
+        # Resolve the same clang driver `clang_header_dump` above used
         # (honoring `--compiler`/`--compiler-prefix`) rather than defaulting to
         # the bare "clang++" — otherwise a hermetic/cross toolchain selected
         # via those flags silently loses every COMPILE_UNIT_INCLUDES_FILE
@@ -317,8 +317,8 @@ def acquire_header_graph_ast(
         load_cached_projection,
         store_cached_projection,
     )
-    from .dumper import _clang_header_dump
     from .dumper_clang_streaming import suppress_streaming_prune
+    from .extract.headers.clang.backend import clang_header_dump
     from .storage.derived_ast import DerivedAstArtifact, derived_ast_scope
 
     # Everything either projection path may raise on an AST that is readable
@@ -455,7 +455,7 @@ def acquire_header_graph_ast(
             # so using the expanded list here diverged from the main pass
             # for any directory `-H` input with nested subdirectories,
             # producing a different eff_includes/eff_tokens and therefore a
-            # different `_clang_header_dump` cache key -- silently missing
+            # different `clang_header_dump` cache key -- silently missing
             # the in-process AST memo in exactly the large-header-tree case
             # this reuse targets (Codex review).
             inc_extra, deferred = resolve_inferred_header_roots(
@@ -468,7 +468,7 @@ def acquire_header_graph_ast(
             eff_tokens = cc.gcc_option_tokens + tuple(deferred)
             # The deferred roots ride in gcc_option_tokens (-isystem), not
             # extra_includes, so their contents must also be hashed into the
-            # AST cache key explicitly — _clang_header_dump's disk cache
+            # AST cache key explicitly — clang_header_dump's disk cache
             # never inspects option-token content, only extra_includes/
             # extra_hash_dirs, so without this a header changed under an
             # inferred root would reuse a stale cached AST (Codex review;
@@ -514,7 +514,7 @@ def acquire_header_graph_ast(
             memory_trace.phase("dump.header_graph.clang_ast"),
             derived_ast_scope(_projection_for) as derived_projection,
         ):
-            ast_root, _resolved_kind, _resolved_force_cpp = _clang_header_dump(
+            ast_root, _resolved_kind, _resolved_force_cpp = clang_header_dump(
                 resolved_headers,
                 eff_includes,
                 compiler="cc" if _is_c else "c++",
@@ -560,7 +560,7 @@ def acquire_header_graph_ast(
                 # Same scope as the batch parse above: the call-graph reader
                 # needs the dependency declarations a prune would collapse.
                 with suppress_streaming_prune():
-                    tree, _kind, _force = _clang_header_dump(
+                    tree, _kind, _force = clang_header_dump(
                         group,
                         eff_includes,
                         compiler="cc" if _is_c else "c++",
@@ -666,7 +666,7 @@ def acquire_header_graph_ast(
             # a cache must not fail the dump.
             store_cached_projection(derived_projection.cache_path, projection)
     # `ast_root` is the only surviving reference to the tree at this point
-    # (`_clang_header_dump` is called with `memoize=False`, so nothing was
+    # (`clang_header_dump` is called with `memoize=False`, so nothing was
     # written into the in-process AST memo either), so clearing the name
     # drops it here rather than at function exit. `gc.collect()` is
     # deliberately NOT called: a clang AST is an acyclic dict/list

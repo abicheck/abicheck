@@ -91,9 +91,12 @@ def test_dump_with_headers_uses_castxml_parser_results(tmp_path, monkeypatch):
         lambda _p: ({"pub"}, {"pub", "local"}),
     )
     monkeypatch.setattr(
-        "abicheck.dumper._castxml_dump", lambda *_args, **_kwargs: Element("GCC_XML")
+        "abicheck.extract.headers.castxml.backend.castxml_dump",
+        lambda *_args, **_kwargs: Element("GCC_XML"),
     )
-    monkeypatch.setattr("abicheck.dumper._CastxmlParser", _FakeParser)
+    monkeypatch.setattr(
+        "abicheck.extract.headers.castxml.backend._CastxmlParser", _FakeParser
+    )
     monkeypatch.setattr(
         "abicheck.elf_metadata.parse_elf_metadata", lambda _p: ElfMetadata()
     )
@@ -125,7 +128,7 @@ def test_dump_with_headers_propagates_castxml_error(tmp_path, monkeypatch):
         "abicheck.dumper._pyelftools_exported_symbols", lambda _p: (set(), set())
     )
     monkeypatch.setattr(
-        "abicheck.dumper._castxml_dump",
+        "abicheck.extract.headers.castxml.backend.castxml_dump",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("castxml failed")),
     )
     monkeypatch.setattr(

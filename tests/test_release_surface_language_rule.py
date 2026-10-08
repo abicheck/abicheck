@@ -1,7 +1,7 @@
 """The release surface parses its headers in the language the members do.
 
 Bug class: two paths that acquire the *same* header tree for one release
-decide its language differently. The member rule is ``service_dump_native``'s
+decide its language differently. The member rule is ``workflows.dump.native``'s
 ``lang if (lang_explicit or lang == "c") else None``. The release surface once
 treated any non-empty ``lang`` -- ``compare``'s default ``"c++"`` included --
 as explicit, so a C tree became a C++ contract no member exports; its first
