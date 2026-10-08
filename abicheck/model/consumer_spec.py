@@ -69,7 +69,7 @@ class ConsumerUnreadableError(ValueError):
     """A consumer binary's format could not be recognized/parsed.
 
     Subclasses :class:`ValueError` so every existing catch site written
-    against :func:`~abicheck.appcompat.parse_app_requirements`'s previous
+    against :func:`~abicheck.workflows.consumer_scope.parse_app_requirements`'s previous
     bare ``ValueError`` keeps working unchanged.
     """
 

@@ -3144,15 +3144,12 @@ def _resolve_input_wrapper_call_sites(tree: ast.Module) -> frozenset[tuple[int, 
 
 
 def _iter_cli_contract_sources() -> Iterable[Path]:
-    """The front-end modules the contract covers: every ``cli*.py``, the
-    consumer-side ``appcompat.py`` (a verdict-emitting front-end too). The MCP
+    """The front-end modules the contract covers: every ``cli*.py``. The
+    consumer-side ``appcompat.py`` it also covered was retired (its logic is
+    in ``workflows.consumer_scope``, a workflow, not a front end). The MCP
     server was removed; agent integrations route through these same
     front ends (CLI or the typed Python API) rather than a separate tier."""
     yield from PKG.glob("cli*.py")
-    for extra in ("appcompat.py",):
-        path = PKG / extra
-        if path.is_file():
-            yield path
 
 
 # ── ADR-037 D10.2 / D10.4: shared-decorator coverage + one-default-per-flag ───
@@ -3331,7 +3328,7 @@ def check_cli_contract(f: Findings) -> None:
     (``checker.compare``, ``dumper.dump``, ``service.resolve_input``) directly
     instead of routing through the Tier-2 service.
 
-    Covers every ``abicheck/cli*.py`` and ``abicheck/appcompat.py``. ADR-037
+    Covers every ``abicheck/cli*.py``. ADR-037
     D1/D10.1: front-ends are thin adapters; one classification/resolution path
     is what keeps ``compare`` / ``compare-release`` / ``appcompat`` from
     drifting apart (the ``scope_public`` default divergence the ADR documents)

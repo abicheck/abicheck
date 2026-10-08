@@ -21,8 +21,8 @@ already-computed library diff. This module is the workflow glue:
 ``extract.consumer_imports``/``extract.library_export_facts`` read the facts,
 ``policy.consumer_requirements`` evaluates them, and this module adds the
 suppressible consumer-overlay findings, the disposition-ledger bookkeeping
-and the result types. ``abicheck.appcompat`` is the documented public import
-path for the same names.
+and the result types. It is the documented public import path
+(``docs/use/python-api.md``).
 
 See docs/contribute/adr/005-application-compat-check.md for the design.
 """

@@ -60,7 +60,7 @@ adrs:
     surfaces:
       - cli: compare --used-by
       - cli: compare --required-symbol
-      - api: abicheck.appcompat.check_appcompat
+      - api: abicheck.workflows.consumer_scope_standalone.check_appcompat
       - action: used-by
       - report: compare_report.used_by
 

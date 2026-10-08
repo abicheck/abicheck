@@ -174,8 +174,8 @@ def test_stamped_sites_really_call_the_stamp() -> None:
 
 
 def test_appcompat_stamps_both_sides(monkeypatch: pytest.MonkeyPatch) -> None:
-    from abicheck import appcompat
     from abicheck.model import AbiSnapshot
+    from abicheck.workflows import consumer_scope_standalone as appcompat
 
     stamped: list[tuple[str, list[Path], list[Path]]] = []
 

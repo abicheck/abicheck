@@ -104,7 +104,7 @@ See [Policy Profiles](policies.md) for the full policy model.
 ## Python API
 
 ```python
-from abicheck.appcompat import check_plugin_host_contract
+from abicheck.workflows.consumer_scope_standalone import check_plugin_host_contract
 from abicheck.service import resolve_input
 
 old = resolve_input("plugin.v1.so")

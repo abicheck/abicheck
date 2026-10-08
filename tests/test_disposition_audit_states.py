@@ -392,9 +392,9 @@ def test_the_plugin_host_entry_point_closes_its_own_scope() -> None:
     reproduction of the pair it runs — the defect was a missing call, so a
     test that made the call itself would have passed against it.
     """
-    from abicheck.appcompat import check_plugin_host_contract
     from abicheck.policy.disposition_close import ledger_for
     from abicheck.policy.disposition_ledger import Disposition
+    from abicheck.workflows.consumer_scope_standalone import check_plugin_host_contract
 
     old, new = _snapshots(removed=2, prefix="plug")
     # The host requires only the first of the two removed entrypoints; the
@@ -436,9 +436,9 @@ def test_a_missing_required_entrypoint_reaches_the_ledger() -> None:
     CLI's own bespoke ``missing_entrypoints`` string list, invisible to the
     conserved ledger and unsuppressible by an exact rule.
     """
-    from abicheck.appcompat import check_plugin_host_contract
     from abicheck.policy.disposition_close import ledger_for
     from abicheck.policy.disposition_ledger import Disposition
+    from abicheck.workflows.consumer_scope_standalone import check_plugin_host_contract
 
     old, new = _snapshots(prefix="plug")  # no removed/added functions at all
     required = "dlsym_only_entrypoint"  # never modeled as a Function on either side
@@ -465,9 +465,9 @@ def test_a_missing_required_entrypoint_reaches_the_ledger() -> None:
 def test_a_suppressed_required_entrypoint_stays_conserved() -> None:
     """The overlay above, suppressed by an exact rule -- the finding moves to
     ``suppressed`` (not vanishes), and the raw total is unchanged (D1/D2)."""
-    from abicheck.appcompat import check_plugin_host_contract
     from abicheck.policy.disposition_close import ledger_for
     from abicheck.policy.disposition_ledger import Disposition
+    from abicheck.workflows.consumer_scope_standalone import check_plugin_host_contract
 
     old, new = _snapshots(prefix="plug")
     required = "dlsym_only_entrypoint"
@@ -510,7 +510,7 @@ def test_suppressed_required_entrypoint_does_not_inflate_coverage() -> None:
     short-circuits to 0.0 whenever the export table is empty regardless of
     the missing count, which would mask the bug this test targets).
     """
-    from abicheck.appcompat import check_plugin_host_contract
+    from abicheck.workflows.consumer_scope_standalone import check_plugin_host_contract
 
     old, new = _snapshots(kept=1, prefix="plug")
     required = "dlsym_only_entrypoint"
@@ -541,9 +541,9 @@ def test_required_symbol_overlay_ledger_persists_without_a_pre_attached_one() ->
     over the result's own buckets"), which is what previously made the
     overlay's recorded finding invisible to a second, independent resolve.
     """
-    from abicheck.appcompat import scope_diff_to_required_symbols
     from abicheck.policy.disposition_close import ledger_for
     from abicheck.service import compare_snapshots
+    from abicheck.workflows.consumer_scope import scope_diff_to_required_symbols
 
     old, new = _snapshots(prefix="plug")
     required = "dlsym_only_entrypoint"

@@ -35,7 +35,7 @@
       "disposition": "surfaced",
       "surfaces": [
         "action: used-by",
-        "api: abicheck.appcompat.check_appcompat",
+        "api: abicheck.workflows.consumer_scope_standalone.check_appcompat",
         "cli: compare --required-symbol",
         "cli: compare --used-by",
         "report: compare_report.used_by"
@@ -689,7 +689,7 @@
     "ADR-004 report: compare_report.redundant_count",
     "ADR-004 report: compare_report.root_causes",
     "ADR-005 action: used-by",
-    "ADR-005 api: abicheck.appcompat.check_appcompat",
+    "ADR-005 api: abicheck.workflows.consumer_scope_standalone.check_appcompat",
     "ADR-005 cli: compare --required-symbol",
     "ADR-005 report: compare_report.used_by",
     "ADR-006 action: devel-pkg1",

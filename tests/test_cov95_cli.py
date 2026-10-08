@@ -1281,7 +1281,7 @@ class TestUsedByScoping:
         missing_versions=None,
         breaking_for_app=None,
     ):
-        from abicheck.appcompat import AppCompatResult
+        from abicheck.workflows.consumer_scope import AppCompatResult
 
         return AppCompatResult(
             app_path="/app",
@@ -1545,7 +1545,7 @@ class TestUsedByScoping:
         # this test targets would never engage, since _finding_id is content-
         # based, not id()-based.
         def _scoped_for(diff, *_args, **_kwargs):
-            from abicheck.appcompat import AppCompatResult
+            from abicheck.workflows.consumer_scope import AppCompatResult
 
             real_change = next(
                 c for c in diff.changes if c.kind == ChangeKind.FUNC_REMOVED
@@ -1677,7 +1677,7 @@ class TestUsedByScoping:
         # verdict), not the merely-COMPATIBLE app2 that happens to tie with
         # it on (now-irrelevant) exit code.
         import abicheck.workflows.consumer_scope as appcompat_mod
-        from abicheck.appcompat import AppCompatResult
+        from abicheck.workflows.consumer_scope import AppCompatResult
 
         breaking_res = self._result(
             verdict=Verdict.BREAKING,
@@ -1734,7 +1734,7 @@ class TestUsedByScoping:
         # `scope_diff_to_app` calls return the *same* `shared_change` object,
         # and it must still appear once in `changes`/`summary`, not twice.
         import abicheck.workflows.consumer_scope as appcompat_mod
-        from abicheck.appcompat import AppCompatResult
+        from abicheck.workflows.consumer_scope import AppCompatResult
 
         shared_change = Change(ChangeKind.FUNC_REMOVED, "foo", "removed: foo")
         res1 = AppCompatResult(
@@ -1795,7 +1795,7 @@ class TestUsedByScoping:
         # old id()-keyed dedup in `_apply_used_by_scoping` would count that
         # as two findings instead of one.
         import abicheck.workflows.consumer_scope as appcompat_mod
-        from abicheck.appcompat import AppCompatResult
+        from abicheck.workflows.consumer_scope import AppCompatResult
 
         res1 = AppCompatResult(
             app_path="/app1",
@@ -2125,7 +2125,7 @@ class TestUsedByScoping:
         # discipline as test_sarif_missing_symbol_covered_by_change_not_
         # double_synthesized above.
         def _scoped_for(diff, *_args, **_kwargs):
-            from abicheck.appcompat import AppCompatResult
+            from abicheck.workflows.consumer_scope import AppCompatResult
 
             real_change = next(
                 c for c in diff.changes if c.kind == ChangeKind.FUNC_REMOVED
@@ -2978,7 +2978,7 @@ class TestUsedByScopingWithSnapshotInputs:
         app = tmp_path / "app"
         app.write_bytes(b"\x7fELF" + b"\x00" * 200)
 
-        from abicheck.appcompat import AppCompatResult
+        from abicheck.workflows.consumer_scope import AppCompatResult
 
         self._patch_scope(
             monkeypatch,

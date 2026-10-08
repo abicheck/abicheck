@@ -9,7 +9,7 @@ depends_on:
   - abicheck/checker.py
   - abicheck/cli_options.py
   - abicheck/cli_compare_helpers.py
-  - abicheck/appcompat.py
+  - abicheck/workflows/consumer_scope.py
 lifecycle: active
 generated: false
 ---

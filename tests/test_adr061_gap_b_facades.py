@@ -189,9 +189,6 @@ def test_public_root_surfaces_matches_the_reviewed_exception_set() -> None:
     repo_root = Path(__file__).resolve().parents[1]
     modules_yaml = json.loads((repo_root / "architecture" / "modules.yaml").read_text())
     assert set(modules_yaml["public_root_surfaces"]) == {
-        # Lane C appcompat.py split: documented in docs/use/python-api.md as
-        # the consumer-scoping entry point; delegation-only facade.
-        "abicheck.appcompat",
         "abicheck.checker_policy",
         "abicheck.contract_evidence",
         "abicheck.header_only_dump",

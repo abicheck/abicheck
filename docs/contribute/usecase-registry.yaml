@@ -126,7 +126,7 @@ use_cases:
       host/plugin binary demo in examples/ remains optional (needs the
       integration toolchain) and is not required for the capability.
     evidence:
-      modules: [abicheck/appcompat.py, abicheck/cli_compare_helpers.py]
+      modules: [abicheck/workflows/consumer_scope.py, abicheck/cli_compare_helpers.py]
       tests: [tests/test_workflow_scenarios.py, tests/test_appcompat.py]
       docs: [docs/use/plugin-systems.md]
 
@@ -374,7 +374,7 @@ use_cases:
     user_task: [release, audit]
     adrs: [ADR-005, ADR-052, ADR-057]
     evidence:
-      modules: [abicheck/appcompat.py]
+      modules: [abicheck/workflows/consumer_scope.py]
       tests: [tests/test_appcompat.py, tests/test_workflow_scenarios.py]
 
   - id: UC-WF-baseline

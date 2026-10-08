@@ -6,7 +6,7 @@ level: intermediate
 canonical_for:
   - consumer-models
 depends_on:
-  - abicheck/appcompat.py
+  - abicheck/workflows/consumer_scope.py
   - abicheck/cli_compare_helpers.py
 lifecycle: active
 generated: false

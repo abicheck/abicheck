@@ -27,11 +27,11 @@ See docs/contribute/usecase-coverage-evaluation.md (gap G3 / G5).
 
 from __future__ import annotations
 
-from abicheck.appcompat import check_plugin_host_contract
 from abicheck.checker import compare
 from abicheck.checker_policy import ChangeKind, Verdict
 from abicheck.model import AbiSnapshot, EnumMember, EnumType, Function, Visibility
 from abicheck.semver import SemverBump, SonameAction, recommend_release
+from abicheck.workflows.consumer_scope_standalone import check_plugin_host_contract
 
 
 def _fn(name: str) -> Function:

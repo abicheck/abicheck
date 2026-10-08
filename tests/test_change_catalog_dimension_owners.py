@@ -72,7 +72,7 @@ class TestASymbolTableFactIsNotClaimedAsAFunction:
         is where that should be noticed."""
         from dataclasses import fields
 
-        from abicheck.appcompat import AppRequirements
+        from abicheck.model.consumer_requirements import AppRequirements
 
         undefined = {f.name: f for f in fields(AppRequirements)}["undefined_symbols"]
         assert "set[str]" in str(undefined.type).replace(" ", "")

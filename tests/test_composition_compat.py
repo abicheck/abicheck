@@ -30,13 +30,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from abicheck.appcompat import AppRequirements
 from abicheck.binder import BindingStatus, SymbolBinding
 from abicheck.checker import Change, ChangeKind, DiffResult, Verdict, compare
 from abicheck.dwarf_advanced import AdvancedDwarfMetadata, ToolchainInfo
 from abicheck.elf_metadata import ElfMetadata
 from abicheck.model import AbiSnapshot
 from abicheck.model.consumer_requirements import (
+    AppRequirements,
     ConsumerImportFacts,
     LibraryExportFacts,
 )

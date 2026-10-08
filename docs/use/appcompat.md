@@ -119,9 +119,9 @@ that didn't fit the unified `compare` surface:
 - **Weak mode** (`appcompat APP --check-against LIB`, checking symbol
   availability with no old library at all — no diff, no change detection) —
   no CLI replacement. The underlying logic still exists as
-  `abicheck.appcompat.check_against()` for Python API use.
+  `abicheck.workflows.consumer_scope.check_against()` for Python API use.
 - **`--list-required-symbols`** (dump the app's imported symbols/versions and
-  exit) — no CLI replacement. Use `abicheck.appcompat.parse_app_requirements()`
+  exit) — no CLI replacement. Use `abicheck.workflows.consumer_scope.parse_app_requirements()`
   from the Python API to get the same `AppRequirements` data (imported
   symbols, needed libraries, required ELF symbol versions) programmatically.
 
@@ -397,7 +397,8 @@ Check if your application works with a library update in CI:
 
 ```python
 from pathlib import Path
-from abicheck.appcompat import check_appcompat, check_against, parse_app_requirements
+from abicheck.workflows.consumer_scope import check_against, parse_app_requirements
+from abicheck.workflows.consumer_scope_standalone import check_appcompat
 
 # Full mode (old + new library) — app_path, old_lib_path, new_lib_path
 result = check_appcompat(
