@@ -1,6 +1,6 @@
 """Coverage tests for dumper.py — target 80%+ coverage.
 
-Covers _castxml_dump internal branches (gcc_prefix, gcc_path, sysroot,
+Covers castxml_dump (extract/headers/castxml/backend.py) internal branches (gcc_prefix, gcc_path, sysroot,
 nostdinc, gcc_options, lang, MSVC detection, castxml failure),
 dump() elf_meta symbol filtering and lang parameter,
 _CastxmlParser edge cases (builtin elements, anonymous fields,
@@ -16,38 +16,41 @@ from xml.etree.ElementTree import Element, SubElement
 
 import pytest
 
-from abicheck import deadline
 from abicheck.dumper import (
     _cache_key,
-    _castxml_dump,
     _CastxmlParser,
     _resolve_force_cpp,
     dump,
 )
 from abicheck.elf_metadata import ElfMetadata
+from abicheck.extract.headers.castxml import backend as castxml_backend
+from abicheck.extract.headers.castxml.backend import castxml_dump as _castxml_dump
 from abicheck.extract.headers.castxml.type_resolution import pointer_depth
 
-# ── _castxml_dump internal branches ────────────────────────────────────
+# ── castxml_dump internal branches ────────────────────────────────────
 
 
 class TestCastxmlDumpBranches:
     def _setup(self, monkeypatch, tmp_path):
         """Common setup: castxml available, cache miss."""
         monkeypatch.setattr(
-            "abicheck.dumper._resolve_selected_tool", lambda _: "/mock/castxml"
+            castxml_backend, "_resolve_selected_tool", lambda _: "/mock/castxml"
         )
-        monkeypatch.setattr("abicheck.dumper._cache_key", lambda *a, **kw: "test_key")
+        monkeypatch.setattr(castxml_backend, "_cache_key", lambda *a, **kw: "test_key")
 
         # Cache path that doesn't exist yet
         cache_file = tmp_path / "cache.xml"
-        monkeypatch.setattr("abicheck.dumper._cache_path", lambda k: cache_file)
+        monkeypatch.setattr(castxml_backend, "_cache_path", lambda k: cache_file)
 
         header = tmp_path / "test.h"
         header.write_text("int foo();", encoding="utf-8")
         return header
 
     def _make_spy(self, monkeypatch):
-        """Create a subprocess.run spy that writes valid XML and captures cmd."""
+        """Create an injected castxml runner that writes valid XML and captures cmd.
+
+        ``self._run`` is the runner; tests pass it as ``castxml_dump(run=...)``.
+        """
         captured_cmd = []
 
         def fake_run(cmd, **kwargs):
@@ -63,64 +66,72 @@ class TestCastxmlDumpBranches:
                     break
             return SimpleNamespace(returncode=0, stdout="", stderr="")
 
-        monkeypatch.setattr(deadline, "run_bounded", fake_run)
+        self._run = fake_run
         return captured_cmd
 
     def test_gcc_path_used(self, tmp_path, monkeypatch):
         header = self._setup(monkeypatch, tmp_path)
         captured = self._make_spy(monkeypatch)
-        result = _castxml_dump([header], [], gcc_path="/opt/cross/bin/g++")
+        result = _castxml_dump(
+            [header], [], gcc_path="/opt/cross/bin/g++", run=self._run
+        )
         assert result.tag == "GCC_XML"
         assert "/opt/cross/bin/g++" in captured
 
     def test_gcc_prefix_cpp(self, tmp_path, monkeypatch):
         header = self._setup(monkeypatch, tmp_path)
         captured = self._make_spy(monkeypatch)
-        _castxml_dump([header], [], compiler="c++", gcc_prefix="aarch64-linux-gnu-")
+        _castxml_dump(
+            [header], [], compiler="c++", gcc_prefix="aarch64-linux-gnu-", run=self._run
+        )
         assert "aarch64-linux-gnu-g++" in captured
 
     def test_gcc_prefix_c(self, tmp_path, monkeypatch):
         header = self._setup(monkeypatch, tmp_path)
         captured = self._make_spy(monkeypatch)
-        _castxml_dump([header], [], compiler="cc", gcc_prefix="arm-none-eabi-")
+        _castxml_dump(
+            [header], [], compiler="cc", gcc_prefix="arm-none-eabi-", run=self._run
+        )
         assert "arm-none-eabi-gcc" in captured
 
     def test_msvc_detection(self, tmp_path, monkeypatch):
         header = self._setup(monkeypatch, tmp_path)
         captured = self._make_spy(monkeypatch)
-        _castxml_dump([header], [], gcc_path="cl.exe")
+        _castxml_dump([header], [], gcc_path="cl.exe", run=self._run)
         assert "--castxml-cc-msvc" in captured
 
     @pytest.mark.parametrize("name", ["CL.EXE", "Cl.exe", "CL"])
     def test_msvc_detection_case_insensitive(self, tmp_path, monkeypatch, name):
         header = self._setup(monkeypatch, tmp_path)
         captured = self._make_spy(monkeypatch)
-        _castxml_dump([header], [], gcc_path=name)
+        _castxml_dump([header], [], gcc_path=name, run=self._run)
         assert "--castxml-cc-msvc" in captured
 
     def test_sysroot_flag(self, tmp_path, monkeypatch):
         header = self._setup(monkeypatch, tmp_path)
         captured = self._make_spy(monkeypatch)
-        _castxml_dump([header], [], sysroot=Path("/opt/sysroot"))
+        _castxml_dump([header], [], sysroot=Path("/opt/sysroot"), run=self._run)
         assert "--sysroot=/opt/sysroot" in captured
 
     def test_nostdinc_flag(self, tmp_path, monkeypatch):
         header = self._setup(monkeypatch, tmp_path)
         captured = self._make_spy(monkeypatch)
-        _castxml_dump([header], [], nostdinc=True)
+        _castxml_dump([header], [], nostdinc=True, run=self._run)
         assert "-nostdinc" in captured
 
     def test_gcc_options_split(self, tmp_path, monkeypatch):
         header = self._setup(monkeypatch, tmp_path)
         captured = self._make_spy(monkeypatch)
-        _castxml_dump([header], [], gcc_options="-march=armv8-a -mfloat-abi=hard")
+        _castxml_dump(
+            [header], [], gcc_options="-march=armv8-a -mfloat-abi=hard", run=self._run
+        )
         assert "-march=armv8-a" in captured
         assert "-mfloat-abi=hard" in captured
 
     def test_lang_c_forces_c_mode(self, tmp_path, monkeypatch):
         header = self._setup(monkeypatch, tmp_path)
         captured = self._make_spy(monkeypatch)
-        _castxml_dump([header], [], lang="C")
+        _castxml_dump([header], [], lang="C", run=self._run)
         assert "-x" in captured
         assert "c" in captured
         assert "-std=gnu11" in captured
@@ -135,17 +146,15 @@ class TestCastxmlDumpBranches:
                     break
             return SimpleNamespace(returncode=1, stdout="", stderr="compilation error")
 
-        monkeypatch.setattr(deadline, "run_bounded", fake_run)
-
         with pytest.raises(RuntimeError, match="castxml failed"):
-            _castxml_dump([header], [])
+            _castxml_dump([header], [], run=fake_run)
 
     def test_extra_includes_passed(self, tmp_path, monkeypatch):
         header = self._setup(monkeypatch, tmp_path)
         inc = tmp_path / "inc"
         inc.mkdir()
         captured = self._make_spy(monkeypatch)
-        _castxml_dump([header], [inc])
+        _castxml_dump([header], [inc], run=self._run)
         assert "-I" in captured
         assert str(inc) in captured
 
@@ -778,7 +787,9 @@ class TestDumpRoutingMachoPe:
         with (
             patch.object(dumper, "_detect_format", return_value="macho"),
             patch.object(_macho_mod, "parse_macho_metadata", return_value=mock_meta),
-            patch.object(dumper, "_castxml_dump", return_value=([], [], None, [])),
+            patch.object(
+                castxml_backend, "castxml_dump", return_value=([], [], None, [])
+            ),
         ):
             snap = dump(dylib, headers=[], version="1.0")
 
@@ -807,7 +818,9 @@ class TestDumpRoutingMachoPe:
         with (
             patch.object(dumper, "_detect_format", return_value="pe"),
             patch.object(_pe_mod, "parse_pe_metadata", return_value=mock_meta),
-            patch.object(dumper, "_castxml_dump", return_value=([], [], None, [])),
+            patch.object(
+                castxml_backend, "castxml_dump", return_value=([], [], None, [])
+            ),
         ):
             snap = dump(dll, headers=[], version="1.0")
 
@@ -863,8 +876,10 @@ class TestFromHeadersProvenance:
         meta = MagicMock(exports=[MagicMock(name="Foo", ordinal=1)])
         with (
             patch.object(_pe, "parse_pe_metadata", return_value=meta),
-            patch.object(dumper, "_castxml_dump", return_value=object()),
-            patch.object(dumper, "_CastxmlParser", return_value=self._mock_parser()),
+            patch.object(castxml_backend, "castxml_dump", return_value=object()),
+            patch.object(
+                castxml_backend, "_CastxmlParser", return_value=self._mock_parser()
+            ),
         ):
             snap = dumper._dump_pe(
                 dll, [tmp_path / "h.h"], [], "1.0", "c++", header_backend="castxml"
@@ -895,8 +910,10 @@ class TestFromHeadersProvenance:
         meta = MagicMock(exports=[])
         with (
             patch.object(_macho, "parse_macho_metadata", return_value=meta),
-            patch.object(dumper, "_castxml_dump", return_value=object()),
-            patch.object(dumper, "_CastxmlParser", return_value=self._mock_parser()),
+            patch.object(castxml_backend, "castxml_dump", return_value=object()),
+            patch.object(
+                castxml_backend, "_CastxmlParser", return_value=self._mock_parser()
+            ),
         ):
             snap = dumper._dump_macho(
                 dylib, [tmp_path / "h.h"], [], "1.0", "c++", header_backend="castxml"
@@ -1030,8 +1047,10 @@ class TestFromHeadersProvenance:
                 "_resolve_debug_metadata",
                 return_value=(DwarfMetadata(), AdvancedDwarfMetadata()),
             ),
-            patch.object(dumper, "_castxml_dump", return_value=object()),
-            patch.object(dumper, "_CastxmlParser", return_value=self._mock_parser()),
+            patch.object(castxml_backend, "castxml_dump", return_value=object()),
+            patch.object(
+                castxml_backend, "_CastxmlParser", return_value=self._mock_parser()
+            ),
             patch.object(dumper, "_populate_elf_visibility", lambda snap: None),
         ):
             snap = dumper._dump_elf(

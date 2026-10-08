@@ -30,6 +30,7 @@ import shutil
 import sys
 import threading
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -241,18 +242,18 @@ def _isolated_cache(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "xdg"))
 
 
-def _count_frontend_runs(monkeypatch) -> list[list[str]]:
-    import abicheck.deadline as deadline
+def _recording_castxml_runner() -> tuple[list[list[str]], Any]:
+    """The default castxml runner, recording every command it runs; injected
+    with ``castxml_dump(..., run=...)`` rather than patched in."""
+    from abicheck.dumper_castxml_probe import run_castxml
 
     runs: list[list[str]] = []
-    real = deadline.run_bounded
 
-    def spy(cmd, *a, **k):
+    def run(cmd: list[str], **kwargs: Any) -> Any:
         runs.append(list(cmd))
-        return real(cmd, *a, **k)
+        return run_castxml(cmd, **kwargs)
 
-    monkeypatch.setattr(deadline, "run_bounded", spy)
-    return runs
+    return runs, run
 
 
 _PLAIN = {"api.hpp": "struct S { int a; virtual ~S(); };\nnamespace n { int f(S*); }\n"}
@@ -341,19 +342,19 @@ class TestRealDumpsMissOnGeneratedInputChange:
 
     def test_castxml(self, tmp_path, monkeypatch) -> None:
         self._castxml_or_skip()
-        import abicheck.dumper as dumper
+        from abicheck.extract.headers.castxml.backend import castxml_dump
 
         _isolated_cache(monkeypatch, tmp_path)
-        runs = _count_frontend_runs(monkeypatch)
+        runs, run = _recording_castxml_runner()
         header = tmp_path / "api.h"
         header.write_text("struct S { int a; };\nint f(struct S*);\n")
 
         def castxml_runs() -> int:
             return sum(1 for c in runs if "castxml" in Path(c[0]).name)
 
-        dumper._castxml_dump([header], [], "cc", lang="c")
+        castxml_dump([header], [], "cc", lang="c", run=run)
         assert castxml_runs() == 1
-        dumper._castxml_dump([header], [], "cc", lang="c")
+        castxml_dump([header], [], "cc", lang="c", run=run)
         assert castxml_runs() == 1, (
             "an unchanged second dump must be served from the cache"
         )
@@ -362,7 +363,7 @@ class TestRealDumpsMissOnGeneratedInputChange:
             "CASTXML_HEADER_PREAMBLE",
             cfg.CASTXML_HEADER_PREAMBLE + "/* changed */\n",
         )
-        dumper._castxml_dump([header], [], "cc", lang="c")
+        castxml_dump([header], [], "cc", lang="c", run=run)
         assert castxml_runs() == 2, "a changed generated input must re-run castxml"
 
     def test_clang(self, tmp_path, monkeypatch) -> None:

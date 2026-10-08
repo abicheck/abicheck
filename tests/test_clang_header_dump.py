@@ -32,7 +32,7 @@ from typing import Any
 
 import pytest
 
-from abicheck import dumper, dumper_ast_config, dumper_cache, dumper_clang
+from abicheck import deadline, dumper, dumper_ast_config, dumper_cache, dumper_clang
 from abicheck.dumper_clang import _ClangAstParser
 from abicheck.errors import SnapshotError
 from abicheck.extract.headers.clang import backend as clang_backend
@@ -365,8 +365,8 @@ def test_clang_header_dump_rechecks_deadline_on_cache_hit(
     clang_header_dump([header], [], run_ast=runner)  # warms the cache
     assert cache.exists() and calls["n"] == 1
 
-    with dumper.deadline.deadline_scope(-1):  # already expired
-        with pytest.raises(dumper.deadline.DeadlineExceeded):
+    with deadline.deadline_scope(-1):  # already expired
+        with pytest.raises(deadline.DeadlineExceeded):
             clang_header_dump([header], [], run_ast=runner)
     assert calls["n"] == 1  # never reached the subprocess path — cache hit
 
@@ -408,8 +408,8 @@ def test_clang_header_dump_rechecks_deadline_after_cache_load(
         return real_json_loads(text)
 
     monkeypatch.setattr(dumper_cache.json, "loads", _slow_loads)
-    with dumper.deadline.deadline_scope(0.03):
-        with pytest.raises(dumper.deadline.DeadlineExceeded):
+    with deadline.deadline_scope(0.03):
+        with pytest.raises(deadline.DeadlineExceeded):
             clang_header_dump([header], [], run_ast=runner)
 
 
@@ -460,8 +460,8 @@ def test_clang_header_dump_rechecks_deadline_before_loading_ast(
         return _fake_proc()
 
     runner = _as_runner(_run)
-    with dumper.deadline.deadline_scope(0.03):
-        with pytest.raises(dumper.deadline.DeadlineExceeded):
+    with deadline.deadline_scope(0.03):
+        with pytest.raises(deadline.DeadlineExceeded):
             clang_header_dump([header], [], run_ast=runner)
 
 

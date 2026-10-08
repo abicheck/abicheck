@@ -43,13 +43,13 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from abicheck.dumper import (
-    _castxml_dump,
     _castxml_failure_hint,
     _castxml_version_note,
     _is_toolchain_version_failure,
     _parse_castxml_version,
 )
 from abicheck.errors import HeaderToolchainError, SnapshotError
+from abicheck.extract.headers.castxml.backend import castxml_dump as _castxml_dump
 
 _FLOATN_STDERR = (
     "/usr/include/bits/floatn-common.h:214:14: error: unknown type name '_Float32'"
@@ -97,7 +97,7 @@ class TestParseCastxmlVersion:
 class TestVersionNote:
     def test_probes_the_selected_castxml_path(self) -> None:
         with patch(
-            "abicheck.dumper.deadline.run_bounded",
+            "abicheck.dumper_castxml_probe.deadline.run_bounded",
             return_value=_completed(stdout="castxml version 0.6.8\n"),
         ) as run:
             _castxml_version_note("/selected/wrapper/castxml")
@@ -105,7 +105,7 @@ class TestVersionNote:
 
     def test_old_clang_recommends_upgrade(self) -> None:
         with patch(
-            "abicheck.dumper.deadline.run_bounded",
+            "abicheck.dumper_castxml_probe.deadline.run_bounded",
             return_value=_completed(
                 stdout="castxml version 0.5.1\nclang version 14.0.0\n"
             ),
@@ -117,7 +117,7 @@ class TestVersionNote:
 
     def test_new_clang_gives_no_note(self) -> None:
         with patch(
-            "abicheck.dumper.deadline.run_bounded",
+            "abicheck.dumper_castxml_probe.deadline.run_bounded",
             return_value=_completed(
                 stdout="castxml version 0.6.8\nclang version 18.1.8\n"
             ),
@@ -127,7 +127,7 @@ class TestVersionNote:
     def test_castxml_version_without_clang_line(self) -> None:
         # castxml version is reported but no parseable clang line — still nudge.
         with patch(
-            "abicheck.dumper.deadline.run_bounded",
+            "abicheck.dumper_castxml_probe.deadline.run_bounded",
             return_value=_completed(stdout="castxml version 0.4.5\n"),
         ):
             note = _castxml_version_note()
@@ -136,14 +136,15 @@ class TestVersionNote:
 
     def test_no_version_info_is_silent(self) -> None:
         with patch(
-            "abicheck.dumper.deadline.run_bounded",
+            "abicheck.dumper_castxml_probe.deadline.run_bounded",
             return_value=_completed(stdout="unrelated output\n"),
         ):
             assert _castxml_version_note() == ""
 
     def test_probe_failure_is_silent(self) -> None:
         with patch(
-            "abicheck.dumper.deadline.run_bounded", side_effect=OSError("not found")
+            "abicheck.dumper_castxml_probe.deadline.run_bounded",
+            side_effect=OSError("not found"),
         ):
             assert _castxml_version_note() == ""
 
@@ -164,7 +165,7 @@ class TestVersionNote:
 
         with (
             patch(
-                "abicheck.dumper.deadline.run_bounded",
+                "abicheck.dumper_castxml_probe.deadline.run_bounded",
                 side_effect=deadline.DeadlineExceeded(-1.0),
             ),
             deadline.deadline_scope(5.0),
@@ -182,7 +183,7 @@ class TestVersionNote:
 
         with (
             patch(
-                "abicheck.dumper.deadline.run_bounded",
+                "abicheck.dumper_castxml_probe.deadline.run_bounded",
                 side_effect=deadline.DeadlineExceeded(-1.0),
             ),
             deadline.deadline_scope(1800.0),  # generous 30-minute --budget
@@ -204,7 +205,10 @@ class TestVersionNote:
             return _completed(stdout="unrelated output\n")
 
         with (
-            patch("abicheck.dumper.deadline.run_bounded", side_effect=fake_run),
+            patch(
+                "abicheck.dumper_castxml_probe.deadline.run_bounded",
+                side_effect=fake_run,
+            ),
             deadline.deadline_scope(1800.0),  # generous 30-minute --budget
         ):
             _castxml_version_note()
@@ -234,7 +238,10 @@ class TestVersionNote:
             raise deadline.DeadlineExceeded(-1.0)
 
         with (
-            patch("abicheck.dumper.deadline.run_bounded", side_effect=fake_run),
+            patch(
+                "abicheck.dumper_castxml_probe.deadline.run_bounded",
+                side_effect=fake_run,
+            ),
             deadline.deadline_scope(15.5),  # just over the 15s local cap
             pytest.raises(deadline.DeadlineExceeded),
         ):
@@ -302,18 +309,27 @@ class TestProbeGating:
             return _completed(returncode=1, stderr=_FLOATN_STDERR)
 
         with (
-            patch("abicheck.dumper._resolve_selected_tool", return_value="castxml"),
-            # Both the main castxml dump and the `castxml --version` probe
-            # (_castxml_version_note) now go through deadline.run_bounded
-            # (Codex review, PR #591) — patched to the same fake so either
-            # call routes here.
-            patch("abicheck.dumper.deadline.run_bounded", side_effect=fake_run),
-            patch("abicheck.dumper._cache_path", return_value=tmp_path / "cache.xml"),
+            patch(
+                "abicheck.extract.headers.castxml.backend._resolve_selected_tool",
+                return_value="castxml",
+            ),
+            # The main castxml dump takes the injected runner; the
+            # `castxml --version` probe (_castxml_version_note) goes through
+            # deadline.run_bounded (Codex review, PR #591) — patched to the
+            # same fake so either call routes here.
+            patch(
+                "abicheck.dumper_castxml_probe.deadline.run_bounded",
+                side_effect=fake_run,
+            ),
+            patch(
+                "abicheck.extract.headers.castxml.backend._cache_path",
+                return_value=tmp_path / "cache.xml",
+            ),
         ):
             header = tmp_path / "api.hpp"
             header.write_text("int f();\n", encoding="utf-8")
             with pytest.raises(RuntimeError) as exc:
-                _castxml_dump([header], [])
+                _castxml_dump([header], [], run=fake_run)
 
         msg = str(exc.value)
         assert "newer castxml" in msg  # base sized-float hint
@@ -325,7 +341,7 @@ class TestProbeGating:
     ) -> None:
         # Second-round Codex review (PR #591): when the scan budget expires
         # during the `--version` probe (triggered by a frontend-too-old
-        # castxml failure), the DeadlineExceeded must escape _castxml_dump
+        # castxml failure), the DeadlineExceeded must escape castxml_dump
         # uncaught -- not get folded into a HeaderToolchainError/SnapshotError
         # (CLI exit 1) the way an earlier fix incorrectly did.
         from abicheck import deadline
@@ -336,9 +352,18 @@ class TestProbeGating:
             return _completed(returncode=1, stderr=_FLOATN_STDERR)
 
         with (
-            patch("abicheck.dumper._resolve_selected_tool", return_value="castxml"),
-            patch("abicheck.dumper.deadline.run_bounded", side_effect=fake_run),
-            patch("abicheck.dumper._cache_path", return_value=tmp_path / "cache.xml"),
+            patch(
+                "abicheck.extract.headers.castxml.backend._resolve_selected_tool",
+                return_value="castxml",
+            ),
+            patch(
+                "abicheck.dumper_castxml_probe.deadline.run_bounded",
+                side_effect=fake_run,
+            ),
+            patch(
+                "abicheck.extract.headers.castxml.backend._cache_path",
+                return_value=tmp_path / "cache.xml",
+            ),
             # Round-3 note: propagation requires the *outer scan* deadline to
             # be the binding constraint, not just this probe's own 15s local
             # cap (Codex review, PR #591, round 3).
@@ -347,7 +372,7 @@ class TestProbeGating:
         ):
             header = tmp_path / "api.hpp"
             header.write_text("int f();\n", encoding="utf-8")
-            _castxml_dump([header], [])
+            _castxml_dump([header], [], run=fake_run)
 
     def test_unrelated_failure_skips_version_probe(self, tmp_path: Path) -> None:
         calls: list[list[str]] = []
@@ -359,14 +384,19 @@ class TestProbeGating:
             )
 
         with (
-            patch("abicheck.dumper._resolve_selected_tool", return_value="castxml"),
-            patch("abicheck.dumper.deadline.run_bounded", side_effect=fake_run),
-            patch("abicheck.dumper._cache_path", return_value=tmp_path / "cache.xml"),
+            patch(
+                "abicheck.extract.headers.castxml.backend._resolve_selected_tool",
+                return_value="castxml",
+            ),
+            patch(
+                "abicheck.extract.headers.castxml.backend._cache_path",
+                return_value=tmp_path / "cache.xml",
+            ),
         ):
             header = tmp_path / "api.hpp"
             header.write_text("int f();\n", encoding="utf-8")
             with pytest.raises(RuntimeError):
-                _castxml_dump([header], [])
+                _castxml_dump([header], [], run=fake_run)
 
         assert not any("--version" in c for c in calls)  # no needless probe
 
@@ -406,12 +436,17 @@ class TestLangCFallsBackToCpp:
         header = tmp_path / "api.h"
         header.write_text("namespace ns { int f(int); }\n", encoding="utf-8")
         with (
-            patch("abicheck.dumper._resolve_selected_tool", return_value="castxml"),
-            patch("abicheck.dumper.deadline.run_bounded", side_effect=fake_run),
-            patch("abicheck.dumper._cache_path", return_value=tmp_path / "cache.xml"),
+            patch(
+                "abicheck.extract.headers.castxml.backend._resolve_selected_tool",
+                return_value="castxml",
+            ),
+            patch(
+                "abicheck.extract.headers.castxml.backend._cache_path",
+                return_value=tmp_path / "cache.xml",
+            ),
             caplog.at_level("WARNING"),
         ):
-            root = _castxml_dump([header], [], compiler="cc", lang="c")
+            root = _castxml_dump([header], [], run=fake_run, compiler="cc", lang="c")
 
         assert root.tag == "GCC_XML"
         # First attempt was C mode (failed), second was C++ mode (succeeded).
@@ -439,12 +474,17 @@ class TestLangCFallsBackToCpp:
             encoding="utf-8",
         )
         with (
-            patch("abicheck.dumper._resolve_selected_tool", return_value="castxml"),
-            patch("abicheck.dumper.deadline.run_bounded", side_effect=fake_run),
-            patch("abicheck.dumper._cache_path", return_value=tmp_path / "cache.xml"),
+            patch(
+                "abicheck.extract.headers.castxml.backend._resolve_selected_tool",
+                return_value="castxml",
+            ),
+            patch(
+                "abicheck.extract.headers.castxml.backend._cache_path",
+                return_value=tmp_path / "cache.xml",
+            ),
             pytest.raises(SnapshotError) as exc,
         ):
-            _castxml_dump([header], [], compiler="cc", lang="c")
+            _castxml_dump([header], [], run=fake_run, compiler="cc", lang="c")
 
         assert modes == [True]  # only C mode ran; no C++ retry
         # The real failure (a missing C-only include) is an ordinary header/
@@ -469,12 +509,21 @@ class TestLangCFallsBackToCpp:
         header = tmp_path / "api.h"
         header.write_text("class Widget { int x; };\n", encoding="utf-8")
         with (
-            patch("abicheck.dumper._resolve_selected_tool", return_value="castxml"),
-            patch("abicheck.dumper.deadline.run_bounded", side_effect=fake_run),
-            patch("abicheck.dumper._cache_path", return_value=tmp_path / "cache.xml"),
+            patch(
+                "abicheck.extract.headers.castxml.backend._resolve_selected_tool",
+                return_value="castxml",
+            ),
+            patch(
+                "abicheck.dumper_castxml_probe.deadline.run_bounded",
+                side_effect=fake_run,
+            ),
+            patch(
+                "abicheck.extract.headers.castxml.backend._cache_path",
+                return_value=tmp_path / "cache.xml",
+            ),
             pytest.raises(SnapshotError) as exc,
         ):
-            _castxml_dump([header], [], compiler="cc", lang="c")
+            _castxml_dump([header], [], run=fake_run, compiler="cc", lang="c")
 
         # The C-mode hint (suggesting --lang c++) is what the user sees, since
         # that matches the mode they explicitly requested.
@@ -498,12 +547,17 @@ class TestLangCFallsBackToCpp:
         header = tmp_path / "api.h"
         header.write_text("int plain_c(void);\n", encoding="utf-8")
         with (
-            patch("abicheck.dumper._resolve_selected_tool", return_value="castxml"),
-            patch("abicheck.dumper.deadline.run_bounded", side_effect=fake_run),
-            patch("abicheck.dumper._cache_path", return_value=tmp_path / "cache.xml"),
+            patch(
+                "abicheck.extract.headers.castxml.backend._resolve_selected_tool",
+                return_value="castxml",
+            ),
+            patch(
+                "abicheck.extract.headers.castxml.backend._cache_path",
+                return_value=tmp_path / "cache.xml",
+            ),
             pytest.raises(SnapshotError),
         ):
-            _castxml_dump([header], [], compiler="cc", lang="c")
+            _castxml_dump([header], [], run=fake_run, compiler="cc", lang="c")
 
         # No C++ retry: a header with no C++ constructs failing in C mode is a
         # real error, not a language-mode mismatch.
@@ -526,12 +580,17 @@ class TestHeaderToolchainErrorClass:
         header = tmp_path / "api.h"
         header.write_text("int f(void);\n", encoding="utf-8")
         with (
-            patch("abicheck.dumper._resolve_selected_tool", return_value="castxml"),
-            patch("abicheck.dumper.deadline.run_bounded", side_effect=fake_run),
-            patch("abicheck.dumper._cache_path", return_value=tmp_path / "cache.xml"),
+            patch(
+                "abicheck.extract.headers.castxml.backend._resolve_selected_tool",
+                return_value="castxml",
+            ),
+            patch(
+                "abicheck.extract.headers.castxml.backend._cache_path",
+                return_value=tmp_path / "cache.xml",
+            ),
             pytest.raises(HeaderToolchainError) as exc,
         ):
-            _castxml_dump([header], [], compiler="cc")
+            _castxml_dump([header], [], run=fake_run, compiler="cc")
         # It is still catchable as the base SnapshotError (back-compat).
         assert isinstance(exc.value, SnapshotError)
         assert "_Float32" in str(exc.value) or "sized-float" in str(exc.value)
@@ -545,12 +604,17 @@ class TestHeaderToolchainErrorClass:
         header = tmp_path / "api.h"
         header.write_text("int f(void);\n", encoding="utf-8")
         with (
-            patch("abicheck.dumper._resolve_selected_tool", return_value="castxml"),
-            patch("abicheck.dumper.deadline.run_bounded", side_effect=fake_run),
-            patch("abicheck.dumper._cache_path", return_value=tmp_path / "cache.xml"),
+            patch(
+                "abicheck.extract.headers.castxml.backend._resolve_selected_tool",
+                return_value="castxml",
+            ),
+            patch(
+                "abicheck.extract.headers.castxml.backend._cache_path",
+                return_value=tmp_path / "cache.xml",
+            ),
             pytest.raises(SnapshotError) as exc,
         ):
-            _castxml_dump([header], [], compiler="cc")
+            _castxml_dump([header], [], run=fake_run, compiler="cc")
         assert not isinstance(exc.value, HeaderToolchainError)
 
     def test_generic_header_hint_stays_plain_snapshot_error(
@@ -572,12 +636,17 @@ class TestHeaderToolchainErrorClass:
         header = tmp_path / "api.h"
         header.write_text("int f(void);\n", encoding="utf-8")
         with (
-            patch("abicheck.dumper._resolve_selected_tool", return_value="castxml"),
-            patch("abicheck.dumper.deadline.run_bounded", side_effect=fake_run),
-            patch("abicheck.dumper._cache_path", return_value=tmp_path / "cache.xml"),
+            patch(
+                "abicheck.extract.headers.castxml.backend._resolve_selected_tool",
+                return_value="castxml",
+            ),
+            patch(
+                "abicheck.extract.headers.castxml.backend._cache_path",
+                return_value=tmp_path / "cache.xml",
+            ),
             pytest.raises(SnapshotError) as exc,
         ):
-            _castxml_dump([header], [], compiler="cc")
+            _castxml_dump([header], [], run=fake_run, compiler="cc")
         assert not isinstance(exc.value, HeaderToolchainError)
         # The generic hint text is still present in the message — only the
         # exception *class* changes, not the diagnostic content.
@@ -620,7 +689,7 @@ class TestG16ClangFallbackRespectsConfiguredDriver:
         with (
             patch.dict(os.environ, {"ABICHECK_ALLOW_AST_FALLBACK": "1"}),
             patch(
-                "abicheck.dumper._castxml_dump",
+                "abicheck.extract.headers.castxml.backend.castxml_dump",
                 side_effect=SnapshotError(_ASSUME_STDERR),
             ),
             patch("abicheck.dumper.shutil.which", side_effect=fake_which),
@@ -665,7 +734,7 @@ class TestG16ClangFallbackRespectsConfiguredDriver:
         with (
             patch.dict(os.environ, {"ABICHECK_ALLOW_AST_FALLBACK": "1"}),
             patch(
-                "abicheck.dumper._castxml_dump",
+                "abicheck.extract.headers.castxml.backend.castxml_dump",
                 side_effect=UnsupportedCastxmlVersionError(
                     "CastXML 0.6.20260105 is not supported."
                 ),
@@ -699,7 +768,7 @@ class TestG16ClangFallbackRespectsConfiguredDriver:
         with (
             patch.dict(os.environ, {}, clear=False),
             patch(
-                "abicheck.dumper._castxml_dump",
+                "abicheck.extract.headers.castxml.backend.castxml_dump",
                 side_effect=SnapshotError(_ASSUME_STDERR),
             ),
             patch("abicheck.dumper.shutil.which", return_value="/usr/bin/clang++"),
@@ -724,7 +793,7 @@ class TestG16ClangFallbackRespectsConfiguredDriver:
         header.write_text("int f(void);\n", encoding="utf-8")
         with (
             patch(
-                "abicheck.dumper._castxml_dump",
+                "abicheck.extract.headers.castxml.backend.castxml_dump",
                 side_effect=SnapshotError(_ASSUME_STDERR),
             ),
             patch("abicheck.dumper.shutil.which", return_value=None),
