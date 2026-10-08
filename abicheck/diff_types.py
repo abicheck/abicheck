@@ -151,9 +151,11 @@ def _field_type_genuinely_changed(
     # on top misreported a source-only change as a BREAKING layout change
     # (catalog case30). With unreliable facts it is neutralized for the
     # tool-upgrade reason below.
-    if func_signature_cv_only_differ(old_type, new_type):
-        return False
-    return True
+    # Only a spelling that names a qualifier can differ by one; skip the
+    # (comparatively costly) cv strip for the common plain type change.
+    if not any(q in t for q in ("const", "volatile") for t in (old_type, new_type)):
+        return True
+    return not func_signature_cv_only_differ(old_type, new_type)
 
 
 def _exported_elf_symbol_names(

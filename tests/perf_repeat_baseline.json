@@ -259,10 +259,10 @@
     "abicheck/model/type_indirection.py(unresolved_pair_verdict)": 1595,
     "abicheck/model/type_label.py(qualified_spelling)": 219,
     "abicheck/name_classification.py(_has_top_level_ptr_or_ref)": 716,
-    "abicheck/name_classification.py(_strip_cv_qualifiers)": 1004,
+    "abicheck/name_classification.py(_strip_cv_qualifiers)": 686,
     "abicheck/name_classification.py(contains_anonymous_type_marker)": 1191,
     "abicheck/name_classification.py(cv_qualifiers_only_differ)": 716,
-    "abicheck/name_classification.py(func_signature_cv_only_differ)": 502,
+    "abicheck/name_classification.py(func_signature_cv_only_differ)": 343,
     "abicheck/name_classification.py(is_abi_surface_type_name)": 306,
     "abicheck/name_classification.py(is_compiler_internal_type)": 1191,
     "abicheck/name_classification.py(is_cxx_runtime_library)": 1344,
@@ -293,5 +293,5 @@
   },
   "mode": "default",
   "n": 40,
-  "total": 240926
+  "total": 240449
 }
