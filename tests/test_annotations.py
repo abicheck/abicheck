@@ -11,6 +11,7 @@ from abicheck.annotations import (
 )
 from abicheck.checker import Change, DiffResult, Verdict
 from abicheck.checker_policy import ChangeKind
+from abicheck.policy.evaluate import effective_kind_sets
 
 _SORT_KEY = {"error": 0, "warning": 1, "notice": 2}
 
@@ -725,7 +726,7 @@ class TestSeverityConfigAwareAnnotations:
         cfg = resolve_severity_config("default")  # abi_breaking=error
 
         # The actual gate: still fails at the frozen finding's raw severity.
-        eff_sets = result._effective_kind_sets()
+        eff_sets = effective_kind_sets(result)
         exit_code = compute_exit_code(
             result.changes,
             cfg,

@@ -29,6 +29,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from ..policy.evaluate import effective_kind_sets
+
 __all__ = ["attach_suppression_audit"]
 
 
@@ -52,7 +54,7 @@ def attach_suppression_audit(result: Any, suppression: Any) -> None:
     """
     if suppression is None:
         return
-    effective_breaking_kinds, _, _, _ = result._effective_kind_sets()
+    effective_breaking_kinds, _, _, _ = effective_kind_sets(result)
     result.suppression_audit = suppression.audit(
         list(result.changes)
         + list(result.suppressed_changes)

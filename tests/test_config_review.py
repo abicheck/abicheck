@@ -742,19 +742,17 @@ class TestComputeReleaseSeverityExitCode:
 class TestReleaseSeverityPolicyAndGlobal:
     """P2: per-library policy-file kind overrides; P1: bundle/matrix folding."""
 
-    def test_per_library_uses_effective_kind_sets(self, monkeypatch):
+    def test_per_library_uses_effective_kind_sets(self):
+        from abicheck.checker import Verdict
         from abicheck.cli_compare_release import _compute_release_severity_exit_code
+        from abicheck.policy_file import PolicyFile
 
         diff = _breaking_diff()
-        # Simulate a policy-file that reclassifies the (normally breaking) change
-        # as compatible via the per-library effective kind sets. Proves the exit
-        # consults diff._effective_kind_sets(), not the canonical sets.
-        empty = frozenset()
-        all_kinds = frozenset(c.kind for c in diff.changes)
-        monkeypatch.setattr(
-            diff,
-            "_effective_kind_sets",
-            lambda: (empty, empty, all_kinds, empty),
+        # A policy file that reclassifies the (normally breaking) change as
+        # compatible. Proves the exit consults the per-library effective kind
+        # sets (policy.evaluate.effective_kind_sets), not the canonical sets.
+        diff.policy_file = PolicyFile(
+            overrides={c.kind: Verdict.COMPATIBLE for c in diff.changes}
         )
         entry = {"_diff_result": diff}
         assert _compute_release_severity_exit_code([entry], _gate("default")) == 0

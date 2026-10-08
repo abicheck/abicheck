@@ -14,6 +14,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+from abicheck.policy.evaluate import evaluate
+
 # Make sure we can run from repo root
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -111,8 +113,8 @@ def main() -> None:
         print("=== Step 3: Compare 1.3.0 → 1.4.0 ===")
         result = compare(snap_v1, snap_v2)
         print(f"  Verdict : {result.verdict.value}")
-        print(f"  Breaking: {len(result.breaking)}")
-        print(f"  Compatible changes: {len(result.compatible)}")
+        print(f"  Breaking: {len(evaluate(result).breaking)}")
+        print(f"  Compatible changes: {len(evaluate(result).compatible)}")
         for c in result.changes:
             print(f"  [{c.kind.value}] {c.description}")
 

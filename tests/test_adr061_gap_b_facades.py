@@ -56,6 +56,8 @@ import importlib
 
 import pytest
 
+from abicheck.policy.evaluate import effective_verdict
+
 # ---------------------------------------------------------------------------
 # Six facades whose real implementation was moved to a named owning layer.
 # (facade module, owner module, [public names checked for identity]).
@@ -149,7 +151,7 @@ def test_diffresult_evaluates_through_the_policy_owner() -> None:
     )
     # DiffResult's own method delegates to the same function the owner exports.
     expected = effective_verdict_for_change(change)
-    assert result._effective_verdict_for_change(change) == expected
+    assert effective_verdict(result, change) == expected
 
 
 @pytest.mark.parametrize(

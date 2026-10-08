@@ -7,6 +7,7 @@ import pytest
 
 from abicheck.checker_policy import ChangeKind, Verdict, policy_kind_sets
 from abicheck.checker_types import DiffResult
+from abicheck.policy.evaluate import evaluate
 from abicheck.policy.severity import (
     PRESET_DEFAULT,
     IssueCategory,
@@ -670,5 +671,5 @@ def test_diffresult_buckets_honor_effective_verdict_over_policy_override(
     )
 
     assert result.verdict == Verdict.BREAKING
-    assert result.breaking == [c]
-    assert result.compatible == []
+    assert evaluate(result).breaking == [c]
+    assert evaluate(result).compatible == []

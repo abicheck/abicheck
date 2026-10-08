@@ -44,8 +44,8 @@ later reader doesn't re-litigate them as if this module were meant to:
 1. It closes only the *field's declared type*. What it does NOT close by
    itself is the real, independent ``model``-holds-policy-logic tension the
    ADR's own Phase 4 section originally recorded as an explicit, unaudited
-   known gap: ``DiffResult``'s own methods (``_effective_kind_sets``/
-   ``_effective_verdict_for_change``) *executing* policy-resolution
+   known gap: ``DiffResult``'s own methods (``effective_kind_sets``/
+   ``effective_verdict``) *executing* policy-resolution
    algorithms in their own bodies, not merely holding a typed reference to
    one. **That gap is now closed separately** (ADR-061 Phase 4 finalization,
    ``checker_policy.apply_policy_file_overrides``): both methods are pure

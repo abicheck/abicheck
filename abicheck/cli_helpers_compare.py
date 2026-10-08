@@ -39,6 +39,7 @@ from .workflows.extraction import (
     has_explicit_std,
     strip_vendor_hash as strip_vendor_hash,
 )
+from .workflows.gate import effective_kind_sets
 
 if TYPE_CHECKING:
     from .checker_types import DiffResult
@@ -750,7 +751,7 @@ def _scoped_exit_code(
             relevant_changes,
             severity,
             policy=policy,
-            kind_sets=result._effective_kind_sets(),
+            kind_sets=effective_kind_sets(result),
             policy_file=policy_file,
         )
         if has_missing_contract:
@@ -796,7 +797,7 @@ def _scoped_severity_summary(
     categorized = categorize_changes(
         relevant_changes,
         policy=policy,
-        kind_sets=result._effective_kind_sets(),
+        kind_sets=effective_kind_sets(result),
         policy_file=policy_file,
     )
     counts = {
@@ -809,7 +810,7 @@ def _scoped_severity_summary(
         relevant_changes,
         sev_config,
         policy=policy,
-        kind_sets=result._effective_kind_sets(),
+        kind_sets=effective_kind_sets(result),
         policy_file=policy_file,
     )
     categories = list(gate.blocking_categories)

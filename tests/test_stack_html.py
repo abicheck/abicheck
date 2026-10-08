@@ -180,15 +180,16 @@ def test_html_shows_stack_changes_added() -> None:
 
 def test_html_shows_stack_changes_content_changed() -> None:
     from abicheck.checker import Verdict
+    from abicheck.checker_types import DiffResult
+    from abicheck.model.change import Change
+    from abicheck.model.change_catalog.kinds import ChangeKind
 
-    abi_diff = SimpleNamespace(
+    abi_diff = DiffResult(
+        old_version="1",
+        new_version="2",
+        library="libchanged.so",
         verdict=Verdict.BREAKING,
-        breaking=[
-            SimpleNamespace(
-                kind=SimpleNamespace(value="func_removed"), description="foo removed"
-            )
-        ],
-        changes=[SimpleNamespace()],
+        changes=[Change(ChangeKind.FUNC_REMOVED, "foo", "foo removed")],
     )
     sc = SimpleNamespace(
         library="libchanged.so", change_type="content_changed", abi_diff=abi_diff

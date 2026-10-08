@@ -20,7 +20,7 @@ Before this module existed, ``reporter._build_severity_json``,
 ``sarif._severity_gate_properties``, and ``html_report``'s CI-gate card each
 independently imported :func:`abicheck.policy.severity.compute_gate_decision`
 and hand-assembled the same four arguments
-(``result.changes``/``result.policy``/``result._effective_kind_sets()``/
+(``result.changes``/``result.policy``/``policy.evaluate.effective_kind_sets(result)``/
 ``result.policy_file``) from the same ``DiffResult``. All three already
 called the one canonical resolver, so the risk was never disagreement --
 but ADR-061 D9 says a report format's document construction *consumes* a
@@ -42,6 +42,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from .evaluate import effective_kind_sets
 from .severity import GateDecision, SeverityConfig, compute_gate_decision
 
 if TYPE_CHECKING:
@@ -76,7 +77,7 @@ def gate_decision_for_result(
         result.changes,
         severity_config,
         policy=result.policy,
-        kind_sets=result._effective_kind_sets(),
+        kind_sets=effective_kind_sets(result),
         policy_file=result.policy_file,
         today=today,
     )

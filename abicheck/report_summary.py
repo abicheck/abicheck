@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING
 
 from .checker import _BREAKING_KINDS, DiffResult
 from .model.change_catalog.kinds import HasKind
+from .policy.evaluate import effective_kind_sets, effective_verdict, evaluated_changes
 from .report.change_inventory import ChangeInventorySplit, compute_change_inventory
 
 if TYPE_CHECKING:
@@ -185,7 +186,7 @@ def compatibility_metrics(
     compatibility") on the same page whose verdict banner reads
     ``COMPATIBLE`` (computed from the *effective* verdict) — a direct,
     visible contradiction. Passing *kind_sets* (from ``DiffResult.
-    _effective_kind_sets()``) and/or *policy_file* makes this metric agree
+    effective_kind_sets()``) and/or *policy_file* makes this metric agree
     with the verdict by counting each change's effective verdict instead of
     its raw kind. A named *policy* alone (e.g. ``plugin_abi``, with no
     ``kind_sets``/``policy_file``) must also take this path --
@@ -256,7 +257,7 @@ def build_summary(
     *findings* (ADR-061 gap C), when given, is an envelope's own already-
     resolved ``ReportFinding`` sequence (one per ``result.changes``) --
     every count below is then read from it instead of independently
-    recomputing via ``result.breaking``/``.compatible``/
+    recomputing via ``policy.evaluate.evaluate(result)``/
     ``classify_effective_change``, which could disagree with the envelope's
     frozen verdicts/categories once a dated ``PolicyFile.reclassify`` rule
     expires between construction and render (Codex review, fresh evidence).
@@ -265,7 +266,7 @@ def build_summary(
     from .policy.classification import Verdict
     from .policy.severity import IssueCategory, classify_effective_change
 
-    evaluated = result._evaluated_changes()
+    evaluated = evaluated_changes(result)
     finding_by_id: dict[int, ReportFinding] = (
         {id(f.change): f for f in findings} if findings is not None else {}
     )
@@ -273,7 +274,7 @@ def build_summary(
     def verdict_of(c: Change) -> Verdict:
         if findings is not None:
             return finding_by_id[id(c)].verdict
-        return result._effective_verdict_for_change(c)
+        return effective_verdict(result, c)
 
     breaking = [c for c in evaluated if verdict_of(c) == Verdict.BREAKING]
     source_breaks = [c for c in evaluated if verdict_of(c) == Verdict.API_BREAK]
@@ -301,7 +302,7 @@ def build_summary(
             if classify_effective_change(
                 c,
                 policy=result.policy,
-                kind_sets=result._effective_kind_sets(),
+                kind_sets=effective_kind_sets(result),
                 policy_file=result.policy_file,
                 verdict=Verdict.COMPATIBLE,
             )
@@ -321,7 +322,7 @@ def build_summary(
         evaluated,
         result.old_symbol_count,
         policy=result.policy,
-        kind_sets=result._effective_kind_sets(),
+        kind_sets=effective_kind_sets(result),
         policy_file=result.policy_file,
         effective_verdicts=(
             [verdict_of(c) for c in evaluated] if findings is not None else None

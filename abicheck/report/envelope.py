@@ -78,6 +78,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import TYPE_CHECKING
 
+from ..policy.evaluate import effective_kind_sets
 from .finding import ReportFinding, build_report_findings
 
 if TYPE_CHECKING:
@@ -228,7 +229,7 @@ class ReportEnvelope:
         return build_report_findings(
             [change],
             policy=self.result.policy,
-            kind_sets=self.result._effective_kind_sets(),
+            kind_sets=effective_kind_sets(self.result),
             policy_file=self.result.policy_file,
             today=self.resolved_today,
         )[0]

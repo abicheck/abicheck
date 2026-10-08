@@ -28,6 +28,7 @@ from abicheck.diff_symbols import (
 )
 from abicheck.elf_metadata import ElfMetadata, ElfSymbol, SymbolBinding, SymbolType
 from abicheck.model import AbiSnapshot, Function, Visibility
+from abicheck.policy.evaluate import evaluate
 
 # Concrete size values for clarity (avoids importing private _MIN_SYMBOL_SIZE).
 _TINY_SIZE = 4  # below minimum threshold — should never match
@@ -603,7 +604,7 @@ class TestFingerprintRenameDetector:
         assert rename_changes[0].new_value == "libfoo_create"
         assert rename_changes[0].caused_count == 2
         assert result.verdict == Verdict.BREAKING
-        assert result.breaking == rename_changes
+        assert evaluate(result).breaking == rename_changes
 
     def test_not_triggered_without_elf_only_mode(self) -> None:
         """Detector is gated behind elf_only_mode — disabled for header-based analysis.

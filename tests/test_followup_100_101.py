@@ -23,6 +23,7 @@ from abicheck.checker_policy import (
 )
 from abicheck.dwarf_advanced import _normalize_arch
 from abicheck.model import AbiSnapshot
+from abicheck.policy.evaluate import evaluate
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -373,19 +374,19 @@ class TestDiffResultPolicyAwareProperties:
 
     def test_enum_rename_in_source_breaks_strict(self) -> None:
         r = self._mk_result("strict_abi", ChangeKind.ENUM_MEMBER_RENAMED)
-        assert len(r.source_breaks) == 1
-        assert len(r.compatible) == 0
+        assert len(evaluate(r).source_breaks) == 1
+        assert len(evaluate(r).compatible) == 0
 
     def test_enum_rename_in_compatible_sdk_vendor(self) -> None:
         r = self._mk_result("sdk_vendor", ChangeKind.ENUM_MEMBER_RENAMED)
-        assert len(r.source_breaks) == 0
-        assert len(r.compatible) == 1
+        assert len(evaluate(r).source_breaks) == 0
+        assert len(evaluate(r).compatible) == 1
 
     def test_calling_convention_in_breaking_strict(self) -> None:
         r = self._mk_result("strict_abi", ChangeKind.CALLING_CONVENTION_CHANGED)
-        assert len(r.breaking) == 1
+        assert len(evaluate(r).breaking) == 1
 
     def test_calling_convention_in_compatible_plugin(self) -> None:
         r = self._mk_result("plugin_abi", ChangeKind.CALLING_CONVENTION_CHANGED)
-        assert len(r.breaking) == 0
-        assert len(r.compatible) == 1
+        assert len(evaluate(r).breaking) == 0
+        assert len(evaluate(r).compatible) == 1
