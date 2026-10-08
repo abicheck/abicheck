@@ -74,6 +74,7 @@ from _family_f2_routes import (  # isort: skip
     STORED_VS_LIVE_PATHS,
     Axis,
     Outcome,
+    _invoke,
     normalize,
     parity_violations,
     release_finding_entry_violations,
@@ -153,7 +154,9 @@ CLICK_ROUTING: dict[str, tuple[str, Any]] = {
     "search_paths": (_UC, "dependency search paths need real binaries"),
     "ld_library_path": (_UC, "dependency search paths need real binaries"),
     "debug_info": (_UC, "external debug roots need real stripped binaries"),
-    "build_info": (_UC, "L3 build evidence needs a build tree"),
+    # Also the probe-matrix spelling (--build-info old=/new=<matrix>), which
+    # is covered; a build-evidence pack still needs a real build tree.
+    "build_info": ("covered", ("probe_matrix",)),
     "sources": (_UC, "L4/L5 source evidence needs a source tree"),
     "depth": (
         _UC,
@@ -186,6 +189,8 @@ REQUEST_ROUTING: dict[str, tuple[str, Any]] = {
     "policy_file_path": ("covered", ("policy_file",)),
     "suppress": ("covered", ("suppress", "suppress_strict")),
     "strict_suppressions": ("covered", ("suppress_strict",)),
+    "old_probe_matrix": ("covered", ("probe_matrix",)),
+    "new_probe_matrix": ("covered", ("probe_matrix",)),
     "require_justification": ("covered", ("suppress_strict",)),
     "scope_public": ("covered", ("no_scope_public",)),
     "severity_preset": ("covered", ("severity_strict",)),
@@ -488,7 +493,7 @@ def _run_all(
     return {
         name: fn(ops, axis, tmp)
         for name, fn in routes.items()
-        if name not in axis.unsupported
+        if name not in axis.unsupported and name not in axis.reported_elsewhere
     }
 
 
@@ -643,6 +648,32 @@ def test_unsupported_route_rejects_explicitly(
     )
     assert r.exit_code == 64, r.output
     assert "not supported" in r.output
+
+
+def test_release_reports_the_probe_matrix_at_release_level(tmp_path: Path) -> None:
+    """The ``probe_matrix`` axis's release placement: the same finding the
+    CLI reports, in the summary's release-level ``matrix_findings``, and the
+    same process exit code."""
+    from _family_f2_routes import _probe_matrix_args
+
+    ops = write_operands(tmp_path, "identical")
+    cli = run_cli(ops, AXES_BY_NAME["probe_matrix"], tmp_path)
+    summary = tmp_path / "release_summary.json"
+    r = _invoke(
+        [
+            "compare",
+            str(ops.old_dir),
+            str(ops.new_dir),
+            *_probe_matrix_args(tmp_path),
+            "-o",
+            f"json={summary}",
+        ]
+    )
+    doc = json.loads(summary.read_text(encoding="utf-8"))
+    cli_kinds = sorted(c["kind"] for c in cli.report["changes"])
+    release_kinds = sorted(f["kind"] for f in doc["matrix_findings"])
+    assert release_kinds == cli_kinds == ["cxx_standard_floor_raised"]
+    assert r.exit_code == cli.exit_code
 
 
 # ── known divergences: pinned, not normalized away ───────────────────────

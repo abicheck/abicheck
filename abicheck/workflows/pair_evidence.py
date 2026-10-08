@@ -30,10 +30,39 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from ..model import AbiSnapshot
     from ..model.change import Change
 
-__all__ = ["FoldedEvidence", "fold_pair_evidence"]
+__all__ = ["FoldedEvidence", "fold_pair_evidence", "load_probe_matrix_changes"]
+
+
+def load_probe_matrix_changes(
+    old_matrix: Path | None, new_matrix: Path | None
+) -> list[Change] | None:
+    """Load two build-configuration matrix snapshots and diff them (G2).
+
+    The findings (``CXX_STANDARD_FLOOR_RAISED``, ``API_DEPENDS_ON_CONSUMER_ENV``,
+    ``BEHAVIOURAL_DEFAULT_CHANGED``) need multi-configuration inputs a single
+    snapshot pair does not have; they join the pair's ``extra_changes``.
+    ``None`` when neither side is given. Raises ``ValidationError`` for one
+    side only: a matrix diff needs both.
+    """
+    if old_matrix is None and new_matrix is None:
+        return None
+    if old_matrix is None or new_matrix is None:
+        from ..errors import ValidationError
+
+        raise ValidationError(
+            "a build-configuration matrix needs both sides: --build-info old=<matrix> "
+            "--build-info new=<matrix>"
+        )
+    from .findings import diff_matrix, load_matrix_snapshot
+
+    return list(
+        diff_matrix(load_matrix_snapshot(old_matrix), load_matrix_snapshot(new_matrix))
+    )
 
 
 @dataclass(frozen=True)

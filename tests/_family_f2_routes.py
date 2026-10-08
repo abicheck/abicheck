@@ -231,6 +231,9 @@ class Axis:
     render: Mapping[str, Any] = field(default_factory=dict)
     #: route -> reason the route explicitly rejects this setting (exit 64).
     unsupported: Mapping[str, str] = field(default_factory=dict)
+    #: route -> where that route reports this setting's effect instead of the
+    #: projected per-member report (checked by its own dedicated test).
+    reported_elsewhere: Mapping[str, str] = field(default_factory=dict)
     #: ``.abicheck.yml`` keys the CLI half sets instead of a Click parameter
     #: -- for a setting whose flag was retired into config (e.g.
     #: ``scope.public``, one-comparison-product Phase 9b).
@@ -256,6 +259,42 @@ def _strict_suppression_args(tmp: Path) -> list[str]:
         encoding="utf-8",
     )
     return ["--suppress", str(_suppress_file(tmp)), "--config", str(cfg)]
+
+
+def _probe_matrices(tmp: Path) -> tuple[Path, Path]:
+    """Two build-configuration matrices whose only delta is a raised C++
+    standard floor (17 -> 20): a ``cxx_standard_floor_raised`` finding."""
+    out = []
+    for name, version, stds in (
+        ("pm_old.json", "1.0", {"a": 17, "b": 20}),
+        ("pm_new.json", "2.0", {"b": 20, "c": 23}),
+    ):
+        path = tmp / name
+        path.write_text(
+            json.dumps(
+                {
+                    "library": "libfoo",
+                    "version": version,
+                    "spec_name": "libfoo",
+                    "cxx_stds": stds,
+                    "defaults": {"backend": "tbb"},
+                    "results": [],
+                }
+            ),
+            encoding="utf-8",
+        )
+        out.append(path)
+    return out[0], out[1]
+
+
+def _probe_matrix_args(tmp: Path) -> list[str]:
+    old, new = _probe_matrices(tmp)
+    return ["--build-info", f"old={old}", "--build-info", f"new={new}"]
+
+
+def _probe_matrix_fields(tmp: Path) -> dict[str, Any]:
+    old, new = _probe_matrices(tmp)
+    return {"old_probe_matrix": old, "new_probe_matrix": new}
 
 
 def _policy_file(tmp: Path) -> Path:
@@ -301,6 +340,18 @@ AXES: tuple[Axis, ...] = (
         ("suppress",),
         ("suppress", "strict_suppressions", "require_justification"),
         config_keys=("suppression.strict", "suppression.require_justification"),
+    ),
+    Axis(
+        "probe_matrix",
+        _probe_matrix_args,
+        _probe_matrix_fields,
+        ("build_info",),
+        ("old_probe_matrix", "new_probe_matrix"),
+        reported_elsewhere={
+            "release": "a matrix describes the release, not one member: the "
+            "release fan-out reports it in the summary's release-level "
+            "matrix_findings/matrix_verdict, not in a member's report"
+        },
     ),
     Axis(
         "no_scope_public",
