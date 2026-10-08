@@ -27,10 +27,13 @@ between them:
   -- pure, no I/O.
 * ``workflows.consumer_scope`` wires the two and owns the result types.
 
-A probe that could not read its input says so with
-:attr:`~abicheck.model.availability.FactStatus.FAILED` and a reason; it is
-never just an empty set (root ``AGENTS.md``: weaker evidence narrows
-conclusions).
+A consumer-import probe that could not read its input says so with
+:attr:`~abicheck.model.availability.FactStatus.FAILED` and a reason rather
+than a bare empty set (root ``AGENTS.md``: weaker evidence narrows
+conclusions). Library-side facts mark only an unrecognised format
+``FAILED``: the platform metadata parsers swallow their own errors and
+return empty metadata, so a library read that failed part-way still reads
+``PRESENT`` -- see ``docs/contribute/known-gaps.md``.
 """
 
 from __future__ import annotations
