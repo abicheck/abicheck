@@ -25,10 +25,10 @@ from pathlib import Path
 
 import pytest
 
-from abicheck import service_dump_native
 from abicheck.compile_context import CompileContext
 from abicheck.model import AbiSnapshot
 from abicheck.service import run_dump
+from abicheck.workflows.dump import native
 from abicheck.workflows.dump.formats import NativeExtractRequest
 from tests._dump_format_fakes import fake_format_adapter
 
@@ -89,13 +89,13 @@ def test_hybrid_never_re_enters_the_orchestrator(
     """The recursive implementation entered ``_run_dump_uncached`` three
     times (outer call plus one per leg); the composition enters it once."""
     calls: list[str] = []
-    real = service_dump_native._run_dump_uncached
+    real = native._run_dump_uncached
 
     def counting(*args: object, **kwargs: object) -> AbiSnapshot:
         calls.append(str(kwargs.get("header_backend")))
         return real(*args, **kwargs)  # type: ignore[arg-type]
 
-    monkeypatch.setattr(service_dump_native, "_run_dump_uncached", counting)
+    monkeypatch.setattr(native, "_run_dump_uncached", counting)
     requests = _hybrid_dump(tmp_path, "elf")
     assert len(requests) == 2
     assert calls == ["hybrid"]

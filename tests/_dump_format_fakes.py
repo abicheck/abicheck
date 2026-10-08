@@ -16,7 +16,7 @@
 """Fake binary-format adapters for dump tests (lane B, stage B1b).
 
 Inject a fake through the production seam -- the registry
-``abicheck.service_dump_native.FORMAT_ADAPTERS`` -- instead of patching a
+``abicheck.workflows.dump.native.FORMAT_ADAPTERS`` -- instead of patching a
 private extractor name::
 
     with fake_format_adapter("pe", result=snap) as fake:
@@ -35,8 +35,8 @@ from contextlib import contextmanager
 from typing import Any
 
 from abicheck.model import AbiSnapshot
-from abicheck.service_dump_native import FORMAT_ADAPTERS
 from abicheck.workflows.dump.formats import NativeExtractRequest
+from abicheck.workflows.dump.native import FORMAT_ADAPTERS
 
 
 class FakeFormatAdapter:

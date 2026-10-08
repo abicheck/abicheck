@@ -68,7 +68,7 @@ from .workflows.contracts import (
 # directly off `abicheck.service` (some) and off
 # `abicheck.workflows.input_resolution` (the ones that need to influence a
 # call made *inside* `resolve_input`'s own body, same rule
-# `service_dump_native.py`'s own re-export block documents above). ────────
+# `workflows/dump/native.py`'s own re-export block documents above). ────────
 from .workflows.input_resolution import (
     _resolve_symvers as _resolve_symvers,
     _typeinfo_functions as _typeinfo_functions,
@@ -110,10 +110,10 @@ del _service_header_scoped
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-# ── Binary dumping: ``run_dump`` lives in ``service_dump_native``; each
+# ── Binary dumping: ``run_dump`` lives in ``workflows.dump.native``; each
 # format's primary extraction is a ``workflows.dump.formats`` adapter. To
 # substitute an extractor, replace its entry in
-# ``service_dump_native.FORMAT_ADAPTERS`` rather than patching a private name.
+# ``workflows.dump.native.FORMAT_ADAPTERS`` rather than patching a private name.
 # run_compare_request/run_compare moved to service_compare_pipeline.py (CLI
 # cleanup phase two, PR B slice 1) to stay under the AI-readiness file-size
 # cap once run_compare gained pack_policy_overrides/pack_internal_namespaces
@@ -147,7 +147,6 @@ from .service_compare_pipeline import (  # noqa: E402,F401
     run_compare,
     run_compare_request,
 )
-from .service_dump_native import run_dump  # noqa: E402,F401
 
 # ── Dump pipeline (G33 Phase 5): ``dump``'s counterpart to the above, in the
 # leaf module ``service_dump_pipeline``. Re-exported for the same reason:
@@ -191,6 +190,7 @@ from .workflows.compare_policy import (  # noqa: E402,F401
     dedup_policy_override_warnings,
     load_suppression_and_policy,
 )
+from .workflows.dump.native import run_dump  # noqa: E402,F401
 
 # ADR-061 gap D, closed: the directory/package release fan-out's
 # pre-execution resolution is one typed request/plan pair, reachable from

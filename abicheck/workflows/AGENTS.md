@@ -67,7 +67,7 @@ outer composition boundary), so it imports the `frontends`-classified
 `input_resolution.py` is a third shape: the real `resolve_input`
 implementation (plus `detect_binary_format`, `sniff_text_format`,
 `collect_metadata`, private helpers), moved here from
-`service.py` (ADR-061 Phase 4). `service_dump_native` (`run_dump`)
+`service.py` (ADR-061 Phase 4). `workflows.dump.native` (`run_dump`)
 reaches the baselined CLI-registration SCC via `service_header_graph_attach ->
 service_scan -> service`, and `service` imports this module — a static edge
 would grow that cycle, so it's bound via `importlib.import_module` instead,
@@ -79,7 +79,7 @@ policy` stayed in `service.py`: both need `PolicyFile`, an open
 `policy_file.py` debt question.
 
 `dump/formats.py` is the dump's binary-format seam: `run_dump` looks the
-format up in `service_dump_native.FORMAT_ADAPTERS` and passes the
+format up in `workflows.dump.native.FORMAT_ADAPTERS` and passes the
 `BinaryFormatAdapter` one `NativeExtractRequest`. To substitute an extractor
 in a test, swap the registry entry (helper: `tests/_dump_format_fakes.py`);
 the extractor names themselves are owned, not patch points.

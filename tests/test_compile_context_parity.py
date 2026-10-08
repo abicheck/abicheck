@@ -119,9 +119,9 @@ def test_input_spec_carries_compile_context() -> None:
 def test_dump_elf_threads_compile_context_to_dumper(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """``service_dump_native.extract_elf`` unpacks the CompileContext into ``dumper.dump``."""
+    """``workflows.dump.native.extract_elf`` unpacks the CompileContext into ``dumper.dump``."""
     import abicheck.dumper as dumper_mod
-    from abicheck import service_dump_native
+    from abicheck.workflows.dump import native
 
     header = tmp_path / "foo.h"
     header.write_text("int foo(void);\n")
@@ -146,7 +146,7 @@ def test_dump_elf_threads_compile_context_to_dumper(
         sysroot=tmp_path,
         nostdinc=True,
     )
-    service_dump_native.extract_elf(
+    native.extract_elf(
         tmp_path / "libfoo.so",
         [header],
         [],
@@ -175,7 +175,7 @@ def test_dump_elf_default_compile_context_is_inert(
 ) -> None:
     """No CompileContext → the dumper sees the unchanged defaults (no regression)."""
     import abicheck.dumper as dumper_mod
-    from abicheck import service_dump_native
+    from abicheck.workflows.dump import native
 
     header = tmp_path / "foo.h"
     header.write_text("int foo(void);\n")
@@ -186,7 +186,7 @@ def test_dump_elf_default_compile_context_is_inert(
         return type("_S", (), {"parsed_with_build_context": False})()
 
     monkeypatch.setattr(dumper_mod, "dump", _fake_dump)
-    service_dump_native.extract_elf(tmp_path / "libfoo.so", [header], [], "1.0", "c++")
+    native.extract_elf(tmp_path / "libfoo.so", [header], [], "1.0", "c++")
     assert captured["gcc_path"] is None
     assert captured["gcc_options"] is None
     assert captured["nostdinc"] is False

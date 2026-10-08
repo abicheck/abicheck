@@ -170,7 +170,7 @@ def test_self_heal_preserves_the_memo_handoff_under_the_lookup_key(
 
     runner = _as_runner(_counted_run)
     with dumper_cache.ast_memoize_scope():
-        # The primary snapshot pass (`service_dump_native.py` wraps both this
+        # The primary snapshot pass (`workflows/dump/native.py` wraps both this
         # call and the follow-up below in one `ast_memoize_scope()`).
         root, _resolved_kind, resolved_force_cpp = clang_header_dump(
             [header], [], memoize=True, run_ast=runner

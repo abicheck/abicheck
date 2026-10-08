@@ -5861,7 +5861,7 @@ value is stopping a re-attempt.
   compile-DB-backed case) — the two ELF-specific post-processing second
   passes (`_attach_header_graph`, `attach_clang_layout`) that Blocker A
   worried about run *inside* `service.resolve_input`'s own ELF dispatch
-  (`service_dump_native.py`), not as a separate stage `execute_dump_request`
+  (`workflows/dump/native.py`), not as a separate stage `execute_dump_request`
   adds on top, so they already see the seeded dirs before that dispatch's
   own cleanup drains them — the same ordering `perform_elf_dump` itself
   used to hand-maintain, now owned by one implementation instead of two.
@@ -8429,7 +8429,7 @@ was registered against in `tests/regressions/manifest.py` was retired in the
 same PR rather than retargeted: a repo-wide audit at retirement time found
 `debug_presence_only` (the underlying dumper-level shortcut parameter,
 still plumbed through `dumper.py`/`service_dump_cache.py`/
-`service_dump_native.py`/`dumper_layout_backfill.py`/
+`workflows/dump/native.py`/`dumper_layout_backfill.py`/
 `workflows/input_resolution.py`) has **no remaining production call site**
 that ever passes `debug_presence_only=True` — every live caller forwards it
 at its default `False`. The shortcut mechanism is therefore currently

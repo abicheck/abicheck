@@ -15,9 +15,9 @@
 
 """Binary-format seam for the native dump (lane B, stage B1b).
 
-``service_dump_native._run_dump_uncached`` builds one
+``workflows.dump.native._run_dump_uncached`` builds one
 :class:`NativeExtractRequest` and looks the detected format up in the
-registry ``service_dump_native.FORMAT_ADAPTERS``. Each adapter performs only
+registry ``workflows.dump.native.FORMAT_ADAPTERS``. Each adapter performs only
 the primary extraction; the shared post-extraction tail (metadata attach,
 header graph, clang layout, closure renumbering) stays with the caller, so a
 substituted adapter sees exactly the request the real one would and its
@@ -159,8 +159,8 @@ class MachoAdapter:
 
 
 #: PE and Mach-O. The ELF adapter lives with its extractor in
-#: ``service_dump_native``, which composes the full registry
-#: (``service_dump_native.FORMAT_ADAPTERS``).
+#: ``workflows.dump.native``, which composes the full registry
+#: (``workflows.dump.native.FORMAT_ADAPTERS``).
 DEFAULT_ADAPTERS: Mapping[str, BinaryFormatAdapter] = {
     "pe": PeAdapter(),
     "macho": MachoAdapter(),

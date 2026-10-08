@@ -18,9 +18,9 @@ a binary-format seam.
 
 * :mod:`.formats` -- :class:`~.formats.BinaryFormatAdapter`, the protocol the
   ELF/PE/Mach-O adapters implement, and the registry
-  ``service_dump_native._run_dump_uncached`` dispatches through.
+  ``workflows.dump.native._run_dump_uncached`` dispatches through.
 * :mod:`.pe`, :mod:`.macho` -- PE and Mach-O primary extraction. ELF's
-  extractor is still ``service_dump_native.extract_elf`` (see
+  extractor is still ``workflows.dump.native.extract_elf`` (see
   :class:`.formats.ElfAdapter`).
 
 No names are re-exported here: import from the owning module.

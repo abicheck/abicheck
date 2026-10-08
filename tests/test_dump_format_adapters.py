@@ -15,7 +15,7 @@
 
 """Contract tests for the dump's binary-format seam (lane B, stage B1b).
 
-``service_dump_native._run_dump_uncached`` dispatches each format's primary
+``workflows.dump.native._run_dump_uncached`` dispatches each format's primary
 extraction through ``workflows.dump.formats``. These tests pin the seam
 itself: which adapter a format reaches, what request it receives, how
 overrides stack, and that every real adapter forwards the full parameter set
@@ -31,18 +31,17 @@ from typing import Any
 
 import pytest
 
-from abicheck import service_dump_native
 from abicheck.compile_context import CompileContext
 from abicheck.errors import UnsupportedArtifactError
 from abicheck.model import AbiSnapshot
 from abicheck.service import run_dump
-from abicheck.service_dump_native import FORMAT_ADAPTERS
-from abicheck.workflows.dump import macho, pe
+from abicheck.workflows.dump import macho, native, pe
 from abicheck.workflows.dump.formats import (
     DEFAULT_ADAPTERS,
     BinaryFormatAdapter,
     NativeExtractRequest,
 )
+from abicheck.workflows.dump.native import FORMAT_ADAPTERS
 from tests._dump_format_fakes import fake_format_adapter
 
 FORMATS = ("elf", "pe", "macho")
@@ -154,7 +153,7 @@ def test_registry_is_exactly_the_three_native_formats() -> None:
 # ── Real adapters forward their extractor's full parameter set ──────────────
 
 _REAL = [
-    ("elf", service_dump_native, "extract_elf"),
+    ("elf", native, "extract_elf"),
     ("pe", pe, "extract_pe"),
     ("macho", macho, "extract_macho"),
 ]

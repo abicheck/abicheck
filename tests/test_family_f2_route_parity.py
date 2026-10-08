@@ -934,7 +934,7 @@ def test_hybrid_dump_routes_parse_their_legs_alike(tmp_path: Path) -> None:
     with (
         fake_format_adapter("elf", side_effect=_fake_dump_elf),
         patch(
-            "abicheck.service_dump_native._attach_header_graph",
+            "abicheck.workflows.dump.native._attach_header_graph",
             side_effect=lambda snap, *_a, **_k: snap,
         ),
     ):

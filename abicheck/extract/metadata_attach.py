@@ -22,7 +22,7 @@ ecosystem cheaply, attaches nothing when it does not apply, and swallows its
 own failures -- an enrichment step must never fail a dump.
 
 Moved from the flat ``service_metadata_attach.py`` into ``extract`` (lane B,
-stage B1c); the native dump's tail in ``service_dump_native`` calls these.
+stage B1c); the native dump's tail in ``workflows.dump.native`` calls these.
 """
 
 from __future__ import annotations

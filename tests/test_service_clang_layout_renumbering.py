@@ -79,11 +79,11 @@ class TestRunDumpRenumbersAfterClangLayoutAttach:
         with (
             fake_format_adapter("elf", side_effect=_fake_dump),
             patch(
-                "abicheck.service_dump_native._attach_header_graph",
+                "abicheck.workflows.dump.native._attach_header_graph",
                 side_effect=lambda s, *_a, **_k: s,
             ),
             patch(
-                "abicheck.service_dump_native.attach_clang_layout",
+                "abicheck.workflows.dump.native.attach_clang_layout",
                 side_effect=_fake_attach_clang_layout,
             ),
         ):
@@ -102,11 +102,11 @@ class TestRunDumpRenumbersAfterClangLayoutAttach:
         with (
             fake_format_adapter("pe", side_effect=_fake_dump),
             patch(
-                "abicheck.service_dump_native._attach_header_graph",
+                "abicheck.workflows.dump.native._attach_header_graph",
                 side_effect=lambda s, *_a, **_k: s,
             ),
             patch(
-                "abicheck.service_dump_native.attach_clang_layout",
+                "abicheck.workflows.dump.native.attach_clang_layout",
                 side_effect=_fake_attach_clang_layout,
             ),
         ):
@@ -125,11 +125,11 @@ class TestRunDumpRenumbersAfterClangLayoutAttach:
         with (
             fake_format_adapter("macho", side_effect=_fake_dump),
             patch(
-                "abicheck.service_dump_native._attach_header_graph",
+                "abicheck.workflows.dump.native._attach_header_graph",
                 side_effect=lambda s, *_a, **_k: s,
             ),
             patch(
-                "abicheck.service_dump_native.attach_clang_layout",
+                "abicheck.workflows.dump.native.attach_clang_layout",
                 side_effect=_fake_attach_clang_layout,
             ),
         ):

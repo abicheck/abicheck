@@ -246,7 +246,7 @@ def _with_inferred_header_roots(
 ) -> tuple[list[Path], object | None]:
     """*includes* and *compile_context* widened by the ``-H`` include roots.
 
-    The same split a member dump applies (``service_dump_native``): plain
+    The same split a member dump applies (``workflows.dump.native``): plain
     ``-I`` with no build-context include dirs, else a deferred token that
     rides in the compile flags below the build's own include dirs.
     """

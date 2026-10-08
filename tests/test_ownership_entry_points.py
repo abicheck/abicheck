@@ -78,10 +78,10 @@ _INVENTORY: dict[tuple[str, str, str], str] = {
     ("abicheck/stack_checker.py", "_run_abi_diff", "run_dump"): "no headers: binary-only, nothing to own",
     ("abicheck/probe_harness.py", "_snapshot_object_file", "dump"): "no headers (dwarf_only probe)",
     ("abicheck/service_dump_cache.py", "_dump_uncached", "run_dump"): "inner layer of resolve_input",
-    ("abicheck/service_dump_native.py", "extract_elf", "dump"): "inner layer of run_dump",
+    ("abicheck/workflows/dump/native.py", "extract_elf", "dump"): "inner layer of run_dump",
     # The format adapters' ``extract`` -- reached from ``_run_dump_uncached``
     # through ``FORMAT_ADAPTERS[fmt].extract(request)``.
-    ("abicheck/service_dump_native.py", "extract", "extract_elf"): "inner layer of run_dump (ELF adapter)",
+    ("abicheck/workflows/dump/native.py", "extract", "extract_elf"): "inner layer of run_dump (ELF adapter)",
     ("abicheck/workflows/dump/formats.py", "extract", "extract_pe"): "inner layer of run_dump (PE adapter)",
     ("abicheck/workflows/dump/formats.py", "extract", "extract_macho"): "inner layer of run_dump (Mach-O adapter)",
     ("abicheck/workflows/dump/hybrid.py", "compose_hybrid", "run_hybrid_dump"): "inner layer of run_dump (hybrid legs)",
@@ -196,7 +196,7 @@ def test_appcompat_stamps_both_sides(monkeypatch: pytest.MonkeyPatch) -> None:
     def _stop(*a: Any, **k: Any) -> None:
         raise _Stop
 
-    monkeypatch.setattr("abicheck.service_dump_native.run_dump", _run_dump)
+    monkeypatch.setattr("abicheck.workflows.dump.native.run_dump", _run_dump)
     monkeypatch.setattr(
         "abicheck.workflows.input_resolution.detect_binary_format", lambda p: "elf"
     )

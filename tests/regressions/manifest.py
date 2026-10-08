@@ -670,7 +670,7 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
     # shortcut from scan's own depth/headers logic -- which was deleted with
     # the rest of `cli_scan_helpers.py`. `debug_presence_only` itself is
     # still a real, plumbed-through parameter
-    # (`dumper.py`/`service_dump_cache.py`/`service_dump_native.py`/
+    # (`dumper.py`/`service_dump_cache.py`/`workflows/dump/native.py`/
     # `dumper_layout_backfill.py`/`workflows/input_resolution.py`), but a
     # repo-wide audit at retirement time found no remaining production call
     # site that ever passes `debug_presence_only=True` -- every live caller

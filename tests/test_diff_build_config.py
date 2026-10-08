@@ -15,7 +15,7 @@ from abicheck.diff_build_config import (
     diff_matrix,
 )
 from abicheck.model import AbiSnapshot, Function, Visibility
-from abicheck.probe_harness import MatrixSnapshot, ProbeResult
+from abicheck.model.probe_matrix import MatrixSnapshot, ProbeResult
 
 
 def _snap_fn(name: str) -> AbiSnapshot:

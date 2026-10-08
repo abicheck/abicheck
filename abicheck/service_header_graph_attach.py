@@ -138,7 +138,7 @@ def _attach_header_graph(
     # closed here, so its peak is attributed to `dump.primary:done` and the
     # stages below start from a fresh window. It lives at the top of this
     # function rather than at the `_dump_elf` call site because `dumper.py`
-    # and `service_dump_native.py` are both at their debt-ledger line caps.
+    # and `workflows/dump/native.py` are both at their debt-ledger line caps.
     memory_trace.mark("dump.primary:done")
     if not header_graph or not headers:
         return snap

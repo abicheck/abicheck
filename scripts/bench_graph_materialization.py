@@ -25,7 +25,7 @@ before ``abicheck.cli.main`` is entered.
 
 Variants:
 
-* ``none``  -- ``service_dump_native._HEADER_GRAPH_ENABLED`` and
+* ``none``  -- ``workflows.dump.native._HEADER_GRAPH_ENABLED`` and
   ``_HEADER_GRAPH_INCLUDES_ENABLED`` off: the plain snapshot.
 * ``graph`` -- today's default: the header graph attached
   (``service_header_graph_attach._attach_header_graph``).
@@ -91,9 +91,9 @@ def _child(variant: str, argv: list[str]) -> int:
     # editable install points at: comparing two revisions means running this
     # script from two worktrees, and each child must import its own tree.
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-    from abicheck import service_dump_native as native
     from abicheck.compare.surface_graph import build_public_surface_facts
     from abicheck.workflows import memory_trace
+    from abicheck.workflows.dump import native
 
     if variant == "none":
         native._HEADER_GRAPH_ENABLED = False

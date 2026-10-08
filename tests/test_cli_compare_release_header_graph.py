@@ -136,7 +136,7 @@ def _graphs_attached(
     (CodeRabbit review). The count is recoverable from the ids, not the
     reverse.
     """
-    import abicheck.service_dump_native as native
+    import abicheck.workflows.dump.native as native
     from abicheck.cli import main
 
     real_attach = native._attach_header_graph

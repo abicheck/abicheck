@@ -48,7 +48,7 @@ from abicheck.model import (
     TypeField,
     Visibility,
 )
-from abicheck.probe_harness import MatrixSnapshot
+from abicheck.model.probe_matrix import MatrixSnapshot
 from abicheck.serialization import snapshot_to_json
 from abicheck.workflows.findings import matrix_snapshot_to_json
 

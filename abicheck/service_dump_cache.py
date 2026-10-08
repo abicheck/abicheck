@@ -227,7 +227,7 @@ def compile_context_cache_field(compile: object | None) -> str:
 def effective_header_backend(header_backend: str, compile: object | None) -> str:
     """The backend request ``run_dump`` honours: an explicit (non-``auto``)
     ``compile.frontend`` wins over the bare ``header_backend`` argument
-    (``service_dump_native._run_dump_uncached``)."""
+    (``workflows.dump.native._run_dump_uncached``)."""
     cc = _normalized_compile_context(compile)
     if cc is not None and cc.frontend != "auto":
         return str(cc.frontend)

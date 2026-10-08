@@ -348,7 +348,7 @@ class TestPeOrdinalRetargeted:
                 "abicheck.workflows.input_resolution.detect_binary_format",
                 return_value="pe",
             ),
-            patch("abicheck.service_dump_native.run_dump") as mock_run_dump,
+            patch("abicheck.workflows.dump.native.run_dump") as mock_run_dump,
             patch(
                 "abicheck.workflows.compare_policy.compare_snapshots"
             ) as mock_compare,

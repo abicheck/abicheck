@@ -265,7 +265,8 @@ class TestTypedPythonApiGetsTheSameLicenceAsTheCli:
     API while working through the CLI (Codex review, P2)."""
 
     def test_run_dump_grants_the_licence(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from abicheck import service, service_dump_native
+        from abicheck import service
+        from abicheck.workflows.dump import native
 
         # Header-derived: the AST frontend really opened the files it attributes
         # declarations to. A DWARF-only extraction is *not* licensed -- see
@@ -274,7 +275,7 @@ class TestTypedPythonApiGetsTheSameLicenceAsTheCli:
         assert produced.live_source_evidence is False
 
         monkeypatch.setattr(
-            service_dump_native,
+            native,
             "_run_dump_uncached",
             lambda *a, **kw: produced,
         )
@@ -287,11 +288,12 @@ class TestTypedPythonApiGetsTheSameLicenceAsTheCli:
         funnels through, so a front end cannot be added that silently skips it.
         `cached_run_dump` keeps its own grant only for the *cache-hit* path,
         which never calls `run_dump` at all."""
-        from abicheck import service_dump_cache, service_dump_native
+        from abicheck import service_dump_cache
         from abicheck.buildsource import source_inputs
+        from abicheck.workflows.dump import native
 
         # The grant is the contract owner's, applied once at the shared dump.
-        assert service_dump_native.granting_live_source_licence is (
+        assert native.granting_live_source_licence is (
             source_inputs.granting_live_source_licence
         )
         cache_src = Path(service_dump_cache.__file__).read_text()
@@ -416,12 +418,11 @@ class TestLicenceRequiresThatSourceInputsWereActuallyRead:
     ) -> None:
         """Through the real `run_dump` wrapper: a snapshot whose provenance is
         DWARF comes back unlicensed even though this run produced it."""
-        from abicheck import service, service_dump_native
+        from abicheck import service
+        from abicheck.workflows.dump import native
 
         dwarf_only = self._snapshot(from_headers=False)
-        monkeypatch.setattr(
-            service_dump_native, "_run_dump_uncached", lambda *a, **kw: dwarf_only
-        )
+        monkeypatch.setattr(native, "_run_dump_uncached", lambda *a, **kw: dwarf_only)
         out = service.run_dump(tmp_path / "libfoo.so", "elf")
         assert out.live_source_evidence is False
         assert snapshot_source_licence(out).permitted is False
@@ -429,11 +430,12 @@ class TestLicenceRequiresThatSourceInputsWereActuallyRead:
     def test_a_header_derived_live_extraction_is_licensed(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        from abicheck import service, service_dump_native
+        from abicheck import service
+        from abicheck.workflows.dump import native
 
         header_derived = self._snapshot(from_headers=True)
         monkeypatch.setattr(
-            service_dump_native, "_run_dump_uncached", lambda *a, **kw: header_derived
+            native, "_run_dump_uncached", lambda *a, **kw: header_derived
         )
         out = service.run_dump(tmp_path / "libfoo.so", "elf")
         assert out.live_source_evidence is True

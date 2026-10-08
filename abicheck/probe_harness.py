@@ -22,14 +22,10 @@ it under one or more *configurations* (compiler × language standard ×
 macro set), and feed the resulting ``.o`` files into the existing
 snapshot pipeline.
 
-Public API:
+Public API (the schema types -- ``ProbeSpec``, ``ProbeConfiguration``,
+``Probe``, ``ProbeResult``, ``MatrixSnapshot`` -- live in
+:mod:`abicheck.model.probe_matrix`):
 
-* :class:`ProbeSpec` — parsed YAML.
-* :class:`ProbeConfiguration` — one (compiler, flags, defines) tuple.
-* :class:`Probe` — one consumer TU snippet.
-* :class:`ProbeResult` — ``(configuration_id, probe_id, AbiSnapshot)``.
-* :class:`MatrixSnapshot` — set of ``ProbeResult`` for one version of
-  a library.
 * :func:`load_probe_spec` — parse YAML into ``ProbeSpec``.
 * :func:`run_probe_matrix` — compile each (configuration × probe) and
   return ``MatrixSnapshot``.
@@ -48,14 +44,12 @@ parsing and matrix bookkeeping don't pay the import cost.
 JSON (de)serialization of a ``MatrixSnapshot`` -- which needs
 ``AbiSnapshot``'s own ``storage``-owned codec (``serialization.
 snapshot_to_dict``/``snapshot_from_dict``) -- deliberately does NOT
-live here (ADR-061 gap E): this module is classified ``compare``,
-which may import only ``model``, and a compare-layer module owning a
-persistence operation is exactly the ownership conflation the ADR
-forbids. ``abicheck.workflows.findings`` owns
+live here (ADR-061 gap E): ``abicheck.workflows.findings`` owns
 ``matrix_snapshot_to_json``/``matrix_snapshot_from_dict``/
-``write_matrix_snapshot``/``load_matrix_snapshot`` instead -- it may
-legally import both this module (``compare``) and ``serialization``
-(a documented ``public_root_surfaces`` compatibility surface).
+``write_matrix_snapshot``/``load_matrix_snapshot``. This module is
+classified ``workflows`` (it compiles probes and runs the dumper); the
+schema it fills is ``model``-owned so the compare-layer detectors in
+``diff_build_config`` read it without importing a workflows module.
 """
 
 from __future__ import annotations
@@ -66,104 +60,21 @@ import re
 import shutil
 import subprocess
 import tempfile
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from .deadline import run_bounded
+from .model.probe_matrix import (
+    MatrixSnapshot,
+    Probe,
+    ProbeConfiguration,
+    ProbeResult,
+    ProbeSpec,
+)
 
 if TYPE_CHECKING:
     from .model import AbiSnapshot
-
-
-# ---------------------------------------------------------------------------
-# Schema
-# ---------------------------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class ProbeConfiguration:
-    """A (compiler, flags, defines) tuple."""
-
-    id: str
-    compiler: str
-    flags: tuple[str, ...] = ()
-    defines: dict[str, str] = field(default_factory=dict)
-    include_dirs: tuple[str, ...] = ()
-    cxx_std: int | None = None  # 17, 20, 23 — parsed from -std=c++NN
-
-    def as_command_args(self) -> list[str]:
-        """Return the compiler invocation prefix (binary + flags + defines)."""
-        out: list[str] = [self.compiler, *self.flags]
-        for k, v in self.defines.items():
-            out.append(f"-D{k}={v}" if v else f"-D{k}")
-        for d in self.include_dirs:
-            out.append(f"-I{d}")
-        return out
-
-
-@dataclass(frozen=True)
-class Probe:
-    """One consumer TU snippet."""
-
-    name: str
-    headers: tuple[str, ...]
-    body: str
-
-    def render(self) -> str:
-        """Generate the full .cpp source the harness will compile."""
-        lines = []
-        for h in self.headers:
-            # Bare angle/quote characters are accepted as-is; the
-            # YAML author writes ``<acme/lib/algorithm>`` or
-            # ``"my_header.h"`` exactly as they would in C++.
-            if h.startswith("<") or h.startswith('"'):
-                lines.append(f"#include {h}")
-            else:
-                lines.append(f"#include <{h}>")
-        lines.append("")
-        lines.append(self.body.rstrip())
-        return "\n".join(lines) + "\n"
-
-
-@dataclass(frozen=True)
-class ProbeSpec:
-    """A parsed probe-harness YAML manifest."""
-
-    name: str
-    configurations: tuple[ProbeConfiguration, ...]
-    probes: tuple[Probe, ...]
-    defaults: dict[str, str] = field(default_factory=dict)
-
-
-@dataclass
-class ProbeResult:
-    """Outcome of compiling one (configuration × probe) pair."""
-
-    configuration_id: str
-    probe_id: str
-    object_path: str | None = None
-    snapshot: AbiSnapshot | None = None
-    error: str | None = None
-
-
-@dataclass
-class MatrixSnapshot:
-    """A version-stamped set of ProbeResults — the matrix-aware analogue
-    of ``AbiSnapshot``."""
-
-    library: str
-    version: str
-    spec_name: str
-    cxx_stds: dict[str, int | None] = field(default_factory=dict)
-    defaults: dict[str, str] = field(default_factory=dict)
-    results: list[ProbeResult] = field(default_factory=list)
-
-    def by_configuration(self) -> dict[str, list[ProbeResult]]:
-        out: dict[str, list[ProbeResult]] = {}
-        for r in self.results:
-            out.setdefault(r.configuration_id, []).append(r)
-        return out
 
 
 # ---------------------------------------------------------------------------

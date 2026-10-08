@@ -7578,7 +7578,7 @@ the PE/Mach-O branch stopped being a single delegating call to
 `handle_non_elf_dump`. Verified via the existing mock-based CLI/unit test
 suite (four CLI-dispatch tests that previously monkeypatched
 `handle_non_elf_dump` were rewritten to patch
-`abicheck.service_dump_native._dump_pe`/`_dump_macho` instead, the same
+`abicheck.workflows.dump.native._dump_pe`/`_dump_macho` instead, the same
 depth below the format dispatch the pre-existing ELF-side precedent,
 `test_compile_context_parity.py::test_dump_reads_compile_block_from_config`,
 already patches `abicheck.dumper.dump` at) — **not** a real PE/Mach-O

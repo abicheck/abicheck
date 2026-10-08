@@ -40,7 +40,7 @@ That symmetry does not extend to a name :func:`resolve_input` calls
 module's own globals now, not ``abicheck.service``'s, so a test that used to
 intercept one via ``monkeypatch.setattr(service, "run_dump", ...)`` must
 patch ``abicheck.workflows.input_resolution.run_dump`` instead -- the same
-rule ``service_dump_native.py``'s own re-export block documents for its
+rule ``workflows/dump/native.py``'s own re-export block documents for its
 split.
 """
 
@@ -79,23 +79,23 @@ if TYPE_CHECKING:
     from ..dump_manifest import DumpManifest
     from ..environment_matrix import EnvironmentMatrix
 
-# `service_dump_native` reaches `service_header_graph_attach` ->
+# `workflows.dump.native` reaches `service_header_graph_attach` ->
 # `dry_run_estimate` -> `service`, the pre-existing, already-baselined CLI-
 # registration SCC (AGENTS.md "M1-3"/CLAUDE.md "What NOT to do"). This
 # module is imported *by* `service` itself, so a static `from
-# ..service_dump_native import ...` here would pull this new module into
+# ..workflows.dump.native import ...` here would pull this new module into
 # that same cycle -- the AI-readiness `import-cycle-growth` gate rejects
 # exactly that ("no *new* module joins"). Bound via `importlib.import_module`
 # instead: a plain function call, not an `ast.ImportFrom` node, so it is
 # invisible to that gate's static AST walk (the identical escape hatch
 # `service.py`'s own `_service_header_scoped` bridge already uses for an
 # analogous reason) while still binding real, usable module-level names here.
-_service_dump_native = _importlib.import_module(".service_dump_native", "abicheck")
+_native = _importlib.import_module(".workflows.dump.native", "abicheck")
 # Explicitly typed (not left as the `Any` importlib.import_module's attribute
 # access would otherwise infer) so a caller still gets a real return-type
 # check instead of a silent `no-any-return`.
-run_dump: Callable[..., AbiSnapshot] = _service_dump_native.run_dump
-del _service_dump_native
+run_dump: Callable[..., AbiSnapshot] = _native.run_dump
+del _native
 
 _logger = logging.getLogger(__name__)
 

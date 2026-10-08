@@ -39,43 +39,43 @@ from contextlib import nullcontext
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from .buildsource.source_inputs import granting_live_source_licence
-from .clang_layout_tool import attach_clang_layout
-from .dry_run_estimate import expand_header_inputs
-from .errors import (
+from ...buildsource.source_inputs import granting_live_source_licence
+from ...clang_layout_tool import attach_clang_layout
+from ...dry_run_estimate import expand_header_inputs
+from ...errors import (
     AbicheckError,
     SnapshotError,
     UnsupportedArtifactError,
     ValidationError,
 )
-from .extract.metadata_attach import (
+from ...extract.metadata_attach import (
     try_attach_numpy_capi_surface,
     try_attach_python_api_surface,
     try_attach_python_ext_metadata,
     try_attach_sycl_metadata,
 )
-from .header_utils import (
+from ...header_utils import (
     cache_relevant_operand_paths,
     deferred_token_dirs,
     resolve_inferred_header_roots,
 )
-from .model import AbiSnapshot
-from .service_header_graph_attach import (
+from ...model import AbiSnapshot
+from ...service_header_graph_attach import (
     _HEADER_GRAPH_ENABLED,
     _HEADER_GRAPH_INCLUDES_ENABLED,
     _attach_header_graph,
     prefetch_graph_if_useful,
     prefetch_settled_on_failure,
 )
-from .storage import closure_identity
-from .workflows.dump.formats import (
+from ...storage import closure_identity
+from ...workflows.dump.formats import (
     DEFAULT_ADAPTERS,
     BinaryFormatAdapter,
     NativeExtractRequest,
     emit_notice,
 )
-from .workflows.dump.hybrid import compose_hybrid
-from .workflows.run_dump_scope import (
+from ...workflows.dump.hybrid import compose_hybrid
+from ...workflows.run_dump_scope import (
     run_dump_header_roots,
     wrap_run_dump_with_dependency_scope,
 )
@@ -83,8 +83,8 @@ from .workflows.run_dump_scope import (
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from .compile_context import CompileContext
-    from .dump_manifest import DumpManifest
+    from ...compile_context import CompileContext
+    from ...dump_manifest import DumpManifest
 
 
 # The facade's logger name, kept from before the split.
@@ -212,7 +212,7 @@ def _run_dump_uncached(
         else header_backend
     )
 
-    from .dumper import _resolve_header_backend
+    from ...extract.header_ast_backend import _resolve_header_backend
 
     request = NativeExtractRequest(
         path=path,
@@ -295,8 +295,8 @@ def _extract_and_finish(
     and the clang layout; PE and Mach-O share :func:`_finish_native_snapshot`.
     Both renumber anonymous closure identities exactly once, at the end.
     """
-    from . import dumper_cache
-    from .dumper import _resolve_header_backend
+    from ...dumper_cache import ast_memoize_scope
+    from ...extract.header_ast_backend import _resolve_header_backend
 
     adapter = FORMAT_ADAPTERS.get(binary_fmt)
     if adapter is None:
@@ -342,11 +342,7 @@ def _extract_and_finish(
         # raw markers and assigns them ordinals from that narrower view.
         # Suppressed for this whole branch, renumbered once at the end.
         with (
-            (
-                dumper_cache.ast_memoize_scope()
-                if _headers and _graph_wanted
-                else nullcontext()
-            ),
+            ast_memoize_scope() if _headers and _graph_wanted else nullcontext(),
             closure_identity.defer_closure_identity_renumbering(),
             prefetch_settled_on_failure(_prefetched_graph),
         ):
@@ -387,7 +383,7 @@ def _extract_and_finish(
     # base_offsets/bases spelling mismatch, since both extractors already
     # renumber too early.
     with (
-        dumper_cache.ast_memoize_scope(),
+        ast_memoize_scope(),
         closure_identity.defer_closure_identity_renumbering(),
     ):
         snap = adapter.extract(request)
@@ -505,7 +501,7 @@ def _apply_native_provenance(
     surface — the exact false-clean result the ELF fix closed, left open on
     these two formats (Codex review, fresh evidence).
     """
-    from .workflows.snapshot_factory import finish_provenance
+    from ...workflows.snapshot_factory import finish_provenance
 
     return finish_provenance(
         snap,
@@ -559,7 +555,7 @@ def extract_elf(
     uses a build-derived directory. Falls back to ``list(includes)`` when
     omitted (unchanged prior behavior).
     """
-    from .dumper import dump
+    from ...dumper import dump
 
     # P1.1 (ADR-021a): a resolved detached debug artifact (--debug-root /
     # --debuginfod) was previously only used for a CLI log line -- the
@@ -572,7 +568,7 @@ def extract_elf(
         and not debug_presence_only
         and (debug_roots or enable_debuginfod)
     ):
-        from .debug_resolver import resolve_debug_info
+        from ...debug_resolver import resolve_debug_info
 
         artifact = resolve_debug_info(
             path,
@@ -590,7 +586,7 @@ def extract_elf(
                 else:
                     _logger.info(message)
 
-    from .compile_context import CompileContext
+    from ...compile_context import CompileContext
 
     cc = compile if compile is not None else CompileContext()
     resolved_headers = expand_header_inputs(headers) if headers else []

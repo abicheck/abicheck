@@ -1314,7 +1314,7 @@ class TestCheckAppcompat:
                 "abicheck.workflows.input_resolution.detect_binary_format",
                 return_value="elf",
             ),
-            patch("abicheck.service_dump_native.run_dump", return_value=MagicMock()),
+            patch("abicheck.workflows.dump.native.run_dump", return_value=MagicMock()),
             patch(
                 "abicheck.workflows.compare_policy.compare_snapshots", return_value=diff
             ),
@@ -1386,7 +1386,7 @@ class TestCheckAppcompat:
                 return_value="elf",
             ),
             patch(
-                "abicheck.service_dump_native.run_dump", return_value=MagicMock()
+                "abicheck.workflows.dump.native.run_dump", return_value=MagicMock()
             ) as mock_run_dump,
             patch(
                 "abicheck.workflows.compare_policy.compare_snapshots", return_value=diff
@@ -1428,7 +1428,7 @@ class TestCheckAppcompat:
                 return_value="elf",
             ),
             patch(
-                "abicheck.service_dump_native.run_dump", return_value=MagicMock()
+                "abicheck.workflows.dump.native.run_dump", return_value=MagicMock()
             ) as mock_run_dump,
             patch(
                 "abicheck.workflows.compare_policy.compare_snapshots", return_value=diff
@@ -1467,7 +1467,7 @@ class TestCheckAppcompat:
                 return_value="elf",
             ),
             patch(
-                "abicheck.service_dump_native.run_dump", return_value=MagicMock()
+                "abicheck.workflows.dump.native.run_dump", return_value=MagicMock()
             ) as mock_run_dump,
             patch(
                 "abicheck.workflows.compare_policy.compare_snapshots", return_value=diff
@@ -1704,7 +1704,7 @@ class TestCheckAppcompat:
                 "abicheck.workflows.input_resolution.detect_binary_format",
                 return_value="elf",
             ),
-            patch("abicheck.service_dump_native.run_dump", return_value=MagicMock()),
+            patch("abicheck.workflows.dump.native.run_dump", return_value=MagicMock()),
             patch(
                 "abicheck.workflows.compare_policy.compare_snapshots", return_value=diff
             ),
@@ -1737,7 +1737,7 @@ class TestCheckAppcompat:
                 return_value="elf",
             ),
             patch(
-                "abicheck.service_dump_native.run_dump", return_value=MagicMock()
+                "abicheck.workflows.dump.native.run_dump", return_value=MagicMock()
             ) as mock_run_dump,
             patch(
                 "abicheck.workflows.compare_policy.compare_snapshots", return_value=diff
@@ -1775,7 +1775,7 @@ class TestCheckAppcompat:
                 "abicheck.workflows.input_resolution.detect_binary_format",
                 return_value="elf",
             ),
-            patch("abicheck.service_dump_native.run_dump", return_value=MagicMock()),
+            patch("abicheck.workflows.dump.native.run_dump", return_value=MagicMock()),
             patch(
                 "abicheck.workflows.compare_policy.compare_snapshots", return_value=diff
             ),
@@ -1812,7 +1812,7 @@ class TestCheckAppcompat:
                 "abicheck.workflows.input_resolution.detect_binary_format",
                 return_value="elf",
             ),
-            patch("abicheck.service_dump_native.run_dump", return_value=MagicMock()),
+            patch("abicheck.workflows.dump.native.run_dump", return_value=MagicMock()),
             patch(
                 "abicheck.workflows.compare_policy.compare_snapshots", return_value=diff
             ),
