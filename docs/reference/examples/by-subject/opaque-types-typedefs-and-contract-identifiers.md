@@ -14,7 +14,7 @@ _9 case(s)._ [← back to all subjects](index.md)
 | [case73_typedef_underlying_changed](../case73_typedef_underlying_changed.md) | Typedef Underlying Type Changed | 🔴 BREAKING | Breaking |
 | [case80_pimpl_shared_to_unique](../case80_pimpl_shared_to_unique.md) | Pimpl Alias Switched from `shared_ptr` to `unique_ptr` | 🔴 BREAKING | Breaking |
 | [case81_serialization_tag_reassigned](../case81_serialization_tag_reassigned.md) | Serialization Tag ID Reassigned | 🔴 BREAKING | Breaking |
-| [case95_allocator_nested_typedef_removed](../case95_allocator_nested_typedef_removed.md) | Allocator Nested-Typedef Removed | 🔴 BREAKING | Breaking |
+| [case95_allocator_nested_typedef_removed](../case95_allocator_nested_typedef_removed.md) | Allocator Nested-Typedef Removed | 🟠 API_BREAK | API Break |
 | [case124_header_constant_value_changed](../case124_header_constant_value_changed.md) | Header Constant Value Changed | 🟠 API_BREAK | API Break |
 | [case156_public_macro_removed](../case156_public_macro_removed.md) | _public_macro_removed — Public macro removed | 🟠 API_BREAK | API Break |
 | [case158_public_typedef_removed](../case158_public_typedef_removed.md) | Public Typedef Removed | 🟠 API_BREAK | API Break |

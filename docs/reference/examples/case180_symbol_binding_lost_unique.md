@@ -61,9 +61,19 @@ Deployment Risk Changes:
 `min_evidence: L0` — read directly from the ELF symbol table's `st_info`
 binding field; no DWARF, no headers.
 
-**Toolchain note:** clang never emits `STB_GNU_UNIQUE` for vague-linkage
-template statics (a GCC ELF extension), so this finding only exists to
-detect under a GCC-built pair like the one below.
+**Toolchain note — applicability, not a detection gap:** Clang never emits
+`STB_GNU_UNIQUE` for vague-linkage template statics (a GCC ELF extension).
+Built with Clang, both v1 and v2 carry an ordinary `WEAK` binding (`readelf
+-s` shows `WEAK` on both sides) and two `RTLD_LOCAL` plugins already get
+separate state with the v1 build — the transition this case encodes does
+not exist, and `NO_CHANGE` is the correct verdict for that pair.
+`ground_truth.json` records this as `not_applicable_toolchains: ["clang"]`
+(lane status `NOT_APPLICABLE`, which still checks that the transition-free
+pair reads `NO_CHANGE`) rather than as an XFAIL that would claim a missed
+detection. Under GCC the binding really moves from `UNIQUE` to `WEAK`: two
+`RTLD_LOCAL` plugins share state with the old build (`second_id = 99`) and
+lose it with the new one (`42`). Block the change if shared singleton
+identity across DSOs is part of the library's promise.
 
 ## Why abicheck catches it
 

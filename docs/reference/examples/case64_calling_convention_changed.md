@@ -46,9 +46,15 @@ double vector_dot(const double *a, const double *b, int len);
 ## abicheck command
 
 ```bash
+# Clang records the convention in DWARF -- debug info alone is enough:
 clang -shared -fPIC -g v1.c -o libfoo_v1.so
 clang -shared -fPIC -g v2.c -o libfoo_v2.so
 abicheck compare libfoo_v1.so libfoo_v2.so
+
+# GCC does not; supply the public headers:
+gcc -shared -fPIC -g v1.c -o libfoo_v1.so
+gcc -shared -fPIC -g v2.c -o libfoo_v2.so
+abicheck compare libfoo_v1.so libfoo_v2.so -H old=v1.h -H new=v2.h
 ```
 
 ## Expected abicheck finding
@@ -66,19 +72,24 @@ Verdict: BREAKING (exit 4)
 
 `min_evidence: L1` — DWARF's `DW_AT_calling_convention` attribute on the
 subprogram DIE records the convention directly, so debug info alone (no
-public headers) is enough. **Toolchain note:** GCC does not emit
-`DW_AT_calling_convention` for `__attribute__((ms_abi))` — compiling both
-sides with GCC produces `NO_CHANGE` (a real false negative, not a fixture
-bug); Clang does emit the attribute and abicheck reports `BREAKING` as
-expected. The command above builds with Clang for exactly that reason.
+public headers) is enough when the producer emits it. **Toolchain note:**
+Clang emits the attribute; GCC does not emit `DW_AT_calling_convention` for
+`__attribute__((ms_abi))`, so a GCC-built pair is detected from the public
+headers instead (L2). The convention is a property of the library's
+transition, not of the extractor: both producers yield the same `BREAKING`
+finding once headers are supplied.
 
 ## Why abicheck catches it
 
-abicheck reads each function's `DW_AT_calling_convention` value from DWARF
-and compares it between versions; ms_abi and the default System V
-convention encode to different DWARF constants, so the change is visible
-without any header/AST evidence — when the compiler emits the attribute at
-all (see the toolchain note above).
+From DWARF, abicheck compares each function's `DW_AT_calling_convention`
+value between versions; ms_abi and the default System V convention encode
+to different DWARF constants. From headers, the convention is a contract
+attribute of the declaration. CastXML 0.7 drops GNU x86-64 conventions
+(`ms_abi`/`sysv_abi`) from its own `attributes` output, so abicheck recovers
+them from the declaration's text at the location CastXML reports
+(`abicheck/extract/headers/castxml/calling_convention.py`); the clang AST
+backend records them natively. A convention spelled through a macro is only
+seen by the clang backend or by DWARF.
 
 ## Runtime failure demonstration
 

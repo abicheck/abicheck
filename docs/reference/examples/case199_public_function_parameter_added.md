@@ -72,19 +72,26 @@ fixture before.
 
 ## Runtime failure demonstration
 
-**Severity: undefined behaviour — the callee reads an argument slot the
-caller never wrote.**
+**Severity: the callee reads an argument the caller never passed.**
+
+v2's `chan_open(name, flags)` accepts exactly two modes (`CHAN_RDONLY`,
+`CHAN_RDWR`) and rejects anything else. The old app calls `chan_open("demo")`
+and asserts v1's contract (fd `3`).
 
 ```bash
 gcc -shared -fPIC -g v1.c -o libv1.so
-gcc -g app.c -L. -lv1 -Wl,-rpath,. -o app
-./app
-# → chan_open -> 3
-
+gcc -g app.c -L. -lv1 -Wl,-rpath,'$ORIGIN' -o app
+./app            # chan_open -> 3                                   exit 0
 gcc -shared -fPIC -g v2.c -o libv1.so   # swap in v2, no recompile
-./app
-# → chan_open -> 3 or -1, depending on register residue
+./app            # chan_open -> -1  BROKEN                          exit 1
 ```
+
+What the callee finds in the unset slot (`%esi` on x86-64) is whatever the
+caller's code last left there — a property of the caller's compiler and
+optimisation level, not of any contract. Disabling ASLR does not make it
+deterministic, so the witness pins that register to a value outside v2's
+accepted set immediately before the call instead of hoping residue fails
+v2's check (the earlier witness exited 0 and could pass by accident).
 
 Recompiling the consumer against v2 fails outright
 (`too few arguments to function 'chan_open'`), which is the API half of the

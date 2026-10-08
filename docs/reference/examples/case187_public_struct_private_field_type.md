@@ -8,7 +8,7 @@
 | **Classification** | Rule |
 | **Platforms** | Linux |
 | **Flags** | ABI break, API break, Bad practice |
-| **Detected `ChangeKind`s** | `struct_field_type_changed`, `public_api_internal_dependency_added` |
+| **Detected `ChangeKind`s** | `type_field_type_changed`, `public_api_internal_dependency_added` |
 | **Source files** | `catalog/cases/case187_public_struct_private_field_type/` |
 | **Rule family** | [`public-struct-private-field-type`](by-rule/public-struct-private-field-type.md) |
 | **Subject** | [Public API depends on an internal declaration](by-subject/internal-dependency-reachability.md) |
@@ -51,8 +51,8 @@ Verdict: BREAKING (exit 4)
 
 - type_field_type_changed: Field type changed: Public::reserved (void * -> detail::PrivateType *)
   > Field has different size or representation; old code misinterprets the data.
-- struct_field_type_changed: Field type changed: demo::Public::reserved void *(8B) -> PrivateType *(8B)
-  > Field type changed in binary; old code misinterprets the field data.
+  (a DWARF-only run reports the same fact as `struct_field_type_changed`;
+  with headers it collapses into the finding above)
 
 Deployment risk (binary-compatible, review needed):
 - public_api_internal_dependency_added: Public entry 'use_public' now reaches internal

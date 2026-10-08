@@ -3,7 +3,7 @@
 
 Backward-compatible changes (additions or quality-only).
 
-_34 case(s)._ [← back to all examples](../index.md)
+_32 case(s)._ [← back to all examples](../index.md)
 
 | Case | Title | Verdict | Category |
 |------|-------|---------|----------|
@@ -17,7 +17,6 @@ _34 case(s)._ [← back to all examples](../index.md)
 | [case29_ifunc_transition](../case29_ifunc_transition.md) | GNU IFUNC Transition | 🟢 COMPATIBLE | Quality (Compatible) |
 | [case47_inline_to_outlined](../case47_inline_to_outlined.md) | Inline Method Moved Out-of-Line | 🟢 COMPATIBLE | Addition (Compatible) |
 | [case49_executable_stack](../case49_executable_stack.md) | Executable Stack (GNU_STACK RWX) | 🟢 COMPATIBLE | Quality (Compatible) |
-| [case51_protected_visibility](../case51_protected_visibility.md) | Protected Visibility (DEFAULT to PROTECTED) | 🟢 COMPATIBLE | Quality (Compatible) |
 | [case52_rpath_leak](../case52_rpath_leak.md) | RPATH Leak (Hardcoded Build Directory) | 🟢 COMPATIBLE | Quality (Compatible) |
 | [case54_used_reserved_field](../case54_used_reserved_field.md) | Used Reserved Field | 🟢 COMPATIBLE | Quality (Compatible) |
 | [case61_var_added](../case61_var_added.md) | Global Variable Added | 🟢 COMPATIBLE | Addition (Compatible) |
@@ -40,4 +39,3 @@ _34 case(s)._ [← back to all examples](../index.md)
 | [case200_new_entry_point_instead_of_parameter_added](../case200_new_entry_point_instead_of_parameter_added.md) | New Entry Point Instead of a Changed Arity | 🟢 COMPATIBLE | Addition (Compatible) |
 | [case204_class_gained_non_virtual_method](../case204_class_gained_non_virtual_method.md) | Class Gained a Non-Virtual Method | 🟢 COMPATIBLE | Addition (Compatible) |
 | [case205_public_function_marked_deprecated](../case205_public_function_marked_deprecated.md) | Public Function Marked Deprecated | 🟢 COMPATIBLE | Quality (Compatible) |
-| [case207_pointer_parameter_gained_restrict](../case207_pointer_parameter_gained_restrict.md) | Pointer Parameter Gained `restrict` | 🟢 COMPATIBLE | Quality (Compatible) |

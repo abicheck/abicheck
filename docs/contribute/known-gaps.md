@@ -7094,6 +7094,34 @@ problem rather than a review-found edge case, the honest fix is reworking
 stream per-artifact results to the caller instead of returning one
 document, which both known callers would need to be updated for together.
 
+### A pointee qualifier change on a *return* type is not reported
+
+Found while fixing catalog case186 (GCC/Clang catalog validation,
+2026-10). Parameter-side pointee const/volatile changes are now classified
+by direction (`param_pointee_qualifier_added` / `_changed`,
+`compare/parameter_facts.py`). The return-type mirror is still suppressed
+entirely by `cv_qualifiers_only_differ`: `char *get_name()` →
+`const char *get_name()` breaks a C++ caller writing
+`char *p = get_name();` (and draws a discarded-qualifier diagnostic in C),
+while the reverse direction is safe. It was left out on purpose — the
+Wayland/libuv false-positive class this suppression was built for included
+accessor *returns* gaining const, and a gating `API_BREAK` there needs its
+own evidence that real consumers bind the result to a mutable pointer.
+A future fix should mirror the parameter split (gained → `API_BREAK` for
+assigning callers, lost → compatible) with its own catalog case and an FP
+measurement against the conda-forge corpus.
+
+### Behavioral regressions behind an unchanged declaration
+
+Catalog case208 (restrict added to a function *definition* only) breaks a
+valid overlapping consumer at runtime under GCC and Clang, while the
+declared interface — everything a binary/header comparison reads — is
+identical. Ground truth records it as `behavioral_break: true` with
+`truth_scope: declared-interface`; no detector is expected to infer it.
+An L4 source-ABI replay *could* see `restrict` on the definition's
+parameters and report a definition/declaration contract mismatch; that is
+not implemented.
+
 ### Dependency static/dynamic linking-mode change has no ChangeKind
 
 Found by Phase 2/3 of

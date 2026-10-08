@@ -29,7 +29,7 @@ _88 case(s)._ [← back to all examples](../index.md)
 | [case27_symbol_binding_weakened](../case27_symbol_binding_weakened.md) | Symbol Binding Weakened (GLOBAL → WEAK) | 🟢 COMPATIBLE | Quality (Compatible) |
 | [case28_typedef_opaque](../case28_typedef_opaque.md) | Typedef and Opaque Type Changes | 🔴 BREAKING | Breaking |
 | [case29_ifunc_transition](../case29_ifunc_transition.md) | GNU IFUNC Transition | 🟢 COMPATIBLE | Quality (Compatible) |
-| [case30_field_qualifiers](../case30_field_qualifiers.md) | Field Qualifier Changes (const, volatile) | 🔴 BREAKING | Breaking |
+| [case30_field_qualifiers](../case30_field_qualifiers.md) | Field Qualifier Changes (const, volatile) | 🟠 API_BREAK | API Break |
 | [case31_enum_rename](../case31_enum_rename.md) | Enum Member Rename | 🟠 API_BREAK | API Break |
 | [case33_pointer_level](../case33_pointer_level.md) | Pointer Level Change | 🔴 BREAKING | Breaking |
 | [case35_field_rename](../case35_field_rename.md) | Field Rename | 🟠 API_BREAK | API Break |
@@ -44,7 +44,7 @@ _88 case(s)._ [← back to all examples](../index.md)
 | [case48_leaf_struct_through_pointer](../case48_leaf_struct_through_pointer.md) | Leaf Struct Change Propagated Through Pointer | 🔴 BREAKING | Breaking |
 | [case49_executable_stack](../case49_executable_stack.md) | Executable Stack (GNU_STACK RWX) | 🟢 COMPATIBLE | Quality (Compatible) |
 | [case50_soname_inconsistent](../case50_soname_inconsistent.md) | SONAME Inconsistent (Wrong Major Version) | 🟡 COMPATIBLE_WITH_RISK | Risk |
-| [case51_protected_visibility](../case51_protected_visibility.md) | Protected Visibility (DEFAULT to PROTECTED) | 🟢 COMPATIBLE | Quality (Compatible) |
+| [case51_protected_visibility](../case51_protected_visibility.md) | Protected Visibility (DEFAULT to PROTECTED) | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case52_rpath_leak](../case52_rpath_leak.md) | RPATH Leak (Hardcoded Build Directory) | 🟢 COMPATIBLE | Quality (Compatible) |
 | [case53_namespace_pollution](../case53_namespace_pollution.md) | Namespace Pollution (Generic Symbol Names) | 🔴 BREAKING | Breaking |
 | [case54_used_reserved_field](../case54_used_reserved_field.md) | Used Reserved Field | 🟢 COMPATIBLE | Quality (Compatible) |
@@ -85,7 +85,7 @@ _88 case(s)._ [← back to all examples](../index.md)
 | [case182_accidental_export_removed_still_breaking](../case182_accidental_export_removed_still_breaking.md) | Accidental Export Removed — Still Breaking Under Public-Header Scoping | 🔴 BREAKING | Breaking |
 | [case183_internal_version_node_churn](../case183_internal_version_node_churn.md) | Internal ELF symbol-version node churn | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case184_internal_enum_churn_scoped](../case184_internal_enum_churn_scoped.md) | Internal Enum Churn, Scoped Out by Private-Header Origin | ✅ NO_CHANGE | No Change |
-| [case186_c_api_pointee_const_abi_neutral](../case186_c_api_pointee_const_abi_neutral.md) | C API Pointee const-Qualification Is ABI-Neutral | ✅ NO_CHANGE | No Change |
+| [case186_c_api_pointee_const_abi_neutral](../case186_c_api_pointee_const_abi_neutral.md) | C API Pointee const-Qualification — ABI-Neutral, Not Source-Neutral | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case198_public_struct_field_reorder](../case198_public_struct_field_reorder.md) | Public Struct Field Reorder | 🔴 BREAKING | Breaking |
 | [case199_public_function_parameter_added](../case199_public_function_parameter_added.md) | Parameter Added to an Exported Function | 🔴 BREAKING | Breaking |
 | [case200_new_entry_point_instead_of_parameter_added](../case200_new_entry_point_instead_of_parameter_added.md) | New Entry Point Instead of a Changed Arity | 🟢 COMPATIBLE | Addition (Compatible) |
@@ -93,5 +93,5 @@ _88 case(s)._ [← back to all examples](../index.md)
 | [case202_public_header_declaration_order_changed](../case202_public_header_declaration_order_changed.md) | Public Header Declaration Order Changed | ✅ NO_CHANGE | No Change |
 | [case205_public_function_marked_deprecated](../case205_public_function_marked_deprecated.md) | Public Function Marked Deprecated | 🟢 COMPATIBLE | Quality (Compatible) |
 | [case206_deprecation_documented_without_attribute](../case206_deprecation_documented_without_attribute.md) | Deprecation Documented Without the Attribute | ✅ NO_CHANGE | No Change |
-| [case207_pointer_parameter_gained_restrict](../case207_pointer_parameter_gained_restrict.md) | Pointer Parameter Gained `restrict` | 🟢 COMPATIBLE | Quality (Compatible) |
+| [case207_pointer_parameter_gained_restrict](../case207_pointer_parameter_gained_restrict.md) | Pointer Parameter Gained `restrict` | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case208_restrict_added_to_definition_only](../case208_restrict_added_to_definition_only.md) | `restrict` Added to the Definition Only | ✅ NO_CHANGE | No Change |

@@ -3,17 +3,20 @@
 
 Source-level / API-only breaks; recompilation fails or behavior shifts.
 
-_17 case(s)._ [← back to all examples](../index.md)
+_20 case(s)._ [← back to all examples](../index.md)
 
 | Case | Title | Verdict | Category |
 |------|-------|---------|----------|
+| [case30_field_qualifiers](../case30_field_qualifiers.md) | Field Qualifier Changes (const, volatile) | 🟠 API_BREAK | API Break |
 | [case31_enum_rename](../case31_enum_rename.md) | Enum Member Rename | 🟠 API_BREAK | API Break |
 | [case32_param_defaults](../case32_param_defaults.md) | Parameter Default Value Changes (C++) | 🟠 API_BREAK | API Break |
 | [case34_access_level](../case34_access_level.md) | Access Level Changed | 🟠 API_BREAK | API Break |
 | [case35_field_rename](../case35_field_rename.md) | Field Rename | 🟠 API_BREAK | API Break |
+| [case95_allocator_nested_typedef_removed](../case95_allocator_nested_typedef_removed.md) | Allocator Nested-Typedef Removed | 🟠 API_BREAK | API Break |
 | [case96_hidden_friend_removed](../case96_hidden_friend_removed.md) | Hidden Friend Operator Removed | 🟠 API_BREAK | API Break |
 | [case105_concept_tightening](../case105_concept_tightening.md) | Concept Tightening (C++20) | 🟠 API_BREAK | API Break |
 | [case106_ctor_became_explicit](../case106_ctor_became_explicit.md) | Conversion Operator Became `explicit` | 🟠 API_BREAK | API Break |
+| [case109_flow_graph_policy_renames](../case109_flow_graph_policy_renames.md) | flow::graph Policy Tag Renames | 🟠 API_BREAK | API Break |
 | [case111_enumerable_thread_specific_lambda_ambiguity](../case111_enumerable_thread_specific_lambda_ambiguity.md) | enumerable_thread_specific Lambda-Init Ambiguity | 🟠 API_BREAK | API Break |
 | [case123_default_argument_removed](../case123_default_argument_removed.md) | Default Argument Removed | 🟠 API_BREAK | API Break |
 | [case124_header_constant_value_changed](../case124_header_constant_value_changed.md) | Header Constant Value Changed | 🟠 API_BREAK | API Break |

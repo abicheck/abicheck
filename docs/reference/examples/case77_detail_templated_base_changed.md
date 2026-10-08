@@ -97,30 +97,20 @@ resolve the templated inheritance edge from source.
 
 **Severity: CRITICAL**
 
-**Scenario:** compile app against v1, swap in v2 `.so` without recompile —
-the app's stack-allocated `knn_descriptor<task::classification>` is sized
-for v1's smaller layout, but v2's constructor writes into the larger one.
+**Scenario:** the consumer owns a `knn_descriptor<task::classification>`
+sized by v1 and constructs it in place; the constructor is the library's
+explicit instantiation, so after the swap v2's runs and initialises the
+template-grown base, storing `neighbor_count_` past the v1-sized object.
 
 ```bash
-# Build old library + app
-g++ -std=c++17 -shared -fPIC -g v1.cpp -o libfoo.so
-g++ -std=c++17 -g -O0 app.cpp -L. -lfoo -Wl,-rpath,. -o app
-./app
-# → class_count    = 2 (expect 2)
-# → neighbor_count = 5 (expect 5)
-# → factory class_count = 2 (expect 2)
-
-# Swap in new library (no recompile)
-g++ -std=c++17 -shared -fPIC -g v2.cpp -o libfoo.so
-./app
-# → *** stack smashing detected ***: terminated
+g++ -std=c++17 -shared -fPIC -g v1.cpp -o libv1.so
+g++ -std=c++17 -g app.cpp -I. -L. -lv1 -Wl,-rpath,'$ORIGIN' -o app
+./app            # class_count = 2, neighbor_count = 5           exit 0
+g++ -std=c++17 -shared -fPIC -g v2.cpp -o libv1.so   # swap, no recompile
+./app            # CORRUPTION: constructor wrote past the v1-sized object, exit 1
 ```
 
-**Why CRITICAL:** the app's `knn_descriptor<task::classification> d;`
-allocates v1's (smaller) stack slot, but v2's constructor initializes the
-larger, template-grown base layout — writing `max_iter_` past the end of
-the allocated object. glibc's stack-protector catches the overwritten
-canary and aborts the process.
+The witness heap-allocates the object with the **v1** size, followed by a 32-byte guard region filled with `0xA5`, and asserts the guard afterwards. That makes the overrun visible deterministically under GCC and Clang, Debug and Release, without depending on stack layout, optimisation level or a stack-protector canary (the original stack-canary witness stayed silent under some Clang builds). An independent ASan build of the same consumer reports `heap-buffer-overflow` after the swap.
 
 ## Safe redesign
 

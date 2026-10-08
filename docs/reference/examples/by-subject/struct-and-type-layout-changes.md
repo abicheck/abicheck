@@ -15,7 +15,7 @@ _21 case(s)._ [← back to all subjects](index.md)
 | [case24_union_field_removed](../case24_union_field_removed.md) | Union Field Removed | 🔴 BREAKING | Breaking |
 | [case26_union_field_added](../case26_union_field_added.md) | Union Field Added (Size Grows) | 🔴 BREAKING | Breaking |
 | [case26b_union_field_added_compatible](../case26b_union_field_added_compatible.md) | Union Field Added (No Size Change) | 🟢 COMPATIBLE | Addition (Compatible) |
-| [case30_field_qualifiers](../case30_field_qualifiers.md) | Field Qualifier Changes (const, volatile) | 🔴 BREAKING | Breaking |
+| [case30_field_qualifiers](../case30_field_qualifiers.md) | Field Qualifier Changes (const, volatile) | 🟠 API_BREAK | API Break |
 | [case36_anon_struct](../case36_anon_struct.md) | Anonymous Struct/Union Change | 🔴 BREAKING | Breaking |
 | [case40_field_layout](../case40_field_layout.md) | Field Layout Changes | 🔴 BREAKING | Breaking |
 | [case42_type_alignment_changed](../case42_type_alignment_changed.md) | Type Alignment Changed (standalone alignas) | 🔴 BREAKING | Breaking |

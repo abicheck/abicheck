@@ -3,8 +3,8 @@
 
 | Field | Value |
 |-------|-------|
-| **Verdict** | 🔴 **BREAKING** |
-| **Category** | Breaking |
+| **Verdict** | 🟠 **API_BREAK** |
+| **Category** | API Break |
 | **Classification** | Rule |
 | **Platforms** | Linux, macOS |
 | **Flags** | API break |
@@ -12,25 +12,27 @@
 | **Source files** | `catalog/cases/case95_allocator_nested_typedef_removed/` |
 | **Rule family** | [`allocator-nested-typedef-removed`](by-rule/allocator-nested-typedef-removed.md) |
 | **Subject** | [Opaque types, typedefs, and contract identifiers](by-subject/opaque-types-typedefs-and-contract-identifiers.md) |
-| **Underlying fact** | API_BREAK (policy-escalated to BREAKING) |
 
-**Category:** Source API contract | **Verdict:** 🔴 BREAKING (policy-escalated source break)
+**Category:** Source API contract | **Verdict:** 🟠 API_BREAK
 
 ## Verdict and consumer impact
 
 An allocator-style class drops its historical nested typedef set
 (`value_type`, `pointer`, `reference`, `size_type`, `difference_type`) —
-mirroring the historical `std::allocator<T>` shape. The exported member
-functions keep their mangled names, so the `.so` symbol table is unchanged
-and previously-linked binaries still load and run. But every consumer
-source TU that wrote `typename my_allocator::value_type` (or participates
-in STL-style generic code that does) fails to **compile** against v2
-headers. `typedef_removed` is a generic detector that conservatively
-classifies every nested-typedef removal as `BREAKING` by default policy —
-the underlying compatibility fact here is `API_BREAK` (recompile-only
-failure, no impact on already-built binaries); see the `policy_note` in
-`ground_truth.json` for the full distinction from the L4 source-ABI-replay
-sibling case that classifies the identical pattern as `API_BREAK`.
+mirroring the historical `std::allocator<T>` shape — and `allocate()` /
+`deallocate()` now spell `std::size_t` directly. The exported member
+functions keep their mangled names (an Itanium name encodes the canonical
+type, `m`, either way), so the `.so` symbol table is unchanged and
+previously-linked binaries still load and run. Every consumer source TU
+that wrote `typename my_allocator::value_type` (or participates in
+STL-style generic code that does) fails to **compile** against v2 headers —
+an **API_BREAK** (`typedef_removed`).
+
+Earlier releases reported this as BREAKING twice over: `typedef_removed`
+was classified as a binary break although a typedef is never encoded in a
+binary, and the respelled parameters (`size_type` → `unsigned long`) were
+read as a parameter *type* change although the unchanged mangled name
+proves the types identical.
 
 ## Old/new diff
 
@@ -55,17 +57,14 @@ abicheck compare libfoo_v1.so libfoo_v2.so -H old=v1.h -H new=v2.h --config .abi
 ## Expected abicheck finding
 
 ```text
-Verdict: BREAKING (exit 4)
+Verdict: API_BREAK (exit 2)
 
 - typedef_removed: Typedef removed: size_type (unsigned long)
-  > Old code using the typedef name won't compile; binary impact
-    depends on usage.
+  > Source that names the typedef no longer compiles. A typedef is never
+    encoded in a binary ...
 ```
 
-(the header AST-level parameter-name diff on `allocate`/`deallocate` also
-surfaces as `func_params_changed` in the full report — the underlying
-integral type and mangled symbol are unchanged, only the header's spelled
-parameter type differs from the removed `size_type` alias.)
+`func_params_changed` must not appear: the parameters are only respelled.
 
 ## Minimum evidence
 
@@ -138,10 +137,6 @@ where a binary-only diff tool is not.
 
 ---
 
-## Ground-truth provenance
-
-**Policy note:** Exported member symbols are unchanged, so an already-built consumer binary keeps linking and running against v2 — the underlying compatibility fact is API_BREAK (recompilation-only failure: `typename Alloc::value_type` and friends stop resolving). `expected` stays BREAKING because `typedef_removed` is a generic detector that conservatively classifies every nested-typedef removal as BREAKING by default policy, regardless of whether the removed alias is reachable only from source (never encoded in the binary). The catalog's `public_typedef_removed` (L4) case is the API_BREAK-classified sibling for source-ABI-replay evidence of the same removal pattern; the two differ in detector, not in the underlying fact.
-
 ## Source files
 
 - `CMakeLists.txt`
@@ -151,4 +146,4 @@ where a binary-only diff tool is not.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Allocator nested typedef removed](by-rule/allocator-nested-typedef-removed.md) · [Subject: Opaque types, typedefs, and contract identifiers](by-subject/opaque-types-typedefs-and-contract-identifiers.md)._
+_See also: [Compatibility Catalog](index.md) · [All API_BREAK cases](by-verdict/api-break.md) · [Category: API Break](by-category/api_break.md) · [Rule: Allocator nested typedef removed](by-rule/allocator-nested-typedef-removed.md) · [Subject: Opaque types, typedefs, and contract identifiers](by-subject/opaque-types-typedefs-and-contract-identifiers.md)._

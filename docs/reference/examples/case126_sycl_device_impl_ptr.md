@@ -8,7 +8,7 @@
 | **Classification** | Scenario — Ecosystem case study |
 | **Platforms** | Linux |
 | **Flags** | ABI break, API break |
-| **Detected `ChangeKind`s** | `struct_size_changed` |
+| **Detected `ChangeKind`s** | `type_size_changed` |
 | **Source files** | `catalog/cases/case126_sycl_device_impl_ptr/` |
 | **Ecosystem** | [SYCL](by-ecosystem/sycl.md) |
 | **Related rules** | [`public-class-representation-changed`](by-rule/public-class-representation-changed.md), [`public-struct-private-field-type`](by-rule/public-struct-private-field-type.md) |

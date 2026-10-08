@@ -8,7 +8,7 @@
 | **Classification** | Rule |
 | **Platforms** | Linux, macOS |
 | **Flags** | ABI break, API break |
-| **Detected `ChangeKind`s** | `typedef_base_changed`, `struct_size_changed` |
+| **Detected `ChangeKind`s** | `type_size_changed`, `type_field_type_changed` |
 | **Source files** | `catalog/cases/case80_pimpl_shared_to_unique/` |
 | **Rule family** | [`pimpl-shared-to-unique`](by-rule/pimpl-shared-to-unique.md) |
 | **Subject** | [Opaque types, typedefs, and contract identifiers](by-subject/opaque-types-typedefs-and-contract-identifiers.md) |
@@ -76,9 +76,9 @@ also diffs the *entire* exported symbol table (including libstdc++
 internals pulled in transitively), which is where the extra noise above
 comes from. Adding public headers (`-H` + `compile.frontend: clang` (via `.abicheck.yml`), scoping
 the surface to `v1.h`/`v2.h`) sharpens this to exactly the two kinds
-`examples/ground_truth.json` records for this case —
-`typedef_base_changed: pimpl (std::shared_ptr<T> -> std::unique_ptr<T>)`
-and `struct_size_changed: mylib::descriptor (16 -> 8 bytes)` — with the
+`catalog/ground_truth.json` records for this case —
+`type_field_type_changed: descriptor::impl_ (shared_ptr<...> -> unique_ptr<...>)`
+and `type_size_changed: descriptor (128 -> 64 bits)` — with the
 system-header noise gone.
 
 ## Why abicheck catches it
@@ -88,8 +88,10 @@ textually identical on both sides — only the `using pimpl = ...` alias
 target changed. DWARF still records the underlying type's byte size
 shrinking (16 → 8 bytes) on both the field and the containing `descriptor`
 struct, so the layout-diff surfaces the change even without seeing the
-alias declaration itself; header evidence additionally names the alias
-flip directly (`typedef_base_changed`).
+alias declaration itself. `pimpl` is an alias *template*, which has no
+instantiation-independent base type to compare, so no `typedef_base_changed`
+is reported for it; header evidence names the flip through the field it
+shapes (`type_field_type_changed`, `shared_ptr<...>` → `unique_ptr<...>`).
 
 ## Runtime failure demonstration
 

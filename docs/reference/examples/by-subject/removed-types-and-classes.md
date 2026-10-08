@@ -12,5 +12,5 @@ _5 case(s)._ [← back to all subjects](index.md)
 | [case41_type_changes](../case41_type_changes.md) | Type-Level Changes | 🔴 BREAKING | Breaking |
 | [case107_task_scheduler_init_removed](../case107_task_scheduler_init_removed.md) | `task_scheduler_init` Removed (historical ABI break) | 🔴 BREAKING | Breaking |
 | [case108_task_class_removed](../case108_task_class_removed.md) | `task` Class Removed (historical ABI break — vtable angle) | 🔴 BREAKING | Breaking |
-| [case109_flow_graph_policy_renames](../case109_flow_graph_policy_renames.md) | flow::graph Policy Tag Renames | 🔴 BREAKING | Breaking |
+| [case109_flow_graph_policy_renames](../case109_flow_graph_policy_renames.md) | flow::graph Policy Tag Renames | 🟠 API_BREAK | API Break |
 | [case110_concurrent_unordered_map_api_drift](../case110_concurrent_unordered_map_api_drift.md) | concurrent_unordered_map API Drift | 🔴 BREAKING | Breaking |
