@@ -154,7 +154,6 @@
         "abicheck/dumper_debug.py",
         "abicheck/dumper_elf_symbols.py",
         "abicheck/dumper_layout_backfill.py",
-        "abicheck/dumper_scoping.py",
         "abicheck/dumper_sysinc.py",
         "abicheck/dumper_toolchain.py",
         "abicheck/dwarf_advanced.py",
@@ -260,6 +259,7 @@
         "abicheck/finding_identity.py",
         "abicheck/finding_identity_atomic.py",
         "abicheck/finding_identity_ctor_dtor.py",
+        "abicheck/type_reachability.py",
         "abicheck/type_reachability_spelling.py",
         "abicheck/type_reachability_stdlib_spellings.py",
         "abicheck/versioned_symbol_scheme.py"
@@ -569,7 +569,6 @@
       "dumper_hybrid.py",
       "dumper_layout_backfill.py",
       "dumper_manifest.py",
-      "dumper_scoping.py",
       "dumper_sysinc.py",
       "dumper_toolchain.py"
     ],
@@ -760,7 +759,6 @@
     "dumper_hybrid.py",
     "dumper_layout_backfill.py",
     "dumper_manifest.py",
-    "dumper_scoping.py",
     "dumper_sysinc.py",
     "dumper_toolchain.py",
     "dwarf_advanced.py",

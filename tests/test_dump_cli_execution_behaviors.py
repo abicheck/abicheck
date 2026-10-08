@@ -119,7 +119,7 @@ def _spy_dependency_scope_roots(monkeypatch) -> list[tuple[Path, ...]]:
     """Record the header-root set ``service.run_dump``'s own dependency-scope
     choke point derives, so a test can compare ``dump``'s independently-built
     ``header_roots`` against it instead of restating its formula."""
-    import abicheck.dumper_scoping as dumper_scoping
+    import abicheck.workflows.dump.dependency_scope as dumper_scoping
 
     seen: list[tuple[Path, ...]] = []
     real = dumper_scoping.resolve_dependency_scope

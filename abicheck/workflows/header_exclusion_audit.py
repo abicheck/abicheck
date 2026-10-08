@@ -61,10 +61,10 @@ def record_achieved_header_exclusions(
     ``model.header_exclusion_record.record_header_exclusions``, which owns
     the "a loaded snapshot keeps its own provenance" rule.
     """
-    from ..dumper_scoping import scope_snapshot_excluding_dependencies
     from ..extract.dump_manifest_roots import dump_manifest_header_roots
     from ..extract.header_exclusions import matched_exclusion_patterns
     from ..model.header_exclusion_record import record_header_exclusions
+    from .dump.dependency_scope import scope_snapshot_excluding_dependencies
 
     achieved = set(matched_exclusion_patterns(headers, exclude_headers))
     if extracted_now and exclude_headers and snapshot.dependency_scope == "filtered":

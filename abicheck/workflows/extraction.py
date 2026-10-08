@@ -121,7 +121,6 @@ from ..dumper_cache import ast_acquisition_scope, ast_memoize_scope
 from ..dumper_clang import resolve_source_frontend_clang_bin
 from ..dumper_clang_streaming import suppress_streaming_prune
 from ..dumper_contract import _manifest_declared_includes
-from ..dumper_scoping import resolve_dependency_scope
 from ..dwarf_snapshot import show_data_sources
 from ..dwarf_unified import parse_dwarf
 from ..elf_metadata import parse_elf_metadata
@@ -154,6 +153,7 @@ from ..provenance import apply_provenance
 from ..python_api import detect_python_api
 from ..python_ext import detect_python_extension
 from ..symvers_metadata import looks_like_symvers
+from .dump.dependency_scope import resolve_dependency_scope
 
 __all__ = [
     "BindingsFile",
