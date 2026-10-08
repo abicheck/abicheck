@@ -92,6 +92,7 @@ from .context import (
 )
 from .inline_semantics import fold_inline_across_redeclarations, is_effectively_inline
 from .param_kind import param_kind as _param_kind
+from .restrict_spelling import without_top_level_restrict
 from .return_type import return_type as _return_type
 
 #: Evaluates a param's default-argument initializer to its snapshot value
@@ -566,21 +567,13 @@ def parse_functions(
         params = [
             Param(
                 name=str(p.get("name", "")),
-                # Top-level `restrict` qualifies the parameter object, not
-                # the function's type, and is carried by `is_restrict`
-                # below -- exactly as CastXML reports it. Left in the
-                # spelling, adding it read as a parameter *type* change
-                # (`float *` -> `float *restrict`, FUNC_PARAMS_CHANGED)
-                # under the clang backend only.
-                type=_without_top_level_restrict(_qualtype(p)),
-                # Desugared, not the raw `qualType`: a typedef'd
-                # pointer/reference/rvalue-reference (`typedef int &Ref;`)
-                # spells its `qualType` as the bare alias name, with no
-                # `&`/`*` token for the spelling heuristic to find -- see
-                # `context.qualtype_desugared`'s own docstring (Codex
-                # review, PR #1200).
+                # Top-level `restrict` is `is_restrict` below, not the type.
+                type=without_top_level_restrict(_qualtype(p)),
+                # Desugared, not the raw `qualType`: a typedef'd pointer/reference/rvalue-reference (`typedef int &Ref;`)
+                # spells its `qualType` as the bare alias name, with no `&`/`*` token for the spelling heuristic to find --
+                # see `context.qualtype_desugared`'s own docstring (Codex review, PR #1200).
                 kind=_param_kind(_qualtype_desugared(p)),
-                pointer_depth=_pointer_depth(_without_top_level_restrict(_qualtype(p))),
+                pointer_depth=_pointer_depth(_qualtype(p)),
                 # G31 Phase C: castxml was the ONLY producer of this fact (`_resolve_cv_restrict`), so a castxml-vs-clang comparison of unchanged headers reported PARAM_RESTRICT_CHANGED for every restrict-qualified parameter -- the detector compares the two bools directly, with no producer gate to decline on (unlike `deprecated`/`is_scoped` before this phase).
                 is_restrict=_clang_param_is_restrict(p),
                 # G31 Phase C continued: same shape as `is_restrict` above -- castxml never populated this fact either. See `dumper_clang_qualifiers._clang_param_is_va_list`. is_va_list_fact is `partial`, not `present`: the check only covers x86-64 System V, and conservatively answers `False` -- not "confirmed no" -- on any other target (Codex review; target-scoping residual unchanged, per that function's own docstring).
@@ -804,32 +797,3 @@ def parse_functions(
             )
         )
     return fold_inline_across_redeclarations(funcs)
-
-
-_RESTRICT_TOKENS = frozenset({"restrict", "__restrict", "__restrict__"})
-
-
-def _without_top_level_restrict(spelling: str) -> str:
-    """*spelling* minus a ``restrict`` on its outermost pointer.
-
-    Only the qualifiers after the last top-level ``*`` are touched, so a
-    restrict on a pointee (``float *restrict *``) or inside a nested
-    function-pointer parameter list stays part of the type.
-    """
-    depth = 0
-    last_star = -1
-    for i, ch in enumerate(spelling):
-        if ch in "(<[":
-            depth += 1
-        elif ch in ")>]":
-            depth -= 1
-        elif ch == "*" and depth == 0:
-            last_star = i
-    if last_star == -1:
-        return spelling
-    tail = spelling[last_star + 1 :].split()
-    if not tail or any(t not in _RESTRICT_TOKENS | {"const", "volatile"} for t in tail):
-        return spelling
-    kept = [t for t in tail if t not in _RESTRICT_TOKENS]
-    head = spelling[: last_star + 1]
-    return head + " ".join(kept)

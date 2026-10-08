@@ -17,6 +17,10 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from _legacy_scope import NO_SCOPE_CONFIG  # noqa: E402
+from example_applicability import (  # noqa: E402
+    not_applicable_on,
+    not_applicable_outcome,
+)
 from source_smoke import SourceSmokeResult  # noqa: E402
 
 import tests.validate_examples as ve  # noqa: E402
@@ -205,13 +209,13 @@ class TestNotApplicableToolchain:
             "not_applicable_expected": "NO_CHANGE",
             "not_applicable_reason": "no such transition",
         }
-        na = ve._not_applicable_on(entry, True)
+        na = not_applicable_on(entry, ve._toolchain_family(True))
         if family != "clang":
             assert na is None
             return
         assert na == ("NO_CHANGE", "no such transition")
-        result = ve._evaluate_not_applicable("caseX", entry["expected"], got, *na)
-        assert result.status == ("NOT_APPLICABLE" if got == "NO_CHANGE" else "FAIL")
+        status, _detail = not_applicable_outcome(got, *na)
+        assert status == ("NOT_APPLICABLE" if got == "NO_CHANGE" else "FAIL")
 
 
 class TestKnownGapVerdictScope:

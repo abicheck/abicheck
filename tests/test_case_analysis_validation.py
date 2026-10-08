@@ -273,7 +273,9 @@ class TestBehavioralBreakLabel:
                 violations.append(f"{case_name}: behavioral_break must be a bool")
                 continue
             if meta["behavioral_break"] and not meta.get("behavioral_note"):
-                violations.append(f"{case_name}: behavioral_break without behavioral_note")
+                violations.append(
+                    f"{case_name}: behavioral_break without behavioral_note"
+                )
             if (
                 meta["behavioral_break"]
                 and meta["expected"] in ("NO_CHANGE", "COMPATIBLE")

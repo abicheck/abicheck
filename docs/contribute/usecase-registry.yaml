@@ -41,7 +41,7 @@ use_cases:
   # ── change_class ──────────────────────────────────────────────────────────
   - id: UC-CHANGE-taxonomy
     axis: change_class
-    name: ABI/API change taxonomy (408 ChangeKinds, 5-tier policy)
+    name: ABI/API change taxonomy (411 ChangeKinds, 5-tier policy)
     status: complete
     user_task: [pr_review, release]
     adrs: [ADR-010, ADR-011]

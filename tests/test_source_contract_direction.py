@@ -271,6 +271,13 @@ def test_removal_kinds_are_source_breaks() -> None:
         # typedef-like name, or the encoded type matches neither side.
         ("int", "long long", "_Z1fi", True),
         ("size_type", "double", "_ZN2ns5alloc8allocateEm", True),
+        # Pointer level changed on a record (the stale key still encodes
+        # `Cfg*`): `Cfg` is the encoded type's own name, not another name
+        # for it -- in either direction, and for references too.
+        ("Cfg*", "Cfg", "_Z4initP3Cfg", True),
+        ("Cfg", "Cfg*", "_Z4initP3Cfg", True),
+        ("Cfg&", "Cfg", "_Z4initR3Cfg", True),
+        ("ns::Cfg", "ns::Cfg*", "_Z4initPN2ns3CfgE", True),
         # extern "C": no parameter encoding, nothing is excused.
         ("size_type", "long unsigned int", "allocate", True),
     ],

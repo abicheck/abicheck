@@ -250,7 +250,7 @@ class TestSingleMutationDetection:
         new = copy.deepcopy(old)
         new.declarations.typedefs = {}
         result = compare(old, new, scope_to_public_surface=False)
-        assert result.verdict == Verdict.BREAKING
+        assert result.verdict == Verdict.API_BREAK
         assert any(c.kind == ChangeKind.TYPEDEF_REMOVED for c in result.changes)
 
     def test_typedef_base_changed_detected(self):

@@ -34,7 +34,13 @@ abicheck compare libfoo_v1.so libfoo_v2.so
 ```text
 Verdict: BREAKING (exit 4)
 
-- tag_type_renamed: Empty tag struct 'mylib::method::brute_force' renamed
+- func_removed_elf_only (BREAKING): the exported constructors of
+  `descriptor<method::brute_force, task::classification>` (`...C1Ev`,
+  `...C2Ev`) are gone from the export table -- this carries the binary
+  break (with headers, `instantiation_missing_from_binary` reports the same
+  for `kind() const`).
+- tag_type_renamed (API_BREAK on its own -- source naming the old tag no
+  longer compiles): Empty tag struct 'mylib::method::brute_force' renamed
   to 'mylib::method::search_brute'. The type has no fields or vtable, so
   layout-based detectors see no change, but 3 explicit instantiation
   symbol(s) referencing the old name were re-mangled (now 3 symbol(s)

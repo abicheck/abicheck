@@ -17,7 +17,9 @@ import itertools
 
 import pytest
 
-from abicheck.extract.headers.clang.functions import _without_top_level_restrict
+from abicheck.extract.headers.clang.restrict_spelling import (
+    without_top_level_restrict as _without_top_level_restrict,
+)
 
 _BASES = ["float *", "const float *", "char **", "struct S *", "ns::T<int> *"]
 _RESTRICT = ["restrict", "__restrict", "__restrict__"]

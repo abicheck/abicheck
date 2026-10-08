@@ -182,10 +182,12 @@ class TestVarAdded:
 
 
 class TestTypeRemoved:
-    def test_type_removed_is_breaking(self) -> None:
+    def test_type_removed_is_api_break(self) -> None:
+        # A type has no symbol of its own: its disappearance alone breaks
+        # source that names it, not already-built binaries.
         t = RecordType(name="Handle", kind="struct")
         r = compare(_snap(types=[t]), _snap("2.0", types=[]))
-        assert r.verdict == Verdict.BREAKING
+        assert r.verdict == Verdict.API_BREAK
         assert any(c.kind == ChangeKind.TYPE_REMOVED for c in r.changes), (
             "Expected TYPE_REMOVED in changes"
         )
@@ -216,11 +218,11 @@ class TestTypeAdded:
         assert change.symbol == "NewConfig"
 
     def test_type_added_alongside_breaking(self) -> None:
-        """Adding a type while removing another: TYPE_ADDED present, verdict BREAKING."""
+        """Adding a type while removing another: TYPE_ADDED present, verdict API_BREAK."""
         old_t = RecordType(name="OldHandle", kind="struct")
         new_t = RecordType(name="NewHandle", kind="struct")
         r = compare(_snap(types=[old_t]), _snap("2.0", types=[new_t]))
-        assert r.verdict == Verdict.BREAKING
+        assert r.verdict == Verdict.API_BREAK
         kinds = {c.kind for c in r.changes}
         assert ChangeKind.TYPE_REMOVED in kinds
         assert ChangeKind.TYPE_ADDED in kinds
@@ -407,11 +409,12 @@ class TestTypeFieldAdded:
 
 
 class TestTypedefRemoved:
-    def test_typedef_removed_is_breaking(self) -> None:
+    def test_typedef_removed_is_api_break(self) -> None:
+        # A typedef is never encoded in a binary; removing it breaks source only.
         old = _snap(typedefs={"size_type": "unsigned long"})
         new = _snap("2.0", typedefs={})
         r = compare(old, new)
-        assert r.verdict == Verdict.BREAKING
+        assert r.verdict == Verdict.API_BREAK
         assert any(c.kind == ChangeKind.TYPEDEF_REMOVED for c in r.changes), (
             "Expected TYPEDEF_REMOVED in changes"
         )

@@ -3424,9 +3424,10 @@
    "api_break": true,
    "bad_practice": false,
    "category": "breaking",
-   "description": "Empty tag struct method::brute_force renamed to method::search_brute. No layout signal (empty type), but every explicit descriptor<method::brute_force, ...> instantiation re-mangles. Emits TAG_TYPE_RENAMED correlating the empty type rename with the symbol-name shift.",
+   "description": "Empty tag struct method::brute_force renamed to method::search_brute. No layout signal (empty type), but every explicit descriptor<method::brute_force, ...> instantiation re-mangles. Emits TAG_TYPE_RENAMED (API_BREAK: source naming the old tag no longer compiles) correlating the empty type rename with the symbol-name shift; the binary break is carried by the removal findings for the re-mangled exported instantiation (FUNC_REMOVED_ELF_ONLY for its constructors, read from the export table alone).",
    "expected": "BREAKING",
    "expected_kinds": [
+    "func_removed_elf_only",
     "tag_type_renamed"
    ],
    "min_evidence": "L0",

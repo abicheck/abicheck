@@ -450,10 +450,13 @@ def test_changed_breaking_kinds_subset_of_breaking_kinds() -> None:
     )
 
 
-def test_removed_kinds_subset_of_breaking_kinds() -> None:
+def test_removed_kinds_are_breaking_or_api_breaking() -> None:
+    # A removed type or typedef has no symbol: it breaks source, not binaries.
+    from abicheck.checker_policy import API_BREAK_KINDS
     from abicheck.report_classifications import BREAKING_KINDS, REMOVED_KINDS
 
-    assert REMOVED_KINDS <= BREAKING_KINDS
+    assert REMOVED_KINDS <= BREAKING_KINDS | {k.value for k in API_BREAK_KINDS}
+    assert {"type_removed", "typedef_removed"} <= REMOVED_KINDS - BREAKING_KINDS
 
 
 # ---------------------------------------------------------------------------

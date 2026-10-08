@@ -306,10 +306,10 @@ class TestTypeChanges:
         r = compare(_snap("1.0", types=[old_t]), _snap("2.0", types=[new_t]))
         assert r.verdict == Verdict.BREAKING
 
-    def test_type_removed_is_breaking(self):
+    def test_type_removed_is_api_break(self):
         t = RecordType(name="Handle", kind="struct")
         r = compare(_snap("1.0", types=[t]), _snap("2.0", types=[]))
-        assert r.verdict == Verdict.BREAKING
+        assert r.verdict == Verdict.API_BREAK
 
     def test_type_added_is_compatible(self):
         t = RecordType(name="NewConfig", kind="struct")

@@ -4112,6 +4112,7 @@
   "operation": "compare",
   "ecosystem": "generic",
   "topics": [
+   "symbols",
    "types"
   ],
   "languages": [

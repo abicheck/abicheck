@@ -46,6 +46,7 @@ REPO_DIR = Path(__file__).parent.parent
 
 sys.path.insert(0, str(REPO_DIR / "scripts"))
 sys.path.insert(0, str(Path(__file__).parent))  # source_smoke lives beside this
+import example_applicability  # noqa: E402
 import example_catalog  # noqa: E402
 from _legacy_scope import scope_args  # noqa: E402
 from example_case_runner import (  # noqa: E402
@@ -218,41 +219,6 @@ def _gap_applies(
     if variants and variant not in variants:
         return False
     return True
-
-
-def _not_applicable_on(entry: dict, is_cpp: bool) -> tuple[str, str] | None:
-    """``(expected verdict, reason)`` when the case's transition does not
-    exist under the producer that built it, else ``None``.
-
-    ``not_applicable_toolchains`` is not a detection gap: the producer never
-    creates the artifact transition the case encodes (Clang never emits
-    ``STB_GNU_UNIQUE``, so case180's v1/v2 are both plain weak symbols). The
-    lane then checks the verdict that transition-free pair actually warrants
-    (``not_applicable_expected``) and reports ``NOT_APPLICABLE`` -- neither a
-    PASS that proves the canonical verdict nor an XFAIL that excuses a miss.
-    """
-    toolchains = entry.get("not_applicable_toolchains")
-    if not toolchains or _toolchain_family(is_cpp) not in toolchains:
-        return None
-    return (
-        str(entry.get("not_applicable_expected", "NO_CHANGE")),
-        str(entry.get("not_applicable_reason", "")),
-    )
-
-
-def _evaluate_not_applicable(
-    name: str, expected_raw: str | None, got: str, na_expected: str, reason: str
-) -> CaseResult:
-    if got == na_expected:
-        return CaseResult(name, "NOT_APPLICABLE", expected_raw, got, reason)
-    return CaseResult(
-        name,
-        "FAIL",
-        expected_raw,
-        got,
-        f"transition not applicable under this toolchain; expected "
-        f"{na_expected!r} for the transition-free pair, got {got!r}",
-    )
 
 
 def _build_info_applies(entry: dict, variant: str) -> bool:
@@ -1471,7 +1437,6 @@ def run_case(
     gap_applies = _gap_applies(entry, v1_src.suffix == ".cpp", variant)
     known_gap = entry.get("known_gap") if gap_applies else None
     known_gap_observed = entry.get("known_gap_observed") if gap_applies else None
-    not_applicable = _not_applicable_on(entry, v1_src.suffix == ".cpp")
 
     tmp = _case_work_dir(tmp_base, name, variant)
     tmp.mkdir(parents=True)
@@ -1558,17 +1523,13 @@ def run_case(
         sources=sources_present,
         build_info=build_info_present,
     )
-    if not_applicable is not None:
-        result = _evaluate_not_applicable(name, expected_raw, got, *not_applicable)
-    else:
-        result = _evaluate_verdict(
-            name,
-            expected_raw,
-            got,
-            known_gap,
-            known_gap_observed,
-        )
-    result = result._replace(variant=variant, source_layers=source_layers)
+    family = _toolchain_family(v1_src.suffix == ".cpp")
+    na = example_applicability.outcome(entry, family, got)
+    result = (
+        CaseResult(name, na[0], expected_raw, got, na[1])
+        if na
+        else _evaluate_verdict(name, expected_raw, got, known_gap, known_gap_observed)
+    )._replace(variant=variant, source_layers=source_layers)
     if smoke_proof:
         combined = (
             smoke_proof if not result.message else f"{smoke_proof} | {result.message}"

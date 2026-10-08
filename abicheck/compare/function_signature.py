@@ -76,6 +76,7 @@ from ..name_classification import (
 from .declined_comparisons import record_declined
 from .detection_memo import memoized
 from .parameter_facts import ParameterView, parameter_view
+from .typedef_respelling import all_respelled
 
 if TYPE_CHECKING:
     from ..model.change import Change
@@ -363,108 +364,6 @@ def _param_differs(
     return not _abi_equivalent_scalar(t_old, t_new, is_llp64)
 
 
-_BUILTIN_TYPE_WORDS = frozenset(
-    {
-        "void",
-        "bool",
-        "char",
-        "wchar_t",
-        "char8_t",
-        "char16_t",
-        "char32_t",
-        "short",
-        "int",
-        "long",
-        "signed",
-        "unsigned",
-        "float",
-        "double",
-        "__int128",
-        "_Bool",
-        "auto",
-    }
-)
-
-
-def _typedef_like(spelling: str) -> bool:
-    """Whether *spelling* names a (possibly qualified) user type -- a typedef
-    candidate -- rather than a builtin, once cv and declarator sigils are
-    stripped."""
-    core = spelling.replace("*", " ").replace("&", " ").split()
-    core = [t for t in core if t not in ("const", "volatile")]
-    if len(core) != 1:
-        return False
-    name = core[0]
-    leaf = name.rsplit("::", 1)[-1]
-    return leaf.isidentifier() and leaf not in _BUILTIN_TYPE_WORDS
-
-
-def _mangled_param_types(mangled: str) -> tuple[str, ...] | None:
-    """The canonical parameter types an Itanium mangled name encodes."""
-    if not mangled.startswith("_Z"):
-        return None
-    from ..demangle import demangle
-
-    text = (demangle(mangled) or "").strip()
-    if not text.endswith(")"):
-        return None
-    depth = 0
-    for i in range(len(text) - 1, -1, -1):
-        ch = text[i]
-        if ch in ")>]":
-            depth += 1
-        elif ch in "(<[":
-            depth -= 1
-            if depth == 0:
-                if ch != "(":
-                    return None
-                inner = text[i + 1 : -1].strip()
-                if inner in ("", "void"):
-                    return ()
-                parts: list[str] = []
-                level = 0
-                start = 0
-                for j, c in enumerate(inner):
-                    if c in "(<[":
-                        level += 1
-                    elif c in ")>]":
-                        level -= 1
-                    elif c == "," and level == 0:
-                        parts.append(inner[start:j].strip())
-                        start = j + 1
-                parts.append(inner[start:].strip())
-                return tuple(parts)
-    return None
-
-
-def _respelled_typedef_positions(
-    mangled: str, o_types: tuple[str, ...], n_types: tuple[str, ...]
-) -> frozenset[int]:
-    """Positions whose spelling changed only by naming a typedef differently.
-
-    An Itanium mangled name encodes each parameter's *canonical* type, so for
-    a pair matched under the same ``_Z`` key a position where one side spells
-    exactly the encoded type and the other spells a typedef-like name is the
-    same type, respelled -- the common case being a typedef replaced by what
-    it names: ``size_type n`` -> ``std::size_t n`` (catalog case95), which
-    header spellings alone would otherwise report as FUNC_PARAMS_CHANGED, a
-    BREAKING calling-convention claim for a change the binary does not even
-    contain. Only positions the mangled name itself vouches for are
-    excused; ``extern "C"`` names encode no parameters and excuse nothing.
-    """
-    encoded = _mangled_param_types(mangled)
-    if encoded is None or not (len(encoded) == len(o_types) == len(n_types)):
-        return frozenset()
-    explained = set()
-    for i, (enc, a, b) in enumerate(zip(encoded, o_types, n_types)):
-        canon_enc = canonicalize_type_name(enc)
-        if canonicalize_type_name(a) == canon_enc and _typedef_like(b):
-            explained.add(i)
-        elif canonicalize_type_name(b) == canon_enc and _typedef_like(a):
-            explained.add(i)
-    return frozenset(explained)
-
-
 def _params_changes(
     mangled: str,
     name: str,
@@ -492,14 +391,9 @@ def _params_changes(
     if len(o_types) != len(n_types):
         changed = True
     else:
-        differing = [
-            i
-            for i, (a, b, ka, kb) in enumerate(zip(o_types, n_types, o_kinds, n_kinds))
-            if _param_differs(a, b, ka, kb, is_llp64)
-        ]
-        changed = bool(differing) and not set(
-            differing
-        ) <= _respelled_typedef_positions(mangled, o_types, n_types)
+        pairs = enumerate(zip(o_types, n_types, o_kinds, n_kinds))
+        diff = [i for i, p in pairs if _param_differs(*p, is_llp64)]
+        changed = bool(diff) and not all_respelled(mangled, o_types, n_types, diff)
     if not changed:
         return []
     return [

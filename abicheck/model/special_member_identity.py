@@ -224,9 +224,9 @@ def _expand_typedefs(param: str, scope: str, typedefs: Mapping[str, str]) -> str
     return param
 
 
-def _demangled_params(demangled: str) -> tuple[str, ...] | None:
-    """The parameter list of a demangled ctor, or ``None`` when its shape is
-    not ``...(<params>)``."""
+def demangled_params(demangled: str) -> tuple[str, ...] | None:
+    """The parameter list of a demangled function (canonical, scope-unqualified
+    comparison form), or ``None`` when its shape is not ``...(<params>)``."""
     text = demangled.strip()
     if not text.endswith(")"):
         return None
@@ -298,7 +298,7 @@ def resolve_special_member_linker_names(
         sig: tuple[str, ...] | None = ()
         if fam.marker == _CTOR:
             text = demangled.get(fam.canonical)
-            sig = _demangled_params(text) if text else None
+            sig = demangled_params(text) if text else None
         by_owner.setdefault((fam.marker, fam.owner), []).append((fam, sig))
 
     out: dict[int, SpecialMemberLinkerNames] = {}

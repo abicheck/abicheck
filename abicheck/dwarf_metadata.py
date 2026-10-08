@@ -64,8 +64,8 @@ from .dwarf_utils import (
     BASE_PRUNE_TAGS,
     attr_bool as _attr_bool,  # noqa: F401
     attr_int as _attr_int,
-    base_type_name as _base_type_name,
     attr_str as _attr_str,
+    base_type_name as _base_type_name,
     decode_member_location as _decode_member_location,
     has_real_dwarf_info,
     resolve_die_ref as _resolve_ref,

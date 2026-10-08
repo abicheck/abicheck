@@ -520,18 +520,12 @@ _CTOR_PTR_TO_CONST_ARG_XML = """<?xml version="1.0"?>
 class TestByValueFieldQualifierEndToEndDiff:
     """Full parser -> compare() pipeline: a by-value field gaining `volatile`
     (castxml's real spelling embeds the qualifier in the type string, e.g.
-    "int" -> "volatile int") is a deliberate source-break escalation for a
-    BY-VALUE field (unlike a pointer/reference-position cv change, which is
-    genuinely ABI-neutral) — see case30_field_qualifiers' BREAKING ground
-    truth and test_top_level_field_const_is_not_neutralised in
-    test_const_pointer_abi_neutral.py. So both the compatible
-    FIELD_BECAME_VOLATILE and the breaking TYPE_FIELD_TYPE_CHANGED are
-    expected from the real parser output, and the verdict is BREAKING. (An
-    earlier attempt to suppress TYPE_FIELD_TYPE_CHANGED here, per a Codex
-    review comment on PR #582, was reverted — it silently regressed that
-    ground truth.)"""
+    "int" -> "volatile int") keeps size, alignment and offset, so the real
+    parser output yields FIELD_BECAME_VOLATILE alone and a
+    COMPATIBLE_WITH_RISK verdict -- never a BREAKING TYPE_FIELD_TYPE_CHANGED
+    (case30_field_qualifiers ground truth)."""
 
-    def test_by_value_volatile_field_change_escalates_to_breaking(self) -> None:
+    def test_by_value_volatile_field_change_is_a_risk_not_a_layout_break(self) -> None:
         old_types = _make_parser(_FIELD_PLAIN_INT_XML).parse_types()
         new_types = _make_parser(_FIELD_VOLATILE_INT_XML).parse_types()
         old_snap = AbiSnapshot(library="libtest.so.1", version="1.0", types=old_types)
@@ -540,8 +534,8 @@ class TestByValueFieldQualifierEndToEndDiff:
         r = compare(old_snap, new_snap)
         kinds = {c.kind for c in r.changes}
         assert ChangeKind.FIELD_BECAME_VOLATILE in kinds
-        assert ChangeKind.TYPE_FIELD_TYPE_CHANGED in kinds
-        assert r.verdict == Verdict.BREAKING
+        assert ChangeKind.TYPE_FIELD_TYPE_CHANGED not in kinds
+        assert r.verdict == Verdict.COMPATIBLE_WITH_RISK
 
 
 class TestUnmangledCtorSyntheticKeyCvStability:

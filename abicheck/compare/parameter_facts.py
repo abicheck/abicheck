@@ -298,10 +298,6 @@ def restrict_changes(
     return changes
 
 
-_CV_TOKENS = frozenset({"const", "volatile"})
-_IGNORED_TOKENS = frozenset({"restrict", "__restrict", "__restrict__"})
-
-
 def _qualifier_levels(spelling: str) -> tuple[frozenset[tuple[str, int]], int] | None:
     """``({(qualifier, level)}, indirection levels)`` of a canonical spelling.
 
@@ -321,7 +317,7 @@ def _qualifier_levels(spelling: str) -> tuple[frozenset[tuple[str, int]], int] |
             continue
         if tok in ("*", "&", "&&"):
             level += 1
-        elif tok in _CV_TOKENS:
+        elif tok in ("const", "volatile"):
             found.add((tok, level))
     if level == 0:
         return None

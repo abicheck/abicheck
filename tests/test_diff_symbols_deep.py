@@ -387,7 +387,7 @@ class TestParamRestrictChanged:
             params=[Param(name="dst", type="void * restrict", is_restrict=True)],
         )
         r = compare(_snap(functions=[f_v1]), _snap(functions=[f_v2]))
-        assert ChangeKind.PARAM_RESTRICT_CHANGED in _kinds(r)
+        assert ChangeKind.PARAM_RESTRICT_ADDED in _kinds(r)
 
     def test_restrict_only_change_does_not_also_report_params_changed(self):
         """A dumper that keeps `type` identical and only flips `is_restrict`
@@ -409,9 +409,11 @@ class TestParamRestrictChanged:
         )
         r = compare(_snap(functions=[f_v1]), _snap(functions=[f_v2]))
         kinds = _kinds(r)
-        assert ChangeKind.PARAM_RESTRICT_CHANGED in kinds
+        assert ChangeKind.PARAM_RESTRICT_ADDED in kinds
         assert ChangeKind.FUNC_PARAMS_CHANGED not in kinds
-        assert r.verdict == Verdict.COMPATIBLE
+        # Adding restrict is a caller-side contract risk (overlapping
+        # callers), not a binary break.
+        assert r.verdict == Verdict.COMPATIBLE_WITH_RISK
 
 
 # ── param_became_va_list / param_lost_va_list ────────────────────────────

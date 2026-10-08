@@ -688,13 +688,14 @@ def test_symbol_version_required_cross_namespace_no_bleed() -> None:
 
 
 def test_elf_visibility_changed_default_to_protected() -> None:
-    """DEFAULT → PROTECTED visibility change is detected and COMPATIBLE."""
+    """DEFAULT → PROTECTED visibility change is detected and a risk: an
+    interposed definition stops intercepting library-internal calls."""
     old = _snap(_elf(symbols=[_sym("foo", visibility="default")]))
     new = _snap(_elf(symbols=[_sym("foo", visibility="protected")]))
     result = compare(old, new)
     kinds = {c.kind for c in result.changes}
     assert ChangeKind.FUNC_VISIBILITY_PROTECTED_CHANGED in kinds
-    assert result.verdict == Verdict.COMPATIBLE
+    assert result.verdict == Verdict.COMPATIBLE_WITH_RISK
 
 
 def test_elf_visibility_unchanged_no_change() -> None:
