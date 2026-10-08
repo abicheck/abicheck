@@ -30,6 +30,8 @@ from __future__ import annotations
 
 import json
 
+from abicheck.policy.evaluate import evaluate
+
 
 class TestLockstepSonameCoupling:
     """A coordinated lockstep SONAME bump across a multi-library release should
@@ -51,10 +53,10 @@ class TestLockstepSonameCoupling:
         return {
             "library": lib,
             "verdict": verdict.value,
-            "breaking": len(result.breaking),
-            "source_breaks": len(result.source_breaks),
-            "risk_changes": len(result.risk),
-            "compatible_additions": len(result.compatible),
+            "breaking": len(evaluate(result).breaking),
+            "source_breaks": len(evaluate(result).source_breaks),
+            "risk_changes": len(evaluate(result).risk),
+            "compatible_additions": len(evaluate(result).compatible),
             "_diff_result": result,
         }
 
@@ -171,10 +173,10 @@ class TestLockstepSonameSuppressionUpdatesDispositionAudit:
         return {
             "library": lib,
             "verdict": verdict.value,
-            "breaking": len(result.breaking),
-            "source_breaks": len(result.source_breaks),
-            "risk_changes": len(result.risk),
-            "compatible_additions": len(result.compatible),
+            "breaking": len(evaluate(result).breaking),
+            "source_breaks": len(evaluate(result).source_breaks),
+            "risk_changes": len(evaluate(result).risk),
+            "compatible_additions": len(evaluate(result).compatible),
             "_diff_result": result,
             # Stamped ahead of the suppression, exactly as
             # `_compare_one_library` does in the real pipeline.

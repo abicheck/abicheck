@@ -49,7 +49,7 @@ def test_member_compare_forwards_lang_explicit(
         seen.update(kw)
         raise RuntimeError("stop after capturing the request")
 
-    monkeypatch.setattr("abicheck.service.run_compare", _fake)
+    monkeypatch.setattr("abicheck.workflows.member_compare.run_compare", _fake)
     with pytest.raises(RuntimeError):
         pairwise._run_compare_pair(
             pairwise.release_parent_request(old_input=Path("old.so"), new_input=Path("new.so"),

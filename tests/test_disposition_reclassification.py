@@ -44,6 +44,7 @@ from abicheck.policy.disposition_close import (
     reclassifications,
     reclassified_total,
 )
+from abicheck.policy.evaluate import effective_kind_sets
 from abicheck.policy_file import PolicyFile
 from abicheck.report.disposition_audit import compute_disposition_audit
 
@@ -222,7 +223,7 @@ def test_every_finding_dict_builder_agrees_on_reclassified_by(
     # real `kind_sets` (as a live `compare()` run always supplies) for the
     # reclassify resolution branch to run at all.
     full_entry = _change_to_dict(
-        change, policy_file=pf, kind_sets=diff._effective_kind_sets()
+        change, policy_file=pf, kind_sets=effective_kind_sets(diff)
     )
     assert full_entry["reclassified_by"] == expected
 

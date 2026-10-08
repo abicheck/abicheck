@@ -146,7 +146,9 @@ def _breaking_change_touches_imports(change: StackChange) -> bool:
     assert change.abi_diff is not None
     imported_symbols = {b.symbol for b in change.impacted_imports}
     breaking_symbols: set[str] = set()
-    for c in change.abi_diff.breaking:
+    from .policy.evaluate import evaluate
+
+    for c in evaluate(change.abi_diff).breaking:
         if c.symbol in _DSO_WIDE_BREAK_SYMBOLS:
             return True
         breaking_symbols.add(c.symbol)

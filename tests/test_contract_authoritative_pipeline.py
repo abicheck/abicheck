@@ -56,6 +56,7 @@ from abicheck.model import (
     Visibility,
 )
 from abicheck.model.change import Change
+from abicheck.policy.evaluate import evaluate
 from abicheck.policy.severity import (
     SeverityConfig,
     SeverityLevel,
@@ -1337,7 +1338,7 @@ class TestNothingIsLost:
             contract_mode="public",
         )
         assert result.verdict is Verdict.NO_CHANGE
-        assert result.breaking == []
+        assert evaluate(result).breaking == []
         assert len(result.not_evaluated) == 1
 
     def test_the_markdown_report_discloses_what_it_did_not_score(self) -> None:

@@ -114,25 +114,6 @@ def resolve_compare_enrichment_inputs(
     return CompareEnrichmentInputs(seed.paths, seed.source, floor)
 
 
-def fold_abi3_into_extra_changes(
-    extra_changes: Any,
-    candidate: Any,
-    abi3_floor: tuple[int, int] | None,
-    name: str,
-) -> tuple[Any, str | None]:
-    """Fold the candidate-side audit into this run's ``extra_changes``.
-
-    A thin bind of :func:`~abicheck.workflows.abi3_audit.fold` (the
-    shared rule that both front ends call) to the CLI's own
-    candidate name. Returns ``(extra_changes, precondition_failure)``; the
-    findings go in *before* ``compare_snapshots`` so policy, suppression,
-    the disposition ledger and the verdict all score them.
-    """
-    from ...workflows import abi3_audit
-
-    return abi3_audit.fold(extra_changes, candidate, abi3_floor, candidate_name=name)
-
-
 def report_abi3_evidence_contract_error(result: Any, failure: str | None) -> None:
     """Stamp ADR-064's exit-7 axis for a failed ``--abi3`` precondition and
     say so on stderr (so the message survives ``-o json=...`` on stdout)."""

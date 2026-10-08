@@ -86,6 +86,13 @@ from ..policy.effective_gate import (
     ScopedGateSelection,
     scoped_gate_selection_from_result,
 )
+from ..policy.evaluate import (
+    ClassifiedDiff,
+    effective_kind_sets,
+    effective_verdict,
+    evaluate,
+    evaluated_changes,
+)
 from ..policy.exit_decision import (
     ExitDecision,
     resolve_compare_exit_decision,
@@ -151,6 +158,11 @@ if TYPE_CHECKING:
     from ..model import AbiSnapshot
 
 __all__ = [
+    "ClassifiedDiff",
+    "effective_kind_sets",
+    "effective_verdict",
+    "evaluate",
+    "evaluated_changes",
     "MemberAssurance",
     "ReleaseAssuranceDecision",
     "EffectiveGate",

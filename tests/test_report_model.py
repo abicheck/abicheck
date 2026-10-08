@@ -17,6 +17,7 @@ from __future__ import annotations
 from abicheck.checker import compare
 from abicheck.checker_policy import Verdict
 from abicheck.model import AbiSnapshot, Function, Visibility
+from abicheck.policy.evaluate import effective_verdict
 from abicheck.report_model import ReportModel
 
 
@@ -44,8 +45,11 @@ def test_buckets_partition_changes_by_effective_verdict() -> None:
     flat = [c for b in buckets for c in b]
     # Every classified change comes from the (filtered) change set, exactly once.
     assert sorted(id(c) for c in flat) == sorted(id(c) for c in model.changes)
+
     # And each lands in the bucket matching its effective verdict.
-    ev = result._effective_verdict_for_change
+    def ev(c):
+        return effective_verdict(result, c)
+
     assert all(ev(c) == Verdict.BREAKING for c in model.breaking)
     assert all(ev(c) == Verdict.API_BREAK for c in model.source_breaks)
     assert all(ev(c) == Verdict.COMPATIBLE_WITH_RISK for c in model.risk)

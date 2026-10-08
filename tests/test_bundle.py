@@ -15,6 +15,8 @@ from pathlib import Path
 
 import pytest
 
+from abicheck.policy.evaluate import effective_kind_sets
+
 # Phase 3 resolver (scripts/CLAUDE.md, docs/contribute/plans/examples-catalog-split.md).
 _REPO_DIR = Path(__file__).resolve().parent.parent
 if str(_REPO_DIR / "scripts") not in sys.path:
@@ -1944,7 +1946,7 @@ class TestIntraTypeReachability:
             modulation_reason="consumer-internal-use",
         )
         result = DiffResult(old_version="1.0", new_version="2.0", library="lib")
-        assert not _is_failure(demoted, result, result._effective_kind_sets())
+        assert not _is_failure(demoted, result, effective_kind_sets(result))
 
 
 # ---------------------------------------------------------------------------

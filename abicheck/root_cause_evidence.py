@@ -30,6 +30,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Sequence
 from typing import TYPE_CHECKING, cast
 
+from .policy.evaluate import effective_kind_sets
 from .reporter_markdown import (
     _finding_id,
     apply_show_only,
@@ -53,7 +54,7 @@ def scoped_only_changes_filtered(
             scoped_only,
             show_only,
             policy=result.policy,
-            kind_sets=result._effective_kind_sets(),
+            kind_sets=effective_kind_sets(result),
             policy_file=result.policy_file,
         )
     return scoped_only

@@ -114,6 +114,8 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING, Any
 
+from .evaluate import effective_kind_sets
+
 if TYPE_CHECKING:
     from collections.abc import Mapping
     from datetime import date
@@ -680,7 +682,7 @@ def resolve_compare_exit_decision(
             result.changes,
             gate.severity,
             policy=result.policy,
-            kind_sets=result._effective_kind_sets(),
+            kind_sets=effective_kind_sets(result),
             policy_file=result.policy_file,
             today=today,
         )
@@ -732,7 +734,7 @@ def _worst_effective_verdict(result: DiffResult, today: date) -> Verdict:
         effective_verdict_for_change(
             c,
             policy=result.policy,
-            kind_sets=result._effective_kind_sets(),
+            kind_sets=effective_kind_sets(result),
             policy_file=result.policy_file,
             today=today,
         )

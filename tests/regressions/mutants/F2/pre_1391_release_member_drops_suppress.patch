@@ -1,11 +1,11 @@
---- a/abicheck/cli_compare_release_pairwise.py
-+++ b/abicheck/cli_compare_release_pairwise.py
-@@ -187,7 +187,7 @@
-         old_input=_normalize_binary_input(request.old_input)[0],
-         new_input=_normalize_binary_input(request.new_input)[0],
-     )
--    result = service.run_compare(**run_compare_kwargs(request))
-+    result = service.run_compare(**{**run_compare_kwargs(request), "suppress": None})
+--- a/abicheck/workflows/member_compare.py
++++ b/abicheck/workflows/member_compare.py
+@@ -49,7 +49,7 @@ def compare_member(
+     overrides are already on *request*. It is passed separately only for the
+     rich-tier config record below.
+     """
+-    result = run_compare(**run_compare_kwargs(request))
++    result = run_compare(**{**run_compare_kwargs(request), "suppress": None})
      # The rich-tier config is recorded under exactly the condition the
      # single-pair CLI (`resolve_and_apply`) and the typed API
      # (`install_resolved_gate_receipt`) record one: a contract evaluation, or

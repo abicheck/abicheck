@@ -30,6 +30,8 @@ from pathlib import Path
 import pytest
 from _cli_option_set_snapshot import OPTION_SET_SNAPSHOT as _OPTION_SET_SNAPSHOT
 
+from abicheck.policy.evaluate import evaluate
+
 # Import the gate from scripts/ — the AI-readiness module is pure stdlib.
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(_REPO_ROOT) not in sys.path:
@@ -1240,14 +1242,14 @@ def test_compare_release_matches_service_run_compare(tmp_path: Path) -> None:
     ).as_tuple()
 
     assert svc_result.verdict == rel_result.verdict
-    assert sorted(c.kind for c in svc_result.breaking) == sorted(
-        c.kind for c in rel_result.breaking
+    assert sorted(c.kind for c in evaluate(svc_result).breaking) == sorted(
+        c.kind for c in evaluate(rel_result).breaking
     )
-    assert sorted(c.kind for c in svc_result.source_breaks) == sorted(
-        c.kind for c in rel_result.source_breaks
+    assert sorted(c.kind for c in evaluate(svc_result).source_breaks) == sorted(
+        c.kind for c in evaluate(rel_result).source_breaks
     )
-    assert sorted(c.kind for c in svc_result.compatible) == sorted(
-        c.kind for c in rel_result.compatible
+    assert sorted(c.kind for c in evaluate(svc_result).compatible) == sorted(
+        c.kind for c in evaluate(rel_result).compatible
     )
 
 
@@ -1268,8 +1270,8 @@ def test_run_compare_request_equivalent_to_kwargs_shim(tmp_path: Path) -> None:
     req_result, _, _ = run_compare_request(req).as_tuple()
 
     assert shim_result.verdict == req_result.verdict
-    assert sorted(c.kind for c in shim_result.breaking) == sorted(
-        c.kind for c in req_result.breaking
+    assert sorted(c.kind for c in evaluate(shim_result).breaking) == sorted(
+        c.kind for c in evaluate(req_result).breaking
     )
 
 

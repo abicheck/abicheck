@@ -16,13 +16,9 @@
 """The comparison result: :class:`DiffResult`.
 
 ``DiffResult`` aggregates the :class:`~abicheck.model.change.Change` records
-one comparison produced. It is model data with one policy question built in:
-its verdict buckets (``breaking``, ``source_breaks``, ``compatible``,
-``risk``) ask ``policy`` for each finding's effective verdict under the
-active policy and policy file. That call is the module's single reviewed
-``model -> policy`` edge (``architecture/debt.yaml``'s
-``dependency_direction_exceptions``); it stays a call-time import so no
-policy-resolved value is cached on the mutable result.
+one comparison produced. It is pure model data: bucketing findings by
+effective verdict under the active policy is a policy question, answered by
+``abicheck.policy.evaluate.evaluate(diff)`` -- never by the result itself.
 """
 
 from __future__ import annotations
@@ -35,7 +31,6 @@ from .model.change import (
     Change,
     LibraryMetadata,
 )
-from .model.change_catalog.kinds import ChangeKind
 from .model.change_catalog.registry import Verdict
 from .model.contract_finding_relevance import is_evaluated
 from .model.evidence_status import (
@@ -416,62 +411,6 @@ class DiffResult(ReportSideFacts):
     # convention as every other block above.
     pattern_preprocessor_scan: object | None = field(default=None, kw_only=True)
 
-    def _effective_kind_sets(
-        self,
-    ) -> tuple[
-        frozenset[ChangeKind],
-        frozenset[ChangeKind],
-        frozenset[ChangeKind],
-        frozenset[ChangeKind],
-    ]:
-        """Return (breaking, api_break, compatible, risk) kind sets with overrides applied.
-
-        Pure delegation (ADR-061 Phase 4's own recorded gap, now closed): the
-        override-application algorithm itself lives in
-        ``policy.classification.apply_policy_file_overrides`` — this method only
-        consumes that already-computed result, it does not itself execute
-        policy-resolution logic. See that function's own docstring for why
-        this split matters and what changed.
-        """
-        from .policy.classification import apply_policy_file_overrides, policy_kind_sets
-
-        overrides = self.policy_file.overrides if self.policy_file else None
-        return apply_policy_file_overrides(policy_kind_sets(self.policy), overrides)
-
-    def _effective_verdict_for_change(self, change: Change) -> Verdict:
-        """Return the per-change verdict, including frozen namespace guards.
-
-        Pure delegation to ``policy.reclassify.effective_verdict_for_change`` — this
-        method holds no policy-resolution logic of its own (unlike
-        ``_effective_kind_sets`` before ADR-061 Phase 4's closure above; see
-        that method's docstring).
-        """
-        from .policy.reclassify import effective_verdict_for_change
-
-        return effective_verdict_for_change(
-            change,
-            policy=self.policy,
-            kind_sets=self._effective_kind_sets(),
-            policy_file=self.policy_file,
-        )
-
-    def _evaluated_changes(self) -> list[Change]:
-        """The findings compatibility policy actually classified (ADR-049 D1).
-
-        The four verdict buckets below are the *compatibility* axis, and the
-        overall ``verdict`` is computed from exactly this set — so a finding
-        contract evaluation left ``NOT_EVALUATED`` must not appear in them,
-        or a report would count a "breaking change" the verdict it sits next
-        to deliberately did not score. Such findings are not lost: they are
-        still in ``changes``, they are listed by :attr:`not_evaluated`, and
-        every renderer discloses them with their relevance and reason.
-
-        Without ``--contract`` no finding carries a relevance at
-        all, so this returns ``changes`` unchanged and every bucket is
-        exactly what it was before ADR-049.
-        """
-        return [c for c in self.changes if is_evaluated(c)]
-
     @property
     def not_evaluated(self) -> list[Change]:
         """Findings compatibility policy did not score (ADR-049 D1).
@@ -481,39 +420,3 @@ class DiffResult(ReportSideFacts):
         every run that did not opt into ``--contract``.
         """
         return [c for c in self.changes if not is_evaluated(c)]
-
-    @property
-    def breaking(self) -> list[Change]:
-        """Changes classified as BREAKING under the active policy."""
-        return [
-            c
-            for c in self._evaluated_changes()
-            if self._effective_verdict_for_change(c) == Verdict.BREAKING
-        ]
-
-    @property
-    def source_breaks(self) -> list[Change]:
-        """Changes classified as API_BREAK under the active policy."""
-        return [
-            c
-            for c in self._evaluated_changes()
-            if self._effective_verdict_for_change(c) == Verdict.API_BREAK
-        ]
-
-    @property
-    def compatible(self) -> list[Change]:
-        """Changes classified as COMPATIBLE under the active policy."""
-        return [
-            c
-            for c in self._evaluated_changes()
-            if self._effective_verdict_for_change(c) == Verdict.COMPATIBLE
-        ]
-
-    @property
-    def risk(self) -> list[Change]:
-        """Changes classified as COMPATIBLE_WITH_RISK under the active policy."""
-        return [
-            c
-            for c in self._evaluated_changes()
-            if self._effective_verdict_for_change(c) == Verdict.COMPATIBLE_WITH_RISK
-        ]

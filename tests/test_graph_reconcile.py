@@ -34,6 +34,7 @@ from abicheck.buildsource.graph_reconcile import (
 )
 from abicheck.buildsource.source_graph import GraphEdge, GraphNode, SourceGraphSummary
 from abicheck.checker_policy import ChangeKind, Verdict
+from abicheck.policy.evaluate import evaluate
 
 
 def _graph(nodes: list[GraphNode], edges: list[GraphEdge]) -> SourceGraphSummary:
@@ -1060,7 +1061,7 @@ def test_reconciliation_never_deletes_or_downgrades_artifact_finding() -> None:
     assert len(enriched_func_removed) == 1
     assert enriched_func_removed[0].symbol == baseline_func_removed[0].symbol
     assert enriched.verdict == Verdict.BREAKING
-    assert enriched_func_removed[0] in enriched.breaking
+    assert enriched_func_removed[0] in evaluate(enriched).breaking
 
     # The reconciliation findings are purely additive: present, RISK-tier,
     # never overriding the BREAKING verdict.
@@ -1080,7 +1081,7 @@ def test_reconciliation_never_deletes_or_downgrades_artifact_finding() -> None:
     assert len(reconciled_in_result) == len(graph_findings)
     assert len(enriched.changes) == len(baseline.changes) + len(graph_findings)
     for c in reconciled_in_result:
-        assert c not in enriched.breaking
+        assert c not in evaluate(enriched).breaking
 
 
 def test_reconcile_added_removed_stays_fast_on_a_large_graph() -> None:

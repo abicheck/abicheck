@@ -81,7 +81,7 @@ from .report.comparison_scope import ComparisonScopeTerms
 from .report.release_assurance import ReleaseAssuranceTerms
 from .report.release_public_surface import ReleasePublicSurfaceTerms
 from .workflows.extraction import package_component_inventory  # noqa: F401
-from .workflows.gate import incomplete_scope_diagnostic
+from .workflows.gate import effective_kind_sets, incomplete_scope_diagnostic
 from .workflows.snapshot_factory import new_snapshot
 
 if TYPE_CHECKING:
@@ -526,7 +526,7 @@ def _release_display_buckets(
     if severity_config is not None:
         from .workflows.gate import categorize_changes
 
-        kind_sets = diff._effective_kind_sets()
+        kind_sets = effective_kind_sets(diff)
         categorized = categorize_changes(
             diff.changes,
             policy=diff.policy,
@@ -552,14 +552,17 @@ def _release_display_buckets(
                 "addition",
             )
         ]
+    from .workflows.gate import evaluate
+
+    classified = evaluate(diff)
     return [
-        ("breaking", diff.breaking),
-        ("api_break", diff.source_breaks),
-        ("risk", diff.risk),
-        ("compatible", diff.compatible),
+        ("breaking", classified.breaking),
+        ("api_break", classified.source_breaks),
+        ("risk", classified.risk),
+        ("compatible", classified.compatible),
         # Codex review, fresh evidence ("Preserve not-evaluated findings in
         # release summaries"): `breaking`/`source_breaks`/`risk`/`compatible`
-        # all route through `_evaluated_changes()`, which -- under
+        # all route through `evaluated_changes()`, which -- under
         # `--contract` -- excludes a finding contract evaluation left
         # NOT_EVALUATED (unknown/unproven/proven-out-of-contract relevance).
         # Without this bucket, the severity_config-is-None branch above (the
@@ -637,7 +640,7 @@ def _release_finding_dicts(
                 bucket_changes,
                 show_only,
                 policy=diff.policy or "strict_abi",
-                kind_sets=diff._effective_kind_sets(),
+                kind_sets=effective_kind_sets(diff),
                 policy_file=diff.policy_file,
             )
         if cap is None:
@@ -802,7 +805,7 @@ def _strip_diff_results_and_adjust_verdict(
                             cat_changes,
                             show_only,
                             policy=diff.policy or "strict_abi",
-                            kind_sets=diff._effective_kind_sets(),
+                            kind_sets=effective_kind_sets(diff),
                             policy_file=diff.policy_file,
                         )
                     )
@@ -848,7 +851,7 @@ def _strip_diff_results_and_adjust_verdict(
                             cat_changes,
                             show_only,
                             policy=diff.policy or "strict_abi",
-                            kind_sets=diff._effective_kind_sets(),
+                            kind_sets=effective_kind_sets(diff),
                             policy_file=diff.policy_file,
                         )
                     ]

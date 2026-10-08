@@ -28,6 +28,7 @@ from abicheck.model import (
     Variable,
     Visibility,
 )
+from abicheck.policy.evaluate import evaluate
 
 
 def _snap(
@@ -252,21 +253,21 @@ class TestCompatibleAdditions:
         f_new = _pub_func("cleanup", "_Z7cleanupv")
         r = compare(_snap(functions=[f_old]), _snap(functions=[f_old, f_new]))
         assert r.verdict == Verdict.COMPATIBLE
-        assert not r.breaking
+        assert not evaluate(r).breaking
 
     def test_new_variable_compatible(self):
         v_old = _pub_var("a", "_Z1av", "int")
         v_new = _pub_var("b", "_Z1bv", "int")
         r = compare(_snap(variables=[v_old]), _snap(variables=[v_old, v_new]))
         assert r.verdict == Verdict.COMPATIBLE
-        assert not r.breaking
+        assert not evaluate(r).breaking
 
     def test_new_type_compatible(self):
         t_old = RecordType(name="OldType", kind="struct", size_bits=32)
         t_new = RecordType(name="NewType", kind="struct", size_bits=64)
         r = compare(_snap(types=[t_old]), _snap(types=[t_old, t_new]))
         assert r.verdict == Verdict.COMPATIBLE
-        assert not r.breaking
+        assert not evaluate(r).breaking
 
     def test_new_enum_member_compatible(self):
         e_old = EnumType(
@@ -282,7 +283,7 @@ class TestCompatibleAdditions:
         )
         r = compare(_snap(enums=[e_old]), _snap(enums=[e_new]))
         assert r.verdict == Verdict.COMPATIBLE
-        assert not r.breaking
+        assert not evaluate(r).breaking
 
     def test_new_typedef_no_change(self):
         """Adding a new typedef is not even tracked as a change."""
@@ -292,7 +293,7 @@ class TestCompatibleAdditions:
     def test_new_constant_compatible(self):
         r = compare(_snap(constants={}), _snap(constants={"NEW_FLAG": "1"}))
         assert r.verdict == Verdict.COMPATIBLE
-        assert not r.breaking
+        assert not evaluate(r).breaking
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -307,13 +308,13 @@ class TestElfCompatibleChanges:
         old_elf = ElfMetadata(needed=["libc.so.6"])
         new_elf = ElfMetadata(needed=["libc.so.6", "libm.so.6"])
         r = compare(_snap(elf=old_elf), _snap(elf=new_elf))
-        assert not r.breaking
+        assert not evaluate(r).breaking
 
     def test_needed_removed_compatible(self):
         old_elf = ElfMetadata(needed=["libc.so.6", "libdl.so.2"])
         new_elf = ElfMetadata(needed=["libc.so.6"])
         r = compare(_snap(elf=old_elf), _snap(elf=new_elf))
-        assert not r.breaking
+        assert not evaluate(r).breaking
 
     def test_weak_to_global_compatible(self):
         old_elf = ElfMetadata(
@@ -331,7 +332,7 @@ class TestElfCompatibleChanges:
             ]
         )
         r = compare(_snap(elf=old_elf), _snap(elf=new_elf))
-        assert not r.breaking
+        assert not evaluate(r).breaking
 
     def test_soname_change_is_deployment_risk(self):
         """SONAME change without API changes still requires loader review."""
@@ -339,7 +340,7 @@ class TestElfCompatibleChanges:
         new_elf = ElfMetadata(soname="libfoo.so.2")
         r = compare(_snap(elf=old_elf), _snap(elf=new_elf))
         assert r.verdict == Verdict.COMPATIBLE_WITH_RISK
-        assert not r.breaking
+        assert not evaluate(r).breaking
 
     def test_func_code_size_change_not_breaking(self):
         """Function code size changed (optimization) → not a break."""

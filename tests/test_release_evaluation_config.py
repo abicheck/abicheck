@@ -102,7 +102,7 @@ class TestReleaseFanOutStampsResolvedConfig:
     ``pack_application.PackApplication.resolved_config`` (set once, for the
     whole release, by the ``pack_application()`` factory both paths share)
     and stamping it in ``_run_compare_pair`` via
-    ``abicheck.cli_compare_receipt.record_release_resolved_config``, right
+    ``abicheck.workflows.member_compare.record_release_resolved_config``, right
     after ``service.run_compare`` returns. That function also merges into
     an existing ``contract_context`` (a release run given ``--contract``),
     which ``TestReleaseFanOutMergesContractContext`` below covers
@@ -129,7 +129,10 @@ class TestReleaseFanOutStampsResolvedConfig:
         old.write_bytes(b"")
         new.write_bytes(b"")
         with (
-            patch("abicheck.service.run_compare", return_value=fake_result),
+            patch(
+                "abicheck.workflows.member_compare.run_compare",
+                return_value=fake_result,
+            ),
             patch(
                 "abicheck.cli_compare_release_pairwise._normalize_binary_input",
                 side_effect=lambda p: (p, None),
@@ -359,7 +362,7 @@ class TestReleaseFanOutMergesContractContext:
         )
 
     def test_no_contract_context_only_stamps_the_bare_attribute(self) -> None:
-        from abicheck.cli_compare_receipt import record_release_resolved_config
+        from abicheck.workflows.member_compare import record_release_resolved_config
 
         config = _minimal_evaluation_config()
         diff = _result()
@@ -371,7 +374,7 @@ class TestReleaseFanOutMergesContractContext:
         """The actual regression: without the merge, `effective_config_
         fields` reads the *old*, unmerged context's config and never sees
         the pack's identity at all."""
-        from abicheck.cli_compare_receipt import record_release_resolved_config
+        from abicheck.workflows.member_compare import record_release_resolved_config
 
         unmerged = _minimal_evaluation_config()
         pack_config = _minimal_evaluation_config(
@@ -395,7 +398,7 @@ class TestReleaseFanOutMergesContractContext:
         """No --pack at all (config=None): neither field may change, even
         when a contract_context already exists -- `record_release_resolved_
         config` must not fabricate a merge from nothing."""
-        from abicheck.cli_compare_receipt import record_release_resolved_config
+        from abicheck.workflows.member_compare import record_release_resolved_config
 
         original_config = _minimal_evaluation_config()
         diff = _result()
@@ -438,8 +441,8 @@ class TestReleaseFanOutPreservesObservedSuppressions:
         )
 
     def test_observed_suppressions_survive_the_merge(self) -> None:
-        from abicheck.cli_compare_receipt import record_release_resolved_config
         from abicheck.compatibility_evaluation_config import SuppressionConfig
+        from abicheck.workflows.member_compare import record_release_resolved_config
 
         observed_suppressions = SuppressionConfig(
             sha256="sha256:observed", rules=("cxx_standard_floor_raised",)
@@ -472,8 +475,8 @@ class TestReleaseFanOutPreservesObservedSuppressions:
         (a future fix to resolve_release_pack_application, or a caller this
         module doesn't control), that real value must not be silently
         discarded in favor of the observed one."""
-        from abicheck.cli_compare_receipt import record_release_resolved_config
         from abicheck.compatibility_evaluation_config import SuppressionConfig
+        from abicheck.workflows.member_compare import record_release_resolved_config
 
         observed_suppressions = SuppressionConfig(sha256="sha256:observed", rules=())
         observed = _minimal_evaluation_config(suppressions=observed_suppressions)
@@ -495,7 +498,7 @@ class TestReleaseFanOutPreservesObservedSuppressions:
         """Neither side has suppressions -- nothing to restore, and the
         merged config's suppressions must stay None rather than fabricating
         an empty SuppressionConfig."""
-        from abicheck.cli_compare_receipt import record_release_resolved_config
+        from abicheck.workflows.member_compare import record_release_resolved_config
 
         observed = _minimal_evaluation_config()
         assert observed.suppressions is None
@@ -525,8 +528,8 @@ class TestReleaseFanOutPreservesObservedSuppressions:
         one result. Pins that ``evaluation_config`` is stamped from the same,
         final (possibly suppression-restored) object as the merged context,
         never the pre-restoration one."""
-        from abicheck.cli_compare_receipt import record_release_resolved_config
         from abicheck.compatibility_evaluation_config import SuppressionConfig
+        from abicheck.workflows.member_compare import record_release_resolved_config
 
         observed_suppressions = SuppressionConfig(
             sha256="sha256:observed", rules=("cxx_standard_floor_raised",)
@@ -557,8 +560,8 @@ class TestReleaseFanOutPreservesObservedSuppressions:
         an ``observed_config`` with the default empty provenance mapping, so
         this is the one exercising the copy rather than the pop-when-absent
         fallback)."""
-        from abicheck.cli_compare_receipt import record_release_resolved_config
         from abicheck.compatibility_evaluation_config import SuppressionConfig
+        from abicheck.workflows.member_compare import record_release_resolved_config
 
         observed_suppressions = SuppressionConfig(
             sha256="sha256:observed", rules=("cxx_standard_floor_raised",)

@@ -29,6 +29,7 @@ from pathlib import Path
 
 from .binder import SymbolBinding
 from .model.change import Change
+from .policy.evaluate import evaluate
 from .report.render_json import render_json
 from .report.stack import (
     DEFAULTED_ROOT_NOTE,
@@ -126,8 +127,9 @@ def _render_stack_changes_section(
                     )
                 elif tiers:
                     lines.append(f"  - Evidence: {tier_str}")
-                if sc.abi_diff.breaking:
-                    for c in sc.abi_diff.breaking[:5]:
+                breaking = evaluate(sc.abi_diff).breaking
+                if breaking:
+                    for c in breaking[:5]:
                         lines.append(f"  - `{c.kind.value}`: {c.description}")
     lines.append("")
 

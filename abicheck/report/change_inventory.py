@@ -100,7 +100,7 @@ def compute_change_inventory(
     """Split *changes* into observed compatibility changes and standing inventory.
 
     *evaluated* is the compatibility-scored subset (``DiffResult.
-    _evaluated_changes()``) and *verdict_of* resolves one already-evaluated
+    evaluated_changes()``) and *verdict_of* resolves one already-evaluated
     finding's effective verdict -- the same two inputs ``build_summary``
     already has, so this never re-resolves a verdict on its own and can
     never disagree with the block beside it.

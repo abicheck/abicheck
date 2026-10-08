@@ -302,7 +302,7 @@ def _is_breaking_kind(change: Change) -> bool:
     """Whether *change* is a break under the default policy's kind sets.
 
     Deliberately kind-level rather than
-    ``DiffResult._effective_verdict_for_change``: the corpus runs the default
+    ``policy.evaluate.effective_verdict``: the corpus runs the default
     policy with no overrides, so the two agree, and reading the registry sets
     keeps this script from depending on a private method.
     """

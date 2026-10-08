@@ -19,6 +19,7 @@ from abicheck.checker_policy import ChangeKind, Verdict
 from abicheck.model import AbiSnapshot, Function, Param, Visibility
 from abicheck.model.change import Change
 from abicheck.policy.effective_gate import EffectiveGate
+from abicheck.policy.evaluate import effective_kind_sets, evaluate
 from abicheck.policy_file import PolicyFile
 from abicheck.post_processing import (
     DEFAULT_PIPELINE,
@@ -315,7 +316,7 @@ class TestFrozenNamespaceBlocksDowngrade:
                 r.changes,
                 PRESET_DEFAULT,
                 policy=r.policy,
-                kind_sets=r._effective_kind_sets(),
+                kind_sets=effective_kind_sets(r),
                 policy_file=r.policy_file,
             )
             == 4
@@ -328,7 +329,7 @@ class TestFrozenNamespaceBlocksDowngrade:
                 r, EffectiveGate.from_severity(PRESET_DEFAULT)
             )
         assert excinfo.value.code == 4
-        assert len(r.breaking) >= 1
+        assert len(evaluate(r).breaking) >= 1
 
     def test_severity_exit_code_still_allows_non_frozen_downgrade(self) -> None:
         """The per-change guard must not make all overrides ineffective."""
@@ -370,12 +371,12 @@ class TestFrozenNamespaceBlocksDowngrade:
                 r.changes,
                 PRESET_DEFAULT,
                 policy=r.policy,
-                kind_sets=r._effective_kind_sets(),
+                kind_sets=effective_kind_sets(r),
                 policy_file=r.policy_file,
             )
             == 0
         )
-        assert r.breaking == []
+        assert evaluate(r).breaking == []
 
 
 # ── Suppression namespace selector ─────────────────────────────────────────

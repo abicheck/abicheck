@@ -71,10 +71,13 @@ def _make_resolved_dso(path, soname="libfoo.so"):
 
 
 def _make_diff_result(verdict=Verdict.NO_CHANGE, breaking=None):
-    mock = MagicMock(spec=DiffResult)
-    mock.verdict = verdict
-    mock.breaking = [] if breaking is None else breaking
-    return mock
+    return DiffResult(
+        old_version="1",
+        new_version="2",
+        library="libfoo.so",
+        changes=[] if breaking is None else list(breaking),
+        verdict=verdict,
+    )
 
 
 def _make_breaking_change(symbol="sym", affected_symbols=None):

@@ -48,7 +48,7 @@ class _GateContext:
     """The per-*result* inputs every per-change gate question needs.
 
     Resolved once per pass rather than per finding: ``DiffResult.
-    _effective_kind_sets()`` re-derives the policy's four kind sets (and
+    effective_kind_sets()`` re-derives the policy's four kind sets (and
     re-applies every policy-file override) on each call, and both
     ``gate_contribution_for_change`` and ``effective_verdict_for_change``
     want them. Hoisting cut the closing pass from ~19% of a 2000-symbol
@@ -67,10 +67,14 @@ class _GateContext:
 
     @classmethod
     def of(cls, result: DiffResult, *, today: date | None = None) -> _GateContext:
-        kind_sets_of = getattr(result, "_effective_kind_sets", None)
+        from ..checker_types import DiffResult
+        from .evaluate import effective_kind_sets
+
         return cls(
             policy=getattr(result, "policy", None),
-            kind_sets=kind_sets_of() if callable(kind_sets_of) else None,
+            kind_sets=effective_kind_sets(result)
+            if isinstance(result, DiffResult)
+            else None,
             policy_file=getattr(result, "policy_file", None),
             today=today,
         )
