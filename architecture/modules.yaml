@@ -189,7 +189,8 @@
         "abicheck/tu_merge_provenance.py",
         "abicheck/type_metadata.py",
         "abicheck/dumper_contract.py",
-        "abicheck/dumper_manifest.py"
+        "abicheck/dumper_manifest.py",
+        "abicheck/dumper_castxml.py"
       ]
     },
     "compare": {

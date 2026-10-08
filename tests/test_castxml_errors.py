@@ -55,66 +55,76 @@ class TestCastxmlNonZeroExit:
 
     def test_nonzero_exit_raises_runtime_error(self, tmp_path: Path) -> None:
         """castxml exit 1 → RuntimeError mentioning exit code."""
+        run = MagicMock(
+            return_value=_make_completed_process(
+                returncode=1, stderr="error: no such file"
+            )
+        )
         with (
-            patch("abicheck.dumper._resolve_selected_tool", return_value="castxml"),
             patch(
-                "abicheck.dumper.deadline.run_bounded",
-                return_value=_make_completed_process(
-                    returncode=1, stderr="error: no such file"
-                ),
+                "abicheck.extract.headers.castxml.backend._resolve_selected_tool",
+                return_value="castxml",
             ),
             patch(
-                "abicheck.dumper._cache_path",
+                "abicheck.extract.headers.castxml.backend._cache_path",
                 return_value=tmp_path / "nonexistent_cache.xml",
             ),
         ):
-            from abicheck.dumper import _castxml_dump
+            from abicheck.extract.headers.castxml.backend import (
+                castxml_dump as _castxml_dump,
+            )
 
             header = tmp_path / "test.hpp"
             header.write_text("// empty", encoding="utf-8")
             with pytest.raises(RuntimeError, match="castxml failed"):
-                _castxml_dump([header], [])
+                _castxml_dump([header], [], run=run)
 
     def test_nonzero_exit_includes_stderr(self, tmp_path: Path) -> None:
         """Error message should include stderr from castxml."""
         stderr_text = "fatal error: myheader.h: No such file or directory"
+        run = MagicMock(
+            return_value=_make_completed_process(returncode=2, stderr=stderr_text)
+        )
         with (
-            patch("abicheck.dumper._resolve_selected_tool", return_value="castxml"),
             patch(
-                "abicheck.dumper.deadline.run_bounded",
-                return_value=_make_completed_process(returncode=2, stderr=stderr_text),
+                "abicheck.extract.headers.castxml.backend._resolve_selected_tool",
+                return_value="castxml",
             ),
             patch(
-                "abicheck.dumper._cache_path",
+                "abicheck.extract.headers.castxml.backend._cache_path",
                 return_value=tmp_path / "nonexistent_cache.xml",
             ),
         ):
-            from abicheck.dumper import _castxml_dump
+            from abicheck.extract.headers.castxml.backend import (
+                castxml_dump as _castxml_dump,
+            )
 
             header = tmp_path / "test.hpp"
             header.write_text("// empty", encoding="utf-8")
             with pytest.raises(RuntimeError, match="No such file"):
-                _castxml_dump([header], [])
+                _castxml_dump([header], [], run=run)
 
     def test_nonzero_exit_includes_exit_code(self, tmp_path: Path) -> None:
         """Error message should include the exit code."""
+        run = MagicMock(return_value=_make_completed_process(returncode=127, stderr=""))
         with (
-            patch("abicheck.dumper._resolve_selected_tool", return_value="castxml"),
             patch(
-                "abicheck.dumper.deadline.run_bounded",
-                return_value=_make_completed_process(returncode=127, stderr=""),
+                "abicheck.extract.headers.castxml.backend._resolve_selected_tool",
+                return_value="castxml",
             ),
             patch(
-                "abicheck.dumper._cache_path",
+                "abicheck.extract.headers.castxml.backend._cache_path",
                 return_value=tmp_path / "nonexistent_cache.xml",
             ),
         ):
-            from abicheck.dumper import _castxml_dump
+            from abicheck.extract.headers.castxml.backend import (
+                castxml_dump as _castxml_dump,
+            )
 
             header = tmp_path / "test.hpp"
             header.write_text("// empty", encoding="utf-8")
             with pytest.raises(RuntimeError, match="127"):
-                _castxml_dump([header], [])
+                _castxml_dump([header], [], run=run)
 
 
 class TestCastxmlEmptyOutput:
@@ -137,19 +147,23 @@ class TestCastxmlEmptyOutput:
             return _make_completed_process(returncode=0)
 
         with (
-            patch("abicheck.dumper._resolve_selected_tool", return_value="castxml"),
-            patch("abicheck.dumper.deadline.run_bounded", side_effect=fake_run),
             patch(
-                "abicheck.dumper._cache_path",
+                "abicheck.extract.headers.castxml.backend._resolve_selected_tool",
+                return_value="castxml",
+            ),
+            patch(
+                "abicheck.extract.headers.castxml.backend._cache_path",
                 return_value=tmp_path / "nonexistent_cache.xml",
             ),
         ):
-            from abicheck.dumper import _castxml_dump
+            from abicheck.extract.headers.castxml.backend import (
+                castxml_dump as _castxml_dump,
+            )
 
             header = tmp_path / "test.hpp"
             header.write_text("// empty", encoding="utf-8")
             with pytest.raises(RuntimeError, match="empty"):
-                _castxml_dump([header], [])
+                _castxml_dump([header], [], run=fake_run)
 
     def test_missing_output_file_raises(self, tmp_path: Path) -> None:
         """castxml exits 0 but does NOT write output file → RuntimeError."""
@@ -159,19 +173,23 @@ class TestCastxmlEmptyOutput:
             return _make_completed_process(returncode=0)
 
         with (
-            patch("abicheck.dumper._resolve_selected_tool", return_value="castxml"),
-            patch("abicheck.dumper.deadline.run_bounded", side_effect=fake_run),
             patch(
-                "abicheck.dumper._cache_path",
+                "abicheck.extract.headers.castxml.backend._resolve_selected_tool",
+                return_value="castxml",
+            ),
+            patch(
+                "abicheck.extract.headers.castxml.backend._cache_path",
                 return_value=tmp_path / "nonexistent_cache.xml",
             ),
         ):
-            from abicheck.dumper import _castxml_dump
+            from abicheck.extract.headers.castxml.backend import (
+                castxml_dump as _castxml_dump,
+            )
 
             header = tmp_path / "test.hpp"
             header.write_text("// empty", encoding="utf-8")
             with pytest.raises(RuntimeError):
-                _castxml_dump([header], [])
+                _castxml_dump([header], [], run=fake_run)
 
 
 class TestCastxmlEmptyXmlRoot:
@@ -187,19 +205,23 @@ class TestCastxmlEmptyXmlRoot:
             return _make_completed_process(returncode=0)
 
         with (
-            patch("abicheck.dumper._resolve_selected_tool", return_value="castxml"),
-            patch("abicheck.dumper.deadline.run_bounded", side_effect=fake_run),
             patch(
-                "abicheck.dumper._cache_path",
+                "abicheck.extract.headers.castxml.backend._resolve_selected_tool",
+                return_value="castxml",
+            ),
+            patch(
+                "abicheck.extract.headers.castxml.backend._cache_path",
                 return_value=tmp_path / "nonexistent_cache.xml",
             ),
         ):
-            from abicheck.dumper import _castxml_dump
+            from abicheck.extract.headers.castxml.backend import (
+                castxml_dump as _castxml_dump,
+            )
 
             header = tmp_path / "test.hpp"
             header.write_text("// empty", encoding="utf-8")
             with pytest.raises(RuntimeError, match="empty"):
-                _castxml_dump([header], [])
+                _castxml_dump([header], [], run=fake_run)
 
     def test_empty_xml_error_message_is_informative(self, tmp_path: Path) -> None:
         """Error message should direct user to check header paths."""
@@ -213,19 +235,23 @@ class TestCastxmlEmptyXmlRoot:
             )
 
         with (
-            patch("abicheck.dumper._resolve_selected_tool", return_value="castxml"),
-            patch("abicheck.dumper.deadline.run_bounded", side_effect=fake_run),
             patch(
-                "abicheck.dumper._cache_path",
+                "abicheck.extract.headers.castxml.backend._resolve_selected_tool",
+                return_value="castxml",
+            ),
+            patch(
+                "abicheck.extract.headers.castxml.backend._cache_path",
                 return_value=tmp_path / "nonexistent_cache.xml",
             ),
         ):
-            from abicheck.dumper import _castxml_dump
+            from abicheck.extract.headers.castxml.backend import (
+                castxml_dump as _castxml_dump,
+            )
 
             header = tmp_path / "test.hpp"
             header.write_text("// empty", encoding="utf-8")
             with pytest.raises(RuntimeError) as exc_info:
-                _castxml_dump([header], [])
+                _castxml_dump([header], [], run=fake_run)
             msg = str(exc_info.value)
             # Should mention "empty" and give actionable guidance
             assert "empty" in msg.lower() or "no declarations" in msg.lower()
@@ -244,19 +270,23 @@ class TestCastxmlInvalidXml:
             return _make_completed_process(returncode=0)
 
         with (
-            patch("abicheck.dumper._resolve_selected_tool", return_value="castxml"),
-            patch("abicheck.dumper.deadline.run_bounded", side_effect=fake_run),
             patch(
-                "abicheck.dumper._cache_path",
+                "abicheck.extract.headers.castxml.backend._resolve_selected_tool",
+                return_value="castxml",
+            ),
+            patch(
+                "abicheck.extract.headers.castxml.backend._cache_path",
                 return_value=tmp_path / "nonexistent_cache.xml",
             ),
         ):
-            from abicheck.dumper import _castxml_dump
+            from abicheck.extract.headers.castxml.backend import (
+                castxml_dump as _castxml_dump,
+            )
 
             header = tmp_path / "test.hpp"
             header.write_text("// empty", encoding="utf-8")
             with pytest.raises(RuntimeError, match="invalid XML"):
-                _castxml_dump([header], [])
+                _castxml_dump([header], [], run=fake_run)
 
     def test_truncated_xml_raises(self, tmp_path: Path) -> None:
         """castxml writes truncated XML (starts valid but truncated) → RuntimeError."""
@@ -269,19 +299,23 @@ class TestCastxmlInvalidXml:
             return _make_completed_process(returncode=0)
 
         with (
-            patch("abicheck.dumper._resolve_selected_tool", return_value="castxml"),
-            patch("abicheck.dumper.deadline.run_bounded", side_effect=fake_run),
             patch(
-                "abicheck.dumper._cache_path",
+                "abicheck.extract.headers.castxml.backend._resolve_selected_tool",
+                return_value="castxml",
+            ),
+            patch(
+                "abicheck.extract.headers.castxml.backend._cache_path",
                 return_value=tmp_path / "nonexistent_cache.xml",
             ),
         ):
-            from abicheck.dumper import _castxml_dump
+            from abicheck.extract.headers.castxml.backend import (
+                castxml_dump as _castxml_dump,
+            )
 
             header = tmp_path / "test.hpp"
             header.write_text("// empty", encoding="utf-8")
             with pytest.raises(RuntimeError):
-                _castxml_dump([header], [])
+                _castxml_dump([header], [], run=fake_run)
 
 
 class TestCastxmlSuccessPath:
@@ -297,20 +331,24 @@ class TestCastxmlSuccessPath:
             return _make_completed_process(returncode=0)
 
         with (
-            patch("abicheck.dumper._resolve_selected_tool", return_value="castxml"),
-            patch("abicheck.dumper.deadline.run_bounded", side_effect=fake_run),
             patch(
-                "abicheck.dumper._cache_path",
+                "abicheck.extract.headers.castxml.backend._resolve_selected_tool",
+                return_value="castxml",
+            ),
+            patch(
+                "abicheck.extract.headers.castxml.backend._cache_path",
                 return_value=tmp_path / "nonexistent_cache.xml",
             ),
         ):
-            from abicheck.dumper import _castxml_dump
+            from abicheck.extract.headers.castxml.backend import (
+                castxml_dump as _castxml_dump,
+            )
 
             header = tmp_path / "test.hpp"
             header.write_text("// empty", encoding="utf-8")
             from xml.etree.ElementTree import Element
 
-            root = _castxml_dump([header], [])
+            root = _castxml_dump([header], [], run=fake_run)
             assert isinstance(root, Element)
             assert len(root) > 0  # has children
 
@@ -322,24 +360,31 @@ class TestCastxmlNotFound:
         """When castxml is not in PATH → RuntimeError."""
         with (
             patch(
-                "abicheck.dumper._resolve_selected_tool", side_effect=FileNotFoundError
+                "abicheck.extract.headers.castxml.backend._resolve_selected_tool",
+                side_effect=FileNotFoundError,
             ),
             patch(
-                "abicheck.dumper._cache_path",
+                "abicheck.extract.headers.castxml.backend._cache_path",
                 return_value=tmp_path / "nonexistent_cache.xml",
             ),
         ):
-            from abicheck.dumper import _castxml_dump
+            from abicheck.extract.headers.castxml.backend import (
+                castxml_dump as _castxml_dump,
+            )
 
             header = tmp_path / "test.hpp"
             header.write_text("// empty", encoding="utf-8")
+            run = MagicMock()
             with pytest.raises(RuntimeError, match="castxml not found"):
-                _castxml_dump([header], [])
+                _castxml_dump([header], [], run=run)
+            run.assert_not_called()
 
     def test_hostile_cwd_castxml_is_not_executed(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from abicheck.dumper import _castxml_dump
+        from abicheck.extract.headers.castxml.backend import (
+            castxml_dump as _castxml_dump,
+        )
 
         fake = tmp_path / "castxml"
         fake.write_text("not an executable", encoding="utf-8")
@@ -348,11 +393,9 @@ class TestCastxmlNotFound:
         monkeypatch.chdir(tmp_path)
         monkeypatch.setenv("PATH", str(tmp_path / "empty-path"))
 
-        with (
-            patch("abicheck.dumper.deadline.run_bounded") as run,
-            pytest.raises(RuntimeError, match="castxml not found"),
-        ):
-            _castxml_dump([header], [])
+        run = MagicMock()
+        with pytest.raises(RuntimeError, match="castxml not found"):
+            _castxml_dump([header], [], run=run)
         run.assert_not_called()
 
 
@@ -410,7 +453,7 @@ def test_castxml_cpp_std_selects_cpp_mode_for_c_compatible_dot_h(tmp_path, monke
     """Cases 66/69: compile-DB -std=gnu++17 beats .h/content heuristics."""
     from xml.etree.ElementTree import Element
 
-    from abicheck import dumper
+    from abicheck.extract.headers.castxml import backend as castxml_backend
 
     header = tmp_path / "public.h"
     header.write_text('extern "C" int api(void);\n', encoding="utf-8")
@@ -420,14 +463,20 @@ def test_castxml_cpp_std_selects_cpp_mode_for_c_compatible_dot_h(tmp_path, monke
         captured["force_cpp"] = force_cpp
         return Element("GCC_XML")
 
-    monkeypatch.setattr(dumper, "_resolve_selected_tool", lambda _name: "castxml")
-    monkeypatch.setattr(dumper, "_cache_path", lambda key: tmp_path / "cache.xml")
     monkeypatch.setattr(
-        dumper, "_resolve_compiler_binary", lambda *args: ("g++", "gnu")
+        castxml_backend, "_resolve_selected_tool", lambda _name: "castxml"
     )
-    monkeypatch.setattr(dumper, "_run_castxml_attempt", fake_run)
+    monkeypatch.setattr(
+        castxml_backend, "_cache_path", lambda key: tmp_path / "cache.xml"
+    )
+    monkeypatch.setattr(
+        castxml_backend, "_resolve_compiler_binary", lambda *args: ("g++", "gnu")
+    )
+    monkeypatch.setattr(castxml_backend, "_run_castxml_attempt", fake_run)
 
-    dumper._castxml_dump([header], [], gcc_option_tokens=("-std=gnu++17",), lang=None)
+    castxml_backend.castxml_dump(
+        [header], [], gcc_option_tokens=("-std=gnu++17",), lang=None
+    )
 
     assert captured["force_cpp"] is True
 
@@ -443,7 +492,7 @@ def test_castxml_cpp20_only_syntax_selects_cpp_mode(tmp_path, monkeypatch):
     failed before producing a snapshot."""
     from xml.etree.ElementTree import Element
 
-    from abicheck import dumper
+    from abicheck.extract.headers.castxml import backend as castxml_backend
 
     header = tmp_path / "public.h"
     header.write_text(
@@ -455,14 +504,18 @@ def test_castxml_cpp20_only_syntax_selects_cpp_mode(tmp_path, monkeypatch):
         captured["force_cpp"] = force_cpp
         return Element("GCC_XML")
 
-    monkeypatch.setattr(dumper, "_resolve_selected_tool", lambda _name: "castxml")
-    monkeypatch.setattr(dumper, "_cache_path", lambda key: tmp_path / "cache.xml")
     monkeypatch.setattr(
-        dumper, "_resolve_compiler_binary", lambda *args: ("g++", "gnu")
+        castxml_backend, "_resolve_selected_tool", lambda _name: "castxml"
     )
-    monkeypatch.setattr(dumper, "_run_castxml_attempt", fake_run)
+    monkeypatch.setattr(
+        castxml_backend, "_cache_path", lambda key: tmp_path / "cache.xml"
+    )
+    monkeypatch.setattr(
+        castxml_backend, "_resolve_compiler_binary", lambda *args: ("g++", "gnu")
+    )
+    monkeypatch.setattr(castxml_backend, "_run_castxml_attempt", fake_run)
 
-    dumper._castxml_dump([header], [], lang=None)
+    castxml_backend.castxml_dump([header], [], lang=None)
 
     assert captured["force_cpp"] is True
 
@@ -640,13 +693,14 @@ def test_header_ast_parser_falls_back_to_clang_on_toolchain_failure(
     from abicheck import dumper
     from abicheck.dumper import _ClangAstParser, _header_ast_parser
     from abicheck.errors import SnapshotError
+    from abicheck.extract.headers.castxml import backend as castxml_backend
 
     def _boom(*a, **k):
         raise SnapshotError("castxml failed: error: unknown type name '_Float128'")
 
     sentinel = object()
     monkeypatch.setattr(dumper, "_resolve_header_backend", lambda b: "castxml")
-    monkeypatch.setattr(dumper, "_castxml_dump", _boom)
+    monkeypatch.setattr(castxml_backend, "castxml_dump", _boom)
     monkeypatch.setattr(dumper, "_resolve_clang_bin", lambda *a, **k: "clang")
     monkeypatch.setattr(
         "abicheck.extract.headers.clang.backend.clang_header_dump",
@@ -667,6 +721,7 @@ def test_header_ast_parser_falls_back_to_clang_on_guard_error(tmp_path, monkeypa
     from abicheck import dumper
     from abicheck.dumper import _ClangAstParser, _header_ast_parser
     from abicheck.errors import SnapshotError
+    from abicheck.extract.headers.castxml import backend as castxml_backend
 
     def _boom(*a, **k):
         raise SnapshotError(
@@ -676,7 +731,7 @@ def test_header_ast_parser_falls_back_to_clang_on_guard_error(tmp_path, monkeypa
 
     sentinel = object()
     monkeypatch.setattr(dumper, "_resolve_header_backend", lambda b: "castxml")
-    monkeypatch.setattr(dumper, "_castxml_dump", _boom)
+    monkeypatch.setattr(castxml_backend, "castxml_dump", _boom)
     monkeypatch.setattr(dumper, "_resolve_clang_bin", lambda *a, **k: "clang")
     monkeypatch.setattr(
         "abicheck.extract.headers.clang.backend.clang_header_dump",
@@ -696,12 +751,13 @@ def test_header_ast_parser_no_fallback_when_castxml_explicit(tmp_path, monkeypat
     from abicheck import dumper
     from abicheck.dumper import _header_ast_parser
     from abicheck.errors import SnapshotError
+    from abicheck.extract.headers.castxml import backend as castxml_backend
 
     def _boom(*a, **k):
         raise SnapshotError("castxml failed: error: unknown type name '_Float128'")
 
     monkeypatch.setattr(dumper, "_resolve_header_backend", lambda b: "castxml")
-    monkeypatch.setattr(dumper, "_castxml_dump", _boom)
+    monkeypatch.setattr(castxml_backend, "castxml_dump", _boom)
     monkeypatch.setattr(dumper, "_resolve_clang_bin", lambda *a, **k: "clang")
     monkeypatch.delenv("ABICHECK_AST_FRONTEND", raising=False)
 
@@ -801,12 +857,13 @@ def test_header_ast_parser_no_fallback_on_non_toolchain_failure(tmp_path, monkey
     from abicheck import dumper
     from abicheck.dumper import _header_ast_parser
     from abicheck.errors import SnapshotError
+    from abicheck.extract.headers.castxml import backend as castxml_backend
 
     def _boom(*a, **k):
         raise SnapshotError("castxml failed: fatal error: 'missing.h' file not found")
 
     monkeypatch.setattr(dumper, "_resolve_header_backend", lambda b: "castxml")
-    monkeypatch.setattr(dumper, "_castxml_dump", _boom)
+    monkeypatch.setattr(castxml_backend, "castxml_dump", _boom)
     monkeypatch.setattr(dumper, "_resolve_clang_bin", lambda *a, **k: "clang")
     monkeypatch.delenv("ABICHECK_AST_FRONTEND", raising=False)
 
@@ -841,9 +898,12 @@ def test_header_ast_parser_castxml_success_returns_castxml_parser(
 
     from abicheck import dumper
     from abicheck.dumper import _CastxmlParser, _header_ast_parser
+    from abicheck.extract.headers.castxml import backend as castxml_backend
 
     monkeypatch.setattr(dumper, "_resolve_header_backend", lambda b: "castxml")
-    monkeypatch.setattr(dumper, "_castxml_dump", lambda *a, **k: Element("GCC_XML"))
+    monkeypatch.setattr(
+        castxml_backend, "castxml_dump", lambda *a, **k: Element("GCC_XML")
+    )
 
     parser = _header_ast_parser(
         [Path("a.h")], [], backend="auto", **_ast_parser_kwargs(tmp_path)

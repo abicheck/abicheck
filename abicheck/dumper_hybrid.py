@@ -114,11 +114,6 @@ from typing import Any
 
 from .comparability import PROFILE_FIELD_KEYS, _sha256_of
 from .diff_helpers import type_map_key
-from .dumper_castxml import (
-    SYNTHETIC_CTOR_KEY_PREFIX,
-    is_synthetic_ctor_key,
-    is_synthetic_dtor_key,
-)
 from .extract.dependency_exclusion import suppress_dependency_exclusion
 from .extract.semantic_ir_merge import merge_semantic_ir
 from .fact_provenance import (
@@ -144,6 +139,11 @@ from .model.mangled_name_template_args import skip_template_args as _skip_templa
 from .model.name_decoration import macho as macho_decoration
 from .model.occurrence import OccurrenceId
 from .model.semantic_ir import CanonicalEntity, SemanticIR, semantic_ir_conflict_key
+from .model.synthetic_key import (
+    SYNTHETIC_CTOR_KEY_PREFIX,
+    is_synthetic_ctor_key,
+    is_synthetic_dtor_key,
+)
 from .name_classification import canonicalize_type_name
 from .storage import closure_identity
 

@@ -61,6 +61,7 @@ from abicheck.dumper_clang import (
 )
 from abicheck.dumper_clang_errors import _parse_clang_ast_result
 from abicheck.errors import SnapshotError
+from abicheck.extract.headers.castxml import backend as cxb
 from abicheck.extract.headers.clang import backend as clang_backend
 from abicheck.extract.headers.clang.backend import ClangBackend, clang_header_dump
 from abicheck.model import AccessLevel, Visibility
@@ -3858,8 +3859,8 @@ def test_header_ast_parser_castxml_branch(monkeypatch: pytest.MonkeyPatch) -> No
     sentinel = object()
     parser_cls = dumper._CastxmlParser
     parser_sentinel = parser_cls.__new__(parser_cls)
-    monkeypatch.setattr(dumper, "_castxml_dump", lambda *a, **k: sentinel)
-    monkeypatch.setattr(dumper, "_CastxmlParser", lambda *a, **k: parser_sentinel)
+    monkeypatch.setattr(cxb, "castxml_dump", lambda *a, **k: sentinel)
+    monkeypatch.setattr(cxb, "_CastxmlParser", lambda *a, **k: parser_sentinel)
     parser = _header_ast_parser(
         [],
         [],
@@ -3890,8 +3891,8 @@ def test_header_ast_parser_castxml_branch_records_abi_dialect(
     sentinel = object()
     parser_cls = dumper._CastxmlParser
     parser_sentinel = parser_cls.__new__(parser_cls)
-    monkeypatch.setattr(dumper, "_castxml_dump", lambda *a, **k: sentinel)
-    monkeypatch.setattr(dumper, "_CastxmlParser", lambda *a, **k: parser_sentinel)
+    monkeypatch.setattr(cxb, "castxml_dump", lambda *a, **k: sentinel)
+    monkeypatch.setattr(cxb, "_CastxmlParser", lambda *a, **k: parser_sentinel)
     parser = _header_ast_parser(
         [],
         [],
@@ -3915,8 +3916,7 @@ def test_header_ast_parser_castxml_branch_records_the_force_cpp_aware_compiler(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Codex review, fresh evidence: for a C-mode dump under the default
-    ``compiler="c++"``, ``_castxml_dump`` internally remaps to ``"cc"``
-    before resolving ``cc_bin`` -- ``ast_toolchain["compiler_selected"]``
+    ``compiler="c++"``, ``castxml_dump`` (castxml backend) internally remaps to ``"cc"`` before resolving ``cc_bin`` -- ``ast_toolchain["compiler_selected"]``
     must record *that* resolved identity, not a re-derivation from the
     caller's original, unresolved ``"c++"`` (which would record g++'s
     identity even though castxml actually ran gcc)."""
@@ -3925,14 +3925,14 @@ def test_header_ast_parser_castxml_branch_records_the_force_cpp_aware_compiler(
     parser_sentinel = parser_cls.__new__(parser_cls)
 
     def fake_castxml_dump(*a, **k):
-        # Mirrors _castxml_dump's own force_cpp=False remap: "c++" -> "cc".
+        # Mirrors castxml_dump's own force_cpp=False remap: "c++" -> "cc".
         out = k.get("_selected_meta_out")
         if out is not None:
             out.append(("cc", False))
         return sentinel
 
-    monkeypatch.setattr(dumper, "_castxml_dump", fake_castxml_dump)
-    monkeypatch.setattr(dumper, "_CastxmlParser", lambda *a, **k: parser_sentinel)
+    monkeypatch.setattr(cxb, "castxml_dump", fake_castxml_dump)
+    monkeypatch.setattr(cxb, "_CastxmlParser", lambda *a, **k: parser_sentinel)
     parser = _header_ast_parser(
         [],
         [],
@@ -3962,8 +3962,8 @@ def test_header_ast_parser_castxml_branch_records_msvc_abi_dialect(
     sentinel = object()
     parser_cls = dumper._CastxmlParser
     parser_sentinel = parser_cls.__new__(parser_cls)
-    monkeypatch.setattr(dumper, "_castxml_dump", lambda *a, **k: sentinel)
-    monkeypatch.setattr(dumper, "_CastxmlParser", lambda *a, **k: parser_sentinel)
+    monkeypatch.setattr(cxb, "castxml_dump", lambda *a, **k: sentinel)
+    monkeypatch.setattr(cxb, "_CastxmlParser", lambda *a, **k: parser_sentinel)
     parser = _header_ast_parser(
         [],
         [],
@@ -3989,8 +3989,8 @@ def test_header_ast_parser_stamps_castxml_supported(
     sentinel = object()
     parser_cls = dumper._CastxmlParser
     parser_sentinel = parser_cls.__new__(parser_cls)
-    monkeypatch.setattr(dumper, "_castxml_dump", lambda *a, **k: sentinel)
-    monkeypatch.setattr(dumper, "_CastxmlParser", lambda *a, **k: parser_sentinel)
+    monkeypatch.setattr(cxb, "castxml_dump", lambda *a, **k: sentinel)
+    monkeypatch.setattr(cxb, "_CastxmlParser", lambda *a, **k: parser_sentinel)
     monkeypatch.setattr(
         dumper_toolchain,
         "_tool_identity_metadata",
@@ -4024,8 +4024,8 @@ def test_header_ast_parser_stamps_castxml_unsupported(
 ) -> None:
     parser_cls = dumper._CastxmlParser
     parser_sentinel = parser_cls.__new__(parser_cls)
-    monkeypatch.setattr(dumper, "_castxml_dump", lambda *a, **k: object())
-    monkeypatch.setattr(dumper, "_CastxmlParser", lambda *a, **k: parser_sentinel)
+    monkeypatch.setattr(cxb, "castxml_dump", lambda *a, **k: object())
+    monkeypatch.setattr(cxb, "_CastxmlParser", lambda *a, **k: parser_sentinel)
     monkeypatch.setattr(
         dumper_toolchain,
         "_tool_identity_metadata",
@@ -4305,7 +4305,7 @@ def test_clang_header_dump_streams_stdout_to_file_not_memory(
         _write_stdout_file(kwargs, '{"kind": "TranslationUnitDecl", "inner": []}')
         return _fake_proc()
 
-    monkeypatch.setattr(dumper.deadline, "run_bounded", _run)
+    monkeypatch.setattr(dumper_clang_errors.deadline, "run_bounded", _run)
     clang_header_dump([header], [])
     assert seen.get("capture_output") is not True
     assert hasattr(seen.get("stdout"), "write"), (

@@ -210,7 +210,7 @@ from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
-from .dumper_castxml import (
+from .model.synthetic_key import (
     _SYNTHETIC_DTOR_KEY_PREFIX,
     SYNTHETIC_CTOR_KEY_PREFIX,
     is_synthetic_ctor_key,

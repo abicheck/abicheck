@@ -35,12 +35,16 @@ import pytest
 from _clang_ast_cache_isolation import _isolate_ast_cache, _reset_ast_memo
 
 from abicheck import deadline, dumper
+from abicheck.dumper_castxml_probe import check_scan_deadline, run_castxml
 from abicheck.dumper_clang_errors import run_clang_ast, run_clang_to_ast_file
+from abicheck.errors import SnapshotError
 from abicheck.extract.header_ast_fields import parse_header_ast_fields
 from abicheck.extract.headers.backend import HeaderAstBackend, HeaderParseRequest
+from abicheck.extract.headers.castxml.backend import CastxmlBackend, CastxmlRunError
 from abicheck.extract.headers.clang.backend import ClangBackend
 
 _HAVE_CLANG = shutil.which("clang") is not None or shutil.which("clang++") is not None
+_HAVE_CASTXML = shutil.which("castxml") is not None
 
 
 class _RecordingRunner:
@@ -133,3 +137,76 @@ def test_dump_dispatches_through_the_registry(
     snap = dumper.dump(so, [header], header_backend="clang", lang="c")
     assert "abicheck_b2a_dump" in {f.name for f in snap.declarations.functions}
     assert runner.commands, "the registered backend's runner never ran"
+
+
+# ── castxml ────────────────────────────────────────────────────────────────
+
+
+def test_registry_holds_a_default_castxml_backend() -> None:
+    backend = dumper.HEADER_AST_BACKENDS["castxml"]
+    assert isinstance(backend, CastxmlBackend)
+    assert isinstance(backend, HeaderAstBackend)
+    assert backend.name == "castxml"
+    assert backend.runner is run_castxml
+    assert backend.check_deadline is check_scan_deadline
+
+
+def test_default_castxml_runner_checks_the_deadline_before_spawning() -> None:
+    with deadline.with_deadline_ts(time.monotonic() - 1):
+        with pytest.raises(deadline.DeadlineExceeded):
+            run_castxml(["abicheck-no-such-castxml-binary"], timeout=5)
+
+
+def test_castxml_run_error_keeps_the_original() -> None:
+    original = SnapshotError("castxml exploded")
+    wrapped = CastxmlRunError(original)
+    assert isinstance(wrapped, SnapshotError)
+    assert wrapped.original is original
+    assert str(wrapped) == "castxml exploded"
+
+
+@pytest.mark.skipif(not _HAVE_CASTXML, reason="castxml not installed")
+def test_injected_castxml_runner_runs_the_parse(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _isolate_ast_cache(monkeypatch, tmp_path)
+    _reset_ast_memo()
+    header = tmp_path / "api.h"
+    header.write_text("int abicheck_b2b_probe(int x);\n")
+    commands: list[list[str]] = []
+
+    def recording(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        commands.append(list(cmd))
+        return run_castxml(cmd, **kwargs)
+
+    parser = CastxmlBackend(runner=recording).parse(
+        HeaderParseRequest(
+            headers=[header], extra_includes=[], public_header_paths=[str(header)]
+        )
+    )
+    fields = parse_header_ast_fields(parser, producer="castxml")
+    assert "abicheck_b2b_probe" in {f.name for f in fields.functions}
+    assert len(commands) == 1
+    assert "castxml" in Path(commands[0][0]).name
+
+
+@pytest.mark.skipif(not _HAVE_CASTXML, reason="castxml not installed")
+def test_a_failing_castxml_run_surfaces_as_castxml_run_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The fallback policy in ``dumper`` keys on this type, so a failed run
+    must arrive as ``CastxmlRunError`` carrying the run's own error."""
+    _isolate_ast_cache(monkeypatch, tmp_path)
+    _reset_ast_memo()
+    header = tmp_path / "api.h"
+    header.write_text("int f(void);\n")
+
+    def failing(cmd: list[str], **_kwargs: Any) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(cmd, 1, "", "error: injected failure")
+
+    with pytest.raises(CastxmlRunError) as info:
+        CastxmlBackend(runner=failing).parse(
+            HeaderParseRequest(headers=[header], extra_includes=[])
+        )
+    assert isinstance(info.value.original, SnapshotError)
+    assert not isinstance(info.value.original, CastxmlRunError)
