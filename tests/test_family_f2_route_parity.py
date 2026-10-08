@@ -97,7 +97,7 @@ _UC = "uncovered"
 
 CLICK_ROUTING: dict[str, tuple[str, Any]] = {
     "policy": ("covered", ("policy_sdk_vendor", "policy_file")),
-    "suppress": ("covered", ("suppress",)),
+    "suppress": ("covered", ("suppress", "suppress_strict")),
     "severity_preset": ("covered", ("severity_strict",)),
     "diagnostic_comparison": ("covered", ("diagnostic_comparison",)),
     "contract_mode": ("covered", ("contract_exports",)),
@@ -184,7 +184,9 @@ REQUEST_ROUTING: dict[str, tuple[str, Any]] = {
     "new": ("covered", ("default",)),
     "policy": ("covered", ("policy_sdk_vendor",)),
     "policy_file_path": ("covered", ("policy_file",)),
-    "suppress": ("covered", ("suppress",)),
+    "suppress": ("covered", ("suppress", "suppress_strict")),
+    "strict_suppressions": ("covered", ("suppress_strict",)),
+    "require_justification": ("covered", ("suppress_strict",)),
     "scope_public": ("covered", ("no_scope_public",)),
     "severity_preset": ("covered", ("severity_strict",)),
     "diagnostic_comparison": ("covered", ("diagnostic_comparison",)),
@@ -240,18 +242,30 @@ REQUEST_ROUTING: dict[str, tuple[str, Any]] = {
 }
 
 
-def _cli_built_in_scope_public() -> bool:
+def _cli_built_in_config() -> Any:
     from abicheck.cli_helpers_compare import resolve_compare_config
 
-    return resolve_compare_config(None, cli_severity_preset=None).scope_public
+    return resolve_compare_config(None, cli_severity_preset=None)
+
+
+def _cli_built_in_scope_public() -> bool:
+    return _cli_built_in_config().scope_public
 
 
 #: ``.abicheck.yml`` key -> (typed-API field, the CLI's built-in default) for a
-#: setting with no Click parameter left. ``scope.public`` lost its flag in
-#: one-comparison-product Phase 9b; the typed API's ``scope_public`` default
-#: must still agree with what a no-flag, no-config CLI run resolves.
+#: setting with no Click parameter. ``scope.public`` lost its flag in
+#: one-comparison-product Phase 9b; ``suppression.*`` never had one. Each
+#: typed-API default must agree with what a no-flag, no-config CLI run resolves.
 CONFIG_DEFAULT_MAP: dict[str, tuple[tuple[str, str], Callable[[], Any]]] = {
     "scope.public": (("CompareRequest", "scope_public"), _cli_built_in_scope_public),
+    "suppression.strict": (
+        ("CompareRequest", "strict_suppressions"),
+        lambda: _cli_built_in_config().strict_suppressions,
+    ),
+    "suppression.require_justification": (
+        ("CompareRequest", "require_justification"),
+        lambda: _cli_built_in_config().require_justification,
+    ),
 }
 
 #: Click dest -> ("CompareRequest"|"InputSpec", field) whose default must match.
