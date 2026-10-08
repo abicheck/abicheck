@@ -95,7 +95,7 @@ handoff (should be cheap: a dict lookup + graph construction, no second
 subprocess) plus the include-graph pass. For the ``castxml`` backend — the
 default L2 backend, and the one most `dump`/`compare` invocations actually
 use — the primary pass never writes to the memo (only ``dumper_clang.py``'s
-``_clang_header_dump`` does), so ``attach_ms`` there is the genuine second
+``clang_header_dump`` does), so ``attach_ms`` there is the genuine second
 ``clang -ast-dump=json`` subprocess every default-backend dump now pays,
 plus the same include-graph pass. Reports both backends' points; the
 ``castxml`` backend's points are simply omitted (not an error) when
@@ -463,7 +463,7 @@ def _resolve_includes(
 
     Both the primary dump and ``service._attach_header_graph`` must resolve
     to the *identical* ``extra_includes``/``gcc_option_tokens`` for their
-    respective ``_clang_header_dump`` calls to land on the same AST
+    respective ``clang_header_dump`` calls to land on the same AST
     disk-cache key (and, on the ``clang`` backend, the same in-process memo
     slot) — ``resolve_inferred_header_roots`` is a pure function of
     ``headers``/``user_includes``/``gcc_options``/``gcc_option_tokens``, so
@@ -608,7 +608,7 @@ def _measure_one(n: int, backend: str, repeat: int) -> dict[str, Any]:
                     # C++ request to None for both this call and the
                     # _attach_header_graph call below (service.py's
                     # `lang if lang == "c" else None`) -- lang is part of
-                    # _clang_header_dump's AST cache key, so passing the
+                    # clang_header_dump's AST cache key, so passing the
                     # unnormalized "c++" here exercised a different cache
                     # key than the one a real default-C++ dump computes
                     # (Codex review). Auto-detection (_detect_cpp_headers)

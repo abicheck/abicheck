@@ -380,7 +380,9 @@ class TestHeaderGraphAstFailureIsNotSilent:
         def failing_dump(*_a: Any, **_k: Any):
             raise SnapshotError(message)
 
-        monkeypatch.setattr("abicheck.dumper._clang_header_dump", failing_dump)
+        monkeypatch.setattr(
+            "abicheck.extract.headers.clang.backend.clang_header_dump", failing_dump
+        )
         monkeypatch.setattr(attach_mod, "expand_header_inputs", lambda h: list(h))
         monkeypatch.setattr(
             attach_mod, "resolve_inferred_header_roots", lambda *a, **k: ([], [])

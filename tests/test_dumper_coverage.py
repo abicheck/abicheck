@@ -927,7 +927,7 @@ class TestFromHeadersProvenance:
         misclassified as a dependency and permanently pruned.
         `_header_ast_parser` computes this internally (no explicit
         `pruning_header_roots` passed by `_dump_pe`) when its own
-        `_clang_header_dump` call receives none, so this test observes the
+        `clang_header_dump` call receives none, so this test observes the
         effect at that call rather than at `_header_ast_parser`'s own args."""
         from unittest.mock import MagicMock, patch
 
@@ -945,7 +945,10 @@ class TestFromHeadersProvenance:
 
         with (
             patch.object(_pe, "parse_pe_metadata", return_value=meta),
-            patch.object(dumper, "_clang_header_dump", _fake_clang_header_dump),
+            patch(
+                "abicheck.extract.headers.clang.backend.clang_header_dump",
+                _fake_clang_header_dump,
+            ),
         ):
             dumper._dump_pe(
                 dll,
@@ -981,7 +984,10 @@ class TestFromHeadersProvenance:
 
         with (
             patch.object(_macho, "parse_macho_metadata", return_value=meta),
-            patch.object(dumper, "_clang_header_dump", _fake_clang_header_dump),
+            patch(
+                "abicheck.extract.headers.clang.backend.clang_header_dump",
+                _fake_clang_header_dump,
+            ),
         ):
             dumper._dump_macho(
                 dylib,

@@ -57,7 +57,7 @@ arrays) rather than reading a value the AST dump already carries.
 
 The parser is pure (no subprocess): it consumes an already-parsed JSON dict, so
 every emit path is unit-testable without clang installed. Shelling out to clang
-lives in :func:`abicheck.dumper._clang_header_dump`.
+lives in :func:`abicheck.extract.headers.clang.backend.clang_header_dump`.
 
 Per ADR-061 D9, ``_Decl`` (the categorized-node-plus-walk-context type every
 entity kind's parsing already received as a parameter) and the
@@ -252,7 +252,7 @@ def _user_explicitly_disabled_sycl(tokens: list[str]) -> bool:
     tokens -- never anything abicheck itself appends) end with an explicit
     ``-fno-sycl`` with no later ``-fsycl`` to re-enable it: i.e. the caller
     explicitly asked for a non-SYCL compile (Codex review, P2: ADR-050 D5's
-    ``dumper._clang_header_dump`` unconditionally forces ``-fsycl`` onto
+    ``extract.headers.clang.backend.clang_header_dump`` unconditionally forces ``-fsycl`` onto
     every DPC++-capable invocation via ``dpcpp_multi_context``, which would
     otherwise silently override this last-flag-wins signal).
 
@@ -279,7 +279,7 @@ def _resolve_dpcpp_multi_context(
 ) -> bool:
     """Validate *frontend_context* against *clang_bin* and the caller's own
     SYCL-enable/disable tokens, returning whether
-    :func:`abicheck.dumper._clang_header_dump` should engage the multi-pass
+    :func:`abicheck.extract.headers.clang.backend.clang_header_dump` should engage the multi-pass
     SYCL decode path for this invocation.
 
     Raises :class:`abicheck.errors.AstContextMissingError` when
@@ -768,7 +768,7 @@ class _ClangAstParser:
         self._target_triple = target_triple
         # Defaults True for direct/unit-test construction (which never
         # exercises plain-C mode): whether the TU that produced this AST was
-        # actually compiled as C++ (`dumper._clang_header_dump`'s own
+        # actually compiled as C++ (`extract.headers.clang.backend.clang_header_dump`'s own
         # `resolved_force_cpp`) -- an explicit `asm(...)` label's mangled
         # spelling is trustworthy evidence of a deliberate C++-linkage
         # override ONLY in C++ mode. In genuinely plain-C code an asm label

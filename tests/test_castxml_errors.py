@@ -469,12 +469,12 @@ def test_castxml_cpp20_only_syntax_selects_cpp_mode(tmp_path, monkeypatch):
 
 def test_explicit_c_language_overrides_forwarded_cpp_standard(tmp_path):
     """An explicit --lang c remains authoritative despite conflicting flags."""
-    from abicheck.dumper import _resolve_clang_langmode
+    from abicheck.extract.headers.clang.backend import resolve_clang_langmode
 
     header = tmp_path / "public.h"
     header.write_text("int api(void);\n", encoding="utf-8")
 
-    force_cpp, _, explicit_c, _ = _resolve_clang_langmode(
+    force_cpp, _, explicit_c, _ = resolve_clang_langmode(
         "C", [header], "clang", gcc_option_tokens=("-std=gnu++17",)
     )
 
@@ -487,14 +487,14 @@ def test_clang_langmode_cpp20_only_syntax_selects_cpp_mode(tmp_path):
     frontend's identical auto-detection: abbreviated constrained-parameter
     syntax alone must select C++ mode (and consequently force_cpp20 too,
     since it was gated on force_cpp)."""
-    from abicheck.dumper import _resolve_clang_langmode
+    from abicheck.extract.headers.clang.backend import resolve_clang_langmode
 
     header = tmp_path / "public.h"
     header.write_text(
         "#include <concepts>\nvoid f(std::integral auto x);\n", encoding="utf-8"
     )
 
-    force_cpp, force_cpp20, explicit_c, _ = _resolve_clang_langmode(
+    force_cpp, force_cpp20, explicit_c, _ = resolve_clang_langmode(
         None, [header], "clang"
     )
 
@@ -649,7 +649,8 @@ def test_header_ast_parser_falls_back_to_clang_on_toolchain_failure(
     monkeypatch.setattr(dumper, "_castxml_dump", _boom)
     monkeypatch.setattr(dumper, "_resolve_clang_bin", lambda *a, **k: "clang")
     monkeypatch.setattr(
-        dumper, "_clang_header_dump", lambda *a, **k: (sentinel, None, False)
+        "abicheck.extract.headers.clang.backend.clang_header_dump",
+        lambda *a, **k: (sentinel, None, False),
     )
     monkeypatch.delenv("ABICHECK_AST_FRONTEND", raising=False)
 
@@ -678,7 +679,8 @@ def test_header_ast_parser_falls_back_to_clang_on_guard_error(tmp_path, monkeypa
     monkeypatch.setattr(dumper, "_castxml_dump", _boom)
     monkeypatch.setattr(dumper, "_resolve_clang_bin", lambda *a, **k: "clang")
     monkeypatch.setattr(
-        dumper, "_clang_header_dump", lambda *a, **k: (sentinel, None, False)
+        "abicheck.extract.headers.clang.backend.clang_header_dump",
+        lambda *a, **k: (sentinel, None, False),
     )
     monkeypatch.delenv("ABICHECK_AST_FRONTEND", raising=False)
 
@@ -745,13 +747,13 @@ def test_header_ast_parser_auto_device_routes_to_clang_not_rejected(
     through plain auto (no --ast-frontend given at all) incorrectly raised
     before ever reaching the clang backend that could actually satisfy it.
     """
-    from abicheck import dumper
     from abicheck.dumper import _ClangAstParser, _header_ast_parser
 
     monkeypatch.delenv("ABICHECK_AST_FRONTEND", raising=False)
     ast = {"kind": "TranslationUnitDecl", "inner": []}
     monkeypatch.setattr(
-        dumper, "_clang_header_dump", lambda *a, **k: (ast, "device", False)
+        "abicheck.extract.headers.clang.backend.clang_header_dump",
+        lambda *a, **k: (ast, "device", False),
     )
 
     parser = _header_ast_parser(
@@ -820,7 +822,10 @@ def test_header_ast_parser_clang_backend_returns_clang_parser(tmp_path, monkeypa
     from abicheck.dumper import _ClangAstParser, _header_ast_parser
 
     monkeypatch.setattr(dumper, "_resolve_header_backend", lambda b: "clang")
-    monkeypatch.setattr(dumper, "_clang_header_dump", lambda *a, **k: ({}, None, False))
+    monkeypatch.setattr(
+        "abicheck.extract.headers.clang.backend.clang_header_dump",
+        lambda *a, **k: ({}, None, False),
+    )
 
     parser = _header_ast_parser(
         [Path("a.h")], [], backend="clang", **_ast_parser_kwargs(tmp_path)

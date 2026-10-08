@@ -303,7 +303,7 @@ class TestResolveInput:
         """Codex review: ``_dump_elf`` normalizes ``lang`` to only ever force
         "c" explicitly (letting auto-detection run for the default "c++"),
         before calling ``dumper.dump()`` -- ``_attach_header_graph``'s own
-        ``_clang_header_dump`` call must be given that identical normalized
+        ``extract.headers.clang.backend.clang_header_dump`` call must be given that identical normalized
         value, or it hashes a different cache key than the main pass just
         used and permanently misses the new AST reuse memo for the default,
         by far the most common, ELF dump shape."""
@@ -4131,7 +4131,8 @@ class TestRunDumpHeaderGraph:
         with (
             fake_format_adapter("pe", result=snap),
             patch(
-                "abicheck.dumper._clang_header_dump", return_value=(ast, None, False)
+                "abicheck.extract.headers.clang.backend.clang_header_dump",
+                return_value=(ast, None, False),
             ) as mock_ast,
         ):
             result = run_dump(p, "pe", [header], [], "1.0", "c++")
@@ -4181,7 +4182,8 @@ class TestRunDumpHeaderGraph:
         with (
             fake_format_adapter("pe", result=snap),
             patch(
-                "abicheck.dumper._clang_header_dump", return_value=(ast, None, False)
+                "abicheck.extract.headers.clang.backend.clang_header_dump",
+                return_value=(ast, None, False),
             ) as mock_ast,
         ):
             run_dump(p, "pe", [header], [], "1.0", "c++", compile=cc)
@@ -4200,7 +4202,10 @@ class TestRunDumpHeaderGraph:
 
         with (
             fake_format_adapter("pe", result=snap),
-            patch("abicheck.dumper._clang_header_dump", side_effect=_raise) as mock_ast,
+            patch(
+                "abicheck.extract.headers.clang.backend.clang_header_dump",
+                side_effect=_raise,
+            ) as mock_ast,
         ):
             result = run_dump(p, "pe", [header], [], "1.0", "c++")
         mock_ast.assert_called_once()
@@ -4226,7 +4231,8 @@ class TestRunDumpHeaderGraph:
         with (
             fake_format_adapter("pe", result=snap),
             patch(
-                "abicheck.dumper._clang_header_dump", return_value=(ast, None, False)
+                "abicheck.extract.headers.clang.backend.clang_header_dump",
+                return_value=(ast, None, False),
             ) as mock_ast,
         ):
             result = run_dump(p, "pe", [hdr_dir], [], "1.0", "c++")
@@ -4253,7 +4259,8 @@ class TestRunDumpHeaderGraph:
         with (
             fake_format_adapter("pe", result=snap),
             patch(
-                "abicheck.dumper._clang_header_dump", return_value=(ast, None, False)
+                "abicheck.extract.headers.clang.backend.clang_header_dump",
+                return_value=(ast, None, False),
             ),
             patch(
                 "abicheck.buildsource.include_graph.shutil.which",
@@ -4299,7 +4306,8 @@ class TestRunDumpHeaderGraph:
         with (
             fake_format_adapter("pe", result=snap),
             patch(
-                "abicheck.dumper._clang_header_dump", return_value=(ast, None, False)
+                "abicheck.extract.headers.clang.backend.clang_header_dump",
+                return_value=(ast, None, False),
             ),
             patch(
                 "abicheck.buildsource.include_graph.shutil.which",
@@ -4359,7 +4367,8 @@ class TestRunDumpHeaderGraph:
         with (
             fake_format_adapter("pe", result=snap),
             patch(
-                "abicheck.dumper._clang_header_dump", return_value=(ast, None, False)
+                "abicheck.extract.headers.clang.backend.clang_header_dump",
+                return_value=(ast, None, False),
             ),
             patch(
                 "abicheck.buildsource.include_graph.shutil.which",
@@ -4692,7 +4701,7 @@ class TestAttachHeaderGraphDeviceContext:
 
     def test_streaming_prune_is_suppressed_for_this_call(self, tmp_path, monkeypatch):
         """Codex review, PR #840: `_attach_header_graph`'s own
-        `_clang_header_dump` call is a real downstream consumer of the raw
+        `clang_header_dump` call is a real downstream consumer of the raw
         AST dict (`buildsource.call_graph.parse_clang_ast_calls` walks it
         directly for call-graph edges), so the opt-in streaming pruner must
         be force-disabled for this call regardless of the env var --
@@ -4713,7 +4722,8 @@ class TestAttachHeaderGraphDeviceContext:
             return {"kind": "TranslationUnitDecl", "inner": []}, None, False
 
         monkeypatch.setattr(
-            "abicheck.dumper._clang_header_dump", _stub_clang_header_dump
+            "abicheck.extract.headers.clang.backend.clang_header_dump",
+            _stub_clang_header_dump,
         )
         assert not streaming_prune_suppressed()  # not leaked before the call
         _attach_header_graph(
@@ -4760,7 +4770,7 @@ class TestAttachHeaderGraphDeviceContext:
 
 class TestAttachHeaderGraphCompilerSelection:
     """Codex review (P2): _attach_header_graph's own compiler selection for
-    its _clang_header_dump call must match whichever main pass it's paired
+    its clang_header_dump call must match whichever main pass it's paired
     with -- case-insensitively, since PE/Mach-O's own main pass
     (service_header_scoped._try_header_scoped_dump) treats "C" the same as
     "c". The compiler string is part of the AST cache key, so a mismatch
@@ -4774,7 +4784,8 @@ class TestAttachHeaderGraphCompilerSelection:
         snap = AbiSnapshot(library="lib", version="1.0")
         ast = {"kind": "TranslationUnitDecl", "inner": []}
         with patch(
-            "abicheck.dumper._clang_header_dump", return_value=(ast, None, False)
+            "abicheck.extract.headers.clang.backend.clang_header_dump",
+            return_value=(ast, None, False),
         ) as mock_ast:
             _attach_header_graph(
                 snap,
@@ -4797,7 +4808,8 @@ class TestAttachHeaderGraphCompilerSelection:
         snap = AbiSnapshot(library="lib", version="1.0")
         ast = {"kind": "TranslationUnitDecl", "inner": []}
         with patch(
-            "abicheck.dumper._clang_header_dump", return_value=(ast, None, False)
+            "abicheck.extract.headers.clang.backend.clang_header_dump",
+            return_value=(ast, None, False),
         ) as mock_ast:
             _attach_header_graph(
                 snap,
@@ -4829,7 +4841,8 @@ class TestAttachHeaderGraphCompilerSelection:
         ast = {"kind": "TranslationUnitDecl", "inner": []}
         with (
             patch(
-                "abicheck.dumper._clang_header_dump", return_value=(ast, None, False)
+                "abicheck.extract.headers.clang.backend.clang_header_dump",
+                return_value=(ast, None, False),
             ),
             patch(
                 "abicheck.dumper._resolve_clang_bin", return_value="/opt/llvm/clang"
@@ -4857,7 +4870,7 @@ class TestAttachHeaderGraphCompilerSelection:
 
 class TestAttachHeaderGraphHashesIncludeSearchTokens:
     """Codex review, PR #782: _attach_header_graph's own independent second
-    _clang_header_dump call has its own AST cache key, but its extra_hash_dirs
+    clang_header_dump call has its own AST cache key, but its extra_hash_dirs
     computation only covered resolve_inferred_header_roots's own deferred
     roots -- never any include-search directory riding in
     compile.gcc_option_tokens itself (an explicit --gcc-options/
@@ -4878,7 +4891,8 @@ class TestAttachHeaderGraphHashesIncludeSearchTokens:
         snap = AbiSnapshot(library="lib", version="1.0")
         ast = {"kind": "TranslationUnitDecl", "inner": []}
         with patch(
-            "abicheck.dumper._clang_header_dump", return_value=(ast, None, False)
+            "abicheck.extract.headers.clang.backend.clang_header_dump",
+            return_value=(ast, None, False),
         ) as mock_ast:
             _attach_header_graph(
                 snap,
@@ -4901,7 +4915,8 @@ class TestAttachHeaderGraphHashesIncludeSearchTokens:
         snap = AbiSnapshot(library="lib", version="1.0")
         ast = {"kind": "TranslationUnitDecl", "inner": []}
         with patch(
-            "abicheck.dumper._clang_header_dump", return_value=(ast, None, False)
+            "abicheck.extract.headers.clang.backend.clang_header_dump",
+            return_value=(ast, None, False),
         ) as mock_ast:
             _attach_header_graph(
                 snap,
