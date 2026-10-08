@@ -835,7 +835,7 @@
       "category": "api_break",
       "default_verdict": "API_BREAK",
       "severity": "warning",
-      "min_evidence": "unspecified",
+      "min_evidence": "L1",
       "doc_slug": "field_became_const",
       "examples": "case30_field_qualifiers"
     },
@@ -853,7 +853,7 @@
       "category": "risk",
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
-      "min_evidence": "unspecified",
+      "min_evidence": "L1",
       "doc_slug": "field_became_volatile",
       "examples": "case30_field_qualifiers"
     },
@@ -1188,7 +1188,7 @@
       "severity": "error",
       "min_evidence": "L0",
       "doc_slug": "func_removed_elf_only",
-      "examples": "case182_accidental_export_removed_still_breaking,case59_func_became_inline,case97_api_depends_on_consumer_env"
+      "examples": "case182_accidental_export_removed_still_breaking,case59_func_became_inline,case86_tag_struct_renamed,case97_api_depends_on_consumer_env"
     },
     {
       "kind": "func_return_changed",
@@ -1267,7 +1267,7 @@
       "category": "risk",
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
-      "min_evidence": "unspecified",
+      "min_evidence": "L0",
       "doc_slug": "func_visibility_protected_changed",
       "examples": "case51_protected_visibility"
     },

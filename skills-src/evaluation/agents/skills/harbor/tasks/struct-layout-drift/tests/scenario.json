@@ -4,7 +4,7 @@
   ],
   "architectures": [],
   "category": "A",
-  "digest": "sha256:cf94aade2cec4f7a6b8dd644c76615919e993201d39a5aec755e0581deecc853",
+  "digest": "sha256:168babe04c2ff37bb197db9d6deea6d827e4e94af7c3fcc17ead10bf6e8e0412",
   "expected": {
     "kinds": [
       "type_size_changed"
