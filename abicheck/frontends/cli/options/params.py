@@ -289,6 +289,7 @@ def _load_suppression_and_policy(
     plugin command — kept here, next to ``POLICY_FILE_PARAM``, rather than in the
     oversized ``cli.py`` so the cross-command resolution logic has one home.
     """
+    from ....workflows.compare_policy import expired_suppressions_message
     from ....workflows.policy_file import (
         PolicyFile,
         pending_validate_overrides_warnings,
@@ -312,36 +313,9 @@ def _load_suppression_and_policy(
         if strict_suppressions:
             expired = suppression.check_expired_strict()
             if expired:
-                parts = [
-                    f"ERROR: {len(expired)} expired suppression rule(s) "
-                    f"found in {suppress}:"
-                ]
-                for idx, rule in expired:
-                    target = (
-                        rule.symbol_pattern
-                        and f'symbol_pattern="{rule.symbol_pattern}"'
-                        or rule.symbol
-                        and f'symbol="{rule.symbol}"'
-                        or rule.type_pattern
-                        and f'type_pattern="{rule.type_pattern}"'
-                        # Canonical (backend-independent) identity selector
-                        # (Codex review, fresh evidence, PR #753): a
-                        # finding_id-only rule with no other selector
-                        # previously rendered as the bare "?" fallback
-                        # here too, the same ambiguity already fixed in
-                        # cli_compare_fold.py/post_processing.py's own
-                        # selector-rendering chains.
-                        or rule.finding_id
-                        and f'finding_id="{rule.finding_id}"'
-                        or rule.source_location
-                        and f'source_location="{rule.source_location}"'
-                        or "?"
-                    )
-                    parts.append(
-                        f"  Rule {idx + 1}: {target} expired on {rule.expires}"
-                    )
-                parts.append("Remove or renew expired rules before proceeding.")
-                raise click.ClickException("\n".join(parts))
+                raise click.ClickException(
+                    expired_suppressions_message(expired, suppress)
+                )
 
     pf: PolicyFile | None = None
     if policy_file_path is not None:

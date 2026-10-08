@@ -74,7 +74,7 @@ _INVENTORY: dict[tuple[str, str, str], str] = {
     ("abicheck/workflows/input_resolution.py", "_resolve_input_impl", "cached_run_dump"): "stamped in resolve_input",
     ("abicheck/workflows/release_surface_acquisition.py", "_produce", "build_header_only_snapshot"): "stamped in _produce",
     ("abicheck/workflows/artifact/execute_header_only.py", "execute_header_only_dump_request", "build_header_only_snapshot"): "stamped in execute_header_only_dump_request",
-    ("abicheck/appcompat.py", "check_appcompat", "run_dump"): "stamped in check_appcompat",
+    ("abicheck/workflows/consumer_scope_standalone.py", "check_appcompat", "run_dump"): "stamped in check_appcompat",
     ("abicheck/stack_checker.py", "_run_abi_diff", "run_dump"): "no headers: binary-only, nothing to own",
     ("abicheck/probe_harness.py", "_snapshot_object_file", "dump"): "no headers (dwarf_only probe)",
     ("abicheck/service_dump_cache.py", "_dump_uncached", "run_dump"): "inner layer of resolve_input",

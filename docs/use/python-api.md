@@ -93,7 +93,11 @@ will reach for most often:
 The table above is the common subset, not the full surface. `run_compare` also
 takes per-side PDB paths, debug roots, forced public symbols, and pattern
 verdicts; for those, build a `CompareRequest`/`InputSpec` directly and call
-`run_compare_request`. See the [Python API Reference](../reference/python-api-reference.md)
+`run_compare_request`. `CompareRequest` alone carries the suppression
+strictness the CLI reads from `.abicheck.yml`: `strict_suppressions=True`
+(`suppression.strict`) rejects a suppression file holding an expired rule,
+and `require_justification=True` (`suppression.require_justification`)
+rejects a rule with no `reason`; both raise `ValidationError` and default off. See the [Python API Reference](../reference/python-api-reference.md)
 for the complete, generated argument/field list of every name in `service.__all__`.
 
 ## Work with snapshots directly
