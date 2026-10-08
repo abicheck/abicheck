@@ -53,11 +53,9 @@ def load_probe_matrix_changes(
         return None
     if old_matrix is None or new_matrix is None:
         from ..errors import ValidationError
+        from .contracts import PROBE_MATRIX_ONE_SIDED
 
-        raise ValidationError(
-            "a build-configuration matrix needs both sides: --build-info old=<matrix> "
-            "--build-info new=<matrix>"
-        )
+        raise ValidationError(PROBE_MATRIX_ONE_SIDED)
     from .findings import diff_matrix, load_matrix_snapshot
 
     return list(

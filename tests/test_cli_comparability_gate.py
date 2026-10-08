@@ -313,7 +313,7 @@ class TestNotComparableExitCode:
             return old_p, None, None
 
         monkeypatch.setattr(
-            "abicheck.frontends.cli.commands.compare._embed_inline_source_side",
+            "abicheck.frontends.cli.commands.compare_routing._embed_inline_source_side",
             _fake_embed,
         )
         snap = AbiSnapshot(library="libfoo.so.1", version="1.0")

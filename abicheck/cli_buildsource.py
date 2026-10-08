@@ -380,8 +380,6 @@ def _write_snapshot_output(
         # L4 source-ABI replay run over it a second time.
         build_source_already_satisfies(snap, collect_mode)
     ):
-        from .cli_buildsource import embed_build_source
-
         embed_build_source(
             snap,
             build_info,

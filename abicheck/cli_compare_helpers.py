@@ -266,7 +266,7 @@ def _needs_inline_embed(
     Those sides get dumped inline at --depth so their L3-L5 facts ride embedded in
     the snapshot; pre-built packs fall through to prepare_embedded_build_source.
     """
-    from .frontends.cli.commands.compare import _source_is_pack  # cycle
+    from .frontends.cli.commands.compare_routing import _source_is_pack
 
     def _raw_evidence(p: Path | None) -> bool:
         return p is not None and not _source_is_pack(p)
@@ -287,7 +287,7 @@ def _classify_and_reject_operands(
     per-library comparison; an application/PIE operand is not a library `compare`
     can pair (hint at `appcompat`). A single .so / snapshot / dump falls through.
     """
-    from .frontends.cli.commands.compare import _reject_application_operand  # cycle
+    from .frontends.cli.operand_diagnostics import _reject_application_operand
 
     old_kind = classify_compare_operand(old_input)
     new_kind = classify_compare_operand(new_input)
@@ -560,7 +560,7 @@ def _embed_inline_source_sides(
     import shutil
     import tempfile
 
-    from .frontends.cli.commands.compare import _embed_inline_source_side  # cycle
+    from .frontends.cli.commands.compare_routing import _embed_inline_source_side
 
     # CLI-over-config explicitness read from compare's *real* ctx (where
     # --ast-frontend/--nostdinc are genuine COMMANDLINE params); the inline
@@ -1206,7 +1206,7 @@ def run_compare(
 ) -> None:
     """Run the single-pair (or set fan-out) ``compare`` flow and exit accordingly."""
     from .dry_run import reject_dry_run_with_output
-    from .frontends.cli.commands.compare import _warn_unused_set_flags  # cycle
+    from .frontends.cli.operand_diagnostics import _warn_unused_set_flags
 
     reject_dry_run_with_output(dry_run, output)
     budget_s = _parse_budget(budget)
@@ -1396,7 +1396,7 @@ def run_compare(
         # 64). Validated here too, ahead of the --dry-run emit below, the
         # same way every other release-only flag conflict in this block
         # already is.
-        from .frontends.cli.commands.compare import (
+        from .frontends.cli.commands.compare_routing import (
             reject_release_incompatible_view_mode,
         )
 
@@ -1582,7 +1582,7 @@ def run_compare(
         directory_config_includes = tuple(directory_includes[len(includes) :])
         # Off the owner, never via ``abicheck.cli`` (install_facade_guard);
         # ADR-068 §3 #23: also thread policy.overrides to the release fan-out.
-        from .frontends.cli.commands.compare import _dispatch_release_compare
+        from .frontends.cli.commands.compare_routing import _dispatch_release_compare
         from .pack_application import resolve_release_project_policy_overrides
 
         # ADR-075: every member dump and the release surface are classified

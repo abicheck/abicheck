@@ -1201,7 +1201,7 @@ def test_compare_threads_compile_context_for_set_inputs(
     whole-product-bundle known-gap entry, AGENTS.md). Phase 7 removed the
     CLI spelling (--compiler-option) this test used to drive it with --
     .abicheck.yml is the only source now."""
-    import abicheck.frontends.cli.commands.compare as cli_mod
+    import abicheck.frontends.cli.commands.compare_routing as cli_mod
 
     old_dir = tmp_path / "old"
     new_dir = tmp_path / "new"
@@ -1249,7 +1249,7 @@ def test_compare_threads_compiler_aliases_for_set_inputs(
     (test_compare_threads_compile_context_for_set_inputs above). Phase 7
     removed the --compiler/--compiler-prefix/--compiler-option CLI
     spellings this test used to drive it with."""
-    import abicheck.frontends.cli.commands.compare as cli_mod
+    import abicheck.frontends.cli.commands.compare_routing as cli_mod
 
     old_dir = tmp_path / "old"
     new_dir = tmp_path / "new"
@@ -1298,7 +1298,7 @@ def test_compare_set_inputs_without_compile_flags_not_rejected(
     """The guard fires only on explicitly-passed compile-context flags — a plain
     directory compare still dispatches (no false rejection from the 'auto'
     --ast-frontend default)."""
-    import abicheck.frontends.cli.commands.compare as cli_mod
+    import abicheck.frontends.cli.commands.compare_routing as cli_mod
 
     old_dir = tmp_path / "old"
     new_dir = tmp_path / "new"
@@ -1323,7 +1323,7 @@ def test_compare_set_inputs_applies_config_compile_block(
     block must apply it (not silently drop it, and no longer just warn) --
     the fan-out now threads the L2 context (fix: whole-product-bundle
     known-gap entry, AGENTS.md)."""
-    import abicheck.frontends.cli.commands.compare as cli_mod
+    import abicheck.frontends.cli.commands.compare_routing as cli_mod
 
     old_dir = tmp_path / "old"
     new_dir = tmp_path / "new"
@@ -1360,7 +1360,7 @@ def test_compare_set_inputs_forwards_config_include_dirs(
     configured include root could fail or parse incompletely despite the
     compile: block otherwise being applied.
     """
-    import abicheck.frontends.cli.commands.compare as cli_mod
+    import abicheck.frontends.cli.commands.compare_routing as cli_mod
 
     old_dir = tmp_path / "old"
     new_dir = tmp_path / "new"
@@ -1528,7 +1528,7 @@ def test_inline_source_side_keeps_its_own_configured_frontend(
     the test states the contract rather than one downstream consequence of
     it.
     """
-    import abicheck.frontends.cli.commands.compare as helpers
+    import abicheck.frontends.cli.commands.compare_routing as helpers
 
     old_so, new_so, header = _two_elf(tmp_path)
     src = tmp_path / "srctree"
@@ -1575,7 +1575,7 @@ def test_project_config_frontend_never_marked_explicit_on_inline_source_sides(
     so it must not mark either inline source side's ``frontend_explicit``
     True, which would incorrectly suppress that side's own source-tree
     config in ``merge_compile_config``'s CLI > config precedence."""
-    import abicheck.frontends.cli.commands.compare as helpers
+    import abicheck.frontends.cli.commands.compare_routing as helpers
 
     old_so, new_so, header = _two_elf(tmp_path)
     src = tmp_path / "srctree2"
