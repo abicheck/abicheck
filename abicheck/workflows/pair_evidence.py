@@ -77,7 +77,7 @@ def fold_pair_evidence(
             None,
             None,
             None,
-            policy_file,
+            policy_file=policy_file,
             on_output=on_output,
         )
     )
