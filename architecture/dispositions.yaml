@@ -80,15 +80,6 @@
       "review_by": "2026-12-15"
     },
     {
-      "path": "abicheck/dumper_castxml.py",
-      "disposition": "migrate",
-      "target_layer": "extract",
-      "slice": "extract/headers/castxml/backend.py per ADR-061's own ownership map ('dumper_castxml.py, dumper_clang.py -> extract/headers/castxml and extract/headers/clang').",
-      "rationale": "Several compare-classified detector modules (diff_symbols.py, diff_templates.py, and others) import this parser directly today. Trial classification into `extract` measured 11 new compare -> extract violations. Those detector call sites need to read a model-shared parsed-result value instead of the parser module itself before this file can move.",
-      "owner": "abicheck maintainers",
-      "review_by": "2026-12-15"
-    },
-    {
       "path": "abicheck/internal_leak.py",
       "disposition": "migrate",
       "target_layer": "compare",

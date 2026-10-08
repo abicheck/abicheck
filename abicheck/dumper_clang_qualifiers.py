@@ -454,7 +454,7 @@ def clang_method_is_override(node: dict[str, Any]) -> bool:
     ``override`` token), matching its exact semantics: whether the keyword
     was actually written, not whether the method genuinely overrides a base
     virtual (that broader, no-keyword-required signal is
-    ``dumper_clang_vtable.py``'s separate reconstruction job).
+    ``extract/headers/clang/vtable.py``'s separate reconstruction job).
 
     Verified against real ``clang -ast-dump=json`` output (Clang 18): unlike
     ``virtual``/``pure``, which are plain boolean keys on the node itself,
@@ -557,7 +557,7 @@ def clang_record_type_traits(node: dict[str, Any]) -> tuple[bool | None, bool | 
     ``RecordDecl`` (these are C++-only type-trait concepts, so a C struct's
     node carries no ``definitionData`` key whatsoever — not "trivially true
     by default", genuinely absent), and an incomplete/forward-declared record
-    (filtered out upstream by ``dumper_clang_vtable.is_record_definition``
+    (filtered out upstream by ``extract.headers.clang.vtable.is_record_definition``
     before this is ever called, but kept conservative here too in case that
     guard's scope ever narrows).
     """

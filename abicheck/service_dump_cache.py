@@ -514,7 +514,7 @@ def _dump_cache_extra_key(
             compiler_identity = f"compiler-unavailable:{type(exc).__name__}:{exc}"
 
     # G29 Phase A's header-graph attach (service._attach_header_graph) always
-    # runs its own internal clang AST pass (_clang_header_dump) to build the
+    # runs its own internal clang AST pass (clang_header_dump) to build the
     # L2 semantic graph -- unconditionally, regardless of which backend
     # `resolved_backend` above is (a plain castxml dump still gets one). That
     # pass resolves clang with the compile context's gcc_path/gcc_prefix

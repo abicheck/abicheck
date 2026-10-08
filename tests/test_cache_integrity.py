@@ -113,13 +113,13 @@ def test_failed_digest_write_drops_the_stale_sidecar(tmp_path, monkeypatch):
 
 
 def test_castxml_store_records_its_digest(tmp_path, monkeypatch):
-    import abicheck.dumper as dumper
+    from abicheck.extract.headers.castxml import backend as castxml_backend
 
     out = tmp_path / "out.xml"
     out.write_text("<CastXML/>")
     cached = tmp_path / "c.xml"
-    monkeypatch.setattr(dumper, "_tool_identity", lambda _b: "id")
-    dumper._write_castxml_cache(
+    monkeypatch.setattr(castxml_backend, "_tool_identity", lambda _b: "id")
+    castxml_backend._write_castxml_cache(
         cached,
         out,
         castxml_bin="castxml",

@@ -478,7 +478,8 @@ class TestAstReleasedBeforeGraphBuild:
 
         monkeypatch.setattr(header_graph_module, "build_header_only_graph", spy_build)
         monkeypatch.setattr(
-            "abicheck.dumper._clang_header_dump", fake_clang_header_dump
+            "abicheck.extract.headers.clang.backend.clang_header_dump",
+            fake_clang_header_dump,
         )
         monkeypatch.setattr(
             "abicheck.service_header_graph_attach.expand_header_inputs",

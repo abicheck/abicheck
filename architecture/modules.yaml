@@ -151,7 +151,6 @@
         "abicheck/dumper_clang_expr.py",
         "abicheck/dumper_clang_qualifiers.py",
         "abicheck/dumper_clang_streaming.py",
-        "abicheck/dumper_clang_vtable.py",
         "abicheck/dumper_debug.py",
         "abicheck/dumper_elf_symbols.py",
         "abicheck/dumper_layout_backfill.py",
@@ -181,7 +180,6 @@
         "abicheck/provenance.py",
         "abicheck/python_api.py",
         "abicheck/python_ext.py",
-        "abicheck/service_metadata_attach.py",
         "abicheck/sycl_context.py",
         "abicheck/sycl_metadata.py",
         "abicheck/symvers_metadata.py",
@@ -190,7 +188,8 @@
         "abicheck/tu_merge_provenance.py",
         "abicheck/type_metadata.py",
         "abicheck/dumper_contract.py",
-        "abicheck/dumper_manifest.py"
+        "abicheck/dumper_manifest.py",
+        "abicheck/dumper_castxml.py"
       ]
     },
     "compare": {
@@ -480,7 +479,6 @@
       "service_dump_pipeline.py",
       "service_header_graph_attach.py",
       "service_header_scoped.py",
-      "service_metadata_attach.py",
       "service_render.py",
       "dry_run_estimate.py"
     ],
@@ -564,7 +562,6 @@
       "dumper_clang_expr.py",
       "dumper_clang_qualifiers.py",
       "dumper_clang_streaming.py",
-      "dumper_clang_vtable.py",
       "dumper_contract.py",
       "dumper_debug.py",
       "dumper_elf_fallback.py",
@@ -756,7 +753,6 @@
     "dumper_clang_expr.py",
     "dumper_clang_qualifiers.py",
     "dumper_clang_streaming.py",
-    "dumper_clang_vtable.py",
     "dumper_contract.py",
     "dumper_debug.py",
     "dumper_elf_fallback.py",
@@ -838,7 +834,6 @@
     "service_dump_pipeline.py",
     "service_header_graph_attach.py",
     "service_header_scoped.py",
-    "service_metadata_attach.py",
     "service_render.py",
     "dry_run_estimate.py",
     "snapshot_cache.py",

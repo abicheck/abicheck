@@ -30,6 +30,7 @@ import shutil
 import sys
 import threading
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -241,18 +242,18 @@ def _isolated_cache(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "xdg"))
 
 
-def _count_frontend_runs(monkeypatch) -> list[list[str]]:
-    import abicheck.deadline as deadline
+def _recording_castxml_runner() -> tuple[list[list[str]], Any]:
+    """The default castxml runner, recording every command it runs; injected
+    with ``castxml_dump(..., run=...)`` rather than patched in."""
+    from abicheck.dumper_castxml_probe import run_castxml
 
     runs: list[list[str]] = []
-    real = deadline.run_bounded
 
-    def spy(cmd, *a, **k):
+    def run(cmd: list[str], **kwargs: Any) -> Any:
         runs.append(list(cmd))
-        return real(cmd, *a, **k)
+        return run_castxml(cmd, **kwargs)
 
-    monkeypatch.setattr(deadline, "run_bounded", spy)
-    return runs
+    return runs, run
 
 
 _PLAIN = {"api.hpp": "struct S { int a; virtual ~S(); };\nnamespace n { int f(S*); }\n"}
@@ -273,7 +274,7 @@ def test_traced_clang_output_path_is_classified(
 ) -> None:
     if not shutil.which("clang++"):
         pytest.skip("clang++ not on PATH")
-    import abicheck.dumper as dumper
+    from abicheck.extract.headers.clang import backend as clang_backend
 
     _isolated_cache(monkeypatch, tmp_path)
     headers = []
@@ -304,14 +305,16 @@ def test_traced_clang_output_path_is_classified(
         return wrapped
 
     monkeypatch.setattr(
-        dumper, "_parse_clang_ast_result", traced(dumper._parse_clang_ast_result)
+        clang_backend,
+        "_parse_clang_ast_result",
+        traced(clang_backend._parse_clang_ast_result),
     )
     monkeypatch.setattr(
-        dumper,
+        clang_backend,
         "retry_excluding_error_headers",
-        traced(dumper.retry_excluding_error_headers),
+        traced(clang_backend.retry_excluding_error_headers),
     )
-    dumper._clang_header_dump(headers, [], "clang++", lang="c++", memoize=False)
+    clang_backend.clang_header_dump(headers, [], "clang++", lang="c++", memoize=False)
 
     assert "abicheck.dumper_clang_errors" in seen, (
         "the trace did not observe the output path at all"
@@ -339,19 +342,19 @@ class TestRealDumpsMissOnGeneratedInputChange:
 
     def test_castxml(self, tmp_path, monkeypatch) -> None:
         self._castxml_or_skip()
-        import abicheck.dumper as dumper
+        from abicheck.extract.headers.castxml.backend import castxml_dump
 
         _isolated_cache(monkeypatch, tmp_path)
-        runs = _count_frontend_runs(monkeypatch)
+        runs, run = _recording_castxml_runner()
         header = tmp_path / "api.h"
         header.write_text("struct S { int a; };\nint f(struct S*);\n")
 
         def castxml_runs() -> int:
             return sum(1 for c in runs if "castxml" in Path(c[0]).name)
 
-        dumper._castxml_dump([header], [], "cc", lang="c")
+        castxml_dump([header], [], "cc", lang="c", run=run)
         assert castxml_runs() == 1
-        dumper._castxml_dump([header], [], "cc", lang="c")
+        castxml_dump([header], [], "cc", lang="c", run=run)
         assert castxml_runs() == 1, (
             "an unchanged second dump must be served from the cache"
         )
@@ -360,29 +363,28 @@ class TestRealDumpsMissOnGeneratedInputChange:
             "CASTXML_HEADER_PREAMBLE",
             cfg.CASTXML_HEADER_PREAMBLE + "/* changed */\n",
         )
-        dumper._castxml_dump([header], [], "cc", lang="c")
+        castxml_dump([header], [], "cc", lang="c", run=run)
         assert castxml_runs() == 2, "a changed generated input must re-run castxml"
 
     def test_clang(self, tmp_path, monkeypatch) -> None:
         if not shutil.which("clang++"):
             pytest.skip("clang++ not on PATH")
-        import abicheck.dumper as dumper
+        from abicheck import dumper_clang_errors
+        from abicheck.extract.headers.clang import backend as clang_backend
 
         _isolated_cache(monkeypatch, tmp_path)
         header = tmp_path / "api.hpp"
         header.write_text("struct S { int a; };\nint f(S*);\n")
         calls: list[int] = []
-        real = dumper.run_clang_to_ast_file
+        real = dumper_clang_errors.run_clang_ast
 
         def spy(*a, **k):
             calls.append(1)
             return real(*a, **k)
 
-        monkeypatch.setattr(dumper, "run_clang_to_ast_file", spy)
-
         def dump() -> None:
-            dumper._clang_header_dump(
-                [header], [], "clang++", lang="c++", memoize=False
+            clang_backend.clang_header_dump(
+                [header], [], "clang++", lang="c++", memoize=False, run_ast=spy
             )
 
         dump()
@@ -400,7 +402,9 @@ class TestRealDumpsMissOnGeneratedInputChange:
             _appending(cfg._build_clang_header_command, "-DABICHECK_NEW_FLAG"),
         )
         monkeypatch.setattr(
-            dumper, "_build_clang_header_command", cfg._build_clang_header_command
+            clang_backend,
+            "_build_clang_header_command",
+            cfg._build_clang_header_command,
         )
         dump()
         assert len(calls) == 3, "a changed generated command line must re-run clang"

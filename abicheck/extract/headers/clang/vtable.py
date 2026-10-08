@@ -189,7 +189,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from .model.signature_normalization import canonicalize_function_signature_param_type
+from ....model.signature_normalization import canonicalize_function_signature_param_type
+from ....name_classification import strip_anonymous_type_location
 
 
 def is_record_definition(node: dict[str, Any]) -> bool:
@@ -539,52 +540,3 @@ def build_vtable(
     """
     slots, _ = _collect_virtual_slots(qualname, records_by_qualname, set())
     return list(slots.values())
-
-
-# ── template-specialization parsing (ADR-061 Phase 5 item 1) ──────────────
-#
-# Moved to ``extract.headers.clang.templates`` — re-exported (not just
-# referenced) so every existing import of these names straight off this
-# module (``from abicheck.dumper_clang_vtable import
-# _index_template_param_defaults``, used directly by several tests) keeps
-# resolving unchanged.
-from .extract.headers.clang.template_param_indexes import (  # noqa: E402
-    TemplateParamIndex as _TemplateParamIndex,
-)
-from .extract.headers.clang.templates import (  # noqa: E402,F401
-    _SAFE_NONTYPE_INT_TYPES,
-    _index_template_param_defaults,
-    _index_template_param_kinds,
-    _index_template_param_names,
-    _register_template_param_metadata,
-    _specialization_spelling,
-    _template_param_defaults,
-    _template_param_kinds,
-    _template_param_names,
-    build_specialization_index as _extract_build_specialization_index,
-)
-from .name_classification import strip_anonymous_type_location  # noqa: E402
-
-
-def build_specialization_index(
-    root: dict[str, Any],
-    param_kinds_by_qualname: _TemplateParamIndex | None = None,
-    param_defaults_by_qualname: _TemplateParamIndex | None = None,
-    param_names_by_qualname: _TemplateParamIndex | None = None,
-) -> dict[str, dict[str, Any]]:
-    """Back-compat wrapper -- see
-    :func:`abicheck.extract.headers.clang.templates.build_specialization_index`
-    for the full contract. The extract implementation takes
-    ``is_record_definition`` as a required keyword-only parameter (this
-    module's own layering forbids it importing that predicate itself at
-    module scope, see the module docstring above); this wrapper supplies
-    it, so a direct import of ``build_specialization_index`` off this
-    module keeps its pre-move, four-positional-argument call signature
-    (Codex review, PR #940)."""
-    return _extract_build_specialization_index(
-        root,
-        param_kinds_by_qualname,
-        param_defaults_by_qualname,
-        param_names_by_qualname,
-        is_record_definition=is_record_definition,
-    )

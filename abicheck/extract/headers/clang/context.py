@@ -49,7 +49,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from ....dumper_clang_vtable import build_vtable, is_record_definition
 from ....model import AccessLevel, ScopeOrigin, Visibility
 from ....model.export_index import ExportMatch, match_export
 from ....model.identity import ScopePath
@@ -59,6 +58,7 @@ from ....provenance import classify_origin, header_from_location
 from ...surface_fact_producers import header_ast_surface_facts
 from .template_param_indexes import TemplateParamIndex
 from .templates import build_specialization_index
+from .vtable import build_vtable, is_record_definition
 
 #: Pseudo-files clang attributes builtin / command-line declarations to.
 BUILTIN_FILES = frozenset(
@@ -634,7 +634,7 @@ class RecordVtableIndex:
     ``specialization_record_index()`` (the same shape over concrete
     ``ClassTemplateSpecializationDecl`` nodes, a different clang node kind
     ``record_index()`` never collects), ``base_lookup_index()`` (their
-    merge, for :func:`dumper_clang_vtable.build_vtable`'s base-lookup
+    merge, for :func:`extract.headers.clang.vtable.build_vtable`'s base-lookup
     recursion), and ``virtual_mangled_names()`` (every mangled name
     occupying a slot in ANY record's reconstructed vtable across the whole
     TU — recovers a signature-matched override with neither a `virtual` nor
@@ -679,7 +679,7 @@ class RecordVtableIndex:
 
     def record_index(self) -> dict[str, dict[str, Any]]:
         """Lazily-built ``qualified name -> node`` index over every parsed
-        record, for :func:`dumper_clang_vtable.build_vtable`'s base-lookup
+        record, for :func:`extract.headers.clang.vtable.build_vtable`'s base-lookup
         recursion.
 
         A forward declaration (``struct A;``) and its later complete
@@ -735,7 +735,7 @@ class RecordVtableIndex:
 
     def base_lookup_index(self) -> dict[str, dict[str, Any]]:
         """Lazily-built, memoized merge of ``record_index()`` +
-        ``specialization_record_index()``, for :func:`dumper_clang_vtable.
+        ``specialization_record_index()``, for :func:`extract.headers.clang.vtable.
         build_vtable`'s base-lookup recursion.
 
         Safe to merge into one dict: an ordinary record's qualname never
@@ -755,7 +755,7 @@ class RecordVtableIndex:
         vtable, across the whole TU.
 
         The gap this closes (Codex review, fresh evidence, real end-to-end
-        repro): :func:`dumper_clang_vtable.build_vtable` correctly
+        repro): :func:`extract.headers.clang.vtable.build_vtable` correctly
         recognizes a signature-matched override with no `virtual`/`override`
         keyword and replaces the inherited slot with the derived method's
         own mangled name -- but that knowledge lived only inside the vtable

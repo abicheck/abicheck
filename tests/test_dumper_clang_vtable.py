@@ -36,7 +36,7 @@ from __future__ import annotations
 import pytest
 
 from abicheck.dumper_clang import _ClangAstParser
-from abicheck.dumper_clang_vtable import (
+from abicheck.extract.headers.clang.vtable import (
     _top_level_param_list_close,
 )
 from abicheck.model.signature_normalization import (

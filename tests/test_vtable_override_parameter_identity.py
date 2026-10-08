@@ -56,7 +56,7 @@ def test_override_key_of_two_spellings_of_one_signature_agrees(
     parameter spellings of the same function signature (array adjustment,
     by-value cv inside a callback); the vtable path kept its own narrower
     normalizer and missed both."""
-    from abicheck.dumper_clang_vtable import _method_signature_key
+    from abicheck.extract.headers.clang.vtable import _method_signature_key
 
     def method(param: str) -> dict:
         return {

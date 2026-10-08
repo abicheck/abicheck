@@ -19,7 +19,7 @@ from xml.etree import ElementTree
 
 import pytest
 
-from abicheck import dumper
+from abicheck import dumper_cache, dumper_clang_errors
 from abicheck.deadline import DeadlineExceeded, deadline_scope
 from abicheck.dumper_cache import (
     _ast_memo_slot,
@@ -30,6 +30,8 @@ from abicheck.dumper_cache import (
 )
 from abicheck.errors import SnapshotError
 from abicheck.extract.header_ast_fields import parse_header_ast_fields
+from abicheck.extract.headers.castxml import backend as castxml_backend
+from abicheck.extract.headers.clang import backend as clang_backend
 from abicheck.model import Function, Visibility
 from abicheck.model.identity import entity_id_for_function
 
@@ -270,18 +272,23 @@ def test_mutated_header_is_not_published_under_pre_acquisition_key(
     header = tmp_path / "api.hpp"
     header.write_text("int api();\n", encoding="utf-8")
     cache = tmp_path / "ast.json"
-    original = dumper.run_clang_to_ast_file
+    original = dumper_clang_errors.run_clang_ast
 
     def mutate_after_compile(*args: object, **kwargs: object) -> object:
         result = original(*args, **kwargs)  # type: ignore[arg-type]
         header.write_text("int api();\nint appeared();\n", encoding="utf-8")
         return result
 
-    monkeypatch.setattr(dumper, "_cache_path", lambda *a, **k: cache)
-    monkeypatch.setattr(dumper, "run_clang_to_ast_file", mutate_after_compile)
+    monkeypatch.setattr(clang_backend, "_cache_path", lambda *a, **k: cache)
     monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "0")
     with pytest.raises(SnapshotError, match="header inputs changed"):
-        dumper._clang_header_dump([header], [], compiler="c++", lang="c++")
+        clang_backend.clang_header_dump(
+            [header],
+            [],
+            compiler="c++",
+            lang="c++",
+            run_ast=mutate_after_compile,  # type: ignore[arg-type]
+        )
     assert not cache.exists()
 
 
@@ -298,11 +305,13 @@ def test_clang_singleflight_binds_producer_to_registered_key(
         header.write_text("int api();\nint appeared();\n", encoding="utf-8")
         return producer()
 
-    monkeypatch.setattr(dumper.dumper_cache, "run_ast_acquisition", mutate_then_run)
-    monkeypatch.setattr(dumper, "_cache_path", lambda *args, **kwargs: tmp_path / "c")
+    monkeypatch.setattr(dumper_cache, "run_ast_acquisition", mutate_then_run)
+    monkeypatch.setattr(
+        clang_backend, "_cache_path", lambda *args, **kwargs: tmp_path / "c"
+    )
     with pytest.raises(SnapshotError, match="before clang acquisition started"):
         with ast_acquisition_scope():
-            dumper._clang_header_dump([header], [], compiler="c++", lang="c++")
+            clang_backend.clang_header_dump([header], [], compiler="c++", lang="c++")
 
 
 def test_castxml_singleflight_binds_producer_to_registered_key(
@@ -310,7 +319,9 @@ def test_castxml_singleflight_binds_producer_to_registered_key(
 ) -> None:
     header = tmp_path / "api.hpp"
     header.write_text("int api();\n", encoding="utf-8")
-    monkeypatch.setattr(dumper, "_resolve_gated_castxml_bin", lambda value: "castxml")
+    monkeypatch.setattr(
+        castxml_backend, "_resolve_gated_castxml_bin", lambda value: "castxml"
+    )
 
     def mutate_then_run(
         backend: str, key: str, producer: object, group: object = None
@@ -319,11 +330,13 @@ def test_castxml_singleflight_binds_producer_to_registered_key(
         header.write_text("int api();\nint appeared();\n", encoding="utf-8")
         return producer()
 
-    monkeypatch.setattr(dumper.dumper_cache, "run_ast_acquisition", mutate_then_run)
-    monkeypatch.setattr(dumper, "_cache_path", lambda *args, **kwargs: tmp_path / "c")
+    monkeypatch.setattr(castxml_backend, "run_ast_acquisition", mutate_then_run)
+    monkeypatch.setattr(
+        castxml_backend, "_cache_path", lambda *args, **kwargs: tmp_path / "c"
+    )
     with pytest.raises(SnapshotError, match="before CastXML acquisition started"):
         with ast_acquisition_scope():
-            dumper._castxml_dump([header], [], compiler="c++", lang="c++")
+            castxml_backend.castxml_dump([header], [], compiler="c++", lang="c++")
 
 
 # --------------------------------------------------------------------------
@@ -339,28 +352,32 @@ def test_castxml_singleflight_binds_producer_to_registered_key(
 
 def _stub_clang_resolution(monkeypatch: pytest.MonkeyPatch, cache: Path) -> None:
     """Pin every input of the clang cache key so the test owns the key."""
-    monkeypatch.setattr(dumper, "_resolve_clang_bin", lambda *a, **k: "clang")
+    monkeypatch.setattr(clang_backend, "_resolve_clang_bin", lambda *a, **k: "clang")
     monkeypatch.setattr(
-        dumper, "_resolve_dpcpp_acquisition", lambda *a, **k: (False, False)
+        clang_backend, "_resolve_dpcpp_acquisition", lambda *a, **k: (False, False)
     )
     monkeypatch.setattr(
-        dumper, "_resolve_clang_langmode", lambda *a, **k: (True, False, False, "clang")
+        clang_backend,
+        "resolve_clang_langmode",
+        lambda *a, **k: (True, False, False, "clang"),
     )
-    monkeypatch.setattr(dumper, "_resolve_clang_system_includes", lambda *a, **k: ())
-    monkeypatch.setattr(dumper, "_tool_identity", lambda *a, **k: "stable")
-    monkeypatch.setattr(dumper, "_cache_path", lambda *a, **k: cache)
+    monkeypatch.setattr(
+        clang_backend, "_resolve_clang_system_includes", lambda *a, **k: ()
+    )
+    monkeypatch.setattr(clang_backend, "_tool_identity", lambda *a, **k: "stable")
+    monkeypatch.setattr(clang_backend, "_cache_path", lambda *a, **k: cache)
 
 
 def _count_json_decodes(monkeypatch: pytest.MonkeyPatch) -> Callable[[], int]:
     decodes = 0
-    original = dumper.dumper_cache.json.loads
+    original = dumper_cache.json.loads
 
     def counted(value: object, *args: object, **kwargs: object) -> object:
         nonlocal decodes
         decodes += 1
         return original(value, *args, **kwargs)  # type: ignore[arg-type]
 
-    monkeypatch.setattr(dumper.dumper_cache.json, "loads", counted)
+    monkeypatch.setattr(dumper_cache.json, "loads", counted)
     return lambda: decodes
 
 
@@ -372,15 +389,15 @@ def test_warm_clang_disk_hit_is_decoded_once_per_request(
     cache = tmp_path / "ast.json"
     cache.write_text('{"kind": "TranslationUnitDecl"}', encoding="utf-8")
     _stub_clang_resolution(monkeypatch, cache)
-    monkeypatch.setattr(dumper, "_cache_key", lambda *a, **k: "same")
+    monkeypatch.setattr(clang_backend, "_cache_key", lambda *a, **k: "same")
     decodes = _count_json_decodes(monkeypatch)
 
     with ast_acquisition_scope():
-        first = dumper._clang_header_dump([header], [], lang="c++")
-        second = dumper._clang_header_dump([header], [], lang="c++")
+        first = clang_backend.clang_header_dump([header], [], lang="c++")
+        second = clang_backend.clang_header_dump([header], [], lang="c++")
         # A later graph-shaped consumer (``memoize=False``, as
         # ``service._attach_header_graph`` passes) must not re-read the cache.
-        graph = dumper._clang_header_dump([header], [], lang="c++", memoize=False)
+        graph = clang_backend.clang_header_dump([header], [], lang="c++", memoize=False)
 
     assert decodes() == 1
     assert second[0] is first[0] and graph[0] is first[0]
@@ -400,17 +417,17 @@ def test_warm_clang_disk_hit_keeps_legacy_handoff_without_acquisition(
     cache = tmp_path / "ast.json"
     cache.write_text('{"kind": "TranslationUnitDecl"}', encoding="utf-8")
     _stub_clang_resolution(monkeypatch, cache)
-    monkeypatch.setattr(dumper, "_cache_key", lambda *a, **k: "same")
+    monkeypatch.setattr(clang_backend, "_cache_key", lambda *a, **k: "same")
     decodes = _count_json_decodes(monkeypatch)
 
     assert ast_acquisition_active() is False
-    root, _kind, _force_cpp = dumper._clang_header_dump(
+    root, _kind, _force_cpp = clang_backend.clang_header_dump(
         [header], [], lang="c++", memoize=True
     )
     slot = _ast_memo_slot.get()
     assert slot is not None and slot[0] == "clang" and slot[2] is root
     # ... and the pending handoff is what the next same-thread caller gets.
-    again = dumper._clang_header_dump([header], [], lang="c++", memoize=True)
+    again = clang_backend.clang_header_dump([header], [], lang="c++", memoize=True)
     assert again[0] is root
     assert decodes() == 1
     assert _ast_memo_slot.get() is None
@@ -428,20 +445,20 @@ def test_warm_clang_distinct_contexts_are_not_merged(
     device_cache.write_text('{"kind": "TranslationUnitDecl", "ctx": "device"}', "utf-8")
     _stub_clang_resolution(monkeypatch, host_cache)
     monkeypatch.setattr(
-        dumper,
+        clang_backend,
         "_cache_key",
         lambda *a, **k: f"key-{k.get('frontend_context')}",
     )
     monkeypatch.setattr(
-        dumper,
+        clang_backend,
         "_cache_path",
         lambda key, **k: host_cache if key.endswith("host") else device_cache,
     )
     decodes = _count_json_decodes(monkeypatch)
 
     with ast_acquisition_scope():
-        host = dumper._clang_header_dump([header], [], lang="c++")
-        device = dumper._clang_header_dump(
+        host = clang_backend.clang_header_dump([header], [], lang="c++")
+        device = clang_backend.clang_header_dump(
             [header], [], lang="c++", frontend_context="device"
         )
 
@@ -458,12 +475,12 @@ def test_warm_clang_edited_header_is_not_served_stale(
     header.write_text("int api();\n", encoding="utf-8")
     _stub_clang_resolution(monkeypatch, tmp_path / "unused.json")
     monkeypatch.setattr(
-        dumper,
+        clang_backend,
         "_cache_key",
         lambda headers, *a, **k: headers[0].read_text(encoding="utf-8"),
     )
     monkeypatch.setattr(
-        dumper,
+        clang_backend,
         "_cache_path",
         lambda key, **k: tmp_path / f"{len(key)}.json",
     )
@@ -473,9 +490,9 @@ def test_warm_clang_edited_header_is_not_served_stale(
     )
 
     with ast_acquisition_scope():
-        before = dumper._clang_header_dump([header], [], lang="c++")
+        before = clang_backend.clang_header_dump([header], [], lang="c++")
         header.write_text("int api();\nint appeared();\n", encoding="utf-8")
-        after = dumper._clang_header_dump([header], [], lang="c++")
+        after = clang_backend.clang_header_dump([header], [], lang="c++")
 
     assert before[0]["decls"] == ["api"]
     assert after[0]["decls"] == ["api", "appeared"]
@@ -489,7 +506,7 @@ def test_warm_clang_failed_acquisition_is_retryable(
     header.write_text("int api();\n", encoding="utf-8")
     cache = tmp_path / "ast.json"
     _stub_clang_resolution(monkeypatch, cache)
-    monkeypatch.setattr(dumper, "_cache_key", lambda *a, **k: "same")
+    monkeypatch.setattr(clang_backend, "_cache_key", lambda *a, **k: "same")
     attempts = 0
 
     def flaky(*args: object, **kwargs: object) -> object:
@@ -497,16 +514,17 @@ def test_warm_clang_failed_acquisition_is_retryable(
         attempts += 1
         raise SnapshotError("clang exploded")
 
-    monkeypatch.setattr(dumper, "run_clang_to_ast_file", flaky)
     with ast_acquisition_scope():
         with pytest.raises(SnapshotError, match="clang exploded"):
-            dumper._clang_header_dump([header], [], lang="c++")
+            clang_backend.clang_header_dump([header], [], lang="c++", run_ast=flaky)
         # The failed entry was dropped rather than published, so a later
         # attempt in the SAME request really re-enters the acquisition (and
         # now finds the warm cache that meanwhile appeared) instead of
         # replaying the stored failure forever.
         cache.write_text('{"kind": "TranslationUnitDecl"}', encoding="utf-8")
-        root, _kind, _force = dumper._clang_header_dump([header], [], lang="c++")
+        root, _kind, _force = clang_backend.clang_header_dump(
+            [header], [], lang="c++", run_ast=flaky
+        )
     assert attempts == 1
     assert root == {"kind": "TranslationUnitDecl"}
     assert _ast_memo_slot.get() is None
@@ -519,32 +537,34 @@ def test_warm_castxml_disk_hit_shares_producer_metadata(
     header.write_text("int api();\n", encoding="utf-8")
     cache = tmp_path / "ast.xml"
     cache.write_text("<GCC_XML/>", encoding="utf-8")
-    monkeypatch.setattr(dumper, "_resolve_gated_castxml_bin", lambda value: "castxml")
-    monkeypatch.setattr(dumper, "_resolve_force_cpp", lambda *a, **k: True)
-    monkeypatch.setattr(dumper, "_detect_cpp20_headers", lambda *a, **k: False)
     monkeypatch.setattr(
-        dumper, "_resolve_compiler_binary", lambda *a, **k: ("c++", "compiler")
+        castxml_backend, "_resolve_gated_castxml_bin", lambda value: "castxml"
     )
-    monkeypatch.setattr(dumper.shutil, "which", lambda value: value)
-    monkeypatch.setattr(dumper, "_tool_identity", lambda *a, **k: "stable")
-    monkeypatch.setattr(dumper, "_cache_key", lambda *a, **k: "same")
-    monkeypatch.setattr(dumper, "_cache_path", lambda *a, **k: cache)
+    monkeypatch.setattr(castxml_backend, "_resolve_force_cpp", lambda *a, **k: True)
+    monkeypatch.setattr(castxml_backend, "_detect_cpp20_headers", lambda *a, **k: False)
+    monkeypatch.setattr(
+        castxml_backend, "_resolve_compiler_binary", lambda *a, **k: ("c++", "compiler")
+    )
+    monkeypatch.setattr(castxml_backend.shutil, "which", lambda value: value)
+    monkeypatch.setattr(castxml_backend, "_tool_identity", lambda *a, **k: "stable")
+    monkeypatch.setattr(castxml_backend, "_cache_key", lambda *a, **k: "same")
+    monkeypatch.setattr(castxml_backend, "_cache_path", lambda *a, **k: cache)
     decodes = 0
-    original = dumper._read_castxml_cache
+    original = castxml_backend._read_castxml_cache
 
     def counted(*args: object, **kwargs: object) -> object:
         nonlocal decodes
         decodes += 1
         return original(*args, **kwargs)
 
-    monkeypatch.setattr(dumper, "_read_castxml_cache", counted)
+    monkeypatch.setattr(castxml_backend, "_read_castxml_cache", counted)
     first_meta: list[tuple[str, bool]] = []
     second_meta: list[tuple[str, bool]] = []
     with ast_acquisition_scope():
-        first = dumper._castxml_dump(
+        first = castxml_backend.castxml_dump(
             [header], [], lang="c++", _selected_meta_out=first_meta
         )
-        second = dumper._castxml_dump(
+        second = castxml_backend.castxml_dump(
             [header], [], lang="c++", _selected_meta_out=second_meta
         )
 
@@ -750,9 +770,17 @@ def acquisition_counters(monkeypatch: pytest.MonkeyPatch) -> _AcquisitionCounter
     def _bump_normalize() -> None:
         counters.normalizations += 1
 
-    _count(dumper, "run_clang_to_ast_file", _bump_compiler)
-    _count(dumper, "_run_castxml_attempt", _bump_compiler)
-    _count(dumper, "_read_castxml_cache", lambda: counters.raw_decodes.append("xml"))
+    # The clang header pass's default runner (``run_clang_ast``) resolves
+    # ``run_clang_to_ast_file`` in ``dumper_clang_errors`` at call time, so
+    # counting there covers every clang compile -- snapshot pass and
+    # header-graph attach alike -- whichever caller reached it.
+    _count(dumper_clang_errors, "run_clang_to_ast_file", _bump_compiler)
+    _count(castxml_backend, "_run_castxml_attempt", _bump_compiler)
+    _count(
+        castxml_backend,
+        "_read_castxml_cache",
+        lambda: counters.raw_decodes.append("xml"),
+    )
     # A projection sidecar is a derived artifact, not a raw AST decode: a
     # retained-table hit offers the cache entry to the header-graph attach
     # (`run_ast_acquisition_offering_entry`), which then reads the sidecar
@@ -817,7 +845,7 @@ def _findings(report: Path) -> list[str]:
         "ELF release fan-out shape: this asserts that a directory compare's "
         "per-member L2 header acquisitions coordinate. On the macOS and "
         "Windows CI runners the fixture's header parse degrades before "
-        "`_clang_header_dump`/`_castxml_dump` reach the acquisition at all "
+        "`clang_header_dump`/`castxml_dump` reach the acquisition at all "
         "(zero keys registered, an honest ADR-028 D3 degrade unrelated to "
         "this coordination), so the invariant has nothing to observe there "
         "-- the same reason this lane already skips the ELF/DWARF suites. "
@@ -1048,17 +1076,19 @@ def test_cold_castxml_acquisition_shares_the_producer_run(
     header = tmp_path / "api.hpp"
     header.write_text("int api();\n", encoding="utf-8")
     cache = tmp_path / "ast.xml"  # deliberately absent: this is the cold path
-    monkeypatch.setattr(dumper, "_resolve_gated_castxml_bin", lambda value: "castxml")
-    monkeypatch.setattr(dumper, "_resolve_force_cpp", lambda *a, **k: False)
-    monkeypatch.setattr(dumper, "_detect_cpp20_headers", lambda *a, **k: False)
     monkeypatch.setattr(
-        dumper, "_resolve_compiler_binary", lambda *a, **k: ("cc", "compiler")
+        castxml_backend, "_resolve_gated_castxml_bin", lambda value: "castxml"
     )
-    monkeypatch.setattr(dumper.shutil, "which", lambda value: value)
-    monkeypatch.setattr(dumper, "_tool_identity", lambda *a, **k: "stable")
-    monkeypatch.setattr(dumper, "_cache_key", lambda *a, **k: "same")
-    monkeypatch.setattr(dumper, "_cache_path", lambda *a, **k: cache)
-    monkeypatch.setattr(dumper, "_write_castxml_cache", lambda *a, **k: None)
+    monkeypatch.setattr(castxml_backend, "_resolve_force_cpp", lambda *a, **k: False)
+    monkeypatch.setattr(castxml_backend, "_detect_cpp20_headers", lambda *a, **k: False)
+    monkeypatch.setattr(
+        castxml_backend, "_resolve_compiler_binary", lambda *a, **k: ("cc", "compiler")
+    )
+    monkeypatch.setattr(castxml_backend.shutil, "which", lambda value: value)
+    monkeypatch.setattr(castxml_backend, "_tool_identity", lambda *a, **k: "stable")
+    monkeypatch.setattr(castxml_backend, "_cache_key", lambda *a, **k: "same")
+    monkeypatch.setattr(castxml_backend, "_cache_path", lambda *a, **k: cache)
+    monkeypatch.setattr(castxml_backend, "_write_castxml_cache", lambda *a, **k: None)
     produced = ElementTree.Element("GCC_XML")
     runs = 0
 
@@ -1067,14 +1097,14 @@ def test_cold_castxml_acquisition_shares_the_producer_run(
         runs += 1
         return produced
 
-    monkeypatch.setattr(dumper, "_run_castxml_attempt", one_run)
+    monkeypatch.setattr(castxml_backend, "_run_castxml_attempt", one_run)
     first_meta: list[tuple[str, bool]] = []
     second_meta: list[tuple[str, bool]] = []
     with ast_acquisition_scope():
-        first = dumper._castxml_dump(
+        first = castxml_backend.castxml_dump(
             [header], [], lang="c", _selected_meta_out=first_meta
         )
-        second = dumper._castxml_dump(
+        second = castxml_backend.castxml_dump(
             [header], [], lang="c", _selected_meta_out=second_meta
         )
 

@@ -229,7 +229,7 @@ FACT_ROWS: tuple[FactRow, ...] = (
         note=(
             "castxml numbers each virtual's slot; the clang backend passes "
             "`None` even though it reconstructs the vtable itself "
-            "(`dumper_clang_vtable.py`), so slot-order findings need castxml."
+            "(`extract/headers/clang/vtable.py`), so slot-order findings need castxml."
         ),
     ),
     FactRow("Function", "source_location", _FULL, _FULL),
@@ -825,7 +825,7 @@ FACT_ROWS: tuple[FactRow, ...] = (
         _FULL,
         note=(
             "clang's is a reconstruction over the AST "
-            "(`dumper_clang_vtable.py`, G31 Phase C, schema v21) rather than a "
+            "(`extract/headers/clang/vtable.py`, G31 Phase C, schema v21) rather than a "
             "compiler-emitted table; castxml's comes from its own bundled "
             "compiler. Both are transitively inherited across bases."
         ),

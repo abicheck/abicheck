@@ -115,7 +115,7 @@ _INCLUDE_MAPPING_FIELDS = frozenset({"path", "project_owned"})
 #: ``frontend_context`` values this schema accepts. ADR-050 D5 (G32 Phase D)
 #: adds ``"device"`` alongside the original ``"host"`` -- both are resolved
 #: for real via ``sycl_context.decode_and_select_frontend_context_from_path`` in the dump pipeline
-#: (``dumper._clang_header_dump``), which raises a clear error itself when a
+#: (``extract.headers.clang.backend.clang_header_dump``), which raises a clear error itself when a
 #: non-DPC++ compiler or a syntax-only invocation can't satisfy the request.
 _SUPPORTED_FRONTEND_CONTEXTS = frozenset({"host", "device"})
 

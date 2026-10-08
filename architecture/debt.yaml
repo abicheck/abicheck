@@ -773,7 +773,7 @@
     },
     {
       "path": "abicheck/dumper.py",
-      "baseline_lines": 2060,
+      "baseline_lines": 1264,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -807,17 +807,6 @@
     {
       "path": "abicheck/dumper_clang.py",
       "baseline_lines": 1961,
-      "target": "see ADR-061 ownership map",
-      "rule": "no_growth",
-      "disposition": "migrate",
-      "category": "legacy_oversized_module",
-      "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
-      "review_by": "2026-11-30"
-    },
-    {
-      "path": "abicheck/dumper_clang_vtable.py",
-      "baseline_lines": 1273,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -1664,7 +1653,7 @@
     },
     {
       "path": "tests/test_clang_header_backend_integration.py",
-      "baseline_lines": 1624,
+      "baseline_lines": 1563,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -1928,7 +1917,7 @@
     },
     {
       "path": "tests/test_dumper_clang.py",
-      "baseline_lines": 6350,
+      "baseline_lines": 5621,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",
