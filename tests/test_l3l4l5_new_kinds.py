@@ -1781,7 +1781,7 @@ def test_dependency_path_reconstructs_multi_hop_chain() -> None:
     )
 
 
-def testformat_dependency_path_empty_list_returns_empty_string() -> None:
+def test_format_dependency_path_empty_list_returns_empty_string() -> None:
     g = SourceGraphSummary(nodes=[_N("a", "source_decl")], edges=[])
     assert format_dependency_path(g, []) == ""
 
