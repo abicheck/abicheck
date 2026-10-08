@@ -141,7 +141,7 @@ def decode_reliability_flags(
     else:
         # Only the direct-clang ("clang") producer path is affected, same as
         # clang_deprecation_facts_reliable above -- not "hybrid" too: the
-        # vtable/vptr reconstruction lives entirely in extract/headers/clang/vtable.py,
+        # vtable/vptr reconstruction lives entirely in dumper_clang_vtable.py,
         # a direct-clang-backend-only module never invoked by the hybrid
         # merge path, so a legacy hybrid snapshot's own vtable facts came
         # from castxml (dumper_hybrid.py's "prefer castxml" merge policy)
