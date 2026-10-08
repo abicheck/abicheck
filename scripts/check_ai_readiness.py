@@ -1499,7 +1499,6 @@ IMPORT_CYCLE_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
         # different representative cycle each process run).
         frozenset(
             {
-                "appcompat",
                 "cli",
                 # `cli_aggregate` joins this SCC: its
                 # `aggregate` command reuses the shared `-o FORMAT=DESTINATION` export request via

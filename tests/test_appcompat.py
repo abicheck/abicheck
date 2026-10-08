@@ -102,9 +102,9 @@ class TestFacadeRetired:
     def test_appcompat_facade_module_is_gone(self):
         """The delegation-only ``abicheck.appcompat`` facade was retired;
         callers import the owners (``workflows.consumer_scope`` and friends)."""
-        import importlib.util
+        import abicheck
 
-        assert importlib.util.find_spec("abicheck.appcompat") is None
+        assert not (Path(abicheck.__file__).parent / "appcompat.py").exists()
 
 
 # ---------------------------------------------------------------------------
