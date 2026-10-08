@@ -329,6 +329,11 @@ class CompareRequest:
     #: Both default off, the behavior every existing caller already had.
     strict_suppressions: bool = field(default=False, kw_only=True)
     require_justification: bool = field(default=False, kw_only=True)
+    #: Build-configuration matrix snapshots for each side (the CLI's
+    #: ``--build-info old=<matrix>``/``new=<matrix>``): their diff joins the
+    #: findings (G2). Both or neither; ``None`` (the default) adds nothing.
+    old_probe_matrix: Path | None = field(default=None, kw_only=True)
+    new_probe_matrix: Path | None = field(default=None, kw_only=True)
     #: ``surface.internal_namespaces`` when a pack supplied it — see
     #: ``pack_policy_overrides`` above for why this field exists and how it
     #: is applied. ``None`` means "no pack stated this"; distinct from an

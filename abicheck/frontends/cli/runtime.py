@@ -404,24 +404,15 @@ def _load_probe_matrix_changes(
     probe_matrix_old: Path | None,
     probe_matrix_new: Path | None,
 ) -> list[Change] | None:
-    """Load build-config matrix snapshots and return diff_matrix() findings.
+    """:func:`~abicheck.workflows.pair_evidence.load_probe_matrix_changes`, with
+    a one-sided matrix reported as a CLI usage error."""
+    from ...errors import ValidationError
+    from ...workflows.pair_evidence import load_probe_matrix_changes
 
-    These findings (CXX_STANDARD_FLOOR_RAISED, API_DEPENDS_ON_CONSUMER_ENV,
-    BEHAVIOURAL_DEFAULT_CHANGED) need multi-configuration inputs the plain
-    compare() does not have, so they are computed here and merged in (G2).
-    """
-    if probe_matrix_old is None and probe_matrix_new is None:
-        return None
-    if probe_matrix_old is None or probe_matrix_new is None:
-        raise click.UsageError(
-            "a build-configuration matrix needs both sides: --build-info old=<matrix> "
-            "--build-info new=<matrix>"
-        )
-    from ...workflows.findings import diff_matrix, load_matrix_snapshot
-
-    old_matrix = load_matrix_snapshot(probe_matrix_old)
-    new_matrix = load_matrix_snapshot(probe_matrix_new)
-    return list(diff_matrix(old_matrix, new_matrix))
+    try:
+        return load_probe_matrix_changes(probe_matrix_old, probe_matrix_new)
+    except ValidationError as exc:
+        raise click.UsageError(str(exc)) from exc
 
 
 # ---------------------------------------------------------------------------

@@ -97,7 +97,10 @@ verdicts; for those, build a `CompareRequest`/`InputSpec` directly and call
 strictness the CLI reads from `.abicheck.yml`: `strict_suppressions=True`
 (`suppression.strict`) rejects a suppression file holding an expired rule,
 and `require_justification=True` (`suppression.require_justification`)
-rejects a rule with no `reason`; both raise `ValidationError` and default off. See the [Python API Reference](../reference/python-api-reference.md)
+rejects a rule with no `reason`; both raise `ValidationError` and default off. `old_probe_matrix`/`new_probe_matrix`
+take the build-configuration matrices the CLI reads from
+`--build-info old=<matrix>`/`new=<matrix>`; their diff (for example
+`cxx_standard_floor_raised`) joins the findings. Give both or neither. See the [Python API Reference](../reference/python-api-reference.md)
 for the complete, generated argument/field list of every name in `service.__all__`.
 
 ## Work with snapshots directly

@@ -538,7 +538,7 @@ def classify_compare_pair(
         collect_metadata,
         sniff_text_format,
     )
-    from .workflows.pair_evidence import fold_pair_evidence
+    from .workflows.pair_evidence import fold_pair_evidence, load_probe_matrix_changes
 
     # Same classify-stage boundary check as `resolve_compare_request`'s own
     # (PR #1178): `compare_snapshots` below may do no extraction work at all.
@@ -558,9 +558,8 @@ def classify_compare_pair(
         strict_suppressions=request.strict_suppressions,
         require_justification=request.require_justification,
     )
-    # A forwarded pack's policy contribution, folded the way
-    # `pack_application.policy_file_with_packs` does for single-pair
-    # `compare`; a no-op unless the caller populated the pack fields.
+    # A forwarded pack's policy contribution, folded as `pack_application.
+    # policy_file_with_packs` does; a no-op unless the pack fields are set.
     if request.pack_policy_overrides or request.pack_internal_namespaces is not None:
         from .pack_application import PackApplication, policy_file_with_packs
 
@@ -579,13 +578,14 @@ def classify_compare_pair(
     policy_inputs = resolve_request_policy_inputs(request, suppression, pf)
     suppression, pf = policy_inputs.suppression, policy_inputs.policy_file
     evaluation_config = policy_inputs.evaluation_config
-    # The shared evidence fold (L0 removals, *embedded* build/source facts --
-    # never raw pack paths -- and the abi3 audit), the same one the CLI runs.
+    # The shared evidence fold the CLI runs too (probe matrix, L0, embedded facts, abi3).
     folded = fold_pair_evidence(
         old,
         new,
         collect_mode=pair.old_evidence.collect_mode,
-        extra_changes=None,
+        extra_changes=load_probe_matrix_changes(
+            request.old_probe_matrix, request.new_probe_matrix
+        ),
         policy_file=pf,
         lang=request.lang,
         abi3_floor=request.abi3_floor,

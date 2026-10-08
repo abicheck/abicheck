@@ -46,6 +46,8 @@ A fully-specified comparison request — the single input to ``run_compare``.
 | `acknowledgment_unacknowledged_additions` | `str \| None` | `None` |
 | `strict_suppressions` | `bool` | `False` |
 | `require_justification` | `bool` | `False` |
+| `old_probe_matrix` | `Path \| None` | `None` |
+| `new_probe_matrix` | `Path \| None` | `None` |
 | `pack_internal_namespaces` | `tuple[str, ...] \| None` | `None` |
 | `severity_preset` | `str \| None` | `None` |
 | `changed_paths` | `tuple[str, ...]` | `()` |
