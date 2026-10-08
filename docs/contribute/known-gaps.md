@@ -11291,24 +11291,26 @@ extraction (`extract/headers/castxml/records.py`).
 
 ## An unreadable consumer import table still reads as "requires nothing" (2026-10-07)
 
-The Lane C split of `appcompat.py` made a consumer binary's import read an
-explicit fact: `extract.consumer_imports.read_consumer_imports` returns a
-`ConsumerImportFacts` whose `status` is `FAILED` (with a `failure_reason`)
-when the ELF/PE/Mach-O import table could not be parsed, instead of a bare
-empty set. Only the *unrecognised format* case is acted on: it raises
-`ConsumerUnreadableError` (or yields an advisory `unreadable=True` result),
-as before. A recognised binary whose import table fails part-way still flows
-into `policy.consumer_requirements` with whatever was read -- usually
-nothing -- so the scoped verdict reads `NO_CHANGE`/100% coverage, the
-"weaker evidence must not upgrade to a clean claim" problem root
-`AGENTS.md` names. The split was behaviour-preserving by mandate (no exit
-code or report change), so the consumer of the `FAILED` status is left for
-its own change: treat a `FAILED` consumer fact like an unreadable one
-(required -> error, advisory -> `unreadable=True`), with a regression test
-over a truncated ELF/PE/Mach-O consumer. Library-side facts have the same
-shape one layer down: `parse_{elf,pe,macho}_metadata` swallow their own
-errors and return empty metadata, so `LibraryExportFacts` cannot yet tell a
-failed read from an empty export table.
+**Closed (2026-10, Lane C stage 5).** `workflows.consumer_scope.read_consumer_facts`
+now treats a `FAILED` consumer-import fact exactly like an unrecognised
+format: a REQUIRED consumer raises `ConsumerUnreadableError`, an ADVISORY one
+yields `unreadable=True`. Regression tests:
+`tests/unit/workflows/test_failed_consumer_read.py`. Still open, one layer
+down: `parse_{elf,pe,macho}_metadata` swallow their own errors and return
+empty metadata, so `LibraryExportFacts` cannot yet tell a failed library read
+from an empty export table.
+
+## `compare --used-by` prints a traceback for an unreadable REQUIRED consumer (2026-10-08)
+
+A REQUIRED `--used-by` consumer that cannot be read (unrecognised format,
+digest mismatch, or -- since Lane C stage 5 -- an unparseable import table)
+raises `ConsumerUnreadableError` out of `cli_helpers_compare._apply_used_by_scoping`
+uncaught: the run exits 1 with a Python traceback rather than a one-line
+`Error: ...` message. The exit status is right; the presentation is not.
+The fix is a `click.ClickException` translation around the
+`scope_diff_to_app` call, but `cli_helpers_compare.py` is already over its
+`no_growth` baseline, so it needs a responsibility moved out of that file
+first (e.g. `_app_compat_summary`'s projection to `report/`).
 
 ## `appcompat_consumer_impact.py` cannot move into `workflows/` yet (2026-10-08)
 

@@ -48,6 +48,7 @@ from ..extract.library_export_facts import (
 )
 from ..impact.engine import assess_change
 from ..model import AbiSnapshot
+from ..model.availability import FactStatus
 from ..model.change import Change
 from ..model.change_catalog.kinds import ChangeKind
 from ..model.consumer_requirements import (
@@ -171,13 +172,17 @@ def read_consumer_facts(spec: ConsumerSpec, library_name: str) -> ConsumerImport
     """Verify *spec*'s digest and read its imports from *library_name*.
 
     Raises :class:`ConsumerUnreadableError` (or its
-    ``ConsumerDigestMismatchError`` subclass) when the digest mismatches or
-    the binary format can't be detected -- the one point where an unreadable
-    consumer fact becomes the caller's error.
+    ``ConsumerDigestMismatchError`` subclass) when the digest mismatches, the
+    binary format can't be detected, or the import table could not be read
+    (a ``FAILED`` fact) -- the one point where an unreadable consumer fact
+    becomes the caller's error. A failed read must not reach evaluation as
+    an empty requirement set: that would report a consumer that "requires
+    nothing" as compatible with 100% coverage (root ``AGENTS.md``: weaker
+    evidence narrows conclusions, it never upgrades to a clean claim).
     """
     verify_digest(spec)
     consumer = read_consumer_imports(spec.path, library_name)
-    if not consumer.is_readable:
+    if not consumer.is_readable or consumer.status is FactStatus.FAILED:
         raise ConsumerUnreadableError(consumer.failure_reason or str(spec.path))
     return consumer
 

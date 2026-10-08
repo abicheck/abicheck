@@ -716,6 +716,9 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
             # and stopped gating.
             "tests/test_contract_adaptive_default_monotone.py",
             "tests/test_export_reconciliation_and_obligations.py",
+            # Lane C stage 5: a recognised consumer binary whose import table
+            # failed to parse read as "requires nothing" -> NO_CHANGE/100%.
+            "tests/unit/workflows/test_failed_consumer_read.py",
         ),
         known_gaps=(
             KnownGap(
