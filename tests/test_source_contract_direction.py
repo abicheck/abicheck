@@ -358,3 +358,17 @@ def test_no_pointee_change_without_a_pointee_difference(old: str, new: str) -> N
     kinds = _kinds(result)
     assert ChangeKind.PARAM_POINTEE_QUALIFIER_ADDED not in kinds
     assert ChangeKind.PARAM_POINTEE_QUALIFIER_CHANGED not in kinds
+
+
+@pytest.mark.parametrize(
+    ("old", "new"),
+    [
+        # Both spellings name both qualifiers: the same type, reordered.
+        ("const volatile int", "const int volatile"),
+        ("const volatile S", "const S volatile"),
+    ],
+)
+def test_field_qualifier_reorder_is_not_a_field_type_change(old: str, new: str) -> None:
+    from abicheck.diff_types import _field_type_genuinely_changed
+
+    assert not _field_type_genuinely_changed(old, new, cv_facts_reliable=True)
