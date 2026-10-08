@@ -139,7 +139,7 @@ def _format_consumer_impact(
     """The human-readable half of a consumer impact explanation — the string
     that replaces "requires missing symbol X" with why it was required.
 
-    Reuses ``source_graph_findings._format_dependency_path`` for the chain
+    Reuses ``source_graph_compare.format_dependency_path`` for the chain
     itself rather than formatting edges here, so a consumer proof path reads
     identically to an internal-leak one for the same edges.
 
@@ -157,9 +157,9 @@ def _format_consumer_impact(
         if name_consumer:
             return f"{explained.consumer} requires public entry {entry} directly"
         return f"{explained.symbol} is declared by public entry {entry}"
-    from .buildsource.source_graph_findings import _format_dependency_path
+    from .buildsource.source_graph_compare import format_dependency_path
 
-    chain = _format_dependency_path(graph, explained.entry_path)
+    chain = format_dependency_path(graph, explained.entry_path)
     if name_consumer:
         return (
             f"{explained.consumer} requires {explained.symbol} "

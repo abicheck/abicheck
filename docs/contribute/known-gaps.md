@@ -11243,3 +11243,21 @@ already shared: `workflows/pair_evidence.fold_pair_evidence`. Unifying the
 fold means generalizing the release fold so N=1 reduces to the scalar one;
 any exit-code difference that exposes at N=1 must be decided before it
 changes (ADR-064). Owner: ADR-063/065, lane A stage A2(b).
+
+## `appcompat_consumer_impact.py` cannot move into `workflows/` yet (2026-10-08)
+
+The ADR-057 consumer-impact join (`abicheck/appcompat_consumer_impact.py`)
+is a `workflows` legacy root module; its target is the `workflows/` package
+beside `workflows/consumer_scope.py`, its one production caller. Inside a
+migrated package `scripts/check_architecture.py` rejects any import of an
+unclassified module, and the join lazily imports
+`buildsource.graph_impact.attach_impact_metadata`, which is unclassified.
+`graph_impact.py` cannot simply be classified either: its own entry above
+(target `compare`) records the self-dependency on the `extract`-classified
+`call_graph.py`, and `impact/consumer_graph.py` (`model`) imports it too, so
+any classification outside `model` turns that into a direction violation.
+Classifying it `workflows` only to unblock this move would be the
+laundering that entry warns against. Lane C stage 2 moved the join's other
+unclassified dependency, `format_dependency_path`, into the
+`compare`-classified `buildsource/source_graph_compare.py`; the move itself
+waits on `graph_impact.py`'s blockers being decoupled first.

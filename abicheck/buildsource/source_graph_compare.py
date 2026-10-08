@@ -32,6 +32,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from ..model.graph_facts import GraphEdge
 from ..model.source_graph import GraphSummaryDiff, SourceGraphSummary, _symbol_node_id
 
 
@@ -41,6 +42,21 @@ def _label_map(graph: SourceGraphSummary) -> dict[str, str]:
 
 def _kind_map(graph: SourceGraphSummary) -> dict[str, str]:
     return {n.id: n.kind for n in graph.nodes}
+
+
+def format_dependency_path(graph: SourceGraphSummary, path: list[GraphEdge]) -> str:
+    """Render a :func:`_dependency_path` result as a human-readable chain.
+
+    E.g. ``pub() --[DECL_CALLS_DECL]--> helper() --[DECL_HAS_TYPE]--> detail::Impl``.
+    Returns ``""`` for an empty path (entry == target).
+    """
+    if not path:
+        return ""
+    labels = _label_map(graph)
+    parts = [labels.get(path[0].src, path[0].src)]
+    for e in path:
+        parts.append(f"--[{e.kind}]--> {labels.get(e.dst, e.dst)}")
+    return " ".join(parts)
 
 
 def localize_symbol(graph: SourceGraphSummary, symbol: str) -> dict[str, Any]:

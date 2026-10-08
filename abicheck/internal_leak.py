@@ -941,7 +941,7 @@ def compute_call_graph_leak_paths(
     for why an ordinary out-of-line exported function does not qualify),
     returning a mapping ``lookup_key -> list of formatted proof-path
     strings`` (one per public entry that reaches it, edge-kind-annotated via
-    :func:`~abicheck.buildsource.source_graph_findings._format_dependency_path`,
+    :func:`~abicheck.buildsource.source_graph_compare.format_dependency_path`,
     e.g. ``"pub() --[DECL_CALLS_DECL]--> detail::helper()"``). A path that
     only exists because it crossed a virtual/function-pointer call
     (``CALL_GRAPH_TRAVERSAL_POLICY.effect_transitions``, ADR-046 D5) is
@@ -990,7 +990,7 @@ def compute_call_graph_leak_paths(
 
     from abicheck.model.source_graph_query import is_consumer_compiled_public_entry
 
-    from .buildsource.source_graph_findings import _format_dependency_path
+    from .buildsource.source_graph_compare import format_dependency_path
 
     if not any(
         e.kind in CALL_GRAPH_TRAVERSAL_POLICY.allowed_edges for e in graph.edges
@@ -1061,7 +1061,7 @@ def compute_call_graph_leak_paths(
                 lookup_name, path_edges, internal_namespaces=internal_set
             ):
                 continue
-            formatted = _format_dependency_path(graph, path_edges)
+            formatted = format_dependency_path(graph, path_edges)
             if target in degraded:
                 # ADR-046 D5 effect_transitions: this proof crossed a
                 # virtual/function-pointer call, so it is an

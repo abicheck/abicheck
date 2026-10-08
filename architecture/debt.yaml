@@ -311,13 +311,13 @@
     },
     {
       "path": "abicheck/buildsource/source_graph_findings.py",
-      "baseline_lines": 1812,
+      "baseline_lines": 1762,
       "target": "extract/build-or-source",
       "rule": "no_growth",
       "disposition": "migrate",
       "category": "legacy_extraction_monolith",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Lowered 1812 -> 1762 (Lane C, stage 2): `format_dependency_path` moved to the `compare`-classified `buildsource/source_graph_compare.py` beside the `_label_map` it reads, so the consumer-impact join and `internal_leak` no longer import this unclassified module for it.",
       "review_by": "2026-11-30"
     },
     {

@@ -56,7 +56,7 @@ from ..model.source_graph_coverage import (
     graph_records_passes,
     trusted_kinds,
 )
-from .source_graph_compare import _kind_map, _label_map
+from .source_graph_compare import _kind_map, _label_map, format_dependency_path
 
 if TYPE_CHECKING:
     from ..model.change import Change
@@ -268,21 +268,6 @@ def _dependency_path(
         cur = e.src
     path.reverse()
     return path
-
-
-def _format_dependency_path(graph: SourceGraphSummary, path: list[GraphEdge]) -> str:
-    """Render a :func:`_dependency_path` result as a human-readable chain.
-
-    E.g. ``pub() --[DECL_CALLS_DECL]--> helper() --[DECL_HAS_TYPE]--> detail::Impl``.
-    Returns ``""`` for an empty path (entry == target).
-    """
-    if not path:
-        return ""
-    labels = _label_map(graph)
-    parts = [labels.get(path[0].src, path[0].src)]
-    for e in path:
-        parts.append(f"--[{e.kind}]--> {labels.get(e.dst, e.dst)}")
-    return " ".join(parts)
 
 
 #: Dependency edge kinds grouped by the single extractor pass that emits them
@@ -1152,7 +1137,7 @@ def _call_reachability_findings(
             for target in added:
                 path = _dependency_path(new, call_kinds, entry, target)
                 if path:
-                    example = f" Example newly-reachable path: {_format_dependency_path(new, path)}."
+                    example = f" Example newly-reachable path: {format_dependency_path(new, path)}."
                     break
             findings.append(
                 # ADR-052 D2 follow-up: not cached -- see
@@ -1466,7 +1451,7 @@ def _internal_dependency_findings(
             if (path := _dependency_path(new_closure, common_kinds, entry, t))
             is not None
         ]
-        proof_paths = [_format_dependency_path(new, path) for _, path in target_paths]
+        proof_paths = [format_dependency_path(new, path) for _, path in target_paths]
         proof = f" Proof path(s): {'; '.join(proof_paths)}." if proof_paths else ""
         own_change = own_changes.get(label)
         correlation = (
