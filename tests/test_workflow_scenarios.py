@@ -231,7 +231,9 @@ def test_host_contract_demangled_cpp_name_is_not_a_dlsym_export() -> None:
 def test_snapshot_export_names_covers_vars_and_unmangled() -> None:
     """The resolvable-export set includes exported variables and falls back to
     the plain name when no mangled symbol is recorded."""
-    from abicheck.appcompat import _snapshot_export_names
+    from abicheck.extract.library_export_facts import (
+        dlsym_export_names as _snapshot_export_names,
+    )
     from abicheck.model import Variable
 
     snap = AbiSnapshot(

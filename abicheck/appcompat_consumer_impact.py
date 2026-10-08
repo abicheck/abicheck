@@ -30,10 +30,11 @@ depends only on a `Change`/`AppRequirements` pair and the L5 source graph.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from .impact.engine import assess_change
 from .model.evidence_status import ReachabilityState
+from .policy.consumer_requirements import change_covers_symbol
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -41,15 +42,8 @@ if TYPE_CHECKING:
     from .checker import Change
     from .impact.consumer_graph import ConsumerImpactPath
     from .model import AbiSnapshot
+    from .model.consumer_requirements import AppRequirements
     from .model.source_graph import SourceGraphSummary
-
-    # Not `.appcompat.AppRequirements`: importing it, even under
-    # TYPE_CHECKING, closes an `appcompat -> appcompat_consumer_impact ->
-    # appcompat` cycle the AI-readiness import-cycle-growth check flags
-    # regardless of the guard (it walks every import statement, not just the
-    # ones that execute). `Any` costs nothing here -- the one caller
-    # (`appcompat.scope_diff_to_app`) already has the concrete type in scope.
-    AppRequirements = Any
 
 
 def _library_source_graph(
@@ -67,7 +61,7 @@ def _library_source_graph(
     though it is holding the snapshot it just dumped or loaded from that same
     path (``cli_compare_helpers._apply_used_by_scoping``'s
     ``old_input if detect_binary_format(...) else old_snapshot``,
-    ``mcp_server``'s identical line, ``appcompat.check_appcompat``'s own
+    ``mcp_server``'s identical line, ``workflows.consumer_scope_standalone.check_appcompat``'s own
     ``dump``). Reading the graph only off *lib* therefore made the consumer
     join fire **only** when OLD happened to be a saved JSON snapshot — the
     inverse of the primary usage, and it silently skipped exactly the runs
@@ -122,7 +116,7 @@ def consumer_impact_explanations(
         join_consumer_graph,
     )
 
-    # _scope_app_symbols_to_library already reduced app_reqs.undefined_symbols
+    # scope_requirements_to_library already reduced app_reqs.undefined_symbols
     # to what this library actually exports, which is the scoping
     # build_consumer_graph requires of its input.
     consumer_graph = build_consumer_graph(app_path.name, app_reqs)
@@ -206,22 +200,6 @@ def _has_impact_evidence(change: Change) -> bool:
     )
 
 
-def _change_covers_symbol(change: Change, symbol: str) -> bool:
-    """Does *change* already account for *symbol* (exact, demangled, or via
-    ``affected_symbols``)? Mirrors ``appcompat._change_covers_symbol`` --
-    duplicated rather than imported back, since the two modules must not
-    import each other at runtime (only ``appcompat`` -> this module, never
-    the reverse); both copies are one-line-bodied and change together."""
-    if change.symbol == symbol:
-        return True
-    from .demangle import demangle as _demangle_symbol
-
-    plain = _demangle_symbol(change.symbol)
-    if plain and plain == symbol:
-        return True
-    return bool(change.affected_symbols and symbol in change.affected_symbols)
-
-
 def enrich_covered_changes(
     changes: list[Change],
     explanations: dict[str, ConsumerImpactPath],
@@ -232,7 +210,7 @@ def enrich_covered_changes(
 
     Without this the join reached only *uncovered* symbols: an ordinary
     removed export produces its own ``FUNC_REMOVED``, which
-    ``appcompat.uncovered_missing_symbols`` then excludes from the overlay —
+    ``policy.consumer_requirements.uncovered_missing_symbols`` then excludes from the overlay —
     so the common case, including the internal-dispatcher one this join was
     built for, got no proof path at all.
 
@@ -251,7 +229,7 @@ def enrich_covered_changes(
     assessment over re-deriving from those flat fields, so without this
     refresh the newly attached consumer explanation would never actually
     reach a JSON/SARIF render. Mirrors the overlay-change path in
-    ``appcompat.scope_diff_to_app``
+    ``workflows.consumer_scope.scope_diff_to_app``
     (``overlay_change.impact_assessment = assess_change(overlay_change)``),
     which already does this correctly for the *uncovered*-symbol case
     because that ``Change`` is always freshly constructed with no
@@ -265,7 +243,7 @@ def enrich_covered_changes(
     (:func:`_merge_consumer_impact_paths`) — a single shared ``Change`` can
     cover more than one missing export at once via ``affected_symbols``
     (e.g. one type-size change breaking several removed functions), and
-    :func:`_change_covers_symbol` treats all of them as covered. Keeping
+    :func:`~abicheck.policy.consumer_requirements.change_covers_symbol` treats all of them as covered. Keeping
     only the first match's ``next(...)`` pick (Codex review, fresh
     evidence) silently discarded every other symbol's own public root and
     proof path, reporting a narrower explanation than the same logic
@@ -275,7 +253,7 @@ def enrich_covered_changes(
         if _has_impact_evidence(change):
             continue
         matches = [
-            e for sym, e in explanations.items() if _change_covers_symbol(change, sym)
+            e for sym, e in explanations.items() if change_covers_symbol(change, sym)
         ]
         if not matches:
             continue

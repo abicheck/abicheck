@@ -29,18 +29,23 @@ at runtime rather than a single library's own declaration diff:
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import patch
 
-from abicheck.appcompat import AppRequirements, _check_pe_ordinal_imports
+from abicheck.appcompat import AppRequirements
 from abicheck.binder import BindingStatus, SymbolBinding
 from abicheck.checker import Change, ChangeKind, DiffResult, Verdict, compare
 from abicheck.dwarf_advanced import AdvancedDwarfMetadata, ToolchainInfo
 from abicheck.elf_metadata import ElfMetadata
 from abicheck.model import AbiSnapshot
+from abicheck.model.consumer_requirements import (
+    ConsumerImportFacts,
+    LibraryExportFacts,
+)
 from abicheck.pe_metadata import PeExport, PeMetadata
+from abicheck.policy.consumer_requirements import resolve_pe_ordinal_imports
 from abicheck.resolver import DependencyGraph, ResolvedDSO
 from abicheck.stack_binding_diff import diff_runtime_bindings
 from abicheck.stack_checker import StackVerdict, _compute_abi_risk
+from abicheck.workflows.consumer_scope import scope_diff_to_consumer_facts
 
 
 def _elf_snap(elf: ElfMetadata) -> AbiSnapshot:
@@ -260,25 +265,31 @@ class TestPeImportLoadModeChanged:
 # ── pe_ordinal_retargeted ────────────────────────────────────────────────────
 
 
-class _FakePeMeta:
-    def __init__(self, exports):
-        self.exports = exports
+def _pe_facts(label: str, exports: list[PeExport]) -> LibraryExportFacts:
+    """PE export facts built directly from an export table."""
+    return LibraryExportFacts(
+        label=label,
+        binary_format="pe",
+        soname=label,
+        export_names=frozenset(e.name for e in exports if e.name),
+        exports_by_ordinal={e.ordinal: e.name for e in exports},
+    )
+
+
+def _resolve(old_exports, new_exports, reqs):
+    return resolve_pe_ordinal_imports(
+        reqs, _pe_facts("old.dll", old_exports), _pe_facts("new.dll", new_exports)
+    )
 
 
 class TestPeOrdinalRetargeted:
     def test_ordinal_retargeted_to_different_function(self):
-        with (
-            patch("abicheck.appcompat._detect_app_format", return_value="pe"),
-            patch("abicheck.pe_metadata.parse_pe_metadata") as mock_parse,
-        ):
-            mock_parse.side_effect = [
-                _FakePeMeta([PeExport(name="Foo", ordinal=17)]),
-                _FakePeMeta([PeExport(name="Bar", ordinal=17)]),
-            ]
-            reqs = AppRequirements(undefined_symbols={"ordinal:17"})
-            resolved, retargeted, names = _check_pe_ordinal_imports(
-                Path("old.dll"), Path("new.dll"), reqs
-            )
+        reqs = AppRequirements(undefined_symbols={"ordinal:17"})
+        resolved, retargeted, names = _resolve(
+            [PeExport(name="Foo", ordinal=17)],
+            [PeExport(name="Bar", ordinal=17)],
+            reqs,
+        )
 
         assert resolved == {"ordinal:17"}
         assert len(retargeted) == 1
@@ -286,36 +297,22 @@ class TestPeOrdinalRetargeted:
         assert names == {"Foo", "Bar"}
 
     def test_ordinal_unchanged_resolved_no_retarget(self):
-        with (
-            patch("abicheck.appcompat._detect_app_format", return_value="pe"),
-            patch("abicheck.pe_metadata.parse_pe_metadata") as mock_parse,
-        ):
-            mock_parse.side_effect = [
-                _FakePeMeta([PeExport(name="Foo", ordinal=17)]),
-                _FakePeMeta([PeExport(name="Foo", ordinal=17)]),
-            ]
-            reqs = AppRequirements(undefined_symbols={"ordinal:17"})
-            resolved, retargeted, names = _check_pe_ordinal_imports(
-                Path("old.dll"), Path("new.dll"), reqs
-            )
+        reqs = AppRequirements(undefined_symbols={"ordinal:17"})
+        resolved, retargeted, names = _resolve(
+            [PeExport(name="Foo", ordinal=17)],
+            [PeExport(name="Foo", ordinal=17)],
+            reqs,
+        )
 
         assert resolved == {"ordinal:17"}
         assert retargeted == []
         assert names == {"Foo"}
 
     def test_ordinal_dropped_stays_unresolved(self):
-        with (
-            patch("abicheck.appcompat._detect_app_format", return_value="pe"),
-            patch("abicheck.pe_metadata.parse_pe_metadata") as mock_parse,
-        ):
-            mock_parse.side_effect = [
-                _FakePeMeta([PeExport(name="Foo", ordinal=17)]),
-                _FakePeMeta([]),
-            ]
-            reqs = AppRequirements(undefined_symbols={"ordinal:17"})
-            resolved, retargeted, names = _check_pe_ordinal_imports(
-                Path("old.dll"), Path("new.dll"), reqs
-            )
+        reqs = AppRequirements(undefined_symbols={"ordinal:17"})
+        resolved, retargeted, names = _resolve(
+            [PeExport(name="Foo", ordinal=17)], [], reqs
+        )
 
         assert resolved == set()
         assert retargeted == []
@@ -323,8 +320,10 @@ class TestPeOrdinalRetargeted:
 
     def test_no_ordinal_requirements_short_circuits(self):
         reqs = AppRequirements(undefined_symbols={"NamedFunc"})
-        resolved, retargeted, names = _check_pe_ordinal_imports(
-            Path("old.dll"), Path("new.dll"), reqs
+        resolved, retargeted, names = _resolve(
+            [PeExport(name="NamedFunc", ordinal=1)],
+            [PeExport(name="NamedFunc", ordinal=1)],
+            reqs,
         )
         assert resolved == set()
         assert retargeted == []
@@ -332,52 +331,36 @@ class TestPeOrdinalRetargeted:
 
     def test_resolved_ordinal_content_change_is_relevant(self):
         """Codex review (PR #537): an ABI break on the export an ordinal-only
-        import resolves to must surface via check_appcompat, not read as
-        irrelevant_for_app just because the app never named the export.
+        import resolves to must surface in the consumer-scoped result, not
+        read as irrelevant_for_app just because the app never named the
+        export.
         """
-        from abicheck.appcompat import check_appcompat
+        exports = [PeExport(name="Foo", ordinal=17)]
+        consumer = ConsumerImportFacts(
+            path=Path("app.exe"),
+            binary_format="pe",
+            target_library="foo.dll",
+            requirements=AppRequirements(undefined_symbols={"ordinal:17"}),
+        )
+        change = Change(
+            kind=ChangeKind.FUNC_PARAMS_CHANGED,
+            symbol="Foo",
+            description="params changed",
+        )
+        diff = DiffResult(
+            old_version="old",
+            new_version="new",
+            library="foo.dll",
+            changes=[change],
+            verdict=Verdict.BREAKING,
+        )
 
-        with (
-            patch("abicheck.appcompat._detect_app_format", return_value="pe"),
-            patch("abicheck.appcompat.parse_app_requirements") as mock_parse_app,
-            patch("abicheck.appcompat._get_lib_soname", return_value="foo.dll"),
-            patch("abicheck.appcompat._get_new_lib_exports", return_value=set()),
-            patch("abicheck.appcompat._missing_app_versions", return_value=[]),
-            patch("abicheck.pe_metadata.parse_pe_metadata") as mock_parse_pe,
-            patch(
-                "abicheck.workflows.input_resolution.detect_binary_format",
-                return_value="pe",
-            ),
-            patch("abicheck.service_dump_native.run_dump") as mock_run_dump,
-            patch(
-                "abicheck.workflows.compare_policy.compare_snapshots"
-            ) as mock_compare,
-        ):
-            mock_parse_app.return_value = AppRequirements(
-                undefined_symbols={"ordinal:17"}
-            )
-            mock_parse_pe.side_effect = [
-                _FakePeMeta([PeExport(name="Foo", ordinal=17)]),
-                _FakePeMeta([PeExport(name="Foo", ordinal=17)]),
-            ]
-            mock_run_dump.side_effect = [
-                AbiSnapshot(library="foo.dll", version="old"),
-                AbiSnapshot(library="foo.dll", version="new"),
-            ]
-            change = Change(
-                kind=ChangeKind.FUNC_PARAMS_CHANGED,
-                symbol="Foo",
-                description="params changed",
-            )
-            mock_compare.return_value = DiffResult(
-                old_version="old",
-                new_version="new",
-                library="foo.dll",
-                changes=[change],
-                verdict=Verdict.BREAKING,
-            )
-
-            result = check_appcompat(Path("app.exe"), Path("old.dll"), Path("new.dll"))
+        result = scope_diff_to_consumer_facts(
+            diff,
+            consumer,
+            _pe_facts("foo.dll", exports),
+            _pe_facts("foo.dll", exports),
+        )
 
         assert change in result.breaking_for_app
         assert change not in result.irrelevant_for_app

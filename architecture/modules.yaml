@@ -284,6 +284,7 @@
         "abicheck/contract_evidence_collect.py",
         "abicheck/export_surface.py",
         "abicheck/idioms.py",
+        "abicheck/impact/engine.py",
         "abicheck/pattern_verdicts.py",
         "abicheck/policies/__init__.py",
         "abicheck/policy_file.py",
@@ -308,7 +309,6 @@
         "policy"
       ],
       "legacy_paths": [
-        "abicheck/appcompat.py",
         "abicheck/appcompat_consumer_impact.py",
         "abicheck/binder.py",
         "abicheck/buildsource/baseline_publish.py",
@@ -437,6 +437,7 @@
     }
   },
   "public_root_surfaces": [
+    "abicheck.appcompat",
     "abicheck.checker_policy",
     "abicheck.contract_evidence",
     "abicheck.header_only_dump",
@@ -444,6 +445,7 @@
     "abicheck.serialization"
   ],
   "facades": [
+    "abicheck.appcompat",
     "abicheck.checker_policy"
   ],
   "frozen_root_families": {

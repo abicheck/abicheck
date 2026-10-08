@@ -125,7 +125,7 @@ disable_error_code = ["unused-ignore"]
 # pyelftools has no type stubs or py.typed marker — all its APIs are untyped.
 # Disable strict checks for modules that directly call pyelftools APIs.
 module = [
-    "abicheck.appcompat",
+    "abicheck.extract.consumer_imports",
     "abicheck.elf_metadata",
     "abicheck.pe_metadata",
     "abicheck.macho_metadata",
