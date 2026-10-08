@@ -334,21 +334,13 @@ def _run_audit_case(
     * Findings live in the flat ``findings`` list (``kind`` per row), not a
       ``crosscheck.counts_by_check`` map.
     * Legacy ``scan``'s per-check ``crosscheck.providers`` coverage rows
-      (ground truth's ``provider_assertions``) have no ``compare``-report
-      equivalent yet -- ADR-068 Phase 6 retired the whole-audit orchestrator
-      (``scan_engine.py``) that built them, and no replacement per-check
-      coverage projection has landed in ``report/no_baseline.py``. It is
-      therefore **not** checked here, and a case whose ground truth carries
-      one says so in its own result (``unvalidated_assertions``) rather than
-      passing as a complete proof: case151 exists precisely to prove a
+      (ground truth's ``provider_assertions``) are carried per finding as
+      ``providers`` in the audit report and checked here
+      (``_provider_assertion_errors``): case151 exists precisely to prove a
       finding is corroborated by *both* ``public_header_ast`` and
       ``source_index``, so a regression dropping the latter while still
-      emitting ``private_header_leak`` would be invisible to every check
-      this runner can make (Codex review). The underlying provider/coverage
-      facts are still exercised directly by
-      ``abicheck/buildsource/cross_source_checks.py``'s own unit tests
-      (``tests/test_cross_source_checks.py``) -- which is detector-level
-      proof, not proof of this case's public workflow behavior.
+      emitting ``private_header_leak`` must fail this public-workflow lane,
+      not only the detector-level unit tests.
 
     What *is* checked, and was not before: each ``findings[]`` row's own
     retained ``verdict``. The top-level verdict being ``null`` is required
@@ -417,6 +409,7 @@ def _run_audit_case(
     ]
     finding_verdicts = sorted({str(v) for _, v in verdicts_by_kind if v})
     errors.extend(_audit_verdict_errors(entry, verdicts_by_kind))
+    errors.extend(_provider_assertion_errors(entry, payload.get("findings") or []))
     result = _result(
         case_id,
         command,
@@ -435,10 +428,40 @@ def _run_audit_case(
     # surfaces this on the COVERED row the same way it surfaces
     # `kinds_strict`, so a PASS here is never read as "every ground-truth
     # assertion for this case was checked".
-    result["unvalidated_assertions"] = (
-        ["provider_assertions"] if entry.get("provider_assertions") else []
-    )
+    # provider_assertions are now checked against each finding's own
+    # `providers` list (see _provider_assertion_errors), so nothing a case
+    # declares is left unvalidated by this lane.
+    result["unvalidated_assertions"] = []
     return result
+
+
+def _provider_assertion_errors(
+    entry: dict[str, Any], findings: list[Any]
+) -> list[str]:
+    """Check ground truth's ``provider_assertions`` against the report.
+
+    Each finding of a cross-source check carries the evidence providers that
+    corroborated it (``providers``). For every asserted check, some finding
+    of that kind must list exactly the asserted providers -- so a regression
+    that still emits case151's ``private_header_leak`` but has lost its
+    ``source_index`` corroboration fails here instead of passing on the
+    finding kind alone.
+    """
+    errors: list[str] = []
+    for check, want in (entry.get("provider_assertions") or {}).items():
+        seen = [
+            list(f.get("providers") or [])
+            for f in findings
+            if isinstance(f, dict) and f.get("kind") == check
+        ]
+        if not seen:
+            errors.append(f"provider assertion for {check!r}: no {check!r} finding")
+        elif sorted(want) not in [sorted(p) for p in seen]:
+            errors.append(
+                f"provider assertion for {check!r}: providers {seen!r}, "
+                f"expected {sorted(want)!r}"
+            )
+    return errors
 
 
 #: The report's verdict vocabulary as ordered severity bands. Ordering is

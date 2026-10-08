@@ -165,9 +165,15 @@ class TestKnownGapToolchainScope:
 
     def test_real_cases_are_scoped(self):
         gt = json.loads(_GROUND_TRUTH.read_text())["verdicts"]
-        assert gt["case64_calling_convention_changed"]["known_gap_toolchains"] == [
-            "gcc"
-        ]
+        # case64's former GCC gap is closed: the CastXML extractor now
+        # recovers the ms_abi CastXML drops, so both producers must PASS.
+        assert "known_gap" not in gt["case64_calling_convention_changed"]
+        # case180 under Clang is applicability, not a gap (no UNIQUE binding
+        # is ever produced), so it is NOT_APPLICABLE rather than XFAIL.
+        case180 = gt["case180_symbol_binding_lost_unique"]
+        assert "known_gap" not in case180
+        assert case180["not_applicable_toolchains"] == ["clang"]
+        assert case180["not_applicable_expected"] == "NO_CHANGE"
         assert gt["case103_toolchain_flag_drift"]["known_gap_toolchains"] == ["clang"]
         case98 = gt["case98_cxx_standard_floor_raised"]
         assert case98["expected"] == "COMPATIBLE_WITH_RISK"
@@ -177,6 +183,35 @@ class TestKnownGapToolchainScope:
             "release-headers",
             "stripped-headers",
         }
+
+
+class TestNotApplicableToolchain:
+    """A producer that never creates a case's transition is NOT_APPLICABLE.
+
+    Exhaustive over the small domain (producer in/out of the list x verdict
+    equal to / different from the transition-free expectation): only an
+    in-list producer reaching exactly the declared verdict is
+    NOT_APPLICABLE; an in-list producer reporting anything else FAILs; an
+    out-of-list producer is untouched and evaluated normally.
+    """
+
+    @pytest.mark.parametrize("family", ["gcc", "clang"])
+    @pytest.mark.parametrize("got", ["NO_CHANGE", "COMPATIBLE_WITH_RISK", "BREAKING"])
+    def test_domain(self, monkeypatch, family, got):
+        monkeypatch.setattr(ve, "_toolchain_family", lambda _is_cpp: family)
+        entry = {
+            "expected": "COMPATIBLE_WITH_RISK",
+            "not_applicable_toolchains": ["clang"],
+            "not_applicable_expected": "NO_CHANGE",
+            "not_applicable_reason": "no such transition",
+        }
+        na = ve._not_applicable_on(entry, True)
+        if family != "clang":
+            assert na is None
+            return
+        assert na == ("NO_CHANGE", "no such transition")
+        result = ve._evaluate_not_applicable("caseX", entry["expected"], got, *na)
+        assert result.status == ("NOT_APPLICABLE" if got == "NO_CHANGE" else "FAIL")
 
 
 class TestKnownGapVerdictScope:

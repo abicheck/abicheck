@@ -53,39 +53,35 @@ regardless of whether DWARF or headers are available.
 
 ## Runtime failure demonstration
 
-**Severity: CRITICAL**
+**Severity: CRITICAL (for a consumer carrying a copy relocation)**
 
-**Scenario:** app compiled against v1 gets a 64-byte copy relocation for
-`config_table`; swap in v2 without recompiling.
+**Scenario:** the consumer is a non-PIE executable (`-fno-pie -no-pie`), so
+GCC and Clang alike resolve its reference to `config_table` through an
+`R_X86_64_COPY` relocation: the executable reserves its own 64-byte copy and
+every reference — the library's included — binds to it. v2 grows the object
+to 128 bytes; its `config_reset()` writes all 32 slots.
 
 ```bash
-# Build old library + app
-gcc -shared -fPIC -g v1.c -o libcfg.so
-gcc -g app.c -I. -L. -lcfg -Wl,-rpath,. -o app
-./app
-# -> config_table[15] = 99
-# -> exit: 0
-
-# Swap in new library (no recompile)
-gcc -shared -fPIC -g v2.c -o libcfg.so
-./app
-# -> ./app: Symbol `config_table' has different size in shared object,
-#    consider re-linking
-# -> config_table[15] = 99
-# -> exit: 0
+gcc -shared -fPIC -g v1.c -o libv1.so
+gcc -g -fno-pie -no-pie app.c -I. -L. -lv1 -Wl,-rpath,'$ORIGIN' -o app
+readelf -r app | grep COPY      # R_X86_64_COPY config_table
+./app            # config_table[15] = 115                          exit 0
+gcc -shared -fPIC -g v2.c -o libv1.so     # swap in v2, no recompile
+./app            # (loader: "Symbol `config_table' has different size ...")
+                 # CORRUPTION: library wrote past the executable's copy, exit 1
 ```
 
-**Why CRITICAL:** glibc's dynamic linker itself detects and warns about the
-symbol-size regression on load ("different size... consider re-linking") —
-real, observable evidence of the ABI break — but does not refuse to run: it
-keeps the app's old 64-byte copy relocation. This particular access
-(`config_table[15]`) still falls inside the old 64-byte reservation, so it
-doesn't crash. Any access the *new* library considers valid but the old
-copy relocation doesn't cover — index 16 through 31, which v2's own
-`config_get()` bounds check (`0 <= index < 32`) happily allows — reads or
-writes past the consumer's fixed-size copy: silent out-of-bounds corruption
-with no further warning, exactly the failure mode the runtime linker's
-one-time notice is warning about.
+The witness snapshots the 64 bytes that follow the executable's copy (other
+objects or padding the executable owns) before calling `config_reset()` and
+compares afterwards, so it asserts the corruption rather than printing the
+loader's warning.
+
+**The hazard is conditional on the consumer.** A PIE consumer built by Clang
+uses `R_X86_64_GLOB_DAT` instead, binds to the library's own 128-byte object
+and is not corrupted (GCC's PIE default on this target still emits a copy
+relocation). The finding stays `BREAKING` because a copy-relocated consumer
+is the common case for exported data objects and is not visible from the
+library; the witness pins that condition explicitly.
 
 ## Safe redesign
 

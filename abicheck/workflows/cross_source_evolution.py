@@ -279,7 +279,14 @@ def _run_one_side(
     result = run_crosschecks(snapshot, cfg)
     evaluated = check in result.providers
     identity = _IDENTITY_FUNCS.get(check, _default_identity)
-    by_identity = {identity(c): c for c in result.findings}
+    providers = tuple(result.providers.get(check, ()))
+    by_identity = {}
+    for c in result.findings:
+        # Which evidence corroborated the finding travels with it, so a
+        # report can state it (Change.cross_source_providers).
+        if providers and c.cross_source_providers is None:
+            c.cross_source_providers = providers
+        by_identity[identity(c)] = c
     return evaluated, by_identity
 
 

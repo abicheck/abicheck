@@ -453,7 +453,22 @@ KIND_NAMES_1: tuple[tuple[str, str, str | None], ...] = (
     (
         "PARAM_RESTRICT_CHANGED",
         "param_restrict_changed",
-        "Parameter restrict qualifier -- restrict qualifier added/removed",
+        "Parameter restrict qualifier -- restrict qualifier removed",
+    ),
+    (
+        "PARAM_RESTRICT_ADDED",
+        "param_restrict_added",
+        "Parameter restrict qualifier added -- caller must no longer pass aliasing pointers",
+    ),
+    (
+        "PARAM_POINTEE_QUALIFIER_ADDED",
+        "param_pointee_qualifier_added",
+        "Single pointee of a pointer/reference parameter gained const/volatile -- direct calls fine, function-pointer consumers break",
+    ),
+    (
+        "PARAM_POINTEE_QUALIFIER_CHANGED",
+        "param_pointee_qualifier_changed",
+        "Pointee const/volatile of a parameter removed or added below the first level -- direct callers break",
     ),
     (
         "PARAM_BECAME_VA_LIST",

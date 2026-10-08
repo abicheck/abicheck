@@ -253,6 +253,39 @@ class TestVerdictCategoryAlignment:
         assert not violations, f"NO_CHANGE cases with break flags set: {violations}"
 
 
+class TestBehavioralBreakLabel:
+    """A behavioral break is recorded separately from the verdict truth.
+
+    A verdict is about the interface the artifacts declare; a runtime witness
+    can also show an implementation-behavior regression the declared
+    interface does not carry (case208: restrict added to the definition
+    only). Such a case must say so explicitly -- a bare NO_CHANGE/COMPATIBLE
+    would otherwise read as "safe to ship" -- and a NO_CHANGE/COMPATIBLE one
+    must scope its truth to the declared interface.
+    """
+
+    def test_behavioral_break_is_explained_and_scoped(self, verdicts: dict) -> None:
+        violations = []
+        for case_name, meta in verdicts.items():
+            if "behavioral_break" not in meta:
+                continue
+            if not isinstance(meta["behavioral_break"], bool):
+                violations.append(f"{case_name}: behavioral_break must be a bool")
+                continue
+            if meta["behavioral_break"] and not meta.get("behavioral_note"):
+                violations.append(f"{case_name}: behavioral_break without behavioral_note")
+            if (
+                meta["behavioral_break"]
+                and meta["expected"] in ("NO_CHANGE", "COMPATIBLE")
+                and meta.get("truth_scope") != "declared-interface"
+            ):
+                violations.append(
+                    f"{case_name}: a behavioral break under a clean verdict must "
+                    "declare truth_scope: declared-interface"
+                )
+        assert not violations, "\n".join(violations)
+
+
 # ---------------------------------------------------------------------------
 # 4b. Fact (underlying_fact) vs. policy (expected) alignment
 #

@@ -220,6 +220,41 @@ def _gap_applies(
     return True
 
 
+def _not_applicable_on(entry: dict, is_cpp: bool) -> tuple[str, str] | None:
+    """``(expected verdict, reason)`` when the case's transition does not
+    exist under the producer that built it, else ``None``.
+
+    ``not_applicable_toolchains`` is not a detection gap: the producer never
+    creates the artifact transition the case encodes (Clang never emits
+    ``STB_GNU_UNIQUE``, so case180's v1/v2 are both plain weak symbols). The
+    lane then checks the verdict that transition-free pair actually warrants
+    (``not_applicable_expected``) and reports ``NOT_APPLICABLE`` -- neither a
+    PASS that proves the canonical verdict nor an XFAIL that excuses a miss.
+    """
+    toolchains = entry.get("not_applicable_toolchains")
+    if not toolchains or _toolchain_family(is_cpp) not in toolchains:
+        return None
+    return (
+        str(entry.get("not_applicable_expected", "NO_CHANGE")),
+        str(entry.get("not_applicable_reason", "")),
+    )
+
+
+def _evaluate_not_applicable(
+    name: str, expected_raw: str | None, got: str, na_expected: str, reason: str
+) -> CaseResult:
+    if got == na_expected:
+        return CaseResult(name, "NOT_APPLICABLE", expected_raw, got, reason)
+    return CaseResult(
+        name,
+        "FAIL",
+        expected_raw,
+        got,
+        f"transition not applicable under this toolchain; expected "
+        f"{na_expected!r} for the transition-free pair, got {got!r}",
+    )
+
+
 def _build_info_applies(entry: dict, variant: str) -> bool:
     """Whether inline L3 build context is enabled for this artifact variant."""
     if not entry.get("build_info"):
@@ -233,7 +268,7 @@ def _build_info_applies(entry: dict, variant: str) -> bool:
 # ---------------------------------------------------------------------------
 class CaseResult(NamedTuple):
     name: str
-    status: str  # PASS | FAIL | XFAIL | SKIP | ERROR
+    status: str  # PASS | FAIL | XFAIL | NOT_APPLICABLE | SKIP | ERROR
     expected: str | None
     got: str | None
     message: str
@@ -1436,6 +1471,7 @@ def run_case(
     gap_applies = _gap_applies(entry, v1_src.suffix == ".cpp", variant)
     known_gap = entry.get("known_gap") if gap_applies else None
     known_gap_observed = entry.get("known_gap_observed") if gap_applies else None
+    not_applicable = _not_applicable_on(entry, v1_src.suffix == ".cpp")
 
     tmp = _case_work_dir(tmp_base, name, variant)
     tmp.mkdir(parents=True)
@@ -1522,13 +1558,17 @@ def run_case(
         sources=sources_present,
         build_info=build_info_present,
     )
-    result = _evaluate_verdict(
-        name,
-        expected_raw,
-        got,
-        known_gap,
-        known_gap_observed,
-    )._replace(variant=variant, source_layers=source_layers)
+    if not_applicable is not None:
+        result = _evaluate_not_applicable(name, expected_raw, got, *not_applicable)
+    else:
+        result = _evaluate_verdict(
+            name,
+            expected_raw,
+            got,
+            known_gap,
+            known_gap_observed,
+        )
+    result = result._replace(variant=variant, source_layers=source_layers)
     if smoke_proof:
         combined = (
             smoke_proof if not result.message else f"{smoke_proof} | {result.message}"
@@ -1704,7 +1744,7 @@ def _result_to_json(r: CaseResult) -> dict[str, object]:
         r.source_layers or SOURCE_LAYERS_BY_VARIANT.get(r.variant, ())
     )
     d["evidence_asymmetry"] = "symmetric"
-    d["manual_review_ok"] = r.status in {"XFAIL", "SKIP"}
+    d["manual_review_ok"] = r.status in {"XFAIL", "SKIP", "NOT_APPLICABLE"}
     d["category_strict"] = r.category_strict
     d["actual_kinds"] = list(r.actual_kinds)
     return d

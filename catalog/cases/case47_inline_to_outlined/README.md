@@ -41,8 +41,8 @@ abicheck compare libcalc_v1.so libcalc_v2.so
 Verdict: COMPATIBLE (exit 0)
 
 Additions:
-- func_added: New public function: Calculator::add(int, int)
-  > New function available; existing binaries are unaffected.
+- func_export_added: Calculator::add(int, int) gained an exported symbol
+- func_lost_inline: Calculator::add(int, int) is no longer inline
 ```
 
 ## Minimum evidence
@@ -54,9 +54,9 @@ info or headers needed to see that a new public symbol appeared.
 ## Why abicheck catches it
 
 abicheck diffs the two libraries' exported-symbol sets directly from ELF;
-a demangled symbol present only in the new snapshot is reported as
-`func_added`, a compatible addition, since no existing symbol changed or
-disappeared.
+a symbol present only in the new snapshot whose declaration existed on both
+sides is reported as `func_export_added` (with `func_lost_inline`), a
+compatible addition, since no existing symbol changed or disappeared.
 
 ## Runtime failure demonstration
 

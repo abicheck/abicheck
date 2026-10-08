@@ -1,6 +1,6 @@
 {
   "description": "Formal detector specification matrix (generated).",
-  "count": 408,
+  "count": 411,
   "detectors": [
     {
       "kind": "abi_relevant_build_flag_changed",
@@ -832,12 +832,12 @@
     },
     {
       "kind": "field_became_const",
-      "category": "quality",
-      "default_verdict": "COMPATIBLE",
+      "category": "api_break",
+      "default_verdict": "API_BREAK",
       "severity": "warning",
       "min_evidence": "unspecified",
       "doc_slug": "field_became_const",
-      "examples": ""
+      "examples": "case30_field_qualifiers"
     },
     {
       "kind": "field_became_mutable",
@@ -850,12 +850,12 @@
     },
     {
       "kind": "field_became_volatile",
-      "category": "quality",
-      "default_verdict": "COMPATIBLE",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
       "min_evidence": "unspecified",
       "doc_slug": "field_became_volatile",
-      "examples": ""
+      "examples": "case30_field_qualifiers"
     },
     {
       "kind": "field_bitfield_changed",
@@ -913,8 +913,8 @@
     },
     {
       "kind": "field_lost_mutable",
-      "category": "quality",
-      "default_verdict": "COMPATIBLE",
+      "category": "api_break",
+      "default_verdict": "API_BREAK",
       "severity": "warning",
       "min_evidence": "unspecified",
       "doc_slug": "field_lost_mutable",
@@ -922,8 +922,8 @@
     },
     {
       "kind": "field_lost_volatile",
-      "category": "quality",
-      "default_verdict": "COMPATIBLE",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
       "min_evidence": "unspecified",
       "doc_slug": "field_lost_volatile",
@@ -972,7 +972,7 @@
       "severity": "warning",
       "min_evidence": "L0",
       "doc_slug": "func_added",
-      "examples": "case03_compat_addition,case111_enumerable_thread_specific_lambda_ambiguity,case141_versioned_symbol_scheme,case16_inline_to_non_inline,case185_inherited_override_reuses_slot,case200_new_entry_point_instead_of_parameter_added,case204_class_gained_non_virtual_method,case47_inline_to_outlined,case53_namespace_pollution,case62_type_field_added_compatible,case99_experimental_graduated"
+      "examples": "case03_compat_addition,case111_enumerable_thread_specific_lambda_ambiguity,case141_versioned_symbol_scheme,case185_inherited_override_reuses_slot,case200_new_entry_point_instead_of_parameter_added,case204_class_gained_non_virtual_method,case53_namespace_pollution,case62_type_field_added_compatible,case99_experimental_graduated"
     },
     {
       "kind": "func_added_elf_only",
@@ -1080,7 +1080,7 @@
       "severity": "warning",
       "min_evidence": "L0",
       "doc_slug": "func_export_added",
-      "examples": ""
+      "examples": "case16_inline_to_non_inline,case47_inline_to_outlined"
     },
     {
       "kind": "func_language_linkage_changed",
@@ -1264,12 +1264,12 @@
     },
     {
       "kind": "func_visibility_protected_changed",
-      "category": "quality",
-      "default_verdict": "COMPATIBLE",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
       "min_evidence": "unspecified",
       "doc_slug": "func_visibility_protected_changed",
-      "examples": ""
+      "examples": "case51_protected_visibility"
     },
     {
       "kind": "generated_file_dependency_unstable",
@@ -1866,6 +1866,24 @@
       "examples": ""
     },
     {
+      "kind": "param_pointee_qualifier_added",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "L2",
+      "doc_slug": "param_pointee_qualifier_added",
+      "examples": "case186_c_api_pointee_const_abi_neutral"
+    },
+    {
+      "kind": "param_pointee_qualifier_changed",
+      "category": "api_break",
+      "default_verdict": "API_BREAK",
+      "severity": "warning",
+      "min_evidence": "L2",
+      "doc_slug": "param_pointee_qualifier_changed",
+      "examples": ""
+    },
+    {
       "kind": "param_pointer_level_changed",
       "category": "breaking",
       "default_verdict": "BREAKING",
@@ -1884,13 +1902,22 @@
       "examples": ""
     },
     {
+      "kind": "param_restrict_added",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "L2",
+      "doc_slug": "param_restrict_added",
+      "examples": "case207_pointer_parameter_gained_restrict"
+    },
+    {
       "kind": "param_restrict_changed",
       "category": "quality",
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
       "min_evidence": "L2",
       "doc_slug": "param_restrict_changed",
-      "examples": "case207_pointer_parameter_gained_restrict"
+      "examples": ""
     },
     {
       "kind": "pe_forwarder_changed",
@@ -2592,7 +2619,7 @@
       "severity": "error",
       "min_evidence": "L1",
       "doc_slug": "struct_field_type_changed",
-      "examples": "case187_public_struct_private_field_type"
+      "examples": ""
     },
     {
       "kind": "struct_packing_changed",
@@ -2628,7 +2655,7 @@
       "severity": "error",
       "min_evidence": "L1",
       "doc_slug": "struct_size_changed",
-      "examples": "case121_kernel_btf_struct_field_added,case126_sycl_device_impl_ptr,case191_header_only_graph_field_type,case80_pimpl_shared_to_unique"
+      "examples": "case121_kernel_btf_struct_field_added"
     },
     {
       "kind": "support_promise_component_introduced",
@@ -2938,9 +2965,9 @@
     },
     {
       "kind": "tag_type_renamed",
-      "category": "breaking",
-      "default_verdict": "BREAKING",
-      "severity": "error",
+      "category": "api_break",
+      "default_verdict": "API_BREAK",
+      "severity": "warning",
       "min_evidence": "L0",
       "doc_slug": "tag_type_renamed",
       "examples": "case86_tag_struct_renamed"
@@ -3186,7 +3213,7 @@
       "severity": "error",
       "min_evidence": "L1",
       "doc_slug": "type_field_type_changed",
-      "examples": "case30_field_qualifiers,case45_multi_dim_array_change"
+      "examples": "case187_public_struct_private_field_type,case45_multi_dim_array_change,case80_pimpl_shared_to_unique"
     },
     {
       "kind": "type_kind_changed",
@@ -3217,9 +3244,9 @@
     },
     {
       "kind": "type_removed",
-      "category": "breaking",
-      "default_verdict": "BREAKING",
-      "severity": "error",
+      "category": "api_break",
+      "default_verdict": "API_BREAK",
+      "severity": "warning",
       "min_evidence": "L1",
       "doc_slug": "type_removed",
       "examples": "case107_task_scheduler_init_removed,case108_task_class_removed,case109_flow_graph_policy_renames,case41_type_changes,case78_task_arena_attach_tag"
@@ -3231,7 +3258,7 @@
       "severity": "error",
       "min_evidence": "L1",
       "doc_slug": "type_size_changed",
-      "examples": "case07_struct_layout,case117_no_unique_address,case140_empty_base_optimization_lost,case14_cpp_class_size,case17_template_abi,case18_dependency_leak,case203_class_gained_vtable_pointer,case26_union_field_added,case36_anon_struct,case40_field_layout,case43_base_class_member_added,case44_cyclic_type_member_added,case45_multi_dim_array_change,case48_leaf_struct_through_pointer,case77_detail_templated_base_changed,case94_empty_tag_gained_state"
+      "examples": "case07_struct_layout,case117_no_unique_address,case126_sycl_device_impl_ptr,case140_empty_base_optimization_lost,case14_cpp_class_size,case17_template_abi,case18_dependency_leak,case191_header_only_graph_field_type,case203_class_gained_vtable_pointer,case26_union_field_added,case36_anon_struct,case40_field_layout,case43_base_class_member_added,case44_cyclic_type_member_added,case45_multi_dim_array_change,case48_leaf_struct_through_pointer,case77_detail_templated_base_changed,case80_pimpl_shared_to_unique,case94_empty_tag_gained_state"
     },
     {
       "kind": "type_visibility_changed",
@@ -3258,13 +3285,13 @@
       "severity": "error",
       "min_evidence": "L1",
       "doc_slug": "typedef_base_changed",
-      "examples": "case73_typedef_underlying_changed,case80_pimpl_shared_to_unique"
+      "examples": "case73_typedef_underlying_changed"
     },
     {
       "kind": "typedef_removed",
-      "category": "breaking",
-      "default_verdict": "BREAKING",
-      "severity": "error",
+      "category": "api_break",
+      "default_verdict": "API_BREAK",
+      "severity": "warning",
       "min_evidence": "L1",
       "doc_slug": "typedef_removed",
       "examples": "case109_flow_graph_policy_renames,case95_allocator_nested_typedef_removed"

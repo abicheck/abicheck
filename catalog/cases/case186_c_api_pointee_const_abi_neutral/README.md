@@ -1,15 +1,28 @@
-# Case 186: C API Pointee const-Qualification Is ABI-Neutral
+# Case 186: C API Pointee const-Qualification — ABI-Neutral, Not Source-Neutral
 
-**Category:** No Change | **Verdict:** ✅ NO_CHANGE
+**Category:** Risk | **Verdict:** 🟡 COMPATIBLE_WITH_RISK
 
 ## Verdict and consumer impact
 
 `send_buffer()`'s parameter changes from `char *` to `const char *`. The
 pointer itself is still one machine word, passed the same way, with the
 same calling convention — only the pointee's mutability contract tightened
-(the callee now promises not to write through the pointer). Every existing
-call site — whether it passes a mutable or already-const buffer — still
-compiles and links unchanged against v2. No consumer action is required.
+(the callee now promises not to write through the pointer). Already-built
+binaries keep working, and every *direct* call — passing a mutable or an
+already-const buffer — still compiles against v2.
+
+It is not a no-op at the source level. The function's **type** changed from
+`void (char *)` to `void (const char *)`, so a consumer that stores it in a
+function pointer of the old type — a callback table, a plugin registration,
+`void (*cb)(char *) = send_buffer;` — no longer builds: a constraint
+violation in C (GCC 13 warns, GCC 14+ and Clang with
+`-Werror=incompatible-function-pointer-types` reject it) and an error in
+C++. Strict C11 GCC and Clang were confirmed to accept the assignment
+against v1 and reject it against v2. Whether any consumer uses the entry
+point that way is not visible from the library, so abicheck reports a
+**conditional risk** (`param_pointee_qualifier_added`,
+`COMPATIBLE_WITH_RISK`, exit 0). A project that promises source
+compatibility for function-pointer use can gate it.
 
 ## Old/new diff
 
@@ -32,68 +45,73 @@ abicheck compare libv1.so libv2.so --header old=v1.h --header new=v2.h --config 
 ## Expected abicheck finding
 
 ```text
-Verdict: NO_CHANGE (exit 0)
+Verdict: COMPATIBLE_WITH_RISK (exit 0)
 
-_No ABI changes detected._
+param_pointee_qualifier_added: Parameter pointee qualifier added: send_buffer param data: char * → const char *
 ```
 
-`func_params_changed` is expected *not* to fire here (it would for an
-ordinary parameter-type change) — the suppression is the point of the case.
+`func_params_changed` must *not* fire — the calling convention is unchanged
+(this is the Wayland `wl_display` false-positive class this case was
+created for). `param_pointee_qualifier_changed` must not fire either: that
+kind is for the direction that breaks *direct* callers (a qualifier removed,
+or added below the first pointer level, e.g. `char **` → `const char **`).
+The case's `source_smoke` proves the function-pointer condition with GCC and
+Clang.
 
 ## Minimum evidence
 
 `min_evidence: L2` — a mechanical type-spelling diff would need only DWARF
 to see `char *` vs `const char *` as differing strings and misreport a
 break; the public header AST is what lets abicheck recognize the top-level
-`*`-plus-`const`-only shape and suppress the finding correctly rather than
-merely downgrade it. castxml is the documented default backend for this
+`*`-plus-`const`-only shape, keep it out of the binary-signature detector
+and report the source-level condition with the right direction. castxml is the documented default backend for this
 evidence layer; clang (`compile.frontend: clang` (via `.abicheck.yml`), used above) is a supported
 alternative AST frontend for hosts without castxml installed.
 
 ## Why abicheck catches it
 
-`abicheck/name_classification.py`'s `cv_qualifiers_only_differ()` recognizes
-a type-pair shape where both sides have a top-level `*`/`&` and differ only
-by `const`/`volatile` on or behind it. The call site in `diff_symbols.py`
-(`_params_differ`) skips emitting a finding entirely when it fires — this is
-fully suppressed, not merely downgraded to a risk tier — because a `char *`
-argument implicitly converts to `const char *` at every call site, so no
-caller can fail to link or misbehave.
+`cv_qualifiers_only_differ()` recognizes a parameter pair with a top-level
+`*`/`&` that differs only by `const`/`volatile` on or behind it, so the
+binary-signature detector (`FUNC_PARAMS_CHANGED`) stays silent. The
+source-level effect is decided separately by
+`compare/parameter_facts.py`'s `pointee_qualifier_changes()`: a qualifier
+gained by the single pointee is `param_pointee_qualifier_added` (risk —
+function-pointer consumers), anything else (removed, or gained deeper) is
+`param_pointee_qualifier_changed` (API break — direct callers). Both are
+header-tier findings; a DWARF-only side carries no reliable qualifier
+spelling.
 
 ## Runtime failure demonstration
 
-**Severity: none — verified no observable effect.**
+**Severity: none for already-built binaries — verified.**
 
 ```bash
-# Build old library + app
 gcc -shared -fPIC -g v1.c -o libv1.so
 gcc -g app.c -L. -lv1 -Wl,-rpath,. -o app
-./app
-# → sent 5 bytes
-
-# Swap in new library (no recompile)
-gcc -shared -fPIC -g v2.c -o libv1.so
-./app
-# → sent 5 bytes   (identical output, no crash, no misread argument)
+./app            # sent 5 bytes
+gcc -shared -fPIC -g v2.c -o libv1.so   # swap in v2, no recompile
+./app            # sent 5 bytes   (identical output)
 ```
 
-The pointer is still passed in the same register with the same width; the
-callee's added promise not to write through it changes nothing observable
-to a caller compiled against the old signature.
+The pointer is still passed in the same register with the same width. The
+break is a rebuild-time one for function-pointer consumers, shown by the
+case's source smoke rather than the runtime swap.
 
 ## Safe redesign
 
-None needed — this is the safe pattern. Adding `const` to a public struct
-**field**, by contrast, is not automatically safe: code that writes through
-the field (`buf.data[0] = 'x'`) would stop compiling against a
-`const`-qualified field, a real source-level break despite identical binary
-layout — that hazard is exactly why this case is scoped to a function
-parameter rather than a struct field.
+For direct callers this is the safe direction. If consumers are known (or
+promised) to register the entry point as a callback, keep the old signature
+and add the const-correct variant under a new name, or document the change
+as a source break for function-pointer users. Adding `const` to a public
+struct **field** is a different, harder case: code that writes through the
+field stops compiling for every consumer that does so
+(`field_became_const`, `case30_field_qualifiers`).
 
 **Real-world example:** Wayland's `wl_display` accessor functions picked up
 pointee `const` on their parameters between releases without an actual ABI
-break, and conda-forge's libuv 1.5x packaging campaign hit exactly this
-false-positive class — the motivating case for this suppression.
+break, and conda-forge's libuv 1.5x packaging campaign hit the false-positive
+class of reporting that as a BREAKING parameter change — the reason it is a
+non-gating risk here, not `FUNC_PARAMS_CHANGED`.
 
 ## Cross-tool comparison
 

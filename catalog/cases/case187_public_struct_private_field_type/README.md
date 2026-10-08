@@ -37,8 +37,8 @@ Verdict: BREAKING (exit 4)
 
 - type_field_type_changed: Field type changed: Public::reserved (void * -> detail::PrivateType *)
   > Field has different size or representation; old code misinterprets the data.
-- struct_field_type_changed: Field type changed: demo::Public::reserved void *(8B) -> PrivateType *(8B)
-  > Field type changed in binary; old code misinterprets the field data.
+  (a DWARF-only run reports the same fact as `struct_field_type_changed`;
+  with headers it collapses into the finding above)
 
 Deployment risk (binary-compatible, review needed):
 - public_api_internal_dependency_added: Public entry 'use_public' now reaches internal

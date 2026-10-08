@@ -46,6 +46,51 @@ _OP = ChangeOperation
 
 SYMBOLS_ENTRIES_2: list[ChangeKindMeta] = [
     _E(
+        "param_pointee_qualifier_added",
+        _R,
+        impact="The single pointee of a pointer/reference parameter gained "
+        "const/volatile (`T *` -> `const T *`). The calling convention and "
+        "every direct call are unaffected -- the callee now promises more. "
+        "But the function's type changed: a consumer that stores it in a "
+        "pointer of the old type (`void (*cb)(T *) = fn;`) no longer "
+        "compiles (a C constraint violation, a C++ error), and a function "
+        "table or callback registration built that way breaks on rebuild. "
+        "Whether any consumer does that is not visible from the library.",
+        description_template="Parameter pointee qualifier added: {name} param {detail}: {old} → {new}",
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
+    ),
+    _E(
+        "param_pointee_qualifier_changed",
+        _A,
+        impact="A const/volatile behind a pointer/reference parameter was "
+        "removed, or added at a level an implicit conversion cannot reach "
+        "(`char **` -> `const char **`). The calling convention is "
+        "unchanged, so already-built binaries keep working, but direct "
+        "callers no longer compile cleanly: passing a pointer to const "
+        "data where the parameter no longer promises const is a C++ error "
+        "(a constraint violation in C), and the callee may now modify "
+        "data the caller assumed it would not.",
+        description_template="Parameter pointee qualifier changed: {name} param {detail}: {old} → {new}",
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
+    ),
+    _E(
+        "param_restrict_added",
+        _R,
+        impact="A pointer parameter gained `restrict`. The calling convention "
+        "is untouched, but the caller's obligation is not: passing "
+        "overlapping buffers, valid under the old declaration, is undefined "
+        "behaviour under the new one, and the new library is compiled to "
+        "exploit that promise (e.g. vectorised loops). An unchanged, "
+        "already-built consumer that relies on overlap silently computes a "
+        "different result -- only consumers that never alias the arguments "
+        "are safe. Removing `restrict` is reported as param_restrict_changed.",
+        description_template="Parameter restrict qualifier added: {name} param {old}",
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
+    ),
+    _E(
         "public_api_exposes_stl_by_value",
         _R,
         impact="A public function takes or returns a `std::` type by value across "

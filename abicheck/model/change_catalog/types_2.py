@@ -60,13 +60,15 @@ TYPES_ENTRIES_2: list[ChangeKindMeta] = [
     ),
     _E(
         "tag_type_renamed",
-        _B,
+        _A,
         impact="An empty tag struct (zero fields, no methods) used solely for "
-        "template specialization was renamed. Layout-based detectors see no "
-        "change because the type has no layout, but every explicit "
-        "instantiation that referenced the old tag is re-mangled and the "
-        "old symbol disappears. Consumers built against the old header get "
-        "unresolved-symbol errors at load time. Common with "
+        "template specialization was renamed. Source naming the old tag no "
+        "longer compiles. Layout-based detectors see no change because the "
+        "type has no layout; when an exported explicit instantiation "
+        "referenced the old tag it is re-mangled and the old symbol "
+        "disappears -- that binary break is reported by the removal "
+        "findings for those symbols (func_removed / "
+        "instantiation_missing_from_binary), not by this one. Common with "
         "method::* / task::* tag families.",
         description_template="Empty tag struct '{old}' renamed to '{new}'. The type has no fields or vtable, so layout-based detectors see no change, but {detail}. Consumers built against the old header fail to resolve the instantiation at load time.",
         entity=_ENT.TYPE,
@@ -315,8 +317,11 @@ TYPES_ENTRIES_2: list[ChangeKindMeta] = [
     ),
     _E(
         "type_removed",
-        _B,
-        impact="Old code references a type that no longer exists; compilation or link failure.",
+        _A,
+        impact="Source that names the type no longer compiles. A type has no symbol of "
+        "its own: if functions or objects that used it went away, those are "
+        "reported as removals in their own right (and carry the binary "
+        "verdict); the type's disappearance alone is a source break.",
         entity=_ENT.TYPE,
         operation=_OP.REMOVED,
     ),
@@ -360,8 +365,12 @@ TYPES_ENTRIES_2: list[ChangeKindMeta] = [
     ),
     _E(
         "typedef_removed",
-        _B,
-        impact="Old code using the typedef name won't compile; binary impact depends on usage.",
+        _A,
+        impact="Source that names the typedef no longer compiles. A typedef is never "
+        "encoded in a binary (mangled names and debug layouts use the type it "
+        "names), so already-built consumers are unaffected by the removal "
+        "itself; any signature or layout that changed with it is reported by "
+        "its own finding.",
         description_template="Typedef removed: {name}",
         entity=_ENT.TYPE,
         operation=_OP.REMOVED,

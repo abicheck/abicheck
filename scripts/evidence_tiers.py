@@ -364,6 +364,11 @@ EVIDENCE_TIER_BY_KIND: dict[str, str] = {
     # DWARF's own DW_TAG_restrict_type on the defining subprogram -- which is
     # exactly the distinction catalog case207/case208 pin.
     "param_restrict_changed": "L2",
+    "param_restrict_added": "L2",
+    # Pointee const/volatile behind a parameter: the qualifier spelling the
+    # header AST records (catalog case186). DWARF-only sides are declined.
+    "param_pointee_qualifier_added": "L2",
+    "param_pointee_qualifier_changed": "L2",
     # ── L2: CastXML schema-completeness (all castxml/header-only facts) ──
     "field_default_initializer_removed": "L2",
     "field_default_initializer_changed": "L2",

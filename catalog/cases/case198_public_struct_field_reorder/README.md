@@ -62,17 +62,23 @@ what a compiled consumer hard-codes.
 **Severity: silent data corruption — no crash, no link error.**
 
 ```bash
-# Build old library + app
 gcc -shared -fPIC -g v1.c -o libv1.so
-gcc -g app.c -L. -lv1 -Wl,-rpath,. -o app
-./app
-# → consumer sees id = 42
-
-# Swap in the new library (no recompile of app)
-gcc -shared -fPIC -g v2.c -o libv1.so
-./app
-# → consumer sees id = 0        (it read `flags`)
+gcc -g app.c -L. -lv1 -Wl,-rpath,'$ORIGIN' -o app
+./app            # consumer sees id = 42, library sees id = 42     exit 0
+gcc -shared -fPIC -g v2.c -o libv1.so   # swap in v2, no recompile
+./app            # consumer sees id = 0  (it read `flags`)         exit 1
 ```
+
+The witness asserts the contract (`id` reads back as `42` through the
+consumer's own layout and through the library) and exits 1 on a misread; it
+used to print `MISREAD` and still exit 0.
+
+**Source side (`api_break: false`).** Consumers that access fields by name
+recompile cleanly against v2, which is why the case records no API break.
+Consumers that use *positional* aggregate initialisation
+(`Record r = {42, 0, 0};`) also recompile without a diagnostic but now put
+`42` into `flags` — a silent source-level behavior change worth reviewing for
+such code; it is not demonstrated by this fixture.
 
 ## Safe redesign
 

@@ -5,11 +5,28 @@
 ## Verdict and consumer impact
 
 `plot_point()`'s two parameters swap places. The exported C symbol name does
-not encode the signature, so the link still succeeds. On the x86-64 System V
-ABI an `int` is passed in an integer register and a `double` in an SSE
-register, so an old caller's arguments land in slots the new callee never
-reads, and the new callee reads slots the old caller never wrote. Consumer
-source breaks too, since the argument types no longer line up.
+not encode the signature, so the link still succeeds. What breaks is the
+**parameter contract**: the old and new declarations are incompatible, a
+caller recompiled against v2 that still writes `plot_point(7, 1.5)` compiles
+(with at most a conversion warning) and silently passes `7.0` / `1`, and an
+already-built caller's arguments reach the callee only as far as the target
+ABI happens to allow.
+
+That last part is ABI-dependent, and the case does not claim a universal
+register story:
+
+* **x86-64 System V (the tested target):** an `int` goes in the first integer
+  register and a `double` in the first SSE register *whatever their
+  positions*, so v2's callee still receives `index=7, value=1.5` from an old
+  caller — the runtime witness shows no signal, under GCC and Clang.
+* **Positional ABIs:** with `__attribute__((ms_abi))` (Microsoft x64
+  convention) the same swap delivers garbage to the callee under both GCC
+  and Clang; i386 stack passing likewise. These are Linux mechanism probes,
+  not native Windows tests.
+
+Register assignments that happen to agree on one ABI do not turn
+incompatible C declarations into a compatibility guarantee, so the verdict
+stays `BREAKING` (`func_params_changed`).
 
 This is the **positive control** for the parameter-order mechanism. Its
 negative control is
@@ -63,17 +80,22 @@ demonstrates is the one abicheck actually observes.
 
 ## Runtime failure demonstration
 
-**Severity: garbage arguments — no crash, no link error.**
+**Severity: ABI-dependent for already-built callers; silent value swap for
+recompiled ones.**
+
+The implementations record what they receive, and the old app checks it:
 
 ```bash
 gcc -shared -fPIC -g v1.c -o libv1.so
-gcc -g app.c -L. -lv1 -Wl,-rpath,. -o app
-./app
-
+gcc -g app.c -L. -lv1 -Wl,-rpath,'$ORIGIN' -o app
+./app            # callee received index=7 value=1.5            exit 0
 gcc -shared -fPIC -g v2.c -o libv1.so   # swap in v2, no recompile
-./app
-# → the callee's `value` reads whatever was in xmm0, `index` whatever was in edi
+./app            # callee received index=7 value=1.5            exit 0  (SysV)
 ```
+
+On x86-64 System V there is deliberately no runtime signal — see above. The
+earlier fixture's implementations ignored their arguments, so its smoke could
+not have shown delivery either way.
 
 ## Safe redesign
 

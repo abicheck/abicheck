@@ -429,11 +429,14 @@ PLATFORM_ENTRIES_1: list[ChangeKindMeta] = [
     ),
     _E(
         "func_visibility_protected_changed",
-        _C,
+        _R,
         impact="Symbol visibility changed to STV_PROTECTED. The symbol remains exported and "
-        "is still resolvable by external consumers. Interposition via LD_PRELOAD no "
-        "longer works for calls originating inside the library itself — intentional "
-        "by the library author. Existing compiled consumers are unaffected.",
+        "calls through the normal dynamic-linking path keep working, but calls "
+        "originating inside the library now bind to the library's own definition: "
+        "an interposed replacement (LD_PRELOAD, a hooking or profiling shim, an "
+        "allocator override) no longer intercepts them, so a consumer that relies on "
+        "interposition silently gets different behavior. Compatible for consumers that "
+        "never interpose; a break for those that do -- unknown from the binary alone.",
         description_template="ELF symbol visibility changed: {name} ({old} → {new}); symbol still exported, interposition semantics changed",
         entity=_ENT.FUNCTION,
         operation=_OP.MODIFIED,

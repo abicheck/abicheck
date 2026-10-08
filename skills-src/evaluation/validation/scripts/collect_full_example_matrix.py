@@ -241,7 +241,7 @@ def _artifact_errors(
                 f"{label}: artifact_variants={data.get('artifact_variants')!r}, "
                 "expected ['debug-headers']"
             )
-        allowed_statuses = {"PASS", "FAIL", "XFAIL", "SKIP", "ERROR"}
+        allowed_statuses = {"PASS", "FAIL", "XFAIL", "NOT_APPLICABLE", "SKIP", "ERROR"}
         bad_statuses = {"FAIL", "ERROR", "BUILD_ERROR"}
     elif label == "build_source":
         if data.get("artifact_variants") != ["build-source"]:
@@ -249,7 +249,7 @@ def _artifact_errors(
                 "build_source: artifact_variants="
                 f"{data.get('artifact_variants')!r}, expected ['build-source']"
             )
-        allowed_statuses = {"PASS", "FAIL", "XFAIL", "SKIP", "ERROR"}
+        allowed_statuses = {"PASS", "FAIL", "XFAIL", "NOT_APPLICABLE", "SKIP", "ERROR"}
         bad_statuses = {"FAIL", "ERROR", "BUILD_ERROR"}
     elif label == "runtime":
         if data.get("build_type") != "Debug":
@@ -597,12 +597,11 @@ def build_matrix(
             "kinds_strict": (proof_lane_record or {}).get("kinds_strict"),
             # Same reasoning one step further: a lane can pass while leaving
             # part of the case's own ground truth unasserted, because the
-            # public report carries no equivalent of it. The audit lane's
-            # `provider_assertions` are today's instance -- case151 exists to
-            # prove two providers corroborate one finding, and nothing in the
-            # `compare --no-baseline` report exposes provider attribution
-            # (Codex review). Surfacing it here is what keeps COVERED from
-            # reading as "this case is fully proven".
+            # public report carries no equivalent of it. Surfacing it here is
+            # what keeps COVERED from reading as "this case is fully proven".
+            # (The audit lane's `provider_assertions` used to be the instance;
+            # the report now carries per-finding `providers` and the lane
+            # checks them.)
             "unvalidated_assertions": (proof_lane_record or {}).get(
                 "unvalidated_assertions"
             )
@@ -626,8 +625,22 @@ def build_matrix(
     )
     unresolved = [row for row in rows if row["status"] == "UNRESOLVED"]
     failed = [row for row in rows if row["status"] == "FAILED"]
+    # Every lane, not only the proof lane: a case proven by its GCC lane can
+    # still mismatch kinds under Clang (case52's rpath/runpath split was
+    # invisible here for exactly that reason), and that is the same triage
+    # item.
+    kind_mismatch_lanes = {
+        row["case_id"]: sorted(
+            str(lane["lane"])
+            for lane in row.get("lanes") or []
+            if lane.get("kinds_strict") == "mismatch"
+        )
+        for row in rows
+    }
+    kind_mismatch_lanes = {k: v for k, v in kind_mismatch_lanes.items() if v}
     kind_mismatch_cases = sorted(
-        row["case_id"] for row in rows if row.get("kinds_strict") == "mismatch"
+        {row["case_id"] for row in rows if row.get("kinds_strict") == "mismatch"}
+        | set(kind_mismatch_lanes)
     )
     # Separate from kind_mismatch_cases: these have already been triaged (root
     # cause identified and recorded in ground_truth.json's known_kind_gap/
@@ -657,6 +670,7 @@ def build_matrix(
         # the verdict without producing the calibrated ChangeKind. Triage
         # target for known_detector_gap entries.
         "kind_mismatch_cases": kind_mismatch_cases,
+        "kind_mismatch_lanes": dict(sorted(kind_mismatch_lanes.items())),
         # Already root-caused (ground_truth.json's known_kind_gap/
         # known_kind_gap_note) — a triaged, tracked detector gap, not an
         # untriaged item on the kind_mismatch_cases backlog above.

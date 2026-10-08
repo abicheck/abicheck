@@ -162,7 +162,28 @@ own declared `source_smoke` oracle proved the canonical verdict; see
   expected cross-check kinds/providers and exits 0 with `COMPATIBLE`. The
   special runner validates that contract instead of falsely requiring the
   comparison-only `COMPATIBLE_WITH_RISK` label.
+- `NOT_APPLICABLE` (compiler lanes): the producer never creates the case's
+  transition (`not_applicable_toolchains` in ground truth — e.g. Clang never
+  emits `STB_GNU_UNIQUE`, so case180 has no `UNIQUE`→`WEAK` move to detect).
+  The lane still checks the transition-free pair reads
+  `not_applicable_expected`, but it proves nothing about the canonical
+  verdict and is not an XFAIL: an XFAIL claims a *missed* detection, which
+  is the wrong statement when there is nothing to detect.
 - Runtime statuses describe behavior; they do not replace verdict proof.
+  `DEMONSTRATED` means the old consumer's observable output or exit code
+  changed after the library swap — not that a compatibility promise was
+  violated (case185's intended override changes `paint(3)` from 4 to 5 on an
+  ABI-compatible change). `NO_RUNTIME_SIGNAL` is not a compatibility proof
+  either (case201 delivers its swapped arguments correctly on x86-64
+  System V only). A witness should assert the contract it demonstrates and
+  exit non-zero on a violation rather than print a warning, and must not
+  depend on stack layout, register residue or one compiler's symbol
+  spelling. `BASELINE_SIGNAL` (the old app fails against its *own* library)
+  is a broken fixture, never a demonstration.
+- A case whose runtime witness shows a behavioral regression the declared
+  interface does not carry records it as `behavioral_break: true` (with
+  `behavioral_note`, and `truth_scope: declared-interface` when the verdict
+  is clean) — case208 — so a clean verdict is never read as "safe to ship".
 
 ## Agent checklist
 
