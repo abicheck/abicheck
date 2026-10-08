@@ -36,6 +36,7 @@ from datetime import date
 
 from ..checker_types import DiffResult
 from ..model.change import Change
+from ..policy.evaluate import effective_kind_sets
 from ..policy.severity import (
     IssueCategory,
     KindSets,
@@ -67,7 +68,7 @@ def build_report_findings(
     *policy*/*kind_sets*/*policy_file*/*today* are forwarded verbatim to
     ``effective_verdict_for_change``/``classify_effective_change`` -- pass
     the same values a caller would have passed to either function directly
-    (typically ``result.policy``/``result._effective_kind_sets()``/
+    (typically ``result.policy``/``policy.evaluate.effective_kind_sets(result)``/
     ``result.policy_file``) so the resolved verdict/category agree with
     what the rest of the report already computes. Each change's verdict is
     resolved once and handed to ``classify_effective_change`` rather than
@@ -134,6 +135,6 @@ def report_findings_for(result: DiffResult) -> tuple[ReportFinding, ...]:
     return build_report_findings(
         result.changes,
         policy=result.policy,
-        kind_sets=result._effective_kind_sets(),
+        kind_sets=effective_kind_sets(result),
         policy_file=result.policy_file,
     )

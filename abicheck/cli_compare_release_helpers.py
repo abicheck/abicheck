@@ -86,6 +86,7 @@ from .workflows.gate import (
     GateOptions as GateOptions,  # re-exported, ADR-064
     _resolve_release_severity_config as _resolve_release_severity_config,  # re-exported, ADR-064
     apply_release_gate_pack as apply_release_gate_pack,  # re-exported, ADR-064
+    effective_kind_sets,
     resolve_release_assurance_decision,
     resolve_release_exit_decision_for_report,
     resolve_release_gate_options as resolve_release_gate_options,  # re-exported, ADR-064
@@ -754,7 +755,7 @@ def _compute_release_severity_exit_code(
     keep the legacy verdict-based exit) -- i.e. when ``gate.severity is
     None``. Otherwise returns the worst :func:`compute_exit_code` over the
     per-library changes. Each library is
-    classified with *its own* ``DiffResult._effective_kind_sets()`` (kind-level
+    classified with *its own* ``policy.evaluate.effective_kind_sets(DiffResult)`` (kind-level
     ``--policy-file`` overrides) *and* its own ``policy``/``policy_file`` (the
     per-finding frozen-namespace floor — Codex review on #549: without
     ``policy_file`` here, a policy override that downgrades a kind could still
@@ -780,7 +781,7 @@ def _compute_release_severity_exit_code(
                 diff.changes,
                 gate.severity,
                 policy=diff.policy,
-                kind_sets=diff._effective_kind_sets(),
+                kind_sets=effective_kind_sets(diff),
                 policy_file=diff.policy_file,
             )
             worst = max(worst, code)
@@ -837,7 +838,7 @@ def _fold_release_global_severity(
                 matrix_result.changes,
                 config,
                 policy=matrix_result.policy,
-                kind_sets=matrix_result._effective_kind_sets(),
+                kind_sets=effective_kind_sets(matrix_result),
                 policy_file=matrix_result.policy_file,
             ),
         )

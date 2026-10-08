@@ -39,9 +39,11 @@ from typing import TYPE_CHECKING, Any, cast
 # longer touches ``_VERDICT_STYLE``/``render_document``/``render_footer``
 # directly -- those moved into ``report/render_html.py`` alongside the rest
 # of this module's formatting responsibility (ADR-061 Phase 2 item 1).
+from .checker_types import DiffResult
 from .html_template import _CSS as _CSS
 from .model.change_catalog.kinds import HasKind
 from .policy.classification import evidence_status_for_result, impact_for
+from .policy.evaluate import effective_kind_sets
 
 # ADR-061 Phase 2 item 1: the pure HTML projection half of this module.
 # Every ``compute_*`` below returns one of these frozen structs (or, for the
@@ -85,7 +87,6 @@ from .report_summary import compatibility_metrics
 if TYPE_CHECKING:
     from datetime import date
 
-    from .checker import DiffResult
     from .policy.severity import SeverityConfig
 
 
@@ -171,7 +172,7 @@ def _change_bucket(
     green "Added" section, reading as safe when it is not.
 
     *effective_verdict*, when given (typically
-    ``result._effective_verdict_for_change``), is also consulted for
+    ``policy.evaluate.effective_verdict``), is also consulted for
     otherwise-additive kinds: a policy file can escalate an inherently
     additive kind (e.g. ``func_added``) to ``Verdict.BREAKING``,
     ``Verdict.API_BREAK``, or ``Verdict.COMPATIBLE_WITH_RISK`` — none of
@@ -512,12 +513,13 @@ def build_html_document(
         from .reporter import _suppress_dangling_correlation_notes, apply_show_only
 
         typed_changes = [c for c in all_changes if isinstance(c, _Change)]
-        _kind_sets_fn = getattr(result, "_effective_kind_sets", None)
         filtered = apply_show_only(
             typed_changes,
             show_only,
             policy=result.policy,
-            kind_sets=_kind_sets_fn() if _kind_sets_fn is not None else None,
+            kind_sets=effective_kind_sets(result)
+            if isinstance(result, DiffResult)
+            else None,
             policy_file=getattr(result, "policy_file", None),
             today=None if envelope is None else envelope.resolved_today,
         )
@@ -532,12 +534,10 @@ def build_html_document(
     # Split display changes into buckets; duck-typed like compatibility_metrics.
     # ADR-061 Phase 2 item 4b: a real DiffResult reads each verdict from a
     # ReportFinding resolved once per change; a stub falls back as before.
-    # Also gate on _effective_kind_sets: report_findings_for needs policy/
-    # policy_file too, absent from a verdict-only stub (Codex review).
-    _effective_verdict_fn: Callable[[object], object] | None = getattr(
-        result, "_effective_verdict_for_change", None
-    )
-    if _effective_verdict_fn is not None and hasattr(result, "_effective_kind_sets"):
+    # report_findings_for needs policy/policy_file too, absent from a
+    # verdict-only stub (Codex review).
+    _effective_verdict_fn: Callable[[object], object] | None = None
+    if isinstance(result, DiffResult):
         from .report.finding import findings_by_change_id, report_findings_for
 
         # ADR-061 gap C: the envelope resolved these once for the whole
@@ -592,8 +592,7 @@ def build_html_document(
     # kind of disagreement (a page whose banner reads NO_CHANGE showing
     # "0.0% binary compatibility") the policy/kind_sets note above already
     # guards against. Filtered via the shared predicate rather than
-    # `result._evaluated_changes()` since a stub result need not expose it.
-    _eff_kind_sets_fn = getattr(result, "_effective_kind_sets", None)
+    # `policy.evaluate.evaluated_changes(result)` since a stub result need not expose it.
     _metrics_changes = [c for c in cast(list[HasKind], all_changes) if is_evaluated(c)]
     # ADR-061 gap C: an envelope has already resolved every change's verdict
     # once, at construction -- reading it here instead of calling
@@ -605,7 +604,9 @@ def build_html_document(
         _metrics_changes,
         old_symbol_count,
         policy=getattr(result, "policy", None),
-        kind_sets=_eff_kind_sets_fn() if callable(_eff_kind_sets_fn) else None,
+        kind_sets=effective_kind_sets(result)
+        if isinstance(result, DiffResult)
+        else None,
         policy_file=getattr(result, "policy_file", None),
         effective_verdicts=(
             [f.verdict for f in envelope.findings_for(_metrics_changes)]  # type: ignore[arg-type]
@@ -787,7 +788,7 @@ def _surface_changes(
     projection never resolves a verdict a second time."""
     from .report.surface_changes import compute_surface_changes
 
-    if not hasattr(result, "_effective_kind_sets"):
+    if not isinstance(result, DiffResult):
         return None
     if envelope is not None:
         findings = envelope.findings_for(changes)  # type: ignore[arg-type]

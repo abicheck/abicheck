@@ -351,7 +351,12 @@ One asymmetry worth knowing about, not a bug to work around:
 
 - **`DiffResult`** (`abicheck.checker_types`) — the comparison result. Key
   fields: `verdict` (a `Verdict`), `changes` (`list[Change]`), and
-  `suppressed_changes` (the suppression audit trail).
+  `suppressed_changes` (the suppression audit trail). It is pure data: to
+  bucket its findings by effective verdict, call
+  `abicheck.policy.evaluate.evaluate(diff)`, which returns a `ClassifiedDiff`
+  with `breaking`, `source_breaks`, `compatible`, `risk` and `not_evaluated`
+  lists. (Before 0.7 the first four were properties on `DiffResult` itself;
+  `diff.breaking` becomes `evaluate(diff).breaking`.)
 - **`Change`** (`abicheck.model.change`) — one finding: its `kind`, `symbol`,
   `description` and the evidence and decisions recorded on it.
 - **`Verdict`** (`abicheck.change_registry_types`) — one of `NO_CHANGE`,

@@ -14,6 +14,7 @@ from abicheck.checker import compare
 from abicheck.comparability import IncludeDir, compute_extraction_contract
 from abicheck.errors import ProfileMismatchError, ScopeMismatchError
 from abicheck.model import AbiSnapshot, Function, Visibility
+from abicheck.policy.evaluate import evaluate
 
 
 def _snap(version: str, contract=None) -> AbiSnapshot:
@@ -180,7 +181,7 @@ def test_compare_diagnostic_comparison_preserves_proven_changes_despite_unverifi
     # from the verdict just because an unrelated dimension is unverified.
     removed_symbols = {c.symbol for c in result.changes}
     assert "_Z1fv" in removed_symbols
-    assert len(result.breaking) >= 1
+    assert len(evaluate(result).breaking) >= 1
 
 
 def test_compare_contract_coverage_partial_when_exactly_one_side_has_a_contract(

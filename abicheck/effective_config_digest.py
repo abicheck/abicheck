@@ -71,7 +71,7 @@ way ``cli_compare_receipt.record_resolved_config`` does for single-pair
 ``compare``. So a release run under two different pack *revisions* that
 happen to project the same policy/severity assignments used to produce the
 same per-library digest, even though the rich tier's whole point is real,
-versioned pack identities. Closed by ``cli_compare_receipt.
+versioned pack identities. Closed by ``workflows.member_compare.
 record_release_resolved_config`` (``PackApplication.resolved_config``,
 populated by the shared ``pack_application()`` factory both paths call
 through, threaded to each library's ``DiffResult.evaluation_config`` *and*,

@@ -66,6 +66,8 @@ from abicheck.reporter_markdown import (
     show_only_matches_severity_label,
 )
 
+from .policy.evaluate import effective_kind_sets, effective_verdict
+
 if TYPE_CHECKING:
     from datetime import date
 
@@ -116,7 +118,7 @@ def _severity(
     as ``level: error``, not the legacy policy severity).
 
     Without a *severity_config*, whenever the canonical per-finding verdict
-    (``result._effective_verdict_for_change`` — A4 per-finding
+    (``policy.evaluate.effective_verdict`` — A4 per-finding
     ``effective_verdict`` (ADR-027), a PolicyFile verdict override, *or* a
     named base policy like ``plugin_abi``/``sdk_vendor`` reclassifying this
     change's kind) differs from the kind's inherent default verdict, the
@@ -147,7 +149,7 @@ def _severity(
             category = classify_effective_change(
                 change,
                 policy=result.policy,
-                kind_sets=result._effective_kind_sets(),
+                kind_sets=effective_kind_sets(result),
                 policy_file=result.policy_file,
             )
         level = severity_config.level_for(category)
@@ -155,9 +157,7 @@ def _severity(
 
     entry = policy_for(change.kind)
     verdict = (
-        finding.verdict
-        if finding is not None
-        else result._effective_verdict_for_change(change)
+        finding.verdict if finding is not None else effective_verdict(result, change)
     )
     if verdict != entry.default_verdict:
         return _VERDICT_TO_SARIF_LEVEL.get(verdict, entry.severity)
@@ -803,7 +803,7 @@ def to_sarif(
             changes,
             show_only,
             result.policy,
-            result._effective_kind_sets(),
+            effective_kind_sets(result),
             result.policy_file,
             _resolved_today,
         )
@@ -834,7 +834,7 @@ def to_sarif(
             scoped_only_changes,
             show_only,
             result.policy,
-            result._effective_kind_sets(),
+            effective_kind_sets(result),
             result.policy_file,
             _resolved_today,
         )

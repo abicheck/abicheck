@@ -94,6 +94,7 @@ from typing import Any
 # it always had, just resolved through this module-level import.
 import abicheck.reporter_markdown as _reporter_markdown_module
 
+from ..policy.evaluate import effective_kind_sets
 from .contract_conflicts_markdown import (
     ContractConflictRow,
     ContractConflictsSection,
@@ -193,7 +194,7 @@ def _resolve_displayed_changes(
             changes,
             show_only,
             result.policy,
-            result._effective_kind_sets(),
+            effective_kind_sets(result),
             result.policy_file,
             today,
         )
@@ -449,7 +450,7 @@ def build_markdown_document(
     # headline totals (the full, unfiltered `result.changes`) reuse the
     # envelope's own finalized verdicts, rather than `ReportModel.classify`/
     # `compute_headline_table` each independently calling
-    # `result._effective_verdict_for_change` fresh -- which could disagree
+    # `policy.evaluate.effective_verdict` fresh -- which could disagree
     # with the envelope once a dated `PolicyFile.reclassify` rule expires
     # between construction and render (Codex review, fresh evidence).
     model = ReportModel.from_result(
@@ -481,7 +482,7 @@ def build_markdown_document(
     # `result.changes` (a different population than the severity groups
     # above), but every one of those changes is already in the envelope's
     # own `findings` -- reused here instead of letting `compute_headline_
-    # table` independently call `result._effective_verdict_for_change`
+    # table` independently call `policy.evaluate.effective_verdict`
     # fresh a second time, which could disagree with the envelope once a
     # dated `PolicyFile.reclassify` rule expires (Codex review, evidence).
     headline_table = rm.compute_headline_table(result, emoji, label)
@@ -521,7 +522,7 @@ def build_markdown_document(
                     severity_config,
                     all_changes=list(result.changes),
                     policy=result.policy,
-                    kind_sets=result._effective_kind_sets(),
+                    kind_sets=effective_kind_sets(result),
                     policy_file=result.policy_file,
                     today=resolved_today,
                 )
@@ -592,7 +593,7 @@ def build_markdown_document(
                     build_report_findings(
                         changes,
                         policy=result.policy,
-                        kind_sets=result._effective_kind_sets(),
+                        kind_sets=effective_kind_sets(result),
                         policy_file=result.policy_file,
                     )
                     if envelope is None

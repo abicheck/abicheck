@@ -2100,3 +2100,22 @@ pins the rule for root modules, root and nested layer files, and packages.
 The inventory therefore counts down monotonically toward D2's end state;
 at this amendment 289 flat `abicheck/*.py` modules remain, 269 of them
 classified as legacy and awaiting a move.
+
+## Amendment (2026-10-07): `DiffResult` is pure data
+
+The 2026-09-13 amendment left `checker_types.DiffResult`'s verdict buckets
+(`breaking`/`source_breaks`/`compatible`/`risk`) as the last `model ->
+policy` edges, recorded as two `dependency_direction_exceptions` because
+removing them is a public Python API decision. That decision is now taken
+(pre-1.0, maintainer-approved): the four properties and the private
+`_effective_kind_sets`/`_effective_verdict_for_change`/`_evaluated_changes`
+helpers are removed, and `abicheck/policy/evaluate.py` is the one
+policy-layer entry that classifies a result — `evaluate(diff) ->
+ClassifiedDiff`, plus `effective_kind_sets`, `effective_verdict` and
+`evaluated_changes` for callers that need one piece. Frontends reach them
+through `workflows/gate.py`, as they already reach every other gate input.
+Nothing is cached on the result, so a caller that edits `diff.changes` or
+`diff.policy_file` and classifies again sees the edit. Both exceptions and
+`checker_types.py`'s `no_growth` entry (now under the 800-line cap) are
+deleted from `architecture/debt.yaml`. `DiffResult.not_evaluated` stays: it
+reads only model data.

@@ -19,6 +19,7 @@ from abicheck.model import (
     Variable,
     Visibility,
 )
+from abicheck.policy.evaluate import evaluate
 
 
 def _snap(
@@ -113,7 +114,7 @@ class TestBenignFunctionChanges:
         f_new2 = _pub_func("cleanup", "_Z7cleanupv")
         r = compare(_snap(functions=[f_old]), _snap(functions=[f_new1, f_new2]))
         assert r.verdict == Verdict.COMPATIBLE
-        assert not r.breaking
+        assert not evaluate(r).breaking
 
     def test_adding_new_variable_is_not_breaking(self):
         v_old = Variable(
@@ -127,7 +128,7 @@ class TestBenignFunctionChanges:
         )
         r = compare(_snap(variables=[v_old]), _snap(variables=[v_new1, v_new2]))
         assert r.verdict == Verdict.COMPATIBLE
-        assert not r.breaking
+        assert not evaluate(r).breaking
 
 
 class TestBenignTypeChanges:
@@ -148,7 +149,7 @@ class TestBenignTypeChanges:
         t = RecordType(name="NewStruct", kind="struct", size_bits=32)
         r = compare(_snap(), _snap(types=[t]))
         assert r.verdict == Verdict.COMPATIBLE
-        assert not r.breaking
+        assert not evaluate(r).breaking
 
     def test_field_added_to_standard_layout_struct_is_compatible(self):
         """Adding a field to a non-polymorphic standard-layout struct is compatible."""
@@ -192,14 +193,14 @@ class TestBenignElfChanges:
         new_elf = ElfMetadata(needed=["libm.so.6", "libpthread.so.0"])
         r = compare(_snap(elf=old_elf), _snap(elf=new_elf))
         assert r.verdict == Verdict.COMPATIBLE
-        assert not r.breaking
+        assert not evaluate(r).breaking
 
     def test_needed_removed_is_compatible(self):
         old_elf = ElfMetadata(needed=["libm.so.6", "libdl.so.2"])
         new_elf = ElfMetadata(needed=["libm.so.6"])
         r = compare(_snap(elf=old_elf), _snap(elf=new_elf))
         assert r.verdict == Verdict.COMPATIBLE
-        assert not r.breaking
+        assert not evaluate(r).breaking
 
     def test_weak_to_global_is_compatible(self):
         """Strengthening a symbol from WEAK to GLOBAL is backward-compatible."""
@@ -219,7 +220,7 @@ class TestBenignElfChanges:
         )
         r = compare(_snap(elf=old_elf), _snap(elf=new_elf))
         assert r.verdict == Verdict.COMPATIBLE
-        assert not r.breaking
+        assert not evaluate(r).breaking
 
     def test_func_size_change_not_breaking(self):
         """Function code size changes (different optimization) are not ABI breaks."""

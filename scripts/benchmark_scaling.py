@@ -213,6 +213,21 @@ TAIL_ABOVE_FLOOR_SIZES = (1000, 2000, 4000, 8000)
 
 
 # ── Snapshot builders (one per scenario) ──────────────────────────────────────
+def _breaking_count(result: object) -> int:
+    """How many findings *result* classifies as BREAKING.
+
+    ``performance.yml``'s baseline-regression job runs this (head's) harness
+    against the *base* branch's installed package, so this must work on both
+    sides of an API change: ``abicheck.policy.evaluate`` where it exists, the
+    former ``DiffResult.breaking`` property otherwise.
+    """
+    try:
+        from abicheck.policy.evaluate import evaluate
+    except ImportError:
+        return len(result.breaking)  # type: ignore[attr-defined]
+    return len(evaluate(result).breaking)  # type: ignore[arg-type]
+
+
 def _build_add_remove(n_funcs: int) -> tuple[AbiSnapshot, AbiSnapshot]:
     """Half the functions are removed, an equal number added. No type churn."""
     old_funcs = [
@@ -1219,7 +1234,7 @@ def _run_compare_verify_scoped_non_breaking(
             "onedal_packaging_noise must not classify as BREAKING: removed "
             "exports here are all Visibility.ELF_ONLY (bundled dependency "
             "symbols), and public-surface scoping should demote them — "
-            f"got {len(result.breaking)} breaking change(s)"
+            f"got {_breaking_count(result)} breaking change(s)"
         )
     return len(result.changes)
 
@@ -1242,7 +1257,7 @@ def _run_compare_verify_breaking(prepared: tuple[AbiSnapshot, AbiSnapshot]) -> i
             "onedal_mass_removal must classify as BREAKING: removed exports "
             "here are all Visibility.PUBLIC (genuine API removals), so "
             f"public-surface scoping must not suppress them — got verdict "
-            f"{result.verdict!r} with {len(result.breaking)} breaking change(s)"
+            f"{result.verdict!r} with {_breaking_count(result)} breaking change(s)"
         )
     return len(result.changes)
 

@@ -20,7 +20,7 @@ verdict-axis buckets (breaking / source-break / risk / compatible) on their own.
 become thin projections over a single, canonical classification.
 
 Canonical severity (ADR-036): the **verdict axis** — each finding's
-``result._effective_verdict_for_change(c)`` (policy-file overrides + ADR-027 A4
+``policy.evaluate.effective_verdict(c)`` (policy-file overrides + ADR-027 A4
 per-finding modulation respected). This is the same partition that drives the
 overall verdict and the process exit code, so the report can never disagree with
 the gate. The ABICC-style display severity (HIGH/MEDIUM/LOW in
@@ -41,6 +41,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from .policy.classification import Verdict
+from .policy.evaluate import effective_verdict
 from .report_summary import ReportSummary, build_summary
 
 if TYPE_CHECKING:
@@ -89,7 +90,7 @@ VERDICT_PRESENTATION: dict[Verdict, VerdictPresentation] = {
     Verdict.COMPATIBLE: VerdictPresentation("compatible", "note", False),
 }
 # Verdict.NO_CHANGE is intentionally absent: per-finding classification
-# (``_effective_verdict_for_change``) only ever returns the four reportable
+# (``effective_verdict``) only ever returns the four reportable
 # verdicts above — a *finding* is never NO_CHANGE (that is an overall-result
 # state, handled by the exit-code path in ``severity.legacy_exit_code``). A
 # lookup miss falls back to UNKNOWN_SEVERITY_LABEL / non-breaking, which is the
@@ -138,7 +139,7 @@ class ReportModel:
     #: ``id(change) -> Verdict`` for a caller with an already-completed
     #: :class:`~abicheck.report.envelope.ReportEnvelope`. ``verdict_of``/
     #: ``severity_label``/``is_breaking_boundary`` consult this before
-    #: falling back to ``result._effective_verdict_for_change`` -- which
+    #: falling back to ``policy.evaluate.effective_verdict`` -- which
     #: resolves a dated ``PolicyFile.reclassify`` rule's expiry against
     #: *today*, so a lookup made after that rule expires could disagree
     #: with the bucket a ``classify()`` call made from the same envelope
@@ -169,7 +170,7 @@ class ReportModel:
         envelope-driven caller passes one built from ``envelope.
         findings_for(changes)`` so this bucket split reuses the same
         finalized verdict the envelope's document was built from, instead of
-        calling ``result._effective_verdict_for_change`` fresh (see
+        calling ``policy.evaluate.effective_verdict`` fresh (see
         :attr:`_verdict_overrides`'s own docstring for why that can
         disagree).
         """
@@ -177,11 +178,7 @@ class ReportModel:
 
         def ev(c: Change) -> Verdict:
             override = verdict_overrides.get(id(c)) if verdict_overrides else None
-            return (
-                override
-                if override is not None
-                else result._effective_verdict_for_change(c)
-            )
+            return override if override is not None else effective_verdict(result, c)
 
         scored = [c for c in changes if is_evaluated(c)]
         breaking = [c for c in scored if ev(c) == Verdict.BREAKING]
@@ -206,7 +203,7 @@ class ReportModel:
         override = self._verdict_overrides.get(id(change))
         if override is not None:
             return override
-        return self.result._effective_verdict_for_change(change)
+        return effective_verdict(self.result, change)
 
     def severity_label(self, change: Change) -> str:
         """Canonical native severity label for *change* (breaking/api_break/…).

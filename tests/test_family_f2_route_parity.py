@@ -696,14 +696,16 @@ def test_mutant_release_member_drops_stated_setting(
 ) -> None:
     """#1391 shape: the release fan-out builds its per-member request and
     drops a field the caller stated. Here: suppress and policy."""
-    real = service_mod.run_compare
+    import abicheck.workflows.member_compare as member_compare
+
+    real = member_compare.run_compare
 
     def dropping(*args: Any, **kwargs: Any) -> Any:
         kwargs["suppress"] = None
         kwargs["policy"] = "strict_abi"
         return real(*args, **kwargs)
 
-    monkeypatch.setattr(service_mod, "run_compare", dropping)
+    monkeypatch.setattr(member_compare, "run_compare", dropping)
     caught = []
     for axis in ("suppress", "policy_sdk_vendor"):
         outs = _run_all(

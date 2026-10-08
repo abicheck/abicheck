@@ -1,5 +1,6 @@
 from abicheck.checker import Change, ChangeKind, DiffResult, Verdict
 from abicheck.checker_policy import policy_for
+from abicheck.policy.evaluate import evaluate
 from abicheck.report_summary import build_summary, compatibility_metrics
 
 
@@ -213,7 +214,7 @@ def test_build_summary_quality_issues_derives_from_effective_category(
         verdict=Verdict.COMPATIBLE,
         policy_file=pf,
     )
-    assert result.compatible == [demoted]
+    assert evaluate(result).compatible == [demoted]
     summary = build_summary(result)
     # New defect 4 fix: this finding is QUALITY_ISSUES under
     # `classify_effective_change` (its kind was overridden out of the

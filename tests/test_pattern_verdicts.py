@@ -39,6 +39,7 @@ from abicheck.model import (
 )
 from abicheck.model.change import Change
 from abicheck.pattern_verdicts import apply_pattern_verdicts
+from abicheck.policy.evaluate import evaluate
 from abicheck.suppression import Suppression, SuppressionList
 
 # ---------------------------------------------------------------------------
@@ -812,8 +813,8 @@ def test_cross_output_completeness_for_demoted_finding() -> None:
     ]
 
     # 1. verdict / compute_verdict exit path
-    assert demoted in result.compatible
-    assert demoted not in result.breaking
+    assert demoted in evaluate(result).compatible
+    assert demoted not in evaluate(result).breaking
 
     # 2. JSON `changes` + severity field
     payload = json.loads(to_json(result))

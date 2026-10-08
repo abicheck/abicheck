@@ -265,7 +265,7 @@ class TestEveryDepthRungReachesTheFanOut:
         "fixed" by accepting the flag and dropping it on the floor, which is
         the silent-no-op failure the sibling ``--sources`` guard exists to
         prevent."""
-        import abicheck.service as service
+        import abicheck.workflows.member_compare as service
 
         old_dir, new_dir = _release_dirs(tmp_path, "build")
         captured: list[object] = []

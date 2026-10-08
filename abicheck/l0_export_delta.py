@@ -169,6 +169,7 @@ def collect_l0_export_delta_from_snapshots(
 
 def _hard_removals(l0_old: AbiSnapshot, l0_new: AbiSnapshot) -> tuple[Change, ...]:
     from .errors import AbicheckError
+    from .policy.evaluate import evaluate
     from .workflows.compare_policy import compare_snapshots
 
     try:
@@ -179,7 +180,7 @@ def _hard_removals(l0_old: AbiSnapshot, l0_new: AbiSnapshot) -> tuple[Change, ..
         return ()
     return tuple(
         change
-        for change in getattr(l0_diff, "breaking", ())
+        for change in evaluate(l0_diff).breaking
         if getattr(getattr(change, "kind", None), "value", None)
         == "func_removed_elf_only"
     )

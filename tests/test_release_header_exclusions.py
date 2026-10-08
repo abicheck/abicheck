@@ -210,7 +210,7 @@ class TestExclusionRulesAreThreadedToEveryReleaseConsumer:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         import abicheck.cli_compare_release_pairwise as pairwise
-        import abicheck.service as service
+        import abicheck.workflows.member_compare as service
 
         seen: dict[str, Any] = {}
 

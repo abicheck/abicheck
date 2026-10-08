@@ -498,19 +498,20 @@ class DispositionLedger:
         contract pipeline's ``compatibility_decision`` and ADR-027's
         ``effective_verdict`` are both opt-in), so the class of a suppressed
         change is only knowable once a ``DiffResult`` exists to answer it —
-        ``DiffResult._effective_verdict_for_change`` is that answer, policy
+        ``policy.evaluate.effective_verdict`` is that answer, policy
         overrides and frozen-namespace guards included. Reading it here rather
         than re-deriving one keeps the ledger free of a second gate algorithm,
         and it is what makes ``suppressed_gating_records`` (hence
         ``semver.recommend_release``'s conserved delta) answerable at all.
         """
+        from ..checker_types import DiffResult
         from ..model.contract_finding_relevance import is_evaluated
         from ..model.evidence_status import is_cross_source_resolved
         from .reclassify import effective_verdict_for_change
 
-        if not callable(getattr(result, "_effective_verdict_for_change", None)):
+        if not isinstance(result, DiffResult):
             return  # a duck-typed stand-in with no verdict to read
-        # The same function ``DiffResult._effective_verdict_for_change``
+        # The same function ``policy.evaluate.effective_verdict``
         # delegates to, with the kind sets resolved once for the whole pass
         # instead of re-derived per finding (see ``_GateContext``).
         gate = _GateContext.of(result, today=today)

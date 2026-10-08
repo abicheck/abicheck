@@ -47,6 +47,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from ..change_registry import ChangeEntity
+from ..policy.evaluate import effective_kind_sets
 from .change_operation import entity_for_change, operation_for_kind
 from .finding import ReportFinding, build_report_findings, report_findings_for
 
@@ -205,7 +206,7 @@ def compute_surface_changes(
         resolved = build_report_findings(
             list(changes),
             policy=result.policy,
-            kind_sets=result._effective_kind_sets(),
+            kind_sets=effective_kind_sets(result),
             policy_file=result.policy_file,
         )
     else:

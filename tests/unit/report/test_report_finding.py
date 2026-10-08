@@ -25,6 +25,7 @@ import pytest
 
 from abicheck.checker import Change, ChangeKind, DiffResult, Verdict
 from abicheck.junit_report import _is_failure, to_junit_xml
+from abicheck.policy.evaluate import effective_kind_sets
 from abicheck.policy.reclassify import effective_verdict_for_change
 from abicheck.policy.severity import classify_effective_change
 from abicheck.report.finding import (
@@ -71,7 +72,7 @@ class TestBuildReportFindingsAgreesWithDirectResolution:
         self, changes: list[Change], policy: str
     ) -> None:
         result = _result(changes, policy)
-        kind_sets = result._effective_kind_sets()
+        kind_sets = effective_kind_sets(result)
 
         findings = build_report_findings(
             result.changes,
@@ -99,7 +100,7 @@ class TestBuildReportFindingsAgreesWithDirectResolution:
         fresh = build_report_findings(
             result.changes,
             policy=result.policy,
-            kind_sets=result._effective_kind_sets(),
+            kind_sets=effective_kind_sets(result),
             policy_file=result.policy_file,
         )
         assert first == fresh
@@ -146,7 +147,7 @@ class TestJunitAgreesWithJsonPerFinding:
         self, changes: list[Change]
     ) -> None:
         result = _result(changes)
-        kind_sets = result._effective_kind_sets()
+        kind_sets = effective_kind_sets(result)
         findings = build_report_findings(
             result.changes, policy=result.policy, kind_sets=kind_sets
         )

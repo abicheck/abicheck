@@ -13,6 +13,7 @@ from abicheck.checker import ChangeKind, Verdict, compare
 from abicheck.checker_policy import BREAKING_KINDS
 from abicheck.diff_cxx_rules import _owner_descends_from, vtable_slot_is_override_reuse
 from abicheck.model import AbiSnapshot, Function, Param, RecordType
+from abicheck.policy.evaluate import effective_kind_sets
 
 
 def _snap(**kwargs: object) -> AbiSnapshot:
@@ -1281,7 +1282,7 @@ class TestLayoutUnverifiableCorrelatedWithVtableChanged:
             result.changes,
             cfg,
             policy=result.policy,
-            kind_sets=result._effective_kind_sets(),
+            kind_sets=effective_kind_sets(result),
             policy_file=result.policy_file,
         )
         # abi_breaking is INFO, so TYPE_VTABLE_CHANGED contributes 0; the

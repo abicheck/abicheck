@@ -78,6 +78,7 @@ import click
 from .errors import ProfileMismatchError, ScopeMismatchError
 from .frontends.cli.runtime import _write_or_echo
 from .service_render import ONELINE_FORMAT as _ONELINE_FORMAT
+from .workflows.gate import effective_kind_sets
 
 if TYPE_CHECKING:
     from .model import AbiSnapshot
@@ -531,7 +532,7 @@ def _fold_use_case_impact_into_text(
                 list(result.changes),
                 show_only,
                 policy=result.policy,
-                kind_sets=result._effective_kind_sets(),
+                kind_sets=effective_kind_sets(result),
                 policy_file=result.policy_file,
             )
             + scoped_only_changes_filtered(result, show_only)

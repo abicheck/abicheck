@@ -140,7 +140,7 @@ from .selectors import SelectorSet
 #: vocabulary maps onto. `NO_CHANGE` is excluded: a `ReclassifyRule`
 #: constructed directly in Python (bypassing that parser -- this class is
 #: public API) with `to_verdict=Verdict.NO_CHANGE` would make a matching
-#: real change disappear from every one of `DiffResult.breaking`/
+#: real change disappear from every one of `policy.evaluate.evaluate()`'s `breaking`/
 #: `source_breaks`/`risk`/`compatible` (Codex review) -- a silently
 #: passing result that conceals a real change, not a lenient reclassification.
 _VALID_RECLASSIFY_VERDICTS: frozenset[Verdict] = frozenset(
@@ -549,7 +549,7 @@ def resolve_kind_sets(
     """Return (breaking, api_break, compatible, risk) kind sets.
 
     *kind_sets* takes precedence when provided (e.g. from
-    ``DiffResult._effective_kind_sets()`` which includes PolicyFile overrides).
+    ``policy.evaluate.effective_kind_sets(DiffResult)`` which includes PolicyFile overrides).
     Falls back to ``policy_kind_sets(policy)`` or canonical sets.
     """
     if kind_sets is not None:

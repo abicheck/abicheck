@@ -21,6 +21,8 @@ import hashlib
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, cast
 
+from .policy.evaluate import effective_kind_sets, effective_verdict
+
 if TYPE_CHECKING:
     from datetime import date
 
@@ -174,7 +176,7 @@ def to_stat_json(
             severity_config,
             gate=gate,
             policy=result.policy,
-            kind_sets=result._effective_kind_sets(),
+            kind_sets=effective_kind_sets(result),
             policy_file=result.policy_file,
         )
     d["release_recommendation"] = recommend_release_for_report(result).to_dict()
@@ -427,12 +429,12 @@ def _to_json_root_cause(
             changes,
             show_only,
             policy=result.policy,
-            kind_sets=result._effective_kind_sets(),
+            kind_sets=effective_kind_sets(result),
             policy_file=result.policy_file,
         )
         changes = _suppress_dangling_correlation_notes(changes)
     effective_policy = result.policy or "strict_abi"
-    eff_sets = result._effective_kind_sets()
+    eff_sets = effective_kind_sets(result)
 
     # G29 Phase 3 slice 3 follow-up (Codex review): the scoped-gate
     # (--used-by/--required-symbol) fold-in in cli_compare_fold.py appends
@@ -658,7 +660,9 @@ def _add_abi_surface_breakdown(d: dict[str, object], result: DiffResult) -> None
     Only present when there are RTTI/internal-namespace changes — additive,
     machine-facing.
     """
-    _bd = surface_breakdown(result.breaking)
+    from .policy.evaluate import evaluate
+
+    _bd = surface_breakdown(evaluate(result).breaking)
     if _bd.rtti or _bd.internal:
         d["abi_surface_breakdown"] = {
             "breaking_total": _bd.total,
@@ -710,19 +714,15 @@ def _add_show_only_filter(
     scored = [c for c in changes if is_evaluated(c)]
     d["filtered_summary"] = {
         "breaking": sum(
-            1
-            for c in scored
-            if result._effective_verdict_for_change(c) == Verdict.BREAKING
+            1 for c in scored if effective_verdict(result, c) == Verdict.BREAKING
         ),
         "source_breaks": sum(
-            1
-            for c in scored
-            if result._effective_verdict_for_change(c) == Verdict.API_BREAK
+            1 for c in scored if effective_verdict(result, c) == Verdict.API_BREAK
         ),
         "risk_changes": sum(
             1
             for c in scored
-            if result._effective_verdict_for_change(c) == Verdict.COMPATIBLE_WITH_RISK
+            if effective_verdict(result, c) == Verdict.COMPATIBLE_WITH_RISK
         ),
         "total_changes": len(changes),
     }
@@ -1575,7 +1575,7 @@ def _build_severity_json(
     (ADR-061 D9: this function projects a decision, it does not recompute
     one) -- always derived from the *unfiltered* change set, so
     ``--show-only`` does not affect the exit code it reports. *kind_sets*
-    from ``DiffResult._effective_kind_sets()`` includes PolicyFile overrides.
+    from ``policy.evaluate.effective_kind_sets(DiffResult)`` includes PolicyFile overrides.
     *today*, forwarded to :func:`categorize_changes`, keeps this agreeing
     with an already-frozen ``ReportEnvelope`` (Codex review, fresh evidence).
     """

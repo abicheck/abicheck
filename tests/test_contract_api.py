@@ -29,6 +29,7 @@ from abicheck.model import (
     Variable,
     Visibility,
 )
+from abicheck.policy.evaluate import evaluate
 from abicheck.reporter import to_json, to_markdown
 from abicheck.sarif import to_sarif_str
 from abicheck.serialization import (
@@ -374,22 +375,23 @@ class TestDiffResultApiContract:
         diff = _make_diff()
         assert hasattr(diff, "verdict")
         assert hasattr(diff, "changes")
-        assert hasattr(diff, "breaking")
-        assert hasattr(diff, "source_breaks")
-        assert hasattr(diff, "compatible")
-        assert hasattr(diff, "risk")
+        assert hasattr(diff, "not_evaluated")
+        # Pure data: classification is policy.evaluate's job, not the result's.
+        for bucket in ("breaking", "source_breaks", "compatible", "risk"):
+            assert not hasattr(diff, bucket)
+            assert hasattr(evaluate(diff), bucket)
 
     def test_breaking_property_returns_list(self) -> None:
         c = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed")
         diff = _make_diff(changes=[c], verdict=Verdict.BREAKING)
-        assert isinstance(diff.breaking, list)
-        assert len(diff.breaking) > 0
+        assert isinstance(evaluate(diff).breaking, list)
+        assert len(evaluate(diff).breaking) > 0
 
     def test_compatible_property_returns_list(self) -> None:
         c = Change(ChangeKind.FUNC_ADDED, "_Z3barv", "added")
         diff = _make_diff(changes=[c], verdict=Verdict.COMPATIBLE)
-        assert isinstance(diff.compatible, list)
-        assert len(diff.compatible) > 0
+        assert isinstance(evaluate(diff).compatible, list)
+        assert len(evaluate(diff).compatible) > 0
 
     def test_changes_contain_expected_fields(self) -> None:
         c = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed")

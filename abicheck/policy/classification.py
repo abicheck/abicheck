@@ -360,7 +360,7 @@ def apply_policy_file_overrides(
 
     ADR-061 Phase 4 (checker_types.py's own module docstring history): this
     was previously the *inline* body of ``checker_types.DiffResult.
-    _effective_kind_sets`` — real policy-resolution logic (not a data lookup)
+    effective_kind_sets`` — real policy-resolution logic (not a data lookup)
     executing directly inside a ``model``-owned dataclass's own method,
     independent of and unaffected by the ``PolicyFileProtocol`` field-typing
     fix `model/policy_file_protocol.py` already closed (that fix narrows

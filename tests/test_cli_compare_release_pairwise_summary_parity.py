@@ -88,7 +88,7 @@ def test_release_pairwise_compatible_additions_matches_scalar_build_summary(
     old_path.write_bytes(b"")
     new_path.write_bytes(b"")
 
-    with patch("abicheck.service.run_compare") as mock_run_compare:
+    with patch("abicheck.workflows.member_compare.run_compare") as mock_run_compare:
         mock_run_compare.return_value = CompareResult(
             diff=result,
             old_snapshot=AbiSnapshot(library="libdemo.so.1", version="1"),
