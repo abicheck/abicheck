@@ -627,7 +627,7 @@ def parse_functions(
                 # bool(node.get("virtual")) alone misses a signature-
                 # matched override with neither `virtual` nor `override`
                 # written -- clang's JSON gives no direct signal for that
-                # case at all (see dumper_clang_vtable.py's own
+                # case at all (see extract/headers/clang/vtable.py's own
                 # docstring). `virtual_mangled_names` recovers it from
                 # the reconstructed vtables, which already do this
                 # matching; only ever widens False -> True.

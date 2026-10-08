@@ -189,7 +189,7 @@ from __future__ import annotations
 #     rather than reusing v19's: a v19 snapshot has reliable
 #     deprecated/is_scoped but unreliable field defaults, which one shared
 #     flag could not express.
-#   21 — G31 Phase C (dumper_clang_vtable.py): the direct-clang backend's
+#   21 — G31 Phase C (extract/headers/clang/vtable.py): the direct-clang backend's
 #     RecordType.vtable/vptr_offset_bits became real, reconstructed facts
 #     instead of an unconditional vtable=[]/vptr_offset_bits=None stub for
 #     EVERY record. A pre-v21, clang-producer record's blanket-empty vtable

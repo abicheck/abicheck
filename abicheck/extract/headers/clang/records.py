@@ -19,7 +19,7 @@ Third entity module split out of ``_ClangAstParser`` proper, after
 ``dumper_clang._ClangAstParser._walk`` already categorized (no traversal of
 its own) and produces ``RecordType`` model objects, including the vtable
 reconstruction walk that recovers a keyword-less virtual override
-(``dumper_clang_vtable.build_vtable`` over ``RecordVtableIndex.
+(``extract.headers.clang.vtable.build_vtable`` over ``RecordVtableIndex.
 base_lookup_index()``).
 
 This is the fullest test of the shared-context design on THIS backend so
@@ -38,7 +38,7 @@ though record parsing needs all five: the first three are also read by
 function/variable/typedef/enum parsing (some still in ``dumper_clang.py``),
 so per this package's own "shared across entity kinds" rule they live in
 ``context.py`` instead (mirroring castxml's ``location.py`` role); the
-latter two already live in ``dumper_clang_vtable.py`` under public names
+latter two already live in ``extract/headers/clang/vtable.py`` under public names
 (``is_record_definition``, ``build_vtable``) for the identical reason.
 ``decl_is_public`` is likewise read by constant parsing (``dumper_clang.py``'s
 still-unmigrated ``parse_constants``) as well as record parsing, so it moved
@@ -88,7 +88,6 @@ from ....dumper_clang_qualifiers import (
     record_kind,
     reduce_opaque_kind_set,
 )
-from ....dumper_clang_vtable import build_vtable, is_record_definition
 from ....model import Fact, RecordType, TypeField
 from ....model.identity import entity_id_for_type
 from .context import (
@@ -101,6 +100,7 @@ from .context import (
     qualtype,
     source_location,
 )
+from .vtable import build_vtable, is_record_definition
 
 #: Evaluates a (possibly wrapped) clang constant-expression node to an int,
 #: or ``None`` when it isn't one. Matches
@@ -259,7 +259,7 @@ def _build_record(
     is_standard_layout, is_trivially_copyable = clang_record_type_traits(node)
     # G31 Phase C: reconstruct the vtable (and, from it, the same
     # 0-if-polymorphic vptr_offset_bits heuristic castxml already uses)
-    # via dumper_clang_vtable's own signature-matching walk -- see that
+    # via vtable.py's own signature-matching walk -- see that
     # module's docstring for why this can't be a simple `node.get
     # ("virtual")` check the way castxml's real semantic analysis allows.
     # Keyed by the SAME qualname _base_qualnames'/_record_index's own
