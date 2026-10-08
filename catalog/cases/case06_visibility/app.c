@@ -1,34 +1,24 @@
-#include <dlfcn.h>
+/* An old consumer that (incorrectly) resolved the accidentally exported
+   helpers at link time.  It is linked against libv1 only; the harness then
+   substitutes libv2 under the same name.
+     v1: both helpers resolve           -> prints the results, exits 0
+     v2: helpers are hidden             -> the dynamic loader refuses to start
+                                           the program (undefined symbol),
+                                           a non-zero exit before main(). */
 #include <stdio.h>
-#include <stdlib.h>
 
-static int check_visibility(const char *path, const char *label,
-                            int expect_exported, int fail_on_hidden) {
-    void *handle = dlopen(path, RTLD_NOW);
-    if (!handle) {
-        fprintf(stderr, "dlopen %s: %s\n", path, dlerror());
-        return 1;
-    }
-
-    void *sym = dlsym(handle, "internal_helper");
-    printf("%s: internal_helper %s\n", label, sym ? "EXPORTED" : "hidden");
-
-    int failure = 0;
-    if (expect_exported && !sym) {
-        printf("WRONG RESULT: %s no longer exports internal_helper\n", label);
-        failure = 1;
-    } else if (!expect_exported && fail_on_hidden && !sym) {
-        printf("WRONG RESULT: %s hides internal_helper (symbol removed)\n", label);
-        failure = 1;
-    }
-
-    dlclose(handle);
-    return failure;
-}
+int public_api(int x);
+int internal_helper(int x);
+int another_impl(int x);
 
 int main(void) {
-    int failed = 0;
-    failed |= check_visibility("./libv1.so", "libv1.so (bad)", 1, 0);
-    failed |= check_visibility("./libv2.so", "libv2.so (good)", 0, 1);
-    return failed ? EXIT_FAILURE : EXIT_SUCCESS;
+    int a = public_api(1);
+    int b = internal_helper(2);
+    int c = another_impl(3);
+    printf("public_api(1)=%d internal_helper(2)=%d another_impl(3)=%d\n", a, b, c);
+    if (a != 1 || b != 4 || c != 6) {
+        fprintf(stderr, "unexpected helper results\n");
+        return 1;
+    }
+    return 0;
 }

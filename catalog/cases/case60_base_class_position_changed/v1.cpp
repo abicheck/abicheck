@@ -5,20 +5,28 @@
 struct Drawable {
     int draw_x;
     int draw_y;
-    virtual void draw() { printf("draw at (%d,%d)\n", draw_x, draw_y); }
-    virtual ~Drawable() = default;
+    virtual void draw();
+    virtual ~Drawable();
 };
 
 struct Clickable {
     int click_zone;
-    virtual void on_click() { printf("clicked zone %d\n", click_zone); }
-    virtual ~Clickable() = default;
+    virtual void on_click();
+    virtual ~Clickable();
 };
 
 /* v1: Drawable first, Clickable second */
 struct Widget : public Drawable, public Clickable {
     int widget_id;
 };
+
+/* Out-of-line (key-function) definitions: the library is the one place that
+   emits these members and the two vtables, at every optimisation level, so
+   a consumer compiled against the same declarations links in Release too. */
+void Drawable::draw() { printf("draw at (%d,%d)\n", draw_x, draw_y); }
+Drawable::~Drawable() = default;
+void Clickable::on_click() { printf("clicked zone %d\n", click_zone); }
+Clickable::~Clickable() = default;
 
 extern "C" {
     Widget* widget_create(int id) {
