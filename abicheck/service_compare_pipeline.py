@@ -541,22 +541,22 @@ def classify_compare_pair(
     from .workflows.pair_evidence import fold_pair_evidence
 
     # Same classify-stage boundary check as `resolve_compare_request`'s own
-    # (Codex review, fresh evidence, PR #1178): `compare_snapshots` below can
-    # complete with no subprocess/extraction work at all.
+    # (PR #1178): `compare_snapshots` below may do no extraction work at all.
     deadline.check()
-
     # ADR-020b / ADR-068 D5: already resolved on the request itself.
     env_matrix: EnvironmentMatrix | None = request.env_matrix
 
     # ADR-063 Phase 8's "--depth floor vs ceiling" gap: the *ceiling* half,
     # narrowing what this classification may see to the requested rung. The
-    # floor is the exit-7 axis below; the ceiling applies either way.
-    # Deliberately a *view*, not a mutation of
-    # `pair.old`/`pair.new` (see `project_pair_to_depth`'s own docstring) --
-    # `pair` may still be read elsewhere for its unprojected snapshots.
+    # floor is the exit-7 axis below; the ceiling applies either way. A *view*,
+    # not a mutation of `pair.old`/`pair.new` (`project_pair_to_depth`'s docstring).
     old, new = project_pair_to_depth(pair.old, pair.new, request.depth)
     suppression, pf = load_suppression_and_policy(
-        request.suppress, request.policy, request.policy_file_path
+        request.suppress,
+        request.policy,
+        request.policy_file_path,
+        strict_suppressions=request.strict_suppressions,
+        require_justification=request.require_justification,
     )
     # A forwarded pack's policy contribution, folded the way
     # `pack_application.policy_file_with_packs` does for single-pair

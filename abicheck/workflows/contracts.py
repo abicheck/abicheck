@@ -323,6 +323,12 @@ class CompareRequest:
     acknowledgment_unacknowledged_additions: str | None = field(
         default=None, kw_only=True
     )
+    #: ``.abicheck.yml`` ``suppression.strict``/``suppression.require_
+    #: justification`` (the CLI resolves both from config): fail on an expired
+    #: rule instead of silently ignoring it, and on a rule with no ``reason``.
+    #: Both default off, the behavior every existing caller already had.
+    strict_suppressions: bool = field(default=False, kw_only=True)
+    require_justification: bool = field(default=False, kw_only=True)
     #: ``surface.internal_namespaces`` when a pack supplied it — see
     #: ``pack_policy_overrides`` above for why this field exists and how it
     #: is applied. ``None`` means "no pack stated this"; distinct from an
