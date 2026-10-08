@@ -34,6 +34,7 @@ from __future__ import annotations
 import shutil
 import struct
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -161,7 +162,10 @@ def test_a_failed_read_never_yields_a_result(tmp_path, magic, body):
 
 
 @pytest.mark.integration
-@pytest.mark.skipif(shutil.which("gcc") is None, reason="needs gcc")
+@pytest.mark.skipif(
+    shutil.which("gcc") is None or not sys.platform.startswith("linux"),
+    reason="needs gcc producing ELF (the -soname and e_shoff edits are ELF64-only)",
+)
 def test_cli_rejects_a_consumer_with_an_unreadable_import_table(tmp_path):
     """End to end through ``compare --used-by``: a real consumer that needs a
     removed symbol is a scoped break; the same binary with its section-header
@@ -182,6 +186,8 @@ def test_cli_rejects_a_consumer_with_an_unreadable_import_table(tmp_path):
     cc("-shared", "-fPIC", "-Wl,-soname,libx.so.1", "-o", "new.so", "v2.c")
     cc("-o", "app", "app.c", "./old.so")
     data = bytearray((tmp_path / "app").read_bytes())
+    if data[:5] != b"\x7fELF\x02":  # not ELF64: the e_shoff offset below is ELF64's
+        pytest.skip("toolchain did not produce an ELF64 executable")
     struct.pack_into("<Q", data, 0x28, len(data) * 4)  # e_shoff past EOF
     (tmp_path / "app_bad").write_bytes(bytes(data))
 
@@ -195,5 +201,6 @@ def test_cli_rejects_a_consumer_with_an_unreadable_import_table(tmp_path):
     good = run("app")
     assert good.exit_code == 4, good.output
     bad = run("app_bad")
-    assert bad.exit_code != 0
-    assert isinstance(bad.exception, ConsumerUnreadableError), bad.output
+    assert bad.exit_code == 1, bad.output
+    assert "--used-by consumer:" in bad.output
+    assert "ELF import table unreadable" in bad.output

@@ -11302,15 +11302,14 @@ from an empty export table.
 
 ## `compare --used-by` prints a traceback for an unreadable REQUIRED consumer (2026-10-08)
 
-A REQUIRED `--used-by` consumer that cannot be read (unrecognised format,
-digest mismatch, or -- since Lane C stage 5 -- an unparseable import table)
-raises `ConsumerUnreadableError` out of `cli_helpers_compare._apply_used_by_scoping`
-uncaught: the run exits 1 with a Python traceback rather than a one-line
-`Error: ...` message. The exit status is right; the presentation is not.
-The fix is a `click.ClickException` translation around the
-`scope_diff_to_app` call, but `cli_helpers_compare.py` is already over its
-`no_growth` baseline, so it needs a responsibility moved out of that file
-first (e.g. `_app_compat_summary`'s projection to `report/`).
+**Closed (2026-10, Lane C stage 5, CodeRabbit review).** A REQUIRED
+`--used-by` consumer that cannot be read (unrecognised format, digest
+mismatch, unparseable import table) raised `ConsumerUnreadableError` out of
+the compare command uncaught: exit 1 with a Python traceback.
+`frontends/cli/compare_report._apply_scoped_gating` now translates it to a
+`click.ClickException` -- the same exit status, 1, with a one-line
+`Error: --used-by consumer: ...` message -- without growing the
+over-baseline `cli_helpers_compare.py`.
 
 ## `appcompat_consumer_impact.py` cannot move into `workflows/` yet (2026-10-08)
 
