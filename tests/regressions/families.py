@@ -224,6 +224,7 @@ _F4 = (
     "classification.name_shape_as_contract_membership",
     "classification.declaration_existence_as_export_obligation",
     "classification.demotion_applied_beyond_its_justification",
+    "classification.source_only_change_scored_as_binary_break",
     "evidence.spelling_used_as_a_semantic_model",
     "evidence.spelling_matcher_same_offset_underreport",
     "policy.public_surface_reachability",

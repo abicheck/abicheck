@@ -66,18 +66,21 @@ the first virtual function to a released non-polymorphic type."
 
 ## Runtime failure demonstration
 
-**Severity: stack corruption / misread members.**
+**Severity: memory corruption.**
+
+**Scenario:** the consumer owns a `Handle` sized by v1 (4 bytes) and
+constructs it in place. After the swap v2's constructor stores a vtable
+pointer at offset 0 and `id_` at offset 8 — 12 bytes into a 4-byte object.
 
 ```bash
 g++ -shared -fPIC -g v1.cpp -o libv1.so
-g++ -g app.cpp -L. -lv1 -Wl,-rpath,. -o app
-./app
-# → via factory: id() = 7
-
+g++ -g app.cpp -L. -lv1 -Wl,-rpath,'$ORIGIN' -o app
+./app            # local.id() = 7                                 exit 0
 g++ -shared -fPIC -g v2.cpp -o libv1.so   # swap in v2, no recompile
-./app
-# → via factory: id() = <garbage>, and the stack canary check may trip
+./app            # CORRUPTION: v2's constructor overran the v1-sized object, exit 1
 ```
+
+The witness heap-allocates the object with the **v1** size, followed by a 32-byte guard region filled with `0xA5`, and asserts the guard afterwards. That makes the overrun visible deterministically under GCC and Clang, Debug and Release, without depending on stack layout, optimisation level or a stack-protector canary (the original stack-canary witness stayed silent under some Clang builds). An independent ASan build of the same consumer reports `heap-buffer-overflow` after the swap.
 
 ## Safe redesign
 

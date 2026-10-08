@@ -37,7 +37,7 @@ _195 case(s)._ [← back to all examples](../index.md)
 | [case27_symbol_binding_weakened](../case27_symbol_binding_weakened.md) | Symbol Binding Weakened (GLOBAL → WEAK) | 🟢 COMPATIBLE | Quality (Compatible) |
 | [case28_typedef_opaque](../case28_typedef_opaque.md) | Typedef and Opaque Type Changes | 🔴 BREAKING | Breaking |
 | [case29_ifunc_transition](../case29_ifunc_transition.md) | GNU IFUNC Transition | 🟢 COMPATIBLE | Quality (Compatible) |
-| [case30_field_qualifiers](../case30_field_qualifiers.md) | Field Qualifier Changes (const, volatile) | 🔴 BREAKING | Breaking |
+| [case30_field_qualifiers](../case30_field_qualifiers.md) | Field Qualifier Changes (const, volatile) | 🟠 API_BREAK | API Break |
 | [case31_enum_rename](../case31_enum_rename.md) | Enum Member Rename | 🟠 API_BREAK | API Break |
 | [case32_param_defaults](../case32_param_defaults.md) | Parameter Default Value Changes (C++) | 🟠 API_BREAK | API Break |
 | [case33_pointer_level](../case33_pointer_level.md) | Pointer Level Change | 🔴 BREAKING | Breaking |
@@ -58,7 +58,7 @@ _195 case(s)._ [← back to all examples](../index.md)
 | [case48_leaf_struct_through_pointer](../case48_leaf_struct_through_pointer.md) | Leaf Struct Change Propagated Through Pointer | 🔴 BREAKING | Breaking |
 | [case49_executable_stack](../case49_executable_stack.md) | Executable Stack (GNU_STACK RWX) | 🟢 COMPATIBLE | Quality (Compatible) |
 | [case50_soname_inconsistent](../case50_soname_inconsistent.md) | SONAME Inconsistent (Wrong Major Version) | 🟡 COMPATIBLE_WITH_RISK | Risk |
-| [case51_protected_visibility](../case51_protected_visibility.md) | Protected Visibility (DEFAULT to PROTECTED) | 🟢 COMPATIBLE | Quality (Compatible) |
+| [case51_protected_visibility](../case51_protected_visibility.md) | Protected Visibility (DEFAULT to PROTECTED) | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case52_rpath_leak](../case52_rpath_leak.md) | RPATH Leak (Hardcoded Build Directory) | 🟢 COMPATIBLE | Quality (Compatible) |
 | [case53_namespace_pollution](../case53_namespace_pollution.md) | Namespace Pollution (Generic Symbol Names) | 🔴 BREAKING | Breaking |
 | [case54_used_reserved_field](../case54_used_reserved_field.md) | Used Reserved Field | 🟢 COMPATIBLE | Quality (Compatible) |
@@ -99,7 +99,7 @@ _195 case(s)._ [← back to all examples](../index.md)
 | [case91_bundle_intra_signature_drift](../case91_bundle_intra_signature_drift.md) | Bundle — Intra-Bundle extern-C Signature Drift | 🔴 BREAKING | Bundle (Multi-library) |
 | [case92_bundle_provider_changed](../case92_bundle_provider_changed.md) | Bundle — Symbol Provider Migration | 🟡 COMPATIBLE_WITH_RISK | Bundle (Multi-library) |
 | [case93_bundle_manifest_drift](../case93_bundle_manifest_drift.md) | Bundle — Instantiation Manifest Drift | 🔴 BREAKING | Bundle (Multi-library) |
-| [case95_allocator_nested_typedef_removed](../case95_allocator_nested_typedef_removed.md) | Allocator Nested-Typedef Removed | 🔴 BREAKING | Breaking |
+| [case95_allocator_nested_typedef_removed](../case95_allocator_nested_typedef_removed.md) | Allocator Nested-Typedef Removed | 🟠 API_BREAK | API Break |
 | [case96_hidden_friend_removed](../case96_hidden_friend_removed.md) | Hidden Friend Operator Removed | 🟠 API_BREAK | API Break |
 | [case97_api_depends_on_consumer_env](../case97_api_depends_on_consumer_env.md) | API Depends on Consumer Environment | 🔴 BREAKING | Breaking |
 | [case98_cxx_standard_floor_raised](../case98_cxx_standard_floor_raised.md) | C++ Standard Floor Raised | 🟡 COMPATIBLE_WITH_RISK | Risk |
@@ -179,7 +179,7 @@ _195 case(s)._ [← back to all examples](../index.md)
 | [case183_internal_version_node_churn](../case183_internal_version_node_churn.md) | Internal ELF symbol-version node churn | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case184_internal_enum_churn_scoped](../case184_internal_enum_churn_scoped.md) | Internal Enum Churn, Scoped Out by Private-Header Origin | ✅ NO_CHANGE | No Change |
 | [case185_inherited_override_reuses_slot](../case185_inherited_override_reuses_slot.md) | Inherited override reuses the base's vtable slot | 🟢 COMPATIBLE | Addition (Compatible) |
-| [case186_c_api_pointee_const_abi_neutral](../case186_c_api_pointee_const_abi_neutral.md) | C API Pointee const-Qualification Is ABI-Neutral | ✅ NO_CHANGE | No Change |
+| [case186_c_api_pointee_const_abi_neutral](../case186_c_api_pointee_const_abi_neutral.md) | C API Pointee const-Qualification — ABI-Neutral, Not Source-Neutral | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case187_public_struct_private_field_type](../case187_public_struct_private_field_type.md) | Public Struct Field Retyped to an Internal Type | 🔴 BREAKING | Breaking |
 | [case188_public_class_private_base_class](../case188_public_class_private_base_class.md) | Public Class Gains a Private Base Class | 🔴 BREAKING | Breaking |
 | [case189_public_function_private_parameter_type](../case189_public_function_private_parameter_type.md) | Public Function Parameter Retyped to an Internal Type | 🔴 BREAKING | Breaking |
@@ -200,5 +200,5 @@ _195 case(s)._ [← back to all examples](../index.md)
 | [case204_class_gained_non_virtual_method](../case204_class_gained_non_virtual_method.md) | Class Gained a Non-Virtual Method | 🟢 COMPATIBLE | Addition (Compatible) |
 | [case205_public_function_marked_deprecated](../case205_public_function_marked_deprecated.md) | Public Function Marked Deprecated | 🟢 COMPATIBLE | Quality (Compatible) |
 | [case206_deprecation_documented_without_attribute](../case206_deprecation_documented_without_attribute.md) | Deprecation Documented Without the Attribute | ✅ NO_CHANGE | No Change |
-| [case207_pointer_parameter_gained_restrict](../case207_pointer_parameter_gained_restrict.md) | Pointer Parameter Gained `restrict` | 🟢 COMPATIBLE | Quality (Compatible) |
+| [case207_pointer_parameter_gained_restrict](../case207_pointer_parameter_gained_restrict.md) | Pointer Parameter Gained `restrict` | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case208_restrict_added_to_definition_only](../case208_restrict_added_to_definition_only.md) | `restrict` Added to the Definition Only | ✅ NO_CHANGE | No Change |

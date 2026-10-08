@@ -162,7 +162,8 @@ class TestOrphanStruct:
         result = compare(old, new)
         kinds = {c.kind for c in result.changes}
         assert ChangeKind.TYPE_REMOVED in kinds
-        assert result.verdict == Verdict.BREAKING
+        # A type has no symbol of its own: removing it breaks source only.
+        assert result.verdict == Verdict.API_BREAK
 
     def test_orphan_struct_model_roundtrip(self) -> None:
         """Orphan struct survives snapshot serialization roundtrip."""

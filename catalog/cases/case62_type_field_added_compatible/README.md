@@ -5,11 +5,19 @@
 ## Verdict and consumer impact
 
 `Session` is an opaque handle — callers only ever hold `Session*`, never
-allocate, embed, or `sizeof()` the struct themselves. v2 grows the private
-struct definition and adds `session_get_priority()`, but every existing
-caller keeps working unmodified: allocation happens inside the library via
-`session_open()`, so the caller-visible surface (the pointer and the
-existing accessor functions) is untouched.
+allocate, embed, or `sizeof()` the struct themselves (the public header only
+declares an incomplete `Session`). v2 repurposes the private struct's
+`_reserved0` slot as `priority` — the struct does **not** actually grow in
+this fixture — and adds `session_get_priority()`. Every existing caller keeps
+working unmodified: allocation and every field access happen inside the
+library via `session_open()` and its accessors, so the caller-visible surface
+(the pointer and the existing functions) is untouched.
+
+**Opacity is the compatibility reason, not the reserved slot.** Because no
+consumer can know the private layout, the library may grow it freely as
+well; a genuinely growing opaque struct is compatible for the same reason.
+The same growth on a struct whose definition *is* public (case07, case14)
+breaks consumers that allocate or embed it.
 
 ## Old/new diff
 

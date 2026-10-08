@@ -22,14 +22,30 @@ int main() {
     auto pick_larger = (two_int_fn)dlsym(handle, "pick_larger");
     printf("pick_larger(3, 7) = %d\n", pick_larger ? pick_larger(3, 7) : -1);
 
-    const char *raw_symbol = "_ZN10descendingMUliiE_4_FUNEii";
-    void *sym = dlsym(handle, raw_symbol);
-    if (!sym) {
-        printf("direct lookup of %s: not present in this build "
-               "(expected against v1; v2 introduces it)\n", raw_symbol);
+    // The invoker's spelling is itself compiler-specific: GCC names the
+    // closure's static invoker `_FUN`, Clang names it `__invoke`. Probe both
+    // so the lookup is exercised under either toolchain.
+    static const char *const raw_symbols[] = {
+        "_ZN10descendingMUliiE_4_FUNEii",     // GCC
+        "_ZN10descendingMUliiE_8__invokeEii", // Clang
+    };
+    const char *found = nullptr;
+    for (const char *name : raw_symbols) {
+        if (dlsym(handle, name)) {
+            found = name;
+            break;
+        }
+    }
+    if (!pick_larger || pick_larger(3, 7) != 7) {
+        printf("public wrapper pick_larger broken\n");
+        return 1;
+    }
+    if (!found) {
+        printf("direct lookup of the lambda invoker: not present in this build "
+               "(expected against v1; v2 introduces it)\n");
         return 0;
     }
     printf("direct lookup of %s succeeded -- but do not rely on this exact "
-           "name surviving a rebuild.\n", raw_symbol);
+           "name surviving a rebuild or a compiler change.\n", found);
     return 0;
 }

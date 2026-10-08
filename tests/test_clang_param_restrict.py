@@ -560,6 +560,10 @@ def _snap(**kwargs: object) -> AbiSnapshot:
     return AbiSnapshot(**defaults)  # type: ignore[arg-type]
 
 
+# Either direction of a restrict finding (added or removed).
+_RESTRICT_KINDS = {ChangeKind.PARAM_RESTRICT_CHANGED, ChangeKind.PARAM_RESTRICT_ADDED}
+
+
 def _kinds(result: object) -> set[ChangeKind]:
     return {c.kind for c in result.changes}  # type: ignore[attr-defined]
 
@@ -575,7 +579,7 @@ class TestCrossBackendFalsePositiveClosed:
         old = _snap(ast_producer="castxml", functions=[_func(True)])
         new = _snap(ast_producer="clang", functions=[_func(True)])
         result = compare(old, new)
-        assert ChangeKind.PARAM_RESTRICT_CHANGED not in _kinds(result)
+        assert not _RESTRICT_KINDS & _kinds(result)
         # Identical surfaces: the pair is not merely non-breaking, it is
         # indistinguishable — which is the point, since the two snapshots
         # describe the same unchanged header through different backends.
@@ -597,12 +601,12 @@ class TestParamRestrictHeaderTierGate:
     def test_dwarf_side_does_not_manufacture_a_removal(self) -> None:
         old = _snap(ast_producer="castxml", functions=[_func(True)])
         new = _snap(from_headers=False, functions=[_func(False)])
-        assert ChangeKind.PARAM_RESTRICT_CHANGED not in _kinds(compare(old, new))
+        assert not _RESTRICT_KINDS & _kinds(compare(old, new))
 
     def test_dwarf_side_does_not_manufacture_an_addition(self) -> None:
         old = _snap(from_headers=False, functions=[_func(False)])
         new = _snap(ast_producer="castxml", functions=[_func(True)])
-        assert ChangeKind.PARAM_RESTRICT_CHANGED not in _kinds(compare(old, new))
+        assert not _RESTRICT_KINDS & _kinds(compare(old, new))
 
     def test_inferred_header_awareness_is_not_enough(self) -> None:
         """A legacy snapshot whose header-awareness was only GUESSED is
@@ -610,7 +614,7 @@ class TestParamRestrictHeaderTierGate:
         old = _snap(ast_producer="castxml", functions=[_func(True)])
         new = _snap(functions=[_func(False)])
         new.from_headers_inferred = True
-        assert ChangeKind.PARAM_RESTRICT_CHANGED not in _kinds(compare(old, new))
+        assert not _RESTRICT_KINDS & _kinds(compare(old, new))
 
     def test_two_header_sides_still_compare(self) -> None:
         """Positive control for the gate above."""
@@ -636,7 +640,7 @@ class TestLegacyClangBaselineSuppression:
             ast_producer="clang",
             functions=[_func(True)],
         )
-        assert ChangeKind.PARAM_RESTRICT_CHANGED in _kinds(compare(old, new))
+        assert ChangeKind.PARAM_RESTRICT_ADDED in _kinds(compare(old, new))
 
     def test_legacy_clang_baseline_suppresses_the_finding(self) -> None:
         old = as_legacy_baseline(
@@ -650,7 +654,7 @@ class TestLegacyClangBaselineSuppression:
             ast_producer="clang",
             functions=[_func(True)],
         )
-        assert ChangeKind.PARAM_RESTRICT_CHANGED not in _kinds(compare(old, new))
+        assert not _RESTRICT_KINDS & _kinds(compare(old, new))
 
     def test_unreliable_new_side_is_also_suppressed(self) -> None:
         """The reverse direction (a fresh baseline compared against an older
@@ -666,7 +670,7 @@ class TestLegacyClangBaselineSuppression:
             ),
             21,
         )
-        assert ChangeKind.PARAM_RESTRICT_CHANGED not in _kinds(compare(old, new))
+        assert not _RESTRICT_KINDS & _kinds(compare(old, new))
 
 
 def _func_with_restrict_fact(fact: Fact[bool]) -> Function:
@@ -695,11 +699,11 @@ class TestParamRestrictFactStatusGating:
             ast_producer="clang",
             functions=[_func(True)],
         )
-        assert ChangeKind.PARAM_RESTRICT_CHANGED not in _kinds(compare(old, new))
+        assert not _RESTRICT_KINDS & _kinds(compare(old, new))
 
     def test_confirmed_present_still_fires(self) -> None:
         # Unaffected: an ordinary construction backfills to Fact.present(...)
         # and behaves exactly as before.
         old = _snap(ast_producer="clang", functions=[_func(False)])
         new = _snap(ast_producer="clang", functions=[_func(True)])
-        assert ChangeKind.PARAM_RESTRICT_CHANGED in _kinds(compare(old, new))
+        assert ChangeKind.PARAM_RESTRICT_ADDED in _kinds(compare(old, new))

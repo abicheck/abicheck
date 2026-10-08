@@ -118,6 +118,19 @@ KNOWN_GAP_TOOLCHAINS: dict[str, list[str]] = {
     for k, v in _gt_data["verdicts"].items()
     if v.get("known_gap_toolchains")
 }
+# not_applicable_toolchains: case_name → (families, verdict). Under those
+# producers the case's transition does not exist at all (case180: Clang never
+# emits STB_GNU_UNIQUE), so the pair is judged by the verdict it actually
+# warrants -- applicability, not a detection gap (see validate_examples.py's
+# _not_applicable_on).
+NOT_APPLICABLE: dict[str, tuple[list[str], str]] = {
+    k: (
+        list(v["not_applicable_toolchains"]),
+        v.get("not_applicable_expected", "NO_CHANGE"),
+    )
+    for k, v in _gt_data["verdicts"].items()
+    if v.get("not_applicable_toolchains")
+}
 # known_gap_platforms: case_name → platform tags where the gap applies.
 # When set, the gap only xfails on those platforms. Absent ⇒ all platforms.
 KNOWN_GAP_PLATFORMS: dict[str, list[str]] = {
@@ -735,6 +748,9 @@ def _assert_verdict(
     is_cpp: bool,
 ) -> None:
     """Assert that the verdict matches, handling known gaps as xfail."""
+    na = NOT_APPLICABLE.get(case_name)
+    if na is not None and _toolchain_family(is_cpp) in na[0]:
+        expected_verdict = na[1]
     if case_name in KNOWN_GAPS and _gap_applies(case_name, is_cpp):
         allowed_verdicts = KNOWN_GAP_OBSERVED.get(case_name)
         if got != expected_verdict and (

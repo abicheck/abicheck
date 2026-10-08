@@ -46,6 +46,7 @@ REPO_DIR = Path(__file__).parent.parent
 
 sys.path.insert(0, str(REPO_DIR / "scripts"))
 sys.path.insert(0, str(Path(__file__).parent))  # source_smoke lives beside this
+import example_applicability  # noqa: E402
 import example_catalog  # noqa: E402
 from _legacy_scope import scope_args  # noqa: E402
 from example_case_runner import (  # noqa: E402
@@ -233,7 +234,7 @@ def _build_info_applies(entry: dict, variant: str) -> bool:
 # ---------------------------------------------------------------------------
 class CaseResult(NamedTuple):
     name: str
-    status: str  # PASS | FAIL | XFAIL | SKIP | ERROR
+    status: str  # PASS | FAIL | XFAIL | NOT_APPLICABLE | SKIP | ERROR
     expected: str | None
     got: str | None
     message: str
@@ -1522,12 +1523,12 @@ def run_case(
         sources=sources_present,
         build_info=build_info_present,
     )
-    result = _evaluate_verdict(
-        name,
-        expected_raw,
-        got,
-        known_gap,
-        known_gap_observed,
+    family = _toolchain_family(v1_src.suffix == ".cpp")
+    na = example_applicability.outcome(entry, family, got)
+    result = (
+        CaseResult(name, na[0], expected_raw, got, na[1])
+        if na
+        else _evaluate_verdict(name, expected_raw, got, known_gap, known_gap_observed)
     )._replace(variant=variant, source_layers=source_layers)
     if smoke_proof:
         combined = (
@@ -1704,7 +1705,7 @@ def _result_to_json(r: CaseResult) -> dict[str, object]:
         r.source_layers or SOURCE_LAYERS_BY_VARIANT.get(r.variant, ())
     )
     d["evidence_asymmetry"] = "symmetric"
-    d["manual_review_ok"] = r.status in {"XFAIL", "SKIP"}
+    d["manual_review_ok"] = r.status in {"XFAIL", "SKIP", "NOT_APPLICABLE"}
     d["category_strict"] = r.category_strict
     d["actual_kinds"] = list(r.actual_kinds)
     return d

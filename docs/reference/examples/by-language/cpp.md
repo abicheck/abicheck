@@ -47,7 +47,7 @@ _89 case(s)._ [← back to all examples](../index.md)
 | [case92_bundle_provider_changed](../case92_bundle_provider_changed.md) | Bundle — Symbol Provider Migration | 🟡 COMPATIBLE_WITH_RISK | Bundle (Multi-library) |
 | [case93_bundle_manifest_drift](../case93_bundle_manifest_drift.md) | Bundle — Instantiation Manifest Drift | 🔴 BREAKING | Bundle (Multi-library) |
 | [case94_empty_tag_gained_state](../case94_empty_tag_gained_state.md) | Empty Tag Gained State | 🔴 BREAKING | Breaking |
-| [case95_allocator_nested_typedef_removed](../case95_allocator_nested_typedef_removed.md) | Allocator Nested-Typedef Removed | 🔴 BREAKING | Breaking |
+| [case95_allocator_nested_typedef_removed](../case95_allocator_nested_typedef_removed.md) | Allocator Nested-Typedef Removed | 🟠 API_BREAK | API Break |
 | [case96_hidden_friend_removed](../case96_hidden_friend_removed.md) | Hidden Friend Operator Removed | 🟠 API_BREAK | API Break |
 | [case97_api_depends_on_consumer_env](../case97_api_depends_on_consumer_env.md) | API Depends on Consumer Environment | 🔴 BREAKING | Breaking |
 | [case98_cxx_standard_floor_raised](../case98_cxx_standard_floor_raised.md) | C++ Standard Floor Raised | 🟡 COMPATIBLE_WITH_RISK | Risk |
@@ -60,7 +60,7 @@ _89 case(s)._ [← back to all examples](../index.md)
 | [case106_ctor_became_explicit](../case106_ctor_became_explicit.md) | Conversion Operator Became `explicit` | 🟠 API_BREAK | API Break |
 | [case107_task_scheduler_init_removed](../case107_task_scheduler_init_removed.md) | `task_scheduler_init` Removed (historical ABI break) | 🔴 BREAKING | Breaking |
 | [case108_task_class_removed](../case108_task_class_removed.md) | `task` Class Removed (historical ABI break — vtable angle) | 🔴 BREAKING | Breaking |
-| [case109_flow_graph_policy_renames](../case109_flow_graph_policy_renames.md) | flow::graph Policy Tag Renames | 🔴 BREAKING | Breaking |
+| [case109_flow_graph_policy_renames](../case109_flow_graph_policy_renames.md) | flow::graph Policy Tag Renames | 🟠 API_BREAK | API Break |
 | [case110_concurrent_unordered_map_api_drift](../case110_concurrent_unordered_map_api_drift.md) | concurrent_unordered_map API Drift | 🔴 BREAKING | Breaking |
 | [case111_enumerable_thread_specific_lambda_ambiguity](../case111_enumerable_thread_specific_lambda_ambiguity.md) | enumerable_thread_specific Lambda-Init Ambiguity | 🟠 API_BREAK | API Break |
 | [case113_abi_tag_changed](../case113_abi_tag_changed.md) | ABI-tag set change ([abi:cxx11] lost on a single symbol) | 🔴 BREAKING | Breaking |

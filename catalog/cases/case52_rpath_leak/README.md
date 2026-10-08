@@ -17,14 +17,14 @@ attacker can plant a malicious library there for the loader to pick up.
 
 | old/lib.c | new/lib.c |
 |-----------|-----------|
-| linked with `-Wl,-rpath,/home/build/myproject/lib` | linked with `-Wl,-rpath,$ORIGIN` |
+| linked with `-Wl,--enable-new-dtags -Wl,-rpath,/home/build/myproject/lib` | linked with `-Wl,--enable-new-dtags -Wl,-rpath,$ORIGIN` |
 | (library source is identical — see `old/lib.c` / `new/lib.c`) | |
 
 ## abicheck command
 
 ```bash
-gcc -shared -fPIC -g old/lib.c -o libfoo_v1.so -Wl,-rpath,/home/build/myproject/lib
-gcc -shared -fPIC -g new/lib.c -o libfoo_v2.so '-Wl,-rpath,$ORIGIN'
+gcc -shared -fPIC -g old/lib.c -o libfoo_v1.so -Wl,--enable-new-dtags -Wl,-rpath,/home/build/myproject/lib
+gcc -shared -fPIC -g new/lib.c -o libfoo_v2.so -Wl,--enable-new-dtags '-Wl,-rpath,$ORIGIN'
 abicheck compare libfoo_v1.so libfoo_v2.so
 ```
 

@@ -106,20 +106,20 @@ class TestVersionStampedTypedefInChecker:
         kinds = {c.kind for c in result.changes}
         assert ChangeKind.TYPEDEF_REMOVED not in kinds
 
-    def test_regular_typedef_removal_still_breaking(self) -> None:
-        """Normal typedef removal is still BREAKING (guard against over-filtering)."""
+    def test_regular_typedef_removal_still_reported(self) -> None:
+        """Normal typedef removal is still a source break (guard against over-filtering)."""
         old = _snap({"handler_t": "int(*)(int)"}, version="1.0")
         new = _snap({}, version="2.0")
         result = compare(old, new)
         assert ChangeKind.TYPEDEF_REMOVED in {c.kind for c in result.changes}
-        assert result.verdict == Verdict.BREAKING
+        assert result.verdict == Verdict.API_BREAK
 
     def test_regular_typedef_removal_unchanged_by_fix(self) -> None:
-        """Non-version-stamped typedefs continue to be reported as BREAKING."""
+        """Non-version-stamped typedefs continue to be reported (API_BREAK)."""
         old = _snap({"callback_t": "void(*)(void*)"}, version="1.0")
         new = _snap({}, version="2.0")
         result = compare(old, new)
-        assert result.verdict == Verdict.BREAKING
+        assert result.verdict == Verdict.API_BREAK
 
     def test_multiple_version_sentinels_all_downgraded(self) -> None:
         """Multiple version-stamped typedefs removed at once — all are COMPATIBLE."""
@@ -149,7 +149,7 @@ class TestVersionStampedTypedefInChecker:
         )
 
     def test_version_sentinel_mixed_with_real_break(self) -> None:
-        """Version sentinel + a real break → overall still BREAKING."""
+        """Version sentinel + a real removal → overall still API_BREAK."""
         old = _snap(
             {
                 "png_libpng_version_1_6_46": "char*",
@@ -168,17 +168,17 @@ class TestVersionStampedTypedefInChecker:
         kinds = {c.kind for c in result.changes}
         # Sentinel should not be TYPEDEF_REMOVED
         assert ChangeKind.TYPEDEF_VERSION_SENTINEL in kinds
-        # The real typedef removal should still be BREAKING
+        # The real typedef removal is still reported, as a source break
         assert ChangeKind.TYPEDEF_REMOVED in kinds
-        assert result.verdict == Verdict.BREAKING
+        assert result.verdict == Verdict.API_BREAK
 
-    def test_sentinel_without_successor_is_breaking(self) -> None:
+    def test_sentinel_without_successor_is_typedef_removed(self) -> None:
         """Version-stamped typedef removed with NO successor → still TYPEDEF_REMOVED."""
         old = _snap({"mylib_version_2_5_3": "unsigned int"}, version="2.5.3")
         new = _snap({}, version="3.0.0")  # no successor at all
         result = compare(old, new)
         kinds = {c.kind for c in result.changes}
-        # No successor → cannot confirm it's a sentinel rotation → report as BREAKING
+        # No successor → cannot confirm it's a sentinel rotation → plain TYPEDEF_REMOVED
         assert ChangeKind.TYPEDEF_REMOVED in kinds
         assert ChangeKind.TYPEDEF_VERSION_SENTINEL not in kinds
 

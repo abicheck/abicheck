@@ -3,17 +3,17 @@
 
 | Field | Value |
 |-------|-------|
-| **Verdict** | 🟢 **COMPATIBLE** |
-| **Category** | Quality (Compatible) |
+| **Verdict** | 🟡 **COMPATIBLE_WITH_RISK** |
+| **Category** | Risk |
 | **Classification** | Rule |
 | **Platforms** | Linux |
 | **Flags** | Bad practice |
-| **Detected `ChangeKind`s** | `param_restrict_changed` |
+| **Detected `ChangeKind`s** | `param_restrict_added` |
 | **Source files** | `catalog/cases/case207_pointer_parameter_gained_restrict/` |
 | **Rule family** | [`pointer-parameter-gained-restrict`](by-rule/pointer-parameter-gained-restrict.md) |
 | **Subject** | [Function-signature and source-API changes](by-subject/function-signature-and-source-api-changes.md) |
 
-**Category:** Quality | **Verdict:** ✅ COMPATIBLE
+**Category:** Risk | **Verdict:** 🟡 COMPATIBLE_WITH_RISK
 
 ## Verdict and consumer impact
 
@@ -24,18 +24,27 @@ compile. What changed is the *caller's* obligation: under v1 a caller could
 legally pass overlapping buffers; under v2 doing so is undefined behaviour,
 and the callee's compiler is now free to vectorise the loop on that promise.
 
-That is why this is a reportable fact rather than a silent one. It is the
-mirror image of
+That obligation is not hypothetical: the runtime witness below shows an
+unchanged, already-built consumer that relies on overlap computing a
+different result after the swap, under both GCC and Clang. Consumers that
+never alias the two arguments are unaffected, and nothing in the library
+says which kind a consumer is — so the finding is a **conditional risk**
+(`param_restrict_added`, `COMPATIBLE_WITH_RISK`), not a calling-convention
+break. A project that promises overlap-tolerant behaviour should gate it.
+
+It is the mirror image of
 `case186_c_api_pointee_const_abi_neutral`,
-where a qualifier change tightened what the *callee* promises (safe, and
-fully suppressed). Here the tightening runs the other way, onto the caller.
+where a qualifier change tightened what the *callee* promises. Here the
+tightening runs the other way, onto the caller.
 
 Its negative control is
 `case208_restrict_added_to_definition_only`,
 where `restrict` appears only inside the implementation and never in the
 published declaration. The pair proves two things about these two fixtures:
 a `restrict` change on the *published contract* is reported, and one confined
-to the implementation is not.
+to the implementation is not — although case208's implementation-only
+`restrict` breaks the same overlapping consumer at runtime (recorded there as
+a separate behavioral break, not a detection target).
 
 ## Old/new diff
 
@@ -54,11 +63,19 @@ abicheck compare libv1.so libv2.so --header old=v1.h --header new=v2.h
 ## Expected abicheck finding
 
 ```text
-Verdict: COMPATIBLE (exit 0)
+Verdict: COMPATIBLE_WITH_RISK (exit 0)
 
-param_restrict_changed: Parameter restrict qualifier added: blend param dst
-param_restrict_changed: Parameter restrict qualifier added: blend param src
+param_restrict_added: Parameter restrict qualifier added: blend param dst
+param_restrict_added: Parameter restrict qualifier added: blend param src
 ```
+
+`func_params_changed` must not appear: top-level `restrict` qualifies the
+parameter object, not the function's type. (The clang header backend used to
+keep it in the parameter's type spelling and report a BREAKING
+"parameters changed" finding with the wrong mechanism; both backends now
+carry it only through `Param.is_restrict`.) Removing `restrict` is reported
+as `param_restrict_changed` (`COMPATIBLE`): the callee only drops an
+optimizer assumption.
 
 ## Minimum evidence
 
@@ -69,30 +86,35 @@ so the public header is the evidence tier this finding rests on.
 
 ## Why abicheck catches it
 
-`diff_param_qualifiers.py` compares each matched parameter's
-`is_restrict_fact` between the two sides and emits `param_restrict_changed`
-when the determination differs. It compares the `Fact[bool]` sibling rather
-than the raw flag precisely so "not collected" and "confirmed not
-restrict-qualified" are not folded together — a snapshot produced by a
-backend that never populated the field would otherwise read as every
-qualifier having just been added.
+`compare/parameter_facts.py` compares each matched parameter's
+`is_restrict_fact` between the two sides and emits `param_restrict_added`
+when it was gained (`param_restrict_changed` when lost). It compares the
+`Fact[bool]` sibling rather than the raw flag precisely so "not collected"
+and "confirmed not restrict-qualified" are not folded together — a snapshot
+produced by a backend that never populated the field would otherwise read as
+every qualifier having just been added.
 
 ## Runtime failure demonstration
 
-**Severity: latent undefined behaviour — correct today, wrong after the next
-optimiser change.**
+**Severity: wrong results for consumers that pass overlapping buffers.**
+
+Both libraries are built at `-O3` regardless of the build type (the promise
+only matters once the optimizer acts on it). The unchanged old consumer
+computes an in-place running prefix sum, `blend(buf + 1, buf, 128)`, which
+v1's declaration permits, and checks every element against a sequential
+oracle.
 
 ```bash
-gcc -shared -fPIC -g v1.c -o libv1.so
-gcc -g app.c -L. -lv1 -Wl,-rpath,. -o app
-./app
-# → 1.0 3.0 5.0 7.0 9.0 6.0 7.0 8.0   (overlapping blend, well-defined under v1)
-
-gcc -shared -fPIC -g -O2 v2.c -o libv1.so   # swap in v2, no recompile
-./app
-# → the same call is now undefined; an -O2/-O3 vectorised v2 may produce
-#   different values for the overlapping region
+gcc -O3 -shared -fPIC -g v1.c -o libv1.so
+gcc -g app.c -L. -lv1 -Wl,-rpath,'$ORIGIN' -o app
+./app            # first five: 1 3 6 10 15                         exit 0
+gcc -O3 -shared -fPIC -g v2.c -o libv1.so   # swap in v2, no recompile
+./app            # first five: 1 3 5 7 9  WRONG RESULT at element 2  exit 1
 ```
+
+Reproduced with GCC 13 and Clang 18/19, Debug and Release consumers. GCC
+already takes the vectorised path at 4 elements; Clang needs a longer input,
+hence 128.
 
 ## Safe redesign
 
@@ -111,6 +133,10 @@ not happen.
 
 ---
 
+## Ground-truth provenance
+
+**Behavioral break:** Demonstrated by the runtime witness: an overlapping old consumer gets a different result after the swap under GCC and Clang at -O3.
+
 ## Source files
 
 - `CMakeLists.txt`
@@ -120,4 +146,4 @@ not happen.
 - `v2.c`
 - `v2.h`
 
-_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md) · [Rule: Pointer parameter gained restrict](by-rule/pointer-parameter-gained-restrict.md) · [Subject: Function-signature and source-API changes](by-subject/function-signature-and-source-api-changes.md)._
+_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: Pointer parameter gained restrict](by-rule/pointer-parameter-gained-restrict.md) · [Subject: Function-signature and source-API changes](by-subject/function-signature-and-source-api-changes.md)._

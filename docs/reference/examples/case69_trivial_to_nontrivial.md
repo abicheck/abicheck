@@ -25,6 +25,15 @@ this is a pure calling-convention break, not a source-level API change —
 so source recompiles cleanly but old binaries crash or read garbage,
 because the caller and callee now disagree on where the arguments live.
 
+**Platform scope.** The verdict is for the Itanium C++ ABI on Linux x86-64,
+where it was demonstrated (the old GCC binary goes from `distance=5` to
+`SIGSEGV`). On Windows x64 MSVC passes a 16-byte struct by reference both
+before and after, so the transition does not exist there; that is an
+applicability fact (Windows is not in this case's `platforms`), not a
+detection gap and not a compatibility claim. macOS has not been verified by
+a native runtime test; its CI lane currently observes `NO_CHANGE`, recorded
+as a separate, undiagnosed detection gap.
+
 ## Old/new diff
 
 | v1.h | v2.h |

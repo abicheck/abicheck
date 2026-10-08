@@ -7,5 +7,5 @@ _Canonical rule slug:_ `pointer-parameter-gained-restrict`. [← back to all rul
 
 ## Canonical demonstration
 
-- [case207_pointer_parameter_gained_restrict](../case207_pointer_parameter_gained_restrict.md) — Pointer Parameter Gained `restrict` (🟢 COMPATIBLE)
+- [case207_pointer_parameter_gained_restrict](../case207_pointer_parameter_gained_restrict.md) — Pointer Parameter Gained `restrict` (🟡 COMPATIBLE_WITH_RISK)
 

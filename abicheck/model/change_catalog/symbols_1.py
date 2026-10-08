@@ -756,20 +756,11 @@ SYMBOLS_ENTRIES_1: list[ChangeKindMeta] = [
     _E(
         "param_restrict_changed",
         _C,
-        impact="A parameter's restrict qualifier was added or removed "
-        "(direction recorded in this finding's own detail); restrict "
-        "is a compiler hint affecting how the library's own "
-        "implementation of the function is optimized, not the "
-        "calling convention. The two directions carry different "
-        "risk: when restrict is ADDED, the new library's own "
-        "compiled code may now assume the parameter doesn't alias "
-        "other arguments — an already-compiled caller that still "
-        "passes aliased pointers for that parameter can hit "
-        "undefined behavior in the new callee's optimized code, with "
-        "no recompilation of the caller involved. When restrict is "
-        "REMOVED, the callee simply becomes more conservative "
-        "(drops an optimization assumption), which is safe for every "
-        "caller.",
+        impact="A parameter's restrict qualifier was removed: the callee "
+        "drops an optimization assumption and becomes more conservative, "
+        "which is safe for every caller and leaves the calling convention "
+        "untouched. (Adding restrict tightens the caller's obligation and "
+        "is reported separately as param_restrict_added.)",
         description_template="Parameter restrict qualifier {detail}: {name} param {old}",
         entity=_ENT.FUNCTION,
         operation=_OP.MODIFIED,

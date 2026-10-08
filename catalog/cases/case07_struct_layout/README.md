@@ -53,27 +53,19 @@ both versions; abicheck compares them directly from debug info.
 
 **Severity: CRITICAL**
 
-**Scenario:** app allocates `Point` with v1 layout (8 bytes), calls `init_point()` from v2 which writes a `z` field at offset 8 — past the allocation.
+**Scenario:** an old consumer allocates `Point` with v1's layout (8 bytes) and
+lets `init_point()` initialise it; v2's `init_point()` also stores `z` at
+offset 8 — past the consumer's allocation.
 
 ```bash
-# Build v1 + app (use -O0 to ensure predictable stack layout for canary demo)
-gcc -shared -fPIC -g v1.c -o libfoo.so
-gcc -g -O0 app.c -I. -L. -lfoo -Wl,-rpath,. -o app
-./app
-# → before: p={0,0} canary=0xDEADBEEF
-# → after:  p={1,2} canary=0xDEADBEEF
-
-# Swap in v2 (no recompile)
-gcc -shared -fPIC -g v2.c -o libfoo.so
-./app
-# → before: p={0,0} canary=0xDEADBEEF
-# → after:  p={1,2} canary=0x00000003   ← CORRUPTED
-# → CORRUPTION detected! (v2 wrote past end of struct)
+gcc -shared -fPIC -g v1.c -o libv1.so
+gcc -g app.c -I. -L. -lv1 -Wl,-rpath,'$ORIGIN' -o app
+./app            # sizeof(Point) as compiled = 8, p={1,2}        exit 0
+gcc -shared -fPIC -g v2.c -o libv1.so     # swap in v2, no recompile
+./app            # CORRUPTION: library wrote 1 byte(s) past ...  exit 1
 ```
 
-**Why CRITICAL:** The v2 library writes a `z` field at byte offset 8, but the app only
-allocated 8 bytes for the struct. The canary variable on the stack is overwritten —
-a classic stack corruption that can corrupt control flow or cause silent data loss.
+The witness heap-allocates the object with the **v1** size, followed by a 32-byte guard region filled with `0xA5`, and asserts the guard afterwards. That makes the overrun visible deterministically under GCC and Clang, Debug and Release, without depending on stack layout, optimisation level or a stack-protector canary (the original stack-canary witness stayed silent under some Clang builds). An independent ASan build of the same consumer reports `heap-buffer-overflow` after the swap.
 
 ## Safe redesign
 

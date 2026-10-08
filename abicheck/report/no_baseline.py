@@ -426,6 +426,9 @@ def _finding_json(finding: ReportFinding) -> dict[str, Any]:
         row["observed_value"] = change.new_value
     if change.source_location:
         row["source_location"] = change.source_location
+    if change.cross_source_providers:
+        # The evidence providers that agreed on this cross-source finding.
+        row["providers"] = list(change.cross_source_providers)
     return row
 
 

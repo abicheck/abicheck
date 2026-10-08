@@ -8,7 +8,7 @@
 | **Classification** | Scenario — Capability / evidence demonstration |
 | **Platforms** | Linux |
 | **Flags** | ABI break, API break, Bad practice |
-| **Detected `ChangeKind`s** | `struct_size_changed`, `public_api_internal_dependency_added` |
+| **Detected `ChangeKind`s** | `type_size_changed`, `public_api_internal_dependency_added` |
 | **Source files** | `catalog/cases/case191_header_only_graph_field_type/` |
 | **Related rules** | [`compatible-type-added`](by-rule/compatible-type-added.md), [`embedded-type-size-increased`](by-rule/embedded-type-size-increased.md), [`public-api-gains-internal-dependency`](by-rule/public-api-gains-internal-dependency.md), [`type-field-added-compatible`](by-rule/type-field-added-compatible.md) |
 | **Subject** | [Public API depends on an internal declaration](by-subject/internal-dependency-reachability.md) |
@@ -51,7 +51,8 @@ Verdict: BREAKING (exit 4)
 - type_size_changed: Size changed: Config (32 -> 128 bits)
   > Old code allocates or copies the type with the old size; heap/stack
     corruption, out-of-bounds access.
-- struct_size_changed: Struct size changed: demo::Config (4 -> 16 bytes)
+  (a DWARF-only run reports the same fact as `struct_size_changed`; with
+  headers it collapses into the finding above)
 
 Deployment risk (binary-compatible, review needed):
 - public_api_internal_dependency_added: Public entry 'use_config' now reaches internal

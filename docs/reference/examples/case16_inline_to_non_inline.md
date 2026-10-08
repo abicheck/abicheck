@@ -8,7 +8,7 @@
 | **Classification** | Rule |
 | **Platforms** | Linux |
 | **Flags** | — |
-| **Detected `ChangeKind`s** | `func_added` |
+| **Detected `ChangeKind`s** | `func_export_added` |
 | **Source files** | `catalog/cases/case16_inline_to_non_inline/` |
 | **Rule family** | [`inline-function-outlined`](by-rule/inline-function-outlined.md) |
 | **Subject** | [Inline-function and ODR-boundary changes](by-subject/inline-function-and-odr-boundary-changes.md) |
@@ -53,8 +53,8 @@ Quality Issues:
   script.
 
 Additions:
-- func_added: New public function: fast_hash
-  > New function available; existing binaries are unaffected.
+- func_export_added: fast_hash gained an exported symbol
+- func_lost_inline: fast_hash is no longer inline
 ```
 
 ## Minimum evidence
@@ -68,8 +68,8 @@ info or headers needed.
 
 The dynamic symbol table is authoritative L0 evidence — old's `.so` truly
 has no `fast_hash` symbol (`nm --dynamic` confirms it), so its appearance in
-new is classified `func_added` from pure ELF symbol-table evidence, same as
-any other new export. abicheck's binary comparison has no way to see (and
+new is classified `func_export_added` — the declaration existed on both sides
+and only its export appeared — rather than a brand-new `func_added`. abicheck's binary comparison has no way to see (and
 correctly doesn't claim to) that the function existed all along as a header
 inline — that fact lives in source, not in either compiled `.so`.
 

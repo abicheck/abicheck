@@ -270,19 +270,15 @@ class TestFieldBecameConst:
         r = compare(_snap(types=[t_old]), _snap(types=[t_new]))
         assert ChangeKind.FIELD_BECAME_CONST in _kinds(r)
 
-    def test_field_became_const_with_type_spelling_change_also_reports_type_changed(
+    def test_field_became_const_with_type_spelling_change_is_api_break_only(
         self,
     ):
         """A real dumper (castxml) spells the qualifier into `type` too
-        ("int" -> "const int"), not just the boolean — and unlike a
-        pointer/reference cv change, a BY-VALUE field's own const/volatile
-        change is a deliberate source-break escalation (case30_field_qualifiers
-        ground truth; see test_top_level_field_const_is_not_neutralised in
-        test_const_pointer_abi_neutral.py), so both the compatible
-        FIELD_BECAME_CONST and the breaking TYPE_FIELD_TYPE_CHANGED are
-        expected together here — a prior attempt to suppress the latter
-        (Codex review, PR #582) was reverted because it silently regressed
-        that ground truth."""
+        ("int" -> "const int"), not just the boolean. A by-value qualifier
+        keeps size, alignment and offset, so the change is reported by
+        FIELD_BECAME_CONST alone (API_BREAK: writes stop compiling), never
+        also as a BREAKING TYPE_FIELD_TYPE_CHANGED (case30_field_qualifiers
+        ground truth)."""
         t_old = RecordType(
             name="Cfg",
             kind="struct",
@@ -298,8 +294,8 @@ class TestFieldBecameConst:
         r = compare(_snap(types=[t_old]), _snap(types=[t_new]))
         kinds = _kinds(r)
         assert ChangeKind.FIELD_BECAME_CONST in kinds
-        assert ChangeKind.TYPE_FIELD_TYPE_CHANGED in kinds
-        assert r.verdict == Verdict.BREAKING
+        assert ChangeKind.TYPE_FIELD_TYPE_CHANGED not in kinds
+        assert r.verdict == Verdict.API_BREAK
 
 
 class TestFieldLostConst:
@@ -357,15 +353,13 @@ class TestFieldVolatileChanged:
         r = compare(_snap(types=[t_old]), _snap(types=[t_new]))
         assert ChangeKind.FIELD_LOST_VOLATILE in _kinds(r)
 
-    def test_field_became_volatile_with_type_spelling_change_also_reports_type_changed(
+    def test_field_became_volatile_with_type_spelling_change_is_risk_only(
         self,
     ):
-        """Same as the by-value const case above: a field changing from
-        "int" to "volatile int" (castxml's real spelling) is a deliberate
-        source-break escalation, so both FIELD_BECAME_VOLATILE and
-        TYPE_FIELD_TYPE_CHANGED fire, and the verdict is BREAKING — not
-        merely COMPATIBLE (a prior attempt to suppress the latter, per
-        Codex review on PR #582, was reverted as an incorrect regression)."""
+        """Same as the by-value const case above: "int" -> "volatile int"
+        keeps the layout, so only FIELD_BECAME_VOLATILE fires and the verdict
+        is COMPATIBLE_WITH_RISK (access semantics change; nothing fails to
+        compile or link)."""
         t_old = RecordType(
             name="Reg",
             kind="struct",
@@ -381,8 +375,8 @@ class TestFieldVolatileChanged:
         r = compare(_snap(types=[t_old]), _snap(types=[t_new]))
         kinds = _kinds(r)
         assert ChangeKind.FIELD_BECAME_VOLATILE in kinds
-        assert ChangeKind.TYPE_FIELD_TYPE_CHANGED in kinds
-        assert r.verdict == Verdict.BREAKING
+        assert ChangeKind.TYPE_FIELD_TYPE_CHANGED not in kinds
+        assert r.verdict == Verdict.COMPATIBLE_WITH_RISK
 
 
 class TestFieldMutableChanged:
@@ -1130,8 +1124,8 @@ class TestLegacyCvFactsReliableGating:
         r = compare(old, new)
         kinds = _kinds(r)
         assert ChangeKind.FIELD_BECAME_VOLATILE in kinds
-        assert ChangeKind.TYPE_FIELD_TYPE_CHANGED in kinds
-        assert r.verdict == Verdict.BREAKING
+        assert ChangeKind.TYPE_FIELD_TYPE_CHANGED not in kinds
+        assert r.verdict == Verdict.COMPATIBLE_WITH_RISK
 
     def test_unrelated_type_change_still_detected_when_legacy(self):
         """A genuine non-cv type change (int -> double) must still fire

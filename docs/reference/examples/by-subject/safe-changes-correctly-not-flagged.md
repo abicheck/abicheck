@@ -15,7 +15,7 @@ _12 case(s)._ [← back to all subjects](index.md)
 | [case120_internal_struct_reordered_scoped](../case120_internal_struct_reordered_scoped.md) | Internal Struct Fields Reordered (Non-Public, Scoped) | ✅ NO_CHANGE | No Change |
 | [case164_preproc_conditional_field](../case164_preproc_conditional_field.md) | Preprocessor-Conditional Field (Build-Context False Positive) | ✅ NO_CHANGE | No Change |
 | [case184_internal_enum_churn_scoped](../case184_internal_enum_churn_scoped.md) | Internal Enum Churn, Scoped Out by Private-Header Origin | ✅ NO_CHANGE | No Change |
-| [case186_c_api_pointee_const_abi_neutral](../case186_c_api_pointee_const_abi_neutral.md) | C API Pointee const-Qualification Is ABI-Neutral | ✅ NO_CHANGE | No Change |
+| [case186_c_api_pointee_const_abi_neutral](../case186_c_api_pointee_const_abi_neutral.md) | C API Pointee const-Qualification — ABI-Neutral, Not Source-Neutral | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case200_new_entry_point_instead_of_parameter_added](../case200_new_entry_point_instead_of_parameter_added.md) | New Entry Point Instead of a Changed Arity | 🟢 COMPATIBLE | Addition (Compatible) |
 | [case202_public_header_declaration_order_changed](../case202_public_header_declaration_order_changed.md) | Public Header Declaration Order Changed | ✅ NO_CHANGE | No Change |
 | [case204_class_gained_non_virtual_method](../case204_class_gained_non_virtual_method.md) | Class Gained a Non-Virtual Method | 🟢 COMPATIBLE | Addition (Compatible) |

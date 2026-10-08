@@ -486,6 +486,26 @@ CELLS: dict[str, Cell] = {
         must_not_kinds=frozenset({"internal_type_leaks_via_public_api"}),
         breaking=True,
     ),
+    # -- PR #1519 typedef respelled under an unchanged Itanium key ----------
+    # The structure here is the mangled name (``_Z1fi``: one ``int``), which
+    # a respelling cannot change; the spelling is the header's parameter type.
+    "respell.fp.typedef_to_its_encoded_type": Cell(
+        _fn_pair((("f", ("myint_t",)),), (("f", ("int",)),)),
+        must_not_kinds=frozenset({"func_params_changed"}),
+        breaking=False,
+        notes="the stale key vouches the typedef names the encoded int",
+    ),
+    "respell.fn.typedef_to_a_different_type": Cell(
+        _fn_pair((("f", ("myint_t",)),), (("f", ("long",)),)),
+        must=frozenset({("func_params_changed", "_Z1fi")}),
+        breaking=True,
+        notes="typedef-like old spelling, but the new one is not the encoded type",
+    ),
+    "respell.control.builtin_change": Cell(
+        _fn_pair((("f", ("int",)),), (("f", ("long",)),)),
+        must=frozenset({("func_params_changed", "_Z1fi")}),
+        breaking=True,
+    ),
 }
 
 #: The structurally identical twin of each reached-by-pointer cell, spelled

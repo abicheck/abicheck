@@ -3,7 +3,7 @@
 
 Listed in `BREAKING_KINDS` — runtime ABI break.
 
-_111 case(s)._ [← back to all examples](../index.md)
+_108 case(s)._ [← back to all examples](../index.md)
 
 | Case | Title | Verdict | Category |
 |------|-------|---------|----------|
@@ -27,7 +27,6 @@ _111 case(s)._ [← back to all examples](../index.md)
 | [case24_union_field_removed](../case24_union_field_removed.md) | Union Field Removed | 🔴 BREAKING | Breaking |
 | [case26_union_field_added](../case26_union_field_added.md) | Union Field Added (Size Grows) | 🔴 BREAKING | Breaking |
 | [case28_typedef_opaque](../case28_typedef_opaque.md) | Typedef and Opaque Type Changes | 🔴 BREAKING | Breaking |
-| [case30_field_qualifiers](../case30_field_qualifiers.md) | Field Qualifier Changes (const, volatile) | 🔴 BREAKING | Breaking |
 | [case33_pointer_level](../case33_pointer_level.md) | Pointer Level Change | 🔴 BREAKING | Breaking |
 | [case36_anon_struct](../case36_anon_struct.md) | Anonymous Struct/Union Change | 🔴 BREAKING | Breaking |
 | [case37_base_class](../case37_base_class.md) | Base Class Changes | 🔴 BREAKING | Breaking |
@@ -74,7 +73,6 @@ _111 case(s)._ [← back to all examples](../index.md)
 | [case88_cpo_kind_changed](../case88_cpo_kind_changed.md) | CPO kind changed (BREAKING) | 🔴 BREAKING | Breaking |
 | [case89_inline_accessor_renamed_pimpl_member](../case89_inline_accessor_renamed_pimpl_member.md) | Inline Accessor References Renamed Pimpl Member | 🔴 BREAKING | Breaking |
 | [case94_empty_tag_gained_state](../case94_empty_tag_gained_state.md) | Empty Tag Gained State | 🔴 BREAKING | Breaking |
-| [case95_allocator_nested_typedef_removed](../case95_allocator_nested_typedef_removed.md) | Allocator Nested-Typedef Removed | 🔴 BREAKING | Breaking |
 | [case97_api_depends_on_consumer_env](../case97_api_depends_on_consumer_env.md) | API Depends on Consumer Environment | 🔴 BREAKING | Breaking |
 | [case100_experimental_removed_without_replacement](../case100_experimental_removed_without_replacement.md) | Experimental Declaration Removed Without Replacement | 🔴 BREAKING | Breaking |
 | [case101_inline_namespace_version_bumped](../case101_inline_namespace_version_bumped.md) | Inline Namespace Version Bumped | 🔴 BREAKING | Breaking |
@@ -82,7 +80,6 @@ _111 case(s)._ [← back to all examples](../index.md)
 | [case104_glibcxx_dual_abi_flip](../case104_glibcxx_dual_abi_flip.md) | libstdc++ Dual-ABI Flip | 🔴 BREAKING | Breaking |
 | [case107_task_scheduler_init_removed](../case107_task_scheduler_init_removed.md) | `task_scheduler_init` Removed (historical ABI break) | 🔴 BREAKING | Breaking |
 | [case108_task_class_removed](../case108_task_class_removed.md) | `task` Class Removed (historical ABI break — vtable angle) | 🔴 BREAKING | Breaking |
-| [case109_flow_graph_policy_renames](../case109_flow_graph_policy_renames.md) | flow::graph Policy Tag Renames | 🔴 BREAKING | Breaking |
 | [case110_concurrent_unordered_map_api_drift](../case110_concurrent_unordered_map_api_drift.md) | concurrent_unordered_map API Drift | 🔴 BREAKING | Breaking |
 | [case112_lp64_ilp64](../case112_lp64_ilp64.md) | LP64 → ILP64 Integer-Model Switch (oneMKL MKL_INT 32→64) | 🔴 BREAKING | Breaking |
 | [case113_abi_tag_changed](../case113_abi_tag_changed.md) | ABI-tag set change ([abi:cxx11] lost on a single symbol) | 🔴 BREAKING | Breaking |

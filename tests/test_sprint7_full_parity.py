@@ -389,7 +389,8 @@ class TestFieldBecameMutable:
 class TestFieldQualifierVerdicts:
     """Field qualifier changes should be COMPATIBLE (informational, not breaking)."""
 
-    def test_field_const_change_is_compatible(self) -> None:
+    def test_field_const_change_is_api_break(self) -> None:
+        # Writes to the field stop compiling; layout is unchanged.
         old = _snap(
             types=[
                 RecordType(
@@ -403,9 +404,10 @@ class TestFieldQualifierVerdicts:
             ]
         )
         result = compare(old, new)
-        assert result.verdict == Verdict.COMPATIBLE
+        assert result.verdict == Verdict.API_BREAK
 
-    def test_field_volatile_change_is_compatible(self) -> None:
+    def test_field_volatile_change_is_risk(self) -> None:
+        # Access semantics change; nothing fails to compile or link.
         old = _snap(
             types=[
                 RecordType(
@@ -421,7 +423,7 @@ class TestFieldQualifierVerdicts:
             ]
         )
         result = compare(old, new)
-        assert result.verdict == Verdict.COMPATIBLE
+        assert result.verdict == Verdict.COMPATIBLE_WITH_RISK
 
 
 # ===========================================================================
@@ -1067,15 +1069,18 @@ class TestClassification:
         assert ChangeKind.METHOD_ACCESS_CHANGED in _API_BREAK_KINDS
         assert ChangeKind.FIELD_ACCESS_CHANGED in _API_BREAK_KINDS
 
-    def test_compatible_kinds_contains_qualifier_changes(self) -> None:
-        from abicheck.checker import _COMPATIBLE_KINDS
+    def test_qualifier_changes_are_classified_by_direction(self) -> None:
+        from abicheck.checker import _API_BREAK_KINDS, _COMPATIBLE_KINDS, _RISK_KINDS
 
-        assert ChangeKind.FIELD_BECAME_CONST in _COMPATIBLE_KINDS
+        # Narrowing what source may do with the field breaks source...
+        assert ChangeKind.FIELD_BECAME_CONST in _API_BREAK_KINDS
+        assert ChangeKind.FIELD_LOST_MUTABLE in _API_BREAK_KINDS
+        # ...widening it does not...
         assert ChangeKind.FIELD_LOST_CONST in _COMPATIBLE_KINDS
-        assert ChangeKind.FIELD_BECAME_VOLATILE in _COMPATIBLE_KINDS
-        assert ChangeKind.FIELD_LOST_VOLATILE in _COMPATIBLE_KINDS
         assert ChangeKind.FIELD_BECAME_MUTABLE in _COMPATIBLE_KINDS
-        assert ChangeKind.FIELD_LOST_MUTABLE in _COMPATIBLE_KINDS
+        # ...and volatile changes access semantics without failing a build.
+        assert ChangeKind.FIELD_BECAME_VOLATILE in _RISK_KINDS
+        assert ChangeKind.FIELD_LOST_VOLATILE in _RISK_KINDS
         assert ChangeKind.PARAM_DEFAULT_VALUE_CHANGED in _COMPATIBLE_KINDS
 
     def test_every_changekind_classified(self) -> None:

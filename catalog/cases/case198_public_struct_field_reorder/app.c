@@ -11,7 +11,9 @@ int main(void) {
     printf("consumer sees id = %d (expected 42)\n", r.id);
     /* Read through the library, which uses its own layout. */
     printf("library sees id = %d (expected 42)\n", record_id(&r));
-    if (r.id != 42)
+    if (r.id != 42 || record_id(&r) != 42) {
         printf("MISREAD: the consumer's offset for `id` no longer matches\n");
+        return 1;
+    }
     return 0;
 }

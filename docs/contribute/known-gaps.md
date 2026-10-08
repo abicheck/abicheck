@@ -7094,6 +7094,34 @@ problem rather than a review-found edge case, the honest fix is reworking
 stream per-artifact results to the caller instead of returning one
 document, which both known callers would need to be updated for together.
 
+### A pointee qualifier change on a *return* type is not reported
+
+Found while fixing catalog case186 (GCC/Clang catalog validation,
+2026-10). Parameter-side pointee const/volatile changes are now classified
+by direction (`param_pointee_qualifier_added` / `_changed`,
+`compare/parameter_facts.py`). The return-type mirror is still suppressed
+entirely by `cv_qualifiers_only_differ`: `char *get_name()` →
+`const char *get_name()` breaks a C++ caller writing
+`char *p = get_name();` (and draws a discarded-qualifier diagnostic in C),
+while the reverse direction is safe. It was left out on purpose — the
+Wayland/libuv false-positive class this suppression was built for included
+accessor *returns* gaining const, and a gating `API_BREAK` there needs its
+own evidence that real consumers bind the result to a mutable pointer.
+A future fix should mirror the parameter split (gained → `API_BREAK` for
+assigning callers, lost → compatible) with its own catalog case and an FP
+measurement against the conda-forge corpus.
+
+### Behavioral regressions behind an unchanged declaration
+
+Catalog case208 (restrict added to a function *definition* only) breaks a
+valid overlapping consumer at runtime under GCC and Clang, while the
+declared interface — everything a binary/header comparison reads — is
+identical. Ground truth records it as `behavioral_break: true` with
+`truth_scope: declared-interface`; no detector is expected to infer it.
+An L4 source-ABI replay *could* see `restrict` on the definition's
+parameters and report a definition/declaration contract mismatch; that is
+not implemented.
+
 ### Dependency static/dynamic linking-mode change has no ChangeKind
 
 Found by Phase 2/3 of
@@ -11245,6 +11273,21 @@ already shared: `workflows/pair_evidence.fold_pair_evidence`. Unifying the
 fold means generalizing the release fold so N=1 reduces to the scalar one;
 any exit-code difference that exposes at N=1 must be decided before it
 changes (ADR-064). Owner: ADR-063/065, lane A stage A2(b).
+
+## A record's triviality change is invisible without DWARF (2026-10-08)
+
+A trivially-copyable struct that gains a user-provided destructor or copy
+operation changes how it is passed by value (registers → hidden pointer on
+Itanium x86-64). abicheck reports that as `value_abi_trait_changed` from DWARF
+only. The header-side `trivially_copyable_lost` detector exists, but CastXML
+never fills `RecordType.is_trivially_copyable`, so a stripped binary plus
+headers reads `case69_trivial_to_nontrivial` as `API_BREAK`. Its earlier
+stripped `BREAKING` came from a spurious binary `func_removed` for the
+implicit copy constructor, which PR #1519 corrected to
+`inline_function_removed`. A sound header-side fix needs the trait proven on
+the *old* side (no user-declared special members, trivially-copyable bases and
+members), not just "a user destructor appeared". Owner: CastXML record
+extraction (`extract/headers/castxml/records.py`).
 
 ## An unreadable consumer import table still reads as "requires nothing" (2026-10-07)
 

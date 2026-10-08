@@ -6,6 +6,9 @@
  * -- but every already-compiled caller passes one argument to a callee that
  * now reads two.
  */
+#define CHAN_RDONLY 0
+#define CHAN_RDWR   1
+
 int chan_open(const char *name, int flags);
 int chan_close(int fd);
 

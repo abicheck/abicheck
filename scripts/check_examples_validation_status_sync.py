@@ -97,7 +97,7 @@ _SCOPE_COUNT_RE = re.compile(r"\d+(?= catalog cases)")
 # fixed status-count order this script renders it in. Renders only counts
 # that are actually present (nonzero), joined as "N STATUS / N STATUS / ...".
 ROW_STATUS_ORDER = {
-    "Default/debug verdicts": ("PASS", "FAIL", "XFAIL", "SKIP", "ERROR"),
+    "Default/debug verdicts": ("PASS", "FAIL", "XFAIL", "NOT_APPLICABLE", "SKIP", "ERROR"),
     "Runtime smoke": (
         "DEMONSTRATED",
         "NO_RUNTIME_SIGNAL",
@@ -105,9 +105,9 @@ ROW_STATUS_ORDER = {
         "SKIP",
         "BUILD_ERROR",
     ),
-    "Release headers": ("PASS", "FAIL", "XFAIL", "SKIP", "ERROR"),
-    "Stripped headers": ("PASS", "FAIL", "XFAIL", "SKIP", "ERROR"),
-    "Build/source proof": ("PASS", "FAIL", "XFAIL", "SKIP", "ERROR"),
+    "Release headers": ("PASS", "FAIL", "XFAIL", "NOT_APPLICABLE", "SKIP", "ERROR"),
+    "Stripped headers": ("PASS", "FAIL", "XFAIL", "NOT_APPLICABLE", "SKIP", "ERROR"),
+    "Build/source proof": ("PASS", "FAIL", "XFAIL", "NOT_APPLICABLE", "SKIP", "ERROR"),
 }
 
 

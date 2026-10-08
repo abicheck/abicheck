@@ -47,6 +47,7 @@ from .compare.parameter_facts import (
     override_changes,
     parameter_default_changes,
     parameter_rename_changes,
+    pointee_qualifier_changes,
     pointer_level_changes,
     restrict_changes,
     va_list_changes,
@@ -156,6 +157,7 @@ from .model.change_catalog.kinds import ChangeKind
 from .model.snapshot_reliability import family_reliable
 from .model.surface_facts import (
     is_abi_visible,
+    is_binary_exported,
     is_export_confirmed_absent,
     is_export_table_only_record,
     surface_fact_summary,
@@ -410,6 +412,13 @@ def _check_removed_function(
         # declaration, not only the hidden friend that surfaced it
         # (catalog case96_hidden_friend_removed, whose verdict went
         # API_BREAK -> BREAKING).
+        removed_kind = ChangeKind.INLINE_FUNCTION_REMOVED
+    elif f_old.is_compiler_generated is True and not is_binary_exported(f_old):
+        # An implicit special member the compiler synthesized (castxml's
+        # `artificial="1"`) and no export table confirms: it is generated
+        # inline in every consumer that uses it, so a const member deleting
+        # the implicit default constructor/`operator=` is a source break
+        # for C++ consumers, never a missing symbol (catalog case30).
         removed_kind = ChangeKind.INLINE_FUNCTION_REMOVED
     else:
         removed_kind = ChangeKind.FUNC_REMOVED
@@ -1293,6 +1302,32 @@ def _diff_param_restrict(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         old, new, *_reconciled_function_surfaces(old, new)
     ):
         changes += restrict_changes(
+            mangled,
+            f_old.name,
+            v_old,
+            v_new,
+            entity_id=f_old.entity_id or f_new.entity_id,
+        )
+    return changes
+
+
+@registry.detector("param_pointee_qualifier")
+def _diff_param_pointee_qualifier(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
+    """Detect a const/volatile change behind a parameter's pointer/reference.
+
+    ``FUNC_PARAMS_CHANGED`` ignores it (the calling convention is the same),
+    but its source-level effect is real and direction-dependent -- see
+    ``compare.parameter_facts.pointee_qualifier_changes``. Header-tier only,
+    for the reason ``param_restrict`` gives: a DWARF or symbol-table side
+    carries no reliable spelling for the pointee's qualifiers.
+    """
+    if not _both_header_aware(old, new):
+        return []
+    changes: list[Change] = []
+    for mangled, f_old, f_new, v_old, v_new in _parameter_view_pairs(
+        old, new, *_reconciled_function_surfaces(old, new)
+    ):
+        changes += pointee_qualifier_changes(
             mangled,
             f_old.name,
             v_old,

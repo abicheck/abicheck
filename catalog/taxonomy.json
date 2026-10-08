@@ -2363,7 +2363,7 @@
   "operation": "compare",
   "ecosystem": "generic",
   "topics": [
-   "controls"
+   "symbols"
   ],
   "languages": [
    "c"
@@ -4112,6 +4112,7 @@
   "operation": "compare",
   "ecosystem": "generic",
   "topics": [
+   "symbols",
    "types"
   ],
   "languages": [

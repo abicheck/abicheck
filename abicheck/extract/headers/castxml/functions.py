@@ -38,9 +38,11 @@ import re
 from xml.etree.ElementTree import Element
 
 from ....model import AccessLevel, Fact, Function, Param, Visibility
+from ....model.cc_attributes import is_cc_attribute
 from ....model.export_index import ExportMatch
 from ....model.identity import entity_id_for_function
 from ...surface_fact_producers import header_ast_surface_facts
+from .calling_convention import source_calling_conventions
 from .context import CastxmlParserContext
 from .location import (
     access_level,
@@ -664,7 +666,7 @@ def parse_function_element(
         is_variadic=is_variadic,
         # Semantic contract / calling-convention attributes, filtered from
         # the compound ``attributes`` string (same channel as noexcept).
-        contract_attributes=_extract_contract_attributes(el.get("attributes", "")),
+        contract_attributes=_contract_attributes_with_source_cc(ctx, el, name),
         exception_spec=function_exception_spec(ctx, el),
         # See _deprecation_marker for why this isn't a plain
         # el.get("deprecation") read.
@@ -718,3 +720,21 @@ def parse_functions(ctx: CastxmlParserContext) -> list[Function]:
         if func is not None:
             funcs.append(func)
     return funcs
+
+
+def _contract_attributes_with_source_cc(
+    ctx: CastxmlParserContext, el: Element, name: str
+) -> list[str]:
+    """CastXML's contract attributes, plus a calling convention it dropped.
+
+    CastXML omits GNU x86-64 conventions (``ms_abi``/``sysv_abi``) from its
+    ``attributes`` string; when it records no convention at all, the one the
+    declaration spells in its own text is added (see
+    :mod:`.calling_convention`). A convention CastXML did report is never
+    second-guessed.
+    """
+    attrs = _extract_contract_attributes(el.get("attributes", ""))
+    if any(is_cc_attribute(a) for a in attrs):
+        return attrs
+    extra = source_calling_conventions(ctx, el, name)
+    return sorted(set(attrs) | extra) if extra else attrs

@@ -64,6 +64,13 @@
         "candidate_side_enrichment": {
           "type": "boolean"
         },
+        "providers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Evidence providers that corroborated this cross-source finding (e.g. public_header_ast, source_index); absent for findings not produced by a cross-source check."
+        },
         "observed_value": {
           "type": [
             "string",

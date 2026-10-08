@@ -92,6 +92,7 @@ from .context import (
 )
 from .inline_semantics import fold_inline_across_redeclarations, is_effectively_inline
 from .param_kind import param_kind as _param_kind
+from .restrict_spelling import without_top_level_restrict
 from .return_type import return_type as _return_type
 
 #: Evaluates a param's default-argument initializer to its snapshot value
@@ -566,13 +567,11 @@ def parse_functions(
         params = [
             Param(
                 name=str(p.get("name", "")),
-                type=_qualtype(p),
-                # Desugared, not the raw `qualType`: a typedef'd
-                # pointer/reference/rvalue-reference (`typedef int &Ref;`)
-                # spells its `qualType` as the bare alias name, with no
-                # `&`/`*` token for the spelling heuristic to find -- see
-                # `context.qualtype_desugared`'s own docstring (Codex
-                # review, PR #1200).
+                # Top-level `restrict` is `is_restrict` below, not the type.
+                type=without_top_level_restrict(_qualtype(p)),
+                # Desugared, not the raw `qualType`: a typedef'd pointer/reference/rvalue-reference (`typedef int &Ref;`)
+                # spells its `qualType` as the bare alias name, with no `&`/`*` token for the spelling heuristic to find --
+                # see `context.qualtype_desugared`'s own docstring (Codex review, PR #1200).
                 kind=_param_kind(_qualtype_desugared(p)),
                 pointer_depth=_pointer_depth(_qualtype(p)),
                 # G31 Phase C: castxml was the ONLY producer of this fact (`_resolve_cv_restrict`), so a castxml-vs-clang comparison of unchanged headers reported PARAM_RESTRICT_CHANGED for every restrict-qualified parameter -- the detector compares the two bools directly, with no producer gate to decline on (unlike `deprecated`/`is_scoped` before this phase).

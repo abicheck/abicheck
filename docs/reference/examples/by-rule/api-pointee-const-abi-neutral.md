@@ -7,5 +7,5 @@ _Canonical rule slug:_ `api-pointee-const-abi-neutral`. [← back to all rules](
 
 ## Canonical demonstration
 
-- [case186_c_api_pointee_const_abi_neutral](../case186_c_api_pointee_const_abi_neutral.md) — C API Pointee const-Qualification Is ABI-Neutral (✅ NO_CHANGE)
+- [case186_c_api_pointee_const_abi_neutral](../case186_c_api_pointee_const_abi_neutral.md) — C API Pointee const-Qualification — ABI-Neutral, Not Source-Neutral (🟡 COMPATIBLE_WITH_RISK)
 

@@ -4,13 +4,29 @@
 
 ## Verdict and consumer impact
 
-Any code compiled against old that stores, transmits, or switches on
-`FOO`'s value (`2`) now runs against a library whose enum no longer defines
-that value. This is an ABI break (a symbol using the enum was recompiled
-around the change) and an API break (`FOO` is gone from the header). The
-value `2` doesn't stop existing at the bit level, but it's no longer a valid
-`Status` member — persisted data, protocol messages, or `switch` statements
-built around it silently mishandle it.
+Three distinct things change here, and they should not be conflated:
+
+1. **Source break.** `FOO` is gone from the header, so consumer source that
+   names it no longer compiles.
+2. **Value-contract break for already-built consumers.** Code compiled
+   against old still holds the constant `2` and may store, transmit, or
+   `switch` on it; the new library no longer defines that value as a
+   `Status`, so persisted data, protocol messages and switch arms built
+   around it are silently mishandled. This is why abicheck classifies
+   `enum_member_removed` as `BREAKING`.
+3. **Not a layout break.** The enum's representation does not change: on
+   the tested targets (x86-64 SysV, GCC and Clang) `Status` keeps the same
+   underlying type and size with or without `FOO`, so no struct offset,
+   parameter slot or return register moves. An enumerator removal is not a
+   universal size/calling-convention change — check the enum's
+   representation (`enum_underlying_size_changed`) separately per ABI.
+
+The fixture additionally changes behavior: `get_status()` returns `ERROR`
+(`1`) where it used to return `FOO` (`2`). The runtime witness below
+therefore demonstrates the changed *result contract* the old consumer relies
+on, not a layout mismatch; a removal that kept the library's numeric results
+unchanged would still be (1) and (2), but would not fail that particular
+smoke.
 
 ## Old/new diff
 
@@ -53,32 +69,24 @@ sets directly from debug info and flags a name present only in old as
 
 ## Runtime failure demonstration
 
-**Severity: CRITICAL**
+**Severity: CRITICAL (changed result contract)**
 
-**Scenario:** compile app against old (checks for `FOO`), swap in new `.so`
-without recompile.
+**Scenario:** compile app against old (it checks for `FOO`), swap in new
+`.so` without recompile.
 
 ```bash
-# Build old library + app
 gcc -shared -fPIC -g old/lib.c -Iold -o libstatus.so
 gcc -g app.c -Iold -L. -lstatus -Wl,-rpath,. -o app
-./app
-# → FOO
-# → exit: 0
-
-# Swap in new library (no recompile)
-gcc -shared -fPIC -g new/lib.c -Inew -o libstatus.so
-./app
-# → WRONG RESULT: expected FOO(2), got 1
-# → exit: 1
+./app            # FOO                                            exit 0
+gcc -shared -fPIC -g new/lib.c -Inew -o libstatus.so   # swap, no recompile
+./app            # WRONG RESULT: expected FOO(2), got 1          exit 1
 ```
 
-**Why CRITICAL:** the app's compiled-in check `if (s == FOO)` still compares
-against the constant `2`, but new's `get_status()` now returns `ERROR` (`1`)
-for the situation it used to report as `FOO` — the app silently falls into
-its mismatch branch instead of the case it was built to handle. Any consumer
-that persisted or transmitted the value `2` under the old meaning faces the
-same kind of silent misinterpretation.
+The app's compiled-in check `if (s == FOO)` still compares against the
+constant `2`, but new's `get_status()` now returns `ERROR` (`1`) for the
+situation it used to report as `FOO`. That is the behavior change the
+fixture makes alongside the removal; the enum's own size and the call's
+register usage are unchanged.
 
 ## Safe redesign
 

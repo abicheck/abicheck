@@ -3,33 +3,36 @@
 
 | Field | Value |
 |-------|-------|
-| **Verdict** | 🔴 **BREAKING** |
-| **Category** | Breaking |
+| **Verdict** | 🟠 **API_BREAK** |
+| **Category** | API Break |
 | **Classification** | Rule |
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | API break |
-| **Detected `ChangeKind`s** | `type_field_type_changed` |
+| **Detected `ChangeKind`s** | `field_became_const`, `field_became_volatile` |
 | **Source files** | `catalog/cases/case30_field_qualifiers/` |
 | **Rule family** | [`field-qualifiers`](by-rule/field-qualifiers.md) |
 | **Subject** | [Struct and type layout changes](by-subject/struct-and-type-layout-changes.md) |
-| **Underlying fact** | API_BREAK (policy-escalated to BREAKING) |
 
-**Category:** Type Qualifiers | **Verdict:** 🔴 BREAKING (policy-escalated API break)
+**Category:** Type Qualifiers | **Verdict:** 🟠 API_BREAK
 
 ## Verdict and consumer impact
 
 The binary layout of `struct SensorConfig` is unchanged — `const` and
 `volatile` don't affect size, alignment, or offsets, so an already-built
-consumer binary keeps linking and running against v2 unmodified. The
-underlying compatibility *fact* is API_BREAK, not ABI_BREAK
-(`ground_truth.json`: `abi_break: false`, `api_break: true`). abicheck's
-default policy escalates the verdict to BREAKING anyway: `sample_rate`
-becomes `const` (writing through the old, non-`const` assumption is
-undefined behavior and will be rejected on recompilation) and `raw_value`
-becomes `volatile` (a binary compiled without the volatile contract may
-observe or rely on compiler-cached reads that are no longer valid). The
-project treats this semantic-divergence risk as release-blocking by
-default rather than recompile-only.
+consumer binary keeps linking and running against v2 unmodified. The break
+is at recompilation: `sample_rate` becomes `const`, so the consumer's
+assignment to it no longer compiles (and, for C++ consumers, the implicit
+default constructor and copy/move assignment become deleted). abicheck
+reports exactly that fact — **API_BREAK** (`field_became_const`); a project
+that promises source compatibility gates it.
+
+`raw_value` becoming `volatile` is a different kind of change: it does not
+break the build, but every recompiled access must now reach memory (e.g.
+memory-mapped hardware state), so code that relied on cached reads changes
+behaviour — reported separately as a risk (`field_became_volatile`).
+Earlier releases also reported both fields as `type_field_type_changed`
+(BREAKING), turning a recompile-only change into a layout claim; the
+qualifier change is not a field *type* change in the layout sense.
 
 ## Old/new diff
 
@@ -50,36 +53,34 @@ abicheck compare libfoo_v1.so libfoo_v2.so
 ## Expected abicheck finding
 
 ```text
-Verdict: BREAKING (exit 4)
+Verdict: API_BREAK (exit 2)
 
-- type_field_type_changed: Field type changed: SensorConfig::sample_rate (int -> const int)
-  > Field has different size or representation; old code misinterprets the data.
-  Affected symbols: sensor_read
-- type_field_type_changed: Field type changed: SensorConfig::raw_value (int -> volatile int)
-  > Field has different size or representation; old code misinterprets the data.
-  Affected symbols: sensor_read
-
-Quality issues:
 - field_became_const: Field became const: SensorConfig::sample_rate
 - field_became_volatile: Field became volatile: SensorConfig::raw_value
+- inline_function_removed: SensorConfig() / operator= (implicit C++ members
+  deleted by the const field; never exported)
 ```
+
+`type_field_type_changed` and `func_removed` must not appear.
 
 ## Minimum evidence
 
 `min_evidence: L1` — DWARF wraps a qualified field's type DIE in
 `DW_TAG_const_type`/`DW_TAG_volatile_type`, so the qualifier change is
-visible directly in debug info; `-g` alone (no public headers) is enough,
-matching the by-value cv-qualifier policy note in `ground_truth.json`.
+visible directly in debug info; `-g` alone (no public headers) reaches the
+same `API_BREAK`.
 
 ## Why abicheck catches it
 
-abicheck resolves each struct member's type DIE for both binaries and
-compares the resolved type name/qualification. A member that gained a
-`DW_TAG_const_type` or `DW_TAG_volatile_type` wrapper reports as a field
-type change even though the underlying byte size and member offset are
-identical — the layout-neutral, contract-only nature of the change is what
-routes it to the quality-issue `field_became_const`/`field_became_volatile`
-findings alongside the escalated breaking finding.
+abicheck resolves each struct member's type for both sides. A member whose
+type differs only by a by-value `const`/`volatile` keeps its size and offset,
+so the layout detectors stay silent and the change is reported by the
+dedicated qualifier kinds: `field_became_const` (`API_BREAK`: writes no
+longer compile), `field_became_volatile` / `field_lost_volatile` (risk),
+`field_lost_const` (compatible). The C++ special members a const member
+implicitly deletes are compiler-generated and never exported, so their
+disappearance is `inline_function_removed` (a source break), not a missing
+symbol.
 
 ## Runtime failure demonstration
 
@@ -151,10 +152,6 @@ echo "exit: $?"
 
 ---
 
-## Ground-truth provenance
-
-**Policy note:** By-value cv-qualifier changes (adding const/volatile to a field) are binary-layout-neutral — size, alignment, and offsets are unchanged, so an already-built consumer binary keeps linking and running. The underlying compatibility fact is API_BREAK (recompilation-only failure: a const write becomes a compile error, a missing volatile risks stale-cache reads). `expected` stays BREAKING because the project's default policy conservatively routes field-qualifier changes through the same contract detector as other field-type changes, treating the semantic-divergence risk as release-blocking rather than recompile-only. This is a deliberate policy choice, not a claim that the binary itself is incompatible.
-
 ## Source files
 
 - `CMakeLists.txt`
@@ -164,4 +161,4 @@ echo "exit: $?"
 - `v2.c`
 - `v2.h`
 
-_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: Field type qualifiers changed](by-rule/field-qualifiers.md) · [Subject: Struct and type layout changes](by-subject/struct-and-type-layout-changes.md)._
+_See also: [Compatibility Catalog](index.md) · [All API_BREAK cases](by-verdict/api-break.md) · [Category: API Break](by-category/api_break.md) · [Rule: Field type qualifiers changed](by-rule/field-qualifiers.md) · [Subject: Struct and type layout changes](by-subject/struct-and-type-layout-changes.md)._
