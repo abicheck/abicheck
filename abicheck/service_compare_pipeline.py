@@ -579,15 +579,15 @@ def classify_compare_pair(
     policy_inputs = resolve_request_policy_inputs(request, suppression, pf)
     suppression, pf = policy_inputs.suppression, policy_inputs.policy_file
     evaluation_config = policy_inputs.evaluation_config
-    # The shared fold diffs the *embedded* build/source facts (never raw
-    # sources/build_info paths, which `_resolve_side_pack` would try and fail
-    # to reload as packs) and folds the abi3 audit.
+    # The shared evidence fold (L0 removals, *embedded* build/source facts --
+    # never raw pack paths -- and the abi3 audit), the same one the CLI runs.
     folded = fold_pair_evidence(
         old,
         new,
         collect_mode=pair.old_evidence.collect_mode,
         extra_changes=None,
         policy_file=pf,
+        lang=request.lang,
         abi3_floor=request.abi3_floor,
     )
     extra_changes, layer_coverage_rows = (

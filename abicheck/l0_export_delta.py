@@ -237,3 +237,125 @@ def collect_l0_export_delta(
     # (Codex/CodeRabbit review, carried over from the original compare-side
     # implementation).
     return _hard_removals(l0_old, l0_new)
+
+
+def fold_l0_hard_removals(
+    old: object,
+    new: object,
+    lang: str,
+    extra_changes: list[Change] | None,
+) -> list[Change] | None:
+    """Preserve hard ELF-only removals a header-scoped compare could hide.
+
+    A function present in the ELF/DWARF exports can be entirely absent from
+    the header AST — most commonly because it is declared behind a
+    consumer-controlled macro the header pass parses without knowing the
+    real build's `-D` set (``examples/case97_api_depends_on_consumer_env``:
+    the header AST is parsed once per compare, with no signal for which
+    macro state the *binary* was actually built under, so a macro-gated
+    declaration silently drops out on both sides). When that happens the
+    function never enters the header-scoped model on either side, so the
+    diff has nothing to compare it against and a real ``BREAKING`` removal
+    is missed.
+
+    Delegates the actual "resolve both inputs symbols-only and diff them
+    unscoped" extraction to :func:`abicheck.l0_export_delta.collect_l0_export_delta`
+    (ADR-049 Phase 5 §6.3) -- the same function the retired ``cli_scan_baseline._run_baseline_compare``
+    called for ``scan --against`` (PR #494 originally hand-copied this
+    logic in both places, locked in by ``tests/test_pr494_scan_regressions.py``;
+    this function's own contribution beyond that shared core is only the
+    staleness check below, since only this call site re-derives paths from
+    an already-resolved snapshot that could have been read from a stale
+    pre-dumped JSON file). Per ADR-028 D3 (artifact-backed evidence stays
+    authoritative), this only restores a fact the ELF layer already
+    asserts; it cannot manufacture a break that isn't really there.
+
+    Re-resolves from each snapshot's own ``source_path`` — the binary it was
+    actually dumped from — rather than the compare CLI's raw input paths, so
+    this also covers the ``dump`` (with `-H`) *then* ``compare snap1.json
+    snap2.json`` two-step workflow, not just a direct ``compare a.so b.so
+    -H``: a pre-dumped JSON snapshot carries no `-H` flag of its own for
+    ``compare`` to see, but it does remember the binary it came from.
+
+    Best-effort: a raw binary input to re-resolve may not be available
+    (e.g. a hand-authored JSON snapshot with no real ``source_path``, or one
+    dumped on a different machine where that path no longer exists) —
+    resolution failures are swallowed and *extra_changes* is returned
+    unchanged.
+
+    Identity-checked against ``source_mtime``/``source_size``: a pre-dumped
+    JSON snapshot read back into ``compare snap1.json snap2.json`` records
+    the mtime and byte size the binary had at dump time; if the file at
+    ``source_path`` has since changed (rebuilt in place, or the path reused
+    for something else) the re-probe would assert a fact about a *different*
+    binary than the one the snapshots actually describe, making the compare
+    non-reproducible. When either doesn't match — or either snapshot
+    predates these fields — the fold-in declines rather than trust a
+    possibly-stale binary. Not a cryptographic guarantee (a same-size,
+    mtime-preserving rebuild — e.g. ``cp -p`` — can still slip through;
+    Codex review), but a proportionate check for a best-effort enrichment
+    that's already documented to swallow anything short of a clean match.
+
+    The mtime side of that check is skipped independently for each side whose
+    own ``source_mtime_epoch`` flag is set: ``dumper._safe_mtime`` recorded
+    the fixed ``SOURCE_DATE_EPOCH`` value rather than that binary's real
+    mtime at *dump* time (reproducible-builds spec), so a live re-probe's
+    real mtime almost never equals it. Each side's flag is checked
+    independently (not OR'd together) so a mixed CI/local compare — one
+    snapshot dumped under a pinned epoch, the other dumped normally — still
+    enforces the real mtime on the non-epoch side rather than letting one
+    epoch-dumped side disable the check for both (Codex review, three
+    rounds: same-process direct compares, then a dump/compare environment
+    mismatch, then this per-side mix). The flag is checked per-snapshot
+    rather than via the *compare*-time environment for the same reason as
+    round two — a dump-time epoch must stay recognized regardless of what's
+    set later. Size still applies unconditionally to both sides — it isn't
+    epoch-gated and remains a real (if imperfect) identity signal.
+    """
+    old_path = getattr(old, "source_path", None)
+    new_path = getattr(new, "source_path", None)
+    if not old_path or not new_path:
+        return extra_changes
+
+    old_snapshot_mtime = getattr(old, "source_mtime", None)
+    new_snapshot_mtime = getattr(new, "source_mtime", None)
+    old_snapshot_size = getattr(old, "source_size", None)
+    new_snapshot_size = getattr(new, "source_size", None)
+    if (
+        old_snapshot_mtime is None
+        or new_snapshot_mtime is None
+        or old_snapshot_size is None
+        or new_snapshot_size is None
+    ):
+        return extra_changes
+    try:
+        old_now_stat = Path(old_path).stat()
+        new_now_stat = Path(new_path).stat()
+    except OSError:
+        return extra_changes
+    old_mtime_ok = getattr(old, "source_mtime_epoch", False) or (
+        old_now_stat.st_mtime == old_snapshot_mtime
+    )
+    new_mtime_ok = getattr(new, "source_mtime_epoch", False) or (
+        new_now_stat.st_mtime == new_snapshot_mtime
+    )
+    if (
+        not old_mtime_ok
+        or not new_mtime_ok
+        or old_now_stat.st_size != old_snapshot_size
+        or new_now_stat.st_size != new_snapshot_size
+    ):
+        return extra_changes
+
+    # Both snapshots were identity-checked against the binaries above, so
+    # their own ELF tables are the tables a symbols-only re-resolve would
+    # read. When NEW keeps every OLD dynamic symbol unchanged there is no
+    # removal to recover, and the re-resolve plus full unscoped compare
+    # (~19% of a libmkl_rt scan) is skipped.
+    if elf_exports_cannot_lose_symbol(old, new):
+        return extra_changes
+
+    # The same identity check is what lets each side's symbols-only view be
+    # built from its own ELF table rather than by re-reading the binary.
+    l0_hard_removals = collect_l0_export_delta_from_snapshots(old, new, lang)
+    return [*(extra_changes or []), *l0_hard_removals]

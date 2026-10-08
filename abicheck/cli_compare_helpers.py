@@ -59,7 +59,6 @@ from .cli_helpers_compare import (
     _scoped_severity_summary as _scoped_severity_summary,
     _verdict_severity_rank as _verdict_severity_rank,
     _warn_ignored_flags,
-    fold_l0_hard_removals,
     load_required_symbols,
     resolve_force_public_scope,
 )
@@ -2005,17 +2004,6 @@ def run_compare(
         click.echo(f"Warning: {w}", err=True)
     extra_changes = _load_probe_matrix_changes(probe_matrix_old, probe_matrix_new)
 
-    # A header-scoped compare can silently drop a function that's genuinely
-    # exported but macro-gated out of the header AST on both sides (case97);
-    # fold back any hard ELF-only removal the header pass can't see. Gated on
-    # the *resolved* snapshots' own from_headers (not the raw -H CLI flags):
-    # a dump-then-compare-JSON-snapshots workflow has no -H of its own to see
-    # here, but the snapshot it loaded still remembers it was header-scoped.
-    # A headerless (DWARF/symbols) compare already sees ELF-only removals
-    # directly, so it's not worth the extra symbols-only re-resolve.
-    if getattr(old, "from_headers", False) or getattr(new, "from_headers", False):
-        extra_changes = fold_l0_hard_removals(old, new, lang, extra_changes)
-
     # ADR-063 Phase 8 "--depth" ceiling (Codex review, PR #1020, second
     # round): an out-of-band --old/new-sources/-build-info pack never lives
     # on old/new until prepare_embedded_build_source diffs it, so
@@ -2046,6 +2034,7 @@ def run_compare(
             collect_mode=collect_mode,
             extra_changes=extra_changes,
             policy_file=pf,
+            lang=lang,
             abi3_floor=_enrich.abi3_floor,
             candidate_name=new_input.name,
             on_output=_evidence_echo,

@@ -10,8 +10,10 @@ fan-out reaches through ``member_compare.compare_member``) and the native
 call :func:`fold_pair_evidence` and the Tier-2 ``compare_snapshots``
 chokepoint. The fold happens here once, in one order:
 
-1. build-info/source facts (ADR-028/033) diffed into ``extra_changes``;
-2. the candidate-only ``--abi3`` audit folded in (ADR-068 D3) -- before
+1. hard ELF-only removals a header-scoped pair hides (case97,
+   :func:`~abicheck.l0_export_delta.fold_l0_hard_removals`);
+2. build-info/source facts (ADR-028/033) diffed into ``extra_changes``;
+3. the candidate-only ``--abi3`` audit folded in (ADR-068 D3) -- before
    classification, so policy, suppression, the disposition ledger and the
    verdict all score it.
 
@@ -52,12 +54,18 @@ def fold_pair_evidence(
     collect_mode: str,
     extra_changes: list[Change] | None,
     policy_file: Any,
+    lang: str,
     abi3_floor: tuple[int, int] | None,
     candidate_name: str | None = None,
     on_output: Callable[[str], None] | None = None,
 ) -> FoldedEvidence:
-    """Diff embedded build/source facts into *extra_changes*, then fold the
-    abi3 audit.
+    """Fold a header-scoped pair's hidden ELF-only removals, diff embedded
+    build/source facts into *extra_changes*, then fold the abi3 audit.
+
+    The L0 fold runs when either snapshot is header-scoped: the header AST
+    can drop a function that is still exported (a macro-gated declaration),
+    and a headerless compare already sees ELF-only removals directly. It
+    re-reads nothing it cannot identity-check against the snapshot.
 
     *extra_changes* are findings the caller already produced (probe matrix,
     L0 hard removals). *on_output* receives the build-source diff's report
@@ -65,8 +73,11 @@ def fold_pair_evidence(
     unchanged for the caller to translate.
     """
     from ..buildsource.evidence_report import prepare_embedded_build_source
+    from ..l0_export_delta import fold_l0_hard_removals
     from . import abi3_audit
 
+    if getattr(old, "from_headers", False) or getattr(new, "from_headers", False):
+        extra_changes = fold_l0_hard_removals(old, new, lang, extra_changes)
     extra_changes, layer_coverage_rows, evidence_metrics, _ev_changes = (
         prepare_embedded_build_source(
             old,
