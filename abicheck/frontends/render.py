@@ -25,14 +25,14 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
-from .errors import ValidationError
-from .model import AbiSnapshot
-from .report.build import build_report_envelope
-from .report.envelope import RenderOptions, ReportEnvelope
-from .report.report_modes import (
+from ..errors import ValidationError
+from ..model import AbiSnapshot
+from ..report.build import build_report_envelope
+from ..report.envelope import RenderOptions, ReportEnvelope
+from ..report.report_modes import (
     normalize_report_mode as _normalize_report_mode,
 )
-from .reporter import (
+from ..reporter import (
     to_json,
     to_markdown,
     to_stat as to_stat,  # re-exported; see service.py's own note
@@ -42,7 +42,7 @@ from .reporter import (
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from .checker_types import DiffResult
+    from ..checker_types import DiffResult
 
     # ADR-061: this module is classified `frontends`, which may not import
     # `policy` (where `severity.py`/`SeverityConfig` now physically live,
@@ -50,7 +50,7 @@ if TYPE_CHECKING:
     # existing re-export facade `frontends`-classified callers already
     # route policy-owned exit-decision types through (its own docstring:
     # "the one place a frontend gets its process response").
-    from .workflows.gate import SeverityConfig
+    from ..workflows.gate import SeverityConfig
 
 #: ``fmt`` value for :func:`render_output` — a one-line human summary.
 #: A public ``-o oneline=...`` choice on ``compare`` (CLI cleanup phase
@@ -318,7 +318,7 @@ def _project_sarif(envelope: ReportEnvelope) -> str:
     resolving one of its own (``report/AGENTS.md``: "renderers do not own
     process exit behavior").
     """
-    from .sarif import to_sarif_str
+    from ..sarif import to_sarif_str
 
     return to_sarif_str(
         envelope.result,
@@ -340,7 +340,7 @@ def _project_html(envelope: ReportEnvelope) -> str:
     the CI-gate card's gate and each row's verdict -- now read the envelope's
     ``gate`` and ``findings``.
     """
-    from .html_report import generate_html_report
+    from ..html_report import generate_html_report
 
     return generate_html_report(
         envelope.result,
@@ -369,7 +369,7 @@ def _project_junit(envelope: ReportEnvelope) -> str:
     JUnit folds in beyond ``result.changes``, which the envelope resolves too
     rather than leaving JUnit to assemble its own policy inputs.
     """
-    from .junit_report import to_junit_xml
+    from ..junit_report import to_junit_xml
 
     return to_junit_xml(
         envelope.result,
@@ -383,7 +383,7 @@ def _project_junit(envelope: ReportEnvelope) -> str:
 
 def _project_review(envelope: ReportEnvelope) -> str:
     """The compact review digest (unconditional-recommendation Markdown)."""
-    from .reporter import to_review_digest
+    from ..reporter import to_review_digest
 
     text = to_review_digest(
         envelope.result,
@@ -403,7 +403,7 @@ def _project_review(envelope: ReportEnvelope) -> str:
 
 
 def _project_terminal(envelope: ReportEnvelope) -> str:
-    from .report.review_digest_document import (
+    from ..report.review_digest_document import (
         build_review_digest_document,
         render_terminal_digest_document,
     )
@@ -485,7 +485,7 @@ def _demangled(
     """
     if not envelope.options.demangle:
         return text
-    from .demangle import demangle_text
+    from ..demangle import demangle_text
 
     return demangle_text(text, escape_table_pipes=escape_table_pipes)
 
@@ -530,12 +530,12 @@ def _render_json_output(
         # the one shared document choke point (report.build.
         # build_report_document) rather than to_json's own independent
         # dict-building pass -- see report/build.py's module docstring.
-        from .report.render_json import render_json
+        from ..report.render_json import render_json
 
         if envelope is not None:
             doc = envelope.document
         else:
-            from .report.build import build_report_document
+            from ..report.build import build_report_document
 
             doc = build_report_document(
                 result,

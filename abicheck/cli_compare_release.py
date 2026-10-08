@@ -1333,7 +1333,7 @@ def compare_release_cmd(
             # means the envelope-level field and `effective_config_fields
             # ["policy.env_matrix"]` are correct regardless of how many
             # library comparisons actually completed.
-            from .service_render import resolve_demangle_for_format
+            from .frontends.render import resolve_demangle_for_format
             from .workflows.comparison_input_receipt import env_matrix_content_digest
 
             env_matrix_source_sha256 = env_matrix_content_digest(env_matrix)

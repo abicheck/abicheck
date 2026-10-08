@@ -11,7 +11,7 @@ separately-decided projections of the same evaluation, rather than one
 shared decided document each format purely projects.
 
 :func:`build_report_document` is the single choke point: called once per
-top-level render (see ``abicheck.service_render.render_output``), it
+top-level render (see ``abicheck.frontends.render.render_output``), it
 performs every fact/decision computation exactly once and returns the frozen
 document every enabled format then reads from. A format needing data this
 document does not yet carry should get that data added *here*, never
@@ -78,7 +78,7 @@ def build_report_document(
 ) -> ReportDocument:
     """Build the one canonical, format-neutral ``report_mode="full"`` document.
 
-    Every keyword mirrors ``abicheck.service_render.render_output``'s own
+    Every keyword mirrors ``abicheck.frontends.render.render_output``'s own
     format-neutral options (``show_only``/``show_impact``/
     ``severity_config``/``require_complete_analysis``/
     ``contract_evaluation``); a genuinely

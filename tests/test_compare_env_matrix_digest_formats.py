@@ -37,8 +37,8 @@ import pytest
 from abicheck.checker import compare
 from abicheck.elf_metadata import ElfMetadata
 from abicheck.environment_matrix import EnvironmentMatrix
+from abicheck.frontends.render import render_output
 from abicheck.model import AbiSnapshot
-from abicheck.service_render import render_output
 
 #: Every ``compare`` output format that renders through the shared
 #: envelope/document pipeline (``service_render._SUPPORTED_FORMATS``, minus

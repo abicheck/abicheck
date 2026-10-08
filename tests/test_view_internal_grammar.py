@@ -332,7 +332,7 @@ class TestDemanglingIsAutomatic:
         # Machine output: the exact symbol, plus the readable name beside it.
         assert removal[0]["demangled_symbol"] == _GONE_DEMANGLED
 
-        from abicheck.service_render import render_output
+        from abicheck.frontends.render import render_output
 
         markdown = render_output(
             "markdown",
@@ -355,7 +355,7 @@ class TestDemanglingIsAutomatic:
         assert _GONE_DEMANGLED in rendered
 
     def test_a_machine_format_is_never_demangled_in_place(self, tmp_path):
-        from abicheck.service_render import (
+        from abicheck.frontends.render import (
             HUMAN_FORMATS,
             resolve_demangle_for_format,
         )
@@ -624,8 +624,8 @@ class TestDemanglingIsPrewarmedOnEveryProjection:
         return calls
 
     def test_the_envelope_path_prewarms_before_serializing_findings(self, monkeypatch):
+        from abicheck.frontends.render import render_output
         from abicheck.model import AbiSnapshot
-        from abicheck.service_render import render_output
 
         result = self._result_with_mangled_findings(12)
         calls = self._count_batches(
@@ -660,8 +660,8 @@ class TestRetirementIsEnforcedAtThePublicApiToo:
 
     def _render(self, mode):
         from abicheck.checker_types import DiffResult
+        from abicheck.frontends.render import render_output
         from abicheck.model import AbiSnapshot
-        from abicheck.service_render import render_output
 
         return render_output(
             "json",
@@ -860,9 +860,9 @@ class TestTheTypedApiDemanglesAutomaticallyToo:
     def _render(self, fmt, **kwargs):
         from abicheck.checker import Verdict
         from abicheck.checker_types import DiffResult
+        from abicheck.frontends.render import render_output
         from abicheck.model import AbiSnapshot
         from abicheck.model.change import Change
-        from abicheck.service_render import render_output
 
         result = DiffResult(
             old_version="1",
@@ -903,7 +903,7 @@ class TestTheTypedApiDemanglesAutomaticallyToo:
         #1284)."""
         import abicheck.cli_compare_options as cli_options
         from abicheck.cli_compare_helpers import resolve_demangle_for_format as via_cli
-        from abicheck.service_render import resolve_demangle_for_format
+        from abicheck.frontends.render import resolve_demangle_for_format
 
         assert not hasattr(cli_options, "_resolve_demangle")
         assert not hasattr(cli_options, "HUMAN_FORMATS")
@@ -923,7 +923,7 @@ class TestEveryAliasOfAHumanFormatDemanglesLikeItsTarget:
 
     def _aliases(self):
         """{projector -> [format names routing to it]}, from the real table."""
-        from abicheck.service_render import _PROJECTIONS
+        from abicheck.frontends.render import _PROJECTIONS
 
         groups: dict[object, list[str]] = {}
         for name, projector in _PROJECTIONS.items():
@@ -936,7 +936,7 @@ class TestEveryAliasOfAHumanFormatDemanglesLikeItsTarget:
         assert any(len(names) > 1 for names in self._aliases().values())
 
     def test_formats_sharing_a_projector_resolve_identically(self):
-        from abicheck.service_render import resolve_demangle_for_format
+        from abicheck.frontends.render import resolve_demangle_for_format
 
         disagreeing = {
             tuple(sorted(names)): {n: resolve_demangle_for_format(n) for n in names}
@@ -946,7 +946,7 @@ class TestEveryAliasOfAHumanFormatDemanglesLikeItsTarget:
         assert not disagreeing, disagreeing
 
     def test_the_reported_alias_specifically(self):
-        from abicheck.service_render import resolve_demangle_for_format
+        from abicheck.frontends.render import resolve_demangle_for_format
 
         assert resolve_demangle_for_format("md")
         assert resolve_demangle_for_format("markdown")
@@ -1006,7 +1006,7 @@ class TestOneEnvelopeProjectsCorrectlyIntoEveryFormat:
 
     def test_one_envelope_demangles_for_human_formats_and_not_machine_ones(self):
         from abicheck.demangle import demangle
-        from abicheck.service_render import render_envelope
+        from abicheck.frontends.render import render_envelope
 
         if demangle("_ZN3lib4goneEi") is None:
             pytest.skip("no demangler available in this environment")
@@ -1022,9 +1022,9 @@ class TestOneEnvelopeProjectsCorrectlyIntoEveryFormat:
 
     def test_the_two_public_entry_points_agree(self):
         """The drift itself: same evaluation, same format, same bytes."""
+        from abicheck.frontends.render import render_envelope, render_output
         from abicheck.report.build import build_report_envelope
         from abicheck.report.envelope import RenderOptions
-        from abicheck.service_render import render_envelope, render_output
 
         envelope = self._envelope()
         for fmt in (*self.HUMAN, *self.MACHINE):
@@ -1036,10 +1036,10 @@ class TestOneEnvelopeProjectsCorrectlyIntoEveryFormat:
     @pytest.mark.parametrize("explicit", [True, False])
     def test_an_explicit_choice_still_overrides_every_format(self, explicit):
         from abicheck.demangle import demangle
+        from abicheck.frontends.render import render_envelope
         from abicheck.model import AbiSnapshot
         from abicheck.report.build import build_report_envelope
         from abicheck.report.envelope import RenderOptions
-        from abicheck.service_render import render_envelope
 
         if demangle("_ZN3lib4goneEi") is None:
             pytest.skip("no demangler available in this environment")
