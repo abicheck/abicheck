@@ -211,7 +211,7 @@
     "abicheck/model/mangled_name_template_args.py(read_length_prefixed_name)": 1890,
     "abicheck/model/name_decoration/macho.py(decode_itanium)": 2676,
     "abicheck/model/name_heuristics.py(NameHeuristic.apply)": 5,
-    "abicheck/model/name_heuristics.py(NameHeuristic.matches)": 1107,
+    "abicheck/model/name_heuristics.py(NameHeuristic.matches)": 1293,
     "abicheck/model/owner_recovery.py(itanium_special_name_owner_identifiers)": 326,
     "abicheck/model/owner_recovery.py(itanium_special_name_owner_scope_components)": 326,
     "abicheck/model/qualified_name_split.py(version_suffix)": 256,
@@ -293,5 +293,5 @@
   },
   "mode": "default",
   "n": 40,
-  "total": 240449
+  "total": 240635
 }

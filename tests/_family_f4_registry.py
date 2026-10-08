@@ -50,6 +50,12 @@ class Covered:
 
 #: Keyed by runtime heuristic id. Every severity-raising heuristic must be here.
 COVERED: dict[str, Covered] = {
+    "typedef_respelling": Covered(
+        fp_cells=("respell.fp.typedef_to_its_encoded_type",),
+        fn_cells=("respell.fn.typedef_to_a_different_type",),
+        control_cells=("respell.control.builtin_change",),
+        bugs=(1519,),
+    ),
     "enum_sentinel": Covered(
         fp_cells=("sentinel.fp.mid_list_max_name",),
         fn_cells=(

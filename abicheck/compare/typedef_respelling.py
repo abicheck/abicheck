@@ -9,7 +9,16 @@ canonical type, so header spellings alone must not report it as
 
 from __future__ import annotations
 
-_BUILTIN_TYPE_WORDS = frozenset(
+from typing import Any
+
+from ..model.name_heuristics import (
+    LazyFactInput,
+    NameHeuristicEffect,
+    StructuralFact,
+    register_name_heuristic,
+)
+
+_BUILTIN_TYPE_NAMES = frozenset(
     {
         "void",
         "bool",
@@ -47,7 +56,7 @@ def typedef_like(spelling: str) -> bool:
     candidate -- rather than a builtin, once cv and declarator sigils are
     stripped."""
     leaf = _core_leaf(spelling)
-    return leaf is not None and leaf.isidentifier() and leaf not in _BUILTIN_TYPE_WORDS
+    return leaf is not None and leaf.isidentifier() and leaf not in _BUILTIN_TYPE_NAMES
 
 
 def _respells(typedef_side: str, encoded: str) -> bool:
@@ -103,6 +112,33 @@ def respelled_typedef_positions(
     return frozenset(explained)
 
 
+def _positions_vouched(fact_input: Any) -> bool:
+    mangled, o_types, n_types, differing = fact_input
+    return set(differing) <= respelled_typedef_positions(mangled, o_types, n_types)
+
+
+#: Name nominates (a parameter spelled as a user type name), structure
+#: decides (the unchanged Itanium key encodes the other side's type at that
+#: position). Lowering only: it can withdraw a FUNC_PARAMS_CHANGED, never
+#: raise one.
+TYPEDEF_RESPELLING = register_name_heuristic(
+    "typedef_respelling",
+    owner=__name__,
+    effect=NameHeuristicEffect.LOWER_CONFIDENCE,
+    lowers_from=("FUNC_PARAMS_CHANGED",),
+    description=(
+        "a parameter respelled between a typedef-like name and the canonical "
+        "type its unchanged Itanium mangled name encodes is the same type"
+    ),
+    matcher=typedef_like,
+    confirmed_by=StructuralFact(
+        "compare.typedef_respelling.encoded_by_mangled_name", _positions_vouched
+    ),
+    helpers=(_core_leaf, _respells, respelled_typedef_positions),
+    vocabularies=("_BUILTIN_TYPE_NAMES",),
+)
+
+
 def all_respelled(
     mangled: str,
     o_types: tuple[str, ...],
@@ -110,9 +146,13 @@ def all_respelled(
     differing: list[int],
 ) -> bool:
     """Whether every *differing* position is a typedef respelling."""
-    # Demangling costs a c++filt spawn on a cache miss: only ask the mangled
-    # name when every differing position is a candidate (a side spells a
-    # user type name).
-    return all(
-        typedef_like(o_types[i]) or typedef_like(n_types[i]) for i in differing
-    ) and set(differing) <= respelled_typedef_positions(mangled, o_types, n_types)
+    nominated = all(
+        TYPEDEF_RESPELLING.matches(o_types[i]) or TYPEDEF_RESPELLING.matches(n_types[i])
+        for i in differing
+    )
+    # Demangling costs a c++filt spawn on a cache miss: the structural fact
+    # is computed only once the name has nominated every position.
+    assert TYPEDEF_RESPELLING.confirmed_by is not None
+    return nominated and TYPEDEF_RESPELLING.confirmed_by.holds(
+        LazyFactInput(lambda: (mangled, o_types, n_types, differing))
+    )

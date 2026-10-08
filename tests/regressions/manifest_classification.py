@@ -489,7 +489,10 @@ CLASSIFICATION_BUG_CLASSES: tuple[BugClass, ...] = (
             "is still reported."
         ),
         fixed_by=(1519,),
-        seed_tests=("tests/test_source_contract_direction.py",),
+        seed_tests=(
+            "tests/test_source_contract_direction.py",
+            "tests/test_family_f4_heuristics.py",
+        ),
         public_surfaces=("compare",),
         axes={
             "direction": ("added", "removed", "deeper level"),
