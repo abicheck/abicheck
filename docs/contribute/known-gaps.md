@@ -8996,22 +8996,13 @@ violations, blocked" pattern this ADR's other gaps already use for
   `may_import` forbids. Unlike every other entry below, no caller needs to
   change — `comdat_groups` (or the piece of it this module actually uses)
   would need to move or be decoupled from this module directly.
-- `abicheck/buildsource/graph_impact.py` (target: `compare` — its own
-  docstring: "Structured graph impact/proof-path data attached to
-  findings"; it deliberately *enriches an existing `Change` finding*
-  rather than extracting a fact, the same shape as its already-`compare`
-  -classified `graph_reconcile.py` sibling — `source_graph_findings.py` is
-  *not* a `compare`-classified precedent despite a similar-sounding role:
-  `architecture/debt.yaml` records it with target `extract/build-or-source`,
-  and it carries no `modules.yaml` classification of its own today — not
-  `extract`, which this module's previous classification in this change
-  wrongly assigned it, laundering a real boundary issue instead of
-  recording it) — a *self-dependency* block, verified empirically by trial
-  classification: it itself imports `.call_graph` (`extract`-classified),
-  producing four new `compare -> extract` findings the moment it is
-  classified `compare`, since `compare`'s `may_import` is `model` only.
-  `call_graph` (or the specific pieces this module actually uses from it)
-  would need to move or be decoupled from this module directly.
+- **Closed (2026-10, Lane C stage 3):** `abicheck/buildsource/graph_impact.py`
+  (target: `compare`) was a self-dependency block: it imported three call-edge
+  label constants from the `extract`-classified `call_graph.py`. Those labels
+  are shared vocabulary, so they moved to `model/graph_vocabulary.py`
+  (`call_graph.py` and every other reader now import them from there), and
+  `graph_impact.py` — which then imports only `model` — is classified
+  `compare`.
 - `abicheck/buildsource/build_output.py` (target: `extract`, alongside its
   sibling adapters) — blocked because `abicheck/cli_project.py`
   (`frontends`) imports it directly; `frontends` may not import `extract`.
@@ -11312,18 +11303,10 @@ failed read from an empty export table.
 
 ## `appcompat_consumer_impact.py` cannot move into `workflows/` yet (2026-10-08)
 
-The ADR-057 consumer-impact join (`abicheck/appcompat_consumer_impact.py`)
-is a `workflows` legacy root module; its target is the `workflows/` package
-beside `workflows/consumer_scope.py`, its one production caller. Inside a
-migrated package `scripts/check_architecture.py` rejects any import of an
-unclassified module, and the join lazily imports
-`buildsource.graph_impact.attach_impact_metadata`, which is unclassified.
-`graph_impact.py` cannot simply be classified either: its own entry above
-(target `compare`) records the self-dependency on the `extract`-classified
-`call_graph.py`, and `impact/consumer_graph.py` (`model`) imports it too, so
-any classification outside `model` turns that into a direction violation.
-Classifying it `workflows` only to unblock this move would be the
-laundering that entry warns against. Lane C stage 2 moved the join's other
-unclassified dependency, `format_dependency_path`, into the
-`compare`-classified `buildsource/source_graph_compare.py`; the move itself
-waits on `graph_impact.py`'s blockers being decoupled first.
+**Closed (2026-10, Lane C stage 3).** The module is now
+`workflows/consumer_impact.py`, beside `workflows/consumer_scope.py`. Both of
+its unclassified dependencies were resolved first: `format_dependency_path`
+moved to the `compare`-classified `buildsource/source_graph_compare.py`
+(stage 2), and `buildsource/graph_impact.py` was classified `compare` once its
+call-edge label constants moved to `model/graph_vocabulary.py` (stage 3; see
+its entry above).

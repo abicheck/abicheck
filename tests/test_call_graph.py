@@ -22,12 +22,6 @@ from __future__ import annotations
 
 from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
 from abicheck.buildsource.call_graph import (
-    CALL_KIND_DIRECT,
-    CALL_KIND_FUNCTION_POINTER,
-    CALL_KIND_VIRTUAL,
-    RESOLUTION_EXACT,
-    RESOLUTION_OVERAPPROX,
-    RESOLUTION_UNKNOWN,
     CallEdge,
     _call_graph_jobs,
     augment_graph_with_calls,
@@ -40,6 +34,14 @@ from abicheck.buildsource.source_graph import (
     diff_source_graph_findings,
 )
 from abicheck.checker_policy import COMPATIBLE_KINDS, ChangeKind
+from abicheck.model.graph_vocabulary import (
+    CALL_KIND_DIRECT,
+    CALL_KIND_FUNCTION_POINTER,
+    CALL_KIND_VIRTUAL,
+    RESOLUTION_EXACT,
+    RESOLUTION_OVERAPPROX,
+    RESOLUTION_UNKNOWN,
+)
 
 
 def _ref(kind: str, name: str, mangled: str = "", *, virtual: bool = False) -> dict:

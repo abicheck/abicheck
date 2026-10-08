@@ -348,3 +348,19 @@ LINK_PROVENANCE_EDGE_KINDS: frozenset[str] = frozenset(
         "OBJECT_DEFINES_SYMBOL",
     }
 )
+
+
+# ── call-edge labels (ADR-031 D4) ───────────────────────────────────────────
+# The ``attrs["kind"]``/``attrs["resolution"]`` values a ``DECL_CALLS_DECL``
+# edge carries. Produced by ``buildsource.call_graph`` and read by consumers in
+# other layers (e.g. ``buildsource.graph_impact``'s proof-path tiering), so the
+# shared vocabulary lives here rather than in the extractor.
+CALL_KIND_DIRECT = "direct"
+CALL_KIND_VIRTUAL = "virtual"
+CALL_KIND_FUNCTION_POINTER = "function_pointer"
+CALL_KIND_TEMPLATE = "template_instantiation"
+CALL_KIND_UNKNOWN = "unknown"
+
+RESOLUTION_EXACT = "exact"
+RESOLUTION_OVERAPPROX = "overapprox"
+RESOLUTION_UNKNOWN = "unknown"

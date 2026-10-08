@@ -22,12 +22,14 @@ known residual gap for an override redeclared with neither ``override``/
 from __future__ import annotations
 
 from abicheck.buildsource.call_graph import (
+    CallEdge,
+    parse_clang_ast_calls,
+)
+from abicheck.model.graph_vocabulary import (
     CALL_KIND_DIRECT,
     CALL_KIND_VIRTUAL,
     RESOLUTION_EXACT,
     RESOLUTION_OVERAPPROX,
-    CallEdge,
-    parse_clang_ast_calls,
 )
 
 

@@ -13,37 +13,34 @@
 # limitations under the License.
 
 """The consumer/source-graph join half of application compatibility (G29
-Phase 4, ADR-057) — split out of ``appcompat.py`` once that file crossed the
-architecture gate's 2000-line hard cap (two independent PRs each raised its
-reviewed ``no_growth`` baseline and landed together; see
-``architecture/debt.yaml``'s entry for the fuller account).
+Phase 4, ADR-057).
 
-``scope_diff_to_app`` is the only caller outside this module (three call
-sites: :func:`consumer_impact_explanations`, :func:`attach_consumer_impact`,
-:func:`enrich_covered_changes`) — the rest of this file's functions are
-private helpers those three build on. The seam is a real one, not a line
-count: this is the one self-contained subsystem in ``appcompat.py`` that
-never touches the ELF/PE/Mach-O app-requirements parsing, the disposition
-ledger, or the CLI-facing result types the rest of that file owns, and it
-depends only on a `Change`/`AppRequirements` pair and the L5 source graph.
+``workflows.consumer_scope.scope_diff_to_app`` is the only caller outside
+this module (three call sites: :func:`consumer_impact_explanations`,
+:func:`attach_consumer_impact`, :func:`enrich_covered_changes`) -- the rest of
+this file's functions are private helpers those three build on. It never
+touches the app-requirements parsing (``extract.consumer_imports``), the
+requirement evaluation (``policy.consumer_requirements``) or the disposition
+ledger; it depends only on a `Change`/`AppRequirements` pair and the L5
+source graph.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from .impact.engine import assess_change
-from .model.evidence_status import ReachabilityState
-from .policy.consumer_requirements import change_covers_symbol
+from ..impact.engine import assess_change
+from ..model.evidence_status import ReachabilityState
+from ..policy.consumer_requirements import change_covers_symbol
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from .checker import Change
-    from .impact.consumer_graph import ConsumerImpactPath
-    from .model import AbiSnapshot
-    from .model.consumer_requirements import AppRequirements
-    from .model.source_graph import SourceGraphSummary
+    from ..checker import Change
+    from ..impact.consumer_graph import ConsumerImpactPath
+    from ..model import AbiSnapshot
+    from ..model.consumer_requirements import AppRequirements
+    from ..model.source_graph import SourceGraphSummary
 
 
 def _library_source_graph(
@@ -71,8 +68,8 @@ def _library_source_graph(
     about what is exported. It must describe the same library as *lib* — at
     all three call sites it is the snapshot of that exact path.
     """
-    from .evidence_depth import resolve_l5_source_graph
-    from .model import AbiSnapshot
+    from ..evidence_depth import resolve_l5_source_graph
+    from ..model import AbiSnapshot
 
     for candidate in (snapshot, lib):
         graph: SourceGraphSummary | None
@@ -110,7 +107,7 @@ def consumer_impact_explanations(
     library_graph = _library_source_graph(old_lib, old_snapshot)
     if library_graph is None or not symbols:
         return None, {}
-    from .impact.consumer_graph import (
+    from ..impact.consumer_graph import (
         build_consumer_graph,
         explain_required_symbols,
         join_consumer_graph,
@@ -151,7 +148,7 @@ def _format_consumer_impact(
         if name_consumer:
             return f"{explained.consumer} requires public entry {entry} directly"
         return f"{explained.symbol} is declared by public entry {entry}"
-    from .buildsource.source_graph_compare import format_dependency_path
+    from ..buildsource.source_graph_compare import format_dependency_path
 
     chain = format_dependency_path(graph, explained.entry_path)
     if name_consumer:
@@ -412,7 +409,7 @@ def _merge_consumer_impact_paths(
             for alt in primary.alternative_entry_paths
             if alt and alt[0].src == primary_start
         )
-    from .impact.consumer_graph import ConsumerImpactPath as _ConsumerImpactPath
+    from ..impact.consumer_graph import ConsumerImpactPath as _ConsumerImpactPath
 
     return _ConsumerImpactPath(
         consumer=primary.consumer,
@@ -466,7 +463,7 @@ def attach_consumer_impact(
     requirement resolving to a real, walked call chain is not a "maybe
     internal, maybe not" ambiguity, by construction, for either caller.
     """
-    from .buildsource.graph_impact import attach_impact_metadata
+    from ..buildsource.graph_impact import attach_impact_metadata
 
     attach_impact_metadata(
         change,
