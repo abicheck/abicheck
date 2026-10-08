@@ -181,7 +181,6 @@
         "abicheck/provenance.py",
         "abicheck/python_api.py",
         "abicheck/python_ext.py",
-        "abicheck/service_metadata_attach.py",
         "abicheck/sycl_context.py",
         "abicheck/sycl_metadata.py",
         "abicheck/symvers_metadata.py",
@@ -479,7 +478,6 @@
       "service_dump_pipeline.py",
       "service_header_graph_attach.py",
       "service_header_scoped.py",
-      "service_metadata_attach.py",
       "service_render.py",
       "dry_run_estimate.py"
     ],
@@ -837,7 +835,6 @@
     "service_dump_pipeline.py",
     "service_header_graph_attach.py",
     "service_header_scoped.py",
-    "service_metadata_attach.py",
     "service_render.py",
     "dry_run_estimate.py",
     "snapshot_cache.py",

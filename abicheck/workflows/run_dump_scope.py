@@ -43,6 +43,7 @@ from .snapshot_factory import DependencyScopeInputs, SnapshotFinish, finish_snap
 __all__ = [
     "apply_dependency_scope_to_run_dump_result",
     "extraction_scope",
+    "run_dump_header_roots",
     "wrap_run_dump_with_dependency_scope",
 ]
 
@@ -114,13 +115,29 @@ def apply_dependency_scope_to_run_dump_result(
 
 def _run_dump_header_roots(bound_args: inspect.BoundArguments) -> tuple[Any, ...]:
     """Scoping roots for one ``run_dump`` call (see the function above)."""
-    headers = tuple(bound_args.arguments.get("headers") or ())
-    manifest_roots = dump_manifest_header_roots(
-        bound_args.arguments.get("dump_manifest")
+    a = bound_args.arguments
+    return run_dump_header_roots(
+        a.get("headers"),
+        a.get("dump_manifest"),
+        a.get("public_headers"),
+        a.get("public_header_dirs"),
     )
-    public_headers = tuple(bound_args.arguments.get("public_headers") or ())
-    public_header_dirs = tuple(bound_args.arguments.get("public_header_dirs") or ())
-    return headers + manifest_roots + public_headers + public_header_dirs
+
+
+def run_dump_header_roots(
+    headers: Sequence[Any] | None,
+    dump_manifest: Any,
+    public_headers: Sequence[Any] | None,
+    public_header_dirs: Sequence[Any] | None,
+) -> tuple[Any, ...]:
+    """A dump's scoping roots: its headers, its manifest's project-owned
+    roots, and its declared public headers and header directories."""
+    return (
+        tuple(headers or ())
+        + dump_manifest_header_roots(dump_manifest)
+        + tuple(public_headers or ())
+        + tuple(public_header_dirs or ())
+    )
 
 
 def wrap_run_dump_with_dependency_scope(

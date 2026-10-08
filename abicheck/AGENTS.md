@@ -71,7 +71,7 @@ filename. **Look up the specific file in `architecture/modules.yaml`'s
 earlier version of this table generalized several families wholesale and
 was repeatedly wrong for a specific existing file (`dumper_cache.py` is
 `storage`, not `extract`; `bundle_manifest.py` is `model`, not `workflows`;
-`service_metadata_attach.py` is `extract` and `service_render.py` is
+`extract/metadata_attach.py` (formerly `service_metadata_attach.py`) is `extract` and `service_render.py` is
 `frontends`, not `workflows`).
 
 Move one vertical slice at a time and preserve the typed request/result

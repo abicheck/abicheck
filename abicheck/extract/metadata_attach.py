@@ -21,11 +21,8 @@ C-API surface, and the recovered Python API surface. Each detects its own
 ecosystem cheaply, attaches nothing when it does not apply, and swallows its
 own failures -- an enrichment step must never fail a dump.
 
-Split out of ``service.py`` (which sits at the AI-readiness file-size hard
-cap -- see ``AGENTS.md``) as a leaf module, the same pattern
-``service_render``/``dry_run_estimate`` already follow. Import these four
-names from this module; ``abicheck.service`` no longer re-exports them
-(``service.py`` is ``frontends``-classified and may not import ``extract``).
+Moved from the flat ``service_metadata_attach.py`` into ``extract`` (lane B,
+stage B1c); the native dump's tail in ``service_dump_native`` calls these.
 """
 
 from __future__ import annotations
@@ -33,7 +30,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from .model import AbiSnapshot
+from ..model import AbiSnapshot
 
 # Deliberately the *parent* module's logger name, not this module's:
 # these functions logged under "abicheck.service" before the split and
@@ -41,7 +38,7 @@ from .model import AbiSnapshot
 _logger = logging.getLogger("abicheck.service")
 
 
-def _try_attach_sycl_metadata(snap: AbiSnapshot, lib_path: Path) -> None:
+def try_attach_sycl_metadata(snap: AbiSnapshot, lib_path: Path) -> None:
     """Auto-detect SYCL distribution and attach plugin metadata.
 
     Runs only when ``lib_path`` lives in a directory that looks like a
@@ -49,7 +46,7 @@ def _try_attach_sycl_metadata(snap: AbiSnapshot, lib_path: Path) -> None:
     Cost for non-SYCL libraries: one ``_detect_sycl_implementation()`` call
     which is a few ``Path.exists()`` checks — effectively zero overhead.
     """
-    from .sycl_metadata import parse_sycl_metadata
+    from ..sycl_metadata import parse_sycl_metadata
 
     try:
         # `resolve()` is inside the handler, not above it: it can raise, and
@@ -74,7 +71,7 @@ def _try_attach_sycl_metadata(snap: AbiSnapshot, lib_path: Path) -> None:
         )
 
 
-def _try_attach_python_ext_metadata(snap: AbiSnapshot) -> None:
+def try_attach_python_ext_metadata(snap: AbiSnapshot) -> None:
     """Recognise a CPython extension module and attach its metadata (G14).
 
     Cheap and side-effect-free: inspects the snapshot's already-parsed export
@@ -82,7 +79,7 @@ def _try_attach_python_ext_metadata(snap: AbiSnapshot) -> None:
     ``Py*`` imports. A plain C/C++ library has neither, so ``python_ext`` stays
     ``None`` and nothing downstream changes.
     """
-    from .python_ext import detect_python_extension
+    from ..python_ext import detect_python_extension
 
     try:
         python_ext = detect_python_extension(snap)
@@ -99,7 +96,7 @@ def _try_attach_python_ext_metadata(snap: AbiSnapshot) -> None:
         )
 
 
-def _try_attach_numpy_capi_surface(snap: AbiSnapshot, lib_path: Path) -> None:
+def try_attach_numpy_capi_surface(snap: AbiSnapshot, lib_path: Path) -> None:
     """Scan for NumPy C-API consumption evidence and attach it (G26).
 
     Cheap: a bounded read of the binary plus a handful of substring/regex
@@ -111,7 +108,7 @@ def _try_attach_numpy_capi_surface(snap: AbiSnapshot, lib_path: Path) -> None:
     which owns the distinction (CodeRabbit review caught this docstring,
     carried over verbatim from ``service.py``, claiming the opposite).
     """
-    from .numpy_capi import extract_numpy_capi_surface
+    from ..numpy_capi import extract_numpy_capi_surface
 
     try:
         numpy_capi = extract_numpy_capi_surface(lib_path)
@@ -129,7 +126,7 @@ def _try_attach_numpy_capi_surface(snap: AbiSnapshot, lib_path: Path) -> None:
             )
 
 
-def _try_attach_python_api_surface(snap: AbiSnapshot) -> None:
+def try_attach_python_api_surface(snap: AbiSnapshot) -> None:
     """Recover an extension module's Python-visible API surface (G23).
 
     Looks for a ``.pyi`` type stub alongside the snapshot's ``source_path`` and,
@@ -138,7 +135,7 @@ def _try_attach_python_api_surface(snap: AbiSnapshot) -> None:
     A no-op (leaves ``python_api`` as ``None``) when no stub is present — the
     common case for a plain C/C++ library or a stubless extension.
     """
-    from .python_api import detect_python_api
+    from ..python_api import detect_python_api
 
     try:
         python_api = detect_python_api(snap)
