@@ -9058,11 +9058,13 @@ violations, blocked" pattern this ADR's other gaps already use for
   `compat/abicc_dump_import.py`) — blocked because `abicheck/compat/cli.py`
   (`frontends`) imports it directly (both the runtime `parse_descriptor`
   call and a `TYPE_CHECKING`-only `CompatDescriptor` reference).
-- `abicheck/impact/engine.py` (target: `workflows` — its `assess_change`
-  builder is called from `appcompat.py`/`appcompat_consumer_impact.py`,
-  both already `workflows`) — blocked because
-  `abicheck/post_processing_reachability.py` (`policy`) also imports it
-  directly (lazily); `policy` may not import `workflows`.
+- **Closed (2026-10) by classifying it `policy`:** `abicheck/impact/engine.py`
+  (originally targeted at `workflows` — its `assess_change` builder is
+  called from the consumer-scoping workflow) was blocked because
+  `abicheck/post_processing_reachability.py` (`policy`) also imports it, and
+  `policy` may not import `workflows`. It imports only `model`, and building
+  a finding's impact assessment is a `policy` decision, so `policy` serves
+  both callers (the Lane C `appcompat.py` split).
 - **Closed (2026-10) by deletion:** `abicheck/compat/_helpers.py` (target: `frontends` — split directly out
   of `compat/cli.py` per its own module docstring, implements ABICC CLI
   translations, imports `click`, and is imported only by `compat/cli.py`
@@ -11243,6 +11245,27 @@ already shared: `workflows/pair_evidence.fold_pair_evidence`. Unifying the
 fold means generalizing the release fold so N=1 reduces to the scalar one;
 any exit-code difference that exposes at N=1 must be decided before it
 changes (ADR-064). Owner: ADR-063/065, lane A stage A2(b).
+
+## An unreadable consumer import table still reads as "requires nothing" (2026-10-07)
+
+The Lane C split of `appcompat.py` made a consumer binary's import read an
+explicit fact: `extract.consumer_imports.read_consumer_imports` returns a
+`ConsumerImportFacts` whose `status` is `FAILED` (with a `failure_reason`)
+when the ELF/PE/Mach-O import table could not be parsed, instead of a bare
+empty set. Only the *unrecognised format* case is acted on: it raises
+`ConsumerUnreadableError` (or yields an advisory `unreadable=True` result),
+as before. A recognised binary whose import table fails part-way still flows
+into `policy.consumer_requirements` with whatever was read -- usually
+nothing -- so the scoped verdict reads `NO_CHANGE`/100% coverage, the
+"weaker evidence must not upgrade to a clean claim" problem root
+`AGENTS.md` names. The split was behaviour-preserving by mandate (no exit
+code or report change), so the consumer of the `FAILED` status is left for
+its own change: treat a `FAILED` consumer fact like an unreadable one
+(required -> error, advisory -> `unreadable=True`), with a regression test
+over a truncated ELF/PE/Mach-O consumer. Library-side facts have the same
+shape one layer down: `parse_{elf,pe,macho}_metadata` swallow their own
+errors and return empty metadata, so `LibraryExportFacts` cannot yet tell a
+failed read from an empty export table.
 
 ## `appcompat_consumer_impact.py` cannot move into `workflows/` yet (2026-10-08)
 

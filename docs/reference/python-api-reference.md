@@ -44,6 +44,8 @@ A fully-specified comparison request — the single input to ``run_compare``.
 | `project_policy_overrides` | `tuple[tuple[ChangeKind, Verdict], ...] \| None` | `None` |
 | `acknowledgments_path` | `Path \| None` | `None` |
 | `acknowledgment_unacknowledged_additions` | `str \| None` | `None` |
+| `strict_suppressions` | `bool` | `False` |
+| `require_justification` | `bool` | `False` |
 | `pack_internal_namespaces` | `tuple[str, ...] \| None` | `None` |
 | `severity_preset` | `str \| None` | `None` |
 | `changed_paths` | `tuple[str, ...]` | `()` |
@@ -341,6 +343,9 @@ Load suppression list and policy file from paths.
 | `suppress` | `Path \| None` | *(required)* |
 | `policy` | `str` | `'strict_abi'` |
 | `policy_file_path` | `Path \| None` | `None` |
+| *(keyword-only below)* | | |
+| `strict_suppressions` | `bool` | `False` |
+| `require_justification` | `bool` | `False` |
 
 **Returns:** `tuple[SuppressionList \| None, PolicyFile \| None]`
 

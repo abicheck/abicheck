@@ -19,9 +19,8 @@ ADR-057)."""
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import patch
 
-from abicheck.appcompat import AppCompatResult, AppRequirements, scope_diff_to_app
+from abicheck.appcompat import AppCompatResult, AppRequirements
 from abicheck.buildsource.graph_impact import (
     _TIER_CONSUMER_PROVEN,
     _TIER_EXACT,
@@ -55,6 +54,11 @@ from abicheck.impact.consumer_graph import (
 )
 from abicheck.model import AbiSnapshot
 from abicheck.model.change import Change
+from abicheck.model.consumer_requirements import (
+    ConsumerImportFacts,
+    LibraryExportFacts,
+)
+from abicheck.workflows.consumer_scope import scope_diff_to_consumer_facts
 
 _DISPATCHER = "_ZN6detail21train_ops_dispatcherEv"
 
@@ -642,6 +646,49 @@ def test_select_preferred_graph_path_prefers_the_consumer_proven_candidate() -> 
 # ── end-to-end through scope_diff_to_app ──────────────────────────────────
 
 
+def _elf_facts(snap: AbiSnapshot, label: str | None = None) -> LibraryExportFacts:
+    """Export facts for an in-memory ELF snapshot, built directly (the same
+    shape ``read_library_export_facts`` yields for an unversioned library)."""
+    assert snap.elf is not None
+    names = frozenset(s.name for s in snap.elf.symbols)
+    return LibraryExportFacts(
+        label=label if label is not None else snap.library,
+        binary_format="elf",
+        soname=snap.elf.soname or snap.library,
+        export_names=names,
+        unversioned_exports=names,
+        versions_defined=frozenset(),
+    )
+
+
+def _scope(
+    diff: DiffResult,
+    app: Path,
+    reqs: AppRequirements,
+    old: AbiSnapshot,
+    new: AbiSnapshot,
+    *,
+    old_operand: Path | AbiSnapshot | None = None,
+    old_snapshot: AbiSnapshot | None = None,
+) -> AppCompatResult:
+    """``scope_diff_to_app`` over directly built consumer/library facts."""
+    operand = old if old_operand is None else old_operand
+    consumer = ConsumerImportFacts(
+        path=app,
+        binary_format="elf",
+        target_library=old.elf.soname if old.elf else old.library,
+        requirements=reqs,
+    )
+    return scope_diff_to_consumer_facts(
+        diff,
+        consumer,
+        _elf_facts(old, label=str(operand) if isinstance(operand, Path) else None),
+        _elf_facts(new),
+        old_lib=operand,
+        old_snapshot=old_snapshot,
+    )
+
+
 class TestScopeDiffToAppConsumerImpact:
     """The wiring: ``compare --used-by``'s ``CONSUMER_REQUIRED_SYMBOL_REMOVED``
     overlay picks up the join's answer, and is byte-for-byte unchanged when
@@ -688,21 +735,15 @@ class TestScopeDiffToAppConsumerImpact:
             old_operand = tmp_path / "libtrain.so.1"
             old_operand.write_bytes(b"\x7fELF" + b"\x00" * 100)
             old_snapshot = old
-        with (
-            patch("abicheck.appcompat.parse_app_requirements", return_value=reqs),
-            patch("abicheck.appcompat._detect_app_format", return_value="elf"),
-            patch(
-                "abicheck.appcompat._lib_elf_meta",
-                side_effect=lambda lib: old.elf if lib is old_operand else new.elf,
-            ),
-        ):
-            result = scope_diff_to_app(
-                diff,
-                tmp_path / "training-service",
-                old_operand,
-                new,
-                old_snapshot=old_snapshot,
-            )
+        result = _scope(
+            diff,
+            tmp_path / "training-service",
+            reqs,
+            old,
+            new,
+            old_operand=old_operand,
+            old_snapshot=old_snapshot,
+        )
         (overlay,) = [
             c
             for c in result.breaking_for_app
@@ -835,11 +876,7 @@ class TestCoveredChangeEnrichment:
             verdict=Verdict.BREAKING,
         )
         reqs = AppRequirements(undefined_symbols={"_Z5trainv", _DISPATCHER})
-        with (
-            patch("abicheck.appcompat.parse_app_requirements", return_value=reqs),
-            patch("abicheck.appcompat._detect_app_format", return_value="elf"),
-        ):
-            result = scope_diff_to_app(diff, tmp_path / "training-service", old, new)
+        result = _scope(diff, tmp_path / "training-service", reqs, old, new)
         return result, removed
 
     def test_the_existing_removal_finding_gets_the_proof_path(
@@ -919,11 +956,7 @@ class TestDirectRequirementAndFallthroughs:
             verdict=Verdict.BREAKING,
         )
         reqs = AppRequirements(undefined_symbols={"_Z5trainv"})
-        with (
-            patch("abicheck.appcompat.parse_app_requirements", return_value=reqs),
-            patch("abicheck.appcompat._detect_app_format", return_value="elf"),
-        ):
-            return scope_diff_to_app(diff, tmp_path / "training-service", old, new)
+        return _scope(diff, tmp_path / "training-service", reqs, old, new)
 
     def test_direct_requirement_overlay_names_the_consumer(
         self, tmp_path: Path
@@ -987,11 +1020,7 @@ class TestDirectRequirementAndFallthroughs:
             verdict=Verdict.BREAKING,
         )
         reqs = AppRequirements(undefined_symbols={"_Z5trainv", "_Z4noopv"})
-        with (
-            patch("abicheck.appcompat.parse_app_requirements", return_value=reqs),
-            patch("abicheck.appcompat._detect_app_format", return_value="elf"),
-        ):
-            scope_diff_to_app(diff, tmp_path / "training-service", old, new)
+        _scope(diff, tmp_path / "training-service", reqs, old, new)
         assert explainable.reachability_proof_path is not None
         assert opaque.reachability_proof_path is None
         assert opaque.impact_proof_path is None

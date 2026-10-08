@@ -233,7 +233,9 @@ class TestTheQuestionDecidesTheFact:
     """
 
     def test_dlsym_resolvable_names_need_a_confirmed_export(self) -> None:
-        from abicheck.appcompat import _snapshot_export_names
+        from abicheck.extract.library_export_facts import (
+            dlsym_export_names as _snapshot_export_names,
+        )
 
         promised_unexported = _fn(
             name="inline_api",

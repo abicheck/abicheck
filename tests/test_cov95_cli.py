@@ -1271,7 +1271,7 @@ class TestUsedByScoping:
         return app, old, new
 
     def _patch_scope(self, monkeypatch, result):
-        import abicheck.appcompat as appcompat_mod
+        import abicheck.workflows.consumer_scope as appcompat_mod
 
         monkeypatch.setattr(appcompat_mod, "scope_diff_to_app", lambda *a, **k: result)
 
@@ -1563,7 +1563,7 @@ class TestUsedByScoping:
                 verdict=Verdict.BREAKING,
             )
 
-        import abicheck.appcompat as appcompat_mod
+        import abicheck.workflows.consumer_scope as appcompat_mod
 
         monkeypatch.setattr(appcompat_mod, "scope_diff_to_app", _scoped_for)
         result = _invoke(
@@ -1678,7 +1678,7 @@ class TestUsedByScoping:
         # `consumer_scope` block: it must report BREAKING (app1's own
         # verdict), not the merely-COMPATIBLE app2 that happens to tie with
         # it on (now-irrelevant) exit code.
-        import abicheck.appcompat as appcompat_mod
+        import abicheck.workflows.consumer_scope as appcompat_mod
         from abicheck.appcompat import AppCompatResult
 
         breaking_res = self._result(
@@ -1735,7 +1735,7 @@ class TestUsedByScoping:
         # now pins the JSON `changes` fold-in dedup instead: both apps'
         # `scope_diff_to_app` calls return the *same* `shared_change` object,
         # and it must still appear once in `changes`/`summary`, not twice.
-        import abicheck.appcompat as appcompat_mod
+        import abicheck.workflows.consumer_scope as appcompat_mod
         from abicheck.appcompat import AppCompatResult
 
         shared_change = Change(ChangeKind.FUNC_REMOVED, "foo", "removed: foo")
@@ -1796,7 +1796,7 @@ class TestUsedByScoping:
         # with identical kind/symbol/description but different id() -- the
         # old id()-keyed dedup in `_apply_used_by_scoping` would count that
         # as two findings instead of one.
-        import abicheck.appcompat as appcompat_mod
+        import abicheck.workflows.consumer_scope as appcompat_mod
         from abicheck.appcompat import AppCompatResult
 
         res1 = AppCompatResult(
@@ -2142,7 +2142,7 @@ class TestUsedByScoping:
                 verdict=Verdict.BREAKING,
             )
 
-        import abicheck.appcompat as appcompat_mod
+        import abicheck.workflows.consumer_scope as appcompat_mod
 
         monkeypatch.setattr(appcompat_mod, "scope_diff_to_app", _scoped_for)
         result = _invoke(
@@ -2968,7 +2968,7 @@ class TestUsedByScopingWithSnapshotInputs:
         return path
 
     def _patch_scope(self, monkeypatch, result):
-        import abicheck.appcompat as appcompat_mod
+        import abicheck.workflows.consumer_scope as appcompat_mod
 
         monkeypatch.setattr(appcompat_mod, "scope_diff_to_app", lambda *a, **k: result)
 

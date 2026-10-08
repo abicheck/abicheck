@@ -804,7 +804,7 @@ class TestUsedByScopedOnlyChange:
     def test_rule_matching_scoped_only_change_is_not_reported_stale(
         self, tmp_path, monkeypatch
     ):
-        import abicheck.appcompat as appcompat_mod
+        import abicheck.workflows.consumer_scope as appcompat_mod
         from abicheck.appcompat import AppCompatResult
         from abicheck.checker import Verdict
         from abicheck.checker_policy import ChangeKind
