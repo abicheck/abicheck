@@ -255,9 +255,18 @@ def budgeted_name(site: str) -> str | None:
 
 
 def count_subprocess_spawns(thunk: Callable[[], object]) -> int:
-    """How many child processes *thunk* starts through ``subprocess.Popen``."""
+    """How many child processes *thunk* starts through ``subprocess.Popen``.
+
+    Counted from a cold demangler: ``demangle`` latches "c++filt is missing"
+    process-wide, and a latch left by an earlier caller in the same process
+    (a test that faked a missing binary) would make every later count read
+    0. That made the recorded budget depend on test order, not on the code.
+    """
     import subprocess
 
+    from abicheck.demangle import _reset_demangle_batch_cache
+
+    _reset_demangle_batch_cache()
     spawned = 0
     original = subprocess.Popen.__init__
 
@@ -333,9 +342,11 @@ def measure_budgets(
     (the demangler's) never hides a spawn a cold run would make.
     """
     from abicheck.checker import compare
+    from abicheck.demangle import _reset_demangle_batch_cache
 
     out: dict[str, dict[str, int]] = {}
     for mode in modes or tuple(MODES):
+        _reset_demangle_batch_cache()
         kwargs = MODES[mode]
         figures: dict[str, int] = {f"repeats:{name}": 0 for name in BUDGETED_FUNCTIONS}
         figures["subprocess_spawns"] = 0
