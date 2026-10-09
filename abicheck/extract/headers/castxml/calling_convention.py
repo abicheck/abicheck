@@ -146,6 +146,21 @@ def _declaration_lines(
     return (lines, line_no) if 1 <= line_no <= len(lines) else None
 
 
+def _blank_directives(window: str) -> str:
+    """*window* with every preprocessor directive line (and its backslash
+    continuations) emptied, line count kept: a ``#define`` above a
+    declaration is not part of it, so a convention token it spells --
+    literally or through an expanded macro -- must never read as the
+    function's own (Codex security review, PR #1530)."""
+    out: list[str] = []
+    continued = False
+    for line in window.split("\n"):
+        directive = continued or line.lstrip().startswith("#")
+        continued = directive and line.rstrip().endswith("\\")
+        out.append("" if directive else line)
+    return "\n".join(out)
+
+
 def _code_window(
     ctx: CastxmlParserContext, lines: list[str], line_no: int
 ) -> tuple[str, int, int]:
@@ -154,7 +169,7 @@ def _code_window(
     start = max(0, line_no - 1 - _LOOKBACK_LINES)
     before = "\n".join(lines[start : line_no - 1])
     here_and_after = "\n".join(lines[line_no - 1 : line_no - 1 + _LOOKAHEAD_LINES])
-    window = _blank_non_code(before + "\n" + here_and_after)
+    window = _blank_directives(_blank_non_code(before + "\n" + here_and_after))
     table = ctx.cc_macro_table
     if table is not None and table.macros:
         window = _expand_cc_macros_on_lines(window, table.macros)

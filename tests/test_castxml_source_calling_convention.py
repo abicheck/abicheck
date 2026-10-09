@@ -301,13 +301,20 @@ _TABLE = MacroTable(
         ("__attribute__((sysv_abi)) int target(int a);", set()),
         ("EMPTY int target(int a);", set()),
         ("int target(void (CALL *cb)(int));", set()),  # a parameter's, not ours
+        # A directive above the declaration is not part of it (Codex review):
+        ("#define UNUSED_CC CALL\nint target(int a);", set()),
+        ("#define LIT __attribute__((ms_abi))\nint target(int a);", set()),
+        ("#define LONG \\\n  CALL\nint target(int a);", set()),
+        ("#define UNUSED_CC CALL\nCALL int target(int a);", {"ms_abi"}),
     ],
 )
 def test_macro_spelled_convention(tmp_path: Path, decl: str, want: set[str]) -> None:
     hdr = tmp_path / "h.h"
     # A longer line before the declaration: offsets shift under expansion.
-    hdr.write_text("MS int other_function_with_a_long_name(int);\n" + decl + "\n")
-    assert source_calling_conventions(_ctx(hdr, _TABLE), _el(2), "target") == want
+    text = "MS int other_function_with_a_long_name(int);\n" + decl + "\n"
+    hdr.write_text(text)
+    line = next(i for i, ln in enumerate(text.splitlines(), 1) if "target" in ln)
+    assert source_calling_conventions(_ctx(hdr, _TABLE), _el(line), "target") == want
 
 
 def test_without_a_table_text_is_read_literally(tmp_path: Path) -> None:
