@@ -22,7 +22,7 @@ their ranking rules are not decided by this witness.
 
 from __future__ import annotations
 
-import re
+import functools
 from collections.abc import Iterable, Mapping
 from typing import TYPE_CHECKING
 
@@ -31,7 +31,7 @@ from ..diff_cxx_rules import itanium_qualified_name
 from ..diff_helpers import make_change
 from ..diff_symbols import _both_header_aware, _reconciled_function_surfaces
 from ..model.change_catalog.kinds import ChangeKind
-from ..model.synthetic_key import SYNTHETIC_CTOR_KEY_PREFIX
+from ..model.synthetic_key import synthetic_ctor_owner
 from ..name_classification import canonicalize_type_name
 
 if TYPE_CHECKING:
@@ -54,17 +54,29 @@ _ARITHMETIC = frozenset(
         "uint8_t", "uint16_t", "uint32_t", "uint64_t",
     }
 )  # fmt: skip
-_CV_RE = re.compile(r"^(?:(?:const|volatile)\s+)+|(?:\s+(?:const|volatile))+$")
+_CV = frozenset({"const", "volatile"})
+_CTOR_LEAF = "{ctor}"
 _MAX_TYPEDEF_HOPS = 8
 
 
 def callable_key(f: Function) -> str | None:
     """Scope-qualified identity of *f*'s overload set (``ns::C::{ctor}`` for a
     constructor, synthetic header-only keys included); ``None`` for a C name."""
-    if f.mangled.startswith(SYNTHETIC_CTOR_KEY_PREFIX):
-        rest = f.mangled[len(SYNTHETIC_CTOR_KEY_PREFIX) :]
-        return rest.split("(", 1)[0] + "::{ctor}"
-    return itanium_qualified_name(f.mangled)
+    return _callable_key(f.mangled)
+
+
+@functools.lru_cache(maxsize=16384)
+def _callable_key(mangled: str) -> str | None:
+    owner = synthetic_ctor_owner(mangled)
+    if owner is not None:
+        return f"{owner}::{_CTOR_LEAF}"
+    return itanium_qualified_name(mangled)
+
+
+def _display(key: str) -> str:
+    """*key* as a caller spells the callable (``ns::C`` for a constructor)."""
+    scope, _, leaf = key.rpartition("::")
+    return scope if leaf == _CTOR_LEAF else key
 
 
 def _top_level(spelling: str) -> str:
@@ -84,15 +96,25 @@ def _top_level(spelling: str) -> str:
     return "".join(out)
 
 
+def _strip_cv(spelling: str) -> str:
+    """*spelling* without leading/trailing ``const``/``volatile`` tokens."""
+    tokens = spelling.split()
+    while tokens and tokens[0] in _CV:
+        tokens.pop(0)
+    while tokens and tokens[-1] in _CV:
+        tokens.pop()
+    return " ".join(tokens)
+
+
 def _resolve(spelling: str, typedefs: Mapping[str, str]) -> str:
     current = canonicalize_type_name(spelling).strip()
     for _ in range(_MAX_TYPEDEF_HOPS):
-        bare = _CV_RE.sub("", current).strip()
+        bare = _strip_cv(current)
         target = typedefs.get(bare) or typedefs.get(bare.rsplit("::", 1)[-1])
         if not target or target == bare:
             return bare
         current = canonicalize_type_name(target).strip()
-    return _CV_RE.sub("", current).strip()
+    return _strip_cv(current)
 
 
 def is_scalar_type(
@@ -225,7 +247,7 @@ def _first_new_ambiguity(
             ChangeKind.OVERLOAD_AMBIGUITY_INTRODUCED,
             symbol=added.mangled,
             name=key,
-            detail=f"{key.removesuffix('::{ctor}')}{witness}",
+            detail=f"{_display(key)}{witness}",
             old=_signature(o),
             new=_signature(added),
             entity_id=added.entity_id,

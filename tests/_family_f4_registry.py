@@ -169,9 +169,6 @@ EXEMPTION_REASONS: dict[str, str] = {
 #: exemption category (maintained by hand -- the completeness test says what
 #: to add or drop).
 HEURISTICS: dict[str, str] = {
-    "abicheck.compare.overload_ambiguity::<module>::re:'^(?:(?:const|volatile)\\\\s+)+|(?:\\\\s+(?:const|volatile))+$'": "spelling",
-    "abicheck.compare.overload_ambiguity::_first_new_ambiguity::affix.removesuffix:'::{ctor}'": "own_format",
-    "abicheck.compare.overload_ambiguity::callable_key::affix.startswith:SYNTHETIC_CTOR_KEY_PREFIX": "own_format",
     "abicheck.diff_bit_int::<module>::re:'\\\\b_BitInt\\\\s*(?:\\\\(\\\\s*(\\\\d+)\\\\s*\\\\)|\\\\[\\\\s*(\\\\d+)-bit storage\\\\s*\\...": "spelling",
     "abicheck.checker::compare::affix.startswith:'rename:'": "own_format",
     "abicheck.model.change::<module>::re:'^[A-Za-z0-9][A-Za-z0-9._-]*@[A-Za-z0-9][A-Za-z0-9._-]*#[A-Za-z0-9][A...": "own_format",

@@ -41,6 +41,7 @@ snapshot metadata, which this migration does not move.
 
 from __future__ import annotations
 
+import functools
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
@@ -374,6 +375,7 @@ def pointee_qualifier_changes(
     return changes
 
 
+@functools.lru_cache(maxsize=16384)
 def _pointee_qualifier_delta(
     old: str | None, new: str | None
 ) -> tuple[frozenset[tuple[str, int]], frozenset[tuple[str, int]]] | None:
