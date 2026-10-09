@@ -148,7 +148,8 @@ def test_parse_elf_metadata_memo_returns_independent_equal_copies(tmp_path) -> N
 
     build("int f(void){return 0;}\n")
     elf_metadata._PARSE_MEMO.clear()
-    fresh = elf_metadata._parse(open(lib, "rb"), lib)
+    with open(lib, "rb") as fh:  # closed: a leaked handle warns in a later test
+        fresh = elf_metadata._parse(fh, lib)
     a = elf_metadata.parse_elf_metadata(lib)
     b = elf_metadata.parse_elf_metadata(lib)
     assert a == b == fresh and a is not b and a.symbols[0] is not b.symbols[0]

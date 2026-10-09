@@ -24,8 +24,9 @@ detector, or default changes — this plan only produces a taxonomy, a
 coverage matrix, and the paired-control cases and page cross-links that
 matrix identifies as missing).
 
-**Status:** Phases 1-3 complete — Phase 4 in progress (first batch landed: 6
-of 17 `MISSING_CASE` leaves closed, 11 remain).
+**Status:** Phases 1-3 complete — Phase 4 in progress (batch 1 closed 6 of
+17 `MISSING_CASE` leaves; `source-api.signature-change-source-only` closed
+once its detection gap was fixed; 10 remain).
 
 Phases 2 and 3 landed together, as one mapping-and-classification pass over
 all 88 leaves: the mapping lives in `docs/_meta/abi-taxonomy-coverage.json`
@@ -35,20 +36,20 @@ all 88 leaves: the mapping lives in `docs/_meta/abi-taxonomy-coverage.json`
 "Tests" section asks for is `check_ai_readiness.py`'s `abi-taxonomy-coverage`
 check (rules in `scripts/abi_taxonomy_coverage.py`, shared with the
 generator). The distribution those two phases produced, and where Phase 4's
-first batch has moved it:
+batches have moved it:
 
-| Status | After Phases 2-3 | After Phase 4 batch 1 |
-|---|--:|--:|
-| `COVERED` | 59 | 65 |
-| `PARTIALLY_COVERED` | 8 | 8 |
-| `MISSING_CASE` | 17 | 11 |
-| `NOT_IMPLEMENTED` | 1 | 1 |
-| `KNOWN_UNDETECTABLE` | 3 | 3 |
-| `NOT_APPLICABLE` | 0 | 0 |
-| **Total** | **88** | **88** |
+| Status | After Phases 2-3 | After Phase 4 batch 1 | After return-pointee fix |
+|---|--:|--:|--:|
+| `COVERED` | 59 | 65 | 66 |
+| `PARTIALLY_COVERED` | 8 | 8 | 8 |
+| `MISSING_CASE` | 17 | 11 | 10 |
+| `NOT_IMPLEMENTED` | 1 | 1 | 1 |
+| `KNOWN_UNDETECTABLE` | 3 | 3 | 3 |
+| `NOT_APPLICABLE` | 0 | 0 | 0 |
+| **Total** | **88** | **88** | **88** |
 
-So the headline this plan asked for reads **65 of 88 known mechanisms
-COVERED**, not "208 cases". The remaining **11 `MISSING_CASE` leaves are
+So the headline this plan asked for reads **66 of 88 known mechanisms
+COVERED**, not "211 cases". The remaining **10 `MISSING_CASE` leaves are
 Phase 4's remaining backlog** — each one already has a detector, so each is a
 corpus gap closable through the ordinary case-authoring path; the report
 lists them with the reason each is open. Nothing else moved: the single
@@ -91,7 +92,7 @@ whose claim is the *absence* of a finding and which therefore carry no
 
 ### Phase 4, batch 2 — suggested scope for the follow-up
 
-The eleven leaves still open split cleanly into three groups, which is the
+The ten leaves still open split cleanly into three groups, which is the
 suggested shape of the next one or two PRs rather than one large batch:
 
 1. **Ordinary C/C++ fixture pairs, same shape as batch 1** —
@@ -116,18 +117,26 @@ suggested shape of the next one or two PRs rather than one large batch:
    than a compile-on-the-host pair).
 
 `source-api.signature-change-source-only` — one of the three leaves Phase 3
-flagged as needing only its positive half — is **deliberately still open**,
-and batch 1 did not close it. The obvious positive control (a `char *` return
-value gaining pointee `const`: binary-identical, but consumer source
-assigning the result to a `char *` no longer compiles) was built and run
-against `compare`, and abicheck reports `NO_CHANGE`. That is not a corpus gap
-this plan may close by authoring a fixture around it; it is a detection gap.
-Per this plan's own non-goals, the honest disposition is to record it rather
-than manufacture a case, so the leaf keeps its `MISSING_CASE` status and its
-Phase 3 reason until either a *different* positive control that abicheck does
-observe is found, or the leaf is reclassified to `NOT_IMPLEMENTED` with a
-[known-gaps](../known-gaps.md) entry — a judgement the follow-up batch should
-make explicitly rather than inherit.
+flagged as needing only its positive half — was left open by batch 1 because
+its obvious positive control (a `char *` return value gaining pointee
+`const`: binary-identical, but consumer source assigning the result to a
+`char *` no longer compiles) reported `NO_CHANGE`: a detection gap, not a
+corpus gap. The gap is now fixed in the detector (new kinds
+`func_return_pointee_qualifier_added` / `func_return_pointee_qualifier_removed`,
+kept apart from `func_return_changed`), and the leaf is **closed** by
+`case211_return_pointee_gained_const` (`API_BREAK`, with a `source_smoke`
+proving the v1-compiles / v2-fails consumer), next to the existing
+`case186_c_api_pointee_const_abi_neutral` as its nearest conditional-risk
+sibling.
+
+The same change added a macro-spelled pair to the already-`COVERED`
+`calling-contract.calling-convention-change` leaf:
+`case209_calling_convention_changed_via_macro` (positive: the convention
+changes only through a config-header macro's expansion) and
+`case210_calling_convention_respelled_via_macro` (negative: a literal
+`ms_abi` respelled through a macro with the same expansion), each verified
+under both header backends. `scripts/evidence_tiers.py` gained a
+`KINDLESS_CASE_TIER` row for case210.
 
 Phase 1's taxonomy is
 [`docs/contribute/abi-api-failure-taxonomy.md`](../abi-api-failure-taxonomy.md),

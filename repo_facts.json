@@ -1,6 +1,6 @@
 {
   "canonical_python": "3.13",
-  "example_cases": 208,
+  "example_cases": 211,
   "fast_test_cases_collected": 48821,
   "generated_utc": "2026-09-15T22:31:19+00:00",
   "latest_release": "0.6.0",

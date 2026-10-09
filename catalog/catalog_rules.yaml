@@ -85,6 +85,12 @@ rules:
   calling-convention-changed:
     title: Calling convention changed
     definition: A function changes calling convention, so existing callers pass arguments and clean up the stack in a way the new code does not expect.
+  calling-convention-changed-via-macro:
+    title: Calling convention changed via a macro
+    definition: An exported function's calling convention changes through the expansion of a convention macro defined in an included config header, while the declaration text in the public header stays identical.
+  calling-convention-respelled-via-macro:
+    title: Calling convention respelled via a macro
+    definition: A declaration's calling-convention attribute moves from a literal spelling to a macro that expands to the same convention, so the binary interface is unchanged.
   cet-protection-weakened:
     title: CET protection weakened
     definition: The library drops Intel CET indirect-branch-tracking or shadow-stack markings, weakening the hardening a consumer process relies on.
@@ -388,6 +394,9 @@ rules:
   restrict-added-to-definition-only:
     title: restrict added to the definition only
     definition: An implementation gains `restrict` on its parameters while the declaration in the public header is untouched, so the contract consumers compile against is unchanged.
+  return-pointee-gained-const:
+    title: Return pointee gained const
+    definition: A function returning a pointer gains const on the pointee -- binary-identical, but callers that store the result in a non-const pointer no longer compile.
   return-type:
     title: Return type changed
     definition: A function's return type changes, so existing callers read the result from the wrong place or with the wrong width.

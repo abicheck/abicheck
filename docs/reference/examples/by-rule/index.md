@@ -25,6 +25,8 @@ Every atomic, ecosystem-neutral compatibility rule the catalog demonstrates or r
 | [`bit-int-width-changed`](bit-int-width-changed.md) | [case115_bit_int_width_changed](../case115_bit_int_width_changed.md) | — | — | — |
 | [`bitfield-changed`](bitfield-changed.md) | [case63_bitfield_changed](../case63_bitfield_changed.md) | — | — | — |
 | [`calling-convention-changed`](calling-convention-changed.md) | [case64_calling_convention_changed](../case64_calling_convention_changed.md) | — | — | — |
+| [`calling-convention-changed-via-macro`](calling-convention-changed-via-macro.md) | [case209_calling_convention_changed_via_macro](../case209_calling_convention_changed_via_macro.md) | — | — | — |
+| [`calling-convention-respelled-via-macro`](calling-convention-respelled-via-macro.md) | [case210_calling_convention_respelled_via_macro](../case210_calling_convention_respelled_via_macro.md) | — | — | — |
 | [`cet-protection-weakened`](cet-protection-weakened.md) | [case179_cet_protection_weakened](../case179_cet_protection_weakened.md) | — | — | — |
 | [`char-signedness-flip`](char-signedness-flip.md) | [case155_char_signedness_flip](../case155_char_signedness_flip.md) | — | — | — |
 | [`char8t-migration`](char8t-migration.md) | [case114_char8t_migration](../case114_char8t_migration.md) | — | — | — |
@@ -139,6 +141,7 @@ Every atomic, ecosystem-neutral compatibility rule the catalog demonstrates or r
 | [`ref-qualifier-added`](ref-qualifier-added.md) | [case166_ref_qualifier_added](../case166_ref_qualifier_added.md) | — | — | — |
 | [`relro-weakened`](relro-weakened.md) | [case134_relro_weakened](../case134_relro_weakened.md) | — | — | — |
 | [`restrict-added-to-definition-only`](restrict-added-to-definition-only.md) | [case208_restrict_added_to_definition_only](../case208_restrict_added_to_definition_only.md) | — | — | — |
+| [`return-pointee-gained-const`](return-pointee-gained-const.md) | [case211_return_pointee_gained_const](../case211_return_pointee_gained_const.md) | — | — | — |
 | [`return-type`](return-type.md) | [case10_return_type](../case10_return_type.md) | — | — | [case91_bundle_intra_signature_drift](../case91_bundle_intra_signature_drift.md) |
 | [`rpath-leak`](rpath-leak.md) | [case52_rpath_leak](../case52_rpath_leak.md) | — | — | — |
 | [`rtti-mode-flip`](rtti-mode-flip.md) | [case131_rtti_mode_flip](../case131_rtti_mode_flip.md) | — | — | — |

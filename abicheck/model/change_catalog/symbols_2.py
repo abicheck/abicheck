@@ -76,6 +76,49 @@ SYMBOLS_ENTRIES_2: list[ChangeKindMeta] = [
         operation=_OP.MODIFIED,
     ),
     _E(
+        "func_return_pointee_qualifier_added",
+        _A,
+        impact="The pointee of a returned pointer/reference gained "
+        "const/volatile (`char *f()` -> `const char *f()`). The return "
+        "register and calling convention are unchanged, so built binaries "
+        "keep working, but a caller that binds the result to a mutable "
+        "pointer (`char *p = f();`) no longer compiles in C++ (a discarded-"
+        "qualifier constraint violation in C), and so does a consumer that "
+        "stores the function in a pointer of the old type.",
+        description_template="Return pointee qualifier added: {name}: {old} → {new}",
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
+    ),
+    _E(
+        "func_return_pointee_qualifier_removed",
+        _R,
+        impact="The pointee of a returned pointer/reference lost "
+        "const/volatile (`const char *f()` -> `char *f()`). Every direct "
+        "call still compiles -- the result converts implicitly to the old "
+        "type -- but the function's type changed: a consumer that stores it "
+        "in a pointer of the old type (`const char *(*fp)(void) = f;`) no "
+        "longer compiles. Whether any consumer does that is not visible "
+        "from the library.",
+        description_template="Return pointee qualifier removed: {name}: {old} → {new}",
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
+    ),
+    _E(
+        "overload_ambiguity_introduced",
+        _R,
+        impact="A new overload joined an existing one with the same arity, "
+        "and at every position where their parameters differ both take a "
+        "scalar (arithmetic, enum, pointer). Built binaries are unaffected, "
+        "but a call that passes an argument with no type of its own there "
+        "-- an empty braced list `{}` -- had one viable candidate and is now "
+        "ambiguous, so that consumer no longer compiles. Constructors are "
+        "included (`T x({});`). Whether any consumer writes such a call is "
+        "not visible from the library.",
+        description_template="Overload makes an existing call ambiguous: {detail} — was {old}, new {new}",
+        entity=_ENT.FUNCTION,
+        operation=_OP.ADDED,
+    ),
+    _E(
         "param_restrict_added",
         _R,
         impact="A pointer parameter gained `restrict`. The calling convention "

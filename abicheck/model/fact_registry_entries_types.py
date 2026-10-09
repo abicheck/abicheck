@@ -177,7 +177,7 @@ TYPE_FACTS: list[FactDefinition] = [
         owner="RecordType",
         field="is_trivially_copyable",
         value_type="bool | None",
-        producing_backends=("clang",),
+        producing_backends=("clang", "castxml"),
         persisted=True,
         identity_relevant=False,
         comparable=True,
@@ -185,9 +185,10 @@ TYPE_FACTS: list[FactDefinition] = [
         reportable=True,
         lifecycle=FactLifecycle.PERSISTED,
         notes=(
-            "Governs how the type is passed by value. Same shape as "
-            "is_standard_layout — clang only. Plain case (b) "
-            "conversion."
+            "Governs how the type is passed by value. clang computes "
+            "it; castxml derives it tri-state from the special members "
+            "it emits (extract/headers/castxml/record_traits.py). Plain "
+            "case (b) conversion."
         ),
     ),
     _E(

@@ -46,6 +46,7 @@ from typing import TYPE_CHECKING, Any
 
 from ..diff_helpers import make_change
 from ..model.change_catalog.kinds import ChangeKind
+from ..model.execution_cache import memoized
 from ..model.type_indirection import unresolved_pair_verdict
 from ..name_classification import canonicalize_type_name, cv_qualifiers_only_differ
 
@@ -350,15 +351,14 @@ def pointee_qualifier_changes(
     for i in range(_count(old.types, new.types)):
         assert old.types is not None and new.types is not None
         t_old, t_new = old.types[i], new.types[i]
-        if t_old == t_new or not cv_qualifiers_only_differ(t_old, t_new):
+        delta = _pointee_qualifier_delta(t_old, t_new)
+        if delta is None:
             continue
-        o, n = _qualifier_levels(t_old), _qualifier_levels(t_new)
-        if o is None or n is None or o[1] != n[1]:
-            continue
-        added, removed = n[0] - o[0], o[0] - n[0]
-        if not added and not removed:
-            continue
-        widening_only = not removed and n[1] == 1 and all(lvl == 0 for _, lvl in added)
+        added, removed = delta
+        single_level = (_qualifier_levels(t_new) or (frozenset(), 0))[1] == 1
+        widening_only = (
+            not removed and single_level and all(lvl == 0 for _, lvl in added)
+        )
         changes.append(
             make_change(
                 ChangeKind.PARAM_POINTEE_QUALIFIER_ADDED
@@ -373,6 +373,55 @@ def pointee_qualifier_changes(
             )
         )
     return changes
+
+
+@memoized(maxsize=16384)
+def _pointee_qualifier_delta(
+    old: str | None, new: str | None
+) -> tuple[frozenset[tuple[str, int]], frozenset[tuple[str, int]]] | None:
+    """``(added, removed)`` pointee qualifiers between two spellings of the
+    same indirection depth that differ only in cv; ``None`` otherwise."""
+    if not old or not new or old == new or not cv_qualifiers_only_differ(old, new):
+        return None
+    o, n = _qualifier_levels(old), _qualifier_levels(new)
+    if o is None or n is None or o[1] != n[1] or o[0] == n[0]:
+        return None
+    return n[0] - o[0], o[0] - n[0]
+
+
+def return_pointee_qualifier_changes(
+    mangled: str,
+    name: str,
+    r_old: str | None,
+    r_new: str | None,
+    *,
+    entity_id: EntityId | None,
+) -> list[Change]:
+    """``FUNC_RETURN_POINTEE_QUALIFIER_ADDED``/``_REMOVED`` -- the return-type
+    mirror of :func:`pointee_qualifier_changes`, with the direction reversed
+    (a return value flows *out* to the caller):
+
+    * a qualifier gained at any level (``char *`` -> ``const char *``): a
+      caller binding the result to a mutable pointer breaks.
+    * qualifiers only lost: every direct call still converts implicitly; a
+      consumer holding the function in a pointer of the old type breaks --
+      a risk conditional on consumer use.
+    """
+    delta = _pointee_qualifier_delta(r_old, r_new)
+    if delta is None:
+        return []
+    return [
+        make_change(
+            ChangeKind.FUNC_RETURN_POINTEE_QUALIFIER_ADDED
+            if delta[0]
+            else ChangeKind.FUNC_RETURN_POINTEE_QUALIFIER_REMOVED,
+            symbol=mangled,
+            name=name,
+            old=r_old,
+            new=r_new,
+            entity_id=entity_id,
+        )
+    ]
 
 
 def va_list_changes(

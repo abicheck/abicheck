@@ -19,7 +19,7 @@ The mapping itself is hand-maintained in `docs/_meta/abi-taxonomy-coverage.json`
 
 ## Headline
 
-**65 of 88 known ABI/API failure mechanisms are `COVERED`** -- explained by a `docs/learn/` page, demonstrated by a `catalog/cases/` case, and detected by at least one `ChangeKind`. The remaining 23: 3 KNOWN_UNDETECTABLE, 1 NOT_IMPLEMENTED, 11 MISSING_CASE, 8 PARTIALLY_COVERED.
+**66 of 88 known ABI/API failure mechanisms are `COVERED`** -- explained by a `docs/learn/` page, demonstrated by a `catalog/cases/` case, and detected by at least one `ChangeKind`. The remaining 22: 3 KNOWN_UNDETECTABLE, 1 NOT_IMPLEMENTED, 10 MISSING_CASE, 8 PARTIALLY_COVERED.
 
 This is the plan's intended metric: completeness against the *domain*, not a case count. A corpus can grow indefinitely without moving this number, and can look complete while a whole mechanism class has no case at all.
 
@@ -28,16 +28,16 @@ This is the plan's intended metric: completeness against the *domain*, not a cas
 | `NOT_APPLICABLE` | 0 | outside abicheck's stated scope |
 | `KNOWN_UNDETECTABLE` | 3 | real and explained, but no static evidence distinguishes it |
 | `NOT_IMPLEMENTED` | 1 | no detector claims it at any evidence tier -- a tractable product gap |
-| `MISSING_CASE` | 11 | a detector exists, but no catalog case demonstrates it |
+| `MISSING_CASE` | 10 | a detector exists, but no catalog case demonstrates it |
 | `PARTIALLY_COVERED` | 8 | detected and demonstrated, but only a narrower sub-case, or unexplained |
-| `COVERED` | 65 | explained, demonstrated, and detected |
+| `COVERED` | 66 | explained, demonstrated, and detected |
 | **Total** | **88** | |
 
 The six statuses are evaluated in the order listed (first match wins) -- see the plan's own Phase 3 table in [ABI/API knowledge and corpus](plans/abi-api-knowledge-and-corpus.md) for each definition. The order, not the prose, is what keeps them mutually exclusive: a mechanism with a detector but no case satisfies both "detection is real" and "no case exists".
 
 ## Phase 4 backlog
 
-The **11 `MISSING_CASE` leaves** below are Phase 4's concrete work list: a detector already claims each one, so the gap is a corpus gap. Phase 4 closes each with a paired positive/negative control through the ordinary case-authoring path (`catalog/CLAUDE.md`) -- it is not started, and this page does not require the list to reach zero (a tracked, visible gap is preferred to a manufactured closure).
+The **10 `MISSING_CASE` leaves** below are Phase 4's concrete work list: a detector already claims each one, so the gap is a corpus gap. Phase 4 closes each with a paired positive/negative control through the ordinary case-authoring path (`catalog/CLAUDE.md`) -- it is not started, and this page does not require the list to reach zero (a tracked, visible gap is preferred to a manufactured closure).
 
 | Leaf | Why it is open |
 |---|---|
@@ -49,7 +49,6 @@ The **11 `MISSING_CASE` leaves** below are Phase 4's concrete work list: a detec
 | `export-surface.documented-contract-drift` | The surface-growth detectors exist and `learn/surface-growth.md` explains the mechanism, but no case exercises accretion of an undocumented surface across releases. |
 | `export-surface.version-script-map-change` | Three detectors claim the export-map surface (an absent version script, a changed export policy, a retargeted PE ordinal), but the corpus has no case where a version script or `.def` file -- and nothing else -- changes the export set. |
 | `source-abi.macro-driven-layout-change` | case164 is the *false-positive* control (a `#ifdef`-guarded field where both releases define the macro, so the correct answer is NO_CHANGE). No case demonstrates the positive mechanism -- two consumers compiling the same header under different macro state and getting different layouts -- which the context-mismatch detectors claim. |
-| `source-api.signature-change-source-only` | case186 is the ABI-neutral *negative* control (a `char*` parameter becoming `const char*`, which must stay NO_CHANGE). No case demonstrates the positive mechanism: a binary-identical change that still breaks recompilation of consumer source. |
 | `symbol-identity.alias-change` | Detection exists for the `.symver` alias half (plus the PE forwarder and Mach-O re-export analogues), but no catalog case exercises any of them, and no detector claims a plain `__attribute__((alias))` repoint. |
 | `toolchain-platform.endianness-change` | `elf_endianness_changed` claims the mechanism outright, but no case pairs a little-endian and a big-endian build -- the catalog's build fixtures are all produced on one host. |
 
@@ -87,7 +86,7 @@ One row per taxonomy leaf, in the taxonomy's own branch and row order. Each dete
 | `calling-contract.parameter-count-change`<br>Parameter count (arity) change | [02-symbol-contracts](../learn/abi-series/02-symbol-contracts.md) | `case199_public_function_parameter_added`<br>`case200_new_entry_point_instead_of_parameter_added` | `func_params_changed` (symbols, L1)<br>`mandatory_template_param_added` (types, --) | `COVERED` |
 | `calling-contract.parameter-order-change`<br>Parameter order change | [02-symbol-contracts](../learn/abi-series/02-symbol-contracts.md) | `case201_public_function_parameters_reordered`<br>`case202_public_header_declaration_order_changed` | `func_params_changed` (symbols, L1) | `COVERED` |
 | `calling-contract.return-type-change`<br>Return type change | [02-symbol-contracts](../learn/abi-series/02-symbol-contracts.md) | `case102_frozen_runtime_signature_changed`<br>`case10_return_type`<br>`case46_pointer_chain_type_change` | `func_return_changed` (symbols, L1)<br>`return_pointer_level_changed` (symbols, --)<br>`template_return_type_changed` (types, --)<br>`unspecified_return_now_named` (types, --) | `COVERED` |
-| `calling-contract.calling-convention-change`<br>Calling-convention change | [05-linker-elf](../learn/abi-series/05-linker-elf.md)<br>[msvc-pe-abi-model](../learn/msvc-pe-abi-model.md) | `case64_calling_convention_changed` | `calling_convention_changed` (symbols, L1) | `COVERED` |
+| `calling-contract.calling-convention-change`<br>Calling-convention change | [05-linker-elf](../learn/abi-series/05-linker-elf.md)<br>[msvc-pe-abi-model](../learn/msvc-pe-abi-model.md) | `case209_calling_convention_changed_via_macro`<br>`case210_calling_convention_respelled_via_macro`<br>`case64_calling_convention_changed` | `calling_convention_changed` (symbols, L1) | `COVERED` |
 | `calling-contract.exception-specification-abi-change`<br>Exception-specification ABI change | [04-cpp-abi](../learn/abi-series/04-cpp-abi.md)<br>[exception-unwinding-abi](../learn/exception-unwinding-abi.md) | `case130_exceptions_mode_flip`<br>`case15_noexcept_change` | `exceptions_mode_changed` (platform, L3)<br>`func_exception_spec_changed` (symbols, L2)<br>`func_noexcept_added` (symbols, --)<br>`func_noexcept_removed` (symbols, --) | `COVERED` |
 | `calling-contract.variadic-change`<br>Variadic/fixed-arity change | _none_ | _none_ | `func_variadic_added` (symbols, L2)<br>`func_variadic_removed` (symbols, L2)<br>`param_became_va_list` (symbols, --)<br>`param_lost_va_list` (symbols, --) | `MISSING_CASE` |
 | `calling-contract.implicit-this-change`<br>Implicit `this` change | [04-cpp-abi](../learn/abi-series/04-cpp-abi.md) | `case21_method_became_static` | `func_static_changed` (types, L1) | `COVERED` |
@@ -208,13 +207,11 @@ One row per taxonomy leaf, in the taxonomy's own branch and row order. Each dete
 
 | Leaf | `learn_pages` | `catalog_cases` | `detector` (kind, module, min evidence) | Status |
 |---|---|---|---|---|
-| `source-api.signature-change-source-only`<br>Source-only signature change | [06-transitive-breaks](../learn/abi-series/06-transitive-breaks.md)<br>[limitations](../learn/limitations.md)<br>[verdicts](../learn/verdicts.md) | `case186_c_api_pointee_const_abi_neutral`<br>_(control only)_ | `func_cv_changed` (types, L1)<br>`func_params_changed` (symbols, L1)<br>`param_renamed` (symbols, --)<br>`removed_const_overload` (types, --)<br>`source_level_kind_changed` (types, --) | `MISSING_CASE` |
+| `source-api.signature-change-source-only`<br>Source-only signature change | [06-transitive-breaks](../learn/abi-series/06-transitive-breaks.md)<br>[limitations](../learn/limitations.md)<br>[verdicts](../learn/verdicts.md) | `case186_c_api_pointee_const_abi_neutral`<br>`case211_return_pointee_gained_const` | `func_cv_changed` (types, L1)<br>`func_params_changed` (symbols, L1)<br>`func_return_pointee_qualifier_added` (symbols, L2)<br>`func_return_pointee_qualifier_removed` (symbols, L2)<br>`param_renamed` (symbols, --)<br>`removed_const_overload` (types, --)<br>`source_level_kind_changed` (types, --) | `COVERED` |
 | `source-api.header-macro-removal`<br>Public macro removal | [06-transitive-breaks](../learn/abi-series/06-transitive-breaks.md)<br>[abi-surface](../learn/abi-surface.md) | `case156_public_macro_removed` | `public_macro_removed` (source, L4)<br>`public_macro_value_changed` (source, --) | `COVERED` |
 | `source-api.deprecation-attribute-addition`<br>Deprecation-attribute addition | [02-symbol-contracts](../learn/abi-series/02-symbol-contracts.md)<br>[rollout-and-governance](../learn/rollout-and-governance.md) | `case205_public_function_marked_deprecated`<br>`case206_deprecation_documented_without_attribute` | `enum_deprecated_added` (types, L2)<br>`field_deprecated_added` (types, L2)<br>`func_deprecated_added` (symbols, L2)<br>`func_deprecated_removed` (symbols, L2)<br>`type_deprecated_added` (types, L2)<br>`var_deprecated_added` (symbols, L2) | `COVERED` |
 | `source-api.default-argument-value-change`<br>Default-argument value change | [abi-cheat-sheet](../learn/abi-cheat-sheet.md)<br>[06-transitive-breaks](../learn/abi-series/06-transitive-breaks.md) | `case123_default_argument_removed`<br>`case32_param_defaults` | `default_argument_changed` (source, --)<br>`param_default_value_changed` (symbols, L2)<br>`param_default_value_removed` (symbols, L2)<br>`python_api_default_removed` (symbols, L2) | `COVERED` |
 | `source-api.overload-resolution-change`<br>Overload-resolution change | [06-transitive-breaks](../learn/abi-series/06-transitive-breaks.md)<br>[modern-cpp-toolchain-hazards](../learn/modern-cpp-toolchain-hazards.md) | `case111_enumerable_thread_specific_lambda_ambiguity`<br>`case169_overload_added` | `ctor_explicit_added` (symbols, L2)<br>`ctor_explicit_removed` (symbols, --)<br>`ctor_overload_ambiguity_risk` (symbols, L2)<br>`overload_added` (types, L0)<br>`overload_set_rerouted` (types, --)<br>`removed_const_overload` (types, --) | `COVERED` |
-
-- `source-api.signature-change-source-only` (MISSING_CASE) — case186 is the ABI-neutral *negative* control (a `char*` parameter becoming `const char*`, which must stay NO_CHANGE). No case demonstrates the positive mechanism: a binary-identical change that still breaks recompilation of consumer source.
 
 ### 12. Header-only compatibility (`header-only`)
 

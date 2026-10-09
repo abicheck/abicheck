@@ -131,6 +131,7 @@ class DetectorRegistry:
         # findings (`tests/test_undeclared_export_additions.py` asserts
         # registration through the real registry for exactly that reason).
         "abicheck.compare.undeclared_exports",
+        "abicheck.compare.overload_ambiguity",
     )
 
     def ensure_loaded(self) -> None:

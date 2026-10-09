@@ -4840,5 +4840,74 @@
   "subjects": [
    "safe-changes-correctly-not-flagged"
   ]
+ },
+ "case209_calling_convention_changed_via_macro": {
+  "entity": "rule",
+  "scenario_kind": null,
+  "operation": "compare",
+  "ecosystem": "generic",
+  "topics": [
+   "symbols"
+  ],
+  "languages": [
+   "c"
+  ],
+  "scope": "single-library",
+  "artifact_shape": "compiled-pair",
+  "validation_owner": "compiler-pair",
+  "related_rules": [],
+  "rule_slug": "calling-convention-changed-via-macro",
+  "variant_of": null,
+  "relation_type": null,
+  "relation_axis": null,
+  "subjects": [
+   "calling-convention-and-integer-model-changes"
+  ]
+ },
+ "case210_calling_convention_respelled_via_macro": {
+  "entity": "rule",
+  "scenario_kind": null,
+  "operation": "compare",
+  "ecosystem": "generic",
+  "topics": [
+   "controls"
+  ],
+  "languages": [
+   "c"
+  ],
+  "scope": "single-library",
+  "artifact_shape": "compiled-pair",
+  "validation_owner": "compiler-pair",
+  "related_rules": [],
+  "rule_slug": "calling-convention-respelled-via-macro",
+  "variant_of": null,
+  "relation_type": null,
+  "relation_axis": null,
+  "subjects": [
+   "safe-changes-correctly-not-flagged"
+  ]
+ },
+ "case211_return_pointee_gained_const": {
+  "entity": "rule",
+  "scenario_kind": null,
+  "operation": "compare",
+  "ecosystem": "generic",
+  "topics": [
+   "symbols"
+  ],
+  "languages": [
+   "c"
+  ],
+  "scope": "single-library",
+  "artifact_shape": "compiled-pair",
+  "validation_owner": "compiler-pair",
+  "related_rules": [],
+  "rule_slug": "return-pointee-gained-const",
+  "variant_of": null,
+  "relation_type": null,
+  "relation_axis": null,
+  "subjects": [
+   "function-signature-and-source-api-changes"
+  ]
  }
 }

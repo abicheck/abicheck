@@ -40,7 +40,7 @@ abicheck compare libfoo.so.1 libfoo.so.2 --header old=include/v1/ --header new=i
 - **Five layers of evidence, not one.** Binary, debug info, headers, build flags, sources. Each layer finds breaks the others miss and removes false positives the weaker ones raise.
 - **It says what it could not check.** Missing evidence is reported, never silently passed.
 - **Additions count.** A compatible release still lists every new function, variable, and enumerator, with a version-bump recommendation, so surface growth is reviewed rather than assumed.
-- **411 ABI/API change types**, and it keeps binary breaks (`BREAKING`) apart from source-only breaks (`API_BREAK`). It is the only tool in the [benchmark](#how-it-compares-to-other-tools) that reports `API_BREAK` as its own verdict; ABICC splits binary and source into separate reports without an equivalent verdict.
+- **414 ABI/API change types**, and it keeps binary breaks (`BREAKING`) apart from source-only breaks (`API_BREAK`). It is the only tool in the [benchmark](#how-it-compares-to-other-tools) that reports `API_BREAK` as its own verdict; ABICC splits binary and source into separate reports without an equivalent verdict.
 - **Zero false positives** on the benchmark catalog, at 95.9% accuracy with headers and 99.5% with full evidence, where `abidiff` scores 28.5% and ABICC 44.6%.
 - **Made for CI.** Deterministic exit codes, SARIF/JSON/Markdown/HTML/JUnit, baselines, policies, suppressions, a [GitHub Action](#github-action), and a typed [Python API](#python-api). Pure Python, Linux/Windows/macOS.
 
@@ -167,7 +167,7 @@ With less input abicheck degrades gracefully instead of failing. `abicheck dump 
 
 ### What each layer buys
 
-Measured on the [`examples/`](examples/README.md) catalog, which holds 208 cases today: 196 of them are compare-style cases with a minimum-evidence label, and the table shows the cumulative share of those whose *every* expected change kind is discovered once a layer is present.
+Measured on the [`examples/`](examples/README.md) catalog, which holds 211 cases today: 199 of them are compare-style cases with a minimum-evidence label, and the table shows the cumulative share of those whose *every* expected change kind is discovered once a layer is present.
 
 | Evidence available | Cases fully covered |
 |--------------------|:-------------------:|
@@ -182,7 +182,7 @@ This is a discoverability floor, not an accuracy score; the [tool comparison pag
 
 ## How it compares to other tools
 
-`abidiff` (libabigail) reads the binary and its DWARF. `abi-compliance-checker` (ABICC) reads headers and a compiled dump. abicheck runs each pass its input supports: a symbol-table pass on every comparison, a header-AST pass when you supply headers, a DWARF/PDB cross-check when the binaries carry debug info (Linux and Windows; Mach-O has none yet), and build and source evidence layered on top when given, feeding **411 change types** of detection. A bare stripped binary gets only the first pass, and the report says so. That is where the gap comes from.
+`abidiff` (libabigail) reads the binary and its DWARF. `abi-compliance-checker` (ABICC) reads headers and a compiled dump. abicheck runs each pass its input supports: a symbol-table pass on every comparison, a header-AST pass when you supply headers, a DWARF/PDB cross-check when the binaries carry debug info (Linux and Windows; Mach-O has none yet), and build and source evidence layered on top when given, feeding **414 change types** of detection. A bare stripped binary gets only the first pass, and the report says so. That is where the gap comes from.
 
 | | abicheck | libabigail `abidiff` | ABICC |
 |---|:---:|:---:|:---:|
@@ -347,13 +347,13 @@ Details, including which toolchains each lane exercises: [Platform Support](http
 
 ## Examples and validation
 
-The [`examples/`](examples/README.md) directory contains **208 real-world ABI/API scenarios and evidence-model fixtures** with ground-truth verdicts: 203 single-library cases (most are compiled `v1`/`v2` pairs with a consumer app modelled on real breaks; the rest are single-snapshot audits and hand-built L3 to L5 evidence-model fixtures for breaks no artifact layer can see) plus 5 multi-library bundle releases. They double as the regression corpus and as a case encyclopedia of how real breaks look ([browse it](https://abicheck.github.io/abicheck/reference/examples/)).
+The [`examples/`](examples/README.md) directory contains **211 real-world ABI/API scenarios and evidence-model fixtures** with ground-truth verdicts: 206 single-library cases (most are compiled `v1`/`v2` pairs with a consumer app modelled on real breaks; the rest are single-snapshot audits and hand-built L3 to L5 evidence-model fixtures for breaks no artifact layer can see) plus 5 multi-library bundle releases. They double as the regression corpus and as a case encyclopedia of how real breaks look ([browse it](https://abicheck.github.io/abicheck/reference/examples/)).
 
-**208 fixtures is not 208 independent concepts, and the catalog no longer reports it as if it were.** Those cases resolve to **171 demonstrated compatibility rules** (each with a definition in `catalog/catalog_rules.yaml`), of which **5 rules with a variant** carry a genuine robustness demonstration and **2 rules with a duplicate** merely restate one, plus **30 composed scenarios** and **17 referenced-only rules** the catalog names but does not yet isolate in a case of its own. The full 208-case accounting stays as the regression-completeness measure it is; the per-dimension breakdown lives in [catalog coverage](docs/contribute/catalog-coverage.md).
+**211 fixtures is not 211 independent concepts, and the catalog no longer reports it as if it were.** Those cases resolve to **174 demonstrated compatibility rules** (each with a definition in `catalog/catalog_rules.yaml`), of which **5 rules with a variant** carry a genuine robustness demonstration and **2 rules with a duplicate** merely restate one, plus **30 composed scenarios** and **17 referenced-only rules** the catalog names but does not yet isolate in a case of its own. The full 211-case accounting stays as the regression-completeness measure it is; the per-dimension breakdown lives in [catalog coverage](docs/contribute/catalog-coverage.md).
 
 Separately from the calibration catalog, [`examples/workflows/`](examples/README.md) holds curated, task-oriented walkthroughs — start there to *use* abicheck. Each one's documented commands are executed in CI, so a walkthrough cannot rot into something that no longer works.
 
-CI validates the full **208-case catalog** on every push to `main` and every pull request that touches the engine, the tests, or the examples, combining GCC and Clang lanes, runtime smoke, artifact variants, and bundle checks into one proof matrix (the [validation runbook](docs/contribute/examples-validation-runbook.md) describes how to reproduce it). `python scripts/benchmark_comparison.py --suite all` scores the catalog's verdict accuracy locally, which is a narrower check than that matrix. Each GitHub Release additionally runs and attaches the pinned 74-case cross-tool subset (`case01` to `case73` plus `case26b`; `python scripts/benchmark_comparison.py --suite pinned74`) for apples-to-apples comparison with libabigail and ABICC.
+CI validates the full **211-case catalog** on every push to `main` and every pull request that touches the engine, the tests, or the examples, combining GCC and Clang lanes, runtime smoke, artifact variants, and bundle checks into one proof matrix (the [validation runbook](docs/contribute/examples-validation-runbook.md) describes how to reproduce it). `python scripts/benchmark_comparison.py --suite all` scores the catalog's verdict accuracy locally, which is a narrower check than that matrix. Each GitHub Release additionally runs and attaches the pinned 74-case cross-tool subset (`case01` to `case73` plus `case26b`; `python scripts/benchmark_comparison.py --suite pinned74`) for apples-to-apples comparison with libabigail and ABICC.
 
 ## Documentation
 

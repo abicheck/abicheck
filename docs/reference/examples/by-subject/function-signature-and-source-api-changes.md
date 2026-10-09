@@ -3,7 +3,7 @@
 
 A function or method's parameter types, return type, qualifiers, access level, or overload set changes in a way that is a source-level (recompile-required) break more often than a binary one.
 
-_21 case(s)._ [← back to all subjects](index.md)
+_22 case(s)._ [← back to all subjects](index.md)
 
 ## Cases
 
@@ -30,3 +30,4 @@ _21 case(s)._ [← back to all subjects](index.md)
 | [case199_public_function_parameter_added](../case199_public_function_parameter_added.md) | Parameter Added to an Exported Function | 🔴 BREAKING | Breaking |
 | [case201_public_function_parameters_reordered](../case201_public_function_parameters_reordered.md) | Public Function Parameters Reordered | 🔴 BREAKING | Breaking |
 | [case207_pointer_parameter_gained_restrict](../case207_pointer_parameter_gained_restrict.md) | Pointer Parameter Gained `restrict` | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case211_return_pointee_gained_const](../case211_return_pointee_gained_const.md) | Return Pointee Gained `const` | 🟠 API_BREAK | API Break |

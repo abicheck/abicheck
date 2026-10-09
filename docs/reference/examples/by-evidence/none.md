@@ -3,8 +3,6 @@
 
 No evidence tier currently reaches this case's canonical verdict — a known detector gap, kept in the catalog as calibration.
 
-_1 case(s)._ [← back to all examples](../index.md)
+_0 case(s)._ [← back to all examples](../index.md)
 
-| Case | Title | Verdict | Category |
-|------|-------|---------|----------|
-| [case111_enumerable_thread_specific_lambda_ambiguity](../case111_enumerable_thread_specific_lambda_ambiguity.md) | enumerable_thread_specific Lambda-Init Ambiguity | 🟠 API_BREAK | API Break |
+_No cases in this group._

@@ -50,6 +50,14 @@ def is_synthetic_ctor_key(key: str) -> bool:
     return key.startswith(SYNTHETIC_CTOR_KEY_PREFIX)
 
 
+def synthetic_ctor_owner(key: str) -> str | None:
+    """The qualified class name a synthetic constructor key belongs to
+    (``__abicheck_ctor__ns::C(int)`` -> ``ns::C``); ``None`` for any other key."""
+    if not is_synthetic_ctor_key(key):
+        return None
+    return key[len(SYNTHETIC_CTOR_KEY_PREFIX) :].split("(", 1)[0]
+
+
 #: Marker for a snapshot key synthesized for a destructor whose real mangled
 #: name castxml omitted (see ``extract.headers.castxml.functions.function_display_name`` and
 #: ``function_mangled_name``'s ``return name`` fallback). A class has at
