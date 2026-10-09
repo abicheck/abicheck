@@ -23,8 +23,7 @@ production cap. Neither function touches the command object -- both take
 plain resolved values and either raise ``click.UsageError`` or warn -- so a
 leaf module is their natural home, and it also removes the reason
 ``cli_compare_helpers`` had to import them from a command module behind a
-``# cycle`` comment. ``commands/compare.py`` re-exports both names, so that
-import path is unchanged.
+``# cycle`` comment.
 """
 
 from __future__ import annotations

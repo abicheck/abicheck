@@ -9581,7 +9581,7 @@ changelog entry and `tests/test_one_comparison_product_parity.py`.
 `json`/`markdown`/`sarif`/`html`/`junit`/`review`/`oneline`; a directory or
 package operand renders `json`/`markdown`/`junit`/`oneline`/`html` and rejects the
 rest
-(`frontends/cli/commands/compare.py`'s `_RELEASE_FORMATS`). The rejection is
+(`frontends/cli/commands/compare_routing.py`'s `_RELEASE_FORMATS`). The rejection is
 loud rather than silent, and it is not arbitrary — the missing formats are
 the ones whose renderers take a single `DiffResult`:
 

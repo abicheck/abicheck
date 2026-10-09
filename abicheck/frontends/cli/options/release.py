@@ -498,7 +498,7 @@ def _stash_variant_in_context(
 
     ``--variant`` means nothing to a single-pair `compare`/`run_compare`
     call -- only the directory/package release fan-out
-    (`frontends.cli.commands.compare._dispatch_release_compare`) reads it
+    (`frontends.cli.commands.compare_routing._dispatch_release_compare`) reads it
     back via `variant_kwargs_from_context`, off the identical `ctx` -- so
     routing it through `ctx.meta` instead of `**kwargs` means `run_compare`
     (whose own typed signature has no matching parameter) never has to see
@@ -571,7 +571,7 @@ def variant_options(func: F) -> F:
 def variant_kwargs_from_context(ctx: click.Context) -> dict[str, str | None]:
     """``--variant``'s resolved per-side values, stashed on *ctx* by
     `_stash_variant_in_context` -- what
-    `frontends.cli.commands.compare._dispatch_release_compare` merges into
+    `frontends.cli.commands.compare_routing._dispatch_release_compare` merges into
     its own kwargs before calling `compare_release_cmd.callback` (ADR-062
     A1.7), since `variant_options`' `expose_value=False` means the flag
     never reaches a decorated command's own `**kwargs`.
