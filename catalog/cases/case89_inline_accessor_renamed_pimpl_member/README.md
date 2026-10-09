@@ -26,6 +26,19 @@ change (`descriptor` still holds one pimpl pointer) — the break lives
 entirely in the gap between what the consumer's inline body assumes and
 what the new detail layout actually is.
 
+**The mechanism is the reorder, not the spelling.** Compiled member access
+uses byte offsets, never C++ member-name strings: a control variant that
+renames `class_count_` → `n_classes_` *without* reordering returns `2` from
+the unchanged old binary on both sides, while the shipped fixture (rename
+plus reorder) changes `class_count` from `2` to `100` and exits 1. The case
+is `BREAKING` for that shipped, reordered layout; a rename that preserves
+every offset leaves old binaries working at the machine level (it is still a
+source change for code naming the member, and the control is not a general
+guarantee about C++ ODR after arbitrary header edits).
+`inline_body_references_renamed_member` is the evidence that an inline body
+consumers compiled in depends on the renamed member; the offset move is
+what makes it a binary break.
+
 ## Old/new diff
 
 | v1.h (`detail::descriptor_impl`) | v2.h (`detail::descriptor_impl`) |

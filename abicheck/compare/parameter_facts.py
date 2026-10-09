@@ -47,6 +47,7 @@ from typing import TYPE_CHECKING, Any
 from ..diff_helpers import make_change
 from ..model.change_catalog.kinds import ChangeKind
 from ..model.type_indirection import unresolved_pair_verdict
+from ..name_classification import canonicalize_type_name, cv_qualifiers_only_differ
 
 if TYPE_CHECKING:
     from ..model.change import Change
@@ -60,6 +61,7 @@ __all__ = [
     "parameter_rename_changes",
     "parameter_view",
     "pointer_level_changes",
+    "pointee_qualifier_changes",
     "restrict_changes",
     "va_list_changes",
 ]
@@ -278,13 +280,95 @@ def restrict_changes(
         old_is, new_is = r_old == "true", r_new == "true"
         changes.append(
             make_change(
-                ChangeKind.PARAM_RESTRICT_CHANGED,
+                # Adding restrict tightens the *caller's* obligation (no
+                # overlapping arguments) for an already-compiled caller;
+                # removing it only drops an optimizer assumption.
+                ChangeKind.PARAM_RESTRICT_ADDED
+                if new_is
+                else ChangeKind.PARAM_RESTRICT_CHANGED,
                 symbol=mangled,
                 name=name,
                 detail="added" if new_is else "removed",
                 old=old.label(i),
                 old_value=f"restrict={old_is}",
                 new_value=f"restrict={new_is}",
+                entity_id=entity_id,
+            )
+        )
+    return changes
+
+
+def _qualifier_levels(spelling: str) -> tuple[frozenset[tuple[str, int]], int] | None:
+    """``({(qualifier, level)}, indirection levels)`` of a canonical spelling.
+
+    Level 0 qualifies the innermost pointee, level *k* the *k*-th pointer or
+    reference; qualifiers at the top level (the parameter object itself,
+    absent from the function's type) are dropped. Template arguments are
+    opaque. ``None`` when the spelling has no top-level indirection.
+    """
+    canon = canonicalize_type_name(spelling)
+    tokens = canon.replace("*", " * ").replace("&", " & ").split()
+    level = 0
+    depth = 0
+    found: set[tuple[str, int]] = set()
+    for tok in tokens:
+        depth += tok.count("<") - tok.count(">")
+        if depth > 0 or "<" in tok or ">" in tok:
+            continue
+        if tok in ("*", "&", "&&"):
+            level += 1
+        elif tok in ("const", "volatile"):
+            found.add((tok, level))
+    if level == 0:
+        return None
+    return frozenset(q for q in found if q[1] < level), level
+
+
+def pointee_qualifier_changes(
+    mangled: str,
+    name: str,
+    old: ParameterView,
+    new: ParameterView,
+    *,
+    entity_id: EntityId | None,
+) -> list[Change]:
+    """``PARAM_POINTEE_QUALIFIER_ADDED``/``_CHANGED`` -- the source-level half
+    of a cv change behind a parameter's pointer or reference.
+
+    Such a change keeps the calling convention, so ``FUNC_PARAMS_CHANGED``
+    deliberately ignores it (``cv_qualifiers_only_differ``). It is not
+    nothing at the source level, and the two directions differ:
+
+    * ``T *`` -> ``const T *`` (a qualifier gained by the single pointee): every
+      direct call still compiles, but a consumer that stores the function in a
+      ``void (*)(T *)`` pointer no longer does (C constraint violation, C++
+      error) -- a risk conditional on how consumers use the entry point.
+    * a qualifier lost, or gained at a deeper level (``char **`` ->
+      ``const char **`` is not an implicit conversion): direct callers break.
+    """
+    changes: list[Change] = []
+    for i in range(_count(old.types, new.types)):
+        assert old.types is not None and new.types is not None
+        t_old, t_new = old.types[i], new.types[i]
+        if t_old == t_new or not cv_qualifiers_only_differ(t_old, t_new):
+            continue
+        o, n = _qualifier_levels(t_old), _qualifier_levels(t_new)
+        if o is None or n is None or o[1] != n[1]:
+            continue
+        added, removed = n[0] - o[0], o[0] - n[0]
+        if not added and not removed:
+            continue
+        widening_only = not removed and n[1] == 1 and all(lvl == 0 for _, lvl in added)
+        changes.append(
+            make_change(
+                ChangeKind.PARAM_POINTEE_QUALIFIER_ADDED
+                if widening_only
+                else ChangeKind.PARAM_POINTEE_QUALIFIER_CHANGED,
+                symbol=mangled,
+                name=name,
+                detail=old.label(i),
+                old=t_old,
+                new=t_new,
                 entity_id=entity_id,
             )
         )

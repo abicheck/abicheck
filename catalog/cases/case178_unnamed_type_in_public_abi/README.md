@@ -94,6 +94,13 @@ g++ -std=c++17 -shared -fPIC -g v2.cpp -o libv1.so
 #   not rely on this exact name surviving a rebuild.
 ```
 
+The spelling is itself compiler-specific: GCC names the closure's static
+invoker `_FUN` (`_ZN10descendingMUliiE_4_FUNEii`), Clang names it `__invoke`
+(`_ZN10descendingMUliiE_8__invokeEii`). The app probes both, so the lookup is
+exercised under either toolchain (it previously hard-coded the GCC name and
+silently tested nothing under Clang); it fails (exit 1) only if the stable
+wrapper stops working.
+
 The stable wrapper (`pick_larger`) resolves identically in both builds and
 the app never crashes; the raw closure symbol simply appears once v2
 introduces it, and nothing in the Itanium ABI promises it will keep this

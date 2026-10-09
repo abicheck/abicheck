@@ -141,7 +141,7 @@ class TestRunLayoutTool:
                 "abicheck.clang_layout_tool._resolve_clang_bin", return_value="clang++"
             ),
             patch(
-                "abicheck.clang_layout_tool._resolve_clang_langmode",
+                "abicheck.clang_layout_tool.resolve_clang_langmode",
                 return_value=(True, False, False, "gnu"),
             ),
             patch(
@@ -162,7 +162,7 @@ class TestRunLayoutTool:
                 "abicheck.clang_layout_tool._resolve_clang_bin", return_value="clang++"
             ),
             patch(
-                "abicheck.clang_layout_tool._resolve_clang_langmode",
+                "abicheck.clang_layout_tool.resolve_clang_langmode",
                 return_value=(True, False, False, "gnu"),
             ),
             patch("abicheck.clang_layout_tool.run_bounded", return_value=fake_result),
@@ -183,7 +183,7 @@ class TestRunLayoutTool:
                 "abicheck.clang_layout_tool._resolve_clang_bin", return_value="clang++"
             ),
             patch(
-                "abicheck.clang_layout_tool._resolve_clang_langmode",
+                "abicheck.clang_layout_tool.resolve_clang_langmode",
                 return_value=(True, False, False, "gnu"),
             ),
             patch("abicheck.clang_layout_tool.run_bounded", return_value=fake_result),
@@ -213,7 +213,7 @@ class TestRunLayoutTool:
                 "abicheck.clang_layout_tool._resolve_clang_bin", return_value="clang++"
             ),
             patch(
-                "abicheck.clang_layout_tool._resolve_clang_langmode",
+                "abicheck.clang_layout_tool.resolve_clang_langmode",
                 return_value=(True, False, False, "gnu"),
             ),
             patch("abicheck.clang_layout_tool.run_bounded", return_value=fake_result),
@@ -242,7 +242,7 @@ class TestRunLayoutTool:
                 "abicheck.clang_layout_tool._resolve_clang_bin", return_value="clang++"
             ),
             patch(
-                "abicheck.clang_layout_tool._resolve_clang_langmode",
+                "abicheck.clang_layout_tool.resolve_clang_langmode",
                 return_value=(True, False, False, "gnu"),
             ),
             patch(
@@ -262,7 +262,7 @@ class TestRunLayoutTool:
 
     def test_probed_system_includes_are_threaded_into_compile_flags(self, tmp_path):
         # Codex review: without this, a header set that only parses because
-        # of dumper._clang_header_dump's own libstdc++/libc auto-probe
+        # of extract.headers.clang.backend.clang_header_dump's own libstdc++/libc auto-probe
         # succeeds for the original direct-clang dump but fails here,
         # silently losing the whole layout enrichment.
         header = tmp_path / "a.h"
@@ -283,7 +283,7 @@ class TestRunLayoutTool:
                 "abicheck.clang_layout_tool._resolve_clang_bin", return_value="clang++"
             ),
             patch(
-                "abicheck.clang_layout_tool._resolve_clang_langmode",
+                "abicheck.clang_layout_tool.resolve_clang_langmode",
                 return_value=(True, False, False, "gnu"),
             ),
             patch(
@@ -305,8 +305,8 @@ class TestRunLayoutTool:
 
     def test_cpp_selfheal_retry_on_missing_cpp_stdlib_header(self, tmp_path):
         # Codex review: this second, independent clang pass re-derives its own
-        # initial force_cpp guess via _resolve_clang_langmode -- the SAME
-        # content-based heuristic dumper._clang_header_dump used BEFORE ITS
+        # initial force_cpp guess via resolve_clang_langmode -- the SAME
+        # content-based heuristic extract.headers.clang.backend.clang_header_dump used BEFORE ITS
         # OWN C->C++ self-heal retry. If that initial guess was wrong (e.g. a
         # pure-#include C++ umbrella header), this tool has to self-heal the
         # exact same way or it silently loses ALL enrichment on an otherwise-
@@ -336,7 +336,7 @@ class TestRunLayoutTool:
                 "abicheck.clang_layout_tool._resolve_clang_bin", return_value="clang++"
             ),
             patch(
-                "abicheck.clang_layout_tool._resolve_clang_langmode",
+                "abicheck.clang_layout_tool.resolve_clang_langmode",
                 return_value=(False, False, False, "gnu"),
             ),
             patch(
@@ -351,7 +351,7 @@ class TestRunLayoutTool:
         assert result == [{"qualified_name": "Foo", "size_bits": 32}]
 
     def test_error_header_exclusion_retry(self, tmp_path):
-        # Codex review: mirrors dumper._clang_header_dump's own graceful
+        # Codex review: mirrors extract.headers.clang.backend.clang_header_dump's own graceful
         # #error handling -- a header not meant for direct inclusion must be
         # dropped and the rest re-parsed, not silently lose the whole
         # enrichment pass.
@@ -390,7 +390,7 @@ class TestRunLayoutTool:
                 "abicheck.clang_layout_tool._resolve_clang_bin", return_value="clang++"
             ),
             patch(
-                "abicheck.clang_layout_tool._resolve_clang_langmode",
+                "abicheck.clang_layout_tool.resolve_clang_langmode",
                 return_value=(True, False, False, "gnu"),
             ),
             patch(

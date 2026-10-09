@@ -542,8 +542,8 @@ def test_real_castxml_attributes_the_failing_header_at_every_position(tmp_path, 
     Enumerates every failing position over 2-4 headers, through real castxml;
     the oracle is the index the test chose, not the attribution arithmetic.
     """
-    from abicheck.dumper import _castxml_dump
     from abicheck.dumper_castxml_probe import castxml_dump_excluding_unparseable
+    from abicheck.extract.headers.castxml.backend import castxml_dump as _castxml_dump
 
     headers = []
     for i in range(n):

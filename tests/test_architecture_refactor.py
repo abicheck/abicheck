@@ -949,9 +949,9 @@ class TestDetectorRegistry:
     """Self-registering detector registry."""
 
     def test_all_detectors_registered(self):
-        """All 67 detectors are registered via decorators."""
+        """All 68 detectors are registered via decorators."""
         registry = _get_populated_registry()
-        assert len(registry) == 67
+        assert len(registry) == 68
 
     def test_detector_names_unique(self):
         """No duplicate detector names."""
@@ -1018,7 +1018,7 @@ class TestDetectorRegistry:
         assert isinstance(changes, list)
         assert isinstance(results, list)
         # Results should have entries for all detectors (enabled or disabled)
-        assert len(results) == 67
+        assert len(results) == 68
 
     def test_support_check_disables_detector(self):
         """Detectors with failing support checks are disabled."""
@@ -1239,7 +1239,7 @@ class TestCompareUsesNewArchitecture:
         result = compare(old, new)
         assert result.verdict.value == "NO_CHANGE"
         assert result.changes == []
-        assert len(result.detector_results) == 67
+        assert len(result.detector_results) == 68
 
     def test_compare_detects_func_removal(self):
         """compare() detects function removal via registry."""

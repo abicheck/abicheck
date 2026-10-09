@@ -107,7 +107,11 @@ def _oracle(o, n, o_ovr, n_ovr) -> list[ChangeKind]:
             out.append(ChangeKind.PARAM_POINTER_LEVEL_CHANGED)
     for (_, _, _, r1, _), (_, _, _, r2, _) in pairs:
         if r1 is not None and r2 is not None and r1 != r2:
-            out.append(ChangeKind.PARAM_RESTRICT_CHANGED)
+            out.append(
+                ChangeKind.PARAM_RESTRICT_ADDED
+                if r2
+                else ChangeKind.PARAM_RESTRICT_CHANGED
+            )
     for (_, _, _, _, v1), (_, _, _, _, v2) in pairs:
         if v1 is not None and v2 is not None and v1 != v2:
             out.append(

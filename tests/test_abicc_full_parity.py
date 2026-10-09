@@ -524,11 +524,15 @@ class TestParamRestrictChanged:
             ]
         )
         result = compare(old, new)
-        assert ChangeKind.PARAM_RESTRICT_CHANGED in _kinds(result)
+        # Adding restrict tightens the caller's obligation: its own kind (a
+        # risk), not the removal-direction PARAM_RESTRICT_CHANGED.
+        assert ChangeKind.PARAM_RESTRICT_ADDED in _kinds(result)
+        assert ChangeKind.PARAM_RESTRICT_CHANGED not in _kinds(result)
         restrict_changes = [
-            c for c in result.changes if c.kind == ChangeKind.PARAM_RESTRICT_CHANGED
+            c for c in result.changes if c.kind == ChangeKind.PARAM_RESTRICT_ADDED
         ]
         assert len(restrict_changes) == 2
+        assert result.verdict == Verdict.COMPATIBLE_WITH_RISK
 
     def test_restrict_removed(self) -> None:
         old = _snap(
@@ -586,8 +590,10 @@ class TestParamRestrictChanged:
         result = compare(old, new)
         assert ChangeKind.PARAM_RESTRICT_CHANGED not in _kinds(result)
 
-    def test_restrict_is_compatible(self) -> None:
-        """restrict change is compatible (optimization hint only)."""
+    def test_restrict_added_is_a_caller_obligation_risk(self) -> None:
+        """Adding restrict leaves the calling convention alone but forbids
+        callers from passing overlapping buffers -- a conditional risk for an
+        already-built caller (catalog case207), not an optimization hint."""
         old = _snap(
             functions=[
                 _func(
@@ -611,7 +617,10 @@ class TestParamRestrictChanged:
             ]
         )
         result = compare(old, new)
-        assert result.verdict == Verdict.COMPATIBLE
+        assert result.verdict == Verdict.COMPATIBLE_WITH_RISK
+        # ... and removing it again is compatible (the callee only drops an
+        # optimizer assumption).
+        assert compare(new, old).verdict == Verdict.COMPATIBLE
 
 
 # ===========================================================================

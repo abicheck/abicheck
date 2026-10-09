@@ -8,3 +8,9 @@ int config_get(int index)
         return -1;
     return config_table[index];
 }
+
+void config_reset(void)
+{
+    for (int i = 0; i < CONFIG_SLOTS; ++i)
+        config_table[i] = 100 + i;
+}

@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""``dumper._clang_header_dump``'s C-to-C++ self-heal cache-write key
+"""``abicheck.extract.headers.clang.backend.clang_header_dump``'s C-to-C++ self-heal cache-write key
 (Codex review, fresh evidence).
 
 Split out of ``test_dumper_clang.py`` (already at its ADR-061 file-size debt
@@ -30,7 +30,7 @@ either wrongly cache-hits stale content, or correctly misses and re-heals).
 Background: a self-healed dump's cache LOOKUP key is computed from the
 pre-retry (C-mode) inputs, before clang even runs -- self-heal cannot be
 known in advance, since it only fires after a real "missing C++ stdlib
-header" compile failure. `_clang_header_dump`'s own docstring documents why
+header" compile failure. `clang_header_dump`'s own docstring documents why
 the lookup key deliberately cannot distinguish a genuine C-mode success from
 an initially-C-mode call that self-healed into C++. Writing the cache entry
 under that same stale key, as this code once did, meant a later IDENTICAL
@@ -46,13 +46,16 @@ benefit for this one narrow input shape rather than a wrong answer.
 
 from __future__ import annotations
 
+import subprocess
+import tempfile
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 
 from abicheck import dumper, dumper_ast_config, dumper_cache, dumper_clang
-from abicheck.dumper import _clang_header_dump
 from abicheck.dumper_ast_config import _cache_key
+from abicheck.extract.headers.clang.backend import clang_header_dump
 
 
 def _fake_proc(stdout: str = "", stderr: str = "", returncode: int = 0):
@@ -64,6 +67,27 @@ def _fake_proc(stdout: str = "", stderr: str = "", returncode: int = 0):
     p.stderr = stderr
     p.returncode = returncode
     return p
+
+
+def _as_runner(run: Callable[..., object]) -> Callable[..., object]:
+    """Adapt a ``run(cmd, stdout=<file>)`` fake to the clang header pass's
+    injected ``run_ast`` runner contract: spill stdout to a fresh temp file
+    handed to ``on_created`` (the caller owns and unlinks it), and return a
+    ``subprocess.CompletedProcess`` like the real runner."""
+
+    def _runner(
+        cmd: list[str], *, timeout: float, on_created: Callable[[Path], None]
+    ) -> subprocess.CompletedProcess[str]:
+        fd, name = tempfile.mkstemp(prefix="abicheck-test-ast-", suffix=".json")
+        path = Path(name)
+        on_created(path)
+        with open(fd, "wb") as out:
+            proc = run(cmd, stdout=out)
+        return subprocess.CompletedProcess(
+            cmd, proc.returncode, stdout="", stderr=proc.stderr
+        )
+
+    return _runner
 
 
 def _write_stdout_file(kwargs: dict, text: str) -> None:
@@ -98,9 +122,10 @@ def test_self_healed_dump_never_returns_a_stale_cache_hit(
         _write_stdout_file(kwargs, ast_json)
         return _fake_proc(returncode=0)
 
-    monkeypatch.setattr(dumper.deadline, "run_bounded", _run)
     for _ in range(2):
-        root, _resolved_kind, resolved_force_cpp = _clang_header_dump([header], [])
+        root, _resolved_kind, resolved_force_cpp = clang_header_dump(
+            [header], [], run_ast=_as_runner(_run)
+        )
         assert root == {"kind": "TranslationUnitDecl", "inner": []}
         assert resolved_force_cpp is True
     assert len(cmds) == 4  # one C attempt + one C++ retry, TWICE independently
@@ -143,12 +168,12 @@ def test_self_heal_preserves_the_memo_handoff_under_the_lookup_key(
         calls["n"] += 1
         return real_run(cmd, **kwargs)
 
-    monkeypatch.setattr(dumper.deadline, "run_bounded", _counted_run)
+    runner = _as_runner(_counted_run)
     with dumper_cache.ast_memoize_scope():
-        # The primary snapshot pass (`service_dump_native.py` wraps both this
+        # The primary snapshot pass (`workflows/dump/native.py` wraps both this
         # call and the follow-up below in one `ast_memoize_scope()`).
-        root, _resolved_kind, resolved_force_cpp = _clang_header_dump(
-            [header], [], memoize=True
+        root, _resolved_kind, resolved_force_cpp = clang_header_dump(
+            [header], [], memoize=True, run_ast=runner
         )
         assert resolved_force_cpp is True
         assert calls["n"] == 2  # one C attempt + one C++ retry
@@ -157,7 +182,9 @@ def test_self_heal_preserves_the_memo_handoff_under_the_lookup_key(
         # A working handoff pops the memo slot without running clang again;
         # a broken one (the memo stored under the corrected post-retry key
         # instead) would miss and redo the whole two-step self-heal here.
-        graph_root, _rk2, _rfc2 = _clang_header_dump([header], [], memoize=False)
+        graph_root, _rk2, _rfc2 = clang_header_dump(
+            [header], [], memoize=False, run_ast=runner
+        )
     assert graph_root == root
     assert calls["n"] == 2  # unchanged: the follow-up call ran no subprocess
 

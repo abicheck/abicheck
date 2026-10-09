@@ -27,7 +27,7 @@ instead of importing the aliases below.
 
 The three builders themselves stay exactly where they are, and keep returning
 the plain mutable dicts their direct callers and tests already expect (see
-``dumper_clang_vtable``'s re-exports). Nothing here migrates that contract; it
+``extract.headers.clang.vtable``'s re-exports). Nothing here migrates that contract; it
 adds a narrow immutable view for one new shared consumer.
 """
 
@@ -87,7 +87,7 @@ class TemplateParamIndexes:
 
     The builders themselves keep returning plain mutable dicts, unchanged:
     they are a long-standing helper contract with direct callers and tests of
-    their own (``dumper_clang_vtable`` re-exports all three), and this is a
+    their own (``extract.headers.clang.vtable`` re-exports all three), and this is a
     narrow immutable view added *for the new shared consumer*, not a
     migration of that contract.
     """

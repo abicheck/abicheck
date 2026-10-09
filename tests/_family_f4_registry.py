@@ -50,6 +50,12 @@ class Covered:
 
 #: Keyed by runtime heuristic id. Every severity-raising heuristic must be here.
 COVERED: dict[str, Covered] = {
+    "typedef_respelling": Covered(
+        fp_cells=("respell.fp.typedef_to_its_encoded_type",),
+        fn_cells=("respell.fn.typedef_to_a_different_type",),
+        control_cells=("respell.control.builtin_change",),
+        bugs=(1519,),
+    ),
     "enum_sentinel": Covered(
         fp_cells=("sentinel.fp.mid_list_max_name",),
         fn_cells=(
@@ -163,6 +169,7 @@ EXEMPTION_REASONS: dict[str, str] = {
 #: exemption category (maintained by hand -- the completeness test says what
 #: to add or drop).
 HEURISTICS: dict[str, str] = {
+    "abicheck.diff_bit_int::<module>::re:'\\\\b_BitInt\\\\s*(?:\\\\(\\\\s*(\\\\d+)\\\\s*\\\\)|\\\\[\\\\s*(\\\\d+)-bit storage\\\\s*\\...": "spelling",
     "abicheck.checker::compare::affix.startswith:'rename:'": "own_format",
     "abicheck.model.change::<module>::re:'^[A-Za-z0-9][A-Za-z0-9._-]*@[A-Za-z0-9][A-Za-z0-9._-]*#[A-Za-z0-9][A...": "own_format",
     'abicheck.classify::AbiJsonClassifier::re:\'(?=[\\\\s\\\\S]*"schema_version"\\\\s*:\\\\s*\\\\d+)(?=[\\\\s\\\\S]*"sections"\\\\s*...': "sniff",
@@ -196,7 +203,6 @@ HEURISTICS: dict[str, str] = {
     "abicheck.diff_abi_tags::<module>::re:'B(\\\\d+)([A-Za-z0-9_]+)'": "grammar",
     "abicheck.diff_abi_tags::<module>::vocab:_CXX11_ABI_MARKERS": "platform",
     "abicheck.diff_atomic::<module>::re:'\\\\b_Atomic\\\\b'": "spelling",
-    "abicheck.diff_bit_int::<module>::re:'\\\\b_BitInt\\\\s*\\\\(\\\\s*(\\\\d+)\\\\s*\\\\)'": "spelling",
     "abicheck.diff_char8t::<module>::re:'\\\\bchar8_t\\\\b'": "spelling",
     "abicheck.diff_cpp_patterns::<module>::re:'::operator(?![A-Za-z0-9_])'": "spelling",
     "abicheck.diff_cpp_patterns::_extract_soname_major::re:'-(\\\\d+)\\\\.dll$'": "spelling",

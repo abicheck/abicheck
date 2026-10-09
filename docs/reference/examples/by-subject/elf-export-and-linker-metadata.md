@@ -13,7 +13,7 @@ _10 case(s)._ [← back to all subjects](index.md)
 | [case27_symbol_binding_weakened](../case27_symbol_binding_weakened.md) | Symbol Binding Weakened (GLOBAL → WEAK) | 🟢 COMPATIBLE | Quality (Compatible) |
 | [case29_ifunc_transition](../case29_ifunc_transition.md) | GNU IFUNC Transition | 🟢 COMPATIBLE | Quality (Compatible) |
 | [case50_soname_inconsistent](../case50_soname_inconsistent.md) | SONAME Inconsistent (Wrong Major Version) | 🟡 COMPATIBLE_WITH_RISK | Risk |
-| [case51_protected_visibility](../case51_protected_visibility.md) | Protected Visibility (DEFAULT to PROTECTED) | 🟢 COMPATIBLE | Quality (Compatible) |
+| [case51_protected_visibility](../case51_protected_visibility.md) | Protected Visibility (DEFAULT to PROTECTED) | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case52_rpath_leak](../case52_rpath_leak.md) | RPATH Leak (Hardcoded Build Directory) | 🟢 COMPATIBLE | Quality (Compatible) |
 | [case128_symbol_binding_strengthened](../case128_symbol_binding_strengthened.md) | Symbol Binding Strengthened (Weak → Global) | 🟢 COMPATIBLE | Quality (Compatible) |
 | [case137_runpath_changed](../case137_runpath_changed.md) | DT_RUNPATH Changed | 🟢 COMPATIBLE | Quality (Compatible) |

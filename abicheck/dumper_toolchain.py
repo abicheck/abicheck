@@ -510,7 +510,7 @@ def _resolve_force_cpp(
     probe needs this exact decision — the raw ``lang`` argument alone is
     not enough, since an unspecified ``lang`` (the common case: ``dump``'s
     own CLI squashes its Click default back to ``None`` so auto-detection
-    can run — see ``service_dump_native._dump_elf``'s own ``lang if
+    can run — see ``workflows.dump.native._dump_elf``'s own ``lang if
     (lang_explicit or lang == "c") else None`` squash) can still auto-detect as either C or C++ depending on the
     header's own content, and probing the wrong language mode would record
     a ``language_standard`` that describes a dialect the real parse never

@@ -98,10 +98,10 @@ class TestEveryPublicRendererRejectsARetiredMode:
         ignores the field entirely, so a retired mode rendered a page
         (CodeRabbit review, PR #1284)."""
         from abicheck.errors import ValidationError
+        from abicheck.frontends.render import render_envelope
         from abicheck.model import AbiSnapshot
         from abicheck.report.build import build_report_envelope
         from abicheck.report.envelope import RenderOptions
-        from abicheck.service_render import render_envelope
 
         result = self._result()
         old, new = (
@@ -117,10 +117,10 @@ class TestEveryPublicRendererRejectsARetiredMode:
                     render_envelope(fmt, envelope)
 
     def test_render_envelope_still_renders_every_supported_mode(self):
+        from abicheck.frontends.render import render_envelope
         from abicheck.model import AbiSnapshot
         from abicheck.report.build import build_report_envelope
         from abicheck.report.envelope import RenderOptions
-        from abicheck.service_render import render_envelope
 
         result = self._result()
         old, new = (
@@ -782,9 +782,9 @@ def _result_with_a_finding():
 
 
 def _render_envelope(fmt: str, result, **options):
+    from abicheck.frontends.render import render_envelope
     from abicheck.report.build import build_report_envelope
     from abicheck.report.envelope import RenderOptions
-    from abicheck.service_render import render_envelope
 
     envelope = build_report_envelope(
         result, _snapshot(), _snapshot(), options=RenderOptions(**options)
@@ -820,9 +820,9 @@ class TestImpactModeIsFoldedAtTheSharedBoundary:
         (``to_sarif``, ``to_junit_xml``) has no section to switch on and is
         covered by the retired-mode sweep above instead.
         """
+        from abicheck.frontends.render import render_output
         from abicheck.report.dispatch_markdown import to_markdown
         from abicheck.reporter import to_json
-        from abicheck.service_render import render_output
 
         return {
             "to_markdown": lambda result, **kw: to_markdown(result, **kw),
@@ -1076,7 +1076,7 @@ class TestEveryMarkdownDemanglePassEscapesTablePipes:
         assert "|" in demangle_text(self.PIPE_SYMBOL)
 
     def test_the_service_markdown_path_keeps_its_column_count(self):
-        from abicheck.service_render import render_output
+        from abicheck.frontends.render import render_output
 
         md = render_output("markdown", self._result(), _snapshot(), _snapshot())
         rows = [
@@ -1106,7 +1106,7 @@ class TestEveryMarkdownDemanglePassEscapesTablePipes:
     def test_the_readable_name_survives_the_escaping(self):
         """Escaping must protect the table without corrupting the symbol:
         the reader still sees `operator|`, just delimiter-safe."""
-        from abicheck.service_render import render_output
+        from abicheck.frontends.render import render_output
 
         md = render_output("markdown", self._result(), _snapshot(), _snapshot())
         assert "operator\\|" in md, md

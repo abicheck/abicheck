@@ -3,12 +3,13 @@
 
 Listed in `RISK_KINDS` — symbol-compatible but behaviorally risky.
 
-_31 case(s)._ [← back to all examples](../index.md)
+_34 case(s)._ [← back to all examples](../index.md)
 
 | Case | Title | Verdict | Category |
 |------|-------|---------|----------|
 | [case15_noexcept_change](../case15_noexcept_change.md) | `noexcept` Removed | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case50_soname_inconsistent](../case50_soname_inconsistent.md) | SONAME Inconsistent (Wrong Major Version) | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case51_protected_visibility](../case51_protected_visibility.md) | Protected Visibility (DEFAULT to PROTECTED) | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case83_cpu_dispatch_isa_dropped](../case83_cpu_dispatch_isa_dropped.md) | CPU-dispatch ISA family dropped | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case98_cxx_standard_floor_raised](../case98_cxx_standard_floor_raised.md) | C++ Standard Floor Raised | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case122_template_signature_uninstantiated](../case122_template_signature_uninstantiated.md) | Uninstantiated Template Signature Change | 🟡 COMPATIBLE_WITH_RISK | Risk |
@@ -33,8 +34,10 @@ _31 case(s)._ [← back to all examples](../index.md)
 | [case179_cet_protection_weakened](../case179_cet_protection_weakened.md) | CET Protection Weakened | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case180_symbol_binding_lost_unique](../case180_symbol_binding_lost_unique.md) | Symbol Binding Lost GNU_UNIQUE | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case183_internal_version_node_churn](../case183_internal_version_node_churn.md) | Internal ELF symbol-version node churn | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case186_c_api_pointee_const_abi_neutral](../case186_c_api_pointee_const_abi_neutral.md) | C API Pointee const-Qualification — ABI-Neutral, Not Source-Neutral | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case190_public_inline_function_references_internal_constant](../case190_public_inline_function_references_internal_constant.md) | Public Inline Function References Internal Constant | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case194_header_graph_rename_reconciled](../case194_header_graph_rename_reconciled.md) | Internal Dependency Target Renamed, Safely Reconciled | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case195_header_graph_ambiguous_rename_not_reconciled](../case195_header_graph_ambiguous_rename_not_reconciled.md) | Ambiguous Simultaneous Rename, Correctly Not Reconciled | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case196_header_graph_move_reconciled](../case196_header_graph_move_reconciled.md) | Declaration Reconciled as Moved Across a Compound Edit | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case197_header_graph_identity_reconciled](../case197_header_graph_identity_reconciled.md) | Declaration Reconciled as Identity-Reconciled (Header Unchanged) | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case207_pointer_parameter_gained_restrict](../case207_pointer_parameter_gained_restrict.md) | Pointer Parameter Gained `restrict` | 🟡 COMPATIBLE_WITH_RISK | Risk |

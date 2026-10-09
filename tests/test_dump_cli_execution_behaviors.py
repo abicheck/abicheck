@@ -89,7 +89,7 @@ def _stub_elf_parse(
     monkeypatch, snap: AbiSnapshot, capture: dict[str, Any] | None = None
 ):
     """Stub ``dumper.dump`` -- the ELF header/binary parse the CLI reaches
-    through ``service.resolve_input`` -> ``service_dump_native._dump_elf``."""
+    through ``service.resolve_input`` -> ``workflows.dump.native.extract_elf``."""
     import abicheck.dumper as dumper
 
     def _fake_dump(**kwargs: Any) -> AbiSnapshot:
@@ -110,7 +110,7 @@ def _stub_native_parse(monkeypatch, snap: AbiSnapshot):
     ``header_roots`` equivalence tests below compare against -- in the call
     chain with nothing left to extract.
     """
-    import abicheck.service_dump_native as native
+    import abicheck.workflows.dump.native as native
 
     monkeypatch.setattr(native, "_run_dump_uncached", lambda *a, **k: snap)
 
@@ -119,7 +119,7 @@ def _spy_dependency_scope_roots(monkeypatch) -> list[tuple[Path, ...]]:
     """Record the header-root set ``service.run_dump``'s own dependency-scope
     choke point derives, so a test can compare ``dump``'s independently-built
     ``header_roots`` against it instead of restating its formula."""
-    import abicheck.dumper_scoping as dumper_scoping
+    import abicheck.workflows.dump.dependency_scope as dumper_scoping
 
     seen: list[tuple[Path, ...]] = []
     real = dumper_scoping.resolve_dependency_scope
@@ -428,7 +428,7 @@ def test_dump_inferred_header_root_ranks_below_the_compile_context(
     On the retired path this was an ordering the caller had to maintain by
     hand (excluding ``deferred`` from the "explicit" side of the L3 merge and
     appending it back afterwards). The shared pipeline makes it structural:
-    ``service_dump_native._dump_elf`` derives the inferred roots *after* the
+    ``workflows.dump.native.extract_elf`` derives the inferred roots *after* the
     compile context is resolved and appends them (``eff_tokens =
     cc.gcc_option_tokens + tuple(deferred)``), so no caller can invert it.
     Asserted here over several independently-supplied context directories,
@@ -547,7 +547,7 @@ def test_dump_include_system_declarations_suppresses_the_streaming_pruner(
     hdr = tmp_path / "h.h"
     hdr.write_text("struct S { int x; };\n", encoding="utf-8")
 
-    import abicheck.service_dump_native as native
+    import abicheck.workflows.dump.native as native
 
     for flags, expected in (([], False), (["--include-system-declarations"], True)):
         seen: list[bool] = []

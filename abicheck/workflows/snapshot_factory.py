@@ -137,7 +137,7 @@ def finish_snapshot(snapshot: AbiSnapshot, finish: SnapshotFinish) -> AbiSnapsho
             ),
         )
     if finish.dependency_scope is not None:
-        from ..dumper_scoping import resolve_dependency_scope
+        from .dump.dependency_scope import resolve_dependency_scope
 
         d = finish.dependency_scope
         snapshot = resolve_dependency_scope(

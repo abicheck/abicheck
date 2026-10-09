@@ -401,7 +401,7 @@ def test_compare_dump_manifest_and_release_manifest_coexist(
         ),
     )
     monkeypatch.setattr(
-        "abicheck.service_render.to_markdown", lambda _r, **_kw: "REPORT"
+        "abicheck.frontends.render.to_markdown", lambda _r, **_kw: "REPORT"
     )
 
     result = runner.invoke(

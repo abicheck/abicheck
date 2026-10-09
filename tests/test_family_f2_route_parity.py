@@ -949,6 +949,8 @@ def test_hybrid_dump_routes_parse_their_legs_alike(tmp_path: Path) -> None:
     that ``dumper.dump``'s route turned off."""
     from unittest.mock import patch
 
+    from _dump_format_fakes import fake_format_adapter
+
     from abicheck import dumper_hybrid
     from abicheck.dumper_clang_streaming import streaming_prune_suppressed
     from abicheck.extract.dependency_exclusion import (
@@ -967,17 +969,17 @@ def test_hybrid_dump_routes_parse_their_legs_alike(tmp_path: Path) -> None:
 
     cli_legs: dict[str, tuple[bool, bool]] = {}
 
-    def _fake_dump_elf(*_a: Any, **kwargs: Any) -> AbiSnapshot:
-        frontend = kwargs["compile"].frontend
+    def _fake_dump_elf(request: Any) -> AbiSnapshot:
+        frontend = request.compile.frontend
         cli_legs[frontend] = _state()
         return AbiSnapshot(
             library="l", version="1", from_headers=True, ast_producer=frontend
         )
 
     with (
-        patch("abicheck.service_dump_native._dump_elf", side_effect=_fake_dump_elf),
+        fake_format_adapter("elf", side_effect=_fake_dump_elf),
         patch(
-            "abicheck.service_dump_native._attach_header_graph",
+            "abicheck.workflows.dump.native._attach_header_graph",
             side_effect=lambda snap, *_a, **_k: snap,
         ),
     ):

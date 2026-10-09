@@ -411,22 +411,22 @@ def test_find_stub_package_init(tmp_path) -> None:
 
 
 def test_service_attach_python_api_surface(tmp_path) -> None:
-    from abicheck.service import _try_attach_python_api_surface
+    from abicheck.extract.metadata_attach import try_attach_python_api_surface
 
     (tmp_path / "foo.pyi").write_text("def go(x): ...\n", encoding="utf-8")
     so = tmp_path / "foo.cpython-311-x86_64-linux-gnu.so"
     snap = _ext_snapshot(so)
-    _try_attach_python_api_surface(snap)
+    try_attach_python_api_surface(snap)
     assert snap.python_api is not None
     assert set(snap.python_api.functions) == {"go"}
 
 
 def test_service_attach_is_noop_without_stub(tmp_path) -> None:
-    from abicheck.service import _try_attach_python_api_surface
+    from abicheck.extract.metadata_attach import try_attach_python_api_surface
 
     so = tmp_path / "foo.abi3.so"
     snap = _ext_snapshot(so)  # a real extension, but no sibling .pyi
-    _try_attach_python_api_surface(snap)
+    try_attach_python_api_surface(snap)
     assert snap.python_api is None
 
 

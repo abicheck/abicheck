@@ -76,6 +76,7 @@ from ..name_classification import (
 from .declined_comparisons import record_declined
 from .detection_memo import memoized
 from .parameter_facts import ParameterView, parameter_view
+from .typedef_respelling import all_respelled
 
 if TYPE_CHECKING:
     from ..model.change import Change
@@ -390,10 +391,9 @@ def _params_changes(
     if len(o_types) != len(n_types):
         changed = True
     else:
-        changed = any(
-            _param_differs(a, b, ka, kb, is_llp64)
-            for a, b, ka, kb in zip(o_types, n_types, o_kinds, n_kinds)
-        )
+        pairs = enumerate(zip(o_types, n_types, o_kinds, n_kinds))
+        diff = [i for i, p in pairs if _param_differs(*p, is_llp64)]
+        changed = bool(diff) and not all_respelled(mangled, o_types, n_types, diff)
     if not changed:
         return []
     return [

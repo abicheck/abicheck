@@ -378,11 +378,10 @@
   "case109_flow_graph_policy_renames": {
    "abi_break": false,
    "api_break": true,
-   "underlying_fact": "API_BREAK",
    "bad_practice": false,
-   "category": "breaking",
-   "description": "Header-only policy-tag types used as template parameters for `function_node` are renamed wholesale (queueing/rejecting \u2192 buffering_policy/backpressure_policy) and the instantiation-anchor typedef is dropped. The example deliberately keeps v1.cpp / v2.cpp byte-identical (no template instantiations) so the .so symbol table is unchanged across the version pair; any rebuild against v2 headers still fails. Detected via `typedef_removed` + `type_removed` (both BREAKING per change_registry). Member of the oneTBB regression suite; mirrors the 2021 flow::graph policy reshuffle.",
-   "expected": "BREAKING",
+   "category": "api_break",
+   "description": "The flow-graph policy tags queueing/rejecting are renamed (buffering_policy/backpressure_policy) and the instantiation-anchor typedef is dropped. No template is instantiated in either library, so the relevant binary interface is unchanged and the old consumer keeps running; rebuilding it fails on the removed queueing/queue_node names -- an API_BREAK (tag_type_renamed, type_removed, typedef_removed). Only the implicit, never-exported special members of the removed tags disappear (inline_function_removed), so func_removed must stay absent.",
+   "expected": "API_BREAK",
    "expected_kinds": [
     "typedef_removed",
     "type_removed"
@@ -398,7 +397,9 @@
     "windows"
    ],
    "runtime_baseline_exit": 1,
-   "policy_note": "The .so files are byte-identical between v1 and v2 (deliberately \u2014 no template instantiations in v1.cpp/v2.cpp), so an already-built consumer binary keeps linking and running unmodified. The underlying compatibility fact is API_BREAK (recompilation-only failure: the renamed policy tags and dropped instantiation-anchor typedef stop resolving against v2 headers). `expected` stays BREAKING because `typedef_removed`/`type_removed` are generic detectors that conservatively classify every such removal as BREAKING by default policy, without distinguishing 'this symbol never existed in the binary to begin with' from an actual layout/link break."
+   "expected_absent_kinds": [
+    "func_removed"
+   ]
   },
   "case10_return_type": {
    "abi_break": true,
@@ -775,7 +776,7 @@
    "description": "Distilled from intel/llvm PR #20821 (the `abi-break`-labelled change that swapped `std::shared_ptr<device_impl>` for a raw `device_impl*` inside `sycl::device`, surfacing as issue #20915 / fix #21028). The shared_ptr member is two pointers (16 bytes) on LP64; the raw pointer is one (8 bytes), so sizeof(sycl::device) shrinks 16->8 \u2014 an ABI break for every consumer that holds a device by value or embeds it. The method mangled names are unchanged, so a pure exported-symbol dump (sycl_symbols_*.dump) does not see the layout change directly. DWARF (L1, from the real compiled .so's) independently detects the 16->8 shrink and reports struct_size_changed; the AST-side type_size_changed does not fire because v1's real std::shared_ptr<device_impl> from <memory> fails castxml, falls back to the clang JSON-AST backend, which cannot compute record layout, leaving size_bits None for v1 \u2014 the null-evidence guard in diff_types.py correctly declines to emit a size-change finding from absent data rather than guessing. struct_size_changed is the kind this case actually calibrates.",
    "expected": "BREAKING",
    "expected_kinds": [
-    "struct_size_changed"
+    "type_size_changed"
    ],
    "min_evidence": "L1",
    "platforms": [
@@ -1662,7 +1663,7 @@
     "linux"
    ],
    "expected_kinds": [
-    "func_added"
+    "func_export_added"
    ]
   },
   "case170_env_runtime_floor_raised": {
@@ -1877,14 +1878,15 @@
    "expected_kinds": [
     "symbol_binding_lost_unique"
    ],
-   "known_gap": "clang never emits STB_GNU_UNIQUE for vague-linkage template statics (a GCC ELF extension; clang always uses ordinary weak/guarded linkage), so no symbol_binding_lost_unique signal exists to detect under this toolchain",
-   "known_gap_toolchains": [
-    "clang"
-   ],
    "min_evidence": "L0",
    "platforms": [
     "linux"
-   ]
+   ],
+   "not_applicable_toolchains": [
+    "clang"
+   ],
+   "not_applicable_expected": "NO_CHANGE",
+   "not_applicable_reason": "The transition does not exist under Clang: Clang never emits STB_GNU_UNIQUE for vague-linkage template statics (a GCC ELF extension) -- readelf shows WEAK on both sides, and two RTLD_LOCAL plugins already get separate state with the v1 build. NO_CHANGE is the correct verdict for that pair; this is applicability, not a missed detection. The GCC lane, where the binding really moves from UNIQUE to WEAK, proves the canonical verdict."
   },
   "case181_xcheck_public_to_internal_dependency": {
    "abi_break": false,
@@ -2006,17 +2008,33 @@
    "abi_break": false,
    "api_break": false,
    "bad_practice": false,
-   "category": "no_change",
-   "description": "send_buffer()'s parameter changes char* to const char* -- same pointer size/offset/calling convention, only the pointee's mutability contract tightens. Deliberately scoped to a function parameter (a pure input-direction contract every existing caller still satisfies) rather than a public struct field, where the same char*->const char* spelling change would be a real source break for code writing through the field. name_classification.py's cv_qualifiers_only_differ() recognizes the top-level-pointer-plus-const/volatile-only shape and diff_symbols.py skips emitting any finding at all (fully suppressed, not merely downgraded) -- the real false-positive class behind Wayland's wl_display accessor functions picking up pointee const (conda-forge libuv 1.5x campaign).",
-   "expected": "NO_CHANGE",
+   "category": "risk",
+   "description": "send_buffer()'s parameter changes char* to const char*. Binary ABI is preserved on the tested target (same pointer size, register and calling convention) and every direct call still compiles -- the callee now promises more. It is not a no-op at the source level: under strict C11, GCC and Clang alike accept `void (*callback)(char *) = send_buffer;` against v1 and reject it against v2, so a consumer that stores the entry point in a function pointer of the old type (callback tables, plugin registration) no longer builds. Whether any consumer does that is not visible from the library, so the finding is a conditional risk (param_pointee_qualifier_added, COMPATIBLE_WITH_RISK, exit 0) rather than an unconditional API_BREAK; a project that promises source compatibility for function-pointer use can gate it. FUNC_PARAMS_CHANGED stays absent -- the calling convention is untouched (the Wayland wl_display accessor false-positive class), and param_pointee_qualifier_changed (the direct-caller break when a qualifier is removed) must not fire for a pure first-level addition.",
+   "expected": "COMPATIBLE_WITH_RISK",
    "expected_absent_kinds": [
-    "func_params_changed"
+    "func_params_changed",
+    "param_pointee_qualifier_changed"
    ],
-   "expected_kinds": [],
+   "expected_kinds": [
+    "param_pointee_qualifier_added"
+   ],
    "min_evidence": "L2",
    "platforms": [
     "linux"
-   ]
+   ],
+   "source_smoke": {
+    "mode": "syntax",
+    "proof": "consumer function-pointer smoke: a void (*)(char *) callback accepts v1's send_buffer and rejects v2's (direct calls compile against both)",
+    "standard": "c11",
+    "v1": {
+     "expect": "success",
+     "code": "#include \"v1.h\"\n/* An old consumer that registers the entry point as a callback of the type\n   v1 published. In C this assignment is a constraint violation once the\n   function's type differs (GCC 13 only warns by default, GCC 14+ and C++\n   reject it), so the smoke states the same requirement as a hard check. */\nvoid (*callback)(char *) = send_buffer;\n_Static_assert(__builtin_types_compatible_p(__typeof__(send_buffer), void(char *)),\n               \"send_buffer is no longer a void(char *): void (*)(char *) callbacks break\");\nint main(void) { return callback != 0 ? 0 : 1; }\n"
+    },
+    "v2": {
+     "expect": "failure",
+     "code": "#include \"v2.h\"\n/* An old consumer that registers the entry point as a callback of the type\n   v1 published. In C this assignment is a constraint violation once the\n   function's type differs (GCC 13 only warns by default, GCC 14+ and C++\n   reject it), so the smoke states the same requirement as a hard check. */\nvoid (*callback)(char *) = send_buffer;\n_Static_assert(__builtin_types_compatible_p(__typeof__(send_buffer), void(char *)),\n               \"send_buffer is no longer a void(char *): void (*)(char *) callbacks break\");\nint main(void) { return callback != 0 ? 0 : 1; }\n"
+    }
+   }
   },
   "case187_public_struct_private_field_type": {
    "abi_break": true,
@@ -2026,7 +2044,7 @@
    "description": "demo::Public's `reserved` field is retyped from `void*` to `detail::PrivateType*`, an internal (non-public-header) type. The retyped field is itself a real, artifact-proven break (struct_field_type_changed/type_field_type_changed, BREAKING) -- verified against a real compiled example (gcc + clang, L2 header-only graph built automatically). Layered on top, the L5 source graph independently confirms demo::Public newly carries a TYPE_HAS_FIELD_TYPE edge to detail::PrivateType it did not reach in v1 (public_api_internal_dependency_added), naming exactly which internal type the new dependency reaches -- correlated context on an already-detected break, not a standalone risk signal (a real compiled field/base/parameter-type change to an internal type is never invisible at L0-L2; only a body-only reference, case190, can be). Sibling of case160 (same finding via a DECL_CALLS_DECL edge) and case188/189 (TYPE_INHERITS/DECL_HAS_TYPE). The public_api_internal_dependency_added kind needs a public-header set (`-H`/`--header`) so declarations get classified as internal (the L2 header-only graph itself is built automatically); the default debug-headers lane reaches the same BREAKING verdict without it, via the structural finding alone.",
    "expected": "BREAKING",
    "expected_kinds": [
-    "struct_field_type_changed",
+    "type_field_type_changed",
     "public_api_internal_dependency_added"
    ],
    "known_kind_gap": "public_api_internal_dependency_added",
@@ -2099,7 +2117,7 @@
    "description": "demo::Config gains a field typed detail::RawConfig*, an internal (non-public-header) type -- verified against a real compiled example (gcc + clang, L2 header-only graph built automatically). The new field grows Config's size (4 -> 16 bytes), itself a real, artifact-proven break (struct_size_changed/type_size_changed/type_alignment_changed, BREAKING) -- no build integration needed; a rebuilt app hits a real stack-smashing crash. Layered on top, the L2 header-only graph independently confirms demo::Config newly carries a TYPE_HAS_FIELD_TYPE edge to detail::RawConfig it did not reach in v1 (public_api_internal_dependency_added), naming exactly which internal type the new dependency reaches. Unlike case187 (which gives its struct a sibling Meta field so the L5 type-graph pass has a same-kind edge to confirm on both sides), Config's old side has zero TYPE_HAS_FIELD_TYPE edges of any kind -- the finding still fires correctly because extractor_passes['header_type_graph'] is trusted for the structural TYPE_HAS_FIELD_TYPE/TYPE_INHERITS/DECL_HAS_TYPE kinds without needing an edge-presence coverage trick. A real compiled field-type change to an internal type is never invisible at L0-L2; only a body-only reference (case190) can be.",
    "expected": "BREAKING",
    "expected_kinds": [
-    "struct_size_changed",
+    "type_size_changed",
     "public_api_internal_dependency_added"
    ],
    "known_kind_gap": "public_api_internal_dependency_added",
@@ -2336,10 +2354,9 @@
   "case30_field_qualifiers": {
    "abi_break": false,
    "api_break": true,
-   "underlying_fact": "API_BREAK",
    "bad_practice": false,
-   "category": "breaking",
-   "expected": "BREAKING",
+   "category": "api_break",
+   "expected": "API_BREAK",
    "min_evidence": "L1",
    "platforms": [
     "linux",
@@ -2347,9 +2364,14 @@
     "windows"
    ],
    "expected_kinds": [
-    "type_field_type_changed"
+    "field_became_const",
+    "field_became_volatile"
    ],
-   "policy_note": "By-value cv-qualifier changes (adding const/volatile to a field) are binary-layout-neutral \u2014 size, alignment, and offsets are unchanged, so an already-built consumer binary keeps linking and running. The underlying compatibility fact is API_BREAK (recompilation-only failure: a const write becomes a compile error, a missing volatile risks stale-cache reads). `expected` stays BREAKING because the project's default policy conservatively routes field-qualifier changes through the same contract detector as other field-type changes, treating the semantic-divergence risk as release-blocking rather than recompile-only. This is a deliberate policy choice, not a claim that the binary itself is incompatible."
+   "expected_absent_kinds": [
+    "type_field_type_changed",
+    "func_removed"
+   ],
+   "description": "Two struct fields gain by-value qualifiers: sample_rate becomes const, raw_value becomes volatile. Size, alignment and offsets are unchanged, and the unchanged old consumer keeps running against v2. Rebuilding it fails: its assignment to sample_rate no longer compiles (and, for C++ consumers, the implicit default constructor and copy/move assignment become deleted) -- an API_BREAK, reported by field_became_const. The volatile change is a separate semantic hazard (field_became_volatile, a risk: a recompiled consumer must now treat every access as observable) and does not break the build. Neither is a field *type* change in the layout sense, so type_field_type_changed must stay absent, and the compiler-synthesized C++ members the const member deletes are never exported, so their disappearance is inline_function_removed, never func_removed."
   },
   "case31_enum_rename": {
    "abi_break": false,
@@ -2682,7 +2704,7 @@
     "windows"
    ],
    "expected_kinds": [
-    "func_added"
+    "func_export_added"
    ],
    "known_gap": "macOS integration-tests observes NO_CHANGE (instead of the expected func_added) for this case as of commit 71b4f624e2b10d53ee662b555907280baad0982a (PR #555); see case100_experimental_removed_without_replacement's known_gap for the shared investigation notes. Linux (gcc and clang) remains the blocking detector lane.",
    "known_gap_platforms": [
@@ -2743,14 +2765,15 @@
    "abi_break": false,
    "api_break": false,
    "bad_practice": false,
-   "category": "quality",
-   "description": "Symbol visibility changed DEFAULT\u2192PROTECTED \u2014 exported but no longer interposable (compatible, interposition policy concern)",
-   "expected": "COMPATIBLE",
+   "category": "risk",
+   "description": "Symbol visibility changed DEFAULT\u2192PROTECTED. The symbol stays exported and ordinary callers are unaffected, but calls made inside the library now bind to its own definition, so an interposed replacement no longer intercepts them: with LD_PRELOAD hook_point(x)=100*x the unchanged old app sees compute(5)=501 with v1 and 11 with v2, both exiting 0. Whether that breaks a consumer depends on whether interposition is part of the library's promise, which the binary does not say -- a conditional risk, not a clean COMPATIBLE.",
+   "expected": "COMPATIBLE_WITH_RISK",
    "min_evidence": "L0",
    "platforms": [
     "linux"
    ],
    "expected_kinds": [
+    "func_visibility_protected_changed",
     "symbol_elf_visibility_changed"
    ]
   },
@@ -2977,14 +3000,10 @@
    ],
    "bad_practice": false,
    "category": "breaking",
-   "description": "Function calling convention changed from default System V to ms_abi \u2014 parameters passed in wrong registers (CALLING_CONVENTION_CHANGED)",
+   "description": "Function calling convention changed from default System V to ms_abi \u2014 parameters passed in wrong registers (CALLING_CONVENTION_CHANGED). Detected under both producers: from Clang's DW_AT_calling_convention, and for GCC (which emits none) from the public header, where the CastXML extractor recovers the __attribute__((ms_abi)) CastXML itself drops (extract/headers/castxml/calling_convention.py).",
    "expected": "BREAKING",
    "expected_kinds": [
     "calling_convention_changed"
-   ],
-   "known_gap": "GCC does not emit DW_AT_calling_convention for __attribute__((ms_abi)); detection requires Clang",
-   "known_gap_toolchains": [
-    "gcc"
    ],
    "min_evidence": "L1",
    "platforms": [
@@ -3063,15 +3082,14 @@
    "api_break": false,
    "bad_practice": false,
    "category": "breaking",
-   "description": "Trivially-copyable struct gains user-defined destructor \u2014 calling convention changes from register passing to hidden pointer (VALUE_ABI_TRAIT_CHANGED)",
+   "description": "Trivially-copyable struct gains a user-defined destructor: under the Itanium C++ ABI on Linux x86-64 (GCC and Clang) the by-value argument moves from register passing to a hidden pointer (VALUE_ABI_TRAIT_CHANGED); the old GCC binary goes from distance=5 to SIGSEGV after the swap. Scoped to this platform: on Windows x64 (MSVC) a 16-byte struct is passed by reference before and after, so the transition does not exist there -- an applicability fact, which is why Windows is excluded from `platforms` rather than recorded as a detection gap. No Windows compatibility claim is made without a native test.",
    "expected": "BREAKING",
    "expected_kinds": [
     "value_abi_trait_changed"
    ],
-   "known_gap": "Windows MSVC x64: structs >8 bytes are always passed by pointer regardless of triviality, so the calling convention does not change. macOS also observes NO_CHANGE (confirmed by CI: the VALUE_ABI_TRAIT_CHANGED detector does not fire there either) for a currently unconfirmed reason distinct from the Windows mechanism above \u2014 tracked as a separate, undiagnosed macOS gap rather than assumed to share the Windows root cause.",
+   "known_gap": "macOS CI observes NO_CHANGE: the VALUE_ABI_TRAIT_CHANGED detector does not fire there, for an undiagnosed reason. The transition itself has not been verified on macOS by a native runtime test, so this records a detection observation, not a claim that the change is compatible there.",
    "known_gap_platforms": [
-    "macos",
-    "windows"
+    "macos"
    ],
    "min_evidence": "L1",
    "platforms": [
@@ -3282,8 +3300,8 @@
    "description": "Pimpl alias switched from shared_ptr<T> to unique_ptr<T>. detail::pimpl<detail::descriptor_impl>'s declared spelling is textually identical in both snapshots (only the `using` target changes), so type_field_type_changed never fires on impl_ as an earlier description of this case claimed. The real, portable signal is the alias-target flip itself (typedef_base_changed: shared_ptr<T> -> unique_ptr<T>) plus the resulting struct_size_changed on the public descriptor struct (refcount/deleter bookkeeping differs between the two smart pointers). internal_type_leaks_via_public_api does not fire here: no internal type's own layout changes (descriptor_impl is untouched; only which smart pointer wraps it changes), and internal_type_leaks_via_public_api's reachability check requires an internal type's layout change to leak, not a pimpl alias-target swap.",
    "expected": "BREAKING",
    "expected_kinds": [
-    "typedef_base_changed",
-    "struct_size_changed"
+    "type_size_changed",
+    "type_field_type_changed"
    ],
    "known_gap": "Windows: std::shared_ptr / std::unique_ptr layout names differ between MSVC STL and libstdc++/libc++, so the type-name-based detection signal is not portable as-shipped. Tracked for a follow-up that normalises smart-pointer template-arg names across stdlibs.",
    "known_gap_platforms": [
@@ -3406,9 +3424,10 @@
    "api_break": true,
    "bad_practice": false,
    "category": "breaking",
-   "description": "Empty tag struct method::brute_force renamed to method::search_brute. No layout signal (empty type), but every explicit descriptor<method::brute_force, ...> instantiation re-mangles. Emits TAG_TYPE_RENAMED correlating the empty type rename with the symbol-name shift.",
+   "description": "Empty tag struct method::brute_force renamed to method::search_brute. No layout signal (empty type), but every explicit descriptor<method::brute_force, ...> instantiation re-mangles. Emits TAG_TYPE_RENAMED (API_BREAK: source naming the old tag no longer compiles) correlating the empty type rename with the symbol-name shift; the binary break is carried by the removal findings for the re-mangled exported instantiation (FUNC_REMOVED_ELF_ONLY for its constructors, read from the export table alone).",
    "expected": "BREAKING",
    "expected_kinds": [
+    "func_removed_elf_only",
     "tag_type_renamed"
    ],
    "min_evidence": "L0",
@@ -3626,11 +3645,10 @@
   "case95_allocator_nested_typedef_removed": {
    "abi_break": false,
    "api_break": true,
-   "underlying_fact": "API_BREAK",
    "bad_practice": false,
-   "category": "breaking",
-   "description": "An allocator-style class drops the historical STL nested-typedef set (value_type, pointer, reference, size_type, difference_type). Exported member symbols are unchanged so binaries still link, but consumer source using `typename Alloc::value_type` etc. fails to compile. Detected via `typedef_removed` (BREAKING per change_registry). Demonstrates the new `member_name` suppression selector \u2014 combined with `change_kind: typedef_removed`, it scopes the inevitable noise from removing a uniform set of nested aliases.",
-   "expected": "BREAKING",
+   "category": "api_break",
+   "description": "my_allocator drops its nested value_type/size_type typedefs; allocate()/deallocate() now spell std::size_t directly. Exported member symbols are byte-for-byte unchanged (the Itanium mangled names encode the canonical type, `m`, on both sides), so the old binary keeps running. The same consumer source no longer rebuilds because my_allocator::value_type is gone -- an API_BREAK (typedef_removed). A typedef is never encoded in a binary, so neither the removal nor the respelled parameters (size_type -> unsigned long, identical under the unchanged mangled name) are an ABI change: func_params_changed must stay absent.",
+   "expected": "API_BREAK",
    "expected_kinds": [
     "typedef_removed"
    ],
@@ -3643,7 +3661,9 @@
     "linux",
     "macos"
    ],
-   "policy_note": "Exported member symbols are unchanged, so an already-built consumer binary keeps linking and running against v2 \u2014 the underlying compatibility fact is API_BREAK (recompilation-only failure: `typename Alloc::value_type` and friends stop resolving). `expected` stays BREAKING because `typedef_removed` is a generic detector that conservatively classifies every nested-typedef removal as BREAKING by default policy, regardless of whether the removed alias is reachable only from source (never encoded in the binary). The catalog's `public_typedef_removed` (L4) case is the API_BREAK-classified sibling for source-ABI-replay evidence of the same removal pattern; the two differ in detector, not in the underlying fact."
+   "expected_absent_kinds": [
+    "func_params_changed"
+   ]
   },
   "case96_hidden_friend_removed": {
    "abi_break": false,
@@ -3954,7 +3974,7 @@
    "api_break": true,
    "bad_practice": false,
    "category": "breaking",
-   "description": "The positive control for a parameter-order change, paired with case202_public_header_declaration_order_changed. plot_point()'s (int, double) parameters swap places: the C export name is unchanged so the link succeeds, but on x86-64 System V the integer and the double travel in different register files, so both arguments are read from slots the old caller never wrote. Deliberately uses two differently-typed parameters -- a same-typed reorder produces an identical signature at every evidence tier and is a documented blind spot for every static tool, not something this fixture claims to cover.",
+   "description": "The positive control for a parameter-order change, paired with case202_public_header_declaration_order_changed. plot_point()'s (int, double) parameters swap places. The C export name is unchanged so the link succeeds; the old and new declarations are incompatible, and a recompiled caller silently converts its arguments. Binary argument delivery is ABI-dependent: on x86-64 System V the int and the double use separate register files regardless of position, so an old caller's values still arrive (the runtime witness shows no signal); with a positional convention (ms_abi probe under GCC and Clang, i386) they are swapped. The verdict rests on the changed parameter contract, not on one ABI's register assignment. Deliberately uses two differently-typed parameters -- a same-typed reorder produces an identical signature at every evidence tier and is a documented blind spot for every static tool, not something this fixture claims to cover.",
    "expected": "BREAKING",
    "expected_kinds": [
     "func_params_changed"
@@ -4052,32 +4072,41 @@
    "abi_break": false,
    "api_break": false,
    "bad_practice": true,
-   "category": "quality",
-   "description": "The positive control for a restrict-qualifier change on a published parameter, paired with case208_restrict_added_to_definition_only. blend()'s two pointer parameters gain restrict: the calling convention is untouched, but the CALLER's obligation is tightened -- passing overlapping buffers, legal under v1, is undefined under v2, and the callee may vectorise on that promise. The mirror image of case186_c_api_pointee_const_abi_neutral, where a qualifier change tightened what the callee promises (safe, and fully suppressed). bad_practice is true: strengthening a precondition on an already-published entry point is the hazard the finding exists to surface.",
-   "expected": "COMPATIBLE",
+   "category": "risk",
+   "description": "The positive control for a restrict-qualifier change on a published parameter, paired with case208_restrict_added_to_definition_only. blend()'s two pointer parameters gain restrict: the calling convention is untouched, but the CALLER's obligation is tightened -- passing overlapping buffers, legal under v1, is undefined under v2, and the -O3 callee vectorises on that promise. The runtime witness shows it under both GCC and Clang: an unchanged old consumer computing an in-place prefix sum (dst = buf + 1, src = buf) gets 1,3,6,10,15,... with v1 and 1,3,5,7,9,... with v2. Consumers that never alias the arguments are unaffected, so the finding is a conditional risk (param_restrict_added) -- not a calling-convention break: func_params_changed must stay absent under every header backend (the clang backend used to keep top-level restrict in the parameter's type spelling and report one). The mirror image of case186_c_api_pointee_const_abi_neutral, where a qualifier change tightened what the callee promises.",
+   "expected": "COMPATIBLE_WITH_RISK",
    "expected_kinds": [
-    "param_restrict_changed"
+    "param_restrict_added"
    ],
    "min_evidence": "L2",
    "platforms": [
     "linux"
-   ]
+   ],
+   "expected_absent_kinds": [
+    "func_params_changed"
+   ],
+   "behavioral_break": true,
+   "behavioral_note": "Demonstrated by the runtime witness: an overlapping old consumer gets a different result after the swap under GCC and Clang at -O3."
   },
   "case208_restrict_added_to_definition_only": {
    "abi_break": false,
    "api_break": false,
    "bad_practice": false,
    "category": "no_change",
-   "description": "The negative control paired with case207_pointer_parameter_gained_restrict: restrict is added to blend()'s DEFINITION while the declaration in the public header is left unchanged, so the contract consumers compile against is unchanged and param_restrict_changed must not fire. Pins which artifact abicheck treats as the contract -- the header a consumer compiles against, not the source file the library happens to build from.",
+   "description": "blend()'s published declaration is unchanged; only the definition in v2.c gains restrict. As a detection control the declared interface is identical, so NO_CHANGE is correct (and param_restrict_changed / param_restrict_added must stay absent). It is NOT behavior-compatible: see behavioral_break / behavioral_note -- the optimised definition now assumes no overlap the declaration still permits.",
    "expected": "NO_CHANGE",
    "expected_absent_kinds": [
+    "param_restrict_added",
     "param_restrict_changed"
    ],
    "expected_kinds": [],
    "min_evidence": "L2",
    "platforms": [
     "linux"
-   ]
+   ],
+   "truth_scope": "declared-interface",
+   "behavioral_break": true,
+   "behavioral_note": "Not a compatibility claim for the release. The declaration consumers compile against is unchanged, so NO_CHANGE is the truth only for the declared interface (and this case's job is to be the no-header-diff detection control for case207). The implementation does break a valid old consumer: with restrict on the -O3 definition, the same overlapping prefix-sum call that works against v1 returns 1,3,5,7,9,... against v2 under GCC and Clang (runtime witness). A binary/header detector cannot infer that from artifacts whose declared contract is identical; it is an implementation-behavior regression, recorded here so NO_CHANGE is never read as 'safe to ship'."
   }
  },
  "version": "4",

@@ -65,15 +65,13 @@ from typing import Any
 
 from .buildsource.build_query import PRUNED_HEADER_DIR_SEGMENTS
 from .deadline import run_bounded
-from .dumper import (
-    _build_clang_header_command,
-    _detect_cpp20_headers,
-    _resolve_clang_langmode,
-)
+from .dumper_ast_config import _build_clang_header_command
+from .dumper_ast_config_cpp20 import _detect_cpp20_headers
 from .dumper_clang import _resolve_clang_bin
 from .dumper_clang_errors import _is_missing_cpp_stdlib_header_error
 from .dumper_sysinc import _resolve_clang_system_includes
 from .errors import SnapshotError, ValidationError
+from .extract.headers.clang.backend import resolve_clang_langmode
 from .extract.headers.clang.error_header_retry import retry_excluding_error_headers
 from .header_utils import iter_directory_headers, resolve_inferred_header_roots
 from .model import AbiSnapshot, RecordType, replace_with_fact_sync
@@ -168,11 +166,11 @@ def run_layout_tool(
         clang_bin = _resolve_clang_bin(compiler, gcc_path, gcc_prefix)
     except Exception:  # noqa: BLE001 -- best-effort enrichment, never raises
         return None
-    force_cpp, force_cpp20, _explicit_c, cc_id = _resolve_clang_langmode(
+    force_cpp, force_cpp20, _explicit_c, cc_id = resolve_clang_langmode(
         lang, resolved_headers, clang_bin, gcc_options, gcc_option_tokens
     )
 
-    # Re-probe the same host system-include dirs `dumper._clang_header_dump`
+    # Re-probe the same host system-include dirs `extract.headers.clang.backend.clang_header_dump`
     # injects (castxml<->clang parity: libstdc++/libc headers a hermetic
     # -isystem doesn't already cover). Without this, a header set that only
     # parses because of that auto-probe succeeds for the original direct-clang
@@ -192,7 +190,7 @@ def run_layout_tool(
 
     system_includes = _resolve_sysinc(force_cpp=force_cpp)
     # Pre-resolved so the C->C++ self-heal retry below (mirroring
-    # dumper._clang_header_dump's own) doesn't need a second probe.
+    # extract.headers.clang.backend.clang_header_dump's own) doesn't need a second probe.
     cpp_system_includes = (
         system_includes if force_cpp else _resolve_sysinc(force_cpp=True)
     )
@@ -241,7 +239,7 @@ def run_layout_tool(
         # total clang parse failure via `"ok": false` in its JSON stdout, not
         # the process exit code that retry_excluding_error_headers (below)
         # expects. Shim a returncode from that "ok" field so the SAME shared
-        # retry driver dumper._clang_header_dump uses can drive this tool too,
+        # retry driver extract.headers.clang.backend.clang_header_dump uses can drive this tool too,
         # instead of reimplementing its bounded-attempts exclusion loop here.
         result = _run(fcpp, fcpp20, sysinc)
         try:
@@ -259,7 +257,7 @@ def run_layout_tool(
             log.debug("clang layout tool invocation failed: %s", exc)
             return None
         cur_fcpp, cur_fcpp20, cur_sysinc = force_cpp, force_cpp20, system_includes
-        # C->C++ self-heal: mirrors dumper._clang_header_dump's own retry, so
+        # C->C++ self-heal: mirrors extract.headers.clang.backend.clang_header_dump's own retry, so
         # a header set that only parses in C++ mode there (e.g. a pure-
         # #include umbrella header) doesn't silently lose all enrichment here
         # just because this second, independent pass repeated the same
@@ -279,7 +277,7 @@ def run_layout_tool(
             except (subprocess.SubprocessError, OSError) as exc:
                 log.debug("clang layout tool invocation failed: %s", exc)
                 return None
-        # Graceful #error handling: mirrors dumper._clang_header_dump's own
+        # Graceful #error handling: mirrors extract.headers.clang.backend.clang_header_dump's own
         # retry, so a header excluded from the main dump's aggregate (not
         # meant for direct inclusion) doesn't abort this second pass entirely
         # — the same reusable driver just drops it and re-parses the rest.

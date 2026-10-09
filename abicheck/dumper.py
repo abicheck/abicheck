@@ -18,31 +18,17 @@ from __future__ import annotations
 
 import logging
 import shutil as shutil  # noqa: F401  # legacy test patch target
-import subprocess
-import sys
-import tempfile
 import warnings
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
-from xml.etree.ElementTree import (
-    Element,  # type annotation only; parsing uses defusedxml
-)
 
 if TYPE_CHECKING:
     from .dump_manifest import DumpManifest
     from .dwarf_unified import DwarfSession
 
 
-from . import deadline, dumper_cache
-from ._compiler_options import (
-    effective_driver_mode_is_cl as _effective_driver_mode_is_cl,
-    explicit_target_triple as _explicit_target_triple,
-    forwarded_driver_mode_token as _forwarded_driver_mode_token,
-    forwards_response_file as _forwards_response_file,
-)
-from .castxml_policy import evaluate_castxml_version
 from .dumper_ast_config import (
     _CPP_ONLY_PATTERNS as _CPP_ONLY_PATTERNS,
     _build_castxml_command as _build_castxml_command,
@@ -50,12 +36,10 @@ from .dumper_ast_config import (
     _cache_key as _cache_key,
     _detect_cpp_headers as _detect_cpp_headers,
     _resolve_compiler_binary as _resolve_compiler_binary,
-    clang_aggregate_text,
 )
 from .dumper_ast_config_cpp20 import _detect_cpp20_headers as _detect_cpp20_headers
 from .dumper_cache import (
     _cache_path as _cache_path,
-    read_cached_castxml as _read_castxml_cache,
 )
 from .dumper_castxml import (
     _CastxmlParser as _CastxmlParser,
@@ -69,8 +53,6 @@ from .dumper_castxml_probe import (
     _is_toolchain_version_failure as _is_toolchain_version_failure,
     _parse_castxml_version as _parse_castxml_version,
     _validate_castxml_output as _validate_castxml_output,
-    castxml_dump_excluding_unparseable,
-    record_unparseable_headers,
 )
 from .dumper_clang import (
     _clang_available as _clang_available,
@@ -80,14 +62,9 @@ from .dumper_clang import (
     _is_dpcpp_family_binary as _is_dpcpp_family_binary,
     _needs_sycl_host_only as _needs_sycl_host_only,
     _resolve_clang_bin as _resolve_clang_bin,
-    _resolve_dpcpp_acquisition,
-    clang_bin_is_explicitly_configured as _clang_bin_is_explicitly_configured,
 )
 from .dumper_clang_errors import (
     _is_direct_include_guard_failure,
-    _is_missing_cpp_stdlib_header_error,
-    _parse_clang_ast_result,
-    run_clang_to_ast_file,
 )
 from .dumper_contract import (
     # ADR-050 D1 extraction-contract attachment lives in the sibling module
@@ -167,7 +144,6 @@ from .errors import (
     UnsupportedCastxmlVersionError,
     ValidationError,
 )
-from .extract.castxml_header_compat import write_castxml_aggregate
 from .extract.export_symbol_identity import (
     itanium_export_function as _itanium_export_function,
     itanium_export_variable as _itanium_export_variable,
@@ -183,331 +159,24 @@ from .extract.header_ast_backend import (
     lang_to_profile,
 )
 from .extract.header_ast_fields import parse_header_ast_fields
-from .extract.headers.clang.error_header_retry import retry_excluding_error_headers
-from .extract.headers.clang.locations import materialize_locations
+from .extract.headers.backend import HeaderAstBackend, HeaderParseRequest
+from .extract.headers.castxml.backend import CastxmlBackend, CastxmlRunError
+from .extract.headers.clang.backend import ClangBackend
 from .extract.path_aliases import absolutize_include_roots
 from .extract.progress import timed
 from .model import AbiSnapshot, RecordType
 from .storage.ast_cache_location import reference_scratch_scoped
-from .storage.atomic_file import atomic_write as _atomic_write
-from .storage.cache_integrity import record_digest
 from .workflows.snapshot_factory import new_snapshot
 
 log = logging.getLogger(__name__)
 
-
-def _resolve_clang_langmode(
-    lang: str | None,
-    headers: list[Path],
-    clang_bin: str,
-    gcc_options: str | None = None,
-    gcc_option_tokens: tuple[str, ...] = (),
-    exported_symbols: frozenset[str] = frozenset(),
-) -> tuple[bool, bool, bool, str]:
-    """Return ``(force_cpp, force_cpp20, explicit_c_request, cc_id)`` for the TU.
-
-    ``explicit_c_request`` records whether C was *explicitly* requested
-    (``--lang c``) vs auto-detected — both leave ``force_cpp`` False, but the
-    C→C++ self-heal treats them differently (warning vs debug; Codex review).
-
-    ``exported_symbols``: see :func:`_resolve_force_cpp`'s own docstring —
-    the binary's already-observed export table, checked as C++ evidence when
-    the header content alone gives no signal.
-    """
-    force_cpp = _resolve_force_cpp(
-        lang, headers, gcc_options, gcc_option_tokens, exported_symbols
-    )
-    force_cpp20 = force_cpp and _detect_cpp20_headers(headers)
-    explicit_c_request = bool(lang) and not force_cpp
-    cc_id = "msvc" if Path(clang_bin).name.lower() in ("cl", "cl.exe") else "gnu"
-    return force_cpp, force_cpp20, explicit_c_request, cc_id
-
-
-def _log_c_to_cpp_selfheal(explicit_c_request: bool) -> None:
-    """Log the C→C++ self-heal at the right level for how C was chosen."""
-    if explicit_c_request:
-        # Explicit compile.lang: c that needs the C++ stdlib: keep the self-heal visible
-        # — the result is C++ ABI evidence, not the C requested (Codex review).
-        log.warning(
-            "clang was asked for C (compile.lang: c) but the header(s) require the "
-            "C++ standard library; self-healing to C++ mode. The result is "
-            "C++ ABI evidence — set compile.lang: c++ to make this explicit, or "
-            "verify you intended a C library."
-        )
-    else:
-        log.debug(
-            "clang auto-detected C for a pure-#include umbrella header (no "
-            "inline C++ syntax to key on), then self-healed to C++ after a "
-            "missing C++ standard header — an unambiguous C++ signal. The "
-            "result is unaffected; set compile.lang: c++ to skip the C probe."
-        )
-
-
-def _clang_header_dump(
-    headers: list[Path],
-    extra_includes: list[Path],
-    compiler: str = "c++",
-    *,
-    gcc_path: str | None = None,
-    gcc_prefix: str | None = None,
-    gcc_options: str | None = None,
-    gcc_option_tokens: tuple[str, ...] = (),
-    sysroot: Path | None = None,
-    nostdinc: bool = False,
-    lang: str | None = None,
-    extra_hash_dirs: tuple[Path, ...] = (),
-    frontend_context: str = "host",
-    memoize: bool | None = None,
-    pruning_header_roots: tuple[str, ...] | None = None,
-    exported_symbols: frozenset[str] = frozenset(),
-    _coordinated: bool = False,
-    _expected_acquisition_key: str | None = None,
-) -> tuple[dict[str, Any], str | None, bool]:
-    """Run clang over *headers* and return ``(root, resolved_kind, resolved_force_cpp)``.
-
-    ``resolved_force_cpp`` is the mode that actually produced *root* -- the
-    post-retry ``True`` when a C-mode parse self-healed into C++, else
-    ``force_cpp`` (Codex review: the provenance probe must not re-derive a
-    stale guess once this already resolved the real answer).
-
-    ``frontend_context`` selects the host or device DPC++ evidence.
-    """
-    # The acquisition key folds the ``-I`` spelling in, so the spelling is
-    # canonicalized here -- the one choke point every caller reaches --
-    # rather than trusted to each caller: a relative root on one caller and
-    # an absolute one on another made two keys (and two full parses) for
-    # one header set. Idempotent for absolute roots.
-    extra_includes = absolutize_include_roots(list(extra_includes))
-    clang_bin = _resolve_clang_bin(compiler, gcc_path, gcc_prefix)
-    dpcpp_multi_context, dpcpp_host_context = _resolve_dpcpp_acquisition(
-        clang_bin, frontend_context, gcc_options, gcc_option_tokens
-    )
-    force_cpp, force_cpp20, explicit_c_request, cc_id = _resolve_clang_langmode(
-        lang,
-        headers,
-        clang_bin,
-        gcc_options,
-        gcc_option_tokens,
-        exported_symbols,
-    )
-
-    def _resolve_sysinc(*, force_cpp: bool) -> tuple[str, ...]:
-        return _resolve_clang_system_includes(
-            compiler,
-            gcc_path=gcc_path,
-            gcc_prefix=gcc_prefix,
-            sysroot=sysroot,
-            nostdinc=nostdinc,
-            force_cpp=force_cpp,
-            gcc_options=gcc_options,
-            gcc_option_tokens=gcc_option_tokens,
-        )
-
-    system_includes = _resolve_sysinc(force_cpp=force_cpp)
-    cpp_system_includes = (
-        system_includes if force_cpp else _resolve_sysinc(force_cpp=True)
-    )
-    frontend_identity = _tool_identity(clang_bin)
-    compiler_identity = frontend_identity
-
-    def _make_key(fcpp: bool, fcpp20: bool, sysinc: tuple[str, ...]) -> str:
-        return _cache_key(
-            headers,
-            extra_includes,
-            clang_bin,
-            gcc_path=gcc_path,
-            gcc_prefix=gcc_prefix,
-            gcc_options=gcc_options,
-            gcc_option_tokens=gcc_option_tokens,
-            sysroot=sysroot,
-            nostdinc=nostdinc,
-            lang=lang,
-            backend="clang",
-            system_includes=sysinc,
-            extra_hash_dirs=extra_hash_dirs,
-            frontend_identity=frontend_identity,
-            compiler_identity=compiler_identity,
-            force_cpp=fcpp,
-            force_cpp20=fcpp20,
-            frontend_context=frontend_context,
-            invocation_tool=(
-                clang_bin,
-                cc_id,
-                str(dpcpp_multi_context),
-                str(dpcpp_host_context),
-            ),
-        )
-
-    key = _make_key(
-        force_cpp,
-        force_cpp20,
-        system_includes if force_cpp else (*system_includes, *cpp_system_includes),
-    )
-    if _expected_acquisition_key is not None and key != _expected_acquisition_key:
-        raise SnapshotError("header inputs changed before clang acquisition started")
-    resolved_kind = (
-        frontend_context if dpcpp_multi_context or dpcpp_host_context else None
-    )
-    cached = _cache_path(key, backend="clang")
-
-    def _cpp_retry_mode() -> tuple[bool, bool, tuple[str, ...]]:  # C->C++ self-heal
-        return True, _detect_cpp20_headers(headers), cpp_system_includes
-
-    def _entry_path(acquired: tuple[Any, str | None, bool]) -> Path:  # its cache entry
-        retry_key = None if acquired[2] == force_cpp else _make_key(*_cpp_retry_mode())
-        return cached if retry_key is None else _cache_path(retry_key, backend="clang")
-
-    if not _coordinated and dumper_cache.ast_acquisition_active():
-        # A warm disk hit is an acquisition too, so it is read on the
-        # `_coordinated=True` re-entry below, never ahead of this call --
-        # `dumper_cache.run_ast_acquisition`'s own docstring has the rule.
-        return dumper_cache.run_ast_acquisition_offering_entry(
-            "clang",
-            key,
-            _entry_path,
-            lambda: _clang_header_dump(
-                headers,
-                extra_includes,
-                compiler,
-                gcc_path=gcc_path,
-                gcc_prefix=gcc_prefix,
-                gcc_options=gcc_options,
-                gcc_option_tokens=gcc_option_tokens,
-                sysroot=sysroot,
-                nostdinc=nostdinc,
-                lang=lang,
-                extra_hash_dirs=extra_hash_dirs,
-                frontend_context=frontend_context,
-                memoize=memoize,
-                pruning_header_roots=pruning_header_roots,
-                exported_symbols=exported_symbols,
-                _coordinated=True,
-                _expected_acquisition_key=key,
-            ),
-        )
-
-    _memoize = dumper_cache.resolve_request_memoization(memoize)
-    _cached_result = dumper_cache.load_cached_ast(
-        key, "clang", cached, memoize=_memoize, on_disk_load=materialize_locations
-    )
-    if _cached_result is not None:
-        return cast("dict[str, Any]", _cached_result), resolved_kind, force_cpp
-
-    agg_ext = ".hpp" if force_cpp else ".h"
-    with tempfile.NamedTemporaryFile(suffix=agg_ext, mode="w", delete=False) as agg:
-        agg_path = Path(agg.name)
-    active_headers = list(headers)
-
-    def _write_agg(hdrs: list[Path]) -> None:
-        agg_path.write_text(clang_aggregate_text(hdrs), encoding="utf-8")
-
-    _write_agg(active_headers)
-
-    _ast_paths: list[Path] = []  # each attempt's AST, cleaned up in `finally` below
-
-    def _run_clang(
-        fcpp: bool, fcpp20: bool, sysinc: tuple[str, ...]
-    ) -> subprocess.CompletedProcess[str]:
-        cmd = _build_clang_header_command(
-            clang_bin,
-            cc_id,
-            extra_includes,
-            agg_path,
-            sysroot=sysroot,
-            nostdinc=nostdinc,
-            gcc_options=gcc_options,
-            gcc_option_tokens=gcc_option_tokens,
-            force_cpp=fcpp,
-            force_cpp20=fcpp20,
-            system_includes=sysinc,
-            dpcpp_multi_context=dpcpp_multi_context,
-            dpcpp_host_context=dpcpp_host_context,
-        )
-        # DeadlineExceeded propagates uncaught, mapped by run_scan_core to _BudgetOverflow.
-        deadline.check()
-        try:
-            return run_clang_to_ast_file(cmd, timeout=120, on_created=_ast_paths.append)
-        except subprocess.TimeoutExpired as exc:
-            raise SnapshotError(
-                "clang timed out after 120 seconds parsing the header(s). The header "
-                "may contain syntax that causes the frontend to hang. The clang "
-                "process (and any child processes) has been terminated."
-            ) from exc
-
-    try:
-        result = _run_clang(force_cpp, force_cpp20, system_includes)
-        # C→C++ self-heal: a pure-``#include`` umbrella header (e.g. oneTBB's
-        # ``oneapi/tbb.h``) picks C mode, then ``#include <cstddef>`` fails — a
-        # missing C++ *standard* header is an unambiguous "this is C++" signal, so
-        # retry once in C++ mode with the pre-resolved C++ system includes. Skipped
-        # when already C++ or the failure is anything but a missing C++ stdlib header.
-        if (
-            result.returncode != 0
-            and not force_cpp
-            and _is_missing_cpp_stdlib_header_error(result.stderr or "")
-        ):
-            _log_c_to_cpp_selfheal(explicit_c_request)
-            cur_fcpp, cur_fcpp20, cur_sysinc = _cpp_retry_mode()
-            result = _run_clang(cur_fcpp, cur_fcpp20, cur_sysinc)
-        else:
-            cur_fcpp, cur_fcpp20, cur_sysinc = force_cpp, force_cpp20, system_includes
-        result = retry_excluding_error_headers(
-            result=result,
-            run_clang=lambda: _run_clang(cur_fcpp, cur_fcpp20, cur_sysinc),
-            write_agg=_write_agg,
-            agg_path=agg_path,
-            active_headers=active_headers,
-        )
-        identities_stable = _tool_identity(clang_bin) == frontend_identity
-        if not identities_stable:
-            log.warning(
-                "AST toolchain changed during clang execution; skipping cache write"
-            )
-        # Write under the mode that ACTUALLY produced `result`, not the
-        # stale pre-retry `key`/`cached` (see this function's own docstring).
-        write_key = (
-            key
-            if cur_fcpp == force_cpp
-            else _make_key(cur_fcpp, cur_fcpp20, cur_sysinc)
-        )
-        write_cached = (
-            cached if cur_fcpp == force_cpp else _cache_path(write_key, backend="clang")
-        )
-        stability_includes = (
-            (system_includes if force_cpp else (*system_includes, *cpp_system_includes))
-            if cur_fcpp == force_cpp
-            else cur_sysinc
-        )
-        if _make_key(cur_fcpp, cur_fcpp20, stability_includes) != write_key:
-            raise SnapshotError(
-                "header inputs changed while clang was acquiring L2 evidence; "
-                "discarding the unstable result"
-            )
-        root = _parse_clang_ast_result(
-            result,
-            write_cached,
-            _ast_paths[-1],
-            cache_write=identities_stable,
-            dpcpp_capable=dpcpp_multi_context,
-            frontend_context=frontend_context,
-            header_roots=pruning_header_roots
-            if pruning_header_roots is not None
-            else tuple(str(h) for h in headers),
-        )
-        if identities_stable and _memoize:
-            # Kept under the ORIGINAL `key`, not `write_key` (Codex review, P1):
-            # the memo is a one-shot HANDOFF to `_attach_header_graph`'s own
-            # follow-up call, which independently recomputes this same
-            # pre-retry key -- storing under `write_key` would miss that
-            # lookup, repeating both clang attempts and leaking the handed-off
-            # tree in this thread's slot forever. Safe: that consumer discards
-            # `resolved_force_cpp`, unlike the disk path keyed correctly above.
-            dumper_cache.store_cached_ast(key, "clang", root)
-        return root, resolved_kind, cur_fcpp
-    finally:
-        agg_path.unlink(missing_ok=True)
-        for _p in _ast_paths:
-            _p.unlink(missing_ok=True)
+#: The header-AST backends ``_header_ast_parser`` dispatches through, by
+#: name. Replace an entry to substitute a backend (a test's fake runner:
+#: ``ClangBackend(runner=...)``) instead of patching a module name.
+HEADER_AST_BACKENDS: dict[str, HeaderAstBackend] = {
+    "castxml": CastxmlBackend(),
+    "clang": ClangBackend(),
+}
 
 
 def _castxml_fallback_reason(
@@ -613,515 +282,55 @@ def _header_ast_parser(
     """
     effective = _resolve_effective_ast_backend(backend, frontend_context)
 
-    def _stamp_parser(
-        parser: _CastxmlParser | _ClangAstParser,
-        *,
-        producer: str,
-        executable: str,
-        fallback_reason: str | None = None,
-        resolved_compiler: str | None = None,
-        resolved_force_cpp: bool | None = None,
-    ) -> _CastxmlParser | _ClangAstParser:
-        return cast(
-            "_CastxmlParser | _ClangAstParser",
-            _stamp_ast_parser(
-                parser,
-                producer=producer,
-                executable=executable,
-                compiler=compiler,
-                gcc_path=gcc_path,
-                gcc_prefix=gcc_prefix,
-                fallback_reason=fallback_reason,
-                resolved_compiler=resolved_compiler,
-                resolved_force_cpp=resolved_force_cpp,
-                gcc_options=gcc_options,
-                gcc_option_tokens=gcc_option_tokens,
-            ),
-        )
+    request = HeaderParseRequest(
+        headers=headers,
+        extra_includes=extra_includes,
+        compiler=compiler,
+        gcc_path=gcc_path,
+        gcc_prefix=gcc_prefix,
+        gcc_options=gcc_options,
+        gcc_option_tokens=gcc_option_tokens,
+        sysroot=sysroot,
+        nostdinc=nostdinc,
+        lang=lang,
+        exported_dynamic=exported_dynamic,
+        exported_static=exported_static,
+        public_header_paths=public_header_paths,
+        public_dir_paths=public_dir_paths,
+        extra_hash_dirs=extra_hash_dirs,
+        frontend_context=frontend_context,
+        pruning_header_roots=pruning_header_roots,
+        no_binary_evidence=no_binary_evidence,
+    )
 
     def _run_clang(*, fallback_reason: str | None = None) -> _ClangAstParser:
-        clang_bin = _resolve_clang_bin(compiler, gcc_path, gcc_prefix)
-        ast_root, resolved_kind, resolved_force_cpp = _clang_header_dump(
-            headers,
-            extra_includes,
-            compiler=compiler,
-            gcc_path=gcc_path,
-            gcc_prefix=gcc_prefix,
-            gcc_options=gcc_options,
-            gcc_option_tokens=gcc_option_tokens,
-            sysroot=sysroot,
-            nostdinc=nostdinc,
-            lang=lang,
-            extra_hash_dirs=extra_hash_dirs,
-            frontend_context=frontend_context,
-            pruning_header_roots=pruning_header_roots
-            if pruning_header_roots is not None
-            else tuple(public_header_paths + public_dir_paths),
-            exported_symbols=frozenset(exported_dynamic | exported_static),
-        )
-        is_cl_mode = _effective_driver_mode_is_cl(
-            _is_cl_style_driver_name(clang_bin), gcc_options, gcc_option_tokens
-        )
-        _target_known = not _forwards_response_file(gcc_options, gcc_option_tokens)
-        _bare_reprobe_args = _forwarded_driver_mode_token(
-            gcc_options, gcc_option_tokens
-        )
-
-        def _bare_reprobe() -> str | None:
-            return (
-                _configured_target_triple(None, _bare_reprobe_args, clang_bin)
-                if _target_known
-                else None
-            )
-
-        _guess_ok = (
-            _target_known
-            and _is_default_clang_bin(clang_bin, compiler)
-            and not _clang_bin_is_explicitly_configured(gcc_path, gcc_prefix)
-        )
-        target_triple = _configured_target_triple(
-            gcc_options, gcc_option_tokens, clang_bin
-        ) or (
-            (
-                _explicit_target_triple(gcc_options, gcc_option_tokens, cl_style=True)
-                or _bare_reprobe()
-            )
-            if is_cl_mode
-            else _explicit_target_triple(gcc_options, gcc_option_tokens)
-            or _bare_reprobe()
-            or (sys.platform if _guess_ok else None)
-        )
-        parser = _ClangAstParser(
-            ast_root,
-            exported_dynamic,
-            exported_static,
-            public_header_paths=public_header_paths,
-            public_dir_paths=public_dir_paths,
-            target_triple=target_triple,
-            no_binary_evidence=no_binary_evidence,
-            is_cxx=resolved_force_cpp,
-        )
-        setattr(
-            parser,
-            "_abicheck_neutral_factory",
-            lambda: _ClangAstParser(
-                ast_root,
-                set(),
-                set(),
-                public_header_paths=public_header_paths,
-                public_dir_paths=public_dir_paths,
-                target_triple=target_triple,
-                no_binary_evidence=False,
-                is_cxx=resolved_force_cpp,
-            ),
-        )
-        stamped = cast(
+        return cast(
             _ClangAstParser,
-            _stamp_parser(
-                parser,
-                producer="clang",
-                executable=clang_bin,
-                fallback_reason=fallback_reason,
-                resolved_force_cpp=resolved_force_cpp,
+            HEADER_AST_BACKENDS["clang"].parse(
+                request, fallback_reason=fallback_reason
             ),
         )
-        setattr(stamped, "_abicheck_frontend_context_kind", resolved_kind)
-        return stamped
 
     if effective == "clang":
         return _run_clang()
 
     auto_selected = _auto_ast_fallback_eligible(backend)
-    selected_castxml: list[str] = []
-    selected_meta: list[tuple[str, bool]] = []
     try:
-        xml_root, _unparseable = castxml_dump_excluding_unparseable(
-            _castxml_dump,
-            headers,
-            extra_includes,
-            compiler=compiler,
-            gcc_path=gcc_path,
-            gcc_prefix=gcc_prefix,
-            gcc_options=gcc_options,
-            gcc_option_tokens=gcc_option_tokens,
-            sysroot=sysroot,
-            nostdinc=nostdinc,
-            lang=lang,
-            extra_hash_dirs=extra_hash_dirs,
-            _selected_tool_out=selected_castxml,
-            _selected_meta_out=selected_meta,
-            exported_symbols=frozenset(exported_dynamic | exported_static),
+        return cast(
+            _CastxmlParser,
+            HEADER_AST_BACKENDS["castxml"].parse(request),
         )
-    except SnapshotError as exc:
+    except CastxmlRunError as exc:
         fallback_reason = _castxml_fallback_reason(
-            exc,
+            exc.original,
             auto_selected=auto_selected,
             compiler=compiler,
             gcc_path=gcc_path,
             gcc_prefix=gcc_prefix,
         )
         if fallback_reason is None:
-            raise
+            raise exc.original from None
         return _run_clang(fallback_reason=fallback_reason)
-    parser = _CastxmlParser(
-        xml_root,
-        exported_dynamic,
-        exported_static,
-        public_header_paths=public_header_paths,
-        public_dir_paths=public_dir_paths,
-        no_binary_evidence=no_binary_evidence,
-    )
-    setattr(
-        parser,
-        "_abicheck_neutral_factory",
-        lambda: _CastxmlParser(
-            xml_root,
-            set(),
-            set(),
-            public_header_paths=public_header_paths,
-            public_dir_paths=public_dir_paths,
-            no_binary_evidence=False,
-        ),
-    )
-    meta = selected_meta[0] if selected_meta else (None, None)
-    return cast(
-        _CastxmlParser,
-        record_unparseable_headers(
-            _stamp_parser(
-                parser,
-                producer="castxml",
-                executable=selected_castxml[0] if selected_castxml else "castxml",
-                resolved_compiler=meta[0],
-                resolved_force_cpp=meta[1],
-            ),
-            _unparseable,
-        ),
-    )
-
-
-def _resolve_gated_castxml_bin(castxml_bin: str | None) -> str:
-    """Resolve the castxml executable and fail closed on an out-of-policy build.
-
-    The version gate (``castxml_policy``) runs *before* any header is parsed. An
-    out-of-policy build (notably the legacy PyPI ``castxml`` distribution) is
-    rejected unless the caller explicitly opted in via
-    ``ABICHECK_ALLOW_UNSUPPORTED_CASTXML``. Skipped when the executable itself
-    could not even be resolved/probed (``"error"`` key) — that is a different,
-    pre-existing failure mode (missing/unreadable binary) that the actual castxml
-    invocation reports precisely; this gate only judges a version it could
-    actually observe.
-    """
-    try:
-        resolved = castxml_bin or _resolve_selected_tool("castxml")
-    except OSError as exc:
-        raise SnapshotError(
-            "castxml not found in PATH. Install with: apt install castxml, "
-            "brew install castxml, conda install -c conda-forge castxml, "
-            "or choco install castxml (Windows); then ensure castxml is in PATH. "
-            "On a clang-only host, set compile.frontend: clang in .abicheck.yml "
-            "(or ABICHECK_AST_FRONTEND=clang) to use the clang JSON-AST backend "
-            "instead — note it does not carry record size/alignment/offset "
-            "layout, so layout-only breaks need castxml or debug info (L1)."
-        ) from exc
-    meta = _tool_identity_metadata(resolved)
-    if "error" not in meta:
-        check = evaluate_castxml_version(meta.get("version", ""))
-        if not check.supported and not _allow_unsupported_castxml_enabled():
-            raise UnsupportedCastxmlVersionError(check.message(found_at=resolved))
-    return resolved
-
-
-def _write_castxml_cache(
-    cached: Path,
-    out_xml: Path,
-    *,
-    castxml_bin: str,
-    cc_bin: str,
-    frontend_identity: str,
-    compiler_identity: str,
-) -> None:
-    """Persist a fresh castxml XML dump, unless the toolchain moved underneath us.
-
-    The cache key encodes the frontend/compiler identities observed *before* the
-    run; if either changed while castxml was executing, the produced XML no
-    longer describes that key, so the write is skipped rather than poisoning the
-    cache. A cache write that fails on I/O is a warning, never an error — the
-    dump itself already succeeded.
-    """
-    if (
-        _tool_identity(castxml_bin) != frontend_identity
-        or _tool_identity(cc_bin) != compiler_identity
-    ):
-        log.warning(
-            "AST toolchain changed during CastXML execution; skipping cache write"
-        )
-        return
-    try:
-        _atomic_write(cached, out_xml.read_bytes())
-        record_digest(cached)  # so the first read is already verified
-    except OSError as exc:
-        log.warning("Could not write castxml AST cache %s: %s", cached, exc)
-
-
-def _castxml_dump(
-    headers: list[Path],
-    extra_includes: list[Path],
-    compiler: str = "c++",
-    *,
-    gcc_path: str | None = None,
-    gcc_prefix: str | None = None,
-    gcc_options: str | None = None,
-    gcc_option_tokens: tuple[str, ...] = (),
-    sysroot: Path | None = None,
-    nostdinc: bool = False,
-    lang: str | None = None,
-    extra_hash_dirs: tuple[Path, ...] = (),
-    castxml_bin: str | None = None,
-    _selected_tool_out: list[str] | None = None,
-    _selected_meta_out: list[tuple[str, bool]] | None = None,
-    exported_symbols: frozenset[str] = frozenset(),
-    _coordinated: bool = False,
-    _expected_acquisition_key: str | None = None,
-) -> Element:
-    """Run CastXML on *headers* and return its parsed XML root."""
-    # One ``-I`` spelling per root for the acquisition key; see
-    # ``_clang_header_dump``.
-    extra_includes = absolutize_include_roots(list(extra_includes))
-    castxml_bin = _resolve_gated_castxml_bin(castxml_bin)
-    if _selected_tool_out is not None:
-        _selected_tool_out.append(castxml_bin)
-
-    force_cpp = _resolve_force_cpp(
-        lang, headers, gcc_options, gcc_option_tokens, exported_symbols
-    )
-    force_cpp20 = force_cpp and _detect_cpp20_headers(headers)
-    resolved_compiler = compiler
-    if not force_cpp and not gcc_path and not gcc_prefix:
-        resolved_compiler = {
-            "c++": "cc",
-            "g++": "gcc",
-            "clang++": "clang",
-        }.get(compiler, compiler)
-    cc_bin, cc_id = _resolve_compiler_binary(resolved_compiler, gcc_path, gcc_prefix)
-    cc_bin = shutil.which(cc_bin) or cc_bin
-    frontend_identity = _tool_identity(castxml_bin)
-    compiler_identity = _tool_identity(cc_bin)
-
-    def _make_key() -> str:
-        return _cache_key(
-            headers,
-            extra_includes,
-            compiler,
-            gcc_path=gcc_path,
-            gcc_prefix=gcc_prefix,
-            gcc_options=gcc_options,
-            gcc_option_tokens=gcc_option_tokens,
-            sysroot=sysroot,
-            nostdinc=nostdinc,
-            lang=lang,
-            extra_hash_dirs=extra_hash_dirs,
-            frontend_identity=frontend_identity,
-            compiler_identity=compiler_identity,
-            force_cpp=force_cpp,
-            force_cpp20=force_cpp20,
-            invocation_tool=(cc_bin, cc_id, castxml_bin),
-        )
-
-    key = _make_key()
-    if _expected_acquisition_key is not None and key != _expected_acquisition_key:
-        raise SnapshotError("header inputs changed before CastXML acquisition started")
-    cached = _cache_path(key)
-    if not _coordinated and dumper_cache.ast_acquisition_active():
-        # Same ordering rule (and reason) as the clang backend above; waiters
-        # also get the producer's `(resolved_compiler, force_cpp)` selection.
-
-        def _produce() -> tuple[Element, tuple[str, bool]]:
-            produced_meta: list[tuple[str, bool]] = []
-            produced = _castxml_dump(
-                headers,
-                extra_includes,
-                compiler,
-                gcc_path=gcc_path,
-                gcc_prefix=gcc_prefix,
-                gcc_options=gcc_options,
-                gcc_option_tokens=gcc_option_tokens,
-                sysroot=sysroot,
-                nostdinc=nostdinc,
-                lang=lang,
-                extra_hash_dirs=extra_hash_dirs,
-                castxml_bin=castxml_bin,
-                _selected_meta_out=produced_meta,
-                exported_symbols=exported_symbols,
-                _coordinated=True,
-                _expected_acquisition_key=key,
-            )
-            return produced, produced_meta[-1]
-
-        root, selected_meta = dumper_cache.run_ast_acquisition("castxml", key, _produce)
-        if _selected_meta_out is not None:
-            _selected_meta_out.append(selected_meta)
-        return root
-
-    if cached.exists():
-        deadline.check()
-        _cached_root = _read_castxml_cache(cached)
-        if _cached_root is not None:
-            deadline.check()
-            if _selected_meta_out is not None:
-                _selected_meta_out.append((resolved_compiler, force_cpp))
-            return _cached_root
-
-    with tempfile.NamedTemporaryFile(suffix=".xml", delete=False) as tmp:
-        out_xml = Path(tmp.name)
-
-    final_force_cpp = force_cpp
-    try:
-        try:
-            root = _run_castxml_attempt(
-                cc_bin,
-                cc_id,
-                headers,
-                extra_includes,
-                out_xml,
-                sysroot=sysroot,
-                nostdinc=nostdinc,
-                gcc_options=gcc_options,
-                gcc_option_tokens=gcc_option_tokens,
-                force_cpp=force_cpp,
-                castxml_bin=castxml_bin,
-            )
-        except SnapshotError as primary:
-            if not _castxml_cpp_retry_allowed(
-                primary, force_cpp=force_cpp, headers=headers
-            ):
-                raise
-            log.warning(
-                "castxml failed to parse the header(s) under compile.lang: c; the header "
-                "contains C++-only constructs (class / namespace / template), so "
-                "retrying in C++ mode. Set compile.lang: c++ in .abicheck.yml to "
-                "select this directly and silence this warning."
-            )
-            try:
-                root = _run_castxml_attempt(
-                    cc_bin,
-                    cc_id,
-                    headers,
-                    extra_includes,
-                    out_xml,
-                    sysroot=sysroot,
-                    nostdinc=nostdinc,
-                    gcc_options=gcc_options,
-                    gcc_option_tokens=gcc_option_tokens,
-                    force_cpp=True,
-                    castxml_bin=castxml_bin,
-                )
-                final_force_cpp = True
-            except SnapshotError as retry_exc:
-                # Both modes failed — surface the originally requested C-mode
-                # error (and its hint), not the fallback's, so the diagnostic
-                # matches what the user asked for. Mark it as a failed
-                # language-mode retry and carry the retry's diagnostics, so
-                # the unparseable-header fallback can still attribute it to
-                # a header instead of treating it as a toolchain failure.
-                primary.language_retry_failed = True
-                primary.attribution_stderr = getattr(retry_exc, "stderr", None) or str(
-                    retry_exc
-                )
-                raise primary from None
-        if final_force_cpp == force_cpp:
-            if _make_key() != key:
-                raise SnapshotError(
-                    "header inputs changed while CastXML was acquiring L2 "
-                    "evidence; discarding the unstable result"
-                )
-            _write_castxml_cache(
-                cached,
-                out_xml,
-                castxml_bin=castxml_bin,
-                cc_bin=cc_bin,
-                frontend_identity=frontend_identity,
-                compiler_identity=compiler_identity,
-            )
-        deadline.check()
-        if _selected_meta_out is not None:
-            _selected_meta_out.append((resolved_compiler, final_force_cpp))
-        return root
-    finally:
-        out_xml.unlink(missing_ok=True)
-
-
-def _run_castxml_attempt(
-    cc_bin: str,
-    cc_id: str,
-    headers: list[Path],
-    extra_includes: list[Path],
-    out_xml: Path,
-    *,
-    sysroot: Path | None,
-    nostdinc: bool,
-    gcc_options: str | None,
-    gcc_option_tokens: tuple[str, ...] = (),
-    force_cpp: bool,
-    castxml_bin: str = "castxml",
-) -> Element:
-    """Run one castxml invocation in a fixed language mode and parse its output.
-
-    Writes the aggregate ``#include`` header (``.h`` for C, ``.hpp`` for C++),
-    builds and runs the castxml command, and validates the result. Raises
-    :class:`SnapshotError` on a non-zero exit, a timeout, or empty/invalid XML —
-    leaving *out_xml* in place on success so the caller can cache it. The agg
-    header is always cleaned up. Factored out of :func:`_castxml_dump` so the
-    C→C++ fallback (G16/A3) can re-run with a different mode without duplicating
-    the run/validate plumbing.
-    """
-    # Detect C++20 concept / requires syntax — castxml's default standard
-    # (typically C++17) rejects these, so we override it. Only in C++ mode.
-    force_cpp20 = force_cpp and _detect_cpp20_headers(headers)
-    agg_ext = ".hpp" if force_cpp else ".h"
-
-    agg_path = write_castxml_aggregate(headers, agg_ext)  # rmtree'd in `finally`
-
-    cmd = _build_castxml_command(
-        cc_bin,
-        cc_id,
-        extra_includes,
-        out_xml,
-        agg_path,
-        sysroot=sysroot,
-        nostdinc=nostdinc,
-        gcc_options=gcc_options,
-        gcc_option_tokens=gcc_option_tokens,
-        force_cpp=force_cpp,
-        force_cpp20=force_cpp20,
-        castxml_bin=castxml_bin,
-    )
-
-    try:
-        deadline.check()  # propagates uncaught, like _clang_header_dump._run_clang
-        try:
-            result = deadline.run_bounded(
-                cmd, capture_output=True, text=True, timeout=120
-            )
-        except subprocess.TimeoutExpired as exc:
-            stderr_snippet = ""
-            if exc.stderr:
-                text = (
-                    exc.stderr
-                    if isinstance(exc.stderr, str)
-                    else exc.stderr.decode("utf-8", errors="replace")
-                )
-                stderr_snippet = f"\nPartial stderr: {text[:1000].strip()}"
-            raise SnapshotError(
-                f"castxml timed out after 120 seconds. The header file may contain "
-                f"syntax that causes the compiler to hang. Check that the header "
-                f"is valid and can be compiled with gcc/g++. The castxml process "
-                f"(and any child processes) has been terminated.{stderr_snippet}"
-            ) from exc
-        return _validate_castxml_output(
-            result, out_xml, headers, force_cpp, castxml_bin=castxml_bin
-        )
-    finally:
-        shutil.rmtree(agg_path.parent, ignore_errors=True)
 
 
 # castxml parser + helpers moved to dumper_castxml (see top-of-file imports)

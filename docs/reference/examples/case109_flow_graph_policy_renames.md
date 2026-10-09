@@ -3,8 +3,8 @@
 
 | Field | Value |
 |-------|-------|
-| **Verdict** | 🔴 **BREAKING** |
-| **Category** | Breaking |
+| **Verdict** | 🟠 **API_BREAK** |
+| **Category** | API Break |
 | **Classification** | Scenario — Ecosystem case study |
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | API break |
@@ -13,9 +13,8 @@
 | **Ecosystem** | [oneTBB](by-ecosystem/onetbb.md) |
 | **Related rules** | [`compatible-type-added`](by-rule/compatible-type-added.md), [`public-typedef-removed`](by-rule/public-typedef-removed.md), [`tag-struct-renamed`](by-rule/tag-struct-renamed.md) |
 | **Subject** | [Removed types and classes](by-subject/removed-types-and-classes.md) |
-| **Underlying fact** | API_BREAK (policy-escalated to BREAKING) |
 
-**Category:** Source API / regression suite | **Verdict:** 🔴 BREAKING (policy-escalated source break)
+**Category:** Source API / regression suite | **Verdict:** 🟠 API_BREAK
 
 ## Verdict and consumer impact
 
@@ -23,15 +22,20 @@ A header-only set of policy-tag types (`queueing`, `rejecting`) used as
 template parameters for `function_node` is renamed wholesale
 (`buffering_policy`, `backpressure_policy`), and the instantiation-anchor
 typedef `queue_node` is dropped. Because these are header-only tag types
-that v1.cpp/v2.cpp deliberately never instantiate, **no exported library
-symbol changes** — the `.so` files are binary-identical and an
-already-deployed consumer binary keeps running unmodified. The break is
-purely at recompilation: any consumer source that references the v1 names
-fails to build against v2's headers. `ground_truth.json` records the
-enforced verdict as `BREAKING` because the generic `typedef_removed` /
-`type_removed` detectors that fire here conservatively classify every such
-removal as BREAKING by default policy — the underlying compatibility fact
-is API_BREAK (recompile-only), not a binary break.
+that v1.cpp/v2.cpp deliberately never instantiate, **the relevant binary
+interface is unchanged** — an already-deployed consumer binary keeps running
+unmodified. (The two `.cpp` files are not byte-identical — includes and
+comments differ — but no exported symbol changes.) The break is purely at
+recompilation: consumer source that references the v1 names fails to build
+against v2's headers — an **API_BREAK** (`type_removed`,
+`tag_type_renamed`, `typedef_removed`).
+
+Earlier releases classified type/typedef/tag removals as binary breaks by
+default. A type has no symbol of its own; when exported functions or
+instantiations that used it go away, those removals are reported in their
+own right and carry the binary verdict. Here only the implicit,
+never-exported special members of the removed tags disappear
+(`inline_function_removed`).
 
 ## Old/new diff
 
@@ -52,17 +56,18 @@ abicheck compare libfoo_v1.so libfoo_v2.so
 ## Expected abicheck finding
 
 ```text
-Verdict: BREAKING (exit 4)
+Verdict: API_BREAK (exit 2)
 
 - type_removed: Type removed: mylib::flow::queueing
-  > Old code references a type that no longer exists; compilation or link
-    failure.
 - type_removed: Type removed: mylib::flow::rejecting
+- tag_type_renamed: Empty tag struct 'queueing' renamed to 'buffering_policy' ...
 
 Additions:
 - type_added: New type: mylib::flow::buffering_policy
 - type_added: New type: mylib::flow::backpressure_policy
 ```
+
+`func_removed` must not appear.
 
 ## Minimum evidence
 
@@ -75,7 +80,7 @@ entries for types declared but never used, which is enough for abicheck's
 DWARF diff to see the rename. (`typedef_removed` on `queue_node` itself
 needs L2 header evidence — GCC does not emit unused-typedef DWARF even with
 that flag — but the two `type_removed` findings above are already enough to
-reach the same BREAKING verdict `ground_truth.json` expects.)
+reach the same API_BREAK verdict `ground_truth.json` expects.)
 
 ## Why abicheck catches it
 
@@ -137,10 +142,6 @@ maintainers.
 
 ---
 
-## Ground-truth provenance
-
-**Policy note:** The .so files are byte-identical between v1 and v2 (deliberately — no template instantiations in v1.cpp/v2.cpp), so an already-built consumer binary keeps linking and running unmodified. The underlying compatibility fact is API_BREAK (recompilation-only failure: the renamed policy tags and dropped instantiation-anchor typedef stop resolving against v2 headers). `expected` stays BREAKING because `typedef_removed`/`type_removed` are generic detectors that conservatively classify every such removal as BREAKING by default policy, without distinguishing 'this symbol never existed in the binary to begin with' from an actual layout/link break.
-
 ## Source files
 
 - `CMakeLists.txt`
@@ -150,4 +151,4 @@ maintainers.
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Ecosystem: oneTBB](by-ecosystem/onetbb.md) · [Subject: Removed types and classes](by-subject/removed-types-and-classes.md)._
+_See also: [Compatibility Catalog](index.md) · [All API_BREAK cases](by-verdict/api-break.md) · [Category: API Break](by-category/api_break.md) · [Ecosystem: oneTBB](by-ecosystem/onetbb.md) · [Subject: Removed types and classes](by-subject/removed-types-and-classes.md)._

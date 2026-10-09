@@ -46,6 +46,19 @@ abicheck compare libv1.so libv2.so --header old=v1.hpp --header new=v2.hpp
 # func_added: New public function: paint
 ```
 
+## ABI-compatible is not behavior-identical
+
+The runtime smoke for this case reports a changed signal (`DEMONSTRATED`):
+the unchanged old app prints `paint(3) = 4` against v1 and `paint(3) = 5`
+against v2, and both runs exit 0. That is the *intended* effect of the new
+override — virtual dispatch now reaches `Derived::paint` — not a broken
+vtable: the slot index, vtable size and every other entry are unchanged, so
+no call lands in the wrong function. The runtime runner's `DEMONSTRATED`
+status means "the observable output changed", not "a compatibility promise
+was violated". If a library promises a stable *result* for `paint()` on
+`Derived` objects, that behavioral contract is a separate claim this case
+does not make; the ABI verdict stays `COMPATIBLE`.
+
 ## Negative twin: same name, different signature *does* add a slot
 
 If `Derived` instead declared `virtual int paint(double x);` — same method

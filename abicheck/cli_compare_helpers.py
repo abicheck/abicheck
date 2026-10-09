@@ -110,10 +110,10 @@ from .frontends.cli.runtime import (
     _setup_verbosity,
     _write_or_echo,
 )
+from .frontends.render import ONELINE_FORMAT, resolve_demangle_for_format
 from .model.sided_inputs import resolve_per_side_inputs
 from .report.report_modes import normalize_report_mode
 from .serialization import run_scoped_digest_cache
-from .service_render import ONELINE_FORMAT, resolve_demangle_for_format
 from .workflows.header_exclusion_audit import unmatched_exclusion_warning
 from .workflows.ownership_request import project_ownership_scope
 from .workflows.public_header_boundary import (

@@ -504,7 +504,7 @@ def test_the_header_graph_pass_is_unchanged_under_reuse(
 ) -> None:
     """The header-graph attach is another parser over the same AST -- cover it.
 
-    ``service_dump_native`` builds the L2 semantic header graph by calling
+    ``workflows.dump.native`` builds the L2 semantic header graph by calling
     ``dumper._clang_header_dump`` a second time, which constructs one more
     ``_ClangAstParser`` over the tree the main pass already parsed. That is
     precisely a consumer this change shares indexes with, and the sibling

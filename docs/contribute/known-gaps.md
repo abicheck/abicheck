@@ -5861,7 +5861,7 @@ value is stopping a re-attempt.
   compile-DB-backed case) — the two ELF-specific post-processing second
   passes (`_attach_header_graph`, `attach_clang_layout`) that Blocker A
   worried about run *inside* `service.resolve_input`'s own ELF dispatch
-  (`service_dump_native.py`), not as a separate stage `execute_dump_request`
+  (`workflows/dump/native.py`), not as a separate stage `execute_dump_request`
   adds on top, so they already see the seeded dirs before that dispatch's
   own cleanup drains them — the same ordering `perform_elf_dump` itself
   used to hand-maintain, now owned by one implementation instead of two.
@@ -7093,6 +7093,34 @@ problem rather than a review-found edge case, the honest fix is reworking
 `export_bundle_facts`/`import_baseline_set`'s shared adapter shape to
 stream per-artifact results to the caller instead of returning one
 document, which both known callers would need to be updated for together.
+
+### A pointee qualifier change on a *return* type is not reported
+
+Found while fixing catalog case186 (GCC/Clang catalog validation,
+2026-10). Parameter-side pointee const/volatile changes are now classified
+by direction (`param_pointee_qualifier_added` / `_changed`,
+`compare/parameter_facts.py`). The return-type mirror is still suppressed
+entirely by `cv_qualifiers_only_differ`: `char *get_name()` →
+`const char *get_name()` breaks a C++ caller writing
+`char *p = get_name();` (and draws a discarded-qualifier diagnostic in C),
+while the reverse direction is safe. It was left out on purpose — the
+Wayland/libuv false-positive class this suppression was built for included
+accessor *returns* gaining const, and a gating `API_BREAK` there needs its
+own evidence that real consumers bind the result to a mutable pointer.
+A future fix should mirror the parameter split (gained → `API_BREAK` for
+assigning callers, lost → compatible) with its own catalog case and an FP
+measurement against the conda-forge corpus.
+
+### Behavioral regressions behind an unchanged declaration
+
+Catalog case208 (restrict added to a function *definition* only) breaks a
+valid overlapping consumer at runtime under GCC and Clang, while the
+declared interface — everything a binary/header comparison reads — is
+identical. Ground truth records it as `behavioral_break: true` with
+`truth_scope: declared-interface`; no detector is expected to infer it.
+An L4 source-ABI replay *could* see `restrict` on the definition's
+parameters and report a definition/declaration contract mismatch; that is
+not implemented.
 
 ### Dependency static/dynamic linking-mode change has no ChangeKind
 
@@ -8429,7 +8457,7 @@ was registered against in `tests/regressions/manifest.py` was retired in the
 same PR rather than retargeted: a repo-wide audit at retirement time found
 `debug_presence_only` (the underlying dumper-level shortcut parameter,
 still plumbed through `dumper.py`/`service_dump_cache.py`/
-`service_dump_native.py`/`dumper_layout_backfill.py`/
+`workflows/dump/native.py`/`dumper_layout_backfill.py`/
 `workflows/input_resolution.py`) has **no remaining production call site**
 that ever passes `debug_presence_only=True` — every live caller forwards it
 at its default `False`. The shortcut mechanism is therefore currently
@@ -8968,22 +8996,13 @@ violations, blocked" pattern this ADR's other gaps already use for
   `may_import` forbids. Unlike every other entry below, no caller needs to
   change — `comdat_groups` (or the piece of it this module actually uses)
   would need to move or be decoupled from this module directly.
-- `abicheck/buildsource/graph_impact.py` (target: `compare` — its own
-  docstring: "Structured graph impact/proof-path data attached to
-  findings"; it deliberately *enriches an existing `Change` finding*
-  rather than extracting a fact, the same shape as its already-`compare`
-  -classified `graph_reconcile.py` sibling — `source_graph_findings.py` is
-  *not* a `compare`-classified precedent despite a similar-sounding role:
-  `architecture/debt.yaml` records it with target `extract/build-or-source`,
-  and it carries no `modules.yaml` classification of its own today — not
-  `extract`, which this module's previous classification in this change
-  wrongly assigned it, laundering a real boundary issue instead of
-  recording it) — a *self-dependency* block, verified empirically by trial
-  classification: it itself imports `.call_graph` (`extract`-classified),
-  producing four new `compare -> extract` findings the moment it is
-  classified `compare`, since `compare`'s `may_import` is `model` only.
-  `call_graph` (or the specific pieces this module actually uses from it)
-  would need to move or be decoupled from this module directly.
+- **Closed (2026-10, Lane C stage 3):** `abicheck/buildsource/graph_impact.py`
+  (target: `compare`) was a self-dependency block: it imported three call-edge
+  label constants from the `extract`-classified `call_graph.py`. Those labels
+  are shared vocabulary, so they moved to `model/graph_vocabulary.py`
+  (`call_graph.py` and every other reader now import them from there), and
+  `graph_impact.py` — which then imports only `model` — is classified
+  `compare`.
 - `abicheck/buildsource/build_output.py` (target: `extract`, alongside its
   sibling adapters) — blocked because `abicheck/cli_project.py`
   (`frontends`) imports it directly; `frontends` may not import `extract`.
@@ -11246,23 +11265,49 @@ fold means generalizing the release fold so N=1 reduces to the scalar one;
 any exit-code difference that exposes at N=1 must be decided before it
 changes (ADR-064). Owner: ADR-063/065, lane A stage A2(b).
 
+## A record's triviality change is invisible without DWARF (2026-10-08)
+
+A trivially-copyable struct that gains a user-provided destructor or copy
+operation changes how it is passed by value (registers → hidden pointer on
+Itanium x86-64). abicheck reports that as `value_abi_trait_changed` from DWARF
+only. The header-side `trivially_copyable_lost` detector exists, but CastXML
+never fills `RecordType.is_trivially_copyable`, so a stripped binary plus
+headers reads `case69_trivial_to_nontrivial` as `API_BREAK`. Its earlier
+stripped `BREAKING` came from a spurious binary `func_removed` for the
+implicit copy constructor, which PR #1519 corrected to
+`inline_function_removed`. A sound header-side fix needs the trait proven on
+the *old* side (no user-declared special members, trivially-copyable bases and
+members), not just "a user destructor appeared". Owner: CastXML record
+extraction (`extract/headers/castxml/records.py`).
+
 ## An unreadable consumer import table still reads as "requires nothing" (2026-10-07)
 
-The Lane C split of `appcompat.py` made a consumer binary's import read an
-explicit fact: `extract.consumer_imports.read_consumer_imports` returns a
-`ConsumerImportFacts` whose `status` is `FAILED` (with a `failure_reason`)
-when the ELF/PE/Mach-O import table could not be parsed, instead of a bare
-empty set. Only the *unrecognised format* case is acted on: it raises
-`ConsumerUnreadableError` (or yields an advisory `unreadable=True` result),
-as before. A recognised binary whose import table fails part-way still flows
-into `policy.consumer_requirements` with whatever was read -- usually
-nothing -- so the scoped verdict reads `NO_CHANGE`/100% coverage, the
-"weaker evidence must not upgrade to a clean claim" problem root
-`AGENTS.md` names. The split was behaviour-preserving by mandate (no exit
-code or report change), so the consumer of the `FAILED` status is left for
-its own change: treat a `FAILED` consumer fact like an unreadable one
-(required -> error, advisory -> `unreadable=True`), with a regression test
-over a truncated ELF/PE/Mach-O consumer. Library-side facts have the same
-shape one layer down: `parse_{elf,pe,macho}_metadata` swallow their own
-errors and return empty metadata, so `LibraryExportFacts` cannot yet tell a
-failed read from an empty export table.
+**Closed (2026-10, Lane C stage 5).** `workflows.consumer_scope.read_consumer_facts`
+now treats a `FAILED` consumer-import fact exactly like an unrecognised
+format: a REQUIRED consumer raises `ConsumerUnreadableError`, an ADVISORY one
+yields `unreadable=True`. Regression tests:
+`tests/unit/workflows/test_failed_consumer_read.py`. Still open, one layer
+down: `parse_{elf,pe,macho}_metadata` swallow their own errors and return
+empty metadata, so `LibraryExportFacts` cannot yet tell a failed library read
+from an empty export table.
+
+## `compare --used-by` prints a traceback for an unreadable REQUIRED consumer (2026-10-08)
+
+**Closed (2026-10, Lane C stage 5, CodeRabbit review).** A REQUIRED
+`--used-by` consumer that cannot be read (unrecognised format, digest
+mismatch, unparseable import table) raised `ConsumerUnreadableError` out of
+the compare command uncaught: exit 1 with a Python traceback.
+`frontends/cli/compare_report._apply_scoped_gating` now translates it to a
+`click.ClickException` -- the same exit status, 1, with a one-line
+`Error: --used-by consumer: ...` message -- without growing the
+over-baseline `cli_helpers_compare.py`.
+
+## `appcompat_consumer_impact.py` cannot move into `workflows/` yet (2026-10-08)
+
+**Closed (2026-10, Lane C stage 3).** The module is now
+`workflows/consumer_impact.py`, beside `workflows/consumer_scope.py`. Both of
+its unclassified dependencies were resolved first: `format_dependency_path`
+moved to the `compare`-classified `buildsource/source_graph_compare.py`
+(stage 2), and `buildsource/graph_impact.py` was classified `compare` once its
+call-edge label constants moved to `model/graph_vocabulary.py` (stage 3; see
+its entry above).

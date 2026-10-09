@@ -7,5 +7,5 @@ _Canonical rule slug:_ `field-qualifiers`. [← back to all rules](index.md)
 
 ## Canonical demonstration
 
-- [case30_field_qualifiers](../case30_field_qualifiers.md) — Field Qualifier Changes (const, volatile) (🔴 BREAKING)
+- [case30_field_qualifiers](../case30_field_qualifiers.md) — Field Qualifier Changes (const, volatile) (🟠 API_BREAK)
 

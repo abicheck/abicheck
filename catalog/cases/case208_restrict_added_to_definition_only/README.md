@@ -1,22 +1,31 @@
 # Case 208: `restrict` Added to the Definition Only
 
-**Category:** No Change | **Verdict:** ✅ NO_CHANGE
+**Category:** No Change (declared interface) | **Verdict:** ✅ NO_CHANGE — with a separate **behavioral break**
 
 ## Verdict and consumer impact
 
 The implementation of `blend()` gains `restrict` on both pointer parameters,
-but the *declaration in the public header is unchanged*. Consumers compile
-against the header, so the contract they are held to is exactly the one v1
-published: overlapping buffers remain permitted. The qualifier is a statement
-about how this one translation unit is compiled, not about what callers must
-guarantee.
+but the *declaration in the public header is unchanged*. As a statement about
+the **declared interface** the verdict is `NO_CHANGE`: consumers compile
+against the header, which still permits overlapping buffers, and nothing a
+binary/header comparison reads has changed.
 
-This is the **negative control** paired with
+**That is not a statement that v2 is safe to ship.** Top-level `restrict` is
+not part of the function's type, so the declaration and the definition stay
+compatible, but inside the definition the parameters now promise not to
+alias, and the `-O3` library is compiled on that promise. An unchanged old
+consumer that passes overlapping buffers — valid under the declaration it
+compiled against — gets a different result after the swap (runtime witness
+below, GCC and Clang). `ground_truth.json` records this separately as
+`behavioral_break: true` with `truth_scope: declared-interface`, so the
+`NO_CHANGE` verdict is never read as overall compatibility truth. It is an
+implementation-behavior regression the library introduced, not something a
+detector can infer from artifacts whose declared contract is identical.
+
+This is the **no-header-diff detection control** paired with
 [`case207_pointer_parameter_gained_restrict`](../case207_pointer_parameter_gained_restrict/README.md),
-where the same qualifier is added to the published declaration. The pair
-proves two things about these two fixtures: a `restrict` change on the
-published contract is reported (case207), and one confined to the
-implementation is not (this case).
+where the same qualifier is added to the published declaration and reported
+as `param_restrict_added`.
 
 ## Old/new diff
 
@@ -42,8 +51,9 @@ Verdict: NO_CHANGE (exit 0)
 _No ABI changes detected._
 ```
 
-`param_restrict_changed` is expected *not* to fire. That absence is the point
-of the case.
+`param_restrict_added` / `param_restrict_changed` are expected *not* to fire:
+the published declaration did not change. That absence is the detection
+control; the behavioral regression is recorded separately (see above).
 
 ## Minimum evidence
 
@@ -64,28 +74,32 @@ compiles against, not the source file the library happens to build from.
 
 ## Runtime failure demonstration
 
-**Severity: none — verified no observable effect.**
+**Severity: wrong results for consumers that pass overlapping buffers — a
+behavioral break the declared interface does not show.**
+
+Both libraries are built at `-O3`. The unchanged old consumer computes an
+in-place running prefix sum, `blend(buf + 1, buf, 128)`, and checks every
+element against a sequential oracle:
 
 ```bash
-gcc -shared -fPIC -g v1.c -o libv1.so
-gcc -g app.c -L. -lv1 -Wl,-rpath,. -o app
-./app
-# → 11.0 22.0 33.0 44.0
-
-gcc -shared -fPIC -g v2.c -o libv1.so   # swap in v2, no recompile
-./app
-# → 11.0 22.0 33.0 44.0   (identical output)
+gcc -O3 -shared -fPIC -g v1.c -o libv1.so
+gcc -g app.c -L. -lv1 -Wl,-rpath,'$ORIGIN' -o app
+./app            # first five: 1 3 6 10 15                         exit 0
+gcc -O3 -shared -fPIC -g v2.c -o libv1.so   # swap in v2, no recompile
+./app            # first five: 1 3 5 7 9  WRONG RESULT at element 2  exit 1
 ```
 
-Callers that pass overlapping buffers remain well-defined, because the
-contract they compiled against never promised otherwise — the implementation
-simply may not exploit that promise for those callers.
+The earlier witness used non-overlapping buffers and so could not observe
+anything.
 
 ## Safe redesign
 
-None needed. If the library *wants* the optimisation licence for all callers,
-it has to publish the stronger precondition, which is case207's break — the
-point of this pair is that those are two different changes, not one.
+Don't add `restrict` to a published function's definition unless the
+declaration says so too: the optimisation licence only exists for callers that
+were promised the stronger precondition, which is case207's (reported)
+change. If the library wants the vectorised path, keep the overlap-tolerant
+entry point and add a new, `restrict`-declared one — or check for overlap and
+dispatch.
 
 ## Cross-tool comparison
 

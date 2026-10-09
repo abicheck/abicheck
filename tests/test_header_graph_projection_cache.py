@@ -328,7 +328,8 @@ class TestTheWarmRunReallySkipsTheParse:
             return real_project(root)
 
         monkeypatch.setattr(
-            "abicheck.dumper._clang_header_dump", fake_clang_header_dump
+            "abicheck.extract.headers.clang.backend.clang_header_dump",
+            fake_clang_header_dump,
         )
         import abicheck.buildsource.header_graph_ast_stream as stream_mod
 
@@ -636,7 +637,9 @@ class TestThePathsWhereNoAstIsAcquired:
         monkeypatch.setattr(
             attach_mod, "resolve_inferred_header_roots", lambda *a, **k: ([], [])
         )
-        monkeypatch.setattr("abicheck.dumper._clang_header_dump", raising)
+        monkeypatch.setattr(
+            "abicheck.extract.headers.clang.backend.clang_header_dump", raising
+        )
 
         snap = self._attach(self._snapshot(), [Path(PUBLIC_HEADER)])
         assert snap.surface_graph is not None
@@ -689,7 +692,7 @@ class TestThePathsWhereNoAstIsAcquired:
             attach_mod, "resolve_inferred_header_roots", lambda *a, **k: ([], [])
         )
         monkeypatch.setattr(
-            "abicheck.dumper._clang_header_dump",
+            "abicheck.extract.headers.clang.backend.clang_header_dump",
             lambda *a, **k: (ast, None, True),
         )
 
@@ -899,7 +902,7 @@ double total_area(const std::vector<std::unique_ptr<Shape>>& shapes);
         field the projection carries but the codec forgets would actually
         show up -- with a real projection, not a two-edge hand-built one.
         """
-        from abicheck.dumper import _clang_header_dump
+        from abicheck.extract.headers.clang.backend import clang_header_dump
 
         header = tmp_path / "realdep.h"
         header.write_text(self._HEADER)
@@ -907,7 +910,7 @@ double total_area(const std::vector<std::unique_ptr<Shape>>& shapes);
         cache_root.mkdir()
         monkeypatch.setenv("XDG_CACHE_HOME", str(cache_root))
 
-        ast_root, _kind, _forced = _clang_header_dump(
+        ast_root, _kind, _forced = clang_header_dump(
             [header], [], lang="c++", memoize=False
         )
         assert ast_root, "live clang produced no AST"

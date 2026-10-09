@@ -468,6 +468,16 @@ class Change:
     review_evidence: dict[str, object] | None = field(
         default=None, kw_only=True, compare=False
     )
+    #: The evidence providers that corroborated a cross-source (audit) finding
+    #: -- ``run_crosschecks``' per-check ``providers`` list, e.g.
+    #: ``("public_header_ast", "source_index")``. Lets a report state *which*
+    #: evidence agreed, so dropping a provider while still emitting the
+    #: finding is visible (catalog case151's provider matrix). ``None`` for
+    #: every finding not produced by a cross-source check. Appended last,
+    #: keyword-only, not part of equality, like `review_evidence`.
+    cross_source_providers: tuple[str, ...] | None = field(
+        default=None, kw_only=True, compare=False
+    )
 
 
 @dataclass

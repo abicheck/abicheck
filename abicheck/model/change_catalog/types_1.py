@@ -283,7 +283,7 @@ TYPES_ENTRIES_1: list[ChangeKindMeta] = [
     ),
     _E(
         "field_became_const",
-        _C,
+        _A,
         impact="A struct/class field gained const. This detector matches "
         "fields by name and only compares the const flag — it "
         "doesn't check whether the same-named field's type or offset "
@@ -314,7 +314,7 @@ TYPES_ENTRIES_1: list[ChangeKindMeta] = [
     ),
     _E(
         "field_became_volatile",
-        _C,
+        _R,
         impact="A field gained volatile. This detector matches fields by "
         "name and only compares the volatile flag — it doesn't check "
         "whether the same-named field's type or offset also changed, "
@@ -405,7 +405,7 @@ TYPES_ENTRIES_1: list[ChangeKindMeta] = [
     ),
     _E(
         "field_lost_mutable",
-        _C,
+        _A,
         impact="A field lost mutable. This detector matches fields by name "
         "and only compares the mutable flag — it doesn't check "
         "whether the same-named field's type or offset also "
@@ -420,7 +420,7 @@ TYPES_ENTRIES_1: list[ChangeKindMeta] = [
     ),
     _E(
         "field_lost_volatile",
-        _C,
+        _R,
         impact="A field lost volatile. This detector matches fields by "
         "name and only compares the volatile flag — it doesn't "
         "check whether the same-named field's type or offset also "

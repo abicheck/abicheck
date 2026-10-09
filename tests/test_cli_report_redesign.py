@@ -6,9 +6,9 @@ import pytest
 from click.testing import CliRunner
 
 from abicheck.cli import main
+from abicheck.frontends.render import render_output
 from abicheck.model import AbiSnapshot, Function, Visibility
 from abicheck.serialization import snapshot_to_json
-from abicheck.service_render import render_output
 
 
 def _write_pair(tmp_path):

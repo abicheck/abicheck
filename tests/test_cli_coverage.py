@@ -76,7 +76,7 @@ class TestResolveInputErrors:
         hdr = tmp_path / "test.h"
         hdr.write_text("int f();", encoding="utf-8")
 
-        # `abicheck.dumper.dump` -- the binding `service_dump_native._dump_elf`
+        # `abicheck.dumper.dump` -- the binding `workflows.dump.native.extract_elf`
         # actually resolves at call time. This used to name
         # `abicheck.cli_dump_helpers.dump`, that module's own separate
         # `from .dumper import dump` alias, which `_resolve_input` never
@@ -338,7 +338,8 @@ class TestCompareApiBreakExitCode:
             ),
         )
         monkeypatch.setattr(
-            "abicheck.service_render.to_markdown", lambda _r, **_kw: "API_BREAK REPORT"
+            "abicheck.frontends.render.to_markdown",
+            lambda _r, **_kw: "API_BREAK REPORT",
         )
 
         runner = CliRunner()

@@ -289,9 +289,25 @@ def _skip_reason(case_name: str, entry: dict[str, object]) -> str | None:
         return f"not supported on {_platform()} (requires {platforms})"
     if not (example_catalog.case_dir(case_name) / "CMakeLists.txt").exists():
         return "no CMakeLists.txt"
-    if entry.get("requires_feature") == "_BitInt":
-        return "compiler lacks required feature '_BitInt'"
+    feature = entry.get("requires_feature")
+    if feature and not _compiler_supports(str(feature)):
+        return f"compiler lacks required feature {feature!r}"
     return None
+
+
+def _compiler_supports(feature: str) -> bool:
+    """Probe the *selected* toolchain (``CC``/``CXX``) for *feature*.
+
+    Shares ``tests/feature_probe.py`` with ``validate_examples.py`` so the
+    runtime lane and the detection lane agree: a ``_BitInt``-capable Clang
+    runs case115 instead of skipping it unconditionally.
+    """
+    tests_dir = str(REPO_DIR / "tests")
+    if tests_dir not in sys.path:
+        sys.path.insert(0, tests_dir)
+    from feature_probe import compiler_supports
+
+    return compiler_supports(feature)
 
 
 def run_case(

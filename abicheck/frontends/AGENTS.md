@@ -85,14 +85,11 @@ during this same migration, which the architecture checker accepted but which
 was itself the wrong layer for policy-owned data (Codex review) — it belongs
 in `policy`'s `legacy_paths` alongside `policy_file.py`, not `model`'s.
 
-**Still open:** `service.py` (1763 lines) has not been thinned, and the reason
-is now specific rather than open-ended. Moving it means classifying the 28 flat
-modules it imports, which surfaces 67 direction violations whose load-bearing
-cause is that `*_metadata.py` conflate a model dataclass with its parser —
-`AbiSnapshot` has typed fields of `PeMetadata`/`DwarfMetadata`/…, so making
-those modules `extract` creates a forbidden `model -> extract`. Splitting them
-is Phase 5's "parsers and catalogs" scope. See ADR-061's Phase 4 status note
-for the full measurement.
+`service.py` (the Tier-2 Python API facade, ~260 lines) is classified
+here: it composes `workflows` owners and re-exports `render_output` from
+the `frontends`-classified `service_render.py`. Do not add an `extract`,
+`compare` or `policy` import to it; re-export only from a `workflows` or
+`frontends` owner.
 
 ## Tests
 

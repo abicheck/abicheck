@@ -17,12 +17,24 @@
 
 ## Verdict and consumer impact
 
-`union Data` loses its `float f` member in v2 — only `int i` remains. Any
-caller compiled against v1 that reads or writes `d.f` is now interacting
-with a member the library no longer maintains: the library's `init_data()`
-stores an `int` bit pattern, but the caller reinterprets those same bits as
-a `float`. The result is silent data corruption, not a crash — the removed
-alternative was part of the union's public contract.
+`union Data` loses its `float f` member in v2 — only `int i` remains.
+Three mechanisms are involved and should be kept apart:
+
+1. **Source break.** Consumer source that names `d.f` no longer compiles.
+2. **Interpretation contract.** A caller compiled against v1 still reads
+   and writes the `f` alternative of storage the library now maintains only
+   as `int`. In this fixture `init_data()` also changes from writing
+   `3.14f` to writing the integer `42`, so the old caller reinterprets an
+   `int` bit pattern as a `float` — silent data corruption, not a crash.
+   That demonstrated consumer incompatibility is why the case stays
+   `BREAKING`.
+3. **Layout is not automatically affected.** Here `sizeof(union Data)` is
+   4 on both sides (both members are 4 bytes), so neither size nor the way
+   the union is passed changes. Removing a union member changes size,
+   alignment or parameter classification only when the removed member was
+   the largest, most-aligned or classification-determining one — judge
+   that separately (`type_size_changed`, `type_alignment_changed`) instead
+   of inferring it from every removal.
 
 ## Old/new diff
 
@@ -87,6 +99,11 @@ gcc -shared -fPIC -g new/lib.c -Inew -o libdata.so
 # → d.f = 5.885454e-44 (expected ~3.14)
 # → UNION_MISMATCH: removed float field changed interpretation
 ```
+
+The runtime failure comes from the changed initialization semantics
+(`init_data()` writing `42` instead of `3.14f`) together with the removed
+alternative; it does not show — and the case does not claim — a size or
+calling-convention change.
 
 **Why CRITICAL:** the library now writes integer bits where the caller
 still reads float bits from the same storage. There is no crash or

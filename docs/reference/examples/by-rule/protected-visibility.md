@@ -7,5 +7,5 @@ _Canonical rule slug:_ `protected-visibility`. [← back to all rules](index.md)
 
 ## Canonical demonstration
 
-- [case51_protected_visibility](../case51_protected_visibility.md) — Protected Visibility (DEFAULT to PROTECTED) (🟢 COMPATIBLE)
+- [case51_protected_visibility](../case51_protected_visibility.md) — Protected Visibility (DEFAULT to PROTECTED) (🟡 COMPATIBLE_WITH_RISK)
 

@@ -560,8 +560,8 @@ def _run_abi_diff(
     # is workflows-classified, so importing `service.py` itself here would
     # widen that workflows -> frontends edge instead of letting it close
     # (ADR-061 gap A).
-    from .service_dump_native import run_dump
     from .workflows.compare_policy import compare_snapshots
+    from .workflows.dump.native import run_dump
     from .workflows.input_resolution import detect_binary_format
 
     try:

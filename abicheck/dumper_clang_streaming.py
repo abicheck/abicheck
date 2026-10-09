@@ -98,7 +98,7 @@ categories ``scope_snapshot_excluding_dependencies`` drops *unconditionally*
 with no carve-out. That reasoning held for the post-hoc filter (which runs
 *after* :class:`~abicheck.dumper_clang._ClangAstParser` has already fully
 built every record's vtable) but not for this module, which runs *before*
-that construction ever happens: :mod:`abicheck.dumper_clang_vtable`'s
+that construction ever happens: :mod:`abicheck.extract.headers.clang.vtable`'s
 ``build_vtable`` reconstructs a class's vtable via **base-lookup
 recursion** -- walking up into each base class's own ``CXXMethodDecl``/
 destructor/conversion nodes to find inherited virtual slots, including

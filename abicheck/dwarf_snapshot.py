@@ -41,6 +41,7 @@ from .dwarf_utils import (
     attr_bool as _attr_bool,
     attr_int as _attr_int,
     attr_str as _attr_str,
+    base_type_name as _base_type_name,
     decode_member_location as _decode_member_location,
     dwarf_low_memory_mode,
     free_cu_die_cache,
@@ -1854,7 +1855,7 @@ class _DwarfSnapshotBuilder:
 
         if tag == "DW_TAG_base_type":
             return (
-                _attr_str(die, "DW_AT_name") or "base",
+                _base_type_name(die),
                 _attr_int(die, "DW_AT_byte_size"),
             )
 

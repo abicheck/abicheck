@@ -349,3 +349,19 @@ def _castxml_cpp_retry_allowed(
     return _detect_cpp_headers(headers, _CPP_ONLY_PATTERNS) or _detect_cpp20_headers(
         headers
     )
+
+
+def run_castxml(cmd: list[str], *, timeout: float) -> subprocess.CompletedProcess[str]:
+    """The castxml backend's default runner: check the scan deadline, then
+    run *cmd* bounded by it with captured text output.
+
+    ``DeadlineExceeded`` propagates uncaught; ``run_scan_core`` maps it to
+    ``_BudgetOverflow``.
+    """
+    deadline.check()
+    return deadline.run_bounded(cmd, capture_output=True, text=True, timeout=timeout)
+
+
+def check_scan_deadline() -> None:
+    """The castxml backend's default between-attempt deadline check."""
+    deadline.check()

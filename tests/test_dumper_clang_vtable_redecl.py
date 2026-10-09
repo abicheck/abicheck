@@ -126,7 +126,7 @@ def test_conflicting_nested_template_defaults_across_sibling_specializations_sta
         outer_double_spec,
         _record("D", bases=[_base("Outer<double>::A<>")]),
     )
-    from abicheck.dumper_clang_vtable import _index_template_param_defaults
+    from abicheck.extract.headers.clang.templates import _index_template_param_defaults
 
     # Both nested "A"s are type-only parameters (the KINDS list -- type vs.
     # non-type -- is identical, [None], for both), so only the DEFAULTS
@@ -332,7 +332,7 @@ def test_unrelated_coincidentally_equal_registration_does_not_corrupt_redecl_ide
         outer_int_spec_redef,
         _record("D", bases=[_base("Outer<int>::A<double>")]),
     )
-    from abicheck.dumper_clang_vtable import _index_template_param_defaults
+    from abicheck.extract.headers.clang.templates import _index_template_param_defaults
 
     # The redeclaration's own previousDecl link must still resolve
     # correctly despite the unrelated, coincidentally-equal middle
@@ -406,7 +406,7 @@ def test_default_added_by_legal_redeclaration_still_resolves_dependent_default()
         },
         _record("D", bases=[_base("A<double>")]),
     )
-    from abicheck.dumper_clang_vtable import _index_template_param_defaults
+    from abicheck.extract.headers.clang.templates import _index_template_param_defaults
 
     # "A" now carries the default the SECOND declaration added, letting
     # dependent-default substitution trim "A<double, double>" down to the
@@ -473,7 +473,7 @@ def test_added_default_with_renamed_params_translates_through_positions() -> Non
         },
         _record("D", bases=[_base("A<double>")]),
     )
-    from abicheck.dumper_clang_vtable import _index_template_param_defaults
+    from abicheck.extract.headers.clang.templates import _index_template_param_defaults
 
     # The added default is translated to the FIRST declaration's own
     # parameter name ("T"), matching the tracked names index used by
@@ -553,7 +553,7 @@ def test_names_filled_in_by_intermediate_redeclaration_translate_correctly() -> 
         },
         _record("D", bases=[_base("A<double>")]),
     )
-    from abicheck.dumper_clang_vtable import _index_template_param_defaults
+    from abicheck.extract.headers.clang.templates import _index_template_param_defaults
 
     # The added default is translated to the names that actually won the
     # merge ("X"/"Y", filled in by the SECOND declaration), not a stale

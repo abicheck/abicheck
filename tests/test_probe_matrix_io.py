@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import json
 
-from abicheck.probe_harness import MatrixSnapshot, ProbeResult
+from abicheck.model.probe_matrix import MatrixSnapshot, ProbeResult
 from abicheck.workflows.findings import (
     matrix_snapshot_from_dict,
     matrix_snapshot_to_json,

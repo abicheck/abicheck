@@ -95,30 +95,20 @@ build integration required.
 
 **Severity: CRITICAL**
 
-**Scenario:** compile app against v1, swap in v2 `.so` without recompile —
-both a stack-allocated `knn_descriptor` and a heap-allocated one via the
-factory function.
+**Scenario:** the consumer owns a `knn_descriptor` sized by v1 (it never
+names `detail::descriptor_base`) and constructs it in place; after the swap
+the constructor that runs is v2's, which initialises the grown base and
+stores `neighbor_count_` at its new, larger offset.
 
 ```bash
-# Build v1 and app
-g++ -shared -fPIC -g v1.cpp -o libmylib.so
-g++ -g app.cpp -L. -lmylib -Wl,-rpath,. -o app
-./app
-# → class_count   = 2 (expect 2)
-# → neighbor_count = 5 (expect 5)
-# → factory class_count = 2 (expect 2)
-
-# Swap in v2 (no recompile)
-g++ -shared -fPIC -g v2.cpp -o libmylib.so
-./app
-# → *** stack smashing detected ***: terminated
+g++ -shared -fPIC -g v1.cpp -o libv1.so
+g++ -g app.cpp -I. -L. -lv1 -Wl,-rpath,'$ORIGIN' -o app
+./app            # class_count = 2, neighbor_count = 5           exit 0
+g++ -shared -fPIC -g v2.cpp -o libv1.so   # swap in v2, no recompile
+./app            # CORRUPTION: constructor wrote past the v1-sized object, exit 1
 ```
 
-**Why CRITICAL:** the app stack-allocates `knn_descriptor` sized for v1's
-8-byte object; v2's constructor, running inside the swapped-in library,
-writes a 12-byte object (the grown `descriptor_base` base subobject plus
-`neighbor_count_` at its new offset) into that undersized stack slot,
-tripping the stack-protector canary and aborting the process.
+The witness heap-allocates the object with the **v1** size, followed by a 32-byte guard region filled with `0xA5`, and asserts the guard afterwards. That makes the overrun visible deterministically under GCC and Clang, Debug and Release, without depending on stack layout, optimisation level or a stack-protector canary (the original stack-canary witness stayed silent under some Clang builds). An independent ASan build of the same consumer reports `heap-buffer-overflow` after the swap.
 
 ## Safe redesign
 

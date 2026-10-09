@@ -60,6 +60,7 @@ from ...cli_helpers_compare import (
 from ...cli_resolve import (
     _reject_evidence_flags_for_set_inputs,
 )
+from ...model.consumer_spec import ConsumerUnreadableError
 from .runtime import _render_output
 
 if TYPE_CHECKING:
@@ -89,18 +90,24 @@ def _apply_scoped_gating(
     when the run is unscoped and the full-library verdict gates instead.
     """
     if used_by_apps:
-        return _apply_used_by_scoping(
-            result,
-            used_by_apps,
-            used_by_old_input,
-            used_by_new_input,
-            old,
-            new,
-            policy,
-            pf,
-            severity=severity,
-            suppression=suppression,
-        )
+        try:
+            return _apply_used_by_scoping(
+                result,
+                used_by_apps,
+                used_by_old_input,
+                used_by_new_input,
+                old,
+                new,
+                policy,
+                pf,
+                severity=severity,
+                suppression=suppression,
+            )
+        except ConsumerUnreadableError as exc:
+            # A REQUIRED consumer that cannot be read is an input error (an
+            # ADVISORY one never raises -- it comes back `unreadable=True`):
+            # exit 1 with one line instead of a Python traceback.
+            raise click.ClickException(f"--used-by consumer: {exc}") from exc
     if required_symbols:
         return _apply_required_symbol_scoping(
             result,

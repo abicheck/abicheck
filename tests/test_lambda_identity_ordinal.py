@@ -729,7 +729,7 @@ class TestServiceRunDumpHybridAlsoDefersRenumbering:
     def test_shared_closure_merges_despite_differing_lambda_counts(
         self, tmp_path
     ) -> None:
-        from unittest.mock import patch
+        from _dump_format_fakes import fake_format_adapter
 
         from abicheck.service import run_dump
 
@@ -767,15 +767,13 @@ class TestServiceRunDumpHybridAlsoDefersRenumbering:
             ],
         )
 
-        def _fake_dump_elf(*args, **kwargs):
-            compile_ctx = kwargs.get("compile")
+        def _fake_dump_elf(request):
+            compile_ctx = request.compile
             if compile_ctx is not None and compile_ctx.frontend == "clang":
                 return clang_snap
             return castxml_snap
 
-        with patch(
-            "abicheck.service_dump_native._dump_elf", side_effect=_fake_dump_elf
-        ):
+        with fake_format_adapter("elf", side_effect=_fake_dump_elf):
             merged = run_dump(p, "elf", header_backend="hybrid")
 
         matched = [t for t in merged.declarations.types if t.name.startswith("Foo<")]

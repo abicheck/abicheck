@@ -88,6 +88,14 @@ g++ -shared -fPIC -g v2.cpp -o libfoo.so
 # → CORRUPTION: base-class order changed, subobject offsets mismatch
 ```
 
+Both libraries define the virtual members and destructors of `Drawable` and
+`Clickable` out of line (their key functions), so the library is the one
+place that emits them and their vtables at every optimisation level. The
+earlier fixture defined them inline in the library while the consumer
+declared them out of line, so a Release (`-O2`) baseline failed to link
+(`undefined reference to Clickable::~Clickable()`) under both GCC and Clang
+and could not witness anything.
+
 **Why CRITICAL:** `widget_get_id()` reads `widget_id` at the offset v2's
 compiler assigned (after the swapped base subobjects), but the app's `Widget`
 object was laid out by v1's compiler with `widget_id` at a different offset

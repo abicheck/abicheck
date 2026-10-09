@@ -390,7 +390,7 @@ def build_header_only_graph(
 
     *ast_projection* is a parsed ``clang -ast-dump=json`` tree over the same
     header aggregate the L2 clang frontend parses
-    (``dumper._clang_header_dump``), already reduced to
+    (``extract.headers.clang.backend.clang_header_dump``), already reduced to
     :class:`HeaderGraphAstProjection` (``project_header_graph_ast``) so the
     caller can drop the parsed tree before this builder allocates anything
     (see that module's docstring for the measurement). ``None`` when clang
@@ -619,7 +619,7 @@ class ClangHeaderIncludeExtractor:
 
         *gcc_options* is the same free-form ``--gcc-options`` string
         (e.g. ``"-I build/generated -DFOO=1"``) the AST pass
-        (``dumper._clang_header_dump``) also receives — tokenized the same
+        (``extract.headers.clang.backend.clang_header_dump``) also receives — tokenized the same
         way (``shlex.split``) so a define/include gated by it doesn't leave
         this include pass silently missing edges the AST pass could resolve
         (Codex review: an earlier version of this method only forwarded

@@ -329,15 +329,16 @@ class TestChangeEntityIdCarrier:
         assert _change(r, ChangeKind.HIDDEN_FRIEND_REMOVED).entity_id == eid  # type: ignore[attr-defined]
 
     def test_param_restrict_changed_carries_old_side_entity_id(self) -> None:
+        # restrict *removed* is PARAM_RESTRICT_CHANGED (added is _ADDED).
         eid = entity_id_for_function((), "f", mangled_name="_Z1fPi")
         old = _func(
             "f",
             "_Z1fPi",
-            params=[Param(name="x", type="int*", is_restrict=False)],
+            params=[Param(name="x", type="int*", is_restrict=True)],
             entity_id=eid,
         )
         new = _func(
-            "f", "_Z1fPi", params=[Param(name="x", type="int*", is_restrict=True)]
+            "f", "_Z1fPi", params=[Param(name="x", type="int*", is_restrict=False)]
         )
         r = compare(_snap([old], from_headers=True), _snap([new], from_headers=True))
         assert _change(r, ChangeKind.PARAM_RESTRICT_CHANGED).entity_id == eid  # type: ignore[attr-defined]

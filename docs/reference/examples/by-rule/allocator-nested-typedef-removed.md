@@ -7,5 +7,5 @@ _Canonical rule slug:_ `allocator-nested-typedef-removed`. [← back to all rule
 
 ## Canonical demonstration
 
-- [case95_allocator_nested_typedef_removed](../case95_allocator_nested_typedef_removed.md) — Allocator Nested-Typedef Removed (🔴 BREAKING)
+- [case95_allocator_nested_typedef_removed](../case95_allocator_nested_typedef_removed.md) — Allocator Nested-Typedef Removed (🟠 API_BREAK)
 

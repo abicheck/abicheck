@@ -184,6 +184,12 @@ def _retry_candidates(
             gaps = gt.get(r["name"], {}).get("known_gap_toolchains")
             if gaps and alt_family not in gaps:
                 names.append(r["name"])
+        elif r["status"] == "NOT_APPLICABLE":
+            # The primary producer never creates the case's transition; the
+            # alternate one may, and is then the lane that proves the verdict.
+            absent = gt.get(r["name"], {}).get("not_applicable_toolchains")
+            if absent and alt_family not in absent:
+                names.append(r["name"])
     return names
 
 

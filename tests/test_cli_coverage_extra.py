@@ -14,6 +14,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+from _dump_format_fakes import fake_format_adapter
 from click.testing import CliRunner
 
 from abicheck.cli import main
@@ -106,13 +107,13 @@ class TestDumpNativeBinary:
         # effect. The previous `abicheck.cli.` target was already inert; the
         # facade split surfaced it by making the attribute stop existing.
         # ADR-063 Phase 1: the real PE dump now executes through
-        # `execute_dump_request` (`abicheck.service_dump_native._dump_pe`),
+        # `execute_dump_request` (the PE format adapter, faked via `fake_format_adapter("pe")`),
         # not `commands.dump._dump_native_binary` -- see
         # `test_compile_context_parity.py`'s `_capture_dump_pe` for the same
         # patch target, established by that migration.
         with (
             patch("abicheck.cli_resolve._detect_binary_format", return_value="pe"),
-            patch("abicheck.service_dump_native._dump_pe", return_value=mock_snap),
+            fake_format_adapter("pe", result=mock_snap),
         ):
             runner = CliRunner()
             result = runner.invoke(
@@ -144,10 +145,10 @@ class TestDumpNativeBinary:
         only the ELF dump path forwarded the opt-in flag and PE/Mach-O
         silently ignored ``--header-graph`` (Codex review); that class of bug
         can no longer occur since there is nothing left to forward
-        selectively. This also confirms ``_dump_pe`` (ADR-063 Phase 1: the
-        real PE dump target, since the migration onto
-        ``execute_dump_request``) is not called with
-        ``header_graph``/``header_graph_includes`` kwargs at all."""
+        selectively. This also confirms the PE format adapter's
+        ``NativeExtractRequest`` (ADR-063 Phase 1: the real PE dump target,
+        since the migration onto ``execute_dump_request``) carries no
+        ``header_graph``/``header_graph_includes`` field at all."""
         from abicheck.model import AbiSnapshot
 
         pe_file = tmp_path / "test.dll"
@@ -156,15 +157,13 @@ class TestDumpNativeBinary:
 
         captured: dict[str, object] = {}
 
-        def _fake_dump_native(*args, **kwargs):
-            captured.update(kwargs)
+        def _fake_dump_native(request):
+            captured.update(vars(request))
             return mock_snap
 
         with (
             patch("abicheck.cli_resolve._detect_binary_format", return_value="pe"),
-            patch(
-                "abicheck.service_dump_native._dump_pe", side_effect=_fake_dump_native
-            ),
+            fake_format_adapter("pe", side_effect=_fake_dump_native),
         ):
             runner = CliRunner()
             result = runner.invoke(
@@ -229,7 +228,7 @@ class TestDumpNativeBinary:
 
         with (
             patch("abicheck.cli_resolve._detect_binary_format", return_value="pe"),
-            patch("abicheck.service_dump_native._dump_pe", return_value=mock_snap),
+            fake_format_adapter("pe", result=mock_snap),
         ):
             runner = CliRunner()
             result = runner.invoke(

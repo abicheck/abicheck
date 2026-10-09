@@ -116,11 +116,11 @@ inventory shrinks.
 ### Phase 2: dump orchestration gets one owner with a stated scope invariant. Strong
 
 **Evidence.**
-- Dump orchestration spans `service_dump_native.py` (809 lines; its
+- Dump orchestration spans `workflows/dump/native.py` (809 lines; its
   `debt.yaml` target is `workflows`), `service_dump_pipeline.py` (613),
   `service_dump_cache.py` (794) and `service_dump_native_pe.py` (286).
 - The hybrid header backend recurses into `run_dump(...,
-  include_dependencies=True)` (`service_dump_native.py:295`) and merges
+  include_dependencies=True)` (`workflows/dump/native.py:295`) and merges
   the two snapshots. The dependency-scope wrapper lives in a fifth
   module, `workflows/run_dump_scope.py`.
 
@@ -157,7 +157,7 @@ change.
 **Landed (2026-10-07), narrower than proposed.** The trace found a live bug of
 exactly this class. `dumper.dump`'s hybrid path turned off the parse-time
 dependency skip for both legs. The CLI's own hybrid path in
-`service_dump_native.py` was a hand-copied recursion that did not, so under
+`workflows/dump/native.py` was a hand-copied recursion that did not, so under
 `compare`'s default scoped run the clang leg skipped declarations the
 castxml leg kept, and each leg was stamped `dependency_scope="full"` over a
 filtered surface. The fix:

@@ -17,18 +17,18 @@
 Phase 5 item 1's fourth and final entity module, closing out the item on
 this backend).
 
-Split out of ``dumper_clang_vtable.py``, which — despite its name — always
+Split out of ``extract/headers/clang/vtable.py``, which — despite its name — always
 held two only loosely related halves: record/vtable layout reconstruction
 (``is_record_definition``/``build_vtable``/``_collect_virtual_slots`` and
 friends, which stay there) and template-specialization scope/spelling
 reconstruction (``build_specialization_index`` and everything it depends
 on, which moved here).
 
-This module has NO import of ``dumper_clang_vtable`` at all, module-level
+This module has NO import of ``extract.headers.clang.vtable`` at all, module-level
 or function-local, even though ``build_specialization_index`` needs its own
 forward-decl-vs-definition tie-break — the same one ``is_record_definition``
 already provides. Reading it back directly would be a genuine cycle:
-``dumper_clang_vtable.py`` re-exports every name this module owns from its
+``extract/headers/clang/vtable.py`` re-exports every name this module owns from its
 own tail (back-compat for existing direct imports of them — see below), so
 whichever direction the OTHER edge went, the two modules would import each
 other, which ``scripts/check_ai_readiness.py``'s static ``import-cycle-
@@ -43,7 +43,7 @@ package already resolves an identical shape of cross-layer need elsewhere
 :func:`build_specialization_index` takes *is_record_definition* as an
 explicit, required keyword-only parameter instead of importing it, and its
 one real caller (``context.py``'s ``specialization_record_index()``, which
-already imports ``is_record_definition`` from ``dumper_clang_vtable`` for
+already imports ``is_record_definition`` from ``extract.headers.clang.vtable`` for
 its own ``record_index()`` use) passes the same function straight through.
 
 Unlike ``enums.py``/``functions.py``/``records.py``, there is no
@@ -61,7 +61,7 @@ parsing — reconstructing a ``ClassTemplateDecl``'s own parameter kinds/
 defaults/names, and a concrete specialization's ``Name<Arg1, Arg2>``
 spelling and qualname-indexed lookup — already existed as free functions
 taking their AST root/node explicitly, just physically in the flat
-``dumper_clang_vtable.py`` sibling rather than this package; moving them
+``extract/headers/clang/vtable.py`` sibling rather than this package; moving them
 here needed no context-shape change either; none of them reads or writes
 ``CastxmlParserContext``/clang's own ``context.py`` state; two of the
 callers already reached them as free functions before this move
@@ -80,10 +80,9 @@ there too, now importing :func:`build_specialization_index`'s sibling
 :func:`_specialization_spelling` from here instead of from the old flat
 module.
 
-``dumper_clang_vtable.py`` keeps every migrated name as a one-line
-re-export (not merely referenced — genuinely imported, so
-``from abicheck.dumper_clang_vtable import _index_template_param_defaults``
-and friends, which several existing tests use directly, keep resolving).
+Import these names from this module; the vtable module
+(``extract/headers/clang/vtable.py``, formerly the flat
+``dumper_clang_vtable.py``) no longer re-exports them.
 
 ``_SCOPE_NODE_KINDS`` moved here too, from ``dumper_clang_expr.py``, for the
 same reason: ``extract`` may not import that module (it pulls in
@@ -662,8 +661,8 @@ def build_specialization_index(
     this function stays independently callable/testable.
 
     *is_record_definition* is keyword-only and required rather than a
-    default import of ``dumper_clang_vtable.is_record_definition`` -- this
-    module is read back BY ``dumper_clang_vtable.py`` itself (see this
+    default import of ``extract.headers.clang.vtable.is_record_definition`` -- this
+    module is read back BY ``extract/headers/clang/vtable.py`` itself (see this
     module's own docstring: that flat module re-exports every name here for
     back-compat), so a module-level (or even function-local, per
     ``scripts/check_ai_readiness.py``'s own static ``import-cycle-growth``
@@ -675,7 +674,7 @@ def build_specialization_index(
     ``field_default_value``) already resolves by taking the dependency as
     an explicit parameter instead. The one real caller
     (``context.py``'s ``specialization_record_index()``) already imports
-    ``is_record_definition`` from ``dumper_clang_vtable`` for its own
+    ``is_record_definition`` from ``extract.headers.clang.vtable`` for its own
     ``record_index()`` use, so passing the same function through costs it
     nothing extra.
     """

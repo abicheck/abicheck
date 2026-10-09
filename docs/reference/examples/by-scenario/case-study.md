@@ -12,7 +12,7 @@ _13 case(s)._ [← back to all examples](../index.md)
 | [case94_empty_tag_gained_state](../case94_empty_tag_gained_state.md) | Empty Tag Gained State | 🔴 BREAKING | Breaking |
 | [case107_task_scheduler_init_removed](../case107_task_scheduler_init_removed.md) | `task_scheduler_init` Removed (historical ABI break) | 🔴 BREAKING | Breaking |
 | [case108_task_class_removed](../case108_task_class_removed.md) | `task` Class Removed (historical ABI break — vtable angle) | 🔴 BREAKING | Breaking |
-| [case109_flow_graph_policy_renames](../case109_flow_graph_policy_renames.md) | flow::graph Policy Tag Renames | 🔴 BREAKING | Breaking |
+| [case109_flow_graph_policy_renames](../case109_flow_graph_policy_renames.md) | flow::graph Policy Tag Renames | 🟠 API_BREAK | API Break |
 | [case110_concurrent_unordered_map_api_drift](../case110_concurrent_unordered_map_api_drift.md) | concurrent_unordered_map API Drift | 🔴 BREAKING | Breaking |
 | [case111_enumerable_thread_specific_lambda_ambiguity](../case111_enumerable_thread_specific_lambda_ambiguity.md) | enumerable_thread_specific Lambda-Init Ambiguity | 🟠 API_BREAK | API Break |
 | [case112_lp64_ilp64](../case112_lp64_ilp64.md) | LP64 → ILP64 Integer-Model Switch (oneMKL MKL_INT 32→64) | 🔴 BREAKING | Breaking |

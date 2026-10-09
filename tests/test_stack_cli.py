@@ -155,7 +155,7 @@ class TestDumpFollowDeps:
         result = runner.invoke(main, ["dump", str(real_lib), "--follow-deps"])
         assert result.exit_code == 0
         # CLI cleanup phase two, PR C: the real ELF run now reaches
-        # service_dump_native's own "no headers provided" notify (routed to
+        # native's own "no headers provided" notify (routed to
         # stderr via `_click_notify`, matching `compare`/`scan`'s existing
         # behavior for the identical pipeline), which `result.output`
         # includes ahead of the JSON (Click 8.2+: `.output` always mixes

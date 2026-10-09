@@ -951,7 +951,7 @@ def test_dynamic_import_module_within_allowed_direction_is_not_flagged(
     the same layer) must not become a spurious finding just because it is
     now visible -- most of the real bridges this closure package audited
     (e.g. ``service.py``'s own ``service_header_scoped`` binding,
-    ``workflows/input_resolution.py``'s ``service_dump_native`` binding)
+    ``workflows/input_resolution.py``'s ``workflows.dump.native`` binding)
     are exactly this shape: legitimate same-layer cycle avoidance, not a
     forbidden-direction evasion."""
     root = _tree(tmp_path)

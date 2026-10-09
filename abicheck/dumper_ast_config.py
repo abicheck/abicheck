@@ -46,7 +46,7 @@ from .header_utils import drop_include_tokens_duplicating_paths
 #: under the pre-retry (C-mode) key -- exactly the key this hash still
 #: computes for the identical input -- so it would otherwise stay silently
 #: reachable and reintroduce the stale `resolved_force_cpp=False` bug the
-#: write-side key fix (see `dumper._clang_header_dump`) closes only for
+#: write-side key fix (see `extract.headers.clang.backend.clang_header_dump`) closes only for
 #: entries written from here on. Bump again if the clang cache format ever
 #: changes in some other incompatible way.
 #: Bumped to 4 when every clang AST pass started receiving
@@ -216,7 +216,7 @@ def _cache_key(
 def clang_aggregate_text(headers: Sequence[Path]) -> str:
     """The clang aggregate header's text: one ``#include`` per header.
 
-    Shared by ``dumper._clang_header_dump`` and the cache key, so a change to
+    Shared by ``extract.headers.clang.backend.clang_header_dump`` and the cache key, so a change to
     what clang is fed is a key change.
     """
     return "".join(f'#include "{h.resolve()}"\n' for h in headers)

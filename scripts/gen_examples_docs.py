@@ -330,6 +330,7 @@ class Case:
     # hand-editing every case's README (see docs completeness review finding).
     underlying_fact: str | None = None
     policy_note: str | None = None
+    behavioral_note: str | None = None
     detectability: str | None = None
     known_detector_gap: str | None = None
     known_kind_gap: str | None = None
@@ -387,6 +388,9 @@ def _read_case(name: str, meta: dict, taxonomy: dict) -> Case:
         body=body,
         underlying_fact=meta.get("underlying_fact"),
         policy_note=meta.get("policy_note"),
+        behavioral_note=(
+            meta.get("behavioral_note") if meta.get("behavioral_break") else None
+        ),
         detectability=meta.get("detectability"),
         known_detector_gap=meta.get("known_detector_gap"),
         known_kind_gap=meta.get("known_kind_gap"),
@@ -606,6 +610,8 @@ def _provenance_notes(case: Case) -> str:
         parts.append(f"**Policy note:** {case.policy_note}\n")
     if case.known_kind_gap_note:
         parts.append(f"**Known kind gap:** {case.known_kind_gap_note}\n")
+    if case.behavioral_note:
+        parts.append(f"**Behavioral break:** {case.behavioral_note}\n")
     if not parts:
         return ""
     return "## Ground-truth provenance\n\n" + "\n".join(parts) + "\n"

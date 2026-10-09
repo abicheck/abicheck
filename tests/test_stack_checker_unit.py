@@ -446,7 +446,7 @@ class TestRunAbiDiff:
             lambda _path: "elf",
         )
         monkeypatch.setattr(
-            "abicheck.service_dump_native.run_dump",
+            "abicheck.workflows.dump.native.run_dump",
             lambda *_a, **_kw: MagicMock(name="snapshot"),
         )
 
@@ -475,7 +475,7 @@ class TestRunAbiDiff:
             lambda _path: "elf",
         )
         monkeypatch.setattr(
-            "abicheck.service_dump_native.run_dump",
+            "abicheck.workflows.dump.native.run_dump",
             lambda *_a, **_kw: MagicMock(name="snapshot"),
         )
 
@@ -528,7 +528,7 @@ class TestRunAbiDiff:
             "abicheck.workflows.input_resolution.detect_binary_format",
             lambda _path: "elf",
         )
-        monkeypatch.setattr("abicheck.service_dump_native.run_dump", _fake_run_dump)
+        monkeypatch.setattr("abicheck.workflows.dump.native.run_dump", _fake_run_dump)
         monkeypatch.setattr(
             "abicheck.workflows.compare_policy.compare_snapshots",
             _fake_compare_snapshots,

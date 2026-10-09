@@ -36,6 +36,17 @@ v1's header calls the first mangled name; the v2 library exports only the
 second. Recompilation is mandatory even though nothing in the consumer's
 own source changed.
 
+**What actually breaks old binaries is the removal of the old explicit
+instantiations,** not the default-argument change by itself. The old
+consumer fails symbol lookup after the swap (exit 127) because v2 stopped
+exporting `descriptor<float, minkowski_distance<float>>`. A library that
+changes the default but *keeps* exporting the old instantiations leaves
+already-built binaries working (only newly compiled code picks up the new
+default); the verdict here is `BREAKING` for this fixture's shipped
+transition — old instantiations replaced — and the
+`instantiation_missing_from_binary` / `func_removed` findings are the binary
+evidence for it, with `default_template_arg_changed` explaining why.
+
 ## Old/new diff
 
 | v1.h | v2.h |

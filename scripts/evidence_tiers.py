@@ -84,6 +84,9 @@ EVIDENCE_TIER_BY_KIND: dict[str, str] = {
     "var_removed": "L0",
     "versioned_symbol_scheme_detected": "L0",  # bulk removed↔added churn in the export table
     "func_visibility_changed": "L0",
+    # DEFAULT -> PROTECTED is read from the ELF dynamic symbol table
+    # (catalog case51).
+    "func_visibility_protected_changed": "L0",
     # The data-symbol counterpart: the export table is L0 evidence, and the
     # declaration half it is compared against does not raise the tier (the
     # finding fires on the export fact alone -- compare/export_transition.py).
@@ -364,6 +367,16 @@ EVIDENCE_TIER_BY_KIND: dict[str, str] = {
     # DWARF's own DW_TAG_restrict_type on the defining subprogram -- which is
     # exactly the distinction catalog case207/case208 pin.
     "param_restrict_changed": "L2",
+    "param_restrict_added": "L2",
+    # A by-value field's own const/volatile is a DWARF type qualifier
+    # (DW_TAG_const_type / DW_TAG_volatile_type) on the member (catalog
+    # case30); headers carry it too, but are not required.
+    "field_became_const": "L1",
+    "field_became_volatile": "L1",
+    # Pointee const/volatile behind a parameter: the qualifier spelling the
+    # header AST records (catalog case186). DWARF-only sides are declined.
+    "param_pointee_qualifier_added": "L2",
+    "param_pointee_qualifier_changed": "L2",
     # ── L2: CastXML schema-completeness (all castxml/header-only facts) ──
     "field_default_initializer_removed": "L2",
     "field_default_initializer_changed": "L2",
@@ -525,10 +538,6 @@ KINDLESS_CASE_TIER: dict[str, str] = {
     # proving it's confined to a private-header origin (so it can be scoped
     # out instead of reported) needs the header AST (L2).
     "case184_internal_enum_churn_scoped": "L2",
-    # The pointee-const suppression is a header-AST-level type comparison
-    # (cv_qualifiers_only_differ); DWARF alone doesn't carry the distinction
-    # abicheck relies on here.
-    "case186_c_api_pointee_const_abi_neutral": "L2",
     # Phase 4 paired negative controls. Each is a NO_CHANGE fixture whose
     # claim is the *absence* of a finding its positive sibling produces, so
     # its tier is the one at which the change it does make is visible at all

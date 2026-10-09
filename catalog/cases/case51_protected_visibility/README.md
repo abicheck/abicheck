@@ -1,15 +1,23 @@
 # Case 51: Protected Visibility (DEFAULT to PROTECTED)
 
-**Category:** Quality | **Verdict:** 🟢 COMPATIBLE
+**Category:** Risk | **Verdict:** 🟡 COMPATIBLE_WITH_RISK
 
 ## Verdict and consumer impact
 
-Existing binaries that call `hook_point()` keep working unmodified — the symbol
-is still exported and resolves normally for external callers. The only effect
-is on **interposition**: with `STV_PROTECTED`, the library's own internal calls
-to `hook_point()` always bind to its local definition, even under `LD_PRELOAD`.
-Tooling that relies on overriding `hook_point()` from outside the library (sanitizers,
-profilers, mocks) silently stops intercepting calls made *from within* the library.
+Existing binaries that call `hook_point()` keep working unmodified — the
+symbol is still exported and resolves normally for external callers. What
+changes is **interposition**: with `STV_PROTECTED`, the library's own
+internal calls to `hook_point()` always bind to its local definition. A
+consumer that installs its own `hook_point()` (an `LD_PRELOAD` shim, a
+profiler, a mock, or simply an executable that defines the symbol) silently
+stops intercepting calls made *from within* the library — the old app below
+sees `compute(5) = 501` with v1 and `11` with v2, both exiting 0.
+
+Whether that is a break depends on whether interposition is part of the
+library's promise, which the binary does not say. abicheck therefore reports
+a **conditional risk** (`func_visibility_protected_changed`,
+`COMPATIBLE_WITH_RISK`, exit 0) rather than an unconditional `COMPATIBLE`;
+block it if the hook is a supported extension point.
 
 ## Old/new diff
 
@@ -28,11 +36,10 @@ abicheck compare libfoo_v1.so libfoo_v2.so
 ## Expected abicheck finding
 
 ```text
-Verdict: COMPATIBLE (exit 0)
+Verdict: COMPATIBLE_WITH_RISK (exit 0)
 
+- func_visibility_protected_changed: ELF symbol visibility changed: hook_point (default → protected)
 - symbol_elf_visibility_changed: ELF visibility changed: hook_point (default -> protected)
-  > Symbol still exported and resolvable; intra-library calls to hook_point
-    no longer honor LD_PRELOAD/interposition.
 ```
 
 ## Minimum evidence
@@ -49,27 +56,28 @@ of DWARF or headers.
 
 ## Runtime failure demonstration
 
-**Severity: INFORMATIONAL** — no observable effect on existing binaries.
+**Severity: silent behavior change for consumers that interpose the hook.**
+
+The app defines its own `hook_point(x) = 100 * x`. Because the library
+references `hook_point`, the linker exports the executable's definition and
+the dynamic loader searches the executable first — the same lookup order an
+`LD_PRELOAD` shim uses. The consumer's contract is that the library's
+`compute()` goes through the installed hook.
 
 ```bash
-# Build old library + app
-gcc -shared -fPIC -g old/lib.c -Iold -o libfoo.so
-gcc -g app.c -Iold -L. -lfoo -Wl,-rpath,. -o app
-./app
-# → hook_point(5) = 10
-# → compute(5)    = 11
-
-# Swap in new library (no recompile)
-gcc -shared -fPIC -g new/lib.c -Inew -o libfoo.so
-./app
-# → hook_point(5) = 10  ← same result
-# → compute(5)    = 11  ← same result
+gcc -shared -fPIC -g -fsemantic-interposition old/lib.c -Iold -o libv1.so
+gcc -g app.c -I. -L. -lv1 -Wl,-rpath,'$ORIGIN' -o app
+./app            # compute(5) = 501 (the installed hook is used)   exit 0
+gcc -shared -fPIC -g -fsemantic-interposition new/lib.c -Inew -o libv1.so
+./app            # compute(5) = 11  INTERPOSITION LOST              exit 1
 ```
 
-Normal callers see identical output before and after the swap. The change
-only surfaces for `LD_PRELOAD`-based interposition of `hook_point()`, where
-v2's library-internal call from `compute()` no longer honors the preloaded
-override — a policy concern, not an ABI break.
+Both libraries are built with `-fsemantic-interposition`: it is GCC's
+default, but Clang (13+) assumes no interposition at `-O1` and above and may
+inline or directly call a default-visibility function from inside the
+library — then even v1 would never call the installed hook, and the
+fixture's premise ("v1 is interposable") would not hold under Clang Release
+builds. The original smoke never installed a hook and so showed no change.
 
 ## Safe redesign
 

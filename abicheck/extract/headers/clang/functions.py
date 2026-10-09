@@ -92,6 +92,7 @@ from .context import (
 )
 from .inline_semantics import fold_inline_across_redeclarations, is_effectively_inline
 from .param_kind import param_kind as _param_kind
+from .restrict_spelling import without_top_level_restrict
 from .return_type import return_type as _return_type
 
 #: Evaluates a param's default-argument initializer to its snapshot value
@@ -538,7 +539,7 @@ def parse_functions(
         # plain-C declaration down the C++/mangled-identity path, breaking
         # self-comparison of an unchanged plain-C header (a spurious
         # FUNC_LANGUAGE_LINKAGE_CHANGED). `is_cxx` -- `dumper.
-        # _clang_header_dump`'s own `resolved_force_cpp`, the mode that
+        # clang_header_dump`'s own `resolved_force_cpp`, the mode that
         # ACTUALLY produced this AST -- is the disambiguator: only in C++
         # mode does an asm label's spelling carry that implication.
         has_asm_label = _has_explicit_asm_label(node)
@@ -566,13 +567,11 @@ def parse_functions(
         params = [
             Param(
                 name=str(p.get("name", "")),
-                type=_qualtype(p),
-                # Desugared, not the raw `qualType`: a typedef'd
-                # pointer/reference/rvalue-reference (`typedef int &Ref;`)
-                # spells its `qualType` as the bare alias name, with no
-                # `&`/`*` token for the spelling heuristic to find -- see
-                # `context.qualtype_desugared`'s own docstring (Codex
-                # review, PR #1200).
+                # Top-level `restrict` is `is_restrict` below, not the type.
+                type=without_top_level_restrict(_qualtype(p)),
+                # Desugared, not the raw `qualType`: a typedef'd pointer/reference/rvalue-reference (`typedef int &Ref;`)
+                # spells its `qualType` as the bare alias name, with no `&`/`*` token for the spelling heuristic to find --
+                # see `context.qualtype_desugared`'s own docstring (Codex review, PR #1200).
                 kind=_param_kind(_qualtype_desugared(p)),
                 pointer_depth=_pointer_depth(_qualtype(p)),
                 # G31 Phase C: castxml was the ONLY producer of this fact (`_resolve_cv_restrict`), so a castxml-vs-clang comparison of unchanged headers reported PARAM_RESTRICT_CHANGED for every restrict-qualified parameter -- the detector compares the two bools directly, with no producer gate to decline on (unlike `deprecated`/`is_scoped` before this phase).
@@ -627,7 +626,7 @@ def parse_functions(
                 # bool(node.get("virtual")) alone misses a signature-
                 # matched override with neither `virtual` nor `override`
                 # written -- clang's JSON gives no direct signal for that
-                # case at all (see dumper_clang_vtable.py's own
+                # case at all (see extract/headers/clang/vtable.py's own
                 # docstring). `virtual_mangled_names` recovers it from
                 # the reconstructed vtables, which already do this
                 # matching; only ever widens False -> True.

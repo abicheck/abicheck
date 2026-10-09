@@ -34,11 +34,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from ..appcompat_consumer_impact import (
-    attach_consumer_impact,
-    consumer_impact_explanations,
-    enrich_covered_changes,
-)
 from ..checker_types import DiffResult
 from ..diff_helpers import make_change
 from ..extract.consumer_imports import read_consumer_imports
@@ -48,6 +43,7 @@ from ..extract.library_export_facts import (
 )
 from ..impact.engine import assess_change
 from ..model import AbiSnapshot
+from ..model.availability import FactStatus
 from ..model.change import Change
 from ..model.change_catalog.kinds import ChangeKind
 from ..model.consumer_requirements import (
@@ -75,6 +71,11 @@ from ..policy.consumer_requirements import (
 from ..policy.disposition_close import (
     ledger_for,
     record_and_maybe_suppress_overlay,
+)
+from .consumer_impact import (
+    attach_consumer_impact,
+    consumer_impact_explanations,
+    enrich_covered_changes,
 )
 
 __all__ = [
@@ -171,13 +172,17 @@ def read_consumer_facts(spec: ConsumerSpec, library_name: str) -> ConsumerImport
     """Verify *spec*'s digest and read its imports from *library_name*.
 
     Raises :class:`ConsumerUnreadableError` (or its
-    ``ConsumerDigestMismatchError`` subclass) when the digest mismatches or
-    the binary format can't be detected -- the one point where an unreadable
-    consumer fact becomes the caller's error.
+    ``ConsumerDigestMismatchError`` subclass) when the digest mismatches, the
+    binary format can't be detected, or the import table could not be read
+    (a ``FAILED`` fact) -- the one point where an unreadable consumer fact
+    becomes the caller's error. A failed read must not reach evaluation as
+    an empty requirement set: that would report a consumer that "requires
+    nothing" as compatible with 100% coverage (root ``AGENTS.md``: weaker
+    evidence narrows conclusions, it never upgrades to a clean claim).
     """
     verify_digest(spec)
     consumer = read_consumer_imports(spec.path, library_name)
-    if not consumer.is_readable:
+    if not consumer.is_readable or consumer.status is FactStatus.FAILED:
         raise ConsumerUnreadableError(consumer.failure_reason or str(spec.path))
     return consumer
 
@@ -243,7 +248,7 @@ def scope_diff_to_app(
     snapshot should pass the snapshot here so the join can explain *why* a
     consumer required a removed symbol. It never affects which symbols,
     exports, or versions are read — see
-    :func:`~abicheck.appcompat_consumer_impact._library_source_graph`.
+    :func:`~abicheck.workflows.consumer_impact._library_source_graph`.
 
     *app_path* (Workstream D-S1) may be a bare :class:`~pathlib.Path` or a
     :class:`~abicheck.model.consumer_spec.ConsumerSpec` (digest/platform/

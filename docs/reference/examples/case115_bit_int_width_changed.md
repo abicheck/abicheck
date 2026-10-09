@@ -97,37 +97,30 @@ precisely instead of only reporting the generic layout/field-type kinds.
 
 ## Runtime failure demonstration
 
-**Severity: CRITICAL** (the mismatch is real; this minimal reproducer
-happens not to crash — see the note below)
+**Severity: CRITICAL**
 
-**Scenario:** compile `app.c` against v1, swap in v2 `.so` without recompile.
+**Scenario:** the consumer owns an `Accumulator` sized by v1 (8 bytes,
+heap-allocated and followed by a guard region of known bytes), sets it to
+`-1` and calls `acc_add(a, 5)`. With v1 the 64-bit add wraps to `4`. v2
+treats the same object as 128-bit storage: the carry out of the low 64 bits
+lands in the upper half — which, for a v1-sized object, is the guard.
 
 ```bash
-# Build old library + app (GCC has no C23 _BitInt support; use clang)
-clang -std=c2x -shared -fPIC -g v1.c -o libfoo.so
-clang -std=c2x -g app.c -I. -L. -lfoo -Wl,-rpath,. -o app
-./app; echo "exit: $?"
-# → exit: 5
-
-# Swap in new library (no recompile)
-clang -std=c2x -shared -fPIC -g v2.c -o libfoo.so
-./app; echo "exit: $?"
-# → exit: 5   (same, in this trivial reproducer)
+# GCC 13 has no C23 _BitInt support; use clang (or GCC 14+)
+clang -std=c2x -shared -fPIC -g v1.c -o libv1.so
+clang -std=c2x -g app.c -I. -L. -lv1 -Wl,-rpath,'$ORIGIN' -o app
+./app            # acc_value = 4 (expected 4)                      exit 0
+clang -std=c2x -shared -fPIC -g v2.c -o libv1.so   # swap, no recompile
+./app            # CORRUPTION: library wrote past the v1-sized Accumulator, exit 1
 ```
 
-**Why the exit code doesn't change here:** `app.c` only calls `acc_add(&a,
-5)` once on a zero-initialized accumulator and returns the low bits of
-`acc_value()`, which happen to come out as `5` either way in this
-toolchain's register layout — so this particular one-shot call doesn't
-happen to visibly crash or misreport. The ABI mismatch is still real:
-`app`'s stack allocates `sizeof(Accumulator)` per **v1** (8 bytes), but v2's
-`acc_add`/`acc_value` read and write it as a 16-byte `_BitInt(128)`, and a
-128-bit value uses a different SysV parameter-passing class than a 64-bit
-one. A less trivial consumer (multiple accumulators on the stack, or a
-non-zero `delta` chosen to exercise the extra 64 bits) reads/writes past the
-old allocation or receives garbage in the unread high bits — this is exactly
-the class of break that a static ABI diff catches even when a minimal
-smoke-test consumer doesn't happen to observe it at runtime.
+On x86-64 the upper half of a `_BitInt(128)` argument travels in `%rdx`,
+which a v1 caller never sets; the witness pins it to `0` immediately before
+the call so the result does not depend on register residue. The earlier
+witness (one add on a zero accumulator, exit code = low bits) produced the
+same exit code on both sides and demonstrated nothing; the runtime runner
+also skipped this case unconditionally instead of probing the selected
+compiler for `_BitInt`.
 
 ## Safe redesign
 

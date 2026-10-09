@@ -555,9 +555,11 @@ def test_dump_scoping_keeps_declarations_under_a_symlinked_root(
     pruned away. Asserted against the real scoping entry point, not against
     ``is_dependency_header`` alone, so the wiring is covered too.
     """
-    from abicheck.dumper_scoping import scope_snapshot_excluding_dependencies
     from abicheck.model import AbiSnapshot, Function
     from abicheck.provenance import apply_provenance
+    from abicheck.workflows.dump.dependency_scope import (
+        scope_snapshot_excluding_dependencies,
+    )
 
     real = tmp_path / "usr" / "include" / "mylib"
     real.mkdir(parents=True)

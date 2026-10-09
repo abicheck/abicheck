@@ -9,4 +9,7 @@ extern int config_table[CONFIG_SLOTS];
 
 int config_get(int index);
 
+/* Restore every slot to its default (100 + slot index). */
+void config_reset(void);
+
 #endif /* CONFIG_TABLE_H */

@@ -332,28 +332,41 @@ def test_dwarf_struct_field_real_pointee_change_still_breaking():
     assert ChangeKind.STRUCT_FIELD_TYPE_CHANGED in _kinds(r)
 
 
-# ── top-level field const is still a (source) break (case30 guard) ────────────
+# ── top-level field const is a source break, not a layout one (case30) ────────
 
 
 def test_top_level_field_const_is_not_neutralised():
-    # Regression guard: int -> const int (by value, no indirection) must remain
-    # a reported field-type change — neutralising it would silently drop the
-    # case30_field_qualifiers source-break escalation. Indirection (``*``/``&``)
-    # is what makes a const change binary-neutral; a by-value field has none.
+    # int -> const int (by value, no indirection) keeps size and offset: it is
+    # reported by its dedicated kind as a source break (assignments stop
+    # compiling), never dropped and never as a BREAKING field-type change.
     old = _snap(
         "1",
         functions=[_fn("api", "api", ret="Sensor *")],
-        types=[_rec("Sensor", [TypeField(name="rate", type="int", offset_bits=0)])],
+        types=[
+            _rec(
+                "Sensor",
+                [TypeField(name="rate", type="int", offset_bits=0, is_const=False)],
+            )
+        ],
     )
     new = _snap(
         "2",
         functions=[_fn("api", "api", ret="Sensor *")],
         types=[
-            _rec("Sensor", [TypeField(name="rate", type="const int", offset_bits=0)])
+            _rec(
+                "Sensor",
+                [
+                    TypeField(
+                        name="rate", type="const int", offset_bits=0, is_const=True
+                    )
+                ],
+            )
         ],
     )
     r = compare(old, new)
-    assert ChangeKind.TYPE_FIELD_TYPE_CHANGED in _kinds(r)
+    assert ChangeKind.FIELD_BECAME_CONST in _kinds(r)
+    assert ChangeKind.TYPE_FIELD_TYPE_CHANGED not in _kinds(r)
+    assert r.verdict == Verdict.API_BREAK
 
 
 # ── top-level by-value param/return cv IS neutralised (unlike fields) ─────────

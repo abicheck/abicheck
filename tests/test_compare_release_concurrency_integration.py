@@ -381,8 +381,8 @@ class TestInstrumentedParallelReleaseMatchesStored:
         import threading  # noqa: PLC0415
 
         import abicheck.cli_compare_release_pairwise as pairwise  # noqa: PLC0415
-        from abicheck import service_dump_native as native  # noqa: PLC0415
         from abicheck.workflows import memory_trace, release_jobs  # noqa: PLC0415
+        from abicheck.workflows.dump import native  # noqa: PLC0415
         from tests.test_compare_release import _invoke_combined  # noqa: PLC0415
 
         old_dir, new_dir, headers = release

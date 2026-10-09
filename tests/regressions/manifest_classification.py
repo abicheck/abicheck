@@ -472,4 +472,43 @@ CLASSIFICATION_BUG_CLASSES: tuple[BugClass, ...] = (
             ),
         ),
     ),
+    BugClass(
+        id="classification.source_only_change_scored_as_binary_break",
+        invariant=(
+            "A change's verdict follows what it does to already-built "
+            "consumers, not the strongest kind any producer emitted for it. "
+            "A change that only narrows what source may do (a removed "
+            "typedef or type, a by-value field gaining const, a pointee "
+            "qualifier lost) is an API break, not a binary one; a change "
+            "that keeps every call compiling but alters the caller contract "
+            "(restrict added, a single pointee gaining const, DEFAULT -> "
+            "PROTECTED visibility) is a risk, not compatible; and a "
+            "spelling-only difference the binary vouches for (a typedef "
+            "respelled under an unchanged Itanium name) is no change -- "
+            "while a real pointer-level change under the same stale name "
+            "is still reported."
+        ),
+        fixed_by=(1519,),
+        seed_tests=(
+            "tests/test_source_contract_direction.py",
+            "tests/test_family_f4_heuristics.py",
+        ),
+        public_surfaces=("compare",),
+        axes={
+            "direction": ("added", "removed", "deeper level"),
+            "indirection": ("by value", "pointer", "reference", "multi-level"),
+            "producer": ("castxml", "clang", "dwarf-only"),
+            "mangling": ("itanium", "extern C"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "A pointee qualifier on a function's return type, and a "
+                    "behavioral regression behind an unchanged declaration "
+                    "(catalog case208), are not classified by direction."
+                ),
+                reference="docs/contribute/known-gaps.md",
+            ),
+        ),
+    ),
 )

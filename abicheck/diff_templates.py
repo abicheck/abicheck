@@ -1346,7 +1346,6 @@ def demote_lambda_closure_unexported_findings(
     """
     from .change_registry import API_BREAK_KINDS, BREAKING_KINDS
     from .diff_symbols import _reconciled_function_surfaces
-    from .dumper_castxml import is_synthetic_ctor_key, is_synthetic_dtor_key
     from .elf_symbol_filter import FUNCTION_SYMBOL_TYPES, exported_symbol_names
     from .finding_identity_ctor_dtor import (
         itanium_source_name_token,
@@ -1354,6 +1353,7 @@ def demote_lambda_closure_unexported_findings(
         synthetic_ctor_dtor_template_base_name,
     )
     from .model.change_catalog.registry import Verdict
+    from .model.synthetic_key import is_synthetic_ctor_key, is_synthetic_dtor_key
 
     old_elf = getattr(old, "elf", None)
     new_elf = getattr(new, "elf", None)

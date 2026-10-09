@@ -282,7 +282,7 @@ def build_compare_dry_run_result(
         # under `auto`, so listing both tools was not a prediction.
 
         # The run lets an explicit compile-context frontend win over the bare
-        # backend argument (``service_dump_native._run_dump_uncached``).
+        # backend argument (``workflows.dump.native._run_dump_uncached``).
         cc_frontend = str(getattr(compile_context, "frontend", "auto") or "auto")
         frontend = preflight_header_frontend(
             cc_frontend if cc_frontend.lower() != "auto" else header_backend,

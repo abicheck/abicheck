@@ -33,12 +33,12 @@ from abicheck.buildsource.inline_graph_fold import _role_coverage_key
 from abicheck.buildsource.source_abi import SourceAbiSurface, SourceEntity
 from abicheck.buildsource.source_diff import diff_source_abi
 from abicheck.buildsource.source_graph import GraphEdge, GraphNode, SourceGraphSummary
+from abicheck.buildsource.source_graph_compare import format_dependency_path
 from abicheck.buildsource.source_graph_findings import (
     _common_dependency_edge_kinds,
     _dependency_kinds_covered,
     _dependency_path,
     _dependency_reachability,
-    _format_dependency_path,
     _include_graph_fully_covered,
     _public_entry_internal_reach,
     _public_types,
@@ -1776,14 +1776,14 @@ def test_dependency_path_reconstructs_multi_hop_chain() -> None:
         ("a", "DECL_CALLS_DECL", "b"),
         ("b", "DECL_HAS_TYPE", "c"),
     ]
-    assert _format_dependency_path(g, path) == (
+    assert format_dependency_path(g, path) == (
         "a --[DECL_CALLS_DECL]--> b --[DECL_HAS_TYPE]--> c"
     )
 
 
 def test_format_dependency_path_empty_list_returns_empty_string() -> None:
     g = SourceGraphSummary(nodes=[_N("a", "source_decl")], edges=[])
-    assert _format_dependency_path(g, []) == ""
+    assert format_dependency_path(g, []) == ""
 
 
 def test_dependency_reachability_empty_edge_kinds_returns_empty() -> None:

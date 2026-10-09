@@ -75,6 +75,33 @@ def attr_int(die: Any, attr: str) -> int:
         return 0
 
 
+_BIT_PRECISE_BASE_NAMES = frozenset({"_BitInt", "unsigned _BitInt"})
+
+
+def base_type_name(die: Any) -> str:
+    """Spelling of a ``DW_TAG_base_type`` DIE that keeps its ABI width.
+
+    Clang names every C23 bit-precise integer just ``_BitInt`` (or
+    ``unsigned _BitInt``) and carries the width only in attributes, so two
+    different widths would otherwise share one spelling and every
+    spelling-based detector would read ``_BitInt(64)`` → ``_BitInt(128)`` as
+    no change. Prefer the precise ``DW_AT_bit_size`` (DWARF 5) as
+    ``_BitInt(N)``; without it fall back to the storage width, spelled
+    ``_BitInt[<bits>-bit storage]`` so it is never mistaken for a declared
+    width. GCC already spells ``_BitInt(N)`` and is returned unchanged.
+    """
+    name = attr_str(die, "DW_AT_name") or "base"
+    if name not in _BIT_PRECISE_BASE_NAMES:
+        return name
+    bits = attr_int(die, "DW_AT_bit_size")
+    if bits:
+        return f"{name}({bits})"
+    byte_size = attr_int(die, "DW_AT_byte_size")
+    if byte_size:
+        return f"{name}[{byte_size * 8}-bit storage]"
+    return name
+
+
 def attr_bool(die: Any, attr: str) -> bool:
     """Return boolean value of a DIE attribute, or False."""
     if attr not in die.attributes:
