@@ -33,7 +33,7 @@ if TYPE_CHECKING:
     from ...model import AbiSnapshot
 
 _service_header_scoped = _importlib.import_module(
-    ".workflows.dump.header_scoped", "abicheck"
+    "abicheck.workflows.dump.header_scoped"
 )
 try_header_scoped_dump: Callable[..., tuple[AbiSnapshot | None, str | None]] = (
     _service_header_scoped._try_header_scoped_dump
