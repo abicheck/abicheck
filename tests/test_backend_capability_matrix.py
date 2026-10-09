@@ -195,7 +195,7 @@ def test_the_fact_this_phase_added_is_present_on_both_backends(caps) -> None:
 
 def test_hybrid_backfilled_rows_match_the_merge_layout_list(caps) -> None:
     """``_LAYOUT_SCALAR_ATTRS`` is imported, so it cannot drift silently."""
-    from abicheck.dumper_hybrid import _LAYOUT_SCALAR_ATTRS
+    from abicheck.workflows.dump.hybrid_merge import _LAYOUT_SCALAR_ATTRS
 
     backfilled = {r.field for r in caps.rows_for("RecordType") if r.hybrid_backfilled}
     assert set(_LAYOUT_SCALAR_ATTRS) <= backfilled, (
@@ -210,9 +210,13 @@ def test_every_merge_backfilled_attr_is_declared(caps) -> None:
     the hybrid column silently understates what a merge recovers."""
     import ast as ast_mod
 
-    source = (REPO_DIR / "abicheck" / "dumper_hybrid.py").read_text()
+    dump_dir = REPO_DIR / "abicheck" / "workflows" / "dump"
     looped: set[str] = set()
-    for node in ast_mod.walk(ast_mod.parse(source)):
+    trees = [
+        ast_mod.parse((dump_dir / name).read_text())
+        for name in ("hybrid_merge.py", "hybrid_identity.py")
+    ]
+    for node in (n for tree in trees for n in ast_mod.walk(tree)):
         if (
             isinstance(node, ast_mod.For)
             and isinstance(node.target, ast_mod.Name)

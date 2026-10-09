@@ -10,9 +10,9 @@ evidence can this document be trusted for" is exercised by loading one.
 from __future__ import annotations
 
 from abicheck.checker import ChangeKind, compare
-from abicheck.dumper_hybrid import merge_snapshots
 from abicheck.fact_provenance import type_fact_key
 from abicheck.model import AbiSnapshot, RecordType, TypeField
+from abicheck.workflows.dump.hybrid_merge import merge_snapshots
 from tests.test_dumper_hybrid import _snap
 
 

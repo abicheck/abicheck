@@ -16,7 +16,7 @@
 """The ``hybrid`` header backend for a native dump, as a composition.
 
 Two single-backend extractions (castxml, then clang) of the same request,
-merged by :func:`abicheck.dumper_hybrid.run_hybrid_dump`. Each leg is one
+merged by :func:`run_hybrid_dump`. Each leg is one
 call of the caller's single-backend *extract-and-finish* function -- the
 format adapter plus its post-extraction tail -- never a re-entry into
 ``run_dump``.
@@ -39,13 +39,40 @@ from typing import Any
 from ...buildsource.source_inputs import granting_live_source_licence
 from ...compile_context import CompileContext
 from ...dumper_cache import ast_memoize_scope
-from ...dumper_hybrid import run_hybrid_dump
+from ...extract.dependency_exclusion import suppress_dependency_exclusion
 from ...model import AbiSnapshot
+from ...storage import closure_identity
 from ..run_dump_scope import extraction_scope
 from ..snapshot_factory import DependencyScopeInputs, SnapshotFinish, finish_snapshot
 from .formats import NativeExtractRequest
+from .hybrid_merge import merge_snapshots
 
 ExtractAndFinish = Callable[[NativeExtractRequest], AbiSnapshot]
+
+
+def run_hybrid_dump(
+    dump_fn: Callable[..., AbiSnapshot],
+    so_path: Path,
+    headers: list[Path],
+    **kwargs: Any,
+) -> AbiSnapshot:
+    """Run *dump_fn* (``dumper.dump``) once per real backend and merge.
+
+    Takes *dump_fn* as a parameter so this module never depends on
+    ``dumper.py``, which depends on it. Every keyword argument is forwarded
+    to both sub-dumps unchanged except ``header_backend``, which this
+    function sets explicitly on each call; only :func:`merge_snapshots` is
+    new. The parse-time dependency skip is off: only clang could apply it.
+    """
+    with (
+        closure_identity.defer_closure_identity_renumbering(),
+        suppress_dependency_exclusion(),
+    ):
+        castxml_snap = dump_fn(so_path, headers, header_backend="castxml", **kwargs)
+        clang_snap = dump_fn(so_path, headers, header_backend="clang", **kwargs)
+    return closure_identity.renumber_anonymous_closure_identities(
+        merge_snapshots(castxml_snap, clang_snap)
+    )
 
 
 def _forced_backend(

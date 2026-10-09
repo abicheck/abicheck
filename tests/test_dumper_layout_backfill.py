@@ -1016,8 +1016,8 @@ class TestBackfilledRecordFactSync:
     def test_hybrid_merge_snapshots_keeps_vptr_fact_in_sync_too(self) -> None:
         # Same bug, reached via dumper_hybrid.merge_snapshots's castxml+clang
         # RecordType.replace() path rather than this module's DWARF backfill.
-        from abicheck.dumper_hybrid import merge_snapshots
         from abicheck.model import AbiSnapshot
+        from abicheck.workflows.dump.hybrid_merge import merge_snapshots
 
         old = RecordType(
             name="Widget", kind="class", size_bits=64, vptr_offset_bits=None

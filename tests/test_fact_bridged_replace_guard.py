@@ -419,7 +419,9 @@ class TestTheScanActuallyCatchesTheBug:
     ) -> None:
         # The specific regression, kept alongside the general rule: this is
         # the call site whose `**updates` spelling the first sweep missed.
-        source = (_PKG / "dumper_hybrid.py").read_text(encoding="utf-8")
+        source = (_PKG / "workflows" / "dump" / "hybrid_merge.py").read_text(
+            encoding="utf-8"
+        )
         tree = ast.parse(source)
         for node in ast.walk(tree):
             if isinstance(node, ast.FunctionDef) and node.name == "_merge_enum_type":
@@ -431,4 +433,6 @@ class TestTheScanActuallyCatchesTheBug:
                 assert "replace_with_fact_sync" in calls
                 assert "replace" not in calls
                 return
-        raise AssertionError("_merge_enum_type not found in dumper_hybrid.py")
+        raise AssertionError(
+            "_merge_enum_type not found in workflows/dump/hybrid_merge.py"
+        )

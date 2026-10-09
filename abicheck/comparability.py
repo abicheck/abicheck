@@ -129,6 +129,7 @@ from .comparability_fields import (
     # and dumper_contract.py/dumper_hybrid.py plus the comparability test
     # modules still import them from here. Without the alias, `--no-implicit-
     # reexport` refuses the import at the call site rather than here.
+    PROFILE_FIELD_KEYS as PROFILE_FIELD_KEYS,
     IncludeDir as IncludeDir,
     _compute_profile_fields,
     _compute_scope_fields,
@@ -181,22 +182,6 @@ from .model.extraction_scope import extraction_scope_refusal
 # catch.
 _FIELD_ABSENT = object()
 
-# Named sub-components hashed into profile_fingerprint / scope_fingerprint,
-# also stored verbatim in ExtractionContract.profile_fields/scope_fields so a
-# mismatch can be attributed to a specific field instead of an opaque hash.
-PROFILE_FIELD_KEYS = (
-    "compiler_family",
-    "compiler_version",
-    "abi_dialect",
-    "language_standard",
-    "target_triple",
-    "pointer_width",
-    "endianness",
-    "macro_ops",
-    "pass_through_flags",
-    "include_sequence",
-    "header_sequence",
-)
 #: Appended to PROFILE_FIELD_KEYS only when a dump actually went through a
 #: DPC++-capable frontend (ADR-050 D5, G32 Phase D) -- never for an ordinary
 #: clang/castxml dump, so every pre-Phase-D profile_fingerprint stays

@@ -26,7 +26,6 @@ which is already at its ``architecture/debt.yaml`` no-growth baseline.
 from __future__ import annotations
 
 from abicheck.dumper_castxml import SYNTHETIC_CTOR_KEY_PREFIX
-from abicheck.dumper_hybrid import merge_snapshots
 from abicheck.model import AbiSnapshot, Function, Param
 from abicheck.model.fact import Fact
 from abicheck.model.identity import (
@@ -40,6 +39,7 @@ from abicheck.model.semantic_ir import (
     SemanticIR,
     semantic_ir_conflict_key,
 )
+from abicheck.workflows.dump.hybrid_merge import merge_snapshots
 
 FOO = entity_id_for_type((), "Foo")
 BAR = entity_id_for_type((), "Bar")

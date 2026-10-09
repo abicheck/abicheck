@@ -98,7 +98,7 @@ Across the 157 fields of the 6 declaration types the two header-AST backends bui
 | Fact | CastXML | direct-clang | hybrid | Notes |
 |------|---------|--------------|--------|-------|
 | `name` | ✅ Yes | ✅ Yes | ✅ Yes | — |
-| `mangled` | ✅ Yes | ✅ Yes | ✅ Yes | castxml cannot always recover a real mangled name for a constructor/destructor and synthesizes a placeholder key; a hybrid merge reconciles those against clang's real Itanium name (`dumper_hybrid._match_synthetic_ctor_dtor`). |
+| `mangled` | ✅ Yes | ✅ Yes | ✅ Yes | castxml cannot always recover a real mangled name for a constructor/destructor and synthesizes a placeholder key; a hybrid merge reconciles those against clang's real Itanium name (`workflows.dump.hybrid_identity._match_synthetic_ctor_dtor`). |
 | `return_type` | ✅ Yes | ✅ Yes | ✅ Yes | — |
 | `params` | ✅ Yes | ✅ Yes | ✅ Yes | — |
 | `visibility` | ✅ Yes | ✅ Yes | ✅ Yes | — |

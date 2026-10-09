@@ -49,7 +49,7 @@ a fact's own producer flag already names elsewhere in this package
 is deliberately **not** a fourth member of that vocabulary — `ast_producer
 ="hybrid"` is a snapshot-level *merge mode*, and the real per-fact producer
 on such a snapshot is still `"castxml"` or `"clang"` (whichever
-`dumper_hybrid.merge_snapshots()` kept), recorded per-declaration by
+`workflows.dump.hybrid_merge.merge_snapshots()` kept), recorded per-declaration by
 `fact_provenance.py` — mirroring `backend_capabilities.py`'s own identical
 "the hybrid column is derived, never hand-typed" stance for the same
 question one layer up.
