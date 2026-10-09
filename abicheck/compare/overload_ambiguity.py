@@ -35,7 +35,7 @@ from ..model.synthetic_key import SYNTHETIC_CTOR_KEY_PREFIX
 from ..name_classification import canonicalize_type_name
 
 if TYPE_CHECKING:
-    from ..model import AbiSnapshot, Function
+    from ..model import AbiSnapshot, Function, Param
     from ..model.change import Change
 
 __all__ = ["callable_key", "is_scalar_type", "ambiguity_witness"]
@@ -121,6 +121,28 @@ def _same_object_shape(a: Function, b: Function) -> bool:
     )
 
 
+def _comparable_pair(old: Function, new: Function) -> bool:
+    """Whether the witness rule applies to this pair at all."""
+    if old.is_variadic or new.is_variadic or old.is_deleted or new.is_deleted:
+        return False
+    if "<" in (old.name or "") or "<" in (new.name or ""):
+        return False  # templates rank by deduction, not by this witness
+    return len(old.params) == len(new.params) and _same_object_shape(old, new)
+
+
+def _witness_argument(
+    p_old: Param, p_new: Param, typedefs: Mapping[str, str], enums: frozenset[str]
+) -> str | None:
+    """The argument for one position: the parameter's own name when both
+    sides take the same type, ``{}`` when both take a scalar, else ``None``."""
+    if _resolve(p_old.type, typedefs) == _resolve(p_new.type, typedefs):
+        return p_old.name or "_"
+    both_scalar = is_scalar_type(p_old.type, typedefs, enums) and is_scalar_type(
+        p_new.type, typedefs, enums
+    )
+    return "{}" if both_scalar else None
+
+
 def ambiguity_witness(
     old: Function,
     new: Function,
@@ -129,26 +151,15 @@ def ambiguity_witness(
 ) -> str | None:
     """The argument list (``"(x, {})"``) whose call resolves to *old* alone
     but is ambiguous between *old* and *new*; ``None`` when there is none."""
-    if old.is_variadic or new.is_variadic or old.is_deleted or new.is_deleted:
+    if not _comparable_pair(old, new):
         return None
-    if "<" in (old.name or "") or "<" in (new.name or ""):
-        return None  # templates rank by deduction, not by this witness
-    if len(old.params) != len(new.params) or not _same_object_shape(old, new):
+    args = [
+        _witness_argument(p_old, p_new, typedefs, enums)
+        for p_old, p_new in zip(old.params, new.params, strict=True)
+    ]
+    if None in args or "{}" not in args:
         return None
-    args: list[str] = []
-    differs = False
-    for p_old, p_new in zip(old.params, new.params, strict=True):
-        if _resolve(p_old.type, typedefs) == _resolve(p_new.type, typedefs):
-            args.append(p_old.name or "_")
-            continue
-        if not (
-            is_scalar_type(p_old.type, typedefs, enums)
-            and is_scalar_type(p_new.type, typedefs, enums)
-        ):
-            return None
-        differs = True
-        args.append("{}")
-    return f"({', '.join(args)})" if differs else None
+    return f"({', '.join(a for a in args if a is not None)})"
 
 
 def _signature(f: Function) -> str:
@@ -183,29 +194,40 @@ def _diff_overload_ambiguity(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]
     for key, members in _groups(new_map.values()).items():
         previous = old_groups.get(key, [])
         kept = [f for f in previous if f.mangled in new_map]
-        added = [f for f in members if f.mangled not in old_map]
-        for n in added:
-            for o in kept:
-                witness = ambiguity_witness(o, n, typedefs, enums)
-                if witness is None:
-                    continue
-                # Already ambiguous before: another old overload matched too.
-                if any(
-                    ambiguity_witness(o, o2, typedefs, enums) == witness
-                    for o2 in previous
-                    if o2 is not o
-                ):
-                    continue
-                changes.append(
-                    make_change(
-                        ChangeKind.OVERLOAD_AMBIGUITY_INTRODUCED,
-                        symbol=n.mangled,
-                        name=key,
-                        detail=f"{key.removesuffix('::{ctor}')}{witness}",
-                        old=_signature(o),
-                        new=_signature(n),
-                        entity_id=n.entity_id,
-                    )
-                )
-                break
+        for n in (f for f in members if f.mangled not in old_map):
+            change = _first_new_ambiguity(key, n, kept, previous, typedefs, enums)
+            if change is not None:
+                changes.append(change)
     return changes
+
+
+def _first_new_ambiguity(
+    key: str,
+    added: Function,
+    kept: list[Function],
+    previous: list[Function],
+    typedefs: Mapping[str, str],
+    enums: frozenset[str],
+) -> Change | None:
+    """The finding for the first kept overload *added* makes ambiguous with a
+    call that was not already ambiguous among the old overloads."""
+    for o in kept:
+        witness = ambiguity_witness(o, added, typedefs, enums)
+        if witness is None:
+            continue
+        if any(
+            ambiguity_witness(o, o2, typedefs, enums) == witness
+            for o2 in previous
+            if o2 is not o
+        ):
+            continue  # already ambiguous before
+        return make_change(
+            ChangeKind.OVERLOAD_AMBIGUITY_INTRODUCED,
+            symbol=added.mangled,
+            name=key,
+            detail=f"{key.removesuffix('::{ctor}')}{witness}",
+            old=_signature(o),
+            new=_signature(added),
+            entity_id=added.entity_id,
+        )
+    return None

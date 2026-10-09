@@ -143,52 +143,60 @@ def _defaulted_after(text: str, open_at: int) -> bool | None:
     return None
 
 
+def _is_special(ctx: CastxmlParserContext, member: Element, record_id: str) -> bool:
+    """A destructor, or a copy/move constructor or assignment of *record_id*."""
+    tag = member.tag
+    if tag == "Destructor":
+        return True
+    if tag == "OperatorMethod" and member.get("name") != "=":
+        return False
+    return tag in ("Constructor", "OperatorMethod") and _is_copy_or_move(
+        ctx, member, record_id
+    )
+
+
+def _member_trait(
+    ctx: CastxmlParserContext, member: Element, record_id: str
+) -> bool | None:
+    """What one member says about the record's trait: ``False`` disproves it,
+    ``None`` leaves it unknown, ``True`` is consistent with it."""
+    tag = member.tag
+    if (
+        tag in ("Method", "OperatorMethod", "Destructor")
+        and member.get("virtual") == "1"
+    ):
+        return False
+    if tag == "Field":
+        return _type_trait(ctx, member.get("type", ""))
+    if not _is_special(ctx, member, record_id) or member.get("artificial") == "1":
+        return True
+    # User-declared: user-provided (never trivial) unless ``= default``.
+    return False if _defaulted_on_declaration(ctx, member) is False else None
+
+
+def _base_trait(ctx: CastxmlParserContext, base: Element) -> bool | None:
+    """A virtual base disproves the trait; otherwise the base's own trait."""
+    if base.get("virtual") == "1":
+        return False
+    return _type_trait(ctx, base.get("type", ""))
+
+
+def _members(ctx: CastxmlParserContext, el: Element) -> list[Element]:
+    found = (ctx.id_map.get(mid) for mid in el.get("members", "").split())
+    return [m for m in found if m is not None]
+
+
 def _record_trait(ctx: CastxmlParserContext, el: Element) -> bool | None:
     if el.get("incomplete") == "1":
         return None
     record_id = el.get("id", "")
-    unknown = False
-    has_copy_ctor = False
-    for base in el:
-        if base.tag != "Base":
-            continue
-        if base.get("virtual") == "1":
-            return False
-        trait = _type_trait(ctx, base.get("type", ""))
-        if trait is False:
-            return False
-        unknown |= trait is None
-    for mid in el.get("members", "").split():
-        member = ctx.id_map.get(mid)
-        if member is None:
-            continue
-        tag = member.tag
-        if (
-            tag in ("Method", "OperatorMethod", "Destructor")
-            and member.get("virtual") == "1"
-        ):
-            return False
-        if tag == "Field":
-            trait = _type_trait(ctx, member.get("type", ""))
-            if trait is False:
-                return False
-            unknown |= trait is None
-            continue
-        special = tag == "Destructor" or (
-            tag in ("Constructor", "OperatorMethod")
-            and (tag == "Constructor" or member.get("name") == "=")
-            and _is_copy_or_move(ctx, member, record_id)
-        )
-        if not special:
-            continue
-        if tag == "Constructor":
-            has_copy_ctor = True
-        if member.get("artificial") == "1":
-            continue
-        defaulted = _defaulted_on_declaration(ctx, member)
-        if defaulted is False:
-            return False  # user-provided
-        unknown = True
-    if unknown or not has_copy_ctor:
-        return None
-    return True
+    members = _members(ctx, el)
+    traits = [_base_trait(ctx, b) for b in el if b.tag == "Base"]
+    traits += [_member_trait(ctx, m, record_id) for m in members]
+    if False in traits:
+        return False
+    # CastXML omits a deleted copy constructor; without one emitted, unknown.
+    copyable = [
+        m for m in members if m.tag == "Constructor" and _is_special(ctx, m, record_id)
+    ]
+    return True if copyable and None not in traits else None
