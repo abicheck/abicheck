@@ -3,7 +3,7 @@
 
 Listed in `API_BREAK_KINDS` — source/API-level break.
 
-_20 case(s)._ [← back to all examples](../index.md)
+_21 case(s)._ [← back to all examples](../index.md)
 
 | Case | Title | Verdict | Category |
 |------|-------|---------|----------|
@@ -27,3 +27,4 @@ _20 case(s)._ [← back to all examples](../index.md)
 | [case157_inline_function_removed](../case157_inline_function_removed.md) | Inline Function Removed | 🟠 API_BREAK | API Break |
 | [case158_public_typedef_removed](../case158_public_typedef_removed.md) | Public Typedef Removed | 🟠 API_BREAK | API Break |
 | [case163_python_kwarg_renamed](../case163_python_kwarg_renamed.md) | Python Keyword Argument Renamed (Stub-Only API Break) | 🟠 API_BREAK | API Break |
+| [case211_return_pointee_gained_const](../case211_return_pointee_gained_const.md) | Return Pointee Gained `const` | 🟠 API_BREAK | API Break |

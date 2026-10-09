@@ -60,7 +60,7 @@ Phase 5 section for the design this page's data comes from.
 | `RecordType.is_abstract` | `bool \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
 | `RecordType.is_final` | `bool \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
 | `RecordType.is_standard_layout` | `bool \| None` | clang | persisted | ✅ | — | ✅ | — | ✅ |
-| `RecordType.is_trivially_copyable` | `bool \| None` | clang | persisted | ✅ | — | ✅ | — | ✅ |
+| `RecordType.is_trivially_copyable` | `bool \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
 | `RecordType.ownership` | `EntityOwnership` | castxml, clang | persisted | ✅ | — | — | — | ✅ |
 | `RecordType.qualified_name` | `str \| None` | castxml, clang | persisted | ✅ | ✅ | ✅ | — | ✅ |
 | `RecordType.source_header` | `str \| None` | castxml, clang, dwarf, pdb | persisted | ✅ | — | ✅ | — | ✅ |

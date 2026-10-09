@@ -1,6 +1,6 @@
 {
   "description": "Formal detector specification matrix (generated).",
-  "count": 411,
+  "count": 413,
   "detectors": [
     {
       "kind": "abi_relevant_build_flag_changed",
@@ -306,7 +306,7 @@
       "severity": "error",
       "min_evidence": "L1",
       "doc_slug": "calling_convention_changed",
-      "examples": "case64_calling_convention_changed"
+      "examples": "case209_calling_convention_changed_via_macro,case64_calling_convention_changed"
     },
     {
       "kind": "cet_protection_improved",
@@ -1198,6 +1198,24 @@
       "min_evidence": "L1",
       "doc_slug": "func_return_changed",
       "examples": "case102_frozen_runtime_signature_changed,case10_return_type,case46_pointer_chain_type_change,case70_flexible_array_member_changed,case72_covariant_return_changed"
+    },
+    {
+      "kind": "func_return_pointee_qualifier_added",
+      "category": "api_break",
+      "default_verdict": "API_BREAK",
+      "severity": "warning",
+      "min_evidence": "L2",
+      "doc_slug": "func_return_pointee_qualifier_added",
+      "examples": "case211_return_pointee_gained_const"
+    },
+    {
+      "kind": "func_return_pointee_qualifier_removed",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "L2",
+      "doc_slug": "func_return_pointee_qualifier_removed",
+      "examples": ""
     },
     {
       "kind": "func_static_changed",

@@ -69,6 +69,7 @@ from .names import (
     _virtual_method_mangled_name,
     _vt_sort_key,
 )
+from .record_traits import trivially_copyable
 from .scope import scope_path
 from .type_resolution import (
     qualified_type_name,
@@ -166,7 +167,8 @@ def build_record_type(
                 off = optional_int_attr(b, "offset")
                 if off is not None:
                     base_offsets[type_name(ctx, b.get("type", ""))] = off
-    # is_standard_layout / is_trivially_copyable / data_size_bits are left None: "not polymorphic and no virtual bases" is not a sound standard-layout signal (a mixed-access class is already non-standard-layout, so the heuristic would flip True→False on gaining a virtual and emit a spurious STANDARD_LAYOUT_LOST), and CastXML doesn't expose the trivially-copyable trait directly (Codex review #345).
+    # is_standard_layout / data_size_bits are left None: "not polymorphic and no virtual bases" is not a sound standard-layout signal (a mixed-access class is already non-standard-layout, so the heuristic would flip True→False on gaining a virtual and emit a spurious STANDARD_LAYOUT_LOST) (Codex review #345). is_trivially_copyable is derived from the special members CastXML emits, tri-state (record_traits.py).
+    trivially = None if is_opaque else trivially_copyable(ctx, el)
     # castxml records the `final` class-key specifier as a `final` token
     # inside the compound ``attributes`` string (e.g. ``attributes="final"``),
     # the same channel used for noexcept -- header mode always knows the
@@ -211,6 +213,7 @@ def build_record_type(
         qualified_name=qualified_name,
         qualified_name_fact=Fact.present(qualified_name),
         is_final=is_final,
+        is_trivially_copyable=trivially,
         # ADR-063 Phase 5: Fact[bool | None] sibling of is_final -- see the
         # local variable's own comment above for why this is always a real,
         # concrete determination on the castxml path.

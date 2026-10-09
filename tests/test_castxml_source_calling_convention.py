@@ -24,13 +24,24 @@ from abicheck.extract.headers.castxml.calling_convention import (
     calling_conventions_in,
     source_calling_conventions,
 )
+from abicheck.extract.headers.castxml.macro_table import (
+    MacroTable,
+    attach_macro_table,
+    calling_convention_macros,
+    expand,
+    macro_dump_command,
+    parse_object_macros,
+    read_macro_table,
+    target_default_convention,
+)
 from abicheck.model.cc_attributes import CC_ATTRIBUTE_BASES
 
 
-def _ctx(path: Path) -> SimpleNamespace:
+def _ctx(path: Path, table: MacroTable | None = None) -> SimpleNamespace:
     return SimpleNamespace(
         id_map={"f1": Element("File", {"id": "f1", "name": str(path)})},
         source_lines_cache={},
+        cc_macro_table=table,
     )
 
 
@@ -215,3 +226,91 @@ def test_castxml_reported_convention_is_not_second_guessed(tmp_path: Path) -> No
     plain = tmp_path / "p.h"
     plain.write_text("int target(int);\n")
     assert _contract_attributes_with_source_cc(_ctx(plain), el, "target") == []
+
+
+# --- macros: the compiler-resolved expansion decides (2026-10-08 re-audit) ---
+
+_DM = """#define __x86_64__ 1
+#define MS __attribute__((ms_abi))
+#define CALL MS
+#define SYSV __attribute__((sysv_abi))
+#define EMPTY
+#define FN(x) __attribute__((ms_abi)) x
+#define SELF SELF
+"""
+
+
+def _has_cc(text: str) -> bool:
+    return bool(calling_conventions_in(text))
+
+
+def test_parse_and_resolve_macro_table() -> None:
+    defs = parse_object_macros(_DM)
+    assert "FN" not in defs  # function-like macros are not substituted
+    assert expand("CALL int", defs) == "__attribute__((ms_abi)) int"
+    assert expand("SELF", defs) == "SELF"  # no self-recursion
+    assert calling_convention_macros(defs, _has_cc) == {
+        "MS": "__attribute__((ms_abi))",
+        "CALL": "__attribute__((ms_abi))",
+        "SYSV": "__attribute__((sysv_abi))",
+    }
+    assert target_default_convention(defs) == "sysv_abi"
+    assert target_default_convention({**defs, "_WIN32": "1"}) == "ms_abi"
+    assert target_default_convention({}) == ""
+
+
+def test_macro_table_round_trips_through_the_document() -> None:
+    root = Element("CastXML")
+    assert read_macro_table(root) is None  # no table: not "no macros"
+    attach_macro_table(
+        root, MacroTable({"CALL": "__attribute__((ms_abi))"}, "sysv_abi")
+    )
+    table = read_macro_table(root)
+    assert table is not None
+    assert table.macros == {"CALL": "__attribute__((ms_abi))"}
+    assert table.default_cc == "sysv_abi"
+    empty = Element("CastXML")
+    attach_macro_table(empty, MacroTable({}, ""))
+    got = read_macro_table(empty)
+    assert got is not None and got.macros == {}
+
+
+def test_macro_dump_command_shape(tmp_path: Path) -> None:
+    out = tmp_path / "m.txt"
+    cmd = ["castxml", "--castxml-output=1", "--castxml-cc-gnu", "gcc", "-x", "c",
+           "-o", "x.xml", "agg.h"]  # fmt: skip
+    assert macro_dump_command(cmd, out) == [
+        "castxml", "--castxml-cc-gnu", "gcc", "-x", "c", "-o", str(out),
+        "-E", "-dM", "agg.h",
+    ]  # fmt: skip
+    assert macro_dump_command(["castxml", "agg.h"], out) is None
+
+
+_TABLE = MacroTable(
+    calling_convention_macros(parse_object_macros(_DM), _has_cc), "sysv_abi"
+)
+
+
+@pytest.mark.parametrize(
+    ("decl", "want"),
+    [
+        ("CALL int target(int a);", {"ms_abi"}),
+        ("int CALL target(int a);", {"ms_abi"}),
+        ("MS int target(int a);", {"ms_abi"}),
+        ("SYSV int target(int a);", set()),  # the target default
+        ("__attribute__((sysv_abi)) int target(int a);", set()),
+        ("EMPTY int target(int a);", set()),
+        ("int target(void (CALL *cb)(int));", set()),  # a parameter's, not ours
+    ],
+)
+def test_macro_spelled_convention(tmp_path: Path, decl: str, want: set[str]) -> None:
+    hdr = tmp_path / "h.h"
+    # A longer line before the declaration: offsets shift under expansion.
+    hdr.write_text("MS int other_function_with_a_long_name(int);\n" + decl + "\n")
+    assert source_calling_conventions(_ctx(hdr, _TABLE), _el(2), "target") == want
+
+
+def test_without_a_table_text_is_read_literally(tmp_path: Path) -> None:
+    hdr = tmp_path / "h.h"
+    hdr.write_text("CALL int target(int a);\n")
+    assert source_calling_conventions(_ctx(hdr), _el(1), "target") == set()

@@ -7096,20 +7096,20 @@ document, which both known callers would need to be updated for together.
 
 ### A pointee qualifier change on a *return* type is not reported
 
-Found while fixing catalog case186 (GCC/Clang catalog validation,
-2026-10). Parameter-side pointee const/volatile changes are now classified
-by direction (`param_pointee_qualifier_added` / `_changed`,
-`compare/parameter_facts.py`). The return-type mirror is still suppressed
-entirely by `cv_qualifiers_only_differ`: `char *get_name()` →
-`const char *get_name()` breaks a C++ caller writing
-`char *p = get_name();` (and draws a discarded-qualifier diagnostic in C),
-while the reverse direction is safe. It was left out on purpose — the
-Wayland/libuv false-positive class this suppression was built for included
-accessor *returns* gaining const, and a gating `API_BREAK` there needs its
-own evidence that real consumers bind the result to a mutable pointer.
-A future fix should mirror the parameter split (gained → `API_BREAK` for
-assigning callers, lost → compatible) with its own catalog case and an FP
-measurement against the conda-forge corpus.
+**Closed (2026-10, catalog re-audit).** The return mirror of the parameter
+split now exists (`compare/parameter_facts.return_pointee_qualifier_changes`,
+detector `func_return_pointee_qualifier`): a qualifier gained on a returned
+pointee at any level is `func_return_pointee_qualifier_added` (API_BREAK --
+`char *p = get_name();` stops compiling), qualifiers only lost are
+`func_return_pointee_qualifier_removed` (COMPATIBLE_WITH_RISK -- only a
+function-pointer consumer of the old type breaks). Header-tier only, like the
+parameter detector. Regression tests: `tests/test_return_pointee_qualifier_direction.py`
+(exhaustive one/two-level domain) and
+`tests/test_header_backend_parity_probes_integration.py` (real gcc build,
+both header backends). Still open: the conda-forge FP measurement the
+original entry asked for has not been run; if accessor returns gaining const
+prove noisy in practice, the remedy is a policy default, not dropping the
+fact.
 
 ### Behavioral regressions behind an unchanged declaration
 
@@ -11267,18 +11267,18 @@ changes (ADR-064). Owner: ADR-063/065, lane A stage A2(b).
 
 ## A record's triviality change is invisible without DWARF (2026-10-08)
 
-A trivially-copyable struct that gains a user-provided destructor or copy
-operation changes how it is passed by value (registers → hidden pointer on
-Itanium x86-64). abicheck reports that as `value_abi_trait_changed` from DWARF
-only. The header-side `trivially_copyable_lost` detector exists, but CastXML
-never fills `RecordType.is_trivially_copyable`, so a stripped binary plus
-headers reads `case69_trivial_to_nontrivial` as `API_BREAK`. Its earlier
-stripped `BREAKING` came from a spurious binary `func_removed` for the
-implicit copy constructor, which PR #1519 corrected to
-`inline_function_removed`. A sound header-side fix needs the trait proven on
-the *old* side (no user-declared special members, trivially-copyable bases and
-members), not just "a user destructor appeared". Owner: CastXML record
-extraction (`extract/headers/castxml/records.py`).
+**Closed (2026-10).** CastXML records now carry `is_trivially_copyable`,
+derived tri-state from the special members CastXML emits
+(`extract/headers/castxml/record_traits.py`): `True` only when every
+copy/move constructor, copy/move assignment and the destructor is implicit,
+a copy constructor exists, there is no virtual function or base, and every
+base and member is itself proven; `False` on a virtual or a user-provided
+special member (a declaration not ending in `= default`) or a non-trivially
+copyable base/member; otherwise unknown. A stripped binary plus headers now
+reads `case69_trivial_to_nontrivial` as `BREAKING` (`trivially_copyable_lost`)
+under both header backends; a `= default` destructor stays unknown and
+reports nothing. Oracle test against g++'s own `__is_trivially_copyable`:
+`tests/test_castxml_record_traits_integration.py`.
 
 ## An unreadable consumer import table still reads as "requires nothing" (2026-10-07)
 

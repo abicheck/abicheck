@@ -158,6 +158,8 @@ class ChangeKind(str, Enum):
     PARAM_RESTRICT_ADDED = 'param_restrict_added'
     PARAM_POINTEE_QUALIFIER_ADDED = 'param_pointee_qualifier_added'
     PARAM_POINTEE_QUALIFIER_CHANGED = 'param_pointee_qualifier_changed'
+    FUNC_RETURN_POINTEE_QUALIFIER_ADDED = 'func_return_pointee_qualifier_added'
+    FUNC_RETURN_POINTEE_QUALIFIER_REMOVED = 'func_return_pointee_qualifier_removed'
     PARAM_BECAME_VA_LIST = 'param_became_va_list'
     PARAM_LOST_VA_LIST = 'param_lost_va_list'
     CONSTANT_CHANGED = 'constant_changed'

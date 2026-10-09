@@ -3,7 +3,7 @@
 
 Cases exercising an old-vs-new comparison — `abicheck compare`, the default operation.
 
-_198 case(s)._ [← back to all examples](../index.md)
+_201 case(s)._ [← back to all examples](../index.md)
 
 | Case | Title | Verdict | Category |
 |------|-------|---------|----------|
@@ -205,3 +205,6 @@ _198 case(s)._ [← back to all examples](../index.md)
 | [case206_deprecation_documented_without_attribute](../case206_deprecation_documented_without_attribute.md) | Deprecation Documented Without the Attribute | ✅ NO_CHANGE | No Change |
 | [case207_pointer_parameter_gained_restrict](../case207_pointer_parameter_gained_restrict.md) | Pointer Parameter Gained `restrict` | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case208_restrict_added_to_definition_only](../case208_restrict_added_to_definition_only.md) | `restrict` Added to the Definition Only | ✅ NO_CHANGE | No Change |
+| [case209_calling_convention_changed_via_macro](../case209_calling_convention_changed_via_macro.md) | Calling Convention Changed via a Macro | 🔴 BREAKING | Breaking |
+| [case210_calling_convention_respelled_via_macro](../case210_calling_convention_respelled_via_macro.md) | Calling Convention Respelled via a Macro | ✅ NO_CHANGE | No Change |
+| [case211_return_pointee_gained_const](../case211_return_pointee_gained_const.md) | Return Pointee Gained `const` | 🟠 API_BREAK | API Break |

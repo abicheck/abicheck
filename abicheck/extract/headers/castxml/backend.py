@@ -40,7 +40,7 @@ import tempfile
 from collections.abc import Callable
 from pathlib import Path
 from typing import cast
-from xml.etree.ElementTree import Element
+from xml.etree.ElementTree import Element, tostring
 
 from ....castxml_policy import evaluate_castxml_version
 from ....dumper_ast_config import (
@@ -78,6 +78,8 @@ from ....storage.cache_integrity import record_digest
 from ...castxml_header_compat import write_castxml_aggregate
 from ...path_aliases import absolutize_include_roots
 from ..backend import HeaderParseRequest
+from .calling_convention import calling_conventions_in
+from .macro_table import attach_macro_table, resolve_macro_table
 
 # The orchestrator's logger name, kept from before the move.
 log = logging.getLogger("abicheck.dumper")
@@ -429,11 +431,39 @@ def _run_castxml_attempt(
                 f"is valid and can be compiled with gcc/g++. The castxml process "
                 f"(and any child processes) has been terminated.{stderr_snippet}"
             ) from exc
-        return _validate_castxml_output(
+        root = _validate_castxml_output(
             result, out_xml, headers, force_cpp, castxml_bin=castxml_bin
         )
+        _record_calling_convention_macros(root, cmd, out_xml, agg_path.parent, run)
+        return root
     finally:
         shutil.rmtree(agg_path.parent, ignore_errors=True)
+
+
+def _record_calling_convention_macros(
+    root: Element,
+    cmd: list[str],
+    out_xml: Path,
+    work_dir: Path,
+    run: CastxmlRunner,
+) -> None:
+    """Attach the compiler-resolved calling-convention macros to *root* and
+    to *out_xml* (so the cached AST keeps them); see :mod:`.macro_table`.
+    A failed preprocess run leaves both untouched."""
+    table = resolve_macro_table(
+        cmd, work_dir, run, lambda t: bool(calling_conventions_in(t))
+    )
+    if table is None:
+        return
+    extra = Element("_")
+    attach_macro_table(extra, table)
+    attach_macro_table(root, table)
+    data = out_xml.read_bytes()
+    close_at = data.rfind(b"</")
+    if close_at == -1:
+        return
+    payload = b"".join(tostring(el) for el in extra)
+    out_xml.write_bytes(data[:close_at] + payload + data[close_at:])
 
 
 class CastxmlBackend:

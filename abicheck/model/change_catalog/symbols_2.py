@@ -76,6 +76,34 @@ SYMBOLS_ENTRIES_2: list[ChangeKindMeta] = [
         operation=_OP.MODIFIED,
     ),
     _E(
+        "func_return_pointee_qualifier_added",
+        _A,
+        impact="The pointee of a returned pointer/reference gained "
+        "const/volatile (`char *f()` -> `const char *f()`). The return "
+        "register and calling convention are unchanged, so built binaries "
+        "keep working, but a caller that binds the result to a mutable "
+        "pointer (`char *p = f();`) no longer compiles in C++ (a discarded-"
+        "qualifier constraint violation in C), and so does a consumer that "
+        "stores the function in a pointer of the old type.",
+        description_template="Return pointee qualifier added: {name}: {old} → {new}",
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
+    ),
+    _E(
+        "func_return_pointee_qualifier_removed",
+        _R,
+        impact="The pointee of a returned pointer/reference lost "
+        "const/volatile (`const char *f()` -> `char *f()`). Every direct "
+        "call still compiles -- the result converts implicitly to the old "
+        "type -- but the function's type changed: a consumer that stores it "
+        "in a pointer of the old type (`const char *(*fp)(void) = f;`) no "
+        "longer compiles. Whether any consumer does that is not visible "
+        "from the library.",
+        description_template="Return pointee qualifier removed: {name}: {old} → {new}",
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
+    ),
+    _E(
         "param_restrict_added",
         _R,
         impact="A pointer parameter gained `restrict`. The calling convention "

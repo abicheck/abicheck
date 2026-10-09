@@ -989,10 +989,15 @@ FACT_ROWS: tuple[FactRow, ...] = (
     FactRow(
         "RecordType",
         "is_trivially_copyable",
-        _NONE,
+        _PARTIAL,
         _FULL,
         hybrid_backfilled=True,
-        note="Same shape as `is_standard_layout`; activated `TRIVIALLY_COPYABLE_LOST`.",
+        note=(
+            "clang computes the trait; castxml derives it tri-state from the "
+            "special members it emits (`extract/headers/castxml/"
+            "record_traits.py`), unknown for a `= default` member. Activated "
+            "`TRIVIALLY_COPYABLE_LOST`."
+        ),
     ),
     FactRow(
         "RecordType",

@@ -8,6 +8,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import subprocess
+from collections import Counter
 from pathlib import Path
 from types import ModuleType
 
@@ -1132,3 +1133,40 @@ def test_full_catalog_main_creates_missing_out_parent_directory(
     exit_code = catalog.main(["--toolchain", "auto", "--out", str(out_path)])
     assert exit_code == 0
     assert out_path.exists()
+
+
+def _runtime_artifact(matrix: ModuleType, statuses: dict[str, str]) -> dict:
+    rows = [{"case_id": case, "status": status} for case, status in statuses.items()]
+    return {
+        "runner": matrix.ARTIFACT_CONTRACTS["runtime"][0],
+        "schema_version": matrix.ARTIFACT_CONTRACTS["runtime"][1],
+        "ground_truth_sha256": matrix._ground_truth_digest(),
+        "ground_truth_cases": len(statuses),
+        "selected_cases": len(statuses),
+        "build_type": "Debug",
+        "summary": dict(Counter(statuses.values())),
+        "results": rows,
+    }
+
+
+@pytest.mark.parametrize(
+    ("status", "fails"),
+    [
+        ("DEMONSTRATED", False),
+        ("NO_RUNTIME_SIGNAL", False),
+        ("SKIP", False),
+        ("BUILD_ERROR", True),
+        ("BASELINE_SIGNAL", True),  # an invalid baseline voids the proof
+    ],
+)
+def test_runtime_proof_failure_statuses(status: str, fails: bool) -> None:
+    """Runner exit code and collector agree on which runtime rows void the
+    proof lane (2026-10-08 re-audit: BASELINE_SIGNAL stayed green)."""
+    matrix = _load_validation_script("collect_full_example_matrix.py")
+    smoke = _load_validation_script("run_example_runtime_smoke.py")
+    cases = {"case_a": "DEMONSTRATED", "case_b": status}
+    errors = matrix._artifact_errors(
+        "runtime", _runtime_artifact(matrix, cases), expected_cases=set(cases)
+    )
+    assert any("failing runner statuses" in e for e in errors) is fails, errors
+    assert (status in smoke.PROOF_FAILURE_STATUSES) is fails

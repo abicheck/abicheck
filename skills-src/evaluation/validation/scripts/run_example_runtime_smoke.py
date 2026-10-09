@@ -34,6 +34,10 @@ GROUND_TRUTH = example_catalog.GROUND_TRUTH_PATH
 SCHEMA_VERSION = "example_runtime_smoke.v1"
 
 
+#: Statuses that mean the runtime proof itself could not be established.
+PROOF_FAILURE_STATUSES = frozenset({"BUILD_ERROR", "BASELINE_SIGNAL"})
+
+
 def _platform() -> str:
     if sys.platform.startswith("linux"):
         return "linux"
@@ -469,7 +473,9 @@ def main(argv: list[str] | None = None) -> int:
                     file=sys.stderr,
                 )
 
-    return 1 if any(r["status"] == "BUILD_ERROR" for r in results) else 0
+    # A baseline that does not behave as its case records is a broken proof,
+    # not a "no signal": the swap comparison it would anchor means nothing.
+    return 1 if any(r["status"] in PROOF_FAILURE_STATUSES for r in results) else 0
 
 
 if __name__ == "__main__":

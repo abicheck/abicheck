@@ -11,7 +11,7 @@ the same cases by rule, scenario kind, ecosystem, operation, evidence level,
 language, and verdict.
 
 <!-- BEGIN GENERATED: catalog-headline (keep counts in sync with examples/ground_truth.json) -->
-This directory contains **208 cases** (203 single-library + 5 multi-library bundle cases) demonstrating real-world ABI/API break scenarios. Most cases are a minimal, compilable C/C++ example with:
+This directory contains **211 cases** (206 single-library + 5 multi-library bundle cases) demonstrating real-world ABI/API break scenarios. Most cases are a minimal, compilable C/C++ example with:
 <!-- END GENERATED: catalog-headline -->
 
 - Paired `v1/` and `v2/` source + headers.
@@ -41,12 +41,12 @@ The catalog drives abicheck's benchmark and serves as an encyclopedia of ABI pit
 <!-- BEGIN GENERATED: verdict-distribution (keep counts in sync with examples/ground_truth.json) -->
 | Verdict | Count | `checker_policy.py` set | Icon |
 |---------|-------|-------------------------|------|
-| BREAKING | 108 | `BREAKING_KINDS` | 🔴 |
-| API_BREAK | 20 | `API_BREAK_KINDS` | 🟠 |
+| BREAKING | 109 | `BREAKING_KINDS` | 🔴 |
+| API_BREAK | 21 | `API_BREAK_KINDS` | 🟠 |
 | COMPATIBLE_WITH_RISK | 34 | `RISK_KINDS` | 🟡 |
 | COMPATIBLE (addition) | 11 | `ADDITION_KINDS` | 🟢 |
 | COMPATIBLE (quality) | 21 | `QUALITY_KINDS` | 🟡 |
-| NO_CHANGE | 9 | — | ✅ |
+| NO_CHANGE | 10 | — | ✅ |
 | Bundle (multi-binary) | 5 | see [Multi-binary analysis](../docs/use/multi-binary.md) | 🔵 |
 <!-- END GENERATED: verdict-distribution -->
 
@@ -483,6 +483,9 @@ Expected non-pass buckets are already represented in `ground_truth.json`:
 | [206](cases/case206_deprecation_documented_without_attribute/README.md) | Deprecation Documented Without the Attribute | No Change | ✅ NO_CHANGE (bad practice) |
 | [207](cases/case207_pointer_parameter_gained_restrict/README.md) | Pointer Parameter Gained `restrict` | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
 | [208](cases/case208_restrict_added_to_definition_only/README.md) | `restrict` Added to the Definition Only | No Change | ✅ NO_CHANGE |
+| [209](cases/case209_calling_convention_changed_via_macro/README.md) | Calling Convention Changed via a Macro | Breaking | 🔴 BREAKING |
+| [210](cases/case210_calling_convention_respelled_via_macro/README.md) | Calling Convention Respelled via a Macro | No Change | ✅ NO_CHANGE |
+| [211](cases/case211_return_pointee_gained_const/README.md) | Return Pointee Gained `const` | API Break | 🟠 API_BREAK |
 <!-- END GENERATED: case-index -->
 
 ---

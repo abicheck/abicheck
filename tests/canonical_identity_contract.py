@@ -326,6 +326,8 @@ UNVERIFIED = frozenset(
         "param_pointer_level_changed",
         "param_pointee_qualifier_added",
         "param_pointee_qualifier_changed",
+        "func_return_pointee_qualifier_added",
+        "func_return_pointee_qualifier_removed",
         "param_renamed",
         "param_restrict_added",
         "param_restrict_changed",

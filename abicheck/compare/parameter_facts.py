@@ -375,6 +375,48 @@ def pointee_qualifier_changes(
     return changes
 
 
+def return_pointee_qualifier_changes(
+    mangled: str,
+    name: str,
+    r_old: str | None,
+    r_new: str | None,
+    *,
+    entity_id: EntityId | None,
+) -> list[Change]:
+    """``FUNC_RETURN_POINTEE_QUALIFIER_ADDED``/``_REMOVED`` -- the return-type
+    mirror of :func:`pointee_qualifier_changes`, with the direction reversed
+    (a return value flows *out* to the caller):
+
+    * a qualifier gained at any level (``char *`` -> ``const char *``): a
+      caller binding the result to a mutable pointer breaks.
+    * qualifiers only lost: every direct call still converts implicitly; a
+      consumer holding the function in a pointer of the old type breaks --
+      a risk conditional on consumer use.
+    """
+    if not r_old or not r_new or r_old == r_new:
+        return []
+    if not cv_qualifiers_only_differ(r_old, r_new):
+        return []
+    o, n = _qualifier_levels(r_old), _qualifier_levels(r_new)
+    if o is None or n is None or o[1] != n[1]:
+        return []
+    added, removed = n[0] - o[0], o[0] - n[0]
+    if not added and not removed:
+        return []
+    return [
+        make_change(
+            ChangeKind.FUNC_RETURN_POINTEE_QUALIFIER_ADDED
+            if added
+            else ChangeKind.FUNC_RETURN_POINTEE_QUALIFIER_REMOVED,
+            symbol=mangled,
+            name=name,
+            old=r_old,
+            new=r_new,
+            entity_id=entity_id,
+        )
+    ]
+
+
 def va_list_changes(
     mangled: str,
     name: str,
