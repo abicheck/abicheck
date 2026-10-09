@@ -1,0 +1,3 @@
+### Changed
+
+- **Internal: a release's compatibility-axis exit fold has one owner, `abicheck.workflows.release_exit_fold`.** `release_severity_exit_code`, `fold_release_global_severity` and `release_compatibility_base_exit` move there from `cli_compare_release_helpers` and `cli_compare_release_matrix` (previously `_compute_release_severity_exit_code`, `_fold_release_global_severity` and `_release_compatibility_base_exit`). No re-export is kept. The unused `frontends.cli.release_evidence_contract.release_evidence_contract_contribution` wrapper is deleted; the policy fold of the same name is the one owner. No exit code or report field changed.
