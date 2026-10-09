@@ -153,6 +153,9 @@ rules:
   - case206_deprecation_documented_without_attribute
   - case207_pointer_parameter_gained_restrict
   - case208_restrict_added_to_definition_only
+  - case209_calling_convention_changed_via_macro
+  - case210_calling_convention_respelled_via_macro
+  - case211_return_pointee_gained_const
   - case19_enum_member_removed
   - case20_enum_member_value_changed
   - case21_method_became_static

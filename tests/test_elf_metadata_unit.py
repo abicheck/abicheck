@@ -209,21 +209,24 @@ class TestParseGnuProperty:
         # _parse_raw_notes must extract the description from raw note bytes.
         import struct
 
-        from abicheck.elf_metadata import _decode_gnu_property_desc, _parse_raw_notes
+        from abicheck.extract.elf_notes import (
+            _parse_raw_notes,
+            decode_gnu_property_desc,
+        )
 
         # ELF note: namesz=4, descsz=16, n_type=5, name="GNU\0", desc=property array.
         desc = struct.pack("<III", 0xC0000002, 4, 0x3) + b"\x00\x00\x00\x00"
         note = struct.pack("<III", 4, len(desc), 5) + b"GNU\x00" + desc
         descs = list(_parse_raw_notes(note, True))
         assert len(descs) == 1
-        assert _decode_gnu_property_desc(descs[0], True, 8) == frozenset(
+        assert decode_gnu_property_desc(descs[0], True, 8) == frozenset(
             {"IBT", "SHSTK"}
         )
 
     def test_raw_note_segment_parser_skips_non_gnu(self):
         import struct
 
-        from abicheck.elf_metadata import _parse_raw_notes
+        from abicheck.extract.elf_notes import _parse_raw_notes
 
         # A non-GNU note (name "XYZ") must be ignored.
         desc = struct.pack("<III", 0xC0000002, 4, 0x3) + b"\x00\x00\x00\x00"
@@ -237,17 +240,17 @@ class TestParseGnuProperty:
         # the 4-byte-aligned decode still finds IBT|SHSTK.
         import struct
 
-        from abicheck.elf_metadata import _decode_gnu_property_desc
+        from abicheck.extract.elf_notes import decode_gnu_property_desc
 
         # Property 1: some other pr_type (0xC0008000), datasz=4, data=0 → 12 bytes.
         desc = struct.pack("<III", 0xC0008000, 4, 0)
         # Property 2: X86_FEATURE_1_AND (0xC0000002), datasz=4, bits=IBT|SHSTK(3).
         desc += struct.pack("<III", 0xC0000002, 4, 0x3)
         # 8-byte alignment would skip the second property; 4-byte finds it.
-        assert _decode_gnu_property_desc(desc, True, align=4) == frozenset(
+        assert decode_gnu_property_desc(desc, True, align=4) == frozenset(
             {"IBT", "SHSTK"}
         )
-        assert _decode_gnu_property_desc(desc, True, align=8) != frozenset(
+        assert decode_gnu_property_desc(desc, True, align=8) != frozenset(
             {"IBT", "SHSTK"}
         )
 

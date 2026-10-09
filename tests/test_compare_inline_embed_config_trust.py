@@ -68,7 +68,7 @@ def _invoke_compare_inline_embed(
     test is only about what reaches that one call, not what happens after.
     """
     import abicheck.cli_compare_helpers as cch
-    import abicheck.frontends.cli.commands.compare as climod
+    import abicheck.frontends.cli.commands.compare_routing as climod
 
     src = tmp_path / "src"
     src.mkdir(exist_ok=True)

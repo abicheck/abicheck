@@ -49,8 +49,8 @@ from .workflows.snapshot_factory import new_snapshot
 
 if TYPE_CHECKING:
     from .model import AbiSnapshot
-    from .service_dump_pipeline import ResolvedDumpRequest
     from .workflows.contracts import DumpRequest
+    from .workflows.dump.pipeline import ResolvedDumpRequest
 
 
 # ── Attach / compare integration (ADR-028 D6, D7; ADR-029 D9) ─────────────────
@@ -380,8 +380,6 @@ def _write_snapshot_output(
         # L4 source-ABI replay run over it a second time.
         build_source_already_satisfies(snap, collect_mode)
     ):
-        from .cli_buildsource import embed_build_source
-
         embed_build_source(
             snap,
             build_info,
@@ -473,7 +471,7 @@ def _write_snapshot_output(
 
 
 def resolve_dump_request_for_cli(request: DumpRequest) -> ResolvedDumpRequest:
-    """:func:`~abicheck.service_dump_pipeline.resolve_dump_request`, with the
+    """:func:`~abicheck.workflows.dump.pipeline.resolve_dump_request`, with the
     CLI's error contract.
 
     The Tier-2 pipeline signals a bad request as
@@ -502,7 +500,7 @@ def resolve_dump_request_for_cli(request: DumpRequest) -> ResolvedDumpRequest:
     `cli_buildsource` already is.
     """
     from .errors import PlanningError, ValidationError
-    from .service_dump_pipeline import resolve_dump_request
+    from .workflows.dump.pipeline import resolve_dump_request
 
     try:
         return resolve_dump_request(request)

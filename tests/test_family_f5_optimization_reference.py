@@ -99,6 +99,8 @@ COVERAGE: dict[str, str] = {
     "abicheck.buildsource.source_extractors.clang::memoized::_clang_compiler_version": "UNCOVERED: L4 clang source extractor tool probe; build-source path only",
     "abicheck.buildsource.toolchain_probe::memoized::_clang_accepts_target": "UNCOVERED: clang cross-target probe; needs clang and a --target build",
     "abicheck.buildsource.type_graph::memoized::_base_type_name": _NEEDS_L5,
+    "abicheck.compare.overload_ambiguity::memoized::_callable_key": H,
+    "abicheck.compare.parameter_facts::memoized::_pointee_qualifier_delta": H,
     "abicheck.compatibility_evaluation_frontend::memoized::builtin_policy_identity": R,
     "abicheck.compatibility_evaluation_frontend::memoized::severity_preset_identity": "UNCOVERED: reached only under --severity-preset; pure function of a packaged preset name",
     "abicheck.demangle::memoized::demangle": R,
@@ -169,8 +171,8 @@ COVERAGE: dict[str, str] = {
     # ---- registered engines (own storage, central switch) ----
     "abicheck.compare.spelling_match_cache::registered::_MATCH_STATS": "UNCOVERED: spelling-pattern matching runs only with an L5 type-reachability graph (#1336's cache); its thread-safety is owned by test_spelling_match_cache_concurrency.py",
     "abicheck.compare.spelling_match_cache::registered::_VOCABULARY_STATS": "UNCOVERED: as _MATCH_STATS",
-    "abicheck.dumper_cache::registered::_AST_SLOT_STATS": "UNCOVERED: the per-thread AST handoff is written only by the clang header backend (--ast-frontend clang); the header cell uses castxml",
-    "abicheck.dumper_cache::registered::_AST_ACQUISITION_STATS": "UNCOVERED: the request-wide AST table is opened by the release fan-out over binaries with headers; no cell builds one",
+    "abicheck.storage.header_ast_cache::registered::_AST_SLOT_STATS": "UNCOVERED: the per-thread AST handoff is written only by the clang header backend (--ast-frontend clang); the header cell uses castxml",
+    "abicheck.storage.header_ast_cache::registered::_AST_ACQUISITION_STATS": "UNCOVERED: the request-wide AST table is opened by the release fan-out over binaries with headers; no cell builds one",
     # ---- disk caches ----
     "abicheck.snapshot_cache::disk_cache::SNAPSHOT_DISK_CACHE": B,
     "abicheck.storage.ast_cache_location::disk_cache::AST_DISK_CACHE": H,

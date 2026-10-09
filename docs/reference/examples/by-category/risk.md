@@ -3,7 +3,7 @@
 
 Listed in `RISK_KINDS` — symbol-compatible but behaviorally risky.
 
-_34 case(s)._ [← back to all examples](../index.md)
+_35 case(s)._ [← back to all examples](../index.md)
 
 | Case | Title | Verdict | Category |
 |------|-------|---------|----------|
@@ -12,6 +12,7 @@ _34 case(s)._ [← back to all examples](../index.md)
 | [case51_protected_visibility](../case51_protected_visibility.md) | Protected Visibility (DEFAULT to PROTECTED) | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case83_cpu_dispatch_isa_dropped](../case83_cpu_dispatch_isa_dropped.md) | CPU-dispatch ISA family dropped | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case98_cxx_standard_floor_raised](../case98_cxx_standard_floor_raised.md) | C++ Standard Floor Raised | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case111_enumerable_thread_specific_lambda_ambiguity](../case111_enumerable_thread_specific_lambda_ambiguity.md) | enumerable_thread_specific Lambda-Init Ambiguity | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case122_template_signature_uninstantiated](../case122_template_signature_uninstantiated.md) | Uninstantiated Template Signature Change | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case130_exceptions_mode_flip](../case130_exceptions_mode_flip.md) | Exceptions Mode Flip (`-fno-exceptions`) | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case131_rtti_mode_flip](../case131_rtti_mode_flip.md) | RTTI Mode Flip (`-fno-rtti`) | 🟡 COMPATIBLE_WITH_RISK | Risk |

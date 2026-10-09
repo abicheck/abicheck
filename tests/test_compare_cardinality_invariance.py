@@ -95,7 +95,9 @@ def _release(root: Path, axis_args: list[str]) -> tuple[dict, dict[str, Outcome]
     return doc, members, r.exit_code
 
 
-@pytest.mark.parametrize("axis", ["default", "policy_sdk_vendor", "suppress"])
+@pytest.mark.parametrize(
+    "axis", ["default", "policy_sdk_vendor", "suppress", "severity_strict"]
+)
 @pytest.mark.parametrize(
     "assignment", _ASSIGNMENTS, ids=lambda a: f"n{len(a)}-" + "+".join(a)
 )

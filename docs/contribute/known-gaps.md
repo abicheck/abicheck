@@ -7096,20 +7096,20 @@ document, which both known callers would need to be updated for together.
 
 ### A pointee qualifier change on a *return* type is not reported
 
-Found while fixing catalog case186 (GCC/Clang catalog validation,
-2026-10). Parameter-side pointee const/volatile changes are now classified
-by direction (`param_pointee_qualifier_added` / `_changed`,
-`compare/parameter_facts.py`). The return-type mirror is still suppressed
-entirely by `cv_qualifiers_only_differ`: `char *get_name()` →
-`const char *get_name()` breaks a C++ caller writing
-`char *p = get_name();` (and draws a discarded-qualifier diagnostic in C),
-while the reverse direction is safe. It was left out on purpose — the
-Wayland/libuv false-positive class this suppression was built for included
-accessor *returns* gaining const, and a gating `API_BREAK` there needs its
-own evidence that real consumers bind the result to a mutable pointer.
-A future fix should mirror the parameter split (gained → `API_BREAK` for
-assigning callers, lost → compatible) with its own catalog case and an FP
-measurement against the conda-forge corpus.
+**Closed (2026-10, catalog re-audit).** The return mirror of the parameter
+split now exists (`compare/parameter_facts.return_pointee_qualifier_changes`,
+detector `func_return_pointee_qualifier`): a qualifier gained on a returned
+pointee at any level is `func_return_pointee_qualifier_added` (API_BREAK --
+`char *p = get_name();` stops compiling), qualifiers only lost are
+`func_return_pointee_qualifier_removed` (COMPATIBLE_WITH_RISK -- only a
+function-pointer consumer of the old type breaks). Header-tier only, like the
+parameter detector. Regression tests: `tests/test_return_pointee_qualifier_direction.py`
+(exhaustive one/two-level domain) and
+`tests/test_header_backend_parity_probes_integration.py` (real gcc build,
+both header backends). Still open: the conda-forge FP measurement the
+original entry asked for has not been run; if accessor returns gaining const
+prove noisy in practice, the remedy is a policy default, not dropping the
+fact.
 
 ### Behavioral regressions behind an unchanged declaration
 
@@ -8691,6 +8691,28 @@ change in a different layer. Over-reporting is the safe direction — no finding
 is *lost* today — which is why this is a gap rather than a blocker on the fix
 that surfaced it.
 
+## A member that fails to extract exits `4` from a directory `compare` but `1` from a single-pair one
+
+**Recorded, not fixed (lane A, A2(b), 2026-10-09; maintainer ruling: keep both).**
+A single-pair `compare` whose operand cannot be dumped (for example a
+truncated ELF) aborts with a CLI error and exits `1`. The same pair as the only
+member of a directory/package release produces a member `ERROR` entry and the
+release exits `4` with `exit.reasons: ["operational_error"]`. Both behaviours are
+documented in `docs/reference/exit-codes.md`. Reproduce: put the same corrupt
+`libm0.so` in `old/` and `new/`, then run `compare old/libm0.so new/libm0.so`
+(exit `1`) and `compare old new` (exit `4`).
+
+This is the one axis where a release of one member and a scalar `compare` of that
+member disagree. The release fold takes each member's compatibility
+contribution from the scalar resolver (`resolve_compare_exit_decision`, stamped
+by `cli_compare_release_pairwise._member_exit_decision`), and
+`tests/test_compare_cardinality_invariance.py` pins the agreement on every axis
+where a comparison completed. A member that never compared has no scalar
+decision to fold, so it falls to the release's own operational-error axis.
+Making the two agree means changing a public exit code in one direction: either
+a release exits `1` for a failed member, or a scalar dump failure exits `4` and
+reads as an ABI break. Either change needs an ADR-064 amendment.
+
 ## Suppression provenance stops at the display label outside the audit path
 
 ADR-067 D3 says a disposition keeps the rule that made it — rule id, source
@@ -9581,7 +9603,7 @@ changelog entry and `tests/test_one_comparison_product_parity.py`.
 `json`/`markdown`/`sarif`/`html`/`junit`/`review`/`oneline`; a directory or
 package operand renders `json`/`markdown`/`junit`/`oneline`/`html` and rejects the
 rest
-(`frontends/cli/commands/compare.py`'s `_RELEASE_FORMATS`). The rejection is
+(`frontends/cli/commands/compare_routing.py`'s `_RELEASE_FORMATS`). The rejection is
 loud rather than silent, and it is not arbitrary — the missing formats are
 the ones whose renderers take a single `DiffResult`:
 
@@ -11267,18 +11289,18 @@ changes (ADR-064). Owner: ADR-063/065, lane A stage A2(b).
 
 ## A record's triviality change is invisible without DWARF (2026-10-08)
 
-A trivially-copyable struct that gains a user-provided destructor or copy
-operation changes how it is passed by value (registers → hidden pointer on
-Itanium x86-64). abicheck reports that as `value_abi_trait_changed` from DWARF
-only. The header-side `trivially_copyable_lost` detector exists, but CastXML
-never fills `RecordType.is_trivially_copyable`, so a stripped binary plus
-headers reads `case69_trivial_to_nontrivial` as `API_BREAK`. Its earlier
-stripped `BREAKING` came from a spurious binary `func_removed` for the
-implicit copy constructor, which PR #1519 corrected to
-`inline_function_removed`. A sound header-side fix needs the trait proven on
-the *old* side (no user-declared special members, trivially-copyable bases and
-members), not just "a user destructor appeared". Owner: CastXML record
-extraction (`extract/headers/castxml/records.py`).
+**Closed (2026-10).** CastXML records now carry `is_trivially_copyable`,
+derived tri-state from the special members CastXML emits
+(`extract/headers/castxml/record_traits.py`): `True` only when every
+copy/move constructor, copy/move assignment and the destructor is implicit,
+a copy constructor exists, there is no virtual function or base, and every
+base and member is itself proven; `False` on a virtual or a user-provided
+special member (a declaration not ending in `= default`) or a non-trivially
+copyable base/member; otherwise unknown. A stripped binary plus headers now
+reads `case69_trivial_to_nontrivial` as `BREAKING` (`trivially_copyable_lost`)
+under both header backends; a `= default` destructor stays unknown and
+reports nothing. Oracle test against g++'s own `__is_trivially_copyable`:
+`tests/test_castxml_record_traits_integration.py`.
 
 ## An unreadable consumer import table still reads as "requires nothing" (2026-10-07)
 
@@ -11286,10 +11308,19 @@ extraction (`extract/headers/castxml/records.py`).
 now treats a `FAILED` consumer-import fact exactly like an unrecognised
 format: a REQUIRED consumer raises `ConsumerUnreadableError`, an ADVISORY one
 yields `unreadable=True`. Regression tests:
-`tests/unit/workflows/test_failed_consumer_read.py`. Still open, one layer
-down: `parse_{elf,pe,macho}_metadata` swallow their own errors and return
-empty metadata, so `LibraryExportFacts` cannot yet tell a failed library read
-from an empty export table.
+`tests/unit/workflows/test_failed_consumer_read.py`. The library side
+followed in Lane C stage 6: `parse_{elf,pe,macho}_metadata` still return what
+they read, but each site that loses export-table facts records it
+(`extract/parse_failures.py`), and `read_library_export_facts` reads such a
+library -- or a stored block that records no parse
+(`model.export_index.platform_block_parsed`) -- as `FAILED`. The scoping
+workflow then raises `LibraryExportsUnreadableError` (`compare --used-by`:
+exit 1, `Error: --used-by library: ...`). Regression tests:
+`tests/unit/extract/test_library_export_read_failures.py`. Still open: a
+stored snapshot keeps no record of a *partial* read (a skipped `.dynsym` with a
+parsed header) -- persisting it needs a snapshot-schema field and its ADR;
+`dump` rejected every such binary tried (ELF and whole-file PE/Mach-O
+failures), so in practice only a snapshot produced elsewhere can carry one.
 
 ## `compare --used-by` prints a traceback for an unreadable REQUIRED consumer (2026-10-08)
 

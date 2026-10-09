@@ -117,7 +117,7 @@
     "calling-contract.calling-convention-change": {
       "learn_pages": ["learn/abi-series/05-linker-elf.md", "learn/msvc-pe-abi-model.md"],
       "topics": ["msvc-pe-abi-model"],
-      "catalog_cases": ["case64_calling_convention_changed"],
+      "catalog_cases": ["case64_calling_convention_changed", "case209_calling_convention_changed_via_macro", "case210_calling_convention_respelled_via_macro"],
       "detector_kinds": ["calling_convention_changed"],
       "status": "COVERED"
     },
@@ -538,11 +538,9 @@
     "source-api.signature-change-source-only": {
       "learn_pages": ["learn/abi-series/06-transitive-breaks.md", "learn/limitations.md", "learn/verdicts.md"],
       "topics": ["verdicts"],
-      "catalog_cases": ["case186_c_api_pointee_const_abi_neutral"],
-      "cases_demonstrate": false,
-      "detector_kinds": ["removed_const_overload", "source_level_kind_changed", "param_renamed", "func_params_changed", "func_cv_changed"],
-      "status": "MISSING_CASE",
-      "reason": "case186 is the ABI-neutral *negative* control (a `char*` parameter becoming `const char*`, which must stay NO_CHANGE). No case demonstrates the positive mechanism: a binary-identical change that still breaks recompilation of consumer source."
+      "catalog_cases": ["case211_return_pointee_gained_const", "case186_c_api_pointee_const_abi_neutral"],
+      "detector_kinds": ["func_return_pointee_qualifier_added", "func_return_pointee_qualifier_removed", "removed_const_overload", "source_level_kind_changed", "param_renamed", "func_params_changed", "func_cv_changed"],
+      "status": "COVERED"
     },
     "source-api.header-macro-removal": {
       "learn_pages": ["learn/abi-surface.md", "learn/abi-series/06-transitive-breaks.md"],

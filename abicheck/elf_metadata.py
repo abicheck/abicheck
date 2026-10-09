@@ -29,8 +29,7 @@ import os
 import pickle
 import re
 import stat
-import struct
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
 from pathlib import Path
 from typing import IO
 
@@ -45,6 +44,12 @@ from elftools.elf.gnuversions import (
 from elftools.elf.sections import SymbolTableSection
 
 from .extract.elf_code_hash import CodeHasher
+from .extract.elf_notes import (
+    NT_GNU_ABI_TAG_NAMES,
+    decode_abi_tag_desc,
+    decode_gnu_property_desc,
+    iter_gnu_property_descs,
+)
 from .extract.elf_static_tls import has_static_tls_relocation
 
 # Fact dataclasses live in the model package (ADR-061 Phase 5): this module
@@ -57,6 +62,10 @@ from .extract.elf_symbol_versions import (
     symbols_of,
 )
 from .extract.mangled_foreign_template_args import has_foreign_template_argument
+from .extract.parse_failures import (
+    note_export_read_failure,
+    recording_export_read_failures,
+)
 from .model.elf_facts import (
     ElfImport as ElfImport,
     ElfMetadata as ElfMetadata,
@@ -122,6 +131,7 @@ def parse_elf_metadata(so_path: Path) -> ElfMetadata:
             st = os.fstat(f.fileno())
             if not stat.S_ISREG(st.st_mode):
                 log.warning("parse_elf_metadata: not a regular file: %s", so_path)
+                note_export_read_failure(f"not a regular file: {so_path}")
                 return ElfMetadata()
             key = request_key(
                 content=hashlib.file_digest(f, "blake2b").hexdigest(),
@@ -129,17 +139,27 @@ def parse_elf_metadata(so_path: Path) -> ElfMetadata:
             )
             f.seek(0)
             stored = _PARSE_MEMO.get_or_compute(
-                key,
-                lambda: pickle.dumps(
-                    _parse(f, so_path), protocol=pickle.HIGHEST_PROTOCOL
-                ),
+                key, lambda: _parse_and_pickle(f, so_path)
             )
             # nosec B301: bytes this function pickled itself, never external input
-            loaded: ElfMetadata = pickle.loads(stored)  # nosec B301
-            return loaded
+            loaded: tuple[ElfMetadata, list[str]] = pickle.loads(stored)  # nosec B301
+            meta, failures = loaded
+            # Replayed on every call, memo hit or not, so a recording caller
+            # sees the failures of a parse an earlier caller paid for.
+            for reason in failures:
+                note_export_read_failure(reason)
+            return meta
     except (ELFError, OSError, ValueError) as exc:
         log.warning("parse_elf_metadata: failed to open/parse %s: %s", so_path, exc)
+        note_export_read_failure(f"ELF parse failed: {exc}")
         return ElfMetadata()
+
+
+def _parse_and_pickle(f: IO[bytes], so_path: Path) -> bytes:
+    """Parse *f* and pickle the metadata with the export-read failures seen."""
+    with recording_export_read_failures() as failures:
+        meta = _parse(f, so_path)
+    return pickle.dumps((meta, failures), protocol=pickle.HIGHEST_PROTOCOL)
 
 
 # ---------------------------------------------------------------------------
@@ -261,92 +281,6 @@ def _read_identity(elf: ELFFile, meta: ElfMetadata, so_path: Path) -> None:
         )
 
 
-# ── GNU-property control-flow-protection decoding (G23-A2) ──────────────────
-# pyelftools reports the note type as the *string* "NT_GNU_PROPERTY_TYPE_0"
-# (its known-type name), not the raw numeric 5 — accept both forms.
-_NT_GNU_PROPERTY_TYPE_0 = 5
-_NT_GNU_PROPERTY_TYPE_0_NAMES = frozenset({5, "NT_GNU_PROPERTY_TYPE_0"})
-_GNU_PROPERTY_X86_FEATURE_1_AND = 0xC0000002
-_GNU_PROPERTY_X86_FEATURE_1_IBT = 0x1
-_GNU_PROPERTY_X86_FEATURE_1_SHSTK = 0x2
-_GNU_PROPERTY_AARCH64_FEATURE_1_AND = 0xC0000000
-_GNU_PROPERTY_AARCH64_FEATURE_1_BTI = 0x1
-_GNU_PROPERTY_AARCH64_FEATURE_1_PAC = 0x2
-# Required micro-architecture level (glibc-hwcaps builds, -march=x86-64-vN).
-# A raised level means older CPUs can no longer run the library at all.
-_GNU_PROPERTY_X86_ISA_1_NEEDED = 0xC0008002
-_X86_ISA_1_LEVEL_TOKENS: tuple[tuple[int, str], ...] = (
-    (0x1, "x86-64-baseline"),
-    (0x2, "x86-64-v2"),
-    (0x4, "x86-64-v3"),
-    (0x8, "x86-64-v4"),
-)
-
-
-def _decode_gnu_property_desc(
-    desc: bytes, little_endian: bool, align: int = 8
-) -> frozenset[str]:
-    """Parse a NT_GNU_PROPERTY_TYPE_0 note description into feature tokens.
-
-    The description is a sequence of properties, each laid out as
-    ``pr_type (u32) | pr_datasz (u32) | pr_data[pr_datasz] | pad``. Each
-    property is padded up to *align* bytes — 8 for ELFCLASS64, **4** for
-    ELFCLASS32 — so a wrong alignment skips or misreads later properties. Only
-    the x86 and AArch64 control-flow-protection AND-features are decoded.
-    """
-    endian = "<" if little_endian else ">"
-    tokens: set[str] = set()
-    off = 0
-    n = len(desc)
-    while off + 8 <= n:
-        pr_type, pr_datasz = struct.unpack_from(endian + "II", desc, off)
-        off += 8
-        if off + pr_datasz > n:
-            break
-        data = desc[off : off + pr_datasz]
-        if pr_type == _GNU_PROPERTY_X86_FEATURE_1_AND and pr_datasz >= 4:
-            (bits,) = struct.unpack_from(endian + "I", data, 0)
-            if bits & _GNU_PROPERTY_X86_FEATURE_1_IBT:
-                tokens.add("IBT")
-            if bits & _GNU_PROPERTY_X86_FEATURE_1_SHSTK:
-                tokens.add("SHSTK")
-        elif pr_type == _GNU_PROPERTY_AARCH64_FEATURE_1_AND and pr_datasz >= 4:
-            (bits,) = struct.unpack_from(endian + "I", data, 0)
-            if bits & _GNU_PROPERTY_AARCH64_FEATURE_1_BTI:
-                tokens.add("BTI")
-            if bits & _GNU_PROPERTY_AARCH64_FEATURE_1_PAC:
-                tokens.add("PAC")
-        elif pr_type == _GNU_PROPERTY_X86_ISA_1_NEEDED and pr_datasz >= 4:
-            (bits,) = struct.unpack_from(endian + "I", data, 0)
-            for bit, token in _X86_ISA_1_LEVEL_TOKENS:
-                if bits & bit:
-                    tokens.add(token)
-        # Advance past pr_data, padded up to the class alignment.
-        off += (pr_datasz + align - 1) & ~(align - 1)
-    return frozenset(tokens)
-
-
-# NT_GNU_ABI_TAG (n_type 1, name "GNU"): 4 words — OS id (0 = Linux) followed
-# by the minimum required kernel version (major, minor, subminor).
-_NT_GNU_ABI_TAG_NAMES = frozenset({1, "NT_GNU_ABI_TAG"})
-_ELF_OSABI_TAG_LINUX = 0
-
-
-def _decode_abi_tag_desc(desc: bytes, little_endian: bool) -> str:
-    """Decode an NT_GNU_ABI_TAG description into a kernel-floor string.
-
-    Returns ``"major.minor.subminor"`` for a Linux tag, ``""`` for a non-Linux
-    OS id or a malformed description.
-    """
-    if len(desc) < 16:
-        return ""
-    endian = "<" if little_endian else ">"
-    os_id, major, minor, subminor = struct.unpack_from(endian + "IIII", desc, 0)
-    if os_id != _ELF_OSABI_TAG_LINUX:
-        return ""
-    return f"{major}.{minor}.{subminor}"
-
-
 def _parse_abi_tag(elf: ELFFile, meta: ElfMetadata, so_path: Path) -> None:
     """Read the minimum-kernel floor from the .note.ABI-tag section."""
     try:
@@ -354,7 +288,7 @@ def _parse_abi_tag(elf: ELFFile, meta: ElfMetadata, so_path: Path) -> None:
         if section is None or not hasattr(section, "iter_notes"):
             return
         for note in section.iter_notes():
-            if note.get("n_type") not in _NT_GNU_ABI_TAG_NAMES:
+            if note.get("n_type") not in NT_GNU_ABI_TAG_NAMES:
                 continue
             if note.get("n_name") not in (None, "GNU"):
                 continue
@@ -362,7 +296,7 @@ def _parse_abi_tag(elf: ELFFile, meta: ElfMetadata, so_path: Path) -> None:
             if isinstance(desc, str):
                 desc = desc.encode("latin-1", "replace")
             if isinstance(desc, (bytes, bytearray)):
-                floor = _decode_abi_tag_desc(bytes(desc), elf.little_endian)
+                floor = decode_abi_tag_desc(bytes(desc), elf.little_endian)
                 if floor:
                     meta.min_kernel_version = floor
                     return
@@ -385,8 +319,8 @@ def _parse_gnu_property(elf: ELFFile, meta: ElfMetadata, so_path: Path) -> None:
         # for ELFCLASS64, 4 bytes for ELFCLASS32.
         align = 4 if elf.elfclass == 32 else 8
         features: set[str] = set()
-        for desc in _iter_gnu_property_descs(elf):
-            features |= _decode_gnu_property_desc(desc, elf.little_endian, align)
+        for desc in iter_gnu_property_descs(elf):
+            features |= decode_gnu_property_desc(desc, elf.little_endian, align)
         meta.gnu_properties = frozenset(features)
     except Exception as exc:  # noqa: BLE001
         log.warning(
@@ -394,55 +328,6 @@ def _parse_gnu_property(elf: ELFFile, meta: ElfMetadata, so_path: Path) -> None:
             so_path,
             exc,
         )
-
-
-def _iter_gnu_property_descs(elf: ELFFile) -> Iterator[bytes]:
-    """Yield NT_GNU_PROPERTY_TYPE_0 description blobs from section or segment."""
-    section = elf.get_section_by_name(".note.gnu.property")
-    if section is not None and hasattr(section, "iter_notes"):
-        found = False
-        for note in section.iter_notes():
-            found = True
-            if note.get("n_type") not in _NT_GNU_PROPERTY_TYPE_0_NAMES:
-                continue
-            desc = note.get("n_descdata") or note.get("n_desc")
-            if isinstance(desc, str):
-                desc = desc.encode("latin-1", "replace")
-            if isinstance(desc, (bytes, bytearray)):
-                yield bytes(desc)
-        if found:
-            return
-    # Fallback: section absent / empty (stripped) — parse the PT_GNU_PROPERTY
-    # program segment's raw note bytes directly.
-    try:
-        segments = list(elf.iter_segments())
-    except Exception:  # noqa: BLE001
-        return
-    for seg in segments:
-        if getattr(seg.header, "p_type", None) != "PT_GNU_PROPERTY":
-            continue
-        yield from _parse_raw_notes(seg.data(), elf.little_endian)
-
-
-def _parse_raw_notes(data: bytes, little_endian: bool) -> Iterator[bytes]:
-    """Parse ELF notes from raw bytes, yielding GNU-property description blobs.
-
-    The note wrapper (namesz | descsz | n_type | name | desc) uses 4-byte
-    padding regardless of ELF class; only the property array *inside* the
-    description follows the class alignment (handled by the desc decoder).
-    """
-    endian = "<" if little_endian else ">"
-    off = 0
-    n = len(data)
-    while off + 12 <= n:
-        namesz, descsz, n_type = struct.unpack_from(endian + "III", data, off)
-        off += 12
-        name = data[off : off + namesz]
-        off += (namesz + 3) & ~3
-        desc = data[off : off + descsz]
-        off += (descsz + 3) & ~3
-        if n_type in _NT_GNU_PROPERTY_TYPE_0_NAMES and name.rstrip(b"\x00") == b"GNU":
-            yield desc
 
 
 _PF_X = 0x1
@@ -514,6 +399,20 @@ def _process_segment(seg: object, meta: ElfMetadata, so_path: Path) -> None:
 _VerIndexMap = dict[int, tuple[str, str, bool]]
 
 
+#: Sections whose loss changes the export table, SONAME or version facts.
+_EXPORT_BEARING_SECTIONS = frozenset(
+    {
+        ".dynsym",
+        ".symtab",
+        ".dynamic",
+        ".dynstr",
+        ".gnu.version",
+        ".gnu.version_d",
+        ".gnu.version_r",
+    }
+)
+
+
 def _parse_all_sections(
     elf: ELFFile, meta: ElfMetadata, so_path: Path
 ) -> tuple[GNUVerSymSection | None, SymbolTableSection | None, _VerIndexMap]:
@@ -560,6 +459,8 @@ def _parse_all_sections(
                 so_path,
                 exc,
             )
+            if section.name in _EXPORT_BEARING_SECTIONS:
+                note_export_read_failure(f"malformed {section.name} section: {exc}")
 
     # Relocatable objects (ET_REL `.o`, e.g. a probe-built object) carry no
     # `.dynsym` — their symbol surface lives in `.symtab`. Fall back to it so the
@@ -573,6 +474,7 @@ def _parse_all_sections(
             log.warning(
                 "parse_elf_metadata: skipping malformed .symtab in %s: %s", so_path, exc
             )
+            note_export_read_failure(f"malformed .symtab section: {exc}")
 
     # Merge: verdef entries take priority over verneed on index collision.
     ver_index_map: _VerIndexMap = {**verneed_index_map, **verdef_index_map}
@@ -1219,6 +1121,7 @@ def _parse_ver_entries(
         log.warning(
             "parse_elf_metadata: failed to read .gnu.version from %s: %s", so_path, exc
         )
+        note_export_read_failure(f"malformed .gnu.version section: {exc}")
         return None
     return ver_entries
 
@@ -1246,7 +1149,8 @@ def _correlate_symbol_versions(
 
     try:
         num_vers = ver_sym_section.num_symbols()
-    except Exception:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001
+        note_export_read_failure(f"malformed .gnu.version section: {exc}")
         return
 
     ver_entries = decode_versym(ver_sym_section, num_vers)

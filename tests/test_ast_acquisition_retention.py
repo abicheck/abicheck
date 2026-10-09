@@ -37,7 +37,7 @@ prevent and it is invisible to every other kind of test.
 
 from __future__ import annotations
 
-from abicheck.dumper_cache import (
+from abicheck.storage.header_ast_cache import (
     MAX_RETAINED_CONTEXT_GROUPS,
     AstAcquisitionScope,
     ast_acquisition_scope,

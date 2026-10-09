@@ -3,7 +3,7 @@
 
 Identical ABI/API — baseline control cases.
 
-_9 case(s)._ [← back to all examples](../index.md)
+_10 case(s)._ [← back to all examples](../index.md)
 
 | Case | Title | Verdict | Category |
 |------|-------|---------|----------|
@@ -16,3 +16,4 @@ _9 case(s)._ [← back to all examples](../index.md)
 | [case202_public_header_declaration_order_changed](../case202_public_header_declaration_order_changed.md) | Public Header Declaration Order Changed | ✅ NO_CHANGE | No Change |
 | [case206_deprecation_documented_without_attribute](../case206_deprecation_documented_without_attribute.md) | Deprecation Documented Without the Attribute | ✅ NO_CHANGE | No Change |
 | [case208_restrict_added_to_definition_only](../case208_restrict_added_to_definition_only.md) | `restrict` Added to the Definition Only | ✅ NO_CHANGE | No Change |
+| [case210_calling_convention_respelled_via_macro](../case210_calling_convention_respelled_via_macro.md) | Calling Convention Respelled via a Macro | ✅ NO_CHANGE | No Change |

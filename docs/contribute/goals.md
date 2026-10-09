@@ -42,7 +42,7 @@ Support everything ABICC currently does so existing users and pipelines can migr
 - JSON/HTML/Markdown reports with equivalent verdict semantics
 - Support for suppression files
 
-**Done:** 411 ChangeKinds implemented; YAML suppression files fully supported; ABICC compat CLI supports `-symbols-list` and `-types-list` whitelist flags (plain-text, one name per line); XML report generation for ABICC-compatible output; ABICC compat CLI with all major flags; auto-forwarding `abicheck compat <flags>` to `compat check`; test parity for ABICC 2.3. **Superseded (2026-10):** the `compat` CLI, descriptors and XML reports were removed before 0.6 (ADR-012, retired); detection parity with ABICC is still measured (`tests/test_abicc_parity.py`).
+**Done:** 414 ChangeKinds implemented; YAML suppression files fully supported; ABICC compat CLI supports `-symbols-list` and `-types-list` whitelist flags (plain-text, one name per line); XML report generation for ABICC-compatible output; ABICC compat CLI with all major flags; auto-forwarding `abicheck compat <flags>` to `compat check`; test parity for ABICC 2.3. **Superseded (2026-10):** the `compat` CLI, descriptors and XML reports were removed before 0.6 (ADR-012, retired); detection parity with ABICC is still measured (`tests/test_abicc_parity.py`).
 
 ---
 
@@ -142,7 +142,7 @@ Public documentation at <https://abicheck.github.io/abicheck/>:
 
 | Goal | Status |
 |------|--------|
-| G1: ABICC drop-in | Done, then retired — 411 ChangeKinds and suppression files remain; the compat CLI and XML reports were removed before 0.6 |
+| G1: ABICC drop-in | Done, then retired — 414 ChangeKinds and suppression files remain; the compat CLI and XML reports were removed before 0.6 |
 | G2: Known gaps | DWARF layout, toolchain flags, AST-DWARF dedup, confidence tracking, canonical evidence tier (ELF_ONLY/DWARF_AWARE/HEADER_AWARE) done |
 | G3: libabigail tests | Done — ~54 parity test functions + 143 example cases |
 | G4: Agent-friendly | Done — JSON, SARIF, exit codes, snapshots, typed Python API, GitHub Action (an MCP server shipped and was later removed) |

@@ -12,10 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""``ResolvedDumpRequest`` -- split out of :mod:`abicheck.service_dump_pipeline`.
+"""``ResolvedDumpRequest`` -- split out of :mod:`abicheck.workflows.dump.pipeline`.
 
 ADR-063 Track T4 ("Dump request contract"): this dataclass carries zero
-dependency on :class:`~abicheck.service_dump_pipeline.DumpResult` or
+dependency on :class:`~abicheck.workflows.dump.pipeline.DumpResult` or
 anything else in that module, so it can live in a real ADR-061
 responsibility-package leaf (``workflows/artifact/``, the same layer
 ``service_dump_pipeline.py`` is itself classified into via
@@ -24,7 +24,7 @@ of growing that flat module further.
 
 The direct motivation: :mod:`abicheck.workflows.artifact.execute_source_only`
 needs this type for its own function signature, and
-:mod:`abicheck.service_dump_pipeline` needs to call that function -- a type
+:mod:`abicheck.workflows.dump.pipeline` needs to call that function -- a type
 importable only from ``service_dump_pipeline.py`` itself would force a
 module-level import back into it, which the AI-readiness
 ``import-cycle-growth`` gate's cycle scan (an AST walk that does not
@@ -33,7 +33,7 @@ new two-module cycle regardless of how the import is spelled. Both modules
 importing this type from one shared, one-directional leaf avoids the cycle
 outright. ``service_dump_pipeline.py`` re-exports the name
 (``ResolvedDumpRequest as ResolvedDumpRequest``) so every existing
-``from abicheck.service_dump_pipeline import ResolvedDumpRequest`` import,
+``from abicheck.workflows.dump.pipeline import ResolvedDumpRequest`` import,
 ``isinstance`` check, and ``dataclasses.replace(...)`` call site is
 unaffected -- it is the identical class object, not a copy.
 """

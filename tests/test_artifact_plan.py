@@ -243,7 +243,7 @@ def test_resolve_dump_request_attaches_a_matching_artifact_plan(
     land on the general ResolvedArtifactPlan it attaches, verbatim -- not a
     second, independently-derived copy that could drift."""
     from abicheck.service import DumpRequest, InputSpec
-    from abicheck.service_dump_pipeline import resolve_dump_request
+    from abicheck.workflows.dump.pipeline import resolve_dump_request
 
     resolved = resolve_dump_request(
         DumpRequest(input=InputSpec(path=snap_path, headers=()))

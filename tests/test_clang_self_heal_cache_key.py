@@ -53,9 +53,10 @@ from pathlib import Path
 
 import pytest
 
-from abicheck import dumper, dumper_ast_config, dumper_cache, dumper_clang
+from abicheck import dumper, dumper_ast_config, dumper_clang
 from abicheck.dumper_ast_config import _cache_key
 from abicheck.extract.headers.clang.backend import clang_header_dump
+from abicheck.storage import header_ast_cache as dumper_cache
 
 
 def _fake_proc(stdout: str = "", stderr: str = "", returncode: int = 0):

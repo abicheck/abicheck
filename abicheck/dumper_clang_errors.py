@@ -37,10 +37,6 @@ from pathlib import Path
 from typing import Any, cast
 
 from . import deadline
-from .dumper_cache import (
-    ast_acquisition_active,
-    ast_memoize_active,
-)
 from .errors import SnapshotError
 from .extract.env_flags import env_flag
 from .extract.headers.clang.error_header_retry import _DIRECT_INCLUDE_GUARD_RE
@@ -52,6 +48,10 @@ from .storage.acyclic_json import gc_paused
 from .storage.ast_parse_exclusions import record_parse_exclusions
 from .storage.ast_size_observer import mark_ast_intake, report_ast_size
 from .storage.derived_ast import offer_derived_ast_source
+from .storage.header_ast_cache import (
+    ast_acquisition_active,
+    ast_memoize_active,
+)
 from .storage.json_chunked_write import _atomic_write_json
 from .storage.json_compact import CompactedAst, compacted_ast
 from .sycl_context import decode_and_select_frontend_context_from_path

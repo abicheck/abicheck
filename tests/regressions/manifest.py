@@ -719,9 +719,13 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
             # Lane C stage 5: a recognised consumer binary whose import table
             # failed to parse read as "requires nothing" -> NO_CHANGE/100%.
             "tests/unit/workflows/test_failed_consumer_read.py",
+            # Lane C stage 6: a library whose export table was not read
+            # (parse failure, skipped .dynsym, parse-failed stored block)
+            # read as "exports nothing" -> every required symbol "missing".
+            "tests/unit/extract/test_library_export_read_failures.py",
         ),
-        # Only test_failed_consumer_read.py reaches a public surface: its
-        # integration test drives `abicheck compare --used-by` end to end.
+        # Only the two consumer-scoping seeds reach a public surface: their
+        # integration tests drive `abicheck compare --used-by` end to end.
         public_surfaces=("cli",),
         known_gaps=(
             KnownGap(
@@ -738,8 +742,9 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
                     "Most seed tests call `abicheck.checker.compare` "
                     "directly on hand-built snapshots — real detection "
                     "logic, but no CLI/python-api/exit-code layer. Only "
-                    "`test_failed_consumer_read.py` drives the CLI and "
-                    "checks an exit code, and it does not cross-check "
+                    "`test_failed_consumer_read.py` and "
+                    "`test_library_export_read_failures.py` drive the CLI "
+                    "and check an exit code, and they do not cross-check "
                     "report/gate/exit-code agreement (the second half of "
                     "this class's own invariant) independently. Incident "
                     "#883's own gap — a dropped `policy_file` reaching "

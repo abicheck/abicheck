@@ -46,7 +46,7 @@ from concurrent.futures import Future
 
 import pytest
 
-from abicheck.dumper_cache import (
+from abicheck.storage.header_ast_cache import (
     MAX_RETAINED_CONTEXT_GROUPS,
     MAX_RETAINED_RAW_ENTRIES,
     AstAcquisitionScope,

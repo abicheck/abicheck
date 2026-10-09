@@ -66,6 +66,7 @@ subjects:
     blurb: "The generated calling convention, parameter-passing model, or a platform's integer/floating-point width for a type changes -- callers and callees stop agreeing on the machine-level contract even though no symbol name changed."
     cases:
       - case64_calling_convention_changed
+      - case209_calling_convention_changed_via_macro
       - case66_language_linkage_changed
       - case69_trivial_to_nontrivial
       - case112_lp64_ilp64
@@ -161,6 +162,7 @@ subjects:
       - case199_public_function_parameter_added
       - case201_public_function_parameters_reordered
       - case207_pointer_parameter_gained_restrict
+      - case211_return_pointee_gained_const
 
   inheritance-layout-and-base-subobjects:
     title: "Inheritance layout and base subobjects"
@@ -272,6 +274,7 @@ subjects:
       - case204_class_gained_non_virtual_method
       - case206_deprecation_documented_without_attribute
       - case208_restrict_added_to_definition_only
+      - case210_calling_convention_respelled_via_macro
 
   struct-and-type-layout-changes:
     title: "Struct and type layout changes"

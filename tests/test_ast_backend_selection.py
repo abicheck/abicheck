@@ -177,7 +177,7 @@ class TestResolveDumpRequestUsesTheSharedSelector:
         from abicheck.model import AbiSnapshot
         from abicheck.serialization import snapshot_to_json
         from abicheck.service import DumpRequest, InputSpec
-        from abicheck.service_dump_pipeline import resolve_dump_request
+        from abicheck.workflows.dump.pipeline import resolve_dump_request
 
         snap_path = tmp_path / "lib.abi.json"
         snap_path.write_text(

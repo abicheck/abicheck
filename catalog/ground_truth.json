@@ -441,24 +441,15 @@
   },
   "case111_enumerable_thread_specific_lambda_ambiguity": {
    "abi_break": false,
-   "api_break": true,
+   "api_break": false,
    "bad_practice": true,
-   "category": "api_break",
-   "description": "A second constructor overload accepting `std::function<int()>` is added next to the existing `int`-form constructor. By itself this looks like a pure addition \u2014 existing call sites that pass an int still resolve to the original constructor. But this case's own source_smoke proves the real failure mode: brace-initialization (`ets({})`) becomes an ambiguous overload at downstream call sites, so recompilation against v2 fails while already-built v1 binaries keep working \u2014 the textbook definition of API_BREAK. Member of the oneTBB regression suite.",
-   "expected": "API_BREAK",
-   "detectability": "none",
-   "observed_detector_behavior": {
-    "verdict": "COMPATIBLE",
-    "kinds": [
-     "func_added"
-    ]
-   },
+   "category": "risk",
+   "description": "A second constructor overload, enumerable_thread_specific(int_factory_t), joins the existing explicit enumerable_thread_specific(int). Built binaries are unaffected and `ets(42)` still resolves to the int form, but both parameters are scalars, so an empty braced argument converts to either by the identity conversion: `mylib::enumerable_thread_specific ets({});` compiles against v1 and is ambiguous against v2 (this case's source_smoke). abicheck reports it as overload_ambiguity_introduced with the witness call `mylib::enumerable_thread_specific({})`. Only consumers that write such a call break, so the default gate is a conditional risk (COMPATIBLE_WITH_RISK) and the proven source break is recorded in conditional_breaks -- the same fact/gate split as case186. Mirrors a oneTBB pain point (adding factory-accepting constructor overloads to handle types); a function-pointer factory stands in for std::function<int()> because libstdc++ 13's <functional> trips castxml.",
+   "expected": "COMPATIBLE_WITH_RISK",
    "expected_kinds": [
-    "func_added"
+    "overload_ambiguity_introduced"
    ],
-   "known_detector_gap": "constructor_overload_ambiguity",
-   "known_gap": "The tool genuinely cannot see this case's real failure mode: this case's own source_smoke proves recompilation against v2 fails (ambiguous overload resolution for `ets({})`), which is an API_BREAK by the project's own definitions. No snapshot-level detector exists that reasons about downstream overload-resolution ambiguity for newly-added constructor overloads (unlike case169_overload_added's OVERLOAD_ADDED, which only groups same-named *free-function* overloads by Itanium mangling). From symbols/DWARF/headers alone the only observable fact is a pure func_added, so every current evidence tier (L0-L5) reaches COMPATIBLE, not the canonical API_BREAK \u2014 this is a real, currently-unfixed detector gap, not an evidence-depth limitation like case105's concept tightening (which L4 source-ABI replay does catch). `expected` records the canonical scenario truth (API_BREAK, proven by source_smoke); the mismatch against every lane's actual COMPATIBLE output is the known gap itself, not a reason to weaken the canonical verdict to match current tool behavior. `expected_kinds` records the same `func_added` that `observed_detector_behavior.kinds` does \u2014 the actual, insufficient, currently-observed detector output \u2014 not a calibration target that proves API_BREAK; `detectability: none` (and the derived `min_evidence: none`, see scripts/evidence_tiers.py) is the explicit signal that no L0-L5 tier proves the canonical verdict, so `min_evidence` must not be misread as \"L0 already sees this.\" Tracked as a real detector gap \u2014 a constructor-overload-ambiguity detector is the natural home for this; see case105 concept tightening for the sibling 'needs call-site context' pattern.",
-   "min_evidence": "none",
+   "min_evidence": "L2",
    "platforms": [
     "linux",
     "macos"
@@ -475,7 +466,15 @@
      "code": "#include \"v2.h\"\nint main() {\n    mylib::enumerable_thread_specific ets({});\n    return ets.local();\n}\n",
      "expect": "failure"
     }
-   }
+   },
+   "conditional_breaks": [
+    {
+     "kind": "api",
+     "consumer_condition": "the consumer constructs the object with an empty braced argument (`enumerable_thread_specific ets({});`), or passes `{}` where both overloads take a scalar",
+     "evidence": "source_smoke",
+     "gate": "Not blocking by default (COMPATIBLE_WITH_RISK, exit 0): `ets(42)` and every typed argument still resolve. A project that promises source compatibility for brace-initialized calls gates overload_ambiguity_introduced."
+    }
+   ]
   },
   "case112_lp64_ilp64": {
    "abi_break": true,
@@ -773,7 +772,7 @@
    "api_break": true,
    "bad_practice": false,
    "category": "breaking",
-   "description": "Distilled from intel/llvm PR #20821 (the `abi-break`-labelled change that swapped `std::shared_ptr<device_impl>` for a raw `device_impl*` inside `sycl::device`, surfacing as issue #20915 / fix #21028). The shared_ptr member is two pointers (16 bytes) on LP64; the raw pointer is one (8 bytes), so sizeof(sycl::device) shrinks 16->8 \u2014 an ABI break for every consumer that holds a device by value or embeds it. The method mangled names are unchanged, so a pure exported-symbol dump (sycl_symbols_*.dump) does not see the layout change directly. DWARF (L1, from the real compiled .so's) independently detects the 16->8 shrink and reports struct_size_changed; the AST-side type_size_changed does not fire because v1's real std::shared_ptr<device_impl> from <memory> fails castxml, falls back to the clang JSON-AST backend, which cannot compute record layout, leaving size_bits None for v1 \u2014 the null-evidence guard in diff_types.py correctly declines to emit a size-change finding from absent data rather than guessing. struct_size_changed is the kind this case actually calibrates.",
+   "description": "Distilled from intel/llvm PR #20821 (the `abi-break`-labelled change that swapped `std::shared_ptr<device_impl>` for a raw `device_impl*` inside `sycl::device`, surfacing as issue #20915 / fix #21028). The shared_ptr member is two pointers (16 bytes) on LP64; the raw pointer is one (8 bytes), so sizeof(sycl::device) shrinks 16->8 -- an ABI break for every consumer that holds a device by value or embeds it. The method mangled names are unchanged, so a pure exported-symbol dump (sycl_symbols_*.dump) does not see the layout change directly. The header AST resolves both record layouts and reports the 16->8 shrink as type_size_changed, the kind this case calibrates; DWARF from the real compiled .so's carries the same fact independently.",
    "expected": "BREAKING",
    "expected_kinds": [
     "type_size_changed"
@@ -2034,7 +2033,15 @@
      "expect": "failure",
      "code": "#include \"v2.h\"\n/* An old consumer that registers the entry point as a callback of the type\n   v1 published. In C this assignment is a constraint violation once the\n   function's type differs (GCC 13 only warns by default, GCC 14+ and C++\n   reject it), so the smoke states the same requirement as a hard check. */\nvoid (*callback)(char *) = send_buffer;\n_Static_assert(__builtin_types_compatible_p(__typeof__(send_buffer), void(char *)),\n               \"send_buffer is no longer a void(char *): void (*)(char *) callbacks break\");\nint main(void) { return callback != 0 ? 0 : 1; }\n"
     }
-   }
+   },
+   "conditional_breaks": [
+    {
+     "kind": "api",
+     "consumer_condition": "the consumer stores send_buffer in a function pointer of v1's type (void (*)(char *)) -- callback tables, plugin registration",
+     "evidence": "source_smoke",
+     "gate": "Not blocking by default (COMPATIBLE_WITH_RISK, exit 0): consumers are unknown and direct calls are unaffected. A project that promises source compatibility for function-pointer use gates param_pointee_qualifier_added (e.g. severity: error for that kind)."
+    }
+   ]
   },
   "case187_public_struct_private_field_type": {
    "abi_break": true,
@@ -4086,7 +4093,15 @@
     "func_params_changed"
    ],
    "behavioral_break": true,
-   "behavioral_note": "Demonstrated by the runtime witness: an overlapping old consumer gets a different result after the swap under GCC and Clang at -O3."
+   "behavioral_note": "Demonstrated by the runtime witness: an overlapping old consumer gets a different result after the swap under GCC and Clang at -O3.",
+   "conditional_breaks": [
+    {
+     "kind": "behavioral",
+     "consumer_condition": "the consumer passes overlapping buffers to blend() (e.g. an in-place prefix sum, dst = buf + 1, src = buf)",
+     "evidence": "runtime_witness",
+     "gate": "Not blocking by default (COMPATIBLE_WITH_RISK, exit 0): consumers that never alias the arguments are unaffected. A project whose contract permits overlapping arguments gates param_restrict_added."
+    }
+   ]
   },
   "case208_restrict_added_to_definition_only": {
    "abi_break": false,
@@ -4107,6 +4122,75 @@
    "truth_scope": "declared-interface",
    "behavioral_break": true,
    "behavioral_note": "Not a compatibility claim for the release. The declaration consumers compile against is unchanged, so NO_CHANGE is the truth only for the declared interface (and this case's job is to be the no-header-diff detection control for case207). The implementation does break a valid old consumer: with restrict on the -O3 definition, the same overlapping prefix-sum call that works against v1 returns 1,3,5,7,9,... against v2 under GCC and Clang (runtime witness). A binary/header detector cannot infer that from artifacts whose declared contract is identical; it is an implementation-behavior regression, recorded here so NO_CHANGE is never read as 'safe to ship'."
+  },
+  "case209_calling_convention_changed_via_macro": {
+   "abi_break": true,
+   "api_break": false,
+   "architectures": [
+    "x86_64"
+   ],
+   "bad_practice": false,
+   "category": "breaking",
+   "description": "Macro-spelled sibling of case64_calling_convention_changed. The public header is textually identical between versions -- vector_dot/vector_scale are declared `double MATHLIB_CALL vector_dot(...)` -- and only the included config header changes MATHLIB_CALL from __attribute__((sysv_abi)) (the System V default, spelled explicitly) to __attribute__((ms_abi)). Parameters now arrive in rcx/rdx/r8 instead of rdi/rsi/rdx, so an unchanged old consumer reads stale registers (CALLING_CONVENTION_CHANGED). Calibrates that the convention is recovered after macro expansion under both header backends -- CastXML drops GNU x86-64 conventions from its own output and the declaration text alone does not name them -- not only when it is spelled literally.",
+   "expected": "BREAKING",
+   "expected_kinds": [
+    "calling_convention_changed"
+   ],
+   "min_evidence": "L1",
+   "platforms": [
+    "linux"
+   ]
+  },
+  "case210_calling_convention_respelled_via_macro": {
+   "abi_break": false,
+   "api_break": false,
+   "architectures": [
+    "x86_64"
+   ],
+   "bad_practice": false,
+   "category": "no_change",
+   "description": "Negative control for case209_calling_convention_changed_via_macro. v1 declares vector_dot/vector_scale with a literal __attribute__((ms_abi)); v2 declares the identical convention through `#define MATHLIB_CALL __attribute__((ms_abi))` / `MATHLIB_CALL double vector_dot(...)`. Both libraries are built ms_abi, so the binary interface is identical and an unchanged old consumer works against either. A respelling of the same convention must not be read as a convention change or a return/declaration change: calling_convention_changed and func_return_changed must stay absent under every header backend.",
+   "expected": "NO_CHANGE",
+   "expected_absent_kinds": [
+    "calling_convention_changed",
+    "func_return_changed"
+   ],
+   "expected_kinds": [],
+   "min_evidence": "L2",
+   "platforms": [
+    "linux"
+   ]
+  },
+  "case211_return_pointee_gained_const": {
+   "abi_break": false,
+   "api_break": true,
+   "bad_practice": false,
+   "category": "api_break",
+   "description": "get_name()'s return type changes from char * to const char *. The binary interface is unchanged on the tested target (the same pointer in the same return register), so every prebuilt consumer keeps working. It is a source break: a caller that stores the result in a plain char * -- `char *p = get_name();`, which v1 permits -- is a constraint violation in C (GCC 14+ and Clang with -Werror, every C++ compiler, reject it). Reported as func_return_pointee_qualifier_added (API_BREAK). func_return_changed must stay absent: the return type's binary representation did not change. Closes the source-api.signature-change-source-only taxonomy leaf.",
+   "expected": "API_BREAK",
+   "expected_absent_kinds": [
+    "func_return_changed"
+   ],
+   "expected_kinds": [
+    "func_return_pointee_qualifier_added"
+   ],
+   "min_evidence": "L2",
+   "platforms": [
+    "linux"
+   ],
+   "source_smoke": {
+    "mode": "syntax",
+    "proof": "consumer assignment smoke: `char *p = get_name();` compiles against v1 and is rejected against v2 (get_name() no longer returns char *)",
+    "standard": "c11",
+    "v1": {
+     "expect": "success",
+     "code": "#include \"v1.h\"\n/* An old consumer that stores the returned name in a plain char *, which\n   v1's declaration permits. In C this initialisation is a constraint\n   violation once the pointee is const (GCC 13 only warns by default, GCC 14+\n   and C++ reject it), so the smoke states the same requirement as a hard check. */\n_Static_assert(__builtin_types_compatible_p(__typeof__(get_name()), char *),\n               \"get_name() no longer returns char *: char *p = get_name(); breaks\");\nint main(void) { char *p = get_name(); return p != 0 ? 0 : 1; }\n"
+    },
+    "v2": {
+     "expect": "failure",
+     "code": "#include \"v2.h\"\n/* An old consumer that stores the returned name in a plain char *, which\n   v1's declaration permits. In C this initialisation is a constraint\n   violation once the pointee is const (GCC 13 only warns by default, GCC 14+\n   and C++ reject it), so the smoke states the same requirement as a hard check. */\n_Static_assert(__builtin_types_compatible_p(__typeof__(get_name()), char *),\n               \"get_name() no longer returns char *: char *p = get_name(); breaks\");\nint main(void) { char *p = get_name(); return p != 0 ? 0 : 1; }\n"
+    }
+   }
   }
  },
  "version": "4",

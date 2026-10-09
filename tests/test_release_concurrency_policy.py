@@ -381,7 +381,7 @@ class _Root:
 def test_release_completed_drops_every_completed_entry(
     grouped: int, ungrouped: int
 ) -> None:
-    from abicheck.dumper_cache import AstAcquisitionScope
+    from abicheck.storage.header_ast_cache import AstAcquisitionScope
 
     scope = AstAcquisitionScope()
     roots = [_Root(f"r{i}") for i in range(grouped)]
@@ -399,7 +399,7 @@ def test_release_completed_drops_every_completed_entry(
 
 
 def test_release_completed_keeps_in_flight_entries_and_their_groups() -> None:
-    from abicheck.dumper_cache import AstAcquisitionScope
+    from abicheck.storage.header_ast_cache import AstAcquisitionScope
 
     scope = AstAcquisitionScope()
     done_root, busy_root = _Root("done"), _Root("busy")

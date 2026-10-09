@@ -91,6 +91,7 @@ from .context import (
     visibility_and_surface_facts as _visibility_and_surface_facts,
 )
 from .inline_semantics import fold_inline_across_redeclarations, is_effectively_inline
+from .macro_qualifier import node_qualtype_without_macro_qualifiers
 from .param_kind import param_kind as _param_kind
 from .restrict_spelling import without_top_level_restrict
 from .return_type import return_type as _return_type
@@ -484,7 +485,7 @@ def parse_functions(
             # what DWARF already does for every member unconditionally
             # (`owner_class_of`'s own docstring).
             name = "::".join((*entry.scope, name))
-        qualtype = _qualtype(node)
+        qualtype = node_qualtype_without_macro_qualifiers(node)
         # ``raw_mangled`` distinguishes "clang genuinely emitted this
         # mangling" from "clang emitted none, and `mangled` fell back to
         # the bare name" -- ``node.get("mangledName", "")`` alone conflates

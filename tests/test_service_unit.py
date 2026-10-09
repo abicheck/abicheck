@@ -4560,7 +4560,7 @@ class TestRunDumpHeaderGraphSkippedForDwarfOnly:
         (gated on `ast_memoize_active()`) for a manifest dump's own TU
         parses too whenever they share this thread (a single TU, or
         `ABICHECK_TU_JOBS=1`)."""
-        from abicheck import dumper_cache
+        from abicheck.storage import header_ast_cache as dumper_cache
 
         p = tmp_path / "lib.so"
         p.write_bytes(b"\x7fELF" + b"\x00" * 100)

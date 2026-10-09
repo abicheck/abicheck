@@ -31,6 +31,7 @@ import pefile  # type: ignore[import-untyped]
 # Fact dataclasses live in the model package (ADR-061 Phase 5): this module
 # parses into them and re-exports them so the historical
 # ``from abicheck.pe_metadata import PeExport`` spelling keeps resolving.
+from .extract.parse_failures import note_export_read_failure
 from .model.fact import sync_present_facts
 from .model.pe_facts import (
     PeExport as PeExport,
@@ -56,12 +57,14 @@ def parse_pe_metadata(dll_path: Path) -> PeMetadata:
             st = os.fstat(f.fileno())
             if not stat.S_ISREG(st.st_mode):
                 log.warning("parse_pe_metadata: not a regular file: %s", dll_path)
+                note_export_read_failure(f"not a regular file: {dll_path}")
                 return PeMetadata()
 
         return _parse(dll_path)
     except Exception as exc:  # noqa: BLE001
         # Catch pefile.PEFormatError (only available when pefile is installed)
         log.warning("parse_pe_metadata: failed to parse %s: %s", dll_path, exc)
+        note_export_read_failure(f"PE parse failed: {exc}")
         return PeMetadata()
 
 

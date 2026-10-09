@@ -121,7 +121,7 @@ def test_compare_frontend_context_device_threaded_for_directory_inputs(
     now-removed `--frontend-context device`."""
     # ADR-061 Phase 4: patch the implementation owner -- `abicheck.cli` resolves
     # these lazily now, so a `setattr` there rebinds nothing the caller reads.
-    import abicheck.frontends.cli.commands.compare as cli_mod
+    import abicheck.frontends.cli.commands.compare_routing as cli_mod
 
     old_dir = tmp_path / "old"
     old_dir.mkdir()
@@ -150,7 +150,7 @@ def test_compare_frontend_context_host_threaded_for_directory_inputs(
     guard itself still rejecting an explicit ``compile.frontend_context``."""
     # ADR-061 Phase 4: patch the implementation owner -- `abicheck.cli` resolves
     # these lazily now, so a `setattr` there rebinds nothing the caller reads.
-    import abicheck.frontends.cli.commands.compare as cli_mod
+    import abicheck.frontends.cli.commands.compare_routing as cli_mod
 
     old_dir = tmp_path / "old"
     old_dir.mkdir()

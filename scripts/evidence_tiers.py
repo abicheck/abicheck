@@ -377,6 +377,9 @@ EVIDENCE_TIER_BY_KIND: dict[str, str] = {
     # header AST records (catalog case186). DWARF-only sides are declined.
     "param_pointee_qualifier_added": "L2",
     "param_pointee_qualifier_changed": "L2",
+    "func_return_pointee_qualifier_added": "L2",
+    "func_return_pointee_qualifier_removed": "L2",
+    "overload_ambiguity_introduced": "L2",
     # ── L2: CastXML schema-completeness (all castxml/header-only facts) ──
     "field_default_initializer_removed": "L2",
     "field_default_initializer_changed": "L2",
@@ -546,6 +549,9 @@ KINDLESS_CASE_TIER: dict[str, str] = {
     "case202_public_header_declaration_order_changed": "L2",
     "case206_deprecation_documented_without_attribute": "L2",
     "case208_restrict_added_to_definition_only": "L2",
+    # A calling convention respelled through a macro: the declaration text
+    # differs only in the public header AST, the binaries are identical.
+    "case210_calling_convention_respelled_via_macro": "L2",
 }
 
 

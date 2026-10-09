@@ -14,7 +14,7 @@ _13 case(s)._ [← back to all examples](../index.md)
 | [case108_task_class_removed](../case108_task_class_removed.md) | `task` Class Removed (historical ABI break — vtable angle) | 🔴 BREAKING | Breaking |
 | [case109_flow_graph_policy_renames](../case109_flow_graph_policy_renames.md) | flow::graph Policy Tag Renames | 🟠 API_BREAK | API Break |
 | [case110_concurrent_unordered_map_api_drift](../case110_concurrent_unordered_map_api_drift.md) | concurrent_unordered_map API Drift | 🔴 BREAKING | Breaking |
-| [case111_enumerable_thread_specific_lambda_ambiguity](../case111_enumerable_thread_specific_lambda_ambiguity.md) | enumerable_thread_specific Lambda-Init Ambiguity | 🟠 API_BREAK | API Break |
+| [case111_enumerable_thread_specific_lambda_ambiguity](../case111_enumerable_thread_specific_lambda_ambiguity.md) | enumerable_thread_specific Lambda-Init Ambiguity | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case112_lp64_ilp64](../case112_lp64_ilp64.md) | LP64 → ILP64 Integer-Model Switch (oneMKL MKL_INT 32→64) | 🔴 BREAKING | Breaking |
 | [case121_kernel_btf_struct_field_added](../case121_kernel_btf_struct_field_added.md) | Kernel BTF Struct Field Growth | 🔴 BREAKING | Breaking |
 | [case126_sycl_device_impl_ptr](../case126_sycl_device_impl_ptr.md) | SYCL `device` Impl Pointer — `shared_ptr` → Raw Pointer | 🔴 BREAKING | Breaking |

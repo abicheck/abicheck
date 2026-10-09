@@ -350,7 +350,10 @@ class TestRealDumpsMissOnGeneratedInputChange:
         header.write_text("struct S { int a; };\nint f(struct S*);\n")
 
         def castxml_runs() -> int:
-            return sum(1 for c in runs if "castxml" in Path(c[0]).name)
+            # Parse runs only, not the macro-table ``-E -dM`` sibling run.
+            return sum(
+                1 for c in runs if "castxml" in Path(c[0]).name and "-dM" not in c
+            )
 
         castxml_dump([header], [], "cc", lang="c", run=run)
         assert castxml_runs() == 1

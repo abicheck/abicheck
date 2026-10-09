@@ -30,10 +30,9 @@ between them:
 A consumer-import probe that could not read its input says so with
 :attr:`~abicheck.model.availability.FactStatus.FAILED` and a reason rather
 than a bare empty set (root ``AGENTS.md``: weaker evidence narrows
-conclusions). Library-side facts mark only an unrecognised format
-``FAILED``: the platform metadata parsers swallow their own errors and
-return empty metadata, so a library read that failed part-way still reads
-``PRESENT`` -- see ``docs/contribute/known-gaps.md``.
+conclusions). The same holds for a library: an unrecognised format, a
+parse that failed outright, or a symbol table the platform parser had to
+skip reads ``FAILED``, never as a library exporting nothing.
 """
 
 from __future__ import annotations
@@ -91,6 +90,12 @@ class ConsumerImportFacts:
     def is_readable(self) -> bool:
         """Was the file's binary format recognised at all?"""
         return self.binary_format is not None
+
+
+class LibraryExportsUnreadableError(ValueError):
+    """A library's export table could not be read, so no consumer can be
+    scoped against it: an unread table would prove every required symbol
+    missing (NEW) or narrow every requirement away (OLD)."""
 
 
 @dataclass(frozen=True)

@@ -94,6 +94,12 @@ from .request_inputs import (
     required_path as required_path,
 )
 
+#: One wording for a one-sided build-configuration matrix, on every route.
+PROBE_MATRIX_ONE_SIDED = (
+    "a build-configuration matrix needs both sides: --build-info old=<matrix> "
+    "--build-info new=<matrix>"
+)
+
 
 @dataclass(frozen=True)
 class OutputSpec:
@@ -389,6 +395,8 @@ class CompareRequest:
         """
         errors: list[str] = []
         errors += _lang_errors(self.lang)
+        if (self.old_probe_matrix is None) != (self.new_probe_matrix is None):
+            errors.append(PROBE_MATRIX_ONE_SIDED)
         if self.performance_profile is not None:
             try:
                 parse_performance_profile(self.performance_profile)
