@@ -59,13 +59,18 @@ from abicheck.workflows.consumer_scope import check_against, scope_diff_to_app
 _SHT_DYNSYM = "SHT_DYNSYM"
 
 
-def _elf_library(names: tuple[str, ...] = ("foo", "bar"), *, dynsym_at=None) -> bytes:
+def _elf_library(
+    names: tuple[str, ...] = ("foo", "bar"), *, dynsym_at=None, symtab=False
+) -> bytes:
     """A minimal ELF64 shared object exporting *names* from ``.dynsym``.
 
     *dynsym_at* overrides the ``.dynsym`` section's file offset, which leaves
     the ELF header and section table readable but the symbol table not.
+    *symtab* names it ``.symtab`` (``SHT_SYMTAB``) instead, the relocatable-
+    object fallback the parser reads when there is no ``.dynsym``.
     """
-    shstr = b"\0.shstrtab\0.dynstr\0.dynsym\0"
+    sym_name = b".symtab" if symtab else b".dynsym"
+    shstr = b"\0.shstrtab\0.dynstr\0" + sym_name + b"\0"
     dynstr = b"\0" + b"".join(n.encode() + b"\0" for n in names)
     syms, pos = b"\0" * 24, 1
     for n in names:  # STB_GLOBAL|STT_FUNC, defined in a non-zero section
@@ -96,7 +101,15 @@ def _elf_library(names: tuple[str, ...] = ("foo", "bar"), *, dynsym_at=None) -> 
         shdr(0, 0, 0, 0)
         + shdr(1, 3, o_shstr, len(shstr))
         + shdr(11, 3, o_dynstr, len(dynstr))
-        + shdr(19, 11, o_syms if dynsym_at is None else dynsym_at, len(syms), 2, 1, 24)
+        + shdr(
+            19,
+            2 if symtab else 11,
+            o_syms if dynsym_at is None else dynsym_at,
+            len(syms),
+            2,
+            1,
+            24,
+        )
     )
     return bytes(body) + table
 
@@ -374,3 +387,147 @@ def test_cli_refuses_a_stored_library_whose_table_was_not_read(tmp_path):
     assert "--used-by library:" in bad.output
     assert "export table was not read" in bad.output
     assert "Traceback" not in bad.output
+
+
+class TestEveryRecordedSite:
+    def test_skipped_symtab_fallback_is_failed(self, tmp_path):
+        path = _write(tmp_path, "obj.o", _elf_library(dynsym_at=10**6, symtab=True))
+        facts = read_library_export_facts(path)
+        assert facts.status is FactStatus.FAILED
+        assert ".symtab" in (facts.failure_reason or "")
+
+    def test_readable_symtab_fallback_is_present(self, tmp_path):
+        path = _write(tmp_path, "obj.o", _elf_library(symtab=True))
+        assert read_library_export_facts(path).status is FactStatus.PRESENT
+
+    @pytest.mark.parametrize(
+        "parse",
+        [
+            "abicheck.elf_metadata:parse_elf_metadata",
+            "abicheck.pe_metadata:parse_pe_metadata",
+            "abicheck.macho_metadata:parse_macho_metadata",
+        ],
+    )
+    @pytest.mark.skipif(not Path("/dev/null").exists(), reason="needs /dev/null")
+    def test_a_non_regular_file_is_recorded(self, parse):
+        import importlib
+
+        module, name = parse.split(":")
+        parser = getattr(importlib.import_module(module), name)
+        with recording_export_read_failures() as failures:
+            parser(Path("/dev/null"))
+        assert failures == ["not a regular file: /dev/null"]
+
+
+class _Note(dict):
+    pass
+
+
+class _Section:
+    def __init__(self, notes):
+        self._notes = notes
+
+    def iter_notes(self):
+        return iter(self._notes)
+
+
+class _Seg:
+    def __init__(self, p_type, data=b""):
+        self.header = type("H", (), {"p_type": p_type})()
+        self._data = data
+
+    def data(self):
+        return self._data
+
+
+class _Elf:
+    little_endian = True
+
+    def __init__(self, section=None, segments=None, segments_error=False):
+        self._section = section
+        self._segments = segments or []
+        self._segments_error = segments_error
+
+    def get_section_by_name(self, name):
+        return self._section
+
+    def iter_segments(self):
+        if self._segments_error:
+            raise ValueError("unreadable program headers")
+        return iter(self._segments)
+
+
+def _prop(pr_type: int, bits: int) -> bytes:
+    return struct.pack("<III", pr_type, 4, bits) + b"\0" * 4
+
+
+class TestElfNotes:
+    """``extract/elf_notes`` moved out of ``elf_metadata`` in this PR; its
+    decoders are checked against hand-packed note bytes."""
+
+    def test_aarch64_bti_and_pac(self):
+        from abicheck.extract.elf_notes import decode_gnu_property_desc
+
+        desc = _prop(0xC0000000, 0x3)
+        assert decode_gnu_property_desc(desc, True, 8) == {"BTI", "PAC"}
+
+    def test_x86_isa_needed_levels(self):
+        from abicheck.extract.elf_notes import decode_gnu_property_desc
+
+        desc = _prop(0xC0008002, 0x1 | 0x4)
+        assert decode_gnu_property_desc(desc, True, 8) == {
+            "x86-64-baseline",
+            "x86-64-v3",
+        }
+
+    def test_truncated_property_stops(self):
+        from abicheck.extract.elf_notes import decode_gnu_property_desc
+
+        desc = struct.pack("<II", 0xC0000002, 64) + b"\0" * 4
+        assert decode_gnu_property_desc(desc, True, 8) == frozenset()
+
+    def test_section_notes_with_string_desc(self):
+        from abicheck.extract.elf_notes import iter_gnu_property_descs
+
+        section = _Section(
+            [
+                _Note(n_type=1, n_desc=b"skip"),
+                _Note(n_type="NT_GNU_PROPERTY_TYPE_0", n_desc="ab"),
+                _Note(n_type=5, n_descdata=b"cd"),
+            ]
+        )
+        assert list(iter_gnu_property_descs(_Elf(section=section))) == [b"ab", b"cd"]
+
+    def test_segment_fallback(self):
+        from abicheck.extract.elf_notes import iter_gnu_property_descs
+
+        note = struct.pack("<III", 4, 4, 5) + b"GNU\0" + b"WXYZ"
+        elf = _Elf(segments=[_Seg("PT_LOAD"), _Seg("PT_GNU_PROPERTY", note)])
+        assert list(iter_gnu_property_descs(elf)) == [b"WXYZ"]
+
+    def test_unreadable_segments_yield_nothing(self):
+        from abicheck.extract.elf_notes import iter_gnu_property_descs
+
+        elf = _Elf(section=_Section([]), segments_error=True)
+        assert list(iter_gnu_property_descs(elf)) == []
+
+
+def test_cli_refuses_a_stored_unread_library_without_a_compiler(tmp_path):
+    """The ``compare --used-by`` translation, with no toolchain: a stored NEW
+    snapshot whose ELF block records no parse is refused with one line."""
+    from click.testing import CliRunner
+
+    from abicheck.cli import main
+    from abicheck.storage.snapshot_codec import save_snapshot
+
+    save_snapshot(_snap("1", ["foo"]), tmp_path / "old.json")
+    save_snapshot(_snap("2", None), tmp_path / "new.json")
+    app = _write(tmp_path, "app", _elf_library(names=()))
+    result = CliRunner().invoke(
+        main,
+        ["compare", str(tmp_path / "old.json"), str(tmp_path / "new.json"),
+         "--used-by", str(app)],
+    )  # fmt: skip
+    assert result.exit_code == 1, result.output
+    assert "--used-by library: libfoo.so.1: export table was not read" in result.output
+    assert "Traceback" not in result.output
