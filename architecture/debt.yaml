@@ -443,7 +443,7 @@
     },
     {
       "path": "abicheck/cli_compare_release_helpers.py",
-      "baseline_lines": 1847,
+      "baseline_lines": 1828,
       "target": "workflows-or-frontends",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -465,7 +465,7 @@
     },
     {
       "path": "abicheck/cli_compare_release_pairwise.py",
-      "baseline_lines": 834,
+      "baseline_lines": 805,
       "target": "workflows-or-frontends (already the release engine's per-library compare shim; each addition below is a keyword-only parameter forwarded onto an existing call, not extractable without splitting one function's argument list across files)",
       "rule": "no_growth",
       "disposition": "migrate",

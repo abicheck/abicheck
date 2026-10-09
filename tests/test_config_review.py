@@ -718,6 +718,21 @@ def _gate(preset, abi=None, potential=None, quality=None, addition=None):
     return GateOptions(severity_preset=preset, severity=severity)
 
 
+def _member(diff, gate):  # type: ignore[no-untyped-def]
+    """A release member entry stamped the way the fan-out stamps it."""
+    from abicheck.workflows.member_compare import stamp_member_exit_contributions
+
+    entry: dict[str, object] = {"library": diff.library}
+    stamp_member_exit_contributions(
+        entry,
+        diff,
+        gate.severity,
+        require_complete_analysis=False,
+        contract_evaluation=False,
+    )
+    return entry
+
+
 class TestComputeReleaseSeverityExitCode:
     def test_none_without_flags(self):
         from abicheck.cli_compare_release import _compute_release_severity_exit_code
@@ -732,11 +747,18 @@ class TestComputeReleaseSeverityExitCode:
     def test_aggregates_breaking_change(self):
         from abicheck.cli_compare_release import _compute_release_severity_exit_code
 
-        entry = {"library": "libtest.so", "_diff_result": _breaking_diff()}
         # default preset: abi_breaking == error -> exit 4.
-        assert _compute_release_severity_exit_code([entry], _gate("default")) == 4
+        gate = _gate("default")
+        assert (
+            _compute_release_severity_exit_code([_member(_breaking_diff(), gate)], gate)
+            == 4
+        )
         # info-only downgrades everything below error -> exit 0.
-        assert _compute_release_severity_exit_code([entry], _gate("info-only")) == 0
+        gate = _gate("info-only")
+        assert (
+            _compute_release_severity_exit_code([_member(_breaking_diff(), gate)], gate)
+            == 0
+        )
 
 
 class TestReleaseSeverityPolicyAndGlobal:
@@ -754,8 +776,13 @@ class TestReleaseSeverityPolicyAndGlobal:
         diff.policy_file = PolicyFile(
             overrides={c.kind: Verdict.COMPATIBLE for c in diff.changes}
         )
-        entry = {"_diff_result": diff}
-        assert _compute_release_severity_exit_code([entry], _gate("default")) == 0
+        gate = _gate("default")
+        # Control: the same diff without the override does gate.
+        assert (
+            _compute_release_severity_exit_code([_member(_breaking_diff(), gate)], gate)
+            == 4
+        )
+        assert _compute_release_severity_exit_code([_member(diff, gate)], gate) == 0
 
     def test_per_library_honours_frozen_namespace_floor(self):
         """Codex review on #549: a policy-file override that demotes a kind
@@ -781,11 +808,11 @@ class TestReleaseSeverityPolicyAndGlobal:
             verdict=Verdict.BREAKING,
             policy_file=pf,
         )
-        entry = {"_diff_result": diff}
         # default preset: abi_breaking == error. Without the policy_file floor
         # this would wrongly exit 0 (the override demotes FUNC_REMOVED to
         # COMPATIBLE); the frozen guard must keep it at its raw BREAKING exit.
-        assert _compute_release_severity_exit_code([entry], _gate("default")) == 4
+        gate = _gate("default")
+        assert _compute_release_severity_exit_code([_member(diff, gate)], gate) == 4
 
     def test_format_release_junit_forwards_severity_config(self):
         """Codex review on #549: `compare-release --format junit` with a
