@@ -126,31 +126,31 @@ def _expand_cc_macros_on_lines(window: str, macros: dict[str, str]) -> str:
     )
 
 
-def source_calling_conventions(
-    ctx: CastxmlParserContext, el: Element, name: str
-) -> set[str]:
-    """Calling conventions the declaration *el* spells in its own text.
-
-    Empty when the location is unknown, the file is unreadable or the name
-    cannot be found at the reported line.
-    """
+def _declaration_lines(
+    ctx: CastxmlParserContext, el: Element
+) -> tuple[list[str], int] | None:
+    """The source lines of *el*'s file and its 1-based line, or ``None``."""
     file_el = ctx.id_map.get(el.get("file", ""))
     line_raw = el.get("line", "")
-    if file_el is None or not line_raw.isdigit() or not name:
-        return set()
-    fname = file_el.get("name", "")
-    if not fname:
-        return set()
+    fname = file_el.get("name", "") if file_el is not None else ""
+    if not fname or not line_raw.isdigit():
+        return None
     lines = ctx.source_lines_cache.get(fname)
     if lines is None:
         try:
             lines = Path(fname).read_text(encoding="utf-8").splitlines()
         except (OSError, UnicodeDecodeError):
-            return set()
+            return None
         ctx.source_lines_cache[fname] = lines
     line_no = int(line_raw)
-    if not 1 <= line_no <= len(lines):
-        return set()
+    return (lines, line_no) if 1 <= line_no <= len(lines) else None
+
+
+def _code_window(
+    ctx: CastxmlParserContext, lines: list[str], line_no: int
+) -> tuple[str, int, int]:
+    """The code around *line_no* (comments/literals blanked, convention
+    macros expanded) and the reported line's ``[start, end)`` offsets."""
     start = max(0, line_no - 1 - _LOOKBACK_LINES)
     before = "\n".join(lines[start : line_no - 1])
     here_and_after = "\n".join(lines[line_no - 1 : line_no - 1 + _LOOKAHEAD_LINES])
@@ -162,7 +162,21 @@ def source_calling_conventions(
     target = before.count("\n") + 1
     line_start = sum(len(ln) + 1 for ln in window.split("\n")[:target])
     line_end = window.find("\n", line_start)
-    line_end = len(window) if line_end == -1 else line_end
+    return window, line_start, len(window) if line_end == -1 else line_end
+
+
+def source_calling_conventions(
+    ctx: CastxmlParserContext, el: Element, name: str
+) -> set[str]:
+    """Calling conventions the declaration *el* spells in its own text.
+
+    Empty when the location is unknown, the file is unreadable or the name
+    cannot be found at the reported line.
+    """
+    located = _declaration_lines(ctx, el) if name else None
+    if located is None:
+        return set()
+    window, line_start, line_end = _code_window(ctx, *located)
     # Every spelling of ``name(`` on the reported line, not the first: the
     # line may also carry an expression or another declaration naming it,
     # and a first-match search would let that shadow the real declaration
@@ -174,6 +188,7 @@ def source_calling_conventions(
         found |= calling_conventions_in(
             _declaration_outside_params(window, name, match.start())
         )
+    table = ctx.cc_macro_table
     if table is not None and table.default_cc:
         # Spelling the target's default convention changes nothing.
         found.discard(table.default_cc)
