@@ -223,7 +223,7 @@ class TestNotComparableExitCode:
             "abicheck.service.compare_snapshots", _fake_compare_snapshots
         )
         monkeypatch.setattr(
-            "abicheck.service_render.to_markdown", lambda _r, **_kw: "REPORT"
+            "abicheck.frontends.render.to_markdown", lambda _r, **_kw: "REPORT"
         )
 
         result = CliRunner().invoke(
@@ -269,7 +269,7 @@ class TestNotComparableExitCode:
             ),
         )
         monkeypatch.setattr(
-            "abicheck.service_render.to_markdown", lambda _r, **_kw: "REPORT"
+            "abicheck.frontends.render.to_markdown", lambda _r, **_kw: "REPORT"
         )
 
         result = CliRunner().invoke(
@@ -332,7 +332,7 @@ class TestNotComparableExitCode:
             ),
         )
         monkeypatch.setattr(
-            "abicheck.service_render.to_markdown", lambda _r, **_kw: "REPORT"
+            "abicheck.frontends.render.to_markdown", lambda _r, **_kw: "REPORT"
         )
 
         result = CliRunner().invoke(

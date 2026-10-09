@@ -429,8 +429,7 @@
         "abicheck/dry_run.py",
         "abicheck/config_paths.py",
         "abicheck/__main__.py",
-        "abicheck/service.py",
-        "abicheck/service_render.py"
+        "abicheck/service.py"
       ]
     }
   },
@@ -481,7 +480,6 @@
       "service_dump_pipeline.py",
       "service_header_graph_attach.py",
       "service_header_scoped.py",
-      "service_render.py",
       "dry_run_estimate.py"
     ],
     "reporter_": [
@@ -835,7 +833,6 @@
     "service_dump_pipeline.py",
     "service_header_graph_attach.py",
     "service_header_scoped.py",
-    "service_render.py",
     "dry_run_estimate.py",
     "snapshot_cache.py",
     "snapshot_io.py",

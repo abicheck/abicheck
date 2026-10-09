@@ -3618,7 +3618,7 @@ class TestRenderOutput:
         # (service_render.ONELINE_FORMAT), reached only via the built-in
         # `quick` --profile at the CLI layer, but directly callable here as
         # a plain fmt string like any other format.
-        from abicheck.service_render import ONELINE_FORMAT
+        from abicheck.frontends.render import ONELINE_FORMAT
 
         out = render_output(ONELINE_FORMAT, diff_result, snap)
         assert isinstance(out, str)

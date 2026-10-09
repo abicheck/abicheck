@@ -12,7 +12,7 @@ exists to provide, for JSON and (below) SARIF's own reuse of it:
 - rendering the shared document produces byte-identical JSON to the
   previous per-call ``to_json`` pipeline (no behavior change from the
   refactor);
-- ``abicheck.service_render.render_output`` calls the shared build exactly
+- ``abicheck.frontends.render.render_output`` calls the shared build exactly
   once per top-level render for the JSON format, never once per format
   branch and never twice for one JSON render.
 """
@@ -33,6 +33,7 @@ from unittest import mock
 import pytest
 
 from abicheck.checker import Change, ChangeKind, DiffResult, LibraryMetadata, Verdict
+from abicheck.frontends.render import render_envelope, render_output
 from abicheck.junit_report import to_junit_xml
 from abicheck.model import AbiSnapshot, DependencyInfo, Function
 from abicheck.policy.disposition_close import finalize_ledger
@@ -51,7 +52,6 @@ from abicheck.report.envelope import RenderOptions, ReportEnvelope
 from abicheck.report.render_json import render_json
 from abicheck.reporter import to_json
 from abicheck.sarif import to_sarif, to_sarif_str
-from abicheck.service_render import render_envelope, render_output
 
 
 def _import_attr(dotted: str) -> object:

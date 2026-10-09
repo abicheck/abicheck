@@ -338,7 +338,8 @@ class TestCompareApiBreakExitCode:
             ),
         )
         monkeypatch.setattr(
-            "abicheck.service_render.to_markdown", lambda _r, **_kw: "API_BREAK REPORT"
+            "abicheck.frontends.render.to_markdown",
+            lambda _r, **_kw: "API_BREAK REPORT",
         )
 
         runner = CliRunner()

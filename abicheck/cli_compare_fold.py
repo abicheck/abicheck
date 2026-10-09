@@ -77,7 +77,7 @@ import click
 
 from .errors import ProfileMismatchError, ScopeMismatchError
 from .frontends.cli.runtime import _write_or_echo
-from .service_render import ONELINE_FORMAT as _ONELINE_FORMAT
+from .frontends.render import ONELINE_FORMAT as _ONELINE_FORMAT
 from .workflows.gate import effective_kind_sets
 
 if TYPE_CHECKING:

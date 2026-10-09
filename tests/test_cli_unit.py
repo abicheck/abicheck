@@ -236,7 +236,7 @@ class TestResolveDemangle:
         _symbol_cell/_changes_table always demangle BEFORE html.escape,
         never the reverse, so there is no injection risk to avoid by
         defaulting it off the way the machine formats correctly are."""
-        from abicheck.service_render import (
+        from abicheck.frontends.render import (
             resolve_demangle_for_format as _resolve_demangle,
         )
 
@@ -252,7 +252,7 @@ class TestResolveDemangle:
 
     @pytest.mark.parametrize("fmt", ["json", "sarif", "junit"])
     def test_defaults_off_for_machine_formats(self, fmt):
-        from abicheck.service_render import (
+        from abicheck.frontends.render import (
             resolve_demangle_for_format as _resolve_demangle,
         )
 
@@ -265,7 +265,7 @@ class TestResolveDemangle:
         both names, so there is nothing a caller could want to override."""
         import inspect
 
-        from abicheck.service_render import (
+        from abicheck.frontends.render import (
             resolve_demangle_for_format as _resolve_demangle,
         )
 
