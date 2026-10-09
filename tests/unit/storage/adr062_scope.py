@@ -164,6 +164,12 @@ NON_ADR062_MODULES = frozenset(
         # lookup key and no versioned document, so every invariant this
         # directory sweeps for is vacuous against it.
         "derived_ast",
+        # The header-AST on-disk/in-process cache (moved from the root
+        # `dumper_cache.py`): cache management ADR-061 routes to `storage`.
+        # Its keys are content digests it computes itself, not caller
+        # lookups into a stored document, and it owns no versioned v2
+        # document, so it is not a Phase 0 primitive either.
+        "header_ast_cache",
     }
 )
 

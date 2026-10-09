@@ -1532,7 +1532,7 @@ IMPORT_CYCLE_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
                 "l0_export_delta",
                 "service",
                 "service_compare_pipeline",
-                "service_dump_pipeline",
+                "workflows.dump.pipeline",
                 # `service_header_graph_attach` joins the same SCC on exactly
                 # the terms `service_compare_pipeline`/`service_dump_pipeline`
                 # above were signed off under -- a *split* of an existing
