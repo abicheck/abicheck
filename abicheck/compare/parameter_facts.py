@@ -41,12 +41,12 @@ snapshot metadata, which this migration does not move.
 
 from __future__ import annotations
 
-import functools
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from ..diff_helpers import make_change
 from ..model.change_catalog.kinds import ChangeKind
+from ..model.execution_cache import memoized
 from ..model.type_indirection import unresolved_pair_verdict
 from ..name_classification import canonicalize_type_name, cv_qualifiers_only_differ
 
@@ -375,7 +375,7 @@ def pointee_qualifier_changes(
     return changes
 
 
-@functools.lru_cache(maxsize=16384)
+@memoized(maxsize=16384)
 def _pointee_qualifier_delta(
     old: str | None, new: str | None
 ) -> tuple[frozenset[tuple[str, int]], frozenset[tuple[str, int]]] | None:

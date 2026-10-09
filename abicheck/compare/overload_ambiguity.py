@@ -22,7 +22,6 @@ their ranking rules are not decided by this witness.
 
 from __future__ import annotations
 
-import functools
 from collections.abc import Iterable, Mapping
 from typing import TYPE_CHECKING
 
@@ -31,6 +30,7 @@ from ..diff_cxx_rules import itanium_qualified_name
 from ..diff_helpers import make_change
 from ..diff_symbols import _both_header_aware, _reconciled_function_surfaces
 from ..model.change_catalog.kinds import ChangeKind
+from ..model.execution_cache import memoized
 from ..model.synthetic_key import synthetic_ctor_owner
 from ..name_classification import canonicalize_type_name
 
@@ -65,7 +65,7 @@ def callable_key(f: Function) -> str | None:
     return _callable_key(f.mangled)
 
 
-@functools.lru_cache(maxsize=16384)
+@memoized(maxsize=16384)
 def _callable_key(mangled: str) -> str | None:
     owner = synthetic_ctor_owner(mangled)
     if owner is not None:
