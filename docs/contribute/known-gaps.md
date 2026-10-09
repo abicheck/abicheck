@@ -43,19 +43,19 @@ status line's date and commit.
 Open correctness gaps, in the order of the maintainer ruling of 2026-10-01
 (items that ruling listed and that are now closed are in the archive):
 
-1. [A directory `compare` still feeds the union `-H` set to every member (no per-member header operand); unreached type findings still count in member verdicts](#a-directory-compare-still-feeds-the-union--h-set-to-every-member-no-per-member-header-operand-unreached-type-findings-still-count-in-member-verdicts) — the per-member header operand (step 2) and the verdict half of
+1. [A directory `compare` still feeds the union `-H` set to every member (no per-member header operand); unreached type findings still count in member verdicts](#a-directory-compare-still-feeds-the-union-h-set-to-every-member-no-per-member-header-operand-unreached-type-findings-still-count-in-member-verdicts) — the per-member header operand (step 2) and the verdict half of
    step 3 remain; step 2 also fixes the quadratic multi-library cost.
-2. [An `-I`-reached sibling library's headers yield LOW-confidence export obligations; release reconciliation and JSON confidence not yet narrowed](#an--i-reached-sibling-librarys-headers-yield-low-confidence-export-obligations-release-reconciliation-and-json-confidence-not-yet-narrowed) — narrowed to LOW confidence; release reconciliation and the JSON
+2. [An `-I`-reached sibling library's headers yield LOW-confidence export obligations; release reconciliation and JSON confidence not yet narrowed](#an-i-reached-sibling-librarys-headers-yield-low-confidence-export-obligations-release-reconciliation-and-json-confidence-not-yet-narrowed) — narrowed to LOW confidence; release reconciliation and the JSON
    confidence field are not narrowed yet.
-3. [`--exclude-header` cannot stop a transitively-included header being analyzed](#--exclude-header-cannot-stop-a-transitively-included-header-being-analyzed) — the `--dump-manifest` combination is now rejected outright (see
+3. [`--exclude-header` cannot stop a transitively-included header being analyzed](#-exclude-header-cannot-stop-a-transitively-included-header-being-analyzed) — the `--dump-manifest` combination is now rejected outright (see
    the archive); what remains is that exclusion acts on the resolved header
    list, not on transitive includes.
 
 Next, unranked. Each of these can let a run read as cleaner or more
 comparable than its evidence supports:
 
-- [`compare --no-baseline` silently drops one-sided detectors' findings (unmarked `del new` detectors such as visibility_leak)](#compare---no-baseline-silently-drops-one-sided-detectors-findings-unmarked-del-new-detectors-such-as-visibility_leak)
-- [An informational, no-material-change reconciliation outcome gates the build under `--severity-preset strict` (2026-09-12)](#an-informational-no-material-change-reconciliation-outcome-gates-the-build-under---severity-preset-strict-2026-09-12)
+- [`compare --no-baseline` silently drops one-sided detectors' findings (unmarked `del new` detectors such as visibility_leak)](#compare-no-baseline-silently-drops-one-sided-detectors-findings-unmarked-del-new-detectors-such-as-visibility_leak)
+- [An informational, no-material-change reconciliation outcome gates the build under `--severity-preset strict` (2026-09-12)](#an-informational-no-material-change-reconciliation-outcome-gates-the-build-under-severity-preset-strict-2026-09-12)
 - [The comparability contract never records the target platform (2026-10-03)](#the-comparability-contract-never-records-the-target-platform-2026-10-03)
 - [A snapshot's `build_mode` is never captured at dump time (2026-10-03)](#a-snapshots-build_mode-is-never-captured-at-dump-time-2026-10-03)
 - [A stored package's extractor/resolver generation drift is never reported (2026-10-03)](#a-stored-packages-extractorresolver-generation-drift-is-never-reported-2026-10-03)

@@ -4029,7 +4029,7 @@ fact.
 
 
 Found while migrating the Phase 4 documentation and corpora of
-[`plans/one-comparison-product.md`](plans/one-comparison-product.md)
+[`plans/one-comparison-product.md`](../plans/one-comparison-product.md)
 (ADR-068 D2, §3 row 2). `abicheck compare --no-baseline CANDIDATE` exists,
 takes one operand, and correctly records the OLD side with ADR-065's
 `declared_absent` acquisition state — but it does **not** report the
@@ -4217,7 +4217,7 @@ while every other fixture, `case143` included, stays `0` — the same split
 legacy `scan` itself on the same committed snapshots. The typed Python API
 carries no `--no-baseline` support at all yet, so there is no
 `CompareResult`-shaped consumer to extend today. See
-[ADR-068's 2026-09-10 amendment](adr/068-one-comparison-product-and-scan-retirement.md#amendment-2026-09-10-the-audit-gate-exit-axis)
+[ADR-068's 2026-09-10 amendment](../adr/068-one-comparison-product-and-scan-retirement.md#amendment-2026-09-10-the-audit-gate-exit-axis)
 for the full account. `scan`'s retirement (§3 of
 `docs/contribute/plans/one-comparison-product.md`) is no longer blocked on
 this gap specifically; the plan's own tracking is updated to match.
@@ -4327,7 +4327,7 @@ threading the resolved `contract_mode`/`contract_evaluation` config through
 `_run_no_baseline_compare_cmd` into `run_no_baseline_compare`, the same way
 the two-sided `compare` path already does via
 `compatibility_evaluation_frontend`/`contract_pipeline`. Recorded in
-[`docs/reference/exit-codes.md`](../reference/exit-codes.md#compare-no-baseline-single-artifact)
+[`docs/reference/exit-codes.md`](../../reference/exit-codes.md#compare-no-baseline-single-artifact)
 rather than left as a silent behavioral gap in the doc that would otherwise
 claim the axis "applies exactly as it would for a two-sided run."
 
@@ -4660,7 +4660,7 @@ than left as an accepted no-op precisely so it is a visible decision.
 
 Found while closing ADR-068's baseline cross-source authority divergence
 (see the ADR's 2026-09-09 amendment,
-[`plans/one-comparison-product.md`](plans/one-comparison-product.md) Phase
+[`plans/one-comparison-product.md`](../plans/one-comparison-product.md) Phase
 4). **Update (2026-09-09, Phase 4 commit 2):** the maintainer re-scoped this
 work — the Action does not keep a compatible interface with every `scan`
 capability, so each remaining condition below is now ruled (a) already
