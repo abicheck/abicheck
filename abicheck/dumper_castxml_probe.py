@@ -44,6 +44,9 @@ from .dumper_ast_config import _CPP_ONLY_PATTERNS, _detect_cpp_headers
 from .dumper_ast_config_cpp20 import _detect_cpp20_headers
 from .dumper_clang_errors import diagnose_header_compile_failure
 from .errors import HeaderToolchainError, SnapshotError, UnsupportedCastxmlVersionError
+from .extract.headers.castxml.policy import (
+    parse_castxml_version_output as _parse_castxml_version,
+)
 from .storage.castxml_xml import parse_castxml_xml
 
 # castxml drives an internal Clang frontend; it must be new enough to parse
@@ -54,27 +57,6 @@ from .storage.castxml_xml import parse_castxml_xml
 # reliably work around a frontend that is simply older than the host headers,
 # so it detects the version and tells the user to upgrade.
 _RECOMMENDED_CLANG_MAJOR = 18
-
-_CASTXML_VERSION_RE = re.compile(r"castxml version\s+(\S+)", re.IGNORECASE)
-# `castxml --version` does not always print the bundled frontend version, and
-# when it does the spelling varies ("clang version 18.1.8", "LLVM version 18.1.8").
-# Accept either so the precise floor comparison can actually fire.
-_CLANG_VERSION_RE = re.compile(
-    r"(?:clang|LLVM) version\s+(\d+)(?:\.(\d+))?", re.IGNORECASE
-)
-
-
-def _parse_castxml_version(output: str) -> tuple[str | None, tuple[int, int] | None]:
-    """Parse ``castxml --version`` text into (castxml_version, clang_major_minor).
-
-    Either element is ``None`` when not found. Pure/string-only so it is fully
-    unit-testable without castxml installed.
-    """
-    cx = _CASTXML_VERSION_RE.search(output or "")
-    cl = _CLANG_VERSION_RE.search(output or "")
-    cx_ver = cx.group(1) if cx else None
-    clang = (int(cl.group(1)), int(cl.group(2) or 0)) if cl else None
-    return cx_ver, clang
 
 
 def _castxml_version_note(castxml_bin: str = "castxml") -> str:

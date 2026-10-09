@@ -117,10 +117,8 @@ def parse_castxml_version_output(
     """Parse ``castxml --version`` text into (castxml_version, clang_major_minor).
 
     Either element is ``None`` when not found. Pure/string-only, so fully
-    unit-testable without castxml installed. Mirrors
-    ``dumper_castxml_probe._parse_castxml_version`` (kept as a separate,
-    narrower helper there for the advisory note; this is the policy-facing
-    copy so ``castxml_policy`` has no import-time dependency on the dumper).
+    unit-testable without castxml installed. The single owner:
+    ``dumper_castxml_probe`` imports it for its advisory note.
     """
     cx = _CASTXML_VERSION_RE.search(output or "")
     cl = _CLANG_VERSION_RE.search(output or "")
