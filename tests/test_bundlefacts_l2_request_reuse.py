@@ -50,13 +50,17 @@ from pathlib import Path
 
 import pytest
 
-from abicheck import bundle, dumper_cache
+from abicheck import bundle
 from abicheck.bundle_side_input import compare_release_against_bundle_facts
 from abicheck.checker_policy import Verdict
 from abicheck.compile_context import CompileContext
-from abicheck.dumper_cache import ast_acquisition_active, ast_acquisition_scope
 from abicheck.extract import header_ast_fields
 from abicheck.serialization import save_bundle_facts
+from abicheck.storage import header_ast_cache as dumper_cache
+from abicheck.storage.header_ast_cache import (
+    ast_acquisition_active,
+    ast_acquisition_scope,
+)
 from abicheck.workflows.bundle_facts_capture import capture_bundle_facts
 from abicheck.workflows.input_resolution import resolve_input
 

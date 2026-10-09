@@ -17,15 +17,16 @@ if TYPE_CHECKING:
     from xml.etree.ElementTree import Element
 
 
-from . import deadline
-from .model.execution_cache import reference_mode, register_cache
-from .storage import ast_parse_exclusions, cache_integrity
-from .storage.acyclic_json import gc_paused
-from .storage.ast_cache_location import AST_DISK_CACHE, ast_cache_entry_path
-from .storage.ast_size_observer import mark_ast_intake, report_ast_size
-from .storage.castxml_xml import parse_castxml_xml
-from .storage.derived_ast import offer_derived_ast_source
-from .storage.json_compact import open_cached_entry
+import abicheck.deadline as deadline
+
+from ..model.execution_cache import reference_mode, register_cache
+from ..storage import ast_parse_exclusions, cache_integrity
+from ..storage.acyclic_json import gc_paused
+from ..storage.ast_cache_location import AST_DISK_CACHE, ast_cache_entry_path
+from ..storage.ast_size_observer import mark_ast_intake, report_ast_size
+from ..storage.castxml_xml import parse_castxml_xml
+from ..storage.derived_ast import offer_derived_ast_source
+from ..storage.json_compact import open_cached_entry
 
 log = logging.getLogger(__name__)
 
@@ -75,9 +76,11 @@ _cache_path = ast_cache_entry_path
 
 #: The in-process AST handoffs: the per-thread memo slot and the request-wide
 #: acquisition table. Reference mode bypasses both.
-_AST_SLOT_STATS = register_cache("abicheck.dumper_cache.ast_slot", "handoff")
+_AST_SLOT_STATS = register_cache(
+    "abicheck.storage.header_ast_cache.ast_slot", "handoff"
+)
 _AST_ACQUISITION_STATS = register_cache(
-    "abicheck.dumper_cache.ast_acquisition", "scoped"
+    "abicheck.storage.header_ast_cache.ast_acquisition", "scoped"
 )
 
 

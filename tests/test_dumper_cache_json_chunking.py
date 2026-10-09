@@ -183,7 +183,7 @@ def test_small_documents_are_delegated_whole_to_the_c_encoder(
         calls.append(obj)
         return real_dumps(obj, *args, **kwargs)  # type: ignore[arg-type]
 
-    monkeypatch.setattr("abicheck.dumper_cache.json.dumps", counting_dumps)
+    monkeypatch.setattr("abicheck.storage.header_ast_cache.json.dumps", counting_dumps)
     small = {"kind": "TranslationUnitDecl", "inner": [{"kind": "VarDecl"}]}
     assert _encode(small) == real_dumps(small)
     assert calls == [small]

@@ -23,7 +23,7 @@ this module used to own (``perform_elf_dump``, and its PE/Mach-O sibling
 ADR-063 Phase 1 routed ``dump_cmd``'s real run for either binary format
 through the shared typed executor
 (``frontends.cli.dump_execute.execute_and_write_dump_cli_run`` ->
-:func:`abicheck.service_dump_pipeline.execute_dump_request`), leaving both
+:func:`abicheck.workflows.dump.pipeline.execute_dump_request`), leaving both
 functions with no production caller and only their own unit tests keeping
 them alive. Track 1 of ``docs/contribute/plans/
 duplication-and-convergence-assessment.md`` retired all three modules'
@@ -71,7 +71,7 @@ from .workflows.extraction import (
 if TYPE_CHECKING:
     from .buildsource.pack import BuildSourcePack
     from .model import AbiSnapshot
-    from .service_dump_pipeline import ResolvedDumpRequest
+    from .workflows.dump.pipeline import ResolvedDumpRequest
 
 # `attach_build_context`/`compile_db_filter_scope_error`/
 # `compile_db_for_filter_scope_check`/`compile_db_from_build_info`/

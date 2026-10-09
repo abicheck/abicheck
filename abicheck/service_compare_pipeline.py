@@ -57,7 +57,6 @@ from typing import TYPE_CHECKING, Any
 from .compile_context import CompileContext
 from .confidence import note_if_same_binary_compared
 from .dependency_info import populate_pair_dependency_info
-from .dumper_cache import ast_acquisition_scope
 from .environment_matrix import EnvironmentMatrix
 from .errors import ValidationError
 from .extract.env_flags import env_flag
@@ -68,6 +67,7 @@ from .policy.depth_projection import (
 )
 from .process_resources import BudgetedExecutor
 from .serialization import run_scoped_digest_cache
+from .storage.header_ast_cache import ast_acquisition_scope
 from .workflows import abi3_audit, gate as gate_workflow
 from .workflows.artifact.compile_context_gate import (
     SideCompileInput,

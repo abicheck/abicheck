@@ -298,8 +298,8 @@ class TestTheWarmRunReallySkipsTheParse:
     @staticmethod
     def _install(monkeypatch, tmp_path: Path, ast: dict) -> dict[str, int]:
         """Point the attach at a fake clang whose AST reads are counted."""
-        import abicheck.dumper_cache as dumper_cache
         import abicheck.service_header_graph_attach as attach_mod
+        import abicheck.storage.header_ast_cache as dumper_cache
 
         entry = tmp_path / "cache" / "abcdef.json"
         entry.parent.mkdir(parents=True, exist_ok=True)
@@ -450,7 +450,7 @@ class TestTheWarmRunReallySkipsTheParse:
     def _primary_clang_pass(tmp_path: Path, ast: dict) -> None:
         """What a primary ``--ast-frontend clang`` pass leaves behind: the AST
         cache entry on disk and the parsed tree in this thread's memo slot."""
-        import abicheck.dumper_cache as dumper_cache
+        import abicheck.storage.header_ast_cache as dumper_cache
 
         entry = tmp_path / "cache" / "abcdef.json"
         entry.write_text(json.dumps(ast))
@@ -471,7 +471,7 @@ class TestTheWarmRunReallySkipsTheParse:
         stream the document off disk while the parsed tree is in hand.
         """
         monkeypatch.setenv("ABICHECK_HEADER_GRAPH_STREAM_MIN_MIB", threshold_mib)
-        import abicheck.dumper_cache as dumper_cache
+        import abicheck.storage.header_ast_cache as dumper_cache
 
         ast = AST_CASES["call_edge"]
         counts = self._install(monkeypatch, tmp_path, ast)
@@ -497,7 +497,7 @@ class TestTheWarmRunReallySkipsTheParse:
     ) -> None:
         """Independent oracle: the graph from a sidecar written on the memo
         path equals the graph a plain disk-path cold run builds."""
-        import abicheck.dumper_cache as dumper_cache
+        import abicheck.storage.header_ast_cache as dumper_cache
 
         for name, ast in AST_CASES.items():
             base = tmp_path / name

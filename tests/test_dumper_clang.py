@@ -32,7 +32,6 @@ import pytest
 
 from abicheck import (
     dumper,
-    dumper_cache,
     dumper_clang,
     dumper_clang_errors,
     dumper_toolchain,
@@ -65,6 +64,7 @@ from abicheck.extract.headers.castxml import backend as cxb
 from abicheck.extract.headers.clang import backend as clang_backend
 from abicheck.extract.headers.clang.backend import ClangBackend, clang_header_dump
 from abicheck.model import AccessLevel, Visibility
+from abicheck.storage import header_ast_cache as dumper_cache
 from tests._clang_runner_fakes import _as_runner, _fake_proc, _write_stdout_file
 
 

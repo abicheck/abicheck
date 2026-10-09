@@ -55,8 +55,6 @@ from typing import Any
 import pytest
 from hypothesis import HealthCheck, given, settings, strategies as st
 
-from abicheck import dumper_cache
-from abicheck.dumper_cache import ast_acquisition_scope
 from abicheck.extract.headers.clang.template_param_indexes import (
     TemplateParamIndexes,
     build_template_param_indexes,
@@ -66,6 +64,8 @@ from abicheck.extract.headers.clang.templates import (
     _index_template_param_kinds,
     _index_template_param_names,
 )
+from abicheck.storage import header_ast_cache as dumper_cache
+from abicheck.storage.header_ast_cache import ast_acquisition_scope
 from tests._dumper_clang_vtable_helpers import _record, _tu
 
 # ── fixtures: hand-built `-ast-dump=json`-shaped nodes ────────────────────────

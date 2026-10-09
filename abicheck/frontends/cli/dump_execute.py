@@ -73,7 +73,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from ...model import AbiSnapshot
-    from ...service_dump_pipeline import ResolvedDumpRequest
+    from ...workflows.dump.pipeline import ResolvedDumpRequest
 
 __all__ = [
     "execute_and_write_dump_cli_run",
@@ -91,7 +91,7 @@ def execute_dump_cli_run(
     snapshot.
 
     *exec_resolved* is the caller's own execution-only
-    :class:`~abicheck.service_dump_pipeline.ResolvedDumpRequest` -- built by
+    :class:`~abicheck.workflows.dump.pipeline.ResolvedDumpRequest` -- built by
     the caller (``dump_cmd``) from the same
     :class:`~abicheck.workflows.contracts.DumpRequest` ``--dry-run`` already resolved,
     but re-pointed at the *normalized* ``so_path`` (following a GNU ld
@@ -99,23 +99,23 @@ def execute_dump_cli_run(
     ``detect_binary_format(side.path)`` call runs before any such
     following, so feeding it the pre-follow path risks a wrong ``fmt`` for
     a symlink-to-linker-script input), with ``requested_depth`` nulled
-    out, and its own :attr:`~abicheck.service_dump_pipeline.
+    out, and its own :attr:`~abicheck.workflows.dump.pipeline.
     ResolvedDumpRequest.execution_options` already attached -- the nine
     out-of-band execution kwargs this function used to accept as its own
     separate parameters (ADR-063 Track T4, "Dump request contract";
-    :class:`~abicheck.service_dump_pipeline.DumpExecutionOptions` documents
+    :class:`~abicheck.workflows.dump.pipeline.DumpExecutionOptions` documents
     each field). Folded onto *exec_resolved* itself, not threaded through
     here, so the object the caller resolved is the one thing describing the
     run -- the same reasoning that already governs every other value this
     function reads off *exec_resolved* rather than taking as its own
-    parameter. :func:`~abicheck.service_dump_pipeline.execute_dump_request`
+    parameter. :func:`~abicheck.workflows.dump.pipeline.execute_dump_request`
     reads ``exec_resolved.execution_options`` itself whenever its own
     ``options`` keyword is left unset, which is what this function relies on
     below.
 
     That null-out matters here too, not just at the call site that does
     it: the shared pipeline's own depth gate
-    (:func:`~abicheck.service_dump_pipeline.execute_dump_request`'s
+    (:func:`~abicheck.workflows.dump.pipeline.execute_dump_request`'s
     ``enforce_requested_depth``) raises a ``ValidationError`` worded
     differently than ``cli_dump_helpers.check_requested_depth_satisfied``'s
     ``DumpDepthNotSatisfiedError`` -- both enforce the identical rule (the
@@ -147,7 +147,7 @@ def execute_dump_cli_run(
     *exec_resolved.execution_options*'s own ``seed_collect_mode``/
     ``source_frontend_from_folded_context`` fields (Codex review, two real
     regressions the initial migration introduced): forwarded verbatim to
-    :func:`~abicheck.service_dump_pipeline.execute_dump_request`, whose own
+    :func:`~abicheck.workflows.dump.pipeline.execute_dump_request`, whose own
     docstring documents each and states the precedence/behavior
     ``perform_elf_dump`` had that these preserve. The caller attaches
     ``seed_collect_mode=resolved.collect_mode`` (the same collect mode
@@ -179,7 +179,7 @@ def execute_dump_cli_run(
         click.ClickException: For any other extraction failure (exit 1).
     """
     from ...errors import ValidationError
-    from ...service_dump_pipeline import execute_dump_request
+    from ...workflows.dump.pipeline import execute_dump_request
 
     try:
         # `options` is left unset: `execute_dump_request` itself falls back
@@ -311,7 +311,7 @@ def execute_and_write_header_only_dump_cli_run(
     that sibling, *resolved* here is the caller's plain, not-yet-re-pointed
     ``ResolvedDumpRequest`` (the dry-run-safe preview object,
     ``_resolved``) -- this function does its own
-    ``requested_depth=None``/:class:`~abicheck.service_dump_pipeline.
+    ``requested_depth=None``/:class:`~abicheck.workflows.dump.pipeline.
     DumpExecutionOptions` re-pointing internally (mirroring
     ``dump_cmd``'s own ELF/PE/Mach-O real-run branch), since a headers-only
     request has no per-format execution-option kwargs (no legacy
@@ -321,7 +321,7 @@ def execute_and_write_header_only_dump_cli_run(
     """
     from dataclasses import replace as _replace
 
-    from ...service_dump_pipeline import DumpExecutionOptions
+    from ...workflows.dump.pipeline import DumpExecutionOptions
     from ...workflows.extraction import (
         dump_manifest_header_roots,
         resolve_source_frontend_clang_bin,

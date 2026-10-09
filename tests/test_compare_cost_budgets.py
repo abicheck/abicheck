@@ -89,6 +89,35 @@ def test_compare_costs_match_their_budget(mode: str) -> None:
     )
 
 
+@pytest.mark.parametrize("mode", sorted(MODES))
+@pytest.mark.parametrize("workload", sorted(WORKLOADS))
+def test_spawn_count_ignores_a_demangler_latch_left_by_earlier_callers(
+    workload: str, mode: str
+) -> None:
+    """A spawn count must not depend on what ran earlier in the process.
+
+    `demangle` latches "c++filt is missing" process-wide. A test that fakes a
+    missing binary and leaves the latch set used to make the budget test
+    measure 0 spawns on whichever xdist worker ran after it. Oracle: the
+    count with the latch forced on equals the count from a clean state, for
+    every workload and compare mode.
+    """
+    import abicheck.demangle as demangle
+
+    def count(prefix: str) -> int:
+        old, new = WORKLOADS[workload](50, f"{prefix}_{mode}_{workload}_")
+        return count_subprocess_spawns(lambda: compare(old, new, **MODES[mode]))
+
+    demangle._reset_demangle_batch_cache()
+    clean = count("latch_clean")
+    demangle._cppfilt_binary_confirmed_missing = True
+    try:
+        latched = count("latch_set")
+    finally:
+        demangle._reset_demangle_batch_cache()
+    assert latched == clean
+
+
 @pytest.mark.parametrize("workload", sorted(WORKLOADS))
 def test_subprocess_spawns_do_not_grow_with_input(workload: str) -> None:
     def spawns(n: int) -> int:

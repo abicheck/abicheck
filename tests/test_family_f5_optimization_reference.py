@@ -171,8 +171,8 @@ COVERAGE: dict[str, str] = {
     # ---- registered engines (own storage, central switch) ----
     "abicheck.compare.spelling_match_cache::registered::_MATCH_STATS": "UNCOVERED: spelling-pattern matching runs only with an L5 type-reachability graph (#1336's cache); its thread-safety is owned by test_spelling_match_cache_concurrency.py",
     "abicheck.compare.spelling_match_cache::registered::_VOCABULARY_STATS": "UNCOVERED: as _MATCH_STATS",
-    "abicheck.dumper_cache::registered::_AST_SLOT_STATS": "UNCOVERED: the per-thread AST handoff is written only by the clang header backend (--ast-frontend clang); the header cell uses castxml",
-    "abicheck.dumper_cache::registered::_AST_ACQUISITION_STATS": "UNCOVERED: the request-wide AST table is opened by the release fan-out over binaries with headers; no cell builds one",
+    "abicheck.storage.header_ast_cache::registered::_AST_SLOT_STATS": "UNCOVERED: the per-thread AST handoff is written only by the clang header backend (--ast-frontend clang); the header cell uses castxml",
+    "abicheck.storage.header_ast_cache::registered::_AST_ACQUISITION_STATS": "UNCOVERED: the request-wide AST table is opened by the release fan-out over binaries with headers; no cell builds one",
     # ---- disk caches ----
     "abicheck.snapshot_cache::disk_cache::SNAPSHOT_DISK_CACHE": B,
     "abicheck.storage.ast_cache_location::disk_cache::AST_DISK_CACHE": H,

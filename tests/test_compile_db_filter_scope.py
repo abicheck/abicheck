@@ -507,7 +507,7 @@ class TestTypedApiHonorsTheFilterInTheFold:
         self, tmp_path: Path
     ) -> None:
         from abicheck.errors import ValidationError
-        from abicheck.service_dump_pipeline import resolve_dump_request
+        from abicheck.workflows.dump.pipeline import resolve_dump_request
 
         so_path, header, compile_db = TestDumpCliHonorsTheFilterInTheFold._project(
             tmp_path
@@ -519,7 +519,7 @@ class TestTypedApiHonorsTheFilterInTheFold:
             resolve_dump_request(request)
 
     def test_no_filter_is_unaffected(self, tmp_path: Path) -> None:
-        from abicheck.service_dump_pipeline import resolve_dump_request
+        from abicheck.workflows.dump.pipeline import resolve_dump_request
 
         so_path, header, compile_db = TestDumpCliHonorsTheFilterInTheFold._project(
             tmp_path
@@ -536,7 +536,7 @@ class TestTypedApiHonorsTheFilterInTheFold:
     def test_the_filter_selects_that_units_context_for_the_header_parse(
         self, tmp_path: Path, pick: str, expects_wide_field: bool
     ) -> None:
-        from abicheck.service_dump_pipeline import (
+        from abicheck.workflows.dump.pipeline import (
             execute_dump_request,
             resolve_dump_request,
         )
@@ -708,7 +708,7 @@ class TestScopeGuardCoversSourcesOnlyAutoDiscovery:
     ) -> None:
         from abicheck.errors import ValidationError
         from abicheck.service import DumpRequest, InputSpec
-        from abicheck.service_dump_pipeline import resolve_dump_request
+        from abicheck.workflows.dump.pipeline import resolve_dump_request
 
         so_path, header, _compile_db = TestDumpCliHonorsTheFilterInTheFold._project(
             tmp_path
@@ -756,7 +756,7 @@ class TestScopeGuardCoversSourcesOnlyAutoDiscovery:
         `resolve_dump_request` never reaches the fold at all, only
         `execute_dump_request` does, so it cannot surface here)."""
         from abicheck.service import DumpRequest, InputSpec
-        from abicheck.service_dump_pipeline import resolve_dump_request
+        from abicheck.workflows.dump.pipeline import resolve_dump_request
 
         so_path, header, _compile_db = TestDumpCliHonorsTheFilterInTheFold._project(
             tmp_path
@@ -845,7 +845,7 @@ class TestScopeGuardCoversNestedBuildInfoDatabases:
     ) -> None:
         from abicheck.errors import ValidationError
         from abicheck.service import DumpRequest, InputSpec
-        from abicheck.service_dump_pipeline import resolve_dump_request
+        from abicheck.workflows.dump.pipeline import resolve_dump_request
 
         so_path, header, build_info = self._project_with_nested_build_info(tmp_path)
         request = DumpRequest(
@@ -885,7 +885,7 @@ class TestScopeGuardCoversNestedBuildInfoDatabases:
         """Positive control: the nested database really is what the fold
         resolves and filters by -- not merely a guard-level assumption."""
         from abicheck.service import DumpRequest, InputSpec
-        from abicheck.service_dump_pipeline import (
+        from abicheck.workflows.dump.pipeline import (
             execute_dump_request,
             resolve_dump_request,
         )
