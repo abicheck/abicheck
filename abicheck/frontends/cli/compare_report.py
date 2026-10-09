@@ -60,6 +60,7 @@ from ...cli_helpers_compare import (
 from ...cli_resolve import (
     _reject_evidence_flags_for_set_inputs,
 )
+from ...model.consumer_requirements import LibraryExportsUnreadableError
 from ...model.consumer_spec import ConsumerUnreadableError
 from .runtime import _render_output
 
@@ -108,6 +109,10 @@ def _apply_scoped_gating(
             # ADVISORY one never raises -- it comes back `unreadable=True`):
             # exit 1 with one line instead of a Python traceback.
             raise click.ClickException(f"--used-by consumer: {exc}") from exc
+        except LibraryExportsUnreadableError as exc:
+            # An OLD/NEW library whose export table was not read cannot scope
+            # any consumer: refuse rather than report a verdict nobody checked.
+            raise click.ClickException(f"--used-by library: {exc}") from exc
     if required_symbols:
         return _apply_required_symbol_scoping(
             result,

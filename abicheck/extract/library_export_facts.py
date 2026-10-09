@@ -32,9 +32,11 @@ from typing import TYPE_CHECKING
 from ..model import AbiSnapshot
 from ..model.availability import FactStatus
 from ..model.consumer_requirements import LibraryExportFacts
+from ..model.export_index import platform_block_parsed
 from ..model.name_decoration import elf_version
 from ..model.surface_facts import is_binary_exported
 from .consumer_imports import detect_binary_file_format
+from .parse_failures import recording_export_read_failures
 
 if TYPE_CHECKING:
     from ..elf_metadata import ElfMetadata
@@ -125,7 +127,14 @@ def read_library_export_facts(lib: Path | AbiSnapshot) -> LibraryExportFacts:
             status=FactStatus.FAILED,
             failure_reason=f"unrecognised library format: {label}",
         )
-    elf_meta, pe_meta, macho_meta = _platform_metadata(lib, fmt)
+    with recording_export_read_failures() as failures:
+        elf_meta, pe_meta, macho_meta = _platform_metadata(lib, fmt)
+    export_names = _export_names(fmt, elf_meta, pe_meta, macho_meta)
+    reason = _export_read_failure(
+        failures,
+        {"elf": elf_meta, "pe": pe_meta, "macho": macho_meta}[fmt],
+        export_names,
+    )
     soname = name
     if fmt == "elf" and elf_meta is not None:
         soname = elf_meta.soname or name
@@ -135,7 +144,7 @@ def read_library_export_facts(lib: Path | AbiSnapshot) -> LibraryExportFacts:
         label=label,
         binary_format=fmt,
         soname=soname,
-        export_names=_export_names(fmt, elf_meta, pe_meta, macho_meta),
+        export_names=export_names,
         unversioned_exports=(
             None
             if elf_meta is None
@@ -149,7 +158,27 @@ def read_library_export_facts(lib: Path | AbiSnapshot) -> LibraryExportFacts:
         exports_by_ordinal=(
             None if pe_meta is None else {e.ordinal: e.name for e in pe_meta.exports}
         ),
+        status=FactStatus.PRESENT if reason is None else FactStatus.FAILED,
+        failure_reason=None if reason is None else f"{label}: {reason}",
     )
+
+
+def _export_read_failure(
+    failures: list[str], meta: object | None, export_names: frozenset[str]
+) -> str | None:
+    """Why *meta*'s export table cannot be trusted, or ``None`` when it was read.
+
+    A failure the platform parser recorded while reading a raw binary wins;
+    otherwise the table counts as read when it holds an entry or its header
+    fields show a real parse (:func:`platform_block_parsed`, the rule the
+    dump's own export fact uses), which also covers a stored snapshot whose
+    platform block is a parse-failed default.
+    """
+    if failures:
+        return "; ".join(dict.fromkeys(failures))
+    if meta is None or not (export_names or platform_block_parsed(meta)):
+        return "export table was not read"
+    return None
 
 
 def _resolvable_symbol_names(name: str, mangled: str | None) -> set[str]:
