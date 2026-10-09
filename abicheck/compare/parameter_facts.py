@@ -350,15 +350,14 @@ def pointee_qualifier_changes(
     for i in range(_count(old.types, new.types)):
         assert old.types is not None and new.types is not None
         t_old, t_new = old.types[i], new.types[i]
-        if t_old == t_new or not cv_qualifiers_only_differ(t_old, t_new):
+        delta = _pointee_qualifier_delta(t_old, t_new)
+        if delta is None:
             continue
-        o, n = _qualifier_levels(t_old), _qualifier_levels(t_new)
-        if o is None or n is None or o[1] != n[1]:
-            continue
-        added, removed = n[0] - o[0], o[0] - n[0]
-        if not added and not removed:
-            continue
-        widening_only = not removed and n[1] == 1 and all(lvl == 0 for _, lvl in added)
+        added, removed = delta
+        single_level = (_qualifier_levels(t_new) or (frozenset(), 0))[1] == 1
+        widening_only = (
+            not removed and single_level and all(lvl == 0 for _, lvl in added)
+        )
         changes.append(
             make_change(
                 ChangeKind.PARAM_POINTEE_QUALIFIER_ADDED
@@ -373,6 +372,19 @@ def pointee_qualifier_changes(
             )
         )
     return changes
+
+
+def _pointee_qualifier_delta(
+    old: str | None, new: str | None
+) -> tuple[frozenset[tuple[str, int]], frozenset[tuple[str, int]]] | None:
+    """``(added, removed)`` pointee qualifiers between two spellings of the
+    same indirection depth that differ only in cv; ``None`` otherwise."""
+    if not old or not new or old == new or not cv_qualifiers_only_differ(old, new):
+        return None
+    o, n = _qualifier_levels(old), _qualifier_levels(new)
+    if o is None or n is None or o[1] != n[1] or o[0] == n[0]:
+        return None
+    return n[0] - o[0], o[0] - n[0]
 
 
 def return_pointee_qualifier_changes(
@@ -393,20 +405,13 @@ def return_pointee_qualifier_changes(
       consumer holding the function in a pointer of the old type breaks --
       a risk conditional on consumer use.
     """
-    if not r_old or not r_new or r_old == r_new:
-        return []
-    if not cv_qualifiers_only_differ(r_old, r_new):
-        return []
-    o, n = _qualifier_levels(r_old), _qualifier_levels(r_new)
-    if o is None or n is None or o[1] != n[1]:
-        return []
-    added, removed = n[0] - o[0], o[0] - n[0]
-    if not added and not removed:
+    delta = _pointee_qualifier_delta(r_old, r_new)
+    if delta is None:
         return []
     return [
         make_change(
             ChangeKind.FUNC_RETURN_POINTEE_QUALIFIER_ADDED
-            if added
+            if delta[0]
             else ChangeKind.FUNC_RETURN_POINTEE_QUALIFIER_REMOVED,
             symbol=mangled,
             name=name,
