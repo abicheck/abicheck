@@ -1,0 +1,3 @@
+### Changed
+
+- **Internal: a directory/package `compare` folds each member's scalar exit decision.** Each release member's compatibility, contract-coverage and additions-review contributions now come from `resolve_compare_exit_decision`, the resolver a single-pair `compare` of that member uses. They are no longer re-derived per axis. The release's severity-aware exit code is the worst member contribution, re-taken after lockstep-SONAME suppression. Exit codes and report fields are unchanged; `tests/test_compare_cardinality_invariance.py` now also checks the `severity_strict` axis. A member that fails to extract still exits `4` on a release but `1` on a single-pair compare; this is recorded in `docs/contribute/known-gaps.md`.
