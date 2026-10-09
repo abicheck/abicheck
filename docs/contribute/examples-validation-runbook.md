@@ -118,7 +118,7 @@ direct = d["direct_coverage"]
 # A case can be COVERED two ways: directly (a compiler lane or public-CLI
 # workflow reached the canonical verdict) or via known-gap-oracle (a
 # reviewed known_gap plus the case's own source_smoke oracle proves the
-# canonical truth while every evidence tier still XFAILs — see case111).
+# canonical truth while every evidence tier still XFAILs).
 # direct_coverage deliberately excludes the latter, so asserting
 # direct["covered"] == total is wrong on a fully-green matrix whenever any
 # case is covered that way. Assert the two provenances sum to the total
@@ -134,8 +134,9 @@ PY
 
 The exact count comes from `catalog/ground_truth.json`; automation must not
 hard-code a historic count. When this runbook was added, the proven result was
-`181/181 COVERED`. As of this writing that is `180` direct + `1` known-gap-oracle
-(`case111`) — a case only qualifies for known-gap-oracle provenance when its
+`181/181 COVERED`. No case currently relies on known-gap-oracle provenance
+(case111, the former one, is detected directly since 2026-10) — a case only
+qualifies for known-gap-oracle provenance when its
 own declared `source_smoke` oracle proved the canonical verdict; see
 `_single_library_status` in `collect_full_example_matrix.py`.
 

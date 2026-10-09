@@ -98,7 +98,7 @@ Commands below use `PYTHONPATH=.`.
 |---|---|---|---:|---|---|
 | Build/autodiscovery | `python -m pytest tests/test_example_autodiscovery.py -v --tb=short -m integration` | CI Linux, gcc/clang | 209 integration items | gcc: 149 passed / 55 skipped / 5 xfailed; clang: 149 passed / 54 skipped / 6 xfailed | Green default single-library build lane. `case115_bit_int_width_changed` needs a `_BitInt`-capable CastXML-bundled Clang; a sandbox with an older bundled Clang (unrelated to the fix in this catalog) sees it fail there instead of building — see `docs/contribute/examples-validation-runbook.md` |
 | Full example proof matrix | `skills-src/evaluation/validation/scripts/collect_full_example_matrix.py` over CI artifacts + dedicated bundle/G20/L3-L5/BTF proofs | CI aggregation | 211 catalog cases | 208/208 COVERED; 207 direct; 0 FAILED / 0 UNRESOLVED | Canonical full-catalog status; a lane-local `SKIP` is accepted only when a dedicated proof covers that case |
-| Default/debug verdicts | `ABICHECK_TRUSTED_SOURCE_SMOKE_RUN=1 PYTHONPATH=. python tests/validate_examples.py --toolchain {gcc,clang} --json` | CI Linux, gcc/clang | 211 catalog cases | gcc: 168 PASS / 4 XFAIL / 39 SKIP; clang: 167 PASS / 5 XFAIL / 1 NOT_APPLICABLE / 38 SKIP | Green default/debug verdict lane. Without the env var, 7 `source_smoke: {mode: run}` cases SKIP instead of running. Under clang `case180_symbol_binding_lost_unique` is `NOT_APPLICABLE`: clang never emits `STB_GNU_UNIQUE`, so its v1/v2 are the same transition-free pair, and the lane checks the `NO_CHANGE` that pair warrants (`not_applicable_expected`) instead of excusing a miss as XFAIL |
+| Default/debug verdicts | `ABICHECK_TRUSTED_SOURCE_SMOKE_RUN=1 PYTHONPATH=. python tests/validate_examples.py --toolchain {gcc,clang} --json` | CI Linux, gcc/clang | 211 catalog cases | gcc: 169 PASS / 3 XFAIL / 39 SKIP; clang: 168 PASS / 4 XFAIL / 1 NOT_APPLICABLE / 38 SKIP | Green default/debug verdict lane. Without the env var, 7 `source_smoke: {mode: run}` cases SKIP instead of running. Under clang `case180_symbol_binding_lost_unique` is `NOT_APPLICABLE`: clang never emits `STB_GNU_UNIQUE`, so its v1/v2 are the same transition-free pair, and the lane checks the `NO_CHANGE` that pair warrants (`not_applicable_expected`) instead of excusing a miss as XFAIL |
 | Runtime smoke | `PYTHONPATH=. python skills-src/evaluation/validation/scripts/run_example_runtime_smoke.py --json` | Linux proof run | 211 catalog cases | 96 DEMONSTRATED / 76 NO_RUNTIME_SIGNAL / 39 SKIP | Passing; no BUILD_ERROR. The runner now compares each app's baseline exit code against a per-case `runtime_baseline_exit` in `ground_truth.json` (default 0) instead of hardcoding zero, so apps that deliberately return a computed value (e.g. case111's `ets(42).local()` returning `42`) are no longer misread as a broken baseline. No case shows a signal against its own baseline library (`BASELINE_SIGNAL`), so every DEMONSTRATED is a v2-only effect — see "Known validation gaps" below for case06's rewrite |
 | Release headers | `ABICHECK_TRUSTED_SOURCE_SMOKE_RUN=1 python tests/validate_examples.py --artifact-variant release-headers --json` | CI Linux artifact | 211 catalog cases | 168 PASS / 4 XFAIL / 39 SKIP | Informational; the false-risk regression on `case61_var_added` (`exported_object_alignment_reduced`) is fixed — CastXML now resolves a variable's natural type alignment as declared-alignment corroboration even without an explicit `alignas` override. Without the env var, the same 7 cases SKIP instead |
 | Stripped headers | `ABICHECK_TRUSTED_SOURCE_SMOKE_RUN=1 python tests/validate_examples.py --artifact-variant stripped-headers --json` | CI Linux artifact | 211 catalog cases | 164 PASS / 4 FAIL / 4 XFAIL / 39 SKIP | Informational; reduced-evidence signal-loss backlog (below). Without the env var, the same 7 cases SKIP instead |
@@ -171,10 +171,7 @@ the way it previously did (stale at a 169-case catalog for several releases).
   earlier `_normalize_verdict` helper that treated the two as equivalent has been removed.
   The one declared escape hatch is a case-level `known_gap`: it only turns a verdict
   mismatch into `XFAIL` (not a silent PASS) when `ground_truth.json` explicitly records
-  the gap, and the full example matrix additionally requires a case's own `source_smoke`
-  oracle to have proven the canonical verdict before crediting it as `COVERED` — see
-  `case111_enumerable_thread_specific_lambda_ambiguity`, the catalog's one case covered
-  this way instead of by a direct detector/CLI match (`docs/contribute/examples-validation-runbook.md`).
+  the gap (`docs/contribute/examples-validation-runbook.md`).
 - **Build/source coverage is a 10-case lane, not every L3/L4/L5 catalog entry —**
   **but it is every entry that lane *can* prove.** `--artifact-variant build-source`
   needs a real compilable `v1`/`v2` pair; of the catalog's L3/L4/L5 cases, only 7
@@ -257,14 +254,13 @@ default/debug and release-header modes classify those catalog cases correctly.
 
 Expected non-pass buckets are already represented in `ground_truth.json`:
 
-- XFAIL: `case105`, `case111`, `case122`, `case98` (gcc); additionally
+- XFAIL: `case105`, `case122`, `case98` (gcc); additionally
   `case103` (clang only) — each carries a `known_gap` explaining why
   debug-headers can't reach the canonical verdict. case105/case122/case98 are
   the catalog's flagship examples of a *higher* evidence tier (L3/L4) closing
-  the gap; case111 is the flagship example of the opposite case — a scenario
-  proven true by its own `source_smoke` oracle with **no** evidence tier that
-  currently catches it (a genuine, unfixed detector gap, not an evidence-depth
-  limitation).
+  the gap. case111 left this bucket in 2026-10: `overload_ambiguity_introduced`
+  now reports its ambiguous witness call, and its proven source break is
+  recorded in `conditional_breaks` rather than as a detector gap.
 - SKIP: `case115`, `case121`, and bundle cases `case84`, `case90`, `case91`,
   `case92`, `case93`
 
