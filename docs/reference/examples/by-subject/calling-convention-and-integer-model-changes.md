@@ -3,7 +3,7 @@
 
 The generated calling convention, parameter-passing model, or a platform's integer/floating-point width for a type changes -- callers and callees stop agreeing on the machine-level contract even though no symbol name changed.
 
-_6 case(s)._ [← back to all subjects](index.md)
+_7 case(s)._ [← back to all subjects](index.md)
 
 ## Cases
 
@@ -15,3 +15,4 @@ _6 case(s)._ [← back to all subjects](index.md)
 | [case112_lp64_ilp64](../case112_lp64_ilp64.md) | LP64 → ILP64 Integer-Model Switch (oneMKL MKL_INT 32→64) | 🔴 BREAKING | Breaking |
 | [case129_struct_return_convention](../case129_struct_return_convention.md) | Struct-Return Convention Change | 🔴 BREAKING | Breaking |
 | [case177_long_double_abi_changed](../case177_long_double_abi_changed.md) | long double ABI Changed | 🔴 BREAKING | Breaking |
+| [case209_calling_convention_changed_via_macro](../case209_calling_convention_changed_via_macro.md) | Calling Convention Changed via a Macro | 🔴 BREAKING | Breaking |

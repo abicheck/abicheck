@@ -34,6 +34,36 @@ GROUND_TRUTH = example_catalog.GROUND_TRUTH_PATH
 SCHEMA_VERSION = "example_runtime_smoke.v1"
 
 
+#: Statuses that mean the runtime proof failed: it could not be established
+#: (BUILD_ERROR, BASELINE_SIGNAL) or it contradicts the case's ground truth.
+PROOF_FAILURE_STATUSES = frozenset({"BUILD_ERROR", "BASELINE_SIGNAL", "CONTRADICTED"})
+#: Signals that mean the unchanged consumer's own check failed or it crashed /
+#: hung -- a consumer assertion, not merely different output.
+_ASSERTION_SIGNALS = frozenset({"nonzero", "timeout"})
+#: Verdicts that claim an unchanged old consumer keeps working.
+_CLEAN_VERDICTS = frozenset({"NO_CHANGE", "COMPATIBLE"})
+
+
+def proof_strength(signal: str) -> str:
+    """How much a runtime signal proves: ``consumer_assertion`` when the old
+    app's own exit status changed (its check failed, it crashed or hung),
+    ``output_only`` when only its stdout/stderr differ, ``none`` otherwise.
+    Only the first is evidence that a consumer broke."""
+    if signal in _ASSERTION_SIGNALS:
+        return "consumer_assertion"
+    return "output_only" if signal != "no_runtime_signal" else "none"
+
+
+def contradicts_ground_truth(entry: dict[str, object], signal: str) -> bool:
+    """A clean verdict (and no recorded behavioral break) whose unchanged old
+    consumer nevertheless fails its own check against the new library."""
+    return (
+        entry.get("expected") in _CLEAN_VERDICTS
+        and not entry.get("behavioral_break")
+        and proof_strength(signal) == "consumer_assertion"
+    )
+
+
 def _platform() -> str:
     if sys.platform.startswith("linux"):
         return "linux"
@@ -310,6 +340,13 @@ def _compiler_supports(feature: str) -> bool:
     return compiler_supports(feature)
 
 
+def _swap_status(entry: dict[str, object], signal: str) -> str:
+    """The row status for a completed swap run."""
+    if contradicts_ground_truth(entry, signal):
+        return "CONTRADICTED"
+    return "DEMONSTRATED" if signal != "no_runtime_signal" else "NO_RUNTIME_SIGNAL"
+
+
 def run_case(
     *,
     build_dir: Path,
@@ -390,12 +427,13 @@ def run_case(
     assert swapped_app is not None
     swapped = _run_app(swapped_app, swap_dir)
     signal = _classify_runtime_signal(baseline, swapped)
-    status = "DEMONSTRATED" if signal != "no_runtime_signal" else "NO_RUNTIME_SIGNAL"
+    status = _swap_status(entry, signal)
     return {
         "case_id": case_name,
         "status": status,
         "expected": expected,
         "runtime_signal": signal,
+        "proof": proof_strength(signal),
         "baseline": baseline,
         "swapped": swapped,
         "seconds": round(time.perf_counter() - started, 3),
@@ -469,7 +507,9 @@ def main(argv: list[str] | None = None) -> int:
                     file=sys.stderr,
                 )
 
-    return 1 if any(r["status"] == "BUILD_ERROR" for r in results) else 0
+    # A baseline that does not behave as its case records is a broken proof,
+    # not a "no signal": the swap comparison it would anchor means nothing.
+    return 1 if any(r["status"] in PROOF_FAILURE_STATUSES for r in results) else 0
 
 
 if __name__ == "__main__":

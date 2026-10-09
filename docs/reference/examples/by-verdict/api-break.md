@@ -17,7 +17,6 @@ _20 case(s)._ [← back to all examples](../index.md)
 | [case105_concept_tightening](../case105_concept_tightening.md) | Concept Tightening (C++20) | 🟠 API_BREAK | API Break |
 | [case106_ctor_became_explicit](../case106_ctor_became_explicit.md) | Conversion Operator Became `explicit` | 🟠 API_BREAK | API Break |
 | [case109_flow_graph_policy_renames](../case109_flow_graph_policy_renames.md) | flow::graph Policy Tag Renames | 🟠 API_BREAK | API Break |
-| [case111_enumerable_thread_specific_lambda_ambiguity](../case111_enumerable_thread_specific_lambda_ambiguity.md) | enumerable_thread_specific Lambda-Init Ambiguity | 🟠 API_BREAK | API Break |
 | [case123_default_argument_removed](../case123_default_argument_removed.md) | Default Argument Removed | 🟠 API_BREAK | API Break |
 | [case124_header_constant_value_changed](../case124_header_constant_value_changed.md) | Header Constant Value Changed | 🟠 API_BREAK | API Break |
 | [case125_class_became_final](../case125_class_became_final.md) | Class Became `final` | 🟠 API_BREAK | API Break |
@@ -27,3 +26,4 @@ _20 case(s)._ [← back to all examples](../index.md)
 | [case157_inline_function_removed](../case157_inline_function_removed.md) | Inline Function Removed | 🟠 API_BREAK | API Break |
 | [case158_public_typedef_removed](../case158_public_typedef_removed.md) | Public Typedef Removed | 🟠 API_BREAK | API Break |
 | [case163_python_kwarg_renamed](../case163_python_kwarg_renamed.md) | Python Keyword Argument Renamed (Stub-Only API Break) | 🟠 API_BREAK | API Break |
+| [case211_return_pointee_gained_const](../case211_return_pointee_gained_const.md) | Return Pointee Gained `const` | 🟠 API_BREAK | API Break |

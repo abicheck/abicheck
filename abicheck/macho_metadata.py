@@ -40,6 +40,7 @@ from macholib.mach_o import (  # type: ignore[import-untyped]
     LC_RPATH,
     LC_SEGMENT,
     LC_SEGMENT_64,
+    LC_SYMTAB,
     LC_VERSION_MIN_MACOSX,
     N_EXT,
     N_TYPE,
@@ -48,6 +49,8 @@ from macholib.mach_o import (  # type: ignore[import-untyped]
 )
 from macholib.MachO import MachO  # type: ignore[import-untyped]
 from macholib.SymbolTable import SymbolTable  # type: ignore[import-untyped]
+
+from .extract.parse_failures import note_export_read_failure
 
 # Fact dataclasses live in the model package (ADR-061 Phase 5): this module
 # parses into them and re-exports them so the historical
@@ -249,6 +252,7 @@ def _parse_export_trie(dylib_path: Path, header: Any, meta: MachoMetadata) -> No
         log.debug(
             "parse_macho_metadata: export trie unreadable for %s: %s", dylib_path, exc
         )
+        note_export_read_failure(f"Mach-O export trie unreadable: {exc}")
         return
 
     by_name = {e.name: e for e in meta.exports if e.name}
@@ -297,11 +301,13 @@ def parse_macho_metadata(dylib_path: Path) -> MachoMetadata:
             st = os.fstat(f.fileno())
             if not stat.S_ISREG(st.st_mode):
                 log.warning("parse_macho_metadata: not a regular file: %s", dylib_path)
+                note_export_read_failure(f"not a regular file: {dylib_path}")
                 return MachoMetadata()
 
         return _parse(dylib_path)
     except (OSError, ValueError, KeyError, struct.error) as exc:
         log.warning("parse_macho_metadata: failed to parse %s: %s", dylib_path, exc)
+        note_export_read_failure(f"Mach-O parse failed: {exc}")
         return MachoMetadata()
 
 
@@ -419,6 +425,7 @@ def _parse(dylib_path: Path) -> MachoMetadata:
     macho = MachO(str(dylib_path))
     header = _select_header(macho)
     if header is None:
+        note_export_read_failure("Mach-O: no architecture slice")
         return MachoMetadata()
 
     meta = MachoMetadata()
@@ -494,3 +501,7 @@ def _parse_macho_symbols(
         log.debug(
             "parse_macho_metadata: SymbolTable failed for %s: %s", dylib_path, exc
         )
+        # Expected without LC_SYMTAB (the export trie still carries the
+        # exports); a symbol table that is present but unreadable is a failure.
+        if any(lc.cmd == LC_SYMTAB for lc, _cmd, _data in header.commands):
+            note_export_read_failure(f"Mach-O symbol table unreadable: {exc}")

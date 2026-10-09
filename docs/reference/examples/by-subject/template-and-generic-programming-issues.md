@@ -14,5 +14,5 @@ _7 case(s)._ [← back to all subjects](index.md)
 | [case85_internal_template_signature_changed](../case85_internal_template_signature_changed.md) | Internal Template Signature Changed | 🔴 BREAKING | Breaking |
 | [case87_default_template_arg_changed](../case87_default_template_arg_changed.md) | Default Template Argument Changed | 🔴 BREAKING | Breaking |
 | [case105_concept_tightening](../case105_concept_tightening.md) | Concept Tightening (C++20) | 🟠 API_BREAK | API Break |
-| [case111_enumerable_thread_specific_lambda_ambiguity](../case111_enumerable_thread_specific_lambda_ambiguity.md) | enumerable_thread_specific Lambda-Init Ambiguity | 🟠 API_BREAK | API Break |
+| [case111_enumerable_thread_specific_lambda_ambiguity](../case111_enumerable_thread_specific_lambda_ambiguity.md) | enumerable_thread_specific Lambda-Init Ambiguity | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case122_template_signature_uninstantiated](../case122_template_signature_uninstantiated.md) | Uninstantiated Template Signature Change | 🟡 COMPATIBLE_WITH_RISK | Risk |

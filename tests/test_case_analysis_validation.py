@@ -288,6 +288,77 @@ class TestBehavioralBreakLabel:
         assert not violations, "\n".join(violations)
 
 
+class TestConditionalBreaks:
+    """A break proven for *some* consumers is recorded apart from the gate.
+
+    A default verdict that does not block (``COMPATIBLE_WITH_RISK``) may be
+    the right acceptance decision when consumers are unknown, but it must
+    not erase a demonstrated break: ``conditional_breaks`` states what
+    breaks, for which consumers, on what evidence, and how a project that
+    promises that use gates it (2026-10-08 re-audit, case186).
+    """
+
+    _KINDS = {"api", "abi", "behavioral"}
+    _EVIDENCE = {"source_smoke", "runtime_witness"}
+
+    def test_entries_are_well_formed(self, verdicts: dict) -> None:
+        violations = []
+        for case_name, meta in verdicts.items():
+            for entry in meta.get("conditional_breaks", []):
+                if entry.get("kind") not in self._KINDS:
+                    violations.append(f"{case_name}: kind {entry.get('kind')!r}")
+                if entry.get("evidence") not in self._EVIDENCE:
+                    violations.append(
+                        f"{case_name}: evidence {entry.get('evidence')!r}"
+                    )
+                if (
+                    entry.get("evidence") == "source_smoke"
+                    and "source_smoke" not in meta
+                ):
+                    violations.append(f"{case_name}: cites a source_smoke it lacks")
+                for key in ("consumer_condition", "gate"):
+                    if not entry.get(key):
+                        violations.append(f"{case_name}: missing {key}")
+        assert not violations, "\n".join(violations)
+
+    def test_proven_source_break_without_api_flag_is_recorded(
+        self, verdicts: dict
+    ) -> None:
+        """A source smoke that accepts v1 and rejects v2 proves an API break
+        for that consumer; when the case's flags do not claim one, the break
+        must be recorded as conditional."""
+        missing = []
+        for case_name, meta in verdicts.items():
+            smoke = meta.get("source_smoke") or {}
+            proven = (
+                smoke.get("v1", {}).get("expect") == "success"
+                and smoke.get("v2", {}).get("expect") == "failure"
+            )
+            if not proven or meta["api_break"] or meta["abi_break"]:
+                continue
+            kinds = {e.get("kind") for e in meta.get("conditional_breaks", [])}
+            if "api" not in kinds:
+                missing.append(case_name)
+        assert not missing, (
+            f"proven source break not recorded as conditional: {missing}"
+        )
+
+    def test_behavioral_break_under_a_clean_gate_is_recorded(
+        self, verdicts: dict
+    ) -> None:
+        """A behavioral break the declared interface carries (not the
+        declared-interface-scoped NO_CHANGE control) is conditional too."""
+        missing = [
+            case_name
+            for case_name, meta in verdicts.items()
+            if meta.get("behavioral_break")
+            and meta.get("truth_scope") != "declared-interface"
+            and "behavioral"
+            not in {e.get("kind") for e in meta.get("conditional_breaks", [])}
+        ]
+        assert not missing, f"behavioral break not recorded as conditional: {missing}"
+
+
 # ---------------------------------------------------------------------------
 # 4b. Fact (underlying_fact) vs. policy (expected) alignment
 #

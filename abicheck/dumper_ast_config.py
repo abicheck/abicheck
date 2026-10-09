@@ -63,7 +63,9 @@ _CLANG_CACHE_SCHEMA_VERSION = 4
 #: `extract.castxml_header_compat.CASTXML_HEADER_PREAMBLE`: on a target
 #: whose `long double` is binary128 the same inputs now parse to a different
 #: (complete) AST.
-_CASTXML_CACHE_SCHEMA_VERSION = 3
+#: Bumped to 4 when the cached document started carrying the compiler-resolved
+#: calling-convention macro table (`extract.headers.castxml.macro_table`).
+_CASTXML_CACHE_SCHEMA_VERSION = 4
 
 #: Which module constant salts each backend's header-parse cache key. Named,
 #: not copied, so the key always reads the constant's current value.

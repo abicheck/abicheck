@@ -99,6 +99,8 @@ COVERAGE: dict[str, str] = {
     "abicheck.buildsource.source_extractors.clang::memoized::_clang_compiler_version": "UNCOVERED: L4 clang source extractor tool probe; build-source path only",
     "abicheck.buildsource.toolchain_probe::memoized::_clang_accepts_target": "UNCOVERED: clang cross-target probe; needs clang and a --target build",
     "abicheck.buildsource.type_graph::memoized::_base_type_name": _NEEDS_L5,
+    "abicheck.compare.overload_ambiguity::memoized::_callable_key": H,
+    "abicheck.compare.parameter_facts::memoized::_pointee_qualifier_delta": H,
     "abicheck.compatibility_evaluation_frontend::memoized::builtin_policy_identity": R,
     "abicheck.compatibility_evaluation_frontend::memoized::severity_preset_identity": "UNCOVERED: reached only under --severity-preset; pure function of a packaged preset name",
     "abicheck.demangle::memoized::demangle": R,

@@ -496,7 +496,10 @@ def _load_with_producer_and_header_confirmation(producer, header_confirmed):
     assert snap.declarations.functions, (
         "fixture must carry at least one function for from_headers to infer True"
     )
-    return str(record[0].message) if record else ""
+    # Only the loader's own UserWarning: a ResourceWarning from an unrelated
+    # object collected during the load must not be read as its message.
+    user = [w for w in record if issubclass(w.category, UserWarning)]
+    return str(user[0].message) if user else ""
 
 
 @pytest.mark.parametrize("flag_name", sorted(_FLAG_DEGRADED_FOR_PRODUCER))

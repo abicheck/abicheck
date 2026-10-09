@@ -50,6 +50,7 @@ from .compare.parameter_facts import (
     pointee_qualifier_changes,
     pointer_level_changes,
     restrict_changes,
+    return_pointee_qualifier_changes,
     va_list_changes,
 )
 from .compare.surface_reconcile import (
@@ -1332,6 +1333,30 @@ def _diff_param_pointee_qualifier(old: AbiSnapshot, new: AbiSnapshot) -> list[Ch
             f_old.name,
             v_old,
             v_new,
+            entity_id=f_old.entity_id or f_new.entity_id,
+        )
+    return changes
+
+
+@registry.detector("func_return_pointee_qualifier")
+def _diff_func_return_pointee_qualifier(
+    old: AbiSnapshot, new: AbiSnapshot
+) -> list[Change]:
+    """Detect a const/volatile change behind a returned pointer/reference --
+    ``FUNC_RETURN_CHANGED`` ignores it, see ``compare.parameter_facts.
+    return_pointee_qualifier_changes``. Header-tier only, as for parameters."""
+    if not _both_header_aware(old, new):
+        return []
+    old_map, new_map = _reconciled_function_surfaces(old, new)
+    old_index = function_signature_index(old.canonical_ir, old_map.values())
+    new_index = function_signature_index(new.canonical_ir, new_map.values())
+    changes: list[Change] = []
+    for mangled, f_old, f_new in iter_matched_function_pairs(old_map, new_map):
+        changes += return_pointee_qualifier_changes(
+            mangled,
+            f_old.name,
+            old_index.signature_for(f_old).return_spelling,
+            new_index.signature_for(f_new).return_spelling,
             entity_id=f_old.entity_id or f_new.entity_id,
         )
     return changes

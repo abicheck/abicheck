@@ -839,7 +839,7 @@
     },
     {
       "path": "abicheck/elf_metadata.py",
-      "baseline_lines": 1270,
+      "baseline_lines": 1168,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "disposition": "migrate",

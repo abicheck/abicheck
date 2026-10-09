@@ -1,0 +1,15 @@
+{
+ "schema": "semantic_review.v1",
+ "description": "Independent semantic review of a catalog case's ground truth, kept apart from detector conformance: a COVERED row in the full example matrix only says some lane matched the recorded expectation, not that the expectation itself was proven. A case is listed here only when its expected verdict/kinds were checked against evidence that is not abicheck's own output (a compiler oracle, a source smoke, a runtime witness). Every case not listed is 'unreviewed'.",
+ "reviews": {
+  "case64_calling_convention_changed": {"date": "2026-10-09", "evidence": ["runtime_witness", "compiler_oracle"], "note": "Old consumer computes the wrong dot product against v2 (registers differ); GCC and Clang agree the attribute differs."},
+  "case69_trivial_to_nontrivial": {"date": "2026-10-09", "evidence": ["compiler_oracle"], "note": "g++ __is_trivially_copyable flips true->false; checked with and without debug info."},
+  "case111_enumerable_thread_specific_lambda_ambiguity": {"date": "2026-10-09", "evidence": ["source_smoke", "compiler_oracle"], "note": "ets({}) compiles against v1 and is ambiguous against v2; ets(42) resolves against both."},
+  "case186_c_api_pointee_const_abi_neutral": {"date": "2026-10-09", "evidence": ["source_smoke"], "note": "Direct calls compile against both; a void (*)(char *) callback rejects v2."},
+  "case207_pointer_parameter_gained_restrict": {"date": "2026-10-09", "evidence": ["runtime_witness"], "note": "Overlapping prefix-sum consumer changes result under GCC and Clang at -O3."},
+  "case208_restrict_added_to_definition_only": {"date": "2026-10-09", "evidence": ["runtime_witness"], "note": "Declared interface identical; behavioral break recorded with truth_scope declared-interface."},
+  "case209_calling_convention_changed_via_macro": {"date": "2026-10-09", "evidence": ["runtime_witness", "compiler_oracle"], "note": "Old app prints dot 0.0 and exits 1 against v2; the macro expands to different attributes."},
+  "case210_calling_convention_respelled_via_macro": {"date": "2026-10-09", "evidence": ["runtime_witness"], "note": "Old app exits 0 against both libraries; same expansion."},
+  "case211_return_pointee_gained_const": {"date": "2026-10-09", "evidence": ["source_smoke", "runtime_witness"], "note": "char *p = get_name() compiles against v1 and is rejected against v2; old binary runs against both."}
+ }
+}
