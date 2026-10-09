@@ -38,7 +38,7 @@ from typing import TYPE_CHECKING, Any
 from abicheck.model.source_graph_query import PUBLIC_VISIBILITIES
 
 from ..model.graph_facts import CONF_HIGH
-from .call_graph import (
+from ..model.graph_vocabulary import (
     CALL_KIND_FUNCTION_POINTER,
     CALL_KIND_VIRTUAL,
     RESOLUTION_OVERAPPROX,
