@@ -13,7 +13,6 @@ from abicheck.service_dump_cache import (
     cached_run_dump,
 )
 
-
 _NO_CLANG_LAYOUT_TOOL = "abicheck.extract.headers.clang.layout_tool.shutil.which"
 
 
