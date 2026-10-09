@@ -914,6 +914,19 @@ class TestTheCanonicalOwnerIsClassifiedNotJustTheFacade:
         ]
         assert unclassified == []
 
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "abicheck/workflows/dump/pipeline.py",
+            "abicheck/workflows/dump/header_scoped.py",
+            "abicheck/workflows/dump/elf_fallback.py",
+            "abicheck/storage/header_ast_cache.py",
+        ],
+    )
+    def test_relocated_dump_modules_stay_perf_classified(self, path: str) -> None:
+        """The root-glob test above no longer sees modules moved out of the root."""
+        assert classify.changed_files_are_perf_sensitive([path])
+
     def test_the_glob_is_not_a_blanket_over_abicheck(self) -> None:
         """Vacuity guard: a pattern matching everything would pass the test above."""
         assert not classify.changed_files_are_perf_sensitive(["abicheck/errors.py"])
