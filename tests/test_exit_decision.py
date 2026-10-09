@@ -631,7 +631,7 @@ class TestResolveReleaseExitDecision:
         """The real bug this axis exists to fix (Codex review, fresh
         evidence): library A's own severity-gate finding and library B's
         operational `ERROR` are independently computed by
-        `_compute_release_severity_exit_code`/`_fold_release_global_
+        `release_severity_exit_code`/`_fold_release_global_
         severity` and then combined with `max()` -- a genuine tie an
         `is_operational_error` boolean (an earlier revision) could not
         represent, since it forced exactly one reason onto one combined
@@ -676,7 +676,7 @@ class TestResolveReleaseExitDecision:
         a gap in the real release fan-out's *legacy* aggregation (closing
         it means iterating `library_results` for a legacy-scheme "worst
         verdict among non-`ERROR`/non-`not_comparable` libraries", the same
-        way `_compute_release_severity_exit_code` already does for
+        way `release_severity_exit_code` already does for
         severity) -- not a limitation of this resolver, which this test
         proves already preserves such a tie correctly *if* a future,
         enhanced caller supplies both contributions. Recorded as explicit
