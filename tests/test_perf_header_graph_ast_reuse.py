@@ -45,8 +45,8 @@ from pathlib import Path
 
 import pytest
 
-from abicheck import dumper_cache
 from abicheck.extract.headers.clang import backend as clang_backend
+from abicheck.storage import header_ast_cache as dumper_cache
 
 pytestmark = [
     pytest.mark.integration,

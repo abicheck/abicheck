@@ -21,7 +21,7 @@ actually runs today.
 Both of those functions lost their production caller when ADR-063 Phase 1
 routed ``dump_cmd``'s real run (ELF *and* PE/Mach-O) through the shared
 typed executor -- ``frontends.cli.dump_execute.execute_and_write_dump_cli_run``
--> :func:`abicheck.service_dump_pipeline.execute_dump_request` ->
+-> :func:`abicheck.workflows.dump.pipeline.execute_dump_request` ->
 :func:`abicheck.workflows.artifact.execute._resolve_side_snapshot_impl` ->
 ``service.resolve_input``. They stayed alive only through their own unit
 tests, which is exactly the shape the duplication-and-convergence plan's

@@ -641,8 +641,8 @@ def dump_cmd(
     # real run below would pass to `execute_dump_request` -- see
     # `try_match_compile_db`'s own docstring for the one accepted
     # imprecision vs. the real run's `match_compile_db`.
-    from ....service_dump_pipeline import DumpExecutionOptions
     from ....workflows.artifact.compile_db_match import try_match_compile_db
+    from ....workflows.dump.pipeline import DumpExecutionOptions
     from ..dump_build_context_preview import (
         add_execution_options_dry_run_section,
         add_ownership_dry_run_section,

@@ -38,10 +38,10 @@ from typing import Any
 
 from ...buildsource.source_inputs import granting_live_source_licence
 from ...compile_context import CompileContext
-from ...dumper_cache import ast_memoize_scope
 from ...extract.dependency_exclusion import suppress_dependency_exclusion
 from ...model import AbiSnapshot
 from ...storage import closure_identity
+from ...storage.header_ast_cache import ast_memoize_scope
 from ..run_dump_scope import extraction_scope
 from ..snapshot_factory import DependencyScopeInputs, SnapshotFinish, finish_snapshot
 from .formats import NativeExtractRequest

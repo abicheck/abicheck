@@ -46,7 +46,7 @@ from abicheck import checker
 from abicheck.checker_policy import COMPATIBLE_KINDS
 from abicheck.errors import ValidationError
 from abicheck.service import DumpRequest, InputSpec
-from abicheck.service_dump_pipeline import run_dump_request
+from abicheck.workflows.dump.pipeline import run_dump_request
 
 pytestmark = pytest.mark.integration
 

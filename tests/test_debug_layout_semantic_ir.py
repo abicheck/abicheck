@@ -27,7 +27,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from abicheck.dumper_elf_fallback import _build_symbol_only_snapshot
 from abicheck.elf_metadata import ElfMetadata
 from abicheck.extract.debug_layout_semantic_ir import semantic_ir_from_debug_metadata
 from abicheck.model.dwarf_facts import (
@@ -38,6 +37,7 @@ from abicheck.model.dwarf_facts import (
     StructLayout,
 )
 from abicheck.model.identity import EntityKind, entity_id_for_enum, entity_id_for_type
+from abicheck.workflows.dump.elf_fallback import _build_symbol_only_snapshot
 
 
 def _struct(name: str, *fields: FieldInfo, is_union: bool = False) -> StructLayout:

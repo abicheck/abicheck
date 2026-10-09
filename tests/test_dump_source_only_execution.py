@@ -17,16 +17,16 @@
 clause: a real *execution* variant for a binary-less
 (``InputSpec.path is None``) :class:`~abicheck.api_types.DumpRequest`.
 
-Before this change, :func:`~abicheck.service_dump_pipeline.execute_dump_request`
+Before this change, :func:`~abicheck.workflows.dump.pipeline.execute_dump_request`
 raised ``ValidationError`` unconditionally for this shape even though
-:func:`~abicheck.service_dump_pipeline.resolve_dump_request` has always fully
+:func:`~abicheck.workflows.dump.pipeline.resolve_dump_request` has always fully
 resolved it -- the only pipeline that could actually produce the snapshot was
 :func:`~abicheck.cli_buildsource.dump_source_only`'s own CLI-only path,
 embedding L3-L5 evidence inline with no typed request at all.
 
 These tests state the general contract (not just one hand-picked example):
 a source-only :class:`~abicheck.api_types.DumpRequest`, executed through
-:func:`~abicheck.service_dump_pipeline.execute_dump_request`, produces a
+:func:`~abicheck.workflows.dump.pipeline.execute_dump_request`, produces a
 snapshot with the same L3 evidence -- and the same "no evidence at all is a
 usage error" / "an unreached requested depth floor is a hard error"
 behavior -- that :func:`~abicheck.cli_buildsource.dump_source_only` produces
@@ -71,7 +71,7 @@ class TestExecuteDumpRequestSourceOnlyMatchesDumpSourceOnly:
     def test_l3_evidence_matches_across_both_pipelines(self, tmp_path):
         from abicheck.cli_buildsource import dump_source_only
         from abicheck.serialization import load_snapshot
-        from abicheck.service_dump_pipeline import (
+        from abicheck.workflows.dump.pipeline import (
             execute_dump_request,
             resolve_dump_request,
         )
@@ -131,7 +131,7 @@ class TestExecuteDumpRequestSourceOnlyMatchesDumpSourceOnly:
         the other half of ``dump_source_only``'s own precondition
         (``sources is None and build_info is None`` is the only rejected
         combination)."""
-        from abicheck.service_dump_pipeline import (
+        from abicheck.workflows.dump.pipeline import (
             execute_dump_request,
             resolve_dump_request,
         )
@@ -162,7 +162,7 @@ class TestExecuteDumpRequestSourceOnlyErrorContract:
         embedding nothing, it fails the same way `dump_source_only`'s own
         "dump requires a binary ... or --sources/--build-info" precondition
         does."""
-        from abicheck.service_dump_pipeline import (
+        from abicheck.workflows.dump.pipeline import (
             execute_dump_request,
             resolve_dump_request,
         )
@@ -192,7 +192,7 @@ class TestExecuteDumpRequestSourceOnlyErrorContract:
         build system from) is a hard ``ValidationError`` -- the identical
         floor `execute_dump_request`'s binary path enforces via
         `enforce_requested_depth`, not a silent weaker snapshot."""
-        from abicheck.service_dump_pipeline import (
+        from abicheck.workflows.dump.pipeline import (
             execute_dump_request,
             resolve_dump_request,
         )

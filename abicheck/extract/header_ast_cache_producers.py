@@ -57,7 +57,7 @@ CLANG_AST_OUTPUT_MODULES: tuple[str, ...] = (
 #: why. A module the trace finds that is in neither tuple fails the test.
 NON_SHAPING_MODULES: dict[str, str] = {
     "abicheck.deadline": "budget checks only",
-    "abicheck.dumper_cache": "coordination and memo bookkeeping",
+    "abicheck.storage.header_ast_cache": "coordination and memo bookkeeping",
     "abicheck.dumper_clang_streaming": "prunes the in-memory tree after the entry is written",
     "abicheck.extract.env_flags": "reads the prune switch, which acts on the in-memory tree only",
     "abicheck.extract.headers.clang.locations": "materializes locations after the cache write",

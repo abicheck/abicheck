@@ -49,12 +49,6 @@ from ....dumper_ast_config import (
     _resolve_compiler_binary,
 )
 from ....dumper_ast_config_cpp20 import _detect_cpp20_headers
-from ....dumper_cache import (
-    _cache_path,
-    ast_acquisition_active,
-    read_cached_castxml as _read_castxml_cache,
-    run_ast_acquisition,
-)
 from ....dumper_castxml import _CastxmlParser
 from ....dumper_castxml_probe import (
     _castxml_cpp_retry_allowed,
@@ -75,6 +69,12 @@ from ....dumper_toolchain import (
 from ....errors import SnapshotError, UnsupportedCastxmlVersionError
 from ....storage.atomic_file import atomic_write as _atomic_write
 from ....storage.cache_integrity import record_digest
+from ....storage.header_ast_cache import (
+    _cache_path,
+    ast_acquisition_active,
+    read_cached_castxml as _read_castxml_cache,
+    run_ast_acquisition,
+)
 from ...castxml_header_compat import write_castxml_aggregate
 from ...path_aliases import absolutize_include_roots
 from ..backend import HeaderParseRequest

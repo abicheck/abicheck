@@ -489,7 +489,7 @@ def test_every_production_cache_is_registered() -> None:
     names = set(cache_stats())
     for expected in (
         "abicheck.snapshot_cache.disk",
-        "abicheck.dumper_cache.ast_disk",
+        "abicheck.storage.header_ast_cache.ast_disk",
         "abicheck.name_classification.canonicalize_type_name",
         "abicheck.model.comparison_memo",
     ):

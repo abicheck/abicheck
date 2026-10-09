@@ -7,13 +7,13 @@ from __future__ import annotations
 import json
 import random
 
-from abicheck.dumper_cache import load_cached_ast, read_cached_castxml
 from abicheck.storage.cache_integrity import (
     digest_file,
     record_digest,
     sidecar_path,
     verify_entry,
 )
+from abicheck.storage.header_ast_cache import load_cached_ast, read_cached_castxml
 from abicheck.storage.json_compact import CompactedAst
 
 _DOC = {

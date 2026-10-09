@@ -14,14 +14,14 @@
 
 """``execute_dump_request``'s own execution-options value object.
 
-Split out of :mod:`abicheck.service_dump_pipeline` purely to keep that
+Split out of :mod:`abicheck.workflows.dump.pipeline` purely to keep that
 module under the architecture gate's 800-line new-file cap once ADR-063
 Track T4's second item (a real source-only dump execution variant) needed
 more room there -- both classes here are plain, dependency-free value
 objects with no reference to :class:`~abicheck.model.AbiSnapshot` or
 anything else that would make ``workflows`` importing them a layering
 problem, so moving them (rather than the execution logic that *constructs*
-:class:`~abicheck.service_dump_pipeline.DumpResult`, which cannot move here
+:class:`~abicheck.workflows.dump.pipeline.DumpResult`, which cannot move here
 without ``workflows`` importing back up into the flat ``service_`` family)
 is the safe half of this split. Mirrors the precedent set when
 ``dry_run_estimate.py`` split ``_descendant_pgids``/``_kill_process_tree`` out
@@ -49,7 +49,7 @@ class _DumpAssuranceView:
     """The minimal shape :meth:`~abicheck.workflows.resolved_execution_context.
     EvidenceView.from_assurance` reads via ``getattr`` -- ``requested_depth``/
     ``effective_depth``/``depth_satisfied`` -- built from a completed
-    :class:`~abicheck.service_dump_pipeline.DumpResult`'s own facts rather
+    :class:`~abicheck.workflows.dump.pipeline.DumpResult`'s own facts rather
     than a real :class:`~abicheck.analysis_assurance.AnalysisAssurance`.
 
     ``AnalysisAssurance`` is comparison-shaped: pair symmetry (L0/header/DWARF
@@ -58,9 +58,9 @@ class _DumpAssuranceView:
     side to compare against. But the one axis ``AnalysisAssurance`` and a
     single dump genuinely share -- "did the requested ``--depth`` get
     reached" -- *is* knowable here, from
-    :func:`~abicheck.service_dump_pipeline.execute_dump_request`'s own
+    :func:`~abicheck.workflows.dump.pipeline.execute_dump_request`'s own
     already-computed ``effective_depth`` (a real post-execution fact, the
-    identical value :class:`~abicheck.service_dump_pipeline.DumpResult`
+    identical value :class:`~abicheck.workflows.dump.pipeline.DumpResult`
     itself carries), so this class states exactly that axis rather than
     leaving :meth:`~abicheck.workflows.resolved_execution_context.
     ResolvedExecutionContext.with_assurance` fully unwired for ``dump``.
@@ -74,23 +74,23 @@ class _DumpAssuranceView:
 @dataclass(frozen=True)
 class DumpExecutionOptions:
     """The out-of-band execution semantics
-    :func:`~abicheck.service_dump_pipeline.execute_dump_request` needs beyond
+    :func:`~abicheck.workflows.dump.pipeline.execute_dump_request` needs beyond
     *resolved* itself and *notify*, folded into one typed value -- ADR-063
     ``duplication-and-convergence-assessment.md`` Track T4 ("Dump request
     contract"). Before this, the nine fields below were nine separate
-    keyword parameters on :func:`~abicheck.service_dump_pipeline.
+    keyword parameters on :func:`~abicheck.workflows.dump.pipeline.
     execute_dump_request`: reaching the same function did not mean a caller
     stated a coherent, nameable execution plan, only that it happened to
     pass the same nine positional names. Grouping them is additive, not a
     new decision point -- every field keeps the exact default
-    :func:`~abicheck.service_dump_pipeline.execute_dump_request` already gave
+    :func:`~abicheck.workflows.dump.pipeline.execute_dump_request` already gave
     it, so ``DumpExecutionOptions()`` (the parameter's own default) is
     bit-for-bit equivalent to omitting all nine kwargs before this change.
 
     Since this track's follow-up, an instance is also attachable to the
-    *resolved* request (see :attr:`~abicheck.service_dump_pipeline.
+    *resolved* request (see :attr:`~abicheck.workflows.dump.pipeline.
     ResolvedDumpRequest.execution_options`) rather than only assembled fresh
-    at :func:`~abicheck.service_dump_pipeline.execute_dump_request`'s own
+    at :func:`~abicheck.workflows.dump.pipeline.execute_dump_request`'s own
     call boundary -- so ``dump --dry-run`` can render what a real run would
     pass, instead of the ``dump`` CLI threading the nine values through
     :func:`~abicheck.frontends.cli.dump_execute.execute_dump_cli_run` as

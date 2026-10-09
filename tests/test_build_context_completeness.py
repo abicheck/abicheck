@@ -736,8 +736,8 @@ class TestForcedIncludeCacheKey:
         tokens those dirs came from — the same fold `service._dump_elf` and
         `service._attach_header_graph` already apply.
         """
-        from abicheck import service_header_scoped
         from abicheck.dry_run_estimate import CompileContext
+        from abicheck.workflows.dump import header_scoped as service_header_scoped
 
         gen = tmp_path / "gen"
         gen.mkdir()

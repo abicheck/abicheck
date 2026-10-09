@@ -587,10 +587,10 @@ def _measure_one(n: int, backend: str, repeat: int) -> dict[str, Any]:
     ``perf_measurement.summarize_samples`` — not the minimum (see that
     module's own docstring for why "keep the fastest" hides regressions).
     """
-    from abicheck import dumper_cache
     from abicheck.compile_context import CompileContext
     from abicheck.dumper import dump
     from abicheck.service import _attach_header_graph
+    from abicheck.storage import header_ast_cache as dumper_cache
 
     def _one_pair() -> tuple[float, float]:
         with tempfile.TemporaryDirectory(prefix="hgperf_") as tmp:
@@ -736,10 +736,10 @@ def _memory_probe(n: int, backend: str) -> dict[str, float]:
     (one point per size/backend, keyed the same way), but note the size
     axis is nearly flat here by design: the dependency headers dominate.
     """
-    from abicheck import dumper_cache
     from abicheck.compile_context import CompileContext
     from abicheck.dumper import dump
     from abicheck.service import _attach_header_graph
+    from abicheck.storage import header_ast_cache as dumper_cache
 
     with tempfile.TemporaryDirectory(prefix="hgperf_mem_") as tmp:
         so, header = _build_fixture(Path(tmp), n, memory_shaped=True)

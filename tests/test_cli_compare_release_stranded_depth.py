@@ -104,7 +104,7 @@ class TestBundleFactsOutStrandedLibraryHonoursDepthBinary:
         step reads) -- so this asserts on those, not the raw request.
         """
         captured: dict[str, object] = {}
-        from abicheck.service_dump_pipeline import (
+        from abicheck.workflows.dump.pipeline import (
             resolve_dump_request as _real_resolve_dump_request,
         )
 
@@ -117,7 +117,7 @@ class TestBundleFactsOutStrandedLibraryHonoursDepthBinary:
             return resolved
 
         monkeypatch.setattr(
-            "abicheck.service_dump_pipeline.resolve_dump_request",
+            "abicheck.workflows.dump.pipeline.resolve_dump_request",
             _fake_resolve_dump_request,
         )
         return captured
@@ -200,14 +200,14 @@ class TestStrandedResolverFallbackIsElfOnly:
         def _raise_for_stranded(request: object) -> object:
             if request.input.path == stranded:  # type: ignore[attr-defined]
                 raise RuntimeError("boom")
-            from abicheck.service_dump_pipeline import (
+            from abicheck.workflows.dump.pipeline import (
                 resolve_dump_request as _real,
             )
 
             return _real(request)  # type: ignore[arg-type]
 
         monkeypatch.setattr(
-            "abicheck.service_dump_pipeline.resolve_dump_request",
+            "abicheck.workflows.dump.pipeline.resolve_dump_request",
             _raise_for_stranded,
         )
 

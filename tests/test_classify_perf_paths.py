@@ -906,7 +906,9 @@ class TestTheCanonicalOwnerIsClassifiedNotJustTheFacade:
             p.relative_to(_REPO_ROOT).as_posix()
             for p in (_REPO_ROOT / "abicheck").glob("service*.py")
         )
-        assert len(modules) > 5, modules
+        # Vacuity floor only: ADR-061 moves keep shrinking the root
+        # `service_*` family into workflows/ (covered by its own pattern).
+        assert len(modules) >= 4, modules
         unclassified = [
             m for m in modules if not classify.changed_files_are_perf_sensitive([m])
         ]

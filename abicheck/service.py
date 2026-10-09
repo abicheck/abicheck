@@ -95,7 +95,9 @@ from .workflows.request_inputs import InputSpec
 # import _try_header_scoped_dump`, and every test's
 # `monkeypatch.setattr(service, "_try_header_scoped_dump", ...)` all keep
 # working exactly as before this module existed.
-_service_header_scoped = _importlib.import_module(".service_header_scoped", __package__)
+_service_header_scoped = _importlib.import_module(
+    ".workflows.dump.header_scoped", __package__
+)
 # Explicitly typed (not left as the `Any` importlib.import_module's attribute
 # access would otherwise infer) so a caller returning this call's result
 # still gets a real return-type check instead of a silent `no-any-return`.
@@ -166,12 +168,6 @@ from .service_compare_pipeline import (  # noqa: E402,F401
     run_compare_request,
 )
 
-# ── Dump pipeline (G33 Phase 5): ``dump``'s counterpart to the above, in the
-# leaf module ``service_dump_pipeline``. Re-exported for the same reason:
-# ``from abicheck.service import run_dump_request`` is the typed entry point
-# every front end (CLI, typed Python) builds a request for. ──────────────────
-from .service_dump_pipeline import run_dump_request  # noqa: E402,F401
-
 # ── Comparison: policy-parameterised (ADR-061 Phase 4). `compare_snapshots`/
 # `load_suppression_and_policy`/`_validate_contract_mode`/
 # `dedup_policy_override_warnings` moved into the leaf module
@@ -191,6 +187,12 @@ from .workflows.compare_policy import (  # noqa: E402,F401
     load_suppression_and_policy,
 )
 from .workflows.dump.native import run_dump  # noqa: E402,F401
+
+# ── Dump pipeline (G33 Phase 5): ``dump``'s counterpart to the above, in the
+# leaf module ``service_dump_pipeline``. Re-exported for the same reason:
+# ``from abicheck.service import run_dump_request`` is the typed entry point
+# every front end (CLI, typed Python) builds a request for. ──────────────────
+from .workflows.dump.pipeline import run_dump_request  # noqa: E402,F401
 
 # ADR-061 gap D, closed: the directory/package release fan-out's
 # pre-execution resolution is one typed request/plan pair, reachable from

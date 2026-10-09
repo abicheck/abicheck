@@ -84,7 +84,7 @@ format up in `workflows.dump.native.FORMAT_ADAPTERS` and passes the
 in a test, swap the registry entry (helper: `tests/_dump_format_fakes.py`);
 the extractor names themselves are owned, not patch points.
 
-`abicheck/service_dump_pipeline.py` is classified `workflows` via
+`abicheck/workflows/dump/pipeline.py` is classified `workflows` via
 `legacy_paths`: it is free of CLI imports and owns `DumpRequest ->
 ResolvedDumpRequest -> DumpResult`, but has not moved into this directory
 yet. Know what that classification enforces, because the two gates differ:
