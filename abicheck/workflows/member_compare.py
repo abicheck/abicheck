@@ -22,9 +22,17 @@ from ..service_compare_pipeline import run_compare
 from .release_member_request import ReleaseMemberCompareRequest, run_compare_kwargs
 
 if TYPE_CHECKING:
+    from ..checker_types import DiffResult
+    from ..policy.exit_decision import ExitDecision
+    from ..policy.severity import SeverityConfig
     from .contracts import CompareResult
 
-__all__ = ["compare_member", "record_release_resolved_config"]
+__all__ = [
+    "compare_member",
+    "member_exit_decision",
+    "record_release_resolved_config",
+    "stamp_member_exit_contributions",
+]
 
 
 def compare_member(
@@ -151,3 +159,65 @@ def record_release_resolved_config(result: Any, config: Any) -> None:
     # disagreeing "resolved" configs on the same result (Codex review, fresh
     # evidence).
     result.evaluation_config = config
+
+
+def member_exit_decision(
+    result: DiffResult,
+    severity_config: SeverityConfig | None,
+    require_complete_analysis: bool,
+) -> ExitDecision:
+    """A release member's exit decision, from the resolver a single-pair
+    ``compare`` of the same pair uses, so a release folds what that compare
+    would decide instead of re-deriving each axis (ADR-064)."""
+    from ..policy.effective_gate import EffectiveGate
+    from ..policy.exit_decision import resolve_compare_exit_decision
+
+    return resolve_compare_exit_decision(
+        result,
+        EffectiveGate.from_severity(
+            severity_config, require_complete_analysis=require_complete_analysis
+        ),
+    )
+
+
+def stamp_member_exit_contributions(
+    entry: dict[str, object],
+    result: DiffResult,
+    severity_config: SeverityConfig | None,
+    *,
+    require_complete_analysis: bool,
+    contract_evaluation: bool,
+) -> None:
+    """Record every exit axis *result* contributes to its release's fold.
+
+    The compatibility contribution rides the private
+    ``_compatibility_contribution`` key (stripped before serialisation) into
+    the release's severity fold. The other stamps are persisted report
+    fields:
+
+    - the evidence-contract axis (exit 7, recorded rather than raised by
+      ``classify_compare_pair``);
+    - ``assurance.require_complete`` (ADR-071), via ``stamp_member_assurance``;
+    - ADR-067 D6's additions-review floor;
+    - ADR-049 Phase 7's contract-coverage floor, under ``--contract`` only.
+
+    Each is ``0`` whenever the run did not ask the question, so library count
+    never changes what a setting means.
+    """
+    from ..policy.exit_decision_precedence import EXIT_EVIDENCE_CONTRACT_ERROR
+
+    decision = member_exit_decision(result, severity_config, require_complete_analysis)
+    entry["_compatibility_contribution"] = decision.compatibility_contribution
+    entry["evidence_contract_error_contribution"] = (
+        EXIT_EVIDENCE_CONTRACT_ERROR if result.evidence_contract_error else 0
+    )
+    # `assurance.require_complete` (ADR-071): recorded unconditionally so the
+    # per-member status is readable even on a run that did not opt in.
+    from .release_assurance_members import stamp_member_assurance
+
+    stamp_member_assurance(entry, result, require_complete=require_complete_analysis)
+    entry["additions_review_exit_contribution"] = decision.additions_review_contribution
+    if contract_evaluation:
+        entry["contract_coverage_exit_contribution"] = (
+            decision.contract_coverage_contribution
+        )
