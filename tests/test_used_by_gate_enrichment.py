@@ -210,7 +210,7 @@ class TestCliExitCodeInvariantToConsumerScope:
         """
         from unittest.mock import patch
 
-        from abicheck.appcompat import AppCompatResult
+        from abicheck.workflows.consumer_scope import AppCompatResult
 
         old_funcs = [_fn("foo", "_Z3foov"), _fn("bar", "_Z3barv")]
         new_funcs = [_fn("bar", "_Z3barv")] if removed else list(old_funcs)
@@ -272,7 +272,7 @@ class TestConsumerImpactSummary:
     def test_n_of_m_affected_across_used_by_and_manifest(self, tmp_path, monkeypatch):
         import json as json_mod
 
-        from abicheck.appcompat import AppCompatResult
+        from abicheck.workflows.consumer_scope import AppCompatResult
 
         old, new, app1, app2 = self._write_binaries(tmp_path)
         manifest = tmp_path / "consumers.json"

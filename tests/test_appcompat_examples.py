@@ -39,8 +39,10 @@ if str(_REPO_DIR / "scripts") not in sys.path:
     sys.path.insert(0, str(_REPO_DIR / "scripts"))
 import example_catalog  # noqa: E402
 
-from abicheck.appcompat import check_appcompat  # noqa: E402
 from abicheck.checker_policy import Verdict  # noqa: E402
+from abicheck.workflows.consumer_scope_standalone import (  # noqa: E402
+    check_appcompat,
+)
 
 pytestmark = pytest.mark.skipif(
     sys.platform != "linux",

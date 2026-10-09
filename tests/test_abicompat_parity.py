@@ -117,7 +117,7 @@ def _run_abicompat(app: Path, old_lib: Path, new_lib: Path) -> str:
 
 
 def _run_abicheck_appcompat(app: Path, old_lib: Path, new_lib: Path) -> str:
-    from abicheck.appcompat import check_appcompat
+    from abicheck.workflows.consumer_scope_standalone import check_appcompat
 
     result = check_appcompat(app, old_lib, new_lib, lang="c")
     return result.verdict.value

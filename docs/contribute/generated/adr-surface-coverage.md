@@ -19,7 +19,7 @@ Which public surface reaches each ADR, which use cases it serves, and whether a 
 | [ADR-002](../adr/002-multi-binary-release-compare.md) | surfaced | UC-WF-compare | `cli: compare --select`<br>`report: compare_report.comparison_scope` | — |
 | [ADR-003](../adr/003-data-source-architecture.md) | internal | — | — | Extractor/data-source layering inside extract/; users reach it only through dump/compare. |
 | [ADR-004](../adr/004-report-filtering-and-deduplication.md) | surfaced | UC-REP-json | `report: compare_report.root_causes`<br>`report: compare_report.redundant_count`<br>`report: compare_report.filtered_summary` | — |
-| [ADR-005](../adr/005-application-compat-check.md) | surfaced | UC-WF-appcompat | `cli: compare --used-by`<br>`cli: compare --required-symbol`<br>`api: abicheck.appcompat.check_appcompat`<br>`action: used-by`<br>`report: compare_report.used_by` | — |
+| [ADR-005](../adr/005-application-compat-check.md) | surfaced | UC-WF-appcompat | `cli: compare --used-by`<br>`cli: compare --required-symbol`<br>`api: abicheck.workflows.consumer_scope_standalone.check_appcompat`<br>`action: used-by`<br>`report: compare_report.used_by` | — |
 | [ADR-006](../adr/006-package-level-comparison.md) | surfaced | UC-WF-compare | `cli: compare`<br>`action: devel-pkg1` | — |
 | [ADR-007](../adr/007-btf-ctf-debug-formats.md) | surfaced | UC-ARCH-kernel-btf | `cli: dump --debug-info`<br>`api: abicheck.btf_metadata` | — |
 | [ADR-008](../adr/008-full-stack-dependency-validation.md) | surfaced | UC-WF-stack-deps | `cli: deps tree`<br>`cli: deps compare`<br>`cli: compare --follow-deps`<br>`action: follow-deps` | — |
@@ -111,7 +111,7 @@ Which public surface reaches each ADR, which use cases it serves, and whether a 
 - ADR-004 report: compare_report.redundant_count
 - ADR-004 report: compare_report.root_causes
 - ADR-005 action: used-by
-- ADR-005 api: abicheck.appcompat.check_appcompat
+- ADR-005 api: abicheck.workflows.consumer_scope_standalone.check_appcompat
 - ADR-005 cli: compare --required-symbol
 - ADR-005 report: compare_report.used_by
 - ADR-006 action: devel-pkg1

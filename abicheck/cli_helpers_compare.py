@@ -743,14 +743,14 @@ def _apply_used_by_scoping(
     already-loaded snapshot (``old_snapshot``/``new_snapshot``, from
     ``compare``'s own pipeline) is used instead, since a snapshot's
     ``elf``/``pe``/``macho`` fields already carry the SONAME/export table/
-    version list/PE ordinal table :func:`~abicheck.appcompat.scope_diff_to_app`
+    version list/PE ordinal table :func:`~abicheck.workflows.consumer_scope.scope_diff_to_app`
     needs. Attaches a JSON-safe summary to ``result.used_by`` for the
     renderer and returns the worst app's exit code, computed under
     the run's scheme (legacy verdict floor when *severity* is ``None``, or
     severity-aware over each app's relevant changes otherwise).
 
     *suppression* (ADR-044 P2, Codex review) is forwarded to
-    :func:`~abicheck.appcompat.scope_diff_to_app`: its findings are
+    :func:`~abicheck.workflows.consumer_scope.scope_diff_to_app`: its findings are
     synthesized *after* the pipeline's own suppression pass already ran over
     ``result.changes``, so without this they would be unsuppressible even by
     an exact rule.
@@ -925,7 +925,7 @@ def _apply_required_symbol_scoping(
 
     *suppression* (ADR-067 C-S2, mirrors :func:`_apply_used_by_scoping`'s
     identical parameter -- ADR-044 P2) is forwarded to
-    :func:`~abicheck.appcompat.scope_diff_to_required_symbols`: its missing-
+    :func:`~abicheck.workflows.consumer_scope.scope_diff_to_required_symbols`: its missing-
     entrypoint overlay is synthesized *after* the pipeline's own suppression
     pass already ran over ``result.changes``, so without this it would be
     unsuppressible even by an exact rule.

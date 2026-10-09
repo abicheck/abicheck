@@ -337,7 +337,7 @@ This would make the report much more useful than a flat
 Detection becomes much more compelling when the report answers: **what
 actually breaks, and who consumes it?**
 
-abicheck already has an `appcompat` concept (`abicheck/appcompat.py`,
+abicheck already has an `appcompat` concept (`abicheck/workflows/consumer_scope.py`,
 [ADR-005](adr/005-application-compat-check.md)). Extend that into a
 scientific-Python consumer graph:
 
@@ -676,7 +676,7 @@ problems faced by SciPy and compiled scientific Python.
 | §2 NumPy C-API envelope | **[G26](plans/g26-numpy-capi-envelope.md)** (`UC-TC-numpy-capi-envelope`, `partial`) | Consumption detection, NPY_TARGET_VERSION extraction, and the wheel-metadata cross-check are done; the raw NPY_ABI_VERSION/NPY_API_VERSION hex constants need disassembly to recover (out of scope, same reasoning as G4) — see the plan's "Out of scope". New provider; extends the existing CPython-extension recognition (G14) to NumPy's own capsule-based API. |
 | §3 Wheel/deployment verification | **[G27](plans/g27-wheel-deployment-verification.md)** (`UC-TC-wheel-deployment-claims`, `partial`) | Linux GLIBCXX/CXXABI floor extension, musllinux glibc-dependency check, macOS deployment-target check, wheel-tag architecture-mismatch check, and a narrow RPATH-portability/vendored-closure check pair are done; Windows, CPU-ISA, the full per-tag closure policy, and CLI auto-derivation from a wheel's own tag remain planned. Generalizes G10 across platforms/toolchains; reuses G13/G12 machinery. |
 | §4 Release-matrix parity | G2 (build matrix), [ADR-002](adr/002-multi-binary-release-compare.md) | Extends multi-binary release compare from "verdict" to "support-set delta." |
-| §5 Downstream-impact analysis | `abicheck/appcompat.py`, [ADR-005](adr/005-application-compat-check.md) | Extends existing app-compat checking into a scientific-Python consumer graph. |
+| §5 Downstream-impact analysis | `abicheck/workflows/consumer_scope.py`, [ADR-005](adr/005-application-compat-check.md) | Extends existing app-compat checking into a scientific-Python consumer graph. |
 | §6 One-command PyPI/conda compare | none yet | New CLI surface; would need a package-resolution/caching layer not currently in scope. |
 | §7 Hermetic runtime-surface provider | G23 (deferred runtime fallback), [ADR-021b](adr/021-mcp-security-model.md) (sandboxing posture) | Picks up G23's explicitly-deferred runtime-introspection path. |
 | §8 BLAS/LAPACK/Fortran profile | [ADR-010](adr/010-policy-profile-system.md) (policy profiles) | New profile + new fact extraction (LP64/ILP64, OpenMP runtime IDs) the profile system doesn't yet have inputs for. |

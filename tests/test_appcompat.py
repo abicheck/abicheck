@@ -12,9 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Tests for the public ``abicheck.appcompat`` facade (ADR-005).
+"""End-to-end tests for application compatibility checking (ADR-005).
 
-End-to-end/public-API tests only: the facade's exports, the standalone
+End-to-end/public-API tests only: the facade's retirement, the standalone
 ``check_appcompat`` orchestrator (patched at the dump/compare boundary), and
 the ADR-057 consumer-impact enrichment helpers. Layered tests live next to
 their owners:
@@ -32,20 +32,21 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-import abicheck.appcompat as appcompat
-from abicheck.appcompat import (
-    AppCompatResult,
+from abicheck.checker import Change, DiffResult
+from abicheck.checker_policy import ChangeKind, ReachabilityState, Verdict
+from abicheck.model.consumer_requirements import (
     AppRequirements,
     ConsumerImportFacts,
     LibraryExportFacts,
-    check_against,
-    check_appcompat,
-    parse_app_requirements,
 )
-from abicheck.checker import Change, DiffResult
-from abicheck.checker_policy import ChangeKind, ReachabilityState, Verdict
 from abicheck.model.consumer_spec import ConsumerUnreadableError
-from abicheck.workflows.consumer_scope import scope_diff_to_consumer_facts
+from abicheck.workflows.consumer_scope import (
+    AppCompatResult,
+    check_against,
+    parse_app_requirements,
+    scope_diff_to_consumer_facts,
+)
+from abicheck.workflows.consumer_scope_standalone import check_appcompat
 
 # ---------------------------------------------------------------------------
 # Public data structures and facade surface
@@ -98,25 +99,13 @@ class TestDataStructures:
         assert result.verdict == verdict
 
 
-class TestFacadeSurface:
-    def test_all_names_resolve_and_no_private_names(self):
-        assert set(appcompat.__all__) == {
-            "AppCompatResult",
-            "AppRequirements",
-            "ConsumerImportFacts",
-            "LibraryExportFacts",
-            "PluginHostContractResult",
-            "check_against",
-            "check_appcompat",
-            "check_plugin_host_contract",
-            "parse_app_requirements",
-            "scope_diff_to_app",
-            "scope_diff_to_required_symbols",
-            "uncovered_missing_symbols",
-        }
-        for name in appcompat.__all__:
-            assert getattr(appcompat, name) is not None
-        assert not [n for n in vars(appcompat) if n.startswith("_") and n[1] != "_"]
+class TestFacadeRetired:
+    def test_appcompat_facade_module_is_gone(self):
+        """The delegation-only ``abicheck.appcompat`` facade was retired;
+        callers import the owners (``workflows.consumer_scope`` and friends)."""
+        import abicheck
+
+        assert not (Path(abicheck.__file__).parent / "appcompat.py").exists()
 
 
 # ---------------------------------------------------------------------------

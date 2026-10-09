@@ -434,7 +434,6 @@
     }
   },
   "public_root_surfaces": [
-    "abicheck.appcompat",
     "abicheck.checker_policy",
     "abicheck.contract_evidence",
     "abicheck.header_only_dump",
@@ -442,7 +441,6 @@
     "abicheck.serialization"
   ],
   "facades": [
-    "abicheck.appcompat",
     "abicheck.checker_policy"
   ],
   "frozen_root_families": {
@@ -607,7 +605,6 @@
     "analysis_assurance_comparability.py",
     "analysis_assurance_layout.py",
     "annotations.py",
-    "appcompat.py",
     "binary_fingerprint.py",
     "binary_utils.py",
     "binder.py",

@@ -805,10 +805,10 @@ class TestUsedByScopedOnlyChange:
         self, tmp_path, monkeypatch
     ):
         import abicheck.workflows.consumer_scope as appcompat_mod
-        from abicheck.appcompat import AppCompatResult
         from abicheck.checker import Verdict
         from abicheck.checker_policy import ChangeKind
         from abicheck.diff_helpers import make_change
+        from abicheck.workflows.consumer_scope import AppCompatResult
 
         app, old, new = self._setup(tmp_path, monkeypatch)
         synthetic = make_change(

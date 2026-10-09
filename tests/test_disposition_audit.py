@@ -350,9 +350,9 @@ def test_suppression_never_changes_the_detected_total() -> None:
 def test_consumer_overlay_suppression_records_into_the_same_ledger() -> None:
     """The fourth application point (``appcompat``), whose input shape is a
     raw ``missing_symbols`` string rather than a detected change."""
-    from abicheck.appcompat import AppRequirements
     from abicheck.checker_types import DiffResult
     from abicheck.model.change import Change
+    from abicheck.model.consumer_requirements import AppRequirements
 
     result = DiffResult(old_version="1.0", new_version="2.0", library="libfoo")
     ledger = finalize_ledger(DispositionLedger(), result)

@@ -20,7 +20,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from abicheck.appcompat import AppCompatResult, AppRequirements
 from abicheck.buildsource.graph_impact import (
     _TIER_CONSUMER_PROVEN,
     _TIER_EXACT,
@@ -55,10 +54,14 @@ from abicheck.impact.consumer_graph import (
 from abicheck.model import AbiSnapshot
 from abicheck.model.change import Change
 from abicheck.model.consumer_requirements import (
+    AppRequirements,
     ConsumerImportFacts,
     LibraryExportFacts,
 )
-from abicheck.workflows.consumer_scope import scope_diff_to_consumer_facts
+from abicheck.workflows.consumer_scope import (
+    AppCompatResult,
+    scope_diff_to_consumer_facts,
+)
 
 _DISPATCHER = "_ZN6detail21train_ops_dispatcherEv"
 

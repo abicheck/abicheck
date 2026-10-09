@@ -815,7 +815,7 @@ topics:
   consumer-models:
     canonical_page: learn/consumer-models.md
     fact_sources:
-      - abicheck/appcompat.py
+      - abicheck/workflows/consumer_scope.py
       - abicheck/cli_compare_helpers.py
     allowed_summaries:
       - learn/abi-series/00-product-contract.md

@@ -64,7 +64,7 @@ def test_no_tier_skip() -> None:
 # Each case plants one front-end module that reaches Tier-1 `checker.compare`
 # a different way; the gate must flag exactly one violation naming that file.
 # (filename, source) — covers: direct import, aliased lazy `compare` import,
-# aliased `checker` *module* call, and the non-`cli*.py` `appcompat.py` scope.
+# and aliased `checker` *module* call.
 _GATE_VIOLATION_CASES: list[pytest.ParameterSet] = [
     pytest.param(
         "cli_bad.py",
@@ -82,11 +82,6 @@ _GATE_VIOLATION_CASES: list[pytest.ParameterSet] = [
         "cli_modalias.py",
         "from . import checker as core\ndef go(a, b):\n    return core.compare(a, b)\n",
         id="aliased-module-call",
-    ),
-    pytest.param(
-        "appcompat.py",
-        "from .checker import compare\ndef check(a, b):\n    return compare(a, b)\n",
-        id="appcompat-in-scope",
     ),
 ]
 

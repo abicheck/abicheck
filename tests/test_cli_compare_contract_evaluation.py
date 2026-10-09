@@ -784,7 +784,7 @@ class TestUsedByScopingStampsExplicitEvidence:
     def test_used_by_missing_symbol_gets_contract_evaluation(
         self, tmp_path, monkeypatch
     ):
-        from abicheck.appcompat import AppCompatResult
+        from abicheck.workflows.consumer_scope import AppCompatResult
 
         app, old, new = self._setup(tmp_path, monkeypatch)
         scoped = AppCompatResult(
@@ -825,7 +825,7 @@ class TestUsedByScopingStampsExplicitEvidence:
             )
 
     def test_used_by_missing_symbol_is_stamped_by_default(self, tmp_path, monkeypatch):
-        from abicheck.appcompat import AppCompatResult
+        from abicheck.workflows.consumer_scope import AppCompatResult
 
         app, old, new = self._setup(tmp_path, monkeypatch)
         scoped = AppCompatResult(
@@ -857,9 +857,9 @@ class TestUsedByScopingStampsExplicitEvidence:
         # A fresh Change scope_diff_to_app synthesizes (never present in
         # result.changes) must also be stamped, not just a reused/existing
         # finding.
-        from abicheck.appcompat import AppCompatResult
         from abicheck.checker_policy import ChangeKind
         from abicheck.diff_helpers import make_change
+        from abicheck.workflows.consumer_scope import AppCompatResult
 
         app, old, new = self._setup(tmp_path, monkeypatch)
         synthetic = make_change(
@@ -922,9 +922,9 @@ class TestUsedByScopingStampsExplicitEvidence:
         # synthesized missing-contract entry, which has no backing Change
         # and so reached neither collection the refresh used to merge
         # (Codex review, fresh evidence).
-        from abicheck.appcompat import AppCompatResult
         from abicheck.checker_policy import ChangeKind
         from abicheck.diff_helpers import make_change
+        from abicheck.workflows.consumer_scope import AppCompatResult
 
         app, old, new = self._setup(tmp_path, monkeypatch)
         synthetic = make_change(
@@ -986,7 +986,7 @@ class TestUsedByScopingStampsExplicitEvidence:
         # JSON branch uses -- so a plain `compare --used-by ... --contract-
         # evaluation` (no --format json) reported the gated finding with no
         # contract decision at all.
-        from abicheck.appcompat import AppCompatResult
+        from abicheck.workflows.consumer_scope import AppCompatResult
 
         app, old, new = self._setup(tmp_path, monkeypatch)
         scoped = AppCompatResult(
@@ -1019,7 +1019,7 @@ class TestUsedByScopingStampsExplicitEvidence:
     def test_used_by_missing_symbol_tags_the_contract_in_markdown_by_default(
         self, tmp_path, monkeypatch
     ):
-        from abicheck.appcompat import AppCompatResult
+        from abicheck.workflows.consumer_scope import AppCompatResult
 
         app, old, new = self._setup(tmp_path, monkeypatch)
         scoped = AppCompatResult(
@@ -1050,7 +1050,7 @@ class TestUsedByScopingStampsExplicitEvidence:
         # explicitly skipped for root-cause markdown), so the same
         # --contract tag was silently dropped for this one
         # report mode even after the fold-in path was fixed.
-        from abicheck.appcompat import AppCompatResult
+        from abicheck.workflows.consumer_scope import AppCompatResult
 
         app, old, new = self._setup(tmp_path, monkeypatch)
         scoped = AppCompatResult(
@@ -1086,7 +1086,7 @@ class TestUsedByScopingStampsExplicitEvidence:
     def test_used_by_missing_symbol_tags_the_contract_in_root_cause_mode_by_default(
         self, tmp_path, monkeypatch
     ):
-        from abicheck.appcompat import AppCompatResult
+        from abicheck.workflows.consumer_scope import AppCompatResult
 
         app, old, new = self._setup(tmp_path, monkeypatch)
         scoped = AppCompatResult(
