@@ -44,6 +44,7 @@ from abicheck.appcompat import (
 )
 from abicheck.checker import Change, DiffResult
 from abicheck.checker_policy import ChangeKind, ReachabilityState, Verdict
+from abicheck.model.consumer_spec import ConsumerUnreadableError
 from abicheck.workflows.consumer_scope import scope_diff_to_consumer_facts
 
 # ---------------------------------------------------------------------------
@@ -130,12 +131,15 @@ class TestParseAppRequirements:
         with pytest.raises(ValueError, match="Cannot detect binary format"):
             parse_app_requirements(f, "libfoo.so")
 
-    def test_corrupt_elf_returns_empty_requirements(self, tmp_path):
-        """Recognised format, unreadable import table: no requirements are
-        invented (the FAILED status is on ``read_consumer_imports``' fact)."""
+    def test_corrupt_elf_raises_unreadable(self, tmp_path):
+        """Recognised format, unreadable import table: an error, never an
+        empty requirement set that would read as "requires nothing"."""
         f = tmp_path / "app.elf"
         f.write_bytes(b"\x7fELF" + b"\x00" * 100)
-        assert parse_app_requirements(f, "libfoo.so") == AppRequirements()
+        with pytest.raises(
+            ConsumerUnreadableError, match="ELF import table unreadable"
+        ):
+            parse_app_requirements(f, "libfoo.so")
 
     def test_check_against_unknown_app_raises(self, tmp_path):
         app = tmp_path / "app"
