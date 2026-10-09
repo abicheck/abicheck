@@ -1053,7 +1053,7 @@ def test_streaming_prune_gate_matrix(
     """
     from abicheck import dumper_clang_errors
     from abicheck.dumper_cache import ast_memoize_scope
-    from abicheck.dumper_clang_streaming import suppress_streaming_prune
+    from abicheck.extract.headers.clang.streaming import suppress_streaming_prune
 
     monkeypatch.setenv(
         dumper_clang_errors.STREAM_PRUNE_DEPENDENCY_DECLS_ENV_VAR,

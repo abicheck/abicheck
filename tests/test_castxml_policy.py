@@ -1,7 +1,7 @@
 # Copyright 2026 Nikolay Petrov
 # SPDX-License-Identifier: Apache-2.0
 
-"""Unit tests for the CastXML version-gate policy (abicheck/castxml_policy.py).
+"""Unit tests for the CastXML version-gate policy (abicheck/extract/headers/castxml/policy.py).
 
 Pure string/version-parsing logic — no castxml binary needed, runs in the
 fast suite.
@@ -9,7 +9,7 @@ fast suite.
 
 from __future__ import annotations
 
-from abicheck.castxml_policy import (
+from abicheck.extract.headers.castxml.policy import (
     MAX_CASTXML,
     MIN_CASTXML,
     MIN_CASTXML_CLANG_MAJOR,

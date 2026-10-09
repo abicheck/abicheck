@@ -16,7 +16,7 @@ import itertools
 import pytest
 
 from abicheck.clang_layout_tool import _bare_base_name
-from abicheck.dumper_clang_expr import _expr_fingerprint
+from abicheck.extract.headers.clang.expr import _expr_fingerprint
 
 ROOTS = ["/old/inc", "/new/inc", "/home/ci/build-7/include", "rel/inc", "C:\\src\\inc"]
 SPELLINGS = [
@@ -85,7 +85,7 @@ def test_real_clang_lambda_initializer_fingerprint_is_checkout_stable(tmp_path) 
     import shutil
     import subprocess
 
-    from abicheck.dumper_clang_expr import _index_decl_id_qualified_names
+    from abicheck.extract.headers.clang.expr import _index_decl_id_qualified_names
 
     clang = shutil.which("clang++") or shutil.which("clang")
     if clang is None:

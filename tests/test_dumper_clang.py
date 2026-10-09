@@ -2253,7 +2253,7 @@ def test_field_default_changes_across_function_template_specializations() -> Non
     """End-to-end: a field default referencing distinct specializations of
     the same function template must fingerprint distinctly (Codex review,
     PR #687, fourth round, fresh evidence)."""
-    from abicheck.dumper_clang_expr import (
+    from abicheck.extract.headers.clang.expr import (
         _field_initializer_value,
         _index_decl_id_qualified_names,
     )
@@ -2341,7 +2341,7 @@ def test_dependent_scope_initializer_documents_known_gap() -> None:
     honest collision behavior (never crashes or fabricates a value) so a
     future fix has a concrete regression to flip, and so this doesn't
     silently regress further."""
-    from abicheck.dumper_clang_expr import _field_initializer_value
+    from abicheck.extract.headers.clang.expr import _field_initializer_value
 
     def _dependent_field(kind: str) -> dict:
         return {
@@ -2387,7 +2387,7 @@ def test_offsetof_initializer_documents_known_gap() -> None:
     deferred gap (see ``_canonical_expr``'s own docstring) -- pinned so a
     future fix has a concrete regression to flip, and so this doesn't
     silently regress further."""
-    from abicheck.dumper_clang_expr import _field_initializer_value
+    from abicheck.extract.headers.clang.expr import _field_initializer_value
 
     def _offsetof_field() -> dict:
         # Real clang output has no reference to the selected member (`x` vs.
@@ -2428,7 +2428,7 @@ def test_new_expr_allocation_semantics_distinguish_fingerprints() -> None:
     exactly this pair -- the member form has no ``isGlobal`` key and an
     ``operatorNewDecl.kind`` of ``CXXMethodDecl``; the global form has
     ``isGlobal: true`` and ``FunctionDecl``."""
-    from abicheck.dumper_clang_expr import _field_initializer_value
+    from abicheck.extract.headers.clang.expr import _field_initializer_value
 
     def _new_field(*, is_global: bool) -> dict:
         new_expr: dict = {
@@ -2485,7 +2485,7 @@ def test_new_expr_init_style_distinguishes_fingerprints() -> None:
     dropped by ``_canonical_expr``'s whitelist. Node shapes below are
     trimmed verbatim from real ``clang++ --std=c++17 -Xclang
     -ast-dump=json`` output (Clang 18) for exactly this pair."""
-    from abicheck.dumper_clang_expr import _field_initializer_value
+    from abicheck.extract.headers.clang.expr import _field_initializer_value
 
     def _new_field(*, value_init: bool) -> dict:
         construct_expr: dict = {
@@ -2543,7 +2543,7 @@ def test_typeid_operand_distinguishes_fingerprints() -> None:
     ``_canonical_expr`` didn't read. Node shape below is trimmed verbatim
     from real ``clang++ --std=c++17 -Xclang -ast-dump=json`` output for
     exactly this pair."""
-    from abicheck.dumper_clang_expr import _field_initializer_value
+    from abicheck.extract.headers.clang.expr import _field_initializer_value
 
     def _typeid_field(type_arg: str) -> dict:
         return {
@@ -2593,7 +2593,7 @@ def test_postfix_increment_distinguishes_fingerprints() -> None:
     read. Node shape below is trimmed verbatim from real
     ``clang++ --std=c++17 -Xclang -ast-dump=json`` output for exactly this
     pair."""
-    from abicheck.dumper_clang_expr import _field_initializer_value
+    from abicheck.extract.headers.clang.expr import _field_initializer_value
 
     def _increment_field(is_postfix: bool) -> dict:
         return {

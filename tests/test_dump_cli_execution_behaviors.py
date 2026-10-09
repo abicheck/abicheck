@@ -541,7 +541,7 @@ def test_dump_include_system_declarations_suppresses_the_streaming_pruner(
     reaches it, and that the default really is the unsuppressed one, for
     either binary format.
     """
-    from abicheck.dumper_clang_streaming import streaming_prune_suppressed
+    from abicheck.extract.headers.clang.streaming import streaming_prune_suppressed
 
     binary = elf_lib if fmt == "elf" else pe_lib
     hdr = tmp_path / "h.h"

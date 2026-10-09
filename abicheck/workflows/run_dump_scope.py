@@ -31,12 +31,12 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
-from ..dumper_clang_streaming import suppress_streaming_prune
 from ..extract.dependency_exclusion import (
     dependency_exclusion_scope,
     suppress_dependency_exclusion,
 )
 from ..extract.dump_manifest_roots import dump_manifest_header_roots
+from ..extract.headers.clang.streaming import suppress_streaming_prune
 from ..model import AbiSnapshot
 from .snapshot_factory import DependencyScopeInputs, SnapshotFinish, finish_snapshot
 

@@ -61,10 +61,10 @@ import re
 from collections.abc import Callable
 from typing import Any
 
-from ....dumper_clang_attributes import (
+from ....extract.headers.clang.attributes import (
     clang_contract_attributes as _clang_contract_attributes,
 )
-from ....dumper_clang_qualifiers import (
+from ....extract.headers.clang.qualifiers import (
     OVERRIDE_ELIGIBLE_KINDS as _OVERRIDE_ELIGIBLE_KINDS,
     clang_method_is_override as _clang_method_is_override,
     clang_param_is_restrict as _clang_param_is_restrict,

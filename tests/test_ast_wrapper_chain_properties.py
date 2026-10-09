@@ -73,8 +73,9 @@ from typing import Any
 import pytest
 from hypothesis import given, settings, strategies as st
 
-from abicheck import dumper_clang, dumper_clang_expr
+from abicheck import dumper_clang
 from abicheck.buildsource.source_extractors import clang_nodes
+from abicheck.extract.headers.clang import expr as dumper_clang_expr
 from tests._wrapper_chain_gen import (
     NON_LITERAL_LEAF_KIND,
     add_irrelevant_metadata,

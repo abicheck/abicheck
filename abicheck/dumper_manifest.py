@@ -57,10 +57,6 @@ from typing import TYPE_CHECKING
 from . import deadline
 from .dump_manifest import DumpManifest, IncludeEntry, TranslationUnit
 from .dumper_clang import _ClangAstParser
-from .dumper_clang_streaming import (
-    streaming_prune_suppressed,
-    suppress_streaming_prune,
-)
 from .dumper_toolchain import (
     _parser_ast_fallback_reason,
     _parser_ast_supported,
@@ -69,6 +65,10 @@ from .dumper_toolchain import (
     _parser_frontend_context_kind,
 )
 from .extract.header_ast_fields import parse_header_ast_fields
+from .extract.headers.clang.streaming import (
+    streaming_prune_suppressed,
+    suppress_streaming_prune,
+)
 from .extract.manifest_semantic_ir import manifest_semantic_ir
 from .extract.path_aliases import absolutize_include_roots
 from .extract.progress import track

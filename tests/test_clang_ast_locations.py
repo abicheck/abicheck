@@ -202,7 +202,7 @@ def test_pruning_keeps_the_location_state_of_what_it_removes(seed):
     import io
     import json
 
-    from abicheck.dumper_clang_streaming import (
+    from abicheck.extract.headers.clang.streaming import (
         PRUNED_PLACEHOLDER_KIND,
         load_pruned_clang_ast,
     )

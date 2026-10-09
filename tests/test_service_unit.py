@@ -4711,7 +4711,7 @@ class TestAttachHeaderGraphDeviceContext:
         be force-disabled for this call regardless of the env var --
         otherwise a pruned dependency function/variable node would degrade
         or drop call-graph edges the graph is built to capture."""
-        from abicheck.dumper_clang_streaming import streaming_prune_suppressed
+        from abicheck.extract.headers.clang.streaming import streaming_prune_suppressed
         from abicheck.service import _attach_header_graph
 
         monkeypatch.setenv("ABICHECK_CLANG_PRUNE_DEPENDENCY_DECLS", "1")

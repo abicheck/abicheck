@@ -212,7 +212,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any
 
-from .extract.dependency_header_roots import dependency_header_predicate
+from ....extract.dependency_header_roots import dependency_header_predicate
 
 #: Ambient, per-thread override forcing the pruner off regardless of
 #: ``ABICHECK_CLANG_PRUNE_DEPENDENCY_DECLS`` -- mirrors ``dumper_cache.py``'s

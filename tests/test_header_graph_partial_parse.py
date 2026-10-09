@@ -200,8 +200,8 @@ def test_recovery_parses_run_with_streaming_prune_suppressed(
     monkeypatch, tmp_path: Path
 ) -> None:
     import abicheck.extract.headers.clang.backend as clang_backend
-    from abicheck.dumper_clang_streaming import streaming_prune_suppressed
     from abicheck.errors import SnapshotError
+    from abicheck.extract.headers.clang.streaming import streaming_prune_suppressed
     from abicheck.service_header_graph_attach import acquire_header_graph_ast
 
     monkeypatch.setenv("ABICHECK_CLANG_PRUNE_DEPENDENCY_DECLS", "1")

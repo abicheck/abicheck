@@ -1363,7 +1363,7 @@ def test_dump_request_and_compare_request_lang_explicit_forces_cpp_mode(
     assert cr_widget.is_standard_layout is True
 
 
-# ─── streaming dependency-declaration pruner (abicheck/dumper_clang_streaming.py) ──
+# ─── streaming dependency-declaration pruner (abicheck/extract/headers/clang/streaming.py) ──
 
 _STREAM_PRUNE_ENV_VAR = "ABICHECK_CLANG_PRUNE_DEPENDENCY_DECLS"
 
@@ -1490,7 +1490,7 @@ def test_streaming_pruner_reports_a_nonzero_prune_count_on_the_raw_ast(
     """Direct, lower-level check on ``clang_header_dump`` -- proves the
     pruner actually engaged on a real clang AST, not just that the higher-
     level ``dump()`` model happened to look the same either way."""
-    from abicheck.dumper_clang_streaming import (
+    from abicheck.extract.headers.clang.streaming import (
         PRUNED_PLACEHOLDER_KIND,
         load_pruned_clang_ast,
     )

@@ -317,8 +317,8 @@ def acquire_header_graph_ast(
         load_cached_projection,
         store_cached_projection,
     )
-    from .dumper_clang_streaming import suppress_streaming_prune
     from .extract.headers.clang.backend import clang_header_dump
+    from .extract.headers.clang.streaming import suppress_streaming_prune
     from .storage.derived_ast import DerivedAstArtifact, derived_ast_scope
 
     # Everything either projection path may raise on an AST that is readable

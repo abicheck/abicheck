@@ -951,11 +951,11 @@ def test_hybrid_dump_routes_parse_their_legs_alike(tmp_path: Path) -> None:
 
     from _dump_format_fakes import fake_format_adapter
 
-    from abicheck.dumper_clang_streaming import streaming_prune_suppressed
     from abicheck.extract.dependency_exclusion import (
         active_dependency_predicate,
         dependency_exclusion_scope,
     )
+    from abicheck.extract.headers.clang.streaming import streaming_prune_suppressed
     from abicheck.model import AbiSnapshot
     from abicheck.workflows.dump import hybrid as dumper_hybrid
 
