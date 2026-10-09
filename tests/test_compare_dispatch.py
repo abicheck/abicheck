@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import json
 import struct
+import types
 from pathlib import Path
 
 import pytest
@@ -34,6 +35,8 @@ from click.testing import CliRunner
 from abicheck import cli_compare_release
 from abicheck.cli import main
 from abicheck.cli_resolve import _looks_like_application, classify_compare_operand
+from abicheck.frontends.cli.commands import compare_routing as climod
+from abicheck.frontends.cli.commands.dump import dump_cmd
 from abicheck.model import AbiSnapshot, Function, Visibility
 from abicheck.serialization import snapshot_to_json
 
@@ -265,6 +268,11 @@ def test_resolve_compare_snapshots_resolves_old_and_new_sequentially(
     assert new_start >= old_end
 
 
+class _RootCtx:
+    def find_root(self) -> object:  # the real tree, so the embed finds `dump`
+        return types.SimpleNamespace(command=main)
+
+
 def _snap(
     version: str = "1.0",
     funcs: list[Function] | None = None,
@@ -291,7 +299,7 @@ def _write_snap(path: Path, snap: AbiSnapshot) -> Path:
 
 def test_source_is_pack_detects_manifest(tmp_path: Path) -> None:
     """A `collect` pack (manifest.json present) is distinguished from a raw tree."""
-    from abicheck.frontends.cli.commands.compare import _source_is_pack
+    from abicheck.frontends.cli.commands.compare_routing import _source_is_pack
 
     tree = tmp_path / "checkout"
     tree.mkdir()
@@ -352,7 +360,7 @@ def test_inputs_pack_routes_to_out_of_band_loader_not_dropped(tmp_path: Path) ->
         )
     )
 
-    from abicheck.frontends.cli.commands.compare import _source_is_pack
+    from abicheck.frontends.cli.commands.compare_routing import _source_is_pack
 
     assert _source_is_pack(inputs)  # classified as a pack, not raw source to collect
     pack = _load_side_pack_input(inputs)  # so the out-of-band loader accepts it
@@ -364,14 +372,13 @@ def test_embed_inline_source_forwards_toolchain_and_collects(
 ) -> None:
     """A raw source tree on a native side dumps inline at the requested depth and
     forwards the resolved compile/toolchain context (gcc/sysroot/nostdinc)."""
-    import abicheck.frontends.cli.commands.compare as climod
     from abicheck.dry_run_estimate import CompileContext
 
     tree = tmp_path / "src"
     tree.mkdir()  # raw checkout (no manifest.json)
     captured: dict = {}
 
-    class _Ctx:
+    class _Ctx(_RootCtx):
         def invoke(self, _cmd, **kwargs):  # type: ignore[no-untyped-def]
             captured.update(kwargs)
 
@@ -415,7 +422,7 @@ def test_embed_inline_source_forwards_toolchain_and_collects(
     # only blow up at runtime with a real Context, not this fake one). Codex review.
     import inspect
 
-    dump_params = set(inspect.signature(climod.dump_cmd.callback).parameters)
+    dump_params = set(inspect.signature(dump_cmd.callback).parameters)
     assert set(captured) <= dump_params, set(captured) - dump_params
     assert (
         captured["sources"] == tree
@@ -453,14 +460,13 @@ def test_embed_inline_source_forwards_lang_explicit(
     `frontend_explicit`/`nostdinc_explicit` already exist to work around),
     auto-detecting instead of honoring the request on a language-ambiguous
     header."""
-    import abicheck.frontends.cli.commands.compare as climod
     from abicheck.dry_run_estimate import CompileContext
 
     tree = tmp_path / "src"
     tree.mkdir()
     captured: dict = {}
 
-    class _Ctx:
+    class _Ctx(_RootCtx):
         def invoke(self, _cmd, **kwargs):  # type: ignore[no-untyped-def]
             captured.update(kwargs)
 
@@ -501,14 +507,13 @@ def test_embed_inline_source_forwards_debug_roots(tmp_path: Path, monkeypatch) -
     even though the non-inline compare path was already fixed."""
     import inspect
 
-    import abicheck.frontends.cli.commands.compare as climod
     from abicheck.dry_run_estimate import CompileContext
 
     tree = tmp_path / "src"
     tree.mkdir()
     captured: dict = {}
 
-    class _Ctx:
+    class _Ctx(_RootCtx):
         def invoke(self, _cmd, **kwargs):  # type: ignore[no-untyped-def]
             captured.update(kwargs)
 
@@ -540,7 +545,7 @@ def test_embed_inline_source_forwards_debug_roots(tmp_path: Path, monkeypatch) -
         debuginfod=True,
         debuginfod_url="https://example.test",
     )
-    dump_params = set(inspect.signature(climod.dump_cmd.callback).parameters)
+    dump_params = set(inspect.signature(dump_cmd.callback).parameters)
     assert set(captured) <= dump_params, set(captured) - dump_params
     assert captured["debug_roots"] == (droot,)
     # Phase 7c: debuginfod/debuginfod_url ride the same `_resolved_debug`.
@@ -554,7 +559,6 @@ def test_embed_inline_source_merges_tree_config_but_cli_wins(
     """The side's source-root .abicheck.yml compile: block is merged into the
     frozen context (so dump --sources behavior is preserved), but an explicit CLI
     override still wins over the config frontend (both Codex findings)."""
-    import abicheck.frontends.cli.commands.compare as climod
     from abicheck.dry_run_estimate import CompileContext
 
     tree = tmp_path / "src"
@@ -564,7 +568,7 @@ def test_embed_inline_source_merges_tree_config_but_cli_wins(
     )
     captured: dict = {}
 
-    class _Ctx:
+    class _Ctx(_RootCtx):
         def invoke(self, _cmd, **kwargs):  # type: ignore[no-untyped-def]
             captured.update(kwargs)
 
@@ -658,14 +662,13 @@ def test_embed_inline_source_ignored_when_depth_collects_nothing(
 ) -> None:
     """At a depth that collects no source (collect_mode 'off') a raw tree is
     ignored rather than silently deepening the run."""
-    import abicheck.frontends.cli.commands.compare as climod
     from abicheck.dry_run_estimate import CompileContext
 
     tree = tmp_path / "src"
     tree.mkdir()
     called = {"n": 0}
 
-    class _Ctx:
+    class _Ctx(_RootCtx):
         def invoke(self, _cmd, **kwargs):  # type: ignore[no-untyped-def]
             called["n"] += 1
 
@@ -705,7 +708,6 @@ def test_embed_inline_source_drops_raw_build_info_when_tree_ignored(
     --build-info dir is dropped too — otherwise prepare_embedded_build_source would
     try to load it as a pack and abort with 'Invalid evidence pack' (Codex review).
     A build-info that *is* a validated pack survives so it can still be applied."""
-    import abicheck.frontends.cli.commands.compare as climod
     from abicheck.dry_run_estimate import CompileContext
 
     tree = tmp_path / "src"
@@ -713,7 +715,7 @@ def test_embed_inline_source_drops_raw_build_info_when_tree_ignored(
     raw_build = tmp_path / "build"  # raw build dir, NOT a pack
     raw_build.mkdir()
 
-    class _Ctx:
+    class _Ctx(_RootCtx):
         def invoke(self, _cmd, **kwargs):  # type: ignore[no-untyped-def]
             pass
 
@@ -751,14 +753,13 @@ def test_embed_inline_collects_raw_build_info_without_sources(
     """A raw --build-info on a native side with no --sources still triggers the
     inline dump (so L3 is collected/embedded) rather than falling through to the
     pack loader and aborting with 'Invalid evidence pack' (Codex review)."""
-    import abicheck.frontends.cli.commands.compare as climod
     from abicheck.dry_run_estimate import CompileContext
 
     raw_build = tmp_path / "build"  # raw build dir, NOT a pack
     raw_build.mkdir()
     captured: dict = {}
 
-    class _Ctx:
+    class _Ctx(_RootCtx):
         def invoke(self, _cmd, **kwargs):  # type: ignore[no-untyped-def]
             captured.update(kwargs)
 
@@ -799,13 +800,12 @@ def test_embed_inline_raw_build_info_on_snapshot_is_ignored(
 ) -> None:
     """A raw --build-info on a snapshot input (can't re-dump) is warned about and
     cleared, so it never reaches the pack loader (Codex review)."""
-    import abicheck.frontends.cli.commands.compare as climod
     from abicheck.dry_run_estimate import CompileContext
 
     raw_build = tmp_path / "build"
     raw_build.mkdir()
 
-    class _Ctx:
+    class _Ctx(_RootCtx):
         def invoke(self, _cmd, **kwargs):  # type: ignore[no-untyped-def]
             raise AssertionError("dump must not run on a snapshot input")
 
@@ -842,14 +842,13 @@ def test_embed_inline_raw_build_info_dropped_at_off_depth(
 ) -> None:
     """A raw --build-info with a no-collect depth (collect_mode 'off') is dropped
     rather than reaching the pack loader."""
-    import abicheck.frontends.cli.commands.compare as climod
     from abicheck.dry_run_estimate import CompileContext
 
     raw_build = tmp_path / "build"
     raw_build.mkdir()
     called = {"n": 0}
 
-    class _Ctx:
+    class _Ctx(_RootCtx):
         def invoke(self, _cmd, **kwargs):  # type: ignore[no-untyped-def]
             called["n"] += 1
 
@@ -895,14 +894,13 @@ def test_embed_inline_source_rejects_hybrid_frontend_at_depth_source(
     run a real, silently-degraded L4 replay). Match string updated to the
     `compile.frontend:` config spelling (CodeRabbit review, PR #1146,
     finding #11) since `--ast-frontend` is gone from dump/compare's CLI."""
-    import abicheck.frontends.cli.commands.compare as climod
     from abicheck.dry_run_estimate import CompileContext
 
     tree = tmp_path / "src"
     tree.mkdir()
     called = {"n": 0}
 
-    class _Ctx:
+    class _Ctx(_RootCtx):
         def invoke(self, _cmd, **kwargs):  # type: ignore[no-untyped-def]
             called["n"] += 1
 
@@ -950,13 +948,12 @@ def test_the_hybrid_rejection_names_only_live_flags(
     ``--ast-frontend`` entirely, making the old "real way out" a second
     instance of this test's own mistake; it now names ``compile.frontend:``.
     """
-    import abicheck.frontends.cli.commands.compare as climod
     from abicheck.dry_run_estimate import CompileContext
 
     tree = tmp_path / "src"
     tree.mkdir()
 
-    class _Ctx:
+    class _Ctx(_RootCtx):
         def invoke(self, _cmd, **kwargs):  # type: ignore[no-untyped-def]
             raise AssertionError("must not run the inline dump")
 
@@ -1010,7 +1007,6 @@ def _embed_side_capturing_warning(
     build_info_raw: bool = False,
 ) -> str:
     """Drive one ignored-evidence warning path and return what it printed."""
-    import abicheck.frontends.cli.commands.compare as climod
     from abicheck.dry_run_estimate import CompileContext
 
     tree = tmp_path / "src"
@@ -1018,7 +1014,7 @@ def _embed_side_capturing_warning(
     db = tmp_path / "compile_commands.json"
     db.write_text("[]", encoding="utf-8")
 
-    class _Ctx:
+    class _Ctx(_RootCtx):
         def invoke(self, _cmd, **kwargs):  # type: ignore[no-untyped-def]
             raise AssertionError("must not reach the inline dump")
 
@@ -1111,14 +1107,13 @@ def test_embed_inline_source_hybrid_not_rejected_below_depth_source(
     """The hybrid rejection is scoped to --depth source specifically (mirrors
     dump_cmd's own scoping) -- hybrid is the normal, supported dual-backend
     choice for the L2 header AST at every other depth."""
-    import abicheck.frontends.cli.commands.compare as climod
     from abicheck.dry_run_estimate import CompileContext
 
     tree = tmp_path / "src"
     tree.mkdir()
     called = {"n": 0}
 
-    class _Ctx:
+    class _Ctx(_RootCtx):
         def invoke(self, _cmd, **kwargs):  # type: ignore[no-untyped-def]
             called["n"] += 1
 

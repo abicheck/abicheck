@@ -679,7 +679,7 @@ class TestCompareFormatAllowlistMatchesCli:
             "only 'json', 'markdown', 'junit', 'oneline', and 'html' are available"
         )
         # ADR-061 Phase 4 moved `compare`'s body out of the `cli.py` facade.
-        cmd = "abicheck/frontends/cli/commands/compare.py"
+        cmd = "abicheck/frontends/cli/commands/compare_routing.py"
         cli_source = (Path(__file__).resolve().parents[1] / cmd).read_text("utf-8")
         m = re.search(r"_RELEASE_FORMATS = frozenset\(\{([^}]+)\}\)", cli_source)
         assert m, "could not find _RELEASE_FORMATS in the compare command module"

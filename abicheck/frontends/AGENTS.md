@@ -44,7 +44,7 @@ lazy compatibility shim. Everything else lives in this package:
 | Module | What it owns |
 |---|---|
 | `cli/commands/dump.py` | `dump`'s ~30 Click parameters → one `DumpRequest`, resolved once and consumed by both the dry run and the real run |
-| `cli/commands/compare.py` | The single-pair compare, the release fan-out, and inline build-source embedding |
+| `cli/commands/compare.py`, `compare_routing.py` | `compare`'s Click parameters and dispatch to `cli_compare_helpers.run_compare`; `compare_routing` holds the release fan-out dispatch and inline build-source embedding both call, so the engine never imports the command back |
 | `cli/runtime.py` | Verbosity, output writing, provenance stamping, and the process-exit decision |
 
 **`abicheck.cli` re-exports nothing. Import from the owner above, and patch

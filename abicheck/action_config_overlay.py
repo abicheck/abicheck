@@ -128,7 +128,7 @@ exact per-field precedence reproduced.
 ``"compile"`` in *blocks* at all any more -- reversing the fourth round's
 own conclusion just above, which believed this promotion needed to
 reproduce BOTH stages of the real pipeline's own two-stage merge itself.
-It doesn't: ``frontends/cli/commands/compare.py``'s
+It doesn't: ``frontends/cli/commands/compare_routing.py``'s
 ``_embed_inline_source_side`` performs the second stage (folding the live
 side's own ``--sources`` tree's ``compile:`` block onto the CLI's
 already-resolved compile context) UNCONDITIONALLY, regardless of whether
@@ -158,7 +158,7 @@ eighth round, Codex review) -- unlike every block above, they are never
 safe to promote from a sources-root document for a caller whose single-
 sided resolution is `compare`'s own shape (``merge_compile=True``): the
 real ``compare`` pipeline always resolves both from the CHECKOUT project
-config alone (``frontends/cli/commands/compare.py``'s
+config alone (``frontends/cli/commands/compare_routing.py``'s
 ``_embed_inline_source_side`` receives them as already-frozen
 ``_resolved_collect_mode``/``_resolved_debug`` arguments, computed once
 from the checkout-side ``resolved_cfg`` before any per-side ``--sources``
@@ -521,7 +521,7 @@ def apply_sources_root_config_blocks(
     ``sources:``/``source:``/``debug:`` above, so ``merge_compile=False``
     (REPLACE, the default) with ``"compile"`` included in *blocks* is
     correct there. ``compare``'s own per-side inline embed
-    (``frontends/cli/commands/compare.py``'s ``_embed_inline_source_side``)
+    (``frontends/cli/commands/compare_routing.py``'s ``_embed_inline_source_side``)
     is different: it always independently resolves the checkout-root
     document's ``compile:`` block FIRST, unconditionally, via
     ``cli_compare_helpers.py``'s own ``resolve_compile_context(...,
@@ -583,7 +583,7 @@ def apply_sources_root_config_blocks(
     (`compare`'s own single-sided shape), the two must be left OUT of
     *blocks* entirely (Codex review, P1, fresh evidence, PR #1222 eighth
     round): `compare`'s real pipeline resolves both EXCLUSIVELY from the
-    CHECKOUT project config (``frontends/cli/commands/compare.py``'s
+    CHECKOUT project config (``frontends/cli/commands/compare_routing.py``'s
     ``_embed_inline_source_side`` receives them as already-frozen
     ``_resolved_collect_mode``/``_resolved_debug`` arguments, computed once
     from the checkout-side ``resolved_cfg`` before any per-side

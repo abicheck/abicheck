@@ -8691,6 +8691,28 @@ change in a different layer. Over-reporting is the safe direction — no finding
 is *lost* today — which is why this is a gap rather than a blocker on the fix
 that surfaced it.
 
+## A member that fails to extract exits `4` from a directory `compare` but `1` from a single-pair one
+
+**Recorded, not fixed (lane A, A2(b), 2026-10-09; maintainer ruling: keep both).**
+A single-pair `compare` whose operand cannot be dumped (for example a
+truncated ELF) aborts with a CLI error and exits `1`. The same pair as the only
+member of a directory/package release produces a member `ERROR` entry and the
+release exits `4` with `exit.reasons: ["operational_error"]`. Both behaviours are
+documented in `docs/reference/exit-codes.md`. Reproduce: put the same corrupt
+`libm0.so` in `old/` and `new/`, then run `compare old/libm0.so new/libm0.so`
+(exit `1`) and `compare old new` (exit `4`).
+
+This is the one axis where a release of one member and a scalar `compare` of that
+member disagree. The release fold takes each member's compatibility
+contribution from the scalar resolver (`resolve_compare_exit_decision`, stamped
+by `cli_compare_release_pairwise._member_exit_decision`), and
+`tests/test_compare_cardinality_invariance.py` pins the agreement on every axis
+where a comparison completed. A member that never compared has no scalar
+decision to fold, so it falls to the release's own operational-error axis.
+Making the two agree means changing a public exit code in one direction: either
+a release exits `1` for a failed member, or a scalar dump failure exits `4` and
+reads as an ABI break. Either change needs an ADR-064 amendment.
+
 ## Suppression provenance stops at the display label outside the audit path
 
 ADR-067 D3 says a disposition keeps the rule that made it — rule id, source
@@ -9581,7 +9603,7 @@ changelog entry and `tests/test_one_comparison_product_parity.py`.
 `json`/`markdown`/`sarif`/`html`/`junit`/`review`/`oneline`; a directory or
 package operand renders `json`/`markdown`/`junit`/`oneline`/`html` and rejects the
 rest
-(`frontends/cli/commands/compare.py`'s `_RELEASE_FORMATS`). The rejection is
+(`frontends/cli/commands/compare_routing.py`'s `_RELEASE_FORMATS`). The rejection is
 loud rather than silent, and it is not arbitrary — the missing formats are
 the ones whose renderers take a single `DiffResult`:
 

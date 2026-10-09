@@ -322,56 +322,21 @@ def _compare_one_library(
                 compare_result.new_snapshot,
                 ctx.retention,
             )
-        # ADR-064's evidence-contract axis (exit 7), per member. `compare`'s
-        # depth-shortfall contract is this axis -- recorded by
-        # `service_compare_pipeline.classify_compare_pair`, never raised --
-        # so the release has to fold each member's own contribution the way
-        # it already folds the contract-coverage floor below, or a pinned
-        # `--depth build`/`source` the members did not reach would exit 7
-        # from a single-pair `compare` and 0 from a directory one (PR #1195,
-        # Codex review). `0` unless this member actually recorded it, which
-        # needs an explicit `--depth` pin, a `build`/`source` rung, and a
-        # live side that fell short -- so every unpinned run is unchanged.
-        # Through `workflows.gate`, which re-exports it: ADR-061 forbids a
-        # `frontends -> policy` import, and this module is a frontend.
-        from .workflows.gate import EXIT_EVIDENCE_CONTRACT_ERROR
+        # Every exit axis this member contributes to the release fold, from
+        # the resolver a single-pair `compare` of it uses (ADR-064).
+        from .workflows.member_compare import stamp_member_exit_contributions
 
-        entry["evidence_contract_error_contribution"] = (
-            EXIT_EVIDENCE_CONTRACT_ERROR if result.evidence_contract_error else 0
-        )
-        # `.abicheck.yml`'s `assurance.require_complete`, per member -- the
-        # same orthogonal 0/1 floor, folded with max() into the release exit
-        # by `_exit_compare_release`. Library count must not change what the
-        # setting means: this is exactly the contribution a single-pair
-        # `compare` of the same library would compute, so a release of one
-        # library and that library compared on its own agree. Recorded
-        # unconditionally (the flag's own `require_complete` gate lives in
-        # the fold, not here) so the per-library status is readable in the
-        # release JSON even on a run that did not opt in.
-        # ADR-071 D1/D6: which keys this axis owns, and the fail-open status
-        # read behind them, are `stamp_member_assurance`'s (see its docstring).
-        from .workflows.release_assurance_members import stamp_member_assurance
-
-        stamp_member_assurance(
-            entry, result, require_complete=require_complete_analysis
-        )
-        # ADR-067 D6's additions-review floor (0/1), per member; folded with
-        # max() by the release exit resolver, like the assurance axis.
-        from .workflows.gate import additions_review_exit_contribution
-
-        entry["additions_review_exit_contribution"] = (
-            additions_review_exit_contribution(result)
+        stamp_member_exit_contributions(
+            entry,
+            result,
+            severity_config,
+            require_complete_analysis=require_complete_analysis,
+            contract_evaluation=contract_evaluation,
         )
         if contract_evaluation:
-            # ADR-049 Phase 7's orthogonal contract-coverage floor (0/1),
-            # read off this library's own persisted contract context --
-            # aggregated with max() into the release-level exit code in
-            # _exit_compare_release, the same "raises a clean 0 to 1, never
-            # lowers a real 2/4" rule a single-pair `compare` applies.
-            from .workflows.gate import coverage_exit_floor, coverage_failure_count
+            from .workflows.gate import coverage_failure_count
 
-            entry["contract_coverage_exit_contribution"] = coverage_exit_floor(result)
-            # The *count* of failures is independent of the exit floor above
+            # The *count* of failures is independent of the exit floor
             # -- `contract.unresolved: warn` deliberately zeroes the floor
             # while the failures themselves stay real and unsuppressible
             # (AGENTS.md's contract_coverage_exit.py entry: "an acceptance
@@ -551,6 +516,12 @@ def _suppress_lockstep_soname_findings(
         from .report.release_member_summary import add_member_review_summary
 
         add_member_review_summary(entry, result, severity_config)
+        # The hidden findings no longer count toward this member's gate.
+        from .workflows.member_compare import member_exit_decision
+
+        entry["_compatibility_contribution"] = member_exit_decision(
+            result, severity_config, require_complete_analysis
+        ).compatibility_contribution
         # ...and the ledger blocks, snapshotted before this pass ran and so
         # naming neither this rule nor what it hid (Codex review, PR #1284).
         entry.update(disposition_ledger_blocks(result))
