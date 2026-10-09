@@ -45,11 +45,6 @@ from typing import TYPE_CHECKING
 
 from abicheck.model.entity_identity import candidate_lookup_keys
 
-from .buildsource.call_graph import (
-    CALL_KIND_FUNCTION_POINTER,
-    CALL_KIND_VIRTUAL,
-    RESOLUTION_OVERAPPROX,
-)
 from .change_registry import unanimous_entity_for
 from .compare.internal_namespaces import (
     DEFAULT_INTERNAL_NAMESPACES,
@@ -63,6 +58,11 @@ from .model.change import Change
 from .model.change_catalog.kinds import ChangeKind
 from .model.evidence_status import ReachabilityState
 from .model.graph_facts import CONF_HIGH, CONF_REDUCED, CONF_UNKNOWN
+from .model.graph_vocabulary import (
+    CALL_KIND_FUNCTION_POINTER,
+    CALL_KIND_VIRTUAL,
+    RESOLUTION_OVERAPPROX,
+)
 from .model.name_heuristics import (
     NameHeuristicEffect,
     StructuralFact,

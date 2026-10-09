@@ -49,6 +49,15 @@ from ..model.graph_facts import (
     GraphEdge,
     GraphNode,
 )
+from ..model.graph_vocabulary import (
+    CALL_KIND_DIRECT,
+    CALL_KIND_FUNCTION_POINTER,
+    CALL_KIND_UNKNOWN,
+    CALL_KIND_VIRTUAL,
+    RESOLUTION_EXACT,
+    RESOLUTION_OVERAPPROX,
+    RESOLUTION_UNKNOWN,
+)
 from ..model.name_decoration import macho as macho_decoration
 from ..model.source_graph import function_decl_identity
 from .call_decl_record import (
@@ -74,16 +83,6 @@ if TYPE_CHECKING:
 
 _log = logging.getLogger(__name__)
 
-# ── call-edge labels (ADR-031 D4) ───────────────────────────────────────────
-CALL_KIND_DIRECT = "direct"
-CALL_KIND_VIRTUAL = "virtual"
-CALL_KIND_FUNCTION_POINTER = "function_pointer"
-CALL_KIND_TEMPLATE = "template_instantiation"
-CALL_KIND_UNKNOWN = "unknown"
-
-RESOLUTION_EXACT = "exact"
-RESOLUTION_OVERAPPROX = "overapprox"
-RESOLUTION_UNKNOWN = "unknown"
 
 #: clang AST node kinds that introduce a callable scope (the "caller").
 _FUNCTION_DECL_KINDS = frozenset(
