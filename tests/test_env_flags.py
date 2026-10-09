@@ -135,13 +135,13 @@ def _cc_capture_enabled() -> bool:
 #: the knob's own resolved value.
 READERS: dict[str, Callable[[], bool]] = {
     "ABICHECK_ALLOW_AST_FALLBACK": lambda: __import__(
-        "abicheck.dumper_toolchain", fromlist=["x"]
+        "abicheck.extract.headers.toolchain", fromlist=["x"]
     )._ast_fallback_enabled(),
     "ABICHECK_ALLOW_UNSUPPORTED_CASTXML": lambda: __import__(
-        "abicheck.dumper_toolchain", fromlist=["x"]
+        "abicheck.extract.headers.toolchain", fromlist=["x"]
     )._allow_unsupported_castxml_enabled(),
     "ABICHECK_AUTO_SYSTEM_INCLUDES": lambda: __import__(
-        "abicheck.dumper_sysinc", fromlist=["x"]
+        "abicheck.extract.headers.sysinc", fromlist=["x"]
     )._auto_system_includes_enabled(),
     "ABICHECK_CC_DISABLE": lambda: not _cc_capture_enabled(),
     "ABICHECK_CLANG_PRUNE_DEPENDENCY_DECLS": lambda: __import__(

@@ -38,9 +38,10 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from . import deadline
-from .dumper_clang import _is_clang_family_binary
-from .extract.env_flags import env_flag
+import abicheck.deadline as deadline
+
+from ...dumper_clang import _is_clang_family_binary
+from ...extract.env_flags import env_flag
 
 #: Env knob to disable the castxml↔clang system-include auto-detection. On by
 #: default; set to a falsey value to suppress the host-compiler probe (e.g. for a

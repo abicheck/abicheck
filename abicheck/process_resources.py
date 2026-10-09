@@ -17,7 +17,7 @@ Phase E).
 
 Factored out of :mod:`abicheck.buildsource.source_replay`'s L4 worker-sizing
 logic so a *second* concurrent per-process pool --
-:mod:`abicheck.dumper_manifest`'s per-TU manifest-dump loop -- can size
+:mod:`abicheck.extract.headers.manifest`'s per-TU manifest-dump loop -- can size
 itself off the same host/cgroup memory-headroom probe instead of a second,
 independently-maintained copy: "move shared logic to a leaf module both
 sides can depend on" (root ``AGENTS.md``'s import-cycle guidance).

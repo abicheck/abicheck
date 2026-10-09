@@ -14,7 +14,7 @@
 
 """Worker count for the per-TU manifest-dump pool (:func:`_tu_jobs`).
 
-Split out of :mod:`abicheck.dumper_manifest`, which runs the pool this sizes.
+Split out of :mod:`abicheck.extract.headers.manifest`, which runs the pool this sizes.
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ from __future__ import annotations
 import logging
 import os
 
-log = logging.getLogger("abicheck.dumper_manifest")
+log = logging.getLogger("abicheck.extract.headers.manifest")
 
 #: Rough peak resident memory budget per concurrent per-TU worker (GiB) --
 #: same default as buildsource.source_replay's L4 pool

@@ -39,8 +39,8 @@ from __future__ import annotations
 
 import pytest
 
-from abicheck import comparability, dumper_toolchain
 from abicheck.comparability import (
+    _PROBED_STANDARD_PREFIX,
     _is_gcc_gxx_driver_pair,
     check_contracts_comparable,
     compute_extraction_contract,
@@ -49,6 +49,9 @@ from abicheck.comparability_language_mode import (
     language_standard_content_divergence_corroborated,
 )
 from abicheck.errors import ProfileMismatchError
+from abicheck.extract.headers.toolchain import (
+    _PROBED_STANDARD_PREFIX as _TOOLCHAIN_PROBED_STANDARD_PREFIX,
+)
 from abicheck.model import AbiSnapshot, ExtractionContract
 
 
@@ -72,10 +75,7 @@ def test_probed_standard_prefix_constants_stay_in_sync():
     one string literal). A mirrored constant can silently drift, so pin the
     two equal directly rather than relying on this file's own scenario tests
     to notice a drift indirectly."""
-    assert (
-        comparability._PROBED_STANDARD_PREFIX
-        == dumper_toolchain._PROBED_STANDARD_PREFIX
-    )
+    assert _PROBED_STANDARD_PREFIX == _TOOLCHAIN_PROBED_STANDARD_PREFIX
 
 
 def test_gate_bare_empty_language_standard_still_raises_even_with_compiler_unchanged():

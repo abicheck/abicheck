@@ -18,7 +18,7 @@ binary-less dump (workstream F S1, "Header-only comparison",
 ``docs/contribute/plans/vision-api-abi-evolution.md``).
 
 Runs the exact same L2 parse-and-normalize machinery a binary dump's own
-header-AST pass uses (:func:`abicheck.dumper_manifest.
+header-AST pass uses (:func:`abicheck.extract.headers.manifest.
 resolve_header_ast_result`, the identical function :func:`abicheck.dumper.
 _dump_elf` calls), with an empty observed-export set on both sides -- there
 is no binary here to have exported anything from -- and projects the result
@@ -92,7 +92,7 @@ def build_header_only_snapshot(
     cannot carry.
     """
     from .dumper import _ast_compile_provenance, _header_ast_parser
-    from .dumper_manifest import resolve_header_ast_result
+    from .extract.headers.manifest import resolve_header_ast_result
     from .workflows.snapshot_factory import new_snapshot
 
     gcc_path = compile.gcc_path if compile is not None else None

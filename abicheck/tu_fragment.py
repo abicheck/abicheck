@@ -24,7 +24,7 @@ cycle: ``dumper_manifest.py`` calls into ``tu_merge.merge_fragments``, and
 ``tu_merge.py`` needs these same dataclasses, so neither of those two
 modules can be the one that *defines* them without the other importing
 back. ``dumper_manifest.py`` re-exports the names from here for backward
-compatibility — existing ``from abicheck.dumper_manifest import
+compatibility — existing ``from abicheck.extract.headers.manifest import
 TuFragment`` call sites (tests included) keep working unchanged.
 """
 

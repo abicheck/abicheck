@@ -1885,7 +1885,7 @@ def test_odr_safe_fixture_merges_cleanly_through_real_clang_backend():
         pytest.skip("clang is required for the real-backend tu_merge test")
     from abicheck.dump_manifest import TranslationUnit
     from abicheck.dumper import _header_ast_parser
-    from abicheck.dumper_manifest import run_tu_loop
+    from abicheck.extract.headers.manifest import run_tu_loop
 
     tu_a = TranslationUnit(
         name="tu_a", forced_includes=(_G32_DIR / "odr_safe" / "tu_a.h",)
@@ -1916,7 +1916,7 @@ def test_odr_conflict_fixture_raises_through_real_clang_backend():
         pytest.skip("clang is required for the real-backend tu_merge test")
     from abicheck.dump_manifest import TranslationUnit
     from abicheck.dumper import _header_ast_parser
-    from abicheck.dumper_manifest import run_tu_loop
+    from abicheck.extract.headers.manifest import run_tu_loop
 
     tu_a = TranslationUnit(
         name="tu_a", forced_includes=(_G32_DIR / "odr_conflict" / "tu_a.h",)

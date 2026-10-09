@@ -414,7 +414,7 @@ class TestL2ExtractionPathsAreClassified:
             "abicheck/extract/header_ast_fields.py",
             "abicheck/extract/header_ast_backend.py",
             "abicheck/extract/export_symbol_identity.py",
-            "abicheck/dumper_manifest.py",
+            "abicheck/extract/headers/manifest.py",
             "abicheck/workflows/dump/hybrid_merge.py",
         ],
     )

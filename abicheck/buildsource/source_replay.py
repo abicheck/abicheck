@@ -1057,7 +1057,7 @@ def _record_replay_coverage(
 #: thrash the host — a warning is logged when it is.
 #:
 #: Delegates to :mod:`abicheck.process_resources` (G32 Phase E) — the same
-#: leaf module :mod:`abicheck.dumper_manifest`'s per-TU pool sizes itself
+#: leaf module :mod:`abicheck.extract.headers.manifest`'s per-TU pool sizes itself
 #: from, so the two pools share one RAM-probing/ceiling implementation
 #: rather than two independently-maintained copies.
 def _l4_jobs_ceiling() -> int:

@@ -245,7 +245,7 @@ def _isolated_cache(monkeypatch, tmp_path: Path) -> None:
 def _recording_castxml_runner() -> tuple[list[list[str]], Any]:
     """The default castxml runner, recording every command it runs; injected
     with ``castxml_dump(..., run=...)`` rather than patched in."""
-    from abicheck.dumper_castxml_probe import run_castxml
+    from abicheck.extract.headers.castxml.probe import run_castxml
 
     runs: list[list[str]] = []
 

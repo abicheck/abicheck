@@ -40,7 +40,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from ...buildsource.source_inputs import granting_live_source_licence
-from ...clang_layout_tool import attach_clang_layout
 from ...dry_run_estimate import expand_header_inputs
 from ...errors import (
     AbicheckError,
@@ -48,6 +47,7 @@ from ...errors import (
     UnsupportedArtifactError,
     ValidationError,
 )
+from ...extract.headers.clang.layout_tool import attach_clang_layout
 from ...extract.metadata_attach import (
     try_attach_numpy_capi_surface,
     try_attach_python_api_surface,

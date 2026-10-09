@@ -488,7 +488,7 @@ def _dump_cache_extra_key(
     )
     layout_tool = ""
     if resolved_backend in ("clang", "hybrid") or auto_may_fallback_to_clang:
-        from .clang_layout_tool import find_layout_tool_bin
+        from .extract.headers.clang.layout_tool import find_layout_tool_bin
 
         layout_tool_bin = find_layout_tool_bin()
         layout_tool = _tool_identity(layout_tool_bin) if layout_tool_bin else ""

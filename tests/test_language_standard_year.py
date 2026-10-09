@@ -18,7 +18,7 @@ import itertools
 import pytest
 
 from abicheck.build_context import _std_sort_key
-from abicheck.dumper_toolchain import _cplusplus_macro_for_standard
+from abicheck.extract.headers.toolchain import _cplusplus_macro_for_standard
 from abicheck.model.language_standard import language_standard_year
 from abicheck.probe_harness import _parse_cxx_std, parse_probe_spec
 

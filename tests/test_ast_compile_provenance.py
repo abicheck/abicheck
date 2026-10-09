@@ -33,7 +33,7 @@ from abicheck.dumper import (
     _cplusplus_macro_for_standard,
     _resolve_standard_provenance,
 )
-from abicheck.dumper_toolchain import (
+from abicheck.extract.headers.toolchain import (
     _extract_explicit_std_value,
     _probe_default_language_standard,
     _resolve_force_cpp,
@@ -275,7 +275,7 @@ class TestProbeDefaultLanguageStandard:
                 argv, 0, stdout=f"#define __cplusplus {std}\n", stderr=""
             )
 
-        monkeypatch.setattr("abicheck.dumper_toolchain.run_bounded", fake_run)
+        monkeypatch.setattr("abicheck.extract.headers.toolchain.run_bounded", fake_run)
         old = _probe_default_language_standard("cxx17", "c++")
         new = _probe_default_language_standard("cxx20", "c++")
         assert old != new
@@ -290,7 +290,7 @@ class TestProbeDefaultLanguageStandard:
         def fake_run(argv, **kwargs):
             return subprocess_module.CompletedProcess(argv, 0, stdout="", stderr="")
 
-        monkeypatch.setattr("abicheck.dumper_toolchain.run_bounded", fake_run)
+        monkeypatch.setattr("abicheck.extract.headers.toolchain.run_bounded", fake_run)
         result = _probe_default_language_standard("old-cc", "c")
         assert result == "probed:__STDC_VERSION__=<absent>"
 
@@ -299,7 +299,7 @@ class TestProbeDefaultLanguageStandard:
         def fake_run(argv, **kwargs):
             raise FileNotFoundError(argv[0])
 
-        monkeypatch.setattr("abicheck.dumper_toolchain.run_bounded", fake_run)
+        monkeypatch.setattr("abicheck.extract.headers.toolchain.run_bounded", fake_run)
         assert _probe_default_language_standard("/no/such/cc", "c++") is None
 
     def test_nonzero_exit_returns_none(self, monkeypatch: pytest.MonkeyPatch):
@@ -308,7 +308,7 @@ class TestProbeDefaultLanguageStandard:
         def fake_run(argv, **kwargs):
             return subprocess_module.CompletedProcess(argv, 1, stdout="", stderr="")
 
-        monkeypatch.setattr("abicheck.dumper_toolchain.run_bounded", fake_run)
+        monkeypatch.setattr("abicheck.extract.headers.toolchain.run_bounded", fake_run)
         assert _probe_default_language_standard("cl.exe", "c++") is None
 
     def test_result_is_cached_per_binary_and_mode(
@@ -332,7 +332,7 @@ class TestProbeDefaultLanguageStandard:
                 argv, 0, stdout=f"#define {macro} 201703L\n", stderr=""
             )
 
-        monkeypatch.setattr("abicheck.dumper_toolchain.run_bounded", fake_run)
+        monkeypatch.setattr("abicheck.extract.headers.toolchain.run_bounded", fake_run)
         _probe_default_language_standard("cached-cc", "c++")
         _probe_default_language_standard("cached-cc", "c++")  # identical: cached
         assert len(calls) == 1
@@ -357,7 +357,8 @@ class TestResolveStandardProvenanceProbing:
             raise AssertionError("must not probe when an explicit -std= is given")
 
         monkeypatch.setattr(
-            "abicheck.dumper_toolchain._probe_default_language_standard", fail_probe
+            "abicheck.extract.headers.toolchain._probe_default_language_standard",
+            fail_probe,
         )
         result = _resolve_standard_provenance(
             [], "-std=gnu++11", (), probe_compiler_bin="cc", lang="c++"
@@ -374,7 +375,8 @@ class TestResolveStandardProvenanceProbing:
             return f"probed:__cplusplus=STUBBED:{compiler_bin}"
 
         monkeypatch.setattr(
-            "abicheck.dumper_toolchain._probe_default_language_standard", fake_probe
+            "abicheck.extract.headers.toolchain._probe_default_language_standard",
+            fake_probe,
         )
         result = _resolve_standard_provenance(
             [], None, (), probe_compiler_bin="my-clang", lang="c++"
@@ -397,7 +399,8 @@ class TestResolveStandardProvenanceProbing:
             raise AssertionError("must not probe a forced-standard C/gnu parse")
 
         monkeypatch.setattr(
-            "abicheck.dumper_toolchain._probe_default_language_standard", fail_probe
+            "abicheck.extract.headers.toolchain._probe_default_language_standard",
+            fail_probe,
         )
         c_header = tmp_path / "c.h"
         c_header.write_text("int f(int x);\n", encoding="utf-8")
@@ -419,7 +422,8 @@ class TestResolveStandardProvenanceProbing:
             return "probed:stub"
 
         monkeypatch.setattr(
-            "abicheck.dumper_toolchain._probe_default_language_standard", fake_probe
+            "abicheck.extract.headers.toolchain._probe_default_language_standard",
+            fake_probe,
         )
         c_header = tmp_path / "c.h"
         c_header.write_text("int f(int x);\n", encoding="utf-8")
@@ -450,7 +454,8 @@ class TestResolveStandardProvenanceProbing:
             return "probed:stub"
 
         monkeypatch.setattr(
-            "abicheck.dumper_toolchain._probe_default_language_standard", fake_probe
+            "abicheck.extract.headers.toolchain._probe_default_language_standard",
+            fake_probe,
         )
         c_header = tmp_path / "c.h"
         c_header.write_text("int f(int x);\n", encoding="utf-8")
@@ -483,7 +488,8 @@ class TestResolveStandardProvenanceProbing:
             raise AssertionError("must not probe a heterogeneous manifest")
 
         monkeypatch.setattr(
-            "abicheck.dumper_toolchain._probe_default_language_standard", fail_probe
+            "abicheck.extract.headers.toolchain._probe_default_language_standard",
+            fail_probe,
         )
         c_header = tmp_path / "c.h"
         c_header.write_text("int f(int x);\n", encoding="utf-8")
@@ -513,7 +519,8 @@ class TestAstCompileProvenanceProbing:
             return "probed:__cplusplus=201402L"
 
         monkeypatch.setattr(
-            "abicheck.dumper_toolchain._probe_default_language_standard", fake_probe
+            "abicheck.extract.headers.toolchain._probe_default_language_standard",
+            fake_probe,
         )
         prov = _ast_compile_provenance(
             [],
@@ -547,7 +554,8 @@ class TestAstCompileProvenanceProbing:
             return "probed:__cplusplus=201703L"
 
         monkeypatch.setattr(
-            "abicheck.dumper_toolchain._probe_default_language_standard", fake_probe
+            "abicheck.extract.headers.toolchain._probe_default_language_standard",
+            fake_probe,
         )
         prov = _ast_compile_provenance(
             [],
@@ -577,7 +585,8 @@ class TestAstCompileProvenanceProbing:
             }[compiler_bin]
 
         monkeypatch.setattr(
-            "abicheck.dumper_toolchain._probe_default_language_standard", fake_probe
+            "abicheck.extract.headers.toolchain._probe_default_language_standard",
+            fake_probe,
         )
         old = _ast_compile_provenance(
             [],
@@ -609,7 +618,8 @@ class TestAstCompileProvenanceProbing:
             return "probed:__cplusplus=201703L"
 
         monkeypatch.setattr(
-            "abicheck.dumper_toolchain._probe_default_language_standard", fake_probe
+            "abicheck.extract.headers.toolchain._probe_default_language_standard",
+            fake_probe,
         )
         _ast_compile_provenance(
             [],

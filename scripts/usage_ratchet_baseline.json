@@ -12,7 +12,6 @@
     "abicheck.buildsource.source_extractors.clang#_typedef_underlying = abicheck.dumper_clang#_typedef_underlying",
     "abicheck.buildsource.source_extractors.clang_nodes#_node_file = abicheck.dumper_clang#_node_file",
     "abicheck.buildsource.toolchain_probe#_pad = abicheck.diff_versioning#_padded_version_cmp",
-    "abicheck.castxml_policy#parse_castxml_version_output = abicheck.dumper_castxml_probe#_parse_castxml_version",
     "abicheck.compare.constants#_attribute_residuals = abicheck.compare.typedefs#_attribute_residuals",
     "abicheck.effective_config_digest#_sha256_of = abicheck.workflows.resolved_execution_context#_sha256_of",
     "abicheck.storage.dto#_unfreeze = abicheck.storage.sparse_section_codec#_unfreeze",

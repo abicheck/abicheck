@@ -6,7 +6,7 @@ import shutil
 import pytest
 
 from abicheck.dumper import _cache_key, _tool_identity
-from abicheck.dumper_toolchain import (
+from abicheck.extract.headers.toolchain import (
     _compiler_family_from_toolchain,
     _resolved_tool,
     _tool_identity_metadata,
@@ -143,7 +143,7 @@ class TestToolTargetTriple:
     def test_tool_target_triple_returns_none_on_timeout(self, tmp_path, monkeypatch):
         import subprocess as subprocess_module
 
-        from abicheck import dumper_toolchain
+        from abicheck.extract.headers import toolchain as dumper_toolchain
 
         tool = tmp_path / "hanging-tool"
         tool.write_text("#!/bin/sh\nsleep 100\n", encoding="utf-8")
