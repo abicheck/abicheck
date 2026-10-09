@@ -42,8 +42,8 @@ The catalog drives abicheck's benchmark and serves as an encyclopedia of ABI pit
 | Verdict | Count | `checker_policy.py` set | Icon |
 |---------|-------|-------------------------|------|
 | BREAKING | 109 | `BREAKING_KINDS` | 🔴 |
-| API_BREAK | 21 | `API_BREAK_KINDS` | 🟠 |
-| COMPATIBLE_WITH_RISK | 34 | `RISK_KINDS` | 🟡 |
+| API_BREAK | 20 | `API_BREAK_KINDS` | 🟠 |
+| COMPATIBLE_WITH_RISK | 35 | `RISK_KINDS` | 🟡 |
 | COMPATIBLE (addition) | 11 | `ADDITION_KINDS` | 🟢 |
 | COMPATIBLE (quality) | 21 | `QUALITY_KINDS` | 🟡 |
 | NO_CHANGE | 10 | — | ✅ |
@@ -386,7 +386,7 @@ Expected non-pass buckets are already represented in `ground_truth.json`:
 | [108](cases/case108_task_class_removed/README.md) | `task` Class Removed (historical ABI break — vtable angle) | Breaking | 🔴 BREAKING |
 | [109](cases/case109_flow_graph_policy_renames/README.md) | flow::graph Policy Tag Renames | API Break | 🟠 API_BREAK |
 | [110](cases/case110_concurrent_unordered_map_api_drift/README.md) | concurrent_unordered_map API Drift | Breaking | 🔴 BREAKING |
-| [111](cases/case111_enumerable_thread_specific_lambda_ambiguity/README.md) | enumerable_thread_specific Lambda-Init Ambiguity | API Break | 🟠 API_BREAK (bad practice) |
+| [111](cases/case111_enumerable_thread_specific_lambda_ambiguity/README.md) | enumerable_thread_specific Lambda-Init Ambiguity | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
 | [112](cases/case112_lp64_ilp64/README.md) | LP64 → ILP64 Integer-Model Switch (oneMKL MKL_INT 32→64) | Breaking | 🔴 BREAKING |
 | [113](cases/case113_abi_tag_changed/README.md) | ABI-tag set change ([abi:cxx11] lost on a single symbol) | Breaking | 🔴 BREAKING |
 | [114](cases/case114_char8t_migration/README.md) | char8_t Migration (C++20 char-family → char8_t) | Breaking | 🔴 BREAKING |

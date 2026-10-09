@@ -34,8 +34,34 @@ GROUND_TRUTH = example_catalog.GROUND_TRUTH_PATH
 SCHEMA_VERSION = "example_runtime_smoke.v1"
 
 
-#: Statuses that mean the runtime proof itself could not be established.
-PROOF_FAILURE_STATUSES = frozenset({"BUILD_ERROR", "BASELINE_SIGNAL"})
+#: Statuses that mean the runtime proof failed: it could not be established
+#: (BUILD_ERROR, BASELINE_SIGNAL) or it contradicts the case's ground truth.
+PROOF_FAILURE_STATUSES = frozenset({"BUILD_ERROR", "BASELINE_SIGNAL", "CONTRADICTED"})
+#: Signals that mean the unchanged consumer's own check failed or it crashed /
+#: hung -- a consumer assertion, not merely different output.
+_ASSERTION_SIGNALS = frozenset({"nonzero", "timeout"})
+#: Verdicts that claim an unchanged old consumer keeps working.
+_CLEAN_VERDICTS = frozenset({"NO_CHANGE", "COMPATIBLE"})
+
+
+def proof_strength(signal: str) -> str:
+    """How much a runtime signal proves: ``consumer_assertion`` when the old
+    app's own exit status changed (its check failed, it crashed or hung),
+    ``output_only`` when only its stdout/stderr differ, ``none`` otherwise.
+    Only the first is evidence that a consumer broke."""
+    if signal in _ASSERTION_SIGNALS:
+        return "consumer_assertion"
+    return "output_only" if signal != "no_runtime_signal" else "none"
+
+
+def contradicts_ground_truth(entry: dict[str, object], signal: str) -> bool:
+    """A clean verdict (and no recorded behavioral break) whose unchanged old
+    consumer nevertheless fails its own check against the new library."""
+    return (
+        entry.get("expected") in _CLEAN_VERDICTS
+        and not entry.get("behavioral_break")
+        and proof_strength(signal) == "consumer_assertion"
+    )
 
 
 def _platform() -> str:
@@ -394,12 +420,18 @@ def run_case(
     assert swapped_app is not None
     swapped = _run_app(swapped_app, swap_dir)
     signal = _classify_runtime_signal(baseline, swapped)
-    status = "DEMONSTRATED" if signal != "no_runtime_signal" else "NO_RUNTIME_SIGNAL"
+    if contradicts_ground_truth(entry, signal):
+        status = "CONTRADICTED"
+    else:
+        status = (
+            "DEMONSTRATED" if signal != "no_runtime_signal" else "NO_RUNTIME_SIGNAL"
+        )
     return {
         "case_id": case_name,
         "status": status,
         "expected": expected,
         "runtime_signal": signal,
+        "proof": proof_strength(signal),
         "baseline": baseline,
         "swapped": swapped,
         "seconds": round(time.perf_counter() - started, 3),

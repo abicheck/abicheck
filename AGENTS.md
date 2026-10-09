@@ -20,7 +20,7 @@ branch-specific reference behind a trigger-worded pointer).
 abicheck helps library and package maintainers understand and validate
 API/ABI evolution: it compares two versions of a native library (ELF, PE/COFF,
 Mach-O, plus optional debug info, headers, build data and sources — evidence
-levels L0–L5), classifies every change into one of 413 `ChangeKind`s
+levels L0–L5), classifies every change into one of 414 `ChangeKind`s
 (`BREAKING_KINDS`, `API_BREAK_KINDS`, `COMPATIBLE_KINDS`, `RISK_KINDS`), and
 gates CI on the result while reporting what the evidence could not establish.
 Pure Python, 3.11+. Product direction: [`vision.md`](vision.md); this file owns
@@ -218,7 +218,7 @@ Follow the pointer whose trigger matches your task:
 
 - `AbiSnapshot` (`model/snapshot.py`) — serializable snapshot of a library's ABI surface
 - `DiffResult` (`checker_types.py`) — comparison result: changes, verdict, context
-- `ChangeKind` (`model/change_catalog/kinds.py`, re-exported by `checker_policy.py`) — the 413 change types
+- `ChangeKind` (`model/change_catalog/kinds.py`, re-exported by `checker_policy.py`) — the 414 change types
 - `Verdict` (`checker.py`) — overall result (compatible/source_break/breaking)
 
 ## Adding a new ChangeKind

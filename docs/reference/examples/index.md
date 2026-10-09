@@ -19,8 +19,8 @@ Use this catalog to:
 | Verdict | Count | What it means |
 |---------|-------|---------------|
 | 🔴 [BREAKING](by-verdict/breaking.md) | 113 | ABI breaks: existing consumers will fail at runtime. |
-| 🟠 [API_BREAK](by-verdict/api-break.md) | 21 | Source-level / API-only breaks; recompilation fails or behavior shifts. |
-| 🟡 [COMPATIBLE_WITH_RISK](by-verdict/compatible-risk.md) | 35 | Backward-compatible at the symbol level but with behavioral risk. |
+| 🟠 [API_BREAK](by-verdict/api-break.md) | 20 | Source-level / API-only breaks; recompilation fails or behavior shifts. |
+| 🟡 [COMPATIBLE_WITH_RISK](by-verdict/compatible-risk.md) | 36 | Backward-compatible at the symbol level but with behavioral risk. |
 | 🟢 [COMPATIBLE](by-verdict/compatible.md) | 32 | Backward-compatible changes (additions or quality-only). |
 | ✅ [NO_CHANGE](by-verdict/no-change.md) | 10 | Identical ABI/API — baseline control cases. |
 
@@ -42,8 +42,8 @@ Source files (`v1.*`, `v2.*`, `app.*`, `CMakeLists.txt`) are listed at the botto
 | Category | Cases | What it covers |
 |----------|-------|----------------|
 | [Breaking](by-category/breaking.md) | 109 | Listed in `BREAKING_KINDS` — runtime ABI break. |
-| [API Break](by-category/api_break.md) | 21 | Listed in `API_BREAK_KINDS` — source/API-level break. |
-| [Risk](by-category/risk.md) | 34 | Listed in `RISK_KINDS` — symbol-compatible but behaviorally risky. |
+| [API Break](by-category/api_break.md) | 20 | Listed in `API_BREAK_KINDS` — source/API-level break. |
+| [Risk](by-category/risk.md) | 35 | Listed in `RISK_KINDS` — symbol-compatible but behaviorally risky. |
 | [Addition (Compatible)](by-category/addition.md) | 11 | Listed in `ADDITION_KINDS` — backward-compatible additions. |
 | [Quality (Compatible)](by-category/quality.md) | 21 | Listed in `QUALITY_KINDS` — metadata/quality issues, not ABI breaks. |
 | [No Change](by-category/no_change.md) | 10 | Identical ABI/API — sanity-check baselines. |
@@ -94,11 +94,11 @@ The weakest evidence source that reaches this case's verdict — see [Evidence a
 |----------|-------|---------------|
 | [L0 — binary only](by-evidence/l0.md) | 67 | Detectable from the shipped binary's symbol table alone. |
 | [L1 — + debug info](by-evidence/l1.md) | 75 | Needs debug information on top of the binary. |
-| [L2 — + headers](by-evidence/l2.md) | 37 | Needs the public headers parsed alongside the binary. |
+| [L2 — + headers](by-evidence/l2.md) | 38 | Needs the public headers parsed alongside the binary. |
 | [L3 — + build evidence](by-evidence/l3.md) | 11 | Needs the build's own configuration and flags. |
 | [L4 — + source replay](by-evidence/l4.md) | 6 | Needs the sources replayed through a source-level ABI extraction. |
 | [L5 — + source graph](by-evidence/l5.md) | 14 | Needs the derived semantic source graph. |
-| [Not currently detectable](by-evidence/none.md) | 1 | No evidence tier currently reaches this case's canonical verdict — a known detector gap, kept in the catalog as calibration. |
+| [Not currently detectable](by-evidence/none.md) | 0 | No evidence tier currently reaches this case's canonical verdict — a known detector gap, kept in the catalog as calibration. |
 
 ## Browse by language
 
@@ -226,7 +226,7 @@ The weakest evidence source that reaches this case's verdict — see [Evidence a
 | [case108_task_class_removed](case108_task_class_removed.md) | `task` Class Removed (historical ABI break — vtable angle) | 🔴 BREAKING | Breaking |
 | [case109_flow_graph_policy_renames](case109_flow_graph_policy_renames.md) | flow::graph Policy Tag Renames | 🟠 API_BREAK | API Break |
 | [case110_concurrent_unordered_map_api_drift](case110_concurrent_unordered_map_api_drift.md) | concurrent_unordered_map API Drift | 🔴 BREAKING | Breaking |
-| [case111_enumerable_thread_specific_lambda_ambiguity](case111_enumerable_thread_specific_lambda_ambiguity.md) | enumerable_thread_specific Lambda-Init Ambiguity | 🟠 API_BREAK | API Break |
+| [case111_enumerable_thread_specific_lambda_ambiguity](case111_enumerable_thread_specific_lambda_ambiguity.md) | enumerable_thread_specific Lambda-Init Ambiguity | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case112_lp64_ilp64](case112_lp64_ilp64.md) | LP64 → ILP64 Integer-Model Switch (oneMKL MKL_INT 32→64) | 🔴 BREAKING | Breaking |
 | [case113_abi_tag_changed](case113_abi_tag_changed.md) | ABI-tag set change ([abi:cxx11] lost on a single symbol) | 🔴 BREAKING | Breaking |
 | [case114_char8t_migration](case114_char8t_migration.md) | char8_t Migration (C++20 char-family → char8_t) | 🔴 BREAKING | Breaking |

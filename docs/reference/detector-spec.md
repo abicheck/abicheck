@@ -2,7 +2,7 @@
 
 # Detector specification matrix
 
-One row per `ChangeKind` (413 total). Columns fuse the verdict partition (`checker_policy`), default policy (`policy_for`), the weakest evidence layer at which the kind becomes detectable (`scripts/evidence_tiers`), and the example case(s) that demonstrate the kind (`catalog/ground_truth.json`). The **Examples** column is capped at 4 links per kind; the full mapping is in `detector-spec.json`.
+One row per `ChangeKind` (414 total). Columns fuse the verdict partition (`checker_policy`), default policy (`policy_for`), the weakest evidence layer at which the kind becomes detectable (`scripts/evidence_tiers`), and the example case(s) that demonstrate the kind (`catalog/ground_truth.json`). The **Examples** column is capped at 4 links per kind; the full mapping is in `detector-spec.json`.
 
 | ChangeKind | Category | Default verdict | Severity | Min evidence | Doc slug | Examples |
 |---|---|---|---|---|---|---|
@@ -113,7 +113,7 @@ One row per `ChangeKind` (413 total). Columns fuse the verdict partition (`check
 | `flexible_array_member_changed` | quality | `COMPATIBLE` | `warning` | L1 | `flexible_array_member_changed` | [case70](examples/case70_flexible_array_member_changed.md) |
 | `float_abi_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L3 | `float_abi_changed` | — |
 | `fortify_source_weakened` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `fortify_source_weakened` | — |
-| `func_added` | addition | `COMPATIBLE` | `warning` | L0 | `func_added` | [case03](examples/case03_compat_addition.md), [case111](examples/case111_enumerable_thread_specific_lambda_ambiguity.md), [case141](examples/case141_versioned_symbol_scheme.md), [case185](examples/case185_inherited_override_reuses_slot.md), +5 |
+| `func_added` | addition | `COMPATIBLE` | `warning` | L0 | `func_added` | [case03](examples/case03_compat_addition.md), [case141](examples/case141_versioned_symbol_scheme.md), [case185](examples/case185_inherited_override_reuses_slot.md), [case200](examples/case200_new_entry_point_instead_of_parameter_added.md), +4 |
 | `func_added_elf_only` | addition | `COMPATIBLE` | `warning` | L0 | `func_added_elf_only` | — |
 | `func_became_inline` | api_break | `API_BREAK` | `warning` | unspecified | `func_became_inline` | — |
 | `func_contract_attribute_added` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L2 | `func_contract_attribute_added` | — |
@@ -210,6 +210,7 @@ One row per `ChangeKind` (413 total). Columns fuse the verdict partition (`check
 | `opaque_invariant_broken` | breaking | `BREAKING` | `error` | unspecified | `opaque_invariant_broken` | — |
 | `os_deployment_floor_raised` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `os_deployment_floor_raised` | — |
 | `overload_added` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `overload_added` | [case169](examples/case169_overload_added.md) |
+| `overload_ambiguity_introduced` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L2 | `overload_ambiguity_introduced` | [case111](examples/case111_enumerable_thread_specific_lambda_ambiguity.md) |
 | `overload_set_rerouted` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `overload_set_rerouted` | — |
 | `param_became_va_list` | quality | `COMPATIBLE` | `warning` | unspecified | `param_became_va_list` | — |
 | `param_default_value_changed` | quality | `COMPATIBLE` | `warning` | L2 | `param_default_value_changed` | [case32](examples/case32_param_defaults.md) |

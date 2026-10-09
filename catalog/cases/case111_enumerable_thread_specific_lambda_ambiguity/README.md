@@ -1,6 +1,6 @@
 # Case 111: enumerable_thread_specific Lambda-Init Ambiguity
 
-**Category:** Subtle source break / regression suite | **Verdict:** 🟠 API_BREAK (known detector gap — abicheck currently reports COMPATIBLE at every evidence tier; see below)
+**Category:** Subtle source break / regression suite | **Verdict:** 🟡 COMPATIBLE_WITH_RISK (conditional source break, proven by `source_smoke`; see below)
 
 ## What breaks
 
@@ -28,63 +28,32 @@ constructor overloads to existing handle types introduced overload
 ambiguity in real downstream code. The pattern is repeatable across
 container-like types.
 
-## How abicheck catches it (and where it doesn't)
+## How abicheck catches it
 
-**It doesn't — at any evidence tier.** This is the catalog's canonical
-example of a *scenario* being proven true (by the `source_smoke` oracle
-below) while no current detector, at any of L0-L5, produces the verdict
-that scenario demands. That is different from case105 (concept tightening)
-or case122 (uninstantiated template change), where a *higher* evidence
-tier (L4) does catch the break — case111 has no tier that catches it yet.
+`overload_ambiguity_introduced` (`abicheck/compare/overload_ambiguity.py`)
+builds a concrete witness call for every (preexisting overload, new
+overload) pair of the same callable, constructors included: same arity,
+same implicit-object qualifiers, identical types at every other position,
+and at least one position where **both** parameters are scalars
+(arithmetic, enum, pointer). An empty braced argument `{}` converts to any
+scalar by the identity conversion, so neither candidate is better and the
+call is ambiguous. Here `int` and `int_factory_t` (a function pointer) are
+both scalars, and the finding names the witness:
+`mylib::enumerable_thread_specific({})`. Both header backends report it.
 
-The diff exposes:
+The break is real but **consumer-conditional** — `ets(42)` and every typed
+argument still resolve; only a caller that writes `ets({})` (or otherwise
+passes `{}` there) stops compiling. So the default gate is
+`COMPATIBLE_WITH_RISK` (exit 0), and `ground_truth.json` records the proven
+source break separately in `conditional_breaks` (the same fact/gate split as
+`case186`). A project that promises source compatibility for brace-initialized
+calls can gate `overload_ambiguity_introduced`.
 
-- `FUNC_ADDED`: the new `std::function<int()>` constructor
-
-`FUNC_ADDED` on a constructor is, in isolation, compatible — it cannot
-link- or ABI-break anything by itself. The follow-on **overload
-ambiguity** that breaks downstream source compilation depends on the
-consumer's call-site context, which no snapshot-level detector currently
-reasons about for newly-added constructor overloads (contrast
-`case169_overload_added`'s `OVERLOAD_ADDED`, which only groups
-same-named *free-function* overloads by Itanium mangling — it does not
-reason about constructor-overload call-site ambiguity).
-
-**Canonical verdict:** `API_BREAK` — proven by this case's own
-`source_smoke` (v1 compiles, v2 is ambiguous), matching the project's
-definition of API_BREAK: a public-header change that breaks
-recompilation while already-built binaries remain viable (`abi_break:
-false`, `api_break: true`). abicheck's actual output at every evidence
-tier is `COMPATIBLE` with only `func_added` observed — a real,
-tracked **known detector gap**, not an evidence-depth limitation. The
-gap is recorded so a `KINDS_MISMATCH`/verdict-mismatch reviewer can see
-*why* the mismatch is expected rather than silently accepting the tool's
-current output as ground truth.
-
-A constructor-overload-ambiguity detector is the natural home for
-closing this gap; it would need the same castxml header-AST capture
-path used for case105's concept-tightening detector to reason about
-call-site resolvability.
-
-**Update:** abicheck has a `ChangeKind.CTOR_OVERLOAD_AMBIGUITY_RISK`
-best-effort heuristic (`diff_symbols._diff_ctor_overload_ambiguity`)
-that flags a class gaining a 2nd+ non-explicit converting constructor —
-the classic *implicit-conversion* ambiguity pattern. **It does not close
-this case's gap.** Both of this case's constructors are declared
-`explicit` (see `v1.h`/`v2.h`), and this case's own `source_smoke`
-proof is triggered by empty-brace-list direct-initialization
-(`ets({})`), not implicit conversion — direct-initialization performs
-overload resolution over explicit constructors too, and an empty
-braced-init-list value-initializes almost any scalar/pointer parameter
-type, so it collides across *both* new and old overloads regardless of
-`explicit`. Soundly detecting that would need a general call-site
-overload-resolution simulation (which argument shapes are viable
-against which parameter types), not a snapshot-level heuristic — still
-future work. The heuristic was deliberately scoped to the narrower,
-lower-false-positive non-explicit case rather than widened to cover
-this scenario, since widening to any 2nd single-scalar-argument
-constructor (explicit or not) would fire on most multi-constructor
-classes.
+Out of scope for the witness: templates (ranking by deduction), variadics,
+and reference/class-typed parameters, whose conversions rank differently.
+The older `ctor_overload_ambiguity_risk` heuristic (a class crossing from one
+to two non-explicit converting constructors) is independent and may also
+appear.
 
 ## Code diff
 

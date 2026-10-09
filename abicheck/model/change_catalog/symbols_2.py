@@ -104,6 +104,21 @@ SYMBOLS_ENTRIES_2: list[ChangeKindMeta] = [
         operation=_OP.MODIFIED,
     ),
     _E(
+        "overload_ambiguity_introduced",
+        _R,
+        impact="A new overload joined an existing one with the same arity, "
+        "and at every position where their parameters differ both take a "
+        "scalar (arithmetic, enum, pointer). Built binaries are unaffected, "
+        "but a call that passes an argument with no type of its own there "
+        "-- an empty braced list `{}` -- had one viable candidate and is now "
+        "ambiguous, so that consumer no longer compiles. Constructors are "
+        "included (`T x({});`). Whether any consumer writes such a call is "
+        "not visible from the library.",
+        description_template="Overload makes an existing call ambiguous: {detail} — was {old}, new {new}",
+        entity=_ENT.FUNCTION,
+        operation=_OP.ADDED,
+    ),
+    _E(
         "param_restrict_added",
         _R,
         impact="A pointer parameter gained `restrict`. The calling convention "

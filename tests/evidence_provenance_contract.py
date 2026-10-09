@@ -315,6 +315,7 @@ PROVENANCE_UNVERIFIED = frozenset(
         "param_pointee_qualifier_changed",
         "func_return_pointee_qualifier_added",
         "func_return_pointee_qualifier_removed",
+        "overload_ambiguity_introduced",
         "param_renamed",
         "param_restrict_added",
         "param_restrict_changed",

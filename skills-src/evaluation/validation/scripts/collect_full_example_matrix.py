@@ -33,6 +33,9 @@ import example_catalog  # noqa: E402
 
 EXAMPLES_DIR = example_catalog.CASES_DIR
 GROUND_TRUTH = example_catalog.GROUND_TRUTH_PATH
+#: Independent semantic review per case, kept apart from detector conformance.
+SEMANTIC_REVIEW = example_catalog.CATALOG_DIR / "semantic_review.json"
+SEMANTIC_REVIEW_EVIDENCE = frozenset({"source_smoke", "runtime_witness", "compiler_oracle"})
 SCHEMA_VERSION = "full_example_matrix.v2"
 
 ARTIFACT_CONTRACTS = {
@@ -260,12 +263,13 @@ def _artifact_errors(
             "DEMONSTRATED",
             "NO_RUNTIME_SIGNAL",
             "BASELINE_SIGNAL",
+            "CONTRADICTED",
             "SKIP",
             "BUILD_ERROR",
         }
         # An invalid baseline (the unmodified app misbehaving against libv1)
         # voids the swap comparison, so it fails the lane like a build error.
-        bad_statuses = {"BUILD_ERROR", "BASELINE_SIGNAL"}
+        bad_statuses = {"BUILD_ERROR", "BASELINE_SIGNAL", "CONTRADICTED"}
     else:
         if data.get("platform") != "linux":
             errors.append(
@@ -509,6 +513,13 @@ def _special_cli_status(
     return "UNRESOLVED", lane, str(result.get("message", ""))
 
 
+def semantic_reviews() -> dict[str, dict[str, Any]]:
+    """``catalog/semantic_review.json``'s reviews ({} when absent)."""
+    if not SEMANTIC_REVIEW.exists():
+        return {}
+    return dict(json.loads(SEMANTIC_REVIEW.read_text(encoding="utf-8"))["reviews"])
+
+
 def build_matrix(
     *,
     gcc: dict[str, Any] | None,
@@ -526,6 +537,7 @@ def build_matrix(
     runtime_results = _results_by_case(runtime)
     build_source_results = _results_by_case(build_source)
 
+    reviews = semantic_reviews()
     rows: list[dict[str, Any]] = []
     for name, entry in sorted(gt.items()):
         owner = _case_owner(name, entry)
@@ -610,10 +622,15 @@ def build_matrix(
             or [],
             "lanes": lanes,
         }
+        # COVERED is detector conformance, not proof the expectation is right.
+        row["semantic_review"] = "reviewed" if name in reviews else "unreviewed"
         if runtime_lane is not None:
             row["runtime_smoke"] = {
                 "status": runtime_lane.get("status"),
                 "message": runtime_lane.get("message", ""),
+                # DEMONSTRATED is not a proven break: only a changed exit
+                # status is a consumer assertion (run_example_runtime_smoke).
+                "proof": runtime_lane.get("proof", ""),
             }
         rows.append(row)
 
@@ -664,6 +681,15 @@ def build_matrix(
             "covered": direct_covered,
             "total": len(gt),
             "percent": round(100 * direct_covered / len(gt), 1),
+        },
+        "semantic_review": {
+            "reviewed": sum(1 for row in rows if row["semantic_review"] == "reviewed"),
+            "total": len(gt),
+            "covered_but_unreviewed": sum(
+                1
+                for row in rows
+                if row["status"] == "COVERED" and row["semantic_review"] == "unreviewed"
+            ),
         },
         "unresolved_cases": [row["case_id"] for row in unresolved],
         "failed_cases": [row["case_id"] for row in failed],
