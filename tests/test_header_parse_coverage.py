@@ -241,7 +241,9 @@ def test_dependency_scope_never_drops_an_unnamed_dwarf_type_under_partial_parse(
 ) -> None:
     """With the parse partial, the DWARF filter drops only confirmed
     dependency types; a type no parsed header names is kept (unknown)."""
-    from abicheck.dumper_scoping import scope_snapshot_excluding_dependencies
+    from abicheck.workflows.dump.dependency_scope import (
+        scope_snapshot_excluding_dependencies,
+    )
 
     snap = _snap("1", excluded=excluded, dependency_scope=None)
     snap.declarations.types = [

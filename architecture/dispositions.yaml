@@ -130,15 +130,6 @@
       "rationale": "A compare-classified caller (diff_surface_metrics.py) already reaches into policy directly on its own, so classifying this module into either `compare` or `policy` both produced a new responsibility cycle in a trial run (4 and 5 new findings respectively, both naming a compare <-> policy cycle). The upstream diff_surface_metrics.py -> policy edge needs closing first, independent of this file's own placement.",
       "owner": "abicheck maintainers",
       "review_by": "2026-12-15"
-    },
-    {
-      "path": "abicheck/type_reachability.py",
-      "disposition": "migrate",
-      "target_layer": "compare",
-      "slice": "compare/type_reachability.py, alongside its already-classified siblings compare/type_reachability_spelling.py and compare/type_reachability_stdlib_spellings.py.",
-      "rationale": "extract-classified dumper_scoping.py imports this module directly (extract may only import model/storage). Trial classification into `compare` measured 6 new extract -> compare violations. Needs that call site routed through a model-shared value or a workflows wrapper before reclassification.",
-      "owner": "abicheck maintainers",
-      "review_by": "2026-12-15"
     }
   ]
 }

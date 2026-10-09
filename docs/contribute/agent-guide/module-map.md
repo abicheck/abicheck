@@ -152,7 +152,7 @@ Core pipeline (in order of data flow):
      surface behind `dumper._header_ast_parser`.
    - `dwarf_snapshot.py` — DWARF-specific snapshot logic
    - `snapshot_cache.py` — caching layer
-   - `dumper_scoping.py` — dependency exclusion, on by default (`dump`/
+   - `workflows/dump/dependency_scope.py` (with `dependency_retention.py`) — dependency exclusion, on by default (`dump`/
      `compare --include-system-declarations` opts out, both sharing one
      `cli_options.include_dependencies_option` decorator): drops
      declarations whose own defining header is a toolchain/system header

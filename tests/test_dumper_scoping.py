@@ -13,10 +13,6 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
-from abicheck.dumper_scoping import (
-    resolve_dependency_scope,
-    scope_snapshot_excluding_dependencies,
-)
 from abicheck.dwarf_advanced import AdvancedDwarfMetadata
 from abicheck.dwarf_metadata import DwarfMetadata, StructLayout
 from abicheck.model import (
@@ -40,6 +36,10 @@ from abicheck.model.semantic_ir import (
     CanonicalEntity,
     SemanticIR,
     semantic_ir_conflict_key,
+)
+from abicheck.workflows.dump.dependency_scope import (
+    resolve_dependency_scope,
+    scope_snapshot_excluding_dependencies,
 )
 from abicheck.workflows.run_dump_scope import wrap_run_dump_with_dependency_scope
 

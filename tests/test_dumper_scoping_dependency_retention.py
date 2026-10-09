@@ -19,10 +19,6 @@ for the full "direct-vs-transitive" design rationale.
 
 from __future__ import annotations
 
-from abicheck.dumper_scoping import (
-    _raw_candidate_spellings,
-    scope_snapshot_excluding_dependencies,
-)
 from abicheck.model import (
     AbiSnapshot,
     EnumType,
@@ -32,6 +28,10 @@ from abicheck.model import (
     ScopeOrigin,
     TypeField,
     Visibility,
+)
+from abicheck.workflows.dump.dependency_retention import _raw_candidate_spellings
+from abicheck.workflows.dump.dependency_scope import (
+    scope_snapshot_excluding_dependencies,
 )
 
 _SYSTEM_HEADER = "/usr/include/c++/11/string"

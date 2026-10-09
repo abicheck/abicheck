@@ -74,7 +74,9 @@ class TestSignatureHaystackIsDeduplicated:
 
     @staticmethod
     def _haystack(functions=(), variables=(), types=()):
-        from abicheck.dumper_scoping import _kept_signature_haystack
+        from abicheck.workflows.dump.dependency_retention import (
+            _kept_signature_haystack,
+        )
 
         return _kept_signature_haystack(list(functions), list(variables), list(types))
 

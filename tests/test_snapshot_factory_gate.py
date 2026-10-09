@@ -151,8 +151,8 @@ def test_finish_runs_exactly_the_requested_passes_in_canonical_order(
 ) -> None:
     """Every subset of passes: each selected pass runs once, unselected ones
     never, and always in the order provenance -> scope -> ownership."""
-    import abicheck.dumper_scoping as scoping
     import abicheck.provenance as provenance
+    import abicheck.workflows.dump.dependency_scope as scoping
     import abicheck.workflows.ownership_request as ownership
     from abicheck.workflows import snapshot_factory as sf
 
@@ -312,8 +312,8 @@ def test_single_pass_helpers_match_finish_snapshot(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Each one-pass helper runs exactly its pass, with its arguments."""
-    import abicheck.dumper_scoping as scoping
     import abicheck.provenance as provenance
+    import abicheck.workflows.dump.dependency_scope as scoping
     import abicheck.workflows.ownership_request as ownership
     from abicheck.workflows import snapshot_factory as sf
 

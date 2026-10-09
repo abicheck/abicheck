@@ -82,7 +82,9 @@ def test_real_system_header_type_directly_referenced_is_kept(tmp_path: Path) -> 
     ``test_non_public_libc_type_directly_referenced_is_kept`` against a real
     castxml-reported ``source_location`` rather than a hand-written path."""
     from abicheck.dumper import dump
-    from abicheck.dumper_scoping import scope_snapshot_excluding_dependencies
+    from abicheck.workflows.dump.dependency_scope import (
+        scope_snapshot_excluding_dependencies,
+    )
 
     so = _compile_so(tmp_path)
     api = tmp_path / "api.h"
