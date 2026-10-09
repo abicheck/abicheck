@@ -650,7 +650,7 @@ class TestForcedIncludeCacheKey:
         per-search-dir candidate, editing the real file leaves the key
         unchanged.
         """
-        from abicheck.dumper_ast_config import _cache_key
+        from abicheck.extract.headers.ast_config import _cache_key
         from abicheck.header_utils import (
             cache_relevant_operand_paths,
             forced_include_operand_paths,
@@ -686,7 +686,7 @@ class TestForcedIncludeCacheKey:
         parent directory left an edit to the one macro-controlling input the
         parse depends on most invisible to the key.
         """
-        from abicheck.dumper_ast_config import _cache_key
+        from abicheck.extract.headers.ast_config import _cache_key
         from abicheck.header_utils import cache_relevant_operand_paths
 
         macros = tmp_path / "settings.def"
@@ -714,7 +714,7 @@ class TestForcedIncludeCacheKey:
         # own directory (the include search is expected to find it), so the
         # cache key routinely sees a path that does not exist from here. It
         # must contribute its path string and move on, not raise.
-        from abicheck.dumper_ast_config import _cache_key
+        from abicheck.extract.headers.ast_config import _cache_key
 
         header = tmp_path / "widget.h"
         header.write_text("struct Widget { int x; };\n", encoding="utf-8")

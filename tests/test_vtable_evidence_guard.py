@@ -105,7 +105,7 @@ class TestVptrIsNotEvidence:
         fails and the reasoning must be revisited before the field is
         trusted as evidence again.
 
-        The derivation itself moved from ``abicheck.dumper_castxml`` to
+        The derivation itself moved from ``abicheck.extract.headers.castxml.dumper`` to
         ``abicheck.extract.headers.castxml.records`` (ADR-061 Phase 5's
         record-entity split) — ``dumper_castxml.py`` now only delegates to
         it, so the source text this test pins must be read from its real

@@ -357,7 +357,9 @@ class TestResolveDebugMetadata:
         """
         from abicheck.btf_metadata import BtfMetadata
 
-        monkeypatch.setattr("abicheck.dumper_debug._is_kernel_binary", lambda _p: True)
+        monkeypatch.setattr(
+            "abicheck.extract.debug_dump._is_kernel_binary", lambda _p: True
+        )
         monkeypatch.setattr("abicheck.btf_metadata.has_btf_section", lambda _p: True)
         monkeypatch.setattr(
             "abicheck.btf_metadata.parse_btf_metadata",
@@ -378,7 +380,9 @@ class TestResolveDebugMetadata:
         from abicheck.dwarf_advanced import AdvancedDwarfMetadata
         from abicheck.dwarf_metadata import DwarfMetadata
 
-        monkeypatch.setattr("abicheck.dumper_debug._is_kernel_binary", lambda _p: False)
+        monkeypatch.setattr(
+            "abicheck.extract.debug_dump._is_kernel_binary", lambda _p: False
+        )
         monkeypatch.setattr(
             "abicheck.dwarf_unified.parse_dwarf",
             lambda _p, **_k: (DwarfMetadata(), AdvancedDwarfMetadata()),
@@ -403,7 +407,9 @@ class TestResolveDebugMetadata:
         from abicheck.dwarf_advanced import AdvancedDwarfMetadata
         from abicheck.dwarf_metadata import DwarfMetadata
 
-        monkeypatch.setattr("abicheck.dumper_debug._is_kernel_binary", lambda _p: False)
+        monkeypatch.setattr(
+            "abicheck.extract.debug_dump._is_kernel_binary", lambda _p: False
+        )
         monkeypatch.setattr(
             "abicheck.dwarf_unified.parse_dwarf",
             lambda _p, **_k: (DwarfMetadata(), AdvancedDwarfMetadata()),
@@ -429,7 +435,9 @@ class TestResolveDebugMetadata:
         from abicheck.dwarf_advanced import AdvancedDwarfMetadata
         from abicheck.dwarf_metadata import DwarfMetadata
 
-        monkeypatch.setattr("abicheck.dumper_debug._is_kernel_binary", lambda _p: False)
+        monkeypatch.setattr(
+            "abicheck.extract.debug_dump._is_kernel_binary", lambda _p: False
+        )
         monkeypatch.setattr(
             "abicheck.dwarf_unified.parse_dwarf",
             lambda _p, **_k: (DwarfMetadata(has_dwarf=True), AdvancedDwarfMetadata()),
@@ -458,7 +466,9 @@ class TestResolveDebugMetadata:
         from abicheck.dwarf_advanced import AdvancedDwarfMetadata
         from abicheck.dwarf_metadata import DwarfMetadata
 
-        monkeypatch.setattr("abicheck.dumper_debug._is_kernel_binary", lambda _p: True)
+        monkeypatch.setattr(
+            "abicheck.extract.debug_dump._is_kernel_binary", lambda _p: True
+        )
         monkeypatch.setattr(
             "abicheck.btf_metadata.has_btf_section", lambda _p: btf_section_present
         )
@@ -483,7 +493,9 @@ class TestResolveDebugMetadata:
         from abicheck.dwarf_advanced import AdvancedDwarfMetadata
         from abicheck.dwarf_metadata import DwarfMetadata
 
-        monkeypatch.setattr("abicheck.dumper_debug._is_kernel_binary", lambda _p: False)
+        monkeypatch.setattr(
+            "abicheck.extract.debug_dump._is_kernel_binary", lambda _p: False
+        )
         monkeypatch.setattr(
             "abicheck.dwarf_unified.parse_dwarf",
             lambda _p, **_k: (DwarfMetadata(), AdvancedDwarfMetadata()),

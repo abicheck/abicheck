@@ -15,7 +15,7 @@
 
 """``clang -ast-dump=json`` → ABI model parser (the alternative L2 backend).
 
-A sibling to :mod:`abicheck.dumper_castxml` that produces the **same**
+A sibling to :mod:`abicheck.extract.headers.castxml.dumper` that produces the **same**
 ``AbiSnapshot`` fields (functions, variables, types, enums, typedefs, constants)
 from a ``clang -ast-dump=json`` tree instead of castxml XML, so a clang-only host
 can still run the header-aware L2 layer — public-surface scoping and the
@@ -23,7 +23,7 @@ ADR-035 D4 cross-source checks that depend on header provenance (ADR-003,
 "Extension: clang as an alternative L2 frontend"; surfaced by a real-world
 UXL field run).
 
-:class:`_ClangAstParser` mirrors :class:`abicheck.dumper_castxml._CastxmlParser`'s
+:class:`_ClangAstParser` mirrors :class:`abicheck.extract.headers.castxml.dumper._CastxmlParser`'s
 public method surface exactly, so the two are interchangeable producers behind
 the :mod:`abicheck.dumper` backend selector and act as a parity oracle for each
 other (the same pattern as the DWARF↔castxml and libabigail/ABICC parity gates).
@@ -42,7 +42,7 @@ full layout.
 The same gap applies to a plain ``Variable``'s *natural* type alignment:
 :func:`_clang_var_alignment_bits` only reads an explicit ``AlignedAttr``
 override, never a computed one (contrast
-:meth:`abicheck.dumper_castxml._CastxmlParser._type_alignment_bits`, which
+:meth:`abicheck.extract.headers.castxml.dumper._CastxmlParser._type_alignment_bits`, which
 castxml's real compiler-computed ``align`` attribute makes possible). Under
 ``--artifact-variant release-headers`` on a clang-only host this leaves
 ``diff_platform_elf_symbols._check_object_alignment_reduced`` without
@@ -743,7 +743,7 @@ def _template_param_indexes_for(root: dict[str, Any]) -> TemplateParamIndexes:
 class _ClangAstParser:
     """Parse a ``clang -ast-dump=json`` tree into ABI model objects.
 
-    Drop-in alternative to :class:`abicheck.dumper_castxml._CastxmlParser`: the
+    Drop-in alternative to :class:`abicheck.extract.headers.castxml.dumper._CastxmlParser`: the
     same six ``parse_*`` methods, the same model types, the same exported-symbol
     visibility resolution and public-header constant scoping. A single pre-order
     walk (in ``__init__``) categorizes the public declarations; the ``parse_*``

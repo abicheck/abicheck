@@ -68,12 +68,13 @@ from xml.etree.ElementTree import (
     Element,  # type annotation only; parsing uses defusedxml
 )
 
-from . import dumper_castxml_typedefs as _typedefs_helpers
-from .dumper_castxml_typedefs import (
+import abicheck.dumper_castxml_typedefs as _typedefs_helpers
+
+from ....dumper_castxml_typedefs import (
     _deprecation_marker as _deprecation_marker,
     _extract_contract_attributes as _extract_contract_attributes,
 )
-from .extract.headers.castxml import (
+from ....extract.headers.castxml import (
     context as _castxml_context,
     enums as _castxml_enums,
     functions as _castxml_functions,
@@ -82,7 +83,7 @@ from .extract.headers.castxml import (
     scope as _castxml_scope,
     type_resolution as _castxml_type_resolution,
 )
-from .extract.headers.castxml.names import (
+from ....extract.headers.castxml.names import (
     _SYNTHETIC_DTOR_KEY_PREFIX as _SYNTHETIC_DTOR_KEY_PREFIX,
     SYNTHETIC_CTOR_KEY_PREFIX as SYNTHETIC_CTOR_KEY_PREFIX,
     _mangled_name_is_local_linkage as _mangled_name_is_local_linkage,
@@ -93,11 +94,11 @@ from .extract.headers.castxml.names import (
     is_synthetic_ctor_key as is_synthetic_ctor_key,
     is_synthetic_dtor_key as is_synthetic_dtor_key,
 )
-from .extract.headers.scope_segments import (
+from ....extract.headers.scope_segments import (
     entity_is_record_member as entity_is_record_member,
 )
-from .extract.surface_fact_producers import header_ast_surface_facts
-from .model import (
+from ....extract.surface_fact_producers import header_ast_surface_facts
+from ....model import (
     AccessLevel,
     EnumType,
     Fact,
@@ -106,16 +107,16 @@ from .model import (
     Variable,
     Visibility,
 )
-from .model.declaration_headers import attributed
-from .model.export_index import ExportMatch
-from .model.identity import (
+from ....model.declaration_headers import attributed
+from ....model.export_index import ExportMatch
+from ....model.identity import (
     EntityId,
     ScopePath,
     entity_id_for_constant,
     entity_id_for_typedef,
     entity_id_for_variable,
 )
-from .provenance import header_from_location
+from ....provenance import header_from_location
 
 
 class _CastxmlParser:

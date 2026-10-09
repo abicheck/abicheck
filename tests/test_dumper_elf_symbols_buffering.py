@@ -46,8 +46,8 @@ import subprocess
 
 import pytest
 
-from abicheck.dumper_elf_symbols import _pyelftools_exported_symbols
 from abicheck.errors import SnapshotError
+from abicheck.extract.elf_symbol_classify import _pyelftools_exported_symbols
 
 _ELF_MAGIC = b"\x7fELF"
 

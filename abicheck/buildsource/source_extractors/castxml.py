@@ -523,7 +523,7 @@ class CastxmlSourceExtractor:
         """
         # Imported lazily: the castxml parser pulls in the heavy dumper model
         # graph, which the lightweight evidence layer should not load eagerly.
-        from ...dumper_castxml import _CastxmlParser
+        from ...extract.headers.castxml.dumper import _CastxmlParser
         from ...model import EnumType, Function, RecordType, ScopeOrigin, Variable
         from ...provenance import build_public_set, is_generated_header, tag_provenance
 

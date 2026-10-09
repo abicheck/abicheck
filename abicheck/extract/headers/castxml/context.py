@@ -24,7 +24,7 @@ the memoization caches the type-resolution helpers in this package share.
 This module does not parse a function, record, enum, or template itself —
 that is each entity module's job (``enums.py``, ``functions.py``, and
 ``records.py``; castxml has no separate template-entity module — see
-``abicheck/dumper_castxml.py``'s module docstring for why). An entity
+``abicheck/extract/headers/castxml/dumper.py``'s module docstring for why). An entity
 module receives a :class:`CastxmlParserContext` instance
 explicitly rather than reading instance state off a monolithic parser
 class, per D9's "entity modules parse one class of node using shared
@@ -33,7 +33,7 @@ configuration, or create policy findings.
 
 Canonical entry point: construct a :class:`CastxmlParserContext` and call
 :meth:`CastxmlParserContext.build_id_map` once, before any entity module
-reads it. ``abicheck.dumper_castxml._CastxmlParser`` is this context's one
+reads it. ``abicheck.extract.headers.castxml.dumper._CastxmlParser`` is this context's one
 production caller today; it holds the state below as ``self._ctx`` and
 exposes only the fields its own still-unmigrated methods read as read-only
 properties. Anything else reads the context directly (``parser._ctx``).

@@ -14,9 +14,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .dwarf_advanced import AdvancedDwarfMetadata
-    from .dwarf_metadata import DwarfMetadata
-    from .dwarf_unified import DwarfSession
+    from ..dwarf_advanced import AdvancedDwarfMetadata
+    from ..dwarf_metadata import DwarfMetadata
+    from ..dwarf_unified import DwarfSession
 
 log = logging.getLogger(__name__)
 
@@ -77,7 +77,7 @@ def _resolve_debug_metadata(
     itself (those formats are not split-debug-file candidates here). ``None``
     (the default) parses DWARF from *so_path*, unchanged from before.
     """
-    from .dwarf_advanced import AdvancedDwarfMetadata
+    from ..dwarf_advanced import AdvancedDwarfMetadata
 
     dwarf_path = dwarf_source or so_path
 
@@ -86,7 +86,7 @@ def _resolve_debug_metadata(
             _format_out.append(fmt)
 
     if debug_format == "btf":
-        from .btf_metadata import parse_btf_metadata
+        from ..btf_metadata import parse_btf_metadata
 
         btf = parse_btf_metadata(so_path)
         if not btf.has_btf:
@@ -95,7 +95,7 @@ def _resolve_debug_metadata(
         return btf.to_dwarf_metadata(), AdvancedDwarfMetadata()
 
     if debug_format == "ctf":
-        from .ctf_metadata import parse_ctf_metadata
+        from ..ctf_metadata import parse_ctf_metadata
 
         ctf = parse_ctf_metadata(so_path)
         if not ctf.has_ctf:
@@ -104,7 +104,7 @@ def _resolve_debug_metadata(
         return ctf.to_dwarf_metadata(), AdvancedDwarfMetadata()
 
     if debug_format == "dwarf":
-        from .dwarf_unified import parse_dwarf
+        from ..dwarf_unified import parse_dwarf
 
         _resolved("dwarf")
         return parse_dwarf(dwarf_path, _session_out=_session_out)
@@ -115,9 +115,9 @@ def _resolve_debug_metadata(
         )
 
     # Auto-detect: kernel binaries prefer BTF, userspace prefers DWARF
-    from .btf_metadata import has_btf_section, parse_btf_metadata
-    from .ctf_metadata import has_ctf_section, parse_ctf_metadata
-    from .dwarf_unified import parse_dwarf
+    from ..btf_metadata import has_btf_section, parse_btf_metadata
+    from ..ctf_metadata import has_ctf_section, parse_ctf_metadata
+    from ..dwarf_unified import parse_dwarf
 
     is_kernel = _is_kernel_binary(so_path)
 

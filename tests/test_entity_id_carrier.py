@@ -55,8 +55,8 @@ from xml.etree.ElementTree import parse as parse_xml
 import pytest
 from test_dumper_hybrid import _snap as _hybrid_snap
 
-from abicheck.dumper_castxml import SYNTHETIC_CTOR_KEY_PREFIX, _CastxmlParser
 from abicheck.dumper_clang import _ClangAstParser
+from abicheck.extract.headers.castxml import dumper as castxml_dumper
 from abicheck.model import (
     AbiSnapshot,
     AccessLevel,
@@ -169,7 +169,7 @@ def _clang_parser(
 
 def _castxml_parser(
     header_text: str, tmp_path: Path, name: str, *, public: bool = False
-) -> _CastxmlParser:
+) -> castxml_dumper._CastxmlParser:
     header = tmp_path / f"{name}.hpp"
     header.write_text(header_text)
     xml_out = tmp_path / f"{name}.xml"
@@ -200,7 +200,7 @@ def _castxml_parser(
         check=True,
         capture_output=True,
     )
-    return _CastxmlParser(
+    return castxml_dumper._CastxmlParser(
         parse_xml(xml_out).getroot(),
         exported_dynamic={"c_fn", "c_var"},
         exported_static=set(),
@@ -609,7 +609,6 @@ class TestMalformedSidecarEntityIdDocumentIsRefused:
 #: is structurally incapable of reproducing a typed ``ScopePath`` anyway.
 _ALLOWED_RESOLVER_CALLERS = (
     "dumper_clang.py",
-    "dumper_castxml.py",
     "extract/headers/",
     # ADR-063 Phase 2: dwarf_snapshot.py/extract/dwarf_scope.py build a typed
     # ScopePath like the two header-AST backends. extract/export_symbol_identity.py
@@ -683,7 +682,7 @@ class TestResolverIsOnlyCalledByAProducer:
         # list would pass just as happily against a broken scanner.
         sites = set(_resolver_call_sites())
         assert "abicheck/dumper_clang.py" in sites
-        assert "abicheck/dumper_castxml.py" in sites
+        assert "abicheck/extract/headers/castxml/dumper.py" in sites
         assert "abicheck/extract/headers/clang/records.py" in sites
         assert "abicheck/extract/headers/castxml/records.py" in sites
 
@@ -825,7 +824,7 @@ def test_live_castxml_honors_static_export_evidence_for_c_linkage(
         check=True,
         capture_output=True,
     )
-    parser = _CastxmlParser(
+    parser = castxml_dumper._CastxmlParser(
         parse_xml(xml_out).getroot(),
         exported_dynamic=set(),
         exported_static={"foo"},
@@ -873,7 +872,7 @@ def test_live_castxml_export_override_recognizes_non_itanium_mangling_prefixes(
             el.set("mangled", "?foo@@YAHH@Z")
         elif el.get("name") == "c_var" and el.get("mangled"):
             el.set("mangled", "?c_var@@3HA")
-    parser = _CastxmlParser(
+    parser = castxml_dumper._CastxmlParser(
         root, exported_dynamic={"foo", "c_var"}, exported_static=set()
     )
     foo = _one(parser.parse_functions(), name="foo")
@@ -1055,7 +1054,7 @@ def test_reconciled_constructor_adopts_clangs_entity_id() -> None:
     ``entity_id`` (rather than ``mangled``) would fragment this one real
     declaration into two identities across a comparison.
     """
-    synthetic = f"{SYNTHETIC_CTOR_KEY_PREFIX}ns::Widget(int)"
+    synthetic = f"{castxml_dumper.SYNTHETIC_CTOR_KEY_PREFIX}ns::Widget(int)"
     castxml_ctor = Function(
         name="Widget",
         mangled=synthetic,

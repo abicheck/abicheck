@@ -37,7 +37,7 @@ class TestEveryAstBuilderCarriesTheShim:
             assert d in tail
 
     def test_l2_header_command(self) -> None:
-        from abicheck.dumper_ast_config import _build_clang_header_command
+        from abicheck.extract.headers.ast_config import _build_clang_header_command
 
         for force_cpp in (False, True):
             cmd = _build_clang_header_command(

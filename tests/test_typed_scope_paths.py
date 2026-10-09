@@ -40,8 +40,8 @@ from xml.etree.ElementTree import Element, SubElement
 
 import pytest
 
-from abicheck.dumper_castxml import _CastxmlParser
 from abicheck.dumper_clang import _ClangAstParser
+from abicheck.extract.headers.castxml.dumper import _CastxmlParser
 from abicheck.extract.headers.castxml.location import qualified_name
 from abicheck.extract.headers.clang.scope import (
     anonymous_scope_key,

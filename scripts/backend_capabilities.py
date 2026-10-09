@@ -1545,10 +1545,9 @@ def _entity_module_paths(header_backend_dir: Path) -> list[Path]:
 
 
 def castxml_evidence() -> dict[str, dict[str, Evidence]]:
-    """What ``dumper_castxml.py`` and its split-out entity modules populate."""
+    """What the castxml backend (``extract/headers/castxml/``) populates."""
     return scan_backend_evidence(
-        [PKG_DIR / "dumper_castxml.py"]
-        + _entity_module_paths(PKG_DIR / "extract" / "headers" / "castxml")
+        _entity_module_paths(PKG_DIR / "extract" / "headers" / "castxml")
     )
 
 

@@ -236,7 +236,7 @@ def clang_param_is_restrict(node: dict[str, Any]) -> bool:
     below is kept as a back-compat alias for every existing caller spelling
     the old private name (Codex review, PR #940).
 
-    Matches :meth:`abicheck.dumper_castxml._CastxmlParser._resolve_cv_restrict`'s
+    Matches :meth:`abicheck.extract.headers.castxml.dumper._CastxmlParser._resolve_cv_restrict`'s
     semantics — the parameter's OWN (top-level) qualification, with typedef
     indirection followed — so the two backends produce a directly comparable
     bool rather than a backend-specific encoding:

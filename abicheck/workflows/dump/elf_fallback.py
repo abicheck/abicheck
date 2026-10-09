@@ -29,9 +29,9 @@ import logging
 import warnings
 from typing import TYPE_CHECKING
 
-from ...dumper_elf_symbols import _populate_elf_visibility
 from ...dumper_toolchain import _safe_mtime, _safe_size
 from ...extract.debug_layout_semantic_ir import semantic_ir_from_debug_metadata
+from ...extract.elf_symbol_classify import _populate_elf_visibility
 from ...extract.export_symbol_identity import (
     itanium_export_function as _elf_export_function,
     itanium_export_variable as _elf_export_variable,

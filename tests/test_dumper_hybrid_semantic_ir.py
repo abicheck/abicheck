@@ -25,7 +25,7 @@ which is already at its ``architecture/debt.yaml`` no-growth baseline.
 
 from __future__ import annotations
 
-from abicheck.dumper_castxml import SYNTHETIC_CTOR_KEY_PREFIX
+from abicheck.extract.headers.castxml.dumper import SYNTHETIC_CTOR_KEY_PREFIX
 from abicheck.model import AbiSnapshot, Function, Param
 from abicheck.model.fact import Fact
 from abicheck.model.identity import (

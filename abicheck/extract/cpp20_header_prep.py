@@ -26,7 +26,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from ..dumper_ast_config_cpp20_chains import _strip_inactive_if_zero_blocks
+from ..extract.headers.ast_config_cpp20_chains import _strip_inactive_if_zero_blocks
 from .quoted_include_expansion import _strip_raw_strings
 
 # Unrolled ("normal* (special normal*)*") rather than one alternation per

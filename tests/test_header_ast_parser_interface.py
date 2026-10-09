@@ -32,12 +32,12 @@ from xml.etree.ElementTree import Element
 
 import pytest
 
-from abicheck.dumper_castxml import _CastxmlParser
 from abicheck.dumper_clang import _ClangAstParser
 from abicheck.extract.header_ast_fields import (
     AST_SCOPE_ATTRIBUTES,
     parse_header_ast_fields,
 )
+from abicheck.extract.headers.castxml.dumper import _CastxmlParser
 from abicheck.model.entities import RecordType
 from abicheck.model.identity import entity_id_for_type
 from abicheck.storage.header_ast_cache import ast_acquisition_scope

@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import replace
 from unittest.mock import patch
 
-from abicheck.dumper_castxml import SYNTHETIC_CTOR_KEY_PREFIX
+from abicheck.extract.headers.castxml.dumper import SYNTHETIC_CTOR_KEY_PREFIX
 from abicheck.fact_provenance import (
     enum_fact_key,
     fact_producer,

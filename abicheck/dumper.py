@@ -29,20 +29,7 @@ if TYPE_CHECKING:
     from .dwarf_unified import DwarfSession
 
 
-from .dumper_ast_config import (
-    _CPP_ONLY_PATTERNS as _CPP_ONLY_PATTERNS,
-    _build_castxml_command as _build_castxml_command,
-    _build_clang_header_command as _build_clang_header_command,
-    _cache_key as _cache_key,
-    _detect_cpp_headers as _detect_cpp_headers,
-    _resolve_compiler_binary as _resolve_compiler_binary,
-)
 from .dumper_ast_config_cpp20 import _detect_cpp20_headers as _detect_cpp20_headers
-from .dumper_castxml import (
-    _CastxmlParser as _CastxmlParser,
-    _parse_vtable_index as _parse_vtable_index,
-    _vt_sort_key as _vt_sort_key,
-)
 from .dumper_castxml_probe import (
     _castxml_cpp_retry_allowed as _castxml_cpp_retry_allowed,
     _castxml_failure_hint as _castxml_failure_hint,
@@ -68,36 +55,6 @@ from .dumper_contract import (
     # (dumper.py is at the file-size cap); re-exported here so
     # ``dumper._attach_extraction_contract`` remains a valid bare-name call
     _attach_extraction_contract as _attach_extraction_contract,
-)
-from .dumper_debug import (
-    # DWARF/BTF/CTF format resolution + the kernel-binary heuristic live in the
-    # sibling module (dumper.py is at the file-size cap); re-exported here so
-    # ``dumper._is_kernel_binary`` / ``dumper._resolve_debug_metadata`` remain
-    # valid bare-name calls in ``_dump_elf`` and test patch targets.
-    _is_kernel_binary as _is_kernel_binary,
-    _resolve_debug_metadata as _resolve_debug_metadata,
-)
-from .dumper_elf_symbols import (
-    # ELF visibility/symbol-classification helpers live in the sibling module
-    # (dumper.py is at the file-size cap); re-exported here so
-    # ``dumper._elf_classify_symbols``/``dumper._populate_elf_visibility``/
-    # ``dumper._pyelftools_exported_symbols`` remain valid bare-name calls in
-    # ``_dump_elf``/``_try_dwarf_snapshot``/``_build_symbol_only_snapshot``
-    # (and in the Mach-O/PE paths) and existing test patch targets. Because
-    # every caller still lives in ``dumper``, a bare-name call resolves through
-    # this module's namespace at call time, so ``monkeypatch.setattr(dumper,
-    # "_pyelftools_exported_symbols", ...)`` keeps taking effect.
-    _ELF_VIS_MAP as _ELF_VIS_MAP,
-    _HIDDEN_VIS as _HIDDEN_VIS,
-    _elf_classify_symbols as _elf_classify_symbols,
-    _is_abi_relevant_symbol as _is_abi_relevant_symbol,
-    _populate_elf_visibility as _populate_elf_visibility,
-    _pyelftools_exported_symbols as _pyelftools_exported_symbols,
-)
-from .dumper_layout_backfill import (
-    backfill_dwarf_layout,
-    dwarf_layout_types_or_empty,
-    resolve_snapshot_layout_coherence,
 )
 from .dumper_sysinc import (
     _auto_system_includes_enabled as _auto_system_includes_enabled,
@@ -132,6 +89,36 @@ from .errors import (
     UnsupportedCastxmlVersionError,
     ValidationError,
 )
+from .extract.debug_dump import (
+    # DWARF/BTF/CTF format resolution + the kernel-binary heuristic live in the
+    # sibling module (dumper.py is at the file-size cap); re-exported here so
+    # ``dumper._is_kernel_binary`` / ``dumper._resolve_debug_metadata`` remain
+    # valid bare-name calls in ``_dump_elf`` and test patch targets.
+    _is_kernel_binary as _is_kernel_binary,
+    _resolve_debug_metadata as _resolve_debug_metadata,
+)
+from .extract.dwarf_layout_backfill import (
+    backfill_dwarf_layout,
+    dwarf_layout_types_or_empty,
+    resolve_snapshot_layout_coherence,
+)
+from .extract.elf_symbol_classify import (
+    # ELF visibility/symbol-classification helpers live in the sibling module
+    # (dumper.py is at the file-size cap); re-exported here so
+    # ``dumper._elf_classify_symbols``/``dumper._populate_elf_visibility``/
+    # ``dumper._pyelftools_exported_symbols`` remain valid bare-name calls in
+    # ``_dump_elf``/``_try_dwarf_snapshot``/``_build_symbol_only_snapshot``
+    # (and in the Mach-O/PE paths) and existing test patch targets. Because
+    # every caller still lives in ``dumper``, a bare-name call resolves through
+    # this module's namespace at call time, so ``monkeypatch.setattr(dumper,
+    # "_pyelftools_exported_symbols", ...)`` keeps taking effect.
+    _ELF_VIS_MAP as _ELF_VIS_MAP,
+    _HIDDEN_VIS as _HIDDEN_VIS,
+    _elf_classify_symbols as _elf_classify_symbols,
+    _is_abi_relevant_symbol as _is_abi_relevant_symbol,
+    _populate_elf_visibility as _populate_elf_visibility,
+    _pyelftools_exported_symbols as _pyelftools_exported_symbols,
+)
 from .extract.export_symbol_identity import (
     itanium_export_function as _itanium_export_function,
     itanium_export_variable as _itanium_export_variable,
@@ -147,8 +134,21 @@ from .extract.header_ast_backend import (
     lang_to_profile,
 )
 from .extract.header_ast_fields import parse_header_ast_fields
+from .extract.headers.ast_config import (
+    _CPP_ONLY_PATTERNS as _CPP_ONLY_PATTERNS,
+    _build_castxml_command as _build_castxml_command,
+    _build_clang_header_command as _build_clang_header_command,
+    _cache_key as _cache_key,
+    _detect_cpp_headers as _detect_cpp_headers,
+    _resolve_compiler_binary as _resolve_compiler_binary,
+)
 from .extract.headers.backend import HeaderAstBackend, HeaderParseRequest
 from .extract.headers.castxml.backend import CastxmlBackend, CastxmlRunError
+from .extract.headers.castxml.dumper import (
+    _CastxmlParser as _CastxmlParser,
+    _parse_vtable_index as _parse_vtable_index,
+    _vt_sort_key as _vt_sort_key,
+)
 from .extract.headers.clang.backend import ClangBackend
 from .extract.path_aliases import absolutize_include_roots
 from .extract.progress import timed

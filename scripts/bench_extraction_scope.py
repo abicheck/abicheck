@@ -223,7 +223,7 @@ def _owner(path: str, owners: list[tuple[str, str]]) -> str:
 
 def owned_counts(xml_path: Path, owners: list[tuple[str, str]]) -> dict[str, object]:
     """Functions and types per owner, via abicheck's own castxml parser."""
-    from abicheck.dumper_castxml import _CastxmlParser
+    from abicheck.extract.headers.castxml.dumper import _CastxmlParser
 
     root = ET.parse(xml_path).getroot()  # nosec B314 - local castxml output
     target_dirs = [prefix for _, prefix in owners[:1]]

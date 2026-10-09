@@ -34,7 +34,7 @@ from typing import Any
 
 import pytest
 
-import abicheck.dumper_ast_config as cfg
+import abicheck.extract.headers.ast_config as cfg
 from abicheck.extract import header_ast_cache_producers as producers
 from abicheck.storage.code_identity import PACKAGE_ROOT, module_source_path
 

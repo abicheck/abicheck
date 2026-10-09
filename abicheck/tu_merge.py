@@ -69,11 +69,11 @@ from dataclasses import replace
 from functools import partial
 from typing import TYPE_CHECKING, Protocol, TypeVar
 
-from .dumper_castxml import (
+from .errors import TuMergeError
+from .extract.headers.castxml.dumper import (
     _mangled_name_is_local_linkage as _mangled_name_is_local_linkage,
     entity_is_record_member as entity_is_record_member,
 )
-from .errors import TuMergeError
 from .model import (
     EnumType,
     Function,
@@ -155,7 +155,7 @@ def _has_local_linkage_mangling(mangled: str) -> bool:
     linkage signal, not a heuristic guess.
 
     The ``L``-marker half of this check delegates to
-    :func:`abicheck.dumper_castxml._mangled_name_is_local_linkage`, which
+    :func:`abicheck.extract.headers.castxml.dumper._mangled_name_is_local_linkage`, which
     already parses the full length-prefixed identifier chain component by
     component rather than substring-matching -- reusing it here (instead of
     a second, narrower ``_ZL``-prefix-only reimplementation) is what catches
@@ -1422,7 +1422,7 @@ def _merge_record_alignment(
     Unlike ``fields``/``bases``/``is_abstract`` -- which castxml only
     populates for a complete definition -- ``alignment_bits`` is captured
     from castxml's ``align`` XML attribute *unconditionally*, including for
-    an opaque/incomplete record (`abicheck/dumper_castxml.py`'s
+    an opaque/incomplete record (`abicheck/extract/headers/castxml/dumper.py`'s
     ``build_record_type``), because an explicit
     ``__attribute__((aligned(N)))`` on a bare forward declaration is itself
     an ABI-relevant fact independent of the member layout: ``struct

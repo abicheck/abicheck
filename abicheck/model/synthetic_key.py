@@ -27,7 +27,7 @@ it lives here in ``model`` -- the one layer both may import (ADR-061 D1) --
 rather than in a castxml-specific module, the same way
 ``model/mangled_name.py`` holds the Itanium/MSVC scope-component decoders
 both layers also share. Re-exported from
-``abicheck.extract.headers.castxml.names``/``abicheck.dumper_castxml`` so
+``abicheck.extract.headers.castxml.names``/``abicheck.extract.headers.castxml.dumper`` so
 every existing import path keeps working.
 """
 

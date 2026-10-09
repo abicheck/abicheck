@@ -82,7 +82,7 @@ def test_merge_l3_compile_context_conflicting_sysroot_explicit_wins_in_rendered_
     assert the *last* --sysroot= token (the one that wins under real
     compiler last-flag-wins semantics) is the explicit one."""
     from abicheck.buildsource.l2_seed import _merge_l3_compile_context
-    from abicheck.dumper_ast_config import _build_castxml_command
+    from abicheck.extract.headers.ast_config import _build_castxml_command
 
     derived = CompileContext(gcc_option_tokens=("--sysroot=/derived",))
     explicit = CompileContext(sysroot=Path("/explicit"))

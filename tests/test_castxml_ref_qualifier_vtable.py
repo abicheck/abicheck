@@ -36,7 +36,7 @@ from xml.etree.ElementTree import Element, SubElement
 import pytest
 
 from abicheck.dumper import _CastxmlParser
-from abicheck.dumper_castxml import _ref_qualifier_from_mangled
+from abicheck.extract.headers.castxml.dumper import _ref_qualifier_from_mangled
 from abicheck.idioms import _has_virtual_destructor
 from abicheck.model import RecordType
 

@@ -40,10 +40,10 @@ from xml.etree.ElementTree import (
 )
 
 from . import deadline
-from .dumper_ast_config import _CPP_ONLY_PATTERNS, _detect_cpp_headers
 from .dumper_ast_config_cpp20 import _detect_cpp20_headers
 from .dumper_clang_errors import diagnose_header_compile_failure
 from .errors import HeaderToolchainError, SnapshotError, UnsupportedCastxmlVersionError
+from .extract.headers.ast_config import _CPP_ONLY_PATTERNS, _detect_cpp_headers
 from .storage.castxml_xml import parse_castxml_xml
 
 # castxml drives an internal Clang frontend; it must be new enough to parse

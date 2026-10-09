@@ -28,11 +28,14 @@ from __future__ import annotations
 from defusedxml.ElementTree import fromstring
 
 from abicheck.checker import ChangeKind, Verdict, compare
-from abicheck.dumper_castxml import _CastxmlParser, _extract_contract_attributes
 from abicheck.dumper_clang import (
     _clang_contract_attributes,
     _clang_exception_spec,
     _clang_var_alignment_bits,
+)
+from abicheck.extract.headers.castxml.dumper import (
+    _CastxmlParser,
+    _extract_contract_attributes,
 )
 from abicheck.model import AbiSnapshot, Function, Variable
 from abicheck.service import _typeinfo_functions

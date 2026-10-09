@@ -214,7 +214,7 @@ def test_link_source_abi_rescues_a_synthetic_ctor_key_with_a_real_export() -> No
     implicit constructor with a real Itanium export (`_ZN6WidgetC1ERKS_`/
     `_ZN6WidgetC2ERKS_`) needs the class-level ctor/dtor owner-index rescue
     (`ctor_export_match`) to be preserved rather than lost."""
-    from abicheck.dumper_castxml import SYNTHETIC_CTOR_KEY_PREFIX
+    from abicheck.extract.headers.castxml.dumper import SYNTHETIC_CTOR_KEY_PREFIX
 
     synthetic_ctor = entity_from_function(
         Function(
@@ -251,7 +251,7 @@ def test_link_source_abi_rescues_a_synthetic_ctor_key_for_an_abi_tagged_owner() 
     strip the tag before matching, or an ODR-used implicit constructor of
     an ABI-tagged public class is wrongly dropped even though its real
     weak C1/C2 exports exist."""
-    from abicheck.dumper_castxml import SYNTHETIC_CTOR_KEY_PREFIX
+    from abicheck.extract.headers.castxml.dumper import SYNTHETIC_CTOR_KEY_PREFIX
 
     synthetic_ctor = entity_from_function(
         Function(
@@ -277,7 +277,7 @@ def test_link_source_abi_rescues_a_synthetic_ctor_key_via_msvc_export() -> None:
     (``??0Widget@@QEAA@XZ``), not Itanium -- `itanium_scope_components`
     alone never recognizes it, so the owner-index rescue must also
     recognize the MSVC plain-ctor/dtor operator codes (`??0`/`??1`)."""
-    from abicheck.dumper_castxml import SYNTHETIC_CTOR_KEY_PREFIX
+    from abicheck.extract.headers.castxml.dumper import SYNTHETIC_CTOR_KEY_PREFIX
 
     synthetic_ctor = entity_from_function(
         Function(

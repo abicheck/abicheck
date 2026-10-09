@@ -151,7 +151,7 @@ def test_compare_dry_run_blocks_when_castxml_missing(monkeypatch, tmp_path):
 def test_real_resolver_names_the_compiler_preflight_checks(monkeypatch):
     """Oracle from the real castxml path: under an explicit selection the
     compiler the dump hands castxml is the one the preflight reports."""
-    from abicheck.dumper_ast_config import _resolve_compiler_binary
+    from abicheck.extract.headers.ast_config import _resolve_compiler_binary
 
     monkeypatch.delenv("ABICHECK_AST_FRONTEND", raising=False)
     monkeypatch.delenv("ABICHECK_ALLOW_AST_FALLBACK", raising=False)

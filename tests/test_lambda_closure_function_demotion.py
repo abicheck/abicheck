@@ -290,7 +290,7 @@ class TestSyntheticCtorDtorKeysNotDemotedWhenTemplateIsExported:
         """``synthetic_ctor_scope`` returns ``None`` for a key with no
         recoverable ``(params)`` suffix -- fails closed, same as any other
         evidence gap in this function."""
-        from abicheck.dumper_castxml import SYNTHETIC_CTOR_KEY_PREFIX
+        from abicheck.extract.headers.castxml.dumper import SYNTHETIC_CTOR_KEY_PREFIX
         from abicheck.model.change import Change
 
         symbol = f"{SYNTHETIC_CTOR_KEY_PREFIX}Foo"  # missing "(params)" suffix
@@ -320,7 +320,7 @@ class TestSyntheticDtorKeyReportedThroughComparePipeline:
     produces."""
 
     def test_removal_demoted_when_owning_template_never_exported(self) -> None:
-        from abicheck.dumper_castxml import _SYNTHETIC_DTOR_KEY_PREFIX
+        from abicheck.extract.headers.castxml.dumper import _SYNTHETIC_DTOR_KEY_PREFIX
 
         old_key = f"{_SYNTHETIC_DTOR_KEY_PREFIX}{_OLD_PARAM}"
         new_key = f"{_SYNTHETIC_DTOR_KEY_PREFIX}{_NEW_PARAM}"
@@ -353,7 +353,7 @@ class TestSyntheticDtorKeyReportedThroughComparePipeline:
         assert removed[0].modulation_rule == "lambda_closure_never_exported"
 
     def test_removal_untouched_when_owning_template_is_exported(self) -> None:
-        from abicheck.dumper_castxml import _SYNTHETIC_DTOR_KEY_PREFIX
+        from abicheck.extract.headers.castxml.dumper import _SYNTHETIC_DTOR_KEY_PREFIX
 
         old_key = f"{_SYNTHETIC_DTOR_KEY_PREFIX}{_OLD_PARAM}"
         new_key = f"{_SYNTHETIC_DTOR_KEY_PREFIX}{_NEW_PARAM}"
@@ -467,7 +467,7 @@ class TestItaniumSourceNameTokenUsesEncodedByteLength:
         non-ASCII class must still be recognized as exported when the real
         mangled symbol (using the correct UTF-8 byte-length encoding) is
         present -- proving the fix, not just the helper in isolation."""
-        from abicheck.dumper_castxml import SYNTHETIC_CTOR_KEY_PREFIX
+        from abicheck.extract.headers.castxml.dumper import SYNTHETIC_CTOR_KEY_PREFIX
         from abicheck.model.change import Change
 
         symbol = f"{SYNTHETIC_CTOR_KEY_PREFIX}Café<(lambda:f.h:1:1)>()"
@@ -497,7 +497,7 @@ class TestItaniumStandardSubstitutionToken:
     read such a class as "never exported" regardless of the truth."""
 
     def test_known_std_names_map_to_their_fixed_substitution(self) -> None:
-        from abicheck.dumper_castxml import SYNTHETIC_CTOR_KEY_PREFIX
+        from abicheck.extract.headers.castxml.dumper import SYNTHETIC_CTOR_KEY_PREFIX
         from abicheck.finding_identity_ctor_dtor import (
             itanium_standard_substitution_token,
         )
@@ -514,7 +514,7 @@ class TestItaniumStandardSubstitutionToken:
             assert itanium_standard_substitution_token(symbol) == expected
 
     def test_non_std_owner_returns_none(self) -> None:
-        from abicheck.dumper_castxml import SYNTHETIC_CTOR_KEY_PREFIX
+        from abicheck.extract.headers.castxml.dumper import SYNTHETIC_CTOR_KEY_PREFIX
         from abicheck.finding_identity_ctor_dtor import (
             itanium_standard_substitution_token,
         )
@@ -523,7 +523,7 @@ class TestItaniumStandardSubstitutionToken:
         assert itanium_standard_substitution_token(symbol) is None
 
     def test_std_name_outside_the_fixed_set_returns_none(self) -> None:
-        from abicheck.dumper_castxml import SYNTHETIC_CTOR_KEY_PREFIX
+        from abicheck.extract.headers.castxml.dumper import SYNTHETIC_CTOR_KEY_PREFIX
         from abicheck.finding_identity_ctor_dtor import (
             itanium_standard_substitution_token,
         )
@@ -550,7 +550,7 @@ class TestStdAllocatorSyntheticKeyNotFalselyDemoted:
     def test_allocator_ctor_not_demoted_when_another_instantiation_is_exported(
         self,
     ) -> None:
-        from abicheck.dumper_castxml import SYNTHETIC_CTOR_KEY_PREFIX
+        from abicheck.extract.headers.castxml.dumper import SYNTHETIC_CTOR_KEY_PREFIX
         from abicheck.model.change import Change
 
         symbol = f"{SYNTHETIC_CTOR_KEY_PREFIX}std::allocator<(lambda:f.h:1:1)>()"
@@ -570,7 +570,7 @@ class TestStdAllocatorSyntheticKeyNotFalselyDemoted:
         assert change.modulation_rule is None
 
     def test_allocator_ctor_still_demoted_when_genuinely_unexported(self) -> None:
-        from abicheck.dumper_castxml import SYNTHETIC_CTOR_KEY_PREFIX
+        from abicheck.extract.headers.castxml.dumper import SYNTHETIC_CTOR_KEY_PREFIX
         from abicheck.model.change import Change
 
         symbol = f"{SYNTHETIC_CTOR_KEY_PREFIX}std::allocator<(lambda:f.h:1:1)>()"
