@@ -50,6 +50,7 @@ from ..model.consumer_requirements import (
     AppRequirements,
     ConsumerImportFacts,
     LibraryExportFacts,
+    LibraryExportsUnreadableError,
 )
 from ..model.consumer_spec import (
     ConsumerAppInput,
@@ -168,6 +169,20 @@ class PluginHostContractResult:
     coverage: float = 100.0
 
 
+def require_read_library(facts: LibraryExportFacts) -> LibraryExportFacts:
+    """Return *facts*, raising when the library's export table was not read.
+
+    Raises :class:`~abicheck.model.consumer_requirements.LibraryExportsUnreadableError`
+    for a ``FAILED`` fact: scoping a consumer against an unread table would
+    narrow every OLD requirement away (a clean verdict nobody checked) or
+    prove every NEW one missing (a break nobody observed). Called after the
+    consumer is read, so an unreadable consumer is still reported first.
+    """
+    if facts.status is FactStatus.FAILED:
+        raise LibraryExportsUnreadableError(facts.failure_reason or facts.label)
+    return facts
+
+
 def read_consumer_facts(spec: ConsumerSpec, library_name: str) -> ConsumerImportFacts:
     """Verify *spec*'s digest and read its imports from *library_name*.
 
@@ -284,8 +299,8 @@ def scope_diff_to_app(
     return scope_diff_to_consumer_facts(
         diff,
         consumer,
-        old_facts,
-        read_library_export_facts(new_lib),
+        require_read_library(old_facts),
+        require_read_library(read_library_export_facts(new_lib)),
         spec=spec,
         old_lib=old_lib,
         policy=policy,
@@ -444,7 +459,7 @@ def check_against(
     """
     new_facts = read_library_export_facts(new_lib_path)
     consumer = read_consumer_facts(as_consumer_spec(app_path), new_facts.soname)
-    return check_against_facts(consumer, new_facts)
+    return check_against_facts(consumer, require_read_library(new_facts))
 
 
 def check_against_facts(

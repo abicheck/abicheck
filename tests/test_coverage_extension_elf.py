@@ -38,12 +38,11 @@ from abicheck.elf_metadata import (
     ElfSymbol,
     SymbolBinding,
     SymbolType,
-    _decode_abi_tag_desc,
-    _decode_gnu_property_desc,
     _parse_abi_tag,
     _parse_dynamic,
     _value_alignment,
 )
+from abicheck.extract.elf_notes import decode_abi_tag_desc, decode_gnu_property_desc
 from abicheck.model import AbiSnapshot, Variable
 
 
@@ -249,11 +248,11 @@ class TestKernelFloor:
 
     def test_decode_abi_tag_desc(self):
         desc = struct.pack("<IIII", 0, 3, 2, 0)
-        assert _decode_abi_tag_desc(desc, little_endian=True) == "3.2.0"
+        assert decode_abi_tag_desc(desc, little_endian=True) == "3.2.0"
         # Non-Linux OS id → no floor.
-        assert _decode_abi_tag_desc(struct.pack("<IIII", 1, 3, 2, 0), True) == ""
+        assert decode_abi_tag_desc(struct.pack("<IIII", 1, 3, 2, 0), True) == ""
         # Truncated description → no floor.
-        assert _decode_abi_tag_desc(b"\x00" * 8, True) == ""
+        assert decode_abi_tag_desc(b"\x00" * 8, True) == ""
 
     def test_unparseable_floor_skipped(self):
         # A malformed captured floor must not crash or report.
@@ -400,7 +399,7 @@ class TestX86IsaBaseline:
     def test_decode_isa_needed_property(self):
         # pr_type=GNU_PROPERTY_X86_ISA_1_NEEDED, datasz=4, bits=v2|v3.
         desc = struct.pack("<III", 0xC0008002, 4, 0x2 | 0x4) + b"\x00" * 4
-        tokens = _decode_gnu_property_desc(desc, little_endian=True, align=8)
+        tokens = decode_gnu_property_desc(desc, little_endian=True, align=8)
         assert tokens == frozenset({"x86-64-v2", "x86-64-v3"})
 
 
