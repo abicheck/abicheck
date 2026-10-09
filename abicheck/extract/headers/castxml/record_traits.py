@@ -186,6 +186,16 @@ def _members(ctx: CastxmlParserContext, el: Element) -> list[Element]:
     return [m for m in found if m is not None]
 
 
+def _has_copy_constructor(
+    ctx: CastxmlParserContext, members: list[Element], record_id: str
+) -> bool:
+    """CastXML omits a deleted copy constructor, so the trait is only proven
+    when one is emitted."""
+    return any(
+        m.tag == "Constructor" and _is_special(ctx, m, record_id) for m in members
+    )
+
+
 def _record_trait(ctx: CastxmlParserContext, el: Element) -> bool | None:
     if el.get("incomplete") == "1":
         return None
@@ -195,8 +205,6 @@ def _record_trait(ctx: CastxmlParserContext, el: Element) -> bool | None:
     traits += [_member_trait(ctx, m, record_id) for m in members]
     if False in traits:
         return False
-    # CastXML omits a deleted copy constructor; without one emitted, unknown.
-    copyable = [
-        m for m in members if m.tag == "Constructor" and _is_special(ctx, m, record_id)
-    ]
-    return True if copyable and None not in traits else None
+    if None in traits or not _has_copy_constructor(ctx, members, record_id):
+        return None
+    return True

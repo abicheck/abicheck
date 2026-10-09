@@ -168,7 +168,7 @@ def build_record_type(
                 if off is not None:
                     base_offsets[type_name(ctx, b.get("type", ""))] = off
     # is_standard_layout / data_size_bits are left None: "not polymorphic and no virtual bases" is not a sound standard-layout signal (a mixed-access class is already non-standard-layout, so the heuristic would flip True→False on gaining a virtual and emit a spurious STANDARD_LAYOUT_LOST) (Codex review #345). is_trivially_copyable is derived from the special members CastXML emits, tri-state (record_traits.py).
-    trivially = None if is_opaque else trivially_copyable(ctx, el)
+    trivially = trivially_copyable(ctx, el)  # None for an incomplete record
     # castxml records the `final` class-key specifier as a `final` token
     # inside the compound ``attributes`` string (e.g. ``attributes="final"``),
     # the same channel used for noexcept -- header mode always knows the

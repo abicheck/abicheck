@@ -340,6 +340,13 @@ def _compiler_supports(feature: str) -> bool:
     return compiler_supports(feature)
 
 
+def _swap_status(entry: dict[str, object], signal: str) -> str:
+    """The row status for a completed swap run."""
+    if contradicts_ground_truth(entry, signal):
+        return "CONTRADICTED"
+    return "DEMONSTRATED" if signal != "no_runtime_signal" else "NO_RUNTIME_SIGNAL"
+
+
 def run_case(
     *,
     build_dir: Path,
@@ -420,12 +427,7 @@ def run_case(
     assert swapped_app is not None
     swapped = _run_app(swapped_app, swap_dir)
     signal = _classify_runtime_signal(baseline, swapped)
-    if contradicts_ground_truth(entry, signal):
-        status = "CONTRADICTED"
-    else:
-        status = (
-            "DEMONSTRATED" if signal != "no_runtime_signal" else "NO_RUNTIME_SIGNAL"
-        )
+    status = _swap_status(entry, signal)
     return {
         "case_id": case_name,
         "status": status,
