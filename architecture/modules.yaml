@@ -204,6 +204,7 @@
         "abicheck/buildsource/cross_source_checks_coherence.py",
         "abicheck/buildsource/graph_reconcile.py",
         "abicheck/buildsource/source_diff.py",
+        "abicheck/buildsource/graph_impact.py",
         "abicheck/buildsource/source_graph_compare.py",
         "abicheck/comparability_fields.py",
         "abicheck/comparability_json.py",
@@ -307,7 +308,6 @@
         "policy"
       ],
       "legacy_paths": [
-        "abicheck/appcompat_consumer_impact.py",
         "abicheck/binder.py",
         "abicheck/buildsource/baseline_publish.py",
         "abicheck/buildsource/run_plan_profile_fields.py",
@@ -608,7 +608,6 @@
     "analysis_assurance_comparability.py",
     "analysis_assurance_layout.py",
     "annotations.py",
-    "appcompat_consumer_impact.py",
     "binary_fingerprint.py",
     "binary_utils.py",
     "binder.py",

@@ -716,7 +716,13 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
             # and stopped gating.
             "tests/test_contract_adaptive_default_monotone.py",
             "tests/test_export_reconciliation_and_obligations.py",
+            # Lane C stage 5: a recognised consumer binary whose import table
+            # failed to parse read as "requires nothing" -> NO_CHANGE/100%.
+            "tests/unit/workflows/test_failed_consumer_read.py",
         ),
+        # Only test_failed_consumer_read.py reaches a public surface: its
+        # integration test drives `abicheck compare --used-by` end to end.
+        public_surfaces=("cli",),
         known_gaps=(
             KnownGap(
                 description=(
@@ -729,11 +735,13 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
             ),
             KnownGap(
                 description=(
-                    "The seed test calls `abicheck.checker.compare` "
+                    "Most seed tests call `abicheck.checker.compare` "
                     "directly on hand-built snapshots — real detection "
-                    "logic, but no CLI/python-api/exit-code layer, so "
+                    "logic, but no CLI/python-api/exit-code layer. Only "
+                    "`test_failed_consumer_read.py` drives the CLI and "
+                    "checks an exit code, and it does not cross-check "
                     "report/gate/exit-code agreement (the second half of "
-                    "this class's own invariant) is untested. Incident "
+                    "this class's own invariant) independently. Incident "
                     "#883's own gap — a dropped `policy_file` reaching "
                     "silently unverified through a mocked "
                     "`compare_snapshots` — is now closed independently by "

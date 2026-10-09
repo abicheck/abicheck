@@ -27,6 +27,7 @@ files -- nothing in the read path is patched.
 from __future__ import annotations
 
 import hashlib
+import struct
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -388,7 +389,16 @@ class TestScopeDiffWithSnapshots:
 # ConsumerSpec advisory/required (Workstream D-S1), end to end on real files
 # ---------------------------------------------------------------------------
 
-_CORRUPT_ELF = b"\x7fELF" + b"\x00" * 100
+# A minimal, valid 64-bit little-endian ELF header with no sections: pyelftools
+# reads it without error, so it is a recognised, *readable* consumer that
+# imports nothing (a corrupt one is unreadable -- see
+# test_failed_consumer_read.py).
+_MINIMAL_ELF = (
+    b"\x7fELF"
+    + bytes([2, 1, 1, 0])
+    + b"\x00" * 8
+    + struct.pack("<HHIQQQIHHHHHH", 2, 62, 1, 0, 0, 0, 0, 64, 0, 0, 0, 0, 0)
+)
 
 
 class TestScopeDiffToAppConsumerSpec:
@@ -436,7 +446,7 @@ class TestScopeDiffToAppConsumerSpec:
 
     def test_digest_mismatch_advisory_is_skipped(self, tmp_path):
         app = tmp_path / "app"
-        app.write_bytes(_CORRUPT_ELF)
+        app.write_bytes(_MINIMAL_ELF)
         spec = ConsumerSpec(
             path=app,
             digest="sha256:" + "0" * 64,
@@ -448,8 +458,8 @@ class TestScopeDiffToAppConsumerSpec:
 
     def test_digest_match_succeeds(self, tmp_path):
         app = tmp_path / "app"
-        app.write_bytes(_CORRUPT_ELF)
-        digest = "sha256:" + hashlib.sha256(_CORRUPT_ELF).hexdigest()
+        app.write_bytes(_MINIMAL_ELF)
+        digest = "sha256:" + hashlib.sha256(_MINIMAL_ELF).hexdigest()
         result = self._run(ConsumerSpec(path=app, digest=digest))
         assert result.unreadable is False
         assert result.digest == digest
@@ -457,7 +467,7 @@ class TestScopeDiffToAppConsumerSpec:
     def test_bare_path_summary_carries_no_provenance(self, tmp_path):
         """A plain Path consumer reports the default 'required' provenance."""
         app = tmp_path / "app"
-        app.write_bytes(_CORRUPT_ELF)
+        app.write_bytes(_MINIMAL_ELF)
         result = self._run(app)
         assert result.requirement == "required"
         assert result.platform is None

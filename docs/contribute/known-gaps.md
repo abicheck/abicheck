@@ -8996,22 +8996,13 @@ violations, blocked" pattern this ADR's other gaps already use for
   `may_import` forbids. Unlike every other entry below, no caller needs to
   change — `comdat_groups` (or the piece of it this module actually uses)
   would need to move or be decoupled from this module directly.
-- `abicheck/buildsource/graph_impact.py` (target: `compare` — its own
-  docstring: "Structured graph impact/proof-path data attached to
-  findings"; it deliberately *enriches an existing `Change` finding*
-  rather than extracting a fact, the same shape as its already-`compare`
-  -classified `graph_reconcile.py` sibling — `source_graph_findings.py` is
-  *not* a `compare`-classified precedent despite a similar-sounding role:
-  `architecture/debt.yaml` records it with target `extract/build-or-source`,
-  and it carries no `modules.yaml` classification of its own today — not
-  `extract`, which this module's previous classification in this change
-  wrongly assigned it, laundering a real boundary issue instead of
-  recording it) — a *self-dependency* block, verified empirically by trial
-  classification: it itself imports `.call_graph` (`extract`-classified),
-  producing four new `compare -> extract` findings the moment it is
-  classified `compare`, since `compare`'s `may_import` is `model` only.
-  `call_graph` (or the specific pieces this module actually uses from it)
-  would need to move or be decoupled from this module directly.
+- **Closed (2026-10, Lane C stage 3):** `abicheck/buildsource/graph_impact.py`
+  (target: `compare`) was a self-dependency block: it imported three call-edge
+  label constants from the `extract`-classified `call_graph.py`. Those labels
+  are shared vocabulary, so they moved to `model/graph_vocabulary.py`
+  (`call_graph.py` and every other reader now import them from there), and
+  `graph_impact.py` — which then imports only `model` — is classified
+  `compare`.
 - `abicheck/buildsource/build_output.py` (target: `extract`, alongside its
   sibling adapters) — blocked because `abicheck/cli_project.py`
   (`frontends`) imports it directly; `frontends` may not import `extract`.
@@ -11291,39 +11282,32 @@ extraction (`extract/headers/castxml/records.py`).
 
 ## An unreadable consumer import table still reads as "requires nothing" (2026-10-07)
 
-The Lane C split of `appcompat.py` made a consumer binary's import read an
-explicit fact: `extract.consumer_imports.read_consumer_imports` returns a
-`ConsumerImportFacts` whose `status` is `FAILED` (with a `failure_reason`)
-when the ELF/PE/Mach-O import table could not be parsed, instead of a bare
-empty set. Only the *unrecognised format* case is acted on: it raises
-`ConsumerUnreadableError` (or yields an advisory `unreadable=True` result),
-as before. A recognised binary whose import table fails part-way still flows
-into `policy.consumer_requirements` with whatever was read -- usually
-nothing -- so the scoped verdict reads `NO_CHANGE`/100% coverage, the
-"weaker evidence must not upgrade to a clean claim" problem root
-`AGENTS.md` names. The split was behaviour-preserving by mandate (no exit
-code or report change), so the consumer of the `FAILED` status is left for
-its own change: treat a `FAILED` consumer fact like an unreadable one
-(required -> error, advisory -> `unreadable=True`), with a regression test
-over a truncated ELF/PE/Mach-O consumer. Library-side facts have the same
-shape one layer down: `parse_{elf,pe,macho}_metadata` swallow their own
-errors and return empty metadata, so `LibraryExportFacts` cannot yet tell a
-failed read from an empty export table.
+**Closed (2026-10, Lane C stage 5).** `workflows.consumer_scope.read_consumer_facts`
+now treats a `FAILED` consumer-import fact exactly like an unrecognised
+format: a REQUIRED consumer raises `ConsumerUnreadableError`, an ADVISORY one
+yields `unreadable=True`. Regression tests:
+`tests/unit/workflows/test_failed_consumer_read.py`. Still open, one layer
+down: `parse_{elf,pe,macho}_metadata` swallow their own errors and return
+empty metadata, so `LibraryExportFacts` cannot yet tell a failed library read
+from an empty export table.
+
+## `compare --used-by` prints a traceback for an unreadable REQUIRED consumer (2026-10-08)
+
+**Closed (2026-10, Lane C stage 5, CodeRabbit review).** A REQUIRED
+`--used-by` consumer that cannot be read (unrecognised format, digest
+mismatch, unparseable import table) raised `ConsumerUnreadableError` out of
+the compare command uncaught: exit 1 with a Python traceback.
+`frontends/cli/compare_report._apply_scoped_gating` now translates it to a
+`click.ClickException` -- the same exit status, 1, with a one-line
+`Error: --used-by consumer: ...` message -- without growing the
+over-baseline `cli_helpers_compare.py`.
 
 ## `appcompat_consumer_impact.py` cannot move into `workflows/` yet (2026-10-08)
 
-The ADR-057 consumer-impact join (`abicheck/appcompat_consumer_impact.py`)
-is a `workflows` legacy root module; its target is the `workflows/` package
-beside `workflows/consumer_scope.py`, its one production caller. Inside a
-migrated package `scripts/check_architecture.py` rejects any import of an
-unclassified module, and the join lazily imports
-`buildsource.graph_impact.attach_impact_metadata`, which is unclassified.
-`graph_impact.py` cannot simply be classified either: its own entry above
-(target `compare`) records the self-dependency on the `extract`-classified
-`call_graph.py`, and `impact/consumer_graph.py` (`model`) imports it too, so
-any classification outside `model` turns that into a direction violation.
-Classifying it `workflows` only to unblock this move would be the
-laundering that entry warns against. Lane C stage 2 moved the join's other
-unclassified dependency, `format_dependency_path`, into the
-`compare`-classified `buildsource/source_graph_compare.py`; the move itself
-waits on `graph_impact.py`'s blockers being decoupled first.
+**Closed (2026-10, Lane C stage 3).** The module is now
+`workflows/consumer_impact.py`, beside `workflows/consumer_scope.py`. Both of
+its unclassified dependencies were resolved first: `format_dependency_path`
+moved to the `compare`-classified `buildsource/source_graph_compare.py`
+(stage 2), and `buildsource/graph_impact.py` was classified `compare` once its
+call-edge label constants moved to `model/graph_vocabulary.py` (stage 3; see
+its entry above).
