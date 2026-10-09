@@ -350,7 +350,7 @@ One asymmetry worth knowing about, not a bug to work around:
 
 - **Consumer scoping has no `CompareRequest` field.** `--used-by` is a
   *post-classification* scoping pass layered on top of an already-computed
-  `CompareResult` (`appcompat.scope_diff_to_app`), not a resolution input —
+  `CompareResult` (`workflows.consumer_scope.scope_diff_to_app`), not a resolution input —
   the CLI and a direct Python caller both call the same function afterward,
   rather than a field on the request itself.
 
