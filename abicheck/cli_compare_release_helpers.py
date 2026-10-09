@@ -749,43 +749,29 @@ def _compute_release_severity_exit_code(
     library_results: list[dict[str, object]],
     gate: GateOptions,
 ) -> int | None:
-    """Compute the severity-aware exit code aggregated across all libraries.
+    """The severity-aware exit code aggregated across all libraries.
 
-    Returns ``None`` when no severity setting was in effect (callers
-    keep the legacy verdict-based exit) -- i.e. when ``gate.severity is
-    None``. Otherwise returns the worst :func:`compute_exit_code` over the
-    per-library changes. Each library is
-    classified with *its own* ``policy.evaluate.effective_kind_sets(DiffResult)`` (kind-level
-    ``--policy-file`` overrides) *and* its own ``policy``/``policy_file`` (the
-    per-finding frozen-namespace floor — Codex review on #549: without
-    ``policy_file`` here, a policy override that downgrades a kind could still
-    silently exit 0 for a finding tagged ``frozen_namespace_violation``, even
-    though that same finding's annotation, via ``annotation_report_entries``, does
-    honour the floor and emits ``::error``) so per-library overrides are
-    honored in the exit code exactly as they are in the report.
-
-    This only covers per-library findings and must run before ``_diff_result``
-    entries are stripped; release-global bundle/matrix findings are folded in
-    separately via :func:`_fold_release_global_severity`.
+    ``None`` when no severity setting is in effect (callers keep the legacy
+    verdict-based exit). Otherwise the worst member compatibility
+    contribution, each one the scalar resolver's own
+    (``resolve_compare_exit_decision``, stamped by the fan-out under
+    ``_compatibility_contribution`` with this run's severity config), so a
+    member's per-library ``--policy-file`` overrides and frozen-namespace
+    floor count exactly as a single-pair ``compare`` of it counts them. Must
+    run before private keys are stripped; release-global bundle/matrix
+    findings are folded in separately via :func:`_fold_release_global_severity`.
     """
     if gate.severity is None:
         return None
-
-    from .workflows.gate import compute_exit_code
-
-    worst = 0
-    for entry in library_results:
-        diff = entry.get("_diff_result") if isinstance(entry, dict) else None
-        if isinstance(diff, DiffResult):
-            code = compute_exit_code(
-                diff.changes,
-                gate.severity,
-                policy=diff.policy,
-                kind_sets=effective_kind_sets(diff),
-                policy_file=diff.policy_file,
-            )
-            worst = max(worst, code)
-    return worst
+    return max(
+        (
+            code
+            for entry in library_results
+            if isinstance(entry, dict)
+            and isinstance(code := entry.get("_compatibility_contribution"), int)
+        ),
+        default=0,
+    )
 
 
 def _fold_release_global_severity(

@@ -76,7 +76,7 @@ if TYPE_CHECKING:
     from .compile_context import CompileContext
     from .environment_matrix import EnvironmentMatrix
     from .pack_application import PackApplication
-    from .workflows.gate import SeverityConfig
+    from .workflows.gate import ExitDecision, SeverityConfig
     from .workflows.release_admission import MemoryAdmission
 
 
@@ -150,6 +150,26 @@ def _run_compare_pair(
         new_input=_normalize_binary_input(request.new_input)[0],
     )
     return compare_member(request, pack_application)
+
+
+def _member_exit_decision(
+    result: DiffResult,
+    severity_config: SeverityConfig | None,
+    require_complete_analysis: bool,
+) -> ExitDecision:
+    """This member's exit decision, from the resolver a scalar ``compare``
+    of the same pair uses -- so the release folds what that compare would
+    decide instead of re-deriving each axis. Its compatibility contribution
+    rides ``entry["_compatibility_contribution"]`` (private, stripped before
+    serialisation) into ``_compute_release_severity_exit_code``."""
+    from .workflows.gate import EffectiveGate, resolve_compare_exit_decision
+
+    return resolve_compare_exit_decision(
+        result,
+        EffectiveGate.from_severity(
+            severity_config, require_complete_analysis=require_complete_analysis
+        ),
+    )
 
 
 def _compare_one_library(
@@ -355,12 +375,20 @@ def _compare_one_library(
         stamp_member_assurance(
             entry, result, require_complete=require_complete_analysis
         )
-        # ADR-067 D6's additions-review floor (0/1), per member; folded with
-        # max() by the release exit resolver, like the assurance axis.
-        from .workflows.gate import additions_review_exit_contribution
-
+        # This member's own exit decision, from the resolver a scalar
+        # `compare` of the same pair uses, so the release folds what that
+        # compare would have decided rather than re-deriving each axis. The
+        # compatibility contribution rides a private key (stripped before
+        # serialisation) into `_compute_release_severity_exit_code`.
+        member_decision = _member_exit_decision(
+            result, severity_config, require_complete_analysis
+        )
+        entry["_compatibility_contribution"] = (
+            member_decision.compatibility_contribution
+        )
+        # ADR-067 D6's additions-review floor (0/1); folded with max().
         entry["additions_review_exit_contribution"] = (
-            additions_review_exit_contribution(result)
+            member_decision.additions_review_contribution
         )
         if contract_evaluation:
             # ADR-049 Phase 7's orthogonal contract-coverage floor (0/1),
@@ -368,9 +396,11 @@ def _compare_one_library(
             # aggregated with max() into the release-level exit code in
             # _exit_compare_release, the same "raises a clean 0 to 1, never
             # lowers a real 2/4" rule a single-pair `compare` applies.
-            from .workflows.gate import coverage_exit_floor, coverage_failure_count
+            from .workflows.gate import coverage_failure_count
 
-            entry["contract_coverage_exit_contribution"] = coverage_exit_floor(result)
+            entry["contract_coverage_exit_contribution"] = (
+                member_decision.contract_coverage_contribution
+            )
             # The *count* of failures is independent of the exit floor above
             # -- `contract.unresolved: warn` deliberately zeroes the floor
             # while the failures themselves stay real and unsuppressible
@@ -551,6 +581,10 @@ def _suppress_lockstep_soname_findings(
         from .report.release_member_summary import add_member_review_summary
 
         add_member_review_summary(entry, result, severity_config)
+        # The hidden findings no longer count toward this member's gate.
+        entry["_compatibility_contribution"] = _member_exit_decision(
+            result, severity_config, require_complete_analysis
+        ).compatibility_contribution
         # ...and the ledger blocks, snapshotted before this pass ran and so
         # naming neither this rule nor what it hid (Codex review, PR #1284).
         entry.update(disposition_ledger_blocks(result))
