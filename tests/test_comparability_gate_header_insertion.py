@@ -573,6 +573,13 @@ def _contract_with(tmp_path, names, **profile):
     )
 
 
+_NATIVE_PLATFORM = {
+    "target_triple": "x86_64-linux-gnu",
+    "pointer_width": 64,
+    "endianness": "little",
+}
+
+
 class TestAnotherDivergingProfileFieldStillRefuses:
     """The carve-out only ever removes `header_sequence` from the working set.
 
@@ -599,7 +606,11 @@ class TestAnotherDivergingProfileFieldStillRefuses:
     )
     @pytest.mark.parametrize("added", ["aaa.h", "json.h", "zzz.h"])
     def test_it_refuses_at_every_insertion_position(self, tmp_path, profile, added):
-        old = _contract_with(tmp_path / "old", _OLD_HEADERS)
+        # A platform field is compared only when BOTH sides recorded it (an
+        # unrecorded side is a legacy baseline: unknown, never a mismatch),
+        # so the old side records the native value the new one diverges from.
+        old_profile = {k: _NATIVE_PLATFORM[k] for k in profile if k in _NATIVE_PLATFORM}
+        old = _contract_with(tmp_path / "old", _OLD_HEADERS, **old_profile)
         new = _contract_with(tmp_path / "new", (*_OLD_HEADERS, added), **profile)
         with pytest.raises(ProfileMismatchError):
             check_contracts_comparable(old, new)

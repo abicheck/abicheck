@@ -173,7 +173,7 @@ from .sparse_section_codec import (
 )
 from .surface_graph_codec import DeferredGraphPayload
 from .types_section_codec import TypesSection
-from .versioning import StorageVersions
+from .versioning import FactGenerations, StorageVersions
 
 #: ADR-063 Track 4 (8B), third slice: one entry per `LEGACY_SECTION_KINDS`
 #: member that has its own dedicated DTO -- every one of them, as of this
@@ -258,6 +258,7 @@ def import_legacy_snapshot(
     max_known_schema_version: int,
     variant_id: str = "default",
     artifact_kind: str | None = None,
+    generations: FactGenerations | None = None,
 ) -> PackageManifest:
     """Import *legacy_document* (a `snapshot_to_dict()`-shaped mapping) as a
     one-artifact, one-variant `ProjectSnapshot` package, writing its content
@@ -308,9 +309,13 @@ def import_legacy_snapshot(
         sections=sections,
     )
     variant = VariantRef(variant_id=variant_id, artifact_ids=(artifact_id,))
-    versions = StorageVersions(
+    # *generations*: the producer's pair when the caller knows it (a fresh
+    # dump); otherwise unstated -- an imported document's facts were not
+    # extracted by this build (StorageVersions.written_by_this_build).
+    versions = StorageVersions.written_by_this_build(
         section_schema_versions=section_schema_versions,
         source_schema_version=source_schema_version,
+        generations=generations,
     )
     return PackageManifest(
         versions=versions, variant_refs=(variant,), artifact_refs=(artifact,)

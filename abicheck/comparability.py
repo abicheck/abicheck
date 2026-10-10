@@ -834,7 +834,8 @@ class ComparabilityMismatch:
     literally.
 
     **Produced today by the build-identity axis** (one side records its
-    build system, the other does not). An earlier producer was
+    build system, the other does not) and the dependency-scope axis (one
+    side's ``dependency_scope`` is unrecorded). An earlier producer was
     ``comparability_profile``'s declared-header-INSERTION branch, which
     priced an added public header's incidental sort position as reduced
     ``declaration``/``layout`` assurance; that branch was wrong (a declared
@@ -883,35 +884,33 @@ def _check_dependency_scope_comparable(
     meaningless for a binary/DWARF-only snapshot, and neither side needing to
     have dependency-scoped anything means there's nothing to mismatch.
 
-    **Deliberately does NOT treat a missing/``None`` value as ``"full"``**
-    (Codex review, PR #651 follow-up): ``dumper_scoping.py``'s default
-    filtering already shipped before this field existed, so an ordinary
-    pre-v18 baseline dumped with `dump`'s default (no
-    ``--include-system-declarations``) is almost always *already filtered* content
-    that simply predates the tag — treating its ``None`` as ``"full"`` would
-    spuriously ``ScopeMismatchError`` the single most common workflow
-    (compare a committed/cached baseline against a fresh default dump),
-    exactly the class of regression this codebase's own schema-version
-    history repeatedly warns against. There is no way to recover which of
-    "filtered" or "full" an old, untagged snapshot actually is from the
-    object alone, so this only fires when BOTH sides carry an explicit,
-    non-``None`` value and they differ — every live-binary or ``dump``
-    snapshot produced by a current abicheck build is tagged
-    ``"filtered"``/``"full"`` explicitly
-    (``dumper_scoping.resolve_dependency_scope``, via
-    ``wrap_run_dump_with_dependency_scope``), so the originally-reported
-    danger — a filtered snapshot compared against an unfiltered one — is
-    still caught once both sides come from a current abicheck build. Only a
-    genuinely ambiguous old baseline (``None``) is left unchecked on this
-    axis, the same conservative only-flag-what's-confidently-known bias
-    ``dumper_scoping.py`` itself already uses throughout.
+    **An untagged (``None``, pre-v18) side is never treated as ``"full"``**
+    (Codex review, PR #651 follow-up): ``dump``'s default filtering shipped
+    before this field, so such a baseline is usually already-filtered
+    content, and refusing it would break the most common workflow (a cached
+    baseline against a fresh dump). Nor is it a clean pass: a one-sided tag
+    returns a NON-fatal mismatch, bounding ``declaration``/``layout`` as
+    unverified with the reason disclosed (ADR-050/063, weaker evidence
+    narrows conclusions). Only two explicit, differing tags refuse.
     """
     if not (old.from_headers or new.from_headers):
         return None
     old_scope = old.dependency_scope
     new_scope = new.dependency_scope
-    if old_scope is None or new_scope is None or old_scope == new_scope:
+    if old_scope == new_scope:
         return None
+    if old_scope is None or new_scope is None:
+        return ComparabilityMismatch(
+            "dependency_scope",
+            "dependency-scoping mode recorded on one side only (old: "
+            f"{_scope_label(old_scope)}; new: {_scope_label(new_scope)}) -- "
+            "the untagged snapshot predates the record, so whether both "
+            "sides exclude toolchain/system-header declarations the same way "
+            "is unverified; regenerate the baseline with a current abicheck "
+            "to verify it",
+            _DEPENDENCY_SCOPE_DIMENSIONS,
+            fatal=False,
+        )
     reason = (
         "old and new snapshots have different dependency-scoping modes "
         f"(old: {old_scope!r}, new: {new_scope!r}) — one side excludes "
@@ -921,6 +920,10 @@ def _check_dependency_scope_comparable(
         "mode: pass --include-system-declarations on both sides, or on neither."
     )
     return _surface_refusal("dependency_scope", reason)
+
+
+def _scope_label(scope: str | None) -> str:
+    return "unrecorded" if scope is None else repr(scope)
 
 
 def _surface_refusal(kind: str, reason: str | None) -> ComparabilityMismatch | None:

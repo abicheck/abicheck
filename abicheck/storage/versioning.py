@@ -58,6 +58,10 @@ __all__ = [
     "UNSTATED_VERSION",
     "PACKAGE_FORMAT_VERSION",
     "COMPARISON_CONTRACT_VERSION",
+    "EXTRACTOR_GENERATION",
+    "GENERATION_DRIFT_NOTICE_MARKER",
+    "RESOLVER_GENERATION",
+    "reader_generation_compatibility",
     "ProducerIdentity",
     "ReaderCompatibility",
     "StorageVersions",
@@ -71,6 +75,35 @@ PACKAGE_FORMAT_VERSION = 1
 #: package without understanding the change could produce a *wrong verdict* —
 #: never for a field a reader can ignore.
 COMPARISON_CONTRACT_VERSION = 1
+
+#: This build's extraction semantics generation (ADR-062 D2). Stamped into
+#: every package this build writes and passed by every reader, so a package
+#: produced under different extraction semantics is reported, never refused.
+#: Bump it when what an extractor records for the same input changes.
+EXTRACTOR_GENERATION = 1
+
+#: This build's resolution semantics generation (ADR-062 D2): provider
+#: selection, alias normalization, symbol-version handling, reachability.
+#: Bump it when a graph derived from the same stored facts would change.
+RESOLVER_GENERATION = 1
+
+#: Substring every generation-drift notice carries, so a consumer can filter
+#: ``coverage_warnings`` for it.
+GENERATION_DRIFT_NOTICE_MARKER = "produced under different"
+
+#: A generation the package did not record (a legacy writer): unknown, never
+#: drift.
+UNSTATED_GENERATION = 0
+
+#: ``(extractor_generation, resolver_generation)`` of the build that
+#: produced a package's facts.
+FactGenerations = tuple[int, int]
+
+
+def this_build_generations() -> FactGenerations:
+    """The pair for facts this build extracts itself (read at call time)."""
+    return EXTRACTOR_GENERATION, RESOLVER_GENERATION
+
 
 #: A version axis the package did not state, or stated unusably. Distinct from
 #: any real version so that "unknown" can never be mistaken for "the same as
@@ -309,6 +342,33 @@ class StorageVersions:
     #: Import provenance for an adapted legacy snapshot; 0/"" when native.
     source_schema_version: int = 0
     source_producer_generation: str = ""
+
+    @classmethod
+    def written_by_this_build(
+        cls,
+        *,
+        section_schema_versions: Mapping[str, int],
+        source_schema_version: int,
+        generations: FactGenerations | None = None,
+    ) -> StorageVersions:
+        """The versions a package this build writes carries: its sections,
+        its import provenance, and the extractor/resolver generations of the
+        build that *produced the facts* (ADR-062 D2).
+
+        *generations* is that producer's pair: :func:`this_build_generations`
+        for facts this build just extracted, the source document's stated
+        pair when it records one, and ``None`` -- both
+        :data:`UNSTATED_GENERATION`, unknown, never drift -- for facts an
+        older document carries without saying which build extracted them.
+        Stamping this build's generations on imported facts would make the
+        drift report silently claim they were extracted today."""
+        extractor, resolver = generations or (UNSTATED_GENERATION, UNSTATED_GENERATION)
+        return cls(
+            section_schema_versions=section_schema_versions,
+            source_schema_version=source_schema_version,
+            extractor_generation=extractor,
+            resolver_generation=resolver,
+        )
 
     def __post_init__(self) -> None:
         """Validate the record slot, and canonicalize the state itself.
@@ -608,7 +668,7 @@ def check_reader_compatibility(
     # whether it had been serialized first (Codex review). A decision reading
     # a field must read the same value the format stores.
     drifted = [
-        name
+        (name, _stated_count(reader_value), package_value)
         for name, reader_value, package_value in (
             (
                 "extractor",
@@ -621,15 +681,38 @@ def check_reader_compatibility(
                 _stated_count(versions.resolver_generation),
             ),
         )
-        if reader_value is not None and package_value != _stated_count(reader_value)
+        # A package that never recorded a generation (`0`, a legacy writer)
+        # is unknown, not drifted: claiming a difference would be a guess.
+        if reader_value is not None
+        and package_value != UNSTATED_GENERATION
+        and package_value != _stated_count(reader_value)
     ]
     if drifted:
+        details = ", ".join(
+            f"{name} {stated} vs this build's {reader}"
+            for name, reader, stated in drifted
+        )
         return ReaderCompatibility(
             readable=True,
             semantics_differ=True,
             reason=(
-                f"package was produced under different {'/'.join(drifted)} semantics; "
+                f"package was {GENERATION_DRIFT_NOTICE_MARKER} "
+                f"{'/'.join(name for name, _, _ in drifted)} semantics ({details}); "
                 "derived results may differ from the original producer's"
             ),
         )
     return ReaderCompatibility(readable=True)
+
+
+def reader_generation_compatibility(versions: StorageVersions) -> ReaderCompatibility:
+    """:func:`check_reader_compatibility` as *this build* reads a package:
+    with its own :data:`EXTRACTOR_GENERATION`/:data:`RESOLVER_GENERATION`.
+
+    The one call every production reader makes, so no reader can forget to
+    state its generations and silently skip ADR-062 D2's drift report.
+    """
+    return check_reader_compatibility(
+        versions,
+        reader_extractor_generation=EXTRACTOR_GENERATION,
+        reader_resolver_generation=RESOLVER_GENERATION,
+    )

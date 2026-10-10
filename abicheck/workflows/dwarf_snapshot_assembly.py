@@ -65,6 +65,10 @@ def build_snapshot_from_dwarf(
     return new_snapshot(
         library=elf_path.name,
         version=version,
+        # The image this surface was read from -- the same identity the
+        # header-AST and symbols-only ELF builders record; dump-time
+        # build-mode capture (extract.build_mode_capture) reads it back.
+        source_path=str(elf_path.resolve()),
         functions=decls.functions,
         variables=decls.variables,
         types=decls.types,

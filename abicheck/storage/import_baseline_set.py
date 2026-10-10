@@ -98,7 +98,7 @@ from .guards import mapping as _mapping
 from .import_v1 import export_legacy_snapshot, import_legacy_snapshot
 from .package import ArtifactRef, ObjectRef, ObjectStore, PackageManifest, VariantRef
 from .ref_ids import resolve_ref_ids
-from .versioning import StorageVersions
+from .versioning import FactGenerations, StorageVersions
 
 #: `native_identity` key this module stamps onto each per-library
 #: `ArtifactRef`, recording the library's own real name -- needed because
@@ -205,6 +205,7 @@ def import_baseline_set(
     store: ObjectStore,
     max_known_schema_version: int,
     variant_id: str = "default",
+    generations: FactGenerations | None = None,
 ) -> PackageManifest:
     """Import a baseline set's already-loaded `manifest.json` mapping
     (*manifest_document*) plus the already-loaded per-library `AbiSnapshot`
@@ -427,9 +428,12 @@ def import_baseline_set(
         artifact_ids=tuple(artifact.artifact_id for artifact in artifact_refs),
         sections={BASELINE_SET_SECTION_KIND: metadata_ref},
     )
-    versions = StorageVersions(
+    # Unstated unless the caller produced these facts itself
+    # (StorageVersions.written_by_this_build).
+    versions = StorageVersions.written_by_this_build(
         section_schema_versions=section_schema_versions,
         source_schema_version=source_schema_version,
+        generations=generations,
     )
     return PackageManifest(
         versions=versions,

@@ -313,9 +313,19 @@ def _write_package(
     from ..project_snapshot_store import DirectoryObjectStore, write_project_manifest
     from ..storage.bundle_facts_package import write_bundle_facts_package
     from ..storage.package import ArtifactRef, ObjectRef, PackageManifest, VariantRef
+    from ..storage.versioning import this_build_generations
     from .bundle_facts_capture import capture_bundle_facts
 
     store = DirectoryObjectStore(staging)
+    # Facts this build dumped carry its generations; a variant assembled
+    # from stored snapshot files carries facts some earlier build extracted,
+    # so the package's generations are unstated (one package states one).
+    fresh = not any(
+        _is_snapshot_file(p)
+        for _spec, _snaps, paths in captures
+        for p in paths.values()
+    )
+    generations = this_build_generations() if fresh else None
     variant_refs: list[VariantRef] = []
     artifact_refs: list[ArtifactRef] = []
     section_versions: dict[str, int] = {
@@ -332,7 +342,9 @@ def _write_package(
                 name: p for name, p in paths.items() if not _is_snapshot_file(p)
             },
         )
-        manifest = write_bundle_facts_package(facts, store=store, variant_id=spec.name)
+        manifest = write_bundle_facts_package(
+            facts, store=store, variant_id=spec.name, generations=generations
+        )
         (variant,) = manifest.variant_refs
         renamed = _variant_artifact_ids(spec.name, variant.artifact_ids)
         artifact_refs.extend(

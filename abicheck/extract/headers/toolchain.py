@@ -41,6 +41,7 @@ from ...extract.headers.ast_config import (
     _exported_symbols_indicate_cpp,
     _header_declared_identifiers,
 )
+from ...extract.target_platform_probe import recorded_target_platform
 
 # E-S1: relocated to extract/toolchain_identity.py (ADR-061's extract
 # package owns "read a binary/debug/header/build fact") alongside the new
@@ -247,8 +248,12 @@ def _stamp_ast_parser(
     resolved_force_cpp: bool | None = None,
     gcc_options: str | None = None,
     gcc_option_tokens: tuple[str, ...] = (),
+    target_triple: str | None = None,
 ) -> Any:
     """Attach the frontend/compiler provenance attributes to a built parser.
+
+    Also records the effective target platform (``extract.target_platform``);
+    *target_triple* is clang's flag-aware resolution, when clang made one.
 
     Module-level (rather than a closure over ``dumper._header_ast_parser``) so
     the stamping rules are readable on their own; *compiler*/*gcc_path*/
@@ -327,6 +332,18 @@ def _stamp_ast_parser(
         metadata["resolved_lang_mode"] = "c++" if resolved_force_cpp else "c"
     metadata["language_standard_explicit"] = (
         "1" if has_explicit_std(gcc_options, gcc_option_tokens) else "0"
+    )
+    metadata.update(
+        recorded_target_platform(
+            metadata,
+            producer,
+            executable,
+            dialect,
+            gcc_options,
+            gcc_option_tokens,
+            target_triple,
+            bool(resolved_force_cpp),
+        )
     )
     # Evidence-entity-model gap A3: headers the clang ``#error`` retry dropped,
     # so the snapshot's header coverage reads partial (compare.edge_query).

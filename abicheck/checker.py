@@ -1106,13 +1106,16 @@ def compare(
     # is a no-op for the modules checker already imports (they fix the canonical
     # registration order); it only catches newly-added modules.
     _detector_registry.ensure_loaded()
-    # Every registered detector answers an OLD->NEW question. With no
-    # baseline there is nothing for one to read, and running them against a
-    # copy of the candidate would produce exactly the empty change set this
-    # branch produces directly -- but by way of a comparison that was never
-    # requested, which is what made the audit's evolution states dishonest.
+    # An OLD->NEW detector has nothing to read with no baseline, and running
+    # it against a copy of the candidate would answer a comparison that was
+    # never requested. A detector registered ``one_sided`` is different: it
+    # audits one snapshot and never reads the other, so with no baseline it
+    # runs against the candidate and its findings are marked
+    # candidate-side (``DetectorRegistry.run_one_sided``).
     changes, detector_results = (
-        _detector_registry.run_all(old, new) if old is not None else ([], [])
+        _detector_registry.run_all(old, new)
+        if old is not None
+        else _detector_registry.run_one_sided(new)
     )
 
     # Merge externally-computed findings (e.g. build-configuration / probe-matrix

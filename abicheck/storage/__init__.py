@@ -150,12 +150,16 @@ from .variant_composition import (
 )
 from .versioning import (
     COMPARISON_CONTRACT_VERSION,
+    EXTRACTOR_GENERATION,
+    GENERATION_DRIFT_NOTICE_MARKER,
     PACKAGE_FORMAT_VERSION,
+    RESOLVER_GENERATION,
     UNSTATED_VERSION,
     ProducerIdentity,
     ReaderCompatibility,
     StorageVersions,
     check_reader_compatibility,
+    reader_generation_compatibility,
 )
 
 __all__ = [
@@ -171,10 +175,12 @@ __all__ = [
     "Confidence",
     "DEBUG_SECTION_KIND",
     "DECLARATIONS_SECTION_KIND",
+    "EXTRACTOR_GENERATION",
     "EntityId",
     "EntityKind",
     "FactAvailability",
     "FactStatus",
+    "GENERATION_DRIFT_NOTICE_MARKER",
     "GRAPH_SECTION_KIND",
     "IdentityConflict",
     "InMemoryObjectStore",
@@ -190,6 +196,7 @@ __all__ = [
     "PROVENANCE_SECTION_KIND",
     "PackageManifest",
     "ProducerIdentity",
+    "RESOLVER_GENERATION",
     "ReaderCompatibility",
     "SCHEMA_VERSION_KEY",
     "SECTIONS_KEY",
@@ -244,6 +251,7 @@ __all__ = [
     "read_variant_composition_inventory_complete",
     "read_variant_composition_library_filenames",
     "read_variant_composition_manifest_payload",
+    "reader_generation_compatibility",
     "semantic_digest",
     "semantic_ir_from_dto",
     "semantic_ir_to_dto",

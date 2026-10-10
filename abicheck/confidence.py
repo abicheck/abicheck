@@ -304,6 +304,7 @@ def compute_confidence(
 
     warnings.extend(unparseable_header_warnings(old, new))
     warnings.extend(extraction_scope_notes(old, new))  # ADR-075 D3
+    warnings.extend(snapshot_load_notices(old, new))  # ADR-062 D2
 
     confidence = _determine_confidence_level(
         has_elf,
@@ -316,6 +317,20 @@ def compute_confidence(
     )
 
     return tiers, confidence, warnings, evidence_tier
+
+
+def snapshot_load_notices(old: AbiSnapshot | None, new: AbiSnapshot) -> list[str]:
+    """Each side's loader notices (``AbiSnapshot.load_notices``), labelled.
+
+    Informational only: appended to ``coverage_warnings`` *after* they could
+    influence nothing but the report -- a generation drift narrows what a
+    derived result means, it never fails the run or moves the exit code.
+    """
+    notices: list[str] = []
+    for side, snap in (("old", old), ("new", new)):
+        for notice in getattr(snap, "load_notices", ()) or ():
+            notices.append(f"{side} side: {notice}")
+    return notices
 
 
 #: Substring every header-exclusion warning shares, so a consumer can filter

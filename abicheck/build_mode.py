@@ -67,7 +67,7 @@ from .model.build_mode_facts import (
 #   1. ELF .comment: ``GCC: (Ubuntu 11.4.0-1ubuntu1~22.04) 11.4.0``
 #   2. DW_AT_producer: ``GNU C++17 11.4.0 -mtune=generic -march=x86-64``
 _GCC_PRODUCER = re.compile(
-    r"(?:GCC:?|GNU\s+(?:C|C\+\+|C99|Fortran)[\d+]*)\s*\(?[^)]*\)?\s*"
+    r"(?:GCC:?|GNU\s+(?:C\+\+|C99|C|Fortran)[\d+]*)\s*(?:\([^)]*\)\s*)?"
     r"(?P<ver>\d+(?:\.\d+){0,2})",
     re.IGNORECASE,
 )
@@ -146,8 +146,14 @@ def detect_compiler_family(
 # CXX14_OR_LATER as a lower-bound, not a literal claim of C++14.
 _DWARF_LANG_TO_STD: dict[int, CxxStandard] = {
     0x01: CxxStandard.C,  # DW_LANG_C89
-    0x02: CxxStandard.CXX98,  # DW_LANG_C_plus_plus (pre-C++03)
+    0x02: CxxStandard.C,  # DW_LANG_C (K&R / unspecified C)
     0x0C: CxxStandard.C,  # DW_LANG_C99
+    0x1D: CxxStandard.C,  # DW_LANG_C11
+    0x2C: CxxStandard.C,  # DW_LANG_C17
+    # DW_LANG_C_plus_plus carries no revision; it is what clang and
+    # ``-gdwarf-4``/``-gstrict-dwarf`` GCC stamp for pre-C++11 *and* for
+    # unversioned C++ CUs, so CXX98 is the conservative lower bound.
+    0x04: CxxStandard.CXX98,  # DW_LANG_C_plus_plus
     # 0x19 (DW_LANG_C_plus_plus_03) is mapped to CXX98 rather than CXX11
     # because the enum has no CXX03 bucket and CXX98 is the closest
     # pre-C++11 standard; upgrading C++03 binaries to CXX11 would
@@ -157,7 +163,7 @@ _DWARF_LANG_TO_STD: dict[int, CxxStandard] = {
     0x21: CxxStandard.CXX14_OR_LATER,  # DW_LANG_C_plus_plus_14
     0x2A: CxxStandard.CXX17,  # DW_LANG_C_plus_plus_17
     0x2B: CxxStandard.CXX20,  # DW_LANG_C_plus_plus_20
-    0x2E: CxxStandard.CXX23,  # DW_LANG_C_plus_plus_23
+    0x3A: CxxStandard.CXX23,  # DW_LANG_C_plus_plus_23 (DWARF 6 registry)
 }
 
 

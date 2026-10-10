@@ -320,10 +320,11 @@ class AbiSnapshot:
     build_id: str | None = None  # opaque CI identifier (run ID, build number, etc.)
     # Build-mode capture (schema v5) — normalized compiler / stdlib / std
     # mode. Used to attribute layout/mangling differences to build
-    # configuration rather than real ABI breaks. No dump path populates it:
-    # it is read back from a stored document that carries it, and the
-    # stdlib-ABI detectors otherwise derive the stdlib dimensions from
-    # mangled symbols at compare time (``build_mode_from_signals``). See
+    # configuration rather than real ABI breaks. An ELF dump records it from
+    # the image's DW_AT_producer/DW_AT_language/.comment
+    # (``extract.build_mode_capture``); the stdlib-ABI detectors prefer it and
+    # otherwise derive the stdlib dimensions from mangled symbols at compare
+    # time (``build_mode_from_signals``). See
     # ``abicheck/build_mode.py`` for the dataclass and detector logic.
     # None when nothing recorded it.
     build_mode: BuildMode | None = None
@@ -520,6 +521,15 @@ class AbiSnapshot:
     # unembedded snapshot) means the pre-scan's own `clang++` default.
     live_preprocessor_clang_bin: str | None = field(
         default=None, repr=False, compare=False, kw_only=True
+    )
+    # Runtime-only, like `live_source_evidence`: notices the *loader* raised
+    # about where this snapshot came from (ADR-062 D2: a stored package
+    # produced under a different extractor/resolver generation). Read into
+    # `DiffResult.coverage_warnings` by `confidence.compute_confidence`; never
+    # serialized (`storage/snapshot_encode.py` drops it), so a notice is
+    # about this run's load, not a property a stored snapshot carries.
+    load_notices: tuple[str, ...] = field(
+        default=(), repr=False, compare=False, kw_only=True
     )
 
     # Indexes (built lazily)

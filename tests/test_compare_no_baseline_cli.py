@@ -483,17 +483,12 @@ def _a_live_binary_this_host_can_audit(tmp_path: Path) -> Path:
     real shared library, and an earlier version of this helper did --
     resolving `libm.so.6` through the standard library directories, since
     `ctypes.util.find_library` answers a soname rather than a path. That
-    fixture immediately hit a *separate, pre-existing* crash: auditing any
-    real ELF library raises an uncaught `NoBaselineInvariantError`, because
-    `diff_platform_elf_dynamic._diff_visibility_leak` is a single-sided
-    detector (`del new  # detector is intentionally old-library-only`) that
-    emits its finding with neither candidate-side marker, so the ADR-068
-    partition files it as an identity-diff finding. It reproduces on `main`
-    from a bare CLI call and is recorded in `docs/contribute/known-gaps.md`
-    -- it is not this test's bug to fix and not this pull request's to
-    widen into. This helper deliberately steps around it rather than
-    silently, and the moment it is fixed the POSIX branch should go back to
-    a real library.
+    fixture hit a *separate* defect in the single-sided `visibility_leak`
+    detector's handling under `--no-baseline` (first a crash, later a
+    silently dropped finding). That is now fixed -- the detector is
+    registered `one_sided` and a real gcc-built library is audited by
+    `tests/test_no_baseline_one_sided_detectors.py` -- so the POSIX branch
+    here may go back to a real library.
 
     macOS additionally rules out `.dylib`: since macOS 11 the system
     libraries live in the dyld shared cache, so the paths `find_library`

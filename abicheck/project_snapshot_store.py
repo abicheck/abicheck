@@ -92,7 +92,7 @@ from .storage.ref_ids import (
     reject_filesystem_collisions as _reject_filesystem_collisions,
     safe_ref_id as _safe_ref_id,
 )
-from .storage.versioning import StorageVersions, check_reader_compatibility
+from .storage.versioning import StorageVersions, reader_generation_compatibility
 
 __all__ = [
     "DirectoryObjectStore",
@@ -475,9 +475,20 @@ def write_project_manifest(root: str | Path, manifest: PackageManifest) -> None:
 class ManifestSummary:
     """`manifest.json`'s own small, always-loaded content — `versions`,
     which variant/artifact ids exist (without either's full record), and
-    `project_sections` (ADR-062 A1.4/A1.5's cross-artifact evidence refs)."""
+    `project_sections` (ADR-062 A1.4/A1.5's cross-artifact evidence refs).
 
-    __slots__ = ("versions", "variant_ids", "artifact_ids", "project_sections")
+    `semantics_notice` is ADR-062 D2's non-fail-closed half: non-empty when
+    the package is readable but was produced under a different extractor or
+    resolver generation than this build's, so a run loading it can say so.
+    """
+
+    __slots__ = (
+        "versions",
+        "variant_ids",
+        "artifact_ids",
+        "project_sections",
+        "semantics_notice",
+    )
 
     def __init__(
         self,
@@ -485,11 +496,13 @@ class ManifestSummary:
         variant_ids: tuple[str, ...],
         artifact_ids: tuple[str, ...],
         project_sections: Mapping[str, ObjectRef] = MappingProxyType({}),
+        semantics_notice: str = "",
     ) -> None:
         self.versions = versions
         self.variant_ids = variant_ids
         self.artifact_ids = artifact_ids
         self.project_sections = project_sections
+        self.semantics_notice = semantics_notice
 
 
 def _required_string_id_list(
@@ -619,7 +632,7 @@ def read_manifest_summary(root: str | Path) -> ManifestSummary:
     if not isinstance(data, dict):
         raise ValueError(f"{root_path / MANIFEST_RELPATH} is not a JSON object")
     versions = StorageVersions.from_dict(data.get("versions", {}))
-    compatibility = check_reader_compatibility(versions)
+    compatibility = reader_generation_compatibility(versions)
     if not compatibility.readable:
         raise ValueError(
             f"{root_path / MANIFEST_RELPATH} is not readable by this build: "
@@ -631,6 +644,9 @@ def read_manifest_summary(root: str | Path) -> ManifestSummary:
         variant_ids=_required_string_id_list(data, "variant_ids", record),
         artifact_ids=_required_string_id_list(data, "artifact_ids", record),
         project_sections=_optional_project_sections(data, record),
+        semantics_notice=(
+            compatibility.reason if compatibility.semantics_differ else ""
+        ),
     )
 
 

@@ -111,6 +111,7 @@ COVERAGE: dict[str, str] = {
     "abicheck.extract.headers.toolchain::memoized::_tool_target_triple": H,
     "abicheck.extract.headers.toolchain::memoized::_tool_version_output": H,
     "abicheck.elf_symbol_filter::memoized::is_abi_relevant_elf_symbol": B,
+    "abicheck.extract.target_platform_probe::memoized::_probe_target_platform": H,
     "abicheck.extract.path_aliases::memoized::_canonical_spelling": H,
     "abicheck.extract.path_aliases::memoized::_source_header_alias_segments": H,
     "abicheck.model.signature_normalization::memoized::_canonicalize_top_level_param_type": R,
