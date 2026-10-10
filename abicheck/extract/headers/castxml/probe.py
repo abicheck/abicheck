@@ -41,9 +41,6 @@ from xml.etree.ElementTree import (
 
 import abicheck.deadline as deadline
 
-from ....castxml_policy import (
-    parse_castxml_version_output as _parse_castxml_version,
-)
 from ....dumper_ast_config import _CPP_ONLY_PATTERNS, _detect_cpp_headers
 from ....dumper_ast_config_cpp20 import _detect_cpp20_headers
 from ....dumper_clang_errors import diagnose_header_compile_failure
@@ -53,6 +50,9 @@ from ....errors import (
     UnsupportedCastxmlVersionError,
 )
 from ....storage.castxml_xml import parse_castxml_xml
+from .policy import (
+    parse_castxml_version_output as _parse_castxml_version,
+)
 
 # castxml drives an internal Clang frontend; it must be new enough to parse
 # modern host headers. _Float32/_Float64/_Float128 land in Clang 16, and the

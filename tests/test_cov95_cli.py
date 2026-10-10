@@ -36,7 +36,6 @@ from abicheck.checker_policy import ChangeKind, Verdict
 from abicheck.cli import main
 from abicheck.cli_compare_release import (
     _exit_compare_release,
-    _fold_release_global_severity,
     _format_release_json,
     _format_release_markdown,
     _release_md_bundle_findings,
@@ -63,6 +62,7 @@ from abicheck.frontends.cli.runtime import (
 from abicheck.model import AbiSnapshot, Function, Visibility
 from abicheck.policy.effective_gate import EffectiveGate
 from abicheck.serialization import snapshot_to_json
+from abicheck.workflows.release_exit_fold import fold_release_global_severity
 from tests._dump_format_fakes import fake_format_adapter
 from tests.schema_validation import validate_instance
 
@@ -102,7 +102,7 @@ def _gate(preset, abi=None, potential=None, quality=None, addition=None):
     property, not a settable field (duplication-and-convergence-assessment
     T6) -- this helper used to pass ``scheme=None`` beside a real
     ``SeverityConfig``, a combination the resolver can never produce. -- since
-    ADR-064's rewrite, ``_fold_release_global_severity`` takes the resolved
+    ADR-064's rewrite, ``fold_release_global_severity`` takes the resolved
     object, not the six raw preset/category/scheme strings directly."""
     from abicheck.cli_compare_release_helpers import GateOptions
 
@@ -1054,7 +1054,7 @@ class TestReleaseVerdictOrder:
 
 class TestFoldReleaseGlobalSeverity:
     def test_no_config_returns_base(self) -> None:
-        assert _fold_release_global_severity(2, None, None, _gate(None)) == 2
+        assert fold_release_global_severity(2, None, None, _gate(None)) == 2
 
     def test_matrix_findings_raise_code(self) -> None:
         mr = DiffResult(
@@ -1067,7 +1067,7 @@ class TestFoldReleaseGlobalSeverity:
                 ),
             ],
         )
-        code = _fold_release_global_severity(0, None, mr, _gate("default"))
+        code = fold_release_global_severity(0, None, mr, _gate("default"))
         assert code >= 0
 
 
@@ -3168,13 +3168,13 @@ class TestFoldReleaseGlobalSeverityBundle:
     def test_bundle_findings_raise_code(self) -> None:
         # A bundle break under a 'default' preset should not stay below the
         # per-library base code; folding considers bundle findings.
-        code = _fold_release_global_severity(
+        code = fold_release_global_severity(
             0, _bundle_with_findings(), None, _gate("default")
         )
         assert code >= 0
 
     def test_matrix_findings_considered(self) -> None:
-        code = _fold_release_global_severity(
+        code = fold_release_global_severity(
             0, None, _matrix_with_changes(), _gate("default")
         )
         assert code >= 0

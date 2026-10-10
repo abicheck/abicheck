@@ -23,7 +23,7 @@ is exactly the "legacy sibling" ``abicheck/extract/AGENTS.md`` says a new
 ``extract`` module must not reach into the private helpers of. Both are
 re-exported here under their old private names so every existing caller
 (including ``dumper_castxml.py``'s own re-export of them, and the direct
-``from abicheck.dumper_castxml_typedefs import ...`` test imports) is
+``from abicheck.extract.headers.castxml.typedefs import ...`` test imports) is
 unaffected.
 
 Pure functions taking the parser's own bound helper methods (or an
@@ -49,12 +49,12 @@ from xml.etree.ElementTree import (
 # warns against. Re-exported under its old private name so every existing
 # caller here (and `dumper_castxml.py`'s own `as`-aliased re-export of it)
 # is unaffected.
-from .extract.headers.castxml.location import (
+from ....extract.headers.castxml.location import (
     _CONTRACT_ATTRIBUTE_BASES as _CONTRACT_ATTRIBUTE_BASES,
     contract_attributes,
     deprecation_marker,
 )
-from .model.declaration_headers import attributed
+from ....model.declaration_headers import attributed
 
 
 def _extract_contract_attributes(attributes: str) -> list[str]:

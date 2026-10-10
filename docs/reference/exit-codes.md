@@ -580,9 +580,8 @@ scheme-independent CI behaviour.
     `scan`'s own exit-code contract while it existed.
 
     Do not write new CI against it: pin the equivalent `compare` invocation
-    instead, and where none exists yet, see
-    [known gaps](../contribute/known-gaps.md#the-actions-mode-scan-still-routes-several-request-shapes-to-the-legacy-scan-cli)
-    for what is still open. The GitHub Action's own `mode: scan` input has
+    instead; the [closed known-gaps entry](../contribute/archive/known-gaps-closed.md#the-actions-mode-scan-still-routes-several-request-shapes-to-the-legacy-scan-cli)
+    records how the remaining `scan`-only request shapes were retired. The GitHub Action's own `mode: scan` input has
     since been retired outright too — see the [migration guide](../use/github-action.md#migrating-from-mode-scan).
 
 **Everything below this point, to the end of this section, is historical —

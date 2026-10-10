@@ -182,7 +182,7 @@ PERF_SENSITIVE_PATTERNS: tuple[str, ...] = (
     "abicheck/extract/headers/toolchain.py",
     "abicheck/dumper_castxml.py",
     "abicheck/compile_context.py",
-    "abicheck/castxml_policy.py",
+    "abicheck/extract/headers/castxml/policy.py",
     "abicheck/header_utils.py",
     "action/install-castxml.sh",
     "scripts/check_header_graph_perf.py",

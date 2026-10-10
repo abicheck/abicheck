@@ -292,9 +292,9 @@ def _stamp_ast_parser(
     the identical installation, purely because this fix corrected which
     binary's identity gets recorded).
     """
-    from ...castxml_policy import evaluate_castxml_version
     from ...dumper_ast_config import _resolve_compiler_binary
     from ...errors import SnapshotError
+    from ...extract.headers.castxml.policy import evaluate_castxml_version
 
     executable_meta = _tool_identity_metadata(executable)
     metadata = {"producer": producer, **executable_meta}

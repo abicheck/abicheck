@@ -58,11 +58,11 @@ import abicheck.deadline as deadline
 
 from ...dump_manifest import DumpManifest, IncludeEntry, TranslationUnit
 from ...dumper_clang import _ClangAstParser
-from ...dumper_clang_streaming import (
+from ...extract.header_ast_fields import parse_header_ast_fields
+from ...extract.headers.clang.streaming import (
     streaming_prune_suppressed,
     suppress_streaming_prune,
 )
-from ...extract.header_ast_fields import parse_header_ast_fields
 from ...extract.headers.toolchain import (
     _parser_ast_fallback_reason,
     _parser_ast_supported,

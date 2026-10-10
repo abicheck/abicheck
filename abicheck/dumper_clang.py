@@ -90,13 +90,22 @@ from pathlib import Path
 from typing import Any
 
 from ._compiler_options import split_gcc_options
+from .errors import AstContextMissingError, SnapshotError
+from .extract.dependency_exclusion import active_dependency_predicate
+from .extract.headers.clang import (
+    context as _clang_context,
+    enums as _clang_enums,
+    functions as _clang_functions,
+    records as _clang_records,
+    scope as _clang_scope,
+)
 
 # Re-exported (not just referenced) so the historical
 # ``dumper_clang._clang_contract_attributes`` import path tests use keeps
 # resolving, even though the real call site moved to
 # ``extract.headers.clang.functions``.
-from .dumper_clang_attributes import _clang_contract_attributes  # noqa: F401
-from .dumper_clang_expr import (  # noqa: F401  (some re-exported for tests)
+from .extract.headers.clang.attributes import _clang_contract_attributes  # noqa: F401
+from .extract.headers.clang.expr import (  # noqa: F401  (some re-exported for tests)
     _SCOPE_NODE_KINDS,
     _WRAPPER_EXPR_KINDS,
     _canonical_expr,
@@ -113,7 +122,7 @@ from .dumper_clang_expr import (  # noqa: F401  (some re-exported for tests)
 # Split out to keep this module under the 2000-line hard cap; imported (not
 # just referenced) so the historical ``dumper_clang._name`` import paths that
 # tests and sibling modules already use keep resolving.
-from .dumper_clang_qualifiers import (  # noqa: F401  (compatibility re-exports)
+from .extract.headers.clang.qualifiers import (  # noqa: F401  (compatibility re-exports)
     _OVERRIDE_ELIGIBLE_KINDS,
     _clang_method_is_override,
     _clang_param_is_restrict,
@@ -125,15 +134,6 @@ from .dumper_clang_qualifiers import (  # noqa: F401  (compatibility re-exports)
     _last_top_level_ptr_end,
     _record_kind,
     _reduce_opaque_kind_set,
-)
-from .errors import AstContextMissingError, SnapshotError
-from .extract.dependency_exclusion import active_dependency_predicate
-from .extract.headers.clang import (
-    context as _clang_context,
-    enums as _clang_enums,
-    functions as _clang_functions,
-    records as _clang_records,
-    scope as _clang_scope,
 )
 from .extract.headers.clang.return_type import return_type as _clang_return_type
 from .extract.headers.clang.template_param_indexes import (

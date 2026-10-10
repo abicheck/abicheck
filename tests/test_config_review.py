@@ -704,8 +704,8 @@ def _gate(preset, abi=None, potential=None, quality=None, addition=None):
     property, not a settable field (duplication-and-convergence-assessment
     T6) -- this helper used to pass ``scheme=None`` beside a real
     ``SeverityConfig``, a combination the resolver can never produce. -- since
-    ADR-064's rewrite, ``_compute_release_severity_exit_code``/
-    ``_fold_release_global_severity`` take the resolved object, not the six
+    ADR-064's rewrite, ``release_severity_exit_code``/
+    ``fold_release_global_severity`` take the resolved object, not the six
     raw preset/category/scheme strings directly."""
     from abicheck.cli_compare_release_helpers import (
         GateOptions,
@@ -735,30 +735,24 @@ def _member(diff, gate):  # type: ignore[no-untyped-def]
 
 class TestComputeReleaseSeverityExitCode:
     def test_none_without_flags(self):
-        from abicheck.cli_compare_release import _compute_release_severity_exit_code
+        from abicheck.workflows.release_exit_fold import release_severity_exit_code
 
-        assert _compute_release_severity_exit_code([], _gate(None)) is None
+        assert release_severity_exit_code([], _gate(None)) is None
 
     def test_zero_with_flag_and_no_changes(self):
-        from abicheck.cli_compare_release import _compute_release_severity_exit_code
+        from abicheck.workflows.release_exit_fold import release_severity_exit_code
 
-        assert _compute_release_severity_exit_code([], _gate("info-only")) == 0
+        assert release_severity_exit_code([], _gate("info-only")) == 0
 
     def test_aggregates_breaking_change(self):
-        from abicheck.cli_compare_release import _compute_release_severity_exit_code
+        from abicheck.workflows.release_exit_fold import release_severity_exit_code
 
         # default preset: abi_breaking == error -> exit 4.
         gate = _gate("default")
-        assert (
-            _compute_release_severity_exit_code([_member(_breaking_diff(), gate)], gate)
-            == 4
-        )
+        assert release_severity_exit_code([_member(_breaking_diff(), gate)], gate) == 4
         # info-only downgrades everything below error -> exit 0.
         gate = _gate("info-only")
-        assert (
-            _compute_release_severity_exit_code([_member(_breaking_diff(), gate)], gate)
-            == 0
-        )
+        assert release_severity_exit_code([_member(_breaking_diff(), gate)], gate) == 0
 
 
 class TestReleaseSeverityPolicyAndGlobal:
@@ -766,8 +760,8 @@ class TestReleaseSeverityPolicyAndGlobal:
 
     def test_per_library_uses_effective_kind_sets(self):
         from abicheck.checker import Verdict
-        from abicheck.cli_compare_release import _compute_release_severity_exit_code
         from abicheck.policy_file import PolicyFile
+        from abicheck.workflows.release_exit_fold import release_severity_exit_code
 
         diff = _breaking_diff()
         # A policy file that reclassifies the (normally breaking) change as
@@ -778,11 +772,8 @@ class TestReleaseSeverityPolicyAndGlobal:
         )
         gate = _gate("default")
         # Control: the same diff without the override does gate.
-        assert (
-            _compute_release_severity_exit_code([_member(_breaking_diff(), gate)], gate)
-            == 4
-        )
-        assert _compute_release_severity_exit_code([_member(diff, gate)], gate) == 0
+        assert release_severity_exit_code([_member(_breaking_diff(), gate)], gate) == 4
+        assert release_severity_exit_code([_member(diff, gate)], gate) == 0
 
     def test_per_library_honours_frozen_namespace_floor(self):
         """Codex review on #549: a policy-file override that demotes a kind
@@ -790,8 +781,8 @@ class TestReleaseSeverityPolicyAndGlobal:
         severity — this is the same floor annotation_report_entries() now honours
         (via result.policy_file), so the release exit code must match it."""
         from abicheck.checker import Change, ChangeKind, DiffResult, Verdict
-        from abicheck.cli_compare_release import _compute_release_severity_exit_code
         from abicheck.policy_file import PolicyFile
+        from abicheck.workflows.release_exit_fold import release_severity_exit_code
 
         c = Change(
             ChangeKind.FUNC_REMOVED,
@@ -812,7 +803,7 @@ class TestReleaseSeverityPolicyAndGlobal:
         # this would wrongly exit 0 (the override demotes FUNC_REMOVED to
         # COMPATIBLE); the frozen guard must keep it at its raw BREAKING exit.
         gate = _gate("default")
-        assert _compute_release_severity_exit_code([_member(diff, gate)], gate) == 4
+        assert release_severity_exit_code([_member(diff, gate)], gate) == 4
 
     def test_format_release_junit_forwards_severity_config(self):
         """Codex review on #549: `compare-release --format junit` with a
@@ -869,23 +860,23 @@ class TestReleaseSeverityPolicyAndGlobal:
         assert "scope_fingerprint mismatch" in xml
 
     def test_fold_matrix_break_raises_exit(self):
-        from abicheck.cli_compare_release import _fold_release_global_severity
+        from abicheck.workflows.release_exit_fold import fold_release_global_severity
 
         # Per-library clean (base 0), but a matrix DiffResult carries a break.
         matrix = _breaking_diff()
-        assert _fold_release_global_severity(0, None, matrix, _gate("default")) == 4
+        assert fold_release_global_severity(0, None, matrix, _gate("default")) == 4
 
     def test_fold_bundle_break_raises_exit(self):
         import types
 
-        from abicheck.cli_compare_release import _fold_release_global_severity
+        from abicheck.workflows.release_exit_fold import fold_release_global_severity
 
         change = _breaking_diff().changes[0]
         finding = types.SimpleNamespace(to_change=lambda: change)
         bundle = types.SimpleNamespace(
             bundle_findings=[finding], policy="strict_abi", policy_file=None
         )
-        assert _fold_release_global_severity(0, bundle, None, _gate("default")) == 4
+        assert fold_release_global_severity(0, bundle, None, _gate("default")) == 4
 
     def test_fold_bundle_honors_the_bundle_result_own_policy(self):
         # G38 stabilization Phase 10 (Codex review, fresh evidence): this
@@ -899,8 +890,8 @@ class TestReleaseSeverityPolicyAndGlobal:
         import types
 
         from abicheck.checker_policy import ChangeKind
-        from abicheck.cli_compare_release import _fold_release_global_severity
         from abicheck.model.change import Change
+        from abicheck.workflows.release_exit_fold import fold_release_global_severity
 
         change = Change(
             kind=ChangeKind.CALLING_CONVENTION_CHANGED,
@@ -914,13 +905,13 @@ class TestReleaseSeverityPolicyAndGlobal:
         strict_bundle = types.SimpleNamespace(
             bundle_findings=[finding], policy="strict_abi", policy_file=None
         )
-        code = _fold_release_global_severity(0, strict_bundle, None, _gate("default"))
+        code = fold_release_global_severity(0, strict_bundle, None, _gate("default"))
         assert code == 4
 
         plugin_bundle = types.SimpleNamespace(
             bundle_findings=[finding], policy="plugin_abi", policy_file=None
         )
-        code = _fold_release_global_severity(0, plugin_bundle, None, _gate("default"))
+        code = fold_release_global_severity(0, plugin_bundle, None, _gate("default"))
         assert code == 0
 
     def test_fold_bundle_honors_the_bundle_result_own_policy_file(self):
@@ -936,9 +927,9 @@ class TestReleaseSeverityPolicyAndGlobal:
         import types
 
         from abicheck.checker_policy import ChangeKind, Verdict
-        from abicheck.cli_compare_release import _fold_release_global_severity
         from abicheck.model.change import Change
         from abicheck.policy_file import PolicyFile
+        from abicheck.workflows.release_exit_fold import fold_release_global_severity
 
         change = Change(
             kind=ChangeKind.BUNDLE_INTRA_DEP_REMOVED,
@@ -952,7 +943,7 @@ class TestReleaseSeverityPolicyAndGlobal:
         unmodified = types.SimpleNamespace(
             bundle_findings=[finding], policy="strict_abi", policy_file=None
         )
-        code = _fold_release_global_severity(0, unmodified, None, _gate("default"))
+        code = fold_release_global_severity(0, unmodified, None, _gate("default"))
         assert code == 4
 
         overridden = types.SimpleNamespace(
@@ -962,21 +953,21 @@ class TestReleaseSeverityPolicyAndGlobal:
                 overrides={ChangeKind.BUNDLE_INTRA_DEP_REMOVED: Verdict.COMPATIBLE}
             ),
         )
-        code = _fold_release_global_severity(0, overridden, None, _gate("default"))
+        code = fold_release_global_severity(0, overridden, None, _gate("default"))
         assert code == 0
 
     def test_fold_info_only_does_not_escalate(self):
-        from abicheck.cli_compare_release import _fold_release_global_severity
+        from abicheck.workflows.release_exit_fold import fold_release_global_severity
 
         matrix = _breaking_diff()
         # info-only downgrades the matrix break below error -> base 0 preserved.
-        code = _fold_release_global_severity(0, None, matrix, _gate("info-only"))
+        code = fold_release_global_severity(0, None, matrix, _gate("info-only"))
         assert code == 0
 
     def test_fold_no_extras_returns_base(self):
-        from abicheck.cli_compare_release import _fold_release_global_severity
+        from abicheck.workflows.release_exit_fold import fold_release_global_severity
 
-        assert _fold_release_global_severity(2, None, None, _gate("default")) == 2
+        assert fold_release_global_severity(2, None, None, _gate("default")) == 2
 
     def test_resolve_config_none_without_flags(self):
         from abicheck.cli_compare_release import _resolve_release_severity_config

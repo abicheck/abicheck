@@ -49,7 +49,7 @@ import pytest
 from abicheck.checker import Verdict, compare
 from abicheck.checker_policy import ChangeKind
 from abicheck.dumper_clang import _clang_param_is_restrict
-from abicheck.dumper_clang_qualifiers import _declarator_group
+from abicheck.extract.headers.clang.qualifiers import _declarator_group
 from abicheck.model import AbiSnapshot, Fact, Function, Param, Visibility
 from tests._legacy_snapshot import as_legacy_baseline
 

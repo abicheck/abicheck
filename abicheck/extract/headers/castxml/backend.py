@@ -42,7 +42,6 @@ from pathlib import Path
 from typing import cast
 from xml.etree.ElementTree import Element, tostring
 
-from ....castxml_policy import evaluate_castxml_version
 from ....dumper_ast_config import (
     _build_castxml_command,
     _cache_key,
@@ -51,6 +50,7 @@ from ....dumper_ast_config import (
 from ....dumper_ast_config_cpp20 import _detect_cpp20_headers
 from ....dumper_castxml import _CastxmlParser
 from ....errors import SnapshotError, UnsupportedCastxmlVersionError
+from ....extract.headers.castxml.policy import evaluate_castxml_version
 from ....extract.headers.castxml.probe import (
     _castxml_cpp_retry_allowed,
     _validate_castxml_output,

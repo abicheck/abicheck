@@ -167,7 +167,7 @@ echo "==> castxml version: ${CASTXML_FULL_OUTPUT%%$'\n'*}"
 # castxml on PATH is that branch's whole reason to exist.
 if ! python3 -c '
 import sys
-from abicheck.castxml_policy import evaluate_castxml_version
+from abicheck.extract.headers.castxml.policy import evaluate_castxml_version
 
 result = evaluate_castxml_version(sys.stdin.read())
 if not result.supported:
