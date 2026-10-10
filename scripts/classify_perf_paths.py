@@ -176,10 +176,10 @@ PERF_SENSITIVE_PATTERNS: tuple[str, ...] = (
     "abicheck/provenance.py",
     "abicheck/storage/header_ast_cache.py",
     "abicheck/extract/headers/ast_config.py",
-    "abicheck/dumper_sysinc.py",
+    "abicheck/extract/headers/sysinc.py",
     "abicheck/dumper_clang.py",
     "abicheck/dumper_clang_errors.py",
-    "abicheck/dumper_toolchain.py",
+    "abicheck/extract/headers/toolchain.py",
     "abicheck/extract/headers/castxml/dumper.py",
     "abicheck/compile_context.py",
     "abicheck/extract/headers/castxml/policy.py",
@@ -274,8 +274,8 @@ PERF_SENSITIVE_PATTERNS: tuple[str, ...] = (
     # which is the same omission, one layer down, that the extract/ hole was.
     # That test now fails if `dumper.py` starts importing a sibling no pattern
     # here covers.
-    "abicheck/dumper_manifest.py",
-    "abicheck/dumper_castxml_probe.py",
+    "abicheck/extract/headers/manifest.py",
+    "abicheck/extract/headers/castxml/probe.py",
     "abicheck/dumper_contract.py",
     "abicheck/extract/debug_dump.py",
     "abicheck/workflows/dump/elf_fallback.py",

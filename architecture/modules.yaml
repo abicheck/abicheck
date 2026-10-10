@@ -133,17 +133,13 @@
         "abicheck/buildsource/type_graph.py",
         "abicheck/buildsource/virtual_dispatch_graph.py",
         "abicheck/cc_wrapper.py",
-        "abicheck/clang_layout_tool.py",
         "abicheck/classify.py",
         "abicheck/ctf_metadata.py",
         "abicheck/debug_resolver.py",
         "abicheck/dump_manifest.py",
         "abicheck/dumper_ast_config_cpp20.py",
-        "abicheck/dumper_castxml_probe.py",
         "abicheck/dumper_clang.py",
         "abicheck/dumper_clang_errors.py",
-        "abicheck/dumper_sysinc.py",
-        "abicheck/dumper_toolchain.py",
         "abicheck/dwarf_advanced.py",
         "abicheck/dwarf_metadata.py",
         "abicheck/dwarf_presence.py",
@@ -174,8 +170,7 @@
         "abicheck/tu_merge.py",
         "abicheck/tu_merge_provenance.py",
         "abicheck/type_metadata.py",
-        "abicheck/dumper_contract.py",
-        "abicheck/dumper_manifest.py"
+        "abicheck/dumper_contract.py"
       ]
     },
     "compare": {
@@ -530,13 +525,9 @@
     "aggregate_": [],
     "dumper_": [
       "dumper_ast_config_cpp20.py",
-      "dumper_castxml_probe.py",
       "dumper_clang.py",
       "dumper_clang_errors.py",
-      "dumper_contract.py",
-      "dumper_manifest.py",
-      "dumper_sysinc.py",
-      "dumper_toolchain.py"
+      "dumper_contract.py"
     ],
     "change_registry_": [
       "change_registry_types.py"
@@ -595,7 +586,6 @@
     "checker.py",
     "checker_policy.py",
     "checker_types.py",
-    "clang_layout_tool.py",
     "classify.py",
     "cli.py",
     "cli_aggregate.py",
@@ -703,13 +693,9 @@
     "dump_manifest.py",
     "dumper.py",
     "dumper_ast_config_cpp20.py",
-    "dumper_castxml_probe.py",
     "dumper_clang.py",
     "dumper_clang_errors.py",
     "dumper_contract.py",
-    "dumper_manifest.py",
-    "dumper_sysinc.py",
-    "dumper_toolchain.py",
     "dwarf_advanced.py",
     "dwarf_metadata.py",
     "dwarf_presence.py",

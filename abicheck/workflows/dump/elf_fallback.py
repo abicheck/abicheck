@@ -29,13 +29,13 @@ import logging
 import warnings
 from typing import TYPE_CHECKING
 
-from ...dumper_toolchain import _safe_mtime, _safe_size
 from ...extract.debug_layout_semantic_ir import semantic_ir_from_debug_metadata
 from ...extract.elf_symbol_classify import _populate_elf_visibility
 from ...extract.export_symbol_identity import (
     itanium_export_function as _elf_export_function,
     itanium_export_variable as _elf_export_variable,
 )
+from ...extract.headers.toolchain import _safe_mtime, _safe_size
 from ...extract.semantic_normalizer import normalize_header_ast
 from ...model import AbiSnapshot, RecordType
 from ...model.semantic_ir import SemanticIR

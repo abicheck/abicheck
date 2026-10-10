@@ -30,14 +30,6 @@ if TYPE_CHECKING:
 
 
 from .dumper_ast_config_cpp20 import _detect_cpp20_headers as _detect_cpp20_headers
-from .dumper_castxml_probe import (
-    _castxml_cpp_retry_allowed as _castxml_cpp_retry_allowed,
-    _castxml_failure_hint as _castxml_failure_hint,
-    _castxml_version_note as _castxml_version_note,
-    _is_toolchain_version_failure as _is_toolchain_version_failure,
-    _parse_castxml_version as _parse_castxml_version,
-    _validate_castxml_output as _validate_castxml_output,
-)
 from .dumper_clang import (
     _clang_available as _clang_available,
     _ClangAstParser as _ClangAstParser,
@@ -55,34 +47,6 @@ from .dumper_contract import (
     # (dumper.py is at the file-size cap); re-exported here so
     # ``dumper._attach_extraction_contract`` remains a valid bare-name call
     _attach_extraction_contract as _attach_extraction_contract,
-)
-from .dumper_sysinc import (
-    _auto_system_includes_enabled as _auto_system_includes_enabled,
-    _parse_gnu_include_search_dirs as _parse_gnu_include_search_dirs,
-    _probe_gnu_system_includes as _probe_gnu_system_includes,
-    _resolve_clang_system_includes as _resolve_clang_system_includes,
-    _resolve_probe_compiler as _resolve_probe_compiler,
-)
-from .dumper_toolchain import (
-    _allow_unsupported_castxml_enabled as _allow_unsupported_castxml_enabled,
-    _ast_compile_provenance as _ast_compile_provenance,
-    _ast_fallback_enabled as _ast_fallback_enabled,
-    _auto_ast_fallback_eligible as _auto_ast_fallback_eligible,
-    _configured_target_triple as _configured_target_triple,
-    _cplusplus_macro_for_standard as _cplusplus_macro_for_standard,
-    _parser_ast_fallback_reason as _parser_ast_fallback_reason,
-    _parser_ast_supported as _parser_ast_supported,
-    _parser_ast_toolchain as _parser_ast_toolchain,
-    _parser_ast_unsupported_reasons as _parser_ast_unsupported_reasons,
-    _parser_frontend_context_kind as _parser_frontend_context_kind,
-    _resolve_force_cpp as _resolve_force_cpp,
-    _resolve_selected_tool as _resolve_selected_tool,
-    _resolve_standard_provenance as _resolve_standard_provenance,
-    _safe_mtime as _safe_mtime,
-    _safe_size as _safe_size,
-    _stamp_ast_parser as _stamp_ast_parser,
-    _tool_identity as _tool_identity,
-    _tool_identity_metadata as _tool_identity_metadata,
 )
 from .errors import (
     SnapshotError,
@@ -149,7 +113,43 @@ from .extract.headers.castxml.dumper import (
     _parse_vtable_index as _parse_vtable_index,
     _vt_sort_key as _vt_sort_key,
 )
+from .extract.headers.castxml.probe import (
+    _castxml_cpp_retry_allowed as _castxml_cpp_retry_allowed,
+    _castxml_failure_hint as _castxml_failure_hint,
+    _castxml_version_note as _castxml_version_note,
+    _is_toolchain_version_failure as _is_toolchain_version_failure,
+    _parse_castxml_version as _parse_castxml_version,
+    _validate_castxml_output as _validate_castxml_output,
+)
 from .extract.headers.clang.backend import ClangBackend
+from .extract.headers.sysinc import (
+    _auto_system_includes_enabled as _auto_system_includes_enabled,
+    _parse_gnu_include_search_dirs as _parse_gnu_include_search_dirs,
+    _probe_gnu_system_includes as _probe_gnu_system_includes,
+    _resolve_clang_system_includes as _resolve_clang_system_includes,
+    _resolve_probe_compiler as _resolve_probe_compiler,
+)
+from .extract.headers.toolchain import (
+    _allow_unsupported_castxml_enabled as _allow_unsupported_castxml_enabled,
+    _ast_compile_provenance as _ast_compile_provenance,
+    _ast_fallback_enabled as _ast_fallback_enabled,
+    _auto_ast_fallback_eligible as _auto_ast_fallback_eligible,
+    _configured_target_triple as _configured_target_triple,
+    _cplusplus_macro_for_standard as _cplusplus_macro_for_standard,
+    _parser_ast_fallback_reason as _parser_ast_fallback_reason,
+    _parser_ast_supported as _parser_ast_supported,
+    _parser_ast_toolchain as _parser_ast_toolchain,
+    _parser_ast_unsupported_reasons as _parser_ast_unsupported_reasons,
+    _parser_frontend_context_kind as _parser_frontend_context_kind,
+    _resolve_force_cpp as _resolve_force_cpp,
+    _resolve_selected_tool as _resolve_selected_tool,
+    _resolve_standard_provenance as _resolve_standard_provenance,
+    _safe_mtime as _safe_mtime,
+    _safe_size as _safe_size,
+    _stamp_ast_parser as _stamp_ast_parser,
+    _tool_identity as _tool_identity,
+    _tool_identity_metadata as _tool_identity_metadata,
+)
 from .extract.path_aliases import absolutize_include_roots
 from .extract.progress import timed
 from .model import AbiSnapshot, RecordType
@@ -713,7 +713,7 @@ def _dump_elf(
     """ELF-specific dump: pyelftools + debug info (DWARF/BTF/CTF) + header AST.
 
     *dump_manifest* (ADR-050 D3, Phase B): a real multi-TU dump via
-    :func:`abicheck.dumper_manifest.resolve_header_ast_result`, replacing
+    :func:`abicheck.extract.headers.manifest.resolve_header_ast_result`, replacing
     the single flat *headers*/*extra_includes* parse. *headers* must be
     empty in this case (enforced by :func:`dump`). PE/Mach-O reject a
     non-``None`` value outright (not yet supported there).
@@ -806,7 +806,7 @@ def _dump_elf(
             )
         # Built here (session open): "auto" can fall back to clang (G16), so
         # ast_result.is_clang is the only reliable signal (Codex review).
-        from .dumper_manifest import resolve_header_ast_result
+        from .extract.headers.manifest import resolve_header_ast_result
 
         ast_result = timed("header AST parse")(resolve_header_ast_result)(
             dump_manifest=dump_manifest,

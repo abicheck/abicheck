@@ -13,6 +13,8 @@ from abicheck.service_dump_cache import (
     cached_run_dump,
 )
 
+_NO_CLANG_LAYOUT_TOOL = "abicheck.extract.headers.clang.layout_tool.shutil.which"
+
 
 def _sample_snap(name: str = "foo") -> AbiSnapshot:
     return AbiSnapshot(
@@ -228,7 +230,7 @@ class TestDumpCacheExtraKey:
         # ABICHECK_CLANG_LAYOUT_TOOL/PATH too -- a cache entry created before
         # enabling the tool must not be silently reused after enabling it.
         monkeypatch.delenv("ABICHECK_CLANG_LAYOUT_TOOL", raising=False)
-        with patch("abicheck.clang_layout_tool.shutil.which", return_value=None):
+        with patch(_NO_CLANG_LAYOUT_TOOL, return_value=None):
             k_before = _dump_cache_extra_key("elf", "clang", None, None)
         monkeypatch.setenv(
             "ABICHECK_CLANG_LAYOUT_TOOL", "/opt/abicheck-clang-layout-tool"
@@ -257,7 +259,7 @@ class TestDumpCacheExtraKey:
         # created before enabling/changing the tool must not be silently
         # reused afterward either.
         monkeypatch.delenv("ABICHECK_CLANG_LAYOUT_TOOL", raising=False)
-        with patch("abicheck.clang_layout_tool.shutil.which", return_value=None):
+        with patch(_NO_CLANG_LAYOUT_TOOL, return_value=None):
             k_before = _dump_cache_extra_key("elf", "hybrid", None, None)
         monkeypatch.setenv(
             "ABICHECK_CLANG_LAYOUT_TOOL", "/opt/abicheck-clang-layout-tool"
@@ -280,7 +282,7 @@ class TestDumpCacheExtraKey:
         monkeypatch.delenv("ABICHECK_AST_FRONTEND", raising=False)
         monkeypatch.setenv("ABICHECK_ALLOW_AST_FALLBACK", "1")
         monkeypatch.delenv("ABICHECK_CLANG_LAYOUT_TOOL", raising=False)
-        with patch("abicheck.clang_layout_tool.shutil.which", return_value=None):
+        with patch(_NO_CLANG_LAYOUT_TOOL, return_value=None):
             k_before = _dump_cache_extra_key("elf", "auto", None, None)
         monkeypatch.setenv(
             "ABICHECK_CLANG_LAYOUT_TOOL", "/opt/abicheck-clang-layout-tool"
@@ -367,7 +369,7 @@ class TestDumpCacheExtraKey:
         monkeypatch.setenv("ABICHECK_AST_FRONTEND", "invalid-value")
         monkeypatch.setenv("ABICHECK_ALLOW_AST_FALLBACK", "1")
         monkeypatch.delenv("ABICHECK_CLANG_LAYOUT_TOOL", raising=False)
-        with patch("abicheck.clang_layout_tool.shutil.which", return_value=None):
+        with patch(_NO_CLANG_LAYOUT_TOOL, return_value=None):
             k_before = _dump_cache_extra_key("elf", "auto", None, None)
         monkeypatch.setenv(
             "ABICHECK_CLANG_LAYOUT_TOOL", "/opt/abicheck-clang-layout-tool"
@@ -379,7 +381,7 @@ class TestDumpCacheExtraKey:
         monkeypatch.setenv("ABICHECK_AST_FRONTEND", "auto")
         monkeypatch.setenv("ABICHECK_ALLOW_AST_FALLBACK", "1")
         monkeypatch.delenv("ABICHECK_CLANG_LAYOUT_TOOL", raising=False)
-        with patch("abicheck.clang_layout_tool.shutil.which", return_value=None):
+        with patch(_NO_CLANG_LAYOUT_TOOL, return_value=None):
             k_before = _dump_cache_extra_key("elf", "auto", None, None)
         monkeypatch.setenv(
             "ABICHECK_CLANG_LAYOUT_TOOL", "/opt/abicheck-clang-layout-tool"

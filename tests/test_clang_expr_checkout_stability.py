@@ -15,8 +15,8 @@ import itertools
 
 import pytest
 
-from abicheck.clang_layout_tool import _bare_base_name
 from abicheck.extract.headers.clang.expr import _expr_fingerprint
+from abicheck.extract.headers.clang.layout_tool import _bare_base_name
 
 ROOTS = ["/old/inc", "/new/inc", "/home/ci/build-7/include", "rel/inc", "C:\\src\\inc"]
 SPELLINGS = [

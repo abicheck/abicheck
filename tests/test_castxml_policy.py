@@ -219,6 +219,6 @@ def test_min_castxml_clang_major_matches_dumper_probe_constant():
     # castxml_policy is the new canonical gate; dumper_castxml_probe's
     # advisory-note floor must stay in sync with it (both express the same
     # "glibc sized-float / __assume__" requirement).
-    from abicheck.dumper_castxml_probe import _RECOMMENDED_CLANG_MAJOR
+    from abicheck.extract.headers.castxml.probe import _RECOMMENDED_CLANG_MAJOR
 
     assert MIN_CASTXML_CLANG_MAJOR == _RECOMMENDED_CLANG_MAJOR

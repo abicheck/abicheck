@@ -38,7 +38,7 @@ docstring is as precise as it is about what it delegates to.
 Lives here (a real ADR-061 ``extract`` responsibility-package module, not a
 flat ``abicheck/dumper_*.py`` sibling) because ``architecture/modules.yaml``'s
 ``frozen_root_families`` closes that flat namespace to new members and
-:mod:`abicheck.dumper`/:mod:`abicheck.dumper_toolchain` were both already
+:mod:`abicheck.dumper`/:mod:`abicheck.extract.headers.toolchain` were both already
 at their own no-growth debt-ledger line-count baseline with no room for a
 new function. Both re-export every name here
 (``abicheck.dumper._resolve_header_backend`` and siblings keep resolving
