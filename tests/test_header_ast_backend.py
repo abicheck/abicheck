@@ -35,12 +35,12 @@ import pytest
 from _clang_ast_cache_isolation import _isolate_ast_cache, _reset_ast_memo
 
 from abicheck import deadline, dumper
-from abicheck.dumper_castxml_probe import check_scan_deadline, run_castxml
 from abicheck.dumper_clang_errors import run_clang_ast, run_clang_to_ast_file
 from abicheck.errors import SnapshotError
 from abicheck.extract.header_ast_fields import parse_header_ast_fields
 from abicheck.extract.headers.backend import HeaderAstBackend, HeaderParseRequest
 from abicheck.extract.headers.castxml.backend import CastxmlBackend, CastxmlRunError
+from abicheck.extract.headers.castxml.probe import check_scan_deadline, run_castxml
 from abicheck.extract.headers.clang.backend import ClangBackend
 
 _HAVE_CLANG = shutil.which("clang") is not None or shutil.which("clang++") is not None

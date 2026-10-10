@@ -106,10 +106,10 @@ COVERAGE: dict[str, str] = {
     "abicheck.demangle::memoized::demangle": R,
     "abicheck.diff_helpers::memoized::depth_aware_bare_name": B,
     "abicheck.diff_symbols_renames::memoized::_rename_name_parse": "UNCOVERED: rename heuristics need a removed+added pair with matching fingerprints; no cell fixture has one",
-    "abicheck.dumper_toolchain::memoized::_executable_sha256": H,
-    "abicheck.dumper_toolchain::memoized::_probe_default_language_standard": H,
-    "abicheck.dumper_toolchain::memoized::_tool_target_triple": H,
-    "abicheck.dumper_toolchain::memoized::_tool_version_output": H,
+    "abicheck.extract.headers.toolchain::memoized::_executable_sha256": H,
+    "abicheck.extract.headers.toolchain::memoized::_probe_default_language_standard": H,
+    "abicheck.extract.headers.toolchain::memoized::_tool_target_triple": H,
+    "abicheck.extract.headers.toolchain::memoized::_tool_version_output": H,
     "abicheck.elf_symbol_filter::memoized::is_abi_relevant_elf_symbol": B,
     "abicheck.extract.path_aliases::memoized::_canonical_spelling": H,
     "abicheck.extract.path_aliases::memoized::_source_header_alias_segments": H,
@@ -185,7 +185,7 @@ COVERAGE: dict[str, str] = {
     "abicheck.buildsource.include_graph_workers::pool::_shared_pool->BudgetedExecutor": _NEEDS_L5,
     "abicheck.buildsource.include_graph_workers::pool::_shared_pool->BudgetedExecutor#2": _NEEDS_L5,
     "abicheck.buildsource.pattern_facts::pool::find_pattern_facts->ProcessPoolExecutor": "UNCOVERED: process pool for large L4 pattern scans (threshold-gated); build-source path only",
-    "abicheck.dumper_manifest::pool::_run_tu_fragments->BudgetedExecutor": "UNCOVERED: per-TU pool of a --dump-manifest dump; needs a manifest + castxml",
+    "abicheck.extract.headers.manifest::pool::_run_tu_fragments->BudgetedExecutor": "UNCOVERED: per-TU pool of a --dump-manifest dump; needs a manifest + castxml",
     # The one pool behind the environment-matrix probes and, since #1425,
     # every L5 clang graph pass (buildsource/l5_ast_pass.run_ast_passes) --
     # it replaced the six per-extractor ``extract_from_build`` pools.

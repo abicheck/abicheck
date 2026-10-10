@@ -13,7 +13,7 @@
 # limitations under the License.
 """ADR-050 D3 (G32 Phase B) — the per-TU dump loop and placeholder merge.
 
-Scope: pure-Python tests over abicheck.dumper_manifest's TuFragment/merge
+Scope: pure-Python tests over abicheck.extract.headers.manifest's TuFragment/merge
 logic (fake entities, no compiler) and the run_tu_fragment/run_tu_loop
 orchestration (a stub header_ast_parser, so the per-TU wiring -- which
 includes get which headers, which public_header_paths, optional-TU-skip --
@@ -49,19 +49,19 @@ import pytest
 from abicheck import process_resources as dm_process_resources
 from abicheck.dump_manifest import DumpManifest, IncludeEntry, TranslationUnit
 from abicheck.dumper import dump
-from abicheck.dumper_manifest import (
+from abicheck.errors import (
+    AstContextMissingError,
+    SnapshotError,
+    TuMergeError,
+    ValidationError,
+)
+from abicheck.extract.headers.manifest import (
     MergedTuFragments,
     TuFragment,
     entity_key,
     merge_tu_fragments,
     run_tu_fragment,
     run_tu_loop,
-)
-from abicheck.errors import (
-    AstContextMissingError,
-    SnapshotError,
-    TuMergeError,
-    ValidationError,
 )
 from abicheck.model import EnumType, Function, Param, RecordType, TypeField, Variable
 
@@ -619,7 +619,7 @@ def test_run_tu_fragments_preserves_declared_order_despite_completion_order(
     returned fragment list -- merge_tu_fragments treats TU order as
     significant (which TU "wins" an ODR-compatible merge), so the pool must
     collect results in submission order, not completion order."""
-    from abicheck.dumper_manifest import _run_tu_fragments
+    from abicheck.extract.headers.manifest import _run_tu_fragments
 
     monkeypatch.setenv("ABICHECK_TU_JOBS", "2")
     monkeypatch.setattr(dm_process_resources, "mem_cap", lambda budget: None)
@@ -676,8 +676,8 @@ def test_run_tu_fragments_cancels_pending_futures_promptly_on_required_failure(
     import threading
     from concurrent.futures import Future
 
-    from abicheck.dumper_manifest import _run_tu_fragments
     from abicheck.errors import SnapshotError
+    from abicheck.extract.headers.manifest import _run_tu_fragments
 
     monkeypatch.setenv("ABICHECK_TU_JOBS", "2")
     # _tu_jobs clamps an explicit ABICHECK_TU_JOBS override by available
@@ -761,8 +761,8 @@ def test_run_tu_fragments_raises_promptly_without_waiting_for_running_siblings(
     """
     import threading
 
-    from abicheck.dumper_manifest import _run_tu_fragments
     from abicheck.errors import SnapshotError
+    from abicheck.extract.headers.manifest import _run_tu_fragments
 
     monkeypatch.setenv("ABICHECK_TU_JOBS", "2")
     monkeypatch.setattr(dm_process_resources, "mem_cap", lambda budget: None)
@@ -833,7 +833,7 @@ def test_run_tu_fragments_propagates_active_deadline_into_pool_workers(monkeypat
     thread had an active scope.
     """
     from abicheck import deadline
-    from abicheck.dumper_manifest import _run_tu_fragments
+    from abicheck.extract.headers.manifest import _run_tu_fragments
 
     monkeypatch.setenv("ABICHECK_TU_JOBS", "2")
     # Same reasoning as the cancellation test above: without this, a
@@ -888,14 +888,14 @@ def test_run_tu_fragments_propagates_prune_suppression_into_pool_workers(
     ``suppress_streaming_prune()``, set around the whole manifest dump
     whenever a full/unscoped request (``include_dependencies=True``) is in
     effect. Each stub "TU" records what
-    ``dumper_clang_streaming.streaming_prune_suppressed()`` sees on its own
+    ``streaming_prune_suppressed()`` sees on its own
     (pool worker) thread; if the signal didn't propagate, that's ``False``
     even though the submitting thread had it active."""
-    from abicheck.dumper_manifest import _run_tu_fragments
     from abicheck.extract.headers.clang.streaming import (
         streaming_prune_suppressed,
         suppress_streaming_prune,
     )
+    from abicheck.extract.headers.manifest import _run_tu_fragments
 
     monkeypatch.setenv("ABICHECK_TU_JOBS", "2")
     monkeypatch.setattr(dm_process_resources, "mem_cap", lambda budget: None)
@@ -939,8 +939,8 @@ def test_run_tu_fragments_pool_workers_unsuppressed_by_default(monkeypatch):
     ``suppress_streaming_prune()`` scope, pool workers see it as inactive --
     proving the propagation mechanism doesn't leak a `True` value by
     accident regardless of what the caller does."""
-    from abicheck.dumper_manifest import _run_tu_fragments
     from abicheck.extract.headers.clang.streaming import streaming_prune_suppressed
+    from abicheck.extract.headers.manifest import _run_tu_fragments
 
     monkeypatch.setenv("ABICHECK_TU_JOBS", "2")
     monkeypatch.setattr(dm_process_resources, "mem_cap", lambda budget: None)
@@ -976,14 +976,14 @@ def test_run_tu_fragments_pool_workers_unsuppressed_by_default(monkeypatch):
 
 
 def test_tu_jobs_env_override_forces_serial(monkeypatch):
-    from abicheck.dumper_manifest import _tu_jobs
+    from abicheck.extract.headers.manifest import _tu_jobs
 
     monkeypatch.setenv("ABICHECK_TU_JOBS", "1")
     assert _tu_jobs(100) == 1
 
 
 def test_tu_jobs_auto_capped_at_cpu_and_eight(monkeypatch):
-    from abicheck.dumper_manifest import _tu_jobs
+    from abicheck.extract.headers.manifest import _tu_jobs
 
     monkeypatch.delenv("ABICHECK_TU_JOBS", raising=False)
     monkeypatch.setattr(dm_process_resources, "mem_cap", lambda budget: None)
@@ -993,7 +993,7 @@ def test_tu_jobs_auto_capped_at_cpu_and_eight(monkeypatch):
 
 
 def test_tu_jobs_clamped_by_available_memory(monkeypatch):
-    from abicheck.dumper_manifest import _tu_jobs
+    from abicheck.extract.headers.manifest import _tu_jobs
 
     monkeypatch.delenv("ABICHECK_TU_JOBS", raising=False)
     monkeypatch.delenv("ABICHECK_TU_JOB_MEM_GIB", raising=False)
@@ -1005,7 +1005,7 @@ def test_tu_jobs_clamped_by_available_memory(monkeypatch):
 def test_tu_jobs_invalid_env_falls_back_to_serial(monkeypatch, caplog):
     import logging
 
-    from abicheck.dumper_manifest import _tu_jobs
+    from abicheck.extract.headers.manifest import _tu_jobs
 
     monkeypatch.setenv("ABICHECK_TU_JOBS", "not-a-number")
     with caplog.at_level(logging.WARNING):
@@ -1020,7 +1020,7 @@ def test_tu_jobs_invalid_env_falls_back_to_serial(monkeypatch, caplog):
 def test_tu_jobs_explicit_env_clamped_by_oversubscription_ceiling(monkeypatch, caplog):
     import logging
 
-    from abicheck.dumper_manifest import _tu_jobs
+    from abicheck.extract.headers.manifest import _tu_jobs
 
     monkeypatch.setenv("ABICHECK_TU_JOBS", "64")
     monkeypatch.setattr(dm_process_resources, "mem_cap", lambda budget: None)
@@ -1034,7 +1034,7 @@ def test_tu_jobs_explicit_env_clamped_by_oversubscription_ceiling(monkeypatch, c
 def test_tu_jobs_explicit_env_clamped_by_available_memory(monkeypatch, caplog):
     import logging
 
-    from abicheck.dumper_manifest import _tu_jobs
+    from abicheck.extract.headers.manifest import _tu_jobs
 
     monkeypatch.setenv("ABICHECK_TU_JOBS", "8")
     monkeypatch.delenv("ABICHECK_TU_JOB_MEM_GIB", raising=False)

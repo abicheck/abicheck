@@ -34,7 +34,6 @@ from abicheck import (
     dumper,
     dumper_clang,
     dumper_clang_errors,
-    dumper_toolchain,
 )
 from abicheck.dumper import (
     _auto_system_includes_enabled,
@@ -60,6 +59,7 @@ from abicheck.dumper_clang import (
 )
 from abicheck.dumper_clang_errors import _parse_clang_ast_result
 from abicheck.errors import SnapshotError
+from abicheck.extract.headers import toolchain as dumper_toolchain
 from abicheck.extract.headers.castxml import backend as cxb
 from abicheck.extract.headers.clang import backend as clang_backend
 from abicheck.extract.headers.clang.backend import ClangBackend, clang_header_dump
@@ -5226,7 +5226,7 @@ def test_auto_system_includes_enabled_default_and_on(
 def test_resolve_probe_compiler_prefers_gnu_gcc_path(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from abicheck import dumper_sysinc
+    from abicheck.extract.headers import sysinc as dumper_sysinc
 
     monkeypatch.setattr(dumper_sysinc.shutil, "which", lambda c: c)
     # An explicit GNU --compiler is used verbatim…
@@ -5250,7 +5250,7 @@ def test_resolve_probe_compiler_skips_clang_family_aliases(
     (instead of a real g++/gcc on PATH) yields incomplete system include dirs
     (e.g. missing /usr/include with stdlib.h), since these are the same clang
     binary under a different name, not real gcc/g++."""
-    from abicheck import dumper_sysinc
+    from abicheck.extract.headers import sysinc as dumper_sysinc
 
     monkeypatch.setattr(dumper_sysinc.shutil, "which", lambda c: c)
     for alias in ("icx", "icpx", "dpcpp", "dpcpp-cl"):
@@ -5260,7 +5260,7 @@ def test_resolve_probe_compiler_skips_clang_family_aliases(
 def test_resolve_probe_compiler_none_when_no_compiler(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from abicheck import dumper_sysinc
+    from abicheck.extract.headers import sysinc as dumper_sysinc
 
     monkeypatch.setattr(dumper_sysinc.shutil, "which", lambda c: None)
     assert _resolve_probe_compiler("c++", None, None) is None
@@ -5269,7 +5269,7 @@ def test_resolve_probe_compiler_none_when_no_compiler(
 def test_resolve_clang_system_includes_gating(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from abicheck import dumper_sysinc
+    from abicheck.extract.headers import sysinc as dumper_sysinc
 
     monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "1")
     monkeypatch.setattr(
@@ -5304,7 +5304,7 @@ def test_resolve_clang_system_includes_gating(
 def test_resolve_clang_system_includes_no_compiler(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from abicheck import dumper_sysinc
+    from abicheck.extract.headers import sysinc as dumper_sysinc
 
     monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "1")
     monkeypatch.setattr(dumper_sysinc, "_resolve_probe_compiler", lambda *a, **k: None)
@@ -5387,7 +5387,7 @@ def test_resolve_clang_system_includes_respects_passthrough(
 ) -> None:
     # Hermetic/cross flags supplied via --compiler-option must suppress
     # the host probe too, not just the structured nostdinc/sysroot (Codex review).
-    from abicheck import dumper_sysinc
+    from abicheck.extract.headers import sysinc as dumper_sysinc
 
     monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "1")
     monkeypatch.setattr(dumper_sysinc, "_resolve_probe_compiler", lambda *a, **k: "g++")
@@ -5413,7 +5413,7 @@ def test_resolve_clang_system_includes_probes_without_passthrough(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # A benign --gcc-options that doesn't isolate the parse still probes.
-    from abicheck import dumper_sysinc
+    from abicheck.extract.headers import sysinc as dumper_sysinc
 
     monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "1")
     monkeypatch.setattr(dumper_sysinc, "_resolve_probe_compiler", lambda *a, **k: "g++")

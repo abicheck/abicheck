@@ -805,7 +805,7 @@
       "review_by": "2026-11-30"
     },
     {
-      "path": "abicheck/dumper_toolchain.py",
+      "path": "abicheck/extract/headers/toolchain.py",
       "baseline_lines": 802,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",

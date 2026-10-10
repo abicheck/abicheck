@@ -27,30 +27,34 @@ import threading
 from pathlib import Path
 from typing import Any, TypedDict
 
-from ._compiler_options import has_explicit_cpp_std, has_explicit_std, split_gcc_options
-from .buildsource.redaction import DEFAULT_REDACTION
-from .deadline import run_bounded, supervised_popen, terminate_process_tree
-from .dumper_ast_config import (
+from ..._compiler_options import (
+    has_explicit_cpp_std,
+    has_explicit_std,
+    split_gcc_options,
+)
+from ...buildsource.redaction import DEFAULT_REDACTION
+from ...deadline import run_bounded, supervised_popen, terminate_process_tree
+from ...dumper_ast_config import (
     _detect_cpp_headers,
     _exported_symbols_indicate_cpp,
     _header_declared_identifiers,
 )
-from .dumper_ast_config_cpp20 import _detect_cpp20_headers
-from .extract.env_flags import env_flag
+from ...dumper_ast_config_cpp20 import _detect_cpp20_headers
+from ...extract.env_flags import env_flag
 
 # E-S1: relocated to extract/toolchain_identity.py (ADR-061's extract
 # package owns "read a binary/debug/header/build fact") alongside the new
 # compiler_identity_status this function's own FAILED-probe carve-out
-# feeds -- re-exported here (`X as X`) so `abicheck.dumper_toolchain.
+# feeds -- re-exported here (`X as X`) so `abicheck.extract.headers.toolchain.
 # _compiler_family_from_toolchain` stays a valid import path for existing
 # callers/tests.
-from .extract.toolchain_identity import (
+from ...extract.toolchain_identity import (
     _compiler_family_from_toolchain as _compiler_family_from_toolchain,
 )
-from .model.execution_cache import memoized, path_witness
-from .model.header_parse_coverage import HEADER_PARSE_EXCLUDED_METADATA
-from .model.language_standard import language_standard_is_cxx, language_standard_year
-from .storage.ast_parse_exclusions import HEADER_PARSE_EXCLUDED_KEY
+from ...model.execution_cache import memoized, path_witness
+from ...model.header_parse_coverage import HEADER_PARSE_EXCLUDED_METADATA
+from ...model.language_standard import language_standard_is_cxx, language_standard_year
+from ...storage.ast_parse_exclusions import HEADER_PARSE_EXCLUDED_KEY
 
 log = logging.getLogger(__name__)
 
@@ -288,9 +292,9 @@ def _stamp_ast_parser(
     the identical installation, purely because this fix corrected which
     binary's identity gets recorded).
     """
-    from .dumper_ast_config import _resolve_compiler_binary
-    from .errors import SnapshotError
-    from .extract.headers.castxml.policy import evaluate_castxml_version
+    from ...dumper_ast_config import _resolve_compiler_binary
+    from ...errors import SnapshotError
+    from ...extract.headers.castxml.policy import evaluate_castxml_version
 
     executable_meta = _tool_identity_metadata(executable)
     metadata = {"producer": producer, **executable_meta}

@@ -35,7 +35,7 @@ from pathlib import Path
 import pytest
 
 from abicheck.dump_manifest import TranslationUnit
-from abicheck.dumper_manifest import run_tu_loop
+from abicheck.extract.headers.manifest import run_tu_loop
 from abicheck.model.fact import FactStatus
 from abicheck.model.occurrence import canonical_key
 from abicheck.tu_fragment import MergedTuFragments

@@ -54,39 +54,40 @@ from dataclasses import dataclass, replace as _dataclasses_replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from . import deadline
-from .dump_manifest import DumpManifest, IncludeEntry, TranslationUnit
-from .dumper_clang import _ClangAstParser
-from .dumper_toolchain import (
+import abicheck.deadline as deadline
+
+from ...dump_manifest import DumpManifest, IncludeEntry, TranslationUnit
+from ...dumper_clang import _ClangAstParser
+from ...extract.header_ast_fields import parse_header_ast_fields
+from ...extract.headers.clang.streaming import (
+    streaming_prune_suppressed,
+    suppress_streaming_prune,
+)
+from ...extract.headers.toolchain import (
     _parser_ast_fallback_reason,
     _parser_ast_supported,
     _parser_ast_toolchain,
     _parser_ast_unsupported_reasons,
     _parser_frontend_context_kind,
 )
-from .extract.header_ast_fields import parse_header_ast_fields
-from .extract.headers.clang.streaming import (
-    streaming_prune_suppressed,
-    suppress_streaming_prune,
-)
-from .extract.manifest_semantic_ir import manifest_semantic_ir
-from .extract.path_aliases import absolutize_include_roots
-from .extract.progress import track
-from .extract.semantic_normalizer import normalize_header_ast
-from .extract.tu_jobs import _tu_jobs
-from .model import EnumType, Function, RecordType, Variable
-from .model.identity import EntityId
-from .model.semantic_ir import SemanticIR
-from .process_resources import BudgetedExecutor
-from .tu_fragment import (
+from ...extract.manifest_semantic_ir import manifest_semantic_ir
+from ...extract.path_aliases import absolutize_include_roots
+from ...extract.progress import track
+from ...extract.semantic_normalizer import normalize_header_ast
+from ...extract.tu_jobs import _tu_jobs
+from ...model import EnumType, Function, RecordType, Variable
+from ...model.identity import EntityId
+from ...model.semantic_ir import SemanticIR
+from ...process_resources import BudgetedExecutor
+from ...tu_fragment import (
     MergedTuFragments as MergedTuFragments,
     TuFragment as TuFragment,
     entity_key as entity_key,
 )
-from .tu_merge import merge_fragments as merge_tu_fragments
+from ...tu_merge import merge_fragments as merge_tu_fragments
 
 if TYPE_CHECKING:
-    from .dumper_castxml import _CastxmlParser
+    from ...dumper_castxml import _CastxmlParser
 
 log = logging.getLogger(__name__)
 _TU_PROGRESS = "header AST (translation units)"
