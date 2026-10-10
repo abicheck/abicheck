@@ -1053,7 +1053,7 @@ def test_streaming_prune_gate_matrix(
     from what each scope means, not from the function's own conditions.
     """
     from abicheck import dumper_clang_errors
-    from abicheck.dumper_clang_streaming import suppress_streaming_prune
+    from abicheck.extract.headers.clang.streaming import suppress_streaming_prune
     from abicheck.storage.header_ast_cache import ast_memoize_scope
 
     monkeypatch.setenv(

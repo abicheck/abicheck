@@ -891,11 +891,11 @@ def test_run_tu_fragments_propagates_prune_suppression_into_pool_workers(
     ``dumper_clang_streaming.streaming_prune_suppressed()`` sees on its own
     (pool worker) thread; if the signal didn't propagate, that's ``False``
     even though the submitting thread had it active."""
-    from abicheck.dumper_clang_streaming import (
+    from abicheck.dumper_manifest import _run_tu_fragments
+    from abicheck.extract.headers.clang.streaming import (
         streaming_prune_suppressed,
         suppress_streaming_prune,
     )
-    from abicheck.dumper_manifest import _run_tu_fragments
 
     monkeypatch.setenv("ABICHECK_TU_JOBS", "2")
     monkeypatch.setattr(dm_process_resources, "mem_cap", lambda budget: None)
@@ -939,8 +939,8 @@ def test_run_tu_fragments_pool_workers_unsuppressed_by_default(monkeypatch):
     ``suppress_streaming_prune()`` scope, pool workers see it as inactive --
     proving the propagation mechanism doesn't leak a `True` value by
     accident regardless of what the caller does."""
-    from abicheck.dumper_clang_streaming import streaming_prune_suppressed
     from abicheck.dumper_manifest import _run_tu_fragments
+    from abicheck.extract.headers.clang.streaming import streaming_prune_suppressed
 
     monkeypatch.setenv("ABICHECK_TU_JOBS", "2")
     monkeypatch.setattr(dm_process_resources, "mem_cap", lambda budget: None)

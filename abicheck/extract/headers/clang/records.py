@@ -80,7 +80,7 @@ import re
 from collections.abc import Callable
 from typing import Any
 
-from ....dumper_clang_qualifiers import (
+from ....extract.headers.clang.qualifiers import (
     clang_record_is_abstract,
     clang_record_type_traits,
     desugared_qualtype,

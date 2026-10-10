@@ -68,12 +68,6 @@ from xml.etree.ElementTree import (
     Element,  # type annotation only; parsing uses defusedxml
 )
 
-import abicheck.dumper_castxml_typedefs as _typedefs_helpers
-
-from ....dumper_castxml_typedefs import (
-    _deprecation_marker as _deprecation_marker,
-    _extract_contract_attributes as _extract_contract_attributes,
-)
 from ....extract.headers.castxml import (
     context as _castxml_context,
     enums as _castxml_enums,
@@ -82,6 +76,7 @@ from ....extract.headers.castxml import (
     records as _castxml_records,
     scope as _castxml_scope,
     type_resolution as _castxml_type_resolution,
+    typedefs as _typedefs_helpers,
 )
 from ....extract.headers.castxml.names import (
     _SYNTHETIC_DTOR_KEY_PREFIX as _SYNTHETIC_DTOR_KEY_PREFIX,
@@ -93,6 +88,10 @@ from ....extract.headers.castxml.names import (
     _vt_sort_key as _vt_sort_key,
     is_synthetic_ctor_key as is_synthetic_ctor_key,
     is_synthetic_dtor_key as is_synthetic_dtor_key,
+)
+from ....extract.headers.castxml.typedefs import (
+    _deprecation_marker as _deprecation_marker,
+    _extract_contract_attributes as _extract_contract_attributes,
 )
 from ....extract.headers.scope_segments import (
     entity_is_record_member as entity_is_record_member,

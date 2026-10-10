@@ -47,22 +47,7 @@ from collections.abc import Sequence
 __all__ = [
     "evidence_contract_error_entries",
     "evidence_contract_notice",
-    "release_evidence_contract_contribution",
 ]
-
-
-def release_evidence_contract_contribution(
-    library_results: Sequence[object],
-) -> int:
-    """The release's own contribution -- see the policy owner of the same name.
-
-    Re-exported here so this module reads as the one place the release's
-    evidence-contract axis is handled; the fold itself belongs to `policy`,
-    which is also where the report's `ExitDecision` derives it.
-    """
-    from ...workflows.gate import release_evidence_contract_contribution as _fold
-
-    return _fold(list(library_results))  # type: ignore[arg-type]
 
 
 def evidence_contract_notice(

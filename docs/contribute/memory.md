@@ -314,4 +314,4 @@ count behind those figures were never established. **None of the reductions
 above is a measured oneDAL reduction**, and no claim is made here about
 fitting a nominal-16-GB runner. The remaining owners, and the exact next
 experiment, are recorded in
-[Known gaps](known-gaps.md#multi-library-compare-memory-the-owners-left-after-the-three-retention-fixes-pr-1332).
+[Known gaps](known-gaps.md#multi-library-compare-memory-bundle-facts-out-still-pins-old-snapshots-per-member).

@@ -118,13 +118,13 @@ from ..classify import is_supported_compare_input
 from ..debug_resolver import DebugArtifact, resolve_debug_info
 from ..dump_manifest import DumpManifest, load_manifest
 from ..dumper_clang import resolve_source_frontend_clang_bin
-from ..dumper_clang_streaming import suppress_streaming_prune
 from ..dumper_contract import _manifest_declared_includes
 from ..dwarf_snapshot import show_data_sources
 from ..dwarf_unified import parse_dwarf
 from ..elf_metadata import parse_elf_metadata
 from ..extract.dependency_exclusion import dependency_exclusion_scope
 from ..extract.dump_manifest_roots import dump_manifest_header_roots
+from ..extract.headers.clang.streaming import suppress_streaming_prune
 from ..header_conditionals import attach_build_context_for_parsed_headers
 from ..header_utils import (
     dedup_paths_preserve_order,

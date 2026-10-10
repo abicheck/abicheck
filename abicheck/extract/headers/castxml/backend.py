@@ -42,7 +42,6 @@ from pathlib import Path
 from typing import cast
 from xml.etree.ElementTree import Element, tostring
 
-from ....castxml_policy import evaluate_castxml_version
 from ....dumper_ast_config_cpp20 import _detect_cpp20_headers
 from ....dumper_castxml_probe import (
     _castxml_cpp_retry_allowed,
@@ -67,6 +66,7 @@ from ....extract.headers.ast_config import (
     _resolve_compiler_binary,
 )
 from ....extract.headers.castxml.dumper import _CastxmlParser
+from ....extract.headers.castxml.policy import evaluate_castxml_version
 from ....storage.atomic_file import atomic_write as _atomic_write
 from ....storage.cache_integrity import record_digest
 from ....storage.header_ast_cache import (

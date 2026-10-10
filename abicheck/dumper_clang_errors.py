@@ -37,10 +37,13 @@ from pathlib import Path
 from typing import Any, cast
 
 from . import deadline
-from .dumper_clang_streaming import load_pruned_clang_ast, streaming_prune_suppressed
 from .errors import SnapshotError
 from .extract.env_flags import env_flag
 from .extract.headers.clang.error_header_retry import _DIRECT_INCLUDE_GUARD_RE
+from .extract.headers.clang.streaming import (
+    load_pruned_clang_ast,
+    streaming_prune_suppressed,
+)
 from .storage.acyclic_json import gc_paused
 from .storage.ast_parse_exclusions import record_parse_exclusions
 from .storage.ast_size_observer import mark_ast_intake, report_ast_size
@@ -410,7 +413,7 @@ def run_clang_to_ast_file(
 
 
 #: Opt-in env var enabling the streaming dependency-declaration pruner
-#: (:mod:`abicheck.dumper_clang_streaming`) for the plain (non-DPC++)
+#: (:mod:`abicheck.extract.headers.clang.streaming`) for the plain (non-DPC++)
 #: ``json.load`` below. Off by default -- matches this codebase's existing
 #: convention for a real, tested, but not-yet-default-wired performance path
 #: (see ``ABICHECK_CLANG_LAYOUT_TOOL``/``ABICHECK_PARALLEL_EXTRACTION``).
