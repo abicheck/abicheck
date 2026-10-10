@@ -299,7 +299,7 @@ class UnsupportedCastxmlVersionError(SnapshotError):
     be used for an authoritative L2 scan, before any header is parsed.
 
     A subclass of :class:`SnapshotError` — existing ``except SnapshotError``
-    handling still catches it unchanged. See :mod:`abicheck.castxml_policy`
+    handling still catches it unchanged. See :mod:`abicheck.extract.headers.castxml.policy`
     for the version range and the explicit ``allow_unsupported`` override
     that turns this hard failure into a degraded, clearly-flagged snapshot
     instead.

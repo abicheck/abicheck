@@ -822,7 +822,7 @@ def check_doc_count_sync(f: Findings) -> None:
     """
     try:
         from abicheck import schemas
-        from abicheck.castxml_policy import (
+        from abicheck.extract.headers.castxml.policy import (
             MAX_CASTXML,
             MIN_CASTXML,
             MIN_CASTXML_CLANG_MAJOR,

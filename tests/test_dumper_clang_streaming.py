@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Unit tests for :mod:`abicheck.dumper_clang_streaming` (no clang required).
+"""Unit tests for :mod:`abicheck.extract.headers.clang.streaming` (no clang required).
 
 Pure-Python tests against hand-built clang-``-ast-dump=json``-shaped dicts —
 see ``tests/test_clang_header_backend_integration.py`` for the companion
@@ -25,7 +25,7 @@ from __future__ import annotations
 import io
 import json
 
-from abicheck.dumper_clang_streaming import (
+from abicheck.extract.headers.clang.streaming import (
     PRUNED_PLACEHOLDER_KIND,
     DependencyDeclPruningHook,
     load_pruned_clang_ast,
@@ -243,7 +243,7 @@ class TestLoadPrunedClangAst:
         an unrelated same-named declaration in a different namespace, the
         exact ``a::VALUE``/``b::VALUE`` collision that index exists to
         prevent."""
-        from abicheck.dumper_clang_expr import _index_decl_id_qualified_names
+        from abicheck.extract.headers.clang.expr import _index_decl_id_qualified_names
 
         dep_value = _func_node("VarDecl", "VALUE", _DEP_HEADER)
         dep_value["id"] = "0xAAA"

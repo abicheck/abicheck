@@ -39,8 +39,8 @@ from unittest.mock import patch
 import pytest
 from _dump_format_fakes import fake_format_adapter
 
-from abicheck.dumper_clang_streaming import streaming_prune_suppressed
 from abicheck.extract.dependency_exclusion import active_dependency_predicate
+from abicheck.extract.headers.clang.streaming import streaming_prune_suppressed
 from abicheck.model import AbiSnapshot
 from abicheck.service import run_dump
 from abicheck.workflows.dump.formats import NativeExtractRequest
