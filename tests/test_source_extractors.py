@@ -1732,7 +1732,7 @@ def test_entity_from_typedef_carries_provenance() -> None:
 def test_castxml_parse_public_typedefs_scopes_to_public_headers() -> None:
     from xml.etree.ElementTree import Element, SubElement
 
-    from abicheck.dumper_castxml import _CastxmlParser
+    from abicheck.extract.headers.castxml.dumper import _CastxmlParser
 
     def _set(parent, tag, **attrs):
         el = SubElement(parent, tag)

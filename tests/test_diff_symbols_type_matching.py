@@ -34,7 +34,7 @@ from __future__ import annotations
 
 from abicheck.checker import ChangeKind, compare
 from abicheck.diff_helpers import build_type_map
-from abicheck.dumper_castxml import SYNTHETIC_CTOR_KEY_PREFIX
+from abicheck.extract.headers.castxml.dumper import SYNTHETIC_CTOR_KEY_PREFIX
 from abicheck.model import (
     AbiSnapshot,
     AccessLevel,

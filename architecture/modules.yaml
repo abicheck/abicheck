@@ -137,14 +137,9 @@
         "abicheck/ctf_metadata.py",
         "abicheck/debug_resolver.py",
         "abicheck/dump_manifest.py",
-        "abicheck/dumper_ast_config.py",
         "abicheck/dumper_ast_config_cpp20.py",
-        "abicheck/dumper_ast_config_cpp20_chains.py",
         "abicheck/dumper_clang.py",
         "abicheck/dumper_clang_errors.py",
-        "abicheck/dumper_debug.py",
-        "abicheck/dumper_elf_symbols.py",
-        "abicheck/dumper_layout_backfill.py",
         "abicheck/dwarf_advanced.py",
         "abicheck/dwarf_metadata.py",
         "abicheck/dwarf_presence.py",
@@ -175,8 +170,7 @@
         "abicheck/tu_merge.py",
         "abicheck/tu_merge_provenance.py",
         "abicheck/type_metadata.py",
-        "abicheck/dumper_contract.py",
-        "abicheck/dumper_castxml.py"
+        "abicheck/dumper_contract.py"
       ]
     },
     "compare": {
@@ -530,16 +524,10 @@
     ],
     "aggregate_": [],
     "dumper_": [
-      "dumper_ast_config.py",
       "dumper_ast_config_cpp20.py",
-      "dumper_ast_config_cpp20_chains.py",
-      "dumper_castxml.py",
       "dumper_clang.py",
       "dumper_clang_errors.py",
-      "dumper_contract.py",
-      "dumper_debug.py",
-      "dumper_elf_symbols.py",
-      "dumper_layout_backfill.py"
+      "dumper_contract.py"
     ],
     "change_registry_": [
       "change_registry_types.py"
@@ -704,16 +692,10 @@
     "dry_run.py",
     "dump_manifest.py",
     "dumper.py",
-    "dumper_ast_config.py",
     "dumper_ast_config_cpp20.py",
-    "dumper_ast_config_cpp20_chains.py",
-    "dumper_castxml.py",
     "dumper_clang.py",
     "dumper_clang_errors.py",
     "dumper_contract.py",
-    "dumper_debug.py",
-    "dumper_elf_symbols.py",
-    "dumper_layout_backfill.py",
     "dwarf_advanced.py",
     "dwarf_metadata.py",
     "dwarf_presence.py",

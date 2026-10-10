@@ -87,7 +87,7 @@ from ...tu_fragment import (
 from ...tu_merge import merge_fragments as merge_tu_fragments
 
 if TYPE_CHECKING:
-    from ...dumper_castxml import _CastxmlParser
+    from ...extract.headers.castxml.dumper import _CastxmlParser
 
 log = logging.getLogger(__name__)
 _TU_PROGRESS = "header AST (translation units)"
@@ -432,7 +432,7 @@ def run_tu_loop(
     *public_header_paths*/*public_header_dirs*) feed each TU's own
     :func:`run_tu_fragment` call, where they scope constant extraction the
     same roots-are-always-public way the legacy CLI's ``-H``/``--header``
-    already does (see :class:`abicheck.dumper_castxml._CastxmlParser`'s own
+    already does (see :class:`abicheck.extract.headers.castxml.dumper._CastxmlParser`'s own
     docstring) -- but :func:`merge_tu_fragments` gets only the manifest's
     *explicit* ``public_header_paths``/``public_header_dirs`` (``roots``
     excluded), because that is what the *later*, authoritative

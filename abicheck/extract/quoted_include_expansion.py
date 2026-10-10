@@ -29,7 +29,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from ..dumper_ast_config_cpp20_chains import _strip_inactive_if_zero_blocks
+from ..extract.headers.ast_config_cpp20_chains import _strip_inactive_if_zero_blocks
 
 # C++11 raw string literal: [prefix]R"delim(...)delim" — the standard
 # permits an optional encoding prefix (u8, u, U, L) directly before the R,

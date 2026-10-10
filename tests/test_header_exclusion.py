@@ -119,7 +119,7 @@ class TestResolveInputExclusionWiring:
         unfiltered entry. Asserting the two keys differ is what pins that
         chain; asserting the filter "works" would not.
         """
-        from abicheck.dumper_ast_config import _cache_key
+        from abicheck.extract.headers.ast_config import _cache_key
 
         inc = tmp_path / "inc"
         inc.mkdir()

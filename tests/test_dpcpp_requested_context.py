@@ -4,8 +4,8 @@
 
 from pathlib import Path
 
-from abicheck.dumper_ast_config import _build_clang_header_command
 from abicheck.dumper_clang import _resolve_dpcpp_acquisition
+from abicheck.extract.headers.ast_config import _build_clang_header_command
 
 
 def test_host_context_uses_one_direct_sycl_pass() -> None:

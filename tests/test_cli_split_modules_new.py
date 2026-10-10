@@ -166,7 +166,7 @@ class TestCastxmlEnumHexInit:
     def test_hex_enum_value_parsed(self) -> None:
         from xml.etree.ElementTree import Element
 
-        from abicheck.dumper_castxml import _CastxmlParser
+        from abicheck.extract.headers.castxml.dumper import _CastxmlParser
 
         root = Element("CastXML")
         enum = Element("Enumeration", id="e1", name="Flags")
@@ -186,7 +186,7 @@ class TestCastxmlAtomicType:
     def _atomic_type_name(inner: str, *, tag: str = "AtomicType") -> str:
         from xml.etree.ElementTree import Element
 
-        from abicheck.dumper_castxml import _CastxmlParser
+        from abicheck.extract.headers.castxml.dumper import _CastxmlParser
 
         root = Element("CastXML")
         root.append(Element("FundamentalType", id="inner", name=inner))
@@ -257,7 +257,7 @@ class TestCastxmlAtomicType:
     def test_legacy_atomic_without_type_uses_sentinel(self) -> None:
         from xml.etree.ElementTree import Element
 
-        from abicheck.dumper_castxml import _CastxmlParser
+        from abicheck.extract.headers.castxml.dumper import _CastxmlParser
 
         root = Element("CastXML")
         root.append(Element("Unimplemented", id="legacy", type_class="Atomic"))
@@ -271,7 +271,7 @@ class TestCastxmlVtableUnindexed:
     def test_unindexed_virtuals_kept_separately(self) -> None:
         from xml.etree.ElementTree import Element
 
-        from abicheck.dumper_castxml import _CastxmlParser
+        from abicheck.extract.headers.castxml.dumper import _CastxmlParser
 
         root = Element("CastXML")
         cls = Element("Class", id="c1", name="C", members="")

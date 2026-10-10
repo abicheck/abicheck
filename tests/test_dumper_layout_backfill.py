@@ -13,13 +13,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Unit tests for abicheck.dumper_layout_backfill."""
+"""Unit tests for abicheck.extract.dwarf_layout_backfill."""
 
 from __future__ import annotations
 
 import pytest
 
-from abicheck.dumper_layout_backfill import (
+from abicheck.extract.dwarf_layout_backfill import (
     DwarfLayoutCoherence,
     _backfilled_record,
     backfill_dwarf_layout,

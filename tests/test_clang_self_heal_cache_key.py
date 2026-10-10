@@ -53,8 +53,9 @@ from pathlib import Path
 
 import pytest
 
-from abicheck import dumper, dumper_ast_config, dumper_clang
-from abicheck.dumper_ast_config import _cache_key
+from abicheck import dumper, dumper_clang
+from abicheck.extract.headers import ast_config as dumper_ast_config
+from abicheck.extract.headers.ast_config import _cache_key
 from abicheck.extract.headers.clang.backend import clang_header_dump
 from abicheck.storage import header_ast_cache as dumper_cache
 

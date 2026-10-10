@@ -620,7 +620,7 @@ def test_alias_resolution_does_not_change_the_ast_cache_key(tmp_path: Path) -> N
     matching the same configuration on another. Asserted against the real
     header-parse cache key rather than against the claim in a docstring.
     """
-    from abicheck.dumper_ast_config import _cache_key
+    from abicheck.extract.headers.ast_config import _cache_key
 
     real, link = _linked_tree(tmp_path)
 

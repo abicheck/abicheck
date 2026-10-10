@@ -428,8 +428,8 @@ def test_each_backend_schema_constant_salts_only_its_own_key(
     """Bumping a backend's schema constant must change that backend's key,
     read at key time (a copy taken at import would ignore the bump), and
     leave the other backend's key alone."""
-    from abicheck import dumper_ast_config
-    from abicheck.dumper_ast_config import _cache_key
+    from abicheck.extract.headers import ast_config as dumper_ast_config
+    from abicheck.extract.headers.ast_config import _cache_key
 
     header = tmp_path / "h.h"
     header.write_text("void f(void);\n")
@@ -469,7 +469,7 @@ def test_both_castxml_command_builders_put_no_msvc_std_on_the_parser(builder) ->
     from pathlib import Path
 
     if builder == "l2":
-        from abicheck.dumper_ast_config import _build_castxml_command
+        from abicheck.extract.headers.ast_config import _build_castxml_command
 
         cmd = _build_castxml_command(
             "cl.exe",

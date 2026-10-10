@@ -28,12 +28,12 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from .elf_symbol_filter import is_abi_relevant_elf_symbol
-from .errors import SnapshotError
-from .model import AbiSnapshot, ElfVisibility, Fact, is_cxx_runtime_library
+from ..elf_symbol_filter import is_abi_relevant_elf_symbol
+from ..errors import SnapshotError
+from ..model import AbiSnapshot, ElfVisibility, Fact, is_cxx_runtime_library
 
 if TYPE_CHECKING:
-    from .elf_metadata import ElfMetadata
+    from ..elf_metadata import ElfMetadata
 
 _ELF_VIS_MAP: dict[str, ElfVisibility] = {
     "default": ElfVisibility.DEFAULT,
@@ -86,7 +86,7 @@ def _elf_classify_symbols(
     Returns ``(exported_dynamic, funcs, objects, tls)`` where *exported_dynamic*
     may be the original fallback set when *elf_meta* has no symbols.
     """
-    from .elf_metadata import SymbolType
+    from ..elf_metadata import SymbolType
 
     exported_dynamic_funcs: set[str] = exported_dynamic  # fallback
     exported_dynamic_objects: set[str] = set()
@@ -169,8 +169,8 @@ def _pyelftools_exported_symbols(so_path: Path) -> tuple[set[str], set[str]]:
     from elftools.elf.elffile import ELFFile
     from elftools.elf.sections import SymbolTableSection
 
-    from .extract.elf_string_table import buffered_string_table, string_table_of
-    from .extract.elf_symbol_fastpath import (
+    from ..extract.elf_string_table import buffered_string_table, string_table_of
+    from ..extract.elf_symbol_fastpath import (
         SHN_ABS,
         SHN_UNDEF,
         STB_GLOBAL,

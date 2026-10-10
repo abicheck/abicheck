@@ -25,7 +25,6 @@ from abicheck.storage.castxml_xml import ARGUMENT_ATTRIBUTES_READ, parse_castxml
 _REPO = Path(__file__).resolve().parents[1]
 _READERS = [
     _REPO / "abicheck" / "extract" / "headers" / "castxml",
-    _REPO / "abicheck" / "dumper_castxml.py",
     _REPO / "abicheck" / "buildsource" / "source_extractors" / "castxml.py",
 ]
 
@@ -160,7 +159,7 @@ def test_argument_with_children_is_not_shared(tmp_path: Path) -> None:
 @pytest.mark.integration
 @pytest.mark.skipif(shutil.which("castxml") is None, reason="castxml not installed")
 def test_real_castxml_parser_output_is_unchanged(tmp_path: Path) -> None:
-    from abicheck.dumper_castxml import _CastxmlParser
+    from abicheck.extract.headers.castxml.dumper import _CastxmlParser
 
     hdr = tmp_path / "a.h"
     hdr.write_text(

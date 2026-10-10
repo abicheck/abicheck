@@ -175,12 +175,12 @@ PERF_SENSITIVE_PATTERNS: tuple[str, ...] = (
     "abicheck/buildsource/**",
     "abicheck/provenance.py",
     "abicheck/storage/header_ast_cache.py",
-    "abicheck/dumper_ast_config.py",
+    "abicheck/extract/headers/ast_config.py",
     "abicheck/extract/headers/sysinc.py",
     "abicheck/dumper_clang.py",
     "abicheck/dumper_clang_errors.py",
     "abicheck/extract/headers/toolchain.py",
-    "abicheck/dumper_castxml.py",
+    "abicheck/extract/headers/castxml/dumper.py",
     "abicheck/compile_context.py",
     "abicheck/extract/headers/castxml/policy.py",
     "abicheck/header_utils.py",
@@ -277,10 +277,10 @@ PERF_SENSITIVE_PATTERNS: tuple[str, ...] = (
     "abicheck/extract/headers/manifest.py",
     "abicheck/extract/headers/castxml/probe.py",
     "abicheck/dumper_contract.py",
-    "abicheck/dumper_debug.py",
+    "abicheck/extract/debug_dump.py",
     "abicheck/workflows/dump/elf_fallback.py",
-    "abicheck/dumper_elf_symbols.py",
-    "abicheck/dumper_layout_backfill.py",
+    "abicheck/extract/elf_symbol_classify.py",
+    "abicheck/extract/dwarf_layout_backfill.py",
     # The module entry point. Every measured command is launched as
     # `python -m abicheck`, which executes BOTH of these before reaching cli.py --
     # so the full-CLI lane, whose largest single cost is interpreter startup and
