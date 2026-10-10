@@ -55,7 +55,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from .compile_context import CompileContext
-from .confidence import note_if_same_binary_compared
 from .dependency_info import populate_pair_dependency_info
 from .environment_matrix import EnvironmentMatrix
 from .errors import ValidationError
@@ -68,7 +67,7 @@ from .policy.depth_projection import (
 from .process_resources import BudgetedExecutor
 from .serialization import run_scoped_digest_cache
 from .storage.header_ast_cache import ast_acquisition_scope
-from .workflows import abi3_audit, gate as gate_workflow
+from .workflows import abi3_audit
 from .workflows.artifact.compile_context_gate import (
     SideCompileInput,
     resolved_pair_compile_contexts,
@@ -533,11 +532,8 @@ def classify_compare_pair(
     """
     from . import deadline
     from .buildsource.evidence_report import attach_evidence_metrics
+    from .workflows.compare_finalize import finalize_classified_pair
     from .workflows.compare_policy import compare_snapshots, load_suppression_and_policy
-    from .workflows.input_resolution import (
-        collect_metadata,
-        sniff_text_format,
-    )
     from .workflows.pair_evidence import fold_pair_evidence, load_probe_matrix_changes
 
     # Same classify-stage boundary check as `resolve_compare_request`'s own
@@ -641,108 +637,14 @@ def classify_compare_pair(
     from .workflows import depth_evidence_contract
 
     depth_evidence_contract.record_for_compare_request(result, request, old, new)
-    # Hash through the full GNU ld linker-script chain to its final resolved
-    # target -- resolve_side_snapshot() already followed the identical chain
-    # to produce `old`/`new` above -- so a (possibly multi-hop) script vs.
-    # its target DSO given as the other `CompareRequest` side still reads as
-    # byte-identical (mirrors the same fix on the retired
-    # `cli_scan_baseline._run_baseline_compare`).
-    from .binary_utils import resolve_linker_script_chain
-
-    # A text snapshot/manifest can coincidentally match the INPUT()/GROUP()
-    # probe -- skip linker-script resolution for it.
-    def _hashable_path(p: Path) -> Path:
-        return (
-            p
-            if sniff_text_format(p) in ("json", "symvers")
-            else resolve_linker_script_chain(p)
-        )
-
-    result.old_metadata = collect_metadata(
-        _hashable_path(required_path(request.old, "old"))
-    )
-    result.new_metadata = collect_metadata(
-        _hashable_path(required_path(request.new, "new"))
-    )
-    # Item 4 fix: collect_metadata() is a no-op for a JSON/text snapshot
-    # path, so a snapshot-input compare left note_if_same_binary_compared
-    # unable to fire on content-identical snapshots. Digest fallback below
-    # requires *both* sides missing metadata (`and`, not `or`): a mixed
-    # live-binary-vs-snapshot compare has one side absent by design.
-    old_digest = new_digest = None
-    if result.old_metadata is None and result.new_metadata is None:
-        from .workflows.gate import snapshot_identity_digests
-
-        old_digest, new_digest = snapshot_identity_digests(old, new)
-    note_if_same_binary_compared(
-        result, old_snapshot_digest=old_digest, new_snapshot_digest=new_digest
-    )
-
-    # P0.4 follow-up (P2 review, discussion_r3787839902): stamps
-    # `DiffResult.requested_depth` for `analysis_assurance` below, preferring
-    # `pair.resolved_execution_context`'s value over `request.depth` only
-    # when the two agree (a caller may pass a *different* `request` than
-    # built `pair`; a disagreement defers to `request.depth`, what `old`/
-    # `new` above were actually projected to -- Codex review).
-    normalized_request_depth = (
-        request.depth.lower() if request.depth is not None else None
-    )
-    context = pair.resolved_execution_context
-    if context is not None and context.requested_depth == normalized_request_depth:
-        result.requested_depth = context.requested_depth
-    elif normalized_request_depth is not None:
-        result.requested_depth = normalized_request_depth
-    # Depths and suppression audit: report fields every pairwise route owes
-    # (F2 route parity), once set by the native CLI alone.
-    from .workflows import analysis_assurance_attach as assurance_attach
-    from .workflows.suppression_audit_attach import attach_suppression_audit
-
-    assurance_attach.attach_analysis_assurance(result, old, new)
-    assurance_attach.attach_evidence_depths(result, old, new)
-    attach_suppression_audit(result, suppression)
-    # ADR-064/PR G2: resolve severity into the same `GateOptions` the
-    # release fan-out uses, then the canonical decision. No manual
-    # exit-code-scheme selector to pass any more -- the algorithm is purely
-    # derived from whether `severity_preset` (or a resolved gate pack) put a
-    # severity setting in effect.
-    gate = gate_workflow.resolve_release_gate_options(
-        None,
-        severity_preset=request.severity_preset,
-        severity_abi_breaking=None,
-        severity_potential_breaking=None,
-        severity_quality_issues=None,
-        severity_addition=None,
-    )
-    # Abort-axes-aware (plan P3): a typed caller's own `exit_decision` reports an `--abi3` evidence-contract abort too.
-    exit_decision = gate_workflow.resolve_compare_exit_decision_with_abort_axes(
-        result, gate.effective_gate
-    )
-
-    # Installs the same gate onto result.contract_context; see
-    # workflows.compare_gate_receipt's own docstring for the full account.
-    from .workflows.compare_gate_receipt import install_resolved_gate_receipt
-
-    install_resolved_gate_receipt(
+    return finalize_classified_pair(
+        request,
+        pair.resolved_execution_context,
         result,
+        old,
+        new,
+        suppression,
         evaluation_config,
-        gate,
-        packs_forwarded=bool(request.pack_policy_overrides)
-        or request.pack_internal_namespaces is not None,
-    )
-    if context is not None:
-        context = context.for_classification(evaluation_config, result.requested_depth)
-
-    # ADR-055 D2/D4: `suppression` is carried out so a front end applying a
-    # post-classification concern (appcompat's `scope_diff_to_app`) reuses the
-    # list this call already resolved instead of loading it a second time.
-    return CompareResult(
-        diff=result,
-        old_snapshot=old,
-        new_snapshot=new,
-        suppression=suppression,
-        exit_decision=exit_decision,
-        severity_config=gate.severity,
-        resolved_execution_context=context,
     )
 
 
