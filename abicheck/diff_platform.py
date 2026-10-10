@@ -168,7 +168,7 @@ def _has_elf_on_both_sides(
     return True, None
 
 
-@registry.detector("visibility_leak")
+@registry.detector("visibility_leak", one_sided=True)
 def _diff_visibility_leak_detector(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """Registered wrapper for :func:`_diff_visibility_leak` (Sprint 2).
 

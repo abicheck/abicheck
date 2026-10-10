@@ -65,7 +65,7 @@ if TYPE_CHECKING:
 class _DetectorEntry:
     """Internal representation of a registered detector."""
 
-    __slots__ = ("name", "fn", "support_fn", "support_is_trigger", "order")
+    __slots__ = ("name", "fn", "support_fn", "support_is_trigger", "order", "one_sided")
 
     def __init__(
         self,
@@ -74,6 +74,7 @@ class _DetectorEntry:
         support_fn: SupportFn | None,
         order: int,
         support_is_trigger: bool = False,
+        one_sided: bool = False,
     ) -> None:
         self.name = name
         self.fn = fn
@@ -98,6 +99,17 @@ class _DetectorEntry:
         #: is identical either way -- only the predicate's *meaning* differs,
         #: and only its author knows it.
         self.support_is_trigger = support_is_trigger
+        #: The detector audits a single snapshot -- the one passed as its
+        #: first (``old``) argument -- and never reads its second (``new``).
+        #: Such a check is candidate-side hygiene, not an OLD->NEW
+        #: comparison, so :meth:`DetectorRegistry.run_one_sided` also runs it
+        #: when there is no baseline (``compare --no-baseline``), against the
+        #: candidate, marking every finding ``candidate_side_enrichment``.
+        #: On an ordinary two-sided run nothing changes: the detector runs in
+        #: :meth:`DetectorRegistry.run_all` exactly as before and its
+        #: findings stay unmarked. ``tests/test_one_sided_detector_gate.py``
+        #: fails when a detector that ignores ``new`` is not declared so.
+        self.one_sided = one_sided
         self.order = order
 
 
@@ -187,6 +199,7 @@ class DetectorRegistry:
         *,
         requires_support: SupportFn | None = None,
         support_is_trigger: bool = False,
+        one_sided: bool = False,
     ) -> Callable[[DetectorFn], DetectorFn]:
         """Decorator to register a detector function.
 
@@ -201,6 +214,10 @@ class DetectorRegistry:
                 conclusively says there is nothing to report, so the detector
                 is recorded as an ordinary evaluated zero. See
                 :attr:`_DetectorEntry.support_is_trigger`.
+            one_sided: The detector inspects only its first snapshot argument
+                and ignores the second -- candidate-side hygiene that a
+                no-baseline audit must also run. See
+                :attr:`_DetectorEntry.one_sided`.
 
         Returns:
             The original function, unmodified.
@@ -216,6 +233,7 @@ class DetectorRegistry:
                 requires_support,
                 self._counter,
                 support_is_trigger=support_is_trigger,
+                one_sided=one_sided,
             )
             self._counter += 1
             self._detectors.append(entry)
@@ -238,15 +256,45 @@ class DetectorRegistry:
         with detection_memo_scope():
             return self._run_all(old, new)
 
+    def run_one_sided(
+        self,
+        subject: AbiSnapshot,
+    ) -> tuple[list[Change], list[DetectorResult]]:
+        """Run only the ``one_sided`` detectors, auditing *subject* alone.
+
+        The no-baseline counterpart of :meth:`run_all`: with no baseline no
+        OLD->NEW detector has anything to read, but a single-snapshot
+        hygiene check does -- skipping it silently dropped its findings
+        from ``compare --no-baseline`` (known-gaps: "``compare
+        --no-baseline`` silently drops one-sided detectors' findings").
+        *subject* is passed as both arguments (the detector reads only the
+        first). Every finding is marked ``candidate_side_enrichment`` so
+        ``policy.no_baseline_findings`` reports it as candidate-side
+        evidence rather than an impossible comparison finding.
+        """
+        from .compare.detection_memo import detection_memo_scope
+
+        with detection_memo_scope():
+            changes, results = self._run_all(
+                subject, subject, only=lambda e: e.one_sided
+            )
+        for change in changes:
+            change.candidate_side_enrichment = True
+        return changes, results
+
     def _run_all(
         self,
         old: AbiSnapshot,
         new: AbiSnapshot,
+        *,
+        only: Callable[[_DetectorEntry], bool] | None = None,
     ) -> tuple[list[Change], list[DetectorResult]]:
         changes: list[Change] = []
         detector_results: list[DetectorResult] = []
 
         for entry in sorted(self._detectors, key=lambda e: e.order):
+            if only is not None and not only(entry):
+                continue
             # Check support gate
             if entry.support_fn is not None:
                 enabled, reason = entry.support_fn(old, new)
@@ -301,6 +349,15 @@ class DetectorRegistry:
     def detector_names(self) -> list[str]:
         """Registered detector names in registration order."""
         return [e.name for e in sorted(self._detectors, key=lambda e: e.order)]
+
+    @property
+    def one_sided_detector_names(self) -> list[str]:
+        """Names of the detectors registered ``one_sided=True``."""
+        return [
+            e.name
+            for e in sorted(self._detectors, key=lambda e: e.order)
+            if e.one_sided
+        ]
 
     def __len__(self) -> int:
         return len(self._detectors)

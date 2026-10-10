@@ -42,7 +42,7 @@ from .model.surface_facts import is_export_table_only_record
 
 def _diff_visibility_leak(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """Detect old-library visibility leaks (ELF-only internal symbols exported)."""
-    del new  # detector is intentionally old-library-only
+    del new  # one-sided: registered `one_sided=True` (see detector_registry)
     if not getattr(old, "elf_only_mode", False):
         return []
 
