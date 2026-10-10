@@ -14,7 +14,7 @@
 
 """castxml XML → ABI model parser, split by parsed entity (ADR-061 D9).
 
-``abicheck.dumper_castxml`` remains the coordinating module (the ADR's
+``abicheck.extract.headers.castxml.dumper`` remains the coordinating module (the ADR's
 ``backend.py`` role: it opens the castxml document, builds the shared id
 map, and drives per-entity parsing) until its own migration lands. Entity
 modules that have already moved out of it live here, one class of node per

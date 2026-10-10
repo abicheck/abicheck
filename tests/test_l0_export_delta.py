@@ -279,8 +279,8 @@ def test_in_memory_view_matches_the_rereading_probe_on_every_pair(
         for o, n in itertools.product(subsets, repeat=2)
     }
 
-    import abicheck.dumper_elf_symbols as elf_symbols
     import abicheck.elf_metadata as elf_metadata
+    import abicheck.extract.elf_symbol_classify as elf_symbols
 
     def _no_reread(*_a, **_kw):
         raise AssertionError("the in-memory view must not re-read the binary")

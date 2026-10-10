@@ -49,8 +49,8 @@ from abicheck.buildsource.source_graph import (  # noqa: E402
     GraphNode,
     SourceGraphSummary,
 )
-from abicheck.dumper_elf_symbols import _populate_elf_visibility  # noqa: E402
 from abicheck.elf_metadata import ElfMetadata, ElfSymbol  # noqa: E402
+from abicheck.extract.elf_symbol_classify import _populate_elf_visibility  # noqa: E402
 from abicheck.model import (  # noqa: E402
     AbiSnapshot,
     Function,

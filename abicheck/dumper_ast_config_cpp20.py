@@ -20,13 +20,6 @@ from functools import partial
 from pathlib import Path
 from typing import Literal
 
-# The preprocessor-chain reachability pass, split into its own module (this
-# file is at the AI-readiness file-size cap). Re-exported by name so both this
-# module's own callers and `tests/test_dumper_ast_config_cpp20_pp_guards.py`
-# keep importing it from here.
-from .dumper_ast_config_cpp20_chains import (
-    _strip_inactive_if_zero_blocks as _strip_inactive_if_zero_blocks,
-)
 from .extract.cpp20_header_prep import (
     _JOINED_CHAR_LITERAL_PATTERN,
     _JOINED_STRING_LITERAL_PATTERN,
@@ -36,6 +29,14 @@ from .extract.cpp20_header_prep import (
 )
 from .extract.digest_memo import content_digest
 from .extract.header_scan_memo import memoize_header_scan
+
+# The preprocessor-chain reachability pass, split into its own module (this
+# file is at the AI-readiness file-size cap). Re-exported by name so both this
+# module's own callers and `tests/test_dumper_ast_config_cpp20_pp_guards.py`
+# keep importing it from here.
+from .extract.headers.ast_config_cpp20_chains import (
+    _strip_inactive_if_zero_blocks as _strip_inactive_if_zero_blocks,
+)
 
 # Quoted-include expansion (and the raw-string stripper it needs) moved out
 # when the scan below gained a memo; this module still uses both.

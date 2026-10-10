@@ -34,13 +34,13 @@ from ..._compiler_options import (
 )
 from ...buildsource.redaction import DEFAULT_REDACTION
 from ...deadline import run_bounded, supervised_popen, terminate_process_tree
-from ...dumper_ast_config import (
+from ...dumper_ast_config_cpp20 import _detect_cpp20_headers
+from ...extract.env_flags import env_flag
+from ...extract.headers.ast_config import (
     _detect_cpp_headers,
     _exported_symbols_indicate_cpp,
     _header_declared_identifiers,
 )
-from ...dumper_ast_config_cpp20 import _detect_cpp20_headers
-from ...extract.env_flags import env_flag
 from ...extract.target_platform_probe import recorded_target_platform
 
 # E-S1: relocated to extract/toolchain_identity.py (ADR-061's extract
@@ -297,8 +297,8 @@ def _stamp_ast_parser(
     the identical installation, purely because this fix corrected which
     binary's identity gets recorded).
     """
-    from ...dumper_ast_config import _resolve_compiler_binary
     from ...errors import SnapshotError
+    from ...extract.headers.ast_config import _resolve_compiler_binary
     from ...extract.headers.castxml.policy import evaluate_castxml_version
 
     executable_meta = _tool_identity_metadata(executable)
@@ -510,7 +510,7 @@ def _resolve_force_cpp(
     them.
 
     *exported_symbols* (``exported_dynamic | exported_static``) is checked
-    last, via :func:`abicheck.dumper_ast_config._exported_symbols_indicate_cpp`,
+    last, via :func:`abicheck.extract.headers.ast_config._exported_symbols_indicate_cpp`,
     which requires the mangled export to **correlate** with an identifier
     *this* header declares, not merely exist anywhere in the binary -- an
     ungated check would wrongly force C++ on a plain-C header (``struct

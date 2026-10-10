@@ -43,11 +43,6 @@ from ...._compiler_options import (
     forwarded_driver_mode_token as _forwarded_driver_mode_token,
     forwards_response_file as _forwards_response_file,
 )
-from ....dumper_ast_config import (
-    _build_clang_header_command,
-    _cache_key,
-    clang_aggregate_text,
-)
 from ....dumper_ast_config_cpp20 import _detect_cpp20_headers
 from ....dumper_clang import (
     _ClangAstParser,
@@ -63,6 +58,11 @@ from ....dumper_clang_errors import (
     run_clang_ast,
 )
 from ....errors import SnapshotError
+from ....extract.headers.ast_config import (
+    _build_clang_header_command,
+    _cache_key,
+    clang_aggregate_text,
+)
 from ....extract.headers.sysinc import _resolve_clang_system_includes
 from ....extract.headers.toolchain import (
     _configured_target_triple,

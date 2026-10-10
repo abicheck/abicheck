@@ -783,7 +783,7 @@
       "review_by": "2026-11-30"
     },
     {
-      "path": "abicheck/dumper_castxml.py",
+      "path": "abicheck/extract/headers/castxml/dumper.py",
       "baseline_lines": 2000,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",

@@ -1233,9 +1233,9 @@ class TestDwarfLayoutCoherencePopulation:
         import abicheck.elf_metadata as _elfmod
         from abicheck import dumper
         from abicheck.dumper_clang import _ClangAstParser
-        from abicheck.dumper_layout_backfill import DwarfLayoutCoherence
         from abicheck.dwarf_advanced import AdvancedDwarfMetadata
         from abicheck.dwarf_metadata import DwarfMetadata
+        from abicheck.extract.dwarf_layout_backfill import DwarfLayoutCoherence
 
         so = tmp_path / "lib.so"
         so.write_bytes(b"\x7fELF")

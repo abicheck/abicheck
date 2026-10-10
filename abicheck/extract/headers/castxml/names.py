@@ -20,7 +20,7 @@ and Clang parsing by entity and shared parser context"). Every function here
 is a pure computation over a string or a single ``xml.etree`` element — none
 of it reads the id map or any other state ``_CastxmlParser`` builds, so it
 needed no shared parser context to become its own module. Re-exported from
-``abicheck.dumper_castxml`` so existing imports keep working.
+``abicheck.extract.headers.castxml.dumper`` so existing imports keep working.
 """
 
 from __future__ import annotations

@@ -72,8 +72,8 @@ is why this stays its own narrowly-scoped module rather than folding into
 **Scope, deliberately narrow:**
 
 - Applies *only* to :class:`~abicheck.model.Function` entries whose key
-  satisfies :func:`~abicheck.dumper_castxml.is_synthetic_ctor_key` or
-  :func:`~abicheck.dumper_castxml.is_synthetic_dtor_key` -- these are
+  satisfies :func:`~abicheck.extract.headers.castxml.dumper.is_synthetic_ctor_key` or
+  :func:`~abicheck.extract.headers.castxml.dumper.is_synthetic_dtor_key` -- these are
   abicheck's own invented per-overload identity strings, never a real
   Itanium/MSVC mangled symbol observed on the binary. A real mangled name
   is never routed through this module.
@@ -253,7 +253,7 @@ class CtorDtorCanonicalKey:
 
 def _split_synthetic_ctor_key_body(body: str) -> tuple[str, str] | None:
     """Split a synthetic ctor key's body (everything after
-    :data:`~abicheck.dumper_castxml.SYNTHETIC_CTOR_KEY_PREFIX`) into
+    :data:`~abicheck.extract.headers.castxml.dumper.SYNTHETIC_CTOR_KEY_PREFIX`) into
     ``(scope, param_sig)``.
 
     The key format is ``f"{scope}({param_sig})"`` (see

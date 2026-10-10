@@ -22,7 +22,7 @@ import itertools
 import pytest
 
 from abicheck.compare.debug_type_join import join_debug_types
-from abicheck.dumper_layout_backfill import backfill_dwarf_layout
+from abicheck.extract.dwarf_layout_backfill import backfill_dwarf_layout
 from abicheck.model import AbiSnapshot, RecordType, TypeField
 from abicheck.model.dwarf_facts import DwarfMetadata, FieldInfo, StructLayout
 from abicheck.model.graph_join import JoinState

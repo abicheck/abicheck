@@ -106,10 +106,10 @@ def preflight_header_frontend(
     Tool presence is a ``PATH`` lookup only (no subprocess), matching the
     dump's own ``_resolve_selected_tool``/``_clang_available`` checks.
     """
-    from ..dumper_ast_config import _resolve_compiler_binary
     from ..dumper_clang import _resolve_clang_bin
     from ..errors import SnapshotError
     from ..extract.header_ast_backend import _resolve_header_backend
+    from ..extract.headers.ast_config import _resolve_compiler_binary
     from ..extract.headers.toolchain import (
         _ast_fallback_enabled,
         _auto_ast_fallback_eligible,

@@ -16,7 +16,7 @@
 """The castxml header-AST backend (lane B, stage B2b).
 
 :class:`CastxmlBackend` runs CastXML over a header set and returns the
-:class:`~abicheck.dumper_castxml._CastxmlParser` built from its XML -- the
+:class:`~abicheck.extract.headers.castxml.dumper._CastxmlParser` built from its XML -- the
 IR-fragment producer
 :func:`~abicheck.extract.header_ast_fields.parse_header_ast_fields` reads.
 :func:`castxml_dump` is the cached, coordinated, C-to-C++-retrying tool run
@@ -42,14 +42,14 @@ from pathlib import Path
 from typing import cast
 from xml.etree.ElementTree import Element, tostring
 
-from ....dumper_ast_config import (
+from ....dumper_ast_config_cpp20 import _detect_cpp20_headers
+from ....errors import SnapshotError, UnsupportedCastxmlVersionError
+from ....extract.headers.ast_config import (
     _build_castxml_command,
     _cache_key,
     _resolve_compiler_binary,
 )
-from ....dumper_ast_config_cpp20 import _detect_cpp20_headers
-from ....dumper_castxml import _CastxmlParser
-from ....errors import SnapshotError, UnsupportedCastxmlVersionError
+from ....extract.headers.castxml.dumper import _CastxmlParser
 from ....extract.headers.castxml.policy import evaluate_castxml_version
 from ....extract.headers.castxml.probe import (
     _castxml_cpp_retry_allowed,

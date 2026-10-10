@@ -65,11 +65,11 @@ from typing import Any
 
 from ....buildsource.build_query import PRUNED_HEADER_DIR_SEGMENTS
 from ....deadline import run_bounded
-from ....dumper_ast_config import _build_clang_header_command
 from ....dumper_ast_config_cpp20 import _detect_cpp20_headers
 from ....dumper_clang import _resolve_clang_bin
 from ....dumper_clang_errors import _is_missing_cpp_stdlib_header_error
 from ....errors import SnapshotError, ValidationError
+from ....extract.headers.ast_config import _build_clang_header_command
 from ....extract.headers.clang.backend import resolve_clang_langmode
 from ....extract.headers.clang.error_header_retry import retry_excluding_error_headers
 from ....extract.headers.sysinc import _resolve_clang_system_includes

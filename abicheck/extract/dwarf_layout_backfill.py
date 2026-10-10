@@ -31,18 +31,18 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING
 
-from .model import RecordType, TypeField, replace_with_fact_sync
-from .model.debug_type_match import DebugRecordFacts, match_header_records
-from .model.fact import legacy_view
-from .model.graph_join import JoinState
+from ..model import RecordType, TypeField, replace_with_fact_sync
+from ..model.debug_type_match import DebugRecordFacts, match_header_records
+from ..model.fact import legacy_view
+from ..model.graph_join import JoinState
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from .dwarf_metadata import DwarfMetadata
-    from .dwarf_unified import DwarfSession
-    from .elf_metadata import ElfMetadata
-    from .model.dwarf_facts import StructLayout
+    from ..dwarf_metadata import DwarfMetadata
+    from ..dwarf_unified import DwarfSession
+    from ..elf_metadata import ElfMetadata
+    from ..model.dwarf_facts import StructLayout
 
 
 def _record_from_layout(layout: StructLayout) -> RecordType:
@@ -113,7 +113,7 @@ def dwarf_layout_types_or_empty(
         or not is_clang_backend
     ):
         return []
-    from .dwarf_snapshot import extract_dwarf_declarations
+    from ..dwarf_snapshot import extract_dwarf_declarations
 
     return list(extract_dwarf_declarations(so_path, elf_meta, session=session).types)
 

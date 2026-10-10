@@ -51,7 +51,7 @@ runs:
     #
     # The key is the content of every input that can change an entry: the
     # catalog/example sources (headers), the toolchain versions, and the AST
-    # cache schema constants in dumper_ast_config.py. Unchanged inputs mean an
+    # cache schema constants in extract/headers/ast_config.py. Unchanged inputs mean an
     # exact hit, and actions/cache skips the save on an exact hit, so a run
     # that changes none of them neither saves a new entry nor evicts other
     # caches (the previous key ended in github.run_id, which saved a fresh
@@ -64,6 +64,6 @@ runs:
         path: |
           ~/.cache/abi_check/castxml
           ~/.cache/abi_check/clang
-        key: abi-check-ast-v2-${{ runner.os }}-${{ inputs.key-suffix }}-${{ hashFiles('results/abi-check-toolchain-versions.txt', 'abicheck/dumper_ast_config.py') }}-${{ hashFiles('examples/**', 'catalog/**') }}
+        key: abi-check-ast-v2-${{ runner.os }}-${{ inputs.key-suffix }}-${{ hashFiles('results/abi-check-toolchain-versions.txt', 'abicheck/extract/headers/ast_config.py') }}-${{ hashFiles('examples/**', 'catalog/**') }}
         restore-keys: |
-          abi-check-ast-v2-${{ runner.os }}-${{ inputs.key-suffix }}-${{ hashFiles('results/abi-check-toolchain-versions.txt', 'abicheck/dumper_ast_config.py') }}-
+          abi-check-ast-v2-${{ runner.os }}-${{ inputs.key-suffix }}-${{ hashFiles('results/abi-check-toolchain-versions.txt', 'abicheck/extract/headers/ast_config.py') }}-

@@ -38,7 +38,7 @@ already in ``_resolve_force_cpp`` found nothing.
 from __future__ import annotations
 
 from abicheck.dumper import _resolve_force_cpp
-from abicheck.dumper_ast_config import _header_declared_identifiers
+from abicheck.extract.headers.ast_config import _header_declared_identifiers
 
 
 class TestResolveForceCppExportedSymbolEvidence:
