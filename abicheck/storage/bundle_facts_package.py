@@ -97,7 +97,7 @@ from .bundle_facts_codec import bundle_facts_from_dict, bundle_facts_to_dict
 from .import_bundle_facts import export_bundle_facts, import_bundle_facts
 from .json_budget import DEFAULT_MAX_JSON_CONTAINER_NODES
 from .package import ObjectStore, PackageManifest
-from .versioning import check_reader_compatibility
+from .versioning import reader_generation_compatibility
 
 __all__ = [
     "read_bundle_facts_package",
@@ -263,7 +263,7 @@ def read_bundle_facts_package(
     `PackageManifest`/`StorageVersions` are public and constructible
     directly.
     """
-    compatibility = check_reader_compatibility(manifest.versions)
+    compatibility = reader_generation_compatibility(manifest.versions)
     if not compatibility.readable:
         raise ValueError(
             f"this PackageManifest is not readable by this build: "

@@ -71,6 +71,7 @@ def _resolve_project_snapshot_directory(path: Path) -> AbiSnapshot:
     at its own boundary.
     """
     from ..project_snapshot_legacy import read_legacy_snapshot_document
+    from ..project_snapshot_store import read_manifest_summary
     from ..serialization import snapshot_from_dict
 
     try:
@@ -80,8 +81,15 @@ def _resolve_project_snapshot_directory(path: Path) -> AbiSnapshot:
             f"Failed to load ProjectSnapshot package '{path}': {exc}"
         ) from exc
     try:
-        return snapshot_from_dict(document)
+        snapshot = snapshot_from_dict(document)
     except (TypeError, ValueError, KeyError, UnicodeDecodeError) as exc:
         raise SnapshotError(
             f"Failed to decode ProjectSnapshot package '{path}': {exc}"
         ) from exc
+    # ADR-062 D2: a package produced under a different extractor/resolver
+    # generation is read, never refused -- but the run that loaded it says so.
+    # `read_legacy_snapshot_document` above already validated the manifest.
+    notice = read_manifest_summary(path).semantics_notice
+    if notice:
+        snapshot.load_notices = (f"stored package '{path}': {notice}",)
+    return snapshot

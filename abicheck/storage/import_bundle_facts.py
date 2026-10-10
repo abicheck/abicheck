@@ -583,7 +583,7 @@ def import_bundle_facts(
         artifact_ids=tuple(artifact.artifact_id for artifact in artifact_refs),
         sections={BUNDLE_COMPOSITION_SECTION_KIND: composition_ref},
     )
-    versions = StorageVersions(
+    versions = StorageVersions.written_by_this_build(
         section_schema_versions=section_schema_versions,
         source_schema_version=source_schema_version,
     )

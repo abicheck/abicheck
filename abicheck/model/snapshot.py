@@ -522,6 +522,15 @@ class AbiSnapshot:
     live_preprocessor_clang_bin: str | None = field(
         default=None, repr=False, compare=False, kw_only=True
     )
+    # Runtime-only, like `live_source_evidence`: notices the *loader* raised
+    # about where this snapshot came from (ADR-062 D2: a stored package
+    # produced under a different extractor/resolver generation). Read into
+    # `DiffResult.coverage_warnings` by `confidence.compute_confidence`; never
+    # serialized (`storage/snapshot_encode.py` drops it), so a notice is
+    # about this run's load, not a property a stored snapshot carries.
+    load_notices: tuple[str, ...] = field(
+        default=(), repr=False, compare=False, kw_only=True
+    )
 
     # Indexes (built lazily)
     _func_by_mangled: dict[str, Function] | None = field(

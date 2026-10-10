@@ -427,7 +427,7 @@ def import_baseline_set(
         artifact_ids=tuple(artifact.artifact_id for artifact in artifact_refs),
         sections={BASELINE_SET_SECTION_KIND: metadata_ref},
     )
-    versions = StorageVersions(
+    versions = StorageVersions.written_by_this_build(
         section_schema_versions=section_schema_versions,
         source_schema_version=source_schema_version,
     )

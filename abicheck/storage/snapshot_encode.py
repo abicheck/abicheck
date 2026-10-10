@@ -418,6 +418,7 @@ def _snapshot_to_dict(snap: AbiSnapshot, encode: Any) -> dict[str, Any]:
     # comes back with the field at its deny-by-default ``False``.
     d.pop("live_source_evidence", None)
     d.pop("live_preprocessor_clang_bin", None)  # runtime-only, as above
+    d.pop("load_notices", None)  # runtime-only, as above
     # If ``from_headers`` was only *inferred* (a legacy snapshot loaded without
     # the explicit key), do not persist it as explicit provenance: drop the key
     # so a reload re-runs the same inference and re-marks it inferred, rather

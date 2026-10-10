@@ -308,7 +308,7 @@ def import_legacy_snapshot(
         sections=sections,
     )
     variant = VariantRef(variant_id=variant_id, artifact_ids=(artifact_id,))
-    versions = StorageVersions(
+    versions = StorageVersions.written_by_this_build(
         section_schema_versions=section_schema_versions,
         source_schema_version=source_schema_version,
     )

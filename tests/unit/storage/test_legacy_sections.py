@@ -39,13 +39,15 @@ from abicheck.storage.package import SECTION_KINDS
 #: every section is therefore the invariant, not an oversight, which is why it
 #: belongs here rather than in a section allowlist. So does
 #: `live_preprocessor_clang_bin`: the compiler a live side's pre-scan runs is a
-#: fact of this run's configuration, not of the stored snapshot.
+#: fact of this run's configuration, not of the stored snapshot. And
+#: `load_notices`: what *this run's* loader said about the package it read.
 _NEVER_IN_A_DOCUMENT = (
     "semantic_ir",
     "semantic_ir_conflicts",
     "from_headers_inferred",
     "live_source_evidence",
     "live_preprocessor_clang_bin",
+    "load_notices",
     "_func_by_mangled",
     "_var_by_mangled",
     "_type_by_name",
