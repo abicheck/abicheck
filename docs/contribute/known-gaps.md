@@ -51,17 +51,14 @@ Open correctness gaps, in the order of the maintainer ruling of 2026-10-01
    the archive); what remains is that exclusion acts on the resolved header
    list, not on transitive includes.
 
-Next, unranked. Each of these can let a run read as cleaner or more
+Next, unranked (the `--no-baseline` one-sided-detector gap, the target-platform gap and the untagged `dependency_scope` gap were closed on 2026-10-10; see the archive). Each of these can let a run read as cleaner or more
 comparable than its evidence supports:
 
-- [`compare --no-baseline` silently drops one-sided detectors' findings (unmarked `del new` detectors such as visibility_leak)](#compare-no-baseline-silently-drops-one-sided-detectors-findings-unmarked-del-new-detectors-such-as-visibility_leak)
 - [An informational, no-material-change reconciliation outcome gates the build under `--severity-preset strict` (2026-09-12)](#an-informational-no-material-change-reconciliation-outcome-gates-the-build-under-severity-preset-strict-2026-09-12)
-- [The comparability contract never records the target platform (2026-10-03)](#the-comparability-contract-never-records-the-target-platform-2026-10-03)
-- [A snapshot's `build_mode` is never captured at dump time (2026-10-03)](#a-snapshots-build_mode-is-never-captured-at-dump-time-2026-10-03)
-- [A stored package's extractor/resolver generation drift is never reported (2026-10-03)](#a-stored-packages-extractorresolver-generation-drift-is-never-reported-2026-10-03)
+- [A snapshot's `build_mode` is captured only for ELF, and only from the main image](#a-snapshots-build_mode-is-captured-only-for-elf-and-only-from-the-main-image)
+- [A stored package's generation drift is reported only for `ProjectSnapshot` packages, and generations are bumped by hand](#a-stored-packages-generation-drift-is-reported-only-for-projectsnapshot-packages-and-generations-are-bumped-by-hand)
 - [Scalar and release `compare` still fold the exit code in two places (2026-10-07)](#scalar-and-release-compare-still-fold-the-exit-code-in-two-places-2026-10-07)
 - [`unversioned_exported_symbol` false-positives on base-version (VER_FLG_BASE) symbols of versioned libraries: the model cannot tell base-bound from unversioned](#unversioned_exported_symbol-false-positives-on-base-version-ver_flg_base-symbols-of-versioned-libraries-the-model-cannot-tell-base-bound-from-unversioned)
-- [Dependency-scoping mismatch is detected only when both snapshots carry dependency_scope; untagged baselines pass](#dependency-scoping-mismatch-is-detected-only-when-both-snapshots-carry-dependency_scope-untagged-baselines-pass)
 
 
 ## Open and partially open gaps
@@ -705,42 +702,6 @@ already correlates symbols against `versions_defined`/`versions_required`
 through a different path) that deserves its own scoped design rather than a
 drive-by change to a cached property several modules depend on today. Per
 this file's own "known gaps over risky reactive patches" convention.
-
-### Dependency-scoping mismatch is detected only when both snapshots carry dependency_scope; untagged baselines pass
-
-**Status (re-verified 2026-10-09 at `456989f`): PARTIAL.** Scoping mode is now recorded as AbiSnapshot.dependency_scope (model/snapshot.py:440-463). comparability.py:861 _check_dependency_scope_comparable raises ScopeMismatchError when both sides are tagged and differ. Untagged (None) pre-v18 snapshots are still treated as comparable, and SCOPE_FIELD_KEYS (comparability.py:192) has no scope entry.
-
-A status-review follow-up flagged
-that `dump`'s default header-origin scoping (`dumper_scoping.py`) and the
-same-pass contextual-reachability work were pulling in opposite
-directions: reachability says a dependency type directly named in a
-public signature (`std::string` taken by a public function, or a
-platform type like `struct tm`) is genuinely part of the library's ABI
-contract, while scoping unconditionally dropped every declaration whose
-own header was a toolchain/system header, regardless of whether anything
-referenced it directly. Fixed: `scope_snapshot_excluding_dependencies`
-now retains a dependency-header type/enum that is directly named by a
-kept declaration's own return/parameter/variable type or by a kept
-type's own field/base (`_directly_referenced_dependency_names`), while
-still dropping what's only reachable transitively through that type's
-own internals (`std::string::_Alloc_hider` and the like stay excluded).
-**Still open, deliberately not attempted in the same change:** the
-chosen dependency-scoping mode (scoped vs. `--include-system-declarations`) is
-not part of the `ExtractionContract` `scope_fingerprint`
-(`comparability.py`'s `SCOPE_FIELD_KEYS`), so two snapshots extracted
-under different scoping modes can still compare as "comparable" even
-though they don't share the same fact universe — and `cli.py`'s inline
-(non-persisted) `compare old.so new.so` path still hardcodes
-`include_dependencies=True` regardless of what a persisted baseline JSON
-on the other side of the same comparison was scoped with. Closing that
-gap needs its own scoped design (a new `SCOPE_FIELD_KEYS` entry plus a
-`comparability.py`-level compatibility rule, verified against
-`test_comparability_gate.py`'s existing superset-growth assertions), not
-a drive-by extension of the direct-reference fix above. Until then, the
-safe authoritative flow for a compiler/stdlib-sensitive comparison is
-either `--include-system-declarations` on both `dump` invocations, or comparing
-two default-scoped persisted snapshots against each other rather than
-mixing a persisted baseline JSON with a live-binary operand.
 
 ### type_base_changed declines on incomplete bases facts but still fires on a PRESENT-but-empty capture gap
 
@@ -3215,99 +3176,6 @@ bug class in `tests/regressions/manifest.py`'s report sibling
 (`tests/regressions/manifest_report.py`), so the next person to touch that
 class sees them without re-deriving the grep.
 
-### `compare --no-baseline` silently drops one-sided detectors' findings (unmarked `del new` detectors such as visibility_leak)
-
-**Status (re-verified 2026-10-09 at `456989f`): OPEN.** The crash no longer reproduces (per the entry's 2026-10-01 status), but the defect class is still there: abicheck/diff_platform_elf_dynamic.py:43-45 `_diff_visibility_leak` still opens with `del new` and emits unmarked findings, so a one-sided finding silently drops out of the --no-baseline audit.
-
-
-> **Status re-verified (2026-10-01): the crash no longer reproduces, the
-> defect class remains.** `compare --no-baseline` exits 0 on the system
-> `libm.so.6` and on a stripped library whose exports trip
-> `_looks_internal` (`internal_helper`, `detail_impl`). But on that same
-> library the audit reports `changes: []` and no verdict, while
-> `compare libv.so libv.so` reports `visibility_leak` — so the one-sided
-> finding is now silently absent from the audit instead of crashing it,
-> and a self-comparison still yields a "comparison" finding.
-> `_diff_visibility_leak` still opens with `del new` and still emits an
-> unmarked `make_change(...)`; the fix shape below (enumerate the
-> `new`-ignoring detectors, mark them, gate it) is unchanged.
-
-Auditing a real ELF shared library raises an **uncaught**
-`NoBaselineInvariantError` — a Python traceback, not a diagnostic — from a
-bare CLI call:
-
-```console
-$ abicheck compare --no-baseline /lib/x86_64-linux-gnu/libm.so.6 -o json=-
-abicheck.policy.no_baseline_findings.NoBaselineInvariantError: a snapshot
-compared against itself must never produce a comparison finding -- if this
-fires, a detector is reading non-identity state. Offending findings:
-visibility_leak(<visibility>)
-```
-
-Reproduced on `main` at `f5df70dd` as well as on the branch that found it,
-so it is not a regression from any in-flight work. It was found only because
-a test fixture in `tests/test_compare_no_baseline_cli.py` was made more
-realistic (see that file's `_a_live_binary_this_host_can_audit`); every
-committed G20 fixture is a stored snapshot, so no existing test audits a
-real live library at all — which is why a crash on the command's most
-obvious input survived.
-
-**The invariant's own message misdiagnoses it.** Nothing is reading
-non-identity state. `diff_platform_elf_dynamic._diff_visibility_leak` is
-deliberately single-sided — its body opens `del new  # detector is
-intentionally old-library-only` — and reports internal-looking symbols
-exported from one snapshot under `elf_only_mode`. That is candidate-side
-hygiene, exactly the category `policy/no_baseline_findings.
-is_one_sided_finding` exists to recognise. But the detector emits a plain
-`make_change(...)` carrying **neither** marker that predicate looks for
-(`cross_source_evolution`, `candidate_side_enrichment`), so
-`partition_no_baseline_findings` files it under `identity`, and
-`check_no_baseline_partition` raises.
-
-There is an irony worth recording, because it is the actual lesson:
-`is_one_sided_finding`'s docstring argues at length against a `ChangeKind`
-allowlist on the grounds that it "would drift out of sync with the detector
-registry." The marker-based design it chose instead has drifted the *other*
-way — a genuinely one-sided detector that never got a marker. Neither
-mechanism is self-enforcing; the missing piece is a check that a detector
-ignoring its `new` argument emits marked findings.
-
-**Why it was not fixed where it was found.** The obvious patch — set
-`candidate_side_enrichment` on the finding — is not local. That marker is
-read on the ordinary two-sided `compare` path too, where this detector also
-runs and reports leaks in the OLD library, so setting it relabels a finding
-in the main command. And `_diff_visibility_leak` is unlikely to be alone:
-any detector that `del`s or ignores `new` is in the same position, so the
-real fix is an audit of that whole set plus a gate, not a one-line change
-to the one instance a traceback happened to name. That is a change with its
-own review surface, and it was out of scope for the pull request (#1188)
-that found it — which touches neither file.
-
-**Fix shape, for whoever takes it:**
-
-1. Enumerate every detector under `abicheck/diff_*.py` whose body ignores
-   its `new` snapshot argument (`del new`, or never referencing it). That
-   set is the population, not `visibility_leak` alone.
-2. Decide per detector whether it is candidate-side hygiene (mark it) or a
-   genuine comparison detector that happens not to need `new` yet.
-3. Mark the hygiene ones, and check what that does to two-sided `compare`'s
-   reports and gating before assuming it is inert there.
-4. Add the missing self-enforcement: a gate — the AI-readiness script is
-   the natural home, alongside `fact-detector-misuse` — asserting that a
-   detector which ignores `new` emits only marked findings. Without it the
-   next single-sided detector reintroduces this exact crash.
-5. Add a test that audits a **real live shared library**, not a stored
-   snapshot. Its absence is why this shipped;
-   `tests/test_compare_no_baseline_cli.py`'s helper documents the platform
-   traps (a soname is not a path; macOS keeps system libraries in the dyld
-   shared cache; a PE executable has no export directory).
-
-Registered as `test_fixture.host_artifact_assumed_capability` in
-`tests/regressions/manifest_report.py`'s sibling
-`tests/regressions/manifest_tool_surface.py` for the fixture half; the
-detector half above has no registry entry yet, deliberately — it is a real
-open defect, not a closed class.
-
 ### `compare`'s migrated cross-source checks drop `--since`'s changed-path confidence boost
 
 **Status (re-verified 2026-10-09 at `456989f`): OPEN.** workflows/cross_source_evolution.py:360 is still `def compute_cross_source_evolution(old, new)` with no changed_paths parameter, and checker.py has no changed_paths.
@@ -4812,46 +4680,6 @@ CLI. Deferred deliberately when F-23 landed: the request type should be one
 decision covering both cardinalities (ADR-061's "one model, any
 cardinality"), not a directory-only addition.
 
-### The comparability contract never records the target platform (2026-10-03)
-
-**Status (re-verified 2026-10-09 at `456989f`): OPEN.** The compute_extraction_contract call at abicheck/dumper_contract.py:186 still passes no target_triple, pointer_width or endianness.
-
-
-Found by the dead-code plan's Stage E parameter pass: no production call
-passes `comparability.compute_extraction_contract`'s `target_triple`,
-`pointer_width` or `endianness`. `dumper_contract._attach_extraction_contract`,
-the one real-extraction caller, omits all three, so every fresh contract's
-`profile_fields` hold `""` for them, and `-m32`/`--target=` reach the
-fingerprint no other way (`macro_ops` covers only `-D`/`-U`,
-`pass_through_flags` only `-include`). The gate rule
-`check_contracts_comparable` documents ("a cross-compiler flag set for only one
-side ... still raises") therefore cannot fire: OLD dumped with
-`--gcc-options=-m32` and NEW without, against the same x86-64 binary, are
-judged comparable, and declarations that differ only because of the target
-(`sizeof`, `#ifdef __LP64__`) are reported as ABI findings rather than
-`ProfileMismatchError`. The platform-identity carve-out that compares these
-fields with the binary's own architecture is likewise dead in production.
-
-Not wired in the parameter pass because it is a gate change, not a missing
-argument:
-
-- castxml's recorded `compiler_target_triple` is the emulated compiler's
-  `-dumpmachine`, which ignores `-m32`; only the clang frontend resolves the
-  effective triple (`dumper_toolchain._configured_target_triple`, which honours
-  `--target=`/`-m32`) and it hands it to the parser alone. A sound
-  `pointer_width`/`endianness` needs the macro query castxml's compiler
-  emulation already runs (`__SIZEOF_POINTER__`, `__BYTE_ORDER__`).
-- Every stored baseline carries `""` for all three. Recording real values
-  changes every fresh `profile_fingerprint`, so the gate needs a
-  legacy-unrecorded carve-out (an empty side is unknown, never a mismatch),
-  as `language_standard` has, or every existing baseline comparison would
-  start failing as not comparable.
-
-Proposed: record the effective triple on `ast_toolchain` for both frontends,
-derive width/endianness from the emulated compiler's macros, pass all three,
-and add the unrecorded-side carve-out with tests over {recorded, unrecorded} x
-{same, different} x {binary differs, binary same}. Owner: ADR-050.
-
 ### The L2 header parse never captures a dependency file (2026-10-03)
 
 **Status (re-verified 2026-10-09 at `456989f`): OPEN.** depfile_resolved_paths is referenced only inside abicheck/comparability.py:563, and no production caller passes it.
@@ -4870,9 +4698,9 @@ Building the capture changes fresh fingerprints the same way the target
 platform entry above does, so it needs the same unrecorded-side carve-out.
 Owner: ADR-050; until then ADR-050 D1 overstates what is fingerprinted.
 
-### A snapshot's `build_mode` is never captured at dump time (2026-10-03)
+### A snapshot's `build_mode` is captured only for ELF, and only from the main image
 
-**Status (re-verified 2026-10-09 at `456989f`): OPEN.** build_mode_from_signals is still called only from abicheck/diff_stdlib_impl.py:268/273, with mangled_symbols only.
+**Status: PARTIAL (2026-10-10).** ELF dumps now record `build_mode` from `DW_AT_producer`/`DW_AT_language` and `.comment` (`extract/build_mode_capture.py`, wired in `workflows/snapshot_factory.finish_binary_dump`); this also fixed a GCC version regex and a wrong `DW_LANG` table in `build_mode.py`. Still open: PE and Mach-O get no `build_mode`; a separate debug file (`debug_info_path`, detached debuginfo) is not read, so capture falls back to `.comment`; nothing yet compares compiler family across snapshots.
 
 
 From Stage E: `build_mode.build_mode_from_signals` takes `raw_producer`
@@ -4896,9 +4724,9 @@ detector reads it, with a test over {GCC, Clang, ICX} x {producer present,
 stripped} against the compiler's own banner. Owner: the build-mode work
 (`abicheck/build_mode.py`).
 
-### A stored package's extractor/resolver generation drift is never reported (2026-10-03)
+### A stored package's generation drift is reported only for `ProjectSnapshot` packages, and generations are bumped by hand
 
-**Status (re-verified 2026-10-09 at `456989f`): OPEN.** reader_resolver_generation appears only in abicheck/storage/versioning.py:515/620. No EXTRACTOR_GENERATION or RESOLVER_GENERATION constant exists in abicheck/.
+**Status: PARTIAL (2026-10-10).** `EXTRACTOR_GENERATION`/`RESOLVER_GENERATION` now exist (`storage/versioning.py`), every package writer stamps them, `project_snapshot_store` passes them to `check_reader_compatibility`, and drift appears in `coverage_warnings` without changing verdict or exit code; an unrecorded generation is unknown. Still open: the `BundleFacts` reader passes them but has no report surface; importing a legacy `.abi.json` stamps today's generations, so the stamp means "the build that wrote the package", not "the build that extracted the facts"; nothing enforces a bump when extraction or resolution semantics change.
 
 
 From Stage E: `storage.versioning.check_reader_compatibility` reports
