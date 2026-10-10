@@ -49,7 +49,9 @@ from ....dumper_ast_config import (
 )
 from ....dumper_ast_config_cpp20 import _detect_cpp20_headers
 from ....dumper_castxml import _CastxmlParser
-from ....dumper_castxml_probe import (
+from ....errors import SnapshotError, UnsupportedCastxmlVersionError
+from ....extract.headers.castxml.policy import evaluate_castxml_version
+from ....extract.headers.castxml.probe import (
     _castxml_cpp_retry_allowed,
     _validate_castxml_output,
     castxml_dump_excluding_unparseable,
@@ -57,7 +59,7 @@ from ....dumper_castxml_probe import (
     record_unparseable_headers,
     run_castxml,
 )
-from ....dumper_toolchain import (
+from ....extract.headers.toolchain import (
     _allow_unsupported_castxml_enabled,
     _resolve_force_cpp,
     _resolve_selected_tool,
@@ -65,8 +67,6 @@ from ....dumper_toolchain import (
     _tool_identity,
     _tool_identity_metadata,
 )
-from ....errors import SnapshotError, UnsupportedCastxmlVersionError
-from ....extract.headers.castxml.policy import evaluate_castxml_version
 from ....storage.atomic_file import atomic_write as _atomic_write
 from ....storage.cache_integrity import record_digest
 from ....storage.header_ast_cache import (
@@ -191,7 +191,7 @@ def castxml_dump(
     """Run CastXML on *headers* and return its parsed XML root.
 
     *run* runs one castxml command (default
-    :func:`~abicheck.dumper_castxml_probe.run_castxml`: the scan-deadline
+    :func:`~abicheck.extract.headers.castxml.probe.run_castxml`: the scan-deadline
     check, then a bounded run) and *check_deadline* is the scan-deadline
     check between attempts. Both are injected, not patched:
     :class:`CastxmlBackend` passes its own.

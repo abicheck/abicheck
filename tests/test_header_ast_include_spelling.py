@@ -36,7 +36,7 @@ from pathlib import Path
 
 import pytest
 
-from abicheck.dumper_manifest import resolve_header_ast_result
+from abicheck.extract.headers.manifest import resolve_header_ast_result
 
 
 class _Captured(Exception):
