@@ -455,7 +455,7 @@ def resolve_release_exit_decision(
     *evidence_contract_error_contribution* (PR #1195) is a member's pinned
     ``--depth build``/``--depth source`` that its own live evidence never
     reached -- ADR-064's exit-7 axis, aggregated across the release by
-    ``frontends.cli.release_evidence_contract``. Unlike the ``0``/``1``
+    ``release_exit_decision.release_evidence_contract_contribution``. Unlike the ``0``/``1``
     floors it is a real code and a *dominant* axis: it is checked directly
     below ``not_comparable`` and above everything else, because a run whose
     pinned evidence contract was not met never established what changed.

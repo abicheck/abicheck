@@ -432,7 +432,7 @@
     },
     {
       "path": "abicheck/cli_compare_release.py",
-      "baseline_lines": 1995,
+      "baseline_lines": 1444,
       "target": "workflows-or-frontends",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -443,7 +443,7 @@
     },
     {
       "path": "abicheck/cli_compare_release_helpers.py",
-      "baseline_lines": 1828,
+      "baseline_lines": 1741,
       "target": "workflows-or-frontends",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -454,7 +454,7 @@
     },
     {
       "path": "abicheck/cli_compare_release_matrix.py",
-      "baseline_lines": 1192,
+      "baseline_lines": 862,
       "target": "workflows-or-frontends",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -1741,7 +1741,7 @@
     },
     {
       "path": "tests/test_cov95_cli.py",
-      "baseline_lines": 3487,
+      "baseline_lines": 3427,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",

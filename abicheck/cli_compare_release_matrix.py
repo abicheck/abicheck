@@ -82,6 +82,7 @@ from .report.release_assurance import ReleaseAssuranceTerms
 from .report.release_public_surface import ReleasePublicSurfaceTerms
 from .workflows.extraction import package_component_inventory  # noqa: F401
 from .workflows.gate import effective_kind_sets, incomplete_scope_diagnostic
+from .workflows.release_exit_fold import release_compatibility_base_exit
 from .workflows.snapshot_factory import new_snapshot
 
 if TYPE_CHECKING:
@@ -328,7 +329,7 @@ def _finalize_release_output(
         scope_notice = incomplete_scope_diagnostic(
             scope_terms.record,
             scope_terms.policy,
-            base_exit=_release_compatibility_base_exit(
+            base_exit=release_compatibility_base_exit(
                 worst_verdict, severity_exit_code
             ),
         )
@@ -424,26 +425,6 @@ def _finalize_release_output(
             assurance_terms.decision if assurance_terms is not None else None
         ),
     )
-
-
-def _release_compatibility_base_exit(
-    worst_verdict: str, severity_exit_code: int | None
-) -> int:
-    """The compatibility axis's own exit code for a stderr notice's wording
-    -- the severity-aware code when one is in effect, else the legacy
-    verdict mapping with the release's own operational ``ERROR`` floor.
-    ``not_comparable`` is ``16`` under either scheme, exactly as
-    ``_exit_compare_release`` exits it ahead of every floor (CodeRabbit)."""
-    if worst_verdict == "not_comparable":
-        return 16
-    if severity_exit_code is not None:
-        return max(severity_exit_code, 4 if worst_verdict == "ERROR" else 0)
-    from .model.change_catalog.registry import Verdict
-    from .workflows.gate import legacy_exit_code
-
-    if worst_verdict in Verdict.__members__:
-        return legacy_exit_code(Verdict[worst_verdict])
-    return 4 if worst_verdict == "ERROR" else 0
 
 
 def _validate_suppression_early(
