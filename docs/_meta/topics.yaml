@@ -282,7 +282,7 @@ topics:
       - abicheck/workflows/contracts.py
       - abicheck/workflows/request_inputs.py
       - abicheck/model/header_ast_frontends.py
-      - abicheck/service_dump_pipeline.py
+      - abicheck/workflows/dump/pipeline.py
       - abicheck/service_compare_pipeline.py
       - abicheck/dry_run_estimate.py
       # ADR-068 §3 #19: CompareRequest.budget_s, same absorbed surface as

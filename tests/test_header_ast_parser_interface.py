@@ -32,7 +32,6 @@ from xml.etree.ElementTree import Element
 
 import pytest
 
-from abicheck.dumper_cache import ast_acquisition_scope
 from abicheck.dumper_castxml import _CastxmlParser
 from abicheck.dumper_clang import _ClangAstParser
 from abicheck.extract.header_ast_fields import (
@@ -41,6 +40,7 @@ from abicheck.extract.header_ast_fields import (
 )
 from abicheck.model.entities import RecordType
 from abicheck.model.identity import entity_id_for_type
+from abicheck.storage.header_ast_cache import ast_acquisition_scope
 
 ROOT = Path(__file__).resolve().parent.parent
 

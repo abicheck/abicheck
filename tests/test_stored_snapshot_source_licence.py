@@ -801,7 +801,7 @@ class TestEveryDumpExecutionBranchGrantsTheLicence:
         one rather than a hand-set flag.
         """
         from abicheck.service import DumpRequest, InputSpec
-        from abicheck.service_dump_pipeline import resolve_dump_request
+        from abicheck.workflows.dump.pipeline import resolve_dump_request
 
         if branch == "binary":
             spec = InputSpec(path=Path("libfoo.so"), version="1.0")
@@ -824,7 +824,7 @@ class TestEveryDumpExecutionBranchGrantsTheLicence:
         `from_headers=False` arm keeps the grant conditional, so a DWARF-only
         dump through any branch is still denied.
         """
-        import abicheck.service_dump_pipeline as pipeline
+        import abicheck.workflows.dump.pipeline as pipeline
 
         produced = AbiSnapshot(
             library="libfoo.so", version="1.0", from_headers=from_headers

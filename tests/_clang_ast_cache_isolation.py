@@ -72,7 +72,7 @@ def _reset_ast_memo() -> None:
     between those two dumps too, for the same reason ``_isolate_ast_cache``
     needs a distinct name.
     """
-    from abicheck import dumper_cache
+    from abicheck.storage import header_ast_cache as dumper_cache
 
     dumper_cache._ast_memo_slot.set(None)
 

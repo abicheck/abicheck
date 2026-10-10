@@ -38,9 +38,6 @@ from .dumper_ast_config import (
     _resolve_compiler_binary as _resolve_compiler_binary,
 )
 from .dumper_ast_config_cpp20 import _detect_cpp20_headers as _detect_cpp20_headers
-from .dumper_cache import (
-    _cache_path as _cache_path,
-)
 from .dumper_castxml import (
     _CastxmlParser as _CastxmlParser,
     _parse_vtable_index as _parse_vtable_index,
@@ -79,15 +76,6 @@ from .dumper_debug import (
     # valid bare-name calls in ``_dump_elf`` and test patch targets.
     _is_kernel_binary as _is_kernel_binary,
     _resolve_debug_metadata as _resolve_debug_metadata,
-)
-from .dumper_elf_fallback import (
-    # DWARF/symbol-only fallback snapshot builders live in the sibling module
-    # (dumper.py is at the file-size cap); re-exported here so
-    # ``dumper._try_dwarf_snapshot``/``dumper._build_symbol_only_snapshot``
-    # remain valid bare-name calls in ``_dump_elf`` and existing test patch
-    # targets (``patch.object(dumper, "_try_dwarf_snapshot", ...)``).
-    _build_symbol_only_snapshot as _build_symbol_only_snapshot,
-    _try_dwarf_snapshot as _try_dwarf_snapshot,
 )
 from .dumper_elf_symbols import (
     # ELF visibility/symbol-classification helpers live in the sibling module
@@ -166,6 +154,18 @@ from .extract.path_aliases import absolutize_include_roots
 from .extract.progress import timed
 from .model import AbiSnapshot, RecordType
 from .storage.ast_cache_location import reference_scratch_scoped
+from .storage.header_ast_cache import (
+    _cache_path as _cache_path,
+)
+from .workflows.dump.elf_fallback import (
+    # DWARF/symbol-only fallback snapshot builders live in the sibling module
+    # (dumper.py is at the file-size cap); re-exported here so
+    # ``dumper._try_dwarf_snapshot``/``dumper._build_symbol_only_snapshot``
+    # remain valid bare-name calls in ``_dump_elf`` and existing test patch
+    # targets (``patch.object(dumper, "_try_dwarf_snapshot", ...)``).
+    _build_symbol_only_snapshot as _build_symbol_only_snapshot,
+    _try_dwarf_snapshot as _try_dwarf_snapshot,
+)
 from .workflows.snapshot_factory import new_snapshot
 
 log = logging.getLogger(__name__)

@@ -568,6 +568,21 @@ def _require_real_ast_attach(snap: Any, n: int, backend: str) -> None:
         )
 
 
+def _header_ast_cache_module() -> Any:
+    """The header-AST cache module under either layout.
+
+    The PR gate runs this head-side harness against the *base* checkout too,
+    so it must import from both sides of the ADR-061 move of the root
+    ``dumper_cache`` to ``storage.header_ast_cache``.
+    """
+    import importlib
+
+    try:
+        return importlib.import_module("abicheck.storage.header_ast_cache")
+    except ImportError:
+        return importlib.import_module("abicheck.dumper_cache")
+
+
 def _measure_one(n: int, backend: str, repeat: int) -> dict[str, Any]:
     """Time *repeat* (dump, attach) pairs, one freshly-built fixture apiece.
 
@@ -587,10 +602,11 @@ def _measure_one(n: int, backend: str, repeat: int) -> dict[str, Any]:
     ``perf_measurement.summarize_samples`` — not the minimum (see that
     module's own docstring for why "keep the fastest" hides regressions).
     """
-    from abicheck import dumper_cache
     from abicheck.compile_context import CompileContext
     from abicheck.dumper import dump
     from abicheck.service import _attach_header_graph
+
+    dumper_cache = _header_ast_cache_module()
 
     def _one_pair() -> tuple[float, float]:
         with tempfile.TemporaryDirectory(prefix="hgperf_") as tmp:
@@ -736,10 +752,11 @@ def _memory_probe(n: int, backend: str) -> dict[str, float]:
     (one point per size/backend, keyed the same way), but note the size
     axis is nearly flat here by design: the dependency headers dominate.
     """
-    from abicheck import dumper_cache
     from abicheck.compile_context import CompileContext
     from abicheck.dumper import dump
     from abicheck.service import _attach_header_graph
+
+    dumper_cache = _header_ast_cache_module()
 
     with tempfile.TemporaryDirectory(prefix="hgperf_mem_") as tmp:
         so, header = _build_fixture(Path(tmp), n, memory_shaped=True)

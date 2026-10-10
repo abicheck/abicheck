@@ -618,7 +618,7 @@ def record_release_member(library: str, retention: Mapping[str, Any]) -> None:
         return
     counts("release.member.retained", library=library, **dict(retention))
     sample("release.member.retained", library=library)
-    from ..dumper_cache import ast_acquisition_stats
+    from ..storage.header_ast_cache import ast_acquisition_stats
 
     stats = ast_acquisition_stats()
     if stats is not None:

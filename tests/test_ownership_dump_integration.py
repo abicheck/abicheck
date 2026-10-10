@@ -286,8 +286,8 @@ def test_typed_api_classifies_exactly_as_the_cli(
     """Front-end parity (``tests/CLAUDE.md``): a typed ``DumpRequest`` whose
     ``InputSpec.ownership`` carries the same project rules decides every
     declaration the way ``abicheck dump`` did."""
-    from abicheck.service_dump_pipeline import run_dump_request
     from abicheck.workflows.contracts import DumpRequest
+    from abicheck.workflows.dump.pipeline import run_dump_request
     from abicheck.workflows.extraction import load_build_config
     from abicheck.workflows.ownership_request import ownership_request_from_config
     from abicheck.workflows.request_inputs import InputSpec

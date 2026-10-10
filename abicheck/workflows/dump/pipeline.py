@@ -48,25 +48,27 @@ import dataclasses
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from .buildsource.source_inputs import granting_live_source_licence
-from .errors import AbicheckError, SnapshotError, ValidationError
-from .workflows.artifact import ResolvedArtifactPlan
-from .workflows.artifact.compile_context_gate import side_effective_compile_context
-from .workflows.artifact.dump_execution_options import (
+from ...buildsource.source_inputs import granting_live_source_licence
+from ...errors import AbicheckError, SnapshotError, ValidationError
+from ...workflows.artifact import ResolvedArtifactPlan
+from ...workflows.artifact.compile_context_gate import side_effective_compile_context
+from ...workflows.artifact.dump_execution_options import (
     DumpExecutionOptions as DumpExecutionOptions,
     _DumpAssuranceView as _DumpAssuranceView,
 )
-from .workflows.artifact.dump_request import ResolvedDumpRequest as ResolvedDumpRequest
-from .workflows.artifact.execute import (
+from ...workflows.artifact.dump_request import (
+    ResolvedDumpRequest as ResolvedDumpRequest,
+)
+from ...workflows.artifact.execute import (
     _resolve_side_snapshot_impl,
     enforce_requested_depth,
 )
-from .workflows.artifact.execute_header_only import (
+from ...workflows.artifact.execute_header_only import (
     execute_header_only_dump_request,
     is_header_only_evidence,
 )
-from .workflows.artifact.execute_source_only import execute_source_only_dump_request
-from .workflows.artifact.resolve import (
+from ...workflows.artifact.execute_source_only import execute_source_only_dump_request
+from ...workflows.artifact.resolve import (
     is_raw_source_tree,
     reject_hybrid_source_frontend,
 )
@@ -75,12 +77,12 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
-    from .compile_context import CompileContext
-    from .model import AbiSnapshot
-    from .service_compare_evidence import SideEvidence
-    from .workflows.artifact.compile_db_match import CompileDbMatch
-    from .workflows.contracts import DumpRequest
-    from .workflows.resolved_execution_context import ResolvedExecutionContext
+    from ...compile_context import CompileContext
+    from ...model import AbiSnapshot
+    from ...service_compare_evidence import SideEvidence
+    from ...workflows.artifact.compile_db_match import CompileDbMatch
+    from ...workflows.contracts import DumpRequest
+    from ...workflows.resolved_execution_context import ResolvedExecutionContext
 
 __all__ = [
     "DumpExecutionOptions",
@@ -265,11 +267,12 @@ def resolve_dump_request(request: DumpRequest) -> ResolvedDumpRequest:
             ``.abicheck.yml`` ``build.targets`` declaration combined with a
             pre-captured Bazel ``aquery``/``cquery`` jsonproto.
     """
-    from . import service_compare_evidence as _sce
-    from .header_utils import split_public_header_inputs
-    from .model.header_ast_frontends import HEADER_AST_FRONTENDS
-    from .workflows.input_resolution import detect_binary_format
-    from .workflows.plan import AnalysisPlanner
+    import abicheck.service_compare_evidence as _sce
+
+    from ...header_utils import split_public_header_inputs
+    from ...model.header_ast_frontends import HEADER_AST_FRONTENDS
+    from ...workflows.input_resolution import detect_binary_format
+    from ...workflows.plan import AnalysisPlanner
 
     request.validate()
     # ADR-063 Phase 4: reject a request no resolved collector/backend
@@ -359,7 +362,7 @@ def resolve_dump_request(request: DumpRequest) -> ResolvedDumpRequest:
         public_headers=tuple(public_headers),
         public_header_dirs=tuple(public_header_dirs),
     )
-    from .workflows.resolved_execution_context import ResolvedExecutionContext
+    from ...workflows.resolved_execution_context import ResolvedExecutionContext
 
     return ResolvedDumpRequest(
         request=request,
@@ -432,9 +435,9 @@ def execute_dump_request(
             snapshot did not reach.
         SnapshotError: If the input cannot be loaded.
     """
-    from .dependency_info import populate_side_dependency_info
-    from .evidence_depth import depth_rank, gated_source_label
-    from .workflows.artifact.compile_db_match import (
+    from ...dependency_info import populate_side_dependency_info
+    from ...evidence_depth import depth_rank, gated_source_label
+    from ...workflows.artifact.compile_db_match import (
         CompileDbMatch as _CompileDbMatch,
         match_compile_db,
     )

@@ -117,7 +117,6 @@ from ..clang_layout_tool import attach_clang_layout
 from ..classify import is_supported_compare_input
 from ..debug_resolver import DebugArtifact, resolve_debug_info
 from ..dump_manifest import DumpManifest, load_manifest
-from ..dumper_cache import ast_acquisition_scope, ast_memoize_scope
 from ..dumper_clang import resolve_source_frontend_clang_bin
 from ..dumper_clang_streaming import suppress_streaming_prune
 from ..dumper_contract import _manifest_declared_includes
@@ -152,6 +151,7 @@ from ..package import (
 from ..provenance import apply_provenance
 from ..python_api import detect_python_api
 from ..python_ext import detect_python_extension
+from ..storage.header_ast_cache import ast_acquisition_scope, ast_memoize_scope
 from ..symvers_metadata import looks_like_symvers
 from .dump.dependency_scope import resolve_dependency_scope
 

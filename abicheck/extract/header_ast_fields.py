@@ -45,14 +45,14 @@ from collections.abc import Iterable
 from dataclasses import dataclass, replace
 from typing import Protocol
 
-from ..dumper_cache import (
+from ..model import EnumType, Function, RecordType, Variable
+from ..model.identity import EntityId
+from ..model.semantic_ir import SemanticIR
+from ..storage.header_ast_cache import (
     ast_acquisition_active,
     retain_ast_context_object,
     run_ast_acquisition,
 )
-from ..model import EnumType, Function, RecordType, Variable
-from ..model.identity import EntityId
-from ..model.semantic_ir import SemanticIR
 from .semantic_normalizer import normalize_header_ast
 
 __all__ = ["AST_SCOPE_ATTRIBUTES", "HeaderAstFields", "parse_header_ast_fields"]

@@ -626,7 +626,7 @@ def test_execute_dump_request_does_not_crash_on_malformed_coverage_without_depth
     from abicheck.model import Function
     from abicheck.serialization import snapshot_to_json
     from abicheck.service import DumpRequest, InputSpec
-    from abicheck.service_dump_pipeline import (
+    from abicheck.workflows.dump.pipeline import (
         execute_dump_request,
         resolve_dump_request,
     )

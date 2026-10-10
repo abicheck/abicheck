@@ -89,7 +89,6 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-from . import dumper_cache
 from ._compiler_options import split_gcc_options
 
 # Re-exported (not just referenced) so the historical
@@ -162,6 +161,7 @@ from .model.identity import (
     entity_id_for_variable,
 )
 from .provenance import build_public_set
+from .storage import header_ast_cache as dumper_cache
 
 
 def _clang_available(clang_bin: str = "clang") -> bool:

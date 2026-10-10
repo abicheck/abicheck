@@ -39,7 +39,7 @@ import pytest
 
 def _minimal_resolved(tmp_path: Path):
     from abicheck.service import DumpRequest, InputSpec
-    from abicheck.service_dump_pipeline import resolve_dump_request
+    from abicheck.workflows.dump.pipeline import resolve_dump_request
 
     so_path = tmp_path / "lib.so"
     so_path.write_bytes(b"\x7fELF" + b"\x00" * 200)
@@ -57,7 +57,7 @@ class TestResolvedDumpRequestExecutionOptionsField:
     ) -> None:
         import dataclasses
 
-        from abicheck.service_dump_pipeline import DumpExecutionOptions
+        from abicheck.workflows.dump.pipeline import DumpExecutionOptions
 
         resolved = _minimal_resolved(tmp_path)
         opts = DumpExecutionOptions(seed_collect_mode="off")
@@ -82,7 +82,7 @@ class TestExecuteDumpRequestDefaultsToResolvedExecutionOptions:
         ``execute_dump_request`` unpacks its resolved ``options`` into --
         that function has no ``options=``-shaped parameter itself, so the
         individual fields are what actually reach it."""
-        from abicheck import service_dump_pipeline
+        from abicheck.workflows.dump import pipeline as service_dump_pipeline
 
         seen: dict[str, object] = {}
 
@@ -108,8 +108,8 @@ class TestExecuteDumpRequestDefaultsToResolvedExecutionOptions:
     ) -> None:
         import dataclasses
 
-        from abicheck import service_dump_pipeline
-        from abicheck.service_dump_pipeline import DumpExecutionOptions
+        from abicheck.workflows.dump import pipeline as service_dump_pipeline
+        from abicheck.workflows.dump.pipeline import DumpExecutionOptions
 
         resolved = _minimal_resolved(tmp_path)
         resolved = dataclasses.replace(
@@ -129,8 +129,8 @@ class TestExecuteDumpRequestDefaultsToResolvedExecutionOptions:
     ) -> None:
         import dataclasses
 
-        from abicheck import service_dump_pipeline
-        from abicheck.service_dump_pipeline import DumpExecutionOptions
+        from abicheck.workflows.dump import pipeline as service_dump_pipeline
+        from abicheck.workflows.dump.pipeline import DumpExecutionOptions
 
         resolved = _minimal_resolved(tmp_path)
         resolved = dataclasses.replace(
@@ -148,7 +148,7 @@ class TestExecuteDumpRequestDefaultsToResolvedExecutionOptions:
         """Every pre-existing caller (no ``options=``, no resolved
         ``execution_options``) is unaffected -- the same
         ``DumpExecutionOptions()`` bare defaults as before this slice."""
-        from abicheck import service_dump_pipeline
+        from abicheck.workflows.dump import pipeline as service_dump_pipeline
 
         resolved = _minimal_resolved(tmp_path)
         assert resolved.execution_options is None
@@ -269,7 +269,7 @@ class TestExecutionOptionsDryRunSection:
         from abicheck.frontends.cli.dump_build_context_preview import (
             add_execution_options_dry_run_section,
         )
-        from abicheck.service_dump_pipeline import DumpExecutionOptions
+        from abicheck.workflows.dump.pipeline import DumpExecutionOptions
 
         resolved = _minimal_resolved(tmp_path)
         resolved = dataclasses.replace(

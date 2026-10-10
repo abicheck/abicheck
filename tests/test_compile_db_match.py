@@ -16,11 +16,11 @@ from pathlib import Path
 import pytest
 
 from abicheck.errors import AbicheckError
-from abicheck.service_dump_pipeline import _announce_compile_db_match
 from abicheck.workflows.artifact.compile_db_match import (
     match_compile_db,
     try_match_compile_db,
 )
+from abicheck.workflows.dump.pipeline import _announce_compile_db_match
 
 
 def _write_compile_db(directory, entries):
@@ -282,7 +282,7 @@ def test_a_bad_database_is_an_operational_failure_not_a_usage_error(tmp_path, co
     from unittest import mock
 
     from abicheck.errors import SnapshotError, ValidationError
-    from abicheck.service_dump_pipeline import (
+    from abicheck.workflows.dump.pipeline import (
         DumpExecutionOptions,
         execute_dump_request,
     )

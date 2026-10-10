@@ -43,7 +43,6 @@
       "legacy_paths": [
         "abicheck/buildsource/build_cache.py",
         "abicheck/buildsource/pack_io.py",
-        "abicheck/dumper_cache.py",
         "abicheck/project_snapshot_legacy.py",
         "abicheck/project_snapshot_store.py",
         "abicheck/snapshot_io.py",
@@ -343,13 +342,10 @@
         "abicheck/service_compare_evidence.py",
         "abicheck/service_compare_pipeline.py",
         "abicheck/service_dump_cache.py",
-        "abicheck/dumper_elf_fallback.py",
         "abicheck/dumper.py",
         "abicheck/probe_harness.py",
         "abicheck/header_only_dump.py",
-        "abicheck/service_dump_pipeline.py",
         "abicheck/service_header_graph_attach.py",
-        "abicheck/service_header_scoped.py",
         "abicheck/dry_run_estimate.py",
         "abicheck/stack_checker.py"
       ]
@@ -435,6 +431,7 @@
   "public_root_surfaces": [
     "abicheck.checker_policy",
     "abicheck.contract_evidence",
+    "abicheck.deadline",
     "abicheck.header_only_dump",
     "abicheck.schemas",
     "abicheck.serialization"
@@ -474,9 +471,7 @@
       "service_compare_pipeline.py",
       "service_dump_cache.py",
       "workflows/dump/native.py",
-      "service_dump_pipeline.py",
       "service_header_graph_attach.py",
-      "service_header_scoped.py",
       "dry_run_estimate.py"
     ],
     "reporter_": [
@@ -549,7 +544,6 @@
       "dumper_ast_config.py",
       "dumper_ast_config_cpp20.py",
       "dumper_ast_config_cpp20_chains.py",
-      "dumper_cache.py",
       "dumper_castxml.py",
       "dumper_castxml_probe.py",
       "dumper_castxml_typedefs.py",
@@ -561,7 +555,6 @@
       "dumper_clang_streaming.py",
       "dumper_contract.py",
       "dumper_debug.py",
-      "dumper_elf_fallback.py",
       "dumper_elf_symbols.py",
       "dumper_layout_backfill.py",
       "dumper_manifest.py",
@@ -736,7 +729,6 @@
     "dumper_ast_config.py",
     "dumper_ast_config_cpp20.py",
     "dumper_ast_config_cpp20_chains.py",
-    "dumper_cache.py",
     "dumper_castxml.py",
     "dumper_castxml_probe.py",
     "dumper_castxml_typedefs.py",
@@ -748,7 +740,6 @@
     "dumper_clang_streaming.py",
     "dumper_contract.py",
     "dumper_debug.py",
-    "dumper_elf_fallback.py",
     "dumper_elf_symbols.py",
     "dumper_layout_backfill.py",
     "dumper_manifest.py",
@@ -822,9 +813,7 @@
     "service_compare_pipeline.py",
     "service_dump_cache.py",
     "workflows/dump/native.py",
-    "service_dump_pipeline.py",
     "service_header_graph_attach.py",
-    "service_header_scoped.py",
     "dry_run_estimate.py",
     "snapshot_cache.py",
     "snapshot_io.py",

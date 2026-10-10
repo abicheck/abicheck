@@ -29,11 +29,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from abicheck.dumper_elf_fallback import _build_symbol_only_snapshot
 from abicheck.elf_metadata import ElfMetadata
 from abicheck.model import RecordType
 from abicheck.model.dwarf_facts import AdvancedDwarfMetadata, DwarfMetadata
 from abicheck.model.identity import EntityKind, entity_id_for_type
+from abicheck.workflows.dump.elf_fallback import _build_symbol_only_snapshot
 
 
 def _snap(funcs: set[str], variables: set[str] = frozenset(), dwarf_only_types=None):

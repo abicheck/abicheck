@@ -40,7 +40,7 @@ from pathlib import Path
 
 import pytest
 
-from abicheck.dumper_cache import AstAcquisitionScope, run_ast_acquisition
+from abicheck.storage.header_ast_cache import AstAcquisitionScope, run_ast_acquisition
 
 _TESTS = Path(__file__).resolve().parent
 

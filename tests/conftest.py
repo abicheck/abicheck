@@ -333,8 +333,8 @@ def _isolate_ast_memo() -> Iterator[None]:
     tests, so a ContextVar set by one test is otherwise still visible to
     the next.
     """
-    from abicheck import dumper_cache
     from abicheck.buildsource.header_include_memo import clear_include_memo
+    from abicheck.storage import header_ast_cache as dumper_cache
 
     # The header-only `clang -M` include-pass memo is process-wide for the
     # same reason and with the same hazard: a test faking the extractor

@@ -162,7 +162,7 @@ def test_write_snapshot_output_accepts_a_resolve_time_embedded_snapshot(
     from abicheck.cli_buildsource import _write_snapshot_output
     from abicheck.compile_context import CompileContext
     from abicheck.service import DumpRequest, InputSpec
-    from abicheck.service_dump_pipeline import (
+    from abicheck.workflows.dump.pipeline import (
         execute_dump_request,
         resolve_dump_request,
     )
@@ -399,7 +399,7 @@ def test_write_snapshot_output_folds_a_flow2_inputs_pack_onto_a_resolve_time_emb
     from abicheck.cli_buildsource import _write_snapshot_output
     from abicheck.compile_context import CompileContext
     from abicheck.service import DumpRequest, InputSpec
-    from abicheck.service_dump_pipeline import (
+    from abicheck.workflows.dump.pipeline import (
         execute_dump_request,
         resolve_dump_request,
     )
@@ -539,7 +539,7 @@ def test_write_snapshot_output_still_raises_for_a_genuinely_unreached_depth(
     from abicheck.cli_buildsource import _write_snapshot_output
     from abicheck.cli_dump_helpers import DumpDepthNotSatisfiedError
     from abicheck.service import DumpRequest, InputSpec
-    from abicheck.service_dump_pipeline import (
+    from abicheck.workflows.dump.pipeline import (
         execute_dump_request,
         resolve_dump_request,
     )

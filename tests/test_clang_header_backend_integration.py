@@ -1336,7 +1336,7 @@ def test_dump_request_and_compare_request_lang_explicit_forces_cpp_mode(
     assert explicit_widget.is_standard_layout is True
 
     # DumpRequest (the typed Python API, G33 Phase 5).
-    from abicheck.service_dump_pipeline import run_dump_request
+    from abicheck.workflows.dump.pipeline import run_dump_request
 
     dump_req_auto = DumpRequest(
         input=InputSpec(path=so, headers=(header,)), frontend="clang"

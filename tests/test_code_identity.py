@@ -213,7 +213,7 @@ DISK_CACHE_CLASSIFICATION = {
     "abicheck.snapshot_cache.disk": "code-identity",
     "abicheck.buildsource.build_cache.disk": "code-identity",
     "abicheck.buildsource.source_replay.disk": "code-identity",
-    "abicheck.dumper_cache.ast_disk": (
+    "abicheck.storage.header_ast_cache.ast_disk": (
         "external-tool output: keyed by the exact aggregate header and command "
         "line abicheck generates, plus the source of the modules that shape a "
         "stored clang entry (tests/test_header_ast_cache_key_inputs.py)"

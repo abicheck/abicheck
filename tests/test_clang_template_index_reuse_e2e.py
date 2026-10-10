@@ -48,7 +48,7 @@ from typing import Any
 
 import pytest
 
-from abicheck.dumper_cache import ast_acquisition_scope
+from abicheck.storage.header_ast_cache import ast_acquisition_scope
 
 _CLANG_L2 = pytest.mark.skipif(
     not sys.platform.startswith("linux")

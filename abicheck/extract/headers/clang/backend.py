@@ -49,14 +49,6 @@ from ....dumper_ast_config import (
     clang_aggregate_text,
 )
 from ....dumper_ast_config_cpp20 import _detect_cpp20_headers
-from ....dumper_cache import (
-    _cache_path,
-    ast_acquisition_active,
-    load_cached_ast,
-    resolve_request_memoization,
-    run_ast_acquisition_offering_entry,
-    store_cached_ast,
-)
 from ....dumper_clang import (
     _ClangAstParser,
     _is_cl_style_driver_name,
@@ -78,6 +70,14 @@ from ....dumper_toolchain import (
     _tool_identity,
 )
 from ....errors import SnapshotError
+from ....storage.header_ast_cache import (
+    _cache_path,
+    ast_acquisition_active,
+    load_cached_ast,
+    resolve_request_memoization,
+    run_ast_acquisition_offering_entry,
+    store_cached_ast,
+)
 from ...path_aliases import absolutize_include_roots
 from ..backend import HeaderParseRequest
 from .error_header_retry import retry_excluding_error_headers

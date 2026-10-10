@@ -41,19 +41,20 @@ import warnings
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from . import deadline
-from .errors import AstContextAmbiguousError, AstContextMissingError
-from .header_utils import (
+import abicheck.deadline as deadline
+
+from ...errors import AstContextAmbiguousError, AstContextMissingError
+from ...header_utils import (
     cache_relevant_operand_paths,
     dedup_paths_preserve_order,
     deferred_token_dirs,
     resolve_inferred_header_roots,
 )
-from .model import AbiSnapshot
-from .model.surface_facts import in_public_surface
+from ...model import AbiSnapshot
+from ...model.surface_facts import in_public_surface
 
 if TYPE_CHECKING:
-    from .dry_run_estimate import CompileContext
+    from ...dry_run_estimate import CompileContext
 
 
 def _has_matched_public_surface(snap: AbiSnapshot) -> bool:
@@ -102,8 +103,8 @@ def _try_header_scoped_dump(
     ``False`` (the default) is a no-op: identical to the pre-existing
     "force only bare ``'c'``" behavior.
     """
-    from .dry_run_estimate import CompileContext, expand_header_inputs
-    from .dumper import _dump_macho as _dumper_macho, _dump_pe as _dumper_pe
+    from ...dry_run_estimate import CompileContext, expand_header_inputs
+    from ...dumper import _dump_macho as _dumper_macho, _dump_pe as _dumper_pe
 
     # Expand header directories into individual files (same as the ELF path),
     # so `--header <dir>` scopes correctly instead of feeding a directory to
@@ -237,7 +238,7 @@ def _try_header_scoped_dump(
     # review, PR #624 follow-up) -- without threading them in here too, two
     # saved snapshots differing only in declared public-header provenance
     # could share the same scope_fingerprint.
-    from .dumper import _attach_extraction_contract
+    from ...dumper import _attach_extraction_contract
 
     _attach_extraction_contract(
         snap,

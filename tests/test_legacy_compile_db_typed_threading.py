@@ -212,7 +212,7 @@ class TestTypedApiThreadsTheLegacyMatch:
         still-default behavior for every caller today), the typed path's
         own P0.3 fold fails closed on this header (no `#include` evidence)
         and the union-fallback flags never reach the parse at all."""
-        from abicheck.service_dump_pipeline import (
+        from abicheck.workflows.dump.pipeline import (
             execute_dump_request,
             resolve_dump_request,
         )
@@ -242,12 +242,12 @@ class TestTypedApiThreadsTheLegacyMatch:
         `execute_dump_request` itself from `DumpExecutionOptions(
         compile_db=...)`, makes the typed path resolve the header-AST
         evidence the compile database implies."""
-        from abicheck.service_dump_pipeline import (
+        from abicheck.workflows.artifact.compile_db_match import match_compile_db
+        from abicheck.workflows.dump.pipeline import (
             DumpExecutionOptions,
             execute_dump_request,
             resolve_dump_request,
         )
-        from abicheck.workflows.artifact.compile_db_match import match_compile_db
 
         so_path, header, compile_db = _project(tmp_path)
 
@@ -280,7 +280,7 @@ class TestTypedApiThreadsTheLegacyMatch:
         `compile_db_tokens` must not additionally stack a duplicate
         `-D` on top of it."""
         from abicheck.service import DumpRequest, InputSpec
-        from abicheck.service_dump_pipeline import (
+        from abicheck.workflows.dump.pipeline import (
             DumpExecutionOptions,
             execute_dump_request,
             resolve_dump_request,

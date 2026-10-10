@@ -191,6 +191,7 @@ def test_public_root_surfaces_matches_the_reviewed_exception_set() -> None:
     assert set(modules_yaml["public_root_surfaces"]) == {
         "abicheck.checker_policy",
         "abicheck.contract_evidence",
+        "abicheck.deadline",
         "abicheck.header_only_dump",
         "abicheck.schemas",
         "abicheck.serialization",

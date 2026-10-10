@@ -20,7 +20,7 @@ collector/backend combination can produce) is rejected before extraction, with
 a named reason, instead of discovered as a silent no-op mid-run or not
 discovered at all. :func:`AnalysisPlanner.resolve` runs first inside
 :func:`abicheck.service_compare_pipeline.resolve_compare_request` and
-:func:`abicheck.service_dump_pipeline.resolve_dump_request` — before either
+:func:`abicheck.workflows.dump.pipeline.resolve_dump_request` — before either
 function touches a header-AST backend, a build-info adapter, or the
 filesystem beyond the small, already-in-hand request paths a check needs to
 classify (e.g. sniffing a ``--build-info`` file's own format) — so a request
@@ -40,9 +40,9 @@ else:
   cannot be determined without invoking it, and it can raise
   ``HeaderCompileContextAmbiguousError`` on genuinely ambiguous build
   evidence — exactly why
-  :class:`abicheck.service_dump_pipeline.ResolvedDumpRequest` already
+  :class:`abicheck.workflows.dump.pipeline.ResolvedDumpRequest` already
   excludes the fold's result and runs it only inside
-  :func:`~abicheck.service_dump_pipeline.execute_dump_request`, never during
+  :func:`~abicheck.workflows.dump.pipeline.execute_dump_request`, never during
   a side-effect-free resolve step. Running it here, before an
   ``AnalysisPlan`` is returned, would be the identical contract change to
   ``--dry-run``'s "never raises but a usage error" guarantee that decision

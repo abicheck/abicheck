@@ -457,7 +457,7 @@ class TestResolveExecuteDumpRequestSplit:
     """
 
     def test_resolve_never_invokes_resolve_input(self, snap_path: Path, monkeypatch):
-        from abicheck.service_dump_pipeline import resolve_dump_request
+        from abicheck.workflows.dump.pipeline import resolve_dump_request
 
         def _boom(*args, **kwargs):  # pragma: no cover - must never run
             raise AssertionError("resolve_input reached during resolve-only step")
@@ -469,7 +469,7 @@ class TestResolveExecuteDumpRequestSplit:
         assert resolved.request.input.path == snap_path
 
     def test_resolve_validates_before_anything_else(self, snap_path: Path):
-        from abicheck.service_dump_pipeline import resolve_dump_request
+        from abicheck.workflows.dump.pipeline import resolve_dump_request
 
         with pytest.raises(ValidationError):
             resolve_dump_request(
@@ -480,7 +480,7 @@ class TestResolveExecuteDumpRequestSplit:
         self, snap_path: Path
     ):
         from abicheck.service import run_dump_request
-        from abicheck.service_dump_pipeline import (
+        from abicheck.workflows.dump.pipeline import (
             execute_dump_request,
             resolve_dump_request,
         )
@@ -496,7 +496,7 @@ class TestResolveExecuteDumpRequestSplit:
     def test_run_dump_request_is_literally_the_composition(self, snap_path: Path):
         """``run_dump_request`` cannot silently diverge from the two-step path."""
         from abicheck import service
-        from abicheck.service_dump_pipeline import (
+        from abicheck.workflows.dump.pipeline import (
             execute_dump_request,
             resolve_dump_request,
         )
@@ -512,7 +512,7 @@ class TestResolveExecuteDumpRequestSplit:
     def test_depth_floor_raises_only_at_execute_time(self, snap_path: Path):
         """A ``depth`` requested but not reached is an execution-time failure —
         the resolve step has no snapshot yet to check it against."""
-        from abicheck.service_dump_pipeline import (
+        from abicheck.workflows.dump.pipeline import (
             execute_dump_request,
             resolve_dump_request,
         )
@@ -526,7 +526,7 @@ class TestResolveExecuteDumpRequestSplit:
     def test_resolved_request_reports_requested_depth_and_collect_mode(
         self, snap_path: Path
     ):
-        from abicheck.service_dump_pipeline import resolve_dump_request
+        from abicheck.workflows.dump.pipeline import resolve_dump_request
 
         resolved = resolve_dump_request(
             DumpRequest(input=InputSpec(path=snap_path), depth="binary")
@@ -537,7 +537,7 @@ class TestResolveExecuteDumpRequestSplit:
     def test_resolved_request_headers_property_reads_from_evidence(
         self, snap_path: Path
     ):
-        from abicheck.service_dump_pipeline import resolve_dump_request
+        from abicheck.workflows.dump.pipeline import resolve_dump_request
 
         resolved = resolve_dump_request(DumpRequest(input=InputSpec(path=snap_path)))
         assert resolved.headers == tuple(resolved.evidence.headers)
@@ -551,7 +551,7 @@ class TestResolveExecuteDumpRequestSplit:
         handles -- still reachable if ``gated_source_label`` raises for a
         different reason."""
         from abicheck import evidence_depth
-        from abicheck.service_dump_pipeline import (
+        from abicheck.workflows.dump.pipeline import (
             execute_dump_request,
             resolve_dump_request,
         )
@@ -572,7 +572,7 @@ class TestResolveExecuteDumpRequestSplit:
         self, snap_path: Path
     ):
         from abicheck.evidence_depth import gated_source_label
-        from abicheck.service_dump_pipeline import (
+        from abicheck.workflows.dump.pipeline import (
             execute_dump_request,
             resolve_dump_request,
         )
@@ -588,7 +588,7 @@ class TestResolveExecuteDumpRequestSplit:
         module's own docstring — not something a resolve/execute split adds."""
         from dataclasses import fields
 
-        from abicheck.service_dump_pipeline import DumpResult
+        from abicheck.workflows.dump.pipeline import DumpResult
 
         assert "storage" not in {f.name for f in fields(DumpResult)}
 
@@ -599,7 +599,7 @@ class TestResolveExecuteDumpRequestSplit:
         so appending effective_includes/effective_compile_context as
         *required* fields would TypeError on an external caller already
         constructing the previous three-field shape. Both must default."""
-        from abicheck.service_dump_pipeline import DumpResult, resolve_dump_request
+        from abicheck.workflows.dump.pipeline import DumpResult, resolve_dump_request
 
         resolved = resolve_dump_request(DumpRequest(input=InputSpec(path=snap_path)))
         result = DumpResult(
@@ -617,7 +617,7 @@ class TestResolveExecuteDumpRequestSplit:
         discarded after use. No sources/build_info here, so the fold is a
         no-op -- includes is whatever the request supplied (empty), and the
         compile context is None (unchanged from the request's own None)."""
-        from abicheck.service_dump_pipeline import (
+        from abicheck.workflows.dump.pipeline import (
             execute_dump_request,
             resolve_dump_request,
         )
@@ -635,7 +635,7 @@ class TestResolveExecuteDumpRequestSplit:
         ``eff_backend`` computation applies at execution time (Codex review,
         fresh evidence)."""
         from abicheck.compile_context import CompileContext
-        from abicheck.service_dump_pipeline import resolve_dump_request
+        from abicheck.workflows.dump.pipeline import resolve_dump_request
 
         request = DumpRequest(
             input=InputSpec(path=snap_path, compile=CompileContext(frontend="clang")),
@@ -648,7 +648,7 @@ class TestResolveExecuteDumpRequestSplit:
     def test_effective_header_backend_resolves_auto_without_override(
         self, snap_path: Path
     ):
-        from abicheck.service_dump_pipeline import resolve_dump_request
+        from abicheck.workflows.dump.pipeline import resolve_dump_request
 
         resolved = resolve_dump_request(
             DumpRequest(input=InputSpec(path=snap_path), frontend="auto")
@@ -665,7 +665,7 @@ class TestResolveExecuteDumpRequestSplit:
         frontend_context != "host": return _run_clang()``) -- the reporting
         projection must reflect that instead of naming the backend "auto"
         would otherwise default to (Codex review, fresh evidence)."""
-        from abicheck.service_dump_pipeline import resolve_dump_request
+        from abicheck.workflows.dump.pipeline import resolve_dump_request
 
         resolved = resolve_dump_request(
             DumpRequest(
@@ -687,7 +687,7 @@ class TestResolveExecuteDumpRequestSplit:
         must not claim "clang" will run in that case (Codex review, two
         rounds -- the first fix applied the clang override unconditionally,
         missing this pinned-castxml case)."""
-        from abicheck.service_dump_pipeline import resolve_dump_request
+        from abicheck.workflows.dump.pipeline import resolve_dump_request
 
         resolved = resolve_dump_request(
             DumpRequest(
@@ -713,9 +713,9 @@ class TestResolveExecuteDumpRequestSplit:
         ``header_backend`` unchanged; ``effective_header_backend`` is a
         reporting-only projection, computed correctly, but never fed back
         into execution."""
-        from abicheck import service_dump_pipeline
         from abicheck.compile_context import CompileContext
-        from abicheck.service_dump_pipeline import (
+        from abicheck.workflows.dump import pipeline as service_dump_pipeline
+        from abicheck.workflows.dump.pipeline import (
             execute_dump_request,
             resolve_dump_request,
         )

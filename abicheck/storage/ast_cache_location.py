@@ -46,7 +46,7 @@ __all__ = ["AST_DISK_CACHE", "ast_cache_entry_path", "reference_scratch_scoped"]
 
 log = logging.getLogger(__name__)
 
-AST_DISK_CACHE = DiskCache("abicheck.dumper_cache.ast_disk")
+AST_DISK_CACHE = DiskCache("abicheck.storage.header_ast_cache.ast_disk")
 
 #: The one process-wide reference-mode scratch root (created on first use,
 #: removed at interpreter exit); each call gets a fresh directory under it.

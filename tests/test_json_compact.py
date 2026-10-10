@@ -257,7 +257,7 @@ class TestMigrateLegacyEntry:
     def test_load_cached_ast_migrates_on_read(self, tmp_path):
         import json
 
-        from abicheck.dumper_cache import load_cached_ast
+        from abicheck.storage.header_ast_cache import load_cached_ast
 
         doc = {"kind": "TranslationUnitDecl", "inner": [{"name": "—"}]}
         p = tmp_path / "ast.json"

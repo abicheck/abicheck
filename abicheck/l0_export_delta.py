@@ -116,10 +116,10 @@ def symbols_only_view(snapshot: object, lang: str) -> AbiSnapshot | None:
     snapshot, a parse failure, a table that is legitimately empty); the
     caller then re-resolves from the path, as before.
     """
-    from .dumper_elf_fallback import _build_symbol_only_snapshot
     from .dumper_elf_symbols import _elf_classify_symbols
     from .extract.header_ast_backend import lang_to_profile
     from .model.dwarf_facts import AdvancedDwarfMetadata, DwarfMetadata
+    from .workflows.dump.elf_fallback import _build_symbol_only_snapshot
 
     elf = getattr(snapshot, "elf", None)
     source_path = getattr(snapshot, "source_path", None)

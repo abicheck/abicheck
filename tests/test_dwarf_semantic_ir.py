@@ -36,11 +36,11 @@ from pathlib import Path
 
 import pytest
 
-from abicheck.dumper_elf_fallback import _try_dwarf_snapshot
 from abicheck.dwarf_unified import parse_dwarf
 from abicheck.elf_metadata import parse_elf_metadata
 from abicheck.model.fact import FactStatus
 from abicheck.model.identity import EntityKind
+from abicheck.workflows.dump.elf_fallback import _try_dwarf_snapshot
 
 _GPP = "g++"
 

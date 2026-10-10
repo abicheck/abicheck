@@ -15,9 +15,9 @@
 """Execute a binary-less (``InputSpec.path is None``) ``ResolvedDumpRequest``.
 
 ADR-063 Track T4 ("Dump request contract"), item 1's second still-open
-clause: :func:`abicheck.service_dump_pipeline.execute_dump_request` used to
+clause: :func:`abicheck.workflows.dump.pipeline.execute_dump_request` used to
 raise unconditionally for this shape even though
-:func:`abicheck.service_dump_pipeline.resolve_dump_request` has always fully
+:func:`abicheck.workflows.dump.pipeline.resolve_dump_request` has always fully
 resolved it (that resolution is what ``dump --dry-run`` needs). The only
 real ``dump --sources``/``--build-info`` (no ``SO_PATH``) pipeline was,
 until now, :func:`~abicheck.cli_buildsource.dump_source_only`'s own -- a
@@ -27,8 +27,8 @@ module is that same pipeline, reduced to its engine primitives so a non-CLI
 (typed API) caller can reach it too.
 
 Split into its own module (rather than living in
-:mod:`abicheck.service_dump_pipeline` alongside
-:func:`~abicheck.service_dump_pipeline.execute_dump_request`) purely to keep
+:mod:`abicheck.workflows.dump.pipeline` alongside
+:func:`~abicheck.workflows.dump.pipeline.execute_dump_request`) purely to keep
 that module under the architecture gate's 800-line new-file cap -- it has
 no debt-ledger baseline of its own and was already at the cap. It lives
 under ``workflows/artifact/`` (a real ADR-061 responsibility-package
@@ -44,7 +44,7 @@ so this is a same-layer sibling, not a new cross-layer dependency.
 
 :func:`execute_source_only_dump_request` returns a plain
 :class:`SourceOnlyDumpOutcome` rather than a real
-:class:`~abicheck.service_dump_pipeline.DumpResult` -- deliberately, not
+:class:`~abicheck.workflows.dump.pipeline.DumpResult` -- deliberately, not
 merely to avoid one import. ``service_dump_pipeline.py`` imports *this*
 module (to call the function), and the AI-readiness ``import-cycle-growth``
 gate's cycle scan walks every import anywhere in a file, including inside a
@@ -77,8 +77,8 @@ __all__ = ["SourceOnlyDumpOutcome", "execute_source_only_dump_request"]
 
 @dataclass(frozen=True)
 class SourceOnlyDumpOutcome:
-    """The three facts :func:`~abicheck.service_dump_pipeline.execute_dump_request`
-    needs to build its own :class:`~abicheck.service_dump_pipeline.DumpResult`
+    """The three facts :func:`~abicheck.workflows.dump.pipeline.execute_dump_request`
+    needs to build its own :class:`~abicheck.workflows.dump.pipeline.DumpResult`
     from -- see this module's own docstring for why this function returns
     this instead of a real ``DumpResult``."""
 
@@ -90,7 +90,7 @@ class SourceOnlyDumpOutcome:
 def execute_source_only_dump_request(
     resolved: ResolvedDumpRequest, options: DumpExecutionOptions
 ) -> SourceOnlyDumpOutcome:
-    """Execute a binary-less :class:`~abicheck.service_dump_pipeline.ResolvedDumpRequest`.
+    """Execute a binary-less :class:`~abicheck.workflows.dump.pipeline.ResolvedDumpRequest`.
 
     Build an empty-library :class:`~abicheck.model.AbiSnapshot` (no L0-L2
     pass at all, named after whichever of ``sources``/``build_info`` is

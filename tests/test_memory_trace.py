@@ -374,7 +374,7 @@ class TestRecordReleaseMember:
         out = tmp_path / "trace.jsonl"
         _enable(monkeypatch, out)
         monkeypatch.setattr(
-            "abicheck.dumper_cache.ast_acquisition_stats",
+            "abicheck.storage.header_ast_cache.ast_acquisition_stats",
             lambda: {"retained_groups": 2, "retained_raw_entries": 4},
         )
         memory_trace.record_release_member("libx.so", {"old_full": True})
@@ -393,7 +393,9 @@ class TestRecordReleaseMember:
         """Absent, not zero -- the same rule the probes follow."""
         out = tmp_path / "trace.jsonl"
         _enable(monkeypatch, out)
-        monkeypatch.setattr("abicheck.dumper_cache.ast_acquisition_stats", lambda: None)
+        monkeypatch.setattr(
+            "abicheck.storage.header_ast_cache.ast_acquisition_stats", lambda: None
+        )
         memory_trace.record_release_member("libx.so", {})
         assert [r["event"] for r in memory_trace.read_samples(out)] == [
             "release.member.retained",
@@ -407,7 +409,7 @@ class TestRecordReleaseMember:
         memory_trace.reset_for_testing()
         called = {"n": 0}
         monkeypatch.setattr(
-            "abicheck.dumper_cache.ast_acquisition_stats",
+            "abicheck.storage.header_ast_cache.ast_acquisition_stats",
             lambda: called.update(n=called["n"] + 1),
         )
         memory_trace.record_release_member("libx.so", {"old_full": True})

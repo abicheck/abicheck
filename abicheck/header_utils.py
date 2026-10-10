@@ -559,7 +559,7 @@ def drop_include_tokens_duplicating_paths(
     *already_covered* (a raw token list, in the same shape as *toks*).
 
     ``dump``'s ELF and PE/Mach-O paths (:func:`abicheck.workflows.dump.native.
-    extract_elf`/:func:`abicheck.service_header_scoped._try_header_
+    extract_elf`/:func:`abicheck.workflows.dump.header_scoped._try_header_
     scoped_dump`) both render the L3->L2 fold's merged compile context into
     ``gcc_option_tokens`` via ``header_compile_context._context_flags`` —
     which independently renders the *same* matched compile unit's

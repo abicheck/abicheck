@@ -39,12 +39,10 @@ from .cli_compare_release_helpers import (  # noqa: F401
     _RELEASE_VERDICT_ORDER,
     _cleanup_temp_dirs,
     _collect_bundle_result,
-    _compute_release_severity_exit_code,
     _debian_symbols_warning,
     _discover_include_roots,
     _exit_compare_release,
     _extract_if_package,
-    _fold_release_global_severity,
     _format_release_json,
     _format_release_junit,
     _format_release_markdown,
@@ -110,6 +108,10 @@ from .workflows.header_exclusion_audit import (
     observed_member_exclusion_identities,
 )
 from .workflows.release_assurance_members import release_assurance_from_entries
+from .workflows.release_exit_fold import (
+    fold_release_global_severity,
+    release_severity_exit_code,
+)
 from .workflows.release_public_surface import (
     reconcile_release_public_surface,
     release_surface_severity_exit,
@@ -1035,12 +1037,12 @@ def compare_release_cmd(
                 def _resolve_stranded_library(
                     old_path: Path,
                 ) -> StrandedLibraryResolution:
-                    from .service_dump_pipeline import (
+                    from .workflows import extraction
+                    from .workflows.contracts import DumpRequest
+                    from .workflows.dump.pipeline import (
                         execute_dump_request,
                         resolve_dump_request,
                     )
-                    from .workflows import extraction
-                    from .workflows.contracts import DumpRequest
                     from .workflows.request_inputs import InputSpec
 
                     old_dbg = (
@@ -1206,7 +1208,7 @@ def compare_release_cmd(
             severity_exit_code = (
                 None
                 if gate.severity is None
-                else _compute_release_severity_exit_code(library_results, gate)
+                else release_severity_exit_code(library_results, gate)
             )
 
             # Phase 7d (one-comparison-product.md §4.1): bundle-level
@@ -1303,7 +1305,7 @@ def compare_release_cmd(
             # Fold release-global bundle/matrix findings into the severity exit so a
             # clean-per-library release with a bundle/matrix break is not masked.
             if severity_exit_code is not None:
-                severity_exit_code = _fold_release_global_severity(
+                severity_exit_code = fold_release_global_severity(
                     severity_exit_code,
                     bundle_result,
                     matrix_result,

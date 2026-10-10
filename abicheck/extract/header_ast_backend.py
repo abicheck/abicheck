@@ -26,7 +26,7 @@ attempt itself happens.
 
 Before this split, :func:`abicheck.dumper._header_ast_parser` computed its
 own dispatch inline, and
-:func:`abicheck.service_dump_pipeline.resolve_dump_request` independently
+:func:`abicheck.workflows.dump.pipeline.resolve_dump_request` independently
 re-derived the identical prediction a second time for its own
 reporting-only ``effective_header_backend`` field -- duplicating both the
 override-precedence rule and the "any non-host context forces clang" rule.

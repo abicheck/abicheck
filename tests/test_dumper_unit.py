@@ -591,7 +591,8 @@ class TestCastxmlDump:
         monkeypatch.setattr(_cx, "_cache_key", lambda *a, **kw: "testkey")
         monkeypatch.setattr(_cx, "_cache_path", lambda k: cache_xml)
 
-        from abicheck import deadline, dumper_cache
+        from abicheck import deadline
+        from abicheck.storage import header_ast_cache as dumper_cache
 
         # The warm-cache parse this exercises lives in `dumper_cache.
         # read_cached_castxml` (`dumper` re-exports it as

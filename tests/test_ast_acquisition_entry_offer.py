@@ -13,12 +13,12 @@ from pathlib import Path
 
 import pytest
 
-from abicheck import dumper_cache
-from abicheck.dumper_cache import (
+from abicheck.storage import header_ast_cache as dumper_cache
+from abicheck.storage.derived_ast import derived_ast_scope
+from abicheck.storage.header_ast_cache import (
     ast_acquisition_scope,
     run_ast_acquisition_offering_entry,
 )
-from abicheck.storage.derived_ast import derived_ast_scope
 
 
 @pytest.fixture

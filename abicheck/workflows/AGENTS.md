@@ -84,14 +84,12 @@ format up in `workflows.dump.native.FORMAT_ADAPTERS` and passes the
 in a test, swap the registry entry (helper: `tests/_dump_format_fakes.py`);
 the extractor names themselves are owned, not patch points.
 
-`abicheck/service_dump_pipeline.py` is classified `workflows` via
-`legacy_paths`: it is free of CLI imports and owns `DumpRequest ->
-ResolvedDumpRequest -> DumpResult`, but has not moved into this directory
-yet. Know what that classification enforces, because the two gates differ:
-`check_architecture.py` rejects a forbidden *direction* to a classified layer
-(a `workflows -> report` import fails, and reports the cycle), while the CLI
-boundary for a still-flat module is held by the separate
-`engine-cli-boundary` gate. Both are live; neither is decorative.
+`abicheck/workflows/dump/pipeline.py` owns `DumpRequest ->
+ResolvedDumpRequest -> DumpResult` and is free of CLI imports. It lives in
+this package, so `check_architecture.py` classifies it as `workflows` by
+path and rejects a forbidden *direction* (a `workflows -> report` import
+fails, and reports the cycle); the separate `engine-cli-boundary` gate
+still guards the root modules that have not moved yet. Both are live; neither is decorative.
 
 `service_input_resolution.py` is classified too, since `embed_build_source`
 moved to `buildsource/embed.py`. Only `service_compare_pipeline.py` is left:

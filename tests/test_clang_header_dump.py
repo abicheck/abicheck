@@ -32,11 +32,12 @@ from typing import Any
 
 import pytest
 
-from abicheck import deadline, dumper, dumper_ast_config, dumper_cache, dumper_clang
+from abicheck import deadline, dumper, dumper_ast_config, dumper_clang
 from abicheck.dumper_clang import _ClangAstParser
 from abicheck.errors import SnapshotError
 from abicheck.extract.headers.clang import backend as clang_backend
 from abicheck.extract.headers.clang.backend import clang_header_dump
+from abicheck.storage import header_ast_cache as dumper_cache
 from tests._clang_runner_fakes import _as_runner, _fake_proc, _write_stdout_file
 
 # The live-clang tests below are Linux/ELF-scoped, matching

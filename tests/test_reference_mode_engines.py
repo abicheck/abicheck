@@ -158,7 +158,7 @@ def test_reference_scratch_scope_is_inert_outside_reference_mode(
 
 
 def test_ast_memo_slot_and_acquisition_scope_bypass(ref: pytest.MonkeyPatch) -> None:
-    from abicheck import dumper_cache
+    from abicheck.storage import header_ast_cache as dumper_cache
 
     with dumper_cache.ast_acquisition_scope():
         assert not dumper_cache.ast_acquisition_active()

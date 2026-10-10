@@ -19,21 +19,22 @@ from xml.etree import ElementTree
 
 import pytest
 
-from abicheck import dumper_cache, dumper_clang_errors
+from abicheck import dumper_clang_errors
 from abicheck.deadline import DeadlineExceeded, deadline_scope
-from abicheck.dumper_cache import (
-    _ast_memo_slot,
-    ast_acquisition_active,
-    ast_acquisition_scope,
-    retain_ast_context_object,
-    run_ast_acquisition,
-)
 from abicheck.errors import SnapshotError
 from abicheck.extract.header_ast_fields import parse_header_ast_fields
 from abicheck.extract.headers.castxml import backend as castxml_backend
 from abicheck.extract.headers.clang import backend as clang_backend
 from abicheck.model import Function, Visibility
 from abicheck.model.identity import entity_id_for_function
+from abicheck.storage import header_ast_cache as dumper_cache
+from abicheck.storage.header_ast_cache import (
+    _ast_memo_slot,
+    ast_acquisition_active,
+    ast_acquisition_scope,
+    retain_ast_context_object,
+    run_ast_acquisition,
+)
 
 
 def _run_in_context(ctx: contextvars.Context, key: str, producer: object) -> object:
@@ -737,8 +738,8 @@ class _AcquisitionCounters:
 
 @pytest.fixture
 def acquisition_counters(monkeypatch: pytest.MonkeyPatch) -> _AcquisitionCounters:
-    from abicheck import dumper_cache
     from abicheck.extract import header_ast_fields
+    from abicheck.storage import header_ast_cache as dumper_cache
 
     counters = _AcquisitionCounters()
     scope_run = dumper_cache.AstAcquisitionScope.run
@@ -968,7 +969,7 @@ def test_directory_l2_compare_acquires_one_ast_per_key(
 
 
 def test_read_cached_castxml_returns_the_parsed_root(tmp_path: Path) -> None:
-    from abicheck.dumper_cache import read_cached_castxml
+    from abicheck.storage.header_ast_cache import read_cached_castxml
 
     cached = tmp_path / "ast.xml"
     cached.write_text("<GCC_XML><Namespace name='demo'/></GCC_XML>", encoding="utf-8")
@@ -980,7 +981,7 @@ def test_read_cached_castxml_returns_the_parsed_root(tmp_path: Path) -> None:
 
 def test_read_cached_castxml_evicts_an_unusable_entry(tmp_path: Path) -> None:
     """A torn/corrupt cache file is discarded, not raised on."""
-    from abicheck.dumper_cache import read_cached_castxml
+    from abicheck.storage.header_ast_cache import read_cached_castxml
 
     cached = tmp_path / "ast.xml"
     cached.write_text("<GCC_XML><unclosed>", encoding="utf-8")
@@ -1011,7 +1012,7 @@ def test_resolve_request_memoization_matrix(
     and an active acquisition scope means the request-keyed table is already
     that handoff -- so the answer is ``wanted and not acquisition``.
     """
-    from abicheck import dumper_cache
+    from abicheck.storage import header_ast_cache as dumper_cache
 
     def check() -> None:
         assert dumper_cache.resolve_request_memoization(memoize) is expected
@@ -1024,7 +1025,7 @@ def test_resolve_request_memoization_matrix(
             check()
 
     if memo_scope:
-        from abicheck.dumper_cache import ast_memoize_scope
+        from abicheck.storage.header_ast_cache import ast_memoize_scope
 
         with ast_memoize_scope():
             with_acquisition()
@@ -1052,8 +1053,8 @@ def test_streaming_prune_gate_matrix(
     from what each scope means, not from the function's own conditions.
     """
     from abicheck import dumper_clang_errors
-    from abicheck.dumper_cache import ast_memoize_scope
     from abicheck.dumper_clang_streaming import suppress_streaming_prune
+    from abicheck.storage.header_ast_cache import ast_memoize_scope
 
     monkeypatch.setenv(
         dumper_clang_errors.STREAM_PRUNE_DEPENDENCY_DECLS_ENV_VAR,

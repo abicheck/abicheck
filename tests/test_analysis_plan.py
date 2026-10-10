@@ -19,7 +19,7 @@ The named acceptance scenario is the ``--build-target`` + pre-captured Bazel
 ``aquery``/``cquery`` gap (``docs/contribute/known-gaps.md``): every one of
 these tests reproduces it end to end through
 :func:`abicheck.service_compare_pipeline.resolve_compare_request`/
-:func:`abicheck.service_dump_pipeline.resolve_dump_request` -- the shared
+:func:`abicheck.workflows.dump.pipeline.resolve_dump_request` -- the shared
 chokepoint every front end (CLI, typed Python API, the release/bundle
 fan-out) resolves a request through -- asserting :class:`~abicheck.errors.PlanningError`,
 not a warning or a silently-unscoped collection.

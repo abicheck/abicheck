@@ -281,11 +281,11 @@ class TestStreamingPruneEnabledRespectsAstMemoization:
     own, differently-scoped check."""
 
     def test_disabled_inside_an_active_memoize_scope(self, monkeypatch) -> None:
-        from abicheck import dumper_cache
         from abicheck.dumper_clang_errors import (
             STREAM_PRUNE_DEPENDENCY_DECLS_ENV_VAR,
             _streaming_prune_enabled,
         )
+        from abicheck.storage import header_ast_cache as dumper_cache
 
         monkeypatch.setenv(STREAM_PRUNE_DEPENDENCY_DECLS_ENV_VAR, "1")
         assert _streaming_prune_enabled() is True  # baseline: env var alone enables it
@@ -308,11 +308,11 @@ class TestStreamingPruneEnabledRespectsAstMemoization:
         """Both `suppress_streaming_prune()` and an active memoize scope
         each independently disable the pruner -- neither leaking into, nor
         depending on, the other."""
-        from abicheck import dumper_cache
         from abicheck.dumper_clang_errors import (
             STREAM_PRUNE_DEPENDENCY_DECLS_ENV_VAR,
             _streaming_prune_enabled,
         )
+        from abicheck.storage import header_ast_cache as dumper_cache
 
         monkeypatch.setenv(STREAM_PRUNE_DEPENDENCY_DECLS_ENV_VAR, "1")
         with suppress_streaming_prune():

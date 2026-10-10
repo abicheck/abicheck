@@ -174,7 +174,7 @@ PERF_SENSITIVE_PATTERNS: tuple[str, ...] = (
     # header_graph, via service._attach_header_graph) -- not core-only.
     "abicheck/buildsource/**",
     "abicheck/provenance.py",
-    "abicheck/dumper_cache.py",
+    "abicheck/storage/header_ast_cache.py",
     "abicheck/dumper_ast_config.py",
     "abicheck/dumper_sysinc.py",
     "abicheck/dumper_clang.py",
@@ -278,7 +278,7 @@ PERF_SENSITIVE_PATTERNS: tuple[str, ...] = (
     "abicheck/dumper_castxml_probe.py",
     "abicheck/dumper_contract.py",
     "abicheck/dumper_debug.py",
-    "abicheck/dumper_elf_fallback.py",
+    "abicheck/workflows/dump/elf_fallback.py",
     "abicheck/dumper_elf_symbols.py",
     "abicheck/dumper_layout_backfill.py",
     # The module entry point. Every measured command is launched as

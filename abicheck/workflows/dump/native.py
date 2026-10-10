@@ -295,8 +295,8 @@ def _extract_and_finish(
     and the clang layout; PE and Mach-O share :func:`_finish_native_snapshot`.
     Both renumber anonymous closure identities exactly once, at the end.
     """
-    from ...dumper_cache import ast_memoize_scope
     from ...extract.header_ast_backend import _resolve_header_backend
+    from ...storage.header_ast_cache import ast_memoize_scope
 
     adapter = FORMAT_ADAPTERS.get(binary_fmt)
     if adapter is None:

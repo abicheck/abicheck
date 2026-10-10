@@ -29,25 +29,25 @@ import logging
 import warnings
 from typing import TYPE_CHECKING
 
-from .dumper_elf_symbols import _populate_elf_visibility
-from .dumper_toolchain import _safe_mtime, _safe_size
-from .extract.debug_layout_semantic_ir import semantic_ir_from_debug_metadata
-from .extract.export_symbol_identity import (
+from ...dumper_elf_symbols import _populate_elf_visibility
+from ...dumper_toolchain import _safe_mtime, _safe_size
+from ...extract.debug_layout_semantic_ir import semantic_ir_from_debug_metadata
+from ...extract.export_symbol_identity import (
     itanium_export_function as _elf_export_function,
     itanium_export_variable as _elf_export_variable,
 )
-from .extract.semantic_normalizer import normalize_header_ast
-from .model import AbiSnapshot, RecordType
-from .model.semantic_ir import SemanticIR
-from .workflows.snapshot_factory import new_snapshot
+from ...extract.semantic_normalizer import normalize_header_ast
+from ...model import AbiSnapshot, RecordType
+from ...model.semantic_ir import SemanticIR
+from ...workflows.snapshot_factory import new_snapshot
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from .dwarf_advanced import AdvancedDwarfMetadata
-    from .dwarf_metadata import DwarfMetadata
-    from .dwarf_unified import DwarfSession
-    from .elf_metadata import ElfMetadata
+    from ...dwarf_advanced import AdvancedDwarfMetadata
+    from ...dwarf_metadata import DwarfMetadata
+    from ...dwarf_unified import DwarfSession
+    from ...elf_metadata import ElfMetadata
 
 # Logs under the original "abicheck.dumper" name (not __name__) since this
 # is a pure relocation: callers/tests scoped to that logger (e.g. caplog)
@@ -139,7 +139,7 @@ def _try_dwarf_snapshot(
     metadata parse; the snapshot DIE walk reuses it instead of re-opening
     ``so_path`` (F5b). The caller retains ownership and closes it.
     """
-    from .workflows.dwarf_snapshot_assembly import build_snapshot_from_dwarf
+    from ...workflows.dwarf_snapshot_assembly import build_snapshot_from_dwarf
 
     if dwarf_only and headers:
         warnings.warn(

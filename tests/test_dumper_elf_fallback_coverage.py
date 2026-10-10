@@ -44,9 +44,9 @@ from pathlib import Path
 import pytest
 
 import abicheck.workflows.dwarf_snapshot_assembly as dwarf_snapshot
-from abicheck.dumper_elf_fallback import _try_dwarf_snapshot
 from abicheck.model import AbiSnapshot, Function, RecordType
 from abicheck.model.dwarf_facts import AdvancedDwarfMetadata, DwarfMetadata
+from abicheck.workflows.dump.elf_fallback import _try_dwarf_snapshot
 
 
 def _args(headers: list[Path], dwarf_only: bool):
