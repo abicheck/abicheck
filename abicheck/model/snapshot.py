@@ -320,10 +320,11 @@ class AbiSnapshot:
     build_id: str | None = None  # opaque CI identifier (run ID, build number, etc.)
     # Build-mode capture (schema v5) — normalized compiler / stdlib / std
     # mode. Used to attribute layout/mangling differences to build
-    # configuration rather than real ABI breaks. No dump path populates it:
-    # it is read back from a stored document that carries it, and the
-    # stdlib-ABI detectors otherwise derive the stdlib dimensions from
-    # mangled symbols at compare time (``build_mode_from_signals``). See
+    # configuration rather than real ABI breaks. An ELF dump records it from
+    # the image's DW_AT_producer/DW_AT_language/.comment
+    # (``extract.build_mode_capture``); the stdlib-ABI detectors prefer it and
+    # otherwise derive the stdlib dimensions from mangled symbols at compare
+    # time (``build_mode_from_signals``). See
     # ``abicheck/build_mode.py`` for the dataclass and detector logic.
     # None when nothing recorded it.
     build_mode: BuildMode | None = None

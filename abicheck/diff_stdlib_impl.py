@@ -28,8 +28,8 @@ implementation (or the libc++ ABI version) differs. It is deliberately
 conservative:
 
 * It works on real snapshots, **not just captured build-mode.** The normalized
-  ``build_mode`` field is not populated by every dump path, so the detector
-  falls back to recovering the stdlib family from the mangled symbol names
+  ``build_mode`` field is recorded at dump time only for ELF images (and is
+  absent from pre-v5 stored baselines), so the detector prefers it and falls back to recovering the stdlib family from the mangled symbol names
   (which are always present and serialized) — see :func:`_effective_build_mode`.
 * It is **quiet when evidence is missing.** When neither a captured build-mode
   nor any mangled symbol reveals the stdlib family (it stays ``UNKNOWN``), it
@@ -343,8 +343,8 @@ def _effective_build_mode(snap: AbiSnapshot) -> BuildMode | None:
     """Return the snapshot's :class:`BuildMode`, deriving it on the fly when the
     captured field is absent.
 
-    The normalized ``build_mode`` field is not populated by every dump path, and
-    serialized snapshots predating schema v5 lack it entirely — but the
+    The normalized ``build_mode`` field is recorded at dump time only for ELF
+    images (``extract.build_mode_capture``), and serialized snapshots predating schema v5 lack it entirely — but the
     standard-library family (and libc++ ABI version) this detector keys on is
     encoded directly in the mangled symbol names (``_ZNSt3__1`` ⇒ libc++ v1,
     ``B5cxx11`` ⇒ libstdc++ C++11 ABI). Those names are always present on a real

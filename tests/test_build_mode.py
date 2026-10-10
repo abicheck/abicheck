@@ -124,12 +124,13 @@ class TestCompilerFamily:
 class TestCxxStandard:
     def test_dwarf_tags(self) -> None:
         # Spot-check the main mappings.
-        assert detect_cxx_standard(0x02) == CxxStandard.CXX98
+        assert detect_cxx_standard(0x02) == CxxStandard.C  # DW_LANG_C
+        assert detect_cxx_standard(0x04) == CxxStandard.CXX98  # DW_LANG_C_plus_plus
         assert detect_cxx_standard(0x1A) == CxxStandard.CXX11
         assert detect_cxx_standard(0x21) == CxxStandard.CXX14_OR_LATER
         assert detect_cxx_standard(0x2A) == CxxStandard.CXX17
         assert detect_cxx_standard(0x2B) == CxxStandard.CXX20
-        assert detect_cxx_standard(0x2E) == CxxStandard.CXX23
+        assert detect_cxx_standard(0x3A) == CxxStandard.CXX23
 
     def test_cpp03_maps_to_pre_cxx11_bucket(self) -> None:
         """Regression for the Codex P2 finding: DW_LANG_C_plus_plus_03

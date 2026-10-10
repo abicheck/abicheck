@@ -674,9 +674,9 @@ def dump(
     # `#include <dep.h>` resolves stays compile context -- see
     # `extract.public_root_ownership` for the rule and the MKL/MPI case
     # that forced it.
-    from .workflows.snapshot_factory import finish_provenance
+    from .workflows.snapshot_factory import finish_binary_dump
 
-    return finish_provenance(
+    return finish_binary_dump(
         snapshot,
         effective_public_headers,
         effective_public_header_dirs,
