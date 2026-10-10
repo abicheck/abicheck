@@ -524,6 +524,7 @@ class ClangBackend:
                 resolved_force_cpp=resolved_force_cpp,
                 gcc_options=r.gcc_options,
                 gcc_option_tokens=r.gcc_option_tokens,
+                target_triple=target_triple,
             ),
         )
         setattr(stamped, "_abicheck_frontend_context_kind", resolved_kind)

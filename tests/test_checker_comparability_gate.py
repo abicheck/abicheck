@@ -274,22 +274,62 @@ class TestDependencyScopeComparabilityGate:
         with pytest.raises(ScopeMismatchError):
             compare(old, new)
 
-    def test_filtered_vs_legacy_none_baseline_is_not_flagged(self):
+    @pytest.mark.parametrize(
+        ("old_scope", "new_scope"),
+        [
+            (None, "filtered"),
+            (None, "full"),
+            ("filtered", None),
+            ("full", None),
+        ],
+    )
+    def test_one_sided_legacy_none_is_bounded_not_refused_nor_clean(
+        self, old_scope, new_scope
+    ):
         # A pre-v18 baseline predates this field but NOT dumper_scoping.py's
-        # default filtering (which already shipped as `dump`'s default) --
-        # its None is genuinely ambiguous (it's usually already-filtered
-        # content that simply predates the tag), so it must NOT be assumed
-        # to mean "full": doing so would spuriously flag the single most
-        # common workflow (compare a cached baseline against a fresh dump)
-        # as not comparable (Codex review, PR #651 follow-up).
-        old = _scoped_snap("1.0", from_headers=True, dependency_scope=None)
-        new = _scoped_snap("2.0", from_headers=True, dependency_scope="filtered")
-        assert compare(old, new) is not None  # must not raise
+        # default filtering -- its None is genuinely ambiguous, so it must
+        # NOT be assumed to mean "full" and refused (Codex review, PR #651
+        # follow-up). But it must not read as a clean comparable pass either
+        # (known-gaps "Dependency-scoping mismatch is detected only when both
+        # snapshots carry dependency_scope"): the pair is bounded -- a
+        # verdict, with declaration/layout unverified and the reason
+        # disclosed. Oracle: the rule stated independently -- a one-sided
+        # tag can never be verified either way.
+        from abicheck.comparability import check_contracts_comparable
 
-    def test_full_vs_legacy_none_baseline_is_not_flagged(self):
-        old = _scoped_snap("1.0", from_headers=True, dependency_scope=None)
-        new = _scoped_snap("2.0", from_headers=True, dependency_scope="full")
-        assert compare(old, new) is not None  # must not raise
+        old = _scoped_snap("1.0", from_headers=True, dependency_scope=old_scope)
+        new = _scoped_snap("2.0", from_headers=True, dependency_scope=new_scope)
+        for diagnostic in (False, True):
+            mismatch = check_contracts_comparable(old, new, diagnostic=diagnostic)
+            assert mismatch is not None
+            assert mismatch.kind == "dependency_scope"
+            assert mismatch.fatal is False
+            assert mismatch.dimensions == {"declaration", "layout"}
+        result = compare(old, new)  # must not raise
+        assert result.assurance is None  # nothing was forced through
+        assert result.comparability_assurance is not None
+        assert {
+            d for d, v in result.comparability_assurance.items() if v == "unverified"
+        } == {"declaration", "layout"}
+        assert any("dependency-scoping" in w for w in result.coverage_warnings)
+
+    @pytest.mark.parametrize(
+        ("old_scope", "new_scope"),
+        [(None, None), ("filtered", "filtered"), ("full", "full")],
+    )
+    def test_matching_scope_records_are_not_bounded(self, old_scope, new_scope):
+        from abicheck.comparability import check_contracts_comparable
+
+        old = _scoped_snap("1.0", from_headers=True, dependency_scope=old_scope)
+        new = _scoped_snap("2.0", from_headers=True, dependency_scope=new_scope)
+        assert check_contracts_comparable(old, new) is None
+
+    def test_one_sided_legacy_none_is_unaffected_for_binary_only(self):
+        from abicheck.comparability import check_contracts_comparable
+
+        old = _scoped_snap("1.0", from_headers=False, dependency_scope=None)
+        new = _scoped_snap("2.0", from_headers=False, dependency_scope="full")
+        assert check_contracts_comparable(old, new) is None
 
     def test_both_filtered_is_comparable(self):
         old = _scoped_snap("1.0", from_headers=True, dependency_scope="filtered")

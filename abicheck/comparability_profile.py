@@ -161,6 +161,15 @@ def _unexplained_profile_fields(
     new_fields = new_contract.profile_fields
     unexplained = set(differing)
 
+    # Legacy-unrecorded carve-out: a platform field one side never recorded
+    # (every pre-recording baseline stores "") is unknown, never a mismatch
+    # -- the language_standard treatment. Only two recorded values can
+    # disagree; that case still needs the binary-confirmed carve-out below.
+    unexplained -= {
+        f
+        for f in unexplained & _PLATFORM_IDENTITY_FIELDS
+        if not old_fields.get(f) or not new_fields.get(f)
+    }
     platform_candidate = unexplained & _PLATFORM_IDENTITY_FIELDS
     if platform_candidate and _platform_identity_confirmed(
         old, new, platform_candidate

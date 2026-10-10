@@ -165,6 +165,7 @@ def _attach_extraction_contract(
         compute_extraction_contract,
         manifest_tu_scope_field,
     )
+    from .extract.target_platform import contract_platform_fields
     from .extract.toolchain_identity import (
         _compiler_family_from_toolchain,
         compiler_identity_status,
@@ -183,6 +184,14 @@ def _attach_extraction_contract(
             pass  # malformed --gcc-options must not abort the dump
 
     _compiler_status = compiler_identity_status(snapshot.ast_toolchain)
+    # ADR-050 D1: the parse's effective target platform, recorded on
+    # ast_toolchain by _stamp_ast_parser; unrecorded (None) for a legacy or
+    # non-header dump, which the gate reads as unknown, never a mismatch.
+    _triple, _width, _endian = (
+        contract_platform_fields(snapshot.ast_toolchain)
+        if snapshot.from_headers
+        else (None, None, None)
+    )
     snapshot.contract = compute_extraction_contract(
         compiler_family=_compiler_family_from_toolchain(snapshot.ast_toolchain),
         compiler_version=_profile_compiler_version(snapshot.ast_toolchain),
@@ -198,6 +207,9 @@ def _attach_extraction_contract(
                 snapshot.ast_resolved_standard if snapshot.from_headers else None
             ),
         ),
+        target_triple=_triple,
+        pointer_width=_width,
+        endianness=_endian,
         macro_ops=ordered_macro_ops(_flag_tokens),
         pass_through_flags=resolve_pass_through_paths(
             pass_through_flags_from_tokens(_flag_tokens), extra_includes or []
