@@ -995,7 +995,7 @@ class TestWrapRunDumpWithDependencyScope:
         otherwise the pruner could silently drop dependency-header
         functions/variables even though this wrapper was about to keep them
         (Codex review, PR #840)."""
-        from abicheck.dumper_clang_streaming import streaming_prune_suppressed
+        from abicheck.extract.headers.clang.streaming import streaming_prune_suppressed
 
         observed: list[bool] = []
 
@@ -1025,7 +1025,7 @@ class TestWrapRunDumpWithDependencyScope:
         """A filtered request needs no suppression: the pruner can never be
         more aggressive than the post-hoc filter this wrapper is about to
         apply anyway."""
-        from abicheck.dumper_clang_streaming import streaming_prune_suppressed
+        from abicheck.extract.headers.clang.streaming import streaming_prune_suppressed
 
         observed: list[bool] = []
 

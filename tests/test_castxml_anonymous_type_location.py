@@ -592,7 +592,7 @@ _SHAPES = (
 def test_every_location_strip_is_checkout_path_independent(
     root: str, shape: str
 ) -> None:
-    from abicheck.dumper_clang_expr import _normalize_qual_type
+    from abicheck.extract.headers.clang.expr import _normalize_qual_type
     from abicheck.name_classification import canonicalize_type_name
 
     spelled, oracle = shape.format(p=root), shape.format(p="/src")

@@ -42,7 +42,6 @@ from pathlib import Path
 from typing import cast
 from xml.etree.ElementTree import Element, tostring
 
-from ....castxml_policy import evaluate_castxml_version
 from ....dumper_ast_config import (
     _build_castxml_command,
     _cache_key,
@@ -67,6 +66,7 @@ from ....dumper_toolchain import (
     _tool_identity_metadata,
 )
 from ....errors import SnapshotError, UnsupportedCastxmlVersionError
+from ....extract.headers.castxml.policy import evaluate_castxml_version
 from ....storage.atomic_file import atomic_write as _atomic_write
 from ....storage.cache_integrity import record_digest
 from ....storage.header_ast_cache import (

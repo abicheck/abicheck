@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 """Regressions for the proactive CastXML version gate wired into
-``extract.headers.castxml.backend.castxml_dump`` (``abicheck/castxml_policy.py``).
+``extract.headers.castxml.backend.castxml_dump`` (``abicheck/extract/headers/castxml/policy.py``).
 
 Split out of ``tests/test_dumper_unit.py`` (at the file-size hard cap) rather
 than grown in place — see ``AGENTS.md`` "Files that are large".
