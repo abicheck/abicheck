@@ -84,6 +84,8 @@ def _write_package(root: Path, *, ret: str) -> Path:
         root,
         artifact_id="libone.so",
         max_known_schema_version=SCHEMA_VERSION,
+        # Stands in for a fresh dump: these facts were extracted now.
+        generations=versioning.this_build_generations(),
     )
     return root
 
@@ -154,3 +156,70 @@ def test_compare_report_carries_the_notice_without_moving_the_exit_code(
     # Informational only: verdict and exit code are the no-notice run's.
     assert exit_code == baseline_exit
     assert report["verdict"] == baseline["verdict"]
+
+
+# --- importers never claim an imported document's facts as this build's -----
+
+
+def _legacy_doc() -> dict:
+    from abicheck.model import AbiSnapshot
+    from abicheck.serialization import snapshot_to_dict
+
+    return snapshot_to_dict(AbiSnapshot(library="libone.so", version="1"))
+
+
+def _import_v1(generations):  # type: ignore[no-untyped-def]
+    from abicheck.serialization import SCHEMA_VERSION
+    from abicheck.storage import InMemoryObjectStore, import_legacy_snapshot
+
+    return import_legacy_snapshot(
+        _legacy_doc(),
+        store=InMemoryObjectStore(),
+        artifact_id="libone.so",
+        max_known_schema_version=SCHEMA_VERSION,
+        generations=generations,
+    )
+
+
+def _import_bundle(generations):  # type: ignore[no-untyped-def]
+    from abicheck.serialization import SCHEMA_VERSION
+    from abicheck.storage import InMemoryObjectStore
+    from abicheck.storage.import_bundle_facts import import_bundle_facts
+
+    return import_bundle_facts(
+        {"per_library_snapshots": {"libone.so": _legacy_doc()}},
+        store=InMemoryObjectStore(),
+        max_known_schema_version=SCHEMA_VERSION,
+        generations=generations,
+    )
+
+
+def _import_baseline(generations):  # type: ignore[no-untyped-def]
+    from abicheck.serialization import SCHEMA_VERSION
+    from abicheck.storage import InMemoryObjectStore, import_baseline_set
+
+    return import_baseline_set(
+        {"manifest_version": 1, "artifacts": [{"library": "libone.so"}]},
+        {"libone.so": _legacy_doc()},
+        store=InMemoryObjectStore(),
+        max_known_schema_version=SCHEMA_VERSION,
+        generations=generations,
+    )
+
+
+@pytest.mark.parametrize("importer", [_import_v1, _import_bundle, _import_baseline])
+@pytest.mark.parametrize("source", [None, (3, 7), "this_build"])
+def test_importers_stamp_the_producers_generations_not_this_builds(
+    reader_at_five: None, importer, source
+) -> None:  # type: ignore[no-untyped-def]
+    generations = (
+        versioning.this_build_generations() if source == "this_build" else source
+    )
+    versions = importer(generations).versions
+    expected = {None: (0, 0), (3, 7): (3, 7), "this_build": (READER, READER)}[
+        source if source is None or source == "this_build" else (3, 7)
+    ]
+    assert (versions.extractor_generation, versions.resolver_generation) == expected
+    # Unknown provenance is never reported as drift against this build.
+    drift = versioning.reader_generation_compatibility(versions).semantics_differ
+    assert drift is (source == (3, 7))

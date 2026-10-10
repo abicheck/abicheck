@@ -4726,7 +4726,7 @@ stripped} against the compiler's own banner. Owner: the build-mode work
 
 ### A stored package's generation drift is reported only for `ProjectSnapshot` packages, and generations are bumped by hand
 
-**Status: PARTIAL (2026-10-10).** `EXTRACTOR_GENERATION`/`RESOLVER_GENERATION` now exist (`storage/versioning.py`), every package writer stamps them, `project_snapshot_store` passes them to `check_reader_compatibility`, and drift appears in `coverage_warnings` without changing verdict or exit code; an unrecorded generation is unknown. Still open: the `BundleFacts` reader passes them but has no report surface; importing a legacy `.abi.json` stamps today's generations, so the stamp means "the build that wrote the package", not "the build that extracted the facts"; nothing enforces a bump when extraction or resolution semantics change.
+**Status: PARTIAL (2026-10-10).** `EXTRACTOR_GENERATION`/`RESOLVER_GENERATION` now exist (`storage/versioning.py`), every package writer stamps them, `project_snapshot_store` passes them to `check_reader_compatibility`, and drift appears in `coverage_warnings` without changing verdict or exit code; an unrecorded generation is unknown. Importers stamp the generations of the build that extracted the facts: this build's only for facts it just dumped (`bundle variants` capture from binaries), a caller-supplied pair when known, else unstated (`StorageVersions.written_by_this_build`'s `generations`). Still open: the `BundleFacts` reader passes them but has no report surface; nothing enforces a bump when extraction or resolution semantics change.
 
 
 From Stage E: `storage.versioning.check_reader_compatibility` reports

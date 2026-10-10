@@ -95,6 +95,16 @@ GENERATION_DRIFT_NOTICE_MARKER = "produced under different"
 #: drift.
 UNSTATED_GENERATION = 0
 
+#: ``(extractor_generation, resolver_generation)`` of the build that
+#: produced a package's facts.
+FactGenerations = tuple[int, int]
+
+
+def this_build_generations() -> FactGenerations:
+    """The pair for facts this build extracts itself (read at call time)."""
+    return EXTRACTOR_GENERATION, RESOLVER_GENERATION
+
+
 #: A version axis the package did not state, or stated unusably. Distinct from
 #: any real version so that "unknown" can never be mistaken for "the same as
 #: mine".
@@ -335,16 +345,29 @@ class StorageVersions:
 
     @classmethod
     def written_by_this_build(
-        cls, *, section_schema_versions: Mapping[str, int], source_schema_version: int
+        cls,
+        *,
+        section_schema_versions: Mapping[str, int],
+        source_schema_version: int,
+        generations: FactGenerations | None = None,
     ) -> StorageVersions:
         """The versions a package this build writes carries: its sections,
-        its import provenance, and this build's own extractor/resolver
-        generations (ADR-062 D2), so a later reader can report drift."""
+        its import provenance, and the extractor/resolver generations of the
+        build that *produced the facts* (ADR-062 D2).
+
+        *generations* is that producer's pair: :func:`this_build_generations`
+        for facts this build just extracted, the source document's stated
+        pair when it records one, and ``None`` -- both
+        :data:`UNSTATED_GENERATION`, unknown, never drift -- for facts an
+        older document carries without saying which build extracted them.
+        Stamping this build's generations on imported facts would make the
+        drift report silently claim they were extracted today."""
+        extractor, resolver = generations or (UNSTATED_GENERATION, UNSTATED_GENERATION)
         return cls(
             section_schema_versions=section_schema_versions,
             source_schema_version=source_schema_version,
-            extractor_generation=EXTRACTOR_GENERATION,
-            resolver_generation=RESOLVER_GENERATION,
+            extractor_generation=extractor,
+            resolver_generation=resolver,
         )
 
     def __post_init__(self) -> None:

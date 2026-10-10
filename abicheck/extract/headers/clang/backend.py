@@ -472,7 +472,11 @@ class ClangBackend:
             and _is_default_clang_bin(clang_bin, r.compiler)
             and not _clang_bin_is_explicitly_configured(r.gcc_path, r.gcc_prefix)
         )
-        target_triple = _configured_target_triple(
+        # ``established_triple`` is what the compiler (or an explicit target
+        # flag) states; only that is recorded as the effective target. The
+        # host ``sys.platform`` guess steers the parser's own heuristics but
+        # is never stamped as provenance -- unrecorded beats fabricated.
+        established_triple = _configured_target_triple(
             r.gcc_options, r.gcc_option_tokens, clang_bin
         ) or (
             (
@@ -484,7 +488,9 @@ class ClangBackend:
             if is_cl_mode
             else _explicit_target_triple(r.gcc_options, r.gcc_option_tokens)
             or _bare_reprobe()
-            or (sys.platform if _guess_ok else None)
+        )
+        target_triple = established_triple or (
+            sys.platform if (_guess_ok and not is_cl_mode) else None
         )
         parser = _ClangAstParser(
             ast_root,
@@ -524,7 +530,7 @@ class ClangBackend:
                 resolved_force_cpp=resolved_force_cpp,
                 gcc_options=r.gcc_options,
                 gcc_option_tokens=r.gcc_option_tokens,
-                target_triple=target_triple,
+                target_triple=established_triple,
             ),
         )
         setattr(stamped, "_abicheck_frontend_context_kind", resolved_kind)

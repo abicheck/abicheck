@@ -45,10 +45,13 @@ def resolve_project_package(path: Path) -> AbiSnapshot:
     with tempfile.TemporaryDirectory(prefix="abicheck-package-") as workdir:
         unpacked = Path(workdir) / "package"
         unpack_project_package(path, unpacked)
-        return _resolve_project_snapshot_directory(unpacked)
+        # The notice names the operand the user gave, not the temp unpack dir.
+        return _resolve_project_snapshot_directory(unpacked, display_path=path)
 
 
-def _resolve_project_snapshot_directory(path: Path) -> AbiSnapshot:
+def _resolve_project_snapshot_directory(
+    path: Path, *, display_path: Path | None = None
+) -> AbiSnapshot:
     """*path* as a directory-backed ADR-062/ADR-063 storage-v2
     `ProjectSnapshot` package (`project_snapshot_legacy
     .read_legacy_snapshot_document` — manifest.json + refs/ + objects/,
@@ -91,5 +94,6 @@ def _resolve_project_snapshot_directory(path: Path) -> AbiSnapshot:
     # `read_legacy_snapshot_document` above already validated the manifest.
     notice = read_manifest_summary(path).semantics_notice
     if notice:
-        snapshot.load_notices = (f"stored package '{path}': {notice}",)
+        shown = display_path if display_path is not None else path
+        snapshot.load_notices = (f"stored package '{shown}': {notice}",)
     return snapshot

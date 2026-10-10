@@ -97,6 +97,15 @@ def explicit_target(args: Sequence[str]) -> str | None:
     return found
 
 
+def _last_x86_abi_flag(args: Sequence[str]) -> str | None:
+    """The last of ``-m32``/``-m64``/``-mx32`` (the one GCC/Clang honour)."""
+    found: str | None = None
+    for tok in args:
+        if tok in ("-m32", "-m64", "-mx32"):
+            found = tok
+    return found
+
+
 def effective_triple(
     resolved: str | None, args: Sequence[str], pointer_width: int | None
 ) -> str | None:
@@ -113,6 +122,16 @@ def effective_triple(
     if not resolved:
         return None
     arch, sep, rest = resolved.partition("-")
+    x86 = _ARCH_BY_WIDTH.get("x86_64", {}).values()
+    if arch in x86 and _last_x86_abi_flag(args) == "-mx32":
+        # x32 is 32-bit pointers on the x86_64 ISA: keep the arch, mark the
+        # ABI in the environment component (clang: ``...-gnux32``).
+        env_rest = (
+            rest if rest.endswith("x32") or not rest.endswith("gnu") else f"{rest}x32"
+        )
+        return f"x86_64{sep}{env_rest}"
+    if arch == "x86_64" and rest.endswith("gnux32") and (pointer_width or 0) == 32:
+        return resolved
     sibling = _ARCH_BY_WIDTH.get(arch, {}).get(pointer_width or 0)
     return f"{sibling}{sep}{rest}" if sibling else resolved
 

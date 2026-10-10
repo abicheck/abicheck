@@ -78,7 +78,7 @@ from .guards import mapping as _mapping
 from .import_v1 import export_legacy_snapshot, import_legacy_snapshot
 from .package import ArtifactRef, ObjectRef, ObjectStore, PackageManifest, VariantRef
 from .ref_ids import resolve_ref_ids
-from .versioning import StorageVersions
+from .versioning import FactGenerations, StorageVersions
 
 #: `native_identity` key `import_bundle_facts` stamps onto each per-library
 #: `ArtifactRef`, recording the library's own real name -- needed because
@@ -375,6 +375,7 @@ def import_bundle_facts(
     store: ObjectStore,
     max_known_schema_version: int,
     variant_id: str = "default",
+    generations: FactGenerations | None = None,
 ) -> PackageManifest:
     """Import *bundle_facts_document* (a `bundle_facts_serialization
     .bundle_facts_to_dict()`-shaped mapping) as a one-variant,
@@ -538,9 +539,8 @@ def import_bundle_facts(
                 "never occur outside a hand-edited or corrupted document"
             )
     if source_schema_version is None:
-        # A vacuous bundle (an empty, but present, `per_library_snapshots`)
-        # has no per-library snapshot to derive a schema version from --
-        # `StorageVersions`' own `0` "unstated" sentinel, not a guess.
+        # A vacuous bundle (an empty, but present, `per_library_snapshots`) has no
+        # per-library snapshot to derive a schema version from -- `0` = unstated.
         source_schema_version = 0
 
     if "variant_fingerprint" in bundle_facts_document:
@@ -583,12 +583,12 @@ def import_bundle_facts(
         artifact_ids=tuple(artifact.artifact_id for artifact in artifact_refs),
         sections={BUNDLE_COMPOSITION_SECTION_KIND: composition_ref},
     )
-    versions = StorageVersions.written_by_this_build(
-        section_schema_versions=section_schema_versions,
-        source_schema_version=source_schema_version,
-    )
     return PackageManifest(
-        versions=versions,
+        versions=StorageVersions.written_by_this_build(
+            section_schema_versions=section_schema_versions,
+            source_schema_version=source_schema_version,
+            generations=generations,  # the extracting build's, else unstated
+        ),
         variant_refs=(variant,),
         artifact_refs=tuple(artifact_refs),
     )

@@ -15,6 +15,7 @@ from __future__ import annotations
 import itertools
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -259,6 +260,8 @@ def test_real_dump_m32_on_one_side_is_refused(tmp_path):
     parsed with ``-m32`` on one side only -- the misconfiguration the gate's
     platform-identity rule documents -- is now refused, while two identical
     dumps stay comparable."""
+    if not sys.platform.startswith("linux"):
+        pytest.skip("needs an ELF-producing host (x86-64 ELF + -m32 headers)")
     if not _gcc_supports_m32():
         pytest.skip("gcc cannot preprocess for -m32 here")
     from abicheck.dumper import dump
@@ -277,3 +280,67 @@ def test_real_dump_m32_on_one_side_is_refused(tmp_path):
     assert check_contracts_comparable(native, native) is None
     with pytest.raises(ProfileMismatchError):
         check_contracts_comparable(native, m32)
+
+
+@pytest.mark.parametrize("nested", [False, True])
+def test_probe_memo_notices_response_file_rewritten_in_place(
+    monkeypatch, tmp_path: Path, nested: bool
+) -> None:
+    """Same ``@file`` path, different flags between probes: the memo must
+    re-probe (the compiler reads the file, not its name). Oracle: the fake
+    compiler answers from the file's flags at call time."""
+    import os
+    import types
+
+    rsp = tmp_path / "flags.rsp"
+    inner = tmp_path / "inner.rsp"
+    target = inner if nested else rsp
+    if nested:
+        rsp.write_text(f"@{inner}\n")
+    calls: list[int] = []
+
+    def fake_run(cmd, **_k):
+        calls.append(1)
+        width = 4 if "-m32" in target.read_text() else 8
+        out = f"#define __SIZEOF_POINTER__ {width}\n#define __BYTE_ORDER__ __ORDER_LITTLE_ENDIAN__\n"
+        return types.SimpleNamespace(returncode=0, stdout=out)
+
+    monkeypatch.setattr(target_platform_probe, "run_bounded", fake_run)
+    cc = str(tmp_path / "cc")
+    Path(cc).write_text("")
+    probe = target_platform_probe._probe_target_platform
+    results = []
+    for flags in ("-m64", "-m32", "-m64"):
+        target.write_text(flags + "\n")
+        st = target.stat()
+        # Keep mtime and size identical: only the content differs.
+        os.utime(target, ns=(st.st_atime_ns, 1_000_000_000))
+        results.append(probe(cc, (f"@{rsp}",), False)[0])
+    assert results == [64, 32, 64]
+    # Unchanged content is still served from the memo.
+    assert probe(cc, (f"@{rsp}",), False)[0] == 64
+    assert len(calls) == 3
+
+
+@pytest.mark.parametrize(
+    ("resolved", "args", "width", "expected"),
+    [
+        # gcc -dumpmachine ignores -mx32; the ISA stays x86_64.
+        ("x86_64-linux-gnu", ("-mx32",), 32, "x86_64-linux-gnux32"),
+        ("x86_64-pc-linux-gnu", ("-m64", "-mx32"), 32, "x86_64-pc-linux-gnux32"),
+        # clang's own flag-aware answer already says gnux32.
+        ("x86_64-unknown-linux-gnux32", ("-mx32",), 32, "x86_64-unknown-linux-gnux32"),
+        ("x86_64-unknown-linux-gnux32", (), 32, "x86_64-unknown-linux-gnux32"),
+        # A later -m32 overrides -mx32: genuine i686.
+        ("x86_64-linux-gnu", ("-mx32", "-m32"), 32, "i686-linux-gnu"),
+        ("x86_64-linux-gnu", ("-m32",), 32, "i686-linux-gnu"),
+    ],
+)
+def test_x32_keeps_the_x86_64_isa(resolved, args, width, expected) -> None:
+    from abicheck.extract.target_platform import effective_triple
+
+    got = effective_triple(resolved, args, width)
+    assert got == expected
+    # Independent oracle: x32 is never spelled with a 32-bit x86 arch.
+    if "-mx32" in args and args[-1] == "-mx32":
+        assert got is not None and got.split("-")[0] == "x86_64"

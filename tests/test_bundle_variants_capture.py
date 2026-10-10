@@ -612,3 +612,38 @@ def test_unrelated_baseline_variant_does_not_change_the_selected_comparison(
         )
     assert results[0] == results[1]
     assert results[0][0] == 4
+
+
+# ── Generation stamping: only facts this build extracted get its generations ─
+
+
+@pytest.mark.parametrize("fresh", [True, False])
+def test_package_generations_name_the_build_that_extracted_the_facts(
+    tmp_path: Path, fresh: bool
+) -> None:
+    from abicheck.storage import versioning
+
+    inputs = _write_inputs(tmp_path / "x", ["f"])
+    if fresh:
+        # Binaries this build dumps (the stub reads the fixture's content).
+        for p in list(inputs.iterdir()):
+            p.rename(p.with_suffix(""))
+    config = parse_bundle_variants(
+        {"x": {"target_triple": "t", "compiler_family": "g"}}
+    )
+    plan = plan_variant_capture(config, [VariantCaptureInput("x", inputs)])
+    out = tmp_path / "pkg"
+
+    def _dump(path: Path, _item: VariantCaptureInput) -> AbiSnapshot:
+        from abicheck.serialization import snapshot_from_dict
+
+        return snapshot_from_dict(json.loads(path.read_text()))
+
+    capture_variants(plan, out, dump=_dump)
+    stored = json.loads((out / "manifest.json").read_text())["versions"]
+    if fresh:
+        assert stored["extractor_generation"] == versioning.EXTRACTOR_GENERATION
+        assert stored["resolver_generation"] == versioning.RESOLVER_GENERATION
+    else:
+        assert stored.get("extractor_generation", 0) == 0
+        assert stored.get("resolver_generation", 0) == 0

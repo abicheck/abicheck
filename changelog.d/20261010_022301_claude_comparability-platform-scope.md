@@ -11,3 +11,8 @@
   where only one side carries `dependency_scope` (a pre-v18 baseline) is no
   longer a clean pass: it is compared with `declaration`/`layout` marked
   unverified and the reason in `coverage_warnings`.
+  The host-platform guess the clang backend uses when no compiler probe
+  answers is never recorded as the effective target; `-mx32` keeps the
+  `x86_64` architecture (`x86_64-…-gnux32`), not `i686`; and the memoized
+  target probe re-runs when an `@response-file`/`--config=` file's contents
+  change in place.

@@ -29,6 +29,7 @@ from __future__ import annotations
 import re
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -143,7 +144,7 @@ def test_capture_matrix(
         "nothing": ElfBuildSignals(None, None, None),
     }[evidence]
     monkeypatch.setattr(
-        build_mode_capture, "read_elf_build_signals", lambda _p: signals
+        build_mode_capture, "read_elf_build_signals", lambda _p, **_k: signals
     )
     snap = capture_elf_build_mode(_elf_snap(tmp_path))
     if evidence == "nothing":
@@ -165,7 +166,7 @@ def test_capture_matrix(
 def test_existing_build_mode_and_non_elf_untouched(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    def _boom(_p: Path) -> ElfBuildSignals:
+    def _boom(_p: Path, **_k: object) -> ElfBuildSignals:
         raise AssertionError("must not read")
 
     monkeypatch.setattr(build_mode_capture, "read_elf_build_signals", _boom)
@@ -181,6 +182,61 @@ def test_existing_build_mode_and_non_elf_untouched(
 def test_unreadable_image_leaves_unknown(tmp_path: Path) -> None:
     snap = _elf_snap(tmp_path)  # empty file: not ELF
     assert capture_elf_build_mode(snap).build_mode is None
+
+
+def test_language_only_cu_still_records_build_mode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A CU with only DW_AT_language (no producer, no .comment, no mangled
+    # symbol) is still evidence: language_std must be recorded.
+    for lang_name, expected_c in (
+        ("DW_LANG_C_plus_plus_14", False),
+        ("DW_LANG_C99", True),
+    ):
+        signals = ElfBuildSignals(None, ENUM_DW_LANG[lang_name], None)
+        monkeypatch.setattr(
+            build_mode_capture, "read_elf_build_signals", lambda _p, **_k: signals
+        )
+        bm = capture_elf_build_mode(_elf_snap(tmp_path)).build_mode
+        assert bm is not None
+        assert (bm.language_std is CxxStandard.C) is expected_c
+        assert bm.language_std is not CxxStandard.UNKNOWN
+
+
+@pytest.mark.parametrize("flag", ["symbols_only", "debug_presence_only"])
+def test_shallow_dump_never_loads_dwarf_for_build_mode(
+    flag: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from abicheck import dumper
+    from abicheck.workflows import snapshot_factory
+
+    seen: list[bool] = []
+    real = snapshot_factory.finish_binary_dump
+
+    def _spy(*a: object, **k: object) -> AbiSnapshot:
+        seen.append(bool(k.get("read_dwarf", True)))
+        return real(*a, **k)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(snapshot_factory, "finish_binary_dump", _spy)
+    called: list[int] = []
+
+    def _no_dwarf(*_a: object, **_k: object) -> ElfBuildSignals:
+        called.append(1)
+        raise AssertionError("shallow capture must not read DWARF")
+
+    monkeypatch.setattr(build_mode_capture, "_read_producer", _no_dwarf)
+    lib = Path(sys.executable).resolve()
+    if not sys.platform.startswith("linux") or lib.read_bytes()[:4] != b"\x7fELF":
+        pytest.skip("needs an ELF host binary")
+    dumper.dump(lib, [], **{flag: True})
+    assert seen == [False]
+    assert called == []
+    # Direct reader: shallow mode skips get_dwarf_info entirely.
+    from elftools.elf.elffile import ELFFile
+
+    monkeypatch.setattr(ELFFile, "get_dwarf_info", lambda *_a, **_k: called.append(2))
+    sig = build_mode_capture.read_elf_build_signals(lib, read_dwarf=False)
+    assert sig is not None and called == []
 
 
 # ── compare-time consumer prefers the recorded value ──────────────────────
@@ -222,6 +278,8 @@ def _banner(cxx: str) -> tuple[CompilerFamily, str]:
 @pytest.mark.parametrize("cxx", ["g++", "clang++"])
 @pytest.mark.parametrize("variant", ["debug", "strip-debug", "strip-all-comment"])
 def test_real_compiler_capture(cxx: str, variant: str, tmp_path: Path) -> None:
+    if not sys.platform.startswith("linux"):
+        pytest.skip("needs an ELF-producing host (GNU strip, .comment, DWARF)")
     if shutil.which(cxx) is None:
         pytest.skip(f"{cxx} not available")
     if variant != "debug" and shutil.which("strip") is None:

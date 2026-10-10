@@ -20,6 +20,7 @@ for a header-AST parse, as ``dumper_toolchain._stamp_ast_parser`` records it.
 from __future__ import annotations
 
 import subprocess
+from collections.abc import Hashable
 
 from .._compiler_options import split_gcc_options
 from ..deadline import run_bounded
@@ -61,7 +62,45 @@ def recorded_target_platform(
     )
 
 
-@memoized(maxsize=32, witness=lambda cc, args, cxx: path_witness(cc))
+def _option_file_contents(args: tuple[str, ...]) -> tuple[tuple[str, str], ...]:
+    """Content witness of every ``@response-file``/``--config=`` file in
+    *args*: the compiler reads them at probe time, so a rewrite in place --
+    same path, different flags -- must invalidate the memo. Nested
+    ``@file`` references inside them are followed (bounded)."""
+    import hashlib
+    from pathlib import Path
+
+    out: list[tuple[str, str]] = []
+    pending = [
+        a[1:] if a.startswith("@") else a.split("=", 1)[1]
+        for a in args
+        if (a.startswith("@") and len(a) > 1) or a.startswith("--config=")
+    ]
+    seen: set[str] = set()
+    while pending and len(seen) < 64:
+        name = pending.pop()
+        if name in seen:
+            continue
+        seen.add(name)
+        try:
+            data = Path(name).read_bytes()
+        except OSError:
+            out.append((name, ""))
+            continue
+        out.append((name, hashlib.sha256(data).hexdigest()))
+        try:
+            nested = split_gcc_options(data.decode("utf-8", errors="replace"))
+        except ValueError:
+            continue
+        pending.extend(t[1:] for t in nested if t.startswith("@") and len(t) > 1)
+    return tuple(sorted(out))
+
+
+def _probe_witness(cc: str, args: tuple[str, ...], cxx: bool) -> Hashable:
+    return (path_witness(cc), _option_file_contents(args))
+
+
+@memoized(maxsize=32, witness=_probe_witness)
 def _probe_target_platform(
     cc: str, args: tuple[str, ...], cxx: bool
 ) -> tuple[int | None, str | None]:

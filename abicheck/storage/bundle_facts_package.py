@@ -97,7 +97,7 @@ from .bundle_facts_codec import bundle_facts_from_dict, bundle_facts_to_dict
 from .import_bundle_facts import export_bundle_facts, import_bundle_facts
 from .json_budget import DEFAULT_MAX_JSON_CONTAINER_NODES
 from .package import ObjectStore, PackageManifest
-from .versioning import reader_generation_compatibility
+from .versioning import FactGenerations, reader_generation_compatibility
 
 __all__ = [
     "read_bundle_facts_package",
@@ -160,7 +160,11 @@ def _alias_element_count(aliases_by_library: object) -> int:
 
 
 def write_bundle_facts_package(
-    facts: BundleFacts, *, store: ObjectStore, variant_id: str = "default"
+    facts: BundleFacts,
+    *,
+    store: ObjectStore,
+    variant_id: str = "default",
+    generations: FactGenerations | None = None,
 ) -> PackageManifest:
     """Write *facts* into *store*, returning the resulting multi-artifact
     `PackageManifest` -- one `ArtifactRef` per `facts.per_library_snapshots`
@@ -242,6 +246,7 @@ def write_bundle_facts_package(
         store=store,
         max_known_schema_version=SCHEMA_VERSION,
         variant_id=variant_id,
+        generations=generations,
     )
 
 

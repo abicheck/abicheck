@@ -33,6 +33,7 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -126,7 +127,10 @@ def test_not_applicable_when_headers_were_provided() -> None:
 
 
 @pytest.mark.integration
-@pytest.mark.skipif(shutil.which("gcc") is None, reason="needs gcc")
+@pytest.mark.skipif(
+    not sys.platform.startswith("linux") or shutil.which("gcc") is None,
+    reason="needs an ELF-producing host with gcc",
+)
 def test_live_shared_library_audit_reports_visibility_leak(tmp_path: Path) -> None:
     """Audit a real, freshly built, stripped ELF shared library from the CLI."""
     src = tmp_path / "v.c"

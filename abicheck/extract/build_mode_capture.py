@@ -120,8 +120,14 @@ def _read_comment(elf: object) -> str | None:
     return "\n".join(parts) or None
 
 
-def read_elf_build_signals(path: Path) -> ElfBuildSignals | None:
+def read_elf_build_signals(
+    path: Path, *, read_dwarf: bool = True
+) -> ElfBuildSignals | None:
     """Read ``DW_AT_producer``/``DW_AT_language`` (best CU) and ``.comment``.
+
+    ``read_dwarf=False`` (shallow ``symbols_only``/``debug_presence_only``
+    dumps) skips the DWARF CU read entirely -- ``get_dwarf_info()`` loads
+    every debug section -- and records only ``.comment``.
 
     Returns ``None`` when the file cannot be read as ELF at all.
     """
@@ -131,8 +137,11 @@ def read_elf_build_signals(path: Path) -> ElfBuildSignals | None:
         with path.open("rb") as fh:
             elf = ELFFile(fh)  # type: ignore[no-untyped-call]
             comment = _read_comment(elf)
+            producer: str | None = None
+            lang: int | None = None
             try:
-                producer, lang = _read_producer(elf)
+                if read_dwarf:
+                    producer, lang = _read_producer(elf)
             except Exception as exc:  # noqa: BLE001 - DWARF is optional evidence
                 log.debug("build_mode_capture: DWARF read failed: %s", exc)
                 producer, lang = None, None
@@ -142,7 +151,9 @@ def read_elf_build_signals(path: Path) -> ElfBuildSignals | None:
     return ElfBuildSignals(producer=producer, dwarf_language=lang, comment=comment)
 
 
-def capture_elf_build_mode(snapshot: AbiSnapshot) -> AbiSnapshot:
+def capture_elf_build_mode(
+    snapshot: AbiSnapshot, *, read_dwarf: bool = True
+) -> AbiSnapshot:
     """Populate ``snapshot.build_mode`` from its ELF image's own signals.
 
     Left alone when the snapshot is not ELF, already carries a build mode, has
@@ -152,14 +163,19 @@ def capture_elf_build_mode(snapshot: AbiSnapshot) -> AbiSnapshot:
         return snapshot
     if not snapshot.source_path:
         return snapshot
-    signals = read_elf_build_signals(Path(snapshot.source_path))
+    signals = read_elf_build_signals(Path(snapshot.source_path), read_dwarf=read_dwarf)
     if signals is None:
         return snapshot
     from ..build_mode import build_mode_from_signals
 
     mangled = [f.mangled for f in snapshot.declarations.functions if f.mangled]
     mangled += [v.mangled for v in snapshot.declarations.variables if v.mangled]
-    if signals.producer is None and signals.comment is None and not mangled:
+    if (
+        signals.producer is None
+        and signals.comment is None
+        and signals.dwarf_language is None
+        and not mangled
+    ):
         return snapshot
     snapshot.build_mode = build_mode_from_signals(
         raw_producer=signals.producer,

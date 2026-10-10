@@ -51,6 +51,7 @@ from .storage.package import (
     PackageManifest,
     VariantRef,
 )
+from .storage.versioning import FactGenerations
 
 __all__ = [
     "is_project_snapshot_package_dir",
@@ -98,6 +99,7 @@ def write_legacy_snapshot_package(
     max_known_schema_version: int,
     variant_id: str = "default",
     artifact_kind: str | None = None,
+    generations: FactGenerations | None = None,
 ) -> PackageManifest:
     """*document* (a `serialization.snapshot_to_dict()`-shaped mapping — the
     same document a real `dump` invocation already produces) written as a
@@ -155,6 +157,7 @@ def write_legacy_snapshot_package(
         max_known_schema_version=max_known_schema_version,
         variant_id=variant_id,
         artifact_kind=artifact_kind,
+        generations=generations,
     )
     directory_store = DirectoryObjectStore(root)
     for artifact in manifest.artifact_refs:

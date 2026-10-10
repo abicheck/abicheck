@@ -276,3 +276,37 @@ def test_a_name_zipfile_rewrites_is_refused_as_on_windows(
     with pytest.raises(SnapshotError, match="portable"):
         unpack_project_package(archive, dest)
     assert not dest.exists() or not any(dest.iterdir())
+
+
+@pytest.mark.parametrize("operand", ["directory", "archive"])
+def test_generation_notice_names_the_operand_the_user_gave(
+    tmp_path: Path, operand: str
+) -> None:
+    """A drift notice on an archive operand names the archive, never the
+    temporary directory it was unpacked into."""
+    import json
+
+    from abicheck.model import AbiSnapshot
+    from abicheck.project_snapshot_legacy import write_legacy_snapshot_package
+    from abicheck.serialization import SCHEMA_VERSION, snapshot_to_dict
+    from abicheck.storage import versioning
+    from abicheck.workflows.input_resolution import resolve_input
+
+    pkg = tmp_path / "one"
+    write_legacy_snapshot_package(
+        snapshot_to_dict(AbiSnapshot(library="libone.so", version="1")),
+        pkg,
+        artifact_id="libone.so",
+        max_known_schema_version=SCHEMA_VERSION,
+    )
+    manifest = pkg / "manifest.json"
+    data = json.loads(manifest.read_text())
+    data["versions"]["extractor_generation"] = versioning.EXTRACTOR_GENERATION + 1
+    manifest.write_text(json.dumps(data))
+    target = pkg
+    if operand == "archive":
+        target = tmp_path / "one.zip"
+        pack_project_package(pkg, target)
+    (notice,) = resolve_input(target).load_notices
+    assert notice.startswith(f"stored package '{target}': ")
+    assert "abicheck-package-" not in notice

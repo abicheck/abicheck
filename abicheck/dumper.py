@@ -672,8 +672,7 @@ def dump(
     # keeps only the roots this run's own declared public headers live
     # underneath. An `-I` a library passes purely so a dependency's
     # `#include <dep.h>` resolves stays compile context -- see
-    # `extract.public_root_ownership` for the rule and the MKL/MPI case
-    # that forced it.
+    # `extract.public_root_ownership` for the rule and the MKL/MPI case that forced it.
     from .workflows.snapshot_factory import finish_binary_dump
 
     return finish_binary_dump(
@@ -681,6 +680,7 @@ def dump(
         effective_public_headers,
         effective_public_header_dirs,
         include_search_dirs=public_include_search_dirs,
+        read_dwarf=not (symbols_only or debug_presence_only),  # shallow: .comment only
     )
 
 

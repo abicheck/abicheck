@@ -177,6 +177,7 @@ def finish_binary_dump(
     public_header_dirs: Sequence[Path] | None,
     *,
     include_search_dirs: Sequence[Path] | None = None,
+    read_dwarf: bool = True,
 ) -> AbiSnapshot:
     """``dumper.dump``'s shared tail for every binary format: record the
     image's own build mode (ELF ``DW_AT_producer``/``DW_AT_language``/
@@ -184,7 +185,7 @@ def finish_binary_dump(
     :func:`finish_provenance`."""
     from ..extract.build_mode_capture import capture_elf_build_mode
 
-    capture_elf_build_mode(snapshot)
+    capture_elf_build_mode(snapshot, read_dwarf=read_dwarf)
     return finish_provenance(
         snapshot,
         public_headers,
