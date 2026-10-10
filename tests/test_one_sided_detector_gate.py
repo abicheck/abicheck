@@ -119,7 +119,7 @@ def test_every_one_sided_detector_really_ignores_new() -> None:
 
 def test_the_known_population_is_classified() -> None:
     """The population enumerated when the gap was fixed (step 1 of its fix shape)."""
-    assert "visibility_leak" in registry.one_sided_detector_names
+    assert "visibility_leak" in {e.name for e in _all_entries() if e.one_sided}
 
 
 # --- the analyser itself must not be vacuous -------------------------------

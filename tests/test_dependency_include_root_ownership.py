@@ -47,6 +47,7 @@ their author thought of.
 
 from __future__ import annotations
 
+import inspect
 import pathlib
 import shutil
 import subprocess
@@ -394,13 +395,19 @@ class TestEveryOwnershipSourceAndEntryPointAgrees:
         import abicheck.workflows.consumer_scope_standalone as appcompat
         from abicheck import provenance
         from abicheck.buildsource import header_graph
+        from abicheck.workflows import snapshot_factory
 
         dumper_src = pathlib.Path(dumper.__file__).read_text(encoding="utf-8")
-        assert dumper_src.count("finish_provenance(") == 1, (
+        # dumper reaches provenance through finish_binary_dump, which records
+        # build_mode and then delegates to finish_provenance exactly once.
+        assert "finish_provenance(" not in dumper_src
+        assert dumper_src.count("finish_binary_dump(") == 1, (
             "dumper must reach declaration provenance through exactly one "
             "call; a second call site is a second place "
             "ownership can be decided"
         )
+        finish_binary_src = inspect.getsource(snapshot_factory.finish_binary_dump)
+        assert finish_binary_src.count("finish_provenance(") == 1
         # appcompat supplies the same parameter rather than classifying
         # its own way.
         appcompat_src = pathlib.Path(appcompat.__file__).read_text(encoding="utf-8")

@@ -350,15 +350,6 @@ class DetectorRegistry:
         """Registered detector names in registration order."""
         return [e.name for e in sorted(self._detectors, key=lambda e: e.order)]
 
-    @property
-    def one_sided_detector_names(self) -> list[str]:
-        """Names of the detectors registered ``one_sided=True``."""
-        return [
-            e.name
-            for e in sorted(self._detectors, key=lambda e: e.order)
-            if e.one_sided
-        ]
-
     def __len__(self) -> int:
         return len(self._detectors)
 

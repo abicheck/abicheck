@@ -105,7 +105,7 @@ def test_no_baseline_matches_one_sided_detectors_on_the_candidate(
     snap = _elf_only(symbols)
     two_sided = compare(snap, snap)
     audit = compare(None, snap)
-    one_sided_names = set(registry.one_sided_detector_names)
+    one_sided_names = {e.name for e in registry._detectors if e.one_sided}
     assert one_sided_names, "no detector is declared one_sided"
     kinds = {ChangeKind.VISIBILITY_LEAK}
 

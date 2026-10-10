@@ -111,11 +111,12 @@ def _read_comment(elf: object) -> str | None:
     section = elf.get_section_by_name(".comment")  # type: ignore[attr-defined]
     if section is None:
         return None
-    parts: list[str] = []
-    for chunk in section.data().split(b"\0"):
-        text = _decode(chunk)
-        if text is not None and text not in parts:
-            parts.append(text)
+    # dict.fromkeys de-duplicates while keeping first-seen order.
+    parts = dict.fromkeys(
+        text
+        for chunk in section.data().split(b"\0")
+        if (text := _decode(chunk)) is not None
+    )
     return "\n".join(parts) or None
 
 
