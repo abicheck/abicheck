@@ -118,7 +118,7 @@ def parse_castxml_version_output(
 
     Either element is ``None`` when not found. Pure/string-only, so fully
     unit-testable without castxml installed. The single owner:
-    ``dumper_castxml_probe`` imports it for its advisory note.
+    ``extract.headers.castxml.probe`` imports it for its advisory note.
     """
     cx = _CASTXML_VERSION_RE.search(output or "")
     cl = _CLANG_VERSION_RE.search(output or "")

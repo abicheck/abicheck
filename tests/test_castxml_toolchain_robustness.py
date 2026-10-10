@@ -97,7 +97,7 @@ class TestParseCastxmlVersion:
 class TestVersionNote:
     def test_probes_the_selected_castxml_path(self) -> None:
         with patch(
-            "abicheck.dumper_castxml_probe.deadline.run_bounded",
+            "abicheck.extract.headers.castxml.probe.deadline.run_bounded",
             return_value=_completed(stdout="castxml version 0.6.8\n"),
         ) as run:
             _castxml_version_note("/selected/wrapper/castxml")
@@ -105,7 +105,7 @@ class TestVersionNote:
 
     def test_old_clang_recommends_upgrade(self) -> None:
         with patch(
-            "abicheck.dumper_castxml_probe.deadline.run_bounded",
+            "abicheck.extract.headers.castxml.probe.deadline.run_bounded",
             return_value=_completed(
                 stdout="castxml version 0.5.1\nclang version 14.0.0\n"
             ),
@@ -117,7 +117,7 @@ class TestVersionNote:
 
     def test_new_clang_gives_no_note(self) -> None:
         with patch(
-            "abicheck.dumper_castxml_probe.deadline.run_bounded",
+            "abicheck.extract.headers.castxml.probe.deadline.run_bounded",
             return_value=_completed(
                 stdout="castxml version 0.6.8\nclang version 18.1.8\n"
             ),
@@ -127,7 +127,7 @@ class TestVersionNote:
     def test_castxml_version_without_clang_line(self) -> None:
         # castxml version is reported but no parseable clang line — still nudge.
         with patch(
-            "abicheck.dumper_castxml_probe.deadline.run_bounded",
+            "abicheck.extract.headers.castxml.probe.deadline.run_bounded",
             return_value=_completed(stdout="castxml version 0.4.5\n"),
         ):
             note = _castxml_version_note()
@@ -136,14 +136,14 @@ class TestVersionNote:
 
     def test_no_version_info_is_silent(self) -> None:
         with patch(
-            "abicheck.dumper_castxml_probe.deadline.run_bounded",
+            "abicheck.extract.headers.castxml.probe.deadline.run_bounded",
             return_value=_completed(stdout="unrelated output\n"),
         ):
             assert _castxml_version_note() == ""
 
     def test_probe_failure_is_silent(self) -> None:
         with patch(
-            "abicheck.dumper_castxml_probe.deadline.run_bounded",
+            "abicheck.extract.headers.castxml.probe.deadline.run_bounded",
             side_effect=OSError("not found"),
         ):
             assert _castxml_version_note() == ""
@@ -165,7 +165,7 @@ class TestVersionNote:
 
         with (
             patch(
-                "abicheck.dumper_castxml_probe.deadline.run_bounded",
+                "abicheck.extract.headers.castxml.probe.deadline.run_bounded",
                 side_effect=deadline.DeadlineExceeded(-1.0),
             ),
             deadline.deadline_scope(5.0),
@@ -183,7 +183,7 @@ class TestVersionNote:
 
         with (
             patch(
-                "abicheck.dumper_castxml_probe.deadline.run_bounded",
+                "abicheck.extract.headers.castxml.probe.deadline.run_bounded",
                 side_effect=deadline.DeadlineExceeded(-1.0),
             ),
             deadline.deadline_scope(1800.0),  # generous 30-minute --budget
@@ -206,7 +206,7 @@ class TestVersionNote:
 
         with (
             patch(
-                "abicheck.dumper_castxml_probe.deadline.run_bounded",
+                "abicheck.extract.headers.castxml.probe.deadline.run_bounded",
                 side_effect=fake_run,
             ),
             deadline.deadline_scope(1800.0),  # generous 30-minute --budget
@@ -239,7 +239,7 @@ class TestVersionNote:
 
         with (
             patch(
-                "abicheck.dumper_castxml_probe.deadline.run_bounded",
+                "abicheck.extract.headers.castxml.probe.deadline.run_bounded",
                 side_effect=fake_run,
             ),
             deadline.deadline_scope(15.5),  # just over the 15s local cap
@@ -318,7 +318,7 @@ class TestProbeGating:
             # deadline.run_bounded (Codex review, PR #591) — patched to the
             # same fake so either call routes here.
             patch(
-                "abicheck.dumper_castxml_probe.deadline.run_bounded",
+                "abicheck.extract.headers.castxml.probe.deadline.run_bounded",
                 side_effect=fake_run,
             ),
             patch(
@@ -357,7 +357,7 @@ class TestProbeGating:
                 return_value="castxml",
             ),
             patch(
-                "abicheck.dumper_castxml_probe.deadline.run_bounded",
+                "abicheck.extract.headers.castxml.probe.deadline.run_bounded",
                 side_effect=fake_run,
             ),
             patch(
@@ -516,7 +516,7 @@ class TestLangCFallsBackToCpp:
                 return_value="castxml",
             ),
             patch(
-                "abicheck.dumper_castxml_probe.deadline.run_bounded",
+                "abicheck.extract.headers.castxml.probe.deadline.run_bounded",
                 side_effect=fake_run,
             ),
             patch(

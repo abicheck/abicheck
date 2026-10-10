@@ -805,7 +805,7 @@
       "review_by": "2026-11-30"
     },
     {
-      "path": "abicheck/dumper_toolchain.py",
+      "path": "abicheck/extract/headers/toolchain.py",
       "baseline_lines": 802,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
@@ -1103,7 +1103,7 @@
     },
     {
       "path": "abicheck/service_compare_pipeline.py",
-      "baseline_lines": 1008,
+      "baseline_lines": 910,
       "target": "workflows-or-frontends (already home for the compare-pipeline shim; the new parameter is one keyword forwarded onto two pre-existing InputSpec constructions, not extractable further)",
       "rule": "no_growth",
       "disposition": "migrate",

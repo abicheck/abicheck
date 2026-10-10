@@ -62,14 +62,14 @@ from ....dumper_clang_errors import (
     _parse_clang_ast_result,
     run_clang_ast,
 )
-from ....dumper_sysinc import _resolve_clang_system_includes
-from ....dumper_toolchain import (
+from ....errors import SnapshotError
+from ....extract.headers.sysinc import _resolve_clang_system_includes
+from ....extract.headers.toolchain import (
     _configured_target_triple,
     _resolve_force_cpp,
     _stamp_ast_parser,
     _tool_identity,
 )
-from ....errors import SnapshotError
 from ....storage.header_ast_cache import (
     _cache_path,
     ast_acquisition_active,

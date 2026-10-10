@@ -417,7 +417,7 @@ def test_merge_compile_config_explicit_config_beats_autodiscovery(
 def test_probe_gnu_system_includes_mocked(monkeypatch, tmp_path: Path) -> None:
     # Cover the subprocess probe body without a real compiler: only *existing*
     # dirs survive the filter, in search order.
-    from abicheck import dumper_sysinc
+    from abicheck.extract.headers import sysinc as dumper_sysinc
 
     real = tmp_path / "inc"
     real.mkdir()
@@ -437,7 +437,7 @@ def test_probe_gnu_system_includes_mocked(monkeypatch, tmp_path: Path) -> None:
 
 
 def test_probe_gnu_system_includes_handles_oserror(monkeypatch) -> None:
-    from abicheck import dumper_sysinc
+    from abicheck.extract.headers import sysinc as dumper_sysinc
 
     def _boom(*a, **k):
         raise OSError("no compiler")
@@ -451,7 +451,7 @@ def test_probe_gnu_system_includes_degrades_on_deadline_exceeded(monkeypatch) ->
     # deadline.run_bounded; an exhausted --budget must degrade to [] (same
     # best-effort contract as a missing compiler/timeout), not propagate and
     # abort the whole L2 clang parse over an auxiliary parity probe.
-    from abicheck import dumper_sysinc
+    from abicheck.extract.headers import sysinc as dumper_sysinc
 
     def _raise(*a, **k):
         raise dumper_sysinc.deadline.DeadlineExceeded(-1.0)
@@ -468,7 +468,8 @@ def test_probe_gnu_system_includes_bounded_by_local_cap_not_full_scan_budget(
     timeout=15 alone did nothing once a generous --budget was active -- a
     hung `g++ -E -v -` could consume the whole remaining scan budget instead
     of this probe's own 15s cap. Mirrors the include-map local-cap fix."""
-    from abicheck import deadline, dumper_sysinc
+    from abicheck import deadline
+    from abicheck.extract.headers import sysinc as dumper_sysinc
 
     seen_remaining: list[float | None] = []
 
@@ -573,7 +574,7 @@ def test_probe_gnu_system_includes_bounded_by_local_cap_not_full_scan_budget(
     ],
 )
 def test_is_gnu_compiler_resource_dir(path: str, expected: bool) -> None:
-    from abicheck import dumper_sysinc
+    from abicheck.extract.headers import sysinc as dumper_sysinc
 
     assert dumper_sysinc._is_gnu_compiler_resource_dir(path) is expected
 
@@ -585,7 +586,7 @@ def test_probe_gnu_system_includes_drops_gcc_resource_dir(
     # the clang backend: clang has its own intrinsics headers, and GCC's
     # immintrin.h/ia32intrin.h reference GCC-only __builtin_ia32_* that clang
     # cannot parse. It is dropped even though it exists on disk.
-    from abicheck import dumper_sysinc
+    from abicheck.extract.headers import sysinc as dumper_sysinc
 
     libstdcxx = tmp_path / "include" / "c++" / "13"
     libc = tmp_path / "include"
@@ -613,7 +614,7 @@ def test_probe_gnu_system_includes_drops_homebrew_nested_gcc_resource_dir(
     # .../lib/gcc/current/gcc/<triple>/<ver>/include[-fixed] (confirmed
     # against a real Homebrew GCC install; Codex review, PR #643, round 6).
     # This must be dropped like any other GCC resource dir, not kept.
-    from abicheck import dumper_sysinc
+    from abicheck.extract.headers import sysinc as dumper_sysinc
 
     libstdcxx = tmp_path / "include" / "c++" / "13"
     homebrew_gcc_res = (
@@ -651,7 +652,7 @@ def test_probe_gnu_system_includes_keeps_unresolved_walk_back_libstdcxx(
     # rather than the already-resolved '/usr/include/c++/13'. That must be
     # kept, not dropped as though it were the GCC resource dir it walks
     # *through* on the way there.
-    from abicheck import dumper_sysinc
+    from abicheck.extract.headers import sysinc as dumper_sysinc
 
     real_libstdcxx = tmp_path / "include" / "c++" / "13"
     real_libstdcxx.mkdir(parents=True, exist_ok=True)
@@ -707,7 +708,7 @@ def test_probe_gnu_system_includes_resolves_symlink_before_classifying(
     # libstdc++ (the shape-tightening from round 3 of this same review means
     # the landing spot must itself match the full resource-dir shape, not
     # merely sit somewhere under lib/gcc).
-    from abicheck import dumper_sysinc
+    from abicheck.extract.headers import sysinc as dumper_sysinc
 
     base = tmp_path / "base"
     real_target = (
@@ -766,7 +767,7 @@ def test_probe_gnu_system_includes_drops_terminal_symlinked_resource_dir(
     # resolve past the lib/gcc evidence and wrongly classify this as safe to
     # keep, feeding clang GCC's incompatible intrinsics headers. The raw,
     # lexically-normalized path must still be checked and win.
-    from abicheck import dumper_sysinc
+    from abicheck.extract.headers import sysinc as dumper_sysinc
 
     base = tmp_path / "base"
     external_storage = base / "external_storage" / "gcc13_include"
@@ -809,7 +810,7 @@ def test_probe_gnu_system_includes_drops_aliased_symlink_to_resource_dir(
     # evidence entirely and would wrongly keep GCC's intrinsics headers under
     # the innocuous-looking alias name. Both directions must be checked when
     # there's no '..' to make the lexical form ambiguous.
-    from abicheck import dumper_sysinc
+    from abicheck.extract.headers import sysinc as dumper_sysinc
 
     base = tmp_path / "base"
     real_resource_dir = base / "lib" / "gcc" / "x86_64-linux-gnu" / "13" / "include"
@@ -851,7 +852,7 @@ def test_probe_gnu_system_includes_keeps_real_dir_via_midpath_symlink(
     # the symlink to a real, unrelated include dir elsewhere. Checking the
     # raw string here would wrongly drop that real include dir -- only
     # realpath is trustworthy once '..' is present.
-    from abicheck import dumper_sysinc
+    from abicheck.extract.headers import sysinc as dumper_sysinc
 
     base = tmp_path / "base"
     real_deep = base / "external" / "deep"
@@ -899,7 +900,7 @@ def test_probe_gnu_system_includes_keeps_libstdcxx_symlinked_under_lib_gcc(
     # trailing shape must be checked precisely (ends in a bare
     # include/include-fixed after exactly <triple>/<ver>, not merely
     # "somewhere under lib/gcc").
-    from abicheck import dumper_sysinc
+    from abicheck.extract.headers import sysinc as dumper_sysinc
 
     base = tmp_path / "base"
     real_target = (

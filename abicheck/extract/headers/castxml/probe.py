@@ -39,15 +39,20 @@ from xml.etree.ElementTree import (
     Element,  # type annotation only; parsing uses defusedxml
 )
 
-from . import deadline
-from .dumper_ast_config import _CPP_ONLY_PATTERNS, _detect_cpp_headers
-from .dumper_ast_config_cpp20 import _detect_cpp20_headers
-from .dumper_clang_errors import diagnose_header_compile_failure
-from .errors import HeaderToolchainError, SnapshotError, UnsupportedCastxmlVersionError
-from .extract.headers.castxml.policy import (
+import abicheck.deadline as deadline
+
+from ....dumper_ast_config import _CPP_ONLY_PATTERNS, _detect_cpp_headers
+from ....dumper_ast_config_cpp20 import _detect_cpp20_headers
+from ....dumper_clang_errors import diagnose_header_compile_failure
+from ....errors import (
+    HeaderToolchainError,
+    SnapshotError,
+    UnsupportedCastxmlVersionError,
+)
+from ....storage.castxml_xml import parse_castxml_xml
+from .policy import (
     parse_castxml_version_output as _parse_castxml_version,
 )
-from .storage.castxml_xml import parse_castxml_xml
 
 # castxml drives an internal Clang frontend; it must be new enough to parse
 # modern host headers. _Float32/_Float64/_Float128 land in Clang 16, and the
@@ -266,7 +271,7 @@ def castxml_dump_excluding_unparseable(
     is not about any one header and is never reduced. Returns the XML root
     and the excluded headers, in input order of exclusion rounds.
     """
-    from .extract.unparseable_header_fallback import (
+    from ....extract.unparseable_header_fallback import (
         parse_excluding_unparseable_headers,
     )
 
@@ -301,7 +306,7 @@ def record_unparseable_headers(parser: Any, excluded: list[Path]) -> Any:
     which ``dumper`` copies onto ``AbiSnapshot.ast_toolchain`` -- so the
     reduced L2 evidence survives serialization and reaches the report."""
     if excluded:
-        from .model.header_exclusion_record import EXCLUDED_HEADERS_TOOLCHAIN_KEY
+        from ....model.header_exclusion_record import EXCLUDED_HEADERS_TOOLCHAIN_KEY
 
         metadata = dict(getattr(parser, "_abicheck_ast_toolchain", {}) or {})
         metadata[EXCLUDED_HEADERS_TOOLCHAIN_KEY] = json.dumps(

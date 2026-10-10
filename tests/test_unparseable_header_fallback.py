@@ -173,8 +173,10 @@ def test_castxml_retry_classification_matrix(
     unsupported castxml is never reducible; a HeaderToolchainError is
     reducible only when it is a failed language-mode retry; any other
     SnapshotError is reducible."""
-    from abicheck.dumper_castxml_probe import castxml_failure_is_header_specific
     from abicheck.errors import UnsupportedCastxmlVersionError
+    from abicheck.extract.headers.castxml.probe import (
+        castxml_failure_is_header_specific,
+    )
 
     ctor = {
         "snapshot": SnapshotError,
@@ -201,7 +203,9 @@ def test_failed_lang_retry_excludes_header_via_retry_diagnostics():
     language retry) is reduced using the C++ retry's diagnostics, which
     implicate only the failing header -- not every C++ header the C-mode
     errors hit."""
-    from abicheck.dumper_castxml_probe import castxml_failure_is_header_specific
+    from abicheck.extract.headers.castxml.probe import (
+        castxml_failure_is_header_specific,
+    )
 
     headers = _headers(4)
     bad = headers[2]
@@ -542,8 +546,10 @@ def test_real_castxml_attributes_the_failing_header_at_every_position(tmp_path, 
     Enumerates every failing position over 2-4 headers, through real castxml;
     the oracle is the index the test chose, not the attribution arithmetic.
     """
-    from abicheck.dumper_castxml_probe import castxml_dump_excluding_unparseable
     from abicheck.extract.headers.castxml.backend import castxml_dump as _castxml_dump
+    from abicheck.extract.headers.castxml.probe import (
+        castxml_dump_excluding_unparseable,
+    )
 
     headers = []
     for i in range(n):

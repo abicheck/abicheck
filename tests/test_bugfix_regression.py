@@ -681,7 +681,8 @@ def test_validate_castxml_output_rechecks_deadline_after_parse(
     again after the parse before handing the root off to the caller."""
     import time
 
-    from abicheck import deadline, dumper, dumper_castxml_probe
+    from abicheck import deadline, dumper
+    from abicheck.extract.headers.castxml import probe as dumper_castxml_probe
 
     out_xml = tmp_path / "out.xml"
     out_xml.write_text('<GCC_XML><File id="f1" name="foo.h"/></GCC_XML>')

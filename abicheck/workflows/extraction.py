@@ -113,7 +113,6 @@ from ..buildsource.toolchain_bindings import (
     load_bindings_file,
 )
 from ..buildsource.toolchain_probe import check_profile_toolchain_constraints
-from ..clang_layout_tool import attach_clang_layout
 from ..classify import is_supported_compare_input
 from ..debug_resolver import DebugArtifact, resolve_debug_info
 from ..dump_manifest import DumpManifest, load_manifest
@@ -124,6 +123,7 @@ from ..dwarf_unified import parse_dwarf
 from ..elf_metadata import parse_elf_metadata
 from ..extract.dependency_exclusion import dependency_exclusion_scope
 from ..extract.dump_manifest_roots import dump_manifest_header_roots
+from ..extract.headers.clang.layout_tool import attach_clang_layout
 from ..extract.headers.clang.streaming import suppress_streaming_prune
 from ..header_conditionals import attach_build_context_for_parsed_headers
 from ..header_utils import (

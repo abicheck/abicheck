@@ -47,12 +47,12 @@ a constraint — so instead this actually invokes Clang with the declared
 a genuinely bogus/misspelled target without rejecting a valid
 cross-compilation profile.
 
-Reuses :mod:`abicheck.dumper_toolchain`'s existing, cached, bounded
-``--version``-capture plumbing (:func:`~abicheck.dumper_toolchain._tool_identity_metadata`)
+Reuses :mod:`abicheck.extract.headers.toolchain`'s existing, cached, bounded
+``--version``-capture plumbing (:func:`~abicheck.extract.headers.toolchain._tool_identity_metadata`)
 rather than re-implementing subprocess handling here — this module only adds
 the version-constraint grammar and its own family-detection
 (:func:`_probe_compiler_family`), deliberately **not**
-:func:`~abicheck.dumper_toolchain._compiler_family_from_toolchain`: that
+:func:`~abicheck.extract.headers.toolchain._compiler_family_from_toolchain`: that
 helper's own docstring says it is a best-effort guess for
 ``profile_fingerprint`` stability, low-stakes because a wrong guess there
 only affects cache-key text — not appropriate for what is now a hard
@@ -79,7 +79,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from ..deadline import run_bounded
-from ..dumper_toolchain import _tool_identity_metadata
+from ..extract.headers.toolchain import _tool_identity_metadata
 from ..model.execution_cache import memoized
 from .toolchain_bindings import BindingsFile
 
@@ -276,7 +276,7 @@ def _clang_accepts_target(selected_path: str, digest: str, target: str) -> bool 
     launch is the compiler rejecting the declared ``--target=``, so any
     nonzero exit is classified as a proven mismatch rather than
     inconclusive. *digest* (the resolved executable's content hash, from
-    :func:`~abicheck.dumper_toolchain._tool_identity_metadata`) keys the
+    :func:`~abicheck.extract.headers.toolchain._tool_identity_metadata`) keys the
     cache per exact binary revision, mirroring that module's own caching
     convention. Returns ``None`` — skip the comparison, never guess a
     mismatch — only when the probe itself can't even run (missing
@@ -502,7 +502,7 @@ def _probe_compiler_family(metadata: dict[str, str]) -> str | None:
     """Best-effort compiler family for *this* validation gate.
 
     Deliberately more conservative than
-    :func:`~abicheck.dumper_toolchain._compiler_family_from_toolchain`
+    :func:`~abicheck.extract.headers.toolchain._compiler_family_from_toolchain`
     (see module docstring for why that helper isn't reused here): derives
     a family independently from the resolved binding's own basename(s)
     (:func:`_family_from_names`, checking both the *selected* path and the

@@ -163,7 +163,7 @@ def test_exclusions_survive_the_ast_cache(tmp_path: Path, dropped: list[str]) ->
 
 
 def test_parser_stamp_carries_the_record_into_the_snapshot_field() -> None:
-    from abicheck.dumper_toolchain import _stamp_ast_parser
+    from abicheck.extract.headers.toolchain import _stamp_ast_parser
     from abicheck.model.header_parse_coverage import header_parse_excluded
     from abicheck.storage.ast_parse_exclusions import HEADER_PARSE_EXCLUDED_KEY
 
