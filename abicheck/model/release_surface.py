@@ -53,7 +53,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import KW_ONLY, dataclass, replace
 
 #: Bumped whenever :meth:`SurfaceAcquisitionIdentity.key` changes what it
 #: folds in or how. Part of the key itself, so an abicheck upgrade that
@@ -168,6 +168,13 @@ class PublicObligation:
     entity: str
     #: ``file:line`` of the declaration, when the parse recorded one.
     source_location: str | None = None
+    _: KW_ONLY
+    #: True when the acquisition recorded a declared (``-H``) surface and this
+    #: declaration lies outside it -- reached only through ``#include`` and an
+    #: include root, so whether the product owes the export is *not
+    #: established* (``buildsource.export_obligation_ownership``). Still an
+    #: obligation; a finding for it is narrowed, never dropped.
+    outside_declared_surface: bool = False
 
     def to_dict(self) -> dict[str, object]:
         out: dict[str, object] = {
@@ -177,6 +184,8 @@ class PublicObligation:
         }
         if self.source_location:
             out["source_location"] = self.source_location
+        if self.outside_declared_surface:
+            out["outside_declared_surface"] = True
         return out
 
 
@@ -257,6 +266,8 @@ class ReleasePublicSurface:
                             if item.get("source_location")
                             else None
                         ),
+                        outside_declared_surface=item.get("outside_declared_surface")
+                        is True,
                     )
                 )
         declared = data.get("declared_symbols") or ()

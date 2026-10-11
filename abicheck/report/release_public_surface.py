@@ -164,6 +164,9 @@ def _finding_dict(change: Any) -> dict[str, object]:
         "symbol": change.symbol,
         "description": change.description,
         "scope": "release",
+        # Release schema 1.13: the finding's own trust level, so a JSON reader
+        # sees a not-established (LOW) obligation as a field, not only in prose.
+        "confidence": getattr(change.confidence, "value", str(change.confidence)),
     }
     if change.old_value is not None:
         out["old_value"] = change.old_value

@@ -227,4 +227,13 @@ __all__ = ["RELEASE_SCHEMA_VERSION"]
 #:       stderr, so neither the JSON nor the Markdown artifact could say a
 #:       rule had gone stale or had hidden a breaking change. Present only
 #:       when an audit was attached. Additive.
-RELEASE_SCHEMA_VERSION = "1.12"
+#: - ``1.13`` adds ``public_surface_reconciliation.missing_exports[].
+#:       confidence`` (``high``/``low``), always present: ``low`` marks a
+#:       declaration outside the run's declared ``-H`` surface (reached only
+#:       through ``#include`` and an include root), whose export obligation
+#:       is reported but not established -- the release counterpart of the
+#:       member check's narrowing. The same obligations in
+#:       ``sides.*.missing_from_bundle``/``unresolved_under_incomplete_coverage``
+#:       carry ``outside_declared_surface: true``, present only when true.
+#:       Additive; no verdict or exit code changes.
+RELEASE_SCHEMA_VERSION = "1.13"

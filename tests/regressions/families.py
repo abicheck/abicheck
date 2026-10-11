@@ -174,6 +174,8 @@ _F1 = (
 )
 _F2 = (
     "report.cross_producer_disagreement_on_one_symbol",
+    # Member check and release reconciliation disagreed on one obligation.
+    "evidence.narrowed_conclusion_not_carried_across_cardinality",
     # The CLI and `dumper.dump` hybrid routes disagreed on the parse-time
     # dependency skip.
     "extraction.recorded_scope_matches_parse_skip",
