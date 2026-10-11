@@ -225,3 +225,35 @@ def test_release_global_verdicts_reads_duck_typed_results() -> None:
     matrix = SimpleNamespace(verdict=Verdict.API_BREAK)
     assert release_global_verdicts(None, None) == (None, None)
     assert release_global_verdicts(bundle, matrix) == ("COMPATIBLE", "API_BREAK")
+
+
+# --- real callers of the derived ranks -----------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("stamped", "frozen", "expected"),
+    [
+        # A frozen-namespace finding is never downgraded below its raw verdict.
+        (Verdict.COMPATIBLE, "std::", Verdict.BREAKING),
+        (Verdict.NO_CHANGE, "std::", Verdict.BREAKING),
+        # Without the tag the stamped verdict stands.
+        (Verdict.COMPATIBLE, None, Verdict.COMPATIBLE),
+        # Never weakened, and an equal verdict is kept as stamped.
+        (Verdict.BREAKING, "std::", Verdict.BREAKING),
+    ],
+)
+def test_reclassify_frozen_namespace_guard_uses_compatibility_rank(
+    stamped: Verdict, frozen: str | None, expected: Verdict
+) -> None:
+    from types import SimpleNamespace
+
+    from abicheck.model.change_catalog.kinds import ChangeKind
+    from abicheck.policy.reclassify import effective_verdict_for_change
+
+    change = SimpleNamespace(
+        kind=ChangeKind.FUNC_REMOVED,
+        effective_verdict=stamped,
+        frozen_namespace_violation=frozen,
+    )
+    got = effective_verdict_for_change(change, policy="strict_abi")  # type: ignore[arg-type]
+    assert got == expected
