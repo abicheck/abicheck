@@ -638,3 +638,10 @@ adrs:
     disposition: internal
     reason: Repository traceability contract and gate; not a product surface.
     use_cases: []
+
+  - id: ADR-077
+    file: 077-exposure-modes-and-change-sensitive-propagation.md
+    disposition: gap
+    use_cases: []
+    surfaces: []
+    missing: Proposed, not yet implemented; no exposure-mode or sensitivity surface exists.
