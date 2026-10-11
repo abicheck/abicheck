@@ -3,7 +3,7 @@
 
 Backward-compatible changes (additions or quality-only).
 
-_32 case(s)._ [← back to all examples](../index.md)
+_33 case(s)._ [← back to all examples](../index.md)
 
 | Case | Title | Verdict | Category |
 |------|-------|---------|----------|
@@ -39,3 +39,4 @@ _32 case(s)._ [← back to all examples](../index.md)
 | [case200_new_entry_point_instead_of_parameter_added](../case200_new_entry_point_instead_of_parameter_added.md) | New Entry Point Instead of a Changed Arity | 🟢 COMPATIBLE | Addition (Compatible) |
 | [case204_class_gained_non_virtual_method](../case204_class_gained_non_virtual_method.md) | Class Gained a Non-Virtual Method | 🟢 COMPATIBLE | Addition (Compatible) |
 | [case205_public_function_marked_deprecated](../case205_public_function_marked_deprecated.md) | Public Function Marked Deprecated | 🟢 COMPATIBLE | Quality (Compatible) |
+| [case216_overload_added_beside_initializer_list](../case216_overload_added_beside_initializer_list.md) | Overload Added Beside an `initializer_list` Overload | 🟢 COMPATIBLE | Addition (Compatible) |

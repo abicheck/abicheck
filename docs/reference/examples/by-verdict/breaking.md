@@ -3,7 +3,7 @@
 
 ABI breaks: existing consumers will fail at runtime.
 
-_113 case(s)._ [← back to all examples](../index.md)
+_115 case(s)._ [← back to all examples](../index.md)
 
 | Case | Title | Verdict | Category |
 |------|-------|---------|----------|
@@ -120,3 +120,5 @@ _113 case(s)._ [← back to all examples](../index.md)
 | [case201_public_function_parameters_reordered](../case201_public_function_parameters_reordered.md) | Public Function Parameters Reordered | 🔴 BREAKING | Breaking |
 | [case203_class_gained_vtable_pointer](../case203_class_gained_vtable_pointer.md) | Class Gained a Vtable Pointer | 🔴 BREAKING | Breaking |
 | [case209_calling_convention_changed_via_macro](../case209_calling_convention_changed_via_macro.md) | Calling Convention Changed via a Macro | 🔴 BREAKING | Breaking |
+| [case212_calling_convention_macro_undefined_after_use](../case212_calling_convention_macro_undefined_after_use.md) | Calling Convention Macro `#undef`'d After Use | 🔴 BREAKING | Breaking |
+| [case213_calling_convention_function_like_macro_changed](../case213_calling_convention_function_like_macro_changed.md) | Calling Convention via a Function-Like Macro | 🔴 BREAKING | Breaking |

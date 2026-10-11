@@ -553,6 +553,7 @@ KINDLESS_CASE_TIER: dict[str, str] = {
     # A calling convention respelled through a macro: the declaration text
     # differs only in the public header AST, the binaries are identical.
     "case210_calling_convention_respelled_via_macro": "L2",
+    "case214_calling_convention_macro_redefined_after_use": "L2",
 }
 
 

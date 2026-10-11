@@ -3,7 +3,7 @@
 
 Cases whose committed fixtures include C sources.
 
-_91 case(s)._ [← back to all examples](../index.md)
+_94 case(s)._ [← back to all examples](../index.md)
 
 | Case | Title | Verdict | Category |
 |------|-------|---------|----------|
@@ -98,3 +98,6 @@ _91 case(s)._ [← back to all examples](../index.md)
 | [case209_calling_convention_changed_via_macro](../case209_calling_convention_changed_via_macro.md) | Calling Convention Changed via a Macro | 🔴 BREAKING | Breaking |
 | [case210_calling_convention_respelled_via_macro](../case210_calling_convention_respelled_via_macro.md) | Calling Convention Respelled via a Macro | ✅ NO_CHANGE | No Change |
 | [case211_return_pointee_gained_const](../case211_return_pointee_gained_const.md) | Return Pointee Gained `const` | 🟠 API_BREAK | API Break |
+| [case212_calling_convention_macro_undefined_after_use](../case212_calling_convention_macro_undefined_after_use.md) | Calling Convention Macro `#undef`'d After Use | 🔴 BREAKING | Breaking |
+| [case213_calling_convention_function_like_macro_changed](../case213_calling_convention_function_like_macro_changed.md) | Calling Convention via a Function-Like Macro | 🔴 BREAKING | Breaking |
+| [case214_calling_convention_macro_redefined_after_use](../case214_calling_convention_macro_redefined_after_use.md) | Convention Macro Redefined After Use (Negative Control) | ✅ NO_CHANGE | No Change |

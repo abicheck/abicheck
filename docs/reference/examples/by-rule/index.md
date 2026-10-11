@@ -26,6 +26,9 @@ Every atomic, ecosystem-neutral compatibility rule the catalog demonstrates or r
 | [`bitfield-changed`](bitfield-changed.md) | [case63_bitfield_changed](../case63_bitfield_changed.md) | — | — | — |
 | [`calling-convention-changed`](calling-convention-changed.md) | [case64_calling_convention_changed](../case64_calling_convention_changed.md) | — | — | — |
 | [`calling-convention-changed-via-macro`](calling-convention-changed-via-macro.md) | [case209_calling_convention_changed_via_macro](../case209_calling_convention_changed_via_macro.md) | — | — | — |
+| [`calling-convention-function-like-macro-changed`](calling-convention-function-like-macro-changed.md) | [case213_calling_convention_function_like_macro_changed](../case213_calling_convention_function_like_macro_changed.md) | — | — | — |
+| [`calling-convention-macro-redefined-after-use`](calling-convention-macro-redefined-after-use.md) | [case214_calling_convention_macro_redefined_after_use](../case214_calling_convention_macro_redefined_after_use.md) | — | — | — |
+| [`calling-convention-macro-undefined-after-use`](calling-convention-macro-undefined-after-use.md) | [case212_calling_convention_macro_undefined_after_use](../case212_calling_convention_macro_undefined_after_use.md) | — | — | — |
 | [`calling-convention-respelled-via-macro`](calling-convention-respelled-via-macro.md) | [case210_calling_convention_respelled_via_macro](../case210_calling_convention_respelled_via_macro.md) | — | — | — |
 | [`cet-protection-weakened`](cet-protection-weakened.md) | [case179_cet_protection_weakened](../case179_cet_protection_weakened.md) | — | — | — |
 | [`char-signedness-flip`](char-signedness-flip.md) | [case155_char_signedness_flip](../case155_char_signedness_flip.md) | — | — | — |
@@ -113,6 +116,7 @@ Every atomic, ecosystem-neutral compatibility rule the catalog demonstrates or r
 | [`noexcept-change`](noexcept-change.md) | [case15_noexcept_change](../case15_noexcept_change.md) | — | — | — |
 | [`odr-type-variant`](odr-type-variant.md) | — | — | — | [case149_xcheck_odr_variant](../case149_xcheck_odr_variant.md) |
 | [`overload-added`](overload-added.md) | [case169_overload_added](../case169_overload_added.md) | — | — | — |
+| [`overload-added-beside-initializer-list`](overload-added-beside-initializer-list.md) | [case216_overload_added_beside_initializer_list](../case216_overload_added_beside_initializer_list.md) | — | — | — |
 | [`overload-set-removed`](overload-set-removed.md) | — | — | — | [case82_sycl_overload_set_removed](../case82_sycl_overload_set_removed.md) |
 | [`param-defaults`](param-defaults.md) | [case32_param_defaults](../case32_param_defaults.md) | — | — | — |
 | [`param-type-change`](param-type-change.md) | [case02_param_type_change](../case02_param_type_change.md) | — | — | [case91_bundle_intra_signature_drift](../case91_bundle_intra_signature_drift.md) |
@@ -141,6 +145,7 @@ Every atomic, ecosystem-neutral compatibility rule the catalog demonstrates or r
 | [`ref-qualifier-added`](ref-qualifier-added.md) | [case166_ref_qualifier_added](../case166_ref_qualifier_added.md) | — | — | — |
 | [`relro-weakened`](relro-weakened.md) | [case134_relro_weakened](../case134_relro_weakened.md) | — | — | — |
 | [`restrict-added-to-definition-only`](restrict-added-to-definition-only.md) | [case208_restrict_added_to_definition_only](../case208_restrict_added_to_definition_only.md) | — | — | — |
+| [`return-double-pointer-lost-const`](return-double-pointer-lost-const.md) | [case215_return_double_pointer_lost_const](../case215_return_double_pointer_lost_const.md) | — | — | — |
 | [`return-pointee-gained-const`](return-pointee-gained-const.md) | [case211_return_pointee_gained_const](../case211_return_pointee_gained_const.md) | — | — | — |
 | [`return-type`](return-type.md) | [case10_return_type](../case10_return_type.md) | — | — | [case91_bundle_intra_signature_drift](../case91_bundle_intra_signature_drift.md) |
 | [`rpath-leak`](rpath-leak.md) | [case52_rpath_leak](../case52_rpath_leak.md) | — | — | — |

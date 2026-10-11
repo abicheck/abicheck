@@ -10,6 +10,11 @@
   "case208_restrict_added_to_definition_only": {"date": "2026-10-09", "evidence": ["runtime_witness"], "note": "Declared interface identical; behavioral break recorded with truth_scope declared-interface."},
   "case209_calling_convention_changed_via_macro": {"date": "2026-10-09", "evidence": ["runtime_witness", "compiler_oracle"], "note": "Old app prints dot 0.0 and exits 1 against v2; the macro expands to different attributes."},
   "case210_calling_convention_respelled_via_macro": {"date": "2026-10-09", "evidence": ["runtime_witness"], "note": "Old app exits 0 against both libraries; same expansion."},
-  "case211_return_pointee_gained_const": {"date": "2026-10-09", "evidence": ["source_smoke", "runtime_witness"], "note": "char *p = get_name() compiles against v1 and is rejected against v2; old binary runs against both."}
+  "case211_return_pointee_gained_const": {"date": "2026-10-09", "evidence": ["source_smoke", "runtime_witness"], "note": "char *p = get_name() compiles against v1 and is rejected against v2; old binary runs against both."},
+  "case212_calling_convention_macro_undefined_after_use": {"date": "2026-10-11", "evidence": ["runtime_witness", "compiler_oracle"], "note": "Old app exits 0 against v1 and 1 against v2; gcc accepts vector_dot as an ms_abi function pointer only with v2.h."},
+  "case213_calling_convention_function_like_macro_changed": {"date": "2026-10-11", "evidence": ["runtime_witness", "compiler_oracle"], "note": "Old app exits 0 against v1 and 1 against v2; the macro argument switches sysv_abi to ms_abi."},
+  "case214_calling_convention_macro_redefined_after_use": {"date": "2026-10-11", "evidence": ["runtime_witness", "compiler_oracle"], "note": "Old app exits 0 against both; vector_dot is ms_abi in both, the later redefinition does not reach it."},
+  "case215_return_double_pointer_lost_const": {"date": "2026-10-11", "evidence": ["source_smoke", "runtime_witness"], "note": "Old app exits 0 against both; const char **p = get_names(); is rejected against v2 by g++ and clang++."},
+  "case216_overload_added_beside_initializer_list": {"date": "2026-10-11", "evidence": ["source_smoke", "runtime_witness"], "note": "pick({}) returns 2 against v1 and, rebuilt, against v2 under g++ and clang++; no ambiguity."}
  }
 }
