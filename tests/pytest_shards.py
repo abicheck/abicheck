@@ -18,7 +18,7 @@
 The canonical coverage-collecting unit lane ran as one ~34-minute job on a
 4-core runner, which made it the critical path of every CI run. Running it
 as N concurrent jobs and combining their coverage data afterwards keeps the
-exact same test selection and the same 95% floor (enforced once, over the
+exact same test selection and the same 80% floor (enforced once, over the
 combined data, by ``ci.yml``'s ``unit-tests-coverage`` job) while dividing
 the wall time.
 

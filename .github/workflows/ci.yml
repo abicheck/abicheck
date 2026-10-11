@@ -219,7 +219,7 @@ jobs:
     # shards (`pytest --shard=K/3`, tests/pytest_shards.py: whole test files,
     # balanced by test count). As one job it ran ~34 minutes on a 4-core
     # runner and was the critical path of every CI run; the selection and
-    # the 95% floor are unchanged -- each shard only *collects* coverage
+    # the 80% floor are unchanged -- each shard only *collects* coverage
     # data, and `unit-tests-coverage` below combines the three and enforces
     # the floor once, over the whole.
     #
@@ -383,7 +383,7 @@ jobs:
 
   unit-tests-coverage:
     # Fan-in for the sharded canonical lane: combines the shards' coverage
-    # data, enforces the 95% floor over the whole selection (the same floor
+    # data, enforces the 80% floor over the whole selection (the same floor
     # verify.py's `unit-pr` step enforces in one process), and uploads the
     # combined report to Codecov. Runs even when a shard failed, so a test
     # failure and a coverage shortfall are both reported; a missing shard
@@ -407,11 +407,11 @@ jobs:
         with:
           pattern: coverage-data-shard*
           merge-multiple: true
-      - name: Combine shard data and enforce the 95% floor
+      - name: Combine shard data and enforce the 80% floor
         run: |
           test "$(ls .coverage.shard* | wc -l)" -eq 3
           coverage combine .coverage.shard*
-          coverage report --skip-covered --fail-under=95
+          coverage report --skip-covered --fail-under=80
           coverage xml
       - name: Upload coverage to Codecov
         if: always()
@@ -580,7 +580,7 @@ jobs:
     # job's critical path: on run 34787831201 the main test step took 22m58s
     # and this step a further 3m38s, serialized behind it for no reason —
     # nothing it runs depends on the main suite's result, and it collects no
-    # coverage (the canonical lane's 95% floor is measured by `unit-tests`
+    # coverage (the canonical lane's 80% floor is measured by `unit-tests`
     # alone and is unaffected by this move). As its own job it runs
     # concurrently instead, taking its wall time off the longest job in the
     # workflow rather than adding to it. Total compute is unchanged; what

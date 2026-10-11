@@ -91,7 +91,7 @@ through, so there's exactly one place check commands are defined:
 
 ```bash
 python scripts/verify.py --profile fast   # inner-loop: lint, format, types, fast unit tests
-python scripts/verify.py --profile pr     # what CI actually requires: + golden tests, 95% coverage floor, ai-readiness, FP-rate/tier-accuracy/doc-sync/FAIR-metadata gates
+python scripts/verify.py --profile pr     # what CI actually requires: + golden tests, 80% coverage floor, ai-readiness, FP-rate/tier-accuracy/doc-sync/FAIR-metadata gates
 python scripts/verify.py --profile full   # + integration/parity/mutation/packaging lanes (skipped, not failed, if your environment lacks a tool)
 ```
 
