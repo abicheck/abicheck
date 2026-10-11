@@ -148,6 +148,9 @@ jobs:
             "python=3.15=*_cp315t" pip
           "$RUNNER_TEMP/py315t/bin/python" -VV
           echo "PY=$RUNNER_TEMP/py315t/bin/python" >> "$GITHUB_ENV"
+          # Action-lane tests shell out to `python3` on PATH; it must be the
+          # interpreter abicheck is installed into, not the runner's system one.
+          echo "$RUNNER_TEMP/py315t/bin" >> "$GITHUB_PATH"
       - name: Install abicheck
         run: |
           "$PY" -m pip install -e ".[dev]"
