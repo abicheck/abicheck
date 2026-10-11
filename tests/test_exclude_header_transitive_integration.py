@@ -21,6 +21,7 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -121,6 +122,13 @@ def test_exclude_header_scopes_out_transitively_included_header(
 ) -> None:
     if frontend not in _frontends():
         pytest.skip(f"{frontend} not found in PATH")
+    if frontend == "clang" and sys.platform == "win32":
+        # A MinGW g++ DLL exports Itanium-mangled names while clang parses
+        # the header for the MSVC target, so no header declaration matches an
+        # export (as in test_checkout_root_independence_integration).
+        pytest.skip(
+            "header/export mangling differs between MinGW g++ and MSVC-target clang"
+        )
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("ABICHECK_AST_FRONTEND", frontend)
     _build(tmp_path / "old", _INTERNAL, _PUBLIC, "int")
