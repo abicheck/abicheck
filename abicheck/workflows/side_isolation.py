@@ -98,9 +98,11 @@ def concurrent_children_apply(
 
 
 def side_processes_enabled() -> bool:
-    """``ABICHECK_SIDE_PROCESSES`` (default on): ``0`` keeps two concurrent
-    sides in this process, as threads -- for an embedding host that must
-    not fork, or a test that observes side resolution in-process."""
+    """``ABICHECK_SIDE_PROCESSES`` (default on): ``0`` keeps both sides in
+    this process -- for an embedding host that must not fork, or a test that
+    observes side resolution in-process. *How* they then run is the caller's
+    ``allow_parallel``: the typed API resolves them in two threads, the
+    ``compare`` CLI (``allow_parallel=False``) one after the other."""
     from ..extract.env_flags import env_flag
 
     return env_flag("ABICHECK_SIDE_PROCESSES")

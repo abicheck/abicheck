@@ -141,3 +141,56 @@ def test_internal_linkage_marker(mangled: str, internal: bool) -> None:
     from abicheck.buildsource.export_obligation_linkage import has_internal_linkage
 
     assert has_internal_linkage(mangled) is internal
+
+
+# Linkage of each spelling, stated from the Itanium/C rules (oracle), not from
+# `has_internal_linkage`/`is_static_member_symbol`: "internal" (an `L` marker),
+# "nested" (inside a class or namespace, external linkage), "c" (unmangled).
+_VAR_SPELLINGS = {
+    "_ZN2nsL14invalid_kvs_idE": "internal",
+    "_ZL5kCount": "internal",
+    "_ZN3ccl14invalid_kvs_idE": "nested",
+    "_ZN2ns1C5countE": "nested",
+    "plain_c_var": "c",
+}
+
+
+def _expected_variable(linkage, is_static, is_const, value) -> str:
+    if linkage == "internal" or (linkage == "c" and is_static):
+        return "header-only"  # emitted in each consumer's own object
+    if linkage == "nested" and is_const and value is not None:
+        # `static constexpr` (inline since C++17) or `static const` integral:
+        # used by value, defined only if odr-used -- never "not shipped".
+        return "header-initialized constant"
+    return "not inline, so its definition is not shipped"
+
+
+@pytest.mark.parametrize(
+    ("mangled", "is_static", "is_const", "value"),
+    list(
+        itertools.product(
+            _VAR_SPELLINGS, (False, True), (False, True), (None, "-1")
+        )
+    ),
+)
+def test_variable_addition_wording_matrix(mangled, is_static, is_const, value) -> None:
+    var = Variable(
+        name="v",
+        mangled=mangled,
+        type="const int" if is_const else "int",
+        is_const=is_const,
+        value=value,
+        origin=ScopeOrigin.PUBLIC_HEADER,
+        is_static=is_static,
+        **_facts(False),
+    )
+    text = addition_evidence(var, "variable")["description"]
+    phrase = _expected_variable(_VAR_SPELLINGS[mangled], is_static, is_const, value)
+    assert phrase in text, text
+    # The three explanations are mutually exclusive.
+    others = {
+        "header-only",
+        "header-initialized constant",
+        "not inline, so its definition is not shipped",
+    } - {phrase}
+    assert not any(o in text for o in others), text

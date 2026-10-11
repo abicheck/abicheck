@@ -127,6 +127,14 @@ def _unexported_shape(decl: Function | Variable) -> str | None:
         decl.is_static and not is_static_member_symbol(mangled)
     ):
         return "header-only"
+    # A const static data member initialized in its class: `static constexpr`
+    # (implicitly inline since C++17) or a `static const` integral, which
+    # consumers use by value and which needs a definition only if odr-used.
+    # Either way "not inline, so not shipped" is wrong (oneCCL's
+    # `invalid_kvs_id`); castxml cannot tell constexpr from const, so the
+    # wording names the shape both share.
+    if decl.is_const and decl.value is not None and is_static_member_symbol(mangled):
+        return "header-initialized constant"
     return None
 
 

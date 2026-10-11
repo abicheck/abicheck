@@ -969,7 +969,12 @@ def _fmt_size(size_bytes: int) -> str:
 def compute_redundancy_note(result: DiffResult) -> _rmd.RedundancyNote | None:
     """The structured intermediate for :func:`~abicheck.report.render_markdown.render_redundancy_note`."""
     if result.redundant_count > 0:
-        return _rmd.RedundancyNote(redundant_count=result.redundant_count)
+        from .report.redundancy_reasons import redundancy_reason_text
+
+        return _rmd.RedundancyNote(
+            redundant_count=result.redundant_count,
+            reasons=redundancy_reason_text(result),
+        )
     return None
 
 
