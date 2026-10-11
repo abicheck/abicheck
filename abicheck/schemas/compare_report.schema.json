@@ -1829,7 +1829,7 @@
           },
           "reason": {
             "type": "string",
-            "description": "Why it counts as a failure: 'provider_unavailable'/'provider_failed'/'provider_unsupported'/'provider_stale' (the search did not deliver), 'search_incomplete'/'search_not_started' (it delivered but did not cover everything), or 'identity_coverage_incomplete' (complete search, ambiguous identities)."
+            "description": "Why it counts as a failure: 'provider_unavailable'/'provider_failed'/'provider_unsupported'/'provider_stale' (the search did not deliver), 'search_incomplete'/'search_not_started' (it delivered but did not cover everything), 'finding_unresolved' (an `UNKNOWN_UNRESOLVED` finding, including one whose identity is ambiguous), or 'identity_coverage_incomplete' (written by older versions for any ambiguous identity on the surface; no longer emitted)."
           },
           "status": {
             "type": "string",

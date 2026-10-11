@@ -52,10 +52,14 @@ finding exactly as before the flip.
 
 `compare` carries an **orthogonal contract-coverage axis**
 (the retired `scan --against` carried the same one). Complete coverage of the mode-selected evidence
-domain contributes `0`; missing, partial, stale, failed, contradictory, or
-identity-incomplete **required domain evidence** is recorded as a
-`CoverageFailure` in the run-level `contract_coverage_failures` ledger and
-contributes `1`. Unrelated provider failures stay advisory. This is a
+domain contributes `0`; missing, partial, stale, failed, or contradictory
+**required domain evidence** is recorded as a `CoverageFailure` in the
+run-level `contract_coverage_failures` ledger and contributes `1`, as does
+each finding the domain leaves `UNKNOWN_UNRESOLVED`. Ambiguous identities
+(two declarations sharing a spelling, such as `byte` and `std::byte`) count
+only for the findings they affect: such a finding is `UNKNOWN_UNRESOLVED`
+and listed, while a surface that merely contains the ambiguity fails
+nothing. Unrelated provider failures stay advisory. This is a
 run-level ledger, not a per-finding field: a coverage gap does not by itself
 force every finding to `UNKNOWN_UNRESOLVED` — an observed root or a
 kind that's `NOT_APPLICABLE` regardless of evidence can still resolve
@@ -136,9 +140,9 @@ release genuinely ships fewer components on purpose, that is what
 **When no layer states a domain, the evidence-adaptive default selects a
 domain the run's own evidence closes**, so the contribution is normally `0`.
 A stated domain -- `--contract`, or a config key such as `scope.public: true`
-(which states `public`) -- is judged as stated, so incomplete identity
-coverage in that domain can raise a clean `0` to `1` even on an unchanged
-library.
+(which states `public`) -- is judged as stated, so missing evidence for
+that domain raises a clean `0` to `1`; ambiguous identities alone do not,
+so an unchanged library still exits `0`.
 
 Ordinary change suppressions cannot clear a provider/domain coverage failure —
 a coverage failure is not a finding, so the suppression machinery structurally
