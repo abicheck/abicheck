@@ -53,7 +53,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import KW_ONLY, dataclass, replace
 
 #: Bumped whenever :meth:`SurfaceAcquisitionIdentity.key` changes what it
 #: folds in or how. Part of the key itself, so an abicheck upgrade that
@@ -168,6 +168,7 @@ class PublicObligation:
     entity: str
     #: ``file:line`` of the declaration, when the parse recorded one.
     source_location: str | None = None
+    _: KW_ONLY
     #: True when the acquisition recorded a declared (``-H``) surface and this
     #: declaration lies outside it -- reached only through ``#include`` and an
     #: include root, so whether the product owes the export is *not
