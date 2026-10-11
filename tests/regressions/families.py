@@ -291,6 +291,7 @@ _F7 = (
     "tests.fixture_fabricates_a_state_the_types_forbid",
     "tests.locale_dependent_repo_text_read",
     "tests.host_dependent_expectation",
+    "tests.language_rule_oracle_restates_the_detector",
 )
 #: id -> reason it belongs to no shared family.
 OTHER_REASONS: dict[str, str] = {

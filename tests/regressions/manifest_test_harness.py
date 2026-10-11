@@ -368,4 +368,42 @@ TEST_HARNESS_BUG_CLASSES: tuple[BugClass, ...] = (
         seed_tests=("tests/test_l4_perf.py",),
         axes={"cpus": ("1", "2", "4", "8", "16", "32", "33", "64", "224", "1024")},
     ),
+    BugClass(
+        id="tests.language_rule_oracle_restates_the_detector",
+        invariant=(
+            "A detector that claims what a compiler or preprocessor does "
+            "(a call is ambiguous, a result converts, a macro expands to a "
+            "convention at a declaration) is checked against that compiler "
+            "over a generated domain, not against a set-difference or a "
+            "pair rule written beside the detector. The 2026-10-11 re-audit "
+            "found three detectors whose own tests restated their rule: "
+            "`const char **` -> `char **` read as a convertible loss, a "
+            "final `-dM` table read `#undef`/later redefinitions into "
+            "earlier declarations and skipped function-like macros, and an "
+            "overload pair rule ignored an `initializer_list` overload that "
+            "wins `f({})`."
+        ),
+        fixed_by=(1554,),
+        seed_tests=(
+            "tests/test_castxml_cc_macro_state_integration.py",
+            "tests/test_return_pointee_qualifier_compiler_integration.py",
+            "tests/test_overload_ambiguity.py",
+        ),
+        axes={
+            "oracle": ("gcc", "g++"),
+            "macro_history": ("none", "undef", "redefined", "function_like"),
+            "pointer_levels": ("1", "2", "3", "reference"),
+            "overload_set": ("pair", "triple"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "The qualification-conversion rule is C++'s; a C "
+                    "consumer rejects some multi-level losses reported "
+                    "as a risk."
+                ),
+                reference="docs/contribute/known-gaps.md",
+            ),
+        ),
+    ),
 )
