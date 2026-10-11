@@ -45,6 +45,7 @@ _ast_memoize_scope: contextvars.ContextVar[bool] = contextvars.ContextVar(
     "_ast_memoize_scope", default=False
 )
 
+
 #: The single pending AST handoff for the *current thread*, or ``None``.
 #: ``(backend, key, root)`` -- a plain per-thread slot (``contextvars``),
 #: never a shared dict keyed only by content hash (Codex review, fresh
@@ -65,9 +66,15 @@ _ast_memoize_scope: contextvars.ContextVar[bool] = contextvars.ContextVar(
 #: ``ThreadPoolExecutor`` boundary on its own (same caveat as
 #: ``deadline``'s own ContextVar) -- that's exactly the point here, not a
 #: gap: each pooled worker thread gets its own independent slot.
-_ast_memo_slot: contextvars.ContextVar[tuple[str, str, Any] | None] = (
-    contextvars.ContextVar("_ast_memo_slot", default=None)
-)
+#: A ``threading.local``, not a ``ContextVar``: on free-threaded builds
+#: (3.14t+) a new ``threading.Thread`` inherits the parent's context, so a
+#: ContextVar slot set by the parent would be visible to -- and poppable by
+#: -- both worker threads, reintroducing exactly the cross-side steal above.
+class _AstMemoSlot(threading.local):
+    value: tuple[str, str, Any] | None = None
+
+
+_ast_memo_slot = _AstMemoSlot()
 
 _T = TypeVar("_T")
 
@@ -611,7 +618,7 @@ def ast_memoize_scope() -> Iterator[None]:
     try:
         yield
     except BaseException:
-        _ast_memo_slot.set(None)
+        _ast_memo_slot.value = None
         raise
     finally:
         _ast_memoize_scope.reset(active_token)
@@ -631,7 +638,7 @@ def store_cached_ast(key: str, backend: str, root: Any) -> None:
         _AST_SLOT_STATS.bypasses += 1
         return
     _AST_SLOT_STATS.stores += 1
-    _ast_memo_slot.set((backend, key, root))
+    _ast_memo_slot.value = (backend, key, root)
 
 
 def load_cached_ast(
@@ -685,10 +692,10 @@ def load_cached_ast(
     path back out of this function, not just the ones that happen to be
     expensive (mirrors the disk-cache-hit contract PR #591 established).
     """
-    slot = _ast_memo_slot.get()
+    slot = _ast_memo_slot.value
     if slot is not None and slot[0] == backend and slot[1] == key:
         _AST_SLOT_STATS.hits += 1
-        _ast_memo_slot.set(None)
+        _ast_memo_slot.value = None
         deadline.check()
         # The tree is already in hand, but a final consumer may still have a
         # stored derived form that is cheaper than projecting it -- and must

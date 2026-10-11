@@ -25,12 +25,12 @@ remains the name every consumer imports.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 
 from .rule_provenance import RuleProvenance
 
 
-class Disposition(str, Enum):
+class Disposition(StrEnum):
     """ADR-067 D2's terminal effective-gate disposition of one change.
 
     Exactly one of these is recorded per atomically detected change. The

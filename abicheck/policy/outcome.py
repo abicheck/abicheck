@@ -64,7 +64,7 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from ..model.change_catalog.registry import Verdict
@@ -117,7 +117,7 @@ def run_outcome_scope_required(schema_version: object) -> bool:
     )
 
 
-class PolicyGateDecision(str, Enum):
+class PolicyGateDecision(StrEnum):
     """The compatibility-policy gate axis -- ordered, exit-code-free.
 
     Mirrors the ``IssueCategory`` ordering ``severity.compute_exit_code``
@@ -167,7 +167,7 @@ def policy_gate_decision_for_exit_code(code: int) -> PolicyGateDecision:
     return _EXIT_CODE_GATE.get(code, PolicyGateDecision.ABI_BREAKING)
 
 
-class OperationalStatus(str, Enum):
+class OperationalStatus(StrEnum):
     """A run that never produced a real compatibility verdict at all.
 
     ``PolicyGateDecision`` alone cannot represent this: it only orders
@@ -228,7 +228,7 @@ def fold_gate_and_operational(
     )
 
 
-class TargetLifecycle(str, Enum):
+class TargetLifecycle(StrEnum):
     """A target's own lifecycle state within an ``aggregate`` baseline-set.
 
     Grounded in vocabulary ``workflows.aggregate.contracts.py`` already
@@ -248,7 +248,7 @@ class TargetLifecycle(str, Enum):
     NEW_TARGET = "new_target"
 
 
-class ScopeCompleteness(str, Enum):
+class ScopeCompleteness(StrEnum):
     """ADR-065 D6's completeness axis: was every *selected, expected*
     member of the comparison scope actually compared?
 
@@ -333,8 +333,8 @@ class RunOutcome:
         if not isinstance(data, dict):
             return None
         try:
-            gate = PolicyGateDecision(data.get("gate"))
-            operational = OperationalStatus(data.get("operational"))
+            gate = PolicyGateDecision(data.get("gate", ""))
+            operational = OperationalStatus(data.get("operational", ""))
         except ValueError:
             return None
         lifecycle_raw = data.get("lifecycle")
@@ -350,7 +350,7 @@ class RunOutcome:
         # writer described the one pair it ran); later ones must carry it.
         required = run_outcome_scope_required(data.get("schema_version"))
         try:
-            scope = ScopeCompleteness(data.get("scope"))
+            scope = ScopeCompleteness(data.get("scope", ""))
         except ValueError:
             if required:
                 return None

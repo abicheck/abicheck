@@ -40,7 +40,7 @@ import os
 import stat
 from collections.abc import Iterable
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
@@ -57,7 +57,7 @@ from .storage.zstd_frame_guard import (
 # ── Compression selector ────────────────────────────────────────────────────
 
 
-class SnapshotCompression(str, Enum):
+class SnapshotCompression(StrEnum):
     """One project-wide vocabulary for snapshot storage encoding.
 
     ``AUTO`` is a *request*, never a stored/resolved value: callers resolve

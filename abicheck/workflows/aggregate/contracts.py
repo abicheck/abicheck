@@ -56,7 +56,7 @@ from __future__ import annotations
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
@@ -344,7 +344,7 @@ _BOOTSTRAP_VERDICT = "NO_BASELINE"
 _NEW_TARGET_VERDICT = "NEW_TARGET"
 
 
-class CoverageStatus(str, Enum):
+class CoverageStatus(StrEnum):
     """Was every *required* expected target actually analyzed?"""
 
     COMPLETE = "complete"  # every required target reported

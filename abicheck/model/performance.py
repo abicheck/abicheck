@@ -32,7 +32,7 @@ import contextvars
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 
 __all__ = [
     "DEFAULT_PERFORMANCE_PROFILE",
@@ -45,7 +45,7 @@ __all__ = [
 ]
 
 
-class PerformanceProfile(str, Enum):
+class PerformanceProfile(StrEnum):
     """What a run optimizes for."""
 
     #: Both sides of a comparison may be resolved at once -- two live binaries

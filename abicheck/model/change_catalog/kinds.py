@@ -88,7 +88,7 @@ Leaf module: no internal imports beyond its three sibling data files
 
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 from typing import Protocol
 
 from .kind_names_1 import KIND_NAMES_1
@@ -102,10 +102,9 @@ _ALL_KIND_NAMES: tuple[tuple[str, str, str | None], ...] = (
 )
 
 
-ChangeKind = Enum(
+ChangeKind = StrEnum(
     "ChangeKind",
     [(name, value) for name, value, _comment in _ALL_KIND_NAMES],
-    type=str,
     module=__name__,
     qualname="ChangeKind",
 )

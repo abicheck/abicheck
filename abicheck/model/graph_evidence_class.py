@@ -12,10 +12,10 @@ reading the builder's docstring.
 
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 
 
-class EdgeEvidenceClass(str, Enum):
+class EdgeEvidenceClass(StrEnum):
     """How an edge kind was established."""
 
     #: Read directly from one input's own observed facts (e.g. a header

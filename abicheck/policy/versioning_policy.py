@@ -51,7 +51,7 @@ S3's CI publication/resolution channel existing at all; see
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from typing import TYPE_CHECKING, TypeVar
 
 from .classification import Verdict
@@ -74,7 +74,7 @@ __all__ = [
 ]
 
 
-class VersioningScheme(str, Enum):
+class VersioningScheme(StrEnum):
     """D4's ``scheme`` control: how version labels parse and order.
 
     ``STRICT_SEMVER`` is the built-in default -- ``abicheck/semver.py``'s
@@ -90,7 +90,7 @@ class VersioningScheme(str, Enum):
     FREEFORM = "freeform"
 
 
-class CompatibilityPromise(str, Enum):
+class CompatibilityPromise(StrEnum):
     """D4's ``promise`` control: what compatibility the project claims
     between two ordered versions.
 
@@ -107,7 +107,7 @@ class CompatibilityPromise(str, Enum):
     SOURCE_WITHIN_MINOR = "source_within_minor"
 
 
-class VersioningEnforcement(str, Enum):
+class VersioningEnforcement(StrEnum):
     """D4's ``enforcement`` control: what a policy deviation does.
 
     ``WARN`` is the built-in default -- advisory only, matching today's

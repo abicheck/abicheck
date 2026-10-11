@@ -220,12 +220,12 @@ def test_clang_header_dump_memoize_false_never_writes_the_memo(
     # Fresh-parse path: memoize=False must leave this thread's slot unset.
     clang_header_dump([header], [], memoize=False, run_ast=runner)
     assert cache.exists()  # the disk cache is still populated, as always
-    assert dumper_cache._ast_memo_slot.get() is None
+    assert dumper_cache._ast_memo_slot.value is None
 
     # Disk-cache-hit path: a second memoize=False call reads the file this
     # test just warmed on disk, and must still leave the slot unset.
     clang_header_dump([header], [], memoize=False, run_ast=runner)
-    assert dumper_cache._ast_memo_slot.get() is None
+    assert dumper_cache._ast_memo_slot.value is None
 
 
 def test_clang_header_dump_direct_caller_never_memoizes(
@@ -254,7 +254,7 @@ def test_clang_header_dump_direct_caller_never_memoizes(
     assert not dumper_cache.ast_memoize_active()
     clang_header_dump([header], [], run_ast=runner)  # no ast_memoize_scope() active
     assert cache.exists()  # the disk cache is still populated, as always
-    assert dumper_cache._ast_memo_slot.get() is None
+    assert dumper_cache._ast_memo_slot.value is None
 
 
 def test_clang_header_dump_memoizes_inside_ast_memoize_scope(
@@ -278,10 +278,10 @@ def test_clang_header_dump_memoizes_inside_ast_memoize_scope(
 
     with dumper_cache.ast_memoize_scope():
         clang_header_dump([header], [], run_ast=runner)
-        assert dumper_cache._ast_memo_slot.get() is not None  # written
+        assert dumper_cache._ast_memo_slot.value is not None  # written
     # The scope exiting doesn't itself clear the slot -- only a subsequent
     # pop (the header-graph attach step) does; still present right after.
-    assert dumper_cache._ast_memo_slot.get() is not None
+    assert dumper_cache._ast_memo_slot.value is not None
 
 
 def test_ast_memoize_scope_cleans_up_its_own_writes_on_exception(
@@ -309,9 +309,9 @@ def test_ast_memoize_scope_cleans_up_its_own_writes_on_exception(
     with pytest.raises(RuntimeError, match="snapshot construction failed"):
         with dumper_cache.ast_memoize_scope():
             clang_header_dump([header], [], run_ast=runner)
-            assert dumper_cache._ast_memo_slot.get() is not None  # written
+            assert dumper_cache._ast_memo_slot.value is not None  # written
             raise RuntimeError("snapshot construction failed")
-    assert dumper_cache._ast_memo_slot.get() is None  # cleaned up on the way out
+    assert dumper_cache._ast_memo_slot.value is None  # cleaned up on the way out
 
 
 def test_clang_only_dump_does_not_require_gxx_identity(
@@ -398,7 +398,7 @@ def test_clang_header_dump_rechecks_deadline_after_cache_load(
     # onto the on-disk read this test is actually about -- a memo hit would
     # skip json.loads (and the slow-patched cost below) entirely, which is
     # exactly the intended optimization but not what this test exercises.
-    dumper_cache._ast_memo_slot.set(None)
+    dumper_cache._ast_memo_slot.value = None
 
     # The disk-cache read (json.loads) now lives in dumper_cache.py, not
     # dumper.py itself (G31 Phase C AST reuse split the read into

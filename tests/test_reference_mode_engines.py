@@ -164,4 +164,4 @@ def test_ast_memo_slot_and_acquisition_scope_bypass(ref: pytest.MonkeyPatch) -> 
         assert not dumper_cache.ast_acquisition_active()
         assert dumper_cache.run_ast_acquisition("clang", "k", lambda: 7) == 7
     dumper_cache.store_cached_ast("k", "clang", object())
-    assert dumper_cache._ast_memo_slot.get() is None
+    assert dumper_cache._ast_memo_slot.value is None

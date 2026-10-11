@@ -114,10 +114,10 @@ def test_a_stored_entry_is_never_served_to_another_test(occurrence: int) -> None
 @pytest.mark.parametrize("occurrence", range(6))
 def test_ast_memo_slot_starts_cleared(occurrence: int) -> None:
     """``_isolate_ast_memo``'s half of the same contract: the in-process
-    memo is a ContextVar on a thread pytest reuses across tests, so a value
+    memo is per-thread state on a thread pytest reuses across tests, so a value
     left by one test is otherwise still visible to the next."""
-    assert dumper_cache._ast_memo_slot.get() is None
-    dumper_cache._ast_memo_slot.set({"poisoned": occurrence})
+    assert dumper_cache._ast_memo_slot.value is None
+    dumper_cache._ast_memo_slot.value = {"poisoned": occurrence}
 
 
 @pytest.mark.parametrize("occurrence", range(6))

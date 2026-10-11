@@ -87,7 +87,7 @@ def debug_type_node_id(fmt: str, kind: str, name: str, occurrence: int = 1) -> s
     return base if occurrence == 1 else f"{base}#{occurrence}"
 
 
-class JoinState(str, enum.Enum):
+class JoinState(enum.StrEnum):
     """The one state a subject lands in for one join (I2)."""
 
     #: Exactly one candidate on the other side, under the join rule.

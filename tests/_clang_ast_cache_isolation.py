@@ -74,7 +74,7 @@ def _reset_ast_memo() -> None:
     """
     from abicheck.storage import header_ast_cache as dumper_cache
 
-    dumper_cache._ast_memo_slot.set(None)
+    dumper_cache._ast_memo_slot.value = None
 
 
 class _PruneSpy:

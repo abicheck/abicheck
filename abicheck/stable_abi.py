@@ -47,7 +47,7 @@ Refresh the data by running ``scripts/gen_stable_abi_data.py`` over a newer
 
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 
 from .stable_abi_data import STABLE_ABI_SYMBOLS
 
@@ -85,7 +85,7 @@ _MAX_KNOWN_MINOR: int = max(minor for _major, minor in STABLE_ABI_SYMBOLS.values
 _MAX_ABI3_MINOR: int = _MAX_KNOWN_MINOR + 10
 
 
-class StableAbiStatus(str, Enum):
+class StableAbiStatus(StrEnum):
     """Classification of one imported CPython symbol against the Limited API."""
 
     #: In the stable-ABI set and at/under the target floor.

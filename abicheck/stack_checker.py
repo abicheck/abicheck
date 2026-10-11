@@ -26,7 +26,7 @@ from __future__ import annotations
 import hashlib
 import logging
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 
 from .binder import BindingStatus, SymbolBinding, compute_bindings
@@ -41,7 +41,7 @@ from .stack_binding_diff import diff_runtime_bindings
 log = logging.getLogger(__name__)
 
 
-class StackVerdict(str, Enum):
+class StackVerdict(StrEnum):
     PASS = "pass"
     WARN = "warn"
     FAIL = "fail"

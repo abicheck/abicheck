@@ -41,14 +41,14 @@ decides an ABI/API verdict. Verdict policy stays in the core compare engine.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 from typing import Any, Literal, Protocol, runtime_checkable
 
 from .redaction import DEFAULT_REDACTION, RedactionPolicy
 
 
-class CollectionAction(str, Enum):
+class CollectionAction(StrEnum):
     """A side-effecting capability an extractor may request at run time (D5).
 
     Ordered shallow→deep by how much they touch the host: ``INSPECT`` only reads
@@ -79,7 +79,7 @@ ALWAYS_DENIED_ACTIONS: frozenset[CollectionAction] = frozenset(
 )
 
 
-class CollectionMode(str, Enum):
+class CollectionMode(StrEnum):
     """How extractor failures affect the command (ADR-032 D9).
 
     These modes affect *collection* only; compare exit codes keep their ADR-009

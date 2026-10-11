@@ -49,7 +49,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from .variant_pairing import VariantPairing
@@ -76,7 +76,7 @@ __all__ = [
 SCOPE_ACQUISITION_SCHEMA_VERSION = "1.1"
 
 
-class AcquisitionState(str, Enum):
+class AcquisitionState(StrEnum):
     """Per expected member: what happened to it in *this* run (ADR-065 D1).
 
     Exactly one state per member; the partitions are pairwise disjoint and
@@ -145,7 +145,7 @@ OPTIONAL_EXCUSABLE_STATES: frozenset[AcquisitionState] = frozenset(
 )
 
 
-class InventoryCompleteness(str, Enum):
+class InventoryCompleteness(StrEnum):
     """Whether one side's member inventory is *proven* complete for the
     analysis boundary (D2) -- the precondition for reading an unmatched
     member on the other side as a removal/addition.

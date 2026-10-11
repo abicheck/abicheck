@@ -60,7 +60,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date
-from enum import Enum
+from enum import StrEnum
 
 from ..errors import PolicyError as PolicyError
 from ..model.change_catalog.kinds import ChangeKind as ChangeKind, HasKind as HasKind
@@ -100,7 +100,7 @@ def gate_eligible_changes(changes: Sequence[HasKind]) -> list[HasKind]:
     return [c for c in changes if is_evaluated(c) and not is_cross_source_resolved(c)]
 
 
-class SeverityLevel(str, Enum):
+class SeverityLevel(StrEnum):
     """Criticality level for an issue category."""
 
     ERROR = "error"
@@ -108,7 +108,7 @@ class SeverityLevel(str, Enum):
     INFO = "info"
 
 
-class IssueCategory(str, Enum):
+class IssueCategory(StrEnum):
     """The four high-level issue categories."""
 
     ABI_BREAKING = "abi_breaking"

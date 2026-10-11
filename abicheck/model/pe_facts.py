@@ -21,14 +21,14 @@ Holds no parsing logic (ADR-061 Phase 5)."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 
 from .execution_cache import memoized_property
 from .fact import Fact, bridge_legacy_and_fact
 from .name_decoration import pe_x86
 
 
-class PeSymbolType(str, Enum):
+class PeSymbolType(StrEnum):
     EXPORTED = "exported"  # ordinal / name in export table
     FORWARDED = "forwarded"  # forwarded to another DLL
     OTHER = "other"

@@ -39,7 +39,8 @@ independently-orthogonal axis below (missing evidence contributing its own
 exit `1`), not from relevance itself; that's what stops missing evidence
 from being the cheapest way to pass.
 
-**Without `--contract` the domain is evidence-adaptive**:
+**When no layer states a domain** (no `--contract`, no `.abicheck.yml`
+`scope.public`, no API `contract_mode`) **the domain is evidence-adaptive**:
 `public` when every compared side carries public-header evidence, otherwise
 `exports` when every side carries an observed export table, otherwise `all`.
 Under that unstated `public` default, a finding the headers make no
@@ -132,8 +133,12 @@ release genuinely ships fewer components on purpose, that is what
 `--support-promise declared` reports as a finding
 (`support_promise_component_retired`) rather than as a bare exit code.
 
-**Without `--contract` the evidence-adaptive default selects a domain the
-run's own evidence closes**, so the contribution is normally `0`.
+**When no layer states a domain, the evidence-adaptive default selects a
+domain the run's own evidence closes**, so the contribution is normally `0`.
+A stated domain -- `--contract`, or a config key such as `scope.public: true`
+(which states `public`) -- is judged as stated, so incomplete identity
+coverage in that domain can raise a clean `0` to `1` even on an unchanged
+library.
 
 Ordinary change suppressions cannot clear a provider/domain coverage failure —
 a coverage failure is not a finding, so the suppression machinery structurally
