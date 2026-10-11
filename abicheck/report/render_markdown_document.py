@@ -606,7 +606,15 @@ def build_markdown_document(
         "out_of_surface_note": _opt_asdict(rm.compute_out_of_surface_note(result)),
         "show_impact": show_impact,
         "impact_table": (
-            _opt_asdict(rm.compute_impact_table(result, displayed_changes=changes))
+            _opt_asdict(
+                rm.compute_impact_table(
+                    result,
+                    displayed_changes=changes,
+                    findings=None
+                    if envelope is None
+                    else envelope.findings_for(changes),
+                )
+            )
             if show_impact
             else None
         ),
