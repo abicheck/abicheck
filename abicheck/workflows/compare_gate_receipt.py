@@ -70,6 +70,7 @@ if TYPE_CHECKING:
     from ..policy.release_gate_options import GateOptions
     from ..policy_file import PolicyFile
     from ..suppression import SuppressionList
+    from .compare_configuration import CompareConfiguration
     from .contracts import CompareRequest
 
 
@@ -140,9 +141,6 @@ def resolve_request_evaluation_config(
     which could digest a different file than the one that scored the
     findings if it changed between the two reads -- Codex review).
     """
-    packs_forwarded = bool(request.pack_policy_overrides) or (
-        request.pack_internal_namespaces is not None
-    )
     from ..compatibility_evaluation_frontend import (
         SuppressionSource,
         compatibility_config_from_compare_request,
@@ -154,9 +152,47 @@ def resolve_request_evaluation_config(
         suppression=SuppressionSource.from_loaded(suppression, path=request.suppress),
         project=_project_inputs_for_request(request),
     )
-    if packs_forwarded:
-        config = _with_pack_forwarded_provenance(config, request)
-    return config
+    return _with_pack_forwarded_provenance(config, request)
+
+
+def resolve_request_pack_configuration(
+    request: CompareRequest,
+    policy_file: PolicyFile | None,
+    suppression: SuppressionList | None,
+) -> CompareConfiguration:
+    """:func:`resolve_request_evaluation_config` for a request selecting
+    ``pack_paths``: the same resolution, through the shared
+    :func:`~abicheck.workflows.compare_configuration.resolve_compare_configuration`
+    so the packs are checked, applied to the policy file, and returned for the
+    gate exactly as the native CLI applies them."""
+    from ..compatibility_evaluation_frontend import (
+        FrontEnd,
+        SuppressionSource,
+        compare_request_inputs,
+    )
+    from .compare_configuration import resolve_compare_configuration
+
+    configuration = resolve_compare_configuration(
+        compare_request_inputs(
+            request,
+            policy_file=policy_file,
+            suppression=SuppressionSource.from_loaded(
+                suppression, path=request.suppress
+            ),
+        ),
+        front_end=FrontEnd.API,
+        project=_project_inputs_for_request(request),
+        policy_file=policy_file,
+        base_policy=request.policy,
+        contract_evaluation=request.contract_evaluation,
+        always_resolve=True,
+    )
+    return replace(
+        configuration,
+        evaluation_config=_with_pack_forwarded_provenance(
+            configuration.evaluation_config, request
+        ),
+    )
 
 
 def install_resolved_gate_receipt(
@@ -179,7 +215,7 @@ def install_resolved_gate_receipt(
     comparison -- read here, never re-resolved (sub-phase 4B).
 
     Stamps ``result.evaluation_config`` exactly when the native CLI's
-    ``resolve_and_apply`` records one: under contract evaluation, or when a
+    ``resolve_compare_configuration`` records one: under contract evaluation, or when a
     pack contributed (*packs_forwarded*; a pack-only run never builds a
     ``PersistedContractContext``, so without the stamp
     ``effective_config_digest``'s rich tier would be unreachable for it).
@@ -258,6 +294,8 @@ def _with_pack_forwarded_provenance(
     from ..compatibility_evaluation_frontend import POLICY_OVERRIDES_FIELD
     from ..compatibility_evaluation_wiring import INTERNAL_NAMESPACES_FIELD
 
+    if not request.pack_policy_overrides and request.pack_internal_namespaces is None:
+        return config
     provenance = dict(config.provenance)
     if request.pack_policy_overrides:
         prior = provenance.get(POLICY_OVERRIDES_FIELD)

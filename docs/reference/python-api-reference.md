@@ -49,6 +49,8 @@ A fully-specified comparison request — the single input to ``run_compare``.
 | `old_probe_matrix` | `Path \| None` | `None` |
 | `new_probe_matrix` | `Path \| None` | `None` |
 | `pack_internal_namespaces` | `tuple[str, ...] \| None` | `None` |
+| `pack_paths` | `tuple[Path, ...]` | `()` |
+| `stated_settings` | `frozenset[str] \| None` | `None` |
 | `severity_preset` | `str \| None` | `None` |
 | `changed_paths` | `tuple[str, ...]` | `()` |
 | `abi3_floor` | `tuple[int, int] \| None` | `None` |

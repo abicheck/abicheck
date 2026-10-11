@@ -45,7 +45,7 @@ gap against the CLI's own, then separately-maintained
 ``debug_format``, ``include_labels``, and ``--follow-deps``. A third slice
 then removed that second implementation outright: ``run_compare_request``
 was split into its two phases (``service_compare_pipeline``), which gave the
-CLI's Click-dependent ADR-049 ``resolve_and_apply`` step a seam to run in —
+CLI's ADR-049 configuration step (``compare_configuration``) a seam to run in —
 the thing that had made a shared resolution look impossible — and
 ``_resolve_compare_snapshots`` now builds one of these requests and
 delegates. So this really is the one resolution every front end uses.
@@ -345,6 +345,12 @@ class CompareRequest:
     #: is applied. ``None`` means "no pack stated this"; distinct from an
     #: empty tuple, which is a pack's explicit "this project has none".
     pack_internal_namespaces: tuple[str, ...] | None = field(default=None, kw_only=True)
+    #: ADR-049 D8 ``--pack`` manifests, resolved as the CLI resolves them
+    #: (``workflows.compare_configuration``); a gate pack moves the gate too.
+    pack_paths: tuple[Path, ...] = field(default=(), kw_only=True)
+    #: The ``DEFAULTED_COMPARE_PARAMETERS`` stated (the CLI derives its set
+    #: from Click's ``ParameterSource``); ``None`` reads every field as stated.
+    stated_settings: frozenset[str] | None = field(default=None, kw_only=True)
     #: The one automatic gate algorithm (ADR-064/CLI cleanup phase two PR
     #: G2) is fully determined by whether a severity setting is in effect
     #: -- there is no ``exit_code_scheme`` field here to force one direction

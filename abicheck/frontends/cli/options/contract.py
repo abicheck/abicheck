@@ -210,7 +210,7 @@ def resolve_contract_domain(
 
     Normalizing the local value alone is not enough: the two front ends read
     the raw parameters differently -- ``compare`` hands
-    ``cli_compare_receipt.resolve_and_apply`` explicit values, but
+    ``workflows.compare_configuration.resolve_compare_configuration`` explicit values, but
     the retired ``cli_scan._resolve_scan_evaluation_config`` rebuilt its inputs from
     ``ctx.params`` and its typed-parameter set from
     ``ctx.get_parameter_source``. Given *ctx*, the normalization is applied

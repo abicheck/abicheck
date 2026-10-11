@@ -204,7 +204,7 @@ class DiffResult(ReportSideFacts):
     # ``CompatibilityEvaluationConfig`` this comparison was configured with,
     # when one was resolved at all -- unlike ``contract_context`` above,
     # this is populated whenever ``--pack`` selected a pack, *not only*
-    # under ``--contract`` (``resolve_and_apply``/``resolve_cli_config``
+    # under ``--contract`` (``resolve_compare_configuration``/``resolve_cli_config``
     # already resolve one for a pack-only run; it was previously only
     # attached to the report through ``contract_context``, which stays
     # unset without ``--contract``, so a pack-only run's real pack

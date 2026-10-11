@@ -123,7 +123,7 @@ if TYPE_CHECKING:
 # classify_compare_pair already use.
 # ── Compare pipeline (ADR-055 D1): `run_compare_request`'s two phases live in
 # the leaf module ``service_compare_pipeline`` so the native ``compare`` CLI can
-# run its Click-dependent ADR-049 ``resolve_and_apply`` step between them and
+# run its ADR-049 configuration step (``workflows.compare_configuration``) between them and
 # still share this resolution instead of keeping a second copy. Re-exported here
 # so ``from abicheck.service import resolve_compare_request`` works.
 # ``run_compare_request``/``run_compare`` (their composition and its

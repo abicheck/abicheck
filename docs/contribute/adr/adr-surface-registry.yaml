@@ -425,6 +425,8 @@ adrs:
     use_cases: [UC-WF-compare]
     surfaces:
       - cli: compare --contract
+      - api: abicheck.workflows.contracts.CompareRequest.pack_paths
+      - api: abicheck.workflows.contracts.CompareRequest.stated_settings
       - report: compare_report.contract_coverage
       - report: compare_report.contract_context
 

@@ -16,18 +16,20 @@
 """A typed ``CompareRequest``'s policy inputs, resolved once.
 
 ``classify_compare_pair`` (``service_compare_pipeline.py``) used to assemble
-these inline: the D7 evaluation config (read *before* the project-config
-fold, which is the weakest tier), the project-config ``policy.overrides``
-fold, and -- since ADR-067 D5/D6 reached the typed API -- the acknowledgment
-records and the additions-review gate. Loading the files and folding a
-forwarded pack stay with the caller, since ``pack_application`` is outside
-what ``workflows`` may import. They are one
-question ("what policy does this request run under?"), and the release
-fan-out reaches them through the same request, so they have one owner here.
+these inline: a forwarded pack's overrides, the D7 evaluation config (read
+*before* the project-config fold, which is the weakest tier), the
+project-config ``policy.overrides`` fold, and -- since ADR-067 D5/D6 reached
+the typed API -- the acknowledgment records and the additions-review gate.
+Selected ``pack_paths`` go through
+:func:`~abicheck.workflows.compare_configuration.resolve_compare_configuration`,
+the resolution the native ``compare`` CLI runs too. They are one question
+("what policy does this request run under?"), and the release fan-out
+reaches them through the same request, so they have one owner here.
 """
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -37,11 +39,14 @@ from .acknowledgment_inputs import (
 )
 
 if TYPE_CHECKING:
+    from ..pack_application import PackApplication
     from ..policy_file import PolicyFile
     from ..suppression import SuppressionList
     from .contracts import CompareRequest
 
 __all__ = ["RequestPolicyInputs", "resolve_request_policy_inputs"]
+
+_logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -50,6 +55,8 @@ class RequestPolicyInputs:
     policy_file: PolicyFile | None
     evaluation_config: Any
     acknowledgments: CompareAcknowledgments
+    #: The selected ``pack_paths``' contribution; ``None`` without a pack.
+    pack_application: PackApplication | None = None
 
 
 def resolve_request_policy_inputs(
@@ -59,27 +66,50 @@ def resolve_request_policy_inputs(
 ) -> RequestPolicyInputs:
     """Resolve *request*'s policy inputs in their precedence order.
 
-    *suppression*/*policy_file* are the request's loaded files with any
-    forwarded pack already folded in (the caller's step: ``pack_application``
-    is not importable from ``workflows``). This reads the D7 evaluation
-    config from them *before* the weakest-tier project-config fold.
+    *suppression*/*policy_file* are the request's loaded files. A forwarded
+    pack contribution (``pack_policy_overrides``/``pack_internal_namespaces``)
+    is folded first; selected ``pack_paths`` are resolved with the D7
+    evaluation config, both *before* the weakest-tier project-config fold.
+
+    Raises :class:`~abicheck.workflows.compare_configuration.CompareConfigurationError`
+    for a pack conflict or an inapplicable pack.
     """
+    from .compare_configuration import fold_project_policy_overrides
     from .compare_gate_receipt import resolve_request_evaluation_config
 
     pf = policy_file
-    evaluation_config = resolve_request_evaluation_config(request, pf, suppression)
-    # ADR-068 §3 #23 / ADR-049 D7: project-config overrides at the weakest tier.
-    if request.project_policy_overrides:
-        from ..policy.policy_file_project_overrides import (
-            apply_lower_precedence_overrides,
-        )
+    if request.pack_policy_overrides or request.pack_internal_namespaces is not None:
+        from ..pack_application import PackApplication, policy_file_with_packs
 
-        pf = apply_lower_precedence_overrides(
-            pf, dict(request.project_policy_overrides), base_policy=request.policy
+        pf = policy_file_with_packs(
+            pf,
+            PackApplication(
+                policy_overrides=dict(request.pack_policy_overrides or {}),
+                internal_namespaces=request.pack_internal_namespaces,
+            ),
+            base_policy=request.policy,
         )
+    application = None
+    if request.pack_paths:
+        from .compare_gate_receipt import resolve_request_pack_configuration
+
+        configuration = resolve_request_pack_configuration(request, pf, suppression)
+        evaluation_config = configuration.evaluation_config
+        pf, application = configuration.policy_file, configuration.pack_application
+    else:
+        evaluation_config = resolve_request_evaluation_config(request, pf, suppression)
+    # ADR-068 §3 #23 / ADR-049 D7: project-config overrides at the weakest tier.
+    project_fold = fold_project_policy_overrides(
+        pf, dict(request.project_policy_overrides or ()), base_policy=request.policy
+    )
+    pf = project_fold.policy_file
+    for warning in project_fold.warnings:
+        _logger.warning("%s", warning)
     acknowledgments = resolve_compare_acknowledgments(
         request.acknowledgments_path,
         policy_file=pf,
         configured_action=request.acknowledgment_unacknowledged_additions,
     )
-    return RequestPolicyInputs(suppression, pf, evaluation_config, acknowledgments)
+    return RequestPolicyInputs(
+        suppression, pf, evaluation_config, acknowledgments, application
+    )

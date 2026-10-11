@@ -55,7 +55,7 @@ shows.
 ``_DwarfSnapshotBuilder._process_record_type_named``'s existing
 ODR-duplicate branch, once per non-retained, non-declaration duplicate
 DIE encountered; ``finalize_vtable_evidence_completeness`` is a new
-post-CU-walk pass (mirroring the existing ``_finalize_vptr_offsets``
+post-CU-walk pass (mirroring the existing ``extract.dwarf_vptr_resolution.finalize_vptr_offsets``
 pass's own "needs every CU to be known first" shape), called once every
 CU has been walked. Only ever escalates evidence from confirmed-complete
 to confirmed-partial -- never resolves a genuine disagreement, never picks
@@ -126,7 +126,7 @@ rather than papered over" section one level up):
   (``_base_edges_by_record``/``_virtual_base_edges_by_record``) are not a
   drop-in source for it: ``_base_edges_by_record`` is deliberately
   incomplete (only appended when ``DW_AT_data_member_location`` is
-  present -- it exists for ``_finalize_vptr_offsets``'s own
+  present -- it exists for ``extract.dwarf_vptr_resolution.finalize_vptr_offsets``'s own
   offset-0-primary-base search, a different purpose with a different
   completeness bar), so building a reliable multiset from it here would
   silently under-count for any base lacking that attribute. A correct fix
@@ -333,7 +333,7 @@ def finalize_vtable_evidence_completeness(builder: Any) -> None:
     Mutates each matching ``RecordType`` in place -- the same plain
     post-construction-mutation pattern ``dwarf_snapshot.
     resolve_vptr_offset_bits`` already uses for this exact builder's own
-    second, whole-binary-scoped pass (``_finalize_vptr_offsets``); this is
+    second, whole-binary-scoped pass (``extract.dwarf_vptr_resolution.finalize_vptr_offsets``); this is
     that pass's sibling, run right alongside it, for the identical reason
     (a conflicting duplicate can appear in a CU processed *after* the
     retained definition, so this cannot be decided at construction time).

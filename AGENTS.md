@@ -176,7 +176,8 @@ line and hangs or kills itself. Keep the tree still while a run is live —
 and push once the run is green; an "unpushed changes" stop-hook nag is
 answered by the running verify, not by an early push.
 
-**PR body.** Write the description to a file and run
+**PR body.** Write every PR description with the `pr` skill
+(`.claude/skills/pr/`), whatever tool opens the PR. Write the description to a file and run
 `BUGFIX_CONTRACT_BODY_FILE=<file> python scripts/check_bugfix_test_contract.py`
 before every `create_pull_request`/`update_pull_request`; CI's test-contract
 check parses the same rows.
@@ -212,7 +213,7 @@ Follow the pointer whose trigger matches your task:
 | [`docs/contribute/adr/index.md`](docs/contribute/adr/index.md) | a change touches a default, schema, exit code or public interface |
 | [`agent-guide/quality-gates.md` § ADR surface traceability](docs/contribute/agent-guide/quality-gates.md#adr-surface-traceability-adr-surfaces) | adding an ADR, or adding/renaming/removing a CLI flag, Action input, API symbol, report field, use case or scenario |
 
-**Repository skills** (`.claude/skills/`): `diagnosing-bugs` (load for a bug report, failing behavior or perf regression), `writing-for-agents` (load before editing any `AGENTS.md`/`CLAUDE.md`/skill), and the user-invoked `/handoff` and `/retro`.
+**Repository skills** (`.claude/skills/`): `diagnosing-bugs` (load for a bug report, failing behavior or perf regression), `writing-for-agents` (load before editing any `AGENTS.md`/`CLAUDE.md`/skill), `pr` (load before creating or updating any PR), `two-axis-review` (standards + spec review of a branch or PR), `codebase-design`/`domain-modeling`/`grilling` (module design, glossary/ADR terms, stress-testing a plan), and the user-invoked `/handoff`, `/retro` and `/improve-codebase-architecture`.
 
 ## Key types
 

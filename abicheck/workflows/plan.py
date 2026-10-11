@@ -52,7 +52,7 @@ else:
   Those answer a later question — how an already-extracted comparison is
   classified and scored — and for the native ``compare``/``scan`` CLIs that
   question is not even answerable at the point a plan is built:
-  ``cli_compare_receipt.resolve_and_apply()`` (ADR-049 Phase 5) is a
+  ``workflows.compare_configuration.resolve_compare_configuration()`` (ADR-049 Phase 5) is a
   separate, Click-dependent step that runs strictly *after* snapshot
   resolution, over CLI-specific inputs (``--policy``/``--pack``/a discovered
   ``.abicheck.yml``) this module's plain ``CompareRequest``/``DumpRequest``

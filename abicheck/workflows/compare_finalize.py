@@ -38,8 +38,14 @@ def finalize_classified_pair(
     new: AbiSnapshot,
     suppression: Any,
     evaluation_config: Any,
+    *,
+    pack_application: Any = None,
 ) -> CompareResult:
-    """Attach the post-classification report fields and build the result."""
+    """Attach the post-classification report fields and build the result.
+
+    *pack_application* is the request's selected ``pack_paths`` contribution
+    (``RequestPolicyInputs.pack_application``): a gate pack's severity levels
+    fold into the gate here, as the native CLI folds them into its own."""
     # Hash through the full GNU ld linker-script chain to its final resolved
     # target -- resolve_side_snapshot() already followed the identical chain
     # to produce `old`/`new` above -- so a (possibly multi-hop) script vs.
@@ -104,7 +110,7 @@ def finalize_classified_pair(
     # derived from whether `severity_preset` (or a resolved gate pack) put a
     # severity setting in effect.
     gate = gate_workflow.resolve_release_gate_options(
-        None,
+        pack_application,
         severity_preset=request.severity_preset,
         severity_abi_breaking=None,
         severity_potential_breaking=None,
@@ -125,7 +131,8 @@ def finalize_classified_pair(
         evaluation_config,
         gate,
         packs_forwarded=bool(request.pack_policy_overrides)
-        or request.pack_internal_namespaces is not None,
+        or request.pack_internal_namespaces is not None
+        or bool(request.pack_paths),
     )
     if context is not None:
         context = context.for_classification(evaluation_config, result.requested_depth)
