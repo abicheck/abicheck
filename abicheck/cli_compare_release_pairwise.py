@@ -65,6 +65,11 @@ from .workflows.crosscheck_ownership import (
 from .workflows.gate import worse_release_verdict
 from .workflows.keyed_thread_pool import run_keyed_in_threads
 from .workflows.member_compare import compare_member
+from .workflows.release_member_headers import (
+    ReleaseHeaderOwnership,
+    member_header_operand,
+    resolve_release_header_ownership,
+)
 from .workflows.release_member_request import (
     MemberDelta,
     ReleaseMemberCompareRequest,
@@ -112,6 +117,7 @@ class ReleaseMemberContext:
     collect_diff_results: bool = False
     retention: release_snapshot_retention.SnapshotRetention | None = None
     show_only: str | None = None
+    header_ownership: ReleaseHeaderOwnership | None = None
 
 
 def release_parent_request(
@@ -218,6 +224,7 @@ def _compare_one_library(
                     new_input=new_path,
                     old_pdb_path=old_dbg,
                     new_pdb_path=new_dbg,
+                    **member_header_operand(ctx.header_ownership, key, request),
                 ),
             ),
             ctx.pack_application,
@@ -280,9 +287,8 @@ def _compare_one_library(
             ),
         }
         add_member_review_summary(entry, result, severity_config)
-        # Known-gaps "-H applied to every member", step 3: which of this
-        # member's type findings its own export surface actually reaches.
-        # Read by the release-level shared-finding fold; never rendered.
+        # Which of this member's type findings its own exports reach; read by
+        # the shared-finding fold and `dispose_release_unreached_types`.
         from .workflows.release_member_attribution import member_type_attribution
 
         if type_attribution := member_type_attribution(
@@ -670,15 +676,15 @@ def _compare_release_libraries(
         collect_diff_results=collect_diff_results,
         retention=retention,
         show_only=show_only,
+        # Each member parses the headers it claims, not the union (step 2).
+        header_ownership=resolve_release_header_ownership(
+            matched_keys, old_map, new_map, old_h, new_h
+        ),
     )
 
     # `workflows.crosscheck_ownership`: the whole-product cross-source check
-    # is answered once at release level, so the member pass must not answer
-    # it per member against the complete product header surface. Entered
-    # around the dispatch because a copy of *this* thread's context is what
-    # reaches each parallel worker (see `_compare_release_parallel`). A
-    # one-member release is excluded on purpose -- no union to take, so the
-    # per-member answer already agrees with the scalar path.
+    # is answered once at release level, entered around the dispatch so each
+    # parallel worker inherits it. A one-member release has no union to take.
     owned = _release_owned_crosschecks() if len(matched_keys) > 1 else frozenset()
     with release_owned_checks_scope(owned):
         if plan.pool_size > 1 and len(matched_keys) > 1:
@@ -692,6 +698,15 @@ def _compare_release_libraries(
                 _compare_release_sequential(matched_keys, ctx),
             )
     cache_counters.record_shared_cache_counters()
+    from .frontends.cli.release_member_restamp import dispose_release_unreached_types
+
+    dispose_release_unreached_types(
+        library_results,
+        severity_config=severity_config,
+        require_complete_analysis=require_complete_analysis,
+        contract_evaluation=contract_evaluation,
+        output_dir=output_dir,
+    )
 
     # Post-process all results: compute worst verdict, collect annotations,
     # and optionally collect diff_pairs (for JUnit).
@@ -732,8 +747,7 @@ def _compare_release_libraries(
             )
         worst_verdict = worse_release_verdict(worst_verdict, v)
 
-    # Cross-library coupling: a coordinated SONAME bump across the release is not
-    # "unnecessary" just because one member had no break of its own.
+    # A coordinated SONAME bump across a breaking release is not "unnecessary".
     suppressed_soname = _suppress_lockstep_soname_findings(
         library_results,
         worst_verdict,
@@ -750,22 +764,11 @@ def _compare_release_libraries(
             err=True,
         )
 
-    # collect_diff_results (JUnit / a secondary `-o junit=...` render)
-    # used to need an independent re-run (`_collect_release_extras`) purely
-    # to recover the old side alongside each `DiffResult` -- the primary
-    # pass above now stashes both directly on each library's own entry, so
-    # building the pairs is a plain read, not a second comparison
-    # (CodeRabbit review, PR #798): the old re-run's own failure handling
-    # silently *dropped* a pair from the secondary report on a rerun error
-    # even when the primary pass had already succeeded for it, which this
-    # can no longer do since there is nothing left to fail. Annotations
-    # were fixed the identical way earlier in this same PR (see
-    # `annotation_report_entries`/`reporter_contract_blocks.
-    # add_annotations`); the Action reads them straight off the JSON
-    # report. The OLD operand here is the compact `SymbolInventory` a JUnit
-    # render needs, never the full `AbiSnapshot`;
-    # `workflows.release_snapshot_retention.release_old_snapshot_pairs` is
-    # what `--bundle-facts-out` uses to recover the whole document.
+    # JUnit pairs are a plain read of what the primary pass stashed, never a
+    # second comparison (CodeRabbit review, PR #798): a re-run could drop a
+    # pair the primary pass had compared. The OLD operand is the compact
+    # `SymbolInventory`; `--bundle-facts-out` reads the full document via
+    # `workflows.release_snapshot_retention.release_old_snapshot_pairs`.
     if collect_diff_results:
         diff_pairs.extend(release_junit_pairs(library_results))
 

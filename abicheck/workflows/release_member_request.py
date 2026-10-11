@@ -27,7 +27,8 @@ comparisons only (#1391, and the ``lang_explicit``/``exclude_headers``/
 Now the release resolves one :class:`ReleaseMemberCompareRequest` -- the
 parent -- and each member receives it plus a :class:`MemberDelta`: a frozen
 type listing the only fields a member may override (its two operands and
-their per-member debug files). :func:`member_request` applies the delta with
+their per-member debug files, plus an optional per-member header operand).
+:func:`member_request` applies the delta with
 :func:`dataclasses.replace`, so every other field is inherited by
 construction, and :func:`run_compare_kwargs` forwards every field by
 iterating the dataclass rather than naming them. A new field therefore
@@ -112,7 +113,19 @@ class MemberDelta:
     new_input: Path
     old_pdb_path: Path | None = None
     new_pdb_path: Path | None = None
+    #: The member's own header operand (``workflows.release_member_headers``).
+    #: ``None`` inherits the parent's union; only these optional fields do.
+    old_headers: list[Path] | None = None
+    new_headers: list[Path] | None = None
+    old_includes: list[Path] | None = None
+    new_includes: list[Path] | None = None
+    public_header_dirs: list[Path] | None = None
 
+
+#: Delta fields where ``None`` means "inherit the parent's value".
+_INHERIT_WHEN_NONE = frozenset(
+    {"old_headers", "new_headers", "old_includes", "new_includes", "public_header_dirs"}
+)
 
 _REQUEST_FIELDS = frozenset(
     f.name for f in dataclasses.fields(ReleaseMemberCompareRequest)
@@ -127,9 +140,15 @@ if not set(_DELTA_FIELDS) <= _REQUEST_FIELDS:  # pragma: no cover - import-time 
 def member_request(
     parent: ReleaseMemberCompareRequest, delta: MemberDelta
 ) -> ReleaseMemberCompareRequest:
-    """*parent* with exactly *delta*'s fields replaced."""
+    """*parent* with exactly *delta*'s fields replaced (an optional header
+    field left ``None`` keeps the parent's value)."""
     return dataclasses.replace(
-        parent, **{name: getattr(delta, name) for name in _DELTA_FIELDS}
+        parent,
+        **{
+            name: getattr(delta, name)
+            for name in _DELTA_FIELDS
+            if not (name in _INHERIT_WHEN_NONE and getattr(delta, name) is None)
+        },
     )
 
 
