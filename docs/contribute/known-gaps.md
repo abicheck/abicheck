@@ -254,7 +254,7 @@ behavior).
 
 ### `unversioned_exported_symbol` false-positives on base-version (VER_FLG_BASE) symbols of versioned libraries: the model cannot tell base-bound from unversioned
 
-**Status (re-verified 2026-10-09 at `456989f`): OPEN.** abicheck/extract/elf_symbol_versions.py:180 still returns early for ver_idx<2, which leaves version='' and is_default=True (the model default in model/elf_facts.py:84). cross_source_checks.py:1065 skips only `not sym.is_default or sym.version`, so symbols bound to the base version still get flagged as unversioned_exported_symbol.
+**Status (re-verified 2026-10-11 at `46c127111`): OPEN.** `extract/elf_symbol_versions.py::_apply_version_to_symbol` still returns early for `ver_idx < 2`, and `buildsource/cross_source_checks.py:1065` still skips only `not sym.is_default or sym.version`, so base-version symbols are still flagged.
 
 Found once ADR-068 §3
 row 3's first slice made `checker.compare()` run this check
@@ -2548,7 +2548,7 @@ fix.
 
 ### `--exclude-header` cannot stop a transitively-included header being analyzed
 
-**Status (re-verified 2026-10-09 at `456989f`): OPEN.** The descriptor half is moot because the ABICC compat front end was removed (the entry says so). The transitive-include limitation still applies to native --exclude-header, since filtering acts on the resolved header list (entry line ~7008).
+**Status (re-verified 2026-10-11 at `46c127111`): OPEN.** `extract/header_exclusions.py::apply_header_exclusions_to_inputs` still filters only the resolved (directory-expanded) header list; nothing prunes a header reached through another header's `#include`. Unmatched patterns now warn (`unmatched_exclusion_patterns`), which does not address the transitive case.
 
 
 **Update (2026-10): the descriptor half is moot.** The ABICC `compat` front
@@ -3771,7 +3771,7 @@ recorded as a gap on `coverage.discovery_derived_completeness`.
 
 ### An informational, no-material-change reconciliation outcome gates the build under `--severity-preset strict` (2026-09-12)
 
-**Status (re-verified 2026-10-09 at `456989f`): OPEN.** No INFORMATIONAL_KINDS partition exists anywhere under abicheck/ (grep is empty). declaration_coordinates_shifted still exists (model/change_catalog/kind_names_1.py, buildsource/graph_reconcile*.py) and still falls in quality_issues.
+**Status (re-verified 2026-10-11 at `46c127111`): OPEN.** `declaration_coordinates_shifted` and `declaration_identity_unchanged` are still in `COMPATIBLE_KINDS` and not in `ADDITION_KINDS`, so `policy/severity.py` still buckets them as `quality_issues`, and `PRESET_STRICT` still sets that category to `ERROR`. No informational category exists.
 
 
 Raised as a triage question ("is `quality_issues` the right bucket for a
@@ -4700,7 +4700,7 @@ Owner: ADR-050; until then ADR-050 D1 overstates what is fingerprinted.
 
 ### A snapshot's `build_mode` is captured only for ELF, and only from the main image
 
-**Status: PARTIAL (2026-10-10).** ELF dumps now record `build_mode` from `DW_AT_producer`/`DW_AT_language` and `.comment` (`extract/build_mode_capture.py`, wired in `workflows/snapshot_factory.finish_binary_dump`); this also fixed a GCC version regex and a wrong `DW_LANG` table in `build_mode.py`. Still open: PE and Mach-O get no `build_mode`; a separate debug file (`debug_info_path`, detached debuginfo) is not read, so capture falls back to `.comment`; nothing yet compares compiler family across snapshots.
+**Status (re-verified 2026-10-11 at `46c127111`): PARTIAL.** Unchanged since 2026-10-10: `extract/build_mode_capture.py` is ELF-only and its only caller is `workflows/snapshot_factory.py`. PE/Mach-O get no `build_mode`, detached debuginfo is not read, and nothing compares compiler family across snapshots.
 
 
 From Stage E: `build_mode.build_mode_from_signals` takes `raw_producer`
@@ -4726,7 +4726,7 @@ stripped} against the compiler's own banner. Owner: the build-mode work
 
 ### A stored package's generation drift is reported only for `ProjectSnapshot` packages, and generations are bumped by hand
 
-**Status: PARTIAL (2026-10-10).** `EXTRACTOR_GENERATION`/`RESOLVER_GENERATION` now exist (`storage/versioning.py`), every package writer stamps them, `project_snapshot_store` passes them to `check_reader_compatibility`, and drift appears in `coverage_warnings` without changing verdict or exit code; an unrecorded generation is unknown. Importers stamp the generations of the build that extracted the facts: this build's only for facts it just dumped (`bundle variants` capture from binaries), a caller-supplied pair when known, else unstated (`StorageVersions.written_by_this_build`'s `generations`). Still open: the `BundleFacts` reader passes them but has no report surface; nothing enforces a bump when extraction or resolution semantics change.
+**Status (re-verified 2026-10-11 at `46c127111`): PARTIAL.** Unchanged since 2026-10-10. `EXTRACTOR_GENERATION`/`RESOLVER_GENERATION` now exist (`storage/versioning.py`), every package writer stamps them, `project_snapshot_store` passes them to `check_reader_compatibility`, and drift appears in `coverage_warnings` without changing verdict or exit code; an unrecorded generation is unknown. Importers stamp the generations of the build that extracted the facts: this build's only for facts it just dumped (`bundle variants` capture from binaries), a caller-supplied pair when known, else unstated (`StorageVersions.written_by_this_build`'s `generations`). Still open: the `BundleFacts` reader passes them but has no report surface; nothing enforces a bump when extraction or resolution semantics change.
 
 
 From Stage E: `storage.versioning.check_reader_compatibility` reports
@@ -4767,7 +4767,7 @@ the function's test suite encodes the line layout in every case.
 
 ### Scalar and release `compare` still fold the exit code in two places (2026-10-07)
 
-**Status (re-verified 2026-10-09 at `456989f`): OPEN.** There are still two folds: policy/exit_decision.py:610 resolve_compare_exit_decision and policy/exit_decision_precedence.py:358 resolve_release_exit_decision.
+**Status (re-verified 2026-10-11 at `46c127111`): OPEN, narrowed.** #1532 moved the release compatibility-axis fold into `workflows/release_exit_fold.py`, which folds each member's scalar-resolver contribution. Two precedence resolvers still exist: `policy/exit_decision.py::resolve_compare_exit_decision` and `policy/exit_decision_precedence.py::resolve_release_exit_decision`, the latter still owning the release-only axes listed below.
 
 
 `tests/test_compare_cardinality_invariance.py` pins, for cardinality 1..4,
