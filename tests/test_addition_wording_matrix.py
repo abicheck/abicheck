@@ -167,11 +167,7 @@ def _expected_variable(linkage, is_static, is_const, value) -> str:
 
 @pytest.mark.parametrize(
     ("mangled", "is_static", "is_const", "value"),
-    list(
-        itertools.product(
-            _VAR_SPELLINGS, (False, True), (False, True), (None, "-1")
-        )
-    ),
+    list(itertools.product(_VAR_SPELLINGS, (False, True), (False, True), (None, "-1"))),
 )
 def test_variable_addition_wording_matrix(mangled, is_static, is_const, value) -> None:
     var = Variable(
