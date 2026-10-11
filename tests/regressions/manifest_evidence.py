@@ -1054,7 +1054,10 @@ EVIDENCE_BUG_CLASSES: tuple[BugClass, ...] = (
             "confidence the member path had already narrowed."
         ),
         fixed_by=(1443,),
-        seed_tests=("tests/test_release_obligation_standing.py",),
+        seed_tests=(
+            "tests/test_release_obligation_standing.py",
+            "tests/test_family_f2_route_parity.py",
+        ),
         axes={
             "cardinality": ("member check", "release reconciliation"),
             "entity": ("function", "variable"),
