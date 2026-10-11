@@ -497,6 +497,17 @@ def _snapshot_schema_version() -> int:
     return SCHEMA_VERSION
 
 
+def write_enabled() -> bool:
+    """``ABICHECK_SNAPSHOT_CACHE_WRITE`` (default on): ``0`` keeps reading the
+    whole-snapshot cache but never populates it -- for a one-shot run (CI on
+    a fresh runner) that would pay to serialize and write snapshots no later
+    run reads. Measured on a 28-member release: populating cost ~30% wall and
+    ~37% peak RSS."""
+    from .extract.env_flags import env_flag
+
+    return env_flag("ABICHECK_SNAPSHOT_CACHE_WRITE")
+
+
 def lookup(
     binary_path: Path,
     headers: list[Path],

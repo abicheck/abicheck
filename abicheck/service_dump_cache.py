@@ -766,7 +766,12 @@ def cached_run_dump(
     initial_key = snapshot_cache._cache_key(
         path, _cache_headers, _cache_includes, version, lang, extra=extra
     )
-    cached = snapshot_cache.lookup_key(initial_key, path)
+    from .workflows import memory_trace
+
+    # Traced: on a warm cache this load replaces the whole dump, so without
+    # it `ABICHECK_MEMORY_TRACE` sees none of the run's `dump.*` marks.
+    with memory_trace.phase("dump.cache.lookup"):
+        cached = snapshot_cache.lookup_key(initial_key, path)
     if cached is not None:
         # A cache hit stands in for the live extraction it replaces, and needs
         # the source-read licence stamped explicitly: `run_dump` grants it (see
@@ -789,6 +794,7 @@ def cached_run_dump(
     final_key = snapshot_cache._cache_key(
         path, _cache_headers, _cache_includes, version, lang, extra=final_extra
     )
-    if initial_key and initial_key == final_key:
-        snapshot_cache.store_key(snap, initial_key, path)
+    if initial_key and initial_key == final_key and snapshot_cache.write_enabled():
+        with memory_trace.phase("dump.cache.store"):
+            snapshot_cache.store_key(snap, initial_key, path)
     return snap
