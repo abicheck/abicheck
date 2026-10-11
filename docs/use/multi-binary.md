@@ -532,6 +532,7 @@ for why a per-member answer is a Cartesian product (787,833 findings on a
       "kind": "public_not_exported",
       "symbol": "api_b",
       "scope": "release",
+      "confidence": "high",               // "low": header reached only via #include, outside -H
       "description": "The release's public headers declare function 'api_b' …",
       "old_value": "api_b",
       "source_location": "include/product.h:6",
