@@ -155,8 +155,15 @@ def run_cold_isolated(
     concurrent: bool,
 ) -> list[_T]:
     """Resolve each of *fns*: a cache-served one here, the rest through
-    :func:`run_isolated` (each wrapped by *wrap* first), results in order."""
-    warm = resolve_cached_in_process(fns)
+    :func:`run_isolated` (each wrapped by *wrap* first), results in order.
+
+    Only *concurrent* (``balanced``) probes the cache first. Sequential
+    isolation is the ``low-memory`` profile, whose contract is that no side's
+    resolution -- a cache or stored-snapshot load included -- leaves its
+    allocations in this process, so every side forks."""
+    warm: list[_T | None] = (
+        resolve_cached_in_process(fns) if concurrent else [None] * len(fns)
+    )
     cold = [wrap(fn) for fn, res in zip(fns, warm, strict=True) if res is None]
     forked = iter(run_isolated(cold, concurrent=concurrent) if cold else [])
     return [res if res is not None else next(forked) for res in warm]

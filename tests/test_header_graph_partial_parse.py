@@ -246,3 +246,64 @@ def test_diagnostics_blamed_headers_cost_one_reparse_and_never_change_the_result
             assert set(merged.type_files.values()) == set(headers) - bad
             if blamed == bad:
                 assert len(calls) == 1
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("bad_names", [("b.h",), ("a.h", "d.h"), ("c.h",)])
+def test_real_clang_diagnostics_blame_exactly_the_failing_headers(
+    tmp_path, bad_names
+) -> None:
+    """Against real clang: the failed batch's diagnostics name the headers that
+    fail alone (direct ``#error`` and a failing private include alike), so the
+    rest re-parses in one call."""
+    import shutil
+
+    from abicheck.buildsource.header_graph_ast_projection import (
+        project_header_graph_ast,
+    )
+    from abicheck.errors import SnapshotError
+    from abicheck.extract.headers.clang.backend import clang_header_dump
+    from abicheck.extract.unparseable_header_fallback import (
+        attribute_failing_headers,
+    )
+
+    if shutil.which("clang++") is None:
+        pytest.skip("clang++ not installed")
+    (tmp_path / "detail").mkdir()
+    (tmp_path / "detail" / "broken.h").write_text("unknown_type_t x;\n")
+    headers = []
+    for i, name in enumerate(("a.h", "b.h", "c.h", "d.h")):
+        body = f"int f{i}(int);\nstruct S{i} {{ int v; }};\n"
+        if name in bad_names:
+            body = (
+                '#error "Unsupported compiler"\n'
+                if i % 2
+                else '#include "detail/broken.h"\n'
+            ) + body
+        (tmp_path / name).write_text(body)
+        headers.append(tmp_path / name)
+
+    def parse(group):
+        tree, _kind, _force = clang_header_dump(group, [tmp_path], memoize=False)
+        return project_header_graph_ast(tree)
+
+    with pytest.raises(SnapshotError) as info:
+        parse(headers)
+    blamed = attribute_failing_headers(info.value, headers)
+    assert [h.name for h in blamed] == sorted(bad_names)
+
+    calls: list[list[Path]] = []
+
+    def counting(group):
+        calls.append(group)
+        return parse(group)
+
+    parts, failed = parse_header_groups_bisecting(
+        headers, counting, (SnapshotError,), known_failed=blamed
+    )
+    assert len(calls) == 1 and sorted(h.name for h in failed) == sorted(bad_names)
+    good = {h.name for h in headers} - set(bad_names)
+    assert {
+        Path(f).name
+        for f in merge_header_graph_ast_projections(parts).type_files.values()
+    } >= good

@@ -163,3 +163,19 @@ def test_symlinked_prefix_keeps_its_spelling(project):
         "c",
     )
     assert calls[0][1] == [project / "include" / "a.h"]
+
+
+@pytest.mark.parametrize("concurrent", [True, False])
+def test_sequential_isolation_forks_even_warm_sides(monkeypatch, concurrent):
+    """``low-memory`` (sequential isolation) keeps every side out of process."""
+    forked: list[int] = []
+
+    def fake_run_isolated(fns, *, concurrent):
+        forked.append(len(fns))
+        return [fn() for fn in fns]
+
+    monkeypatch.setattr(side_isolation, "run_isolated", fake_run_isolated)
+    side_isolation.run_cold_isolated(
+        [lambda: "old", lambda: "new"], lambda fn: fn, concurrent=concurrent
+    )
+    assert forked == ([] if concurrent else [2])
