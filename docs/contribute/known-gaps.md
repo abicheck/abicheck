@@ -292,6 +292,11 @@ Each entry's status line says what is still open. A PARTIAL entry's write-up als
 **Status (re-verified 2026-10-09 at `456989f`): PARTIAL.** The 'currently ungated' clause is closed: scripts/check_header_graph_perf.py:267 defines MEMORY_METRICS attach_peak_rss_mib/attach_end_rss_mib. The peak from materialising the clang JSON AST is still open, and the empty-list reduction is a recorded negative result.  
 `perf` — A member's attach peak is the clang JSON document plus its parsed tree, not the header graph; the memory metrics are now gated, the peak itself is not reduced. [Full write-up](known-gaps/a-members-peak-memory-is-the-clang-json-ast-not-the-header.md)
 
+#### Python-level AST walks, the side boundary and the snapshot cache dominate large runs (2026-10-11)
+
+**Status (2026-10-11): OPEN.** Cheap levers landed (location materialization loop, scoped GC threshold for DWARF, free-threaded threads path, cache trace marks and write switch); whole-AST walk fusion, side-boundary pickling, the cold GIL member-parallelism A/B and the free-threaded warm-slower-than-cold cache cost remain.  
+`perf` — The clang JSON tree is walked at least eight times in Python, snapshots are pickled across the side boundary, and populating the snapshot cache costs ~30 % wall on a 28-member release. [Full write-up](known-gaps/python-level-ast-walks-side-boundary-and-cache-costs.md)
+
 ### Hygiene
 
 #### Public-surface graph: surface_graph vs L5 header_graph node-id namespaces not unified; type_reachability stdlib query unmigrated
