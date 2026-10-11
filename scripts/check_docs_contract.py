@@ -1309,6 +1309,9 @@ _STALE_PROCESS_LANGUAGE_EXEMPT_PREFIXES = (
     "contribute/adr/",
     "contribute/plans/",
     "contribute/archive/",
+    # Per-entry known-gaps write-ups: historical records of what was tried,
+    # moved verbatim out of contribute/known-gaps.md (which stays scanned).
+    "contribute/known-gaps/",
 )
 _STALE_PROCESS_LANGUAGE_EXEMPT_LIFECYCLES = frozenset({"migration", "historical"})
 
