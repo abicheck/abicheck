@@ -57,6 +57,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "EXCLUDED_HEADERS_TOOLCHAIN_KEY",
+    "attribute_failing_headers",
     "parse_excluding_unparseable_headers",
 ]
 
@@ -163,6 +164,20 @@ def _attribute(located: list[tuple[str, int]], index: dict[str, int]) -> int | N
         if idx is not None:
             return idx
     return None
+
+
+def attribute_failing_headers(
+    exc: SnapshotError, headers: Sequence[Path]
+) -> list[Path]:
+    """The headers *exc*'s diagnostics blame, by the same rules the exclusion
+    loop below uses; ``[]`` when that loop would re-raise instead (nothing
+    attributable, a conflict between listed headers, or every header blamed).
+    """
+    stderr = exc.attribution_stderr or exc.stderr or str(exc)
+    bad, conflicts = _scan_diagnostics(stderr, headers)
+    if not bad or conflicts or len(bad) >= len(headers):
+        return []
+    return [headers[i] for i in sorted(bad)]
 
 
 def parse_excluding_unparseable_headers(

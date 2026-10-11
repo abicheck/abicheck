@@ -220,3 +220,29 @@ def test_recovery_parses_run_with_streaming_prune_suppressed(
     acquire_header_graph_ast([good, bad], [], "c++", None)
     assert len(prune_seen) == 3  # batch + two halves
     assert all(prune_seen)
+
+
+def test_diagnostics_blamed_headers_cost_one_reparse_and_never_change_the_result() -> (
+    None
+):
+    """With the failed batch's own diagnostics naming the bad headers, the rest
+    parse in ONE call; when the diagnostics name only some of them, the bisect
+    still finds the others. Oracle as above: lost iff it fails on its own."""
+    rng = random.Random(99)
+    for headers, bad in _cases():
+        if not bad or len(bad) == len(headers):
+            continue
+        blamed_sets = [set(bad), set(rng.sample(sorted(bad), rng.randint(1, len(bad))))]
+        for blamed in blamed_sets:
+            calls: list[list[str]] = []
+            parts, failed = parse_header_groups_bisecting(
+                headers,
+                _parser(bad, calls),
+                (_Boom,),
+                known_failed=[h for h in headers if h in blamed],
+            )
+            merged = merge_header_graph_ast_projections(parts)
+            assert sorted(failed) == sorted(bad)
+            assert set(merged.type_files.values()) == set(headers) - bad
+            if blamed == bad:
+                assert len(calls) == 1

@@ -401,6 +401,16 @@ _CACHE_DIR: Path = _get_cache_dir()
 SNAPSHOT_DISK_CACHE = DiskCache("abicheck.snapshot_cache.disk")
 
 
+def absolute_paths(paths: list[Path] | None) -> list[Path] | None:
+    """*paths* made absolute, so ``inc/a.h`` and its absolute spelling of one
+    file share a cache key. Applied to the dump's inputs, not only the key: a
+    snapshot records the spelling it was given (surface-graph node ids), so a
+    key-only fix would let a warm hit return the other spelling's strings.
+    ``abspath``, not ``resolve()``: a symlinked install prefix keeps its name.
+    """
+    return None if paths is None else [Path(os.path.abspath(p)) for p in paths]
+
+
 def _cache_key(
     binary_path: Path,
     headers: list[Path],

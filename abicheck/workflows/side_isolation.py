@@ -57,6 +57,8 @@ from ..storage.acyclic_json import gc_paused
 __all__ = [
     "concurrent_children_apply",
     "isolation_supported",
+    "resolve_cached_in_process",
+    "run_cold_isolated",
     "run_isolated",
     "side_processes_enabled",
 ]
@@ -122,6 +124,42 @@ def _child(conn: Any, fn: Callable[[], Any]) -> None:
         )
     finally:
         conn.close()
+
+
+def resolve_cached_in_process(fns: Sequence[Callable[[], _T]]) -> list[_T | None]:
+    """Resolve each of *fns* here if the snapshot cache can serve it whole.
+
+    ``None`` marks a side that would have to extract (a cache miss, or a
+    dump shape the cache does not hold); only those are worth a child. A warm
+    side measured ~12 s either way on oneDNN, but forked it cost 2.6x the
+    peak memory and a third more CPU -- fork, pickle back, and a second
+    resident copy, for a load that is cheap in-process. Any other failure
+    propagates, exactly as it would have from the child.
+    """
+    from .cache_probe import CacheProbeMiss, cache_only_probe
+
+    results: list[_T | None] = []
+    for fn in fns:
+        try:
+            with cache_only_probe():
+                results.append(fn())
+        except CacheProbeMiss:
+            results.append(None)
+    return results
+
+
+def run_cold_isolated(
+    fns: Sequence[Callable[[], _T]],
+    wrap: Callable[[Callable[[], _T]], Callable[[], _T]],
+    *,
+    concurrent: bool,
+) -> list[_T]:
+    """Resolve each of *fns*: a cache-served one here, the rest through
+    :func:`run_isolated` (each wrapped by *wrap* first), results in order."""
+    warm = resolve_cached_in_process(fns)
+    cold = [wrap(fn) for fn, res in zip(fns, warm, strict=True) if res is None]
+    forked = iter(run_isolated(cold, concurrent=concurrent) if cold else [])
+    return [res if res is not None else next(forked) for res in warm]
 
 
 def run_isolated(fns: Sequence[Callable[[], _T]], *, concurrent: bool) -> list[_T]:
