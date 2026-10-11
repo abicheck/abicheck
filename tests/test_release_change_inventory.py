@@ -493,10 +493,11 @@ class TestRenderersAgree:
         assert "standing inventory" in "\n".join(annotated)
 
     def test_json_release_summary_carries_the_aggregate(self) -> None:
-        from abicheck.cli_compare_release_helpers import _format_release_json
+        from abicheck.frontends.cli.release_report import render_release_summary
 
         doc = json.loads(
-            _format_release_json(
+            render_release_summary(
+                "json",
                 "NO_CHANGE",
                 __import__("pathlib").Path("old"),
                 __import__("pathlib").Path("new"),
@@ -506,8 +507,8 @@ class TestRenderersAgree:
                 {},
                 {},
                 [],
-                None,
-                None,
+                bundle_result=None,
+                matrix_result=None,
             )
         )
         aggregate = doc["change_inventory"]

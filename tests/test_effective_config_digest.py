@@ -353,9 +353,10 @@ class TestReleaseSummaryCarriesDigest:
     per-library sidecar files did."""
 
     def _release_json(self, **kwargs):
-        from abicheck.cli_compare_release_helpers import _format_release_json
+        from abicheck.frontends.cli.release_report import render_release_summary
 
-        out = _format_release_json(
+        out = render_release_summary(
+            "json",
             "NO_CHANGE",
             Path("/o"),
             Path("/n"),
@@ -365,8 +366,8 @@ class TestReleaseSummaryCarriesDigest:
             {},
             {},
             [],
-            None,
-            None,
+            bundle_result=None,
+            matrix_result=None,
             **kwargs,
         )
         return json.loads(out)
@@ -515,7 +516,7 @@ class TestReleaseOutputDirSummaryCarriesDigest:
         """The two release-level summary documents must never independently
         drift -- both route through the same shared helper."""
         from abicheck.cli_compare_release import _write_release_summary_file
-        from abicheck.cli_compare_release_helpers import _format_release_json
+        from abicheck.frontends.cli.release_report import render_release_summary
 
         severity = resolve_severity_config("strict")
         _write_release_summary_file(
@@ -523,7 +524,8 @@ class TestReleaseOutputDirSummaryCarriesDigest:
         )
         output_dir_data = json.loads((tmp_path / "summary.json").read_text())
         primary_data = json.loads(
-            _format_release_json(
+            render_release_summary(
+                "json",
                 "NO_CHANGE",
                 Path("/o"),
                 Path("/n"),
@@ -533,8 +535,8 @@ class TestReleaseOutputDirSummaryCarriesDigest:
                 {},
                 {},
                 [],
-                None,
-                None,
+                bundle_result=None,
+                matrix_result=None,
                 severity_config=severity,
             )
         )

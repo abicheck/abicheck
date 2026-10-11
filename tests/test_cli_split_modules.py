@@ -228,9 +228,9 @@ class TestCompareReleaseErrorPaths:
     def test_format_release_summary_json(self, tmp_path: Path) -> None:
         """_format_release_summary returns a parseable JSON object when
         fmt=\"json\"."""
-        from abicheck.cli_compare_release import _format_release_summary
+        from abicheck.frontends.cli.release_report import render_release_summary
 
-        text = _format_release_summary(
+        text = render_release_summary(
             fmt="json",
             worst_verdict="COMPATIBLE",
             old_dir=tmp_path / "old",
@@ -258,9 +258,9 @@ class TestCompareReleaseErrorPaths:
 
     def test_format_release_summary_markdown(self, tmp_path: Path) -> None:
         """Markdown format includes a header and per-library lines."""
-        from abicheck.cli_compare_release import _format_release_summary
+        from abicheck.frontends.cli.release_report import render_release_summary
 
-        text = _format_release_summary(
+        text = render_release_summary(
             fmt="markdown",
             worst_verdict="BREAKING",
             old_dir=tmp_path / "old",
@@ -312,9 +312,9 @@ class TestCompareReleaseErrorPaths:
 
     def test_format_release_summary_json_matrix_findings(self, tmp_path: Path) -> None:
         """Release-global matrix findings surface in the JSON summary."""
-        from abicheck.cli_compare_release import _format_release_summary
+        from abicheck.frontends.cli.release_report import render_release_summary
 
-        text = _format_release_summary(
+        text = render_release_summary(
             fmt="json",
             worst_verdict="API_BREAK",
             old_dir=tmp_path / "old",
@@ -343,9 +343,9 @@ class TestCompareReleaseErrorPaths:
         self, tmp_path: Path
     ) -> None:
         """Markdown renders a build-configuration findings section."""
-        from abicheck.cli_compare_release import _format_release_summary
+        from abicheck.frontends.cli.release_report import render_release_summary
 
-        text = _format_release_summary(
+        text = render_release_summary(
             fmt="markdown",
             worst_verdict="API_BREAK",
             old_dir=tmp_path / "old",
@@ -364,9 +364,9 @@ class TestCompareReleaseErrorPaths:
     def test_format_release_summary_junit_matrix_findings(self, tmp_path: Path) -> None:
         """JUnit output includes a testsuite for the matrix finding so CI
         dashboards reading the report see the ABI failure (Codex review)."""
-        from abicheck.cli_compare_release import _format_release_summary
+        from abicheck.frontends.cli.release_report import render_release_summary
 
-        text = _format_release_summary(
+        text = render_release_summary(
             fmt="junit",
             worst_verdict="API_BREAK",
             old_dir=tmp_path / "old",
@@ -737,9 +737,9 @@ class TestCompareReleaseErrorPaths:
 
     def test_format_release_summary_junit(self, tmp_path: Path) -> None:
         """JUnit format emits XML with <testsuites>."""
-        from abicheck.cli_compare_release import _format_release_summary
+        from abicheck.frontends.cli.release_report import render_release_summary
 
-        text = _format_release_summary(
+        text = render_release_summary(
             fmt="junit",
             worst_verdict="COMPATIBLE",
             old_dir=tmp_path / "old",

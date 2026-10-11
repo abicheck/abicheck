@@ -52,13 +52,11 @@ from __future__ import annotations
 
 from collections.abc import Collection, Mapping
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from .frontends.cli.options.params import DEFAULT_POLICY_PROFILE
 
 if TYPE_CHECKING:
-    from .bundle_models import BundleDiffResult
-    from .checker_types import DiffResult
     from .pack_application import PackApplication
     from .workflows.gate import SeverityConfig
 
@@ -684,7 +682,7 @@ def _release_summary_effective_config_block(
     same ``dedup_validate_overrides_warnings()`` scope ``compare_release_cmd``
     opens, so it doesn't duplicate a per-library warning).
 
-    Called from ``cli_compare_release_helpers``/``cli_compare_release_matrix``/
+    Called from ``frontends.cli.release_report``/``cli_compare_release_matrix``/
     ``frontends.cli.release_summary`` (all three at their own ``no_growth``
     cap, hence living here).
 
@@ -770,191 +768,3 @@ def _release_summary_effective_config_block(
     resolved = getattr(pack_application, "resolved_config", None)
     ec_fields = release_summary_fields(resolved, ec_result, policy_file=pf, gate=gate)
     return effective_config_digest(ec_fields), ec_fields
-
-
-def _release_md_library_findings(
-    library_results: list[dict[str, object]],
-    *,
-    display_cap: int | None = None,
-) -> list[str]:
-    """Per-library findings (kind/symbol/description) -- symbol names
-    included. R2 (CLI-audit): the release Markdown report's own
-    ``## Libraries`` table is counts only; reuses ``entry["findings"]`` --
-    the same capped list ``cli_compare_release_matrix._release_finding_dicts``
-    already projects, built regardless of output format -- mirroring
-    ``cli_compare_release_helpers``'s existing per-finding sections
-    (``_release_md_bundle_findings``/``_release_md_matrix_findings``, which
-    call this). Notes a truncated list (``entry["findings_truncated"]``)
-    rather than presenting it as complete. Lives here (not next to its
-    callers) for the identical reason as
-    :func:`_release_summary_effective_config_block` above -- both
-    ``cli_compare_release_helpers.py``/``cli_compare_release_matrix.py``
-    are at their own ``no_growth`` cap.
-
-    **Not routed through ``report/`` (Codex review, PR #1016), checked
-    rather than assumed fine:** AGENTS.md's task-routing table says a new
-    output-format section belongs in ``report/``, and this genuinely is one.
-    Two things stop a clean move today, though -- this function's own real
-    siblings, not just this one: neither ``_release_md_bundle_findings`` nor
-    ``_release_md_matrix_findings`` (the two existing per-finding sections
-    this mirrors) lives in ``report/`` either (``cli_compare_release_helpers.py``/
-    ``bundle.py``), so this is an already-unmigrated neighborhood, not one
-    function breaking an otherwise-followed rule. More fundamentally, this
-    function's input is *not* the shape ``report/``'s ``compute_*``/``render_*``
-    split is built around: every per-library ``DiffResult`` is deliberately
-    discarded before this ever runs (``cli_compare_release_matrix.
-    _strip_diff_results_and_adjust_verdict``, to bound peak memory across a
-    whole release run's ``library_results``), so this reads an already-
-    flattened ``list[dict]`` projection, not a live ``DiffResult``/
-    ``ReportDocument``. Moving only the rendering half into ``report/``
-    while leaving that flattening decision here would be a new, unreviewed
-    input shape for the package to accept, not a mechanical relocation --
-    real, separately-justified follow-up work (migrating this whole
-    three-function neighborhood together, once its memory-lifecycle
-    constraint has a place in that package's own model), not a same-PR fix.
-    """
-    from .reporter import release_finding_detail_lines
-
-    lines: list[str] = []
-    for lib in library_results:
-        findings = lib.get("findings")
-        impact_table = lib.get("impact_table")
-        impact_root_entries = (
-            impact_table.get("root_entries") if isinstance(impact_table, dict) else None
-        ) or []
-        impact_direct_removals = (
-            impact_table.get("direct_removals", 0)
-            if isinstance(impact_table, dict)
-            else 0
-        )
-        has_impact = bool(impact_root_entries) or bool(impact_direct_removals)
-        if not findings and not has_impact:
-            continue
-        lines += ["", f"### `{lib['library']}` Findings", ""]
-        all_findings = cast(list[dict[str, object]], findings or [])
-        # The presentation cap lives here, at render time, not in the
-        # projection every format shares: a human summary may be bounded, a
-        # machine document may not be silently truncated (see
-        # `report.release_display_limits`, which owns the one automatic cap
-        # since plan slice 7m retired every way of overriding it).
-        shown = all_findings if display_cap is None else all_findings[:display_cap]
-        rendered_truncated = len(shown) < len(all_findings)
-        for f in shown:
-            symbol = f.get("symbol")
-            lines.append(
-                f"- **{f.get('kind')}**" + (f" — `{symbol}`" if symbol else "")
-            )
-            lines.extend(release_finding_detail_lines(f))
-        if rendered_truncated or lib.get("findings_truncated"):
-            # `-o json=...` *is* a complete-list source now, unless this
-            # run explicitly asked for a cap (`--max-findings-per-library`
-            # or the env var), which is what this note distinguishes. It
-            # used not to be: the release JSON carried the identical capped
-            # projection, so a reader following the old advice met the same
-            # truncated list again.
-            complete_report = lib.get("complete_report")
-            if lib.get("findings_truncated"):
-                where = (
-                    f"`{complete_report}`"
-                    if complete_report
-                    else "a per-component export (`-o json=DIR/`), or compare this library individually"
-                )
-                lines.append(
-                    f"  - _...additional findings omitted; see {where} for "
-                    "the complete list._"
-                )
-            else:
-                lines.append(
-                    "  - _...additional findings omitted from this summary; "
-                    "`-o json=...` carries the complete list._"
-                )
-        if has_impact:
-            # `--view impact`'s aggregate counterpart (Codex review, PR
-            # #1154 follow-up: "Reject unsupported impact views instead of
-            # silently dropping them") -- same shape
-            # `reporter_markdown.compute_impact_table` produces for a
-            # single-pair `compare` report, rendered per library here since
-            # a release has one impact table per library, not one overall.
-            lines.append("")
-            lines.append(f"**Impact** for `{lib['library']}`:")
-            for entry in impact_root_entries:
-                lines.append(
-                    f"- `{entry.get('symbol')}` ({entry.get('kind')}): "
-                    f"{entry.get('iface_count', 0)} interface(s), "
-                    f"{entry.get('caused', 0)} caused change(s)"
-                )
-            if impact_direct_removals:
-                lines.append(f"- {impact_direct_removals} direct removal(s)")
-    return ["", "## Per-Library Findings", *lines] if lines else []
-
-
-def release_disposition_audit_block(
-    library_results: list[dict[str, object]],
-    matrix_result: DiffResult | None = None,
-    severity_config: SeverityConfig | None = None,
-    bundle_result: BundleDiffResult | None = None,
-) -> dict[str, object]:
-    """ADR-067 C-S2: the release/bundle fan-out's own ``disposition_audit``.
-
-    Folds every library's already-computed per-library block (each library
-    entry carries one, set alongside ``entry["findings"]`` in
-    ``cli_compare_release_pairwise._compare_one_library`` -- the identical
-    scalar-``compare`` shape, so a consumer parses one shape everywhere),
-    the release-global probe-matrix comparison's own audit, and the
-    cross-library bundle-analysis findings (*bundle_result*, Codex review,
-    fresh evidence: "Include bundle findings in the release disposition
-    audit" -- without this, a release whose only change is a
-    ``bundle_library_removed``-shaped bundle finding reported a breaking
-    ``bundle_findings`` entry alongside a ``detected_total: 0``/
-    ``effective_total: 0`` audit, breaking D3's "every observed change is
-    accounted for" conservation rule), into one release-level total via
-    :func:`~abicheck.report.disposition_audit.fold_disposition_audits`. A
-    library entry with no ``disposition_audit`` (an operational-error/
-    not-comparable/unsupported outcome that never reached a real
-    comparison) contributes nothing, the same way such a library
-    contributes no ``findings`` either -- it is not a comparison the
-    audit's raw total should silently pretend happened.
-
-    ``BundleDiffResult`` carries no ``changes``/``redundant_changes``/etc.
-    buckets of its own (only ``bundle_findings``, a distinct ``BundleFinding``
-    type) -- unlike ``matrix_result``, a real ``DiffResult`` `checker.compare`
-    already built -- so a real (not merely duck-typed) minimal ``DiffResult``
-    is built here with ``changes`` set from ``bundle_findings.to_change()``,
-    scored under the bundle's own policy/policy_file, for
-    :func:`~abicheck.report.disposition_audit.compute_disposition_audit` to
-    read.
-
-    Lives here rather than in ``cli_compare_release_helpers.py``/
-    ``cli_compare_release_matrix.py`` for the identical reason
-    :func:`_release_summary_effective_config_block`/
-    :func:`_release_md_library_findings` above do: both original candidate
-    homes are at their own ``no_growth`` cap with zero headroom, and this
-    module is the established shared home for a release-summary-wide fold
-    neither has room for.
-    """
-    from .checker_types import DiffResult as _DiffResult
-    from .report.disposition_audit import (
-        DispositionAudit,
-        compute_disposition_audit,
-        fold_disposition_audits,
-    )
-
-    audits: list[DispositionAudit] = []
-    for lib in library_results:
-        block = lib.get("disposition_audit")
-        if isinstance(block, dict):
-            audits.append(DispositionAudit.from_dict(block))
-    if matrix_result is not None:
-        audits.append(compute_disposition_audit(matrix_result, severity_config))
-    if bundle_result is not None and bundle_result.bundle_findings:
-        bundle_as_diff_result = _DiffResult(
-            old_version="",
-            new_version="",
-            library="<bundle>",
-            changes=[f.to_change() for f in bundle_result.bundle_findings],
-            verdict=bundle_result.bundle_verdict,
-            policy=bundle_result.policy,
-            policy_file=bundle_result.policy_file,
-        )
-        audits.append(compute_disposition_audit(bundle_as_diff_result, severity_config))
-    return fold_disposition_audits(audits).to_dict()

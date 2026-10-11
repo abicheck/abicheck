@@ -811,7 +811,7 @@ class TestReleaseSeverityPolicyAndGlobal:
         fail that finding's JUnit testcase, or a CI dashboard reading the
         JUnit file would disagree with the release's severity-aware exit."""
         from abicheck.checker import Change, ChangeKind, DiffResult, Verdict
-        from abicheck.cli_compare_release_helpers import _format_release_junit
+        from abicheck.frontends.cli.release_report import render_release_summary
         from abicheck.policy.severity import resolve_severity_config
 
         c = Change(ChangeKind.FUNC_ADDED, "_Z3newv", "new public function")
@@ -824,13 +824,35 @@ class TestReleaseSeverityPolicyAndGlobal:
         )
         cfg = resolve_severity_config("default", addition="error")
 
-        xml_without_config = _format_release_junit([(diff, None)], None, [])
+        xml_without_config = render_release_summary(
+            "junit",
+            "NO_CHANGE",
+            Path("."),
+            Path("."),
+            [],
+            [],
+            [],
+            {},
+            {},
+            [],
+            diff_pairs=[(diff, None)],
+            matrix_result=None,
+        )
         assert 'failures="0"' in xml_without_config
 
-        xml_with_config = _format_release_junit(
-            [(diff, None)],
-            None,
+        xml_with_config = render_release_summary(
+            "junit",
+            "NO_CHANGE",
+            Path("."),
+            Path("."),
             [],
+            [],
+            [],
+            {},
+            {},
+            [],
+            diff_pairs=[(diff, None)],
+            matrix_result=None,
             severity_config=cfg,
         )
         assert 'failures="1"' in xml_with_config
@@ -842,11 +864,13 @@ class TestReleaseSeverityPolicyAndGlobal:
         "ERROR"`, so a library that hit PROFILE_MISMATCH/SCOPE_MISMATCH
         silently produced zero testsuites, disagreeing with the release's
         own non-zero exit code."""
-        from abicheck.cli_compare_release_helpers import _format_release_junit
+        from abicheck.frontends.cli.release_report import render_release_summary
 
-        xml = _format_release_junit(
-            None,
-            None,
+        xml = render_release_summary(
+            "junit",
+            "NO_CHANGE",
+            Path("."),
+            Path("."),
             [
                 {
                     "library": "libfoo.so",
@@ -854,6 +878,13 @@ class TestReleaseSeverityPolicyAndGlobal:
                     "reason": "scope_fingerprint mismatch",
                 }
             ],
+            [],
+            [],
+            {},
+            {},
+            [],
+            diff_pairs=None,
+            matrix_result=None,
         )
         assert 'errors="1"' in xml
         assert "libfoo.so" in xml

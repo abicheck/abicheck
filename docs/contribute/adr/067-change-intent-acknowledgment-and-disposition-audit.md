@@ -28,7 +28,7 @@ post-suppression change list — the one behavior change, carried with a
 migration note. What S2 added on top: the release/bundle fan-out's JSON/
 Markdown reports and `--output-dir` `summary.json` sidecar gain a folded
 `disposition_audit` block over every library
-(`abicheck/cli_compare_receipt.py`'s `release_disposition_audit_block`,
+(`abicheck/report/release_document.py`'s `release_disposition_audit_block`,
 `abicheck/report/disposition_audit.py`'s `fold_disposition_audits`);
 `abicheck aggregate --format json` gains the same folded block plus a
 `disposition_audit_missing_targets` list (aggregate schema 1.9,

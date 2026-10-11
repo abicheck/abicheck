@@ -113,8 +113,8 @@ def run_outcome_dict_for_release(
     scope: ScopeCompleteness = ScopeCompleteness.COMPLETE,
 ) -> dict[str, Any]:
     """Build the ``run_outcome`` dict for a directory/package release
-    comparison's own summary JSON (``cli_compare_release_helpers.
-    _format_release_json``, ``cli_compare_release_summary.
+    comparison's own summary JSON (``report.release_document.
+    release_json_document``, ``cli_compare_release_summary.
     _write_release_summary_file``) -- both claim ``run_outcome`` per the
     "every JSON report" contract (``docs/use/output-formats.md``) but never
     actually built one (Codex review).

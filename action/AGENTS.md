@@ -256,7 +256,7 @@ Two predicates close that without weakening anything above:
   rejects — `{"verdict": "write interrupted", "reason": {}}` passed on the
   `reason` object alone. And there is deliberately **no** `libraries` rule: no
   reader extracts a verdict from that array, and
-  `_format_release_json` emits a rolled-up top-level `verdict` on every release
+  `release_json_document` emits a rolled-up top-level `verdict` on every release
   document, so a library-only shape is not one any emitter writes.
 
   **Stdout mode is judged by the mode, not by an empty destination inventory.**

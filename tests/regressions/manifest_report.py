@@ -664,7 +664,7 @@ REPORT_BUG_CLASSES: tuple[BugClass, ...] = (
                 description=(
                     "The aggregate is verified over hand-built and "
                     "`add_member_review_summary`-stamped member entries and "
-                    "through `_format_release_json`, not through a real "
+                    "through `release_json_document`, not through a real "
                     "multi-binary `compare` of a directory pair: no native "
                     "toolchain fixture in this workspace produces members "
                     "carrying cross-source hygiene findings. The JUnit and "

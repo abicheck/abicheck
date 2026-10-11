@@ -55,7 +55,6 @@ from .cli_compare_release_helpers import (  # noqa: F401
     _debian_symbols_warning,
     _discover_include_roots,
     _exit_compare_release,
-    _format_release_summary,
     _match_release_keys,
     _resolve_release_headers,
     debian_symbols_release_conflict_lines as _debian_symbols_release_conflict_lines,
@@ -71,6 +70,7 @@ from .frontends.cli.options.params import (
     DEFAULT_POLICY_PROFILE,
     _load_suppression_and_policy,
 )
+from .frontends.cli.release_report import render_release_summary
 from .frontends.cli.release_summary import (  # moved (ADR-065 S2), re-exported
     _write_release_summary_file as _write_release_summary_file,
 )
@@ -252,7 +252,7 @@ def _finalize_release_output(
     never passes it), so it is the one caller allowed to forward the
     release's ``--view show=`` selection into the rendered text.
     """
-    text = _format_release_summary(
+    text = render_release_summary(
         fmt,
         worst_verdict,
         old_dir,
@@ -709,7 +709,7 @@ def _strip_diff_results_and_adjust_verdict(
     projection, exactly as it would with no ``--view show=`` in effect. The
     filtered view is stashed under the private ``findings_view``/
     ``findings_view_truncated`` keys, consumed (and stripped) by
-    :func:`abicheck.cli_compare_release_helpers._release_findings_for_render`
+    :func:`abicheck.report.release_document.release_findings_for_render`
     only for whichever renderer is the *primary* (``--format``) one -- a
     secondary ``-o`` report is documented/contracted to always be full
     (mirroring single-pair ``compare``'s own ``-o`` behaviour), so it
@@ -732,14 +732,14 @@ def _strip_diff_results_and_adjust_verdict(
     is also active, a second, filtered ``entry["impact_table_view"]`` is
     computed the same way :func:`_release_finding_dicts`'s ``findings_view``
     is -- consumed and stripped by
-    :func:`abicheck.cli_compare_release_helpers._release_findings_for_render`
+    :func:`abicheck.report.release_document.release_findings_for_render`
     for whichever renderer is primary, never for a secondary ``-o``.
 
     ``entry["findings"]``/``entry["findings_view"]`` are always the
     **complete** projections (plan slice 7m -- there is no longer any way to
     ask for a truncated machine document, so ``uncapped`` below is
     unconditional). The presentation cap is applied at Markdown render time
-    instead (``_release_md_library_findings``), which is also where the
+    instead (``release_md_library_findings``), which is also where the
     ``findings_truncated_kinds``/``findings_view_truncated_kinds`` (kind ->
     count cut) disclosure of what a human summary omitted is produced.
 
@@ -773,8 +773,8 @@ def _strip_diff_results_and_adjust_verdict(
             # place the real, uncapped
             # `total_gating` is still available before `diff` is discarded
             # below; a private, `findings_view`-shaped key (popped by
-            # `_release_findings_for_render`, never rendered) so
-            # `_format_release_json`'s `filtered_summary`-equivalent totals
+            # `release_findings_for_render`, never rendered) so
+            # `release_json_document`'s `filtered_summary`-equivalent totals
             # can read the true pre-filter count instead of re-deriving it
             # from the already-capped display list.
             entry["findings_total_count"] = total_gating
@@ -843,7 +843,7 @@ def _strip_diff_results_and_adjust_verdict(
                     # Unlike `entry["impact_table"]` above (only set when
                     # non-None), this key is *always* set whenever
                     # `show_only` is active -- even to `None` -- so
-                    # `_release_findings_for_render`'s swap (mirroring
+                    # `release_findings_for_render`'s swap (mirroring
                     # `findings_view`'s own always-set contract) can tell
                     # "no view was computed" apart from "the view is empty".
                     entry["impact_table_view"] = (

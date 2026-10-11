@@ -289,7 +289,7 @@ class TestDispositionAuditBlockAbsent:
 
 class TestReleaseDispositionAuditBlockWithMatrixResult:
     def test_matrix_result_contributes_its_own_audit(self) -> None:
-        from abicheck.cli_compare_receipt import release_disposition_audit_block
+        from abicheck.report.release_document import release_disposition_audit_block
 
         matrix_result = DiffResult(
             changes=[Change(kind=ChangeKind.FUNC_REMOVED, symbol="m", description="x")],

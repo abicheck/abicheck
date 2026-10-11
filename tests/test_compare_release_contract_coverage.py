@@ -38,13 +38,13 @@ from abicheck.bundle_models import BundleSignatureEvidence
 from abicheck.cli_compare_release import (
     _compare_one_library,
     _finalize_release_output,
-    _format_release_json,
     _strip_diff_results_and_adjust_verdict,
 )
 from abicheck.cli_compare_release_pairwise import (
     ReleaseMemberContext,
     release_parent_request,
 )
+from abicheck.frontends.cli.release_report import render_release_summary
 from abicheck.model.symbol_inventory import (
     SymbolInventory,
     build_symbol_inventory,
@@ -89,7 +89,8 @@ def test_release_json_emits_contract_coverage_block_when_active() -> None:
             "contract_coverage_exit_contribution": 1,
         },
     ]
-    out = _format_release_json(
+    out = render_release_summary(
+        "json",
         "NO_CHANGE",
         Path("/o"),
         Path("/n"),
@@ -99,8 +100,8 @@ def test_release_json_emits_contract_coverage_block_when_active() -> None:
         {},
         {},
         [],
-        None,
-        None,
+        bundle_result=None,
+        matrix_result=None,
         contract_coverage_exit_contribution=1,
         contract_coverage_failure_count=1,
     )
@@ -266,7 +267,7 @@ def test_release_markdown_renders_the_per_library_coverage_warnings() -> None:
     renders library/verdict/counts -- a byte-identical matched library
     otherwise still presents a clean report with no warning at all in
     this format."""
-    from abicheck.cli_compare_release import _format_release_markdown
+    from abicheck.frontends.cli.release_report import render_release_summary
 
     libs = [
         {
@@ -278,19 +279,41 @@ def test_release_markdown_renders_the_per_library_coverage_warnings() -> None:
         },
         {"library": "libb.so", "verdict": "NO_CHANGE"},
     ]
-    md = _format_release_markdown(
-        "NO_CHANGE", Path("/o"), Path("/n"), libs, [], [], {}, {}, None, None
+    md = render_release_summary(
+        "markdown",
+        "NO_CHANGE",
+        Path("/o"),
+        Path("/n"),
+        libs,
+        [],
+        [],
+        {},
+        {},
+        [],
+        bundle_result=None,
+        matrix_result=None,
     )
     assert "## ⚠️ Coverage Warnings" in md
     assert "`liba.so`: old and new binaries are byte-identical" in md
 
 
 def test_release_markdown_omits_the_section_when_no_library_carries_a_warning() -> None:
-    from abicheck.cli_compare_release import _format_release_markdown
+    from abicheck.frontends.cli.release_report import render_release_summary
 
     libs = [{"library": "liba.so", "verdict": "NO_CHANGE"}]
-    md = _format_release_markdown(
-        "NO_CHANGE", Path("/o"), Path("/n"), libs, [], [], {}, {}, None, None
+    md = render_release_summary(
+        "markdown",
+        "NO_CHANGE",
+        Path("/o"),
+        Path("/n"),
+        libs,
+        [],
+        [],
+        {},
+        {},
+        [],
+        bundle_result=None,
+        matrix_result=None,
     )
     assert "Coverage Warnings" not in md
 
@@ -307,8 +330,19 @@ def test_release_json_carries_the_per_library_coverage_warnings_through() -> Non
             ],
         },
     ]
-    out = _format_release_json(
-        "NO_CHANGE", Path("/o"), Path("/n"), libs, [], [], {}, {}, [], None, None
+    out = render_release_summary(
+        "json",
+        "NO_CHANGE",
+        Path("/o"),
+        Path("/n"),
+        libs,
+        [],
+        [],
+        {},
+        {},
+        [],
+        bundle_result=None,
+        matrix_result=None,
     )
     data = json.loads(out)
     assert data["libraries"][0]["coverage_warnings"] == [
@@ -469,7 +503,8 @@ def test_release_json_contract_coverage_failure_count_independent_of_warn() -> N
             "contract_coverage_failure_count": 1,
         },
     ]
-    out = _format_release_json(
+    out = render_release_summary(
+        "json",
         "NO_CHANGE",
         Path("/o"),
         Path("/n"),
@@ -479,8 +514,8 @@ def test_release_json_contract_coverage_failure_count_independent_of_warn() -> N
         {},
         {},
         [],
-        None,
-        None,
+        bundle_result=None,
+        matrix_result=None,
         contract_coverage_exit_contribution=0,
         contract_coverage_failure_count=1,
     )
@@ -684,7 +719,8 @@ def test_release_stderr_silent_when_contract_coverage_contribution_zero(capsys) 
 
 def test_release_json_omits_contract_coverage_block_by_default() -> None:
     libs = [{"library": "liba.so", "verdict": "NO_CHANGE"}]
-    out = _format_release_json(
+    out = render_release_summary(
+        "json",
         "NO_CHANGE",
         Path("/o"),
         Path("/n"),
@@ -694,7 +730,7 @@ def test_release_json_omits_contract_coverage_block_by_default() -> None:
         {},
         {},
         [],
-        None,
-        None,
+        bundle_result=None,
+        matrix_result=None,
     )
     assert "contract_coverage_exit_contribution" not in json.loads(out)

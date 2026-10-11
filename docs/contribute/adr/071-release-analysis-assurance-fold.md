@@ -223,7 +223,7 @@ about the fold, not about evidence parity between operand shapes.
 **D9 — Every document a run publishes carries the axis, and the notice is
 formatted where the real code is known.** Three places build a
 release `ExitDecision` — the process exit (`release_exit.py`), the primary
-report (`cli_compare_release_helpers._format_release_json`), and the
+report (`report.release_document.release_json_document`), and the
 `--output-dir` sidecar (`release_summary._write_release_summary_file`) — and
 all three fold it. The sidecar is the one worth naming: it resolves its own
 `exit` block through the same resolver, so threading the axis into only the

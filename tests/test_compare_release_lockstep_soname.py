@@ -282,8 +282,8 @@ class TestLockstepSonameSuppressionUpdatesDispositionAudit:
         library's own entry weren't updated, the release-level total would
         still show the finding as non_gating too."""
         from abicheck.checker import Change, ChangeKind, DiffResult, Verdict
-        from abicheck.cli_compare_receipt import release_disposition_audit_block
         from abicheck.cli_compare_release import _suppress_lockstep_soname_findings
+        from abicheck.report.release_document import release_disposition_audit_block
 
         umbrella = self._entry_with_real_ledger("libonedal.so", Verdict.COMPATIBLE)
         core_result = DiffResult(

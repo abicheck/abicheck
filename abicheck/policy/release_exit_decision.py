@@ -29,7 +29,7 @@ along a real seam rather than a convenient line number: everything here
 reads *release-shaped reported input*, and everything left there is pure
 arithmetic over already-resolved integers. It is also the half both
 consumers now share -- ``frontends.cli.release_exit`` for the process status
-and ``cli_compare_release_helpers._format_release_json`` for the persisted
+and ``report.release_document.release_json_document`` for the persisted
 ``exit`` block -- so giving it its own name makes "one resolution, two
 readers" legible instead of implied.
 
