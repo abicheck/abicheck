@@ -36,7 +36,7 @@ __all__ = ["RELEASE_SCHEMA_VERSION"]
 
 #: SemVer-style (MAJOR.MINOR) version of the directory/package release JSON
 #: envelope (`compare-release`'s per-run document,
-#: ``cli_compare_release_helpers._format_release_json``).
+#: ``report.release_document.release_json_document``).
 #:
 #: 1.0 -- introduced (Codex review, findings-fixes round 11): this document
 #:       had no schema-version field at all before this constant, so a

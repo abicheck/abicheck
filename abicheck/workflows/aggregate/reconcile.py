@@ -395,7 +395,7 @@ class ReportFindings:
 
 
 #: Finding arrays a ``compare-release`` report carries instead of ``changes``
-#: (``cli_compare_release_helpers._format_release_json``) — the shape a
+#: (``report.release_document.release_json_document``) — the shape a
 #: ``kind: bundle`` check produces, since a bundle comparison routes through
 #: the per-library release fan-out. Both carry the same
 #: ``kind``/``symbol``/``description``/``old_value``/``new_value`` fields

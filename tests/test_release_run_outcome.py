@@ -36,9 +36,10 @@ class TestReleaseJsonRunOutcome:
         import json
         from pathlib import Path
 
-        from abicheck.cli_compare_release_helpers import _format_release_json
+        from abicheck.frontends.cli.release_report import render_release_summary
 
-        out = _format_release_json(
+        out = render_release_summary(
+            "json",
             "BREAKING",
             Path("/o"),
             Path("/n"),
@@ -48,8 +49,8 @@ class TestReleaseJsonRunOutcome:
             {},
             {},
             [],
-            None,
-            None,
+            bundle_result=None,
+            matrix_result=None,
         )
         data = json.loads(out)
         assert "run_outcome" in data
@@ -64,9 +65,10 @@ class TestReleaseJsonRunOutcome:
         import json
         from pathlib import Path
 
-        from abicheck.cli_compare_release_helpers import _format_release_json
+        from abicheck.frontends.cli.release_report import render_release_summary
 
-        out = _format_release_json(
+        out = render_release_summary(
+            "json",
             "ERROR",
             Path("/o"),
             Path("/n"),
@@ -76,8 +78,8 @@ class TestReleaseJsonRunOutcome:
             {},
             {},
             [],
-            None,
-            None,
+            bundle_result=None,
+            matrix_result=None,
         )
         data = json.loads(out)
         assert data["run_outcome"]["operational"] == "extraction_error"
@@ -95,12 +97,13 @@ class TestReleaseJsonRunOutcome:
         import json
         from pathlib import Path
 
-        from abicheck.cli_compare_release_helpers import _format_release_json
+        from abicheck.frontends.cli.release_report import render_release_summary
         from abicheck.policy.severity import resolve_severity_config
         from abicheck.workflows.aggregate.gate import GateInfo
 
         cfg = resolve_severity_config("default")
-        out = _format_release_json(
+        out = render_release_summary(
+            "json",
             "COMPATIBLE",
             Path("/o"),
             Path("/n"),
@@ -110,8 +113,8 @@ class TestReleaseJsonRunOutcome:
             {"libfoo.so": Path("/o/libfoo.so")},
             {},
             [],
-            None,
-            None,
+            bundle_result=None,
+            matrix_result=None,
             severity_config=cfg,
             severity_exit_code=0,
             fail_on_removed=True,
@@ -135,9 +138,10 @@ class TestReleaseJsonRunOutcome:
         import json
         from pathlib import Path
 
-        from abicheck.cli_compare_release_helpers import _format_release_json
+        from abicheck.frontends.cli.release_report import render_release_summary
 
-        out = _format_release_json(
+        out = render_release_summary(
+            "json",
             "ERROR",
             Path("/o"),
             Path("/n"),
@@ -150,8 +154,8 @@ class TestReleaseJsonRunOutcome:
             {},
             {},
             [],
-            None,
-            None,
+            bundle_result=None,
+            matrix_result=None,
         )
         data = json.loads(out)
         assert data["verdict"] == "ERROR"
@@ -171,9 +175,10 @@ class TestReleaseJsonRunOutcome:
         import json
         from pathlib import Path
 
-        from abicheck.cli_compare_release_helpers import _format_release_json
+        from abicheck.frontends.cli.release_report import render_release_summary
 
-        out = _format_release_json(
+        out = render_release_summary(
+            "json",
             "ERROR",
             Path("/o"),
             Path("/n"),
@@ -186,8 +191,8 @@ class TestReleaseJsonRunOutcome:
             {},
             {},
             [],
-            None,
-            None,
+            bundle_result=None,
+            matrix_result=None,
         )
         data = json.loads(out)
         assert data["verdict"] == "ERROR"

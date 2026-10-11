@@ -18,7 +18,7 @@
 Moved out of ``cli_compare_release_matrix.py`` (at the 800-line production
 cap) when ADR-065 S2 gave the sidecar the same ``comparison_scope`` block
 and scope-aware ``exit``/``run_outcome`` the primary release JSON carries
-(``cli_compare_release_helpers._format_release_json``); that module still
+(``report.release_document.release_json_document``); that module still
 re-exports the name for every pre-existing importer.
 """
 
@@ -85,7 +85,7 @@ def _write_release_summary_file(
     cycle that module belongs to; ``Path.write_text`` when omitted.
 
     *severity_config*, when in effect, feeds the same effective-config
-    digest ``_format_release_json`` (the primary release report) already
+    digest ``release_json_document`` (the primary release report) already
     stamps, via the one shared helper ``_release_summary_effective_config_
     block`` so the two can never independently drift (Codex review, PR
     #803). Also gains the same ``exit`` block that report does, via the
@@ -104,13 +104,11 @@ def _write_release_summary_file(
     real value for ``effective_config_fields["policy.env_matrix"]``.
     """
     from ...cli_compare_receipt import _release_summary_effective_config_block
-    from ...cli_compare_release_helpers import (
-        _release_completed_compatibility_verdict,
-        _release_findings_for_render,
-        _release_global_verdict,
-    )
     from ...report.not_comparable import run_outcome_dict_for_release
+    from ...report.release_document import release_findings_for_render
     from ...workflows.gate import (
+        fold_release_outcome,
+        release_global_verdicts,
         resolve_release_exit_decision_for_report,
         resolve_scope_decision,
     )
@@ -135,7 +133,12 @@ def _write_release_summary_file(
         require_complete_analysis=require_complete_analysis,
         excluded_header_patterns=excluded_header_patterns,
     )
-    release_global_verdict = _release_global_verdict(bundle_result, matrix_result)
+    outcome = fold_release_outcome(
+        (str(entry.get("verdict", "NO_CHANGE")) for entry in library_results),
+        release_global_verdicts(bundle_result, matrix_result),
+        global_ran=release_global_ran(bundle_result, matrix_result, terms.record),
+    )
+    release_global_verdict = outcome.global_verdict
     # `require_complete_analysis` reaches this sidecar's own decision too,
     # not only the process exit -- the same reason the release JSON threads
     # it (Codex review, PR #1238, P1): this file is what a consumer reads
@@ -170,7 +173,7 @@ def _write_release_summary_file(
     # `summary.json`'s per-library entries (Codex review, fresh evidence,
     # discovered while fixing the adjacent "uncapped release filter
     # totals" finding).
-    display_library_results = _release_findings_for_render(library_results, None)
+    display_library_results = release_findings_for_render(library_results, None)
     summary_data: dict[str, object] = {
         "verdict": worst_verdict,
         "libraries": display_library_results,
@@ -182,13 +185,7 @@ def _write_release_summary_file(
         "effective_config_fields": fields,
         "exit": exit_dict,
         "run_outcome": run_outcome_dict_for_release(
-            _release_completed_compatibility_verdict(
-                library_results,
-                release_global_verdict,
-                release_global_ran=release_global_ran(
-                    bundle_result, matrix_result, record
-                ),
-            ),
+            outcome.compatibility,
             exit_dict,
             scope=terms.completeness,
         ),
@@ -223,10 +220,10 @@ def _write_release_summary_file(
             assurance_terms.decision.exit_contribution
         )
     # ADR-067 C-S2: the same folded release-level `disposition_audit` the
-    # primary report carries (`cli_compare_release_helpers._format_release_
-    # json`), via the identical shared helper, so this sidecar cannot drift
+    # primary report carries (`report.release_document.
+    # release_json_document`), via the identical shared helper, so this sidecar cannot drift
     # from it.
-    from ...cli_compare_receipt import release_disposition_audit_block
+    from ...report.release_document import release_disposition_audit_block
 
     summary_data["disposition_audit"] = release_disposition_audit_block(
         library_results, matrix_result, severity_config, bundle_result

@@ -59,7 +59,6 @@ broken, not that nothing was compared at all.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any
 
@@ -71,17 +70,17 @@ from ....report.comparison_scope import ComparisonScopeTerms
 # Via `report`, which re-exports it: `frontends -> policy` is forbidden
 # (`architecture/modules.yaml`), even for a signature's own annotation.
 from ....report.release_assurance import ReleaseAssuranceDecision
+from ....report.release_document import (
+    StoredReleaseEvaluation,
+    build_release_report,
+    stored_reported_verdict,
+)
+from ....report.release_stored_scope import scope_terms_for
+from ....report.render_release_report import (
+    render_stored_release_json,
+    render_stored_release_markdown,
+)
 from ....workflows.release_assurance_members import release_assurance_from_results
-from .compare_bundle_facts_scope import (
-    json_scope_fields,
-    markdown_scope_lines,
-    scope_terms_for,
-)
-from .compare_bundle_facts_sections import (
-    assurance_sections,
-    public_surface_markdown_lines,
-    public_surface_terms,
-)
 
 
 def _resolve_new_side_headers_includes(
@@ -851,22 +850,13 @@ def dispatch(
             )
 
     _exit_compare_release(
-        _reported_verdict(result),
+        stored_reported_verdict(result),
         fail_on_removed=False,
         removed_keys=[],
         incomplete_scope_exit_contribution=scope_terms.decision.incomplete_scope_exit_contribution,
         no_comparison_completed_exit_contribution=scope_terms.decision.no_comparison_completed_exit_contribution,
         assurance_decision=assurance_decision,
     )
-
-
-def _reported_verdict(result: Any) -> str:
-    """The fan-out's ``"not_comparable"`` (ADR-050 D2; exit 16, ranked above
-    ``ERROR``) when a matched pair's contracts disagreed, else its ``"ERROR"``
-    when a NEW member failed extraction (ADR-065 D1; exit 4), else the verdict."""
-    if result.not_comparable_members:
-        return "not_comparable"
-    return "ERROR" if result.extraction_failures else result.verdict.value
 
 
 def _render(
@@ -879,156 +869,21 @@ def _render(
     scope_terms: ComparisonScopeTerms | None = None,
     assurance_decision: ReleaseAssuranceDecision | None = None,
 ) -> str:
-    if fmt == "markdown":
-        return _render_markdown(
-            result,
+    """Hand the stored-operand comparison to the one release report builder
+    (``report.release_document``) and render it as *fmt* (``markdown``, else
+    JSON)."""
+    report = build_release_report(
+        StoredReleaseEvaluation(
+            result=result,
             old_facts_path=old_facts_path,
             new_dir=new_dir,
+            scope_terms=(
+                scope_terms if scope_terms is not None else scope_terms_for(result, {})
+            ),
             new_is_stored=new_is_stored,
-            scope_terms=scope_terms,
+            assurance_decision=assurance_decision,
         )
-    return _render_json(
-        result,
-        old_facts_path=old_facts_path,
-        new_dir=new_dir,
-        new_is_stored=new_is_stored,
-        scope_terms=scope_terms,
-        assurance_decision=assurance_decision,
     )
-
-
-def _render_json(
-    result: Any,
-    *,
-    old_facts_path: Path,
-    new_dir: Path,
-    new_is_stored: bool = False,
-    scope_terms: ComparisonScopeTerms | None = None,
-    assurance_decision: ReleaseAssuranceDecision | None = None,
-) -> str:
-    from ....report.run_outcome import run_outcome_dict_for_diff_result
-    from ....reporter import (
-        prewarm_change_demangling,
-        resolve_demangled_symbol as _resolve_demangled_symbol,
-        to_json,
-    )
-
-    # One batched demangle for the whole findings list, the same reason
-    # `report.build` prewarms per-library findings: without it a host with
-    # no in-process `cxxfilt` forks a subprocess per distinct symbol.
-    prewarm_change_demangling(
-        type("_Findings", (), {"changes": list(result.bundle_findings)})()
-    )
-
-    _require = bool(assurance_decision and assurance_decision.require_complete)
-    # perf-ok: to_json is the canonical per-library serializer; one round trip per library
-    libraries = {
-        diff.library: json.loads(to_json(diff, require_complete_analysis=_require))
-        for diff in result.per_library
-    }
-    # ADR-063 Phase 7 `run_outcome` (`report` builder); ADR-065 S2 adds `scope` + section.
-    run_outcome = run_outcome_dict_for_diff_result(result, None, None)
-    terms = scope_terms if scope_terms is not None else scope_terms_for(result, {})
-    summary: dict[str, object] = {
-        "mode": "bundle_facts",
-        "old_bundle_facts": str(old_facts_path),
-        # PR I stored/stored: `new_dir` keeps its established key/meaning
-        # even when NEW_INPUT is itself a stored document too (its path,
-        # not a live release directory) -- `new_is_stored` is the new,
-        # additive signal a consumer checks to tell the two shapes apart,
-        # rather than a field rename that would break an existing consumer
-        # keyed on `new_dir`.
-        "new_dir": str(new_dir),
-        "new_is_stored": new_is_stored,
-        "verdict": _reported_verdict(result),
-        "per_library_verdict": result.per_library_verdict.value,
-        "bundle_verdict": result.bundle_verdict.value,
-        **json_scope_fields(terms, run_outcome, result),
-        "libraries": libraries,
-        # `demangled_symbol` beside the exact `symbol`, resolved through the
-        # same `reporter.resolve_demangled_symbol` every other machine
-        # projection uses: this aggregate document is a machine projection
-        # too, and "every machine projection carries both names" is not a
-        # per-format promise (Codex review, PR #1284). Omitted rather than
-        # null when the symbol is not Itanium-mangled, matching
-        # `_change_to_dict`.
-        "bundle_findings": [
-            {
-                "kind": f.kind.value,
-                "symbol": f.symbol,
-                **(
-                    {"demangled_symbol": demangled}
-                    if (demangled := _resolve_demangled_symbol(f))
-                    else {}
-                ),
-                "consumer_library": f.consumer_library,
-                "provider_library": f.provider_library,
-                "description": f.description,
-                "old_value": f.old_value,
-                "new_value": f.new_value,
-                "affected_libraries": list(f.affected_libraries),
-            }
-            for f in result.bundle_findings
-        ],
-        "analysis_errors": list(result.analysis_errors),
-    }
-    summary.update(assurance_sections(assurance_decision))
-    if (_surface := public_surface_terms(result)) is not None:
-        summary["public_surface_reconciliation"] = _surface.to_dict()
-    # Mirrors the two-sided compare report's env_matrix_source_sha256.
-    if result.env_matrix_source_sha256 is not None:
-        summary["env_matrix_source_sha256"] = result.env_matrix_source_sha256
-    return json.dumps(summary, indent=2)
-
-
-def _render_markdown(
-    result: Any,
-    *,
-    old_facts_path: Path,
-    new_dir: Path,
-    new_is_stored: bool = False,
-    scope_terms: ComparisonScopeTerms | None = None,
-) -> str:
-    from ....bundle import render_bundle_findings_markdown
-
-    new_label = "stored facts" if new_is_stored else "release directory"
-    lines = [
-        "# Bundle-facts comparison",
-        "",
-        f"- OLD (stored facts): `{old_facts_path}`",
-        f"- NEW ({new_label}): `{new_dir}`",
-        f"- **Verdict:** `{_reported_verdict(result)}`",
-        f"- Per-library verdict: `{result.per_library_verdict.value}`",
-        f"- Bundle verdict: `{result.bundle_verdict.value}`",
-        "",
-    ]
-    # Mirrors the JSON renderer above / compare report's own bullet.
-    if result.env_matrix_source_sha256 is not None:
-        lines.append(f"- Deployment floor digest: `{result.env_matrix_source_sha256}`")
-        lines.append("")
-    lines += markdown_scope_lines(
-        scope_terms if scope_terms is not None else scope_terms_for(result, {})
-    )
-    if result.analysis_errors:
-        lines.append("## Bundle analysis errors")
-        lines += [f"- {msg}" for msg in result.analysis_errors]
-        lines.append("")
-    lines.append("## Per-library results")
-    lines.append("")
-    lines.append("| Library | Verdict |")
-    lines.append("|---|---|")
-    for diff in result.per_library:
-        lines.append(f"| {diff.library} | `{diff.verdict.value}` |")
-    lines.append("")
-    lines += public_surface_markdown_lines(result)
-    lines.append("## Bundle findings")
-    lines.append("")
-    bundle_lines = render_bundle_findings_markdown(result.bundle_findings)
-    lines += bundle_lines if bundle_lines else ["(none)"]
-    # Markdown is a human format, and demangling is a property of the
-    # format rather than a token a user types, so this path honours it like
-    # every other human renderer. `demangle_text` rewrites only Itanium
-    # tokens and keeps the exact spelling beside the readable name.
-    from ....demangle import demangle_text
-
-    return demangle_text("\n".join(lines) + "\n")
+    if fmt == "markdown":
+        return render_stored_release_markdown(report)
+    return render_stored_release_json(report)

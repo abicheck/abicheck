@@ -128,6 +128,15 @@ from ..policy.release_gate_options import (
     apply_release_gate_pack,
     resolve_release_gate_options,
 )
+from ..policy.release_outcome import (
+    RELEASE_OPERATIONAL_SENTINELS,
+    ReleaseOutcome,
+    apply_removed_member_floor,
+    consumer_verdict_rank,
+    fold_release_outcome,
+    release_global_verdicts,
+    worse_release_verdict,
+)
 from ..policy.scope_completeness import (
     INCOMPLETE_SCOPE_POLICIES,
     ScopeDecision,
@@ -159,6 +168,13 @@ if TYPE_CHECKING:
 
 __all__ = [
     "ClassifiedDiff",
+    "ReleaseOutcome",
+    "RELEASE_OPERATIONAL_SENTINELS",
+    "apply_removed_member_floor",
+    "consumer_verdict_rank",
+    "worse_release_verdict",
+    "fold_release_outcome",
+    "release_global_verdicts",
     "effective_kind_sets",
     "effective_verdict",
     "evaluate",

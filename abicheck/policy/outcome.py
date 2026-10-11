@@ -655,7 +655,7 @@ def worst_real_verdict(candidates: Iterable[object]) -> Verdict | None:
     """Worst real :class:`Verdict` among *candidates* (declaration order),
     skipping every non-parseable entry (``None``, an operational sentinel)
     -- ``None`` if nothing parses. Sibling of ``cli_compare_release_
-    helpers._release_completed_compatibility_verdict`` (a `frontends`
+    release_outcome.fold_release_outcome`` (a `frontends`
     module `policy`/`buildsource` may not import) shared by the scan-set
     (below) and legacy-release-backfill callers instead of each re-deriving
     "worst real verdict, sentinels excluded".
