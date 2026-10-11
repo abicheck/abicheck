@@ -515,6 +515,7 @@ def release_matrix_changes_for_view(
 def compute_impact_table(
     result: DiffResult,
     displayed_changes: list[Change] | None = None,
+    findings: Sequence[ReportFinding] | None = None,
 ) -> _rmd.ImpactTable | None:
     """Build the impact summary table's structured intermediate.
 
@@ -544,11 +545,23 @@ def compute_impact_table(
                     )
                 )
 
-    # Count non-type direct changes
+    # Non-type direct removals, read from each finding's resolved bucket
+    # (*findings*: the envelope's, when the caller holds one), never from a
+    # kind-name suffix -- `func_noexcept_removed` is a trait change, and
+    # `func_deleted` a removal.
+    if findings is None:
+        from .report.finding import build_report_findings
+
+        findings = build_report_findings(
+            changes,
+            policy=result.policy,
+            kind_sets=effective_kind_sets(result),
+            policy_file=result.policy_file,
+        )
     direct_removals = sum(
         1
-        for c in changes
-        if c.kind.value.endswith("_removed") and c.kind not in _ROOT_TYPE_CHANGE_KINDS
+        for f in findings
+        if f.bucket == "removed" and f.change.kind not in _ROOT_TYPE_CHANGE_KINDS
     )
 
     if not root_entries and direct_removals == 0:
