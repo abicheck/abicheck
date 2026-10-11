@@ -134,6 +134,28 @@ _CC_SCENARIOS = {
         _c_lib(f"{_SYSV} int add(int a, int b);\n"),
         False,
     ),
+    # 2026-10-11 re-audit: the macro state *at the declaration* decides.
+    "macro-undefined-after-declaration": (
+        _c_lib(f"#define CALL {_SYSV}\nCALL int add(int a, int b);\n#undef CALL\n",
+               impl_cc=_SYSV),
+        _c_lib(f"#define CALL {_MS}\nCALL int add(int a, int b);\n#undef CALL\n",
+               impl_cc=_MS),
+        True,
+    ),
+    "function-like-macro-switch": (
+        _c_lib("#define CALL(x) __attribute__((x))\nint CALL(sysv_abi) add(int a, int b);\n",
+               impl_cc=_SYSV),
+        _c_lib("#define CALL(x) __attribute__((x))\nint CALL(ms_abi) add(int a, int b);\n",
+               impl_cc=_MS),
+        True,
+    ),
+    "macro-redefined-after-declaration": (
+        _c_lib(f"#define CALL {_MS}\nCALL int add(int a, int b);\n#undef CALL\n"
+               f"#define CALL {_SYSV}\n", impl_cc=_MS),
+        _c_lib(f"#define CALL {_MS}\nCALL int add(int a, int b);\n#undef CALL\n"
+               f"#define CALL {_MS}\n", impl_cc=_MS),
+        False,
+    ),
 }  # fmt: skip
 
 
@@ -155,7 +177,7 @@ def test_calling_convention_through_macros(
 def _ret_lib(ret: str) -> dict[str, str]:
     return {
         "lib.h": f"{ret} get_name(void);\n",
-        "lib.c": f'#include "lib.h"\nstatic char n[] = "x";\n{ret} get_name(void) {{ return n; }}\n',
+        "lib.c": f'#include "lib.h"\nstatic char *n[1];\n{ret} get_name(void) {{ return (void *)n; }}\n',
     }
 
 
@@ -165,6 +187,14 @@ def _ret_lib(ret: str) -> dict[str, str]:
     [
         ("char *", "const char *", "func_return_pointee_qualifier_added", 2),
         ("const char *", "char *", "func_return_pointee_qualifier_removed", 0),
+        # 2026-10-11 re-audit: ``const char **p = get_name();`` stops compiling.
+        ("const char **", "char **", "func_return_pointee_qualifier_changed", 2),
+        (
+            "const char * const *",
+            "char * const *",
+            "func_return_pointee_qualifier_removed",
+            0,
+        ),
     ],
 )
 def test_return_pointee_qualifier(

@@ -44,7 +44,7 @@ from __future__ import annotations
 from xml.etree.ElementTree import Element
 
 from ....provenance import build_public_set
-from .macro_table import MacroTable, read_macro_table
+from .preprocessed_text import PreprocessedText, read_preprocessed_text
 
 # castxml tags that represent a callable (free function, method, special
 # member, or operator).
@@ -95,10 +95,10 @@ class CastxmlParserContext:
         self.id_map: dict[str, Element] = {}
         self.virtual_methods_by_class: dict[str, list[Element]] = {}
         self.source_lines_cache: dict[str, list[str]] = {}
-        #: Compiler-resolved calling-convention macros and the target's
-        #: default convention (``macro_table``); ``None`` when the document
-        #: carries no table.
-        self.cc_macro_table: MacroTable | None = read_macro_table(root)
+        #: Preprocessed declaration text and the target's default calling
+        #: convention (``preprocessed_text``); ``None`` when the document
+        #: carries none.
+        self.preprocessed: PreprocessedText | None = read_preprocessed_text(root)
         #: ``record_traits.trivially_copyable`` memo, keyed by element id.
         self.trivially_copyable_cache: dict[str, bool | None] = {}
         # Per-file index / per-directory file list for

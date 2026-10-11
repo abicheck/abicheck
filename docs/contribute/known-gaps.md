@@ -99,6 +99,11 @@ Each entry's status line says what is still open. A PARTIAL entry's write-up als
 **Status (re-verified 2026-10-09 at `456989f`): PARTIAL.** compare/opaque_types.py:74-130 now uses OpaqueTypeIndex carrying stable EntityIds plus a bare-name 'local' tier. contains(strict=True) narrows the bare-name collision only when intersect() proves the pairing is complete, and otherwise falls back to the old bare RecordType.name matching. diff_filtering.py:854 _root_type_name now prefers Change.qualified_name.  
 `false-clean` — Opaque-type suppression keys on stable `EntityId`s only when the pairing is proven complete; otherwise it falls back to bare `RecordType.name`, so same-named types in different scopes can suppress each other. [Full write-up](known-gaps/opaque-type-suppression-still-falls-back-to-bare-recordtypename.md)
 
+#### A lost return-pointee qualifier is judged by the C++ conversion rule, not C's (2026-10-11)
+
+**Status (recorded 2026-10-11): OPEN.** `compare/parameter_facts.py`'s `_qualification_converts` implements C++ [conv.qual] only.  
+`false-clean` — `const char * const *f()` -> `char * const *f()` is a risk under C++ but breaks a C consumer (`const char * const *p = f();`), which C rejects. [Full write-up](known-gaps/return-pointee-qualifier-loss-is-judged-by-the-c-plus-plus-conversion-rule.md)
+
 #### Type identity: typedef and tag names keyed by bare spelling
 
 `false-clean` — Two entries on one shape: a typedef's identity is its bare spelling, so a tag-namespace record and a same-spelled typedef collide in the clang parser, and typedef diffing still reads the bare-keyed `AbiSnapshot.typedefs` instead of the qualified twin.

@@ -1,6 +1,6 @@
 {
   "description": "Formal detector specification matrix (generated).",
-  "count": 414,
+  "count": 415,
   "detectors": [
     {
       "kind": "abi_relevant_build_flag_changed",
@@ -1207,6 +1207,15 @@
       "min_evidence": "L2",
       "doc_slug": "func_return_pointee_qualifier_added",
       "examples": "case211_return_pointee_gained_const"
+    },
+    {
+      "kind": "func_return_pointee_qualifier_changed",
+      "category": "api_break",
+      "default_verdict": "API_BREAK",
+      "severity": "warning",
+      "min_evidence": "L2",
+      "doc_slug": "func_return_pointee_qualifier_changed",
+      "examples": ""
     },
     {
       "kind": "func_return_pointee_qualifier_removed",

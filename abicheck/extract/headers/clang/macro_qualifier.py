@@ -18,6 +18,12 @@ identifier that is followed by another identifier or keyword -- and is
 absent from the desugared spelling -- can only be a macro qualifier. A
 typedef'd return type (``size_t (int)``) is never followed by another
 token and is kept.
+
+A function-like macro is printed with its arguments
+(``"CALL(ms_abi) int (int) __attribute__((ms_abi))"``), so the leading name
+may carry one balanced parenthesised group; switching ``CALL(sysv_abi)`` to
+``CALL(ms_abi)`` otherwise read as a ``func_return_changed`` next to the
+real calling-convention change (2026-10-11 re-audit).
 """
 
 from __future__ import annotations
@@ -29,7 +35,10 @@ from .context import qualtype
 
 __all__ = ["node_qualtype_without_macro_qualifiers", "strip_macro_qualifiers"]
 
-_LEADING_WORD_RE = re.compile(r"([A-Za-z_]\w*)\s+(?=[A-Za-z_])")
+#: A leading name, then either its macro arguments -- printed with no space
+#: before ``(``, unlike a parameter list (``size_t (int)``) -- or a next word.
+_LEADING_WORD_RE = re.compile(r"([A-Za-z_]\w*)(?=\(|\s+[A-Za-z_])")
+_NEXT_WORD_RE = re.compile(r"\s+(?=[A-Za-z_])")
 
 #: Keywords that may legitimately lead a type spelling.
 _TYPE_KEYWORDS = frozenset(
@@ -53,8 +62,30 @@ def strip_macro_qualifiers(qualtype: str, desugared: str | None) -> str:
         word = m.group(1)
         if word in _TYPE_KEYWORDS or word in desugared_words:
             break
-        out = out[m.end() :]
+        end = _after_macro_arguments(out, m.end())
+        nxt = _NEXT_WORD_RE.match(out, end) if end != -1 else None
+        if nxt is None:
+            break
+        out = out[nxt.end() :]
     return out
+
+
+def _after_macro_arguments(text: str, at: int) -> int:
+    """The index past a function-like macro's balanced ``(...)`` starting at
+    *at*, *at* itself when none starts there, or ``-1`` when the group is
+    unbalanced."""
+    i = at
+    if i >= len(text) or text[i] != "(":
+        return at
+    depth = 0
+    for j in range(i, len(text)):
+        if text[j] == "(":
+            depth += 1
+        elif text[j] == ")":
+            depth -= 1
+            if depth == 0:
+                return j + 1
+    return -1
 
 
 def node_qualtype_without_macro_qualifiers(node: dict[str, Any]) -> str:

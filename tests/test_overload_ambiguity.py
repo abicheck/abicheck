@@ -9,11 +9,18 @@ against g++ itself as the oracle -- never the detector's own scalar rule:
   rejected against the new one;
 * completeness on the scalar sub-domain: for two scalar parameter types the
   finding fires exactly when the compiler says the call became ambiguous.
+
+The claim is about the whole overload set (2026-10-11 re-audit: with
+``f(int)`` and ``f(std::initializer_list<int>)`` present, adding
+``f(double)`` leaves ``f({})`` calling the ``initializer_list`` overload), so
+soundness and scalar completeness are also checked over every
+(old pair, added overload) triple of the domain, in one batched g++ run.
 """
 
 from __future__ import annotations
 
 import itertools
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -44,9 +51,14 @@ _TYPES = {
     "Widget": "Widget",  # struct Widget {};
     "const Widget &": "const Widget &",
     "const int &": "const int &",
+    "std::initializer_list<int>": "std::initializer_list<int>",
+    "const std::initializer_list<int> &": "const std::initializer_list<int> &",
 }
 _SCALARS = {"int", "long", "double", "char *", "fnptr_t", "E"}
-_PRELUDE = "typedef int (*fnptr_t)();\nenum E { A };\nstruct Widget {};\n"
+_PRELUDE = (
+    "#include <initializer_list>\n"
+    "typedef int (*fnptr_t)();\nenum E { A };\nstruct Widget {};\n"
+)
 
 
 def _ctor(cls: str, ptype: str, tag: str) -> Function:
@@ -101,6 +113,64 @@ def test_against_the_compiler(a: str, b: str, tmp_path: Path) -> None:
         assert became_ambiguous, (a, b)
     if a in _SCALARS and b in _SCALARS:
         assert fires == became_ambiguous, (a, b)
+
+
+def _fires_set(old_types: list[str], added: str) -> bool:
+    base = [_ctor("S", _TYPES[t], t) for t in old_types]
+    new = _snap([*base, _ctor("S", _TYPES[added], added)])
+    return _KIND in {c.kind for c in compare(_snap(base), new).changes}
+
+
+_TRIPLES = list(itertools.permutations(_TYPES, 3))
+
+
+@pytest.mark.integration
+def test_whole_overload_set_against_the_compiler(tmp_path: Path) -> None:
+    """For old set {a, c} plus added b: the finding fires only when ``S s({})``
+    compiled before and is rejected after; on all-scalar sets, exactly then."""
+    if shutil.which("g++") is None:
+        pytest.skip("g++ not available")
+    lines = _PRELUDE.rstrip("\n").split("\n")
+    first = len(lines) + 1  # 1-based line of the first probe
+    for i, (a, c, b) in enumerate(_TRIPLES):
+        for tag, types in (("O", (a, c)), ("N", (a, c, b))):
+            decls = " ".join(f"explicit {tag}{i}({t});" for t in types)
+            lines.append(
+                f"struct {tag}{i} {{ {decls} }}; void u{tag}{i}() {{ {tag}{i} s({{}}); }}"
+            )
+    src = tmp_path / "probe.cpp"
+    src.write_text("\n".join(lines) + "\n")
+    r = subprocess.run(
+        ["g++", "-std=c++17", "-fsyntax-only", "-fmax-errors=0", str(src)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    bad = {
+        int(m.group(1)) for m in re.finditer(r"probe\.cpp:(\d+):\d+: error", r.stderr)
+    }
+    wrong: list[str] = []
+    fired = 0
+    for i, (a, c, b) in enumerate(_TRIPLES):
+        old_ok, new_ok = first + 2 * i not in bad, first + 2 * i + 1 not in bad
+        became_ambiguous = old_ok and not new_ok
+        fires = _fires_set([a, c], b)
+        fired += fires
+        if fires and not became_ambiguous:
+            wrong.append(f"unsound: {{{a}, {c}}} + {b}")
+        if {a, b, c} <= _SCALARS and fires != became_ambiguous:
+            wrong.append(f"incomplete: {{{a}, {c}}} + {b}: compiler={became_ambiguous}")
+    assert fired, "the domain must exercise the finding"
+    assert not wrong, "\n".join(wrong)
+
+
+def test_initializer_list_overload_wins_the_braced_call() -> None:
+    """The re-audit's set: ``f({})`` keeps selecting the initializer_list
+    overload, so adding ``f(double)`` makes nothing ambiguous."""
+    for il in ("std::initializer_list<int>", "const std::initializer_list<int> &"):
+        assert not _fires_set(["int", il], "double")
+        assert not _fires_set([il, "int"], "double")
+    assert _fires_set(["int", "Widget"], "double")  # a class type does not win
 
 
 def test_verdict_is_risk() -> None:

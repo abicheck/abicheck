@@ -425,7 +425,7 @@ class TestLangCFallsBackToCpp:
         modes: list[bool] = []
 
         def fake_run(cmd, **kwargs):  # noqa: ANN001
-            if "-dM" in cmd:  # the macro-table preprocess run (macro_table)
+            if "-dD" in cmd:  # the preprocess run (preprocessed_text)
                 return _completed(returncode=1)
             c_mode = _in_c_mode(cmd)
             modes.append(c_mode)

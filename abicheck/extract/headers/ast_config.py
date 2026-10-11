@@ -65,7 +65,9 @@ _CLANG_CACHE_SCHEMA_VERSION = 4
 #: (complete) AST.
 #: Bumped to 4 when the cached document started carrying the compiler-resolved
 #: calling-convention macro table (`extract.headers.castxml.macro_table`).
-_CASTXML_CACHE_SCHEMA_VERSION = 4
+#: Bumped to 5 when that table was replaced by the preprocessed text of each
+#: convention-bearing declaration (`extract.headers.castxml.preprocessed_text`).
+_CASTXML_CACHE_SCHEMA_VERSION = 5
 
 #: Which module constant salts each backend's header-parse cache key. Named,
 #: not copied, so the key always reads the constant's current value.
