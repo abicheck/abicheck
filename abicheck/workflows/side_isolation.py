@@ -166,6 +166,10 @@ def run_cold_isolated(
     warm: list[_T | None] = (
         resolve_cached_in_process(fns) if concurrent else [None] * len(fns)
     )
+    from ..deadline import check as check_deadline
+
+    # The warm loads above ran outside any worker's deadline re-check.
+    check_deadline()
     cold = [wrap(fn) for fn, res in zip(fns, warm, strict=True) if res is None]
     forked = iter(run_isolated(cold, concurrent=concurrent) if cold else [])
     return [res if res is not None else next(forked) for res in warm]

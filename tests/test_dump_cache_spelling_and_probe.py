@@ -179,3 +179,31 @@ def test_sequential_isolation_forks_even_warm_sides(monkeypatch, concurrent):
         [lambda: "old", lambda: "new"], lambda fn: fn, concurrent=concurrent
     )
     assert forked == ([] if concurrent else [2])
+
+
+@pytest.mark.parametrize("warm_mask", [(True, True), (True, False)])
+def test_budget_spent_during_warm_loads_raises_before_later_work(
+    monkeypatch, warm_mask
+):
+    """Warm sides load outside any worker's deadline re-check, so the budget
+    is checked once they are done -- whether or not a cold side remains."""
+    import time
+
+    from abicheck import deadline
+
+    monkeypatch.setattr(
+        side_isolation, "run_isolated", lambda fns, **_: [f() for f in fns]
+    )
+
+    def make(name: str, warm: bool):
+        def fn() -> str:
+            if not warm:
+                refuse_dump_while_probing()
+            time.sleep(0.05)  # the slow cache read
+            return name
+
+        return fn
+
+    fns = [make(n, w) for n, w in zip(("old", "new"), warm_mask, strict=True)]
+    with deadline.deadline_scope(0.02), pytest.raises(deadline.DeadlineExceeded):
+        side_isolation.run_cold_isolated(fns, lambda fn: fn, concurrent=True)
