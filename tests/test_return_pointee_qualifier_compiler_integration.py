@@ -21,6 +21,7 @@ import itertools
 import re
 import shutil
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -80,35 +81,55 @@ def _no_error_limit() -> str:
 _PAIRS = _pairs()
 
 
-@pytest.fixture(scope="module")
-def gxx_rejected(tmp_path_factory: pytest.TempPathFactory) -> set[int]:
-    """Indices of :data:`_PAIRS` whose ``T_old y = x;`` g++ rejects."""
-    src = tmp_path_factory.mktemp("conv") / "probe.cpp"
-    lines = [
-        f"void t{i}({new} x) {{ {old} y = x; (void)y; }}"
-        for i, (old, new) in enumerate(_PAIRS)
-    ]
-    src.write_text("\n".join(lines) + "\n")
+#: C consumers: no references, and the C rule (only the first pointee's
+#: qualifiers may be added) is enforced as an error.
+_C_PAIRS = [(o, n) for o, n in _PAIRS if "&" not in o]
+
+
+def _rejected(pairs: list[tuple[str, str]], src: Path, cmd: list[str]) -> set[int]:
+    """Indices of *pairs* whose ``T_old y = x;`` the compiler rejects."""
+    src.write_text(
+        "\n".join(
+            f"void t{i}({new} x) {{ {old} y = x; (void)y; }}"
+            for i, (old, new) in enumerate(pairs)
+        )
+        + "\n"
+    )
     result = subprocess.run(
-        ["g++", "-std=c++17", "-fsyntax-only", _no_error_limit(), str(src)],
-        capture_output=True,
-        text=True,
-        timeout=300,
-        check=False,
+        [*cmd, str(src)], capture_output=True, text=True, timeout=300, check=False
     )
     rejected = {
         int(m.group(1)) - 1
         for m in re.finditer(rf"{re.escape(src.name)}:(\d+):\d+: error", result.stderr)
     }
     assert rejected, result.stderr  # the oracle must see some breaks
-    assert len(rejected) < len(_PAIRS)  # and some conversions
+    assert len(rejected) < len(pairs)  # and some conversions
     return rejected
 
 
-def _snap(ret: str) -> AbiSnapshot:
+@pytest.fixture(scope="module")
+def gxx_rejected(tmp_path_factory: pytest.TempPathFactory) -> set[int]:
+    src = tmp_path_factory.mktemp("conv") / "probe.cpp"
+    return _rejected(
+        _PAIRS, src, ["g++", "-std=c++17", "-fsyntax-only", _no_error_limit()]
+    )
+
+
+@pytest.fixture(scope="module")
+def gcc_rejected(tmp_path_factory: pytest.TempPathFactory) -> set[int]:
+    src = tmp_path_factory.mktemp("conv") / "probe.c"
+    limit = _no_error_limit()
+    return _rejected(
+        _C_PAIRS,
+        src,
+        ["gcc", "-x", "c", "-std=c11", "-fsyntax-only", "-Werror", limit],
+    )
+
+
+def _snap(ret: str, mangled: str) -> AbiSnapshot:
     fn = Function(
         name="get_name",
-        mangled="get_name",
+        mangled=mangled,
         return_type=ret,
         params=[],
         visibility=Visibility.PUBLIC,
@@ -116,17 +137,33 @@ def _snap(ret: str) -> AbiSnapshot:
     return AbiSnapshot(library="lib.so", version="1", from_headers=True, functions=[fn])
 
 
-def test_matrix_agrees_with_gxx(gxx_rejected: set[int]) -> None:
+def _disagreements(
+    pairs: list[tuple[str, str]], rejected: set[int], mangled: str, oracle: str
+) -> list[str]:
     wrong: list[str] = []
-    for i, (old, new) in enumerate(_PAIRS):
-        got = {c.kind for c in compare(_snap(old), _snap(new)).changes} & _KINDS
+    for i, (old, new) in enumerate(pairs):
+        changes = compare(_snap(old, mangled), _snap(new, mangled)).changes
+        got = {c.kind for c in changes} & _KINDS
         if len(got) != 1:
             wrong.append(f"{old!r} -> {new!r}: {sorted(got)}")
             continue
         (kind,) = got
-        breaks = i in gxx_rejected
+        breaks = i in rejected
         if breaks != (kind in API_BREAK_KINDS) or (
             not breaks and kind not in RISK_KINDS
         ):
-            wrong.append(f"{old!r} -> {new!r}: {kind.value}, g++ rejects={breaks}")
+            wrong.append(f"{old!r} -> {new!r}: {kind.value}, {oracle} rejects={breaks}")
+    return wrong
+
+
+def test_matrix_agrees_with_gxx(gxx_rejected: set[int]) -> None:
+    """A C++-only function (Itanium-mangled): g++ decides."""
+    wrong = _disagreements(_PAIRS, gxx_rejected, "_Z8get_namev", "g++")
+    assert not wrong, "\n".join(wrong)
+
+
+def test_c_callable_matrix_agrees_with_gcc(gcc_rejected: set[int]) -> None:
+    """A C-linkage function also has C consumers: gcc in C mode decides
+    (stricter than C++: ``const char * const *`` -> ``char * const *``)."""
+    wrong = _disagreements(_C_PAIRS, gcc_rejected, "get_name", "gcc -x c")
     assert not wrong, "\n".join(wrong)

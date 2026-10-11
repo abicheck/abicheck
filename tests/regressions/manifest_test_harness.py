@@ -398,11 +398,11 @@ TEST_HARNESS_BUG_CLASSES: tuple[BugClass, ...] = (
         known_gaps=(
             KnownGap(
                 description=(
-                    "The qualification-conversion rule is C++'s; a C "
-                    "consumer rejects some multi-level losses reported "
-                    "as a risk."
+                    "The C conversion rule is chosen by linkage (C linkage or "
+                    "an unmangled name); a C++-mangled function declared for "
+                    "C consumers through a wrapper is judged by the C++ rule."
                 ),
-                reference="docs/contribute/known-gaps.md",
+                reference="docs/contribute/archive/known-gaps-closed.md",
             ),
         ),
     ),

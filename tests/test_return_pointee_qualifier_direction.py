@@ -35,10 +35,14 @@ _REMOVED = ChangeKind.FUNC_RETURN_POINTEE_QUALIFIER_REMOVED
 _Q = [(), ("const",), ("volatile",), ("const", "volatile")]
 
 
-def _snap(ret: str, *, from_headers: bool = True) -> AbiSnapshot:
+#: An Itanium-mangled (C++-only) function: the C++ rule decides.
+_CXX = "_Z8get_namev"
+
+
+def _snap(ret: str, *, from_headers: bool = True, mangled: str = _CXX) -> AbiSnapshot:
     fn = Function(
         name="get_name",
-        mangled="get_name",
+        mangled=mangled,
         return_type=ret,
         params=[],
         visibility=Visibility.PUBLIC,
@@ -48,8 +52,13 @@ def _snap(ret: str, *, from_headers: bool = True) -> AbiSnapshot:
     )
 
 
-def _kinds(old: str, new: str, **kw: bool) -> set[ChangeKind]:
-    return {c.kind for c in compare(_snap(old, **kw), _snap(new)).changes}
+def _kinds(old: str, new: str, *, mangled: str = _CXX, **kw: bool) -> set[ChangeKind]:
+    return {
+        c.kind
+        for c in compare(
+            _snap(old, mangled=mangled, **kw), _snap(new, mangled=mangled)
+        ).changes
+    }
 
 
 _CHANGED = ChangeKind.FUNC_RETURN_POINTEE_QUALIFIER_CHANGED
@@ -152,3 +161,33 @@ def test_verdicts() -> None:
 def test_header_less_side_declines() -> None:
     got = _kinds("char *", "const char *", from_headers=False)
     assert not got & {_ADDED, _REMOVED, _CHANGED}
+
+
+def _c_converts(src: list[set[str]], dst: list[set[str]]) -> bool:
+    """C11 6.5.16.1 for cv lists ordered outermost pointee first: only the
+    first pointed-to type may gain qualifiers; deeper levels must match."""
+    return src[0] <= dst[0] and src[1:] == dst[1:]
+
+
+@pytest.mark.parametrize(
+    ("old", "new"),
+    list(itertools.product(itertools.product(_Q, _Q[:2]), repeat=2)),
+)
+def test_c_callable_two_levels(old: tuple, new: tuple) -> None:
+    """A C-linkage function (unmangled) has C consumers: the C rule decides,
+    stricter than C++ (``const char * const *`` -> ``char * const *``)."""
+    kinds = _kinds(_spell2(*old), _spell2(*new), mangled="get_name")
+    o, n = [set(old[1]), set(old[0])], [set(new[1]), set(new[0])]
+    if o == n:
+        want = None
+    elif _c_converts(n, o):
+        want = _REMOVED
+    else:
+        want = _ADDED if any(b - a for a, b in zip(o, n, strict=True)) else _CHANGED
+    assert kinds & {_ADDED, _REMOVED, _CHANGED} == ({want} if want else set())
+
+
+def test_c_and_cxx_rules_differ_on_the_known_case() -> None:
+    old, new = "const char * const *", "char * const *"
+    assert _REMOVED in _kinds(old, new)  # C++: converts
+    assert _CHANGED in _kinds(old, new, mangled="get_name")  # C: rejected

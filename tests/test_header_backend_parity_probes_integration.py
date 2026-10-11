@@ -189,12 +189,15 @@ def _ret_lib(ret: str) -> dict[str, str]:
         ("const char *", "char *", "func_return_pointee_qualifier_removed", 0),
         # 2026-10-11 re-audit: ``const char **p = get_name();`` stops compiling.
         ("const char **", "char **", "func_return_pointee_qualifier_changed", 2),
+        # A C library: C rejects this loss, though C++ would convert it.
         (
             "const char * const *",
             "char * const *",
-            "func_return_pointee_qualifier_removed",
-            0,
+            "func_return_pointee_qualifier_changed",
+            2,
         ),
+        # The first pointee's qualifier is the only one C lets a loss convert.
+        ("char * const *", "char **", "func_return_pointee_qualifier_removed", 0),
     ],
 )
 def test_return_pointee_qualifier(

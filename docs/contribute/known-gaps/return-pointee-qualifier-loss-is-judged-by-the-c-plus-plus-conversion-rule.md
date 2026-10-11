@@ -9,9 +9,9 @@ generated: false
 
 # A lost return-pointee qualifier is judged by the C++ conversion rule, not C's stricter one (2026-10-11)
 
-Index: [Known gaps](../known-gaps.md)
+Index: [Known gaps — closed and moot](../archive/known-gaps-closed.md)
 
-**Status (recorded 2026-10-11 at `2a1ccb0c8`): OPEN.**
+**Status (2026-10-11): CLOSED.** A C-callable function is now judged by the C rule; see the archive entry in [Known gaps — closed and moot](../archive/known-gaps-closed.md).
 
 `func_return_pointee_qualifier_removed` (risk) versus
 `func_return_pointee_qualifier_changed` (API break) is decided by whether the

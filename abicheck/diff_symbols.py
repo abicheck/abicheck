@@ -1358,8 +1358,15 @@ def _diff_func_return_pointee_qualifier(
             old_index.signature_for(f_old).return_spelling,
             new_index.signature_for(f_new).return_spelling,
             entity_id=f_old.entity_id or f_new.entity_id,
+            c_callable=_c_callable(f_old) or _c_callable(f_new),
         )
     return changes
+
+
+def _c_callable(f: Function) -> bool:
+    """Whether C code can call *f*: C linkage, or a name no C++ mangling
+    produced."""
+    return f.is_extern_c or f.mangled == f.name
 
 
 @registry.detector("func_deprecated")
