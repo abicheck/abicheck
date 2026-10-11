@@ -212,7 +212,7 @@ Follow the pointer whose trigger matches your task:
 | [`docs/contribute/adr/index.md`](docs/contribute/adr/index.md) | a change touches a default, schema, exit code or public interface |
 | [`agent-guide/quality-gates.md` § ADR surface traceability](docs/contribute/agent-guide/quality-gates.md#adr-surface-traceability-adr-surfaces) | adding an ADR, or adding/renaming/removing a CLI flag, Action input, API symbol, report field, use case or scenario |
 
-**Repository skills** (`.claude/skills/`): `diagnosing-bugs` (load for a bug report, failing behavior or perf regression), `writing-for-agents` (load before editing any `AGENTS.md`/`CLAUDE.md`/skill), `pr` (load before writing a PR body), `codebase-design`/`domain-modeling`/`grilling` (module design, glossary/ADR terms, stress-testing a plan), and the user-invoked `/handoff`, `/retro` and `/improve-codebase-architecture`.
+**Repository skills** (`.claude/skills/`): `diagnosing-bugs` (load for a bug report, failing behavior or perf regression), `writing-for-agents` (load before editing any `AGENTS.md`/`CLAUDE.md`/skill), `pr` (load before writing a PR body), `two-axis-review` (standards + spec review of a branch or PR), `codebase-design`/`domain-modeling`/`grilling` (module design, glossary/ADR terms, stress-testing a plan), and the user-invoked `/handoff`, `/retro` and `/improve-codebase-architecture`.
 
 ## Key types
 
