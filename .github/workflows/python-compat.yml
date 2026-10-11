@@ -2,7 +2,7 @@ name: Python compatibility
 
 # Tiered Python testing. The *full* suite runs on one modern interpreter --
 # `ci.yml`'s `unit-tests` job, canonical Python 3.13 (Linux, plus the macOS
-# and Windows legs), which also owns the 95% coverage floor. Re-running all
+# and Windows legs), which also owns the 80% coverage floor. Re-running all
 # ~50,000 tests on every other supported interpreter mostly re-proved the
 # same thing at a full suite's cost per leg, while 3.11 -- the floor
 # `requires-python = ">=3.11"` promises -- were not tested at all.

@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Usage ratchet: code kept alive only by tests, and cross-module clones.
 
-The 95% coverage floor counts a test as a caller, so a function whose last
+The 80% coverage floor counts a test as a caller, so a function whose last
 production caller was deleted stays green forever: its unit test keeps it
 covered. This gate reads the tree statically (stdlib ``ast``, no import, no
 recording) and reports three finding families, each as a stable key:

@@ -40,10 +40,10 @@ Current CI command:
 pytest tests/ -v --tb=short \
   -m "not integration and not libabigail and not abicc and not slow" \
   -n auto --dist worksteal \
-  --cov=abicheck --cov-report=term-missing --cov-report=xml --cov-fail-under=95
+  --cov=abicheck --cov-report=term-missing --cov-report=xml --cov-fail-under=80
 ```
 
-The 95% line+branch floor is enforced **only on the Linux unit-test lane** — macOS
+The 80% line+branch floor is enforced **only on the Linux unit-test lane** — macOS
 and Windows skip the Linux-only ELF/DWARF tests, which structurally lowers their
 coverage, so those lanes run without the fail-under gate.
 
