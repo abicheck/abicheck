@@ -1798,7 +1798,9 @@ def compare_request_inputs(
 ) -> ExplicitCompatibilityInputs:
     """Normalize a typed :class:`~abicheck.workflows.contracts.CompareRequest`.
 
-    Every field is read as *stated*: unlike the CLI, the typed request has no
+    Every field is read as *stated* unless ``request.stated_settings`` names
+    the stated ones (then an unnamed ``policy`` is the built-in default, as
+    for the CLI); unlike the CLI, the typed request has no
     "unset" representation for ``policy`` (defaults to ``"strict_abi"``) or
     ``scope_public`` (defaults to ``True``) -- a caller constructing the
     request chose those values, whether deliberately or by accepting the
@@ -1825,11 +1827,16 @@ def compare_request_inputs(
         # Phase 7, states no domain: the evidence-adaptive built-in default
         # decides. Only `False` (the legacy alias for `all`) is a statement.
         scope_public_headers=None if request.scope_public else False,
-        policy_base=stated_policy_base(request.policy, policy_file),
+        policy_base=(
+            stated_policy_base(request.policy, policy_file)
+            if request.stated_settings is None or "policy" in request.stated_settings
+            else None
+        ),
         policy_file=policy_file,
         public_symbols=tuple(sorted(request.force_public_symbols or ())),
         suppression=suppression,
         severity_preset=request.severity_preset,
+        pack_paths=tuple(str(p) for p in request.pack_paths),
         header_dirs=header_dir_spellings(
             (*request.new.headers, *request.new.public_header_dirs)
         ),

@@ -277,7 +277,8 @@
         "abicheck/semver.py",
         "abicheck/suppression.py",
         "abicheck/suppression_yaml.py",
-        "abicheck/surface.py"
+        "abicheck/surface.py",
+        "abicheck/compatibility_evaluation_resolver.py"
       ]
     },
     "workflows": {
@@ -330,7 +331,8 @@
         "abicheck/header_only_dump.py",
         "abicheck/service_header_graph_attach.py",
         "abicheck/dry_run_estimate.py",
-        "abicheck/stack_checker.py"
+        "abicheck/stack_checker.py",
+        "abicheck/pack_application.py"
       ]
     },
     "report": {
@@ -621,7 +623,6 @@
     "compatibility_evaluation_config.py",
     "compatibility_evaluation_frontend.py",
     "compatibility_evaluation_packs.py",
-    "compatibility_evaluation_resolver.py",
     "compatibility_evaluation_wiring.py",
     "compile_context.py",
     "confidence.py",
@@ -723,7 +724,6 @@
     "macho_metadata.py",
     "name_classification.py",
     "numpy_capi.py",
-    "pack_application.py",
     "package.py",
     "parallel_probe.py",
     "pattern_verdicts.py",

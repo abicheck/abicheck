@@ -72,7 +72,7 @@ from .cli_resolve import (
     resolve_directory_compile_context,
 )
 from .contract_scoped_promotion import stamp_scoped_result_findings
-from .errors import PolicyError, ProfileMismatchError, ScopeMismatchError, SnapshotError
+from .errors import ProfileMismatchError, ScopeMismatchError, SnapshotError
 from .frontends.cli import compare_enrichment as _enrichment
 from .frontends.cli.acknowledgment_config import (
     compare_acknowledgments_for,
@@ -693,69 +693,62 @@ def _resolve_evaluation_config(
     policy_selected_path: Path | None,
     policy_selected_sha: str | None,
 ) -> tuple[Any, PolicyFile | None, Any]:
-    """Resolve this invocation's ADR-049 configuration and apply its packs.
-
-    Returns ``(evaluation_config, policy_file, resolved_cfg)``. A D7 same-tier
-    conflict, a D8 pack conflict, or an inapplicable manifest is a usage error
-    -- the exit code the resolver leaves to its front end.
-    """
-    pf = policy_file
-    # ADR-049: one resolved configuration for this invocation -- the receipt
-    # the report carries *and*, since D8's `--pack` landed, the thing that
-    # configures the run (hence: before the comparison). Built from the raw
-    # CLI values, not the already-merged locals several of these were
-    # overwritten with above -- the resolver merges them itself, and a
-    # pre-merged value would look CLI-stated.
-    from .cli_compare_receipt import resolve_and_apply, typed_parameter_names
-    from .compatibility_evaluation_resolver import (
-        FieldResolutionError,
-        PackConflictError,
+    """``(evaluation_config, policy_file, resolved_cfg)`` via the typed API's
+    ``workflows.compare_configuration``; a gate pack's levels fold into
+    *resolved_cfg*. Built from the raw CLI values, not merged locals (a
+    pre-merged value would look CLI-stated)."""
+    from .cli_compare_receipt import cli_configuration_inputs, typed_parameter_names
+    from .compatibility_evaluation_frontend import FrontEnd
+    from .pack_application import apply_to_compare_config
+    from .workflows.compare_configuration import (
+        ConfigurationConflictError,
+        ProjectPolicyOverridesError,
+        resolve_compare_configuration,
     )
-    from .errors import PackManifestError
 
+    explicit, project = cli_configuration_inputs(
+        {
+            "contract_mode": contract_mode,
+            "policy": policy,
+            "policy_file_path": policy_file_path,
+            "suppress": suppress,
+            "require_justification": require_justification,
+            "severity_preset": severity_preset,
+            "pack_paths": pack_paths,
+            # The roots each side was classified under (ADR-075 D7).
+            "headers": headers,
+        },
+        # The stated settings: only this module holds the Click context.
+        typed={n for n in typed_parameter_names() if _param_from_cli(n)},
+        project_cfg=project_cfg,
+        project_path=cfg_path,
+        # The overlay applies only from an explicitly named --config.
+        project_overlays_applied=config_explicit,
+        policy_file=policy_file,  # already loaded: one read per digest
+        suppression=suppression,
+        suppress_path=suppress,
+        policy_option=policy_selected_by,
+        policy_path=policy_selected_path,
+        policy_sha256=policy_selected_sha,
+        project_sha256=cfg_sha,
+        symbols_list=symbols_list,
+    )
     try:
-        evaluation_config, pf, resolved_cfg = resolve_and_apply(
-            {
-                "contract_mode": contract_mode,
-                "policy": policy,
-                "policy_file_path": policy_file_path,
-                "suppress": suppress,
-                "require_justification": require_justification,
-                "severity_preset": severity_preset,
-                "pack_paths": pack_paths,
-                # The roots each side was classified under (ADR-075 D7).
-                "headers": headers,
-            },
-            resolved_cfg=resolved_cfg,
-            policy=policy,
+        configuration = resolve_compare_configuration(
+            explicit,
+            front_end=FrontEnd.CLI,
+            project=project,
+            policy_file=policy_file,
+            base_policy=policy,
             contract_evaluation=contract_evaluation,
-            # Only this module holds the Click context, so it answers "did the
-            # user type this?" and hands the answers over as data -- which is
-            # what keeps `cli_compare_receipt` a leaf.
-            typed={n for n in typed_parameter_names() if _param_from_cli(n)},
-            project_cfg=project_cfg,
-            project_path=cfg_path,
-            # The overlay applies only from an explicitly named --config.
-            project_overlays_applied=config_explicit,
-            # Both already loaded for the comparison itself; re-reading them
-            # here could pair one content's digest with another's rules.
-            policy_file=pf,
-            suppression=suppression,
-            suppress_path=suppress,
-            policy_option=policy_selected_by,
-            policy_path=policy_selected_path,
-            policy_sha256=policy_selected_sha,
-            project_sha256=cfg_sha,
-            symbols_list=symbols_list,
         )
-    except (FieldResolutionError, PackConflictError, PackManifestError) as exc:
-        # A D7 same-tier conflict / D8 pack conflict / inapplicable manifest
-        # is a usage error, the exit code the resolver leaves to its front end.
+    except ConfigurationConflictError as exc:
         raise click.UsageError(str(exc)) from exc
-    except PolicyError as exc:
-        # A malformed `.abicheck.yml` `policy.overrides` entry (finding 1).
+    except ProjectPolicyOverridesError as exc:
         raise click.BadParameter(str(exc), param_hint="--policy") from exc
-    return evaluation_config, pf, resolved_cfg
+    if (application := configuration.pack_application) is not None:
+        resolved_cfg = apply_to_compare_config(resolved_cfg, application)
+    return configuration.evaluation_config, configuration.policy_file, resolved_cfg
 
 
 def _attach_use_case_impact(
@@ -1985,21 +1978,25 @@ def run_compare(
         policy_selected_path=policy_selected_path,
         policy_selected_sha=policy_selected_sha,
     )
-    # ADR-068 §3 #23 / ADR-049 D7: fold `.abicheck.yml`'s `policy.overrides`
-    # in at PROJECT_CONFIG tier, after the pack fold above (see
-    # `apply_lower_precedence_overrides`'s docstring for why ordering matters).
-    from .workflows import policy_file as _policy_file_mod
+    # ADR-068 §3 #23 / ADR-049 D7: `.abicheck.yml`'s `policy.overrides` at
+    # PROJECT_CONFIG tier, after the pack fold above (the typed API's order).
+    from .workflows.compare_configuration import (
+        CompareConfigurationError,
+        fold_project_policy_overrides,
+        project_policy_overrides,
+    )
 
-    _pf0 = pf
     try:
-        pf = _policy_file_mod.merge_project_config_policy_overrides(
-            pf, base_policy=policy, project_cfg=project_cfg, project_path=cfg_path
+        project_fold = fold_project_policy_overrides(
+            pf,
+            project_policy_overrides(project_cfg, cfg_path),
+            base_policy=policy,
+            project_path=cfg_path,
         )
-    except PolicyError as e:
+    except CompareConfigurationError as e:
         raise click.BadParameter(str(e), param_hint="--policy") from e
-    for w in _policy_file_mod.project_config_policy_downgrade_warnings(  # round 9/10
-        _pf0, pf, project_path=cfg_path
-    ):
+    pf = project_fold.policy_file
+    for w in project_fold.warnings:  # round 9/10
         click.echo(f"Warning: {w}", err=True)
     extra_changes = _load_probe_matrix_changes(probe_matrix_old, probe_matrix_new)
 

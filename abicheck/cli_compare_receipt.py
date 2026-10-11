@@ -113,7 +113,7 @@ def _suppression_source(suppression: Any, path: Any) -> Any:
     )
 
 
-def resolve_cli_config(
+def cli_configuration_inputs(
     params: Mapping[str, Any],
     *,
     typed: Collection[str],
@@ -128,9 +128,13 @@ def resolve_cli_config(
     project_sha256: str | None = None,
     symbols_list: Any = None,
     project_overlays_applied: bool = False,
-) -> Any:
-    """Resolve one :class:`CompatibilityEvaluationConfig` for this invocation.
+) -> tuple[Any, Any]:
+    """This invocation's ``(explicit, project)`` resolver inputs.
 
+    *typed* names the parameters the user really typed (the CLI answers that
+    from Click's ``ParameterSource`` at its own call site and hands it over as
+    data -- the same stated-settings set a typed caller puts in
+    ``CompareRequest.stated_settings``).
     *policy_option* names the flag that selected ``policy`` when it was not
     ``--policy`` -- ``--required-symbol``, whose contract switches an
     untouched ``--policy`` to ``plugin_abi``, with *policy_path*/
@@ -140,16 +144,10 @@ def resolve_cli_config(
     *project_overlays_applied*: this route applies the config's
     ``contract.overlays`` (a single-pair compare under an explicit
     ``--config``), so the receipt states them at ``project_config`` tier.
-
-    Raises whatever the canonical resolver raises (a D7 same-tier conflict, a
-    D8 pack conflict, a malformed pack manifest); mapping those onto an exit
-    code is the caller's job, as that module documents.
     """
     from .compatibility_evaluation_frontend import (
-        FrontEnd,
         ProjectCompatibilityInputs,
         compare_cli_inputs,
-        resolve_compatibility_evaluation_config,
     )
 
     # The declared contract, enforced rather than only documented: every one
@@ -163,25 +161,41 @@ def resolve_cli_config(
             "COMPARE_CONFIG_PARAMS must be forwarded, since an absent one "
             "resolves as unstated rather than failing"
         )
+    explicit = compare_cli_inputs(
+        params,
+        explicit_parameters=typed,
+        policy_file=policy_file,
+        suppression=_suppression_source(suppression, suppress_path),
+        policy_base_option=policy_option,
+        policy_base_path=str(policy_path) if policy_path is not None else None,
+        policy_base_sha256=policy_sha256,
+        public_symbols_list=symbols_list,
+    )
+    project = ProjectCompatibilityInputs.from_build_config(
+        project_cfg,
+        path=project_path,
+        sha256=project_sha256,
+        overlays_applied=project_overlays_applied,
+    )
+    return explicit, project
 
+
+def resolve_cli_config(params: Mapping[str, Any], **kwargs: Any) -> Any:
+    """Resolve one :class:`CompatibilityEvaluationConfig` for this invocation.
+
+    :func:`cli_configuration_inputs` through the canonical resolver. Raises
+    whatever that resolver raises (a D7 same-tier conflict, a D8 pack
+    conflict, a malformed pack manifest); mapping those onto an exit code is
+    the caller's job, as that module documents.
+    """
+    from .compatibility_evaluation_frontend import (
+        FrontEnd,
+        resolve_compatibility_evaluation_config,
+    )
+
+    explicit, project = cli_configuration_inputs(params, **kwargs)
     return resolve_compatibility_evaluation_config(
-        front_end=FrontEnd.CLI,
-        explicit=compare_cli_inputs(
-            params,
-            explicit_parameters=typed,
-            policy_file=policy_file,
-            suppression=_suppression_source(suppression, suppress_path),
-            policy_base_option=policy_option,
-            policy_base_path=str(policy_path) if policy_path is not None else None,
-            policy_base_sha256=policy_sha256,
-            public_symbols_list=symbols_list,
-        ),
-        project=ProjectCompatibilityInputs.from_build_config(
-            project_cfg,
-            path=project_path,
-            sha256=project_sha256,
-            overlays_applied=project_overlays_applied,
-        ),
+        front_end=FrontEnd.CLI, explicit=explicit, project=project
     )
 
 
@@ -284,84 +298,6 @@ def validate_pack_manifests(
     )
 
 
-def resolve_and_apply(
-    params: Mapping[str, Any],
-    *,
-    resolved_cfg: Any,
-    policy: str,
-    contract_evaluation: bool = False,
-    **kwargs: Any,
-) -> tuple[Any, Any, Any]:
-    """Resolve this invocation's configuration, then let its packs configure it.
-
-    Returns ``(config, policy_file, resolved_cfg)``: the resolved
-    configuration (``None`` when nothing would read one -- see
-    :func:`record_resolved_config`), and the policy file and compare config
-    the comparison should actually run with.
-
-    The selected packs are read from ``params['pack_paths']`` and nowhere
-    else. An earlier revision also took them as a keyword and let that
-    overwrite the ``params`` entry, so the two could silently disagree -- and
-    the branches below read only the keyword, meaning a caller that filled
-    ``params`` alone would have its packs *recorded in the receipt and
-    applied to nothing*. That is precisely the decorative-``--pack``
-    regression this module exists to prevent, so there is one source
-    (CodeRabbit review).
-
-    Both halves come from the *same* resolution, which is what makes
-    ``--pack`` real rather than decorative: the resolver has already applied
-    D7 precedence and D8 conflict detection, and
-    :func:`~abicheck.pack_application.pack_application` reads back only the
-    fields whose provenance names a pack. Nothing here decides precedence.
-
-    The order matters and is not incidental: the configuration is resolved
-    from the *explicitly given* ``policy_file`` (``kwargs['policy_file']``),
-    and only then are the packs' contributions folded into a new one. Folding
-    first would present a pack's override to the resolver as an explicitly
-    stated ``--policy-file`` value -- outranking the packs it came from, and
-    misreported in the receipt.
-
-    Raises what the canonical resolver and the pack loader raise; mapping
-    those onto exit 64 is the caller's job, as both modules document.
-    """
-    pack_paths = tuple(params.get("pack_paths") or ())
-    if not contract_evaluation and not pack_paths:
-        # Nothing would read a resolution: no context exists to record one
-        # onto, and no pack can contribute to the run. Resolving anyway would
-        # make every ordinary `compare` newly able to fail on a D7 conflict
-        # it never previously computed.
-        return None, kwargs.get("policy_file"), resolved_cfg
-    config = resolve_cli_config(params, **kwargs)
-    policy_file = kwargs.get("policy_file")
-    if not pack_paths:
-        return config, policy_file, resolved_cfg
-    from .pack_application import (
-        apply_to_compare_config,
-        check_resolved_config_applies_packs,
-        pack_application,
-        policy_file_with_packs,
-    )
-
-    # Checked again here -- but against the *resolution*, not a second read of
-    # the files. `validate_pack_manifests` ran much earlier (before the
-    # dry-run emit) and validated whatever was on disk then; re-reading here
-    # would only move that window rather than close it, since the resolver had
-    # already loaded its own copy. Asking the resolved config is exact: it is
-    # the revision that configures the run, by construction.
-    # `contract_evaluation` is passed because a field like
-    # `contract.unresolved` only has a consumer when a domain is selected --
-    # accepting it otherwise would record active configuration that reads
-    # back as nothing, the decorative-pack failure again (Codex review).
-    check_resolved_config_applies_packs(config, contract_evaluation=contract_evaluation)
-
-    application = pack_application(config, policy_file=policy_file)
-    return (
-        config,
-        policy_file_with_packs(policy_file, application, base_policy=policy),
-        apply_to_compare_config(resolved_cfg, application),
-    )
-
-
 def resolve_release_pack_application(
     params: Mapping[str, Any],
     *,
@@ -378,8 +314,9 @@ def resolve_release_pack_application(
     into each library's own ``CompareRequest`` fields the same way, folded
     per library by :func:`~abicheck.service_compare_pipeline.classify_compare_pair`.
 
-    Distinct from :func:`resolve_and_apply`, which also merges the packs into
-    *one* ``PolicyFile``/``ResolvedCompareConfig`` -- fits a single-pair
+    Distinct from the single-pair ``workflows.compare_configuration.
+    resolve_compare_configuration``, which folds the packs into *one*
+    ``PolicyFile`` -- fits a single-pair
     ``compare``'s single ambient policy file, but the release fan-out
     reloads its own ``PolicyFile`` fresh per library, so this returns the
     pack's *contribution* for the caller to fold in once per library.
@@ -455,7 +392,7 @@ def resolve_release_pack_application(
         # function's own docstring.
         # `contract_evaluation` is this release invocation's own real value
         # (whether *this* run passed `--contract`) -- the same gate the
-        # single-pair path applies via `resolve_and_apply`, now that this
+        # single-pair path applies via `resolve_compare_configuration`, now that this
         # function's own docstring has confirmed there is no release-specific
         # hazard left to guard against beyond that.
         contract_evaluation=contract_evaluation,
@@ -496,10 +433,6 @@ def resolve_release_pack_application_from_ctx(
     import click
     import yaml
 
-    from .compatibility_evaluation_resolver import (
-        FieldResolutionError,
-        PackConflictError,
-    )
     from .errors import PackManifestError
     from .workflows.policy_file import PolicyFile
 
@@ -544,8 +477,8 @@ def resolve_release_pack_application_from_ctx(
             symbols_list=None,
         )
     except (
-        FieldResolutionError,
-        PackConflictError,
+        # A D7 same-tier / D8 pack conflict is a `ValueError` subclass of the
+        # resolver's own, covered by the `ValueError` arm below.
         PackManifestError,
         # `resolve_release_pack_application`'s own `resolve_cli_config` call
         # loads `--policy`'s document a *second* time (for D7 provenance,
