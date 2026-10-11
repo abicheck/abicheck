@@ -39,12 +39,13 @@ from __future__ import annotations
 
 import gc
 import json
+import sys
 import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any
 
-__all__ = ["gc_paused", "loads_acyclic"]
+__all__ = ["RELAXED_GC_THRESHOLDS", "gc_paused", "gc_relaxed", "loads_acyclic"]
 
 
 #: Overlapping pauses (two dumps parsing on two threads) share one pause:
@@ -83,3 +84,48 @@ def loads_acyclic(document: str | bytes | bytearray, **kwargs: Any) -> Any:
     every caller here."""
     with gc_paused():
         return json.loads(document, **kwargs)
+
+
+#: Generation thresholds while a live dump runs. A dump builds millions of
+#: long-lived model objects, and at CPython's default 2000-allocation
+#: generation-0 threshold the collector rescans them over and over without
+#: freeing anything. Measured on oneCCL 2021.15 (field run, identical output):
+#: dump 44 -> 37.5 s on 3.12 and 41 -> 35.4 s on 3.15, for 20-90 MB more
+#: peak. No effect on a free-threaded build, which skips it.
+RELAXED_GC_THRESHOLDS = (100_000, 50, 100)
+
+_relax_lock = threading.Lock()
+_relax_active = 0
+_relax_restore: tuple[int, ...] = ()
+
+
+def _gil_enabled() -> bool:
+    probe = getattr(sys, "_is_gil_enabled", None)
+    return True if probe is None else bool(probe())
+
+
+@contextmanager
+def gc_relaxed(enabled: bool = True) -> Iterator[None]:
+    """Raise the collector's thresholds for the ``with`` body, then restore
+    the ones in effect before the outermost overlapping scope.
+
+    Same overlap rule as :func:`gc_paused` (two sides dumping on two
+    threads share one scope). A no-op when *enabled* is false (the
+    ``low-memory`` profile keeps the default) or on a free-threaded build.
+    """
+    global _relax_active, _relax_restore
+    if not enabled or not _gil_enabled():
+        yield
+        return
+    with _relax_lock:
+        if _relax_active == 0:
+            _relax_restore = gc.get_threshold()
+            gc.set_threshold(*RELAXED_GC_THRESHOLDS)
+        _relax_active += 1
+    try:
+        yield
+    finally:
+        with _relax_lock:
+            _relax_active -= 1
+            if _relax_active == 0:
+                gc.set_threshold(*_relax_restore)

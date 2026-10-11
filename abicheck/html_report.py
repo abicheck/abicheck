@@ -61,6 +61,7 @@ from .report.document import ReportDocument
 from .report.edge_coverage_section import compute_edge_coverage_section
 from .report.envelope import ReportEnvelope, resolved_document, resolved_gate
 from .report.finding import effective_bucket
+from .report.redundancy_reasons import redundancy_reason_text
 from .report.render_html import (
     ChangeRow,
     ConfidenceData,
@@ -672,6 +673,7 @@ def build_html_document(
             "all_changes_count": len(all_changes),
             "display_changes_count": len(display_changes),
             "redundant_count": getattr(result, "redundant_count", 0),
+            "redundant_reasons": redundancy_reason_text(result),
             "nav_bar": dataclasses.asdict(
                 compute_nav_bar(removed, changed, added, suppressed_count)
             ),

@@ -19,6 +19,7 @@ from abicheck.errors import HeaderToolchainError, SnapshotError
 from abicheck.extract.castxml_header_compat import write_castxml_aggregate
 from abicheck.extract.unparseable_header_fallback import (
     _scan_diagnostics,
+    attribute_failing_headers,
     parse_excluding_unparseable_headers,
 )
 from abicheck.model.header_exclusion_record import (
@@ -561,3 +562,46 @@ def test_real_castxml_attributes_the_failing_header_at_every_position(tmp_path, 
         _castxml_dump, headers, [tmp_path], "cc", lang="c"
     )
     assert excluded == [headers[bad]]
+
+
+@pytest.mark.parametrize("seed", range(20))
+def test_attribution_names_exactly_the_failing_headers_or_nothing(seed):
+    """The header graph's one-shot re-parse trusts this list; it must equal the
+    headers that fail on their own, and be empty whenever the exclusion loop
+    would refuse (every header blamed, nothing attributable)."""
+    rng = random.Random(seed)
+    headers = _headers(rng.randint(2, 9))
+    bad = set(rng.sample(headers, rng.randint(1, len(headers))))
+    exc = SnapshotError("clang failed (exit 1)")
+    exc.stderr = _stderr_for(headers, bad, seed % 3)
+    expected = [] if len(bad) == len(headers) else [h for h in headers if h in bad]
+    assert attribute_failing_headers(exc, headers) == expected
+
+
+def test_attribution_is_empty_for_an_unattributable_error():
+    exc = SnapshotError("clang failed")
+    exc.stderr = f"{AGG}:1:1: error: something in the aggregate itself"
+    assert attribute_failing_headers(exc, _headers(4)) == []
+
+
+@pytest.mark.parametrize("width", [10, 999, 1000, 5000])
+def test_clang_failure_carries_full_diagnostics_for_attribution(tmp_path, width):
+    """The message truncates clang's stderr; the attached ``stderr`` never
+    does, so a late header's error (past the 1000-char message cut) is still
+    attributable."""
+    from types import SimpleNamespace
+
+    from abicheck.dumper_clang_errors import _parse_clang_ast_result
+
+    headers = _headers(3)
+    tail = f"In file included from {AGG}:9:\n{headers[2]}:1:2: error: late\n"
+    stderr = "x" * width + "\n" + tail
+    with pytest.raises(SnapshotError) as info:
+        _parse_clang_ast_result(
+            SimpleNamespace(returncode=1, stderr=stderr),
+            tmp_path / "ast.json",
+            tmp_path / "cache.json",
+            cache_write=False,
+        )
+    assert info.value.stderr == stderr
+    assert attribute_failing_headers(info.value, headers) == [headers[2]]

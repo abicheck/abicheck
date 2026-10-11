@@ -57,6 +57,8 @@ from ..storage.acyclic_json import gc_paused
 __all__ = [
     "concurrent_children_apply",
     "isolation_supported",
+    "resolve_cached_in_process",
+    "run_cold_isolated",
     "run_isolated",
     "side_processes_enabled",
 ]
@@ -96,9 +98,11 @@ def concurrent_children_apply(
 
 
 def side_processes_enabled() -> bool:
-    """``ABICHECK_SIDE_PROCESSES`` (default on): ``0`` keeps two concurrent
-    sides in this process, as threads -- for an embedding host that must
-    not fork, or a test that observes side resolution in-process."""
+    """``ABICHECK_SIDE_PROCESSES`` (default on): ``0`` keeps both sides in
+    this process -- for an embedding host that must not fork, or a test that
+    observes side resolution in-process. *How* they then run is the caller's
+    ``allow_parallel``: the typed API resolves them in two threads, the
+    ``compare`` CLI (``allow_parallel=False``) one after the other."""
     from ..extract.env_flags import env_flag
 
     return env_flag("ABICHECK_SIDE_PROCESSES")
@@ -122,6 +126,53 @@ def _child(conn: Any, fn: Callable[[], Any]) -> None:
         )
     finally:
         conn.close()
+
+
+def resolve_cached_in_process(fns: Sequence[Callable[[], _T]]) -> list[_T | None]:
+    """Resolve each of *fns* here if the snapshot cache can serve it whole.
+
+    ``None`` marks a side that would have to extract (a cache miss, or a
+    dump shape the cache does not hold); only those are worth a child. A warm
+    side measured ~12 s either way on oneDNN, but forked it cost 2.6x the
+    peak memory and a third more CPU -- fork, pickle back, and a second
+    resident copy, for a load that is cheap in-process. Any other failure
+    propagates, exactly as it would have from the child.
+    """
+    from .cache_probe import CacheProbeMiss, cache_only_probe
+
+    results: list[_T | None] = []
+    for fn in fns:
+        try:
+            with cache_only_probe():
+                results.append(fn())
+        except CacheProbeMiss:
+            results.append(None)
+    return results
+
+
+def run_cold_isolated(
+    fns: Sequence[Callable[[], _T]],
+    wrap: Callable[[Callable[[], _T]], Callable[[], _T]],
+    *,
+    concurrent: bool,
+) -> list[_T]:
+    """Resolve each of *fns*: a cache-served one here, the rest through
+    :func:`run_isolated` (each wrapped by *wrap* first), results in order.
+
+    Only *concurrent* (``balanced``) probes the cache first. Sequential
+    isolation is the ``low-memory`` profile, whose contract is that no side's
+    resolution -- a cache or stored-snapshot load included -- leaves its
+    allocations in this process, so every side forks."""
+    warm: list[_T | None] = (
+        resolve_cached_in_process(fns) if concurrent else [None] * len(fns)
+    )
+    from ..deadline import check as check_deadline
+
+    # The warm loads above ran outside any worker's deadline re-check.
+    check_deadline()
+    cold = [wrap(fn) for fn, res in zip(fns, warm, strict=True) if res is None]
+    forked = iter(run_isolated(cold, concurrent=concurrent) if cold else [])
+    return [res if res is not None else next(forked) for res in warm]
 
 
 def run_isolated(fns: Sequence[Callable[[], _T]], *, concurrent: bool) -> list[_T]:

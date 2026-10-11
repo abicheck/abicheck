@@ -216,6 +216,8 @@ def parse_header_groups_bisecting(
     headers: Sequence[_H],
     parse: Callable[[list[_H]], HeaderGraphAstProjection],
     errors: tuple[type[BaseException], ...],
+    *,
+    known_failed: Sequence[_H] = (),
 ) -> tuple[list[HeaderGraphAstProjection], list[_H]]:
     """Parse *headers* in groups, halving any group whose parse raises.
 
@@ -224,13 +226,30 @@ def parse_header_groups_bisecting(
     split before the first attempt. Cost is ``O(f * log n)`` parses for
     ``f`` failing headers, never one parse per header unless every header
     fails.
+
+    *known_failed* are headers the failed batch's own diagnostics already
+    blame. They are dropped first and the rest parsed as one group: one
+    parse instead of ~2 * f * log2(n), each of which re-reads the whole
+    shared include closure (18 parses, 3.75 GB of AST JSON, on oneDNN's
+    SYCL headers). Only when that group fails too -- the diagnostics missed
+    a header -- does the bisect run, over the rest.
     """
     parts: list[HeaderGraphAstProjection] = []
     failed: list[_H] = []
     pending: list[list[_H]] = []
     items = list(headers)
+    if known_failed:
+        blamed = set(known_failed)
+        rest = [h for h in items if h not in blamed]
+        failed = [h for h in items if h in blamed]
+        if not rest:
+            return parts, failed
+        try:
+            return [parse(rest)], failed
+        except errors:
+            items = rest
     if len(items) <= 1:
-        return parts, items
+        return parts, failed + items
     mid = len(items) // 2
     pending = [items[:mid], items[mid:]]
     while pending:

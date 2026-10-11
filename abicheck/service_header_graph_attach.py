@@ -319,6 +319,7 @@ def acquire_header_graph_ast(
     )
     from .extract.headers.clang.backend import clang_header_dump
     from .extract.headers.clang.streaming import suppress_streaming_prune
+    from .extract.unparseable_header_fallback import attribute_failing_headers
     from .storage.derived_ast import DerivedAstArtifact, derived_ast_scope
 
     # Everything either projection path may raise on an AST that is readable
@@ -544,13 +545,14 @@ def acquire_header_graph_ast(
         ast_failure = (
             str(exc).strip().splitlines()[0] if str(exc).strip() else type(exc).__name__
         )
-        _log.warning(
-            "header graph: clang AST parse failed; falling back to a "
-            "declaration-only graph (call/reference edges not collected): %s",
-            ast_failure,
-        )
         memory_trace.mark("dump.header_graph.clang_ast:failed")
-        if len(resolved_headers) > 1:
+        if len(resolved_headers) < 2:
+            _log.warning(
+                "header graph: clang AST parse failed; falling back to a "
+                "declaration-only graph (call/reference edges not collected): %s",
+                ast_failure,
+            )
+        else:
             # One header the frontend rejects (a SYCL header needing a flag
             # this host parse lacks, say) must not cost every other header
             # its call/reference edges. Re-parse in halves and keep each
@@ -582,15 +584,23 @@ def acquire_header_graph_ast(
                     resolved_headers,
                     _parse_group,
                     (SnapshotError, ValidationError, *_MALFORMED_AST_ERRORS),
+                    known_failed=(
+                        attribute_failing_headers(exc, resolved_headers)
+                        if isinstance(exc, SnapshotError)
+                        else ()
+                    ),
                 )
             if parts:
                 projection_from_groups = merge_header_graph_ast_projections(parts)
             names = ", ".join(p.name for p in failed[:5])
             more = ", ..." if len(failed) > 5 else ""
             recovered = (
-                "the rest were parsed separately"
+                f"call/reference edges collected for the other "
+                f"{len(resolved_headers) - len(failed)}; these contribute "
+                "declarations only"
                 if parts
-                else "no header could be recovered"
+                else "no header could be recovered, so the graph is "
+                "declaration-only (call/reference edges not collected)"
             )
             ast_failure = (
                 f"clang AST parse failed for {len(failed)} of "

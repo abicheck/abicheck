@@ -57,6 +57,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "EXCLUDED_HEADERS_TOOLCHAIN_KEY",
+    "attribute_failing_headers",
     "parse_excluding_unparseable_headers",
 ]
 
@@ -165,6 +166,20 @@ def _attribute(located: list[tuple[str, int]], index: dict[str, int]) -> int | N
     return None
 
 
+def attribute_failing_headers(
+    exc: SnapshotError, headers: Sequence[Path]
+) -> list[Path]:
+    """The headers *exc*'s diagnostics blame, by the same rules the exclusion
+    loop below uses; ``[]`` when that loop would re-raise instead (nothing
+    attributable, a conflict between listed headers, or every header blamed).
+    """
+    stderr = exc.attribution_stderr or exc.stderr or str(exc)
+    bad, conflicts = _scan_diagnostics(stderr, headers)
+    if not bad or conflicts or len(bad) >= len(headers):
+        return []
+    return [headers[i] for i in sorted(bad)]
+
+
 def parse_excluding_unparseable_headers(
     headers: Sequence[Path],
     attempt: Callable[[list[Path]], T],
@@ -192,14 +207,12 @@ def parse_excluding_unparseable_headers(
             # A failed language-mode retry carries the retry's diagnostics
             # for attribution (the original mode's errors on C++ syntax
             # would implicate every C++ header, not the failing one).
-            stderr = exc.attribution_stderr or exc.stderr or str(exc)
-            bad, conflicts = _scan_diagnostics(stderr, active)
             # A clash *between* listed headers is not attributable to either:
             # which one to drop would be an arbitrary choice, and the user's
             # explicit ``--exclude-header`` is the way to make it.
-            if not bad or conflicts or len(bad) >= len(active):
+            dropped = attribute_failing_headers(exc, active)
+            if not dropped:
                 raise
-            dropped = [active[i] for i in sorted(bad)]
             log.warning(
                 "L2 header parse failed in %d of %d header(s); excluding them and "
                 "retrying (reduced evidence: their declarations are absent from "
@@ -209,6 +222,6 @@ def parse_excluding_unparseable_headers(
                 ", ".join(str(p) for p in dropped),
             )
             excluded.extend(dropped)
-            active = [h for i, h in enumerate(active) if i not in bad]
+            active = [h for h in active if h not in dropped]
             continue
         return result, excluded

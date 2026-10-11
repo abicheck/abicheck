@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .disposition_audit import DispositionAudit, render_disposition_audit_lines
+from .result_counts import held_out_note
 from .surface_changes import SurfaceChangeSection, render_surface_changes_lines
 
 
@@ -160,7 +161,8 @@ def render_review_digest(digest: ReviewDigest) -> str:
         lines += [
             "**Count populations:** "
             f"{counts['raw_detected']} detected; {counts['retained']} retained "
-            f"({counts['gating']} gating, {counts['non_gating']} non-gating); "
+            f"({counts['gating']} gating, {counts['non_gating']} non-gating)"
+            f"{held_out_note(counts, digest.disposition_audit)}; "
             f"{counts['review_groups']} review group(s).",
             "",
             "**Public surface:** "
@@ -307,7 +309,8 @@ def render_terminal_digest(digest: ReviewDigest) -> str:
         c = digest.result_counts
         lines += [
             f"Findings: {c['raw_detected']} detected; {c['retained']} retained "
-            f"({c['gating']} gating, {c['non_gating']} non-gating); "
+            f"({c['gating']} gating, {c['non_gating']} non-gating)"
+            f"{held_out_note(c, digest.disposition_audit)}; "
             f"{c['review_groups']} review groups.",
             f"Public surface: {c['public_additions']} additions, "
             f"{c['public_removals']} removals, {c['public_modifications']} modifications.",
