@@ -107,6 +107,9 @@ def _project(tmp_path: Path) -> Path:
 def _trace(
     project: Path, extra: list[str], inherited_worker: str | None = None
 ) -> set[str]:
+    if sys.version_info < (3, 12):
+        # The plugin itself refuses to run without sys.monitoring.
+        pytest.skip("mutation_reach_trace needs Python 3.12+ (sys.monitoring)")
     out = project / "reach"
     # The nested run is its own session: an outer xdist worker's identity
     # (PYTEST_XDIST_WORKER=gwN) would otherwise be inherited by the nested

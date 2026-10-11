@@ -266,12 +266,22 @@ def test_a_name_zipfile_rewrites_is_refused_as_on_windows(
     backslash into "/" in ``ZipInfo.filename`` there, so validating that
     field alone accepts a name every other platform refuses."""
     archive = _hostile(tmp_path, [(member, b"{}")])
-    real = zipfile._sanitize_filename
+    if hasattr(zipfile, "_sanitize_filename"):
+        real = zipfile._sanitize_filename
 
-    def _windows(name: str) -> str:
-        return real(name).replace("\\", "/")
+        def _windows(name: str) -> str:
+            return real(name).replace("\\", "/")
 
-    monkeypatch.setattr(zipfile, "_sanitize_filename", _windows)
+        monkeypatch.setattr(zipfile, "_sanitize_filename", _windows)
+    else:
+        # Python 3.11 rewrites the separator inside ZipInfo.__init__ instead.
+        real_init = zipfile.ZipInfo.__init__
+
+        def _windows_init(self, filename="NoName", *args, **kwargs):  # type: ignore[no-untyped-def]
+            real_init(self, filename, *args, **kwargs)
+            self.filename = self.filename.replace("\\", "/")
+
+        monkeypatch.setattr(zipfile.ZipInfo, "__init__", _windows_init)
     dest = tmp_path / "dest"
     with pytest.raises(SnapshotError, match="portable"):
         unpack_project_package(archive, dest)

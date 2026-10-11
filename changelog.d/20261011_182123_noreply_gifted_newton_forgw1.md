@@ -14,3 +14,7 @@
   `.abicheck.yml` `scope.public: true` states `public` just as
   `--contract public` does, so incomplete identity coverage can turn a clean
   `0` into `1`.
+- **Compiled-pattern memory estimate no longer undercounts on Python 3.11**
+  — the spelling-pattern cache budget now charges a fixed per-pattern
+  overhead, so small vocabularies are never accounted below their measured
+  size.
