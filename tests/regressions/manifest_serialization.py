@@ -114,7 +114,6 @@ SERIALIZATION_BUG_CLASSES: tuple[BugClass, ...] = (
         ),
         fixed_by=(1552,),
         seed_tests=("tests/test_str_enum_serialized_token.py",),
-        public_surfaces=("cli",),
         axes={
             "rendering": ("str", "format", "json"),
             "interpreter": ("3.11", "3.13", "3.15", "3.15t"),

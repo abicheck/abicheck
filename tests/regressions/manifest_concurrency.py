@@ -213,7 +213,6 @@ CONCURRENCY_BUG_CLASSES: tuple[BugClass, ...] = (
             "tests/test_ast_memo_slot_thread_context.py",
             "tests/test_dumper_clang.py",
         ),
-        public_surfaces=("cli",),
         axes={"workers": ("1", "2", "4"), "context": ("fresh", "inherited")},
     ),
 )
