@@ -202,3 +202,131 @@ def test_dispose_records_lowers_and_never_raises() -> None:
     # Nothing to move: the verdict is untouched.
     assert dispose_unreached_type_findings(result, {"Gadget": ("liba.so",)}) == []
     assert result.verdict == Verdict.COMPATIBLE
+
+
+# --- unit paths the CLI integration proof covers only end to end ---------
+
+
+def test_export_tokens_reads_plain_and_demangled_names(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import abicheck.elf_symbol_filter as esf
+    import abicheck.workflows.extraction as extraction
+    from abicheck.workflows import release_member_headers as rmh
+
+    monkeypatch.setattr(extraction, "parse_elf_metadata", lambda p: object())
+    monkeypatch.setattr(
+        esf,
+        "exported_symbol_names",
+        lambda elf, types, abi_relevant_only: [
+            "a_open@@V1",
+            "_ZN2ns6Widget4drawEv",
+            "_Z",  # demangles to nothing usable
+        ],
+    )
+    assert rmh._export_tokens(tmp_path / "lib.so") == frozenset({"a_open", "draw"})
+    # No exports, and an unreadable binary: ownership unknown.
+    monkeypatch.setattr(esf, "exported_symbol_names", lambda *a, **k: [])
+    assert rmh._export_tokens(tmp_path / "lib.so") is None
+
+    def boom(p: Path) -> object:
+        raise ValueError("not ELF")
+
+    monkeypatch.setattr(extraction, "parse_elf_metadata", boom)
+    assert rmh._export_tokens(tmp_path / "lib.so") is None
+
+
+def test_header_tokens_of_an_unreadable_header_is_empty(tmp_path: Path) -> None:
+    from abicheck.workflows.release_member_headers import _header_tokens
+
+    assert _header_tokens(tmp_path / "missing.h") == frozenset()
+
+
+def test_resolve_release_header_ownership_sides(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from abicheck.workflows import release_member_headers as rmh
+
+    a, b = tmp_path / "a.h", tmp_path / "b.h"
+    a.write_text("int a_open(void);\n")
+    b.write_text("int b_open(void);\n")
+    tokens = {"liba": frozenset({"a_open"}), "libb": frozenset({"b_open"})}
+    monkeypatch.setattr(rmh, "_export_tokens", lambda p: tokens.get(p.stem))
+    paths = {"liba": tmp_path / "liba", "libb": tmp_path / "libb"}
+    got = rmh.resolve_release_header_ownership(
+        ["liba", "libb"], paths, paths, [a, b], []
+    )
+    assert got.old.headers_for("liba") == [a]
+    assert got.old.headers_for("libb") == [b]
+    assert got.new == SideHeaderOwnership()  # no headers on that side
+    # Fewer than two members: the union on both sides.
+    one = rmh.resolve_release_header_ownership(["liba"], paths, paths, [a], [b])
+    assert one.old.union == (a,) and one.new.union == (b,)
+
+
+def test_release_pass_moves_only_scoped_sibling_owned_findings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from abicheck.frontends.cli import release_member_restamp as rr
+
+    def result(library: str, *, scoped: bool) -> DiffResult:
+        return DiffResult(
+            old_version="1",
+            new_version="2",
+            library=library,
+            changes=[_change(ChangeKind.TYPE_SIZE_CHANGED, "Widget")],
+            verdict=Verdict.BREAKING,
+            scope_to_public_surface=scoped,
+        )
+
+    restamped: list[str] = []
+    monkeypatch.setattr(
+        rr, "_restamp", lambda entry, res, **kw: restamped.append(entry["library"])
+    )
+    entries: list[dict[str, object]] = [
+        {"library": "liba.so", "_type_attribution": {"Widget": REACHES},
+         "_diff_result": result("liba.so", scoped=True)},
+        {"library": "libb.so", "_type_attribution": {"Widget": PROVEN_UNREACHABLE},
+         "_diff_result": result("libb.so", scoped=True)},
+        {"library": "libc.so", "_type_attribution": {"Widget": PROVEN_UNREACHABLE},
+         "_diff_result": result("libc.so", scoped=False)},  # scoping off: kept
+        {"library": "libd.so", "_type_attribution": "not a dict"},
+    ]  # fmt: skip
+    moved = rr.dispose_release_unreached_types(
+        entries,
+        severity_config=None,
+        require_complete_analysis=False,
+        contract_evaluation=False,
+        output_dir=None,
+    )
+    assert moved == 1 and restamped == ["libb.so"]
+    assert entries[2]["_diff_result"].changes  # type: ignore[union-attr]
+
+
+def test_restamp_rederives_the_member_entry(tmp_path: Path) -> None:
+    from abicheck.frontends.cli.release_member_restamp import _restamp
+
+    res = DiffResult(
+        old_version="1",
+        new_version="2",
+        library="libb.so",
+        changes=[_change(ChangeKind.FUNC_ADDED, "b_new")],
+        verdict=Verdict.COMPATIBLE,
+        scope_to_public_surface=True,
+    )
+    dispose_unreached_type_findings(res, {"Widget": ("liba.so",)})
+    entry: dict[str, object] = {"library": "libb.so", "verdict": "BREAKING"}
+    _restamp(
+        entry,
+        res,
+        severity_config=None,
+        require_complete_analysis=False,
+        contract_evaluation=False,
+        output_dir=tmp_path,
+    )
+    assert entry["verdict"] == res.verdict.value
+    assert entry["breaking"] == 0
+    assert "Filtered as non-public ABI surface in libb.so" in str(
+        entry["_scope_ledger_text"]
+    )
+    assert (tmp_path / "libb.json").is_file()
