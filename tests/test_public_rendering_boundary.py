@@ -558,8 +558,10 @@ class TestTheDisposedFindingsTableSurvivesHostileCells:
     HEADER = "| Library | Disposition | Kind | Symbol | Rule / reason |"
 
     def _render(self, symbol, reason):
-        from abicheck.cli_compare_release_helpers import _release_md_disposed_findings
         from abicheck.demangle import demangle_text
+        from abicheck.report.render_release_markdown import (
+            _release_md_disposed_findings,
+        )
 
         lib = {
             "library": "libfoo.so",

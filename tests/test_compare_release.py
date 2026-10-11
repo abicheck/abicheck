@@ -13,7 +13,6 @@ from abicheck.binary_utils import build_match_map as _build_match_map
 from abicheck.cli import main
 from abicheck.cli_compare_release import (
     _discover_include_roots,
-    _format_release_json,
     _prepare_compare_release_inputs,
 )
 from abicheck.cli_helpers_compare import (
@@ -21,6 +20,7 @@ from abicheck.cli_helpers_compare import (
     _version_sort_key,
     strip_vendor_hash,
 )
+from abicheck.frontends.cli.release_report import render_release_summary
 from abicheck.model import (
     AbiSnapshot,
     Function,
@@ -1679,7 +1679,8 @@ def test_release_json_emits_severity_block() -> None:
     from abicheck.policy.severity import resolve_severity_config
 
     cfg = resolve_severity_config("default", addition="error")
-    out = _format_release_json(
+    out = render_release_summary(
+        "json",
         "COMPATIBLE",
         Path("/o"),
         Path("/n"),
@@ -1689,8 +1690,8 @@ def test_release_json_emits_severity_block() -> None:
         {},
         {},
         [],
-        None,
-        None,
+        bundle_result=None,
+        matrix_result=None,
         severity_config=cfg,
         severity_exit_code=1,
     )
@@ -1700,7 +1701,8 @@ def test_release_json_emits_severity_block() -> None:
 
 
 def test_release_json_omits_severity_block_without_config() -> None:
-    out = _format_release_json(
+    out = render_release_summary(
+        "json",
         "COMPATIBLE",
         Path("/o"),
         Path("/n"),
@@ -1710,8 +1712,8 @@ def test_release_json_omits_severity_block_without_config() -> None:
         {},
         {},
         [],
-        None,
-        None,
+        bundle_result=None,
+        matrix_result=None,
     )
     assert "severity" not in json.loads(out)
 

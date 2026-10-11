@@ -45,7 +45,6 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 __all__ = [
-    "evidence_contract_error_entries",
     "evidence_contract_notice",
 ]
 
@@ -76,31 +75,3 @@ def evidence_contract_notice(
         "with `dump --sources`/`--build-info` and compare the snapshot "
         "directories, or compare the library individually."
     )
-
-
-def evidence_contract_error_entries(
-    library_results: Sequence[object],
-) -> list[dict[str, object]]:
-    """``{"library", "error"}`` entries for members short of the pinned rung.
-
-    Fed to ``junit_report.to_junit_xml_multi``'s ``error_libraries``, which
-    renders one ``<testsuite>`` with an ``<error>`` testcase each. Without
-    this, a release that exits 7 rendered a JUnit document with
-    ``failures="0" errors="0"`` -- the process failed while a report-driven
-    dashboard read the run as successful (Codex review). The XML is written
-    before the exit is taken, so the renderer has to carry the fact itself,
-    exactly as the JSON ``exit`` block does.
-    """
-    return [
-        {
-            "library": str(entry.get("library")),
-            "error": (
-                "Requested --depth evidence was not reached for this member; "
-                "its findings rest on shallower evidence than was asked for. "
-                "Contributes 7 to the release exit code "
-                "(evidence-contract axis)."
-            ),
-        }
-        for entry in library_results
-        if isinstance(entry, dict) and entry.get("evidence_contract_error_contribution")
-    ]

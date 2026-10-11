@@ -33,10 +33,10 @@ from pathlib import Path
 
 from abicheck.checker_policy import ChangeKind
 from abicheck.checker_types import DiffResult
-from abicheck.cli_compare_receipt import release_disposition_audit_block
-from abicheck.cli_compare_release_helpers import _format_release_json
+from abicheck.frontends.cli.release_report import render_release_summary
 from abicheck.model.change import Change
 from abicheck.report.disposition_audit import DispositionAudit
+from abicheck.report.release_document import release_disposition_audit_block
 from abicheck.suppression import Suppression, SuppressionList
 
 
@@ -139,7 +139,8 @@ class TestReleaseFanOutFoldsPerLibraryAudits:
 
     def test_format_release_json_carries_the_folded_block(self) -> None:
         entries = self._library_entries()
-        out = _format_release_json(
+        out = render_release_summary(
+            "json",
             "NO_CHANGE",
             Path("/o"),
             Path("/n"),
@@ -149,8 +150,8 @@ class TestReleaseFanOutFoldsPerLibraryAudits:
             {},
             {},
             [],
-            None,
-            None,
+            bundle_result=None,
+            matrix_result=None,
         )
         data = json.loads(out)
         assert data["disposition_audit"]["detected_total"] == 175
@@ -210,7 +211,8 @@ class TestReleaseFanOutFoldsBundleFindings:
         assert folded["detected_total"] == 0
 
     def test_format_release_json_carries_the_bundle_contribution(self) -> None:
-        out = _format_release_json(
+        out = render_release_summary(
+            "json",
             "BREAKING",
             Path("/o"),
             Path("/n"),
@@ -220,8 +222,8 @@ class TestReleaseFanOutFoldsBundleFindings:
             {},
             {},
             [],
-            self._bundle_result(1),
-            None,
+            bundle_result=self._bundle_result(1),
+            matrix_result=None,
         )
         data = json.loads(out)
         assert data["disposition_audit"]["detected_total"] == 1

@@ -144,7 +144,7 @@ def _dispatch_release_compare(ctx: click.Context, **kwargs: Any) -> None:
     # fan-out cannot produce must be rejected here explicitly. Without it,
     # compare_release_cmd's own callback is reached directly (not through
     # Click's arg parsing, so its own decorator-level validation never runs)
-    # and _format_release_summary's fallback branch would silently render
+    # and render_release_summary's fallback branch would silently render
     # markdown to the requested sarif/html/review destination instead of
     # erroring.
     #

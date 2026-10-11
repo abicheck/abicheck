@@ -36,10 +36,6 @@ from abicheck.checker_policy import ChangeKind, Verdict
 from abicheck.cli import main
 from abicheck.cli_compare_release import (
     _exit_compare_release,
-    _format_release_json,
-    _format_release_markdown,
-    _release_md_bundle_findings,
-    _release_md_matrix_findings,
     _resolve_release_severity_config,
 )
 from abicheck.cli_helpers_compare import (
@@ -52,6 +48,7 @@ from abicheck.cli_resolve import (
 )
 from abicheck.elf_metadata import ElfMetadata, ElfSymbol
 from abicheck.frontends.cli.options.params import _load_suppression_and_policy
+from abicheck.frontends.cli.release_report import render_release_summary
 from abicheck.frontends.cli.runtime import (
     _announce_exit_scheme,
     _exit_with_severity_or_verdict,
@@ -61,6 +58,10 @@ from abicheck.frontends.cli.runtime import (
 )
 from abicheck.model import AbiSnapshot, Function, Visibility
 from abicheck.policy.effective_gate import EffectiveGate
+from abicheck.report.render_release_markdown import (
+    _release_md_bundle_findings,
+    _release_md_matrix_findings,
+)
 from abicheck.serialization import snapshot_to_json
 from abicheck.workflows.release_exit_fold import fold_release_global_severity
 from tests._dump_format_fakes import fake_format_adapter
@@ -898,7 +899,8 @@ class TestCompareReleaseFormatHelpers:
         }
 
     def test_format_json_basic(self, tmp_path: Path) -> None:
-        text = _format_release_json(
+        text = render_release_summary(
+            "json",
             "NO_CHANGE",
             tmp_path / "old",
             tmp_path / "new",
@@ -908,15 +910,16 @@ class TestCompareReleaseFormatHelpers:
             {},
             {},
             [],
-            None,
-            None,
+            bundle_result=None,
+            matrix_result=None,
         )
         data = json.loads(text)
         assert data["verdict"] == "NO_CHANGE"
         assert data["changed_libraries"] == []
 
     def test_format_json_changed_libraries(self, tmp_path: Path) -> None:
-        text = _format_release_json(
+        text = render_release_summary(
+            "json",
             "BREAKING",
             tmp_path / "old",
             tmp_path / "new",
@@ -926,14 +929,15 @@ class TestCompareReleaseFormatHelpers:
             {},
             {},
             [],
-            None,
-            None,
+            bundle_result=None,
+            matrix_result=None,
         )
         data = json.loads(text)
         assert data["changed_libraries"] == ["libfoo.so"]
 
     def test_format_markdown_basic(self, tmp_path: Path) -> None:
-        text = _format_release_markdown(
+        text = render_release_summary(
+            "markdown",
             "NO_CHANGE",
             tmp_path / "old",
             tmp_path / "new",
@@ -942,8 +946,9 @@ class TestCompareReleaseFormatHelpers:
             [],
             {},
             {},
-            None,
-            None,
+            [],
+            bundle_result=None,
+            matrix_result=None,
         )
         assert "# ABI Release Comparison" in text
         assert "libfoo.so" in text
@@ -3119,7 +3124,8 @@ class TestReleaseFormatWithBundleAndMatrix:
         assert any("consumer" in ln for ln in lines)
 
     def test_markdown_with_bundle_and_matrix(self, tmp_path) -> None:
-        text = _format_release_markdown(
+        text = render_release_summary(
+            "markdown",
             "BREAKING",
             tmp_path / "old",
             tmp_path / "new",
@@ -3128,14 +3134,16 @@ class TestReleaseFormatWithBundleAndMatrix:
             [],
             {},
             {},
-            _bundle_with_findings(),
-            _matrix_with_changes(),
+            [],
+            bundle_result=_bundle_with_findings(),
+            matrix_result=_matrix_with_changes(),
         )
         assert "Bundle" in text
         assert "Matrix" in text
 
     def test_json_with_bundle(self, tmp_path) -> None:
-        text = _format_release_json(
+        text = render_release_summary(
+            "json",
             "BREAKING",
             tmp_path / "old",
             tmp_path / "new",
@@ -3145,8 +3153,8 @@ class TestReleaseFormatWithBundleAndMatrix:
             {},
             {},
             [],
-            _bundle_with_findings(),
-            None,
+            bundle_result=_bundle_with_findings(),
+            matrix_result=None,
         )
         data = json.loads(text)
         assert "bundle_verdict" in data

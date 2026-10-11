@@ -212,7 +212,7 @@ scenarios:
       fail_when:
         - verdict in [BREAKING, API_BREAK]
       do_not_fail_on: [COMPATIBLE]
-      # Real compare-release JSON keys (see _format_release_summary): the scope
+      # Real compare-release JSON keys (see render_release_summary): the scope
       # rollup separates public growth from internal-only growth.
       require_summary_fields:
         - changed_libraries

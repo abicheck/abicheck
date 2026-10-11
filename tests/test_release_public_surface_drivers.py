@@ -452,7 +452,7 @@ class TestTheStoredEnvelopeCarriesTheSection:
         )
 
     def test_the_json_envelope_carries_the_block(self) -> None:
-        from abicheck.frontends.cli.commands.compare_bundle_facts_sections import (
+        from abicheck.report.release_stored_sections import (
             public_surface_terms,
         )
 
@@ -464,14 +464,14 @@ class TestTheStoredEnvelopeCarriesTheSection:
     def test_a_comparison_with_no_contract_omits_it(self) -> None:
         """Absent rather than an empty section: an empty one reads as "the
         product promises nothing" instead of "no contract was recorded"."""
-        from abicheck.frontends.cli.commands.compare_bundle_facts_sections import (
+        from abicheck.report.release_stored_sections import (
             public_surface_terms,
         )
 
         assert public_surface_terms(self._Result(None)) is None
 
     def test_the_markdown_reader_sees_it_too(self) -> None:
-        from abicheck.frontends.cli.commands.compare_bundle_facts_sections import (
+        from abicheck.report.release_stored_sections import (
             public_surface_markdown_lines,
         )
 
@@ -484,7 +484,7 @@ class TestTheStoredEnvelopeCarriesTheSection:
         """The vacuity guard on the assertion above: the same renderer over
         a satisfied contract must not name a symbol, or "api_c appears"
         would hold for a renderer that printed every obligation."""
-        from abicheck.frontends.cli.commands.compare_bundle_facts_sections import (
+        from abicheck.report.release_stored_sections import (
             public_surface_markdown_lines,
         )
 
@@ -668,7 +668,7 @@ class TestTheStoredEnvelopesGateBearingKeys:
         )
 
     def test_the_gate_bearing_scalar_is_emitted_under_the_setting(self) -> None:
-        from abicheck.frontends.cli.commands.compare_bundle_facts_sections import (
+        from abicheck.report.release_stored_sections import (
             assurance_sections,
         )
 
@@ -680,7 +680,7 @@ class TestTheStoredEnvelopesGateBearingKeys:
         """Present-and-zero, not absent: a consumer reading the gate must be
         able to tell "the axis ran and found nothing" from "the axis did not
         run", which is the whole reason this key is a plain scalar."""
-        from abicheck.frontends.cli.commands.compare_bundle_facts_sections import (
+        from abicheck.report.release_stored_sections import (
             assurance_sections,
         )
 
@@ -693,7 +693,7 @@ class TestTheStoredEnvelopesGateBearingKeys:
     def test_without_the_setting_nothing_is_emitted(self, decision: str) -> None:
         """D4: present only under the setting, so every run that never asked
         for the axis is byte-identical to before it existed."""
-        from abicheck.frontends.cli.commands.compare_bundle_facts_sections import (
+        from abicheck.report.release_stored_sections import (
             assurance_sections,
         )
 
@@ -703,7 +703,7 @@ class TestTheStoredEnvelopesGateBearingKeys:
     def test_an_unevaluated_surface_renders_no_markdown_lines(self) -> None:
         """The empty-render branch: a reconciliation that states nothing
         contributes no lines rather than a bare heading."""
-        from abicheck.frontends.cli.commands.compare_bundle_facts_sections import (
+        from abicheck.report.release_stored_sections import (
             public_surface_markdown_lines,
         )
 

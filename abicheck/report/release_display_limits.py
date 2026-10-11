@@ -17,7 +17,7 @@
 
 A one-value leaf, extracted so the modules that need it -- the resolver
 (``cli_compare_release_matrix``) and the Markdown renderer that applies the
-cap (``cli_compare_receipt._release_md_library_findings``, reached from
+cap (``report.render_release_markdown.release_md_library_findings``, reached from
 ``cli_compare_release_helpers``) -- can both depend on it without depending
 on each other. A function-local import between those two was a real new
 import cycle the ``import-cycle-growth`` gate rejects, and ``AGENTS.md``'s

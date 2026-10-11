@@ -1014,10 +1014,11 @@ class TestRenderJsonCarriesRunOutcome:
 
     def test_breaking_verdict_gets_a_real_gate(self, tmp_path: Path) -> None:
         from abicheck.change_registry_types import Verdict
-        from abicheck.frontends.cli.commands.compare_bundle_facts import _render_json
+        from abicheck.frontends.cli.commands.compare_bundle_facts import _render
 
-        out = _render_json(
+        out = _render(
             self._result(Verdict.BREAKING),
+            "json",
             old_facts_path=tmp_path / "old.bundlefacts.json",
             new_dir=tmp_path / "new",
         )
@@ -1029,10 +1030,11 @@ class TestRenderJsonCarriesRunOutcome:
 
     def test_no_change_verdict_gets_a_clean_gate(self, tmp_path: Path) -> None:
         from abicheck.change_registry_types import Verdict
-        from abicheck.frontends.cli.commands.compare_bundle_facts import _render_json
+        from abicheck.frontends.cli.commands.compare_bundle_facts import _render
 
-        out = _render_json(
+        out = _render(
             self._result(Verdict.NO_CHANGE),
+            "json",
             old_facts_path=tmp_path / "old.bundlefacts.json",
             new_dir=tmp_path / "new",
         )
@@ -1069,10 +1071,11 @@ class TestBundleFactsRendererCarriesEnvMatrixDigest:
         )
 
     def test_json_carries_the_digest_when_present(self, tmp_path: Path) -> None:
-        from abicheck.frontends.cli.commands.compare_bundle_facts import _render_json
+        from abicheck.frontends.cli.commands.compare_bundle_facts import _render
 
-        out = _render_json(
+        out = _render(
             self._result(env_matrix_source_sha256="sha256:" + "ab" * 32),
+            "json",
             old_facts_path=tmp_path / "old.bundlefacts.json",
             new_dir=tmp_path / "new",
         )
@@ -1080,10 +1083,11 @@ class TestBundleFactsRendererCarriesEnvMatrixDigest:
         assert payload["env_matrix_source_sha256"] == "sha256:" + "ab" * 32
 
     def test_json_omits_the_digest_when_absent(self, tmp_path: Path) -> None:
-        from abicheck.frontends.cli.commands.compare_bundle_facts import _render_json
+        from abicheck.frontends.cli.commands.compare_bundle_facts import _render
 
-        out = _render_json(
+        out = _render(
             self._result(env_matrix_source_sha256=None),
+            "json",
             old_facts_path=tmp_path / "old.bundlefacts.json",
             new_dir=tmp_path / "new",
         )
@@ -1092,11 +1096,12 @@ class TestBundleFactsRendererCarriesEnvMatrixDigest:
 
     def test_markdown_carries_the_digest_when_present(self, tmp_path: Path) -> None:
         from abicheck.frontends.cli.commands.compare_bundle_facts import (
-            _render_markdown,
+            _render,
         )
 
-        text = _render_markdown(
+        text = _render(
             self._result(env_matrix_source_sha256="sha256:" + "cd" * 32),
+            "markdown",
             old_facts_path=tmp_path / "old.bundlefacts.json",
             new_dir=tmp_path / "new",
         )
@@ -1104,11 +1109,12 @@ class TestBundleFactsRendererCarriesEnvMatrixDigest:
 
     def test_markdown_omits_the_digest_when_absent(self, tmp_path: Path) -> None:
         from abicheck.frontends.cli.commands.compare_bundle_facts import (
-            _render_markdown,
+            _render,
         )
 
-        text = _render_markdown(
+        text = _render(
             self._result(env_matrix_source_sha256=None),
+            "markdown",
             old_facts_path=tmp_path / "old.bundlefacts.json",
             new_dir=tmp_path / "new",
         )

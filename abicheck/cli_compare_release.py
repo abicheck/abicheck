@@ -42,16 +42,7 @@ from .cli_compare_release_helpers import (  # noqa: F401
     _discover_include_roots,
     _exit_compare_release,
     _extract_if_package,
-    _format_release_json,
-    _format_release_junit,
-    _format_release_markdown,
-    _format_release_summary,
     _match_release_keys,
-    _release_json_scope,
-    _release_md_bundle_findings,
-    _release_md_changed_libraries,
-    _release_md_libraries_table,
-    _release_md_matrix_findings,
     _resolve_bundle_manifest,
     _resolve_release_headers,
     _resolve_release_severity_config as _resolve_release_severity_config,  # re-exported, ADR-064
@@ -88,6 +79,7 @@ from .cli_options import (
     verbose_option,
 )
 from .errors import SnapshotError
+from .frontends.cli.release_report import render_release_summary
 from .frontends.cli.runtime import _setup_verbosity, _write_or_echo
 from .model.header_exclusion_record import (
     canonical_exclusion_identity,
@@ -1361,7 +1353,7 @@ def compare_release_cmd(
                 # selector now means the same thing for every export, here
                 # exactly as in single-pair `compare`
                 # (`cli_compare_helpers._report_compare_result`).
-                secondary_text = _format_release_summary(
+                secondary_text = render_release_summary(
                     secondary_fmt,
                     worst_verdict,
                     old_dir,
