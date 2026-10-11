@@ -7,3 +7,7 @@
 ### Documentation
 
 - `ABICHECK_SIDE_PROCESSES=0` is documented consistently: both sides stay in one process, and the `compare` CLI then resolves them one after the other while the typed API uses two threads.
+
+### Performance
+
+- A live dump now runs with the cyclic garbage collector's thresholds raised to `(100000, 50, 100)` on GIL builds under the default `balanced` profile. On oneCCL 2021.15 the dump went from 44 s to 37.5 s on 3.12 and from 41 s to 35.4 s on 3.15, with identical output and 20–90 MB more peak memory. Free-threaded builds (no measured effect there) and the `low-memory` profile keep the default thresholds. The previous thresholds are restored when the dump ends.
