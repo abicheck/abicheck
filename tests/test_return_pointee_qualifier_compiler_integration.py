@@ -68,6 +68,15 @@ def _pairs() -> list[tuple[str, str]]:
     ]
 
 
+def _no_error_limit() -> str:
+    """g++'s flag lifting the error cap; Apple's ``g++`` is clang, which
+    ignores ``-fmax-errors`` and stops after 20 errors."""
+    version = subprocess.run(
+        ["g++", "--version"], capture_output=True, text=True, check=False
+    ).stdout
+    return "-ferror-limit=0" if "clang" in version.lower() else "-fmax-errors=0"
+
+
 _PAIRS = _pairs()
 
 
@@ -81,7 +90,7 @@ def gxx_rejected(tmp_path_factory: pytest.TempPathFactory) -> set[int]:
     ]
     src.write_text("\n".join(lines) + "\n")
     result = subprocess.run(
-        ["g++", "-std=c++17", "-fsyntax-only", "-fmax-errors=0", str(src)],
+        ["g++", "-std=c++17", "-fsyntax-only", _no_error_limit(), str(src)],
         capture_output=True,
         text=True,
         timeout=300,

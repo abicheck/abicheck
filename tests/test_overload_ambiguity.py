@@ -121,6 +121,15 @@ def _fires_set(old_types: list[str], added: str) -> bool:
     return _KIND in {c.kind for c in compare(_snap(base), new).changes}
 
 
+def _no_error_limit() -> str:
+    """g++'s flag lifting the error cap; Apple's ``g++`` is clang, which
+    ignores ``-fmax-errors`` and stops after 20 errors."""
+    version = subprocess.run(
+        ["g++", "--version"], capture_output=True, text=True, check=False
+    ).stdout
+    return "-ferror-limit=0" if "clang" in version.lower() else "-fmax-errors=0"
+
+
 _TRIPLES = list(itertools.permutations(_TYPES, 3))
 
 
@@ -141,7 +150,7 @@ def test_whole_overload_set_against_the_compiler(tmp_path: Path) -> None:
     src = tmp_path / "probe.cpp"
     src.write_text("\n".join(lines) + "\n")
     r = subprocess.run(
-        ["g++", "-std=c++17", "-fsyntax-only", "-fmax-errors=0", str(src)],
+        ["g++", "-std=c++17", "-fsyntax-only", _no_error_limit(), str(src)],
         capture_output=True,
         text=True,
         check=False,

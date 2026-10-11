@@ -17,6 +17,7 @@ it, so the whole class -- not the three reported inputs -- is covered.
 from __future__ import annotations
 
 import itertools
+import platform
 import shutil
 import subprocess
 from pathlib import Path
@@ -34,6 +35,11 @@ pytestmark = [
     pytest.mark.skipif(
         not (shutil.which("castxml") and shutil.which("gcc")),
         reason="needs castxml and gcc",
+    ),
+    # ms_abi/sysv_abi are x86-64 conventions; elsewhere they are ignored.
+    pytest.mark.skipif(
+        platform.machine().lower() not in ("x86_64", "amd64"),
+        reason="x86-64 calling conventions",
     ),
 ]
 
