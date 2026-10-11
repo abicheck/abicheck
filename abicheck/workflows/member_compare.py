@@ -59,7 +59,7 @@ def compare_member(
     """
     result = run_compare(**run_compare_kwargs(request))
     # The rich-tier config is recorded under exactly the condition the
-    # single-pair CLI (`resolve_compare_configuration`) and the typed API
+    # single-pair CLI (`resolve_and_apply`) and the typed API
     # (`install_resolved_gate_receipt`) record one: a contract evaluation, or
     # a pack that contributed. A plain member run stays on the documented
     # baseline tier -- stamping the no-pack application's always-resolved
@@ -107,7 +107,7 @@ def record_release_resolved_config(result: Any, config: Any) -> None:
 
     **Preserves the context's own ``suppressions`` when *config* has none**
     (Codex review, fresh evidence): unlike single-pair `compare`'s
-    ``resolve_compare_configuration`` (which passes the real, already-loaded
+    ``resolve_and_apply`` (which passes the real, already-loaded
     ``SuppressionList`` as ``suppression=`` into ``resolve_cli_config``),
     ``resolve_release_pack_application(_from_ctx)`` only ever passes
     ``suppress_path=`` -- and ``_suppression_source`` returns ``None``
