@@ -53,9 +53,7 @@ its lossless encoding; `render_xml_document` is the projection. Put a report
 *fact* in the document, a *formatting* choice (indentation, XML declaration)
 in the projection. `finding.py` is the per-`Change` counterpart to `document.py`'s whole-report
 value: `ReportFinding` holds one change's already-resolved `verdict`/
-`category`/`bucket`/`entity`/`reclassified_by`, built once per render by
-`build_report_findings`; never bucket or count by kind-name affixes or a
-hand-kept kind set (`test_report_format_bucket_parity.py`). `report_findings_for` is the
+`category`/`bucket`/`entity`/`reclassified_by`, built once per render by `build_report_findings`; never bucket or count by kind-name affixes or a hand-kept kind set (`test_report_format_bucket_parity.py`). `report_findings_for` is the
 per-`DiffResult` convenience (not a `DiffResult` method — `model` may not
 import this package); it recomputes every call rather than caching on the
 result instance, since a mutable `DiffResult` cache went stale across two
