@@ -1352,11 +1352,15 @@ def _diff_func_return_pointee_qualifier(
     new_index = function_signature_index(new.canonical_ir, new_map.values())
     changes: list[Change] = []
     for mangled, f_old, f_new in iter_matched_function_pairs(old_map, new_map):
+        r_old = old_index.signature_for(f_old).return_spelling
+        r_new = new_index.signature_for(f_new).return_spelling
+        if r_old == r_new:
+            continue
         changes += return_pointee_qualifier_changes(
             mangled,
             f_old.name,
-            old_index.signature_for(f_old).return_spelling,
-            new_index.signature_for(f_new).return_spelling,
+            r_old,
+            r_new,
             entity_id=f_old.entity_id or f_new.entity_id,
             c_callable=_c_callable(f_old) or _c_callable(f_new),
         )
