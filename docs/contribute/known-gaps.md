@@ -94,6 +94,21 @@ Each entry's status line says what is still open. A PARTIAL entry's write-up als
 **Status (re-verified 2026-10-09 at `456989f`): OPEN.** actions/check-target/action.yml:1828 still routes bundle old-library to `steps.resolve.outputs.binaries-dir`, not `member-snapshots-dir`. BUNDLE_CHECK_DEPTHS is unchanged (abicheck/buildsource/bundle_member_snapshots.py:18,69). So (a) routing and (b) candidate-side per-member headers are still open.  
 `false-clean` — Bundle checks can stage per-member *baseline* header snapshots, but the Action still routes the old side to binaries and the candidate side has no per-member headers, so a bundle check cannot run at `depth: headers`. [Full write-up](known-gaps/a-kind-bundle-check-still-cannot-run-at-depth-headers-only-the.md)
 
+#### The structural source-graph diff is role-blind (2026-10-11)
+
+**Status (recorded 2026-10-11 at `2a1ccb0c8`): OPEN.** source_graph_compare.diff_source_graph keys edges on (src, dst, kind), not relation_key(); a param→return role change reads as no change.  
+`false-clean` — A public declaration that changes how it uses a type (param → return, field → base) produces an empty structural edge diff. [Full write-up](known-gaps/source-graph-structural-diff-is-role-blind.md)
+
+#### The default L2 header projection drops template/override/callback facts (2026-10-11)
+
+**Status (recorded 2026-10-11 at `2a1ccb0c8`): OPEN.** header_graph_ast_projection reads four projections only; fold_template_graph and the callback/override folds run only from l5_ast_pass.  
+`false-clean` — Headers-only graphs carry no template-instantiation, override or callback facts, although the same AST holds them. [Full write-up](known-gaps/l2-header-projection-drops-template-override-callback-facts.md)
+
+#### Header-pass body coverage is one blanket unit, not per body (2026-10-11)
+
+**Status (recorded 2026-10-11 at `2a1ccb0c8`): OPEN.** source_graph_coverage gives header passes a single HEADER_INLINE_BODIES unit; no per-declaration body fact exists.  
+`false-clean` — Body-dependent call/reference changes in an inline function visible on both sides are declined, because coverage cannot prove that specific body was seen. [Full write-up](known-gaps/header-body-coverage-is-not-per-body.md)
+
 #### Opaque-type suppression still falls back to bare RecordType.name when stable identities are incomplete
 
 **Status (re-verified 2026-10-09 at `456989f`): PARTIAL.** compare/opaque_types.py:74-130 now uses OpaqueTypeIndex carrying stable EntityIds plus a bare-name 'local' tier. contains(strict=True) narrows the bare-name collision only when intersect() proves the pairing is complete, and otherwise falls back to the old bare RecordType.name matching. diff_filtering.py:854 _root_type_name now prefers Change.qualified_name.  
