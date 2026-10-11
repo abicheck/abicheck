@@ -72,6 +72,17 @@ a default argument or inline body), `CONSTRAINT`, `CALL`, `UNKNOWN`.
 `UNKNOWN` is a real value. Producers that cannot decide the mode emit it;
 they never default to the weakest mode.
 
+Mode is part of relation identity. Today `TypeEdge` and `GraphEdge`
+deduplicate on `(src, dst, kind, role)` (`type_graph.py`,
+`model/graph_facts.py`), so `f(T, T*)` has two `param` uses of `T` that
+need different modes (`BY_VALUE`, `COMPLETE_INDIRECT`/`OPAQUE_HANDLE`) but
+collapse into one relation. The dedup key becomes
+`(src, dst, kind, role, mode)`. Collapsing two modes into one relation is
+never allowed, because the sensitivity table would then silently apply
+whichever mode survived. A consumer that wants the coarser relation takes
+the *union* of its modes, and the change is sensitive if any mode in that
+union is sensitive.
+
 ### D2. A sensitivity table owned by `policy/`
 
 A single table maps `(ChangeKind family, ExposureMode)` to an affected
@@ -109,8 +120,14 @@ removed+added pair nor drops it. Existing consumers of the coarse
 
 A header pass records, for each inline or template body, an ADR-063
 `Fact[T]`: `PRESENT` with the body digest, or a reason it was not seen.
-A body-dependent edge may be `proven_absent` only when that declaration's
-body is `PRESENT` on both sides. Otherwise it stays `unknown`.
+Absence is decided per side. An observed edge proves its own presence on
+the side where it was seen, whatever that side's coverage. A body-dependent
+edge is `proven_absent` on a side only when that declaration's body is
+`PRESENT` *on that side*. So a removal (edge seen in old) needs only the
+new body `PRESENT`, and an addition (edge seen in new) needs only the old
+body `PRESENT`. Requiring both sides would discard valid one-sided negative
+evidence and recreate the false-clean this decision closes. A side whose
+body is not `PRESENT` and shows no edge stays `unknown`.
 
 ### D6. Facts from the same parse
 

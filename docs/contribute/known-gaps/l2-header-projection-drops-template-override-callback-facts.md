@@ -11,7 +11,7 @@ generated: false
 
 Index: [Known gaps](../known-gaps.md)
 
-**Status (recorded 2026-10-11 at `2a1ccb0c8`): OPEN.** `buildsource/header_graph_ast_projection.py` reads exactly four projections (declared type files, `parse_clang_ast_types`, `parse_clang_ast_calls`, declared entity files). `fold_template_graph` (and the callback/override folds) run only from the L5 pass (`buildsource/l5_ast_pass.py:266`), never from the header-only attach path.
+**Status (recorded 2026-10-11 at `2a1ccb0c8`): OPEN.** `buildsource/header_graph_ast_projection.py` builds its graph from four projections (declared type files, `parse_clang_ast_types`, `parse_clang_ast_calls`, declared entity files), plus a separate `special_member_names` collection (`collect_special_member_names`). None of them projects template, override or callback facts. `fold_template_graph` (and the callback/override folds) run only from the L5 pass (`buildsource/l5_ast_pass.py:266`), never from the header-only attach path.
 
 `false-clean` — With headers only (the default L2 path), the graph has no `template_instantiation`/`DECL_INSTANTIATES_TEMPLATE`/`TEMPLATE_USES_TYPE` facts, no override and no callback edges. This holds even though the same `clang -ast-dump=json` document contains them. An external review (2026-10-11) ran `template_graph`'s parser on a fixture and got an instantiation that the L2 projection did not keep.
 

@@ -17,4 +17,4 @@ Index: [Known gaps](../known-gaps.md)
 
 ## Direction (not yet designed)
 
-Record body coverage as a per-declaration fact (one ADR-063 `Fact[T]` per inline/template body: `PRESENT` with the body's digest, or a reason it was not seen). Then allow `proven_absent` for a body edge only when that declaration's body is `PRESENT` on both sides. Owner: [ADR-077](../adr/077-exposure-modes-and-change-sensitive-propagation.md) D5.
+Record body coverage as a per-declaration fact (one ADR-063 `Fact[T]` per inline/template body: `PRESENT` with the body's digest, or a reason it was not seen). Then decide absence per side: a body edge is `proven_absent` on a side only when that declaration's body is `PRESENT` on that side. An observed edge proves presence on its own side, so a removal needs only the new body `PRESENT`, and an addition only the old one. Owner: [ADR-077](../adr/077-exposure-modes-and-change-sensitive-propagation.md) D5.

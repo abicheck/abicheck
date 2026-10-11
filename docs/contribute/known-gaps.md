@@ -101,7 +101,7 @@ Each entry's status line says what is still open. A PARTIAL entry's write-up als
 
 #### The default L2 header projection drops template/override/callback facts (2026-10-11)
 
-**Status (recorded 2026-10-11 at `2a1ccb0c8`): OPEN.** header_graph_ast_projection reads four projections only; fold_template_graph and the callback/override folds run only from l5_ast_pass.  
+**Status (recorded 2026-10-11 at `2a1ccb0c8`): OPEN.** header_graph_ast_projection's graph projections (types, calls, type/entity files) and its special_member_names collection carry no template, override or callback facts; fold_template_graph and the callback/override folds run only from l5_ast_pass.  
 `false-clean` — Headers-only graphs carry no template-instantiation, override or callback facts, although the same AST holds them. [Full write-up](known-gaps/l2-header-projection-drops-template-override-callback-facts.md)
 
 #### Header-pass body coverage is one blanket unit, not per body (2026-10-11)
