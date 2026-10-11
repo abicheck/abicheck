@@ -97,6 +97,17 @@ def test_single_header_is_reported_failed_without_reparse() -> None:
     assert parts == [] and failed == ["a.h"] and calls == []
 
 
+def test_everything_blamed_reports_all_without_parsing() -> None:
+    calls: list[list[str]] = []
+    parts, failed = parse_header_groups_bisecting(
+        ["a.h", "b.h"],
+        _parser({"a.h", "b.h"}, calls),
+        (_Boom,),
+        known_failed=["b.h", "a.h"],
+    )
+    assert parts == [] and failed == ["a.h", "b.h"] and calls == []
+
+
 def test_unexpected_exception_type_propagates() -> None:
     def parse(group):
         raise KeyError("not a parse failure")

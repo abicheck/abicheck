@@ -582,3 +582,26 @@ def test_attribution_is_empty_for_an_unattributable_error():
     exc = SnapshotError("clang failed")
     exc.stderr = f"{AGG}:1:1: error: something in the aggregate itself"
     assert attribute_failing_headers(exc, _headers(4)) == []
+
+
+@pytest.mark.parametrize("width", [10, 999, 1000, 5000])
+def test_clang_failure_carries_full_diagnostics_for_attribution(tmp_path, width):
+    """The message truncates clang's stderr; the attached ``stderr`` never
+    does, so a late header's error (past the 1000-char message cut) is still
+    attributable."""
+    from types import SimpleNamespace
+
+    from abicheck.dumper_clang_errors import _parse_clang_ast_result
+
+    headers = _headers(3)
+    tail = f"In file included from {AGG}:9:\n{headers[2]}:1:2: error: late\n"
+    stderr = "x" * width + "\n" + tail
+    with pytest.raises(SnapshotError) as info:
+        _parse_clang_ast_result(
+            SimpleNamespace(returncode=1, stderr=stderr),
+            tmp_path / "ast.json",
+            tmp_path / "cache.json",
+            cache_write=False,
+        )
+    assert info.value.stderr == stderr
+    assert attribute_failing_headers(info.value, headers) == [headers[2]]

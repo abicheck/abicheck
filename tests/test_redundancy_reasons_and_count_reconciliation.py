@@ -134,3 +134,18 @@ def test_non_gating_counts_reconcile_through_the_ledger(tmp_path, seed) -> None:
     assert held_out_non_gating(doc["result_counts"], audit) == held_out
     counts = doc["result_counts"]
     assert counts["non_gating"] + held_out == dict(audit.counts)["non_gating"]
+
+
+def test_held_out_note_absent_without_audit_or_difference() -> None:
+    from abicheck.report.result_counts import held_out_note
+
+    audit = DispositionAudit(
+        detected_total=3,
+        effective_total=0,
+        counts=(("non_gating", 3),),
+        rules=(),
+        not_evaluated_detectors=(),
+    )
+    assert held_out_note({"non_gating": 3}, None) == ""
+    assert held_out_note({"non_gating": 3}, audit) == ""
+    assert "2 non-gating held out" in held_out_note({"non_gating": 1}, audit)
