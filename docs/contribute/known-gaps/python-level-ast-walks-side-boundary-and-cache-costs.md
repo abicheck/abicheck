@@ -19,8 +19,6 @@ Index: [Known gaps](../known-gaps.md)
   touches its stack on descent (~15 % on a synthetic tree; the walk was
   23.5 s self / 46 M `isinstance` of 435 s profiled on oneDAL).
 - GC thresholds during a live dump: `storage.acyclic_json.gc_relaxed` (#1544).
-- Free-threaded interpreters resolve two live binaries as two threads, not
-  two forked children (`side_isolation.concurrent_threads_apply`).
 - `ABICHECK_MEMORY_TRACE` marks `dump.cache.lookup`/`dump.cache.store`;
   `ABICHECK_SNAPSHOT_CACHE_WRITE=0` skips populating the snapshot cache.
 
@@ -49,6 +47,29 @@ Index: [Known gaps](../known-gaps.md)
    and enum members; the earlier "3.1x `__post_init__`" micro-win could not
    be located on `Fact` (it has no `__post_init__`) — re-profile to find
    which owning dataclass it named.
+
+## Measured and rejected (oneDAL 2026.0 → 2026.1, `libonedal.so.4` + `oneapi/dal.hpp`, 4 cores)
+
+- **Threads instead of forked children on a free-threaded build.** python3.14t,
+  cold, whole-tree PSS sampled every 0.5 s: fork 99.1 s / 1.61 GiB, threads
+  112.4 s / 1.27 GiB. Threads trade ~13% wall for ~21% memory, so they are not
+  the `balanced` (fastest) default; at most a memory-saving option.
+- **Faster `json_compact._compact`.** A single `re.sub(rb"\n[ \t]*")` pass over
+  a real 445 MiB clang AST: 3.4-4.0 s vs 3.2-4.3 s for split/strip/join,
+  identical output. Already at the pure-Python floor.
+- **Pickle protocol 5 at the side boundary.** A 50 MiB oneDAL snapshot:
+  ~2.6 s `dumps` / ~1 s `loads` (gc paused) at protocol 4 or 5 alike. A
+  snapshot *loaded from storage* costs far more (6-13 s) because
+  `PendingGraph.__reduce__` decodes its graph first, by contract; since #1544
+  a cache-served side is loaded in the parent, so that path is not pickled.
+- **cProfile overstates per-node walks ~7x.** Closure renumbering profiled at
+  ~32 s/side but measures 4.4 s/side unprofiled (functions 2.0 s,
+  `semantic_ir` 2.3 s over ~870k strings). It runs before dependency scoping;
+  on the scoped snapshot the same walk is 0.35 s, but moving it changes
+  closure ordinals, i.e. finding identities -- a maintainer decision.
+- **Free-threaded warm slower than cold** does not reproduce on one library
+  (3.14t: cold 124 s, warm 31.6 s; `ABICHECK_SNAPSHOT_CACHE_WRITE=0` changes
+  neither measurably); it is specific to the 28-member release fan-out.
 
 ## Measurement method that worked
 

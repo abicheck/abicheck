@@ -289,7 +289,7 @@ Each entry's status line says what is still open. A PARTIAL entry's write-up als
 
 #### Python-level AST walks, the side boundary and the snapshot cache dominate large runs (2026-10-11)
 
-**Status (2026-10-11): OPEN.** Cheap levers landed (location materialization loop, free-threaded threads path, cache trace marks and write switch); whole-AST walk fusion, side-boundary pickling, the cold GIL member-parallelism A/B and the free-threaded warm-slower-than-cold cache cost remain.  
+**Status (2026-10-11): OPEN.** Location-pass, cache trace and cache write switch landed; threads-on-free-threaded, a faster `json_compact` and pickle protocol 5 were measured on oneDAL and rejected; walk fusion is smaller than profiled (cProfile ~7x); closure renumbering after scoping and the cold GIL member-parallelism A/B remain.  
 `perf` — The clang JSON tree is walked at least eight times in Python, snapshots are pickled across the side boundary, and populating the snapshot cache costs ~30 % wall on a 28-member release. [Full write-up](known-gaps/python-level-ast-walks-side-boundary-and-cache-costs.md)
 
 ### Hygiene

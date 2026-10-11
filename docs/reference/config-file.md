@@ -707,9 +707,7 @@ performance:
 
 - **`balanced`** — fastest. Two live binaries are resolved concurrently in
   two child processes on Linux (when the caller runs no other threads, and
-  `ABICHECK_SIDE_PROCESSES` is not `0`); on a free-threaded (`python3.xt`)
-  interpreter they run in two threads instead, which overlap there without
-  forking; a side the snapshot cache serves
+  `ABICHECK_SIDE_PROCESSES` is not `0`); a side the snapshot cache serves
   whole is loaded in the parent instead of a child. With
   `ABICHECK_SIDE_PROCESSES=0`, and for any other pair, the `compare` CLI
   resolves one side after the other and the typed API uses two threads of

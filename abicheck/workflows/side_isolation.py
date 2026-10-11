@@ -56,7 +56,6 @@ from ..storage.acyclic_json import gc_paused
 
 __all__ = [
     "concurrent_children_apply",
-    "concurrent_threads_apply",
     "isolation_supported",
     "resolve_cached_in_process",
     "run_cold_isolated",
@@ -72,17 +71,6 @@ def isolation_supported() -> bool:
     return sys.platform.startswith("linux")
 
 
-def _live_binary_pair_may_overlap(
-    tuning: ExecutionTuning, old_fmt: str | None, new_fmt: str | None
-) -> bool:
-    return (
-        tuning.concurrent_side_processes
-        and side_processes_enabled()
-        and old_fmt is not None
-        and new_fmt is not None
-    )
-
-
 def concurrent_children_apply(
     tuning: ExecutionTuning, old_fmt: str | None, new_fmt: str | None
 ) -> bool:
@@ -90,43 +78,23 @@ def concurrent_children_apply(
     in two concurrent children rather than two threads of this process.
 
     Only for two live binaries (*old_fmt*/*new_fmt* are their detected
-    formats) on an interpreter with a GIL: extraction is dominated by Python,
-    so two threads barely overlap and two forked children do -- measured, a
-    cold compare of two 60-module C++ libraries went from 64 s to 41 s. A
-    stored snapshot, directory or package side keeps the thread path: loading
-    one is cheap, and a child would pay to pickle its result back. So does a
+    formats): extraction is dominated by Python under the GIL, so two
+    threads barely overlap and two forked children do -- measured, a cold
+    compare of two 60-module C++ libraries went from 64 s to 41 s. A stored
+    snapshot, directory or package side keeps the thread path: loading one
+    is cheap, and a child would pay to pickle its result back. So does a
     caller already running other threads (a typed-API host, a test runner):
     forking a multi-threaded process can leave a child waiting on a lock no
-    thread of its own will ever release. Without a GIL the threads overlap
-    by themselves -- :func:`concurrent_threads_apply` takes that case.
+    thread of its own will ever release.
     """
-    from ..process_resources import gil_enabled
-
     return (
-        _live_binary_pair_may_overlap(tuning, old_fmt, new_fmt)
-        and gil_enabled()
+        tuning.concurrent_side_processes
+        and side_processes_enabled()
         and isolation_supported()
+        and old_fmt is not None
+        and new_fmt is not None
         and threading.active_count() == 1
     )
-
-
-def concurrent_threads_apply(
-    tuning: ExecutionTuning, old_fmt: str | None, new_fmt: str | None
-) -> bool:
-    """Whether two live binaries should resolve as two threads even for a
-    caller that did not permit parallel threads (the CLI).
-
-    The free-threaded counterpart of :func:`concurrent_children_apply`: the
-    same pairs, on an interpreter without a GIL, where threads really overlap
-    and forking buys nothing. Measured on python3.15t (two 2021.x dumps):
-    42 s in one process at ~980 MB vs 39 s / 1.26 GB summed RSS for two
-    forked children -- the same wall time without pickling either snapshot
-    back across a process boundary. Progress notes may interleave, exactly
-    as they already did from the two children.
-    """
-    from ..process_resources import gil_enabled
-
-    return _live_binary_pair_may_overlap(tuning, old_fmt, new_fmt) and not gil_enabled()
 
 
 def side_processes_enabled() -> bool:

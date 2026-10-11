@@ -270,31 +270,3 @@ def test_a_child_that_survives_sigterm_is_still_reaped(
         for child in multiprocessing.active_children():
             child.kill()
             child.join()
-
-
-@pytest.mark.parametrize("gil", [True, False])
-@pytest.mark.parametrize("profile", ["balanced", "low-memory"])
-@pytest.mark.parametrize("fmts", [("elf", "elf"), ("elf", None), (None, None)])
-@pytest.mark.parametrize("side_processes", ["1", "0"])
-def test_live_pair_goes_to_children_under_gil_and_threads_without(
-    monkeypatch, gil, profile, fmts, side_processes
-):
-    """Exactly one of the two overlap paths applies to a live-binary pair the
-    tuning lets overlap: forked children with a GIL, threads without one.
-    Anything else (a stored side, a profile that keeps sides apart,
-    ``ABICHECK_SIDE_PROCESSES=0``) takes neither."""
-    import abicheck.process_resources as pr
-    import abicheck.workflows.side_isolation as iso
-    from abicheck.model.performance import PerformanceProfile, tuning_for
-
-    tuning = tuning_for(PerformanceProfile(profile))
-    monkeypatch.setattr(pr, "gil_enabled", lambda: gil)
-    monkeypatch.setattr(iso, "isolation_supported", lambda: True)
-    monkeypatch.setattr(threading, "active_count", lambda: 1)
-    monkeypatch.setenv("ABICHECK_SIDE_PROCESSES", side_processes)
-    children = iso.concurrent_children_apply(tuning, *fmts)
-    threads = iso.concurrent_threads_apply(tuning, *fmts)
-    eligible = (
-        tuning.concurrent_side_processes and side_processes == "1" and None not in fmts
-    )
-    assert (children, threads) == ((eligible, False) if gil else (False, eligible))
