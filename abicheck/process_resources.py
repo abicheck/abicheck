@@ -40,9 +40,12 @@ caller and test keeps working unchanged.
 
 from __future__ import annotations
 
+import gc
 import os
-from collections.abc import Callable
+import threading
+from collections.abc import Callable, Iterator
 from concurrent.futures import Executor, Future, ThreadPoolExecutor
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, TypeVar
 
@@ -271,7 +274,11 @@ MEMBER_JOBS_ENV_VAR = "ABICHECK_MEMBER_JOBS"
 #: runs, so a second member overlaps the child-process phases for the cost of
 #: one extra working set. Beyond two, measured wall time was flat and resident
 #: memory grew linearly (28 concurrent members vs. batches: ~10x peak RSS for
-#: no speedup).
+#: no speedup). Open question (``docs/contribute/known-gaps.md``): with a warm
+#: snapshot cache there are no clang children to overlap, and a 28-member
+#: release measured j=1 29:45 / 3.99 GiB against j=2 30:48 / 9.44 GiB with
+#: identical findings; the cold j=1-vs-2 A/B that would justify lowering this
+#: has not been run.
 GIL_MEMBER_PARALLELISM = 2
 
 #: Level-1 default on a free-threaded interpreter, as a ceiling on the CPU
@@ -280,7 +287,8 @@ GIL_MEMBER_PARALLELISM = 2
 #: 28-member release on a 224-core host (python3.14t), wall time was flat
 #: from 4 to 96 members (17:12 / 17:58 / 18:14) while CPU seconds grew 6.5x
 #: (5 191 -> 33 869) and peak RSS 4-7x -- past ~4 the extra members only
-#: contend. Still 2.9x faster than the GIL default on that release.
+#: contend. Still 2.9x faster than the GIL default on that release. On
+#: python3.15t, j=8 bought 4% wall for 2.1x peak RSS and 1.55x CPU seconds.
 FREE_THREADED_MEMBER_PARALLELISM = 4
 
 
@@ -299,6 +307,52 @@ def gil_enabled() -> bool:
     return True if probe is None else bool(probe())
 
 
+#: Generation-0 threshold while :func:`gc_relaxed` is active. A DWARF walk
+#: allocates millions of short-lived pyelftools objects and the default
+#: threshold (2000 on 3.12-3.13) collects every few thousand of them: ~20% of
+#: main-thread samples on a GIL build. Measured on a 2021.x dump: 44 -> 37.5 s
+#: (3.12) and 41 -> 35.4 s (3.15), identical output, +20-90 MB peak RSS.
+RELAXED_GC_GEN0_THRESHOLD = 100_000
+
+_gc_lock = threading.Lock()
+_gc_active = 0
+_gc_saved: tuple[int, ...] | None = None
+
+
+@contextmanager
+def gc_relaxed() -> Iterator[None]:
+    """Raise the cyclic collector's generation-0 threshold for the ``with``
+    body, then restore the thresholds in effect before the outermost
+    overlapping use.
+
+    Not a pause: pyelftools' DIE graph has parent/CU back-references, so
+    cycles exist and collection must keep running -- only less often. A no-op
+    on a free-threaded interpreter, whose collector is not driven by these
+    thresholds (measured: no effect on 3.15t). Overlapping uses from several
+    threads share one setting; a threshold the caller set below the relaxed
+    value is raised for the duration, one already above it is kept.
+    """
+    global _gc_active, _gc_saved
+    if not gil_enabled():
+        yield
+        return
+    with _gc_lock:
+        if _gc_active == 0:
+            _gc_saved = gc.get_threshold()
+            gen0, *rest = _gc_saved
+            if gen0 and gen0 < RELAXED_GC_GEN0_THRESHOLD:
+                gc.set_threshold(RELAXED_GC_GEN0_THRESHOLD, *rest)
+        _gc_active += 1
+    try:
+        yield
+    finally:
+        with _gc_lock:
+            _gc_active -= 1
+            if _gc_active == 0 and _gc_saved is not None:
+                gc.set_threshold(*_gc_saved)
+                _gc_saved = None
+
+
 def python_parallelism() -> int:
     """How many Python-heavy units may run at once (>= 1).
 
@@ -309,7 +363,10 @@ def python_parallelism() -> int:
     :data:`FREE_THREADED_MEMBER_PARALLELISM`. Memory is *not* considered here -- the caller's
     memory admission is what bounds a level-1 pool by RAM; this bounds it by
     what can actually execute. An unparsable override falls back to that
-    default silently, as every other sizing variable here does.
+    default silently, as every other sizing variable here does. Setting
+    ``ABICHECK_MEMBER_JOBS`` does **not** turn that admission gate off (only
+    an explicit ``-j`` or ``ABICHECK_RELEASE_JOB_MEM_GIB`` does): it caps how
+    many members run, and memory may still admit fewer.
     """
     raw = os.environ.get(MEMBER_JOBS_ENV_VAR, "").strip()
     if raw:

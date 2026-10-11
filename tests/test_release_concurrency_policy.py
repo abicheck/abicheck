@@ -493,3 +493,23 @@ def test_bad_member_jobs_without_a_diagnostics_list_is_ignored_quietly(
         process_resources.python_parallelism()
         == process_resources.GIL_MEMBER_PARALLELISM
     )
+
+
+@pytest.mark.parametrize("member_jobs", ["1", "2", "4", "8", "64"])
+@pytest.mark.parametrize("avail", [4.0, 16.0, 256.0])
+def test_member_jobs_env_caps_parallelism_without_disabling_memory_gate(
+    monkeypatch: pytest.MonkeyPatch, member_jobs: str, avail: float
+) -> None:
+    """``ABICHECK_MEMBER_JOBS`` sizes level-1 concurrency; it is not a memory
+    budget, so unlike an explicit ``-j`` or ``ABICHECK_RELEASE_JOB_MEM_GIB``
+    it must leave the AST-size-costed admission gate enforcing."""
+    monkeypatch.delenv("ABICHECK_RELEASE_JOB_MEM_GIB", raising=False)
+    monkeypatch.setenv(process_resources.MEMBER_JOBS_ENV_VAR, member_jobs)
+    monkeypatch.setattr("os.cpu_count", lambda: 224)
+    monkeypatch.setattr(process_resources, "available_mem_gib", lambda: avail)
+    plan = release_jobs.plan_release_workers(0, depth="headers", header_roots=True)
+    assert plan.admission._committable is not None
+    assert plan.pool_size <= int(member_jobs)
+    # The documented gate-off instruction, for contrast.
+    explicit = release_jobs.plan_release_workers(3, depth="headers", header_roots=True)
+    assert explicit.admission._committable is None

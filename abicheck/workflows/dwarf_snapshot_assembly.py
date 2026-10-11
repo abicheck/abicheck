@@ -28,6 +28,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from ..dwarf_snapshot import extract_dwarf_declarations
+from ..process_resources import gc_relaxed
 from .snapshot_factory import new_snapshot
 
 if TYPE_CHECKING:
@@ -61,7 +62,10 @@ def build_snapshot_from_dwarf(
     has functions, variables, types, enums and typedefs populated from DWARF
     and ``elf_only_mode=False``.
     """
-    decls = extract_dwarf_declarations(elf_path, elf_meta, session=session)
+    # The DIE walk allocates millions of short-lived pyelftools objects; see
+    # `gc_relaxed` for the measured cost of collecting through them.
+    with gc_relaxed():
+        decls = extract_dwarf_declarations(elf_path, elf_meta, session=session)
     return new_snapshot(
         library=elf_path.name,
         version=version,
