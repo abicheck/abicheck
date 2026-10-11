@@ -449,6 +449,8 @@
     "ADR-049": {
       "disposition": "surfaced",
       "surfaces": [
+        "api: abicheck.workflows.contracts.CompareRequest.pack_paths",
+        "api: abicheck.workflows.contracts.CompareRequest.stated_settings",
         "cli: compare --contract",
         "report: compare_report.contract_context",
         "report: compare_report.contract_coverage"
@@ -760,6 +762,8 @@
     "ADR-047 action: actions/baseline",
     "ADR-047 action: actions/check-target",
     "ADR-047 cli: aggregate",
+    "ADR-049 api: abicheck.workflows.contracts.CompareRequest.pack_paths",
+    "ADR-049 api: abicheck.workflows.contracts.CompareRequest.stated_settings",
     "ADR-049 cli: compare --contract",
     "ADR-049 report: compare_report.contract_context",
     "ADR-049 report: compare_report.contract_coverage",

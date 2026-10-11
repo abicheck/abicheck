@@ -17,9 +17,9 @@
 ``run_compare_request`` was one function doing two separable things — turning a
 :class:`CompareRequest` into a resolved pair of snapshots, then classifying that
 pair. The native ``compare`` CLI needs to run its own ADR-049 step *between*
-those two (``cli_compare_receipt.resolve_and_apply`` needs the Click context to
-answer "did the user type this?", and a ``--pack`` it selects can move the
-policy file and severity levels the classification is then scored under), so as
+those two (its ADR-049 configuration step, now the shared
+``workflows.compare_configuration``, can move the policy file and severity
+levels the classification is then scored under via a ``--pack``), so as
 one function it could not reuse either half and kept a parallel resolution
 implementation of its own (``cli_resolve._resolve_compare_snapshots``).
 
@@ -518,7 +518,7 @@ def classify_compare_pair(
     coverage/metrics the diff itself does not produce -- plus ADR-068 D3's candidate-only ``--abi3`` enrichment (Phase 2d), folded into ``extra_changes`` *before* classification so policy scores it; a no-op unless ``CompareRequest.abi3_floor`` is set.
 
     A front end that must configure the run between the two phases (the native
-    ``compare`` CLI's ADR-049 ``resolve_and_apply``, which can move the policy
+    ``compare`` CLI's ADR-049 ``resolve_compare_configuration``, which can move the policy
     file and severity levels a ``--pack`` selects) calls
     :func:`resolve_compare_request` and then classifies on its own terms
     instead of calling this; everything else composes the two through
@@ -554,21 +554,8 @@ def classify_compare_pair(
         strict_suppressions=request.strict_suppressions,
         require_justification=request.require_justification,
     )
-    # A forwarded pack's policy contribution, folded as `pack_application.
-    # policy_file_with_packs` does; a no-op unless the pack fields are set.
-    if request.pack_policy_overrides or request.pack_internal_namespaces is not None:
-        from .pack_application import PackApplication, policy_file_with_packs
-
-        pf = policy_file_with_packs(
-            pf,
-            PackApplication(
-                policy_overrides=dict(request.pack_policy_overrides or {}),
-                internal_namespaces=request.pack_internal_namespaces,
-            ),
-            base_policy=request.policy,
-        )
-    # The rest of the request's policy inputs (evaluation config, project
-    # fold, acknowledgments), resolved once in `workflows`.
+    # The request's policy inputs (forwarded and selected packs, evaluation
+    # config, project fold, acknowledgments), resolved once in `workflows`.
     from .workflows.compare_request_policy import resolve_request_policy_inputs
 
     policy_inputs = resolve_request_policy_inputs(request, suppression, pf)
@@ -645,6 +632,7 @@ def classify_compare_pair(
         new,
         suppression,
         evaluation_config,
+        pack_application=policy_inputs.pack_application,
     )
 
 
@@ -659,7 +647,7 @@ def run_compare_request(request: CompareRequest) -> CompareResult:
     Exactly the composition of this module's own two phases --
     :func:`resolve_compare_request` then :func:`classify_compare_pair`. A
     front end that must configure the run between them (the native
-    ``compare`` CLI's ADR-049 ``resolve_and_apply``, whose ``--pack`` can
+    ``compare`` CLI's ADR-049 ``resolve_compare_configuration``, whose ``--pack`` can
     move the policy file and severity levels the classification is scored
     under) calls the two phases directly rather than keeping a second
     resolution implementation.

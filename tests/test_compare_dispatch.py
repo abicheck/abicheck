@@ -1794,7 +1794,7 @@ class TestCompareCliSharesServiceResolution:
     ``cli_resolve._resolve_compare_snapshots`` kept a second implementation of
     what ``service.run_compare_request`` already did, because that function was
     one unit with no seam for ``compare``'s Click-dependent ADR-049
-    ``resolve_and_apply`` step. Splitting it into
+    ``resolve_compare_configuration`` step. Splitting it into
     ``resolve_compare_request``/``classify_compare_pair`` removed the reason
     for the copy, so this pins that the CLI really delegates rather than
     merely producing a similar answer.

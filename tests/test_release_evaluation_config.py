@@ -237,7 +237,7 @@ class TestReleaseFanOutStampsResolvedConfig:
 
     def test_pack_application_factory_populates_resolved_config(self) -> None:
         """Direct unit test of the shared factory both single-pair `compare`
-        (via `resolve_and_apply`) and the release fan-out (via
+        (via `resolve_compare_configuration`) and the release fan-out (via
         `resolve_release_pack_application`) call -- confirms the field is
         wired at the source, not only through `_run_compare_pair`'s own
         stamp."""
@@ -413,7 +413,7 @@ class TestReleaseFanOutMergesContractContext:
 
 class TestReleaseFanOutPreservesObservedSuppressions:
     """Codex review, fresh evidence: unlike single-pair `compare`'s
-    ``resolve_and_apply`` (which passes the real, already-loaded
+    ``resolve_compare_configuration`` (which passes the real, already-loaded
     ``SuppressionList`` into the resolver), the release fan-out's own
     ``resolve_release_pack_application(_from_ctx)`` only ever passes a raw
     ``--suppress`` *path* -- and the resolver's own ``_suppression_source``

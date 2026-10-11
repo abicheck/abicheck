@@ -481,7 +481,7 @@ def _resolve_compare_snapshots(
     resolution the typed Python API and the MCP ``abi_compare`` tool run. It
     kept a parallel implementation until now only because
     ``run_compare_request`` was one function with no seam for ``compare``'s
-    Click-dependent ADR-049 ``resolve_and_apply`` step to sit in; splitting
+    ADR-049 configuration step (``compare_configuration``) to sit in; splitting
     that function into its two phases removed the reason for the copy. What
     stays CLI-specific is exactly what is genuinely CLI-specific: the
     ``click.echo`` notifier, translating the framework-free errors into
