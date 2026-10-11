@@ -28,8 +28,10 @@ development procedure.
 
 **Python versions:** `requires-python = ">=3.11"` is the supported minimum;
 **3.13** is the canonical development/CI version (full suite, 80% coverage
-floor, `ai-readiness` job). Develop against 3.13. Other versions run a smoke
-lane (`.github/workflows/python-compat.yml`).
+floor, `ai-readiness` job). Develop against 3.13. 3.11, 3.15 and 3.15t also
+run the full fast suite on every PR; 3.12/3.14 a smoke lane
+(`.github/workflows/python-compat.yml`). Use `enum.StrEnum`, never a
+`(str, Enum)` mixin: 3.15's `json` writes the latter as `"Cls.NAME"`.
 
 ## Product decisions and change routing
 

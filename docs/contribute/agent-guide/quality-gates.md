@@ -339,8 +339,11 @@ suite runs under coverage. In CI that lane runs as three concurrent
 test count) that only collect coverage data; `unit-tests-coverage` combines
 them and enforces the floor once. Locally, `verify.py`'s `unit-pr` step runs
 the same selection unsharded, in one process.
-Other Python versions do not run the full suite at all; `python-compat.yml`'s
-smoke lane covers them (a second full-suite leg would only re-check the same tests).
+`python-compat.yml` runs the same full fast suite, uncovered and required (no `continue-on-error`), on
+3.11 (the `requires-python` floor), 3.15 and free-threaded 3.15t on every PR:
+interpreter behavior changes (3.15's `json` serializing a `str` subclass via
+`str()`, 3.15t threads inheriting the parent context) break tests no smoke
+subset selects. 3.12/3.14 keep the wheel-install smoke lane.
 macOS/Windows skip the Linux-only ELF/DWARF parsing tests, which structurally lowers
 their coverage (~93% on macOS), so those lanes run the same tests without the
 fail-under gate — and, since a CI audit found the reports had no reader, without

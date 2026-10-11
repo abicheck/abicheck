@@ -406,7 +406,7 @@ def test_warm_clang_disk_hit_is_decoded_once_per_request(
     # context kind and post-retry language mode alike.
     assert second == first == graph
     # No unconsumed legacy handoff is left behind holding the tree.
-    assert _ast_memo_slot.get() is None
+    assert _ast_memo_slot.value is None
 
 
 def test_warm_clang_disk_hit_keeps_legacy_handoff_without_acquisition(
@@ -425,13 +425,13 @@ def test_warm_clang_disk_hit_keeps_legacy_handoff_without_acquisition(
     root, _kind, _force_cpp = clang_backend.clang_header_dump(
         [header], [], lang="c++", memoize=True
     )
-    slot = _ast_memo_slot.get()
+    slot = _ast_memo_slot.value
     assert slot is not None and slot[0] == "clang" and slot[2] is root
     # ... and the pending handoff is what the next same-thread caller gets.
     again = clang_backend.clang_header_dump([header], [], lang="c++", memoize=True)
     assert again[0] is root
     assert decodes() == 1
-    assert _ast_memo_slot.get() is None
+    assert _ast_memo_slot.value is None
 
 
 def test_warm_clang_distinct_contexts_are_not_merged(
@@ -528,7 +528,7 @@ def test_warm_clang_failed_acquisition_is_retryable(
         )
     assert attempts == 1
     assert root == {"kind": "TranslationUnitDecl"}
-    assert _ast_memo_slot.get() is None
+    assert _ast_memo_slot.value is None
 
 
 def test_warm_castxml_disk_hit_shares_producer_metadata(

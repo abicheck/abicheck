@@ -45,10 +45,10 @@ Pure functions over enums and strings; fully unit-tested.
 
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 
 
-class SourceMethod(str, Enum):
+class SourceMethod(StrEnum):
     """The S-axis: six cost-ordered source-analysis methods, plus ``auto`` (D1)."""
 
     S0 = "s0"  # diff classifier (risk tags/score) — no L output
@@ -61,7 +61,7 @@ class SourceMethod(str, Enum):
     AUTO = "auto"  # risk-driven escalation (opt-in, local/dev only)
 
 
-class EvidenceDepth(str, Enum):
+class EvidenceDepth(StrEnum):
     """The coarse L-axis ``--depth`` selector (maps lossily to a representative S)."""
 
     BINARY = "binary"  # L0/L1 exported symbols + binary metadata only (no L2 AST)
@@ -94,7 +94,7 @@ USER_DEPTHS: tuple[EvidenceDepth, ...] = (
 #: for internal callers.
 
 
-class SourceScope(str, Enum):
+class SourceScope(StrEnum):
     """Internal replay-scope axis for ``EvidenceDepth.SOURCE`` (ADR-043 D2/D3).
 
     Never a public CLI flag. The public ``--depth source`` rung always means

@@ -69,14 +69,14 @@ def _is_schema_valid_run_outcome(data: object) -> bool:
     if assurance is not None and not isinstance(assurance, Mapping):
         return False
     try:
-        PolicyGateDecision(data.get("gate"))
-        OperationalStatus(data.get("operational"))
-        TargetLifecycle(data.get("lifecycle"))
+        PolicyGateDecision(data.get("gate", ""))
+        OperationalStatus(data.get("operational", ""))
+        TargetLifecycle(data.get("lifecycle", ""))
     except ValueError:
         return False
     if run_outcome_scope_required(data.get("schema_version")) or "scope" in data:
         try:
-            ScopeCompleteness(data.get("scope"))
+            ScopeCompleteness(data.get("scope", ""))
         except ValueError:
             return False
     return True

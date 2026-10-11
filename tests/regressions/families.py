@@ -135,6 +135,22 @@ FAMILIES: dict[str, Family] = {
             harness_tests=("tests/test_family_f8_target_parity.py",),
         ),
         Family(
+            key="F9",
+            title="Host-interpreter parity",
+            invariant=(
+                "abicheck produces the same persisted tokens and the same "
+                "thread isolation on every supported Python, GIL and "
+                "free-threaded alike; behavior that newer interpreters change "
+                "(how json encodes str subclasses, whether a thread inherits "
+                "its parent's context) is pinned against a declared oracle, "
+                "not a same-interpreter round trip."
+            ),
+            harness_tests=(
+                "tests/test_str_enum_serialized_token.py",
+                "tests/test_ast_memo_slot_thread_context.py",
+            ),
+        ),
+        Family(
             key="OTHER",
             title="CI, tooling, storage and trust-boundary surfaces",
             invariant=(
@@ -292,6 +308,11 @@ _F7 = (
     "tests.locale_dependent_repo_text_read",
     "tests.host_dependent_expectation",
 )
+_F9 = (
+    "serialization.interpreter_dependent_str_subclass_token",
+    "concurrency.per_thread_state_in_inherited_context",
+)
+
 #: id -> reason it belongs to no shared family.
 OTHER_REASONS: dict[str, str] = {
     "guard.platform_convention_without_a_gate": "platform convention lint gate",
@@ -327,6 +348,7 @@ for _key, _ids in (
     ("F5", _F5),
     ("F7", _F7),
     ("F8", _F8),
+    ("F9", _F9),
     ("OTHER", tuple(OTHER_REASONS)),
 ):
     for _id in _ids:

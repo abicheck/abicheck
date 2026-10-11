@@ -111,7 +111,7 @@ prerequisite only retires the "`compare` cannot even carry the signal" gap
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
 from .evaluate import effective_kind_sets
@@ -125,7 +125,7 @@ if TYPE_CHECKING:
     from .effective_gate import EffectiveGate
 
 
-class ExitReason(str, Enum):
+class ExitReason(StrEnum):
     """Which orthogonal axis a resolved :class:`ExitDecision` traces to.
 
     A member appears in :attr:`ExitDecision.reasons` only when its own

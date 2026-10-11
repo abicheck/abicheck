@@ -51,7 +51,7 @@ import logging
 import tempfile
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -259,7 +259,7 @@ def cleanup_no_baseline_set_plan(plan: NoBaselineSetPlan) -> None:
         shutil.rmtree(path, ignore_errors=True)
 
 
-class MemberAuditStatus(str, Enum):
+class MemberAuditStatus(StrEnum):
     """How one selected member's audit ended -- the three outcomes the
     two-sided release path's ``release_member_errors`` distinguishes,
     minus ``not_comparable`` (a one-sided audit has no pair to refuse)."""

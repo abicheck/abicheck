@@ -132,6 +132,10 @@ _ORACLE_SCRIPT = textwrap.dedent(
     spec.loader.exec_module(module)
 
     assert threading.active_count() == 1, "oracle census needs a single thread"
+    # Free-threaded builds free a class body's throwaway function object
+    # (qualname "Outer") lazily; collect first so the census holds only
+    # functions something still references.
+    gc.collect()
     expected = {
         o for o in gc.get_objects()
         if isinstance(o, types.FunctionType) and o.__code__.co_filename == module_path

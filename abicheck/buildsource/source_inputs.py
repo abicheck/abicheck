@@ -55,14 +55,14 @@ import functools
 import os
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 from typing import Any, TypeVar
 
 _T = TypeVar("_T")
 
 
-class SourceInputDisposition(str, Enum):
+class SourceInputDisposition(StrEnum):
     """What became of one declared input.
 
     Every root a caller declares resolves to exactly one of these, so the set

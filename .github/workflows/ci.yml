@@ -276,9 +276,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Full suite on the canonical interpreter only. Every other supported
-        # Python (3.11, 3.12, 3.14, and the in-development 3.15) is covered by
-        # python-compat.yml's wheel-install + import + smoke-subset lane.
+        # Coverage on the canonical interpreter only. python-compat.yml runs
+        # the same full suite (uncovered) on 3.11, 3.15 and 3.15t on every PR;
+        # 3.12/3.14 get its wheel-install + smoke-subset lane.
         python-version: ['3.13']
         shard: [1, 2, 3]
     steps:

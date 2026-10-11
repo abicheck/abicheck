@@ -74,7 +74,7 @@ import hashlib
 import json
 from collections.abc import Collection, Hashable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, cast
@@ -162,7 +162,7 @@ SEVERITY_CATEGORY_FIELDS: Mapping[str, str] = {
 }
 
 
-class FrontEnd(str, Enum):
+class FrontEnd(StrEnum):
     """Which front end stated a run's explicit inputs.
 
     ADR-049 D7 puts "explicit CLI" and "explicit API request" in the *same*

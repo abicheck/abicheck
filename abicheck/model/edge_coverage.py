@@ -55,7 +55,7 @@ __all__ = [
 ]
 
 
-class EdgeAnswer(str, enum.Enum):
+class EdgeAnswer(enum.StrEnum):
     """I4's three-valued answer."""
 
     #: The producer observed (or, for a ``derived`` kind, the records
@@ -67,7 +67,7 @@ class EdgeAnswer(str, enum.Enum):
     UNKNOWN = "unknown"
 
 
-class ProducerRun(str, enum.Enum):
+class ProducerRun(enum.StrEnum):
     """How far one producer got over the units it is responsible for."""
 
     #: Ran over every unit it is responsible for, without diagnostics.

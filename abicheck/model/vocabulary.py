@@ -22,16 +22,16 @@ every consumer package can depend on it without ordering concerns.
 
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 
 
-class Visibility(str, Enum):
+class Visibility(StrEnum):
     PUBLIC = "public"  # default visibility / exported
     HIDDEN = "hidden"  # __attribute__((visibility("hidden")))
     ELF_ONLY = "elf_only"  # present in ELF symbol table, not in headers
 
 
-class ElfVisibility(str, Enum):
+class ElfVisibility(StrEnum):
     """ELF st_other visibility from .dynsym — separate from API-level Visibility."""
 
     DEFAULT = "default"  # STV_DEFAULT
@@ -40,20 +40,20 @@ class ElfVisibility(str, Enum):
     INTERNAL = "internal"  # STV_INTERNAL
 
 
-class AccessLevel(str, Enum):
+class AccessLevel(StrEnum):
     PUBLIC = "public"
     PROTECTED = "protected"
     PRIVATE = "private"
 
 
-class ParamKind(str, Enum):
+class ParamKind(StrEnum):
     VALUE = "value"
     POINTER = "pointer"
     REFERENCE = "reference"
     RVALUE_REF = "rvalue_ref"
 
 
-class ScopeOrigin(str, Enum):
+class ScopeOrigin(StrEnum):
     """Where a declaration's defining header sits relative to the
     user-provided public-header set — the *Origin* axis of the two-axis
     Linkage × Origin surface model (ADR-024 D1, ADR-015 schema v6).

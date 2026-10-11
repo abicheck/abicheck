@@ -27,13 +27,13 @@ with its parser").
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 
 from .execution_cache import memoized_property
 from .fact import Fact, bridge_legacy_and_fact
 
 
-class SymbolBinding(str, Enum):
+class SymbolBinding(StrEnum):
     GLOBAL = "global"
     WEAK = "weak"
     LOCAL = "local"
@@ -41,7 +41,7 @@ class SymbolBinding(str, Enum):
     OTHER = "other"
 
 
-class SymbolType(str, Enum):
+class SymbolType(StrEnum):
     FUNC = "func"
     OBJECT = "object"
     TLS = "tls"

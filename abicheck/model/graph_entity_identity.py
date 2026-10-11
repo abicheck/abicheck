@@ -128,7 +128,7 @@ UNRESOLVED_PREFIX = _UNRESOLVED_PREFIX
 IDENTITY_STATE_ATTR = "identity"
 
 
-class IdentityState(str, enum.Enum):
+class IdentityState(enum.StrEnum):
     RESOLVED = "resolved"
     UNRESOLVED = "unresolved"
 

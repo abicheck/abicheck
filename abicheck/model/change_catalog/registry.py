@@ -42,7 +42,7 @@ from __future__ import annotations
 import string
 from collections.abc import Mapping
 from dataclasses import MISSING, dataclass, field, fields
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from ._immutable_mapping import _ImmutableDict as _ImmutableDict
@@ -52,7 +52,7 @@ from .dimensions import (
 )
 
 
-class Verdict(str, Enum):
+class Verdict(StrEnum):
     NO_CHANGE = "NO_CHANGE"
     COMPATIBLE = "COMPATIBLE"
     COMPATIBLE_WITH_RISK = "COMPATIBLE_WITH_RISK"

@@ -490,7 +490,7 @@ class TestTheWarmRunReallySkipsTheParse:
             )
             assert second == first
         finally:
-            dumper_cache._ast_memo_slot.set(None)
+            dumper_cache._ast_memo_slot.value = None
 
     def test_a_memo_handoff_warm_hit_equals_a_disk_path_cold_run(
         self, monkeypatch, tmp_path: Path
@@ -515,7 +515,7 @@ class TestTheWarmRunReallySkipsTheParse:
                     self._primary_clang_pass(other, ast)
                     warm = self._graph_shape(self._attach(self._snapshot()))
                 finally:
-                    dumper_cache._ast_memo_slot.set(None)
+                    dumper_cache._ast_memo_slot.value = None
             assert warm == reference, name
 
     @pytest.mark.parametrize(

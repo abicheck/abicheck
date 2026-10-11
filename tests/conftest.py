@@ -339,10 +339,10 @@ def _isolate_ast_memo() -> Iterator[None]:
     # The header-only `clang -M` include-pass memo is process-wide for the
     # same reason and with the same hazard: a test faking the extractor
     # must never be served another test's include map.
-    dumper_cache._ast_memo_slot.set(None)
+    dumper_cache._ast_memo_slot.value = None
     clear_include_memo()
     yield
-    dumper_cache._ast_memo_slot.set(None)
+    dumper_cache._ast_memo_slot.value = None
     clear_include_memo()
 
 

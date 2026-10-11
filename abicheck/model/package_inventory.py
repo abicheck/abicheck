@@ -53,7 +53,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 __all__ = [
@@ -68,7 +68,7 @@ __all__ = [
 PACKAGE_INVENTORY_SCHEMA_VERSION = "1.0"
 
 
-class ComponentKind(str, Enum):
+class ComponentKind(StrEnum):
     """What a declared component is, as far as the container's own member
     table can tell -- a name-shape judgement, never an opened file."""
 

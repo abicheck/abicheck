@@ -65,7 +65,7 @@ import hashlib
 import math
 from collections.abc import Hashable, Mapping, Sequence
 from dataclasses import dataclass
-from enum import Enum
+from enum import Enum, StrEnum
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any
@@ -78,7 +78,7 @@ from .model.yaml_strict import load_strict_yaml
 from .policy_file import parse_severity_value
 
 
-class PackKind(str, Enum):
+class PackKind(StrEnum):
     """Which ADR-049 D8 namespace a pack manifest's assignments belong to."""
 
     CONTRACT = "contract"

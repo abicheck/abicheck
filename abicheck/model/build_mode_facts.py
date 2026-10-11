@@ -24,10 +24,10 @@ shapes (ADR-061 Phase 5).
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 
 
-class CompilerFamily(str, Enum):
+class CompilerFamily(StrEnum):
     """Normalized compiler identity.  Patch / minor version intentionally
     NOT captured here — those live in :attr:`BuildMode.provenance` so
     snapshots stay equal across CI runners with different point releases."""
@@ -40,14 +40,14 @@ class CompilerFamily(str, Enum):
     UNKNOWN = "unknown"
 
 
-class StdlibFamily(str, Enum):
+class StdlibFamily(StrEnum):
     LIBSTDCXX = "libstdc++"
     LIBCXX = "libc++"
     MSVC_STL = "msvc_stl"
     UNKNOWN = "unknown"
 
 
-class CxxStandard(str, Enum):
+class CxxStandard(StrEnum):
     """Coarse-grained C++ standard bucket.
 
     Maps DWARF ``DW_AT_language`` values to a stable enum.  Note that
@@ -67,7 +67,7 @@ class CxxStandard(str, Enum):
     UNKNOWN = "unknown"
 
 
-class GlibcxxDualAbi(str, Enum):
+class GlibcxxDualAbi(StrEnum):
     """libstdc++ dual-ABI flavor (only meaningful when stdlib == LIBSTDCXX)."""
 
     CXX11 = "cxx11"  # _GLIBCXX_USE_CXX11_ABI=1 (default since gcc 5)

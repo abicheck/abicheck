@@ -145,7 +145,10 @@ def _record(tmp_path: Path, n: int, calls: dict[str, list[str]]):
     proc = subprocess.run(
         [sys.executable, "-c", _RUNNER, str(pkg), str(data_file), json.dumps(calls)],
         capture_output=True, text=True, check=True,
-        env={k: v for k, v in os.environ.items() if not k.startswith("COV")},
+        env={
+            **{k: v for k, v in os.environ.items() if not k.startswith("COV")},
+            **up.CONTEXT_COVERAGE_ENV,
+        },
     )  # fmt: skip
     logged = {ctx: set(fns) for ctx, fns in json.loads(proc.stdout).items()}
     got = up.functions_by_context(data_file, root=tmp_path)

@@ -26,10 +26,10 @@ working.
 
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 
 
-class ChangeEntity(str, Enum):
+class ChangeEntity(StrEnum):
     """Which kind of thing a finding is *about* -- the canonical display
     "element" dimension (plan slice 7o).
 
@@ -54,7 +54,7 @@ class ChangeEntity(str, Enum):
     ANALYSIS = "analysis"
 
 
-class ChangeOperation(str, Enum):
+class ChangeOperation(StrEnum):
     """Whether a finding reports an entity appearing, disappearing, or
     changing in place -- the canonical display "action" dimension.
 

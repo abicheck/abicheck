@@ -36,6 +36,14 @@ def _restore_thresholds():
     gc.set_threshold(*before)
 
 
+@pytest.fixture
+def _gil_build(monkeypatch):
+    """Exercise the relax/restore logic on every build: on a free-threaded
+    interpreter ``gc_relaxed`` is deliberately a no-op (pinned separately by
+    ``test_no_op_when_disabled_or_free_threaded``)."""
+    monkeypatch.setattr(acyclic_json, "_gil_enabled", lambda: True)
+
+
 def _nest(rng: random.Random, depth: int) -> None:
     with gc_relaxed():
         if gc.get_threshold() != RELAXED_GC_THRESHOLDS:
@@ -47,7 +55,9 @@ def _nest(rng: random.Random, depth: int) -> None:
 
 
 @pytest.mark.parametrize("seed", range(25))
-def test_any_nesting_and_failure_restores_the_prior_thresholds(seed) -> None:
+def test_any_nesting_and_failure_restores_the_prior_thresholds(
+    seed, _gil_build
+) -> None:
     rng = random.Random(seed)
     prior = (rng.randint(100, 5000), rng.randint(2, 20), rng.randint(2, 20))
     gc.set_threshold(*prior)
@@ -59,7 +69,7 @@ def test_any_nesting_and_failure_restores_the_prior_thresholds(seed) -> None:
         assert gc.get_threshold() == prior
 
 
-def test_overlapping_threads_restore_only_after_the_last() -> None:
+def test_overlapping_threads_restore_only_after_the_last(_gil_build) -> None:
     prior = gc.get_threshold()
     inside = threading.Barrier(4)
     seen: list[tuple[int, ...]] = []

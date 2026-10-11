@@ -34,7 +34,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 
 from .model import ParamKind, RecordType, ScopeOrigin, resolved_fact_value
 from .model.change_catalog.kinds import ChangeKind
@@ -55,7 +55,7 @@ _NON_PUBLIC_ORIGINS = frozenset(
 )
 
 
-class Idiom(str, Enum):
+class Idiom(StrEnum):
     """API idioms recognised from the declaration graph (ADR-025 D2.1)."""
 
     OPAQUE_POINTER = "opaque_pointer"  # definition hidden; only ever crossed by pointer

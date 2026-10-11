@@ -4129,7 +4129,7 @@ def test_header_graph_attach_reuses_primary_snapshot_ast(
         # The memo slot now holds the parsed AST, primed for step 2's pop --
         # proving this test actually exercises the memo handoff, not just
         # the pre-existing disk-cache dedup.
-        assert dumper_cache._ast_memo_slot.get() is not None
+        assert dumper_cache._ast_memo_slot.value is not None
     assert calls["n"] == 1
 
     # Step 2: the post-dump header-graph attach step, over the identical
@@ -4159,7 +4159,7 @@ def test_ast_memo_slot_overwrites_previous_pending_value() -> None:
     old shared-dict design this superseded)."""
     dumper_cache.store_cached_ast("k1", "clang", {"n": 1})
     dumper_cache.store_cached_ast("k2", "clang", {"n": 2})
-    assert dumper_cache._ast_memo_slot.get() == ("clang", "k2", {"n": 2})
+    assert dumper_cache._ast_memo_slot.value == ("clang", "k2", {"n": 2})
 
 
 def test_ast_memo_slot_is_per_thread_not_shared(
@@ -4183,9 +4183,9 @@ def test_ast_memo_slot_is_per_thread_not_shared(
     def _other_thread() -> None:
         # A fresh thread starts with an empty slot regardless of what the
         # main thread just stored under the identical key.
-        other_saw["before"] = dumper_cache._ast_memo_slot.get()
+        other_saw["before"] = dumper_cache._ast_memo_slot.value
         dumper_cache.store_cached_ast("shared-key", "clang", {"side": "other"})
-        other_saw["after"] = dumper_cache._ast_memo_slot.get()
+        other_saw["after"] = dumper_cache._ast_memo_slot.value
 
     t = threading.Thread(target=_other_thread)
     t.start()
@@ -4195,7 +4195,7 @@ def test_ast_memo_slot_is_per_thread_not_shared(
     assert other_saw["after"] == ("clang", "shared-key", {"side": "other"})
     # The main thread's own slot is untouched by the other thread's write
     # under the identical key.
-    assert dumper_cache._ast_memo_slot.get() == (
+    assert dumper_cache._ast_memo_slot.value == (
         "clang",
         "shared-key",
         {"side": "main"},

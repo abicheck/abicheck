@@ -27,7 +27,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 #: SemVer-style (MAJOR.MINOR) version of the expected-target *manifest* input
@@ -53,14 +53,14 @@ from typing import Any
 AGGREGATE_MANIFEST_VERSION = "2.0"
 
 
-class OnMissingRequired(str, Enum):
+class OnMissingRequired(StrEnum):
     """Gate policy for a required target that never reported."""
 
     FAIL = "fail"  # incomplete required coverage fails the gate (default)
     WARN = "warn"  # report the gap but do not fail on coverage alone
 
 
-class OnUnexpectedTarget(str, Enum):
+class OnUnexpectedTarget(StrEnum):
     """Gate policy for a report whose target is not in the expected set."""
 
     INCLUDE = "include"  # count its real findings in the gate, not in coverage

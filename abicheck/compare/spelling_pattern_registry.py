@@ -81,10 +81,15 @@ MAX_PATTERN_BYTES = 256 * 1024 * 1024
 # growth.
 _PATTERN_BYTES_PER_CHAR = 9
 
+# Fixed per-pattern object overhead on top of the per-char cost. Without it
+# the estimate for a small vocabulary sits within a few bytes of the measured
+# size on 3.13 and below it on 3.11, whose compiled-pattern header is larger.
+_PATTERN_OVERHEAD_BYTES = 256
+
 
 def _pattern_bytes(pattern: re.Pattern[str]) -> int:
     """Estimated bytes retained by holding *pattern* alive."""
-    return len(pattern.pattern) * _PATTERN_BYTES_PER_CHAR
+    return _PATTERN_OVERHEAD_BYTES + len(pattern.pattern) * _PATTERN_BYTES_PER_CHAR
 
 
 class _PatternRegistry:

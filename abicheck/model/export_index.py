@@ -60,7 +60,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Collection, Iterable, Sequence
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 from typing import TYPE_CHECKING, Literal
 
 from .execution_cache import request_key
@@ -479,7 +479,7 @@ def snapshot_export_names(snap: AbiSnapshot) -> frozenset[str]:
 # ---------------------------------------------------------------------------
 
 
-class ExportMatch(str, Enum):
+class ExportMatch(StrEnum):
     """How a declaration was found in a binary's symbol tables.
 
     The one vocabulary the export fact (``binary_exported_fact``) and the
@@ -578,7 +578,7 @@ def read_export_platforms(snap: AbiSnapshot) -> dict[str, bool]:
     return read
 
 
-class ExportTableState(str, Enum):
+class ExportTableState(StrEnum):
     """Whether a dump actually *read* an export table (evidence-entity-model
     Phase 4, gap A1).
 

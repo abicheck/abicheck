@@ -25,7 +25,7 @@ Nothing here parses binaries or runs external tools — the model is pure data.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 #: Evidence-pack schema version. Bumped on any breaking change to the manifest
@@ -34,7 +34,7 @@ from typing import Any
 BUILD_SOURCE_PACK_VERSION: int = 1
 
 
-class DataLayer(str, Enum):
+class DataLayer(StrEnum):
     """Optional evidence layers added by ADR-028 on top of L0/L1/L2.
 
     L0 (binary), L1 (debug info), and L2 (header AST) are intrinsic to the
@@ -47,7 +47,7 @@ class DataLayer(str, Enum):
     L5_SOURCE_GRAPH = "L5_source_graph"  # include/type/call/build graph (ADR-031)
 
 
-class LayerConfidence(str, Enum):
+class LayerConfidence(StrEnum):
     """Confidence qualifier for an evidence layer or joined entity (ADR-028 D5).
 
     ``HIGH`` — facts are directly observed (e.g. exact compile command, exported
@@ -61,7 +61,7 @@ class LayerConfidence(str, Enum):
     UNKNOWN = "unknown"
 
 
-class CoverageStatus(str, Enum):
+class CoverageStatus(StrEnum):
     """Collection status for an evidence layer in the coverage table (D7)."""
 
     PRESENT = "present"  # collected in full

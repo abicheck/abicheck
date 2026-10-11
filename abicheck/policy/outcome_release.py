@@ -187,7 +187,7 @@ def run_outcome_dict_for_release(
 
     compatibility: Verdict | None
     try:
-        compatibility = Verdict(compatibility_verdict)
+        compatibility = Verdict(compatibility_verdict or "")
     except ValueError:
         compatibility = None
 

@@ -21,13 +21,13 @@ no parsing logic (ADR-061 Phase 5)."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 
 from .execution_cache import memoized_property
 from .fact import Fact, bridge_legacy_and_fact
 
 
-class MachoSymbolType(str, Enum):
+class MachoSymbolType(StrEnum):
     EXPORTED = "exported"  # N_EXT: externally visible
     WEAK = "weak"  # N_WEAK_DEF: weak definition
     REEXPORT = "reexport"  # re-exported from another dylib
