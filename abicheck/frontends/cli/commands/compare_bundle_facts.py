@@ -71,6 +71,7 @@ from ....report.comparison_scope import ComparisonScopeTerms
 # Via `report`, which re-exports it: `frontends -> policy` is forbidden
 # (`architecture/modules.yaml`), even for a signature's own annotation.
 from ....report.release_assurance import ReleaseAssuranceDecision
+from ....workflows.gate import fold_release_outcome
 from ....workflows.release_assurance_members import release_assurance_from_results
 from .compare_bundle_facts_scope import (
     json_scope_fields,
@@ -851,7 +852,7 @@ def dispatch(
             )
 
     _exit_compare_release(
-        _reported_verdict(result),
+        bundle_facts_reported_verdict(result),
         fail_on_removed=False,
         removed_keys=[],
         incomplete_scope_exit_contribution=scope_terms.decision.incomplete_scope_exit_contribution,
@@ -860,13 +861,16 @@ def dispatch(
     )
 
 
-def _reported_verdict(result: Any) -> str:
-    """The fan-out's ``"not_comparable"`` (ADR-050 D2; exit 16, ranked above
-    ``ERROR``) when a matched pair's contracts disagreed, else its ``"ERROR"``
-    when a NEW member failed extraction (ADR-065 D1; exit 4), else the verdict."""
-    if result.not_comparable_members:
-        return "not_comparable"
-    return "ERROR" if result.extraction_failures else result.verdict.value
+def bundle_facts_reported_verdict(result: Any) -> str:
+    """The release-outcome fold over this comparison's sentinels and verdict:
+    ``"not_comparable"`` (ADR-050 D2) when a matched pair's contracts
+    disagreed, else ``"ERROR"`` when a NEW member failed extraction (ADR-065
+    D1), else the verdict -- the ranking itself is ``policy.release_outcome``'s."""
+    sentinels = [
+        *(["not_comparable"] if result.not_comparable_members else []),
+        *(["ERROR"] if result.extraction_failures else []),
+    ]
+    return fold_release_outcome(sentinels, [result.verdict.value]).reported_verdict
 
 
 def _render(
@@ -940,7 +944,7 @@ def _render_json(
         # keyed on `new_dir`.
         "new_dir": str(new_dir),
         "new_is_stored": new_is_stored,
-        "verdict": _reported_verdict(result),
+        "verdict": bundle_facts_reported_verdict(result),
         "per_library_verdict": result.per_library_verdict.value,
         "bundle_verdict": result.bundle_verdict.value,
         **json_scope_fields(terms, run_outcome, result),
@@ -997,7 +1001,7 @@ def _render_markdown(
         "",
         f"- OLD (stored facts): `{old_facts_path}`",
         f"- NEW ({new_label}): `{new_dir}`",
-        f"- **Verdict:** `{_reported_verdict(result)}`",
+        f"- **Verdict:** `{bundle_facts_reported_verdict(result)}`",
         f"- Per-library verdict: `{result.per_library_verdict.value}`",
         f"- Bundle verdict: `{result.bundle_verdict.value}`",
         "",

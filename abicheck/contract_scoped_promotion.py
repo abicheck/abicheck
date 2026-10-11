@@ -191,7 +191,7 @@ def recompute_verdict_after_promotion(
     """
     from .model.contract_finding_relevance import is_evaluated
     from .policy.classification import compute_verdict
-    from .policy.reclassify import _VERDICT_ORDER
+    from .policy.release_outcome import compatibility_rank
 
     changes = getattr(result, "changes", None)
     if not changes:
@@ -225,7 +225,7 @@ def recompute_verdict_after_promotion(
     #    two preserves whatever those findings contributed, without this
     #    function having to reconstruct a set the result no longer
     #    distinguishes.
-    if _VERDICT_ORDER.index(recomputed) > _VERDICT_ORDER.index(result.verdict):
+    if compatibility_rank(recomputed) > compatibility_rank(result.verdict):
         result.verdict = recomputed
 
 

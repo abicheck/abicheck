@@ -48,7 +48,6 @@ from typing import TYPE_CHECKING, Any
 import click
 
 from .checker import DiffResult
-from .cli_compare_release_helpers import _RELEASE_VERDICT_ORDER
 from .cli_resolve import _normalize_binary_input
 from .frontends.cli.release_member_errors import (
     member_dispatch_failure_entry,
@@ -63,6 +62,7 @@ from .workflows.crosscheck_ownership import (
     release_level_checks,
     release_owned_checks_scope,
 )
+from .workflows.gate import worse_release_verdict
 from .workflows.keyed_thread_pool import run_keyed_in_threads
 from .workflows.member_compare import compare_member
 from .workflows.release_member_request import (
@@ -730,10 +730,7 @@ def _compare_release_libraries(
             click.echo(
                 f"Failed: {entry['library']}: {entry.get('reason', '')}", err=True
             )
-        if _RELEASE_VERDICT_ORDER.get(v, 0) > _RELEASE_VERDICT_ORDER.get(
-            worst_verdict, 0
-        ):
-            worst_verdict = v
+        worst_verdict = worse_release_verdict(worst_verdict, v)
 
     # Cross-library coupling: a coordinated SONAME bump across the release is not
     # "unnecessary" just because one member had no break of its own.

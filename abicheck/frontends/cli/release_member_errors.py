@@ -113,7 +113,7 @@ def member_error_entry(
         # were not extracted under a comparable profile/scope contract: a
         # distinct, expected outcome (not an abicheck bug), so it gets its
         # own "not_comparable" verdict string instead of the "ERROR"/exit-4
-        # bucket a genuine crash uses — see `_RELEASE_VERDICT_ORDER`'s
+        # bucket a genuine crash uses — see `policy.release_outcome.RELEASE_VERDICT_ORDER`'s
         # dedicated rank for it.
         kind = (
             "profile_mismatch"

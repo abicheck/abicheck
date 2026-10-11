@@ -104,13 +104,11 @@ def _write_release_summary_file(
     real value for ``effective_config_fields["policy.env_matrix"]``.
     """
     from ...cli_compare_receipt import _release_summary_effective_config_block
-    from ...cli_compare_release_helpers import (
-        _release_completed_compatibility_verdict,
-        _release_findings_for_render,
-        _release_global_verdict,
-    )
+    from ...cli_compare_release_helpers import _release_findings_for_render
     from ...report.not_comparable import run_outcome_dict_for_release
     from ...workflows.gate import (
+        fold_release_outcome,
+        release_global_verdicts,
         resolve_release_exit_decision_for_report,
         resolve_scope_decision,
     )
@@ -135,7 +133,12 @@ def _write_release_summary_file(
         require_complete_analysis=require_complete_analysis,
         excluded_header_patterns=excluded_header_patterns,
     )
-    release_global_verdict = _release_global_verdict(bundle_result, matrix_result)
+    outcome = fold_release_outcome(
+        (str(entry.get("verdict", "NO_CHANGE")) for entry in library_results),
+        release_global_verdicts(bundle_result, matrix_result),
+        global_ran=release_global_ran(bundle_result, matrix_result, terms.record),
+    )
+    release_global_verdict = outcome.global_verdict
     # `require_complete_analysis` reaches this sidecar's own decision too,
     # not only the process exit -- the same reason the release JSON threads
     # it (Codex review, PR #1238, P1): this file is what a consumer reads
@@ -182,13 +185,7 @@ def _write_release_summary_file(
         "effective_config_fields": fields,
         "exit": exit_dict,
         "run_outcome": run_outcome_dict_for_release(
-            _release_completed_compatibility_verdict(
-                library_results,
-                release_global_verdict,
-                release_global_ran=release_global_ran(
-                    bundle_result, matrix_result, record
-                ),
-            ),
+            outcome.compatibility,
             exit_dict,
             scope=terms.completeness,
         ),

@@ -45,13 +45,13 @@ import pytest
 from abicheck.checker_policy import ChangeKind, CrossSourceEvolution, Verdict
 from abicheck.checker_types import DiffResult
 from abicheck.model.change import Change
+from abicheck.policy.release_outcome import RELEASE_OPERATIONAL_SENTINELS
 from abicheck.report.change_inventory import (
     ChangeInventorySplit,
     render_change_inventory_json,
 )
 from abicheck.report.release_change_inventory import (
     RELEASE_INVENTORY_COUNTERS,
-    RELEASE_OPERATIONAL_SENTINELS,
     fold_release_change_inventory,
     release_change_inventory,
     release_inventory_counters,
@@ -67,15 +67,17 @@ _SENTINELS = RELEASE_OPERATIONAL_SENTINELS
 
 
 def test_the_sentinel_vocabulary_is_what_the_release_actually_uses() -> None:
-    """The CLI helper's historical private name must still be this set.
+    """The inventory fold reads the release-outcome owner's one set.
 
     Two definitions of "this member completed no comparison" -- one in the
-    report layer and one in the front end -- is how the fold and the
+    report layer and one in the verdict fold -- is how the fold and the
     verdict rollup would come to disagree about which members count.
     """
-    from abicheck.cli_compare_release_helpers import _RELEASE_OPERATIONAL_SENTINELS
+    from abicheck.report import release_change_inventory
 
-    assert _RELEASE_OPERATIONAL_SENTINELS is RELEASE_OPERATIONAL_SENTINELS
+    assert release_change_inventory.RELEASE_OPERATIONAL_SENTINELS is (
+        RELEASE_OPERATIONAL_SENTINELS
+    )
     assert {"ERROR", "not_comparable", "unsupported", "failed"} <= set(_SENTINELS)
 
 

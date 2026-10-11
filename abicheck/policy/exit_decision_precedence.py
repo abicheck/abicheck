@@ -430,7 +430,7 @@ def resolve_release_exit_decision(
     *operational_error_contribution* for the legacy scheme exactly as it
     does for severity (both fold through :func:`resolve_exit_decision`'s
     tie-inclusive logic below) -- but today's real `worst_verdict`
-    aggregation (`cli_compare_release.py`'s `_RELEASE_VERDICT_ORDER` loop)
+    aggregation (`policy.release_outcome`'s rollup)
     ranks `"ERROR"` *above* `"BREAKING"` and collapses the whole release to
     one scalar, so a release with one `BREAKING` library and a second,
     unrelated library that failed to compare never gets to *supply* a

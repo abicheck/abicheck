@@ -52,7 +52,6 @@ import click
 from .bundle import BundleDiffResult
 from .checker import Change, DiffResult
 from .cli_compare_release_helpers import (  # noqa: F401
-    _RELEASE_VERDICT_ORDER,
     _debian_symbols_warning,
     _discover_include_roots,
     _exit_compare_release,
@@ -81,7 +80,14 @@ from .report.comparison_scope import ComparisonScopeTerms
 from .report.release_assurance import ReleaseAssuranceTerms
 from .report.release_public_surface import ReleasePublicSurfaceTerms
 from .workflows.extraction import package_component_inventory  # noqa: F401
-from .workflows.gate import effective_kind_sets, incomplete_scope_diagnostic
+from .workflows.gate import (
+    apply_removed_member_floor,
+    effective_kind_sets,
+    fold_release_outcome,
+    incomplete_scope_diagnostic,
+    release_global_verdicts,
+    worse_release_verdict,
+)
 from .workflows.release_exit_fold import release_compatibility_base_exit
 from .workflows.snapshot_factory import new_snapshot
 
@@ -188,10 +194,7 @@ def _collect_matrix_result(
         extra_changes=matrix_changes,
     )
     matrix_verdict = result.verdict.value
-    if _RELEASE_VERDICT_ORDER.get(matrix_verdict, 0) > _RELEASE_VERDICT_ORDER.get(
-        worst_verdict, 0
-    ):
-        worst_verdict = matrix_verdict
+    worst_verdict = worse_release_verdict(worst_verdict, matrix_verdict)
     return result, worst_verdict
 
 
@@ -395,8 +398,6 @@ def _finalize_release_output(
     # single-pair run renders cannot be); the *decision* is not -- it goes
     # through `_exit_compare_release` like every other axis, so the process
     # exit and the persisted `exit` block cannot disagree.
-    from .cli_compare_release_helpers import _release_global_verdict
-
     _exit_compare_release(
         worst_verdict,
         fail_on_removed,
@@ -406,7 +407,9 @@ def _finalize_release_output(
         # The evidence-contract axis and its stderr notice are both derived
         # from these, by the one resolver the persisted `exit` block reads.
         library_results=library_results,
-        release_global_verdict=_release_global_verdict(bundle_result, matrix_result),
+        release_global_verdict=fold_release_outcome(
+            (), release_global_verdicts(bundle_result, matrix_result)
+        ).global_verdict,
         incomplete_scope_exit_contribution=(
             scope_terms.decision.incomplete_scope_exit_contribution
             if scope_terms
@@ -855,8 +858,4 @@ def _strip_diff_results_and_adjust_verdict(
                     diff, severity_config=severity_config
                 )
         strip_internal_keys(entry)
-    if removed_keys and _RELEASE_VERDICT_ORDER.get(
-        worst_verdict, 0
-    ) < _RELEASE_VERDICT_ORDER.get("COMPATIBLE_WITH_RISK", 0):
-        worst_verdict = "COMPATIBLE_WITH_RISK"
-    return worst_verdict
+    return apply_removed_member_floor(worst_verdict, removed=bool(removed_keys))

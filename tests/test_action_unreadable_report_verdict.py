@@ -578,7 +578,7 @@ class TestAnOperationalOutcomeIsNotACompatibilityResult:
     compatibility claim (Codex review, P2, reproduced as `ERROR COMPATIBLE 0`).
 
     The engine already draws this line for the same reason:
-    `cli_compare_release_helpers._release_completed_compatibility_verdict`
+    `policy.release_outcome.fold_release_outcome`
     excludes exactly these from `run_outcome.compatibility`, because an
     operational failure and a compatibility result are separate axes.
 

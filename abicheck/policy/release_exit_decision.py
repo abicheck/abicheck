@@ -151,7 +151,7 @@ def _compute_release_legacy_exit_code(
 
     ADR-064 stage 1b. Mirrors ``cli_compare_release_helpers.
     _compute_release_severity_exit_code``'s per-library independence for
-    the *legacy* scheme: ``_RELEASE_VERDICT_ORDER``'s collapsed
+    the *legacy* scheme: ``release_outcome.RELEASE_VERDICT_ORDER``'s collapsed
     ``worst_verdict`` ranks ``"ERROR"``/``"not_comparable"`` above every
     real :class:`~abicheck.checker_policy.Verdict`, so using it directly as
     the legacy compatibility-gate contribution would let an unrelated
@@ -254,7 +254,7 @@ def resolve_release_exit_decision_for_report(
     records. Concretely, a release with one ``BREAKING`` library and a
     second, unrelated library that failed to compare (an ``"ERROR"``
     verdict) collapses to ``worst_verdict == "ERROR"`` in today's
-    ``_RELEASE_VERDICT_ORDER`` rollup (ADR-050 D2's ``"not_comparable"``
+    ``release_outcome.RELEASE_VERDICT_ORDER`` rollup (ADR-050 D2's ``"not_comparable"``
     ranks higher still, but is handled by its own dominant branch below) --
     ``_exit_compare_release`` never even computes the ``BREAKING``
     library's own code in that case, since its ``ERROR`` short-circuit
@@ -283,7 +283,7 @@ def resolve_release_exit_decision_for_report(
     (Codex review, fresh evidence) rather than checking ``worst_verdict ==
     "ERROR"`` -- an earlier revision did the latter, which reads ``0``
     whenever a *different* library's ``"not_comparable"`` verdict outranks
-    ``"ERROR"`` in ``_RELEASE_VERDICT_ORDER`` and becomes the aggregate
+    ``"ERROR"`` in ``release_outcome.RELEASE_VERDICT_ORDER`` and becomes the aggregate
     ``worst_verdict``, even though a real operational failure still
     happened elsewhere in the release and `resolve_release_exit_decision`'s
     own ``not_comparable`` branch already preserves this value for exactly

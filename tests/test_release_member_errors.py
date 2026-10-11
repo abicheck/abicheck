@@ -60,7 +60,7 @@ class TestEachOutcomeIsItsOwnVerdict:
     """The four buckets, and that they stay distinct.
 
     Collapsing any two would change a release's exit code: `not_comparable`
-    ranks above `ERROR` in `_RELEASE_VERDICT_ORDER` (exit 16 vs 4), and
+    ranks above `ERROR` in `RELEASE_VERDICT_ORDER` (exit 16 vs 4), and
     `unsupported` is a scope-completeness signal that must not be floored to
     4 the way an operational crash is.
     """

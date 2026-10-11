@@ -83,13 +83,17 @@ from .workflows.contract_conflicts import (
     debian_symbols_release_conflict_lines as debian_symbols_release_conflict_lines,  # re-exported, E-S3
 )
 from .workflows.gate import (
+    RELEASE_OPERATIONAL_SENTINELS,
     GateOptions as GateOptions,  # re-exported, ADR-064
     _resolve_release_severity_config as _resolve_release_severity_config,  # re-exported, ADR-064
     apply_release_gate_pack as apply_release_gate_pack,  # re-exported, ADR-064
+    fold_release_outcome,
+    release_global_verdicts,
     resolve_release_assurance_decision,
     resolve_release_exit_decision_for_report,
     resolve_release_gate_options as resolve_release_gate_options,  # re-exported, ADR-064
     resolve_scope_decision,
+    worse_release_verdict,
 )
 from .workflows.release_scope import (
     StrandedLibraryResolution,
@@ -103,93 +107,6 @@ if TYPE_CHECKING:
     from .workflows.extraction import PackageExtractor
     from .workflows.gate import SeverityConfig
     from .workflows.policy_file import PolicyFile
-
-
-_RELEASE_VERDICT_ORDER: dict[str, int] = {
-    "NO_CHANGE": 0,
-    "COMPATIBLE": 1,
-    "COMPATIBLE_WITH_RISK": 2,
-    "API_BREAK": 3,
-    "BREAKING": 4,
-    "ERROR": 5,
-    # ADR-050 D2 — ranked above even ERROR: a not_comparable library means
-    # the comparison couldn't establish what changed at all, so it dominates
-    # the release-level "worst verdict wins" rollup over every other outcome
-    # in the same release, including a genuine crash.
-    "not_comparable": 6,
-}
-
-
-def _release_global_verdict(
-    bundle_result: BundleDiffResult | None, matrix_result: DiffResult | None
-) -> str:
-    """Release-global (bundle/probe-matrix) verdict alone -- unlike
-    ``worst_verdict``'s own fold of it, never masked by an unrelated
-    library's ``ERROR``/``not_comparable`` (Codex review, fresh evidence)."""
-    worst = "NO_CHANGE"
-    for v in (
-        bundle_result.bundle_verdict.value if bundle_result else None,
-        matrix_result.verdict.value if matrix_result else None,
-    ):
-        if v is not None and _RELEASE_VERDICT_ORDER.get(
-            v, 0
-        ) > _RELEASE_VERDICT_ORDER.get(worst, 0):
-            worst = v
-    return worst
-
-
-#: Historical private name; owned by `report/release_change_inventory.py`.
-_RELEASE_OPERATIONAL_SENTINELS = _inventory.RELEASE_OPERATIONAL_SENTINELS
-
-
-def _release_completed_compatibility_verdict(
-    library_results: list[dict[str, object]],
-    release_global_verdict: str,
-    *,
-    release_global_ran: bool,
-) -> str | None:
-    """The worst real `Verdict` among *library_results* + *release_global_
-    verdict*, with the two operational sentinels excluded -- for
-    ``run_outcome.compatibility``, never for the release's own reported
-    ``verdict`` (``worst_verdict`` stays exactly what it always was).
-
-    One `BREAKING` library plus a second, unrelated library's `ERROR` still
-    surfaces `compatibility: "BREAKING"` here, even though `worst_verdict`
-    itself (correctly) reports `"ERROR"` -- the real compatibility result
-    is not lost just because a different library's operational failure
-    dominates the release-level rollup.
-
-    Returns ``None`` -- never the floor ``"NO_CHANGE"`` -- when no real
-    compatibility result was actually observed at all (every library
-    result is one of the two operational sentinels, and no bundle/probe-
-    matrix comparison ran either): `run_outcome.compatibility` must stay
-    unknown, not falsely claim a clean completed comparison (Codex review,
-    fresh evidence). *release_global_ran* -- whether a bundle or matrix
-    comparison actually ran -- must be passed explicitly rather than
-    inferred from *release_global_verdict* alone: `_release_global_
-    verdict`'s own floor default is `"NO_CHANGE"`, indistinguishable from a
-    real completed no-change bundle/matrix result by string value alone.
-    """
-    worst: str | None = None
-    for entry in library_results:
-        v = str(entry.get("verdict", "NO_CHANGE"))
-        if v in _RELEASE_OPERATIONAL_SENTINELS:
-            continue
-        if worst is None or _RELEASE_VERDICT_ORDER.get(
-            v, 0
-        ) > _RELEASE_VERDICT_ORDER.get(worst, 0):
-            worst = v
-    if (
-        release_global_ran
-        and release_global_verdict not in _RELEASE_OPERATIONAL_SENTINELS
-        and (
-            worst is None
-            or _RELEASE_VERDICT_ORDER.get(release_global_verdict, 0)
-            > _RELEASE_VERDICT_ORDER.get(worst, 0)
-        )
-    ):
-        worst = release_global_verdict
-    return worst
 
 
 def _resolve_bundle_manifest(
@@ -725,11 +642,9 @@ def _collect_bundle_result(
     )
     if bundle_result is not None:
         bundle_result.policy_file = policy_file  # G38 Phase 16
-        bv = bundle_result.bundle_verdict.value
-        if _RELEASE_VERDICT_ORDER.get(bv, 0) > _RELEASE_VERDICT_ORDER.get(
-            worst_verdict, 0
-        ):
-            worst_verdict = bv
+        worst_verdict = worse_release_verdict(
+            worst_verdict, bundle_result.bundle_verdict.value
+        )
     return bundle_result, worst_verdict
 
 
@@ -1013,7 +928,7 @@ def _format_release_junit(
     that just exited non-zero on that exact finding.
 
     A ``"not_comparable"`` library (ADR-050 D2 — its own dedicated verdict
-    string, not folded into ``"ERROR"``, see ``_RELEASE_VERDICT_ORDER``) gets
+    string, not folded into ``"ERROR"``, see ``policy.release_outcome.RELEASE_VERDICT_ORDER``) gets
     the same treatment as a genuine ``"ERROR"``: without this, it would
     contribute zero testsuites here, so a CI dashboard reading only this
     JUnit file would show no failures for a release that just exited 16 on
@@ -1251,7 +1166,7 @@ def _format_release_json(
         str(lib["library"])
         for lib in library_results
         if str(lib.get("verdict")) != "NO_CHANGE"
-        and str(lib.get("verdict")) not in _RELEASE_OPERATIONAL_SENTINELS
+        and str(lib.get("verdict")) not in RELEASE_OPERATIONAL_SENTINELS
     ]
     from .report.not_comparable import run_outcome_dict_for_release
     from .workflows.release_scope import release_global_ran, unmatched_names
@@ -1271,7 +1186,12 @@ def _format_release_json(
             resolve_release_assurance_decision((), require_complete=False)
         )
     )
-    release_global_verdict = _release_global_verdict(bundle_result, matrix_result)
+    outcome = fold_release_outcome(
+        (str(entry.get("verdict", "NO_CHANGE")) for entry in library_results),
+        release_global_verdicts(bundle_result, matrix_result),
+        global_ran=release_global_ran(bundle_result, matrix_result, terms.record),
+    )
+    release_global_verdict = outcome.global_verdict
     # The release's own assurance gate (`assurance.require_complete`),
     # threaded into *every* decision a reader sees, not just the process
     # exit: the persisted `exit` block, `run_outcome` and
@@ -1310,13 +1230,7 @@ def _format_release_json(
         "warnings": warning_msgs,
         "exit": exit_dict,
         "run_outcome": run_outcome_dict_for_release(
-            _release_completed_compatibility_verdict(
-                library_results,
-                release_global_verdict,
-                release_global_ran=release_global_ran(
-                    bundle_result, matrix_result, record
-                ),
-            ),
+            outcome.compatibility,
             exit_dict,
             scope=terms.completeness,
         ),

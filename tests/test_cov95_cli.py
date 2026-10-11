@@ -1041,17 +1041,6 @@ class TestExitCompareRelease:
         assert exc.value.code == 16
 
 
-class TestReleaseVerdictOrder:
-    def test_not_comparable_ranks_above_error(self) -> None:
-        # ADR-050 D2: not_comparable dominates the release-level "worst
-        # verdict wins" rollup over every other outcome, including ERROR.
-        from abicheck.cli_compare_release_helpers import _RELEASE_VERDICT_ORDER
-
-        assert (
-            _RELEASE_VERDICT_ORDER["not_comparable"] > _RELEASE_VERDICT_ORDER["ERROR"]
-        )
-
-
 class TestFoldReleaseGlobalSeverity:
     def test_no_config_returns_base(self) -> None:
         assert fold_release_global_severity(2, None, None, _gate(None)) == 2
