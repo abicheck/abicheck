@@ -1245,12 +1245,9 @@ def _reclassified_by_for_change(
     *today*, forwarded there, keeps this agreeing with an already-frozen
     ``ReportEnvelope`` (Codex review, fresh evidence).
     """
-    from .policy.severity import reclassify_rule_for_change
+    from .report.finding import reclassified_by_label
 
-    rule = reclassify_rule_for_change(cast(HasKind, c), policy_file, today)
-    if rule is None:
-        return None
-    return cast(str, rule.label or rule.reason or rule.to_verdict.value)
+    return reclassified_by_label(c, policy_file, today)
 
 
 def release_finding_entry(

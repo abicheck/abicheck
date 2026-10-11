@@ -199,8 +199,8 @@ def test_policy_escalated_addition_not_in_green_added_section(
     """Codex review on #549 (two rounds): a policy file that escalates an
     inherently additive kind away from COMPATIBLE — to BREAKING, API_BREAK,
     *or* COMPATIBLE_WITH_RISK — must not leave the finding in the green
-    "Added" section. `_change_bucket`'s canonical `BREAKING_KINDS`
-    membership check can never see a policy-file escalation since it only
+    "Added" section. The superseded `_change_bucket`'s canonical `BREAKING_KINDS`
+    membership check could never see a policy-file escalation since it only
     looks at the kind's own default classification. The first fix only
     diverted the `== Verdict.BREAKING` case; a non-BREAKING escalation
     (API_BREAK, COMPATIBLE_WITH_RISK) still rendered under "Added" even
@@ -429,10 +429,10 @@ def test_enum_member_removed_is_breaking() -> None:
 
 
 def test_enum_member_removed_bucket_is_removed() -> None:
-    from abicheck.html_report import _change_bucket
+    from abicheck.report.finding import effective_bucket
 
     ch = _ch("enum_member_removed", "SOME_VAL")
-    assert _change_bucket(ch) == "removed"
+    assert effective_bucket(ch, None) == "removed"
 
 
 # ---------------------------------------------------------------------------
@@ -448,15 +448,6 @@ def test_changed_breaking_kinds_subset_of_breaking_kinds() -> None:
         "CHANGED_BREAKING_KINDS has entries not in BREAKING_KINDS: "
         f"{CHANGED_BREAKING_KINDS - BREAKING_KINDS}"
     )
-
-
-def test_removed_kinds_are_breaking_or_api_breaking() -> None:
-    # A removed type or typedef has no symbol: it breaks source, not binaries.
-    from abicheck.checker_policy import API_BREAK_KINDS
-    from abicheck.report_classifications import BREAKING_KINDS, REMOVED_KINDS
-
-    assert REMOVED_KINDS <= BREAKING_KINDS | {k.value for k in API_BREAK_KINDS}
-    assert {"type_removed", "typedef_removed"} <= REMOVED_KINDS - BREAKING_KINDS
 
 
 # ---------------------------------------------------------------------------

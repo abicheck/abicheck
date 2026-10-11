@@ -6,13 +6,11 @@ import pytest
 
 from abicheck.checker_policy import ChangeKind
 from abicheck.report_classifications import (
-    ADDED_KINDS,
     BREAKING_KINDS,
     CHANGED_BREAKING_KINDS,
     ENVIRONMENT_DRIFT_KINDS,
     HIGH_SEVERITY_KINDS,
     MEDIUM_SEVERITY_KINDS,
-    REMOVED_KINDS,
     category,
     is_breaking,
     kind_str,
@@ -25,18 +23,6 @@ from abicheck.report_classifications import (
 
 
 class TestConstants:
-    def test_removed_kinds_contains_expected_members(self):
-        assert isinstance(REMOVED_KINDS, frozenset)
-        assert "func_removed" in REMOVED_KINDS
-        assert "var_removed" in REMOVED_KINDS
-        assert "type_removed" in REMOVED_KINDS
-
-    def test_added_kinds_contains_expected_members(self):
-        assert isinstance(ADDED_KINDS, frozenset)
-        assert "func_added" in ADDED_KINDS
-        assert "var_added" in ADDED_KINDS
-        assert "type_added" in ADDED_KINDS
-
     def test_breaking_kinds_contains_expected_members(self):
         assert isinstance(BREAKING_KINDS, frozenset)
         assert "func_removed" in BREAKING_KINDS
@@ -195,15 +181,9 @@ _ALL_KIND_VALUES: frozenset[str] = frozenset(k.value for k in ChangeKind)
 #: Every hand-maintained kind-keyed set this module defines. Deliberately
 #: reverse-completeness only (every member must name a real ChangeKind) —
 #: NOT forward-completeness (every ChangeKind of some shape must be a
-#: member). REMOVED_KINDS/ADDED_KINDS in particular are small, deliberately
-#: curated subsets for one report section — as of this writing only 6 of the
-#: 56 real ``*_removed`` kinds and 8 of the 40 real ``*_added`` kinds are
-#: members — not an attempt to enumerate every kind sharing that suffix.
-#: Asserting forward-completeness there would invent a business rule this
-#: module's own authors never stated.
+#: member). Asserting forward-completeness would invent a business rule
+#: this module's own authors never stated.
 _HAND_MAINTAINED_KIND_SETS: dict[str, frozenset[str]] = {
-    "REMOVED_KINDS": REMOVED_KINDS,
-    "ADDED_KINDS": ADDED_KINDS,
     "ENVIRONMENT_DRIFT_KINDS": ENVIRONMENT_DRIFT_KINDS,
     "CHANGED_BREAKING_KINDS": CHANGED_BREAKING_KINDS,
     "HIGH_SEVERITY_KINDS": HIGH_SEVERITY_KINDS,
@@ -241,11 +221,11 @@ class TestRegistryCompleteness:
         that never fires because nothing ever exercises its failure path)."""
         fake_kind = "this_change_kind_does_not_and_will_never_exist_xyz"
         assert fake_kind not in _ALL_KIND_VALUES
-        corrupted = REMOVED_KINDS | {fake_kind}
+        corrupted = ENVIRONMENT_DRIFT_KINDS | {fake_kind}
         assert _dangling_entries(corrupted) == frozenset({fake_kind})
         # And the real, uncorrupted set stays clean -- the helper isn't just
         # unconditionally reporting something.
-        assert not _dangling_entries(REMOVED_KINDS)
+        assert not _dangling_entries(ENVIRONMENT_DRIFT_KINDS)
 
 
 class TestSeverityTiersAreDisjoint:

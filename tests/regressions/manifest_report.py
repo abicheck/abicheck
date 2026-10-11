@@ -160,6 +160,13 @@ REPORT_BUG_CLASSES: tuple[BugClass, ...] = (
             # configuration. The harness diffs whole reports across routes over
             # an operand corpus x config axes, with an empty KNOWN_DIVERGENCES.
             "tests/test_family_f2_route_parity.py",
+            # Between formats, for a *derived* fact: HTML bucketed findings
+            # by two hand-kept kind subsets and Markdown counted removals by
+            # a `*_removed` name suffix, while JSON and the PR comment read
+            # the registry-declared operation/entity. The seed test renders
+            # one policy-bearing fixture in every format against a
+            # hand-written oracle table.
+            "tests/test_report_format_bucket_parity.py",
         ),
         axes={
             # Only what a seed test really drives -- and *all* of it. This
