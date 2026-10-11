@@ -1010,3 +1010,36 @@ def test_hybrid_dump_routes_parse_their_legs_alike(tmp_path: Path) -> None:
         assert cli_legs[backend][0] is dumper_legs[backend][0] is True, backend
     # The CLI legs are full-surface requests, so the streaming pruner is off.
     assert all(prune_off for _skip_off, prune_off in cli_legs.values())
+
+
+# ── evidence.narrowed_conclusion_not_carried_across_cardinality ─────────────
+
+
+@pytest.mark.parametrize("entity", ["function", "variable"])
+@pytest.mark.parametrize("narrowed", [True, False])
+def test_member_and_release_routes_agree_on_obligation_confidence(
+    entity: str, narrowed: bool
+) -> None:
+    """Scalar member check vs release reconciliation: one declaration under
+    one recorded scope gets one confidence on both routes (full domain in
+    tests/test_release_obligation_standing.py)."""
+    from test_release_obligation_standing import _release_findings, _snapshot
+
+    from abicheck.buildsource.cross_source_checks import (
+        CrosscheckConfig,
+        _check_public_not_exported,
+    )
+    from abicheck.model.evidence_status import Confidence
+    from abicheck.workflows.release_surface_acquisition import (
+        surface_from_snapshot,
+    )
+
+    rule = "no_root" if narrowed else "target_root:include/pvxs/iochooks.h"
+    snap = _snapshot(("include/pvxs/iochooks.h",), "unresolved", rule, entity)
+    member = [
+        c.confidence
+        for c in _check_public_not_exported(snap, CrosscheckConfig()).findings
+    ]
+    surface = surface_from_snapshot(snap, acquisition_key="k", side="new")
+    release = [c.confidence for c in _release_findings(surface).findings]
+    assert member == release == [Confidence.LOW if narrowed else Confidence.HIGH]

@@ -94,7 +94,9 @@ class TestTheVerdictVocabularyTracksTheRealEmitters:
             assert rq._carries_a_result(doc), (load, risk)
 
     def test_every_release_rollup_verdict_is_known(self) -> None:
-        from abicheck.cli_compare_release_helpers import _RELEASE_VERDICT_ORDER
+        from abicheck.policy.release_outcome import (
+            RELEASE_VERDICT_ORDER as _RELEASE_VERDICT_ORDER,
+        )
 
         missing = set(_RELEASE_VERDICT_ORDER) - rq.KNOWN_VERDICTS
         assert not missing, f"emitted by the release fan-out but unreadable: {missing}"
@@ -111,8 +113,8 @@ class TestTheVerdictVocabularyTracksTheRealEmitters:
         assert not missing, f"emitted by release_scope but unreadable: {missing}"
 
     def test_every_operational_sentinel_is_known(self) -> None:
-        from abicheck.cli_compare_release_helpers import (
-            _RELEASE_OPERATIONAL_SENTINELS,
+        from abicheck.policy.release_outcome import (
+            RELEASE_OPERATIONAL_SENTINELS as _RELEASE_OPERATIONAL_SENTINELS,
         )
 
         missing = _RELEASE_OPERATIONAL_SENTINELS - rq.KNOWN_VERDICTS
@@ -125,15 +127,15 @@ class TestTheOperationalSetTracksTheEngine:
     These values are *known* verdicts — real emitter output — but they are not
     compatibility results, so the Action must not let one become a clean claim.
     The engine already separates them for the same reason
-    (`_release_completed_compatibility_verdict` excludes them from
+    (`policy.release_outcome.fold_release_outcome` excludes them from
     `run_outcome.compatibility`), so this set is derived from both emitter sets
     rather than restated: a sentinel added there and missed here would silently
     publish COMPATIBLE again, which is the defect this exists to prevent.
     """
 
     def test_it_covers_the_release_sentinels(self) -> None:
-        from abicheck.cli_compare_release_helpers import (
-            _RELEASE_OPERATIONAL_SENTINELS,
+        from abicheck.policy.release_outcome import (
+            RELEASE_OPERATIONAL_SENTINELS as _RELEASE_OPERATIONAL_SENTINELS,
         )
 
         missing = _RELEASE_OPERATIONAL_SENTINELS - rq.OPERATIONAL_VERDICTS

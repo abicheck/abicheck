@@ -18,9 +18,7 @@ Index: [Known gaps](../known-gaps.md)
 - `materialize_locations` iterates siblings in a C-level `for` loop and only
   touches its stack on descent (~15 % on a synthetic tree; the walk was
   23.5 s self / 46 M `isinstance` of 435 s profiled on oneDAL).
-- `process_resources.gc_relaxed` raises the gen-0 threshold around the DWARF
-  CU walk on GIL builds (44 → 37.5 s on 3.12, 41 → 35.4 s on 3.15 measured
-  with a process-wide threshold; identical output, +20-90 MB).
+- GC thresholds during a live dump: `storage.acyclic_json.gc_relaxed` (#1544).
 - Free-threaded interpreters resolve two live binaries as two threads, not
   two forked children (`side_isolation.concurrent_threads_apply`).
 - `ABICHECK_MEMORY_TRACE` marks `dump.cache.lookup`/`dump.cache.store`;

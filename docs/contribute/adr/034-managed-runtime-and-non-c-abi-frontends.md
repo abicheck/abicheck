@@ -111,7 +111,7 @@ guarantees.
 **Positive**
 
 - Each ecosystem ships independently behind a frontend flag; the native core and
-  its 95% coverage floor are untouched.
+  its 80% coverage floor are untouched.
 - Reuses the policy, suppression, reporting (SARIF/JUnit/HTML), and example/
   ground-truth machinery already in place.
 - The execution-oracle requirement keeps managed-runtime verdicts grounded in

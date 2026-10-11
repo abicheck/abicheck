@@ -401,6 +401,16 @@ _CACHE_DIR: Path = _get_cache_dir()
 SNAPSHOT_DISK_CACHE = DiskCache("abicheck.snapshot_cache.disk")
 
 
+def absolute_paths(paths: list[Path] | None) -> list[Path] | None:
+    """*paths* made absolute, so ``inc/a.h`` and its absolute spelling of one
+    file share a cache key. Applied to the dump's inputs, not only the key: a
+    snapshot records the spelling it was given (surface-graph node ids), so a
+    key-only fix would let a warm hit return the other spelling's strings.
+    ``abspath``, not ``resolve()``: a symlinked install prefix keeps its name.
+    """
+    return None if paths is None else [Path(os.path.abspath(p)) for p in paths]
+
+
 def _cache_key(
     binary_path: Path,
     headers: list[Path],
@@ -532,8 +542,13 @@ def lookup_key(key: str, binary_path: Path) -> AbiSnapshot | None:
     any other read problem here -- never a caller-visible failure."""
     if not key:
         return None
+    from .workflows import memory_trace
+
     started = time.monotonic()
-    snap = SNAPSHOT_DISK_CACHE.lookup(lambda: _read_entry(key, binary_path))
+    # Traced: on a hit this load replaces the whole dump, so without it
+    # `ABICHECK_MEMORY_TRACE` would see none of a warm run's `dump.*` marks.
+    with memory_trace.phase("dump.cache.lookup"):
+        snap = SNAPSHOT_DISK_CACHE.lookup(lambda: _read_entry(key, binary_path))
     if snap is not None:
         # A hit replaces every extraction phase, each of which reports its own
         # progress line. Say so, or a warm run's redirected log is silent --
@@ -593,7 +608,10 @@ def store_key(snap: AbiSnapshot, key: str, binary_path: Path) -> None:
     keep preferring an old snapshot over a freshly stored one."""
     if not key:
         return
-    SNAPSHOT_DISK_CACHE.store(lambda: _write_entry(snap, key, binary_path))
+    from .workflows import memory_trace
+
+    with memory_trace.phase("dump.cache.store"):
+        SNAPSHOT_DISK_CACHE.store(lambda: _write_entry(snap, key, binary_path))
 
 
 def _write_entry(snap: AbiSnapshot, key: str, binary_path: Path) -> None:

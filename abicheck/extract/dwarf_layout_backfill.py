@@ -114,12 +114,8 @@ def dwarf_layout_types_or_empty(
     ):
         return []
     from ..dwarf_snapshot import extract_dwarf_declarations
-    from ..process_resources import gc_relaxed
 
-    with gc_relaxed():  # the same DIE walk as a DWARF dump
-        return list(
-            extract_dwarf_declarations(so_path, elf_meta, session=session).types
-        )
+    return list(extract_dwarf_declarations(so_path, elf_meta, session=session).types)
 
 
 @dataclass(frozen=True)

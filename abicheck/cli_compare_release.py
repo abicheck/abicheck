@@ -36,23 +36,13 @@ from typing import TYPE_CHECKING, Any
 import click
 
 from .cli_compare_release_helpers import (  # noqa: F401
-    _RELEASE_VERDICT_ORDER,
     _cleanup_temp_dirs,
     _collect_bundle_result,
     _debian_symbols_warning,
     _discover_include_roots,
     _exit_compare_release,
     _extract_if_package,
-    _format_release_json,
-    _format_release_junit,
-    _format_release_markdown,
-    _format_release_summary,
     _match_release_keys,
-    _release_json_scope,
-    _release_md_bundle_findings,
-    _release_md_changed_libraries,
-    _release_md_libraries_table,
-    _release_md_matrix_findings,
     _resolve_bundle_manifest,
     _resolve_release_headers,
     _resolve_release_severity_config as _resolve_release_severity_config,  # re-exported, ADR-064
@@ -89,6 +79,7 @@ from .cli_options import (
     verbose_option,
 )
 from .errors import SnapshotError
+from .frontends.cli.release_report import render_release_summary
 from .frontends.cli.runtime import _setup_verbosity, _write_or_echo
 from .model.header_exclusion_record import (
     canonical_exclusion_identity,
@@ -103,7 +94,7 @@ from .report.comparison_scope import (
 )
 from .report.release_assurance import release_assurance_terms
 from .report.release_public_surface import assemble_release_public_surface
-from .workflows.gate import resolve_scope_decision
+from .workflows.gate import resolve_scope_decision, worse_release_verdict
 from .workflows.header_exclusion_audit import (
     observed_member_exclusion_identities,
 )
@@ -889,10 +880,7 @@ def compare_release_cmd(
                 library_results.append(
                     {"library": key, "verdict": "ERROR", "error": reason}
                 )
-                if _RELEASE_VERDICT_ORDER.get("ERROR", 0) > _RELEASE_VERDICT_ORDER.get(
-                    worst_verdict, 0
-                ):
-                    worst_verdict = "ERROR"
+                worst_verdict = worse_release_verdict(worst_verdict, "ERROR")
                 click.echo(f"Failed: {key}: {reason}", err=True)
             # Decided by policy once; every consumer below (the writers, the
             # sidecar, the stderr notice, the exit) reads this one decision.
@@ -925,11 +913,9 @@ def compare_release_cmd(
             # disposition audit see it without a parallel pipeline.
             for entry in support_promise_results(scope_result.record, support_promise):
                 library_results.append(entry)
-                entry_verdict = str(entry["verdict"])
-                if _RELEASE_VERDICT_ORDER.get(
-                    entry_verdict, 0
-                ) > _RELEASE_VERDICT_ORDER.get(worst_verdict, 0):
-                    worst_verdict = entry_verdict
+                worst_verdict = worse_release_verdict(
+                    worst_verdict, str(entry["verdict"])
+                )
 
             # One product contract, many binary providers: acquire each
             # side's public surface once and reconcile it against the union
@@ -986,7 +972,7 @@ def compare_release_cmd(
             # not carry roots nobody will read again. A pure cache flush:
             # anything still in flight stays, and a later ask re-parses.
             ast_scope.release_completed()
-            # Folded with the same `_RELEASE_VERDICT_ORDER` ranking every
+            # Folded with the same `policy.release_outcome` ranking every
             # other release-global contributor (bundle findings, the probe
             # matrix, a removed library) uses, so a release-level contract
             # finding can never rank differently from a bundle one.
@@ -995,10 +981,7 @@ def compare_release_cmd(
                 policy=policy,
                 policy_file=_release_policy_file,
             )
-            if _RELEASE_VERDICT_ORDER.get(
-                _surface_verdict, 0
-            ) > _RELEASE_VERDICT_ORDER.get(worst_verdict, 0):
-                worst_verdict = _surface_verdict
+            worst_verdict = worse_release_verdict(worst_verdict, _surface_verdict)
             for _msg in release_surface_stage.warnings:
                 warning_msgs.append(_msg)
 
@@ -1370,7 +1353,7 @@ def compare_release_cmd(
                 # selector now means the same thing for every export, here
                 # exactly as in single-pair `compare`
                 # (`cli_compare_helpers._report_compare_result`).
-                secondary_text = _format_release_summary(
+                secondary_text = render_release_summary(
                     secondary_fmt,
                     worst_verdict,
                     old_dir,

@@ -424,7 +424,7 @@ def resolve_compare_request(
     from .workflows.side_isolation import (
         concurrent_children_apply,
         concurrent_threads_apply,
-        run_isolated,
+        run_cold_isolated,
     )
 
     tuning = tuning_for(
@@ -441,11 +441,11 @@ def resolve_compare_request(
             concurrent and concurrent_children_apply(tuning, old_fmt, new_fmt)
         ):
             _deadline_ts = deadline.current_deadline_ts()
-            old_res, new_res = run_isolated(
-                [
-                    functools.partial(_deadline_bound_side_worker, _deadline_ts, fn)
-                    for fn in (_resolve_old_side, _resolve_new_side)
-                ],
+            old_res, new_res = run_cold_isolated(
+                (_resolve_old_side, _resolve_new_side),
+                lambda fn: functools.partial(
+                    _deadline_bound_side_worker, _deadline_ts, fn
+                ),
                 concurrent=not tuning.isolate_sides,
             )
         elif not (

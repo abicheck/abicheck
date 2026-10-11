@@ -84,7 +84,7 @@ resolution (exit-code scheme/severity) has no per-library
 ``GateOptions``-shaped object yet -- see the plan doc's PR B section, "the
 GateOptions unification" -- so this closed slice covers only the
 config-merge half, never ``with_resolved_gate``. The release-level
-*summary* digest (``cli_compare_release_helpers._format_release_json``) is
+*summary* digest (``report.release_document.release_json_document``) is
 a separate, narrower computation -- it only ever resolves the baseline tier
 (no `CompatibilityEvaluationConfig` object exists at that scope at all), so
 it was never subject to this same gap; it captures the release's own

@@ -143,7 +143,7 @@ VALIDITY_NO_RESULT = "no_result"
 #: ``_report_compat_verdict`` looks at it), so admitting a library-only document
 #: licensed the COMPATIBLE fallthrough for a release whose members said
 #: ``BREAKING`` -- and ``{"libraries": []}`` was admitted too (Codex review,
-#: P2). Nor was a rollup the fix: ``_format_release_json`` emits a top-level
+#: P2). Nor was a rollup the fix: ``release_json_document`` emits a top-level
 #: ``"verdict": worst_verdict`` -- already rolled up -- alongside
 #: ``run_outcome`` on *every* release document, so a ``libraries`` array with no
 #: readable verdict beside it is not a shape any emitter produces. The first two

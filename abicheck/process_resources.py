@@ -40,12 +40,9 @@ caller and test keeps working unchanged.
 
 from __future__ import annotations
 
-import gc
 import os
-import threading
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
 from concurrent.futures import Executor, Future, ThreadPoolExecutor
-from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, TypeVar
 
@@ -305,52 +302,6 @@ def gil_enabled() -> bool:
 
     probe = getattr(sys, "_is_gil_enabled", None)
     return True if probe is None else bool(probe())
-
-
-#: Generation-0 threshold while :func:`gc_relaxed` is active. A DWARF walk
-#: allocates millions of short-lived pyelftools objects and the default
-#: threshold (2000 on 3.12-3.13) collects every few thousand of them: ~20% of
-#: main-thread samples on a GIL build. Measured on a 2021.x dump: 44 -> 37.5 s
-#: (3.12) and 41 -> 35.4 s (3.15), identical output, +20-90 MB peak RSS.
-RELAXED_GC_GEN0_THRESHOLD = 100_000
-
-_gc_lock = threading.Lock()
-_gc_active = 0
-_gc_saved: tuple[int, ...] | None = None
-
-
-@contextmanager
-def gc_relaxed() -> Iterator[None]:
-    """Raise the cyclic collector's generation-0 threshold for the ``with``
-    body, then restore the thresholds in effect before the outermost
-    overlapping use.
-
-    Not a pause: pyelftools' DIE graph has parent/CU back-references, so
-    cycles exist and collection must keep running -- only less often. A no-op
-    on a free-threaded interpreter, whose collector is not driven by these
-    thresholds (measured: no effect on 3.15t). Overlapping uses from several
-    threads share one setting; a threshold the caller set below the relaxed
-    value is raised for the duration, one already above it is kept.
-    """
-    global _gc_active, _gc_saved
-    if not gil_enabled():
-        yield
-        return
-    with _gc_lock:
-        if _gc_active == 0:
-            _gc_saved = gc.get_threshold()
-            gen0, *rest = _gc_saved
-            if gen0 and gen0 < RELAXED_GC_GEN0_THRESHOLD:
-                gc.set_threshold(RELAXED_GC_GEN0_THRESHOLD, *rest)
-        _gc_active += 1
-    try:
-        yield
-    finally:
-        with _gc_lock:
-            _gc_active -= 1
-            if _gc_active == 0 and _gc_saved is not None:
-                gc.set_threshold(*_gc_saved)
-                _gc_saved = None
 
 
 def python_parallelism() -> int:

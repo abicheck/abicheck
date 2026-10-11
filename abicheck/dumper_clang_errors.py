@@ -555,7 +555,7 @@ def _parse_clang_ast_result(
     ``json.loads``) needs no changes for either case.
     """
     if result.returncode != 0:
-        raise SnapshotError(
+        failure = SnapshotError(
             f"clang failed to parse the header(s) (exit {result.returncode}). The "
             "header may be malformed or need build flags it was not given (try "
             "-D/--define for a required feature macro, .abicheck.yml's "
@@ -564,6 +564,10 @@ def _parse_clang_ast_result(
             f"{result.stderr[:1000].strip()}"
             f"{diagnose_header_compile_failure(result.stderr) or ''}"
         )
+        # Untruncated, so a multi-header caller can attribute every error to
+        # the header whose include chain raised it.
+        failure.stderr = result.stderr
+        raise failure
     try:
         ast_size = ast_path.stat().st_size
     except OSError:

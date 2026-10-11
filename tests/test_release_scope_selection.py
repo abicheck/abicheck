@@ -1005,26 +1005,26 @@ class TestStoredLiveExtractionFailureIsAnOperationalError:
 
     def test_render_json_states_the_operational_axis(self, tmp_path: Path) -> None:
         from abicheck.bundle_models import BundleDiffResult
-        from abicheck.frontends.cli.commands.compare_bundle_facts import _render_json
+        from abicheck.frontends.cli.commands.compare_bundle_facts import _render
 
         result = BundleDiffResult(old_root=tmp_path, new_root=tmp_path)
         clean = json.loads(
-            _render_json(result, old_facts_path=tmp_path, new_dir=tmp_path)
+            _render(result, "json", old_facts_path=tmp_path, new_dir=tmp_path)
         )
         assert clean["run_outcome"]["operational"] == "none"
         assert clean["extraction_failures"] == {}
         result.extraction_failures = {"libbad.so": "boom"}
         doc = json.loads(
-            _render_json(result, old_facts_path=tmp_path, new_dir=tmp_path)
+            _render(result, "json", old_facts_path=tmp_path, new_dir=tmp_path)
         )
         assert doc["run_outcome"]["operational"] == "extraction_error"
         assert doc["extraction_failures"] == {"libbad.so": "boom"}
         assert clean["verdict"] == "NO_CHANGE" and doc["verdict"] == "ERROR"
         from abicheck.frontends.cli.commands.compare_bundle_facts import (
-            _render_markdown,
+            _render,
         )
 
-        md = _render_markdown(result, old_facts_path=tmp_path, new_dir=tmp_path)
+        md = _render(result, "markdown", old_facts_path=tmp_path, new_dir=tmp_path)
         assert "- **Verdict:** `ERROR`" in md
 
 

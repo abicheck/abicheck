@@ -48,7 +48,6 @@ from typing import TYPE_CHECKING, Any
 import click
 
 from .checker import DiffResult
-from .cli_compare_release_helpers import _RELEASE_VERDICT_ORDER
 from .cli_resolve import _normalize_binary_input
 from .frontends.cli.release_member_errors import (
     member_dispatch_failure_entry,
@@ -63,6 +62,7 @@ from .workflows.crosscheck_ownership import (
     release_level_checks,
     release_owned_checks_scope,
 )
+from .workflows.gate import worse_release_verdict
 from .workflows.keyed_thread_pool import run_keyed_in_threads
 from .workflows.member_compare import compare_member
 from .workflows.release_member_request import (
@@ -249,7 +249,7 @@ def _compare_one_library(
         # (`report.disposition_audit.compute_disposition_audit`/`.to_dict()`)
         # -- stamped here, before `_strip_diff_results_and_adjust_verdict`
         # discards `_diff_result`, so the release-level fold
-        # (`cli_compare_receipt.release_disposition_audit_block`) has
+        # (`report.release_document.release_disposition_audit_block`) has
         # something to read per library.
         from .report.release_member_summary import add_member_review_summary
         from .workflows.gate import evaluate
@@ -272,7 +272,7 @@ def _compare_one_library(
             # Codex review, P2: stamped here (before `_diff_result` is
             # discarded below) so this library's declared-deployment-floor
             # digest survives `_strip_diff_results_and_adjust_verdict`; also
-            # promoted once to the release envelope (`_format_release_json`).
+            # promoted once to the release envelope (`release_json_document`).
             **(
                 {"env_matrix_source_sha256": result.env_matrix_source_sha256}
                 if result.env_matrix_source_sha256 is not None
@@ -373,12 +373,12 @@ def _compare_one_library(
             lib_report_path = output_dir / f"{old_path.stem}.json"
             # Codex review, fresh evidence ("Keep per-library output-dir
             # reports unfiltered"): `show_only` is deliberately NOT
-            # forwarded here -- `_release_md_library_findings` directs a
+            # forwarded here -- `release_md_library_findings` directs a
             # reader to `--output-dir` as the one uncapped, *complete*
             # per-library source when the aggregate report's own findings
             # list was truncated, the same "always full" contract a
             # secondary `-o` already gets (see
-            # `cli_compare_release_helpers._release_findings_for_render`).
+            # `report.release_document.release_findings_for_render`).
             # Applying the primary display filter here too would let
             # `--view show=...` make a genuinely truncated (or simply
             # filtered-out) finding disappear from the one place that note
@@ -492,7 +492,7 @@ def _suppress_lockstep_soname_findings(
         # on a copy of the ledger (`with_suppressed`, mirroring `with_gate`'s
         # own "return a copy relabelled" shape) before `entry["disposition_
         # audit"]` is recomputed below, so the release-level fold
-        # (`cli_compare_receipt.release_disposition_audit_block`) sees the
+        # (`report.release_document.release_disposition_audit_block`) sees the
         # suppression too. Applied via `workflows.disposition` (Codex
         # review, fresh evidence: "Move release suppression out of report
         # projection") -- mutating the ledger is the policy decision
@@ -543,7 +543,7 @@ def _suppress_lockstep_soname_findings(
             # reports unfiltered"): `show_only` deliberately NOT forwarded
             # -- see `_compare_one_library`'s identical first write above
             # for the full rationale (the "always full" `--output-dir`
-            # contract `_release_md_library_findings` documents).
+            # contract `release_md_library_findings` documents).
             _safe_write_output(
                 lib_report_path,
                 # Same ADR-071 threading as the first write above.
@@ -730,10 +730,7 @@ def _compare_release_libraries(
             click.echo(
                 f"Failed: {entry['library']}: {entry.get('reason', '')}", err=True
             )
-        if _RELEASE_VERDICT_ORDER.get(v, 0) > _RELEASE_VERDICT_ORDER.get(
-            worst_verdict, 0
-        ):
-            worst_verdict = v
+        worst_verdict = worse_release_verdict(worst_verdict, v)
 
     # Cross-library coupling: a coordinated SONAME bump across the release is not
     # "unnecessary" just because one member had no break of its own.

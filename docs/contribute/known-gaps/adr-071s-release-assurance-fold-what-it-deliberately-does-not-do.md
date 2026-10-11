@@ -40,7 +40,7 @@ left out, each for a stated reason rather than for effort:
    ADR-071's assurance floor now have the same shape — resolve a decision per
    run, `max` it across members, carry it to the exit and the report — and
    each has its own resolver, its own `*_terms` projection and its own
-   parameter threaded through `_format_release_summary`/
+   parameter threaded through `render_release_summary`/
    `_finalize_release_output`/`_exit_compare_release`. That is three near-
    identical threadings, and the `no_growth` baseline bumps ADR-071 needed in
    five files are the visible cost of adding the third. The convergence target

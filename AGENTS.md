@@ -27,7 +27,7 @@ Pure Python, 3.11+. Product direction: [`vision.md`](vision.md); this file owns
 development procedure.
 
 **Python versions:** `requires-python = ">=3.11"` is the supported minimum;
-**3.13** is the canonical development/CI version (full suite, 95% coverage
+**3.13** is the canonical development/CI version (full suite, 80% coverage
 floor, `ai-readiness` job). Develop against 3.13. Other versions run a smoke
 lane (`.github/workflows/python-compat.yml`).
 
@@ -151,7 +151,7 @@ python scripts/check_ai_readiness.py   # structural repo gates
 pre-commit, CI and this file all route through
 (`tests/test_verify_profiles.py` enforces that). **Before opening a PR, run
 `python scripts/verify.py --profile pr`** (same as `pixi run check`) — it adds
-golden tests, the 95% coverage floor and ai-readiness on top of the fast loop.
+golden tests, the 80% coverage floor and ai-readiness on top of the fast loop.
 
 ```bash
 python scripts/verify.py --profile fast            # the commands above

@@ -1,104 +1,142 @@
-# Copyright 2026 Nikolay Petrov
 # SPDX-License-Identifier: Apache-2.0
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+"""Relaxed collector thresholds during a live dump: always restored, never on
+a free-threaded build or under ``low-memory``, and never change the output.
 
-"""`process_resources.gc_relaxed`: a scoped, overlap-safe gen-0 threshold raise.
-
-The oracle is ``gc.get_threshold()`` itself: whatever the caller had before
-the outermost use must be back afterwards, whatever the nesting, threading or
-exception path, and a free-threaded interpreter must never be touched.
+Field run (oneCCL 2021.15): ``gc.set_threshold(100000, 50, 100)`` cut the dump
+44 -> 37.5 s (3.12) and 41 -> 35.4 s (3.15) with identical output.
 """
 
 from __future__ import annotations
 
 import gc
+import random
+import shutil
+import subprocess
+import sys
 import threading
 
 import pytest
 
-from abicheck import process_resources as pr
-from abicheck.process_resources import RELAXED_GC_GEN0_THRESHOLD, gc_relaxed
-
-
-@pytest.fixture
-def restore_threshold():
-    saved = gc.get_threshold()
-    yield
-    gc.set_threshold(*saved)
-
-
-@pytest.fixture
-def gil(monkeypatch):
-    monkeypatch.setattr(pr, "gil_enabled", lambda: True)
-
-
-@pytest.mark.parametrize("before", [(700, 10, 10), (2000, 10, 10), (5, 1, 1)])
-def test_raised_inside_and_restored_after(restore_threshold, gil, before):
-    gc.set_threshold(*before)
-    with gc_relaxed():
-        assert gc.get_threshold() == (RELAXED_GC_GEN0_THRESHOLD, *before[1:])
-    assert gc.get_threshold() == before
-
-
-@pytest.mark.parametrize(
-    "before", [(RELAXED_GC_GEN0_THRESHOLD * 2, 10, 10), (0, 10, 10)]
+from abicheck.model.performance import (
+    PerformanceProfile,
+    performance_profile_scope,
 )
-def test_higher_or_disabled_threshold_is_kept(restore_threshold, gil, before):
-    # 0 disables automatic collection; raising it would *enable* collection.
+from abicheck.storage import acyclic_json
+from abicheck.storage.acyclic_json import RELAXED_GC_THRESHOLDS, gc_relaxed
+
+
+class _Boom(Exception):
+    pass
+
+
+@pytest.fixture(autouse=True)
+def _restore_thresholds():
+    before = gc.get_threshold()
+    yield
     gc.set_threshold(*before)
+
+
+def _nest(rng: random.Random, depth: int) -> None:
     with gc_relaxed():
-        assert gc.get_threshold() == before
-    assert gc.get_threshold() == before
+        if gc.get_threshold() != RELAXED_GC_THRESHOLDS:
+            raise AssertionError(gc.get_threshold())
+        if depth and rng.random() < 0.7:
+            _nest(rng, depth - 1)
+        if rng.random() < 0.3:
+            raise _Boom
 
 
-def test_nested_and_exception_restore(restore_threshold, gil):
-    gc.set_threshold(700, 10, 10)
-    with pytest.raises(RuntimeError), gc_relaxed():
-        with gc_relaxed():
+@pytest.mark.parametrize("seed", range(25))
+def test_any_nesting_and_failure_restores_the_prior_thresholds(seed) -> None:
+    rng = random.Random(seed)
+    prior = (rng.randint(100, 5000), rng.randint(2, 20), rng.randint(2, 20))
+    gc.set_threshold(*prior)
+    for _ in range(5):
+        try:
+            _nest(rng, rng.randint(0, 4))
+        except _Boom:
             pass
-        assert gc.get_threshold()[0] == RELAXED_GC_GEN0_THRESHOLD
-        raise RuntimeError
-    assert gc.get_threshold() == (700, 10, 10)
+        assert gc.get_threshold() == prior
 
 
-def test_overlapping_threads_restore_once_last_exits(restore_threshold, gil):
-    gc.set_threshold(700, 10, 10)
+def test_overlapping_threads_restore_only_after_the_last() -> None:
+    prior = gc.get_threshold()
     inside = threading.Barrier(4)
-    leave = threading.Event()
-    seen: list[int] = []
+    seen: list[tuple[int, ...]] = []
 
     def worker() -> None:
         with gc_relaxed():
             inside.wait()
-            leave.wait()
-            seen.append(gc.get_threshold()[0])
+            seen.append(gc.get_threshold())
+            inside.wait()
 
-    threads = [threading.Thread(target=worker) for _ in range(3)]
+    threads = [threading.Thread(target=worker) for _ in range(4)]
     for t in threads:
         t.start()
-    inside.wait()
-    assert gc.get_threshold()[0] == RELAXED_GC_GEN0_THRESHOLD
-    leave.set()
     for t in threads:
         t.join()
-    assert gc.get_threshold() == (700, 10, 10)
-    assert seen and all(v in (700, RELAXED_GC_GEN0_THRESHOLD) for v in seen)
+    assert seen == [RELAXED_GC_THRESHOLDS] * 4
+    assert gc.get_threshold() == prior
 
 
-def test_noop_without_gil(restore_threshold, monkeypatch):
-    monkeypatch.setattr(pr, "gil_enabled", lambda: False)
-    gc.set_threshold(700, 10, 10)
-    with gc_relaxed():
-        assert gc.get_threshold() == (700, 10, 10)
-    assert gc.get_threshold() == (700, 10, 10)
+@pytest.mark.parametrize(
+    ("enabled", "gil"), [(False, True), (True, False), (False, False)]
+)
+def test_no_op_when_disabled_or_free_threaded(monkeypatch, enabled, gil) -> None:
+    monkeypatch.setattr(sys, "_is_gil_enabled", lambda: gil, raising=False)
+    prior = gc.get_threshold()
+    with gc_relaxed(enabled):
+        assert gc.get_threshold() == prior
+
+
+@pytest.mark.parametrize(
+    ("profile", "relaxed"),
+    [(PerformanceProfile.BALANCED, True), (PerformanceProfile.LOW_MEMORY, False)],
+)
+def test_every_live_dump_runs_under_its_profiles_setting(monkeypatch, profile, relaxed):
+    from abicheck.workflows.dump import native
+
+    monkeypatch.setattr(acyclic_json, "_gil_enabled", lambda: True)
+    seen = []
+    monkeypatch.setattr(
+        native, "_run_dump_uncached", lambda *a, **k: seen.append(gc.get_threshold())
+    )
+    prior = gc.get_threshold()
+    with performance_profile_scope(profile):
+        native._call_run_dump_uncached()
+    assert seen == [RELAXED_GC_THRESHOLDS if relaxed else prior]
+    assert gc.get_threshold() == prior
+
+
+@pytest.mark.integration
+def test_relaxed_and_default_collectors_produce_the_same_snapshot(tmp_path):
+    """Scheduling only: the dump's content must not depend on when the
+    collector runs (weakref/finalizer-driven state would show here)."""
+    if shutil.which("gcc") is None:
+        pytest.skip("gcc not installed")
+    from abicheck.serialization import snapshot_to_json
+    from abicheck.workflows.dump.native import _call_run_dump_uncached
+
+    (tmp_path / "a.h").write_text(
+        "struct S { int a; long b; };\nstruct T { struct S s; T* next; };\n"
+        "int f(struct S*);\nint g(const struct T*);\n".replace(
+            "T* next", "struct T* next"
+        )
+    )
+    (tmp_path / "a.c").write_text(
+        '#include "a.h"\nint f(struct S*s){return s->a;}\n'
+        "int g(const struct T*t){return t->s.a;}\n"
+    )
+    so = tmp_path / "liba.so"
+    subprocess.run(
+        ["gcc", "-g", "-shared", "-fPIC", str(tmp_path / "a.c"), "-o", str(so)],
+        check=True,
+    )
+
+    def dump(profile):
+        with performance_profile_scope(profile):
+            snap = _call_run_dump_uncached(so, "elf", [tmp_path / "a.h"], [], "1", "c")
+        snap.created_at = None
+        return snapshot_to_json(snap)
+
+    assert dump(PerformanceProfile.BALANCED) == dump(PerformanceProfile.LOW_MEMORY)

@@ -308,7 +308,7 @@ def _render_native_html_document(d: Mapping[str, Any]) -> str:
         redundancy_note = (
             f"<div class='section' style='background:#fff3e0; padding:10px; border-left:4px solid #ff9800;'>"
             f"<strong>ℹ️ {redundant_count} redundant change(s)</strong> hidden "
-            f"(derived from root type changes). Set <code>scope.show_redundant: true</code> "
+            f"({html.escape(str(d.get('redundant_reasons') or 'derived from root type changes'))}). Set <code>scope.show_redundant: true</code> "
             f"in <code>.abicheck.yml</code> to show all."
             f"</div>"
         )

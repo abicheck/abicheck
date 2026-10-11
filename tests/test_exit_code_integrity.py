@@ -385,7 +385,7 @@ class TestReleaseExitDecisionForReportAgreesWithRealExit:
         """Codex review, fresh evidence: one library `not_comparable` and a
         *different* library `ERROR` collapses `worst_verdict` to
         `"not_comparable"` (it outranks `"ERROR"` in
-        `_RELEASE_VERDICT_ORDER`). `.code` is correctly `16` either way, but
+        `RELEASE_VERDICT_ORDER`). `.code` is correctly `16` either way, but
         an earlier revision computed `operational_error_contribution` from
         `worst_verdict == "ERROR"` alone, reading `0` and silently dropping
         the real operational failure from the persisted decision even
@@ -428,7 +428,7 @@ class TestReleaseExitDecisionForReportAgreesWithRealExit:
         `library_results` (see `_compute_release_legacy_exit_code`'s own
         docstring) -- it only ever reaches this resolver through the
         already-collapsed `worst_verdict`. When an unrelated library's
-        `"ERROR"` outranks that same `BREAKING` in `_RELEASE_VERDICT_ORDER`,
+        `"ERROR"` outranks that same `BREAKING` in `RELEASE_VERDICT_ORDER`,
         `worst_verdict` becomes `"ERROR"` and the release-global break is
         gone from both inputs. `.code` still comes out `4` either way (the
         `ERROR` floor), but without `release_global_verdict` passed through
@@ -454,34 +454,40 @@ class TestReleaseExitDecisionForReportAgreesWithRealExit:
         assert "operational_error" in mine.reasons
 
 
+def _release_global_verdict(bundle: Any, matrix: Any) -> str:
+    from abicheck.policy.release_outcome import (
+        fold_release_outcome,
+        release_global_verdicts,
+    )
+
+    return fold_release_outcome(
+        (), release_global_verdicts(bundle, matrix)
+    ).global_verdict
+
+
 class TestReleaseGlobalVerdict:
-    """`cli_compare_release_helpers._release_global_verdict` -- the
+    """`policy.release_outcome.fold_release_outcome(...).global_verdict` -- the
     uncollapsed bundle/probe-matrix verdict `resolve_release_exit_decision_
     for_report` needs independently of `worst_verdict` (Codex review, fresh
     evidence, second round)."""
 
     def test_no_bundle_or_matrix_is_no_change(self) -> None:
-        from abicheck.cli_compare_release_helpers import _release_global_verdict
-
         assert _release_global_verdict(None, None) == "NO_CHANGE"
 
     def test_bundle_verdict_alone(self) -> None:
         from abicheck.checker_policy import Verdict
-        from abicheck.cli_compare_release_helpers import _release_global_verdict
 
         bundle = cast(Any, SimpleNamespace(bundle_verdict=Verdict.BREAKING))
         assert _release_global_verdict(bundle, None) == "BREAKING"
 
     def test_matrix_verdict_alone(self) -> None:
         from abicheck.checker_policy import Verdict
-        from abicheck.cli_compare_release_helpers import _release_global_verdict
 
         matrix = cast(Any, SimpleNamespace(verdict=Verdict.API_BREAK))
         assert _release_global_verdict(None, matrix) == "API_BREAK"
 
     def test_the_worse_of_bundle_and_matrix_wins(self) -> None:
         from abicheck.checker_policy import Verdict
-        from abicheck.cli_compare_release_helpers import _release_global_verdict
 
         bundle = cast(Any, SimpleNamespace(bundle_verdict=Verdict.COMPATIBLE))
         matrix = cast(Any, SimpleNamespace(verdict=Verdict.BREAKING))

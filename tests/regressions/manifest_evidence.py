@@ -1041,4 +1041,38 @@ EVIDENCE_BUG_CLASSES: tuple[BugClass, ...] = (
             ),
         ),
     ),
+    BugClass(
+        id="evidence.narrowed_conclusion_not_carried_across_cardinality",
+        invariant=(
+            "A conclusion narrowed for weaker evidence is narrowed on every "
+            "path that reaches it: one declaration under one recorded scope "
+            "has one confidence whether the scalar member check or the "
+            "release-level reconciliation judges it, and whether it is read "
+            "in memory, from the release JSON, or from a stored surface. "
+            "Moving a check from per-member to release level (cardinality) "
+            "must not silently restore the full-strength wording and "
+            "confidence the member path had already narrowed."
+        ),
+        fixed_by=(1443,),
+        seed_tests=(
+            "tests/test_release_obligation_standing.py",
+            "tests/test_family_f2_route_parity.py",
+        ),
+        axes={
+            "cardinality": ("member check", "release reconciliation"),
+            "entity": ("function", "variable"),
+            "wire_form": ("Change", "release JSON", "stored surface round-trip"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "Pinned for the -I-reached export-obligation narrowing "
+                    "only. Other member-path confidence downgrades have not "
+                    "been audited for a release-level counterpart that "
+                    "re-derives the finding at HIGH."
+                ),
+                reference="abicheck/policy/release_contract_reconciliation.py",
+            ),
+        ),
+    ),
 )

@@ -133,6 +133,7 @@ from ..model.change_catalog.kinds import ChangeKind, HasKind
 from ..model.execution_cache import MemoryCache, request_key
 from ..model.policy_file_protocol import ReclassifyRuleProtocol
 from .classification import Verdict, effective_category, policy_kind_sets
+from .release_outcome import compatibility_rank
 from .selectors import SelectorSet
 
 #: The four verdicts a `to:` value is allowed to resolve to -- the exact set
@@ -533,14 +534,6 @@ KindSets = tuple[
     frozenset[ChangeKind],
 ]
 
-_VERDICT_ORDER = [
-    Verdict.NO_CHANGE,
-    Verdict.COMPATIBLE,
-    Verdict.COMPATIBLE_WITH_RISK,
-    Verdict.API_BREAK,
-    Verdict.BREAKING,
-]
-
 
 def resolve_kind_sets(
     policy: str | None = None,
@@ -609,9 +602,9 @@ def effective_verdict_for_change(
     eff = getattr(change, "effective_verdict", None)
     if isinstance(eff, Verdict):
         raw_v = _raw_verdict_for_kind(kind, base_sets)
-        if _has_frozen_namespace_violation(change) and _VERDICT_ORDER.index(
+        if _has_frozen_namespace_violation(change) and compatibility_rank(
             eff
-        ) < _VERDICT_ORDER.index(raw_v):
+        ) < compatibility_rank(raw_v):
             return raw_v
         return eff
 
@@ -629,9 +622,9 @@ def effective_verdict_for_change(
         reclass_v = first_matching_reclassify_verdict(reclassify_rules, change, today)
         if reclass_v is not None:
             base_v = effective_category(change, *base_sets)
-            if _has_frozen_namespace_violation(change) and _VERDICT_ORDER.index(
+            if _has_frozen_namespace_violation(change) and compatibility_rank(
                 reclass_v
-            ) < _VERDICT_ORDER.index(base_v):
+            ) < compatibility_rank(base_v):
                 return base_v
             return reclass_v
 
@@ -641,9 +634,9 @@ def effective_verdict_for_change(
     if overrides and kind in overrides:
         base_v = effective_category(change, *base_sets)
         override_v = cast(Verdict, overrides[kind])
-        if _has_frozen_namespace_violation(change) and _VERDICT_ORDER.index(
+        if _has_frozen_namespace_violation(change) and compatibility_rank(
             override_v
-        ) < _VERDICT_ORDER.index(base_v):
+        ) < compatibility_rank(base_v):
             return base_v
         return override_v
     # Reuses `base_sets` (already computed above from `policy_file.
@@ -726,9 +719,9 @@ def reclassify_rule_for_change(
     # regardless of whether the floor would already have clamped it.
     if overrides and kind in overrides:
         override_v = cast(Verdict, overrides[kind])
-        if _has_frozen_namespace_violation(change) and _VERDICT_ORDER.index(
+        if _has_frozen_namespace_violation(change) and compatibility_rank(
             override_v
-        ) < _VERDICT_ORDER.index(base_v):
+        ) < compatibility_rank(base_v):
             next_priority_v = base_v
         else:
             next_priority_v = override_v
@@ -755,7 +748,7 @@ def reclassify_rule_for_change(
                 base_v
                 if (
                     _has_frozen_namespace_violation(change)
-                    and _VERDICT_ORDER.index(reclass_v) < _VERDICT_ORDER.index(base_v)
+                    and compatibility_rank(reclass_v) < compatibility_rank(base_v)
                 )
                 else reclass_v
             )

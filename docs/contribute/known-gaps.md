@@ -51,11 +51,6 @@ Open correctness gaps, in the order of the maintainer ruling of 2026-10-01 (clos
 **Status (re-verified 2026-10-09 at `456989f`): PARTIAL.** Step 1 (dedupe), the public_not_exported release-level half and the step-3 attribution report (workflows/release_member_attribution.py, policy/member_type_attribution.py) have landed. Still open: step 2 (a per-member header operand, plus the quadratic union-header walk) and keeping proven_unreachable findings out of member verdicts.  
 `false-positive` — Every member of a directory/package `compare` parses the union of all members' `-H` headers, so type findings a member never reaches still count in its verdict, and the walk grows quadratically with library count. Remaining: a per-member header operand (step 2) and keeping `proven_unreachable` findings out of member verdicts. [Full write-up](known-gaps/a-directory-compare-still-feeds-the-union-h-set-to-every-member.md)
 
-### An `-I`-reached sibling library's headers yield LOW-confidence export obligations; release reconciliation and JSON confidence not yet narrowed
-
-**Status (re-verified 2026-10-09 at `456989f`): PARTIAL.** The dependency include-root case is closed (extract/public_root_ownership.py) and the PVXS case is narrowed to LOW confidence via workflows/ownership_request.py:136 with_target_roots. The entry's own 'Still open' list remains: per-finding confidence is missing from JSON findings, policy/release_contract_reconciliation.py:237 still emits HIGH confidence without the narrowing, and umbrella headers get LOW-confidence findings.  
-`false-positive` — A declaration reached only through an `-I` root into a sibling library is reported as `public_not_exported`. Narrowed to LOW confidence on the scalar path, but release reconciliation still emits HIGH confidence and JSON findings carry no per-finding confidence. [Full write-up](known-gaps/an-i-reached-sibling-librarys-headers-yield-low-confidence.md)
-
 ### `--exclude-header` cannot stop a transitively-included header being analyzed
 
 **Status (re-verified 2026-10-11 at `46c127111`): OPEN.** `extract/header_exclusions.py::apply_header_exclusions_to_inputs` still filters only the resolved (directory-expanded) header list; nothing prunes a header reached through another header's `#include`. Unmatched patterns now warn (`unmatched_exclusion_patterns`), which does not address the transitive case.  
@@ -294,10 +289,15 @@ Each entry's status line says what is still open. A PARTIAL entry's write-up als
 
 #### Python-level AST walks, the side boundary and the snapshot cache dominate large runs (2026-10-11)
 
-**Status (2026-10-11): OPEN.** Cheap levers landed (location materialization loop, scoped GC threshold for DWARF, free-threaded threads path, cache trace marks and write switch); whole-AST walk fusion, side-boundary pickling, the cold GIL member-parallelism A/B and the free-threaded warm-slower-than-cold cache cost remain.  
+**Status (2026-10-11): OPEN.** Cheap levers landed (location materialization loop, free-threaded threads path, cache trace marks and write switch); whole-AST walk fusion, side-boundary pickling, the cold GIL member-parallelism A/B and the free-threaded warm-slower-than-cold cache cost remain.  
 `perf` — The clang JSON tree is walked at least eight times in Python, snapshots are pickled across the side boundary, and populating the snapshot cache costs ~30 % wall on a 28-member release. [Full write-up](known-gaps/python-level-ast-walks-side-boundary-and-cache-costs.md)
 
 ### Hygiene
+
+#### Release report: live and stored operands render different documents
+
+**Status (recorded 2026-10-11): OPEN.** Both operands go through `report.release_document.build_release_report` and agree on every shared semantic field (`tests/unit/report/test_release_document.py`), but each yields its own JSON/Markdown shape and the stored operand has no JUnit, HTML, `oneline` or `--view show=` projection.
+`hygiene` — Converging the shapes changes a published JSON document, so it needs a release-schema decision. [Full write-up](known-gaps/release-report-live-and-stored-operands-render-different-documents.md)
 
 #### Public-surface graph: surface_graph vs L5 header_graph node-id namespaces not unified; type_reachability stdlib query unmigrated
 

@@ -708,9 +708,12 @@ performance:
 - **`balanced`** — fastest. Two live binaries are resolved concurrently in
   two child processes on Linux (when the caller runs no other threads, and
   `ABICHECK_SIDE_PROCESSES` is not `0`); on a free-threaded (`python3.xt`)
-  interpreter, in two threads instead, which overlap there without forking. Any other pair is resolved one side
-  after the other by the `compare` CLI, and in two threads of one process by
-  the typed API. A directory/package comparison sizes its worker
+  interpreter they run in two threads instead, which overlap there without
+  forking; a side the snapshot cache serves
+  whole is loaded in the parent instead of a child. With
+  `ABICHECK_SIDE_PROCESSES=0`, and for any other pair, the `compare` CLI
+  resolves one side after the other and the typed API uses two threads of
+  one process. A directory/package comparison sizes its worker
   pool to the host. Measured on a cold compare of two 60-module C++
   libraries: 64 s one side at a time, 42 s with concurrent children, at
   about 1.5x the peak memory. `ABICHECK_PARALLEL_EXTRACTION=0` resolves the
