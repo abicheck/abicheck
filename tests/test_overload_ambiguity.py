@@ -51,6 +51,7 @@ _TYPES = {
     "Widget": "Widget",  # struct Widget {};
     "const Widget &": "const Widget &",
     "const int &": "const int &",
+    "long &&": "long &&",
     "std::initializer_list<int>": "std::initializer_list<int>",
     "const std::initializer_list<int> &": "const std::initializer_list<int> &",
 }
@@ -225,3 +226,52 @@ def test_header_less_side_declines() -> None:
     old.from_headers = False
     new = _snap([_ctor("S", "int", "int"), _ctor("S", "char *", "p")])
     assert _KIND not in {c.kind for c in compare(old, new).changes}
+
+
+def _free(
+    params: list[tuple[str, str | None]], tag: str, *, variadic: bool = False
+) -> Function:
+    return Function(
+        name="ns::g",
+        mangled=f"_ZN2ns1gE{tag}",
+        return_type="void",
+        params=[
+            Param(name=f"p{i}", type=t, default=d) for i, (t, d) in enumerate(params)
+        ],
+        visibility=Visibility.PUBLIC,
+        is_variadic=variadic,
+    )
+
+
+@pytest.mark.parametrize(
+    ("rival", "fires"),
+    [
+        # Rival with a defaulted extra parameter is viable and ties: no claim.
+        (_free([("long", None), ("int", "0")], "r1"), False),
+        # Extra parameter without a default: not viable for the call.
+        (_free([("long", None), ("int", None)], "r2"), True),
+        # Variadic rival: ranking unknown, no claim.
+        (_free([("long", None)], "r3", variadic=True), False),
+        # Rvalue reference to a scalar binds {} by identity: ties.
+        (_free([("long &&", None)], "r4"), False),
+        # Reference to a class type: a user-defined conversion, worse.
+        (_free([("const Widget &", None)], "r5"), True),
+    ],
+)
+def test_old_rival_decides_whether_the_call_was_valid(
+    rival: Function, fires: bool
+) -> None:
+    """The old overload must have been the unique best candidate for the
+    witness call; a rival that could tie withdraws the claim."""
+    base = [_free([("int", None)], "a"), rival]
+    new = _snap([*base, _free([("double", None)], "b")])
+    assert (_KIND in {c.kind for c in compare(_snap(base), new).changes}) is fires
+
+
+def test_identity_position_rival_with_another_type_is_worse() -> None:
+    base = [
+        _free([("int", None), ("int", None)], "a"),
+        _free([("long", None), ("long", None)], "r"),
+    ]
+    new = _snap([*base, _free([("double", None), ("int", None)], "b")])
+    assert _KIND in {c.kind for c in compare(_snap(base), new).changes}

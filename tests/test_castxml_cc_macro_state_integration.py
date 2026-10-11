@@ -71,6 +71,15 @@ _AFTER = {
 _CCS = ("ms_abi", "sysv_abi")
 
 
+def _target_default() -> str:
+    """gcc's default x86-64 convention: ms_abi on Windows targets."""
+    machine = subprocess.run(
+        ["gcc", "-dumpmachine"], capture_output=True, text=True, check=False
+    ).stdout.lower()
+    windows = any(t in machine for t in ("mingw", "windows", "cygwin", "msys"))
+    return "ms_abi" if windows else "sysv_abi"
+
+
 def _gcc_says_ms_abi(header: Path, scratch: Path) -> bool:
     probe = scratch / "probe.c"
     probe.write_text(
@@ -118,5 +127,7 @@ def test_convention_matches_the_compiler(
     )
     ms = _gcc_says_ms_abi(header, tmp_path)
     assert ms == (cc == "ms_abi")  # the oracle itself sees the declaration's cc
-    # On x86-64 SysV, ``sysv_abi`` is the default and reads as no convention.
-    assert _abicheck_conventions(header) == ({"ms_abi"} if ms else set())
+    # The target's own default convention (sysv_abi on SysV targets, ms_abi
+    # on Windows) changes nothing and reads as no convention.
+    effective = "ms_abi" if ms else "sysv_abi"
+    assert _abicheck_conventions(header) == ({effective} - {_target_default()})

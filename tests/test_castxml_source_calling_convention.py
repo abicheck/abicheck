@@ -383,3 +383,49 @@ def test_without_a_table_text_is_read_literally(tmp_path: Path) -> None:
     hdr = tmp_path / "h.h"
     hdr.write_text("CALL int target(int a);\n")
     assert source_calling_conventions(_ctx(hdr), _el(1), "target") == set()
+
+
+def _completed(rc: int) -> SimpleNamespace:
+    return SimpleNamespace(returncode=rc, stdout="", stderr="")
+
+
+_CMD = ["castxml", "--castxml-output=1", "-o", "x.xml", "agg.h"]
+
+
+def test_resolve_preprocessed_text_end_to_end_and_failures(tmp_path: Path) -> None:
+    from abicheck.extract.headers.castxml.preprocessed_text import (
+        resolve_preprocessed_text,
+    )
+
+    root = _root(("f1", 3))
+
+    def ok(cmd: list[str], **_: object) -> SimpleNamespace:
+        Path(cmd[cmd.index("-o") + 1]).write_text(_PP)
+        return _completed(0)
+
+    got = resolve_preprocessed_text(_CMD, root, tmp_path, ok, _has_cc)
+    assert got is not None and got.default_cc == "sysv_abi"
+    assert set(got.lines) == {"/inc/api.h"}
+    # Unusable command shape, failing run, missing output, raising runner.
+    assert (
+        resolve_preprocessed_text(["castxml", "a.h"], root, tmp_path, ok, _has_cc)
+        is None
+    )
+    (tmp_path / "preprocessed.txt").unlink()
+    assert (
+        resolve_preprocessed_text(
+            _CMD, root, tmp_path, lambda c, **k: _completed(1), _has_cc
+        )
+        is None
+    )
+    assert (
+        resolve_preprocessed_text(
+            _CMD, root, tmp_path, lambda c, **k: _completed(0), _has_cc
+        )
+        is None
+    )
+
+    def boom(cmd: list[str], **_: object) -> SimpleNamespace:
+        raise OSError("no castxml")
+
+    assert resolve_preprocessed_text(_CMD, root, tmp_path, boom, _has_cc) is None
