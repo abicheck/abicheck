@@ -99,4 +99,25 @@ SERIALIZATION_BUG_CLASSES: tuple[BugClass, ...] = (
             "tests/test_family_f2_route_parity.py",
         ),
     ),
+    BugClass(
+        id="serialization.interpreter_dependent_str_subclass_token",
+        invariant=(
+            "Every str-valued enum member must serialize to its declared "
+            "value on every supported interpreter. A `(str, Enum)` mixin "
+            "relies on json reading the underlying str buffer; CPython 3.15 "
+            "encodes str subclasses through str(), which for such a mixin is "
+            "'Cls.NAME', so 3.15-written snapshots, baselines and caches no "
+            "interpreter could load. A same-interpreter round trip cannot "
+            "see this, so the oracle is the declared value: for every enum "
+            "in the package, str(m), format(m) and the json token equal "
+            "m.value, which holds on 3.11-3.15 only for enum.StrEnum."
+        ),
+        fixed_by=(1552,),
+        seed_tests=("tests/test_str_enum_serialized_token.py",),
+        public_surfaces=("cli",),
+        axes={
+            "rendering": ("str", "format", "json"),
+            "interpreter": ("3.11", "3.13", "3.15", "3.15t"),
+        },
+    ),
 )

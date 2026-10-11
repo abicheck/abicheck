@@ -195,4 +195,25 @@ CONCURRENCY_BUG_CLASSES: tuple[BugClass, ...] = (
             "position": ("1", "2"),
         },
     ),
+    BugClass(
+        id="concurrency.per_thread_state_in_inherited_context",
+        invariant=(
+            "State that must be private to one worker thread may not live in "
+            "a ContextVar: free-threaded CPython (3.14t+) starts a new "
+            "threading.Thread with a copy of the parent's context, so a "
+            "value the parent set is visible to every worker. The header-AST "
+            "handoff slot was such a ContextVar, letting both compare sides "
+            "pop the same parsed AST. The test starts 1, 2 and 4 workers "
+            "with an explicitly inherited context (reproducible on any "
+            "3.14+ build, not only 3.15t) and asserts each sees an empty "
+            "slot and the parent's own entry survives."
+        ),
+        fixed_by=(1552,),
+        seed_tests=(
+            "tests/test_ast_memo_slot_thread_context.py",
+            "tests/test_dumper_clang.py",
+        ),
+        public_surfaces=("cli",),
+        axes={"workers": ("1", "2", "4"), "context": ("fresh", "inherited")},
+    ),
 )
