@@ -2,7 +2,8 @@ name: Python compatibility
 
 # Tiered Python testing. `ci.yml`'s `unit-tests` job runs the full suite
 # with coverage (80% floor) on canonical 3.13. This workflow adds, on every
-# PR and blocking:
+# PR, with no continue-on-error (required in .github/AGENTS.md terms; no check
+# is mechanically merge-blocking on main):
 #   * full-suite: the same full fast suite on the oldest supported Python
 #     (3.11, the `requires-python` floor) and on 3.15;
 #   * free-threading: the full fast suite on 3.15t with the GIL disabled;
@@ -36,7 +37,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # 3.15 (and 3.15t below) block merges: a non-blocking leg went red
+        # 3.15 (and 3.15t below) are required lanes: a continue-on-error leg went red
         # on a str-mixin Enum serialization break and nobody noticed.
         python-version: ['3.11', '3.12', '3.14', '3.15']
     steps:
@@ -122,7 +123,7 @@ jobs:
     # 3.15t is the base free-threaded interpreter this project tests; 3.14t is
     # deliberately not covered. Taken from conda-forge (its `python_rc` label
     # while 3.15 is a release candidate) via the same pinned, sha256-verified
-    # micromamba `scripts/setup_dev_env.sh` uses. Blocking, like the 3.15
+    # micromamba `scripts/setup_dev_env.sh` uses. Required, like the 3.15
     # smoke leg above.
     name: free-threading (py3.15t, shard ${{ matrix.shard }}/3)
     runs-on: ubuntu-latest

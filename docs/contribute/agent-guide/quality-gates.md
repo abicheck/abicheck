@@ -339,7 +339,7 @@ suite runs under coverage. In CI that lane runs as three concurrent
 test count) that only collect coverage data; `unit-tests-coverage` combines
 them and enforces the floor once. Locally, `verify.py`'s `unit-pr` step runs
 the same selection unsharded, in one process.
-`python-compat.yml` runs the same full fast suite, uncovered and blocking, on
+`python-compat.yml` runs the same full fast suite, uncovered and required (no `continue-on-error`), on
 3.11 (the `requires-python` floor), 3.15 and free-threaded 3.15t on every PR:
 interpreter behavior changes (3.15's `json` serializing a `str` subclass via
 `str()`, 3.15t threads inheriting the parent context) break tests no smoke

@@ -67,10 +67,10 @@ dev = [
     # distinction.
     "pytest-timeout>=2.3",
     "filelock>=3.0",
-    "hypothesis>=6.0; python_version < '3.15'",
+    "hypothesis>=6.0; python_version != '3.15'",
     # 6.140+ ships a native extension that fails to import on CPython 3.15
     # ("unknown slot ID 85"); the 3.15/3.15t CI lanes are blocking.
-    "hypothesis>=6.0,<6.140; python_version >= '3.15'",
+    "hypothesis>=6.0,<6.140; python_version == '3.15'",
     # Pinned exactly, and kept in lockstep with .pre-commit-config.yaml's
     # `rev:` — tests/test_toolchain_pins.py asserts the two agree.
     #
