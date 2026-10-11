@@ -28,13 +28,13 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from ....report.comparison_scope import (
+from ..workflows.gate import resolve_scope_decision
+from .comparison_scope import (
     ComparisonScopeTerms,
     comparison_scope_terms,
     render_comparison_scope_markdown,
 )
-from ....report.not_comparable import OperationalStatus
-from ....workflows.gate import resolve_scope_decision
+from .not_comparable import OperationalStatus
 
 __all__ = [
     "json_scope_fields",

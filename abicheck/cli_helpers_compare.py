@@ -39,7 +39,7 @@ from .workflows.extraction import (
     has_explicit_std,
     strip_vendor_hash as strip_vendor_hash,
 )
-from .workflows.gate import effective_kind_sets
+from .workflows.gate import consumer_verdict_rank, effective_kind_sets
 
 if TYPE_CHECKING:
     from .checker_types import DiffResult
@@ -562,30 +562,6 @@ def _plugin_contract_summary(result: object) -> dict[str, Any]:
     }
 
 
-_VERDICT_SEVERITY_RANK = {
-    "BREAKING": 3,
-    "API_BREAK": 2,
-    "COMPATIBLE_WITH_RISK": 1,
-    "COMPATIBLE": 0,
-    "NO_CHANGE": 0,
-}
-
-
-def _verdict_severity_rank(verdict: object) -> int:
-    """Rank a Verdict by severity, independent of any exit-code scheme.
-
-    Under a severity scheme, a BREAKING app can carry exit code 0 (e.g.
-    ``--severity-preset info-only``) -- ranking "worst app" by exit code
-    would then let a later COMPATIBLE app (also exit code 0) overwrite the
-    reported scoped verdict, so JSON/HTML/SARIF could claim COMPATIBLE while
-    an earlier --used-by summary is still BREAKING (Codex review). Verdict
-    selection for reporting must stay keyed on verdict severity, not on the
-    (independently correct) max-exit-code computation used for gating.
-    """
-    value = getattr(verdict, "value", verdict)
-    return _VERDICT_SEVERITY_RANK.get(value, 0) if isinstance(value, str) else 0
-
-
 def _scoped_exit_code(
     scoped: Any,
     relevant_changes: list[Any],
@@ -860,7 +836,7 @@ def _apply_used_by_scoping(
                     scoped.missing_versions
                 )
         worst_exit = max(worst_exit, exit_code)
-        rank = _verdict_severity_rank(scoped.verdict)
+        rank = consumer_verdict_rank(scoped.verdict)
         if worst_verdict is None or rank >= worst_verdict_rank:
             worst_verdict_rank = rank
             worst_verdict = scoped.verdict

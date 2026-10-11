@@ -665,7 +665,7 @@ class TestResolveReleaseExitDecision:
         self,
     ) -> None:
         """Codex review, fresh evidence: today's real `worst_verdict`
-        aggregation (`cli_compare_release.py`'s `_RELEASE_VERDICT_ORDER`
+        aggregation (`policy.release_outcome`'s `RELEASE_VERDICT_ORDER`
         loop) collapses a release's outcome to one scalar ranked with
         `"ERROR"` *above* `"BREAKING"`, so a release with one `BREAKING`
         library and a second, unrelated library that failed to compare

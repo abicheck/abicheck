@@ -225,16 +225,34 @@ def reconcile_side(
 
 def _missing_export_finding(obligation: PublicObligation) -> Change:
     entity = "extern variable" if obligation.entity == "variable" else "function"
+    if obligation.outside_declared_surface:
+        # Same narrowing the member check applies
+        # (``buildsource.export_obligation_ownership``): a declaration the
+        # run's declared -H surface does not cover may belong to a sibling
+        # library sharing the include tree, so the absence is reported but
+        # the obligation itself is not established.
+        description = (
+            f"No library in the bundle exports {entity} {obligation.name!r} "
+            f"(expected symbol {obligation.symbol!r}), but its header is not one "
+            "the run's -H set names: it was reached only through #include, so "
+            "whether this product owes the export is not established."
+        )
+        confidence = Confidence.LOW
+    else:
+        description = (
+            f"The release's public headers declare {entity} {obligation.name!r} "
+            f"(expected symbol {obligation.symbol!r}) but no library in the bundle "
+            "exports it. Code that compiles against the headers gets an "
+            "undefined-symbol link error against the whole product, not against "
+            "one member."
+        )
+        confidence = Confidence.HIGH
     return _change(
         ChangeKind.PUBLIC_NOT_EXPORTED,
         obligation.symbol,
-        f"The release's public headers declare {entity} {obligation.name!r} "
-        f"(expected symbol {obligation.symbol!r}) but no library in the bundle "
-        "exports it. Code that compiles against the headers gets an "
-        "undefined-symbol link error against the whole product, not against "
-        "one member.",
+        description,
         old_value=obligation.symbol,
-        confidence=Confidence.HIGH,
+        confidence=confidence,
         source_location=obligation.source_location,
     )
 

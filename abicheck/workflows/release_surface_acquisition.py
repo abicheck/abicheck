@@ -87,6 +87,7 @@ def surface_from_snapshot(
         inline_declared_symbols,
     )
     from ..buildsource.export_account_decision import _candidate_symbols
+    from ..buildsource.export_obligation_ownership import obligation_standing
     from ..compare.ownership_relations import contract_relations
     from ..model.vocabulary import ScopeOrigin
 
@@ -117,6 +118,11 @@ def surface_from_snapshot(
                     name=fn.name,
                     entity="function",
                     source_location=fn.source_location,
+                    # The member check's own narrowing, applied to the same
+                    # declaration (known gap: -I-reached sibling headers).
+                    outside_declared_surface=obligation_standing(
+                        snapshot, fn
+                    ).outside_declared_surface,
                 )
             )
     for i, var in enumerate(snapshot.declarations.variables):
@@ -129,6 +135,11 @@ def surface_from_snapshot(
                     name=var.name,
                     entity="variable",
                     source_location=var.source_location,
+                    # The member check's own narrowing, applied to the same
+                    # declaration (known gap: -I-reached sibling headers).
+                    outside_declared_surface=obligation_standing(
+                        snapshot, var
+                    ).outside_declared_surface,
                 )
             )
     declaring_headers: set[str] = set()

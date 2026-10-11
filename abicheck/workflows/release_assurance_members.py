@@ -151,8 +151,8 @@ def release_assurance_from_entries(
 
 def _as_list(value: object) -> list[object]:
     """*value* as a list, or ``[]`` -- a type-safe read of an
-    ``object``-typed ``library_results`` entry value (the same need
-    ``cli_compare_release_helpers._list_len`` exists for)."""
+    ``object``-typed ``library_results`` entry value (the same need the release report's ``_list_len`` helper
+    once served)."""
     return list(value) if isinstance(value, list) else []
 
 

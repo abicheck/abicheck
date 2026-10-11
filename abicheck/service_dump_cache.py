@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from .buildsource.source_inputs import extraction_read_source_inputs
+from .workflows.cache_probe import refuse_dump_while_probing
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -620,6 +621,13 @@ def cached_run_dump(
     simpler than threading a cheap "will this dump have headers" pre-check
     through every cacheable call shape.
     """
+    from .snapshot_cache import absolute_paths as _abs  # one spelling per input
+
+    path = Path(os.path.abspath(path))
+    headers, includes, public_headers, public_header_dirs = map(
+        _abs, (headers, includes, public_headers, public_header_dirs)
+    )
+    public_include_search_dirs = _abs(public_include_search_dirs)
     _headers = headers or []
     _includes = includes or []
     cacheable = _dump_is_cacheable(
@@ -636,13 +644,8 @@ def cached_run_dump(
     )
 
     def _dump_uncached() -> AbiSnapshot:
-        """Run the real dump with this call's arguments, cache aside.
-
-        Both the not-cacheable early return and the cache-miss path below hand
-        `run_dump` the exact same 22 arguments; stated once so a newly threaded
-        parameter cannot reach one of them and silently skip the other
-        (CodeFactor: duplicate code).
-        """
+        """The real dump with this call's exact arguments, cache aside -- one
+        spelling for the uncacheable and the miss path alike."""
         return run_dump(
             path,
             binary_fmt,
@@ -671,6 +674,7 @@ def cached_run_dump(
         )
 
     if not cacheable:
+        refuse_dump_while_probing()
         return _dump_uncached()
 
     from . import snapshot_cache
@@ -734,6 +738,7 @@ def cached_run_dump(
     # the same walk, so an edit under any of them busts the key.
     _cc_inputs = compile_context_header_inputs(compile)
     if _cc_inputs is None:  # guarded by _dump_is_cacheable; defensive
+        refuse_dump_while_probing()
         return _dump_uncached()
     _cache_headers = [*_cache_headers, *_cc_inputs[0]]
     _cache_includes = [*_cache_includes, *_cc_inputs[1]]
@@ -784,6 +789,7 @@ def cached_run_dump(
         if extraction_read_source_inputs(cached):
             cached.live_source_evidence = True
         return cached
+    refuse_dump_while_probing()
     snap = _dump_uncached()
     final_extra = _build_extra()
     final_key = snapshot_cache._cache_key(

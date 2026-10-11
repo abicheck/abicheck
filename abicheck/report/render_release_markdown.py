@@ -20,8 +20,9 @@ module at its baseline) when ADR-065 S2 added the ``comparison_scope``
 section; they take plain per-library result dicts, a
 ``BundleDiffResult``, or a ``DiffResult`` and return Markdown lines --
 pure projections in this package's sense (``AGENTS.md``: format, decide
-nothing). ``cli_compare_release_helpers._format_release_markdown`` is the
-whole-document assembler and still imports them by their old names.
+nothing). ``report.render_release_report`` is the whole-document
+assembler. ``release_md_library_findings`` joined them from
+``cli_compare_receipt`` when the release report got one builder.
 
 ``_release_md_changed_libraries`` renders the **proven** removed/added
 sets since S2 (ADR-065 D2): its callers pass
@@ -432,3 +433,95 @@ def finish_release_markdown(
         md = demangle_text(md, escape_table_pipes=True)
     audit_lines = _release_md_suppression_audit(library_results, demangle=demangle)
     return md + "\n".join(audit_lines) if audit_lines else md
+
+
+def release_md_library_findings(
+    library_results: list[dict[str, object]],
+    *,
+    display_cap: int | None = None,
+) -> list[str]:
+    """Per-library findings (kind/symbol/description), symbol names included.
+
+    R2 (CLI-audit): the ``## Libraries`` table is counts only; this reads
+    ``entry["findings"]`` -- the projection
+    ``cli_compare_release_matrix._release_finding_dicts`` builds before each
+    library's ``DiffResult`` is discarded for memory -- and notes a truncated
+    list rather than presenting it as complete. *display_cap* is the
+    presentation cap (``report.release_display_limits``): a human summary may
+    be bounded, a machine document may not be silently truncated. Moved here
+    from ``cli_compare_receipt`` with its siblings when the release report
+    got one builder (``report.release_document``).
+    """
+    from ..reporter import release_finding_detail_lines
+
+    lines: list[str] = []
+    for lib in library_results:
+        findings = lib.get("findings")
+        impact_table = lib.get("impact_table")
+        impact_root_entries = (
+            impact_table.get("root_entries") if isinstance(impact_table, dict) else None
+        ) or []
+        impact_direct_removals = (
+            impact_table.get("direct_removals", 0)
+            if isinstance(impact_table, dict)
+            else 0
+        )
+        has_impact = bool(impact_root_entries) or bool(impact_direct_removals)
+        if not findings and not has_impact:
+            continue
+        lines += ["", f"### `{lib['library']}` Findings", ""]
+        all_findings = cast(list[dict[str, object]], findings or [])
+        # The presentation cap lives here, at render time, not in the
+        # projection every format shares: a human summary may be bounded, a
+        # machine document may not be silently truncated (see
+        # `report.release_display_limits`, which owns the one automatic cap
+        # since plan slice 7m retired every way of overriding it).
+        shown = all_findings if display_cap is None else all_findings[:display_cap]
+        rendered_truncated = len(shown) < len(all_findings)
+        for f in shown:
+            symbol = f.get("symbol")
+            lines.append(
+                f"- **{f.get('kind')}**" + (f" — `{symbol}`" if symbol else "")
+            )
+            lines.extend(release_finding_detail_lines(f))
+        if rendered_truncated or lib.get("findings_truncated"):
+            # `-o json=...` *is* a complete-list source now, unless this
+            # run explicitly asked for a cap (`--max-findings-per-library`
+            # or the env var), which is what this note distinguishes. It
+            # used not to be: the release JSON carried the identical capped
+            # projection, so a reader following the old advice met the same
+            # truncated list again.
+            complete_report = lib.get("complete_report")
+            if lib.get("findings_truncated"):
+                where = (
+                    f"`{complete_report}`"
+                    if complete_report
+                    else "a per-component export (`-o json=DIR/`), or compare this library individually"
+                )
+                lines.append(
+                    f"  - _...additional findings omitted; see {where} for "
+                    "the complete list._"
+                )
+            else:
+                lines.append(
+                    "  - _...additional findings omitted from this summary; "
+                    "`-o json=...` carries the complete list._"
+                )
+        if has_impact:
+            # `--view impact`'s aggregate counterpart (Codex review, PR
+            # #1154 follow-up: "Reject unsupported impact views instead of
+            # silently dropping them") -- same shape
+            # `reporter_markdown.compute_impact_table` produces for a
+            # single-pair `compare` report, rendered per library here since
+            # a release has one impact table per library, not one overall.
+            lines.append("")
+            lines.append(f"**Impact** for `{lib['library']}`:")
+            for entry in impact_root_entries:
+                lines.append(
+                    f"- `{entry.get('symbol')}` ({entry.get('kind')}): "
+                    f"{entry.get('iface_count', 0)} interface(s), "
+                    f"{entry.get('caused', 0)} caused change(s)"
+                )
+            if impact_direct_removals:
+                lines.append(f"- {impact_direct_removals} direct removal(s)")
+    return ["", "## Per-Library Findings", *lines] if lines else []

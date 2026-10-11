@@ -472,7 +472,13 @@ def _finish_native_snapshot(
 
 @functools.wraps(_run_dump_uncached)  # name lookup below so patching sticks
 def _call_run_dump_uncached(*args: Any, **kwargs: Any) -> AbiSnapshot:
-    return _run_dump_uncached(*args, **kwargs)
+    from ...model.performance import current_performance_profile, tuning_for
+    from ...storage.acyclic_json import gc_relaxed
+
+    # The one funnel every live extraction passes through, so every front
+    # end gets the same collector setting; a cache hit never gets here.
+    with gc_relaxed(tuning_for(current_performance_profile()).relaxed_gc):
+        return _run_dump_uncached(*args, **kwargs)
 
 
 run_dump = granting_live_source_licence(

@@ -1557,6 +1557,18 @@ formats and repeated renders, plus a call-count spy proving every decision
 function runs once at envelope-construction time and never during a
 projection).
 
+**Release slice (2026-10-11).** The directory/package release report had its
+own copy of this problem: four format functions in
+`cli_compare_release_helpers.py`, each re-deriving the display projection,
+filtered counts, exit block and disposition audit. `report/release_document.py`
+now builds one `ReleaseReport` (live operand) or `StoredReleaseReport` (stored
+`BundleFacts` operand) per evaluation. `report/render_release_report.py`
+projects JSON, Markdown, JUnit, HTML and `oneline` from it, and the output
+bytes did not change. `tests/unit/report/test_release_document.py` repeats
+the completion test at release cardinality. The live and stored operands
+still render different document *shapes*. That gap is recorded in
+`docs/contribute/known-gaps.md` and not closed here.
+
 ### D. Typed request/plan and operand convergence
 
 **Re-measured, closure package 4 (this section was stale — it described a

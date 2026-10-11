@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any
 from .change_operation import entity_for_change
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Mapping, Sequence
 
     from .disposition_audit import DispositionAudit
     from .finding import ReportFinding
@@ -107,3 +107,28 @@ def compute_result_counts(
         hygiene_persistent=hygiene["persistent"],
         hygiene_not_evaluated=hygiene["not_evaluated"],
     )
+
+
+def held_out_non_gating(counts: Mapping[str, int], audit: DispositionAudit) -> int:
+    """Non-gating changes the audit records but the retained findings omit.
+
+    ``result_counts.non_gating`` counts the *retained* findings; the audit's
+    ``non_gating`` also counts changes held out of them before display (a
+    redundant finding folded into another, an opaque-handle downgrade, an
+    out-of-surface or reconciled change). oneCCL: 49 retained vs 59 audited,
+    the 10 being folded ``exported_not_public`` findings -- both right, but a
+    reader saw two disagreeing numbers with nothing linking them.
+    """
+    audited = dict(audit.counts).get("non_gating", 0)
+    return max(0, audited - int(counts.get("non_gating", 0)))
+
+
+def held_out_note(counts: Mapping[str, int], audit: DispositionAudit | None) -> str:
+    """``" + 10 non-gating held out of the findings (see the disposition
+    audit)"`` when the two counts differ, else ``""``."""
+    if audit is None:
+        return ""
+    held = held_out_non_gating(counts, audit)
+    if not held:
+        return ""
+    return f" + {held} non-gating held out of the findings (see the disposition audit)"

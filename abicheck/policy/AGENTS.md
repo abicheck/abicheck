@@ -44,6 +44,11 @@ or a CLI flag directly is in the wrong layer.
   `SeverityConfig`, `SeverityLevel`, ...).
 - `exit_decision.py` — `ExitDecision`/`ExitReason`, the orthogonal-axis
   exit-code fold shared by `compare`/`scan`.
+- `release_outcome.py` — the one release verdict ordering and fold
+  (`fold_release_outcome` -> `ReleaseOutcome`, `worse_release_verdict`,
+  the removed-member floor, the derived compatibility/consumer ranks).
+  Never restate the ordering elsewhere; frontends reach it via
+  `workflows.gate`.
 - `contract_coverage_exit.py` — ADR-049 Phase 7's contract-coverage exit
   contribution.
 - `gate_decision.py` — ADR-061 Phase 2's `gate_decision_for_result`: the one

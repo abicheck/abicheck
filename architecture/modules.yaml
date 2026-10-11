@@ -82,6 +82,7 @@
         "abicheck/buildsource/embed.py",
         "abicheck/buildsource/export_account_decision.py",
         "abicheck/buildsource/export_accounting.py",
+        "abicheck/buildsource/export_obligation_ownership.py",
         "abicheck/buildsource/extractor.py",
         "abicheck/buildsource/extractor_manifest.py",
         "abicheck/buildsource/graph_backends.py",

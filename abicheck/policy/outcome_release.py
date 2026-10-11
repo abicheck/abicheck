@@ -113,8 +113,8 @@ def run_outcome_dict_for_release(
     scope: ScopeCompleteness = ScopeCompleteness.COMPLETE,
 ) -> dict[str, Any]:
     """Build the ``run_outcome`` dict for a directory/package release
-    comparison's own summary JSON (``cli_compare_release_helpers.
-    _format_release_json``, ``cli_compare_release_summary.
+    comparison's own summary JSON (``report.release_document.
+    release_json_document``, ``cli_compare_release_summary.
     _write_release_summary_file``) -- both claim ``run_outcome`` per the
     "every JSON report" contract (``docs/use/output-formats.md``) but never
     actually built one (Codex review).
@@ -122,12 +122,12 @@ def run_outcome_dict_for_release(
     *compatibility_verdict* is deliberately **not** the release's own
     reported ``worst_verdict`` -- that string can legitimately be the
     ``"ERROR"``/``"not_comparable"``/``"unsupported"`` operational sentinels
-    ``_RELEASE_VERDICT_ORDER`` ranks outside every real verdict, correct for
+    ``release_outcome.RELEASE_VERDICT_ORDER`` ranks outside every real verdict, correct for
     the release's *reported* verdict but would erase a real, already-
     completed compatibility result from this separate axis. Callers pass
     the worst real ``Verdict`` among the release's library/global results
     with the sentinels excluded instead -- ``cli_compare_release_
-    helpers._release_completed_compatibility_verdict(...)`` for a native
+    release_outcome.fold_release_outcome(...)`` for a native
     writer, :func:`~abicheck.policy.outcome.worst_real_verdict` for the
     legacy-report backfill -- or ``None`` when no real result was observed
     at all (``compatibility`` stays unknown, never the dishonest floor

@@ -1,7 +1,7 @@
 name: Python compatibility
 
 # Tiered Python testing. `ci.yml`'s `unit-tests` job runs the full suite
-# with coverage (95% floor) on canonical 3.13. This workflow adds, on every
+# with coverage (80% floor) on canonical 3.13. This workflow adds, on every
 # PR and blocking:
 #   * full-suite: the same full fast suite on the oldest supported Python
 #     (3.11, the `requires-python` floor) and on 3.15;

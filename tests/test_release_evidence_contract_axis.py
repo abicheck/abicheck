@@ -278,7 +278,9 @@ class TestTheExitAndTheReportComeFromOneResolution:
 
     @staticmethod
     def _rollup(results: list[dict[str, object]]) -> str:
-        from abicheck.cli_compare_release_helpers import _RELEASE_VERDICT_ORDER
+        from abicheck.policy.release_outcome import (
+            RELEASE_VERDICT_ORDER as _RELEASE_VERDICT_ORDER,
+        )
 
         worst = "NO_CHANGE"
         for entry in results:

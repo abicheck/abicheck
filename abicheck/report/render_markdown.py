@@ -223,6 +223,8 @@ def render_footer() -> list[str]:
 @dataclass(frozen=True, slots=True)
 class RedundancyNote:
     redundant_count: int
+    #: ``report.redundancy_reasons.redundancy_reason_text``.
+    reasons: str = "derived from root type changes"
 
 
 def render_redundancy_note(note: RedundancyNote | None) -> list[str]:
@@ -231,7 +233,7 @@ def render_redundancy_note(note: RedundancyNote | None) -> list[str]:
     return [
         "",
         f"> ℹ️ {note.redundant_count} redundant change(s) hidden "
-        "(derived from root type changes). Set `scope.show_redundant: true` in\n"
+        f"({note.reasons}). Set `scope.show_redundant: true` in\n"
         "> `.abicheck.yml` to show all.",
     ]
 

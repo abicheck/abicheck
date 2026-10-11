@@ -39,34 +39,18 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 
+from ..policy.release_outcome import RELEASE_OPERATIONAL_SENTINELS
+
 __all__ = [
     "RELEASE_INVENTORY_COUNTERS",
-    "RELEASE_OPERATIONAL_SENTINELS",
     "fold_release_change_inventory",
     "release_inventory_counters",
     "release_change_inventory",
 ]
 
-#: The release verdicts that are not real ``Verdict`` values but operational
-#: states: a member carrying one completed no comparison. Owned here rather
-#: than by the CLI helper module that historically spelled it, so the report
-#: layer can answer "did this member actually produce findings?" without
-#: importing a front end (and so the front end keeps one definition, which
-#: it now imports back under its historical private name).
-#:
-#: They must never mask a *different*, already-completed compatibility
-#: result on ``RunOutcome.compatibility``'s own independent axis (Codex
-#: review, fresh evidence): the release fan-out's own
-#: ``_RELEASE_VERDICT_ORDER`` rollup ranks both above every real verdict by
-#: design -- an operational failure or refusal dominates the release's own
-#: reported ``verdict``, which is exactly right for that field and exactly
-#: wrong for ``run_outcome.compatibility``, a genuinely separate axis. The
-#: same reasoning is why this set gates the inventory fold below: a member
-#: that never completed a comparison has no findings to sum, and summing it
-#: as zero would read as a clean, fully-inventoried member.
-RELEASE_OPERATIONAL_SENTINELS = frozenset(
-    {"ERROR", "not_comparable", "unsupported", "failed"}
-)
+#: The operational sentinels (owned by ``policy.release_outcome``): a member
+#: carrying one completed no comparison, so the inventory fold below skips it
+#: -- summing it as zero would read as a clean, fully-inventoried member.
 
 #: The member counters summed, in the order the block renders them. Kept as
 #: an explicit tuple rather than read off whichever member happened to come

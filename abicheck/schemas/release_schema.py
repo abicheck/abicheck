@@ -36,7 +36,7 @@ __all__ = ["RELEASE_SCHEMA_VERSION"]
 
 #: SemVer-style (MAJOR.MINOR) version of the directory/package release JSON
 #: envelope (`compare-release`'s per-run document,
-#: ``cli_compare_release_helpers._format_release_json``).
+#: ``report.release_document.release_json_document``).
 #:
 #: 1.0 -- introduced (Codex review, findings-fixes round 11): this document
 #:       had no schema-version field at all before this constant, so a
@@ -227,4 +227,13 @@ __all__ = ["RELEASE_SCHEMA_VERSION"]
 #:       stderr, so neither the JSON nor the Markdown artifact could say a
 #:       rule had gone stale or had hidden a breaking change. Present only
 #:       when an audit was attached. Additive.
-RELEASE_SCHEMA_VERSION = "1.12"
+#: - ``1.13`` adds ``public_surface_reconciliation.missing_exports[].
+#:       confidence`` (``high``/``low``), always present: ``low`` marks a
+#:       declaration outside the run's declared ``-H`` surface (reached only
+#:       through ``#include`` and an include root), whose export obligation
+#:       is reported but not established -- the release counterpart of the
+#:       member check's narrowing. The same obligations in
+#:       ``sides.*.missing_from_bundle``/``unresolved_under_incomplete_coverage``
+#:       carry ``outside_declared_surface: true``, present only when true.
+#:       Additive; no verdict or exit code changes.
+RELEASE_SCHEMA_VERSION = "1.13"
