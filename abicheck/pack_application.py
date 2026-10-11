@@ -483,9 +483,13 @@ def resolve_bundle_policy_file(
     ``dedup_validate_overrides_warnings()`` scope (e.g. the whole
     ``compare-release`` run) is not repeated per library/matrix cell.
     """
-    from .frontends.cli.options.params import _load_suppression_and_policy
+    # The Tier-2 loader each release member's own `run_compare` already uses,
+    # not the CLI's: this module is `workflows`-classified (ADR-061), and the
+    # release run's `dedup_validate_overrides_warnings()` scope keeps a
+    # warning that loader already surfaced from repeating here.
+    from .workflows.compare_policy import load_suppression_and_policy
 
-    _, pf = _load_suppression_and_policy(suppress, policy, policy_file_path)
+    _, pf = load_suppression_and_policy(suppress, policy, policy_file_path)
     if application is not None:
         pf = policy_file_with_packs(pf, application, base_policy=policy)
     if project_policy_overrides:

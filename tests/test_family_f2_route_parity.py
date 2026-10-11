@@ -172,7 +172,7 @@ CLICK_ROUTING: dict[str, tuple[str, Any]] = {
     ),
     "pack_paths": (
         _UC,
-        "pack manifests fold through the CLI resolver; typed API takes pack_* projections",
+        "CLI/API parity is test_compare_request_configuration_parity.py",
     ),
     "use_cases_manifest": (_RS, "use-case manifest; CLI-only project integration"),
     "performance_profile": (
@@ -239,6 +239,11 @@ REQUEST_ROUTING: dict[str, tuple[str, Any]] = {
     "pack_policy_overrides": (_UC, "pack projection; CLI spelling is --pack"),
     "project_policy_overrides": (_UC, "config projection; CLI spelling is --config"),
     "pack_internal_namespaces": (_UC, "pack projection"),
+    "pack_paths": (
+        _UC,
+        "CLI/API parity is test_compare_request_configuration_parity.py",
+    ),
+    "stated_settings": (_UC, "receipt provenance; parity in the same module"),
     "changed_paths": (_UC, "not yet a cell"),
     "abi3_floor": (_UC, "needs a CPython extension module"),
     "collapse_versioned_symbols": (_UC, "config-only; needs versioned ELF symbols"),
@@ -288,6 +293,7 @@ DEFAULT_MAP: dict[str, tuple[str, str]] = {
     "abi3": ("CompareRequest", "abi3_floor"),
     "changed_paths_opt": ("CompareRequest", "changed_paths"),
     "performance_profile": ("CompareRequest", "performance_profile"),
+    "pack_paths": ("CompareRequest", "pack_paths"),
     "include_dependencies": ("InputSpec", "include_dependencies"),
     "header": ("InputSpec", "headers"),
     "include": ("InputSpec", "includes"),
@@ -322,7 +328,6 @@ DEFAULT_UNMAPPED: dict[str, str] = {
     "defines": "folded into InputSpec.compile (a context object)",
     "since": "git-ref operand sugar",
     "dry_run": "CLI-only planning mode",
-    "pack_paths": "folded into pack_* request projections",
     "use_cases_manifest": "CLI-only project integration",
     "verbose": "stderr only",
 }

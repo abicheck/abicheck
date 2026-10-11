@@ -27,15 +27,6 @@
       "review_by": "2026-12-15"
     },
     {
-      "path": "abicheck/compatibility_evaluation_resolver.py",
-      "disposition": "migrate",
-      "target_layer": "policy",
-      "slice": "policy/effective_config_resolver.py -- D1 names 'effective configuration' as a policy responsibility; its own siblings (compatibility_evaluation_frontend.py, compatibility_evaluation_wiring.py, compatibility_evaluation_versioning_wiring.py) are already classified `workflows`.",
-      "rationale": "frontends (cli_compare_helpers.py, cli_compare_receipt.py) import this module directly today. Trial classification into `policy` measured 9 new frontends -> policy violations. Those call sites need to route through workflows first, the same way the already-classified compatibility_evaluation_* siblings do.",
-      "owner": "abicheck maintainers",
-      "review_by": "2026-12-15"
-    },
-    {
       "path": "abicheck/contract_evidence.py",
       "disposition": "migrate",
       "target_layer": "policy",
@@ -76,15 +67,6 @@
       "target_layer": "compare",
       "slice": "compare's internal-namespace-leak detector, alongside its sibling diff_* detectors.",
       "rationale": "This module's own body imports several extract-classified buildsource modules (entity_identity.py, graph_facts.py, source_graph_findings.py, source_graph_query.py) plus two still-unclassified siblings (checker_policy.py, impact/engine.py) directly. Trial classification into `compare` measured 4 new compare -> extract violations. Needs real decoupling of its buildsource reads (through a model-shared graph value, or a workflows composition point) before reclassification, not just a debt entry.",
-      "owner": "abicheck maintainers",
-      "review_by": "2026-12-15"
-    },
-    {
-      "path": "abicheck/pack_application.py",
-      "disposition": "migrate",
-      "target_layer": "policy",
-      "slice": "policy/pack_application.py -- ADR-049 Phase 5's pack-to-engine application layer, alongside its sibling policy-classified compatibility_evaluation_config.py.",
-      "rationale": "frontends imports this module directly across dozens of call sites (cli_compare_receipt.py alone three times, plus cli_compare_release*.py and cli_scan_*.py). Trial classification into `policy` measured 41 new frontends -> policy violations -- by far the largest of any module in this ledger. Needs those call sites routed through workflows first, mirroring gap A's own cli_dump_helpers.py precedent, before this file can move.",
       "owner": "abicheck maintainers",
       "review_by": "2026-12-15"
     },
