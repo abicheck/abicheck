@@ -559,7 +559,7 @@ wrongly, and py-spy corrected it. Before → after, 4 CPUs, cold cache:
 and 16 libraries 32.2 s → 19.1 s.
 The 1.7 budget catches regression; lower it toward ~1.1 once members stop
 receiving the union set. Recorded in
-[Known gaps](known-gaps.md#multi-library-l2-compare-scales-quadratically-with-library-count).
+[Known gaps](known-gaps/multi-library-l2-compare-scales-quadratically-with-library-count.md).
 
 ### Real-integration profiles (oneDAL, SVS, PVXS)
 
