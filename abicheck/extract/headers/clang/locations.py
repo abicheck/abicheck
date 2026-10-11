@@ -60,34 +60,39 @@ def materialize_locations(root: _T) -> _T:
     current_file: Any = None
     current_line: Any = None
     stack: list[Iterator[Any]] = [iter((root,))]
+    push = stack.append
+    # Siblings are consumed by a plain ``for`` over the top iterator, which
+    # stays on the stack: descending into a container pushes its iterator and
+    # breaks out, and the sibling loop resumes where it stopped once that
+    # subtree is exhausted. Only an exhausted iterator is popped, so scalars
+    # and location leaves -- most of a multi-GiB tree -- never touch the stack.
     while stack:
-        item = next(stack[-1], _DONE)
-        if item is _DONE:
+        for item in stack[-1]:
+            if isinstance(item, dict):
+                if "offset" in item and "col" in item:
+                    # A bare location is a leaf apart from `includedFrom`,
+                    # which never moves the state -- nothing to descend into.
+                    if "file" in item:
+                        current_file = item["file"]
+                    elif current_file is not None:
+                        item["file"] = current_file
+                    if "line" in item:
+                        current_line = item["line"]
+                    elif current_line is not None:
+                        item["line"] = current_line
+                    # `includedFrom` is a one-key dict clang attaches to
+                    # roughly every location in an included header (1.29M of
+                    # them on a oneDAL AST) and no reader of an L2 tree
+                    # consults it; it never moves the writer state either, so
+                    # dropping it here, once materialized, is invisible to
+                    # every consumer.
+                    item.pop("includedFrom", None)
+                    continue
+                push(iter(item.values()))
+                break
+            if isinstance(item, list):
+                push(iter(item))
+                break
+        else:
             stack.pop()
-            continue
-        if isinstance(item, dict):
-            if "offset" in item and "col" in item:
-                # A bare location is a leaf apart from `includedFrom`, which
-                # never moves the state -- so there is nothing to descend into.
-                if "file" in item:
-                    current_file = item["file"]
-                elif current_file is not None:
-                    item["file"] = current_file
-                if "line" in item:
-                    current_line = item["line"]
-                elif current_line is not None:
-                    item["line"] = current_line
-                # `includedFrom` is a one-key dict clang attaches to roughly
-                # every location in an included header (1.29M of them on a
-                # oneDAL AST) and no reader of an L2 tree consults it; it
-                # never moves the writer state either, so dropping it here,
-                # once materialized, is invisible to every consumer.
-                item.pop("includedFrom", None)
-                continue
-            stack.append(iter(item.values()))
-        elif isinstance(item, list):
-            stack.append(iter(item))
     return root
-
-
-_DONE = object()

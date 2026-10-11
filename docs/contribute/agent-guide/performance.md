@@ -41,6 +41,9 @@ Manual-only investigation tools (never gates):
   but does not follow forks, exits 0 whatever abicheck returned, and on a
   free-threaded build reports enough sample errors that its proportions are
   approximate.
+  Summed RSS of forked children double-counts shared pages (compare PSS);
+  `tracemalloc` is for memory only (it ~3x the wall time). On a warm snapshot
+  cache the `dump.*` marks vanish -- read `dump.cache.lookup`/`dump.cache.store`.
 
 Use-case reach (weekly `usecase-paths.yml`, never on a PR):
 `python scripts/usecase_paths.py ratchet REC --strict` fails when a function

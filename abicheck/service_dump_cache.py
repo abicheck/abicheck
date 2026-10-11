@@ -795,6 +795,6 @@ def cached_run_dump(
     final_key = snapshot_cache._cache_key(
         path, _cache_headers, _cache_includes, version, lang, extra=final_extra
     )
-    if initial_key and initial_key == final_key:
+    if initial_key and initial_key == final_key and snapshot_cache.write_enabled():
         snapshot_cache.store_key(snap, initial_key, path)
     return snap

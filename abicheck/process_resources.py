@@ -271,7 +271,11 @@ MEMBER_JOBS_ENV_VAR = "ABICHECK_MEMBER_JOBS"
 #: runs, so a second member overlaps the child-process phases for the cost of
 #: one extra working set. Beyond two, measured wall time was flat and resident
 #: memory grew linearly (28 concurrent members vs. batches: ~10x peak RSS for
-#: no speedup).
+#: no speedup). Open question (``docs/contribute/known-gaps.md``): with a warm
+#: snapshot cache there are no clang children to overlap, and a 28-member
+#: release measured j=1 29:45 / 3.99 GiB against j=2 30:48 / 9.44 GiB with
+#: identical findings; the cold j=1-vs-2 A/B that would justify lowering this
+#: has not been run.
 GIL_MEMBER_PARALLELISM = 2
 
 #: Level-1 default on a free-threaded interpreter, as a ceiling on the CPU
@@ -280,7 +284,8 @@ GIL_MEMBER_PARALLELISM = 2
 #: 28-member release on a 224-core host (python3.14t), wall time was flat
 #: from 4 to 96 members (17:12 / 17:58 / 18:14) while CPU seconds grew 6.5x
 #: (5 191 -> 33 869) and peak RSS 4-7x -- past ~4 the extra members only
-#: contend. Still 2.9x faster than the GIL default on that release.
+#: contend. Still 2.9x faster than the GIL default on that release. On
+#: python3.15t, j=8 bought 4% wall for 2.1x peak RSS and 1.55x CPU seconds.
 FREE_THREADED_MEMBER_PARALLELISM = 4
 
 
@@ -309,7 +314,10 @@ def python_parallelism() -> int:
     :data:`FREE_THREADED_MEMBER_PARALLELISM`. Memory is *not* considered here -- the caller's
     memory admission is what bounds a level-1 pool by RAM; this bounds it by
     what can actually execute. An unparsable override falls back to that
-    default silently, as every other sizing variable here does.
+    default silently, as every other sizing variable here does. Setting
+    ``ABICHECK_MEMBER_JOBS`` does **not** turn that admission gate off (only
+    an explicit ``-j`` or ``ABICHECK_RELEASE_JOB_MEM_GIB`` does): it caps how
+    many members run, and memory may still admit fewer.
     """
     raw = os.environ.get(MEMBER_JOBS_ENV_VAR, "").strip()
     if raw:

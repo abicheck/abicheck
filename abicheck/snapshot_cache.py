@@ -507,6 +507,17 @@ def _snapshot_schema_version() -> int:
     return SCHEMA_VERSION
 
 
+def write_enabled() -> bool:
+    """``ABICHECK_SNAPSHOT_CACHE_WRITE`` (default on): ``0`` keeps reading the
+    whole-snapshot cache but never populates it -- for a one-shot run (CI on
+    a fresh runner) that would pay to serialize and write snapshots no later
+    run reads. Measured on a 28-member release: populating cost ~30% wall and
+    ~37% peak RSS."""
+    from .extract.env_flags import env_flag
+
+    return env_flag("ABICHECK_SNAPSHOT_CACHE_WRITE")
+
+
 def lookup(
     binary_path: Path,
     headers: list[Path],
@@ -531,8 +542,13 @@ def lookup_key(key: str, binary_path: Path) -> AbiSnapshot | None:
     any other read problem here -- never a caller-visible failure."""
     if not key:
         return None
+    from .workflows import memory_trace
+
     started = time.monotonic()
-    snap = SNAPSHOT_DISK_CACHE.lookup(lambda: _read_entry(key, binary_path))
+    # Traced: on a hit this load replaces the whole dump, so without it
+    # `ABICHECK_MEMORY_TRACE` would see none of a warm run's `dump.*` marks.
+    with memory_trace.phase("dump.cache.lookup"):
+        snap = SNAPSHOT_DISK_CACHE.lookup(lambda: _read_entry(key, binary_path))
     if snap is not None:
         # A hit replaces every extraction phase, each of which reports its own
         # progress line. Say so, or a warm run's redirected log is silent --
@@ -592,7 +608,10 @@ def store_key(snap: AbiSnapshot, key: str, binary_path: Path) -> None:
     keep preferring an old snapshot over a freshly stored one."""
     if not key:
         return
-    SNAPSHOT_DISK_CACHE.store(lambda: _write_entry(snap, key, binary_path))
+    from .workflows import memory_trace
+
+    with memory_trace.phase("dump.cache.store"):
+        SNAPSHOT_DISK_CACHE.store(lambda: _write_entry(snap, key, binary_path))
 
 
 def _write_entry(snap: AbiSnapshot, key: str, binary_path: Path) -> None:
