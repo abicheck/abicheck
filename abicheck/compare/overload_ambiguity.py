@@ -38,7 +38,6 @@ type, or a reference to it, at every other position -- or that could win
 
 from __future__ import annotations
 
-import re
 from collections.abc import Iterable, Mapping
 from typing import TYPE_CHECKING
 
@@ -73,7 +72,6 @@ _ARITHMETIC = frozenset(
 )  # fmt: skip
 _CV = frozenset({"const", "volatile"})
 _CTOR_LEAF = "{ctor}"
-_TRAILING_REFERENCE_RE = re.compile(r"(?:\s*&)+\s*$")
 _MAX_TYPEDEF_HOPS = 8
 
 
@@ -217,7 +215,7 @@ def _strip_reference(spelling: str) -> str:
     """*spelling* (already resolved) without a top-level ``&``/``&&``
     (canonical spellings write ``&&`` as ``& &``). A top-level reference
     always ends the spelling; a nested one is followed by ``>`` or ``)``."""
-    bare = _TRAILING_REFERENCE_RE.sub("", spelling)
+    bare = spelling.rstrip(" &")
     return spelling if bare == spelling else _strip_cv(bare.strip())
 
 
