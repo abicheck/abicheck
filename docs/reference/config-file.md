@@ -707,7 +707,8 @@ performance:
 
 - **`balanced`** — fastest. Two live binaries are resolved concurrently in
   two child processes on Linux (when the caller runs no other threads, and
-  `ABICHECK_SIDE_PROCESSES` is not `0`). Any other pair is resolved one side
+  `ABICHECK_SIDE_PROCESSES` is not `0`); on a free-threaded (`python3.xt`)
+  interpreter, in two threads instead, which overlap there without forking. Any other pair is resolved one side
   after the other by the `compare` CLI, and in two threads of one process by
   the typed API. A directory/package comparison sizes its worker
   pool to the host. Measured on a cold compare of two 60-module C++

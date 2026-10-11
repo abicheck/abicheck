@@ -295,7 +295,8 @@ def resolve_compare_request(
     veto it (a ``dump_manifest`` on either side, or
     ``ABICHECK_PARALLEL_EXTRACTION=0``) -- and covers *threads* only: two
     live binaries resolve in two concurrent child processes either way
-    (``workflows.side_isolation.concurrent_children_apply``). The native
+    (``workflows.side_isolation.concurrent_children_apply``), or in two
+    threads on a free-threaded interpreter (``concurrent_threads_apply``). The native
     ``compare`` CLI passes ``False`` so any other pair keeps its sequential,
     non-interleaved order.
 
@@ -420,7 +421,11 @@ def resolve_compare_request(
         parse_performance_profile,
         tuning_for,
     )
-    from .workflows.side_isolation import concurrent_children_apply, run_isolated
+    from .workflows.side_isolation import (
+        concurrent_children_apply,
+        concurrent_threads_apply,
+        run_isolated,
+    )
 
     tuning = tuning_for(
         parse_performance_profile(request.performance_profile)
@@ -428,7 +433,8 @@ def resolve_compare_request(
         else current_performance_profile()
     )
     # `allow_parallel` permits two *threads*; two live binaries may still go
-    # to two concurrent child processes without it (`concurrent_children_apply`).
+    # to two concurrent child processes without it (`concurrent_children_apply`),
+    # or, on a free-threaded interpreter, to two threads (`concurrent_threads_apply`).
     concurrent = not tuning.sequential_sides and not resolve_sides_sequentially(request)
     with ast_acquisition_scope():
         if tuning.isolate_sides or (
@@ -442,7 +448,10 @@ def resolve_compare_request(
                 ],
                 concurrent=not tuning.isolate_sides,
             )
-        elif not (concurrent and allow_parallel):
+        elif not (
+            concurrent
+            and (allow_parallel or concurrent_threads_apply(tuning, old_fmt, new_fmt))
+        ):
             old_res = _resolve_old_side()
             new_res = _resolve_new_side()
         else:

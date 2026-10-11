@@ -489,8 +489,9 @@ def _resolve_compare_snapshots(
     ``allow_parallel=False``: no two *threads*. Two live binaries still
     resolve in two concurrent child processes (the ``balanced`` profile;
     measured, a cold compare of two 60-module C++ libraries went from 64 s
-    to 41 s at ~1.5x peak tree memory), so their progress notes may
-    interleave on stderr; ``ABICHECK_PARALLEL_EXTRACTION=0``,
+    to 41 s at ~1.5x peak tree memory) -- or, on a free-threaded
+    interpreter, in two threads, which overlap there without forking -- so
+    their progress notes may interleave on stderr; ``ABICHECK_PARALLEL_EXTRACTION=0``,
     ``ABICHECK_SIDE_PROCESSES=0`` and the ``low-memory`` profile keep one
     side at a time.
 
