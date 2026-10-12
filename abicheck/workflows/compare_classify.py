@@ -238,7 +238,9 @@ def classify_resolved_pair(
         result.layer_coverage = folded.layer_coverage_rows
     # All injected findings (probe matrix + evidence), so "artifact-backed"
     # excludes them -- none come from L0-L2 diffing.
-    attach_evidence_metrics(result, folded.evidence_metrics, extra_changes or [])
+    attach_evidence_metrics(
+        result, folded.evidence_metrics, extra_changes or [], on_output=on_output
+    )
     abi3_audit.record_abi3_evidence_contract_error(result, folded.abi3_failure)
     # ADR-068 §3 #28 -- `compare`'s only depth-floor mechanism since PR #1195.
     record_depth_evidence_contract_error(

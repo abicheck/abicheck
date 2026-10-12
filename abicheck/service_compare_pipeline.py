@@ -59,7 +59,6 @@ from .environment_matrix import EnvironmentMatrix
 from .errors import ValidationError
 from .extract.env_flags import env_flag
 from .policy.depth_projection import (
-    project_build_source_pack_to_depth,
     project_pair_to_depth,
     project_snapshot_to_depth,
 )
@@ -84,7 +83,6 @@ if TYPE_CHECKING:
 __all__ = [
     "ResolvedComparePair",
     "classify_compare_pair",
-    "project_build_source_pack_to_depth",
     "project_pair_to_depth",
     "project_snapshot_to_depth",
     "resolve_compare_request",

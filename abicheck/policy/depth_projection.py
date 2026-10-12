@@ -148,7 +148,6 @@ if TYPE_CHECKING:
     from ..model import AbiSnapshot
 
 __all__ = [
-    "project_build_source_pack_to_depth",
     "project_pair_to_depth",
     "project_snapshot_to_depth",
 ]
@@ -512,11 +511,9 @@ def _project_build_source_pack(
 ) -> BuildSourcePack | None:
     """Degrade one already-resolved ``BuildSourcePack`` to *rank*, in place.
 
-    Shared by :func:`project_snapshot_to_depth` (for a snapshot's embedded
-    ``build_source``) and :func:`project_build_source_pack_to_depth` (for a
-    pack resolved out-of-band from an explicit ``--build-info``/``--sources``
-    path) so the L3-L5 capping rule is stated once rather than duplicated
-    between the two callers. Below ``build``, the whole pack carries no
+    Called by :func:`project_snapshot_to_depth` for a snapshot's
+    ``build_source`` -- an out-of-band ``--build-info``/``--sources`` pack
+    included, since the CLI attaches it onto the snapshot first. Below ``build``, the whole pack carries no
     evidence an explicit ``--depth`` asked for and is dropped entirely — its
     ``manifest.coverage`` goes with it, so no separate row-demotion is
     needed there. Between ``build`` and ``source``, the L3 ``build_evidence``
@@ -655,36 +652,6 @@ def project_snapshot_to_depth(
         # since below `build` the pack itself is dropped.
         out.surface_graph = None
     return out
-
-
-def project_build_source_pack_to_depth(
-    pack: BuildSourcePack | None, depth: str | None
-) -> BuildSourcePack | None:
-    """Return a copy of *pack* capped to what an explicit ``--depth`` requested.
-
-    The out-of-band counterpart to :func:`project_snapshot_to_depth`'s own
-    ``build_source`` handling, for a caller that resolves an explicit
-    ``--build-info``/``--sources`` pack *itself* rather than reading one
-    already embedded on a snapshot object. ``project_snapshot_to_depth`` only
-    ever sees what already lives on the snapshot it was handed, so a raw pack
-    path threaded straight through to ``prepare_embedded_build_source``
-    bypasses it entirely (Codex review, PR #1020, third round) — a caller
-    doing that must cap the pack itself with this function before attaching
-    or diffing it. A no-op (returns *pack* itself) when *pack* or *depth* is
-    ``None``, or *depth* is not a recognized public rung — matching
-    :func:`project_snapshot_to_depth`'s identical no-op contract.
-    """
-    if pack is None or depth is None:
-        return pack
-    depth = depth.lower()
-    if depth not in DEPTH_RANK:
-        return pack
-    rank = DEPTH_RANK[depth]
-    build_rank = DEPTH_RANK["build"]
-    source_rank = DEPTH_RANK["source"]
-    return _project_build_source_pack(
-        copy.deepcopy(pack), rank, build_rank, source_rank
-    )
 
 
 def project_pair_to_depth(
