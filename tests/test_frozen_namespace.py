@@ -20,11 +20,9 @@ from abicheck.model import AbiSnapshot, Function, Param, Visibility
 from abicheck.model.change import Change
 from abicheck.policy.effective_gate import EffectiveGate
 from abicheck.policy.evaluate import effective_kind_sets, evaluate
+from abicheck.policy.finding_disposition import DispositionRules, dispose_findings
 from abicheck.policy_file import PolicyFile
-from abicheck.post_processing import (
-    DEFAULT_PIPELINE,
-    EscalateFrozenNamespaceViolations,
-)
+from abicheck.post_processing import EscalateFrozenNamespaceViolations
 from abicheck.suppression import Suppression, SuppressionList
 
 # ── Test fixtures ──────────────────────────────────────────────────────────
@@ -104,7 +102,7 @@ class TestEscalateFrozenNamespaceViolations:
         )
         old = _snap("1.0", [])
         new = _snap("2.0", [])
-        pp = DEFAULT_PIPELINE.run([c], old, new, frozen_namespaces=[])
+        pp = dispose_findings([c], old, new, DispositionRules(frozen_namespaces=()))
         assert pp.kept[0].frozen_namespace_violation is None
         assert not pp.kept[0].description.startswith("[frozen-namespace")
 
@@ -116,11 +114,8 @@ class TestEscalateFrozenNamespaceViolations:
         )
         old = _snap("1.0", [])
         new = _snap("2.0", [])
-        pp = DEFAULT_PIPELINE.run(
-            [c],
-            old,
-            new,
-            frozen_namespaces=["**::detail::r1::*"],
+        pp = dispose_findings(
+            [c], old, new, DispositionRules(frozen_namespaces=("**::detail::r1::*",))
         )
         kept = pp.kept[0]
         assert kept.frozen_namespace_violation == "**::detail::r1::*"
@@ -129,7 +124,7 @@ class TestEscalateFrozenNamespaceViolations:
     def test_tags_via_caused_by_type(self) -> None:
         """Synthetic overlay findings carry the root cause in
         caused_by_type rather than symbol; the step must match both."""
-        from abicheck.post_processing import PipelineContext
+        from abicheck.policy.finding_disposition import PipelineContext
 
         c = Change(
             kind=ChangeKind.INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API,
@@ -153,11 +148,8 @@ class TestEscalateFrozenNamespaceViolations:
         )
         old = _snap("1.0", [])
         new = _snap("2.0", [])
-        pp = DEFAULT_PIPELINE.run(
-            [c],
-            old,
-            new,
-            frozen_namespaces=["**::detail::r1::*"],
+        pp = dispose_findings(
+            [c], old, new, DispositionRules(frozen_namespaces=("**::detail::r1::*",))
         )
         assert pp.kept[0].frozen_namespace_violation == "**::detail::r1::*"
 
@@ -169,11 +161,8 @@ class TestEscalateFrozenNamespaceViolations:
         )
         old = _snap("1.0", [])
         new = _snap("2.0", [])
-        pp = DEFAULT_PIPELINE.run(
-            [c],
-            old,
-            new,
-            frozen_namespaces=["**::detail::r1::*"],
+        pp = dispose_findings(
+            [c], old, new, DispositionRules(frozen_namespaces=("**::detail::r1::*",))
         )
         assert pp.kept[0].frozen_namespace_violation is None
 
@@ -573,11 +562,8 @@ class TestEscalationRegressions:
         )
         old = _snap("1.0", [])
         new = _snap("2.0", [])
-        pp = DEFAULT_PIPELINE.run(
-            [c],
-            old,
-            new,
-            frozen_namespaces=["**::detail::r1"],
+        pp = dispose_findings(
+            [c], old, new, DispositionRules(frozen_namespaces=("**::detail::r1",))
         )
         assert pp.kept[0].frozen_namespace_violation == "**::detail::r1"
 
@@ -610,11 +596,8 @@ class TestEscalationRegressions:
             symbol="dispatch",  # unqualified, as it appears in ELF .dynsym
             description="param changed",
         )
-        pp = DEFAULT_PIPELINE.run(
-            [c],
-            old,
-            new,
-            frozen_namespaces=["**::detail::r1::*"],
+        pp = dispose_findings(
+            [c], old, new, DispositionRules(frozen_namespaces=("**::detail::r1::*",))
         )
         assert pp.kept[0].frozen_namespace_violation == "**::detail::r1::*"
 
@@ -626,10 +609,8 @@ class TestEscalationRegressions:
         # Synthesize a change directly into ctx.redundant by running the
         # pipeline through compare() with a rename pair.  Simpler: call
         # the step directly with a redundant entry preloaded.
-        from abicheck.post_processing import (
-            EscalateFrozenNamespaceViolations,
-            PipelineContext,
-        )
+        from abicheck.policy.finding_disposition import PipelineContext
+        from abicheck.post_processing import EscalateFrozenNamespaceViolations
 
         old = _snap("1.0", [])
         new = _snap("2.0", [])

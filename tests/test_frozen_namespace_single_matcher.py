@@ -22,11 +22,11 @@ import pytest
 from abicheck.checker_policy import ChangeKind
 from abicheck.model import AbiSnapshot
 from abicheck.model.change import Change
+from abicheck.policy.finding_disposition import PipelineContext
 from abicheck.post_processing import (
     DemoteUnreachableInternalChurn,
     EscalateFrozenNamespaceViolations,
 )
-from abicheck.post_processing_context import PipelineContext
 
 _PATTERNS = (["**::frozen::*"], ["lib::detail::r1"], ["**::detail::r1::*", "x::*"])
 _SYMBOLS = ("lib::detail::Impl", "lib::detail::r1::Impl", "lib::frozen::detail::Impl")

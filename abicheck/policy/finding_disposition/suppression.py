@@ -53,6 +53,7 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
     from ...model.change import Change
     from ...suppression import Suppression, SuppressionList
     from ..disposition_ledger import DispositionLedger
+    from .context import PipelineContext
 
 
 @dataclass(frozen=True)
@@ -114,6 +115,32 @@ def dispose_by_suppression(
     return SuppressionDisposition(
         kept=kept, suppressed=suppressed, diagnostics=diagnostics
     )
+
+
+class ApplySuppression:
+    """Apply user-provided suppression rules.
+
+    ADR-044 D2: a rule matches only when ``Suppression.matches()`` also passes
+    its reachability/``allow_public_break`` gate — see that method for the
+    semantics. A match refused by that gate is recorded as a
+    ``SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK`` diagnostic (ADR-044 D4) instead of
+    being silently dropped, so the change stays visible *and* the suppression
+    author sees why their rule did not apply.
+    """
+
+    name = "apply_suppression"
+
+    def run(self, changes: list[Change], ctx: PipelineContext) -> list[Change]:
+        if ctx.suppression is None:
+            return changes
+        outcome = dispose_by_suppression(
+            changes,
+            ctx.suppression,
+            ledger=ctx.disposition_ledger,
+            application_point=self.name,
+        )
+        ctx.suppressed.extend(outcome.suppressed)
+        return outcome.visible
 
 
 def overreach_diagnostic(change: Change, rule: Suppression) -> Change:

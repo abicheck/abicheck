@@ -59,6 +59,7 @@ from abicheck.policy.disposition_ledger import (
     DispositionLedger,
     record_suppressed_change,
 )
+from abicheck.policy.finding_disposition import dispose_findings
 from abicheck.report.disposition_audit import compute_disposition_audit
 from abicheck.semver import SemverBump
 from abicheck.suppression import Suppression, SuppressionList
@@ -607,7 +608,6 @@ def test_early_deduplication_is_counted_not_dropped() -> None:
     length, which is an oracle independent of the ledger.
     """
     from abicheck.model.change import Change
-    from abicheck.post_processing import DEFAULT_PIPELINE
 
     duplicates = [
         Change(kind=ChangeKind.FUNC_REMOVED, symbol="dup", description="a"),
@@ -615,7 +615,7 @@ def test_early_deduplication_is_counted_not_dropped() -> None:
     ]
     old, new = _snapshots()
     ledger = DispositionLedger()
-    ctx = DEFAULT_PIPELINE.run(list(duplicates), old, new, disposition_ledger=ledger)
+    ctx = dispose_findings(list(duplicates), old, new, ledger=ledger)
     dropped = len(duplicates) - len(ctx.kept)
     if dropped == 0:  # pragma: no cover - defends the fixture, not the code
         pytest.skip("this pair was not collapsed by any early dedup step")
@@ -629,7 +629,6 @@ def test_a_pipeline_step_can_never_drop_a_finding_unrecorded() -> None:
     of the context's own buckets is recorded, so the ledger plus the buckets
     always account for every input change."""
     from abicheck.model.change import Change
-    from abicheck.post_processing import DEFAULT_PIPELINE
 
     inputs = [
         Change(kind=ChangeKind.FUNC_REMOVED, symbol=f"sym{i}", description="x")
@@ -639,7 +638,7 @@ def test_a_pipeline_step_can_never_drop_a_finding_unrecorded() -> None:
     ]
     old, new = _snapshots()
     ledger = DispositionLedger()
-    ctx = DEFAULT_PIPELINE.run(list(inputs), old, new, disposition_ledger=ledger)
+    ctx = dispose_findings(list(inputs), old, new, ledger=ledger)
     accounted = {id(c) for c in ctx.kept}
     for bucket in (
         ctx.suppressed,
@@ -684,7 +683,8 @@ def test_a_grouped_child_is_deduplicated_not_suppressed() -> None:
     ISA-tier grouping look like a waived major break.
     """
     from abicheck.model.change import Change
-    from abicheck.post_processing import DetectCppPatterns, PipelineContext
+    from abicheck.policy.finding_disposition import PipelineContext
+    from abicheck.post_processing import DetectCppPatterns
 
     old, new = _snapshots()
     children = [
@@ -713,7 +713,8 @@ def test_grouping_children_does_not_recommend_a_major_release() -> None:
     MAJOR/REVIEW."""
     from abicheck.checker_types import DiffResult
     from abicheck.model.change import Change
-    from abicheck.post_processing import DetectCppPatterns, PipelineContext
+    from abicheck.policy.finding_disposition import PipelineContext
+    from abicheck.post_processing import DetectCppPatterns
     from abicheck.semver import recommend_release
 
     old, new = _snapshots()
@@ -737,7 +738,7 @@ def test_grouping_children_does_not_recommend_a_major_release() -> None:
 
 
 def test_a_late_duplicate_finding_is_conserved_with_and_without_a_rule() -> None:
-    """`_merge_findings_respecting_suppression` drops a late finding whose
+    """`merge_late_findings` drops a late finding whose
     `(kind, symbol)` is already present. That drop is invisible to
     `Pipeline.run`'s own sweep (these objects are created *by* the step, so
     they are not in the snapshot it diffs against), so it is recorded here --
@@ -745,10 +746,8 @@ def test_a_late_duplicate_finding_is_conserved_with_and_without_a_rule() -> None
     instead of moving the finding between dispositions.
     """
     from abicheck.model.change import Change
-    from abicheck.post_processing import (
-        PipelineContext,
-        _merge_findings_respecting_suppression,
-    )
+    from abicheck.policy.finding_disposition import PipelineContext
+    from abicheck.policy.finding_disposition.pipeline import merge_late_findings
 
     old, new = _snapshots()
     totals = {}
@@ -771,7 +770,7 @@ def test_a_late_duplicate_finding_is_conserved_with_and_without_a_rule() -> None
         late = [
             Change(kind=ChangeKind.FUNC_REMOVED, symbol="dup", description="second")
         ]
-        _merge_findings_respecting_suppression(existing, late, ctx)
+        merge_late_findings(existing, late, ctx)
         totals[label] = ledger.detected_total
     assert totals["no rule"] == totals["matching rule"] == 1
 
@@ -786,7 +785,8 @@ def test_a_versioned_symbol_collapse_is_deduplicated_not_suppressed() -> None:
     """
     from abicheck.checker_types import DiffResult
     from abicheck.model.change import Change
-    from abicheck.post_processing import PipelineContext, _record_collapsed_findings
+    from abicheck.policy.finding_disposition import PipelineContext
+    from abicheck.policy.finding_disposition.pipeline import record_collapsed_findings
     from abicheck.semver import recommend_release
 
     old, new = _snapshots()
@@ -796,7 +796,7 @@ def test_a_versioned_symbol_collapse_is_deduplicated_not_suppressed() -> None:
     ]
     ledger = DispositionLedger()
     ctx = PipelineContext(old=old, new=new, disposition_ledger=ledger)
-    _record_collapsed_findings(
+    record_collapsed_findings(
         matched, ctx, application_point="versioned_symbol_collapse"
     )
     for change in matched:
@@ -827,7 +827,6 @@ def test_every_rule_less_suppressed_bucket_write_is_recorded() -> None:
     attributed — which is exactly what made `recommend_release` misread them.
     """
     from abicheck.model.change import Change
-    from abicheck.post_processing import DEFAULT_PIPELINE
 
     old, new = _snapshots()
     inputs = [
@@ -836,7 +835,7 @@ def test_every_rule_less_suppressed_bucket_write_is_recorded() -> None:
         Change(kind=ChangeKind.FUNC_ADDED, symbol="added", description="c"),
     ]
     ledger = DispositionLedger()
-    ctx = DEFAULT_PIPELINE.run(list(inputs), old, new, disposition_ledger=ledger)
+    ctx = dispose_findings(list(inputs), old, new, ledger=ledger)
     for change in ctx.suppressed:
         record = ledger.record_for(change)
         assert record is not None, (
@@ -856,11 +855,9 @@ def test_a_substituting_step_records_one_observation_not_two() -> None:
     trustworthy.
     """
     from abicheck.model.change import Change
-    from abicheck.post_processing import (
-        DowngradeOpaqueStructChanges,
-        PipelineContext,
-        _record_dropped_duplicates,
-    )
+    from abicheck.policy.finding_disposition import PipelineContext
+    from abicheck.policy.finding_disposition.pipeline import _record_dropped_duplicates
+    from abicheck.post_processing import DowngradeOpaqueStructChanges
 
     old, new = _snapshots()
     original = Change(
@@ -904,7 +901,8 @@ def test_a_steps_declared_drop_meaning_is_what_gets_recorded(
     declaration is honoured rather than one step's happening to work.
     """
     from abicheck.model.change import Change
-    from abicheck.post_processing import PipelineContext, _record_dropped_duplicates
+    from abicheck.policy.finding_disposition import PipelineContext
+    from abicheck.policy.finding_disposition.pipeline import _record_dropped_duplicates
 
     old, new = _snapshots()
     dropped = Change(kind=ChangeKind.FUNC_REMOVED, symbol="gone", description="x")

@@ -58,6 +58,7 @@ from abicheck.model.elf_facts import ElfSymbol, SymbolType
 from abicheck.model.macho_facts import MachoExport
 from abicheck.model.vocabulary import ScopeOrigin
 from abicheck.pe_metadata import PeMetadata
+from abicheck.policy.finding_disposition import DispositionRules, dispose_findings
 from abicheck.policy.public_surface_closure import resolve_public_surface
 from abicheck.surface import classify_change_surface
 
@@ -385,7 +386,6 @@ class TestThroughTheRealPipeline:
 
     @staticmethod
     def _pipeline(force_public=None, scope=True):
-        from abicheck.post_processing import DEFAULT_PIPELINE
 
         old = _elf_snapshot(declared=[_public_fn()], exports=["api", "internal_table"])
         new = _elf_snapshot(declared=[_public_fn()], exports=["api", "internal_table"])
@@ -401,12 +401,14 @@ class TestThroughTheRealPipeline:
                 description="undocumented export",
             ),
         ]
-        return DEFAULT_PIPELINE.run(
+        return dispose_findings(
             changes,
             old,
             new,
-            scope_to_public_surface=scope,
-            force_public_symbols=force_public,
+            DispositionRules(
+                scope_to_public_surface=scope,
+                force_public_symbols=frozenset(force_public or ()),
+            ),
         )
 
     def test_the_ledger_records_the_reason(self) -> None:

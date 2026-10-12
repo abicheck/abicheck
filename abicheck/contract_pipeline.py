@@ -86,8 +86,8 @@ if TYPE_CHECKING:
     from .model import AbiSnapshot
     from .model.change import Change
     from .model.contract_conflicts import ContractSourceConflict
+    from .policy.finding_disposition import PipelineContext
     from .policy_file import PolicyFile
-    from .post_processing import PipelineContext
     from .suppression import SuppressionList
     from .surface import PublicSurface
 

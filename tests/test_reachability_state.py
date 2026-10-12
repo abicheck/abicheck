@@ -37,8 +37,15 @@ import pytest
 from abicheck.checker_policy import ChangeKind, ReachabilityState
 from abicheck.model import AbiSnapshot, Function, RecordType, Visibility
 from abicheck.model.change import Change
-from abicheck.post_processing import DEFAULT_PIPELINE
+from abicheck.policy.finding_disposition import DispositionRules, dispose_findings
 from abicheck.suppression import Suppression, SuppressionList
+
+
+def _dispose(changes, old, new, suppression=None):
+    """The default disposition order under *suppression* alone."""
+    return dispose_findings(
+        changes, old, new, DispositionRules(suppression=suppression)
+    )
 
 
 def _snap(*, functions=None, types=None, enums=None, build_source=None) -> AbiSnapshot:
@@ -138,9 +145,7 @@ class TestMarkReachabilityTriState:
             symbol="ns::detail::Base",
             description="size changed",
         )
-        ctx = DEFAULT_PIPELINE.run(
-            [raw_change], old, new, suppression=_needs_evidence_suppression()
-        )
+        ctx = _dispose([raw_change], old, new, _needs_evidence_suppression())
         found = [c for c in ctx.kept if c.kind == ChangeKind.TYPE_SIZE_CHANGED]
         assert len(found) == 1
         assert found[0].public_reachable is True
@@ -189,9 +194,7 @@ class TestMarkReachabilityTriState:
             symbol="ns::detail::Hidden",
             description="size changed",
         )
-        DEFAULT_PIPELINE.run(
-            [raw_change], old, new, suppression=_needs_evidence_suppression()
-        )
+        _dispose([raw_change], old, new, _needs_evidence_suppression())
         assert raw_change.public_reachable is False
         assert raw_change.reachability_state == ReachabilityState.PROVEN_UNREACHABLE
 
@@ -246,9 +249,7 @@ class TestMarkReachabilityTriState:
             symbol="ns::detail::Status::ERR",
             description="member removed",
         )
-        ctx = DEFAULT_PIPELINE.run(
-            [raw_change], old, new, suppression=_needs_evidence_suppression()
-        )
+        ctx = _dispose([raw_change], old, new, _needs_evidence_suppression())
         found = [c for c in ctx.kept if c.kind == ChangeKind.ENUM_MEMBER_REMOVED]
         assert len(found) == 1
         assert found[0].public_reachable is True
@@ -300,7 +301,7 @@ class TestMarkReachabilityTriState:
                 )
             ]
         )
-        ctx = DEFAULT_PIPELINE.run([raw_change], old, new, suppression=suppression)
+        ctx = _dispose([raw_change], old, new, suppression)
         found = [c for c in ctx.kept if c.kind == ChangeKind.ENUM_MEMBER_REMOVED]
         assert len(found) == 1
         assert found[0].reachability_state == ReachabilityState.UNKNOWN
@@ -340,7 +341,7 @@ class TestMarkReachabilityTriState:
                 )
             ]
         )
-        ctx = DEFAULT_PIPELINE.run([raw_change], old, new, suppression=suppression)
+        ctx = _dispose([raw_change], old, new, suppression)
         found = [c for c in ctx.kept if c.kind == ChangeKind.PUBLIC_TYPEDEF_REMOVED]
         assert len(found) == 1
         assert found[0].public_reachable is True
@@ -390,7 +391,7 @@ class TestMarkReachabilityTriState:
                 )
             ]
         )
-        ctx = DEFAULT_PIPELINE.run([raw_change], old, new, suppression=suppression)
+        ctx = _dispose([raw_change], old, new, suppression)
         found = [c for c in ctx.kept if c.kind == kind]
         assert len(found) == 1
         assert found[0].public_reachable is True
@@ -421,9 +422,7 @@ class TestMarkReachabilityTriState:
             symbol="ns::detail::Hidden",
             description="size changed",
         )
-        DEFAULT_PIPELINE.run(
-            [raw_change], old, new, suppression=_needs_evidence_suppression()
-        )
+        _dispose([raw_change], old, new, _needs_evidence_suppression())
         assert raw_change.public_reachable is False
         assert raw_change.reachability_state == ReachabilityState.PROVEN_UNREACHABLE
         # Contrast: a function-shaped change with nothing reachable anywhere
@@ -470,9 +469,7 @@ class TestMarkReachabilityTriState:
             symbol="Hidden",
             description="size changed",
         )
-        DEFAULT_PIPELINE.run(
-            [raw_change], old, new, suppression=_needs_evidence_suppression()
-        )
+        _dispose([raw_change], old, new, _needs_evidence_suppression())
         assert raw_change.reachability_state == ReachabilityState.PROVEN_UNREACHABLE
 
     def test_ambiguous_bare_name_qualified_lookup_contributes_no_signal(self) -> None:
@@ -524,9 +521,7 @@ class TestMarkReachabilityTriState:
             symbol="Hidden",
             description="size changed",
         )
-        DEFAULT_PIPELINE.run(
-            [raw_change], old, new, suppression=_needs_evidence_suppression()
-        )
+        _dispose([raw_change], old, new, _needs_evidence_suppression())
         assert raw_change.reachability_state == ReachabilityState.UNKNOWN
 
     def test_enum_owner_does_not_inherit_colliding_record_qualified_name(
@@ -581,9 +576,7 @@ class TestMarkReachabilityTriState:
             symbol="Status::ERR",
             description="member removed",
         )
-        DEFAULT_PIPELINE.run(
-            [raw_change], old, new, suppression=_needs_evidence_suppression()
-        )
+        _dispose([raw_change], old, new, _needs_evidence_suppression())
         assert raw_change.reachability_state == ReachabilityState.UNKNOWN
 
     def test_degraded_call_graph_leaves_unexamined_change_unknown(self) -> None:
@@ -615,9 +608,7 @@ class TestMarkReachabilityTriState:
             symbol="ns::detail::train_ops_dispatcher",
             description="removed",
         )
-        ctx = DEFAULT_PIPELINE.run(
-            [raw_change], old, new, suppression=_needs_evidence_suppression()
-        )
+        ctx = _dispose([raw_change], old, new, _needs_evidence_suppression())
         found = [c for c in ctx.kept if c.kind == ChangeKind.FUNC_REMOVED]
         assert len(found) == 1
         assert found[0].public_reachable is False
@@ -656,9 +647,7 @@ class TestMarkReachabilityImpactAssessmentCache:
             symbol="ns::detail::Base",
             description="size changed",
         )
-        ctx = DEFAULT_PIPELINE.run(
-            [raw_change], old, new, suppression=_needs_evidence_suppression()
-        )
+        ctx = _dispose([raw_change], old, new, _needs_evidence_suppression())
         found = next(c for c in ctx.kept if c.kind == ChangeKind.TYPE_SIZE_CHANGED)
         assert found.reachability_state == ReachabilityState.PROVEN_REACHABLE
         assert found.impact_assessment is not None
@@ -715,9 +704,7 @@ class TestMarkReachabilityImpactAssessmentCache:
             symbol="ns::detail::Hidden",
             description="size changed",
         )
-        DEFAULT_PIPELINE.run(
-            [raw_change], old, new, suppression=_needs_evidence_suppression()
-        )
+        _dispose([raw_change], old, new, _needs_evidence_suppression())
         assert raw_change.reachability_state == ReachabilityState.PROVEN_UNREACHABLE
         assert raw_change.impact_assessment is not None
         # The critical pipeline-ordering safety property: the cache reflects
@@ -747,7 +734,7 @@ class TestMarkReachabilityImpactAssessmentCache:
             symbol="PublicWidget",
             description="size changed",
         )
-        ctx = DEFAULT_PIPELINE.run([raw_change], old, new, suppression=None)
+        ctx = dispose_findings([raw_change], old, new)
         found = next(c for c in ctx.kept if c.kind == ChangeKind.TYPE_SIZE_CHANGED)
         assert found.impact_assessment is None
 
@@ -873,7 +860,7 @@ class TestSuppressionReachabilityUnknownDiagnostic:
                 )
             ]
         )
-        ctx = DEFAULT_PIPELINE.run([raw_change], old, new, suppression=suppression)
+        ctx = _dispose([raw_change], old, new, suppression)
         assert raw_change not in ctx.suppressed
         kinds = [c.kind for c in ctx.kept]
         assert ChangeKind.FUNC_REMOVED in kinds
@@ -902,7 +889,7 @@ class TestSuppressionReachabilityUnknownDiagnostic:
                 )
             ]
         )
-        ctx = DEFAULT_PIPELINE.run([raw_change], old, new, suppression=suppression)
+        ctx = _dispose([raw_change], old, new, suppression)
         diag = next(
             c for c in ctx.kept if c.kind == ChangeKind.SUPPRESSION_REACHABILITY_UNKNOWN
         )
@@ -921,7 +908,7 @@ class TestSuppressionReachabilityUnknownDiagnostic:
                 )
             ]
         )
-        ctx = DEFAULT_PIPELINE.run([raw_change], old, new, suppression=suppression)
+        ctx = _dispose([raw_change], old, new, suppression)
         assert raw_change in ctx.suppressed
         assert ChangeKind.SUPPRESSION_REACHABILITY_UNKNOWN not in [
             c.kind for c in ctx.kept
@@ -957,9 +944,7 @@ class TestFunctionShapedChangeWithNoCallGraphIsUnknown:
             symbol="ns::detail::helper",
             description="removed",
         )
-        ctx = DEFAULT_PIPELINE.run(
-            [raw_change], old, new, suppression=_needs_evidence_suppression()
-        )
+        ctx = _dispose([raw_change], old, new, _needs_evidence_suppression())
         found = [c for c in ctx.kept if c.kind == ChangeKind.FUNC_REMOVED]
         assert len(found) == 1
         assert found[0].public_reachable is False
@@ -1003,7 +988,7 @@ class TestFunctionShapedChangeWithNoCallGraphIsUnknown:
                 )
             ]
         )
-        ctx = DEFAULT_PIPELINE.run([raw_change], old, new, suppression=suppression)
+        ctx = _dispose([raw_change], old, new, suppression)
         assert raw_change in ctx.suppressed
         assert ChangeKind.SUPPRESSION_REACHABILITY_UNKNOWN not in [
             c.kind for c in ctx.kept
@@ -1042,7 +1027,7 @@ class TestFunctionShapedChangeWithNoCallGraphIsUnknown:
                 )
             ]
         )
-        ctx = DEFAULT_PIPELINE.run([raw_change], old, new, suppression=suppression)
+        ctx = _dispose([raw_change], old, new, suppression)
         found = [c for c in ctx.kept if c.kind == ChangeKind.TYPE_SIZE_CHANGED]
         assert len(found) == 1
         assert found[0].reachability_state == ReachabilityState.UNKNOWN
@@ -1052,9 +1037,7 @@ class TestFunctionShapedChangeWithNoCallGraphIsUnknown:
         """A call graph that IS present but flagged degraded/narrowed must
         not count as trustworthy negative evidence either."""
         old, new, raw_change = _degraded_call_graph_scenario()
-        ctx = DEFAULT_PIPELINE.run(
-            [raw_change], old, new, suppression=_needs_evidence_suppression()
-        )
+        ctx = _dispose([raw_change], old, new, _needs_evidence_suppression())
         found = [c for c in ctx.kept if c.kind == ChangeKind.FUNC_REMOVED]
         assert len(found) == 1
         assert found[0].reachability_state == ReachabilityState.UNKNOWN
@@ -1093,9 +1076,7 @@ class TestFunctionShapedChangeWithNoCallGraphIsUnknown:
             symbol="ns::detail::unrelated_and_never_called",
             description="removed",
         )
-        ctx = DEFAULT_PIPELINE.run(
-            [raw_change], old, new, suppression=_needs_evidence_suppression()
-        )
+        ctx = _dispose([raw_change], old, new, _needs_evidence_suppression())
         found = [c for c in ctx.kept if c.kind == ChangeKind.FUNC_REMOVED]
         assert len(found) == 1
         assert found[0].reachability_state == ReachabilityState.PROVEN_UNREACHABLE
@@ -1138,9 +1119,7 @@ class TestFunctionShapedChangeWithNoCallGraphIsUnknown:
             symbol="ns::detail::unrelated_and_never_called",
             description="removed",
         )
-        ctx = DEFAULT_PIPELINE.run(
-            [raw_change], old, new, suppression=_needs_evidence_suppression()
-        )
+        ctx = _dispose([raw_change], old, new, _needs_evidence_suppression())
         found = [c for c in ctx.kept if c.kind == ChangeKind.FUNC_REMOVED]
         assert len(found) == 1
         assert found[0].reachability_state == ReachabilityState.UNKNOWN
@@ -1191,9 +1170,7 @@ class TestFunctionShapedChangeWithNoCallGraphIsUnknown:
             symbol="ns::detail::unrelated_and_never_called",
             description="removed",
         )
-        ctx = DEFAULT_PIPELINE.run(
-            [raw_change], old, new, suppression=_needs_evidence_suppression()
-        )
+        ctx = _dispose([raw_change], old, new, _needs_evidence_suppression())
         found = [c for c in ctx.kept if c.kind == ChangeKind.FUNC_REMOVED]
         assert len(found) == 1
         assert found[0].reachability_state == ReachabilityState.UNKNOWN
@@ -1227,9 +1204,7 @@ class TestFunctionShapedChangeWithNoCallGraphIsUnknown:
             symbol="ns::detail::unrelated_and_never_called",
             description="removed",
         )
-        ctx = DEFAULT_PIPELINE.run(
-            [raw_change], old, new, suppression=_needs_evidence_suppression()
-        )
+        ctx = _dispose([raw_change], old, new, _needs_evidence_suppression())
         found = [c for c in ctx.kept if c.kind == ChangeKind.FUNC_REMOVED]
         assert len(found) == 1
         assert found[0].reachability_state == ReachabilityState.UNKNOWN
@@ -1268,9 +1243,7 @@ class TestFunctionShapedChangeWithNoCallGraphIsUnknown:
             symbol="ns::detail::unrelated_and_never_called",
             description="removed",
         )
-        ctx = DEFAULT_PIPELINE.run(
-            [raw_change], old, new, suppression=_needs_evidence_suppression()
-        )
+        ctx = _dispose([raw_change], old, new, _needs_evidence_suppression())
         found = [c for c in ctx.kept if c.kind == ChangeKind.FUNC_REMOVED]
         assert len(found) == 1
         assert found[0].reachability_state == ReachabilityState.UNKNOWN
@@ -1304,9 +1277,7 @@ class TestFunctionShapedChangeWithNoCallGraphIsUnknown:
             symbol="ns::detail::unrelated_and_never_called",
             description="removed",
         )
-        ctx = DEFAULT_PIPELINE.run(
-            [raw_change], old, new, suppression=_needs_evidence_suppression()
-        )
+        ctx = _dispose([raw_change], old, new, _needs_evidence_suppression())
         found = [c for c in ctx.kept if c.kind == ChangeKind.FUNC_REMOVED]
         assert len(found) == 1
         assert found[0].reachability_state == ReachabilityState.PROVEN_UNREACHABLE
@@ -1337,9 +1308,7 @@ class TestFunctionShapedChangeWithNoCallGraphIsUnknown:
             symbol="ns::detail::unrelated_and_never_called",
             description="added",
         )
-        ctx = DEFAULT_PIPELINE.run(
-            [raw_change], old, new, suppression=_needs_evidence_suppression()
-        )
+        ctx = _dispose([raw_change], old, new, _needs_evidence_suppression())
         found = [c for c in ctx.kept if c.kind == ChangeKind.FUNC_ADDED]
         assert len(found) == 1
         assert found[0].reachability_state == ReachabilityState.PROVEN_UNREACHABLE
@@ -1377,9 +1346,7 @@ class TestFunctionShapedChangeWithNoCallGraphIsUnknown:
             symbol="ns::detail::unrelated_and_never_called",
             description="return type changed",
         )
-        ctx = DEFAULT_PIPELINE.run(
-            [raw_change], old, new, suppression=_needs_evidence_suppression()
-        )
+        ctx = _dispose([raw_change], old, new, _needs_evidence_suppression())
         found = [c for c in ctx.kept if c.kind == ChangeKind.FUNC_RETURN_CHANGED]
         assert len(found) == 1
         assert found[0].reachability_state == ReachabilityState.UNKNOWN
@@ -1423,9 +1390,7 @@ class TestFunctionShapedChangeWithNoCallGraphIsUnknown:
             symbol="ns::detail::Thing::unrelated_and_never_called",
             description="became virtual",
         )
-        ctx = DEFAULT_PIPELINE.run(
-            [raw_change], old, new, suppression=_needs_evidence_suppression()
-        )
+        ctx = _dispose([raw_change], old, new, _needs_evidence_suppression())
         found = [c for c in ctx.kept if c.kind == ChangeKind.FUNC_VIRTUAL_ADDED]
         assert len(found) == 1
         assert found[0].reachability_state == ReachabilityState.UNKNOWN
@@ -1477,7 +1442,7 @@ class TestFunctionShapedChangeWithNoCallGraphIsUnknown:
                 )
             ]
         )
-        ctx = DEFAULT_PIPELINE.run([raw_change], old, new, suppression=suppression)
+        ctx = _dispose([raw_change], old, new, suppression)
         found = [c for c in ctx.kept if c.kind == ChangeKind.FUNC_REMOVED]
         assert len(found) == 1
         assert found[0].reachability_state == ReachabilityState.UNKNOWN
@@ -1519,7 +1484,7 @@ class TestFunctionShapedChangeWithNoCallGraphIsUnknown:
                 )
             ]
         )
-        ctx = DEFAULT_PIPELINE.run([raw_change], old, new, suppression=suppression)
+        ctx = _dispose([raw_change], old, new, suppression)
         assert raw_change in ctx.suppressed
         assert ChangeKind.SUPPRESSION_REACHABILITY_UNKNOWN not in [
             c.kind for c in ctx.kept

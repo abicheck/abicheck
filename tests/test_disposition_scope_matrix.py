@@ -66,6 +66,7 @@ from abicheck.policy.disposition_ledger import (
     DispositionLedger,
     record_suppressed_change,
 )
+from abicheck.policy.finding_disposition.default_pipeline import DEFAULT_PIPELINE
 from abicheck.policy.severity import SeverityConfig, SeverityLevel
 
 # ---------------------------------------------------------------------------
@@ -775,7 +776,7 @@ def test_a_promotion_outside_the_consumer_scope_is_still_excluded() -> None:
 
 def _pipeline_context(ledger: DispositionLedger):
     """A real `PipelineContext` carrying *ledger*, with empty operands."""
-    from abicheck.post_processing import PipelineContext
+    from abicheck.policy.finding_disposition import PipelineContext
 
     ctx = PipelineContext(
         old=AbiSnapshot(library="libmatrix", version="1.0"),
@@ -793,16 +794,15 @@ def test_every_compatibility_dropping_step_records_a_gate_excluded_finding() -> 
     severity setting may put it back. Enumerated from `DEFAULT_PIPELINE`
     itself, so a step added later is covered without editing this test.
     """
-    from abicheck.post_processing import (
-        _DEFAULT_DROPPED_DISPOSITION,
-        DEFAULT_PIPELINE,
+    from abicheck.policy.finding_disposition.pipeline import (
+        DEFAULT_DROPPED_DISPOSITION,
         _record_dropped_duplicates,
     )
 
     declaring = [
         step
         for step in DEFAULT_PIPELINE.steps
-        if getattr(step, "dropped_finding_disposition", _DEFAULT_DROPPED_DISPOSITION)
+        if getattr(step, "dropped_finding_disposition", DEFAULT_DROPPED_DISPOSITION)
         is Disposition.NON_GATING
     ]
     assert declaring, "the pipeline must still contain such a step"
@@ -824,19 +824,18 @@ def test_every_compatibility_dropping_step_records_a_gate_excluded_finding() -> 
 
 def test_a_dropped_compatibility_finding_survives_a_strict_severity_config() -> None:
     """…and the same statement end to end, through `with_gate`."""
-    from abicheck.policy.severity import SeverityConfig, SeverityLevel
-    from abicheck.post_processing import (
-        _DEFAULT_DROPPED_DISPOSITION,
-        DEFAULT_PIPELINE,
+    from abicheck.policy.finding_disposition.pipeline import (
+        DEFAULT_DROPPED_DISPOSITION,
         _record_dropped_duplicates,
     )
+    from abicheck.policy.severity import SeverityConfig, SeverityLevel
 
     result = _empty_result()
     ledger = DispositionLedger()
     ctx = _pipeline_context(ledger)
     for index, step in enumerate(DEFAULT_PIPELINE.steps):
         if (
-            getattr(step, "dropped_finding_disposition", _DEFAULT_DROPPED_DISPOSITION)
+            getattr(step, "dropped_finding_disposition", DEFAULT_DROPPED_DISPOSITION)
             is not Disposition.NON_GATING
         ):
             continue

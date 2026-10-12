@@ -41,6 +41,7 @@ from abicheck.model import (
     ScopeOrigin,
     Visibility,
 )
+from abicheck.policy.finding_disposition.default_pipeline import DEFAULT_PIPELINE
 
 # ---------------------------------------------------------------------------
 # helpers
@@ -1179,7 +1180,6 @@ class TestCombinedEntryPoint:
 
 class TestPipelineIntegration:
     def test_default_pipeline_includes_namespace_step(self) -> None:
-        from abicheck.post_processing import DEFAULT_PIPELINE
 
         assert "detect_namespace_patterns" in [s.name for s in DEFAULT_PIPELINE.steps]
 

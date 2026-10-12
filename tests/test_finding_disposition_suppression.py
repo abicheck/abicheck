@@ -81,7 +81,9 @@ _RULE_SUBSETS = [
 ]
 
 
-@pytest.mark.parametrize("rule_names", _RULE_SUBSETS, ids=lambda s: "+".join(s) or "none")
+@pytest.mark.parametrize(
+    "rule_names", _RULE_SUBSETS, ids=lambda s: "+".join(s) or "none"
+)
 def test_every_finding_lands_in_exactly_one_place_and_matches_evaluate(
     rule_names: tuple[str, ...],
 ) -> None:

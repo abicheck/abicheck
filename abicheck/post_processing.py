@@ -12,67 +12,29 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Post-processing pipeline for ABI change lists.
+"""Legacy home of most finding-disposition *steps*.
 
-Each step is independently testable, reorderable, and self-documenting.
-The pipeline transforms the raw detector output into the final change list
-through filtering, deduplication, enrichment, and suppression.
-
-Architecture review: Problem C — explicit pipeline replaces imperative chain.
+The pipeline that runs them -- its step protocol, its audit sweep, its
+default order and its entry point ``dispose_findings`` -- is owned by
+:mod:`abicheck.policy.finding_disposition`. The steps below still live here
+until each moves to its ADR-061 owner; each is independently testable
+against a hand-built ``PipelineContext``.
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING
 
 from .policy.disposition_ledger import Disposition
-from .policy.export_existence_fold import FoldExportHygieneIntoExistence
-from .policy.finding_disposition.suppression import dispose_by_suppression
-
-# Split out when this module reached the 2000-line hard cap (see each new
-# module's own docstring). `PipelineContext` is re-exported rather than
-# relocated outright: 23 call sites import it from this historical path.
-from .post_processing_context import (
-    _ENUM_MEMBER_KINDS as _ENUM_MEMBER_KINDS,
-    _PUBLIC_SOURCE_ABI_KINDS as _PUBLIC_SOURCE_ABI_KINDS,
-    PipelineContext as PipelineContext,
+from .policy.finding_disposition.pipeline import (
+    merge_late_findings,
+    record_collapsed_findings,
 )
-from .post_processing_reachability import MarkReachability as MarkReachability
 
 if TYPE_CHECKING:
     from .model import AbiSnapshot
     from .model.change import Change
-    from .policy.disposition_ledger import DispositionLedger
-    from .suppression import SuppressionList
-
-
-class PipelineStep(Protocol):
-    """Protocol for a single post-processing step."""
-
-    #: ADR-067: what it *means* when this step's output no longer contains a
-    #: finding its input did, for a finding that did not land in one of the
-    #: context's own buckets. Three answers, and the step is the only thing
-    #: that knows which applies:
-    #:
-    #: * ``Disposition.DEDUPLICATED`` (the default, declared by
-    #:   :data:`_DEFAULT_DROPPED_DISPOSITION`) -- the finding was folded into
-    #:   another one that survived;
-    #: * ``Disposition.NON_GATING`` -- it was excluded on its own merits as
-    #:   compatible noise, not collapsed into anything;
-    #: * ``None`` -- the step *substituted* a replacement object for it (a
-    #:   reclassification of the same observation), so recording the original
-    #:   as a drop would count one observed change twice: once as a
-    #:   disappearance and once as the replacement.
-    #:
-    #: Declared as a class attribute rather than inferred, because none of
-    #: the three is derivable from the before/after lists alone.
-
-    name: str
-
-    def run(self, changes: list[Change], ctx: PipelineContext) -> list[Change]:
-        """Transform the change list, returning the updated list."""
-        ...
+    from .policy.finding_disposition.context import PipelineContext
 
 
 # ---------------------------------------------------------------------------
@@ -608,198 +570,6 @@ class DemoteOffPythonSurface:
         return kept
 
 
-class ApplySuppression:
-    """Apply user-provided suppression rules.
-
-    ADR-044 D2: a rule matches only when ``Suppression.matches()`` also passes
-    its reachability/``allow_public_break`` gate — see that method for the
-    semantics. A match refused by that gate is recorded as a
-    ``SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK`` diagnostic (ADR-044 D4) instead of
-    being silently dropped, so the change stays visible *and* the suppression
-    author sees why their rule did not apply.
-    """
-
-    name = "apply_suppression"
-
-    def run(self, changes: list[Change], ctx: PipelineContext) -> list[Change]:
-        if ctx.suppression is None:
-            return changes
-        outcome = dispose_by_suppression(
-            changes,
-            ctx.suppression,
-            ledger=ctx.disposition_ledger,
-            application_point=self.name,
-        )
-        ctx.suppressed.extend(outcome.suppressed)
-        return outcome.visible
-
-
-#: The answer for a step that does not declare one: most steps that drop a
-#: finding drop it because another finding now covers it.
-_DEFAULT_DROPPED_DISPOSITION = Disposition.DEDUPLICATED
-
-
-def _record_collapsed_findings(
-    changes: Iterable[Change],
-    ctx: PipelineContext,
-    *,
-    application_point: str,
-) -> None:
-    """Record findings this pipeline folded away as ``deduplicated``.
-
-    **The rule this exists to enforce:** several steps park a change in
-    ``ctx.suppressed`` with no user rule involved, because that is the only
-    bucket ``compare()`` excludes from the verdict (see
-    ``DetectCppPatterns._suppress_grouped_children``'s own (a)/(b) note for
-    the mechanics). The bucket therefore does *not* identify the mechanism,
-    and the ledger cannot infer it: labelling these ``suppressed`` makes
-    ``semver.recommend_release`` read an ordinary grouping or version-rename
-    collapse as a user-waived major break. So every such step names itself
-    here instead, and ``DispositionLedger.record`` being first-write-wins is
-    what makes that stick against the ledger's own closing fallback.
-
-    Every current caller collapses a finding into another one (a grouped
-    parent, a surviving duplicate, a version-rename pair), which is why they
-    share one disposition and differ only in *application_point*. A future
-    step that parks a change in ``ctx.suppressed`` for some other
-    rule-less reason needs its own recording call, not this one.
-    """
-    if ctx.disposition_ledger is None:
-        return
-    for change in changes:
-        ctx.disposition_ledger.record(
-            change, Disposition.DEDUPLICATED, application_point=application_point
-        )
-
-
-def _bucket_total(ctx: PipelineContext) -> int:
-    """How many findings the context's own side-output buckets hold."""
-    return (
-        len(ctx.suppressed)
-        + len(ctx.redundant)
-        + len(ctx.opaque_filtered)
-        + len(ctx.out_of_surface)
-    )
-
-
-def _record_dropped_duplicates(
-    before: Sequence[Change],
-    after: list[Change],
-    bucket_total_before: int,
-    ctx: PipelineContext,
-    step_name: str,
-    disposition: Disposition | None = _DEFAULT_DROPPED_DISPOSITION,
-) -> None:
-    """Record findings a step discarded outright as ``deduplicated``.
-
-    ADR-067 D1/D3: the raw total must count every atomically detected change,
-    including the ones an early collapse removed. ``DeduplicateAstDwarf`` and
-    ``DeduplicateCrossDetector`` run *before* ``FilterRedundant`` and simply
-    return a shorter list, so without this the detected total silently
-    undercounted by exactly the duplicates they folded away.
-
-    Deliberately generic rather than a patch to those two steps: any future
-    step that drops a finding is covered the same way, which is the failure
-    class -- a collapse with no audit record -- not the two instances of it.
-
-    A finding a step *moved* into one of the context's own side-output lists
-    is not a discard and is skipped here: it keeps the disposition its own
-    owner assigns (suppression records at the point it fires; the surface,
-    redundancy and opaque buckets are labelled when the ledger is closed over
-    the result). Since :meth:`DispositionLedger.record` is identity-keyed and
-    first-write-wins, mislabelling one here would be permanent.
-
-    *disposition* is what the step declares its drops mean
-    (:class:`PipelineStep`'s own ``dropped_finding_disposition``); ``None``
-    means the step substitutes rather than drops, and nothing is recorded.
-    """
-    ledger = ctx.disposition_ledger
-    if ledger is None or disposition is None:
-        return
-    # Counting first, identity second. This runs once per step on every
-    # comparison, and a wide diff runs two dozen steps over thousands of
-    # findings, so the overwhelmingly common "this step changed nothing"
-    # case must cost O(1) rather than two identity sets per step.
-    #
-    # The count is a sound trigger because a step that removes a finding
-    # either drops it (shortening `changes`) or moves it into one of the
-    # buckets (growing them by the same amount). The one shape it cannot see
-    # is a step that adds and drops in the same call, so such a step records
-    # its own drops -- `_merge_findings_respecting_suppression` is the only
-    # one today and does exactly that. That is not an honour-system rule:
-    # `tests/test_disposition_audit.py::
-    # test_a_pipeline_step_can_never_drop_a_finding_unrecorded` runs the real
-    # pipeline and asserts every input finding is accounted for by the kept
-    # list, a bucket, or the ledger.
-    if len(after) + (_bucket_total(ctx) - bucket_total_before) >= len(before):
-        return
-    survived = set(map(id, after))
-    for bucket in (
-        ctx.suppressed,
-        ctx.redundant,
-        ctx.opaque_filtered,
-        ctx.out_of_surface,
-    ):
-        survived.update(map(id, bucket))
-    missing = set(map(id, before)) - survived
-    if not missing:
-        return
-    for change in before:
-        if id(change) in missing:
-            ledger.record(change, disposition, application_point=step_name)
-
-
-def _merge_findings_respecting_suppression(
-    changes: list[Change],
-    new_findings: list[Change],
-    ctx: PipelineContext,
-) -> None:
-    """Append deduplicated ``new_findings`` to ``changes``, respecting suppression.
-
-    Mutates ``changes`` in place. Shared by every post-``ApplySuppression``
-    detector that builds fresh ``Change`` objects (``DetectCppPatterns``,
-    ``DetectTemplatePatterns``, ``DetectNamespacePatterns``) — those findings
-    never passed through ``ApplySuppression`` itself, so they must run their
-    own suppression check here.
-
-    Uses :meth:`SuppressionList.evaluate` (not the cheaper ``is_suppressed``)
-    so a broad rule whose selectors matched but was withheld by the
-    reachability/``allow_public_break`` gate still emits the same
-    ``SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK`` diagnostic ``ApplySuppression``
-    produces for changes it sees directly (ADR-044 D4; Codex review, fresh
-    evidence) — otherwise a late finding that a broad rule *would* have
-    hidden, had it been reachable earlier, is silently kept with no
-    explanation of why the matching rule didn't apply.
-    """
-    outcome = dispose_by_suppression(
-        new_findings,
-        ctx.suppression,
-        ledger=ctx.disposition_ledger,
-        application_point="merge_late_findings",
-    )
-    ctx.suppressed.extend(outcome.suppressed)
-    seen_keys = {(c.kind, c.symbol) for c in changes}
-    for c in outcome.kept:
-        key = (c.kind, c.symbol)
-        if key in seen_keys:
-            # ADR-067 D1: a late finding a *second* detector produced for an
-            # entity already reported is still an observed change, and it is
-            # dropped here rather than moved to any bucket -- so it is
-            # recorded, in both the suppressed and unsuppressed paths, or
-            # adding a suppression rule would change the detected total
-            # instead of moving the finding between dispositions. It never
-            # reaches ``Pipeline.run``'s own dropped-finding sweep either:
-            # these objects are created *by* the step, so they are not in the
-            # snapshot that sweep diffs against.
-            _record_collapsed_findings(
-                [c], ctx, application_point="merge_late_findings"
-            )
-            continue
-        changes.append(c)
-        seen_keys.add(key)
-    changes.extend(outcome.diagnostics)
-
-
 class SuppressRenamedPairs:
     """Suppress FUNC_REMOVED + FUNC_ADDED pairs when a FUNC_LIKELY_RENAMED exists.
 
@@ -987,6 +757,8 @@ class FilterRedundant:
     """Split changes into kept + redundant (derived from root type changes)."""
 
     name = "filter_redundant"
+    #: From here on ``ctx.kept`` aliases the pipeline's change list.
+    establishes_kept_alias = True
 
     def run(self, changes: list[Change], ctx: PipelineContext) -> list[Change]:
         from .diff_filtering import _filter_redundant
@@ -1137,7 +909,7 @@ class DetectCppPatterns:
             if ch.kind == ChangeKind.FUNC_REMOVED and any(
                 _matches_suppression_key(ch.symbol, key) for key in suppressed_keys
             ):
-                _record_collapsed_findings(
+                record_collapsed_findings(
                     [ch], ctx, application_point="grouped_into_parent_finding"
                 )
                 ctx.suppressed.append(ch)
@@ -1157,7 +929,7 @@ class DetectCppPatterns:
             self._suppress_grouped_children(changes, suppressed_keys, ctx)
 
         if new_findings:
-            _merge_findings_respecting_suppression(changes, new_findings, ctx)
+            merge_late_findings(changes, new_findings, ctx)
 
         return changes
 
@@ -1201,7 +973,7 @@ class DetectTemplatePatterns:
         new_findings = detect_template_patterns(ctx.old, ctx.new, namespaces)
         if not new_findings:
             return changes
-        _merge_findings_respecting_suppression(changes, new_findings, ctx)
+        merge_late_findings(changes, new_findings, ctx)
         return changes
 
 
@@ -1245,7 +1017,7 @@ class DetectNamespacePatterns:
         )
         if not new_findings:
             return changes
-        _merge_findings_respecting_suppression(changes, new_findings, ctx)
+        merge_late_findings(changes, new_findings, ctx)
         return changes
 
 
@@ -1290,7 +1062,7 @@ class DetectInternalLeaks:
         # same check by hand here (via the shared helper, which also emits
         # the withheld-rule diagnostic ``ApplySuppression`` would have)
         # rather than re-running the whole step.
-        _merge_findings_respecting_suppression(changes, extra, ctx)
+        merge_late_findings(changes, extra, ctx)
         return changes
 
 
@@ -1441,7 +1213,7 @@ class DetectVersionedSymbolScheme:
                 "the symbol churn is a version-rename."
             )
         # Codex review: shared helper attributes a matched suppression rule.
-        _merge_findings_respecting_suppression(changes, [advisory], ctx)
+        merge_late_findings(changes, [advisory], ctx)
         if ctx.collapse_versioned_symbols and matched:
             # G15: report the collapse count in the summary. caused_count is the
             # number of old-side version-rename pairs reclassified as compatible;
@@ -1459,10 +1231,10 @@ class DetectVersionedSymbolScheme:
             matched_ids = {id(c) for c in matched}
             # G15's collapse is a reclassification of a version-rename pair as
             # compatible, not a user waiver -- see
-            # ``_record_collapsed_findings`` for why the bucket alone cannot
+            # ``record_collapsed_findings`` for why the bucket alone cannot
             # say which, and what reading it as a waiver would do to the
             # release recommendation.
-            _record_collapsed_findings(
+            record_collapsed_findings(
                 matched, ctx, application_point="versioned_symbol_collapse"
             )
             ctx.suppressed.extend(matched)
@@ -1584,180 +1356,3 @@ class EscalateFrozenNamespaceViolations:
         for c in ctx.redundant:
             self._tag(c, patterns, old_qualified, new_qualified)
         return changes
-
-
-# ---------------------------------------------------------------------------
-# Pipeline orchestrator
-# ---------------------------------------------------------------------------
-
-
-class PostProcessingPipeline:
-    """Execute a sequence of post-processing steps on a change list.
-
-    Each step receives the current change list and a shared context,
-    and returns the (possibly modified) change list for the next step.
-    """
-
-    def __init__(self, steps: list[PipelineStep]) -> None:
-        self.steps = list(steps)
-
-    def run(
-        self,
-        changes: list[Change],
-        old: AbiSnapshot | None,
-        new: AbiSnapshot,
-        suppression: SuppressionList | None = None,
-        frozen_namespaces: list[str] | None = None,
-        scope_to_public_surface: bool = False,
-        force_public_symbols: set[str] | None = None,
-        collapse_versioned_symbols: bool = False,
-        public_surface_allowlist: set[str] | None = None,
-        # Appended after the existing optional parameters (Codex review) —
-        # inserting it earlier would silently break a positional caller of
-        # any parameter after it (e.g. `.run(c, old, new, sup, fns, True)`
-        # for scope_to_public_surface would instead bind `True` here and
-        # leave scoping disabled, with no error).
-        internal_namespaces: tuple[str, ...] | None = None,
-        # ADR-067 C-S1: appended last for the same positional-safety reason
-        # the note above records.
-        disposition_ledger: DispositionLedger | None = None,
-        # ADR-069: likewise appended, not slotted next to `internal_namespaces`
-        # where it reads better -- doing that rebound a positional
-        # `disposition_ledger` to this parameter (Codex review, PR #1231).
-        experimental_namespaces: tuple[str, ...] | None = None,
-        # Design-hardening Phase 2: the OLD-side stand-in when *old* is None,
-        # built by the snapshot factory -- see `PipelineContext.absent_baseline`.
-        absent_baseline: AbiSnapshot | None = None,
-    ) -> PipelineContext:
-        """Run all steps, returning the final PipelineContext."""
-        ctx = PipelineContext(
-            old=old,
-            new=new,
-            suppression=suppression,
-            frozen_namespaces=list(frozen_namespaces or []),
-            internal_namespaces=internal_namespaces,
-            experimental_namespaces=experimental_namespaces,
-            scope_to_public_surface=scope_to_public_surface,
-            force_public_symbols=set(force_public_symbols or set()),
-            collapse_versioned_symbols=collapse_versioned_symbols,
-            public_surface_allowlist=public_surface_allowlist,
-            disposition_ledger=disposition_ledger,
-            absent_baseline=absent_baseline,
-        )
-        # ``FilterRedundant`` sets ``ctx.kept = kept`` — an *aliasing* contract,
-        # not a snapshot: every step from that point on is required to either
-        # leave ``changes`` untouched, mutate it in place (``changes[:] = ...``),
-        # or explicitly resync ``ctx.kept`` to whatever new list it returns (see
-        # ``DetectVersionedSymbolScheme``). If a future step instead rebinds
-        # ``changes = [c for c in changes if ...]`` without updating ``ctx.kept``,
-        # ``ctx.kept`` silently keeps pointing at the stale pre-filter list and
-        # any suppression/demotion recorded downstream is lost from the verdict
-        # with no visible error (this happened once already — see
-        # ``DetectCppPatterns``/``DemoteUnreachableInternalChurn``'s in-place
-        # comments). Enforce the invariant here instead of trusting every future
-        # step author to remember it.
-        kept_tracking_active = False
-        # One identity snapshot per step is the cost of the dropped-finding
-        # sweep below; skipped entirely when no ledger was supplied, so a
-        # caller that did not opt into the audit pays nothing for it.
-        auditing = ctx.disposition_ledger is not None
-        for step in self.steps:
-            before = list(changes) if auditing else ()
-            bucket_total = _bucket_total(ctx) if auditing else 0
-            changes = step.run(changes, ctx)
-            _record_dropped_duplicates(
-                before,
-                changes,
-                bucket_total,
-                ctx,
-                step.name,
-                getattr(
-                    step, "dropped_finding_disposition", _DEFAULT_DROPPED_DISPOSITION
-                ),
-            )
-            if step.name == FilterRedundant.name:
-                kept_tracking_active = True
-            elif kept_tracking_active and ctx.kept is not changes:
-                raise RuntimeError(
-                    f"post-processing step {step.name!r} broke the ctx.kept "
-                    "aliasing contract established by FilterRedundant: it "
-                    "returned a `changes` list that is not the same object as "
-                    "`ctx.kept`, which silently discards any suppression or "
-                    "demotion tracked via ctx.kept from the verdict. Fix the "
-                    "step to mutate `changes[:] = ...` in place, or to "
-                    "explicitly resync `ctx.kept = changes` before returning."
-                )
-        # Ensure ctx.kept is set even if FilterRedundant didn't run
-        if not ctx.kept and changes:
-            ctx.kept = changes
-        return ctx
-
-
-# Default pipeline matching the current compare() post-processing order.
-DEFAULT_PIPELINE = PostProcessingPipeline(
-    [
-        FilterReservedFieldRenames(),
-        FilterOpaqueSizeChanges(),
-        DowngradeOpaqueStructChanges(),
-        DeduplicateAstDwarf(),
-        DeduplicateCrossDetector(),
-        DowngradeOpaqueTypeChanges(),
-        EnrichSourceLocations(),
-        FilterNonPublicSurface(),
-        # Runs immediately after FilterNonPublicSurface so it can read the
-        # resolved C-header surface (ctx.surf_new) and defer to it; otherwise it
-        # uses the recovered Python API as the extension's public-contract oracle.
-        DemoteOffPythonSurface(),
-        # Reads markers TYPE_VTABLE_CHANGED set at emission time (diff_types.py)
-        # to cross-reference a LAYOUT_UNVERIFIABLE finding covering the identical
-        # evidence gap via Change.correlated_change_kind. Never removes anything
-        # from `changes` (see the step's own docstring for why an earlier,
-        # removal-based design was unsafe), so its position relative to
-        # scoping/suppression/FilterRedundant is not load-bearing the way a
-        # filtering step's would be -- kept here simply to run once both
-        # findings are guaranteed to exist in `changes` (i.e. after scoping
-        # has settled which findings are even still present).
-        #
-        # Must run *before* MarkReachability, though (Codex review, fresh
-        # evidence): that step caches each tagged change's whole
-        # ImpactAssessment via impact.engine.assess_change(), and
-        # assess_change() itself prefers a cached assessment's own
-        # correlated_change_kind over the flat Change field once one exists
-        # (impact/engine.py's own documented contract for reusing a cached
-        # assessment). Running this step after MarkReachability would let it
-        # set the flat field on a change whose impact_assessment was already
-        # cached with correlated_change_kind=None -- silently stale for every
-        # consumer of that unified object (JSON/SARIF's impact_assessment
-        # block) even though the flat top-level field is correct.
-        AnnotateLayoutUnverifiableCoveredByVtableChanged(),
-        # ADR-044 D1: must run before ApplySuppression so a broad suppression
-        # rule can see whether the change it is about to remove is part of the
-        # effective public ABI.
-        MarkReachability(),
-        ApplySuppression(),
-        SuppressRenamedPairs(),
-        FoldExportHygieneIntoExistence(),  # one finding per export event
-        # Runs immediately after suppression settles `changes` so it sees
-        # the final post-suppression set -- see its own docstring for why a
-        # suppression targeting only the covering TYPE_VTABLE_CHANGED would
-        # otherwise leave the earlier annotation dangling.
-        ClearOrphanedVtableGapCorrelation(),
-        DisambiguateTypeSymbols(),
-        FilterRedundant(),
-        EnrichAffectedSymbols(),
-        AttributeStdlibEmbedding(),
-        DetectInternalLeaks(),
-        # Must run immediately after DetectInternalLeaks: it consumes that step's
-        # leak verdict to demote confirmed-unreachable internal-namespace churn.
-        DemoteUnreachableInternalChurn(),
-        DetectCppPatterns(),
-        DetectNamespacePatterns(),
-        DetectTemplatePatterns(),
-        # Advisory overlay: explains a versioned-symbol-scheme churn (P08). Runs
-        # after rename suppression so it only sees residual removed/added pairs.
-        DetectVersionedSymbolScheme(),
-        # Runs last so it can tag both raw findings and the synthetic
-        # overlays added by DetectInternalLeaks / DetectCppPatterns.
-        EscalateFrozenNamespaceViolations(),
-    ]
-)

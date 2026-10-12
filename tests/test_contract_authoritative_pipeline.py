@@ -1229,7 +1229,7 @@ class TestExplicitConsumerEvidencePromotesAFinding:
     @staticmethod
     def _unresolved_removal():
         from abicheck.contract_pipeline import build_contract_stage
-        from abicheck.post_processing import PipelineContext
+        from abicheck.policy.finding_disposition import PipelineContext
 
         old, new = _removal_pair()
         stage = build_contract_stage(
@@ -1440,7 +1440,7 @@ class TestTheStageClassifiesEveryFinding:
         """`_compute_verdict_for` calls it on every recomputation, so a
         second pass must not duplicate a finding in the decision receipt."""
         from abicheck.contract_pipeline import build_contract_stage
-        from abicheck.post_processing import PipelineContext
+        from abicheck.policy.finding_disposition import PipelineContext
 
         old, new = _unreached_public_type_pair()
         stage = build_contract_stage(

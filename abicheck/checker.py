@@ -135,7 +135,11 @@ from .model.surface_facts import is_abi_visible
 from .policy.classification import Verdict, compute_verdict
 from .policy.disposition_close import finalize_ledger
 from .policy.disposition_ledger import DispositionLedger
-from .policy.finding_disposition.suppression import dispose_by_suppression
+from .policy.finding_disposition import (
+    DispositionRules,
+    dispose_by_suppression,
+    dispose_findings,
+)
 from .policy.persistent_hygiene import drop_persistent_hygiene
 from .policy.policy_file_namespaces import (
     experimental_namespaces as _experimental_namespaces,
@@ -152,7 +156,7 @@ if TYPE_CHECKING:
     from .model.acknowledgment_policy import AcknowledgmentPolicy
     from .model.identity import EntityId  # noqa: F401
     from .policy.acknowledgment import AcknowledgmentList
-    from .post_processing import PipelineContext
+    from .policy.finding_disposition import PipelineContext
     from .suppression import SuppressionList
 
 __all__ = [
@@ -353,7 +357,7 @@ def _filter_pattern_synthetic(
     ``SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK`` diagnostic ``ApplySuppression``
     produces for changes it sees directly (ADR-044 D4; Codex review, fresh
     evidence) — this ADR-027 pattern-verdict path builds its findings well
-    after ``post_processing.DEFAULT_PIPELINE`` runs, so nothing else would
+    after ``policy.finding_disposition.dispose_findings`` runs, so nothing else would
     ever emit that diagnostic for them.
     """
     outcome = dispose_by_suppression(
@@ -496,68 +500,6 @@ def _diff_advanced_dwarf(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         for kind_str, sym, desc, old_val, new_val in diff_advanced_dwarf(o, n)
         if kind_str in _kind_map
     ]
-
-
-def _run_post_processing(
-    changes: list[Change],
-    old: AbiSnapshot | None,
-    new: AbiSnapshot,
-    suppression: SuppressionList | None,
-    policy_file: PolicyFile | None,
-    scope_to_public_surface: bool,
-    force_public_symbols: set[str] | None,
-    collapse_versioned_symbols: bool,
-    public_surface_allowlist: set[str] | None = None,
-    disposition_ledger: DispositionLedger | None = None,
-) -> tuple[
-    list[Change],
-    list[Change],
-    list[Change],
-    list[Change],
-    list[Change],
-    bool,
-    PipelineContext,
-]:
-    """Run the post-processing pipeline and unpack results.
-
-    Returns ``(kept, redundant, opaque_filtered, suppressed, out_of_surface,
-    scope_resolved, pp_ctx)`` where *pp_ctx* is retained for ``surf_old``/
-    ``surf_new`` access.
-    """
-    from .post_processing import DEFAULT_PIPELINE
-    from .workflows.snapshot_factory import absent_baseline
-
-    frozen_ns = list(policy_file.frozen_namespaces) if policy_file is not None else []
-    internal_ns = _internal_namespaces(policy_file) or None
-    experimental_ns = _experimental_namespaces(policy_file) or None
-    pp_ctx = DEFAULT_PIPELINE.run(
-        changes,
-        old,
-        new,
-        suppression=suppression,
-        frozen_namespaces=frozen_ns,
-        internal_namespaces=internal_ns,
-        experimental_namespaces=experimental_ns,
-        scope_to_public_surface=scope_to_public_surface,
-        force_public_symbols=force_public_symbols,
-        collapse_versioned_symbols=collapse_versioned_symbols,
-        public_surface_allowlist=public_surface_allowlist,
-        disposition_ledger=disposition_ledger,
-        absent_baseline=absent_baseline(new.library) if old is None else None,
-    )
-    # scoping is "resolved" unless it was requested and had to fall back to the
-    # full export table (issue #235: an unconfirmed scope must not read as a
-    # confidently-clean public surface).
-    scope_resolved = not (scope_to_public_surface and pp_ctx.scope_fell_back)
-    return (
-        pp_ctx.kept,
-        pp_ctx.redundant,
-        pp_ctx.opaque_filtered,
-        pp_ctx.suppressed,
-        pp_ctx.out_of_surface,
-        scope_resolved,
-        pp_ctx,
-    )
 
 
 def _apply_soname_policy(
@@ -1078,29 +1020,32 @@ def compare(
     # reconcile by construction rather than being reconstructed afterwards.
     ledger = DispositionLedger()
 
-    # Run the post-processing pipeline (filtering, dedup, enrichment, suppression).
-    # PolicyFile.frozen_namespaces is threaded in so the late-stage
-    # EscalateFrozenNamespaceViolations step can tag matching findings.
-    (
-        kept,
-        redundant,
-        opaque_filtered,
-        suppressed,
-        out_of_surface,
-        scope_resolved,
-        pp_ctx,
-    ) = _run_post_processing(
+    # Dispose of the raw findings (filtering, dedup, enrichment, suppression)
+    # in the default order `policy.finding_disposition` owns. The policy
+    # file's namespace conventions reach the late steps through the rules.
+    from .workflows.snapshot_factory import absent_baseline
+
+    pp_ctx = dispose_findings(
         changes,
         old,
         new,
-        suppression,
-        policy_file,
-        scope_to_public_surface,
-        force_public_symbols,
-        collapse_versioned_symbols,
-        public_surface_allowlist=public_surface_allowlist,
-        disposition_ledger=ledger,
+        DispositionRules.from_policy_file(
+            policy_file,
+            suppression=suppression,
+            scope_to_public_surface=scope_to_public_surface,
+            force_public_symbols=force_public_symbols,
+            collapse_versioned_symbols=collapse_versioned_symbols,
+            public_surface_allowlist=public_surface_allowlist,
+        ),
+        ledger=ledger,
+        absent_baseline=absent_baseline(new.library) if old is None else None,
     )
+    kept = pp_ctx.kept
+    redundant = pp_ctx.redundant
+    opaque_filtered = pp_ctx.opaque_filtered
+    suppressed = pp_ctx.suppressed
+    out_of_surface = pp_ctx.out_of_surface
+    scope_resolved = pp_ctx.scope_resolved
 
     # ADR-049 D9 — contract relevance is classified *before* compatibility
     # policy, not after it. Post-processing has settled canonical identity,

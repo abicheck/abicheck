@@ -27,7 +27,7 @@ builders do (Slice 8/9) -- the pipeline-ordering audit in
 ``source_graph_findings.py``'s own comments (see ``_mapping_drift_findings``)
 found ``post_processing.MarkReachability`` runs *downstream* of these
 builders (their output is merged into ``checker.compare()``'s ``changes``
-before ``_run_post_processing``/``DEFAULT_PIPELINE.run()``, unlike
+before ``_run_post_processing``/``dispose_findings()``, unlike
 ``internal_leak.py``'s builders, which are themselves a *later* pipeline
 step), so caching at construction time would freeze a stale, unset default.
 ``MarkReachability`` itself now caches the assessment once it finalizes
@@ -49,7 +49,7 @@ from abicheck.buildsource.source_graph_findings import diff_source_graph_finding
 from abicheck.checker_policy import ChangeKind, ReachabilityState
 from abicheck.impact.engine import assess_change
 from abicheck.model import AbiSnapshot
-from abicheck.post_processing import DEFAULT_PIPELINE
+from abicheck.policy.finding_disposition import DispositionRules, dispose_findings
 from abicheck.suppression import Suppression, SuppressionList
 
 
@@ -129,8 +129,11 @@ def test_source_graph_finding_gets_cached_assessment_once_it_reaches_mark_reacha
 
     old_snap = AbiSnapshot(library="libtest.so", version="1.0")
     new_snap = AbiSnapshot(library="libtest.so", version="2.0")
-    ctx = DEFAULT_PIPELINE.run(
-        list(findings), old_snap, new_snap, suppression=_needs_evidence_suppression()
+    ctx = dispose_findings(
+        list(findings),
+        old_snap,
+        new_snap,
+        DispositionRules(suppression=_needs_evidence_suppression()),
     )
     found = [
         c for c in ctx.kept if c.kind == ChangeKind.SOURCE_TO_BINARY_MAPPING_CHANGED
@@ -158,7 +161,7 @@ def test_no_suppression_leaves_findings_uncached_same_as_before() -> None:
     findings = _mapping_drift_findings()
     old_snap = AbiSnapshot(library="libtest.so", version="1.0")
     new_snap = AbiSnapshot(library="libtest.so", version="2.0")
-    ctx = DEFAULT_PIPELINE.run(list(findings), old_snap, new_snap, suppression=None)
+    ctx = dispose_findings(list(findings), old_snap, new_snap)
     found = [
         c for c in ctx.kept if c.kind == ChangeKind.SOURCE_TO_BINARY_MAPPING_CHANGED
     ]

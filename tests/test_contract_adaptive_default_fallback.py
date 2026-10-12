@@ -35,7 +35,7 @@ from abicheck.contract_relevance_types import (
 from abicheck.model import AbiSnapshot, Function, Visibility
 from abicheck.model.change import Change
 from abicheck.policy.contract_default_mode import unresolved_default_fallback_applies
-from abicheck.post_processing import PipelineContext
+from abicheck.policy.finding_disposition import PipelineContext
 
 _ADAPTIVE = ValueProvenance(
     layer=SelectorLayer.BUILT_IN_DEFAULT,

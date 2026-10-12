@@ -77,7 +77,8 @@ from .policy.finding_type_candidates import (
     qualified_type_candidates as _qualified_type_candidates,
     type_candidates as _type_candidates,
 )
-from .post_processing import _PUBLIC_SOURCE_ABI_KINDS, _change_matches_symbols
+from .post_processing import _change_matches_symbols
+from .post_processing_reachability import _PUBLIC_SOURCE_ABI_KINDS
 from .surface import (
     _HIDDEN_FRIEND_KIND_NAMES,
     _MEMBER_LEVEL_TYPE_KIND_NAMES,
