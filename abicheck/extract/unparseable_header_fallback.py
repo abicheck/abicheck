@@ -200,6 +200,10 @@ def parse_excluding_unparseable_headers(
     """
     active = list(headers)
     excluded: list[Path] = []
+    # Headers blamed only by an isolated probe, not yet confirmed in the
+    # context (preceding headers) a full parse gives them.
+    unconfirmed: list[Path] = []
+    probing = True
     while True:
         try:
             result = attempt(active)
@@ -225,7 +229,7 @@ def parse_excluding_unparseable_headers(
             )
             excluded.extend(dropped)
             active = [h for h in active if h not in dropped]
-            if _stopped_at_fatal(exc) and len(active) >= 2:
+            if probing and _stopped_at_fatal(exc) and len(active) >= 2:
                 # A fatal error ends the frontend run, so the diagnostics
                 # above can only ever name one header per fatal; dropping
                 # them one round at a time costs one full parse per bad
@@ -240,10 +244,53 @@ def parse_excluding_unparseable_headers(
                         ", ".join(str(p) for p in found),
                     )
                     excluded.extend(found)
+                    unconfirmed.extend(found)
                     blamed = set(found)
                     active = [h for h in active if h not in blamed]
             continue
+        if unconfirmed:
+            # A probe parsed its group without the headers before it, so a
+            # header that needs an earlier one (its context in the full TU)
+            # fails there but not here. Re-check each in its real context;
+            # the restored set then goes through one full parse, and any
+            # failure there is attributed by the ordinary full-context rules.
+            restored = _confirm_in_context(headers, active, unconfirmed, attempt)
+            unconfirmed = []
+            probing = False
+            if restored:
+                keep = set(active) | set(restored)
+                active = [h for h in headers if h in keep]
+                excluded = [h for h in excluded if h not in set(restored)]
+                continue
         return result, excluded
+
+
+def _confirm_in_context(
+    headers: Sequence[Path],
+    active: Sequence[Path],
+    suspects: Sequence[Path],
+    attempt: Callable[[list[Path]], object],
+) -> list[Path]:
+    """Suspects that parse after the active headers preceding them.
+
+    One concurrent wave: suspect ``s`` is parsed as the active headers that
+    precede it in input order followed by ``s`` -- the context it has in the
+    full parse. Returned in input order.
+    """
+    position = {h: i for i, h in enumerate(headers)}
+    groups = [[h for h in active if position[h] < position[s]] + [s] for s in suspects]
+
+    def ok(group: list[Path]) -> bool:
+        try:
+            attempt(group)
+        except SnapshotError:
+            return False
+        return True
+
+    with ThreadPoolExecutor(max_workers=_probe_jobs()) as pool:
+        passed = list(pool.map(ok, groups))
+    restored = [s for s, good in zip(suspects, passed, strict=True) if good]
+    return sorted(restored, key=position.__getitem__)
 
 
 def _stopped_at_fatal(exc: SnapshotError) -> bool:

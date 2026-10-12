@@ -108,9 +108,9 @@ def test_fatal_errors_cost_logarithmic_rounds_and_exclude_exactly_the_bad(
         log_n = math.ceil(math.log2(len(headers)))
         full_rounds = len(calls) - _SerialPool.probes
         assert full_rounds <= 3, (len(headers), len(bad), full_rounds)
-        assert _SerialPool.waves <= log_n + 1, (len(headers), len(bad))
+        assert _SerialPool.waves <= log_n + 2, (len(headers), len(bad))
         # Total work stays O(f log n), never one parse per header.
-        assert len(calls) <= 3 + 2 * (len(bad) + 1) * (log_n + 1)
+        assert len(calls) <= 3 + 2 * (len(bad) + 1) * (log_n + 1) + len(bad)
 
 
 def test_single_fatal_failure_costs_one_clean_probe_wave(
@@ -127,6 +127,43 @@ def test_single_fatal_failure_costs_one_clean_probe_wave(
     # Failed full parse, two clean half probes, then the final full parse.
     assert _SerialPool.waves == 1
     assert len(calls) == 4
+
+
+@pytest.mark.parametrize(
+    ("n", "bad", "needs"),
+    [
+        (10, {0}, {5: 2}),
+        (16, {0, 11}, {9: 3, 14: 1}),
+        (32, {4, 20, 27}, {8: 1, 30: 22}),
+    ],
+)
+def test_header_failing_alone_but_parsing_in_context_is_not_excluded(
+    monkeypatch: pytest.MonkeyPatch, n: int, bad: set[int], needs: dict[int, int]
+) -> None:
+    """``needs[d] = p``: header d parses only when header p precedes it in the
+    TU (it relies on p's declarations), so an isolated probe blames d although
+    the full-context parse accepts it. Only the genuinely bad are excluded."""
+    monkeypatch.setattr(fallback, "ThreadPoolExecutor", _SerialPool)
+    _reset()
+    hs = [Path(f"/inc/h{i}.h") for i in range(n)]
+    bad_paths = {hs[i] for i in bad}
+    calls: list[list[Path]] = []
+
+    def attempt(group: list[Path]) -> tuple[Path, ...]:
+        calls.append(list(group))
+        for pos, h in enumerate(group):
+            i = int(h.stem[1:])
+            dep = needs.get(i)
+            if h in bad_paths or (dep is not None and hs[dep] not in group[:pos]):
+                exc = SnapshotError("castxml failed")
+                exc.stderr = f"{h}:1:10: fatal error: 'dep.h' file not found"
+                raise exc
+        return tuple(group)
+
+    result, excluded = parse_excluding_unparseable_headers(hs, attempt)
+    assert set(excluded) == bad_paths
+    assert list(result) == [h for h in hs if h not in bad_paths]
+    assert all(hs[d] in result for d in needs)
 
 
 def test_non_fatal_diagnostics_never_probe(monkeypatch: pytest.MonkeyPatch) -> None:
