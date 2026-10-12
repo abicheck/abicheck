@@ -7,11 +7,11 @@ lifecycle: active
 generated: false
 ---
 
-# `Function.elf_binding`/`Variable.elf_binding` (and the pre-existing `elf_visibility` it mirrors) collapse mixed bindings across symbol-versioned aliases sharing one bare name — investigated, not fixed (Codex review, fresh evidence)
+# `Function.elf_binding`/`Variable.elf_binding` (and the pre-existing `elf_visibility` it mirrors) collapse mixed bindings across symbol-versioned aliases sharing one bare name — fixed 2026-10-12 (Codex review, fresh evidence)
 
 Index: [Known gaps](../known-gaps.md)
 
-**Status (closed 2026-10-12): CLOSED.** Every ELF reader that compared a binding, visibility, size, COMMON or UNIQUE state, origin, or presence per bare name now pairs symbol-versioned aliases. Nothing under `abicheck/` reads `ElfMetadata.symbol_map` any more, and `tests/test_elf_version_alias_binding.py::test_no_new_code_reader_of_the_collapsed_symbol_map` keeps it that way.
+**Status (closed 2026-10-12): CLOSED.** Every ELF reader that compared a binding, visibility, size, COMMON or UNIQUE state, origin, or presence per bare name now pairs symbol-versioned aliases. Nothing under `abicheck/` reads `ElfMetadata.symbol_map` anymore, and `tests/test_elf_version_alias_binding.py::test_no_new_code_reader_of_the_collapsed_symbol_map` keeps it that way.
 
 **What changed.** Reproduced first: a two-version library built with `.symver` (`foo@VER1` WEAK, `foo@@VER2` GLOBAL in `.dynsym` order, so the changed alias is the non-last entry) went GLOBAL→WEAK on `foo@@VER2`, and `abicheck compare` exited 0 with no finding for `foo`.
 - `model/elf_facts.py`: `ElfMetadata.symbol_aliases` keeps every versioned entry per bare name. `unambiguous_symbol(name)` returns the symbol only when all aliases agree on binding and visibility, otherwise None. `symbol_map` is unchanged, for external callers that want one entry per name.
@@ -37,7 +37,7 @@ Index: [Known gaps](../known-gaps.md)
 - Verdict impact: `TLS_VAR_SIZE_CHANGED` defaults to `BREAKING`, so a size change on a hidden alias of a multi-alias library now fails where it was hidden. The other newly reachable kinds (`PROTECTED_VISIBILITY_CHANGED`, `VTABLE_SYMBOL_IDENTITY_CHANGED`, `SYMBOL_BINDING_BECAME_UNIQUE`, `SYMBOL_LEAKED_FROM_DEPENDENCY_CHANGED`) default to `COMPATIBLE_WITH_RISK`; `COMMON_SYMBOL_RISK`, `SYMBOL_BINDING_CHANGED` and `SYMBOL_ELF_VISIBILITY_CHANGED` default to `COMPATIBLE`.
 
 
-`ElfMetadata.symbol_map` is a `name -> ElfSymbol` dict
+**Historical analysis (the state before the fix, kept for context).** `ElfMetadata.symbol_map` was a `name -> ElfSymbol` dict
 built from `elf.symbols`, last-entry-wins; `elf_metadata.py`'s own parser
 deliberately never embeds a version suffix in `ElfSymbol.name` (pyelftools
 doesn't decode `@@`/`@` into the name either — see the `_pyelftools_exported_symbols`
@@ -49,7 +49,7 @@ fields share) reads only that survivor. A `Function`/`Variable` whose
 happened to parse last, not "the" binding — and if that happens to be
 `WEAK` while an older, still-live version was `GLOBAL`, a `binding: weak`
 suppression rule (`suppression.py`) could match a removal that, from the
-`GLOBAL` version's perspective, is a real break. Not fixed here: a correct
+`GLOBAL` version's perspective, is a real break. The first pass did not fix this: a correct
 fix needs `symbol_map` (or a sibling index) to preserve every versioned
 entry per bare name rather than collapsing to one — a change with several
 other consumers beyond `elf_visibility`/`elf_binding` (`dumper_elf_symbols.py`'s
