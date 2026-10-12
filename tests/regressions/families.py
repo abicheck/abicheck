@@ -192,6 +192,9 @@ _F1 = (
 )
 _F2 = (
     "report.cross_producer_disagreement_on_one_symbol",
+    # The L2 header pass and the L5 pass derived different fact families
+    # from the same AST.
+    "evidence.producer_drops_facts_its_input_holds",
     # Member check and release reconciliation disagreed on one obligation.
     "evidence.narrowed_conclusion_not_carried_across_cardinality",
     # The CLI and `dumper.dump` hybrid routes disagreed on the parse-time

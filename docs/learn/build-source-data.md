@@ -124,10 +124,17 @@ castxml backend, or clang unavailable) it falls back to deriving the three
 structural type edges directly from the parsed `AbiSnapshot`'s
 `RecordType.bases`/`.fields`/`Function.params` — weaker resolution (bare
 unqualified names, always reduced confidence) but works with any L2 backend.
-Its own `extractor_passes` names (`header_call_graph`/`header_type_graph`) are
-tracked separately from the build-integrated passes so a header-only
-confirmation is never mistaken for a full per-TU pass when judging whether an
-edge kind's absence is a real zero or missing coverage.
+With a clang AST it also carries the template-instantiation, virtual-override
+(and virtual-dispatch) and callback facts of the same parse, derived exactly as
+the build-integrated graph derives them, for code written in the headers.
+Its own `extractor_passes` names (`header_call_graph`/`header_type_graph`, and
+`header_override_graph`/`header_template_graph`/`header_callback_graph`/
+`header_virtual_dispatch_graph`) are tracked separately from the
+build-integrated passes so a header-only confirmation is never mistaken for a
+full per-TU pass when judging whether an edge kind's absence is a real zero or
+missing coverage. A graph stored before those families were collected carries
+none of their flags; a graph diff reports them as a coverage gap, not as
+removed facts.
 [case191](../reference/examples/case191_header_only_graph_field_type.md) demonstrates
 the same `public_api_internal_dependency_added` finding as case187, proven
 entirely through this no-build-integration path.
