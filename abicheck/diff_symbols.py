@@ -490,7 +490,10 @@ def _check_inline_transitions(
     would otherwise surface as a spurious FUNC_BECAME_INLINE. The coverage
     record names the family via ``analysis_assurance_degraded_facts``.
     """
-    if not (family_reliable(old_snapshot, "inline") and family_reliable(new_snapshot, "inline")):
+    if not (
+        family_reliable(old_snapshot, "inline")
+        and family_reliable(new_snapshot, "inline")
+    ):
         return []
     old_index = function_signature_index(old_snapshot.canonical_ir, old_map.values())
     new_index = function_signature_index(new_snapshot.canonical_ir, new_map.values())

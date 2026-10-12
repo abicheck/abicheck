@@ -135,5 +135,7 @@ def test_stale_marker_survives_resave_at_current_schema() -> None:
 
 
 def test_current_snapshot_is_never_marked_stale() -> None:
-    fresh = snapshot_from_dict(snapshot_to_dict(_snap(from_headers=True, ast_producer="clang")))
+    fresh = snapshot_from_dict(
+        snapshot_to_dict(_snap(from_headers=True, ast_producer="clang"))
+    )
     assert "inline" not in fresh.stale_fact_families
