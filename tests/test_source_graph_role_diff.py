@@ -385,3 +385,59 @@ def test_cli_compare_reports_public_role_change(
     ]
     assert not [c for c in changes if c["kind"] == _ROLE_UNKNOWN.value]
     assert role == ([expected] if expected else []), (case, changes)
+
+
+def test_diff_to_dict_carries_changed_and_unknown_relations() -> None:
+    """The serialized diff reports both new lists and their counts."""
+    old = _graph("DECL_HAS_TYPE", frozenset({"param"}))
+    new = _graph("DECL_HAS_TYPE", frozenset({"return"}))
+    payload = diff_source_graph(old, new).to_dict()
+    assert payload["changed_edges"] == [
+        {
+            "edge": "DECL_HAS_TYPE",
+            "src": _SRC,
+            "dst": _DST,
+            "old_roles": ["param"],
+            "new_roles": ["return"],
+        }
+    ]
+    assert payload["counts"]["changed_edges"] == 1
+    assert payload["counts"]["role_unknown_edges"] == 0
+    stored = diff_source_graph(_strip_roles(old), new).to_dict()
+    assert stored["changed_edges"] == []
+    assert stored["role_unknown_edges"][0]["old_roles"] == [""]
+    assert stored["counts"]["role_unknown_edges"] == 1
+
+
+@pytest.mark.parametrize("dependencies", [1, 3, 4, 7])
+def test_role_gap_note_is_one_per_kind_and_counts_every_dependency(
+    dependencies: int,
+) -> None:
+    """Many role-less dependencies against a role-stamped graph: one note per
+    edge kind, naming the total and at most three examples."""
+
+    def build(role: str) -> SourceGraphSummary:
+        g = SourceGraphSummary()
+        g.add_node(
+            GraphNode(
+                id=_SRC, kind="source_decl", attrs={"visibility": "public_header"}
+            )
+        )
+        for i in range(dependencies):
+            g.add_node(GraphNode(id=f"type://T{i}", kind="record_type", label=f"T{i}"))
+            g.add_edge(
+                GraphEdge(
+                    src=_SRC,
+                    dst=f"type://T{i}",
+                    kind="DECL_HAS_TYPE",
+                    attrs={"role": role} if role else {},
+                )
+            )
+        return g
+
+    findings = role_change_findings(build(""), build("param"), {})
+    assert [f.kind for f in findings] == [_ROLE_UNKNOWN]
+    text = findings[0].description
+    assert text.startswith(f"{dependencies} public DECL_HAS_TYPE dependenc")
+    assert text.count(" -> T") == min(dependencies, 3)
+    assert ("more" in text) == (dependencies > 3)
