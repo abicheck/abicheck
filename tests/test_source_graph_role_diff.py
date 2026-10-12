@@ -44,6 +44,8 @@ from abicheck.model.change_catalog.kinds import ChangeKind
 from abicheck.model.graph_facts import GraphEdge, GraphNode
 from abicheck.model.source_graph import SourceGraphSummary
 from abicheck.model.source_graph_coverage import ROLE_COVERAGE_MATRIX
+from abicheck.policy.classification import Verdict, compute_verdict
+from abicheck.policy.severity import PRESET_DEFAULT, compute_exit_code
 from abicheck.policy.source_graph_role_findings import role_change_findings
 
 REPO_DIR = Path(__file__).resolve().parent.parent
@@ -244,6 +246,29 @@ def test_callback_slot_discriminator_is_not_a_usage_role() -> None:
     assert role_change_findings(old, new, {}) == []
 
 
+@pytest.mark.parametrize(
+    ("old_roles", "new_roles", "kind", "verdict"),
+    [
+        ({"param"}, {"return"}, _ROLE_CHANGED, Verdict.COMPATIBLE_WITH_RISK),
+        ({"param"}, {"param", "return"}, _ROLE_CHANGED, Verdict.COMPATIBLE_WITH_RISK),
+        ({""}, {"param"}, _ROLE_UNKNOWN, Verdict.COMPATIBLE),
+        ({"return"}, {""}, _ROLE_UNKNOWN, Verdict.COMPATIBLE),
+    ],
+)
+def test_role_finding_alone_never_gates(
+    old_roles: set[str], new_roles: set[str], kind: ChangeKind, verdict: Verdict
+) -> None:
+    """Each new finding as the only change: its verdict comes from the
+    catalog, and under the default severity config it never fails the run
+    (exit 0) -- it explains, it does not decide."""
+    old = _graph("DECL_HAS_TYPE", frozenset(old_roles))
+    new = _graph("DECL_HAS_TYPE", frozenset(new_roles))
+    findings = diff_source_graph_findings(old, new)
+    assert [f.kind for f in findings] == [kind]
+    assert compute_verdict(findings) == verdict
+    assert compute_exit_code(findings, PRESET_DEFAULT) == 0
+
+
 # ── Public workflow: dump + compare through the CLI ─────────────────────
 
 #: (case id, v1 header body, v2 header body, expected role finding values or
@@ -346,7 +371,13 @@ def test_cli_compare_reports_public_role_change(
         text=True,
     )
     assert report.is_file(), result.stderr
-    changes = json.loads(report.read_text())["changes"]
+    payload = json.loads(report.read_text())
+    # The role finding explains; the artifact diff decides. A changed case is
+    # BREAKING / exit 4 from its signature findings, the unchanged one is clean.
+    assert (payload["verdict"], result.returncode) == (
+        ("BREAKING", 4) if expected else ("NO_CHANGE", 0)
+    ), (case, payload["verdict"], result.returncode)
+    changes = payload["changes"]
     role = [
         (c["old_value"], c["new_value"])
         for c in changes

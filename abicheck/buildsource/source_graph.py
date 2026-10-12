@@ -96,11 +96,10 @@ from ..model.source_graph import (
     function_decl_identity as function_decl_identity,
 )
 
-# SourceGraphSummary/GraphSummaryDiff, the node-id constructors, and the
-# schema vocabulary (NODE_KINDS/EDGE_KINDS/...) live in
-# abicheck.model.source_graph now (ADR-061 Phase 5 item 2's "values" slice)
-# and are re-exported here for backward compatibility (the same "as"-alias
-# convention the graph_facts re-export block below already established).
+# GraphSummaryDiff (the structural-diff result) lives in
+# abicheck.model.source_graph_diff; SourceGraphSummary, the node-id
+# constructors and the schema vocabulary are re-exported from
+# abicheck.model.source_graph above (ADR-061 Phase 5 item 2's "values" slice).
 from ..model.source_graph_diff import GraphSummaryDiff as GraphSummaryDiff
 
 # Construction (ADR-061 Phase 5 item 2's construction slice).
