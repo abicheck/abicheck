@@ -60,6 +60,7 @@ __all__ = [
     "INCLUDE_GRAPH_PASS",
     "L5_EDGE_KINDS",
     "PASS_EDGE_KINDS",
+    "ROLE_COVERAGE_MATRIX",
     "TYPE_GRAPH_PASS",
     "pass_coverage_records",
     "pass_for_edge_kind",
@@ -78,6 +79,36 @@ INCLUDE_GRAPH_PASS = "include_graph"
 HEADER_CALL_GRAPH_PASS = "header_call_graph"
 HEADER_TYPE_GRAPH_PASS = "header_type_graph"
 HEADER_INCLUDE_GRAPH_PASS = "header_include_graph"
+
+#: ADR-046 D3: the roles each role-bearing edge kind can carry, per kind --
+#: the vocabulary ``GraphEdge.role`` takes on these kinds. ``type_graph.py``'s
+#: ``_walk_types`` emits exactly these role values, each from its own
+#: unconditional code path, so a confirmed family-level pass may honestly
+#: claim every role below (``inline_graph_fold._mark_role_coverage``); the
+#: ADR-038 C.8 clang-plugin producer is a different, filtered walk and is out
+#: of scope here. The structural diff's role-change finding reads the same
+#: table to tell a usage role from a role-shaped discriminator such as
+#: ``CALLBACK_MAY_INVOKE``'s slot id.
+ROLE_COVERAGE_MATRIX: Mapping[str, tuple[str, ...]] = MappingProxyType(
+    {
+        "TYPE_INHERITS": ("base",),
+        "TYPE_HAS_FIELD_TYPE": (
+            "field",
+            "alias",
+            "enum_underlying",
+            "template_param",
+            "default_template_arg",
+        ),
+        "DECL_HAS_TYPE": (
+            "var",
+            "return",
+            "param",
+            "template_param",
+            "default_template_arg",
+        ),
+        "DECL_REFERENCES_DECL": ("ref",),
+    }
+)
 
 #: Build-integrated pass -> the edge kinds it produces.
 PASS_EDGE_KINDS: Mapping[str, frozenset[str]] = MappingProxyType(

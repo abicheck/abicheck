@@ -445,6 +445,33 @@ SOURCE_ENTRIES: list[ChangeKindMeta] = [
         operation=_OP.ADDED,
     ),
     _E(
+        "public_dependency_role_changed",
+        _R,
+        impact="A public entry point still depends on the same entity in the L5 "
+        "source graph, but uses it in a different role: a type that was a "
+        "parameter is now the return type, a field type became an alias, a "
+        "role was added beside an existing one. Callers that pass, receive, "
+        "or embed that entity are affected differently than before. A risk "
+        "to review; the artifact diff decides whether the declaration's "
+        "signature or layout actually broke.",
+        description_template="Public dependency role changed: {name}",
+        entity=_ENT.SOURCE,
+        operation=_OP.MODIFIED,
+    ),
+    _E(
+        "public_dependency_role_unknown",
+        _C,
+        impact="One side's L5 source graph records a public entry's dependency "
+        "without the role it plays (a graph stored by an abicheck version "
+        "that did not stamp edge roles), so whether that dependency changed "
+        "role (parameter, return, field, base, ...) cannot be confirmed or "
+        "ruled out. A coverage note, not a change: re-collect the older "
+        "graph with the current abicheck to compare roles.",
+        description_template="Public dependency role not comparable: {name}",
+        entity=_ENT.ANALYSIS,
+        operation=_OP.MODIFIED,
+    ),
+    _E(
         "public_macro_removed",
         _A,
         impact="A macro that was part of the public header surface was removed. "

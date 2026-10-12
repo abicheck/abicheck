@@ -346,6 +346,8 @@ UNVERIFIED = frozenset(
         "protected_visibility_changed",
         "public_api_exposes_stl_by_value",
         "public_api_internal_dependency_added",
+        "public_dependency_role_changed",
+        "public_dependency_role_unknown",
         "public_macro_removed",
         "public_macro_value_changed",
         "public_not_exported",

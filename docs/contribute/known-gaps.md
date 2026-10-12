@@ -84,11 +84,6 @@ Each entry's status line says what is still open. A PARTIAL entry's write-up als
 **Status (re-verified 2026-10-09 at `456989f`): OPEN.** actions/check-target/action.yml:1828 still routes bundle old-library to `steps.resolve.outputs.binaries-dir`, not `member-snapshots-dir`. BUNDLE_CHECK_DEPTHS is unchanged (abicheck/buildsource/bundle_member_snapshots.py:18,69). So (a) routing and (b) candidate-side per-member headers are still open.  
 `false-clean` — Bundle checks can stage per-member *baseline* header snapshots, but the Action still routes the old side to binaries and the candidate side has no per-member headers, so a bundle check cannot run at `depth: headers`. [Full write-up](known-gaps/a-kind-bundle-check-still-cannot-run-at-depth-headers-only-the.md)
 
-#### The structural source-graph diff is role-blind (2026-10-11)
-
-**Status (recorded 2026-10-11 at `2a1ccb0c8`): OPEN.** source_graph_compare.diff_source_graph keys edges on (src, dst, kind), not relation_key(); a param→return role change reads as no change.  
-`false-clean` — A public declaration that changes how it uses a type (param → return, field → base) produces an empty structural edge diff. [Full write-up](known-gaps/source-graph-structural-diff-is-role-blind.md)
-
 #### The default L2 header projection drops template/override/callback facts (2026-10-11)
 
 **Status (recorded 2026-10-11 at `2a1ccb0c8`): OPEN.** header_graph_ast_projection's graph projections (types, calls, type/entity files) and its special_member_names collection carry no template, override or callback facts; fold_template_graph and the callback/override folds run only from l5_ast_pass.  

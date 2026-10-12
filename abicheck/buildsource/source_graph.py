@@ -74,12 +74,6 @@ from ..model.graph_facts import (
     _type_node_id as _type_node_id,
     register_fact as register_fact,
 )
-
-# SourceGraphSummary/GraphSummaryDiff, the node-id constructors, and the
-# schema vocabulary (NODE_KINDS/EDGE_KINDS/...) live in
-# abicheck.model.source_graph now (ADR-061 Phase 5 item 2's "values" slice)
-# and are re-exported here for backward compatibility (the same "as"-alias
-# convention the graph_facts re-export block below already established).
 from ..model.source_graph import (
     _FULL_WALK_SOURCE_EDGES_PRODUCER as _FULL_WALK_SOURCE_EDGES_PRODUCER,
     DEPENDENCY_EDGE_KINDS as DEPENDENCY_EDGE_KINDS,
@@ -87,7 +81,6 @@ from ..model.source_graph import (
     EVIDENCE_TIER_L5 as EVIDENCE_TIER_L5,
     NODE_KINDS as NODE_KINDS,
     SOURCE_GRAPH_VERSION as SOURCE_GRAPH_VERSION,
-    GraphSummaryDiff as GraphSummaryDiff,
     SourceGraphSummary as SourceGraphSummary,
     _debug_type_node_id as _debug_type_node_id,
     _header_node_id as _header_node_id,
@@ -102,6 +95,13 @@ from ..model.source_graph import (
     _vtable_node_id as _vtable_node_id,
     function_decl_identity as function_decl_identity,
 )
+
+# SourceGraphSummary/GraphSummaryDiff, the node-id constructors, and the
+# schema vocabulary (NODE_KINDS/EDGE_KINDS/...) live in
+# abicheck.model.source_graph now (ADR-061 Phase 5 item 2's "values" slice)
+# and are re-exported here for backward compatibility (the same "as"-alias
+# convention the graph_facts re-export block below already established).
+from ..model.source_graph_diff import GraphSummaryDiff as GraphSummaryDiff
 
 # Construction (ADR-061 Phase 5 item 2's construction slice).
 from .source_graph_build import (

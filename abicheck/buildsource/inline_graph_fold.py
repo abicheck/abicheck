@@ -29,6 +29,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from ..model.source_graph_coverage import ROLE_COVERAGE_MATRIX
 from .build_evidence import BuildEvidence
 from .model import ExtractorRecord
 from .virtual_dispatch_graph import augment_graph_with_virtual_dispatch
@@ -36,35 +37,6 @@ from .virtual_dispatch_graph import augment_graph_with_virtual_dispatch
 if TYPE_CHECKING:
     from ..model.source_graph import SourceGraphSummary
     from .l5_ast_run import L5AstRun
-
-
-#: ADR-046 D3: the per-(kind, role) coverage matrix. ``type_graph.py``'s
-#: ``_walk_types`` (the pure-AST full walk this module's ``fold_type_graph``
-#: drives) emits exactly these role values, each from its own unconditional
-#: code path — unlike the ADR-038 C.8 clang-plugin producer (a *different*,
-#: filtered walk ingested via ``inputs_pack.py``, out of scope here), this
-#: pass has no known per-role gap, so a confirmed family-level pass may
-#: honestly claim every role below too. Kept here (not in ``type_graph.py``)
-#: since this module is the one call site that turns "family confirmed" into
-#: role-level claims.
-ROLE_COVERAGE_MATRIX: dict[str, tuple[str, ...]] = {
-    "TYPE_INHERITS": ("base",),
-    "TYPE_HAS_FIELD_TYPE": (
-        "field",
-        "alias",
-        "enum_underlying",
-        "template_param",
-        "default_template_arg",
-    ),
-    "DECL_HAS_TYPE": (
-        "var",
-        "return",
-        "param",
-        "template_param",
-        "default_template_arg",
-    ),
-    "DECL_REFERENCES_DECL": ("ref",),
-}
 
 
 def _role_coverage_key(pass_name: str, edge_kind: str, role: str) -> str:

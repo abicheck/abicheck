@@ -174,6 +174,8 @@ class ChangeKind(StrEnum):
     DECLARATION_COORDINATES_SHIFTED = 'declaration_coordinates_shifted'
     DECLARATION_IDENTITY_UNCHANGED = 'declaration_identity_unchanged'
     DECLARATION_IDENTITY_RECONCILED_UNRESOLVED = 'declaration_identity_reconciled_unresolved'
+    PUBLIC_DEPENDENCY_ROLE_CHANGED = 'public_dependency_role_changed'
+    PUBLIC_DEPENDENCY_ROLE_UNKNOWN = 'public_dependency_role_unknown'
     VAR_REMOVED_ELF_ONLY = 'var_removed_elf_only'
     FUNC_BECAME_INLINE = 'func_became_inline'
     FUNC_LOST_INLINE = 'func_lost_inline'
