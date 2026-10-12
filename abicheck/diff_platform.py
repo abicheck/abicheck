@@ -979,7 +979,10 @@ def _diff_tls_symbols(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     n: ElfMetadata = getattr(new, "elf", None) or ElfMetadata()
     changes: list[Change] = []
 
-    for sym_name, s_old, s_new in pair_elf_aliases(o, n):
+    tls_names = {
+        s.name for s in (*o.symbols, *n.symbols) if s.sym_type == SymbolType.TLS
+    }
+    for sym_name, s_old, s_new in pair_elf_aliases(o, n, tls_names.__contains__):
         if s_old.sym_type != SymbolType.TLS or s_new.sym_type != SymbolType.TLS:
             continue
         if s_old.size > 0 and s_new.size > 0 and s_old.size != s_new.size:
@@ -1009,7 +1012,10 @@ def _diff_protected_visibility(old: AbiSnapshot, new: AbiSnapshot) -> list[Chang
     n: ElfMetadata = getattr(new, "elf", None) or ElfMetadata()
     changes: list[Change] = []
 
-    for sym_name, s_old, s_new in pair_elf_aliases(o, n):
+    copy_reloc_names = {
+        s.name for s in (*o.symbols, *n.symbols) if s.sym_type in _COPY_RELOC_TYPES
+    }
+    for sym_name, s_old, s_new in pair_elf_aliases(o, n, copy_reloc_names.__contains__):
         old_vis = s_old.visibility or "default"
         new_vis = s_new.visibility or "default"
         if old_vis == new_vis:
@@ -1317,9 +1323,7 @@ def _diff_vtable_identity(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
 
     # Also check existing RTTI symbols for visibility or version changes
     if common_rtti:
-        for sym_name, s_old, s_new in pair_elf_aliases(o, n):
-            if sym_name not in common_rtti:
-                continue
+        for sym_name, s_old, s_new in pair_elf_aliases(o, n, common_rtti.__contains__):
             old_vis = s_old.visibility or "default"
             new_vis = s_new.visibility or "default"
             vis_changed = old_vis != new_vis

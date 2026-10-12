@@ -34,7 +34,7 @@ from pathlib import Path
 
 import pytest
 
-from abicheck.checker import ChangeKind, compare
+from abicheck.checker import ChangeKind, Verdict, compare
 from abicheck.compare.elf_alias_pairs import pair_elf_aliases
 from abicheck.elf_metadata import ElfMetadata, ElfSymbol, SymbolBinding, SymbolType
 from abicheck.extract.elf_symbol_classify import _populate_elf_visibility
@@ -518,3 +518,101 @@ def test_real_library_alias_change_survives_a_stored_baseline(tmp_path: Path) ->
     new = dump(new_so, [], version="2")
     kinds = _changed_kinds(compare(baseline, new), "foo")
     assert ChangeKind.SYMBOL_BINDING_CHANGED in kinds
+
+
+def test_single_alias_version_bump_is_not_a_leaked_finding() -> None:
+    # One export per side with a bumped version tag: base reported nothing, and
+    # the per-version matching must not start reporting a removal and an
+    # addition for it.
+    old = ElfMetadata(
+        symbols=[
+            _named("foo", "LIB_1", sym_type=SymbolType.FUNC, origin_lib="libdep.so")
+        ]
+    )
+    new = ElfMetadata(
+        symbols=[
+            _named("foo", "LIB_2", sym_type=SymbolType.FUNC, origin_lib="libdep.so")
+        ]
+    )
+    kinds = _changed_kinds(compare(_snap(old), _snap(new)), "foo")
+    assert ChangeKind.SYMBOL_LEAKED_FROM_DEPENDENCY_CHANGED not in kinds
+
+
+def test_ambiguous_decline_is_attributed_to_the_detector_that_judged_it() -> None:
+    # Ambiguous aliases of ``foo``; ``bar`` is a plain single export. Only the
+    # per-symbol detector examines every name, so only it may record a decline
+    # for ``foo``; the TLS, protected-visibility and RTTI detectors must not.
+    old = ElfMetadata(
+        symbols=[
+            _named("foo", "VER1", sym_type=SymbolType.FUNC),
+            _named("foo", "VER2", sym_type=SymbolType.FUNC),
+            _named("bar", "VER1", sym_type=SymbolType.FUNC),
+        ]
+    )
+    new = ElfMetadata(
+        symbols=[
+            _named("foo", "VER3", sym_type=SymbolType.FUNC),
+            _named("foo", "VER4", sym_type=SymbolType.FUNC),
+            _named("bar", "VER1", sym_type=SymbolType.FUNC),
+        ]
+    )
+    result = compare(_snap(old), _snap(new))
+    declining = [
+        det.name
+        for det in result.detector_results
+        if any(entity == "foo" for entity, _ in det.declined)
+    ]
+    assert len(declining) == 1, declining
+    assert all(
+        entity != "bar" for det in result.detector_results for entity, _ in det.declined
+    )
+
+
+def test_tls_size_change_on_any_alias_is_breaking() -> None:
+    # TLS_VAR_SIZE_CHANGED defaults to BREAKING, so a multi-alias library whose
+    # hidden alias changed size now fails where it passed before. Pinned here so
+    # the Merge Danger text stays true.
+    base = [
+        _named("tv", "VER2", sym_type=SymbolType.TLS, size=8),
+        _named("tv", "VER1", is_default=False, sym_type=SymbolType.TLS, size=8),
+    ]
+    new = list(base)
+    new[0] = _named("tv", "VER2", sym_type=SymbolType.TLS, size=16)
+    result = compare(
+        _snap(ElfMetadata(symbols=list(base))), _snap(ElfMetadata(symbols=new))
+    )
+    assert result.verdict == Verdict.BREAKING
+
+
+def test_stored_and_fresh_mixed_declarations_have_equal_binding_fact(
+    tmp_path: Path,
+) -> None:
+    from abicheck.serialization import load_snapshot
+    from abicheck.storage.snapshot_codec import save_snapshot
+
+    elf = ElfMetadata(
+        symbols=[
+            _named(
+                "foo", "VER2", sym_type=SymbolType.FUNC, binding=SymbolBinding.GLOBAL
+            ),
+            _named(
+                "foo",
+                "VER1",
+                is_default=False,
+                sym_type=SymbolType.FUNC,
+                binding=SymbolBinding.WEAK,
+            ),
+        ]
+    )
+    fresh = Function(name="foo", mangled="foo", return_type="int")
+    snap = _snap(elf, [fresh])
+    _populate_elf_visibility(snap)  # the dump path: mixed name is left unset
+
+    stored_src = _snap(elf, [Function(name="foo", mangled="foo", return_type="int")])
+    stored_src.declarations.functions[0].elf_binding = SymbolBinding.GLOBAL
+    path = tmp_path / "mixed.json"
+    save_snapshot(stored_src, path)
+    loaded = load_snapshot(path).declarations.functions[0]
+
+    assert loaded.elf_binding is None and fresh.elf_binding is None
+    assert loaded.elf_binding_fact == fresh.elf_binding_fact

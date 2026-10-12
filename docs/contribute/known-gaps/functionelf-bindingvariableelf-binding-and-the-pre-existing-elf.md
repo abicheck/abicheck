@@ -23,14 +23,18 @@ Index: [Known gaps](../known-gaps.md)
 - Declarations: `_populate_elf_visibility` and `backfill_missing_elf_binding` take values from `unambiguous_symbol`. On load, a declaration whose aliases disagree has its binding and visibility cleared, so a snapshot written by an older last-wins writer does not keep the wrong value.
 - `snapshot_cache.py` bumped to v36, since declaration output changed. A warm cache would otherwise replay the last-alias values.
 
-**Verified.** `tests/test_elf_version_alias_binding.py` (34 tests):
+**Verified.** `tests/test_elf_version_alias_binding.py` (38 tests):
 - A table covers each converted reader (TLS size, protected visibility, COMMON, UNIQUE, RTTI visibility, leaked removal) with the change on the non-last and on the last alias. On the first-fix commit (`98314ad`) the non-last cases for TLS, protected, COMMON, RTTI and leaked fail; the last-alias controls pass.
 - Declined leftovers, the `is_default` rule for renames, and the reader guard fail on `98314ad` and pass now.
 - A real gcc-built library is dumped, saved, loaded through the storage codec, and compared. Alias versions survive the round trip, and `foo` is reported.
 - A stored snapshot with a disagreeing declaration comes back with binding and visibility unset, while an agreeing one keeps its value.
-- Single-version libraries are unchanged; the existing ELF, binding, visibility and diff-platform test files pass (1,813 tests before the table and round-trip additions).
+- Single-version libraries are unchanged, including a version-tag bump on a leaked dependency symbol (name presence still decides); the existing ELF, binding, visibility and diff-platform test files pass (1,813 tests before the table and round-trip additions).
 
-**Residual by design.** `symbol_map` remains for external callers and is documented as one entry per bare name. The rule-based declines are accounting only: they never change a finding, a verdict or an exit code.
+**Residual by design.**
+- `symbol_map` remains for external callers and is documented as one entry per bare name.
+- A finding still names the bare symbol, so `foo: global → weak` does not say which alias changed. Carrying the version in a finding is a report-field change and needs its own ADR.
+- Declines are accounting only and never change a finding. An ambiguous name is declined only by a detector that judged it.
+- Verdict impact: `TLS_VAR_SIZE_CHANGED` defaults to `BREAKING`, so a size change on a hidden alias of a multi-alias library now fails where it was hidden. The other newly reachable kinds (`PROTECTED_VISIBILITY_CHANGED`, `VTABLE_SYMBOL_IDENTITY_CHANGED`, `SYMBOL_BINDING_BECAME_UNIQUE`, `SYMBOL_LEAKED_FROM_DEPENDENCY_CHANGED`) default to `COMPATIBLE_WITH_RISK`; `COMMON_SYMBOL_RISK`, `SYMBOL_BINDING_CHANGED` and `SYMBOL_ELF_VISIBILITY_CHANGED` default to `COMPATIBLE`.
 
 
 `ElfMetadata.symbol_map` is a `name -> ElfSymbol` dict

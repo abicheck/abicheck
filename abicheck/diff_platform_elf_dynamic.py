@@ -107,6 +107,8 @@ def _diff_leaked_dependency_symbols(old_elf: Any, new_elf: Any) -> list[Change]:
     # version tag keeps a surviving alias from hiding the removed one.
     for sym_name, old_list in old_aliases.items():
         new_list = new_aliases.get(sym_name, [])
+        if len(old_list) == 1 and len(new_list) == 1:
+            continue  # one export per side: name presence decides, as before
         new_versions = {s.version for s in new_list}
         gone = [s for s in old_list if s.version not in new_versions]
         origin = next((s.origin_lib for s in gone if s.origin_lib is not None), None)
@@ -130,6 +132,8 @@ def _diff_leaked_dependency_symbols(old_elf: Any, new_elf: Any) -> list[Change]:
     # Aliases added: the same version-tag matching, on the new side.
     for sym_name, new_list in new_aliases.items():
         old_list = old_aliases.get(sym_name, [])
+        if len(old_list) == 1 and len(new_list) == 1:
+            continue  # one export per side: name presence decides, as before
         old_versions = {s.version for s in old_list}
         fresh = [s for s in new_list if s.version not in old_versions]
         origin = next((s.origin_lib for s in fresh if s.origin_lib is not None), None)

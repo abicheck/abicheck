@@ -23,12 +23,16 @@ sides, which is the old/new matching the symbol diff needs.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from ..model.elf_facts import ElfMetadata, ElfSymbol
 from .declined_comparisons import record_declined
 
 
 def pair_elf_aliases(
-    old_elf: ElfMetadata, new_elf: ElfMetadata
+    old_elf: ElfMetadata,
+    new_elf: ElfMetadata,
+    keep: Callable[[str], bool] = lambda _name: True,
 ) -> list[tuple[str, ElfSymbol, ElfSymbol]]:
     """Pair every symbol-versioned alias that exists on both sides.
 
@@ -41,12 +45,16 @@ def pair_elf_aliases(
     rename. Any other leftover is ambiguous: it is skipped rather than matched to
     an arbitrary alias, and recorded as a declined comparison so the report shows
     it instead of dropping it silently.
+
+    *keep* selects the bare names this caller judges. Other names are neither
+    paired nor declined, so a detector never reports a decline for a name it
+    would not have examined.
     """
     new_aliases = new_elf.symbol_aliases
     pairs: list[tuple[str, ElfSymbol, ElfSymbol]] = []
     for name, old_list in old_elf.symbol_aliases.items():
         new_list = new_aliases.get(name)
-        if not new_list:
+        if not new_list or not keep(name):
             continue
         if len(old_list) == 1 and len(new_list) == 1:
             pairs.append((name, old_list[0], new_list[0]))

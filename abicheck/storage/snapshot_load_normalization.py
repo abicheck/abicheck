@@ -164,12 +164,12 @@ def _clear_ambiguous_elf_facts(snap: AbiSnapshot) -> None:
     for func in snap.declarations.functions:
         if _has_disagreeing_aliases(elf, func.mangled):
             func.elf_binding = None
-            func.elf_binding_fact = None
+            func.elf_binding_fact = Fact.not_collected()
             func.elf_visibility = None
     for var in snap.declarations.variables:
         if _has_disagreeing_aliases(elf, var.mangled):
             var.elf_binding = None
-            var.elf_binding_fact = None
+            var.elf_binding_fact = Fact.not_collected()
             var.elf_visibility = None
 
 
