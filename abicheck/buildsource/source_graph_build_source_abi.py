@@ -379,8 +379,8 @@ def fold_source_edges(
     ``TYPE_INHERITS`` rows collected during the *same* L4 frontend invocation
     are folded in exactly like a separate ``call_graph``/``type_graph`` replay
     pass would, using the identical node-id scheme -- so an edge here
-    reconciles with (de-duplicates against, via ``add_edge``'s
-    ``(src, dst, kind)`` key) one already present from L4 declaration
+    reconciles with (de-duplicates against, via ``add_edge``'s full
+    ``relation_key()``) one already present from L4 declaration
     enrichment or a separate replay pass, first-writer-wins.
 
     Malformed rows (missing edge-kind/src/dst, or a non-dict entry from a

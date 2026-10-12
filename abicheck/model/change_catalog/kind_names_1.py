@@ -539,6 +539,16 @@ KIND_NAMES_1: tuple[tuple[str, str, str | None], ...] = (
         "graph-reconciled with SOME identity evidence differing that the classifier cannot attribute to a rename or a move → COMPATIBLE_WITH_RISK",
     ),
     (
+        "PUBLIC_DEPENDENCY_ROLE_CHANGED",
+        "public_dependency_role_changed",
+        "ADR-077 D4: a public entry keeps its L5 graph dependency on an entity but uses it in a different role (param -> return, field -> alias, ...) → RISK",
+    ),
+    (
+        "PUBLIC_DEPENDENCY_ROLE_UNKNOWN",
+        "public_dependency_role_unknown",
+        "ADR-077 D4: one side's L5 graph carries no role data for a public entry's dependency (stored before roles were stamped), so a role change can be neither confirmed nor ruled out → COMPATIBLE (coverage note)",
+    ),
+    (
         "VAR_REMOVED_ELF_ONLY",
         "var_removed_elf_only",
         "exported ELF-only data symbol removed -> binary break",
