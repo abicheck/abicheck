@@ -47,6 +47,7 @@ from typing import TYPE_CHECKING, Any
 
 import click
 
+from .buildsource.header_graph_ast_projection import header_graph_bisection_scope
 from .checker import DiffResult
 from .cli_resolve import _normalize_binary_input
 from .frontends.cli.release_member_errors import (
@@ -684,9 +685,10 @@ def _compare_release_libraries(
 
     # `workflows.crosscheck_ownership`: the whole-product cross-source check
     # is answered once at release level, entered around the dispatch so each
-    # parallel worker inherits it. A one-member release has no union to take.
+    # parallel worker inherits it (as it does the header-graph bisection memo).
+    # A one-member release has no union to take.
     owned = _release_owned_crosschecks() if len(matched_keys) > 1 else frozenset()
-    with release_owned_checks_scope(owned):
+    with release_owned_checks_scope(owned), header_graph_bisection_scope():
         if plan.pool_size > 1 and len(matched_keys) > 1:
             library_results.extend(
                 _compare_release_parallel(
@@ -694,9 +696,7 @@ def _compare_release_libraries(
                 ),
             )
         else:
-            library_results.extend(
-                _compare_release_sequential(matched_keys, ctx),
-            )
+            library_results.extend(_compare_release_sequential(matched_keys, ctx))
     cache_counters.record_shared_cache_counters()
     from .frontends.cli.release_member_restamp import dispose_release_unreached_types
 

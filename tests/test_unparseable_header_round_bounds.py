@@ -21,7 +21,7 @@ import pytest
 
 import abicheck.extract.unparseable_header_fallback as fallback
 from abicheck.buildsource.header_graph_ast_projection import (
-    HEADER_GRAPH_BISECTION_MEMO,
+    header_graph_bisection_scope,
 )
 from abicheck.errors import SnapshotError
 from abicheck.extract.unparseable_header_fallback import (
@@ -196,11 +196,11 @@ def test_non_fatal_diagnostics_never_probe(monkeypatch: pytest.MonkeyPatch) -> N
 # --- header-graph clang pass: one bisection per shared header tree ----------
 
 
-@pytest.fixture(autouse=True)
-def _clear_memo():
-    HEADER_GRAPH_BISECTION_MEMO.clear()
-    yield
-    HEADER_GRAPH_BISECTION_MEMO.clear()
+@pytest.fixture
+def _request_scope():
+    """One compare request: the bisection memo exists only inside it."""
+    with header_graph_bisection_scope():
+        yield
 
 
 def _tree(tmp_path: Path, n: int, bad: set[int]) -> list[Path]:
@@ -245,6 +245,7 @@ def _fake_clang(bad_names: set[str], calls: list[list[str]]):
     ("n", "bad", "libraries"),
     [(8, {2}, 4), (16, {1, 9, 14}, 3), (5, {0, 4}, 2), (12, set(range(0, 12, 2)), 4)],
 )
+@pytest.mark.usefixtures("_request_scope")
 def test_libraries_sharing_a_header_tree_bisect_once(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -280,6 +281,7 @@ def test_libraries_sharing_a_header_tree_bisect_once(
         }
 
 
+@pytest.mark.usefixtures("_request_scope")
 def test_memo_misses_on_different_flags_or_edited_header(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -301,3 +303,71 @@ def test_memo_misses_on_different_flags_or_edited_header(
     before = len(calls)
     acquire_header_graph_ast(paths, [], "c++", None)
     assert len(calls) - before == base
+
+
+@pytest.mark.parametrize(("n", "bad", "requests"), [(6, {3}, 3), (9, {0, 5, 8}, 2)])
+def test_memo_is_dropped_when_the_request_ends(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    n: int,
+    bad: set[int],
+    requests: int,
+) -> None:
+    """A failure learned in one request never outlives it: the next request
+    re-runs the whole-tree parse (so a repaired included header, which the
+    key does not fingerprint, is seen), and nothing accumulates."""
+    import abicheck.buildsource.header_graph_ast_projection as hgp
+    import abicheck.extract.headers.clang.backend as clang_backend
+    from abicheck.service_header_graph_attach import acquire_header_graph_ast
+
+    paths = _tree(tmp_path, n, bad)
+    bad_names = {paths[i].name for i in bad}
+    calls: list[list[str]] = []
+    monkeypatch.setattr(
+        clang_backend, "clang_header_dump", _fake_clang(bad_names, calls)
+    )
+    memos = []
+    for _ in range(requests):
+        with header_graph_bisection_scope():
+            before = len(calls)
+            acquire_header_graph_ast(paths, [], "c++", None)
+            # Every request starts cold: whole-tree failure + bisection.
+            assert len(calls) - before > 2
+            assert calls[before] == [p.name for p in paths]
+            memos.append(hgp.current_bisection_memo())
+        assert not hgp._BISECTION_SCOPE.active()
+    assert len({id(m) for m in memos}) == requests
+    # Repair the "included" header without touching the top-level files the
+    # key fingerprints: a fresh request parses the whole tree once, cleanly.
+    bad_names.clear()
+    with header_graph_bisection_scope():
+        before = len(calls)
+        got = acquire_header_graph_ast(paths, [], "c++", None)
+        assert len(calls) - before == 1
+    assert got.ast_failure is None
+
+
+def test_threads_of_one_request_share_the_memo(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """K libraries dumped by worker threads of one request (the release
+    fan-out's ``run_keyed_in_threads``) bisect the shared tree once."""
+    import abicheck.extract.headers.clang.backend as clang_backend
+    from abicheck.service_header_graph_attach import acquire_header_graph_ast
+    from abicheck.workflows.keyed_thread_pool import run_keyed_in_threads
+
+    paths = _tree(tmp_path, 8, {2, 6})
+    calls: list[list[str]] = []
+    monkeypatch.setattr(
+        clang_backend, "clang_header_dump", _fake_clang({"h2.h", "h6.h"}, calls)
+    )
+    with header_graph_bisection_scope():
+        results = run_keyed_in_threads(
+            [f"lib{i}" for i in range(4)],
+            lambda _k: acquire_header_graph_ast(paths, [], "c++", None),
+            max_workers=4,
+            on_error=lambda exc, _k: pytest.fail(str(exc)),
+        )
+    whole_tree = [c for c in calls if c == [p.name for p in paths]]
+    assert len(whole_tree) == 1
+    assert len({r.ast_failure for r in results}) == 1

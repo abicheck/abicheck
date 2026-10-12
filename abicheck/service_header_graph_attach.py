@@ -309,9 +309,9 @@ def acquire_header_graph_ast(
     headers and compile context, never the snapshot it is later attached to.
     """
     from .buildsource.header_graph_ast_projection import (
-        HEADER_GRAPH_BISECTION_MEMO,
         HeaderGraphAstProjection,
         MemoizedParseFailure,
+        current_bisection_memo,
         header_graph_memo_key,
         merge_header_graph_ast_projections,
         parse_header_groups_bisecting,
@@ -454,10 +454,10 @@ def acquire_header_graph_ast(
     ast_failure: str | None = None
     projection_from_groups: HeaderGraphAstProjection | None = None
     # Libraries sharing a header tree and flags share a failed parse's
-    # outcome; the slot spans parse + bisect (HeaderGraphBisectionMemo).
+    # outcome within one request; the slot spans parse + bisect.
     memo_key: tuple[Any, ...] | None = None
     memo_hit: tuple[tuple[Path, ...], str] | None = None
-    memo_scope = ExitStack()
+    memo_scope, bisection_memo = ExitStack(), current_bisection_memo()
     try:
         resolved_headers = expand_header_inputs(headers)
         if resolved_headers:
@@ -502,7 +502,7 @@ def acquire_header_graph_ast(
                 resolved_headers, eff_includes, eff_tokens, deferred_dirs, lang, cc
             )
             # A sibling's known failure skips straight to the recovery below.
-            HEADER_GRAPH_BISECTION_MEMO.enter(memo_scope, memo_key)
+            bisection_memo.enter(memo_scope, memo_key)
         # ADR-050 D5 (Codex review): this internal semantic header graph
         # (G29 Phase A) must be built from the SAME frontend_context as the
         # primary snapshot it's attached to -- a device-context dump's
@@ -614,7 +614,7 @@ def acquire_header_graph_ast(
                     ),
                 )
             if memo_key is not None and memo_hit is None:
-                HEADER_GRAPH_BISECTION_MEMO.put(memo_key, failed, ast_failure)
+                bisection_memo.put(memo_key, failed, ast_failure)
             if parts:
                 projection_from_groups = merge_header_graph_ast_projections(parts)
             names = ", ".join(p.name for p in failed[:5])

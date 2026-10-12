@@ -82,13 +82,15 @@ from __future__ import annotations
 
 import threading
 from collections.abc import Callable, Hashable, Iterator, Sequence
-from contextlib import ExitStack, contextmanager
+from contextlib import AbstractContextManager, ExitStack, contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypeVar
 
 from ..errors import SnapshotError
 from ..model import ScopeOrigin
+from ..model.execution_cache import request_key
+from ..model.execution_cache_scoped import ScopedCache
 from ..model.graph_facts import (
     CONF_HIGH,
     GraphEdge,
@@ -463,7 +465,7 @@ class MemoizedParseFailure(SnapshotError):
 
 
 class HeaderGraphBisectionMemo:
-    """Process-wide memo of which headers a header-graph clang parse loses.
+    """One request's memo of which headers a header-graph clang parse loses.
 
     The header-graph parse runs once per library per side, and libraries of
     one package usually share one header tree and one compile context. When
@@ -509,13 +511,6 @@ class HeaderGraphBisectionMemo:
         with self._lock:
             self._outcomes[key] = (tuple(failed), failure)
 
-    def clear(self) -> None:
-        with self._lock:
-            # Only the outcomes: a key lock may be held by an in-flight
-            # computation, and dropping it would let a second caller mint a
-            # fresh lock for the same key and compute it concurrently.
-            self._outcomes.clear()
-
 
 def header_tree_signature(headers: Sequence[Path]) -> tuple[tuple[str, int, int], ...]:
     """``(path, size, mtime_ns)`` per header, so an edited header misses."""
@@ -548,5 +543,25 @@ def header_graph_memo_key(
     )
 
 
-#: The one memo the header-graph attach uses (tests ``clear()`` it).
-HEADER_GRAPH_BISECTION_MEMO = HeaderGraphBisectionMemo()
+#: The memo lives only inside :func:`header_graph_bisection_scope` (one
+#: compare/release request). The key fingerprints the top-level headers, not
+#: every transitively included one, so it is valid only while those inputs
+#: cannot change -- one request -- and a process-wide memo would replay a
+#: stale failure after an included header is repaired, and keep a lock and an
+#: outcome per key forever. Worker threads share it by inheriting the
+#: request's context (``copy_context``), as the release fan-out and the
+#: header-graph prefetch both do.
+_BISECTION_SCOPE = ScopedCache("abicheck.buildsource.header_graph_bisection")
+
+
+def header_graph_bisection_scope() -> AbstractContextManager[None]:
+    """Share header-graph bisection outcomes across one request's dumps."""
+    return _BISECTION_SCOPE.scope()
+
+
+def current_bisection_memo() -> HeaderGraphBisectionMemo:
+    """This request's memo; a throwaway one outside a scope (or in reference
+    mode), so a bare dump simply memoizes nothing."""
+    return _BISECTION_SCOPE.get_or_compute(
+        request_key(memo="header_graph_bisection"), HeaderGraphBisectionMemo
+    )
