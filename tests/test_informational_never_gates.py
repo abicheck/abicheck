@@ -327,3 +327,73 @@ def test_pr_comment_never_blames_quality_for_an_informational_finding() -> None:
     for kind in EXPECTED_INFORMATIONAL:
         assert _finding_category("compatible", kind) == "informational"
     assert _finding_category("compatible", "visibility_leak") == "quality_issues"
+
+
+# ── release PR comment: member and release-global rows ───────────────────────
+
+
+def _release_report(config: dict, *, member_info: int, global_kinds: list[str]) -> dict:
+    return {
+        "verdict": "COMPATIBLE",
+        "old_dir": "/o",
+        "new_dir": "/n",
+        "libraries": [
+            {
+                "library": "lib.so",
+                "verdict": "COMPATIBLE",
+                "breaking": 0,
+                "source_breaks": 0,
+                "risk_changes": 0,
+                "compatible_additions": 0,
+                "quality_issues": 0,
+                "informational": member_info,
+            }
+        ],
+        "matrix_verdict": "COMPATIBLE",
+        "matrix_findings": [
+            {"kind": k, "symbol": f"s{i}", "description": "x"}
+            for i, k in enumerate(global_kinds)
+        ],
+        "severity": {"config": config, "exit_code": 0},
+        "unmatched_old": [],
+        "unmatched_new": [],
+    }
+
+
+@pytest.mark.parametrize(
+    "config",
+    [
+        {"quality_issues": "error"},
+        dict.fromkeys(
+            ("abi_breaking", "potential_breaking", "quality_issues", "addition"),
+            "error",
+        ),
+    ],
+)
+def test_release_pr_comment_counts_informational_as_safe_never_blocking(
+    config: dict,
+) -> None:
+    """A member's ``informational`` count and a release-global roll-up both
+    land in Safe, and neither names ``quality_issues`` as a blocker."""
+    from abicheck.pr_comment import build_model
+
+    model = build_model(
+        _release_report(config, member_info=2, global_kinds=["public_surface_grew"])
+    )
+    assert model.counts == (0, 0, 3)
+    assert "quality_issues" not in model.breaking_categories
+
+
+def test_release_pr_comment_global_quality_finding_still_blocks() -> None:
+    """Control: a real quality finding beside the roll-up still gates."""
+    from abicheck.pr_comment import build_model
+
+    model = build_model(
+        _release_report(
+            {"quality_issues": "error"},
+            member_info=0,
+            global_kinds=["public_surface_grew", "soname_bump_unnecessary"],
+        )
+    )
+    assert model.counts == (1, 0, 1)
+    assert model.breaking_categories == frozenset({"quality_issues"})
