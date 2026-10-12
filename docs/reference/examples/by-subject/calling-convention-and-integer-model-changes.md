@@ -3,7 +3,7 @@
 
 The generated calling convention, parameter-passing model, or a platform's integer/floating-point width for a type changes -- callers and callees stop agreeing on the machine-level contract even though no symbol name changed.
 
-_7 case(s)._ [← back to all subjects](index.md)
+_9 case(s)._ [← back to all subjects](index.md)
 
 ## Cases
 
@@ -16,3 +16,5 @@ _7 case(s)._ [← back to all subjects](index.md)
 | [case129_struct_return_convention](../case129_struct_return_convention.md) | Struct-Return Convention Change | 🔴 BREAKING | Breaking |
 | [case177_long_double_abi_changed](../case177_long_double_abi_changed.md) | long double ABI Changed | 🔴 BREAKING | Breaking |
 | [case209_calling_convention_changed_via_macro](../case209_calling_convention_changed_via_macro.md) | Calling Convention Changed via a Macro | 🔴 BREAKING | Breaking |
+| [case212_calling_convention_macro_undefined_after_use](../case212_calling_convention_macro_undefined_after_use.md) | Calling Convention Macro `#undef`'d After Use | 🔴 BREAKING | Breaking |
+| [case213_calling_convention_function_like_macro_changed](../case213_calling_convention_function_like_macro_changed.md) | Calling Convention via a Function-Like Macro | 🔴 BREAKING | Breaking |

@@ -307,6 +307,7 @@ _F7 = (
     "tests.fixture_fabricates_a_state_the_types_forbid",
     "tests.locale_dependent_repo_text_read",
     "tests.host_dependent_expectation",
+    "tests.language_rule_oracle_restates_the_detector",
 )
 _F9 = (
     "serialization.interpreter_dependent_str_subclass_token",

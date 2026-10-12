@@ -79,7 +79,7 @@ from ...castxml_header_compat import write_castxml_aggregate
 from ...path_aliases import absolutize_include_roots
 from ..backend import HeaderParseRequest
 from .calling_convention import calling_conventions_in
-from .macro_table import attach_macro_table, resolve_macro_table
+from .preprocessed_text import attach_preprocessed_text, resolve_preprocessed_text
 
 # The orchestrator's logger name, kept from before the move.
 log = logging.getLogger("abicheck.dumper")
@@ -447,17 +447,17 @@ def _record_calling_convention_macros(
     work_dir: Path,
     run: CastxmlRunner,
 ) -> None:
-    """Attach the compiler-resolved calling-convention macros to *root* and
-    to *out_xml* (so the cached AST keeps them); see :mod:`.macro_table`.
-    A failed preprocess run leaves both untouched."""
-    table = resolve_macro_table(
-        cmd, work_dir, run, lambda t: bool(calling_conventions_in(t))
+    """Attach the preprocessed text of the declarations spelling a calling
+    convention to *root* and to *out_xml* (so the cached AST keeps it); see
+    :mod:`.preprocessed_text`. A failed preprocess run leaves both untouched."""
+    table = resolve_preprocessed_text(
+        cmd, root, work_dir, run, lambda t: bool(calling_conventions_in(t))
     )
     if table is None:
         return
     extra = Element("_")
-    attach_macro_table(extra, table)
-    attach_macro_table(root, table)
+    attach_preprocessed_text(extra, table)
+    attach_preprocessed_text(root, table)
     data = out_xml.read_bytes()
     close_at = data.rfind(b"</")
     if close_at == -1:

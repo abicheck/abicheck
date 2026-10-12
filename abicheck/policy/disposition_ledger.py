@@ -341,8 +341,11 @@ class DispositionLedger:
         *,
         application_point: str,
         rule: RuleProvenance | None = None,
+        disposition: Disposition = Disposition.SUPPRESSED,
     ) -> DispositionLedger:
-        """A copy with each of *changes* now labelled ``SUPPRESSED``.
+        """A copy with each of *changes* now labelled *disposition*
+        (``SUPPRESSED`` by default; the release's unreached-type pass uses
+        ``OUT_OF_CONTRACT``, ``workflows.release_member_attribution``).
 
         For a release-level policy decision applied strictly *after* the
         per-comparison ledger closed -- a cross-member decision an individual
@@ -381,7 +384,7 @@ class DispositionLedger:
         superseded._records = [
             replace(
                 record,
-                disposition=Disposition.SUPPRESSED,
+                disposition=disposition,
                 application_point=application_point,
                 rule=rule,
                 gate_excluded=True,

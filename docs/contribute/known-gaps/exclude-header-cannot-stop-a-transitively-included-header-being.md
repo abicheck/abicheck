@@ -3,15 +3,15 @@ doc_type: contributor
 audience:
   - contributor
 level: advanced
-lifecycle: active
+lifecycle: historical
 generated: false
 ---
 
 # `--exclude-header` cannot stop a transitively-included header being analyzed
 
-Index: [Known gaps](../known-gaps.md)
+Index: [Known gaps — closed](../archive/known-gaps-closed.md)
 
-**Status (re-verified 2026-10-11 at `46c127111`): OPEN.** `extract/header_exclusions.py::apply_header_exclusions_to_inputs` still filters only the resolved (directory-expanded) header list; nothing prunes a header reached through another header's `#include`. Unmatched patterns now warn (`unmatched_exclusion_patterns`), which does not address the transitive case.
+**Status (2026-10-11): CLOSED.** Already fixed in code before this re-verification: the exclusion is honoured post-parse by declaring header, not only on the parse roots. `extract/header_exclusions.py::scoping_header_predicate` widens the dump's dependency scope (`workflows/dump/dependency_scope.py`) so a declaration whose `source_header` matches a pattern is scoped out like a toolchain header's, for both castxml and clang (each records the declaring file); `workflows/header_exclusion_audit.py` records a pattern as achieved when it matched only a transitively reached header. The headers are still parsed, so types the public header needs still resolve. Decision for a public declaration whose *type* lives in an excluded header: the type is kept and checked (direct-reference retention, same as a toolchain type a public signature names), because its layout is part of the public ABI. Disposition stays recorded (ADR-067): a `coverage_warnings` line names the excluded patterns, edge coverage carries `dependency_headers_excluded`, and an exported symbol declared only in an excluded header is reported as `exported_not_public` naming that header. No schema, default or exit code changed. Regression: `tests/test_exclude_header_transitive_integration.py` (public.h includes internal.h; internal-only layout/enum change reported without the flag, not with it; a public.h break still exits 4 with it; castxml and clang over g++-built libs), alongside `tests/test_exclude_header_dependency_scope.py` and the embedded-type case in `tests/test_checkout_root_independence_integration.py`. Out of scope: `dump --include-system-declarations` (full dependency scope) does not apply the transitive half, by that flag's own contract.
 
 
 **Update (2026-10): the descriptor half is moot.** The ABICC `compat` front

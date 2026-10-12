@@ -35,6 +35,20 @@ _TAIL = " __attribute__((ms_abi))"
         (f"CALL struct S (void){_TAIL}", f"struct S (void){_TAIL}", "struct S"),
         # No macro sugar: a typedef'd or qualified return type is kept.
         ("size_t (int)", "unsigned long (int)", "size_t"),
+        # Function-like macro qualifiers (2026-10-11 re-audit).
+        (
+            "CALL(ms_abi) int (int) __attribute__((ms_abi))",
+            "int (int) __attribute__((ms_abi))",
+            "int",
+        ),
+        ("CALL(sysv_abi) int (int)", "int (int)", "int"),
+        (
+            "CC(__attribute__((ms_abi))) const char *(int) __attribute__((ms_abi))",
+            "const char *(int) __attribute__((ms_abi))",
+            "const char *",
+        ),
+        ("A(x) B int (int)", "int (int)", "int"),
+        ("F(int (int)", "int (int)", "F(int (int)"),  # unbalanced: left alone
         ("ns::T (int)", "ns::Impl (int)", "ns::T"),
         ("unsigned int (int)", None, "unsigned int"),
         ("const Widget &(void)", "const ns::Widget &(void)", "const Widget &"),

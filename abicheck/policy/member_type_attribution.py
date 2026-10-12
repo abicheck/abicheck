@@ -28,15 +28,17 @@ are evidence; :data:`UNESTABLISHED` is the honest answer whenever
 :attr:`~abicheck.export_surface.ExportSurface.exclusion_is_provable` is
 false on a side that knows the type (an unexported or untyped root, an
 unresolved type edge, no export table at all) or the name is ambiguous.
-Attribution never *removes* a finding and never changes a count, verdict
-or exit code -- it only narrows which members a product-level finding is
-said to affect, and falls back to "not established" rather than to
-silence (step 3's own rule: "must fall back to (1), never to silence").
+:func:`attribute_type` never *removes* a finding -- it only narrows which
+members a product-level finding is said to affect, and falls back to "not
+established" rather than to silence (step 3's own rule). The verdict half,
+:func:`unreached_types_owned_elsewhere`, relieves a member of a type only
+when its own evidence proves the type unreached *and* a sibling reaches it;
+the finding stays recorded on the member as ``out_of_contract``.
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -47,6 +49,7 @@ __all__ = [
     "REACHES",
     "UNESTABLISHED",
     "attribute_type",
+    "unreached_types_owned_elsewhere",
 ]
 
 #: The member's export surface reaches the type on at least one side.
@@ -74,3 +77,30 @@ def attribute_type(name: str, surfaces: Iterable[ExportSurface]) -> str | None:
     if all(s.exclusion_is_provable for s in knowing):
         return PROVEN_UNREACHABLE
     return UNESTABLISHED
+
+
+def unreached_types_owned_elsewhere(
+    attributions: Mapping[str, Mapping[str, str]],
+) -> dict[str, dict[str, tuple[str, ...]]]:
+    """``{member: {type: reaching members}}`` -- the type findings a member
+    may keep out of its *own* verdict.
+
+    The release-level policy half of step 3: a member whose evidence proves
+    it does not reach a type is relieved of that type's findings **only**
+    when another member's surface does reach it, so the finding still gates
+    the release through that member. A type no member reaches stays counted
+    wherever it was found, and an ``unestablished`` member keeps it --
+    exclusion is never the fallback for missing evidence.
+    """
+    reaching: dict[str, list[str]] = {}
+    for member, by_type in attributions.items():
+        for name, verdict in by_type.items():
+            if verdict == REACHES:
+                reaching.setdefault(name, []).append(member)
+    out: dict[str, dict[str, tuple[str, ...]]] = {}
+    for member, by_type in attributions.items():
+        for name, verdict in by_type.items():
+            owners = tuple(sorted(m for m in reaching.get(name, ()) if m != member))
+            if verdict == PROVEN_UNREACHABLE and owners:
+                out.setdefault(member, {})[name] = owners
+    return out

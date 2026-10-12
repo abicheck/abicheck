@@ -13,10 +13,11 @@ This module recovers the convention from the declaration CastXML itself
 located (``file``/``line``), reading only that declaration's own text: the
 specifiers before the function's name and the tail after its parameter list,
 never the parameter list itself (a callback parameter's ``ms_abi`` belongs to
-the parameter's type, not to the function). A convention spelled through a
-macro is expanded with the compiler-resolved macro table the castxml run
-recorded (:mod:`.macro_table`) before the text is read, so ``CALL int f()``
-reads as whatever ``CALL`` really expanded to in that translation unit.
+the parameter's type, not to the function). When the castxml run recorded the
+preprocessed text (:mod:`.preprocessed_text`), that text is read instead of
+the raw header, so ``CALL int f()`` reads as whatever ``CALL`` expanded to at
+that declaration -- function-like macros, ``#undef`` and later redefinitions
+included.
 """
 
 from __future__ import annotations
@@ -27,11 +28,13 @@ from xml.etree.ElementTree import Element
 
 from ....model.cc_attributes import CC_ATTRIBUTE_BASES
 from .context import CastxmlParserContext
+from .preprocessed_text import (
+    LOOKAHEAD_LINES as _LOOKAHEAD_LINES,
+    LOOKBACK_LINES as _LOOKBACK_LINES,
+)
 
-#: How far above the reported line a declaration's specifiers may start.
-_LOOKBACK_LINES = 8
-#: How far below it the parameter list and trailing attributes may run.
-_LOOKAHEAD_LINES = 12
+#: ``source_lines_cache`` key prefix of a file's preprocessed lines.
+_PREPROCESSED_KEY = "\0preprocessed:"
 
 _BLOCK_COMMENT_RE = re.compile(r"/\*.*?\*/", re.DOTALL)
 _LINE_COMMENT_RE = re.compile(r"//[^\n]*")
@@ -117,24 +120,29 @@ def _declaration_outside_params(window: str, name: str, name_at: int) -> str:
     return head + " " + (tail[:stop] if stop != -1 else tail)
 
 
-def _expand_cc_macros_on_lines(window: str, macros: dict[str, str]) -> str:
-    """*window* with each calling-convention macro expanded in place, line
-    by line so the reported line keeps its index."""
-    pattern = re.compile(r"\b(" + "|".join(map(re.escape, macros)) + r")\b")
-    return "\n".join(
-        pattern.sub(lambda m: macros[m.group(1)], line) for line in window.split("\n")
-    )
-
-
 def _declaration_lines(
     ctx: CastxmlParserContext, el: Element
 ) -> tuple[list[str], int] | None:
-    """The source lines of *el*'s file and its 1-based line, or ``None``."""
+    """The source lines of *el*'s file and its 1-based line, or ``None``.
+
+    With recorded preprocessed text those lines are the preprocessed ones,
+    and a file without any spells no convention (``None``).
+    """
     file_el = ctx.id_map.get(el.get("file", ""))
     line_raw = el.get("line", "")
     fname = file_el.get("name", "") if file_el is not None else ""
     if not fname or not line_raw.isdigit():
         return None
+    table = ctx.preprocessed
+    if table is not None:
+        lines = ctx.source_lines_cache.get(_PREPROCESSED_KEY + fname)
+        if lines is None:
+            lines = table.source_lines(fname)
+            if lines is None:
+                return None
+            ctx.source_lines_cache[_PREPROCESSED_KEY + fname] = lines
+        line_no = int(line_raw)
+        return (lines, line_no) if 1 <= line_no <= len(lines) else None
     lines = ctx.source_lines_cache.get(fname)
     if lines is None:
         try:
@@ -161,19 +169,15 @@ def _blank_directives(window: str) -> str:
     return "\n".join(out)
 
 
-def _code_window(
-    ctx: CastxmlParserContext, lines: list[str], line_no: int
-) -> tuple[str, int, int]:
-    """The code around *line_no* (comments/literals blanked, convention
-    macros expanded) and the reported line's ``[start, end)`` offsets."""
+def _code_window(lines: list[str], line_no: int) -> tuple[str, int, int]:
+    """The code around *line_no* (comments/literals and directives blanked)
+    and the reported line's ``[start, end)`` offsets."""
     start = max(0, line_no - 1 - _LOOKBACK_LINES)
     before = "\n".join(lines[start : line_no - 1])
     here_and_after = "\n".join(lines[line_no - 1 : line_no - 1 + _LOOKAHEAD_LINES])
     window = _blank_directives(_blank_non_code(before + "\n" + here_and_after))
-    table = ctx.cc_macro_table
-    if table is not None and table.macros:
-        window = _expand_cc_macros_on_lines(window, table.macros)
-    # Located by line index, not by ``len(before)``: expansion changes lengths.
+    # Located by line index, not by ``len(before)``: blanked directive lines
+    # are emptied, which changes lengths.
     target = before.count("\n") + 1
     line_start = sum(len(ln) + 1 for ln in window.split("\n")[:target])
     line_end = window.find("\n", line_start)
@@ -191,7 +195,7 @@ def source_calling_conventions(
     located = _declaration_lines(ctx, el) if name else None
     if located is None:
         return set()
-    window, line_start, line_end = _code_window(ctx, *located)
+    window, line_start, line_end = _code_window(*located)
     # Every spelling of ``name(`` on the reported line, not the first: the
     # line may also carry an expression or another declaration naming it,
     # and a first-match search would let that shadow the real declaration
@@ -203,7 +207,7 @@ def source_calling_conventions(
         found |= calling_conventions_in(
             _declaration_outside_params(window, name, match.start())
         )
-    table = ctx.cc_macro_table
+    table = ctx.preprocessed
     if table is not None and table.default_cc:
         # Spelling the target's default convention changes nothing.
         found.discard(table.default_cc)

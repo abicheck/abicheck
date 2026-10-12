@@ -481,6 +481,11 @@ KIND_NAMES_1: tuple[tuple[str, str, str | None], ...] = (
         "Pointee of a returned pointer/reference lost const/volatile -- direct calls fine, function-pointer consumers break",
     ),
     (
+        "FUNC_RETURN_POINTEE_QUALIFIER_CHANGED",
+        "func_return_pointee_qualifier_changed",
+        "Pointee of a returned pointer lost const/volatile below a level the old type does not protect with const -- the result no longer converts to the old type",
+    ),
+    (
         "OVERLOAD_AMBIGUITY_INTRODUCED",
         "overload_ambiguity_introduced",
         "A new overload makes an existing call form ambiguous (e.g. a {} argument where both overloads take a scalar)",

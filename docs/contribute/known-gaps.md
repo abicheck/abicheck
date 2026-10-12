@@ -46,16 +46,6 @@ Each open entry below has its status line, a risk tag and a short summary; the f
 
 Open correctness gaps, in the order of the maintainer ruling of 2026-10-01 (closed items from that ruling are in the archive):
 
-### A directory `compare` still feeds the union `-H` set to every member (no per-member header operand); unreached type findings still count in member verdicts
-
-**Status (re-verified 2026-10-09 at `456989f`): PARTIAL.** Step 1 (dedupe), the public_not_exported release-level half and the step-3 attribution report (workflows/release_member_attribution.py, policy/member_type_attribution.py) have landed. Still open: step 2 (a per-member header operand, plus the quadratic union-header walk) and keeping proven_unreachable findings out of member verdicts.  
-`false-positive` — Every member of a directory/package `compare` parses the union of all members' `-H` headers, so type findings a member never reaches still count in its verdict, and the walk grows quadratically with library count. Remaining: a per-member header operand (step 2) and keeping `proven_unreachable` findings out of member verdicts. [Full write-up](known-gaps/a-directory-compare-still-feeds-the-union-h-set-to-every-member.md)
-
-### `--exclude-header` cannot stop a transitively-included header being analyzed
-
-**Status (re-verified 2026-10-11 at `46c127111`): OPEN.** `extract/header_exclusions.py::apply_header_exclusions_to_inputs` still filters only the resolved (directory-expanded) header list; nothing prunes a header reached through another header's `#include`. Unmatched patterns now warn (`unmatched_exclusion_patterns`), which does not address the transitive case.  
-`false-positive` — Exclusion filters only the resolved header list, so a header pulled in through another header's `#include` is still parsed and can still produce findings. [Full write-up](known-gaps/exclude-header-cannot-stop-a-transitively-included-header-being.md)
-
 Next, unranked (the `--no-baseline` one-sided-detector gap, the target-platform gap and the untagged `dependency_scope` gap were closed on 2026-10-10; see the archive). Each of these can let a run read as cleaner or more comparable than its evidence supports:
 
 ### An informational, no-material-change reconciliation outcome gates the build under `--severity-preset strict` (2026-09-12)
@@ -285,9 +275,14 @@ Each entry's status line says what is still open. A PARTIAL entry's write-up als
 - [The `clang -M` include pass is unaffected by a warm AST cache — confirmed at `--repeat 3`](known-gaps/the-clang-m-include-pass-is-unaffected-by-a-warm-ast-cache.md)  
   **Status (re-verified 2026-10-09 at `456989f`): OPEN.** header_include_memo.py is a process-wide memo with no persistent/AST-cache tier, so a new run still recomputes the include graph whatever the warm AST cache holds.
 
+#### A directory `compare`'s per-member header narrowing is ELF-only
+
+**Status (2026-10-11): OPEN.** A PE or Mach-O member of a directory/package `compare` still parses the union `-H` set, because `workflows/release_member_headers.py` reads exports only from ELF. A second, ELF-side limit: an export spelled only through macro token pasting is not matched to its header (see the write-up).
+`perf` — The narrowing reads ELF export tables only (`elf_symbol_filter.exported_symbol_names`). For a PE or Mach-O member it finds no export tokens and falls back to the union operand. That fallback is safe (it over-reports and never hides a finding), but it leaves the per-member union walk and the duplicated type findings in place on those platforms. The parent entry is closed (see the [archive](archive/known-gaps-closed.md)). [Full write-up](known-gaps/a-directory-compare-s-per-member-header-narrowing-is-elf-only.md)
+
 #### Multi-library L2 compare scales quadratically with library count
 
-`perf` — Memoization landed (scaling budget 1.7); each member still walks the union header set, which step 2 of the Priority-1 entry removes.
+`perf` — Memoization landed (scaling budget 1.7), and step 2 (2026-10-11) means an ELF member no longer walks the union header set; the scaling budget has not been re-measured since.
 
 - [Multi-library L2 compare scales quadratically with library count](known-gaps/multi-library-l2-compare-scales-quadratically-with-library-count.md)  
   **Status (re-verified 2026-10-09 at `456989f`): PARTIAL.** The memoization landed: the libraries budget is 1.7 in scripts/check_l2_scaling_perf.py:103 and header_scan_memo/include memo exist. Still open: every member walks the union header set and runs the per-member field parse (step 2 of entry 73).

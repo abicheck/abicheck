@@ -186,12 +186,12 @@ def test_injected_castxml_runner_runs_the_parse(
     )
     fields = parse_header_ast_fields(parser, producer="castxml")
     assert "abicheck_b2b_probe" in {f.name for f in fields.functions}
-    # One parse, plus the macro-table preprocess run (``macro_table``).
+    # One parse, plus the preprocess run (``preprocessed_text``).
     parses = [c for c in commands if "--castxml-output=1" in c]
     assert len(parses) == 1
     assert "castxml" in Path(parses[0][0]).name
     assert [c for c in commands if c not in parses] == [
-        c for c in commands if "-E" in c and "-dM" in c
+        c for c in commands if "-E" in c and "-dD" in c
     ]
 
 

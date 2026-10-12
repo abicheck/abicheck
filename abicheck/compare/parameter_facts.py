@@ -389,6 +389,35 @@ def _pointee_qualifier_delta(
     return n[0] - o[0], o[0] - n[0]
 
 
+def _qualification_converts(
+    src: str | None, dst: str | None, *, c_rule: bool = False
+) -> bool:
+    """Whether a *src* value converts to *dst* by a qualification conversion
+    alone (C++ [conv.qual]), for two spellings of the same indirection depth.
+
+    Every qualifier of *src* must be kept by *dst*, and wherever *dst* adds
+    one, *dst* must carry ``const`` at every level between it and the top
+    (``char **`` -> ``const char * const *`` converts; ``-> const char **``
+    does not, or the callee's ``char *`` could be pointed at a ``const char``).
+
+    With *c_rule* the C rule (C11 6.5.16.1) applies instead: only the
+    qualifiers of the first pointed-to type may be added, every deeper level
+    must match exactly (``char **`` -> ``char * const *`` converts,
+    ``-> const char * const *`` does not).
+    """
+    s, d = _qualifier_levels(src or ""), _qualifier_levels(dst or "")
+    if s is None or d is None or s[1] != d[1] or not s[0] <= d[0]:
+        return False
+    depth = d[1]
+    if c_rule:
+        return all(level == depth - 1 for _, level in d[0] - s[0])
+    return all(
+        ("const", above) in d[0]
+        for _, level in d[0] - s[0]
+        for above in range(level + 1, depth)
+    )
+
+
 def return_pointee_qualifier_changes(
     mangled: str,
     name: str,
@@ -396,6 +425,7 @@ def return_pointee_qualifier_changes(
     r_new: str | None,
     *,
     entity_id: EntityId | None,
+    c_callable: bool = False,
 ) -> list[Change]:
     """``FUNC_RETURN_POINTEE_QUALIFIER_ADDED``/``_REMOVED`` -- the return-type
     mirror of :func:`pointee_qualifier_changes`, with the direction reversed
@@ -403,18 +433,30 @@ def return_pointee_qualifier_changes(
 
     * a qualifier gained at any level (``char *`` -> ``const char *``): a
       caller binding the result to a mutable pointer breaks.
-    * qualifiers only lost: every direct call still converts implicitly; a
-      consumer holding the function in a pointer of the old type breaks --
-      a risk conditional on consumer use.
+    * qualifiers only lost, and the new result still converts implicitly to
+      the old type (:func:`_qualification_converts`): every direct call
+      compiles; a consumer holding the function in a pointer of the old type
+      breaks -- a risk conditional on consumer use (``_REMOVED``).
+    * qualifiers only lost, but the result no longer converts
+      (``const char **`` -> ``char **``): a caller binding it to the old
+      type breaks (``_CHANGED``, 2026-10-11 re-audit).
+
+    A *c_callable* function (C linkage) also has C consumers, so the stricter
+    C conversion rule decides: ``const char * const *`` -> ``char * const *``
+    converts in C++ but C rejects it.
     """
     delta = _pointee_qualifier_delta(r_old, r_new)
     if delta is None:
         return []
+    if delta[0]:
+        kind = ChangeKind.FUNC_RETURN_POINTEE_QUALIFIER_ADDED
+    elif _qualification_converts(r_new, r_old, c_rule=c_callable):
+        kind = ChangeKind.FUNC_RETURN_POINTEE_QUALIFIER_REMOVED
+    else:
+        kind = ChangeKind.FUNC_RETURN_POINTEE_QUALIFIER_CHANGED
     return [
         make_change(
-            ChangeKind.FUNC_RETURN_POINTEE_QUALIFIER_ADDED
-            if delta[0]
-            else ChangeKind.FUNC_RETURN_POINTEE_QUALIFIER_REMOVED,
+            kind,
             symbol=mangled,
             name=name,
             old=r_old,

@@ -379,6 +379,7 @@ EVIDENCE_TIER_BY_KIND: dict[str, str] = {
     "param_pointee_qualifier_changed": "L2",
     "func_return_pointee_qualifier_added": "L2",
     "func_return_pointee_qualifier_removed": "L2",
+    "func_return_pointee_qualifier_changed": "L2",
     "overload_ambiguity_introduced": "L2",
     # ── L2: CastXML schema-completeness (all castxml/header-only facts) ──
     "field_default_initializer_removed": "L2",
@@ -552,6 +553,7 @@ KINDLESS_CASE_TIER: dict[str, str] = {
     # A calling convention respelled through a macro: the declaration text
     # differs only in the public header AST, the binaries are identical.
     "case210_calling_convention_respelled_via_macro": "L2",
+    "case214_calling_convention_macro_redefined_after_use": "L2",
 }
 
 
