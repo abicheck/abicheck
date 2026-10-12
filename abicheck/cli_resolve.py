@@ -44,6 +44,8 @@ if TYPE_CHECKING:
     from .dry_run_estimate import CompileContext
     from .model import AbiSnapshot
     from .model.ownership_rules import OwnershipRequest
+    from .service_compare_pipeline import ResolvedComparePair
+    from .workflows.contracts import CompareRequest
     from .workflows.extraction import DumpManifest
 
 
@@ -386,7 +388,7 @@ def classify_compare_operand(path: Path) -> str:
     return "file"
 
 
-def _resolve_compare_snapshots(
+def _resolve_compare_pair(
     old_input: Path,
     new_input: Path,
     old_fmt: str | None,
@@ -425,7 +427,7 @@ def _resolve_compare_snapshots(
     # callers (`api.positional_slot_rebinding`, tests/regressions/manifest.py).
     exclude_headers: tuple[str, ...] = (),
     ownership: OwnershipRequest | None = None,  # ADR-075: both sides share it
-) -> tuple[AbiSnapshot, AbiSnapshot]:
+) -> tuple[CompareRequest, ResolvedComparePair]:
     """Load both ABI snapshots and (optionally) populate ELF dependency info.
 
     ``include_dependencies`` (default ``False``, mirroring ``dump``'s own
@@ -581,6 +583,15 @@ def _resolve_compare_snapshots(
         raise click.UsageError(str(exc)) from exc
     except SnapshotError as exc:
         raise click.ClickException(str(exc)) from exc
+    return request, pair
+
+
+def _resolve_compare_snapshots(
+    *args: Any, **kwargs: Any
+) -> tuple[AbiSnapshot, AbiSnapshot]:
+    """:func:`_resolve_compare_pair`'s two snapshots, for a caller that needs
+    neither the request nor the resolved pair's evidence."""
+    _, pair = _resolve_compare_pair(*args, **kwargs)
     return pair.old, pair.new
 
 

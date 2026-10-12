@@ -245,12 +245,9 @@ def snapshot_identity_digest(snap: AbiSnapshot) -> str:
     :func:`note_if_same_binary_compared`'s snapshot-digest fallback.
 
     Thin re-export of ``serialization.snapshot_content_digest`` -- exists so
-    a ``frontends`` caller (``frontends/cli/runtime.py``'s own
-    ``_finalize_compare_result``, Codex review: importing ``serialization``
-    directly there crossed the documented ``frontends`` dependency boundary,
-    which permits only ``model``/``workflows``/``report``) can reach the
-    identical computation ``service_compare_pipeline.classify_compare_pair``
-    uses without importing a non-permitted module itself.
+    a ``workflows`` caller (``workflows.compare_classify``, the one
+    classification every scalar ``compare`` route runs) reaches it without
+    importing ``serialization`` itself.
     """
     from ..serialization import snapshot_content_digest
 

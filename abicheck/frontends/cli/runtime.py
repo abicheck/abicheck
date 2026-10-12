@@ -642,74 +642,17 @@ def _log_debug_resolution(
 
 def _finalize_compare_result(
     result: DiffResult,
-    metadata_old_input: Path,
-    metadata_new_input: Path,
     *,
     show_redundant: bool,
     severity_config: SeverityConfig | None = None,
     contract_evaluation: bool = False,
-    old_snapshot: AbiSnapshot | None = None,
-    new_snapshot: AbiSnapshot | None = None,
 ) -> None:
-    """Attach metadata and emit redundancy/filter/suppression output.
+    """Emit redundancy/filter/suppression output for a classified result.
 
-    ``metadata_old_input``/``metadata_new_input`` must be the *original*
-    library paths -- resolved through any GNU ld linker-script chain, but
-    from *before* ``_embed_inline_source_sides`` may have rewritten
-    ``old_input``/``new_input`` to a temporary embedded-snapshot ``.abi.json``
-    path (Codex review). ``_collect_metadata`` returns ``None`` for a
-    JSON/Perl-text path, so passing the post-embed operands here would
-    silently drop ``note_if_same_binary_compared``'s byte-identical-binaries
-    warning for any ``--old/new-sources``/raw ``--build-info`` comparison,
-    even when the two underlying native binaries really are identical.
-    Callers already resolve this same pre-embed pair for
-    ``--used-by``/``--required-symbol`` scoping (``used_by_old_input``/
-    ``used_by_new_input``) -- reuse that pair here rather than threading a
-    third copy of the same resolution through.
-
-    ``old_snapshot``/``new_snapshot``, when given, feed Item 4's snapshot-
-    content-digest fallback (Codex review, fresh evidence: this native CLI
-    path was missing it entirely, unlike the typed-API path's
-    ``service_compare_pipeline.classify_compare_pair``) -- only consulted
-    when neither side got real metadata above.
+    Operand metadata and the same-binary note are attached by the shared
+    classification (``workflows.compare_classify``), from the pre-embed
+    operand paths the CLI hands it.
     """
-    # Routed through `workflows.extraction`/`workflows.gate`, not
-    # `binary_utils`/`confidence` directly, and not through `service` --
-    # this module is `frontends` layer under ADR-061, which may import
-    # `workflows` but must never import back through the `service`/`cli`
-    # compatibility facades (abicheck/frontends/AGENTS.md).
-    # `note_if_same_binary_compared` lives in `workflows.gate` rather than
-    # `workflows.extraction` (Codex review): it decides part of the process
-    # response a completed comparison returns, not an operation performed on
-    # an input, which is what `extraction.py`'s own docstring scopes it to.
-    from ...workflows.extraction import resolve_linker_script_chain
-    from ...workflows.gate import note_if_same_binary_compared
-
-    def _hashable_path(
-        p: Path,
-    ) -> Path:  # a text snapshot/manifest can coincidentally match the INPUT()/GROUP() probe -- skip linker-script resolution for it (Codex review)
-        return (
-            p
-            if _sniff_text_format(p) in ("json", "symvers")
-            else resolve_linker_script_chain(p)
-        )
-
-    result.old_metadata = _collect_metadata(_hashable_path(metadata_old_input))
-    result.new_metadata = _collect_metadata(_hashable_path(metadata_new_input))
-    old_digest = new_digest = None
-    if (
-        result.old_metadata is None
-        and result.new_metadata is None
-        and old_snapshot is not None
-        and new_snapshot is not None
-    ):
-        from ...workflows.gate import snapshot_identity_digests
-
-        old_digest, new_digest = snapshot_identity_digests(old_snapshot, new_snapshot)
-    note_if_same_binary_compared(
-        result, old_snapshot_digest=old_digest, new_snapshot_digest=new_digest
-    )
-
     if show_redundant and result.redundant_changes:
         _merge_redundant_changes(result)
     # Plan slice 7o: both ledgers are unconditional. They used to be gated

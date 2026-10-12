@@ -109,8 +109,10 @@ and ``source``). Callers that resolve build-info/source packs
 *out-of-band* (a real, pre-built pack directory, not embedded inline) must
 project or withhold those packs themselves before diffing them — this
 module only ever sees what already lives on the snapshot object it was
-handed; see ``cli_compare_helpers.run_compare``'s own comment on its
-``prepare_embedded_build_source`` call for the call-site half of that fix.
+handed. The native ``compare`` CLI attaches such a pack onto the snapshot
+*before* the shared classification projects it
+(``cli_buildsource_helpers._with_out_of_band_packs``), so it is capped here
+like an embedded one.
 
 **Deliberately out of scope, not silently assumed handled**: platform
 container facts (``elf``/``pe``/``macho``/``dwarf``/``dwarf_advanced``
@@ -561,9 +563,7 @@ def project_snapshot_to_depth(
     everything.** The returned object is always a distinct ``AbiSnapshot``,
     so every field this function *rebinds* (``build_mode``, ``build_source``)
     is rebound on the copy and never on *snap* — and so is a field a caller
-    rebinds afterwards, which the native ``compare`` CLI relies on
-    (``cli_compare_helpers.run_compare`` assigns ``old.build_source`` on the
-    projected snapshot). What it owns *beneath* those fields is scoped to
+    rebinds afterwards. What it owns *beneath* those fields is scoped to
     what each rung actually writes to:
 
     * **Below ``headers``** — :func:`_strip_header_and_above_evidence`
