@@ -679,7 +679,7 @@ def _dwarf_context_status(old: AbiSnapshot, new: AbiSnapshot) -> tuple[str, list
     """
 
     from .model.debug_evidence import debug_info_evidence
-    from .model.dwarf_facts import AdvancedExtractionStatus, advanced_extraction_status
+    from .model.dwarf_facts import AdvancedExtractionStatus
 
     old_ev, new_ev = debug_info_evidence(old), debug_info_evidence(new)
     old_basic, new_basic = old_ev.basic, new_ev.basic
@@ -690,8 +690,8 @@ def _dwarf_context_status(old: AbiSnapshot, new: AbiSnapshot) -> tuple[str, list
     failed_sides = [
         (side, snap)
         for side, snap in (("old", old), ("new", new))
-        if advanced_extraction_status(snap.declarations.debug_advanced)
-        is AdvancedExtractionStatus.FAILED
+        if (adv := snap.declarations.debug_advanced) is not None
+        and adv.extraction is AdvancedExtractionStatus.FAILED
     ]
     if failed_sides:
         failed_notes = [

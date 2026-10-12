@@ -31,7 +31,6 @@ from ..model.dwarf_facts import (
     DwarfMetadata,
     EnumInfo,
     StructLayout,
-    advanced_extraction_status,
     advanced_facts_collected,
     debug_info_present,
 )
@@ -87,7 +86,11 @@ def debug_layout_view(snap: AbiSnapshot) -> DebugLayoutView:
         enums=layout.enums,
         base_type_sizes=layout.base_types,
         advanced_collected=advanced_facts_collected(advanced),
-        advanced_status=advanced_extraction_status(advanced),
+        advanced_status=(
+            advanced.extraction
+            if advanced is not None
+            else AdvancedExtractionStatus.UNRECORDED
+        ),
         layout=layout,
         advanced=advanced or AdvancedDwarfMetadata(),
     )

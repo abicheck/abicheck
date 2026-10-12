@@ -206,15 +206,6 @@ def debug_info_present(*metadata: DwarfMetadata | AdvancedDwarfMetadata | None) 
     return any(meta is not None and meta.has_dwarf for meta in metadata)
 
 
-def advanced_extraction_status(
-    meta: AdvancedDwarfMetadata | None,
-) -> AdvancedExtractionStatus:
-    """The recorded extraction status of *meta*; ``UNRECORDED`` when there is none."""
-    if meta is None:
-        return AdvancedExtractionStatus.UNRECORDED
-    return meta.extraction
-
-
 def advanced_facts_collected(meta: AdvancedDwarfMetadata | None) -> bool:
     """Whether *meta* carries advanced DWARF facts that were actually parsed.
 
