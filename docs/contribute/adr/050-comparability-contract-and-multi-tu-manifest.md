@@ -1628,6 +1628,37 @@ attributable field values on `ExtractionContract` (not just the fingerprint
 hash) specifically so a later carve-out can reason about *what* changed,
 not merely *that* something did.
 
+**Amendment (2026-10, oneDAL 2026.0): header-set *evolution*, not only
+growth.** The "direction" argument above did not survive real data:
+oneDAL 2026.0 deleted 122 public headers (whole algorithm directories,
+`apriori`, `adaboost`, ...) with flags, defines and include topology
+unchanged, and `compare` refused it as "manifest/CLI-flag drift" (exit 16)
+after up to 54 minutes of parsing. A removed public header is evidence of an
+API removal — the root `AGENTS.md` rules "Absent is not removed" and "Record
+before disposing" — so the pair must be compared and the removed
+declarations reported. The scope carve-out is therefore restated over any
+verifiable change of the declared set (`_scope_field_is_set_evolution`:
+additions, removals, both, a side collapsing to the single-entry sentinel
+or to nothing). The drift the gate exists to catch is extraction
+configuration, which `profile_fingerprint` carries and which stays refused:
+compiler, standard, macros, `ext:`/`label:` include slots, the `sys:`
+bucket, slot topology, and — the one header-related hazard — a header
+declared on both sides but parsed on only one. The `header_sequence`/
+`include_sequence` carve-outs are generalized symmetrically
+(`comparability_sequences.header_sequence_is_scope_confirmed_evolution`/
+`include_sequence_is_scope_confirmed_evolution`): every entry no longer
+parsed/owned must be one the scope removed, every newly parsed/owned one it
+added, survivors keep their relative order, and an owned root slot may
+appear or vanish only with a subtree of confirmed-added/removed headers.
+Identities are realigned by directory prefix first
+(`scope_header_delta`), which also retires the "header added outside the
+old common root" limitation recorded below. The single-header sentinel
+paragraph above is superseded the same way: a sentinel side is accepted
+when both sides parsed exactly their declared scope. The gate still runs
+after extraction: the header set is the only input known before the parse,
+and it no longer refuses; what does refuse is computed from the parse's own
+compiler probe and depfile.
+
 **Correction (Codex review, PR #641 follow-up): the carve-out's original
 `return None` was placed inside the scope `if` block, exiting the whole
 function and silently skipping the profile check that follows.** A release

@@ -1,7 +1,10 @@
 # ADR-077: Exposure Modes and Change-Sensitive Propagation
 
 **Date:** 2026-10-11
-**Status:** Proposed — not implemented. Amends
+**Status:** Proposed — partially implemented: D4's role half shipped
+2026-10-12 (`diff_source_graph`'s `changed_edges`/`role_unknown_edges`, the
+`public_dependency_role_changed`/`_unknown` findings); exposure modes, the
+sensitivity table, D4's mode half and D5 are not implemented. Amends
 [ADR-046](046-source-graph-identity-v2-and-evidence-merge.md) D5
 (`TraversalPolicy`) and [ADR-044](044-reachability-aware-suppression.md)
 (effective public ABI). Sequenced after the identity and per-member
@@ -44,8 +47,9 @@ in both directions:
 
 - a layout change to a type that is reachable only through an opaque
   pointer can still count against the verdict (a false positive);
-- a role change on an existing edge is invisible to the structural diff
-  ([known gap](../known-gaps/source-graph-structural-diff-is-role-blind.md));
+- a role change on an existing edge was invisible to the structural diff
+  ([closed known gap](../known-gaps/source-graph-structural-diff-is-role-blind.md),
+  fixed by D4's role half);
 - body-dependent edges are declined wholesale, because coverage is one
   blanket `header_inline_bodies` unit
   ([known gap](../known-gaps/header-body-coverage-is-not-per-body.md)), a
@@ -116,6 +120,15 @@ content.
 removed+added pair nor drops it. Existing consumers of the coarse
 `added`/`removed` sets are unaffected (ADR-046 D1's promise is kept).
 
+*Role half implemented (2026-10-12).* `GraphSummaryDiff.changed_edges` holds
+each dependency whose role set differs; when exactly one side carries
+role-less edges for it (a graph stored before roles were stamped) the entry
+goes to `role_unknown_edges`, a coverage gap rather than a change.
+`policy/source_graph_role_findings.py` reports a public entry's change as
+`public_dependency_role_changed` (RISK) and a non-comparable one as
+`public_dependency_role_unknown` (COMPATIBLE). The mode half waits on
+`ExposureMode` (D1).
+
 ### D5. Body coverage per declaration
 
 A header pass records, for each inline or template body, an ADR-063
@@ -133,8 +146,8 @@ body is not `PRESENT` and shows no edge stays `unknown`.
 
 New modes and families come from compact projections of the existing L2
 AST parse ([`l4-l2-extraction-convergence.md`](../plans/l4-l2-extraction-convergence.md)).
-That includes the template/override/callback facts the projection drops
-today ([known gap](../known-gaps/l2-header-projection-drops-template-override-callback-facts.md)).
+The template/override/callback facts already come that way
+(`buildsource/semantic_fact_folds.py`; [closed gap](../known-gaps/l2-header-projection-drops-template-override-callback-facts.md)).
 No rule may add its own clang invocation.
 
 ## Prerequisites (tracked elsewhere, not reopened here)

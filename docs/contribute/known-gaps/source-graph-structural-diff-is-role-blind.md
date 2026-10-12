@@ -3,15 +3,15 @@ doc_type: contributor
 audience:
   - contributor
 level: advanced
-lifecycle: active
+lifecycle: historical
 generated: false
 ---
 
 # The structural source-graph diff is role-blind: a `param` → `return` change on the same edge reads as no change
 
-Index: [Known gaps](../known-gaps.md)
+Index: [Known gaps — closed and moot](../archive/known-gaps-closed.md)
 
-**Status (recorded 2026-10-11 at `2a1ccb0c8`): OPEN.** `buildsource/source_graph_compare.py::diff_source_graph` keys edges on `SourceEdge.key()` = `(src, dst, kind)`, not ADR-046 D1's `relation_key()`; its own docstring says "role-level diff granularity is not implemented here".
+**Status (2026-10-12): CLOSED.** `diff_source_graph` now matches edges on `relation_key()` and reports a kept dependency's role change as a `changed_edges` entry (ADR-077 D4), or as `role_unknown_edges` when one side carries no role data. Public entries' role changes surface as `public_dependency_role_changed`. See the [archive entry](../archive/known-gaps-closed.md) for the fix and its tests. Original write-up (recorded 2026-10-11 at `2a1ccb0c8`, status OPEN) follows.
 
 `false-clean` — When a public declaration keeps its dependency on a type but changes *how* it uses it (`param` → `return`, `field` → `base`), the structural `added`/`removed` edge diff is empty. A two-sided experiment (external review, 2026-10-11) confirmed a zero diff for `param` → `return`.
 

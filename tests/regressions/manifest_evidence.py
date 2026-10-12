@@ -662,7 +662,12 @@ EVIDENCE_BUG_CLASSES: tuple[BugClass, ...] = (
             "one reported header name. What the order fact still refuses is "
             "unchanged: an EXISTING header that moved, growth the declared "
             "surface does not confirm as new, and any other diverging "
-            "profile field alongside it."
+            "profile field alongside it. The same holds for a SHRINKING "
+            "declared set: removed public headers (pure removal, removal "
+            "plus addition, all but one, all of them, a removal that moves "
+            "the common header root) are API evolution the diff engine "
+            "reports as removals, never extraction drift -- while a header "
+            "declared on both sides but parsed on only one stays refused."
         ),
         # Real integration evidence: a project whose public headers are
         # discovered by a sorted directory sweep added one header named
@@ -676,6 +681,11 @@ EVIDENCE_BUG_CLASSES: tuple[BugClass, ...] = (
         seed_tests=(
             "tests/test_comparability_gate_header_insertion.py",
             "tests/test_cli_compare_added_public_header_live.py",
+            # oneDAL 2026.0 removed 122 public headers and was refused as
+            # "CLI-flag drift" (exit 16): every header-set waiver was
+            # growth-only.
+            "tests/test_comparability_gate_header_removal.py",
+            "tests/test_cli_compare_removed_public_header_live.py",
         ),
         # The gate-level seed tests call `check_contracts_comparable`/
         # `checker.compare` directly; the live sibling runs the reported
@@ -692,6 +702,9 @@ EVIDENCE_BUG_CLASSES: tuple[BugClass, ...] = (
                 "multi-insertion",
                 "reorder",
                 "shrink",
+                "removal+addition",
+                "all-removed",
+                "root-shifting-removal",
                 "duplicate",
                 "sentinel",
             ),
@@ -1072,6 +1085,81 @@ EVIDENCE_BUG_CLASSES: tuple[BugClass, ...] = (
                     "re-derives the finding at HIGH."
                 ),
                 reference="abicheck/policy/release_contract_reconciliation.py",
+            ),
+        ),
+    ),
+    BugClass(
+        id="evidence.producer_drops_facts_its_input_holds",
+        invariant=(
+            "Two producers that read the same AST derive the same facts for "
+            "every family both claim, because they parse, merge and fold it "
+            "through one owner rather than each keeping its own subset; and a "
+            "family a producer never derived carries no pass flag, so a graph "
+            "lacking it (one stored before the family existed there) reads as "
+            "a coverage gap in a comparison, never as removed or added facts. "
+            "The defect shape: the default L2 header projection kept type and "
+            "call edges only, so headers-only graphs had no template, override "
+            "or callback facts although the same parse held them."
+        ),
+        fixed_by=(1553,),
+        seed_tests=(
+            # headers-only == L5 family edges, four C++ fixtures, whole-tree
+            # and streamed reader; family changes surface in the graph diff;
+            # a real v1 graph with the families stripped is a gap.
+            "tests/test_header_graph_semantic_facts.py",
+            # compiler-free: a committed clang capture through the owner, the
+            # stream, the cache, and both routes (L5 dump replaced).
+            "tests/test_semantic_fact_folds.py",
+            # F2 harness cell: one header through both routes, plus a mutant.
+            "tests/test_family_f2_route_parity.py",
+            # every family x {stored old, stored new, both looked, degraded/
+            # narrowed, unflagged legacy} against the family's own flags.
+            "tests/test_source_graph_diff_semantic_coverage.py",
+            # the streamed reader equals the materialized whole-tree one.
+            "tests/test_header_graph_ast_stream.py",
+        ),
+        public_surfaces=("cli",),
+        axes={
+            "family": ("template", "override", "virtual_dispatch", "callback"),
+            "producer": ("l2_header_whole_tree", "l2_header_streamed", "l5_per_tu"),
+            "operand": ("live", "stored_before_the_family"),
+        },
+    ),
+    BugClass(
+        id="evidence.distinct_encoded_states_collapsed_to_one_value",
+        invariant=(
+            "Two states a binary format encodes differently stay two states "
+            "in the model when a check reads the difference: an export bound "
+            "to a versioned ELF library's VER_FLG_BASE definition (index 1, "
+            "objdump -T 'Base') and one with no version at all (no "
+            ".gnu.version, or index 0) both left ElfSymbol.version empty, so "
+            "unversioned_exported_symbol flagged every base-API symbol of "
+            "zlib. The distinguishing fact is recorded beside the shared "
+            "field (ElfSymbol.version_binding), never by changing that "
+            "field's value, which other detectors read; and a stored document "
+            "that never recorded it decodes as unknown, which the check "
+            "reports as not evaluated rather than resolving either way."
+        ),
+        fixed_by=(1558,),
+        seed_tests=(
+            "tests/test_unversioned_exported_symbol.py",
+            "tests/test_family_f1_evidence_ablation.py",
+        ),
+        public_surfaces=("cli",),
+        axes={
+            "linker": ("GNU ld", "gold", "lld"),
+            "binding": ("base", "named", "unversioned", "unknown"),
+            "operand": ("live", "stored v58", "pre-v58 stored"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "An export a version script forgot to name is bound to "
+                    "the base version by every linker tested, so it is "
+                    "indistinguishable in the binary from intended base API "
+                    "and is not flagged."
+                ),
+                reference="docs/contribute/archive/known-gaps-closed.md",
             ),
         ),
     ),

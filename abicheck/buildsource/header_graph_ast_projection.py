@@ -38,7 +38,12 @@ compact projections of it:
   declared identity -> declaring file, consulted only to resolve the
   *source* side of a ``DECL_REFERENCES_DECL`` edge.
 
-Taking all four **before** the graph exists lets the caller drop its
+It also carries, from the same parse, the override, template and callback
+facts (``semantic_facts``, :mod:`~abicheck.buildsource.semantic_fact_folds`
+-- the owner the L5 pass folds those families through too), so a
+headers-only graph has the facts its AST holds rather than none of them.
+
+Taking all of it **before** the graph exists lets the caller drop its
 reference to the AST first, so the two never occupy memory at the same time
 and the graph's own long-lived objects land in arenas the AST parse has
 already released rather than pinning them.
@@ -75,11 +80,17 @@ fallback) stays there -- it touches no AST at all.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+import threading
+from collections.abc import Callable, Hashable, Iterator, Sequence
+from contextlib import AbstractContextManager, ExitStack, contextmanager
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypeVar
 
+from ..errors import SnapshotError
 from ..model import ScopeOrigin
+from ..model.execution_cache import request_key
+from ..model.execution_cache_scoped import ScopedCache
 from ..model.graph_facts import (
     CONF_HIGH,
     GraphEdge,
@@ -95,6 +106,12 @@ from ..model.source_graph_coverage import (
 from .ast_special_members import collect_special_member_names
 from .call_graph import augment_graph_with_calls, parse_clang_ast_calls
 from .inline_graph_fold import _mark_role_coverage
+from .semantic_fact_folds import (
+    SemanticFacts,
+    fold_header_semantic_facts,
+    merge_semantic_facts,
+    parse_semantic_facts,
+)
 from .type_graph import (
     ast_derived_scope,
     augment_graph_with_types,
@@ -152,6 +169,11 @@ class HeaderGraphAstProjection:
     #: (``ast_special_members``) -- binary-independent identity evidence for
     #: castxml's unmangled ctor/dtor placeholders.
     special_member_names: frozenset[str] = frozenset()
+    #: The override, template and callback facts of the same parse
+    #: (``semantic_fact_folds``). ``None`` when they were not projected --
+    #: a hand-built projection -- so the header passes for those families
+    #: stay unstamped (unknown), never "ran and found nothing".
+    semantic_facts: SemanticFacts | None = None
 
 
 def project_header_graph_ast(ast_root: dict[str, Any]) -> HeaderGraphAstProjection:
@@ -165,6 +187,9 @@ def project_header_graph_ast(ast_root: dict[str, Any]) -> HeaderGraphAstProjecti
         entity_files = (
             index_declared_entity_files(ast_root) if needs_entity_files else {}
         )
+        # Inside the same scope, and handed the type edges just parsed: the
+        # override facts read the inheritance edges, never a second walk.
+        semantic_facts = parse_semantic_facts(ast_root, type_edges)
     call_edges = parse_clang_ast_calls(ast_root)
     special: set[str] = set()
     collect_special_member_names(ast_root, special)
@@ -174,6 +199,7 @@ def project_header_graph_ast(ast_root: dict[str, Any]) -> HeaderGraphAstProjecti
         call_edges=call_edges,
         entity_files=entity_files,
         special_member_names=frozenset(special),
+        semantic_facts=semantic_facts,
     )
 
 
@@ -203,12 +229,18 @@ def merge_header_graph_ast_projections(
         type_edges.update(dict.fromkeys(part.type_edges))
         call_edges.update(dict.fromkeys(part.call_edges))
         special.update(part.special_member_names)
+    facts = [p.semantic_facts for p in parts]
     return HeaderGraphAstProjection(
         type_files=type_files,
         type_edges=list(type_edges),
         call_edges=list(call_edges),
         entity_files=entity_files,
         special_member_names=frozenset(special),
+        semantic_facts=(
+            merge_semantic_facts(f for f in facts if f is not None)
+            if facts and all(f is not None for f in facts)
+            else None
+        ),
     )
 
 
@@ -391,6 +423,10 @@ def seed_ast_graph(
         )
     augment_graph_with_types(graph, type_edges)
     augment_graph_with_calls(graph, call_edges)
+    if projection.semantic_facts is not None:
+        # After the call and type edges, which the virtual-dispatch and
+        # callback joins read -- the same order the L5 folds run in.
+        fold_header_semantic_facts(graph, projection.semantic_facts)
     # A header-only pass is a single parse over the whole header aggregate —
     # never narrowed/scoped like a per-compile-unit build-integrated pass, and
     # ``clang_header_dump`` raises on a failed/empty parse rather than
@@ -417,3 +453,115 @@ def seed_ast_graph(
     # through as a false `PUBLIC_API_INTERNAL_DEPENDENCY_ADDED` the same way
     # the build-integrated pass's own pre-D3-consumer gap did.
     _mark_role_coverage(graph.extractor_passes, HEADER_TYPE_GRAPH_PASS)
+
+
+class MemoizedParseFailure(SnapshotError):
+    """A whole-tree header-graph parse already known (memoized) to fail;
+    ``hit`` is the memoized ``(failed_headers, failure_line)``."""
+
+    def __init__(self, hit: tuple[tuple[Path, ...], str]) -> None:
+        super().__init__(hit[1])
+        self.hit = hit
+
+
+class HeaderGraphBisectionMemo:
+    """One request's memo of which headers a header-graph clang parse loses.
+
+    The header-graph parse runs once per library per side, and libraries of
+    one package usually share one header tree and one compile context. When
+    that whole-tree parse fails, the per-group bisect is the expensive part
+    (~455 s per library on oneDAL), and its answer depends only on the
+    headers, their content and the parse flags -- so every library sharing
+    the key reuses the first one's answer instead of failing the whole-tree
+    parse and bisecting again. :meth:`slot` serializes concurrent callers on
+    one key, so two prefetches of the same tree bisect once, not twice.
+
+    The memo holds the outcome (the headers that failed alone, plus the
+    first line of the original failure for the degraded-graph record), never
+    a projection: a hit still parses the surviving headers, so the graph is
+    built from the same parse a first run makes.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._key_locks: dict[Hashable, threading.Lock] = {}
+        self._outcomes: dict[Hashable, tuple[tuple[Path, ...], str]] = {}
+
+    @contextmanager
+    def slot(self, key: Hashable) -> Iterator[None]:
+        with self._lock:
+            key_lock = self._key_locks.setdefault(key, threading.Lock())
+        with key_lock:
+            yield
+
+    def get(self, key: Hashable) -> tuple[tuple[Path, ...], str] | None:
+        with self._lock:
+            return self._outcomes.get(key)
+
+    def enter(self, scope: ExitStack, key: Hashable) -> None:
+        """Hold *key*'s slot for the rest of *scope*; raise
+        :class:`MemoizedParseFailure` when a sibling already learned this
+        whole-tree parse fails."""
+        scope.enter_context(self.slot(key))
+        hit = self.get(key)
+        if hit is not None:
+            raise MemoizedParseFailure(hit)
+
+    def put(self, key: Hashable, failed: Sequence[Path], failure: str) -> None:
+        with self._lock:
+            self._outcomes[key] = (tuple(failed), failure)
+
+
+def header_tree_signature(headers: Sequence[Path]) -> tuple[tuple[str, int, int], ...]:
+    """``(path, size, mtime_ns)`` per header, so an edited header misses."""
+    sig: list[tuple[str, int, int]] = []
+    for h in headers:
+        try:
+            st = h.stat()
+            sig.append((str(h), st.st_size, st.st_mtime_ns))
+        except OSError:
+            sig.append((str(h), -1, -1))
+    return tuple(sig)
+
+
+def header_graph_memo_key(
+    headers: Sequence[Path],
+    includes: Sequence[Path],
+    tokens: Sequence[str],
+    hash_dirs: Sequence[Path],
+    lang: str | None,
+    compile_context: object,
+) -> tuple[Any, ...]:
+    """Everything a header-graph parse's outcome depends on."""
+    return (
+        header_tree_signature(headers),
+        tuple(str(p) for p in includes),
+        tuple(tokens),
+        tuple(str(p) for p in hash_dirs),
+        (lang or "").lower(),
+        repr(compile_context),
+    )
+
+
+#: The memo lives only inside :func:`header_graph_bisection_scope` (one
+#: compare/release request). The key fingerprints the top-level headers, not
+#: every transitively included one, so it is valid only while those inputs
+#: cannot change -- one request -- and a process-wide memo would replay a
+#: stale failure after an included header is repaired, and keep a lock and an
+#: outcome per key forever. Worker threads share it by inheriting the
+#: request's context (``copy_context``), as the release fan-out and the
+#: header-graph prefetch both do.
+_BISECTION_SCOPE = ScopedCache("abicheck.buildsource.header_graph_bisection")
+
+
+def header_graph_bisection_scope() -> AbstractContextManager[None]:
+    """Share header-graph bisection outcomes across one request's dumps."""
+    return _BISECTION_SCOPE.scope()
+
+
+def current_bisection_memo() -> HeaderGraphBisectionMemo:
+    """This request's memo; a throwaway one outside a scope (or in reference
+    mode), so a bare dump simply memoizes nothing."""
+    return _BISECTION_SCOPE.get_or_compute(
+        request_key(memo="header_graph_bisection"), HeaderGraphBisectionMemo
+    )

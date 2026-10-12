@@ -1,134 +1,49 @@
 # Copyright 2026 Nikolay Petrov
 # SPDX-License-Identifier: Apache-2.0
 
-"""The report fields a classified pair owes before it is a :class:`CompareResult`.
+"""The gate a classified pair is scored under, and its :class:`CompareResult`.
 
-The second half of :func:`abicheck.service_compare_pipeline.classify_compare_pair`:
-everything after ``compare_snapshots`` and the evidence fold -- operand metadata
-and the same-binary note, ``requested_depth``, analysis assurance, evidence
-depths, the suppression audit, the exit decision and the resolved gate receipt.
-Split out so a front end that classifies through the shared core can run these
-once, in the order its own post-processing needs, instead of twice.
+The last step of :func:`abicheck.service_compare_pipeline.classify_compare_pair`,
+after :func:`~abicheck.workflows.compare_classify.classify_resolved_pair` has
+classified the pair and attached its report fields: the suppression audit, the
+exit decision and the resolved gate receipt. The gate is resolved from a typed
+request's own settings; the native ``compare`` CLI resolves its gate from its
+``ResolvedCompareConfig`` instead (``cli_compare_receipt.record_resolved_config``)
+and audits suppressions after its ``--used-by`` scoping, so it does not call
+this.
 """
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from ..confidence import note_if_same_binary_compared
 from . import gate as gate_workflow
 from .contracts import CompareRequest, CompareResult
-from .input_resolution import collect_metadata, sniff_text_format
-from .request_inputs import required_path
 
 if TYPE_CHECKING:
-    from ..checker_types import DiffResult
-    from ..model import AbiSnapshot
+    from .compare_classify import ClassifiedPair
     from .resolved_execution_context import ResolvedExecutionContext
 
-__all__ = ["attach_operand_metadata", "finalize_classified_pair"]
-
-
-def attach_operand_metadata(
-    result: DiffResult,
-    old_path: Path,
-    new_path: Path,
-    *,
-    old_snapshot: AbiSnapshot | None = None,
-    new_snapshot: AbiSnapshot | None = None,
-) -> None:
-    """Stamp ``old_metadata``/``new_metadata`` and the same-binary note.
-
-    The one owner both the typed API (:func:`finalize_classified_pair`) and
-    the native CLI's compare finalization call, so the two cannot drift on
-    what makes two operands "the same binary".
-
-    *old_path*/*new_path* must be the *original* operand paths -- from
-    before any rewrite to a temporary embedded-snapshot ``.abi.json`` --
-    since :func:`collect_metadata` deliberately returns ``None`` for a
-    JSON/text path. Each is hashed through the full GNU ld linker-script
-    chain to its final resolved target, so a (possibly multi-hop) script vs.
-    its target DSO given as the other side still reads as byte-identical; a
-    text snapshot/manifest can coincidentally match the INPUT()/GROUP()
-    probe, so linker-script resolution is skipped for it.
-
-    When neither side yields real metadata (a snapshot-vs-snapshot compare)
-    and both snapshots are given, the note falls back to a snapshot-content
-    digest. The fallback requires *both* sides missing metadata (`and`, not
-    `or`): a mixed live-binary-vs-snapshot compare has one side absent by
-    design.
-    """
-    from ..binary_utils import resolve_linker_script_chain
-
-    def _hashable_path(p: Path) -> Path:
-        return (
-            p
-            if sniff_text_format(p) in ("json", "symvers")
-            else resolve_linker_script_chain(p)
-        )
-
-    result.old_metadata = collect_metadata(_hashable_path(old_path))
-    result.new_metadata = collect_metadata(_hashable_path(new_path))
-    old_digest = new_digest = None
-    if (
-        result.old_metadata is None
-        and result.new_metadata is None
-        and old_snapshot is not None
-        and new_snapshot is not None
-    ):
-        from .gate import snapshot_identity_digests
-
-        old_digest, new_digest = snapshot_identity_digests(old_snapshot, new_snapshot)
-    note_if_same_binary_compared(
-        result, old_snapshot_digest=old_digest, new_snapshot_digest=new_digest
-    )
+__all__ = ["finalize_classified_pair"]
 
 
 def finalize_classified_pair(
     request: CompareRequest,
     context: ResolvedExecutionContext | None,
-    result: DiffResult,
-    old: AbiSnapshot,
-    new: AbiSnapshot,
+    classified: ClassifiedPair,
     suppression: Any,
     evaluation_config: Any,
     *,
     pack_application: Any = None,
 ) -> CompareResult:
-    """Attach the post-classification report fields and build the result.
+    """Audit suppressions, resolve the gate and build the result.
 
     *pack_application* is the request's selected ``pack_paths`` contribution
     (``RequestPolicyInputs.pack_application``): a gate pack's severity levels
     fold into the gate here, as the native CLI folds them into its own."""
-    attach_operand_metadata(
-        result,
-        required_path(request.old, "old"),
-        required_path(request.new, "new"),
-        old_snapshot=old,
-        new_snapshot=new,
-    )
-
-    # P0.4 follow-up (P2 review, discussion_r3787839902): stamps
-    # `DiffResult.requested_depth` for `analysis_assurance` below, preferring
-    # `pair.resolved_execution_context`'s value over `request.depth` only
-    # when the two agree (a caller may pass a *different* `request` than
-    # built `pair`; a disagreement defers to `request.depth`, what `old`/
-    # `new` above were actually projected to -- Codex review).
-    normalized_request_depth = (
-        request.depth.lower() if request.depth is not None else None
-    )
-    if context is not None and context.requested_depth == normalized_request_depth:
-        result.requested_depth = context.requested_depth
-    elif normalized_request_depth is not None:
-        result.requested_depth = normalized_request_depth
-    # Depths and suppression audit: report fields every pairwise route owes
-    # (F2 route parity), once set by the native CLI alone.
-    from . import analysis_assurance_attach as assurance_attach
     from .suppression_audit_attach import attach_suppression_audit
 
-    assurance_attach.attach_analysis_assurance(result, old, new)
-    assurance_attach.attach_evidence_depths(result, old, new)
+    result, old, new = classified.result, classified.old, classified.new
     attach_suppression_audit(result, suppression)
     # ADR-064/PR G2: resolve severity into the same `GateOptions` the
     # release fan-out uses, then the canonical decision. No manual

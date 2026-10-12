@@ -1063,9 +1063,10 @@ class TestNoteIfSameBinaryCompared:
         assert "byte-identical" in result.stdout, result.output
 
     def test_native_compare_cli_excludes_symvers_manifests(self, tmp_path):
-        """Codex review, fresh evidence: `_finalize_compare_result`'s
-        metadata step (then a separate, frontends-layer copy of
-        `service.collect_metadata`) still excluded only JSON/Perl -- two
+        """Codex review, fresh evidence: the native CLI's own metadata
+        step (then a separate, frontends-layer copy of
+        `service.collect_metadata`; now the shared classification's) still
+        excluded only JSON/Perl -- two
         identical `Module.symvers` manifests, not binaries at all, still
         produced a false "old and new binaries are byte-identical" claim
         through the native `compare` CLI."""
@@ -1085,28 +1086,42 @@ class TestNoteIfSameBinaryCompared:
         assert result.exit_code == 0, result.output
         assert "byte-identical" not in result.output, result.output
 
-    def test_finalize_compare_result_does_not_hash_a_json_snapshot_path(self, tmp_path):
-        """Sanity check for the fix above: confirms `collect_metadata`
-        really does treat a `.abi.json` snapshot path as non-hashable (the
-        precondition that makes the bug this fix closes possible), so a
-        caller that mistakenly passed the post-embed operand here would see
-        the warning silently vanish rather than this test passing
-        vacuously."""
+    def test_classification_does_not_hash_a_json_snapshot_operand(self, tmp_path):
+        """Sanity check for the fix above: confirms the shared
+        classification's operand metadata really does treat a `.abi.json`
+        snapshot path as non-hashable (the precondition that makes the bug
+        this fix closes possible), so a caller that mistakenly named the
+        post-embed operand would see the warning silently vanish rather than
+        this test passing vacuously."""
         from abicheck.checker import DiffResult
-        from abicheck.frontends.cli.runtime import _finalize_compare_result
+        from abicheck.model import AbiSnapshot
+        from abicheck.service_compare_pipeline import ResolvedComparePair
+        from abicheck.workflows import compare_classify
+        from abicheck.workflows.contracts import CompareRequest
+        from abicheck.workflows.request_inputs import InputSpec
 
         embedded_snapshot = tmp_path / "old.abi.json"
         embedded_snapshot.write_text(json.dumps({"library": "libfoo.so"}))
         real_so = tmp_path / "libfoo.so"
         real_so.write_bytes(b"\x7fELF" + b"\x00" * 200)
 
-        result = DiffResult(old_version="1.0", new_version="1.0", library="lib")
-        _finalize_compare_result(
-            result,
-            embedded_snapshot,
-            real_so,
-            show_redundant=False,
+        old = AbiSnapshot(library="libfoo.so", version="1.0")
+        new = AbiSnapshot(library="libfoo.so", version="1.0")
+        request = CompareRequest(
+            old=InputSpec(path=embedded_snapshot), new=InputSpec(path=real_so)
         )
+        pair = ResolvedComparePair(old, new, None, None, None, None)  # type: ignore[arg-type]
+        result = DiffResult(old_version="1.0", new_version="1.0", library="lib")
+        compare_classify._attach_pair_report_fields(
+            request,
+            pair,
+            result,
+            old,
+            new,
+            compare_classify.ComparedOperands.from_request(request),
+        )
+        assert result.old_metadata is None
+        assert result.new_metadata is not None
         assert result.coverage_warnings == []
 
 

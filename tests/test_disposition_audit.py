@@ -954,7 +954,9 @@ def test_severity_cannot_un_demote_a_gate_excluded_finding() -> None:
     result = compare(old, new)
     ledger = ledger_for(result)
     result.disposition_ledger = ledger
-    close_consumer_scope(ledger, result, gating=[result.changes[0]])
+    close_consumer_scope(
+        ledger, result, gating=[result.changes[0]], scope_decides_exit=True
+    )
     assert ledger.effective_total == 1
 
     strict = SeverityConfig(abi_breaking=SeverityLevel.ERROR)
@@ -981,15 +983,21 @@ def test_one_close_over_the_union_not_one_per_consumer() -> None:
     first, second = result.changes[0], result.changes[1]
 
     # The union, as the orchestrator does it: both stay gating.
-    close_consumer_scope(ledger, result, gating=[first, second])
+    close_consumer_scope(
+        ledger, result, gating=[first, second], scope_decides_exit=True
+    )
     assert ledger.effective_total == 2
 
     # …and per-consumer closes would have left one of them out, which is why
     # the call belongs to the orchestrator that knows every consumer.
     result_b = compare(old, new)
     result_b.disposition_ledger = per_consumer = ledger_for(result_b)
-    close_consumer_scope(per_consumer, result_b, gating=[result_b.changes[0]])
-    close_consumer_scope(per_consumer, result_b, gating=[result_b.changes[1]])
+    close_consumer_scope(
+        per_consumer, result_b, gating=[result_b.changes[0]], scope_decides_exit=True
+    )
+    close_consumer_scope(
+        per_consumer, result_b, gating=[result_b.changes[1]], scope_decides_exit=True
+    )
     assert per_consumer.effective_total == 0
 
 
@@ -1012,7 +1020,11 @@ def test_synthesized_scoped_findings_join_the_audit() -> None:
         description="required by consumer",
     )
     close_consumer_scope(
-        ledger, result, gating=[synthesized], also_detected=[synthesized]
+        ledger,
+        result,
+        gating=[synthesized],
+        also_detected=[synthesized],
+        scope_decides_exit=True,
     )
     assert ledger.detected_total == before + 1
     assert ledger.record_for(synthesized).disposition is Disposition.GATING
@@ -1056,7 +1068,7 @@ class TestALateProducerClosesTheLedgerAgain:
         )
         assert ledger.record_for(late).verdict_class is None
 
-        close_consumer_scope(ledger, result, gating=[])
+        close_consumer_scope(ledger, result, gating=[], scope_decides_exit=True)
         assert ledger.record_for(late).verdict_class is not None
         assert ledger.suppressed_gating_records()
         # …and the consequence: the hidden consumer break reaches the release
@@ -1077,7 +1089,7 @@ class TestALateProducerClosesTheLedgerAgain:
         assert ledger.effective_total == 2
 
         used = [result.changes[0]]
-        close_consumer_scope(ledger, result, gating=used)
+        close_consumer_scope(ledger, result, gating=used, scope_decides_exit=True)
         assert ledger.effective_total == 1
         assert ledger.detected_total == 2, "scoping moves, it never removes"
         assert (
@@ -1099,7 +1111,7 @@ class TestALateProducerClosesTheLedgerAgain:
         )
         ledger = ledger_for(result)
         hidden = result.suppressed_changes[0]
-        close_consumer_scope(ledger, result, gating=[hidden])
+        close_consumer_scope(ledger, result, gating=[hidden], scope_decides_exit=True)
         assert ledger.record_for(hidden).disposition is Disposition.SUPPRESSED
         assert ledger.effective_total == 0
 

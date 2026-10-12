@@ -78,7 +78,7 @@ def structured_proof_path(
             {
                 "type": "edge",
                 "kind": e.kind,
-                "role": str(e.attrs.get("role", "")),
+                "role": e.role,
                 "confidence": e.confidence,
             }
         )

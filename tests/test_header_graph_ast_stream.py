@@ -45,6 +45,7 @@ equivalence test below cannot quietly stop testing what it is for.
 
 from __future__ import annotations
 
+import copy
 import json
 import shutil
 import subprocess
@@ -64,6 +65,7 @@ from abicheck.buildsource.header_graph_ast_stream import (
     stream_recorded_decls,
     stream_top_level_decls,
 )
+from abicheck.extract.headers.clang.locations import materialize_locations
 
 # A header built to contain, at **top level** (so each lands in its own
 # element of the TU's `inner`, with the boundary falling between them):
@@ -686,6 +688,16 @@ def _assert_same_projection(
     assert streamed.entity_files == whole.entity_files
     assert streamed.type_edges == whole.type_edges
     assert streamed.call_edges == whole.call_edges
+    assert streamed.special_member_names == whole.special_member_names
+    assert streamed.semantic_facts == whole.semantic_facts
+
+
+def _whole_tree_projection(ast: dict) -> HeaderGraphAstProjection:
+    """What the attach's whole-tree path projects: the parsed tree *after*
+    ``materialize_locations`` (``dumper_clang_errors`` materializes every
+    header tree it hands out), not clang's raw sticky locations. The stream
+    reads the raw cache document and must agree with that."""
+    return project_header_graph_ast(materialize_locations(copy.deepcopy(ast)))
 
 
 #: Hand-built documents in clang's own shape, covering each projection
@@ -836,7 +848,7 @@ class TestStreamedProjectionWithoutACompiler:
         path = tmp_path / "ast.json"
         path.write_text(json.dumps(ast, indent=2), encoding="utf-8")
         _assert_same_projection(
-            project_header_graph_ast_file(path), project_header_graph_ast(ast)
+            project_header_graph_ast_file(path), _whole_tree_projection(ast)
         )
 
     def test_the_synthetic_cases_are_not_all_the_same_projection(self) -> None:
@@ -866,7 +878,7 @@ class TestStreamedProjectionEqualsWholeTreeProjection:
     def test_on_a_header_containing_both_boundary_shapes(self, tmp_path: Path) -> None:
         ast_path = _dump_ast(tmp_path, _BOUNDARY_HEADER)
         streamed = project_header_graph_ast_file(ast_path)
-        whole = project_header_graph_ast(json.loads(ast_path.read_text()))
+        whole = _whole_tree_projection(json.loads(ast_path.read_text()))
         _assert_same_projection(streamed, whole)
 
     def test_the_projection_is_not_vacuously_empty(self, tmp_path: Path) -> None:
@@ -895,8 +907,14 @@ class TestStreamedProjectionEqualsWholeTreeProjection:
             "}\n",
         )
         streamed = project_header_graph_ast_file(ast_path)
-        whole = project_header_graph_ast(json.loads(ast_path.read_text()))
+        whole = _whole_tree_projection(json.loads(ast_path.read_text()))
         _assert_same_projection(streamed, whole)
+        # Not vacuous for the semantic families: <vector>/<map> instantiate
+        # class and function templates and declare virtual overrides.
+        assert whole.semantic_facts is not None
+        assert whole.semantic_facts.templates
+        assert any(t.kind == "function" for t in whole.semantic_facts.templates)
+        assert whole.semantic_facts.overrides[0]
 
 
 @needs_clang

@@ -45,10 +45,11 @@ from .comparability import (
     ComparabilityMismatch,
     _binary_platform_components,
     _build_context_corroborated,
+    _contract_scope_headers,
     _differing_keys,
     _dimensions_for_fields,
     _fingerprint_is_authentic,
-    _scope_growth_corroborated,
+    _scope_evolution_delta,
     _unknown_differing_keys,
 )
 from .comparability_language_mode import (
@@ -58,9 +59,8 @@ from .comparability_language_mode import (
 from .comparability_sequences import (
     _HEADER_SEQUENCE_FIELDS,
     _INCLUDE_SEQUENCE_FIELDS,
-    _header_sequence_is_scope_confirmed_growth,
-    _include_sequence_is_additive_owned_growth,
-    _scope_newly_added_headers,
+    header_sequence_is_scope_confirmed_evolution,
+    include_sequence_is_scope_confirmed_evolution,
 )
 from .model import AbiSnapshot, ExtractionContract, FactStatus
 
@@ -233,62 +233,37 @@ def _unexplained_profile_fields(
         unexplained.discard("language_standard")
         unexplained.discard("compiler_version")
 
-    # Both sequence carve-outs below additionally require
-    # _scope_growth_corroborated (Codex review, PR #641 follow-up, P1):
-    # an additive-shaped header_sequence/include_sequence on its own is
-    # not sufficient evidence -- a header already declared identically
-    # on both sides as public headers, but fed to the L2 frontend via
-    # -H only on the new side, produces the identical additive-growth
-    # SHAPE with scope_fingerprint completely UNCHANGED, even though the
-    # old snapshot never actually parsed that header's content at all
-    # (see _scope_growth_corroborated's own docstring for why that's
-    # unsafe to wave through). Requiring a genuinely differing,
-    # independently-verified scope-level growth corroborates that the
-    # sequence growth reflects real new declared content, not just a
-    # same-declared-surface extraction-mechanism difference.
-    scope_growth_corroborated = _scope_growth_corroborated(old_contract, new_contract)
-    # The specific set of header identities the sequence carve-outs
-    # below are allowed to treat an appended/newly-owned entry as
-    # corresponding to (Codex review, PR #641 follow-up, ninth P1) --
-    # see _scope_newly_added_headers's own docstring for why
-    # scope_growth_corroborated alone (proving the scope grew by SOME
-    # header) isn't enough; the carve-outs must additionally verify
-    # they're waiving growth in the SAME header(s).
-    scope_new_headers = _scope_newly_added_headers(
-        old_contract.scope_fields.get("headers"),
-        new_contract.scope_fields.get("headers"),
-    )
+    # Both sequence carve-outs below require the declared scope to corroborate
+    # the specific headers whose parsing/ownership changed (Codex review, PR
+    # #641 follow-up, P1/eighth/ninth P1): a header declared identically on
+    # both sides but fed to the L2 frontend on only one changes the sequence
+    # without changing the scope, and the side that never parsed it would hide
+    # a removal inside it. _scope_evolution_delta returns the scope-confirmed
+    # added AND removed identities (a release may delete public headers --
+    # oneDAL 2026.0 removed 122 -- which is API evolution, not drift).
+    delta = _scope_evolution_delta(old_contract, new_contract)
 
     header_seq_candidate = unexplained & _HEADER_SEQUENCE_FIELDS
-    if (
-        header_seq_candidate
-        and scope_growth_corroborated
-        and _header_sequence_is_scope_confirmed_growth(
-            old_fields.get("header_sequence"),
-            new_fields.get("header_sequence"),
-            scope_new_headers,
-        )
+    if header_seq_candidate and header_sequence_is_scope_confirmed_evolution(
+        old_fields.get("header_sequence"),
+        new_fields.get("header_sequence"),
+        delta,
+        old_scope=_contract_scope_headers(old_contract),
+        new_scope=_contract_scope_headers(new_contract),
     ):
-        # Header-sequence-growth carve-out (PR #641 follow-up, third
-        # round) -- see check_contracts_comparable's own docstring, and
-        # `_header_sequence_is_scope_confirmed_growth` for why a
-        # scope-confirmed public-header addition is waived wherever the new
-        # header sorts, rather than only when it sorts last.
+        # Header-sequence-evolution carve-out -- see check_contracts_comparable's
+        # own docstring: waived wherever an added header sorts and whichever
+        # declared headers were removed, never for a reordered survivor.
         unexplained -= header_seq_candidate
 
     include_seq_candidate = unexplained & _INCLUDE_SEQUENCE_FIELDS
-    if (
-        include_seq_candidate
-        and scope_growth_corroborated
-        and _include_sequence_is_additive_owned_growth(
-            old_fields.get("include_sequence"),
-            new_fields.get("include_sequence"),
-            scope_new_headers,
-        )
+    if include_seq_candidate and include_sequence_is_scope_confirmed_evolution(
+        old_fields.get("include_sequence"),
+        new_fields.get("include_sequence"),
+        delta,
     ):
-        # Include-sequence-owned-growth carve-out (PR #641 follow-up,
-        # fourth round) -- see check_contracts_comparable's own
-        # docstring.
+        # Include-sequence-owned-evolution carve-out -- see
+        # check_contracts_comparable's own docstring.
         unexplained -= include_seq_candidate
 
     return unexplained

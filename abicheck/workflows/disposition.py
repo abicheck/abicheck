@@ -26,8 +26,9 @@ orchestrators (``cli_helpers_compare._apply_used_by_scoping`` and
 ``_apply_required_symbol_scoping``) are the only code that knows the *union*
 of relevant findings across every ``--used-by`` consumer, and
 ``close_consumer_scope`` has to be called once with that union rather than
-once per consumer (``apply_scope`` only demotes, so per-consumer calls would
-intersect the consumers' sets). See that function's own docstring.
+once per consumer (under a scoped gate ``apply_scope`` only demotes, so
+per-consumer calls would intersect the consumers' sets). See that
+function's own docstring.
 ``supersede_as_suppressed`` joined it for a second: the release fan-out's
 lockstep-SONAME suppression is decided after every member's ledger closed
 (see its own docstring).

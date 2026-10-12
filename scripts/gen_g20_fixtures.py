@@ -58,6 +58,7 @@ from abicheck.model import (  # noqa: E402
     RecordType,
     ScopeOrigin,
 )
+from abicheck.model.elf_facts import ElfVersionBinding  # noqa: E402
 from abicheck.serialization import snapshot_to_dict  # noqa: E402
 
 
@@ -140,8 +141,14 @@ def case145_audit_unversioned_export() -> AbiSnapshot:
     elf = _elf(
         ElfSymbol(name="demo_init", version="DEMO_1.0", is_default=True),
         ElfSymbol(name="demo_run", version="DEMO_1.0", is_default=True),
-        # New export shipped with no version node though a scheme exists.
-        ElfSymbol(name="demo_experimental", version=None, is_default=True),
+        # New export shipped with no version node -- not even the base
+        # (VER_FLG_BASE) one -- though a scheme exists.
+        ElfSymbol(
+            name="demo_experimental",
+            version=None,
+            is_default=True,
+            version_binding=ElfVersionBinding.UNVERSIONED,
+        ),
         versions_defined=["DEMO_1.0"],
     )
     return _snap(elf=elf)

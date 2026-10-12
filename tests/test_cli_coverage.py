@@ -328,7 +328,7 @@ class TestCompareApiBreakExitCode:
             "abicheck.workflows.input_resolution.load_snapshot", lambda _: snap
         )
         monkeypatch.setattr(
-            "abicheck.service.compare_snapshots",
+            "abicheck.workflows.compare_policy.compare_snapshots",
             lambda *_a, **_kw: DiffResult(
                 old_version="1",
                 new_version="2",

@@ -21,7 +21,7 @@ which is why that file could not become a registration facade while they
 lived there. Work that is not a terminal concern lives with its owner, so the
 typed API reaches the same code: snapshot provenance in
 :mod:`abicheck.workflows.provenance`, operand metadata and the same-binary
-note in :func:`abicheck.workflows.compare_finalize.attach_operand_metadata`.
+note in :mod:`abicheck.workflows.compare_classify`.
 
 The exit path is the one worth reading: ``_exit_with_severity_or_verdict``
 folds three orthogonal axes -- the compatibility verdict, the ADR-049
@@ -56,13 +56,7 @@ except ImportError:  # pragma: no cover - rich-click is a declared dependency
 # import for two value types.
 from ...checker_types import DiffResult
 from ...cli_audit import echo_filtered_surface, echo_reconciled
-from ...cli_helpers_compare import (  # noqa: F401  — re-exported to keep cli import sites stable
-    _canonical_library_key as _canonical_library_key,
-    _collect_force_public_symbols as _collect_force_public_symbols,
-    _merge_redundant_changes as _merge_redundant_changes,
-    _version_sort_key as _version_sort_key,
-    _warn_ignored_flags as _warn_ignored_flags,
-)
+from ...cli_helpers_compare import _merge_redundant_changes
 from ...cli_resolve import _detect_binary_format
 from ...frontends.cli import help as cli_help
 from .options.export import ExportSet
@@ -74,7 +68,6 @@ if TYPE_CHECKING:
     from ...model.change import Change
     from ...workflows.gate import EffectiveGate, SeverityConfig
 
-from ...model import AbiSnapshot
 
 _logger = logging.getLogger("abicheck")
 # `extract.progress`'s logger, by name: frontends may not import `extract`
@@ -487,52 +480,17 @@ def _log_debug_resolution(
 
 def _finalize_compare_result(
     result: DiffResult,
-    metadata_old_input: Path,
-    metadata_new_input: Path,
     *,
     show_redundant: bool,
     severity_config: SeverityConfig | None = None,
     contract_evaluation: bool = False,
-    old_snapshot: AbiSnapshot | None = None,
-    new_snapshot: AbiSnapshot | None = None,
 ) -> None:
-    """Attach metadata and emit redundancy/filter/suppression output.
+    """Emit redundancy/filter/suppression output for a classified result.
 
-    ``metadata_old_input``/``metadata_new_input`` must be the *original*
-    library paths -- resolved through any GNU ld linker-script chain, but
-    from *before* ``_embed_inline_source_sides`` may have rewritten
-    ``old_input``/``new_input`` to a temporary embedded-snapshot ``.abi.json``
-    path (Codex review). ``collect_metadata`` returns ``None`` for a
-    JSON/Perl-text path, so passing the post-embed operands here would
-    silently drop ``note_if_same_binary_compared``'s byte-identical-binaries
-    warning for any ``--old/new-sources``/raw ``--build-info`` comparison,
-    even when the two underlying native binaries really are identical.
-    Callers already resolve this same pre-embed pair for
-    ``--used-by``/``--required-symbol`` scoping (``used_by_old_input``/
-    ``used_by_new_input``) -- reuse that pair here rather than threading a
-    third copy of the same resolution through.
-
-    ``old_snapshot``/``new_snapshot``, when given, feed Item 4's snapshot-
-    content-digest fallback (Codex review, fresh evidence: this native CLI
-    path was missing it entirely, unlike the typed-API path's
-    ``service_compare_pipeline.classify_compare_pair``) -- only consulted
-    when neither side got real metadata above.
+    Operand metadata and the same-binary note are attached by the shared
+    classification (``workflows.compare_classify``), from the pre-embed
+    operand paths the CLI hands it.
     """
-    # Routed through `workflows`, not `binary_utils`/`confidence` directly,
-    # and not through `service` -- this module is `frontends` layer under
-    # ADR-061 (abicheck/frontends/AGENTS.md). The typed API's
-    # `finalize_classified_pair` calls the same owner, so the two front ends
-    # cannot drift on what makes two operands "the same binary".
-    from ...workflows.compare_finalize import attach_operand_metadata
-
-    attach_operand_metadata(
-        result,
-        metadata_old_input,
-        metadata_new_input,
-        old_snapshot=old_snapshot,
-        new_snapshot=new_snapshot,
-    )
-
     if show_redundant and result.redundant_changes:
         _merge_redundant_changes(result)
     # Plan slice 7o: both ledgers are unconditional. They used to be gated

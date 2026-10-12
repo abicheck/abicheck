@@ -337,24 +337,29 @@ class GraphEdge:
     occurrences: Sequence[str] = ()
 
     def key(self) -> tuple[str, str, str]:
-        """Identity for diffing/de-dup: (src, dst, kind) — ADR-046 D1's
-        coarsest (role-blind) projection. Still used by
-        :func:`~abicheck.buildsource.source_graph_compare.diff_source_graph`'s
-        edge-set comparison (deliberately role-blind there); no longer used
-        by ``SourceGraphSummary.add_edge``, which dedups on
-        :meth:`relation_key` instead (a follow-up fix — see that method's
-        docstring). Role-aware code should use :meth:`relation_key`.
+        """ADR-046 D1's coarse, role-blind projection: (src, dst, kind).
+
+        Groups the role-distinct relations of one dependency.
+        :func:`~abicheck.buildsource.source_graph_compare.diff_source_graph`
+        keys its coarse ``added_edges``/``removed_edges`` on it and reports a
+        role change inside one group as a changed relation (ADR-077 D4).
+        Never use it alone as an edge's identity; that is
+        :meth:`relation_key`.
         """
         return (self.src, self.dst, self.kind)
 
+    @property
+    def role(self) -> str:
+        """The role this edge carries (``"param"``, ``"field"``, ...; ``""``
+        when the producer stamped none): the D2-merged ``resolved`` view,
+        falling back to raw ``attrs`` pre-registration. The one reader of an
+        edge's role -- :meth:`relation_key` and every role-aware consumer go
+        through it."""
+        return str((self.resolved or self.attrs).get("role", ""))
+
     def relation_key(self) -> tuple[str, str, str, str]:
-        """Role-aware identity (ADR-046 D1) — see :func:`edge_relation_key`.
-        Falls back to raw ``attrs`` pre-registration, when ``resolved`` is
-        still empty.
-        """
-        return edge_relation_key(
-            self.src, self.dst, self.kind, self.resolved or self.attrs
-        )
+        """Full edge identity (ADR-046 D1): :meth:`key` plus :attr:`role`."""
+        return (self.src, self.dst, self.kind, self.role)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -523,9 +528,8 @@ def edge_relation_key(
     ``SourceGraphSummary.add_edge`` dedups on this role-aware key (a
     follow-up fix, Codex review on PR #620 — deduping on the coarse
     ``key()`` alone silently folded two real, role-distinct edges into one).
-    ``diff_source_graph``'s edge-set comparison deliberately keeps using the
-    coarser ``key()`` — role-level diff granularity is out of scope for this
-    ADR's D1 slice.
+    ``diff_source_graph`` matches on it too: a role change inside one coarse
+    ``key()`` group is a changed relation (ADR-077 D4).
 
     D1's second half — the full, non-deduplicated per-call-site/
     per-configuration evidence trail a ``relation_key`` can back many of —

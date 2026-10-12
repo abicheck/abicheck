@@ -133,11 +133,9 @@ or a CLI flag directly is in the wrong layer.
   classify_compare_pair` applies it as a view over what gets classified,
   right after `workflows.artifact.execute.enforce_requested_depth` confirms
   the floor — deliberately separate functions (floor vs. ceiling), not one.
-  `project_build_source_pack_to_depth()` is the sibling entry point for a
-  `BuildSourcePack` resolved *out-of-band* (an explicit `--old/new-sources`/
-  `--old/new-build-info` pack, not a snapshot's embedded payload) —
-  `cli_compare_helpers.run_compare` is the one caller, since that pack never
-  lives on the snapshot object `project_snapshot_to_depth` projects.
+  An out-of-band `--old/new-sources`/`--old/new-build-info` pack is attached
+  onto the snapshot before classification, so `project_snapshot_to_depth`
+  caps it like an embedded one.
 ## Conventions
 
 - Every module starts with `from __future__ import annotations`.

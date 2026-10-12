@@ -133,6 +133,8 @@ ASSERTED_CHANGE_KINDS: set[ChangeKind] = {
     ChangeKind.BUILD_OPTION_REACHES_PUBLIC_SYMBOL,
     # L5 version-over-version graph deltas — tests/test_l3l4l5_new_kinds.py.
     ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED,
+    ChangeKind.PUBLIC_DEPENDENCY_ROLE_CHANGED,
+    ChangeKind.PUBLIC_DEPENDENCY_ROLE_UNKNOWN,
     ChangeKind.TARGET_DEPENDENCY_ADDED,
     ChangeKind.EXPORTED_SYMBOL_SOURCE_OWNER_CHANGED,
     # G31 Phase B graph reconciliation (ADR-048) — tests/test_graph_reconcile.py.

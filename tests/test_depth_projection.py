@@ -123,12 +123,21 @@ from abicheck.model.extraction_contract import ExtractionContract
 from abicheck.model.source_graph import SourceGraphSummary
 from abicheck.policy.depth_projection import (
     _public_dwarf_scope,
-    project_build_source_pack_to_depth,
     project_pair_to_depth,
     project_snapshot_to_depth,
 )
 from abicheck.serialization import save_snapshot
 from tests.snapshot_fields import field_of
+
+
+def _project_pack(pack, depth):
+    """*pack* as a snapshot's embedded payload, projected to *depth*.
+
+    The out-of-band pack path now attaches the pack onto the snapshot before
+    classification, so ``project_snapshot_to_depth`` is the one entry point
+    every pack reaches; these cells drive it."""
+    snap = AbiSnapshot(library="lib", version="1", build_source=pack)
+    return project_snapshot_to_depth(snap, depth).build_source
 
 
 def _headers_only_pair(*, dwarf: bool) -> tuple[AbiSnapshot, AbiSnapshot]:
@@ -662,7 +671,7 @@ class TestBuildSourcePackCoverageProjection:
         return pack
 
     def test_l4_l5_coverage_demoted_at_build_depth(self) -> None:
-        capped = project_build_source_pack_to_depth(self._pack(), "build")
+        capped = _project_pack(self._pack(), "build")
         assert capped is not None
         rows = {row.layer: row.status for row in capped.manifest.coverage}
         assert rows[DataLayer.L3_BUILD.value] == CoverageStatus.PRESENT
@@ -670,7 +679,7 @@ class TestBuildSourcePackCoverageProjection:
         assert rows[DataLayer.L5_SOURCE_GRAPH.value] == CoverageStatus.NOT_COLLECTED
 
     def test_coverage_untouched_at_source_depth(self) -> None:
-        capped = project_build_source_pack_to_depth(self._pack(), "source")
+        capped = _project_pack(self._pack(), "source")
         assert capped is not None
         rows = {row.layer: row.status for row in capped.manifest.coverage}
         assert rows[DataLayer.L4_SOURCE_ABI.value] == CoverageStatus.PRESENT
@@ -1117,7 +1126,7 @@ class TestMarkLayersNotCollectedInsertsAMissingRow:
         pack = BuildSourcePack(root="", source_graph=graph)
         assert pack.manifest.coverage == []  # no rows tracked at all
 
-        projected = project_build_source_pack_to_depth(pack, "build")
+        projected = _project_pack(pack, "build")
 
         assert projected is not None
         assert projected.source_graph is None
@@ -1137,7 +1146,7 @@ class TestMarkLayersNotCollectedInsertsAMissingRow:
             )
         ]
 
-        projected = project_build_source_pack_to_depth(pack, "build")
+        projected = _project_pack(pack, "build")
 
         assert projected is not None
         row = projected.manifest.coverage_for(DataLayer.L5_SOURCE_GRAPH)
@@ -1167,7 +1176,7 @@ class TestMarkLayersNotCollectedInsertsAMissingRow:
             )
             assert pack.manifest.coverage == []
 
-            projected = project_build_source_pack_to_depth(pack, "build")
+            projected = _project_pack(pack, "build")
 
             assert projected is not None
             layers = [c.layer for c in projected.manifest.coverage]

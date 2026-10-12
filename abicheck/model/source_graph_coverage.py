@@ -28,10 +28,18 @@ Scope units are compile-unit / file paths, with
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Protocol
 
 from .edge_coverage import ALL_UNITS, CoverageRecord, ProducerRun
+from .graph_vocabulary import (
+    CALLBACK_EDGE_KINDS,
+    TEMPLATE_EDGE_KINDS,
+    TEMPLATE_NODE_KINDS,
+    VIRTUAL_DISPATCH_EDGE_KINDS,
+    VIRTUAL_DISPATCH_NODE_KINDS,
+)
 
 
 class SourceGraphSummary(Protocol):
@@ -60,7 +68,11 @@ __all__ = [
     "INCLUDE_GRAPH_PASS",
     "L5_EDGE_KINDS",
     "PASS_EDGE_KINDS",
+    "ROLE_COVERAGE_MATRIX",
     "TYPE_GRAPH_PASS",
+    "SEMANTIC_FAMILIES",
+    "SemanticFamily",
+    "family_collected",
     "pass_coverage_records",
     "pass_for_edge_kind",
     "trusted_kinds",
@@ -78,6 +90,102 @@ INCLUDE_GRAPH_PASS = "include_graph"
 HEADER_CALL_GRAPH_PASS = "header_call_graph"
 HEADER_TYPE_GRAPH_PASS = "header_type_graph"
 HEADER_INCLUDE_GRAPH_PASS = "header_include_graph"
+OVERRIDE_GRAPH_PASS = "override_graph"
+TEMPLATE_GRAPH_PASS = "template_graph"
+CALLBACK_GRAPH_PASS = "callback_graph"
+VIRTUAL_DISPATCH_GRAPH_PASS = "virtual_dispatch_graph"
+HEADER_OVERRIDE_GRAPH_PASS = "header_override_graph"
+HEADER_TEMPLATE_GRAPH_PASS = "header_template_graph"
+HEADER_CALLBACK_GRAPH_PASS = "header_callback_graph"
+HEADER_VIRTUAL_DISPATCH_GRAPH_PASS = "header_virtual_dispatch_graph"
+
+
+@dataclass(frozen=True)
+class SemanticFamily:
+    """One AST-derived semantic fact family (override, virtual dispatch,
+    template, callback): the pass flag each producer stamps, and the edges,
+    node kinds and provenance the family alone contributes.
+
+    Both producers -- the L5 per-TU pass and the default L2 header pass --
+    fold the family through one owner (``buildsource/semantic_fact_folds``),
+    so their facts are the same; only the pass flag says which ran. A graph
+    carrying neither flag (one stored before the header pass projected these
+    facts) never looked for the family: its silence is a coverage gap, not
+    an absence (``source_graph_compare.diff_source_graph``)."""
+
+    name: str
+    build_pass: str
+    header_pass: str
+    edge_kinds: frozenset[str]
+    node_kinds: frozenset[str]
+    #: The provenance its fold stamps on what it mints.
+    provenance: str
+
+
+SEMANTIC_FAMILIES: tuple[SemanticFamily, ...] = (
+    SemanticFamily(
+        "override", OVERRIDE_GRAPH_PASS, HEADER_OVERRIDE_GRAPH_PASS,
+        frozenset({"METHOD_POSSIBLE_OVERRIDE"}), frozenset(), "override_graph",
+    ),
+    SemanticFamily(
+        "virtual_dispatch", VIRTUAL_DISPATCH_GRAPH_PASS,
+        HEADER_VIRTUAL_DISPATCH_GRAPH_PASS, VIRTUAL_DISPATCH_EDGE_KINDS,
+        VIRTUAL_DISPATCH_NODE_KINDS, "virtual_dispatch_graph",
+    ),
+    SemanticFamily(
+        "template", TEMPLATE_GRAPH_PASS, HEADER_TEMPLATE_GRAPH_PASS,
+        TEMPLATE_EDGE_KINDS, TEMPLATE_NODE_KINDS, "template_graph",
+    ),
+    SemanticFamily(
+        "callback", CALLBACK_GRAPH_PASS, HEADER_CALLBACK_GRAPH_PASS,
+        CALLBACK_EDGE_KINDS, frozenset(), "callback_graph",
+    ),
+)  # fmt: skip
+
+
+def family_collected(graph: SourceGraphSummary, family: SemanticFamily) -> bool:
+    """Whether either producer of *family* left any flag on *graph* (ran in
+    full, narrowed, or degraded): the family was looked for."""
+    return any(
+        name in flags
+        for name in (family.build_pass, family.header_pass)
+        for flags in (
+            graph.extractor_passes,
+            graph.narrowed_passes,
+            graph.degraded_passes,
+        )
+    )
+
+
+#: ADR-046 D3: the roles each role-bearing edge kind can carry, per kind --
+#: the vocabulary ``GraphEdge.role`` takes on these kinds. ``type_graph.py``'s
+#: ``_walk_types`` emits exactly these role values, each from its own
+#: unconditional code path, so a confirmed family-level pass may honestly
+#: claim every role below (``inline_graph_fold._mark_role_coverage``); the
+#: ADR-038 C.8 clang-plugin producer is a different, filtered walk and is out
+#: of scope here. The structural diff's role-change finding reads the same
+#: table to tell a usage role from a role-shaped discriminator such as
+#: ``CALLBACK_MAY_INVOKE``'s slot id.
+ROLE_COVERAGE_MATRIX: Mapping[str, tuple[str, ...]] = MappingProxyType(
+    {
+        "TYPE_INHERITS": ("base",),
+        "TYPE_HAS_FIELD_TYPE": (
+            "field",
+            "alias",
+            "enum_underlying",
+            "template_param",
+            "default_template_arg",
+        ),
+        "DECL_HAS_TYPE": (
+            "var",
+            "return",
+            "param",
+            "template_param",
+            "default_template_arg",
+        ),
+        "DECL_REFERENCES_DECL": ("ref",),
+    }
+)
 
 #: Build-integrated pass -> the edge kinds it produces.
 PASS_EDGE_KINDS: Mapping[str, frozenset[str]] = MappingProxyType(

@@ -187,9 +187,14 @@ _F1 = (
     "guard.absent_capability_vs_real_failure",
     "registry.kind_completeness",
     "evidence.optional_layer_prerequisite_for_a_stated_fact",
+    # An empty `ElfSymbol.version` stood for both "base-bound" and "no version".
+    "evidence.distinct_encoded_states_collapsed_to_one_value",
 )
 _F2 = (
     "report.cross_producer_disagreement_on_one_symbol",
+    # The L2 header pass and the L5 pass derived different fact families
+    # from the same AST.
+    "evidence.producer_drops_facts_its_input_holds",
     # Member check and release reconciliation disagreed on one obligation.
     "evidence.narrowed_conclusion_not_carried_across_cardinality",
     # The CLI and `dumper.dump` hybrid routes disagreed on the parse-time
@@ -223,6 +228,7 @@ _F2 = (
 _F3 = (
     "config.location_dependent_fingerprint",
     "extract.aggregate_layout_header_attribution",
+    "identity.edge_matched_on_coarse_key",
     "identity.environment_taint",
     "identity.name_and_referent_compared_as_one",
     "identity.pe_x86_c_decoration_alias",

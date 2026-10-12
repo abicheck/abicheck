@@ -17,13 +17,14 @@
 
 Split out of ``buildsource/source_graph.py``, which re-exports every name
 here so existing imports keep working. Owns the compact
-:class:`SourceGraphSummary` container (ADR-031 D7), its structural-diff
-result shape :class:`GraphSummaryDiff`, the node-id constructors, and the
-schema vocabulary (``NODE_KINDS``/``EDGE_KINDS``/``SOURCE_GRAPH_VERSION``).
-Construction (folding :class:`~abicheck.buildsource.build_evidence.
-BuildEvidence`/``SourceAbiSurface`` into a graph — ``build_source_graph`` and
-its `_fold_*`/`_augment_*` helpers) and comparison (``diff_source_graph``,
-``localize_symbol``) remain in ``buildsource/source_graph.py`` — a separate,
+:class:`SourceGraphSummary` container (ADR-031 D7), the node-id
+constructors, and the schema vocabulary
+(``NODE_KINDS``/``EDGE_KINDS``/``SOURCE_GRAPH_VERSION``); the
+structural-diff result lives in ``source_graph_diff.py``. Construction
+(folding :class:`~abicheck.buildsource.build_evidence.BuildEvidence`/
+``SourceAbiSurface`` into a graph — ``build_source_graph`` and its
+`_fold_*`/`_augment_*` helpers) and comparison (``diff_source_graph``,
+``localize_symbol``) remain in ``buildsource/`` — a separate,
 not-yet-attempted follow-up slice of the same item.
 """
 
@@ -759,42 +760,3 @@ _TYPE_NODE_KINDS: dict[str, str] = {"enum": "enum_type", "typedef": "typedef"}
 
 def _type_node_kind(decl_kind: str) -> str:
     return _TYPE_NODE_KINDS.get(decl_kind, "record_type")
-
-
-@dataclass
-class GraphSummaryDiff:
-    """Structural delta between two :class:`SourceGraphSummary` snapshots.
-
-    A pure structural diff (which nodes/edges entered or left the graph) — the
-    foundation the ``graph compare`` command renders and that a later phase maps
-    onto the ADR-031 D6 secondary findings. Per ADR-028 D3 / ADR-031 D6 these
-    deltas *explain and prioritize*; they never decide an ABI break on their own.
-    """
-
-    added_nodes: list[GraphNode] = field(default_factory=list)
-    removed_nodes: list[GraphNode] = field(default_factory=list)
-    added_edges: list[GraphEdge] = field(default_factory=list)
-    removed_edges: list[GraphEdge] = field(default_factory=list)
-
-    @property
-    def changed(self) -> bool:
-        return bool(
-            self.added_nodes
-            or self.removed_nodes
-            or self.added_edges
-            or self.removed_edges
-        )
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "added_nodes": [n.to_dict() for n in self.added_nodes],
-            "removed_nodes": [n.to_dict() for n in self.removed_nodes],
-            "added_edges": [e.to_dict() for e in self.added_edges],
-            "removed_edges": [e.to_dict() for e in self.removed_edges],
-            "counts": {
-                "added_nodes": len(self.added_nodes),
-                "removed_nodes": len(self.removed_nodes),
-                "added_edges": len(self.added_edges),
-                "removed_edges": len(self.removed_edges),
-            },
-        }
