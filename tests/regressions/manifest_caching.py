@@ -217,7 +217,7 @@ CACHING_BUG_CLASSES: tuple[BugClass, ...] = (
             "must equal what an uncached run of the same path would report. "
             "The oracle is the uncached run, not the cache's own helper."
         ),
-        fixed_by=(1569,),
+        fixed_by=(1579,),
         seed_tests=("tests/test_snapshot_hit_binary_identity.py",),
         public_surfaces=("python-api", "cli"),
         axes={"rename": ("same-dir-new-basename", "other-dir", "symlink")},
