@@ -1231,19 +1231,27 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
             "elsewhere in the same multi-header binary, or a name that "
             "only appears in a COMMENT/STRING LITERAL/inactive `#if 0` "
             "block are all not evidence for THIS header -- only active "
-            "declaration text correlates."
+            "declaration text correlates. Every later parse of the same "
+            "headers in the same dump (the header graph's own clang parse, "
+            "even one prefetched before the decision existed) follows the "
+            "resolved mode rather than re-deciding from header text."
         ),
-        fixed_by=(1138,),
+        fixed_by=(1138, 1565),
         seed_tests=(
             "tests/test_dumper_language_mode_export_evidence.py",
             "tests/test_crosscheck_language_mode_export_evidence.py",
+            # the header graph follows the primary decision (live dumps,
+            # both frontends, C controls) and its two seams, compiler-free.
+            "tests/test_header_graph_language_mode.py",
+            "tests/test_header_graph_language_mode_unit.py",
         ),
         public_surfaces=("python-api", "cli"),
         axes={
-            "frontend": ("castxml", "clang"),
+            "frontend": ("castxml", "clang", "hybrid"),
             "declaration_shape": ("function", "ns_function", "extern_c", "variable"),
             "export_mangling": ("itanium", "macho_itanium", "msvc", "bare_c"),
             "excluded_text_source": ("comment", "string_literal", "if_zero_block"),
+            "consumer": ("primary_parse", "header_graph_parse"),
         },
         known_gaps=(
             KnownGap(

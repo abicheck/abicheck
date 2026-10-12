@@ -531,8 +531,11 @@ def header_graph_memo_key(
     hash_dirs: Sequence[Path],
     lang: str | None,
     compile_context: object,
+    resolved_lang_mode: str | None = None,
 ) -> tuple[Any, ...]:
-    """Everything a header-graph parse's outcome depends on."""
+    """Everything a header-graph parse's outcome depends on. That includes
+    *resolved_lang_mode*, the mode the primary pass resolved: under no
+    *lang* it turns a C parse of the same headers into a C++ one."""
     return (
         header_tree_signature(headers),
         tuple(str(p) for p in includes),
@@ -540,6 +543,7 @@ def header_graph_memo_key(
         tuple(str(p) for p in hash_dirs),
         (lang or "").lower(),
         repr(compile_context),
+        resolved_lang_mode or "",
     )
 
 

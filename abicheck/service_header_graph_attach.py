@@ -38,9 +38,8 @@ from __future__ import annotations
 
 import logging
 import os
-from collections.abc import Iterator
 from concurrent.futures import Future
-from contextlib import ExitStack, contextmanager, suppress
+from contextlib import ExitStack
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -150,15 +149,21 @@ def _attach_header_graph(
     from .buildsource.include_graph import augment_graph_with_includes
     from .buildsource.semantic_fact_folds import HEADER_SEMANTIC_PASSES
     from .dumper import _resolve_clang_bin
+    from .model.header_lang_mode import recorded_lang_mode
     from .model.source_graph_coverage import HEADER_CALL_GRAPH_PASS
 
     cc = compile if compile is not None else CompileContext()
     _is_c = (lang or "").lower() == "c"
-    acquired = (
-        prefetched.result()
-        if prefetched is not None
-        else acquire_header_graph_ast(headers, includes, lang, compile)
-    )
+    # The primary pass decided C/C++ with the binary's mangled exports too (a
+    # hybrid snapshot: both legs); a prefetch had header text only, so ran as C.
+    primary_mode = recorded_lang_mode(snap.ast_toolchain)
+    acquired = prefetched.result() if prefetched is not None else None
+    if acquired is None or (
+        not lang and primary_mode == "c++" and acquired.resolved_force_cpp is not True
+    ):
+        acquired = acquire_header_graph_ast(
+            headers, includes, lang, compile, resolved_lang_mode=primary_mode
+        )
     projection = acquired.projection
     ast_failure = acquired.ast_failure
     resolved_headers = acquired.resolved_headers
@@ -294,6 +299,9 @@ class HeaderGraphAst:
     resolved_headers: list[Path]
     eff_includes: list[Path]
     eff_tokens: tuple[str, ...]
+    #: Whether the whole-tree parse ran -- or, when it failed, was attempted
+    #: -- as C++. ``None`` when no parse ran at all.
+    resolved_force_cpp: bool | None = None
 
 
 def acquire_header_graph_ast(
@@ -301,6 +309,7 @@ def acquire_header_graph_ast(
     includes: list[Path],
     lang: str | None,
     compile: CompileContext | None,
+    resolved_lang_mode: str | None = None,
 ) -> HeaderGraphAst:
     """The header graph's own clang parse, projected; independent of the snapshot.
 
@@ -327,6 +336,7 @@ def acquire_header_graph_ast(
     )
     from .extract.headers.clang.backend import clang_header_dump
     from .extract.headers.clang.streaming import suppress_streaming_prune
+    from .extract.headers.toolchain import _resolve_force_cpp
     from .extract.unparseable_header_fallback import attribute_failing_headers
     from .storage.derived_ast import DerivedAstArtifact, derived_ast_scope
 
@@ -398,6 +408,7 @@ def acquire_header_graph_ast(
     # the main pass wrote (CodeRabbit review, Codex review).
     _is_c = (lang or "").lower() == "c"
     ast_root: dict[str, Any] | None = None
+    resolved_force_cpp: bool | None = None
     resolved_headers: list[Path] = []
     eff_includes: list[Path] = list(includes)
     eff_tokens: tuple[str, ...] = cc.gcc_option_tokens
@@ -499,7 +510,13 @@ def acquire_header_graph_ast(
                 deferred_token_dirs(deferred)
             ) + cache_relevant_operand_paths(cc.gcc_option_tokens)
             memo_key = header_graph_memo_key(
-                resolved_headers, eff_includes, eff_tokens, deferred_dirs, lang, cc
+                resolved_headers,
+                eff_includes,
+                eff_tokens,
+                deferred_dirs,
+                lang,
+                cc,
+                resolved_lang_mode,
             )
             # A sibling's known failure skips straight to the recovery below.
             bisection_memo.enter(memo_scope, memo_key)
@@ -533,7 +550,7 @@ def acquire_header_graph_ast(
             memory_trace.phase("dump.header_graph.clang_ast"),
             derived_ast_scope(_projection_for) as derived_projection,
         ):
-            ast_root, _resolved_kind, _resolved_force_cpp = clang_header_dump(
+            ast_root, _resolved_kind, resolved_force_cpp = clang_header_dump(
                 resolved_headers,
                 eff_includes,
                 compiler="cc" if _is_c else "c++",
@@ -546,6 +563,7 @@ def acquire_header_graph_ast(
                 lang=lang,
                 extra_hash_dirs=deferred_dirs,
                 frontend_context=cc.frontend_context,
+                resolved_lang_mode=resolved_lang_mode,
                 # This is the *final* consumer of this AST -- writing it into
                 # the in-process memo here would have no further same-process
                 # reader to hand off to (Codex review). A memo entry the
@@ -554,6 +572,11 @@ def acquire_header_graph_ast(
                 memoize=False,
             )
     except (SnapshotError, ValidationError) as exc:
+        # The mode it attempted (`clang_header_dump`'s own decision), so the
+        # attach re-parses only a parse that tried C.
+        resolved_force_cpp = (
+            not lang and resolved_lang_mode == "c++"
+        ) or _resolve_force_cpp(lang, resolved_headers, cc.gcc_options, eff_tokens)
         # Not silent: the graph below falls back to declaration-only, and
         # the call-graph pass is recorded as *attempted and failed* so the
         # comparison's `graph_completeness` reads "degraded" rather than a
@@ -596,6 +619,7 @@ def acquire_header_graph_ast(
                         lang=lang,
                         extra_hash_dirs=deferred_dirs,
                         frontend_context=cc.frontend_context,
+                        resolved_lang_mode=resolved_lang_mode,
                         memoize=False,
                     )
                 return project_header_graph_ast(tree)
@@ -713,86 +737,10 @@ def acquire_header_graph_ast(
     ast_root = None
     memory_trace.mark("dump.header_graph.ast_released")
     return HeaderGraphAst(
-        projection, ast_failure, resolved_headers, eff_includes, eff_tokens
+        projection,
+        ast_failure,
+        resolved_headers,
+        eff_includes,
+        eff_tokens,
+        resolved_force_cpp,
     )
-
-
-def prefetch_header_graph_ast(
-    headers: list[Path],
-    includes: list[Path],
-    lang: str | None,
-    compile: CompileContext | None,
-) -> Future[HeaderGraphAst]:
-    """Start :func:`acquire_header_graph_ast` on a budgeted thread now.
-
-    Lets the header graph's own clang parse run while the primary castxml
-    dump runs. Its thread comes from the process-wide budget
-    (``ABICHECK_MAX_THREADS``); with the budget spent it runs inline, which
-    is exactly the old, sequential order.
-    """
-    import contextvars
-
-    from .process_resources import BudgetedExecutor
-
-    pool = BudgetedExecutor(1, thread_name_prefix="abicheck-hgraph")
-    ctx = contextvars.copy_context()
-    future = pool.submit(
-        ctx.run, acquire_header_graph_ast, headers, includes, lang, compile
-    )
-    future.add_done_callback(lambda _f: pool.shutdown(wait=False))
-    return future
-
-
-#: Longest a failed dump waits for its abandoned header-graph prefetch.
-_PREFETCH_SETTLE_TIMEOUT_S = 10.0
-
-
-@contextmanager
-def prefetch_settled_on_failure(
-    future: Future[HeaderGraphAst] | None,
-) -> Iterator[None]:
-    """Wait for *future* to finish before re-raising a failure of the block.
-
-    A prefetch runs beside the primary dump; if that dump fails, nothing will
-    ever consume the prefetched graph, but its parse keeps running and keeps
-    its thread-budget slot (released only when it completes). Settling it
-    here returns the slot before the failing call returns, so a failed dump
-    never leaves an orphaned parse behind to starve a later pool.
-    """
-    try:
-        yield
-    except Exception:
-        # Bounded: a prefetch stuck in a slow parse must not hold the error
-        # hostage. Past the bound the slot is returned when the parse ends,
-        # exactly the pre-fix behavior, but the common case (a parse that is
-        # finishing or already done) is settled before the error propagates.
-        if future is not None:
-            with suppress(BaseException):
-                future.result(timeout=_PREFETCH_SETTLE_TIMEOUT_S)
-        raise
-    # KeyboardInterrupt / SystemExit propagate immediately: an interrupt must
-    # never wait on a background parse (up to clang's own timeout).
-
-
-def prefetch_graph_if_useful(
-    wanted: bool,
-    resolved_backend: str,
-    headers: list[Path],
-    includes: list[Path],
-    lang: str | None,
-    compile: CompileContext | None,
-) -> Future[HeaderGraphAst] | None:
-    """Start the header graph's clang parse now, when that is worth doing.
-
-    The parse depends only on the headers and compile context, never on the
-    snapshot, so under castxml -- which never produces the clang AST the
-    graph needs -- it can run alongside the primary dump. Measured on a cold
-    header cache: 11-15% off a single-library compare, neutral on a warm
-    cache and on a release whose members already fill the cores. Under the
-    clang frontend the attach reuses the primary pass's AST instead, so a
-    prefetch there would parse the same headers twice; ``None`` then, and
-    whenever the graph is not wanted at all.
-    """
-    if not (wanted and headers and resolved_backend == "castxml"):
-        return None
-    return prefetch_header_graph_ast(headers, includes, lang, compile)

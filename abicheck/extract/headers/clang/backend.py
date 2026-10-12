@@ -156,6 +156,7 @@ def clang_header_dump(
     memoize: bool | None = None,
     pruning_header_roots: tuple[str, ...] | None = None,
     exported_symbols: frozenset[str] = frozenset(),
+    resolved_lang_mode: str | None = None,
     _coordinated: bool = False,
     _expected_acquisition_key: str | None = None,
     run_ast: ClangAstRunner = run_clang_ast,
@@ -173,6 +174,13 @@ def clang_header_dump(
     stale guess once this already resolved the real answer).
 
     ``frontend_context`` selects the host or device DPC++ evidence.
+
+    ``resolved_lang_mode`` (``"c"``/``"c++"``) is the mode an earlier pass
+    over the same headers already resolved, from evidence this call may not
+    have -- the primary dump's export table (``_resolve_force_cpp``). With no
+    explicit ``lang``, ``"c++"`` is used instead of re-deriving C from header
+    text alone; the cache key is then the one that pass produced. It never
+    demotes: header text that already proves C++ stays C++.
     """
     # The acquisition key folds the ``-I`` spelling in, so the spelling is
     # canonicalized here -- the one choke point every caller reaches --
@@ -192,6 +200,9 @@ def clang_header_dump(
         gcc_option_tokens,
         exported_symbols,
     )
+    if not lang and resolved_lang_mode == "c++" and not force_cpp:
+        force_cpp = True
+        force_cpp20 = _detect_cpp20_headers(headers)
 
     def _resolve_sysinc(*, force_cpp: bool) -> tuple[str, ...]:
         return _resolve_clang_system_includes(
@@ -283,6 +294,7 @@ def clang_header_dump(
                 memoize=memoize,
                 pruning_header_roots=pruning_header_roots,
                 exported_symbols=exported_symbols,
+                resolved_lang_mode=resolved_lang_mode,
                 _coordinated=True,
                 _expected_acquisition_key=key,
                 run_ast=run_ast,

@@ -64,8 +64,6 @@ from ...service_header_graph_attach import (
     _HEADER_GRAPH_ENABLED,
     _HEADER_GRAPH_INCLUDES_ENABLED,
     _attach_header_graph,
-    prefetch_graph_if_useful,
-    prefetch_settled_on_failure,
 )
 from ...storage import closure_identity
 from ...workflows.dump.formats import (
@@ -73,6 +71,10 @@ from ...workflows.dump.formats import (
     BinaryFormatAdapter,
     NativeExtractRequest,
     emit_notice,
+)
+from ...workflows.dump.header_graph_prefetch import (
+    prefetch_graph_if_useful,
+    prefetch_settled_on_failure,
 )
 from ...workflows.dump.hybrid import compose_hybrid
 from ...workflows.run_dump_scope import (

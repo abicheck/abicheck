@@ -74,11 +74,6 @@ Each entry's status line says what is still open. A PARTIAL entry's write-up als
 **Status (re-verified 2026-10-09 at `456989f`): OPEN.** actions/check-target/action.yml:1828 still routes bundle old-library to `steps.resolve.outputs.binaries-dir`, not `member-snapshots-dir`. BUNDLE_CHECK_DEPTHS is unchanged (abicheck/buildsource/bundle_member_snapshots.py:18,69). So (a) routing and (b) candidate-side per-member headers are still open.  
 `false-clean` — Bundle checks can stage per-member *baseline* header snapshots, but the Action still routes the old side to binaries and the candidate side has no per-member headers, so a bundle check cannot run at `depth: headers`. [Full write-up](known-gaps/a-kind-bundle-check-still-cannot-run-at-depth-headers-only-the.md)
 
-#### The header-graph parse picks C mode for C++ headers without a recognised C++ construct (2026-10-12)
-
-**Status (recorded 2026-10-12 at `f25eddcdd`): OPEN.** `extract/headers/ast_config._detect_cpp_headers` decides the header graph's clang mode from header text alone; a non-const reference (`Slot&`) or `std::` is not in `_CPP_ONLY_PATTERNS`, so such a `.h` header parses as `-x c -std=gnu11`, fails, and the header graph degrades to declaration-only.  
-`hygiene` — A C++ `.h` header whose only C++ markers are non-const references or `std::` names gets a degraded (declaration-only) header graph although the binary's exports are C++-mangled. Coverage stays honest (`header_call_graph` is degraded), but the graph loses its edges. [Full write-up](known-gaps/header-graph-parse-picks-c-mode-for-cxx-headers.md)
-
 #### Header-pass body coverage is one blanket unit, not per body (2026-10-11)
 
 **Status (recorded 2026-10-11 at `2a1ccb0c8`): OPEN.** source_graph_coverage gives header passes a single HEADER_INLINE_BODIES unit; no per-declaration body fact exists.  

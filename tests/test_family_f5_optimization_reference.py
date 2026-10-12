@@ -194,7 +194,7 @@ COVERAGE: dict[str, str] = {
     # every L5 clang graph pass (buildsource/l5_ast_pass.run_ast_passes) --
     # it replaced the six per-extractor ``extract_from_build`` pools.
     "abicheck.parallel_probe::pool::run_parallel_probes->BudgetedExecutor": "UNCOVERED: environment-matrix probes (--probe-matrix) and the shared L5 clang AST passes; needs a probe matrix or a compile database + clang",
-    "abicheck.service_header_graph_attach::pool::prefetch_header_graph_ast->BudgetedExecutor": _NEEDS_L5,
+    "abicheck.workflows.dump.header_graph_prefetch::pool::prefetch_header_graph_ast->BudgetedExecutor": _NEEDS_L5,
 }
 
 _SITES = scan_optimization_sites()

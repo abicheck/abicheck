@@ -16,6 +16,12 @@ re-verification status line (2026-10-09, `456989f`). Do not re-open an
 entry from here without reproducing it on current `main`; record a new
 gap on the main page instead.
 
+### The header-graph parse picks C mode for C++ headers without a recognised C++ construct (closed 2026-10-12)
+
+**Status (2026-10-12): CLOSED.** With no explicit `--lang`, the header graph's own clang parse now follows the language mode the primary pass resolved from header text and the binary's mangled exports (`ast_toolchain["resolved_lang_mode"]`, or a hybrid merge's agreeing legs -> `clang_header_dump(resolved_lang_mode=...)`); a prefetched parse that ran or failed as C under a C++ decision is re-parsed once. `tests/test_header_graph_language_mode.py` covers four C++ headers with no textual C++ marker and two C controls, under the castxml, clang and hybrid frontends.
+
+[Full write-up](../known-gaps/header-graph-parse-picks-c-mode-for-cxx-headers.md)
+
 ### A typed release compare did not record the gate on its members (closed 2026-10-12)
 
 **Status (2026-10-12): CLOSED.** A release run through the typed workflow (`workflows.release_compare.execute_release_compare`) without a `pack_application` now resolves its own configuration. It uses the resolver the CLI's release route and the scalar compare share, `workflows.compare_configuration.resolve_release_pack_application`. The plan's gate, the policy, the suppression and the project overrides are stated at the `API_REQUEST`/`PROJECT_CONFIG` tiers, so each member records the gate the identical typed scalar compare records. The CLI route now goes through the same function and supplies only its own inputs. Regression: `tests/test_release_compare_workflow.py`'s `severity_strict` cells, previously a strict xfail, pass for cardinality 1–3. The former write-up is [here](../known-gaps/a-typed-release-compare-does-not-record-the-gate-on-its-members.md).
