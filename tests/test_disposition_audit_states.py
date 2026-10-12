@@ -346,7 +346,7 @@ def test_every_policy_overlay_kind_is_produced_by_policy_not_a_detector() -> Non
             f"{slug!r} is not a real ChangeKind"
         )
     # Derived from the source rather than hand-listed: every kind
-    # `post_processing`'s `_build_suppression_*` helpers synthesize is a
+    # the suppression disposition's `*_diagnostic` builders synthesize is a
     # policy overlay by construction, and a third such builder must be
     # classified rather than silently counted as an observation. This is what
     # the reported gap was -- the sibling
@@ -355,14 +355,14 @@ def test_every_policy_overlay_kind_is_produced_by_policy_not_a_detector() -> Non
     import ast
     import inspect
 
-    from abicheck import post_processing
+    from abicheck.policy.finding_disposition import suppression
 
     synthesized = set()
-    tree = ast.parse(inspect.getsource(post_processing))
+    tree = ast.parse(inspect.getsource(suppression))
     for node in ast.walk(tree):
         if not isinstance(node, ast.FunctionDef):
             continue
-        if not node.name.startswith("_build_suppression"):
+        if not node.name.endswith("_diagnostic"):
             continue
         for inner in ast.walk(node):
             if (

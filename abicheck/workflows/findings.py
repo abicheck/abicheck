@@ -41,12 +41,12 @@ import json
 from pathlib import Path
 from typing import Any
 
-from ..diff_build_config import diff_matrix
-from ..finding_identity import (
+from ..compare.finding_identity import (
     missing_contract_finding,
     report_canonical_finding_id,
     report_finding_id,
 )
+from ..diff_build_config import diff_matrix
 from ..model.probe_matrix import MatrixSnapshot, ProbeResult
 from ..serialization import snapshot_from_dict, snapshot_to_dict
 

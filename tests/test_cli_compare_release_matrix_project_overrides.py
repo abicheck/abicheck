@@ -31,11 +31,13 @@ touches.
 
 from __future__ import annotations
 
-import abicheck.frontends.cli.runtime as runtime_mod
+import abicheck.workflows.pair_evidence as runtime_mod
 from abicheck.change_registry_types import Verdict
 from abicheck.checker_policy import ChangeKind
-from abicheck.cli_compare_release_matrix import _collect_matrix_result
 from abicheck.model.change import Change
+from abicheck.workflows.release_compare import (
+    collect_matrix_result as _collect_matrix_result,
+)
 
 
 def test_project_config_policy_override_reaches_matrix_findings(
@@ -47,7 +49,7 @@ def test_project_config_policy_override_reaches_matrix_findings(
         description="C++ standard floor raised",
     )
     monkeypatch.setattr(  # type: ignore[attr-defined]
-        runtime_mod, "_load_probe_matrix_changes", lambda *a, **k: [matrix_change]
+        runtime_mod, "load_probe_matrix_changes", lambda *a, **k: [matrix_change]
     )
 
     result, worst_verdict = _collect_matrix_result(
@@ -77,7 +79,7 @@ def test_no_project_config_still_scores_the_matrix_finding(
         description="C++ standard floor raised",
     )
     monkeypatch.setattr(  # type: ignore[attr-defined]
-        runtime_mod, "_load_probe_matrix_changes", lambda *a, **k: [matrix_change]
+        runtime_mod, "load_probe_matrix_changes", lambda *a, **k: [matrix_change]
     )
 
     result, worst_verdict = _collect_matrix_result(

@@ -46,12 +46,7 @@ Each open entry below has its status line, a risk tag and a short summary; the f
 
 Open correctness gaps, in the order of the maintainer ruling of 2026-10-01 (closed items from that ruling are in the archive):
 
-Next, unranked (the `--no-baseline` one-sided-detector gap, the target-platform gap and the untagged `dependency_scope` gap were closed on 2026-10-10; see the archive). Each of these can let a run read as cleaner or more comparable than its evidence supports:
-
-### An informational, no-material-change reconciliation outcome gates the build under `--severity-preset strict` (2026-09-12)
-
-**Status (re-verified 2026-10-11 at `46c127111`): OPEN.** `declaration_coordinates_shifted` and `declaration_identity_unchanged` are still in `COMPATIBLE_KINDS` and not in `ADDITION_KINDS`, so `policy/severity.py` still buckets them as `quality_issues`, and `PRESET_STRICT` still sets that category to `ERROR`. No informational category exists.  
-`false-positive` — `declaration_coordinates_shifted`/`declaration_identity_unchanged` are bucketed as `quality_issues`, which `--severity-preset strict` sets to `ERROR`, so a no-change outcome fails the build. [Full write-up](known-gaps/an-informational-no-material-change-reconciliation-outcome.md)
+Next, unranked (the `--no-baseline` one-sided-detector gap, the target-platform gap and the untagged `dependency_scope` gap were closed on 2026-10-10, and the informational-outcome strict-gate gap on 2026-10-12; see the archive). Each of these can let a run read as cleaner or more comparable than its evidence supports:
 
 ### A snapshot's `build_mode` is captured only for ELF, and only from the main image
 
@@ -356,7 +351,7 @@ Each entry's status line says what is still open. A PARTIAL entry's write-up als
 
 #### Release-fan-out CLI tests JSON-parse `CliRunner.output`, which the memory-clamp note can join
 
-**Status (re-verified 2026-10-09 at `456989f`): OPEN.** cli_compare_release_pairwise.py:621-628 still echoes the clamp note with err=True. tests/test_release_package_inventory_cli.py:92-99 still does `json.loads(CliRunner().invoke(...).output)`, as do test_release_evaluation_config.py:712,730.  
+**Status (re-verified 2026-10-09 at `456989f`): OPEN.** The clamp note is still a stderr line: `workflows/release_members.compare_release_members` emits it through the reporter's `notice`, which the CLI echoes with `err=True`. tests/test_release_package_inventory_cli.py:92-99 still does `json.loads(CliRunner().invoke(...).output)`, as do test_release_evaluation_config.py:712,730.  
 `hygiene` — The memory-clamp note goes to stderr, and several release CLI tests `json.loads(CliRunner(...).output)`, which can mix the two streams. [Full write-up](known-gaps/release-fan-out-cli-tests-json-parse-clirunneroutput-which-the.md)
 
 #### Source-read licence: enforced at the one consumer, not repo-wide (2026-09-12)

@@ -55,6 +55,11 @@ from ..buildsource.export_accounting import (
 from ..model import AbiSnapshot
 from ..model.change import Change
 from ..model.change_catalog.kinds import ChangeKind
+from ..model.cxx_artifact_symbols import (
+    KIND_CONSTRUCTOR,
+    KIND_DESTRUCTOR,
+    cxx_class_artifact_kind,
+)
 
 __all__ = ["EXISTENCE_KINDS", "describe_export_existence", "existence_description"]
 
@@ -101,9 +106,15 @@ def existence_description(change: Change, decision: ExportAccount) -> str | None
     if category == ACCOUNT_PUBLIC:
         return f"{lead} symbol of a public declaration: {sym}"
     if category == ACCOUNT_CXX_ARTIFACT:
+        what = cxx_class_artifact_kind(sym) or "compiler-emitted artifact"
+        if what in (KIND_CONSTRUCTOR, KIND_DESTRUCTOR):
+            return (
+                f"{lead} C++ ABI artifact ({what}) of a class, accounted for "
+                f"by its class's declaration: {sym}"
+            )
         return (
-            f"{lead} C++ ABI artifact (vtable/typeinfo/VTT/thunk) of a class, "
-            f"declared by no header by construction: {sym}"
+            f"{lead} C++ ABI artifact ({what}) of a class, declared by no "
+            f"header by construction: {sym}"
         )
     if category == ACCOUNT_ALLOCATOR_INTERPOSER:
         return f"{lead} allocator replacement of a malloc-interposer library: {sym}"

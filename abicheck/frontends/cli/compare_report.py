@@ -62,11 +62,65 @@ from ...cli_resolve import (
 )
 from ...model.consumer_requirements import LibraryExportsUnreadableError
 from ...model.consumer_spec import ConsumerUnreadableError
-from .runtime import _render_output
 
 if TYPE_CHECKING:
+    from ...checker_types import DiffResult
+    from ...model import AbiSnapshot
     from ...model.consumer_spec import ConsumerAppInput
+    from ...workflows.gate import SeverityConfig
     from ...workflows.policy_file import PolicyFile
+
+
+def _render_output(
+    fmt: str,
+    result: DiffResult,
+    old: AbiSnapshot,
+    new: AbiSnapshot | None = None,
+    *,
+    follow_deps: bool = False,
+    show_only: str | None = None,
+    report_mode: str = "full",
+    show_impact: bool = False,
+    severity_config: SeverityConfig | None = None,
+    demangle: bool = False,
+    contract_evaluation: bool = False,
+    require_complete_analysis: bool = False,
+) -> str:
+    """Render comparison result in the requested output format.
+
+    No ``stat``/``show_recommendation`` parameters: the one-line summary is
+    reached only via ``fmt == frontends.render.ONELINE_FORMAT``
+    (``-o oneline=...``), and the summary-only JSON via
+    ``reporter.to_stat_json``.
+
+    ``show_recommendation=True`` is still passed explicitly below even though
+    :func:`~abicheck.frontends.render.render_output`'s own default is now ``True`` as well. It is
+    redundant, deliberately: this wrapper states the CLI's own contract (the
+    release recommendation is unconditional for every CLI invocation) rather
+    than inheriting it, so a future change to the library default cannot alter
+    CLI output without a test here failing first. It previously *compensated*
+    for a ``False`` default, which is the divergence the defaults-alignment
+    pass removed.
+    """
+    # `frontends.render` directly, not the `service` facade that re-exports
+    # it (abicheck/frontends/AGENTS.md).
+    from ..render import render_output
+
+    return render_output(
+        fmt,
+        result,
+        old,
+        new,
+        follow_deps=follow_deps,
+        show_only=show_only,
+        report_mode=report_mode,
+        show_impact=show_impact,
+        severity_config=severity_config,
+        demangle=demangle,
+        contract_evaluation=contract_evaluation,
+        show_recommendation=True,
+        require_complete_analysis=require_complete_analysis,
+    )
 
 
 def _apply_scoped_gating(
@@ -149,7 +203,7 @@ def _render_compare_report(
     they share this one function rather than keeping two copies that can drift.
 
     No ``stat``/``recommend`` parameters (CLI cleanup phase two, PR 1): see
-    ``_render_output``/``service_render.render_output`` for where the
+    ``_render_output``/``frontends.render.render_output`` for where the
     one-line format and the unconditional recommendation now live.
 
     ADR-061 Phase 2 item 5: this used to be a four-fold pipeline -- the

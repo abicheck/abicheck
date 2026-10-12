@@ -92,7 +92,7 @@ def _param_is_ignored(
 
 def _all_entries() -> list[Any]:
     registry.ensure_loaded()
-    return sorted(registry._detectors, key=lambda e: e.order)
+    return sorted(registry._detectors, key=lambda e: e.priority)
 
 
 def test_every_detector_ignoring_new_is_declared_one_sided() -> None:

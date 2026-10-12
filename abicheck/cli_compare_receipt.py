@@ -367,37 +367,29 @@ def resolve_release_pack_application(
     ``--contract`` is still rejected as decorative, and with ``--contract``
     it is accepted and threaded through like every other pack field.
 
-    Raises what the canonical resolver and the pack loader raise (a D7
-    same-tier conflict, a D8 pack conflict, an inapplicable, gate-only, or
-    unresolved-only pack); mapping those onto exit 64 is the caller's job.
+    Raises :class:`~abicheck.workflows.compare_configuration.
+    ConfigurationConflictError` (a D7 same-tier conflict, a D8 pack conflict,
+    an inapplicable, gate-only, or unresolved-only pack) or
+    ``ProjectPolicyOverridesError``; mapping those onto exit 64 is the
+    caller's job.
     """
-    pack_paths = tuple(params.get("pack_paths") or ())
     # Runs regardless of `pack_paths` (finding 1) -- see docstring above.
-    config = resolve_cli_config(params, **kwargs)
-    from .pack_application import (
-        PackApplication,
-        check_resolved_config_applies_packs,
-        pack_application,
+    # This function supplies the CLI's inputs only; the resolution itself is
+    # the one the typed release route shares.
+    from .compatibility_evaluation_frontend import FrontEnd
+    from .workflows.compare_configuration import (
+        resolve_release_pack_application as _resolve_release_configuration,
     )
 
-    if not pack_paths:
-        return PackApplication(policy_overrides={}, resolved_config=config)
-    check_resolved_config_applies_packs(
-        config,
-        # A `kind: gate` pack needs no check here: since CLI cleanup phase two
-        # "PR B" slice 2, the release fan-out folds its `severity.*` (no
-        # `exit_code_scheme` any more, PR G2) into its own raw severity inputs
-        # (`cli_compare_release_helpers.apply_release_gate_pack`) the same way
-        # `compare --pack` folds them into `ResolvedCompareConfig` -- see this
-        # function's own docstring.
-        # `contract_evaluation` is this release invocation's own real value
-        # (whether *this* run passed `--contract`) -- the same gate the
-        # single-pair path applies via `resolve_compare_configuration`, now that this
-        # function's own docstring has confirmed there is no release-specific
-        # hazard left to guard against beyond that.
+    explicit, project = cli_configuration_inputs(params, **kwargs)
+    return _resolve_release_configuration(
+        explicit,
+        front_end=FrontEnd.CLI,
+        project=project,
+        policy_file=kwargs.get("policy_file"),
+        base_policy=params.get("policy") or DEFAULT_POLICY_PROFILE,
         contract_evaluation=contract_evaluation,
     )
-    return pack_application(config, policy_file=kwargs.get("policy_file"))
 
 
 def resolve_release_pack_application_from_ctx(
@@ -608,7 +600,7 @@ def _release_summary_effective_config_block(
     resolving it once more here the same way
     (:func:`~abicheck.frontends.cli.options.params._load_suppression_and_policy`,
     folding *pack_application* like
-    :func:`~abicheck.cli_compare_release_matrix._collect_matrix_result`
+    :func:`~abicheck.workflows.release_compare.collect_matrix_result`
     does) reproduces what any one library's own report shows for these
     fields; reloaded rather than threaded down since no per-library
     ``PolicyFile`` is retained at this scope (the reload runs inside the

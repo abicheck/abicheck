@@ -3,8 +3,8 @@
 """Contract of the root-type matching primitives in ``diff_filtering``.
 
 ``_root_pattern`` (one type name as a whole-identifier regex),
-``_match_root_type`` (which root type a derived finding names) and
-``_root_type_name`` (the type a finding is about). The oracle for the
+``match_root_type`` (which root type a derived finding names) and
+``root_type_name`` (the type a finding is about). The oracle for the
 pattern is an independent token scan, never the regex under test.
 """
 
@@ -15,11 +15,11 @@ import re
 import pytest
 from hypothesis import given, settings, strategies as st
 
-from abicheck.diff_filtering import (
+from abicheck.compare.finding_redundancy import (
     _compile_root_patterns,
-    _match_root_type,
     _root_pattern,
-    _root_type_name,
+    match_root_type,
+    root_type_name,
 )
 from abicheck.model.change import Change
 from abicheck.model.change_catalog.kinds import ChangeKind
@@ -101,18 +101,18 @@ _ROOTS = {"Config": _change(), "Data": _change()}
 )
 def test_match_root_type(kw, expected, precompiled) -> None:
     patterns = _compile_root_patterns(_ROOTS) if precompiled else None
-    assert _match_root_type(_change(**kw), _ROOTS, patterns) == expected
+    assert match_root_type(_change(**kw), _ROOTS, patterns) == expected
 
 
 def test_match_root_type_falls_back_for_a_root_missing_from_the_patterns() -> None:
     partial = {"Config": re.compile("Config")}
-    assert _match_root_type(_change(new_value="Data*"), _ROOTS, partial) == "Data"
+    assert match_root_type(_change(new_value="Data*"), _ROOTS, partial) == "Data"
 
 
 def test_match_root_type_uses_the_given_patterns() -> None:
     # A caller's precompiled pattern is authoritative for its name.
     never = {"Config": re.compile(r"(?!x)x"), "Data": re.compile(r"(?!x)x")}
-    assert _match_root_type(_change(new_value="Config*"), _ROOTS, never) is None
+    assert match_root_type(_change(new_value="Config*"), _ROOTS, never) is None
 
 
 @pytest.mark.parametrize(
@@ -136,4 +136,4 @@ def test_match_root_type_uses_the_given_patterns() -> None:
 )
 def test_root_type_name(symbol, qualified, kind, expected) -> None:
     c = _change(kind=kind, symbol=symbol, qualified_name=qualified)
-    assert _root_type_name(c) == expected
+    assert root_type_name(c) == expected

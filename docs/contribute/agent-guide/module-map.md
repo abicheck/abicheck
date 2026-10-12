@@ -186,10 +186,15 @@ Core pipeline (in order of data flow):
    - `diff_types.py` — struct/enum/union/typedef changes
    - `diff_platform.py` — ELF/PE/Mach-O specific changes
    - `diff_elf_layout.py` — binary-only (no-DWARF/L0) vtable & RTTI layout diff from `_ZTV`/`_ZTI` symbol sizes
-   - `diff_filtering.py` — deduplication and redundancy removal
+   - `diff_filtering.py` — source-location/affected-symbol enrichment and
+     opaque-type filtering
+   - `compare/finding_redundancy.py` — root-type redundancy
+     (`split_redundant`: a derived finding folds into the root-type change it
+     names); `compare/finding_dedup.py` — exact, enum, DWARF-vs-AST and
+     cross-detector deduplication
    - `diff_versioning.py` — symbol version checks
    - `diff_sycl.py` — SYCL-specific diffs
-   - `finding_identity.py` — ADR-049 Phase 2: tiered canonical/normalized/
+   - `compare/finding_identity/` — ADR-049 Phase 2: tiered canonical/normalized/
      reduced identity resolution for flat (L0-L2) findings
      (`resolve_function_identity`/`resolve_variable_identity`/
      `resolve_change_identity`), generalizing the mangled-primary +
@@ -198,7 +203,10 @@ Core pipeline (in order of data flow):
      identity, ambiguity-safe fallback" principle ADR-045 established for
      flat type matching (`diff_helpers.TypeMap`) and ADR-048 established for
      L5 source-graph nodes (`buildsource/entity_identity.py`). Fully wired:
-     `diff_filtering.py`'s cross-detector dedup key uses
+     the package `__init__` is the interface (`resolve_*_identity`,
+     `SymbolIdentityIndex`, `report_finding_id`/`report_canonical_finding_id`);
+     `mangled`/`symbols`/`change_kinds`/`change`/`report_ids` are its
+     implementation. `compare/finding_dedup.py`'s cross-detector dedup key uses
      `resolve_change_identity()`, and `diff_symbols.py`'s own old/new
      function and variable matching joins through `SymbolIdentityIndex` —
      the flat-symbol counterpart of `TypeMap`, a `Mapping` over the same
@@ -234,6 +242,15 @@ Core pipeline (in order of data flow):
      `LongitudinalHistoryResult.deprecation_compliance`, never read by any
      pairwise `compare()` verdict)
    - `suppression.py` — suppression rules (YAML + ABICC formats)
+   - `policy/finding_disposition/` — what happens to a finding after diff
+     (ADR-067 "record before disposing"): `dispose_findings(changes, old,
+     new, DispositionRules)` runs the default step order
+     (`default_pipeline.py`) and returns a `PipelineContext` whose buckets
+     plus disposition ledger account for every input finding;
+     `dispose_by_suppression` is the one suppression primitive every
+     application point (pipeline step, late detector findings, `compare()`'s
+     SONAME/floor/metric/pattern findings) shares. The step classes still
+     live in the legacy `post_processing.py`
    - `severity.py` — severity configuration
    - `contract_relevance_types.py` — ADR-049 Phase 0 (accepted): reserved
      contract-mode/relevance vocabulary, reason-code registry, and
@@ -317,7 +334,7 @@ Core pipeline (in order of data flow):
      nothing, which is the single failure all of these guard. `compare`
      takes all three kinds (`scan --against`, which also took all three,
      was deleted by ADR-068 Phase 6). The directory/package
-     release fan-out (`cli_compare_release.py`) takes all three kinds too,
+     release fan-out (`workflows/release_compare.py`) takes all three kinds too,
      since CLI cleanup phase two's "PR B" slice 2 — a `kind: gate` pack's
      `gate.severity.*` folds into the fan-out's own
      resolved `GateOptions` (`policy.release_gate_options.
@@ -519,7 +536,7 @@ Core pipeline (in order of data flow):
    `reconcile_member_sets` is the driver-agnostic core and
    `member_pass_scope` the one place the ">1 member" rule lives, so a new
    multi-member driver wires to those rather than restating either: the
-   live directory/package fan-out (`cli_compare_release*.py`), a stored
+   live directory/package fan-out (`workflows/release_compare.py`), a stored
    `BundleFacts` baseline against a live release
    (`stored_old_live_new_reconciliation`), and two stored documents
    (`workflows/bundle_stored_pair_compare.py`). Only the live path
@@ -794,7 +811,7 @@ cover the surrounding first-party trees this file doesn't detail.
    `tests/canonical_identity_contract.py` — put it in exactly one of
    `TYPE_BEARING` (its `old_value`/`new_value` hold C/C++ type spellings, so
    they must be canonicalized, which also means adding it to
-   `finding_identity._TYPE_BEARING_DISCRIMINATOR_KINDS`),
+   `compare/finding_identity/change_kinds._TYPE_BEARING_DISCRIMINATOR_KINDS`),
    `VALUE_INSENSITIVE` (identity does not vary with value spelling because the
    kind resolves through an `_EQUIVALENT_CHANGE_CATEGORIES` entry), or
    `UNVERIFIED` (the call site has not been read yet — an explicit backlog

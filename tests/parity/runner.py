@@ -102,7 +102,7 @@ def crosscheck_finding_set(snapshot: Any, config: Any = None) -> FindingSet:
     (``workflows/cross_source_evolution.py``) runs.
     """
     from abicheck.buildsource.cross_source_checks import run_crosschecks
-    from abicheck.finding_identity import report_finding_id
+    from abicheck.compare.finding_identity import report_finding_id
 
     result = run_crosschecks(snapshot, config)
     findings = set()

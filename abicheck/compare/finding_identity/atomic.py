@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import re
 
-from .name_classification import canonicalize_type_name
+from ...name_classification import canonicalize_type_name
 
 # Matches an `_Atomic`-qualified spelling (after stripping a leading
 # const/volatile prefix -- see _CV_PREFIX_RE) in either form castxml/clang

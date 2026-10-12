@@ -111,7 +111,7 @@ def test_release_json_block_equals_the_single_pair_block(
             "json=-",
         )
     )
-    assert release["release_schema_version"] == "1.13"
+    assert release["release_schema_version"] == "2.0"
     (lib,) = release["libraries"]
     assert lib["suppression_audit"] == single["suppression_audit"]
     # Vacuity guard: the oracle itself says something for every case.

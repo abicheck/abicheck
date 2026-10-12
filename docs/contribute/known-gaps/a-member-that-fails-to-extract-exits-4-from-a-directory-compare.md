@@ -26,7 +26,7 @@ documented in `docs/reference/exit-codes.md`. Reproduce: put the same corrupt
 This is the one axis where a release of one member and a scalar `compare` of that
 member disagree. The release fold takes each member's compatibility
 contribution from the scalar resolver (`resolve_compare_exit_decision`, stamped
-by `cli_compare_release_pairwise._member_exit_decision`), and
+by `workflows.member_compare.member_exit_decision`), and
 `tests/test_compare_cardinality_invariance.py` pins the agreement on every axis
 where a comparison completed. A member that never compared has no scalar
 decision to fold, so it falls to the release's own operational-error axis.

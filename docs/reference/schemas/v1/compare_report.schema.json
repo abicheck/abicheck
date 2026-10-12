@@ -2547,7 +2547,12 @@
         "quality_issues": {
           "type": "integer",
           "minimum": 0,
-          "description": "Additive (report_schema_version 3.13): the subset of COMPATIBLE findings that is not a genuine addition (e.g. public_surface_shrank, which is COMPATIBLE but reports a decrease). Disjoint from compatible_additions as of 4.0 -- see that field's own description."
+          "description": "Additive (report_schema_version 3.13): the COMPATIBLE findings that are neither a genuine addition nor an informational outcome. Disjoint from compatible_additions as of 4.0 -- see that field's own description. As of 6.0 (ADR-078, a meaning change, hence MAJOR) it also excludes the informational outcomes counted by 'informational' (e.g. public_surface_shrank, declaration_identity_unchanged); the pre-6.0 value is quality_issues + informational."
+        },
+        "informational": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "report_schema_version 6.0 (ADR-078): COMPATIBLE findings recording that nothing a consumer can act on changed -- a reconciliation proving a declaration identical, or an aggregate roll-up of findings reported individually. Their severity category is fixed at info and never gates. compatible_additions + quality_issues + informational counts every COMPATIBLE finding."
         },
         "total_changes": {
           "type": "integer",
@@ -2567,7 +2572,7 @@
     },
     "severity": {
       "type": "object",
-      "description": "Present only when a severity configuration was active. config/categories mirror the resolved SeverityConfig and per-category counts; blocking/blocking_categories (schema 2.3) are a typed gate summary mirroring SARIF's severityGate block.",
+      "description": "Present only when a severity configuration was active. config/categories mirror the resolved SeverityConfig and per-category counts; blocking/blocking_categories (schema 2.3) are a typed gate summary mirroring SARIF's severityGate block. categories also carries 'informational' (schema 6.0, ADR-078): a category with a fixed 'info' level, absent from config and never in blocking_categories.",
       "required": [
         "config",
         "categories",

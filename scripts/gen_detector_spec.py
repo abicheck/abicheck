@@ -72,6 +72,8 @@ def _category_of(kind, policy) -> str:
         return "risk"
     if kind in policy.ADDITION_KINDS:
         return "addition"
+    if kind in policy.INFORMATIONAL_KINDS:
+        return "informational"
     if kind in policy.QUALITY_KINDS:
         return "quality"
     return "unknown"

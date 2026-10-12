@@ -70,6 +70,8 @@ business logic of its own, matching every other option-only module under
 
 from __future__ import annotations
 
+import click
+
 REPORT_MODES: tuple[str, ...] = ("full", "impact", "root-cause")
 
 _SHOW_PREFIX = "show="
@@ -164,3 +166,25 @@ def parse_view_tokens(tokens: tuple[str, ...]) -> dict[str, object]:
         parse_show_only_groups(show_only)
 
     return {"report_mode": report_mode, "show_only": show_only}
+
+
+def validate_view(
+    ctx: click.Context,
+    param: click.Parameter,
+    value: tuple[str, ...],
+) -> tuple[str, ...]:
+    """Eagerly validate ``--view`` tokens (ADR-068 D4/Phase 5) so an
+    unrecognized token or a malformed ``show=...`` filter surfaces before
+    any work runs, the same eagerness ``--show-only`` already had.
+
+    Returns the raw token tuple unchanged (Click needs a value on this
+    dest); the real derived values are computed once more, cheaply, by
+    :func:`parse_view_tokens` right before ``run_compare`` is called, so
+    there is exactly one place that ever turns tokens into
+    ``report_mode``/``show_only``.
+    """
+    try:
+        parse_view_tokens(value)
+    except ValueError as exc:
+        raise click.BadParameter(str(exc)) from exc
+    return value

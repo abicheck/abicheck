@@ -32,8 +32,8 @@ from importlib.metadata import version as _pkg_version
 from typing import TYPE_CHECKING, Any, cast
 
 from abicheck.checker import Change, ChangeKind, DiffResult
+from abicheck.compare.finding_identity import missing_contract_kind
 from abicheck.contract_relevance_types import CompatibilityEvaluationStatus
-from abicheck.finding_identity import missing_contract_kind
 from abicheck.impact import assess_change
 from abicheck.model.contract_finding_relevance import (
     contract_relevance_of,

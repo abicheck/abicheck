@@ -27,7 +27,7 @@ a new export whose type evidence can't confirm or deny the signature
 actually agrees).
 
 The live ``compare --release`` CLI path (``cli_compare_release_helpers.
-_run_bundle_analysis``) called both, in order, folding the second into the
+run_bundle_analysis``) called both, in order, folding the second into the
 first's own ``bundle_findings`` list. The stored-baseline path
 (:func:`abicheck.model.bundle_facts.compare_bundle_from_facts`) called only the
 first — a stored side had no full ``AbiSnapshot`` map (a
@@ -162,7 +162,7 @@ def analyze_bundle(
             policy_file=policy_file,
         )
     except Exception as exc:
-        # Mirrors the pre-Phase-12 `_run_bundle_analysis` contract exactly:
+        # Mirrors the pre-Phase-12 `run_bundle_analysis` contract exactly:
         # a `compare_bundle()` failure still yields a usable (if empty)
         # `BundleDiffResult`, carrying the resolved `policy` so a caller's
         # later severity/exit-code fold (Phase 10) doesn't silently score

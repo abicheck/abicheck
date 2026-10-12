@@ -35,6 +35,9 @@ from .checker_types import DiffResult
 from .comparability import check_contracts_comparable, comparability_outcome
 from .compare.debug_layout_view import debug_layout_view as _debug_layout_view
 from .compare.edge_query import edge_coverage_report
+from .compare.finding_redundancy import (
+    ROOT_TYPE_CHANGE_KINDS as _ROOT_TYPE_CHANGE_KINDS,
+)
 from .compare.surface_reconcile import releases_reconciliation
 from .confidence import _compute_confidence
 from .contract_pipeline import (
@@ -45,19 +48,6 @@ from .contract_pipeline import (
 from .detector_registry import registry as _detector_registry
 from .diff_elf_layout import (  # noqa: F401 — triggers detector registration
     _diff_elf_layout,
-)
-from .diff_filtering import (  # noqa: F401
-    _ROOT_TYPE_CHANGE_KINDS,
-    _deduplicate_ast_dwarf,
-    _deduplicate_cross_detector,
-    _downgrade_opaque_struct_changes,
-    _downgrade_opaque_type_changes,
-    _enrich_affected_symbols,
-    _enrich_source_locations,
-    _filter_opaque_size_changes,
-    _filter_redundant,
-    _filter_reserved_field_renames,
-    _match_root_type,
 )
 from .diff_kabi import (  # noqa: F401 — triggers detector registration
     _diff_kabi,
@@ -93,6 +83,9 @@ from .diff_stdlib_impl import (  # noqa: F401 — triggers detector registration
     _diff_stdlib_implementation,
 )
 from .diff_sycl import _diff_sycl  # noqa: F401 — triggers detector registration
+from .diff_symbols import (  # noqa: F401 — triggers detector registration
+    _public_functions,
+)
 from .diff_time64 import (  # noqa: F401 — triggers detector registration
     _diff_time64_abi,
 )
@@ -134,9 +127,11 @@ from .model.header_exclusion_record import comparison_exclusion_identity
 from .model.surface_facts import is_abi_visible
 from .policy.classification import Verdict, compute_verdict
 from .policy.disposition_close import finalize_ledger
-from .policy.disposition_ledger import (
-    DispositionLedger,
-    record_suppressed_change,
+from .policy.disposition_ledger import DispositionLedger
+from .policy.finding_disposition import (
+    DispositionRules,
+    dispose_by_suppression,
+    dispose_findings,
 )
 from .policy.persistent_hygiene import drop_persistent_hygiene
 from .policy.policy_file_namespaces import (
@@ -154,7 +149,7 @@ if TYPE_CHECKING:
     from .model.acknowledgment_policy import AcknowledgmentPolicy
     from .model.identity import EntityId  # noqa: F401
     from .policy.acknowledgment import AcknowledgmentList
-    from .post_processing import PipelineContext
+    from .policy.finding_disposition import PipelineContext
     from .suppression import SuppressionList
 
 __all__ = [
@@ -247,51 +242,19 @@ def _filter_suppressed_changes(
     ledger: DispositionLedger | None = None,
 ) -> list[Change]:
     """Remove suppressed advisories (SONAME/platform-floor) from *changes*,
-    appending them to *suppressed* in-place. Returns the visible subset.
-
-    Uses :meth:`SuppressionList.evaluate` (not the cheaper ``is_suppressed``)
-    so a broad rule whose selectors matched a public-reachable change but was
-    withheld by the reachability/``allow_public_break`` gate still produces
-    the same ``SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK`` diagnostic
-    ``ApplySuppression`` produces for changes it sees directly (ADR-044 D4;
-    P1 item 6) — mirrors ``_filter_pattern_synthetic``'s established pattern
-    for this same plain-``SuppressionList``-plus-``list[Change]`` shape.
+    appending them to *suppressed* in-place. Returns the visible subset
+    (kept findings, then any ADR-044 D4 withheld-rule diagnostics).
     """
     if suppression is None or not changes:
         return changes
-    from .post_processing import (
-        _build_suppression_overreach_change,
-        _build_suppression_unknown_reachability_change,
+    outcome = dispose_by_suppression(
+        changes,
+        suppression,
+        ledger=ledger,
+        application_point="filter_suppressed_changes",
     )
-
-    visible: list[Change] = []
-    diagnostics: list[Change] = []
-    for c in changes:
-        outcome = suppression.evaluate(c)
-        if outcome.suppressed:
-            c.suppression_rule = outcome.rule_label()
-            record_suppressed_change(
-                ledger,
-                c,
-                rule=outcome.matched_rule,
-                application_point="filter_suppressed_changes",
-                suppression=suppression,
-            )
-            suppressed.append(c)
-            continue
-        visible.append(c)
-        if outcome.withheld_rule is not None:
-            diagnostics.append(
-                _build_suppression_overreach_change(c, outcome.withheld_rule)
-            )
-        if outcome.withheld_unknown_rule is not None:
-            diagnostics.append(
-                _build_suppression_unknown_reachability_change(
-                    c, outcome.withheld_unknown_rule
-                )
-            )
-    visible.extend(diagnostics)
-    return visible
+    suppressed.extend(outcome.suppressed)
+    return outcome.visible
 
 
 def _apply_surface_metrics(
@@ -387,47 +350,22 @@ def _filter_pattern_synthetic(
     ``SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK`` diagnostic ``ApplySuppression``
     produces for changes it sees directly (ADR-044 D4; Codex review, fresh
     evidence) — this ADR-027 pattern-verdict path builds its findings well
-    after ``post_processing.DEFAULT_PIPELINE`` runs, so nothing else would
+    after ``policy.finding_disposition.dispose_findings`` runs, so nothing else would
     ever emit that diagnostic for them.
     """
-    from .post_processing import (
-        _build_suppression_overreach_change,
-        _build_suppression_unknown_reachability_change,
+    outcome = dispose_by_suppression(
+        kept[pre_pattern_count:],
+        suppression,
+        ledger=ledger,
+        application_point="filter_pattern_synthetic",
     )
-
-    retained = kept[:pre_pattern_count]
-    diagnostics: list[Change] = []
-    suppressed_synthetic: set[tuple[str, str | None]] = set()
-    for c in kept[pre_pattern_count:]:
-        outcome = suppression.evaluate(c)
-        if outcome.suppressed:
-            c.suppression_rule = outcome.rule_label()
-            record_suppressed_change(
-                ledger,
-                c,
-                rule=outcome.matched_rule,
-                application_point="filter_pattern_synthetic",
-                suppression=suppression,
-            )
-            suppressed.append(c)
-            # Drop this synthetic finding's disclosure row too, so a
-            # fully-suppressed handle/opaque/anti-pattern transition does
-            # not linger in the pattern_modulations ledger while it is
-            # absent from `changes` and the verdict (ADR-027 review).
-            suppressed_synthetic.add((c.symbol, c.modulation_rule))
-            continue
-        retained.append(c)
-        if outcome.withheld_rule is not None:
-            diagnostics.append(
-                _build_suppression_overreach_change(c, outcome.withheld_rule)
-            )
-        if outcome.withheld_unknown_rule is not None:
-            diagnostics.append(
-                _build_suppression_unknown_reachability_change(
-                    c, outcome.withheld_unknown_rule
-                )
-            )
-    retained.extend(diagnostics)
+    suppressed.extend(outcome.suppressed)
+    retained = [*kept[:pre_pattern_count], *outcome.visible]
+    # Drop each suppressed synthetic finding's disclosure row too, so a
+    # fully-suppressed handle/opaque/anti-pattern transition does not linger
+    # in the pattern_modulations ledger while it is absent from `changes` and
+    # the verdict (ADR-027 review).
+    suppressed_synthetic = {(c.symbol, c.modulation_rule) for c in outcome.suppressed}
     if suppressed_synthetic:
         pattern_modulations = [
             m
@@ -555,68 +493,6 @@ def _diff_advanced_dwarf(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         for kind_str, sym, desc, old_val, new_val in diff_advanced_dwarf(o, n)
         if kind_str in _kind_map
     ]
-
-
-def _run_post_processing(
-    changes: list[Change],
-    old: AbiSnapshot | None,
-    new: AbiSnapshot,
-    suppression: SuppressionList | None,
-    policy_file: PolicyFile | None,
-    scope_to_public_surface: bool,
-    force_public_symbols: set[str] | None,
-    collapse_versioned_symbols: bool,
-    public_surface_allowlist: set[str] | None = None,
-    disposition_ledger: DispositionLedger | None = None,
-) -> tuple[
-    list[Change],
-    list[Change],
-    list[Change],
-    list[Change],
-    list[Change],
-    bool,
-    PipelineContext,
-]:
-    """Run the post-processing pipeline and unpack results.
-
-    Returns ``(kept, redundant, opaque_filtered, suppressed, out_of_surface,
-    scope_resolved, pp_ctx)`` where *pp_ctx* is retained for ``surf_old``/
-    ``surf_new`` access.
-    """
-    from .post_processing import DEFAULT_PIPELINE
-    from .workflows.snapshot_factory import absent_baseline
-
-    frozen_ns = list(policy_file.frozen_namespaces) if policy_file is not None else []
-    internal_ns = _internal_namespaces(policy_file) or None
-    experimental_ns = _experimental_namespaces(policy_file) or None
-    pp_ctx = DEFAULT_PIPELINE.run(
-        changes,
-        old,
-        new,
-        suppression=suppression,
-        frozen_namespaces=frozen_ns,
-        internal_namespaces=internal_ns,
-        experimental_namespaces=experimental_ns,
-        scope_to_public_surface=scope_to_public_surface,
-        force_public_symbols=force_public_symbols,
-        collapse_versioned_symbols=collapse_versioned_symbols,
-        public_surface_allowlist=public_surface_allowlist,
-        disposition_ledger=disposition_ledger,
-        absent_baseline=absent_baseline(new.library) if old is None else None,
-    )
-    # scoping is "resolved" unless it was requested and had to fall back to the
-    # full export table (issue #235: an unconfirmed scope must not read as a
-    # confidently-clean public surface).
-    scope_resolved = not (scope_to_public_surface and pp_ctx.scope_fell_back)
-    return (
-        pp_ctx.kept,
-        pp_ctx.redundant,
-        pp_ctx.opaque_filtered,
-        pp_ctx.suppressed,
-        pp_ctx.out_of_surface,
-        scope_resolved,
-        pp_ctx,
-    )
 
 
 def _apply_soname_policy(
@@ -1137,29 +1013,32 @@ def compare(
     # reconcile by construction rather than being reconstructed afterwards.
     ledger = DispositionLedger()
 
-    # Run the post-processing pipeline (filtering, dedup, enrichment, suppression).
-    # PolicyFile.frozen_namespaces is threaded in so the late-stage
-    # EscalateFrozenNamespaceViolations step can tag matching findings.
-    (
-        kept,
-        redundant,
-        opaque_filtered,
-        suppressed,
-        out_of_surface,
-        scope_resolved,
-        pp_ctx,
-    ) = _run_post_processing(
+    # Dispose of the raw findings (filtering, dedup, enrichment, suppression)
+    # in the default order `policy.finding_disposition` owns. The policy
+    # file's namespace conventions reach the late steps through the rules.
+    from .workflows.snapshot_factory import absent_baseline
+
+    pp_ctx = dispose_findings(
         changes,
         old,
         new,
-        suppression,
-        policy_file,
-        scope_to_public_surface,
-        force_public_symbols,
-        collapse_versioned_symbols,
-        public_surface_allowlist=public_surface_allowlist,
-        disposition_ledger=ledger,
+        DispositionRules.from_policy_file(
+            policy_file,
+            suppression=suppression,
+            scope_to_public_surface=scope_to_public_surface,
+            force_public_symbols=force_public_symbols,
+            collapse_versioned_symbols=collapse_versioned_symbols,
+            public_surface_allowlist=public_surface_allowlist,
+        ),
+        ledger=ledger,
+        absent_baseline=absent_baseline(new.library) if old is None else None,
     )
+    kept = pp_ctx.kept
+    redundant = pp_ctx.redundant
+    opaque_filtered = pp_ctx.opaque_filtered
+    suppressed = pp_ctx.suppressed
+    out_of_surface = pp_ctx.out_of_surface
+    scope_resolved = pp_ctx.scope_resolved
 
     # ADR-049 D9 — contract relevance is classified *before* compatibility
     # policy, not after it. Post-processing has settled canonical identity,

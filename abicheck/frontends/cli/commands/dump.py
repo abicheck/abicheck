@@ -73,12 +73,9 @@ if TYPE_CHECKING:
 # importing this module from `cli.py`'s registration block is the same
 # side-effect pattern every sibling `cli_*` command module already uses.
 from ....cli import main
+from ....workflows.provenance import stamp_provenance
 from ..options.provenance import dump_provenance_option, parse_provenance_tokens
-from ..runtime import (
-    _resolve_debug_artifact,
-    _setup_verbosity,
-    _stamp_provenance,
-)
+from ..runtime import _setup_verbosity
 
 
 def _load_dump_manifest_or_reject(
@@ -725,7 +722,7 @@ def dump_cmd(
                 notify=_click_notify,
                 build_config=config_path,
                 build_config_explicit=_project.explicit,
-                stamp_provenance=_stamp_provenance,
+                stamp_provenance=stamp_provenance,
                 write_snapshot_output=_write_snapshot_output_fn,
                 git_tag=git_tag,
                 build_id=build_id,
@@ -849,11 +846,13 @@ def dump_cmd(
         # resolved a detached debug artifact from here either, before this
         # migration.
         if debug_roots or debuginfod:
-            artifact = _resolve_debug_artifact(
+            from ....workflows.extraction import resolve_debug_info
+
+            artifact = resolve_debug_info(
                 so_path,
-                debug_roots,
-                debuginfod,
-                debuginfod_url,
+                debug_roots=list(debug_roots) or None,
+                enable_debuginfod=debuginfod,
+                debuginfod_urls=[debuginfod_url] if debuginfod_url else None,
             )
             if artifact:
                 click.echo(f"Debug info: {artifact.source}", err=True)
@@ -901,7 +900,7 @@ def dump_cmd(
         notify=_click_notify,
         build_config=config_path,
         build_config_explicit=_project.explicit,
-        stamp_provenance=_stamp_provenance,
+        stamp_provenance=stamp_provenance,
         write_snapshot_output=_write_snapshot_output_fn,
         git_tag=git_tag,
         build_id=build_id,

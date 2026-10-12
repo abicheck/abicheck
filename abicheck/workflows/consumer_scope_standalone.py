@@ -160,7 +160,11 @@ def check_appcompat(
     # newly recording only the scoped-only findings.
     relevant = scoped.breaking_for_app
     close_consumer_scope(
-        ledger_for(diff), diff, gating=relevant, also_detected=relevant
+        ledger_for(diff),
+        diff,
+        gating=relevant,
+        also_detected=relevant,
+        scope_decides_exit=True,
     )
     return scoped
 
@@ -219,6 +223,10 @@ def check_plugin_host_contract(
     # call sites is what this closes).
     relevant = scoped.breaking_for_host
     close_consumer_scope(
-        ledger_for(diff), diff, gating=relevant, also_detected=relevant
+        ledger_for(diff),
+        diff,
+        gating=relevant,
+        also_detected=relevant,
+        scope_decides_exit=True,
     )
     return scoped

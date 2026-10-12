@@ -236,4 +236,11 @@ __all__ = ["RELEASE_SCHEMA_VERSION"]
 #:       ``sides.*.missing_from_bundle``/``unresolved_under_incomplete_coverage``
 #:       carry ``outside_declared_surface: true``, present only when true.
 #:       Additive; no verdict or exit code changes.
-RELEASE_SCHEMA_VERSION = "1.13"
+#: - ``2.0`` (ADR-078, BREAKING): every ``libraries[]`` entry's
+#:       ``quality_issues`` narrows to exclude informational outcomes
+#:       (``INFORMATIONAL_KINDS``), counted in the new always-present
+#:       ``informational`` field beside it -- the report schema 6.0 change
+#:       applied to the release envelope. The pre-2.0 value is
+#:       ``quality_issues + informational``. Each such finding's ``bucket``
+#:       reads ``informational`` under a severity setting.
+RELEASE_SCHEMA_VERSION = "2.0"

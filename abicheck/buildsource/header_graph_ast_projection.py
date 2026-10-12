@@ -80,11 +80,17 @@ fallback) stays there -- it touches no AST at all.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+import threading
+from collections.abc import Callable, Hashable, Iterator, Sequence
+from contextlib import AbstractContextManager, ExitStack, contextmanager
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypeVar
 
+from ..errors import SnapshotError
 from ..model import ScopeOrigin
+from ..model.execution_cache import request_key
+from ..model.execution_cache_scoped import ScopedCache
 from ..model.graph_facts import (
     CONF_HIGH,
     GraphEdge,
@@ -447,3 +453,119 @@ def seed_ast_graph(
     # through as a false `PUBLIC_API_INTERNAL_DEPENDENCY_ADDED` the same way
     # the build-integrated pass's own pre-D3-consumer gap did.
     _mark_role_coverage(graph.extractor_passes, HEADER_TYPE_GRAPH_PASS)
+
+
+class MemoizedParseFailure(SnapshotError):
+    """A whole-tree header-graph parse already known (memoized) to fail;
+    ``hit`` is the memoized ``(failed_headers, failure_line)``."""
+
+    def __init__(self, hit: tuple[tuple[Path, ...], str]) -> None:
+        super().__init__(hit[1])
+        self.hit = hit
+
+
+class HeaderGraphBisectionMemo:
+    """One request's memo of which headers a header-graph clang parse loses.
+
+    The header-graph parse runs once per library per side, and libraries of
+    one package usually share one header tree and one compile context. When
+    that whole-tree parse fails, the per-group bisect is the expensive part
+    (~455 s per library on oneDAL), and its answer depends only on the
+    headers, their content and the parse flags -- so every library sharing
+    the key reuses the first one's answer instead of failing the whole-tree
+    parse and bisecting again. :meth:`slot` serializes concurrent callers on
+    one key, so two prefetches of the same tree bisect once, not twice.
+
+    The memo holds the outcome (the headers that failed alone, plus the
+    first line of the original failure for the degraded-graph record), never
+    a projection: a hit still parses the surviving headers, so the graph is
+    built from the same parse a first run makes.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._key_locks: dict[Hashable, threading.Lock] = {}
+        self._outcomes: dict[Hashable, tuple[tuple[Path, ...], str]] = {}
+
+    @contextmanager
+    def slot(self, key: Hashable) -> Iterator[None]:
+        with self._lock:
+            key_lock = self._key_locks.setdefault(key, threading.Lock())
+        with key_lock:
+            yield
+
+    def get(self, key: Hashable) -> tuple[tuple[Path, ...], str] | None:
+        with self._lock:
+            return self._outcomes.get(key)
+
+    def enter(self, scope: ExitStack, key: Hashable) -> None:
+        """Hold *key*'s slot for the rest of *scope*; raise
+        :class:`MemoizedParseFailure` when a sibling already learned this
+        whole-tree parse fails."""
+        scope.enter_context(self.slot(key))
+        hit = self.get(key)
+        if hit is not None:
+            raise MemoizedParseFailure(hit)
+
+    def put(self, key: Hashable, failed: Sequence[Path], failure: str) -> None:
+        with self._lock:
+            self._outcomes[key] = (tuple(failed), failure)
+
+
+def header_tree_signature(headers: Sequence[Path]) -> tuple[tuple[str, int, int], ...]:
+    """``(path, size, mtime_ns)`` per header, so an edited header misses."""
+    sig: list[tuple[str, int, int]] = []
+    for h in headers:
+        try:
+            st = h.stat()
+            sig.append((str(h), st.st_size, st.st_mtime_ns))
+        except OSError:
+            sig.append((str(h), -1, -1))
+    return tuple(sig)
+
+
+def header_graph_memo_key(
+    headers: Sequence[Path],
+    includes: Sequence[Path],
+    tokens: Sequence[str],
+    hash_dirs: Sequence[Path],
+    lang: str | None,
+    compile_context: object,
+    resolved_lang_mode: str | None = None,
+) -> tuple[Any, ...]:
+    """Everything a header-graph parse's outcome depends on. That includes
+    *resolved_lang_mode*, the mode the primary pass resolved: under no
+    *lang* it turns a C parse of the same headers into a C++ one."""
+    return (
+        header_tree_signature(headers),
+        tuple(str(p) for p in includes),
+        tuple(tokens),
+        tuple(str(p) for p in hash_dirs),
+        (lang or "").lower(),
+        repr(compile_context),
+        resolved_lang_mode or "",
+    )
+
+
+#: The memo lives only inside :func:`header_graph_bisection_scope` (one
+#: compare/release request). The key fingerprints the top-level headers, not
+#: every transitively included one, so it is valid only while those inputs
+#: cannot change -- one request -- and a process-wide memo would replay a
+#: stale failure after an included header is repaired, and keep a lock and an
+#: outcome per key forever. Worker threads share it by inheriting the
+#: request's context (``copy_context``), as the release fan-out and the
+#: header-graph prefetch both do.
+_BISECTION_SCOPE = ScopedCache("abicheck.buildsource.header_graph_bisection")
+
+
+def header_graph_bisection_scope() -> AbstractContextManager[None]:
+    """Share header-graph bisection outcomes across one request's dumps."""
+    return _BISECTION_SCOPE.scope()
+
+
+def current_bisection_memo() -> HeaderGraphBisectionMemo:
+    """This request's memo; a throwaway one outside a scope (or in reference
+    mode), so a bare dump simply memoizes nothing."""
+    return _BISECTION_SCOPE.get_or_compute(
+        request_key(memo="header_graph_bisection"), HeaderGraphBisectionMemo
+    )

@@ -44,6 +44,7 @@ or a CLI flag directly is in the wrong layer.
   `SeverityConfig`, `SeverityLevel`, ...).
 - `exit_decision.py` — `ExitDecision`/`ExitReason`, the orthogonal-axis
   exit-code fold shared by `compare`/`scan`.
+- `finding_disposition/` — what happens to a finding after diff (ADR-067 record-before-disposing): `dispose_findings` runs the default step order with an always-present ledger; `dispose_by_suppression` is the one suppression primitive.
 - `release_outcome.py` — the one release verdict ordering and fold
   (`fold_release_outcome` -> `ReleaseOutcome`, `worse_release_verdict`,
   the removed-member floor, the derived compatibility/consumer ranks).
@@ -108,10 +109,10 @@ or a CLI flag directly is in the wrong layer.
   `binding`/`finding_id`/`expires`) instead of two independently-maintained
   copies. **Genuinely dependency-free leaves** — zero import of
   `checker_types.py`/`suppression.py`/`reclassify.py`/`policy_file.py`/
-  `finding_identity.py`, checked directly by
+  `compare/finding_identity/`, checked directly by
   `scripts/check_architecture.py` (narrower than the general
   `policy -> compare` layer edge, which would otherwise permit
-  `finding_identity.py`) — which is what lets `reclassify.py` import
+  `compare.finding_identity`) — which is what lets `reclassify.py` import
   `selectors.py` **statically**: before this phase it built a `Suppression`
   instance purely for its selector grammar, resolved via a runtime
   `importlib.import_module` call to dodge the cycle a static import would
@@ -133,11 +134,9 @@ or a CLI flag directly is in the wrong layer.
   classify_compare_pair` applies it as a view over what gets classified,
   right after `workflows.artifact.execute.enforce_requested_depth` confirms
   the floor — deliberately separate functions (floor vs. ceiling), not one.
-  `project_build_source_pack_to_depth()` is the sibling entry point for a
-  `BuildSourcePack` resolved *out-of-band* (an explicit `--old/new-sources`/
-  `--old/new-build-info` pack, not a snapshot's embedded payload) —
-  `cli_compare_helpers.run_compare` is the one caller, since that pack never
-  lives on the snapshot object `project_snapshot_to_depth` projects.
+  An out-of-band `--old/new-sources`/`--old/new-build-info` pack is attached
+  onto the snapshot before classification, so `project_snapshot_to_depth`
+  caps it like an embedded one.
 ## Conventions
 
 - Every module starts with `from __future__ import annotations`.

@@ -80,6 +80,7 @@ from .demangle import demangle_batch
 from .pr_comment_base import (
     _ADDITION_KIND_VALUES,
     _EVIDENCE_KIND_VALUES,
+    _INFORMATIONAL_KIND_VALUES,
     _SEVERITY_BUCKET,
     CommentModel,
     Finding,
@@ -1002,13 +1003,10 @@ def _append_release_global_row(
         add_err = levels.get("addition") == "error"
         qual_err = levels.get("quality_issues") == "error"
         if add_err or qual_err:
-            n_add = sum(
-                1
-                for f in findings
-                if isinstance(f, dict)
-                and str(f.get("kind", "")) in _ADDITION_KIND_VALUES
-            )
-            n_qual = n - n_add
+            kinds = [str(f.get("kind", "")) for f in findings if isinstance(f, dict)]
+            n_add = sum(k in _ADDITION_KIND_VALUES for k in kinds)
+            # ADR-078: an informational finding never gates, so never a blocker.
+            n_qual = n - n_add - sum(k in _INFORMATIONAL_KIND_VALUES for k in kinds)
             nb = (n_add if add_err else 0) + (n_qual if qual_err else 0)
             if add_err and n_add:
                 categories.add("addition")
@@ -1065,7 +1063,7 @@ def _release_lib_row(
     # (round 11) confirms this document was written after the correction;
     # its absence is ambiguous (see `RELEASE_SCHEMA_VERSION`'s own
     # docstring), so this reader assumes the current writer's semantics
-    # either way, matching `cli_compare_release_pairwise.py`'s own values.
+    # either way, matching `workflows/release_members.py`'s own values.
     quality = _as_int(lib.get("quality_issues"))
     additions = _as_int(lib.get("compatible_additions"))
     pot_err = levels.get("potential_breaking") == "error"
@@ -1104,6 +1102,7 @@ def _release_lib_row(
         nb += quality
     else:
         ns += quality
+    ns += _as_int(lib.get("informational"))  # ADR-078: never gates
     return name, verdict, nb, nr, ns
 
 

@@ -1,4 +1,5 @@
 # Copyright 2026 Nikolay Petrov
+# SPDX-License-Identifier: Apache-2.0
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -12,20 +13,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""State and kind sets shared across the post-processing pipeline.
+"""The state one disposition run threads through its steps, and the rules
+that seed it.
 
-A leaf split out of :mod:`abicheck.post_processing` so the reachability pass
-(:mod:`abicheck.post_processing_reachability`) can use them without importing
-its own parent — which would be a genuine import cycle, not a stylistic one.
-
-That parent had reached exactly the 2000-line hard cap the AI-readiness gate
-enforces, so it could not absorb another line; splitting is what
-``scripts/check_ai_readiness.py`` asks for there rather than an allowlist
-entry. ``PipelineContext`` is re-exported from ``post_processing`` because 23
-call sites import it from that historical path.
-
-Deliberately imports only ``checker_policy`` (itself a leaf), so nothing here
-can pull a cycle into either consumer.
+:class:`DispositionRules` is everything a caller resolves *before* the run
+(the suppression list, namespace conventions, scope switches);
+:class:`PipelineContext` is the per-run state the steps share: those rules,
+both snapshots, and the side-output buckets each disposed-of finding lands in.
+Callers build the rules; the pipeline builds the context
+(:meth:`PipelineContext.from_rules`). Steps -- and tests of one step -- may
+construct a context directly.
 """
 
 from __future__ import annotations
@@ -33,14 +30,69 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from .model.change_catalog.kinds import ChangeKind
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from ...model import AbiSnapshot
+    from ...model.change import Change
+    from ...policy_file import PolicyFile
+    from ...suppression import SuppressionList
+    from ...surface import PublicSurface
+    from ..disposition_ledger import DispositionLedger
 
-if TYPE_CHECKING:
-    from .model import AbiSnapshot
-    from .model.change import Change
-    from .policy.disposition_ledger import DispositionLedger
-    from .suppression import SuppressionList
-    from .surface import PublicSurface
+
+@dataclass(frozen=True)
+class DispositionRules:
+    """What decides a finding's disposition, resolved before the run.
+
+    Grouped into one value rather than a dozen trailing parameters: the
+    pipeline's previous signature twice had a parameter inserted mid-list,
+    silently rebinding a positional caller's ledger (bug class
+    ``api.positional_slot_rebinding``).
+    """
+
+    suppression: SuppressionList | None = None
+    #: Contractually frozen namespace globs (``PolicyFile.frozen_namespaces``).
+    frozen_namespaces: tuple[str, ...] = ()
+    #: ``None`` means "not configured": each consumer uses its own default.
+    internal_namespaces: tuple[str, ...] | None = None
+    #: ``None`` means "not configured": each consumer uses its own default.
+    experimental_namespaces: tuple[str, ...] | None = None
+    scope_to_public_surface: bool = False
+    force_public_symbols: frozenset[str] = frozenset()
+    collapse_versioned_symbols: bool = False
+    public_surface_allowlist: frozenset[str] | None = None
+
+    @classmethod
+    def from_policy_file(
+        cls,
+        policy_file: PolicyFile | None,
+        *,
+        suppression: SuppressionList | None = None,
+        scope_to_public_surface: bool = False,
+        force_public_symbols: set[str] | frozenset[str] | None = None,
+        collapse_versioned_symbols: bool = False,
+        public_surface_allowlist: set[str] | frozenset[str] | None = None,
+    ) -> DispositionRules:
+        """The rules ``compare()`` applies: the policy file's namespace
+        conventions plus the run's own suppression and scope switches."""
+        from ..policy_file_namespaces import (
+            experimental_namespaces,
+            internal_namespaces,
+        )
+
+        return cls(
+            suppression=suppression,
+            frozen_namespaces=tuple(policy_file.frozen_namespaces)
+            if policy_file is not None
+            else (),
+            internal_namespaces=internal_namespaces(policy_file) or None,
+            experimental_namespaces=experimental_namespaces(policy_file) or None,
+            scope_to_public_surface=scope_to_public_surface,
+            force_public_symbols=frozenset(force_public_symbols or ()),
+            collapse_versioned_symbols=collapse_versioned_symbols,
+            public_surface_allowlist=frozenset(public_surface_allowlist)
+            if public_surface_allowlist is not None
+            else None,
+        )
 
 
 @dataclass
@@ -141,6 +193,16 @@ class PipelineContext:
     absent_baseline: AbiSnapshot | None = None
 
     @property
+    def scope_resolved(self) -> bool:
+        """Whether a requested public-surface scope actually resolved.
+
+        ``True`` unless scoping was requested and had to fall back to the
+        full export table (issue #235: an unconfirmed scope must not read as
+        a confidently-clean public surface).
+        """
+        return not (self.scope_to_public_surface and self.scope_fell_back)
+
+    @property
     def baseline_or_empty(self) -> AbiSnapshot:
         """The OLD side for a step that unions or looks up across both.
 
@@ -167,58 +229,30 @@ class PipelineContext:
             )
         return self.absent_baseline
 
-
-# diff_types.py builds ENUM_MEMBER_*/ENUM_LAST_MEMBER_VALUE_CHANGED's symbol
-# as "EnumName::member" (unlike TYPE_FIELD_* kinds, which carry the
-# containing type name directly) — MarkReachability.run needs this set to
-# know when to peel the member suffix before checking the owning EnumType's
-# public-header origin.
-_ENUM_MEMBER_KINDS = frozenset(
-    {
-        ChangeKind.ENUM_MEMBER_REMOVED,
-        ChangeKind.ENUM_MEMBER_ADDED,
-        ChangeKind.ENUM_MEMBER_VALUE_CHANGED,
-        ChangeKind.ENUM_LAST_MEMBER_VALUE_CHANGED,
-    }
-)
-
-# L4 (source_diff.py) / L5 (source_graph_findings.py) findings below are
-# public *by construction* -- each built only from an already-proven-public
-# entity, never a bare namespace-name heuristic (Codex review, many passes).
-# NOT extended to SOURCE_BINARY_PROVENANCE_MISMATCH (aggregate, symbol="")
-# or ODR_SOURCE_CONFLICT's sibling checks not scoped to public types.
-_PUBLIC_SOURCE_ABI_KINDS = frozenset(
-    {
-        ChangeKind.PUBLIC_TYPEDEF_REMOVED,
-        ChangeKind.PUBLIC_TYPEDEF_TARGET_CHANGED,
-        ChangeKind.PUBLIC_MACRO_REMOVED,
-        ChangeKind.PUBLIC_MACRO_VALUE_CHANGED,
-        ChangeKind.INLINE_FUNCTION_REMOVED,
-        ChangeKind.UNINSTANTIATED_TEMPLATE_REMOVED,
-        ChangeKind.CONCEPT_TIGHTENED,
-        ChangeKind.CONSTEXPR_VALUE_CHANGED,
-        ChangeKind.DEFAULT_ARGUMENT_CHANGED,
-        ChangeKind.INLINE_BODY_CHANGED,
-        ChangeKind.TEMPLATE_BODY_CHANGED,
-        ChangeKind.GENERATED_HEADER_CHANGED,
-        ChangeKind.SOURCE_DECL_BINARY_SYMBOL_MISMATCH,
-        ChangeKind.ODR_SOURCE_CONFLICT,
-        # L5 (source_graph_findings.py) kinds whose subject is itself a
-        # proven-public entry/decl/symbol, not just something touching one.
-        # NOT extended to BUILD_OPTION_REACHES_PUBLIC_SYMBOL/TARGET_DEPENDENCY_
-        # ADDED -- keyed on an option/target that merely reaches something
-        # public, not a public entity itself.
-        ChangeKind.PUBLIC_REACHABILITY_CHANGED,
-        ChangeKind.GENERATED_HEADER_REACHES_PUBLIC_API,
-        ChangeKind.CALL_GRAPH_PUBLIC_ENTRY_REACHABILITY_CHANGED,
-        ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED,
-        ChangeKind.INCLUDE_GRAPH_PUBLIC_HEADER_DRIFT,
-        ChangeKind.EXPORTED_SYMBOL_SOURCE_OWNER_CHANGED,
-        # _mapping_drift_findings fires only on old_sym != new_sym, and a
-        # SOURCE_DECL_MAPS_TO_SYMBOL edge's target is always a genuinely
-        # *exported* symbol (source_link.relink_surface_exports matches only
-        # against the real export set) -- so at least one side has this decl
-        # actually exported whenever it fires (Codex review).
-        ChangeKind.SOURCE_TO_BINARY_MAPPING_CHANGED,
-    }
-)
+    @classmethod
+    def from_rules(
+        cls,
+        old: AbiSnapshot | None,
+        new: AbiSnapshot,
+        rules: DispositionRules,
+        *,
+        ledger: DispositionLedger | None,
+        absent_baseline: AbiSnapshot | None = None,
+    ) -> PipelineContext:
+        """A fresh context for one run of *rules* over *old* -> *new*."""
+        return cls(
+            old=old,
+            new=new,
+            suppression=rules.suppression,
+            frozen_namespaces=list(rules.frozen_namespaces),
+            internal_namespaces=rules.internal_namespaces,
+            experimental_namespaces=rules.experimental_namespaces,
+            scope_to_public_surface=rules.scope_to_public_surface,
+            force_public_symbols=set(rules.force_public_symbols),
+            collapse_versioned_symbols=rules.collapse_versioned_symbols,
+            public_surface_allowlist=set(rules.public_surface_allowlist)
+            if rules.public_surface_allowlist is not None
+            else None,
+            disposition_ledger=ledger,
+            absent_baseline=absent_baseline,
+        )

@@ -221,7 +221,7 @@ def test_absent_baseline_knows_nothing() -> None:
 def test_pipeline_without_baseline_requires_the_factory_stand_in() -> None:
     """The policy-layer context never builds a snapshot: with no baseline and
     no stand-in it refuses rather than inventing one."""
-    from abicheck.post_processing_context import PipelineContext
+    from abicheck.policy.finding_disposition import PipelineContext
     from abicheck.workflows.snapshot_factory import absent_baseline
 
     new = absent_baseline("n")

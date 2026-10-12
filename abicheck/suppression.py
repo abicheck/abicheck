@@ -376,7 +376,7 @@ class Suppression:
         """
         if self.finding_id is None:
             return self._selector.matches_selectors(change, today=today)
-        from .finding_identity import report_canonical_finding_id
+        from .compare.finding_identity import report_canonical_finding_id
 
         return self._selector.matches_selectors(
             change,

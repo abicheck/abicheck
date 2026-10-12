@@ -9,7 +9,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from ..finding_identity import report_finding_id, resolve_change_identity
+from ..compare.finding_identity import report_finding_id, resolve_change_identity
 from .change_operation import entity_for_change, operation_for_kind
 
 if TYPE_CHECKING:

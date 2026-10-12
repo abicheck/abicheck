@@ -86,8 +86,8 @@ if TYPE_CHECKING:
     from .model import AbiSnapshot
     from .model.change import Change
     from .model.contract_conflicts import ContractSourceConflict
+    from .policy.finding_disposition import PipelineContext
     from .policy_file import PolicyFile
-    from .post_processing import PipelineContext
     from .suppression import SuppressionList
     from .surface import PublicSurface
 
@@ -327,8 +327,6 @@ class ContractEvaluationStage:
         findings too, which is the property the old "classify last" ordering
         got for free and this one has to keep deliberately.
         """
-        from .contract_context import build_persisted_context, suppression_config_for
-
         # The report's own per-finding id, taken from the dependency-free
         # `finding_identity` leaf module rather than from `reporter_markdown`
         # (which re-exports it): importing the renderer here would close a
@@ -338,7 +336,8 @@ class ContractEvaluationStage:
         # of one kind on one symbol (two parameters of the same function),
         # silently dropping one recorded decision and making the receipt
         # uncorrelatable with the report (Codex review, fresh evidence).
-        from .finding_identity import report_finding_id
+        from .compare.finding_identity import report_finding_id
+        from .contract_context import build_persisted_context, suppression_config_for
 
         return build_persisted_context(
             self.evidence,

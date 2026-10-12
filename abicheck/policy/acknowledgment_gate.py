@@ -124,7 +124,7 @@ def evaluate_unacknowledged_additions(
     additions, exactly the "policy decides acceptance, not facts" boundary
     the root ``AGENTS.md`` states.
     """
-    from ..finding_identity import report_canonical_finding_id
+    from ..compare.finding_identity import report_canonical_finding_id
     from .classification import ADDITION_KINDS
 
     action = (policy or AcknowledgmentPolicy()).unacknowledged_additions

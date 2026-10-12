@@ -38,9 +38,8 @@ from __future__ import annotations
 
 import logging
 import os
-from collections.abc import Iterator
 from concurrent.futures import Future
-from contextlib import contextmanager, suppress
+from contextlib import ExitStack
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -320,6 +319,9 @@ def acquire_header_graph_ast(
     """
     from .buildsource.header_graph_ast_projection import (
         HeaderGraphAstProjection,
+        MemoizedParseFailure,
+        current_bisection_memo,
+        header_graph_memo_key,
         merge_header_graph_ast_projections,
         parse_header_groups_bisecting,
         project_header_graph_ast,
@@ -462,6 +464,11 @@ def acquire_header_graph_ast(
 
     ast_failure: str | None = None
     projection_from_groups: HeaderGraphAstProjection | None = None
+    # Libraries sharing a header tree and flags share a failed parse's
+    # outcome within one request; the slot spans parse + bisect.
+    memo_key: tuple[Any, ...] | None = None
+    memo_hit: tuple[tuple[Path, ...], str] | None = None
+    memo_scope, bisection_memo = ExitStack(), current_bisection_memo()
     try:
         resolved_headers = expand_header_inputs(headers)
         if resolved_headers:
@@ -502,6 +509,17 @@ def acquire_header_graph_ast(
             deferred_dirs = tuple(
                 deferred_token_dirs(deferred)
             ) + cache_relevant_operand_paths(cc.gcc_option_tokens)
+            memo_key = header_graph_memo_key(
+                resolved_headers,
+                eff_includes,
+                eff_tokens,
+                deferred_dirs,
+                lang,
+                cc,
+                resolved_lang_mode,
+            )
+            # A sibling's known failure skips straight to the recovery below.
+            bisection_memo.enter(memo_scope, memo_key)
         # ADR-050 D5 (Codex review): this internal semantic header graph
         # (G29 Phase A) must be built from the SAME frontend_context as the
         # primary snapshot it's attached to -- a device-context dump's
@@ -568,6 +586,9 @@ def acquire_header_graph_ast(
         ast_failure = (
             str(exc).strip().splitlines()[0] if str(exc).strip() else type(exc).__name__
         )
+        if isinstance(exc, MemoizedParseFailure):
+            memo_hit = exc.hit
+            memory_trace.mark("dump.header_graph.clang_ast:memo_hit")
         memory_trace.mark("dump.header_graph.clang_ast:failed")
         if len(resolved_headers) < 2:
             _log.warning(
@@ -609,11 +630,15 @@ def acquire_header_graph_ast(
                     _parse_group,
                     (SnapshotError, ValidationError, *_MALFORMED_AST_ERRORS),
                     known_failed=(
-                        attribute_failing_headers(exc, resolved_headers)
+                        memo_hit[0]
+                        if memo_hit is not None
+                        else attribute_failing_headers(exc, resolved_headers)
                         if isinstance(exc, SnapshotError)
                         else ()
                     ),
                 )
+            if memo_key is not None and memo_hit is None:
+                bisection_memo.put(memo_key, failed, ast_failure)
             if parts:
                 projection_from_groups = merge_header_graph_ast_projections(parts)
             names = ", ".join(p.name for p in failed[:5])
@@ -632,6 +657,8 @@ def acquire_header_graph_ast(
                 f"{recovered}: {ast_failure}"
             )
             _log.warning("header graph: %s", ast_failure)
+    finally:
+        memo_scope.close()
     # Reduce the AST to the four compact projections the graph builder
     # actually reads, then drop the tree BEFORE the graph is allocated, so
     # the two are never resident together.
@@ -717,84 +744,3 @@ def acquire_header_graph_ast(
         eff_tokens,
         resolved_force_cpp,
     )
-
-
-def prefetch_header_graph_ast(
-    headers: list[Path],
-    includes: list[Path],
-    lang: str | None,
-    compile: CompileContext | None,
-) -> Future[HeaderGraphAst]:
-    """Start :func:`acquire_header_graph_ast` on a budgeted thread now.
-
-    Lets the header graph's own clang parse run while the primary castxml
-    dump runs. Its thread comes from the process-wide budget
-    (``ABICHECK_MAX_THREADS``); with the budget spent it runs inline, which
-    is exactly the old, sequential order.
-    """
-    import contextvars
-
-    from .process_resources import BudgetedExecutor
-
-    pool = BudgetedExecutor(1, thread_name_prefix="abicheck-hgraph")
-    ctx = contextvars.copy_context()
-    future = pool.submit(
-        ctx.run, acquire_header_graph_ast, headers, includes, lang, compile
-    )
-    future.add_done_callback(lambda _f: pool.shutdown(wait=False))
-    return future
-
-
-#: Longest a failed dump waits for its abandoned header-graph prefetch.
-_PREFETCH_SETTLE_TIMEOUT_S = 10.0
-
-
-@contextmanager
-def prefetch_settled_on_failure(
-    future: Future[HeaderGraphAst] | None,
-) -> Iterator[None]:
-    """Wait for *future* to finish before re-raising a failure of the block.
-
-    A prefetch runs beside the primary dump; if that dump fails, nothing will
-    ever consume the prefetched graph, but its parse keeps running and keeps
-    its thread-budget slot (released only when it completes). Settling it
-    here returns the slot before the failing call returns, so a failed dump
-    never leaves an orphaned parse behind to starve a later pool.
-    """
-    try:
-        yield
-    except Exception:
-        # Bounded: a prefetch stuck in a slow parse must not hold the error
-        # hostage. Past the bound the slot is returned when the parse ends,
-        # exactly the pre-fix behavior, but the common case (a parse that is
-        # finishing or already done) is settled before the error propagates.
-        if future is not None:
-            with suppress(BaseException):
-                future.result(timeout=_PREFETCH_SETTLE_TIMEOUT_S)
-        raise
-    # KeyboardInterrupt / SystemExit propagate immediately: an interrupt must
-    # never wait on a background parse (up to clang's own timeout).
-
-
-def prefetch_graph_if_useful(
-    wanted: bool,
-    resolved_backend: str,
-    headers: list[Path],
-    includes: list[Path],
-    lang: str | None,
-    compile: CompileContext | None,
-) -> Future[HeaderGraphAst] | None:
-    """Start the header graph's clang parse now, when that is worth doing.
-
-    The parse depends only on the headers and compile context, never on the
-    snapshot, so under castxml -- which never produces the clang AST the
-    graph needs -- it can run alongside the primary dump. Measured on a cold
-    header cache: 11-15% off a single-library compare, neutral on a warm
-    cache and on a release whose members already fill the cores. Under the
-    clang frontend the attach reuses the primary pass's AST instead, so a
-    prefetch there would parse the same headers twice; ``None`` then, and
-    whenever the graph is not wanted at all.
-    """
-    if not (wanted and headers and resolved_backend == "castxml"):
-        return None
-    return prefetch_header_graph_ast(headers, includes, lang, compile)

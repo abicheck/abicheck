@@ -18,7 +18,7 @@ import pytest
 
 from abicheck import service_header_graph_attach as attach
 from abicheck.serialization import snapshot_to_dict
-from abicheck.workflows.dump import native
+from abicheck.workflows.dump import header_graph_prefetch as prefetch, native
 
 _HEADER = """\
 #pragma once
@@ -143,8 +143,10 @@ def test_prefetch_engages_only_where_it_cannot_parse_twice(
         started.append(args)
         return Future()
 
-    monkeypatch.setattr(attach, "prefetch_header_graph_ast", fake_prefetch)
-    result = attach.prefetch_graph_if_useful(wanted, backend, headers, [], "c++", None)
+    monkeypatch.setattr(prefetch, "prefetch_header_graph_ast", fake_prefetch)
+    result = prefetch.prefetch_graph_if_useful(
+        wanted, backend, headers, [], "c++", None
+    )
     assert (result is not None) is engages
     assert bool(started) is engages
 
@@ -170,7 +172,9 @@ def test_prefetch_runs_the_acquisition_on_its_own_thread_and_returns_it(
         return sentinel
 
     monkeypatch.setattr(attach, "acquire_header_graph_ast", fake_acquire)
-    future = attach.prefetch_header_graph_ast([Path("a.h")], [Path("inc")], "c++", None)
+    future = prefetch.prefetch_header_graph_ast(
+        [Path("a.h")], [Path("inc")], "c++", None
+    )
     assert future.result(timeout=10) is sentinel
     ((thread_name, args),) = seen
     assert args == ([Path("a.h")], [Path("inc")], "c++", None)
@@ -194,7 +198,7 @@ def test_a_spent_budget_runs_the_prefetch_inline(
         lambda *a: names.append(threading.current_thread().name),
     )
     with pr.BudgetedExecutor(1):  # takes the only budgeted thread
-        attach.prefetch_header_graph_ast([Path("a.h")], [], "c++", None).result(
+        prefetch.prefetch_header_graph_ast([Path("a.h")], [], "c++", None).result(
             timeout=10
         )
     assert names == [threading.current_thread().name]
@@ -221,11 +225,11 @@ def test_a_failing_dump_settles_its_prefetch_before_returning(
     monkeypatch.setenv("ABICHECK_MAX_THREADS", "")
     monkeypatch.setattr(attach, "acquire_header_graph_ast", slow_acquire)
     before = THREAD_BUDGET.in_use
-    future = attach.prefetch_header_graph_ast([Path("a.h")], [], "c++", None)
+    future = prefetch.prefetch_header_graph_ast([Path("a.h")], [], "c++", None)
     assert THREAD_BUDGET.in_use == before + 1
     threading.Timer(0.05, release.set).start()
     with pytest.raises(type(exc)):
-        with attach.prefetch_settled_on_failure(future):
+        with prefetch.prefetch_settled_on_failure(future):
             raise exc
     assert future.done()
     # The done-callback's shutdown may run a moment after result() returns.
@@ -242,10 +246,10 @@ def test_a_successful_block_does_not_wait_on_the_prefetch() -> None:
     from concurrent.futures import Future
 
     pending: Future[attach.HeaderGraphAst] = Future()
-    with attach.prefetch_settled_on_failure(pending):
+    with prefetch.prefetch_settled_on_failure(pending):
         pass
     assert not pending.done()
-    with attach.prefetch_settled_on_failure(None):
+    with prefetch.prefetch_settled_on_failure(None):
         pass
 
 
@@ -256,7 +260,7 @@ def test_an_interrupt_never_waits_on_the_prefetch(exc: BaseException) -> None:
 
     never: Future[attach.HeaderGraphAst] = Future()  # would block forever
     with pytest.raises(type(exc)):
-        with attach.prefetch_settled_on_failure(never):
+        with prefetch.prefetch_settled_on_failure(never):
             raise exc
     assert not never.done()
 
@@ -268,10 +272,10 @@ def test_a_stuck_prefetch_bounds_the_failure_wait(
     import time
     from concurrent.futures import Future
 
-    monkeypatch.setattr(attach, "_PREFETCH_SETTLE_TIMEOUT_S", 0.05)
+    monkeypatch.setattr(prefetch, "_PREFETCH_SETTLE_TIMEOUT_S", 0.05)
     stuck: Future[attach.HeaderGraphAst] = Future()
     start = time.monotonic()
     with pytest.raises(RuntimeError):
-        with attach.prefetch_settled_on_failure(stuck):
+        with prefetch.prefetch_settled_on_failure(stuck):
             raise RuntimeError("boom")
     assert time.monotonic() - start < 2.0

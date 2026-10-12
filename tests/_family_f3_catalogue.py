@@ -48,9 +48,9 @@ from dataclasses import dataclass
 from typing import Any
 
 import abicheck.checker as checker_mod
+import abicheck.compare.finding_identity as finding_mod
 import abicheck.extract.export_symbol_identity as export_ident_mod
 import abicheck.extract.headers.clang.context as clang_ctx_mod
-import abicheck.finding_identity as finding_mod
 import abicheck.model.export_index as export_index_mod
 import abicheck.model.graph_entity_identity as gei_mod
 import abicheck.model.graph_identity as gid_mod
@@ -232,7 +232,7 @@ STRING_PROBES: tuple[Probe, ...] = (
     Probe(
         # resolve_function_identity folds each parameter spelling through
         # canonicalize_type_name, which drops :line:col by design.
-        "abicheck.finding_identity:resolve_function_identity",
+        "abicheck.compare.finding_identity.symbols:resolve_function_identity",
         _fn_identity,
         distinguishes_same_header_lambdas=False,
     ),
@@ -317,14 +317,14 @@ def _path_probes() -> dict[str, Callable[[str], str]]:
                 ).primary_id
             )
         ),
-        "abicheck.finding_identity:resolve_symbol_identity": (
+        "abicheck.compare.finding_identity.symbols:resolve_symbol_identity": (
             lambda p: (
                 finding_mod.resolve_symbol_identity(
                     kind="function", source_location=rel(f"{p}:3")
                 ).primary_id
             )
         ),
-        "abicheck.finding_identity:resolve_change_identity": (
+        "abicheck.compare.finding_identity.change:resolve_change_identity": (
             lambda p: (
                 finding_mod.resolve_change_identity(
                     Change(

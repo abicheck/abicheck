@@ -293,3 +293,42 @@ def test_a_failed_parse_records_the_mode_it_attempted(
     )
     assert acquired.ast_failure
     assert acquired.resolved_force_cpp is attempted_cpp
+
+
+def test_a_memoized_c_failure_is_not_replayed_for_a_cxx_decision(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Libraries of one request share a failed header-graph parse's outcome
+    (the bisection memo). A sibling whose primary pass resolved C++ runs a
+    different parse of the same headers, so it must not inherit the C one's
+    failure."""
+    from abicheck.buildsource.header_graph_ast_projection import (
+        header_graph_bisection_scope,
+    )
+    from abicheck.errors import SnapshotError
+    from abicheck.extract.headers.clang import backend
+
+    headers = []
+    for i in range(3):
+        header = tmp_path / f"h{i}.h"
+        header.write_text(f"struct S{i} {{ int v; }};\nint get{i}(S{i}& s);\n")
+        headers.append(header)
+    modes: list[str | None] = []
+
+    def _dump(group: list[Path], *_a: Any, **k: Any) -> Any:
+        modes.append(k.get("resolved_lang_mode"))
+        if k.get("resolved_lang_mode") != "c++":  # these headers are C++ only
+            raise SnapshotError("clang failed to parse the header(s)")
+        return {"kind": "TranslationUnitDecl", "inner": []}, "c++", True
+
+    monkeypatch.setattr(backend, "clang_header_dump", _dump)
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    with header_graph_bisection_scope():
+        as_c = attach.acquire_header_graph_ast(headers, [], None, None)
+        parses_as_c = len(modes)
+        as_cxx = attach.acquire_header_graph_ast(
+            headers, [], None, None, resolved_lang_mode="c++"
+        )
+    assert as_c.ast_failure and parses_as_c > 1  # failed, then bisected
+    assert as_cxx.ast_failure is None and as_cxx.projection is not None
+    assert modes[parses_as_c:] == ["c++"]  # one whole-tree C++ parse

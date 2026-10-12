@@ -826,7 +826,7 @@ def test_selector_leaf_purity_rejects_each_denylisted_module(tmp_path: Path) -> 
         "abicheck.checker_types",
         "abicheck.suppression",
         "abicheck.policy.reclassify",
-        "abicheck.finding_identity",
+        "abicheck.compare.finding_identity",
     ):
         root = _tree(tmp_path / denied)
         _add_package(root, "policy", "")
@@ -839,13 +839,13 @@ def test_selector_leaf_purity_rejects_each_denylisted_module(tmp_path: Path) -> 
 
 
 def test_selector_leaf_purity_rejects_submodule_import_too(tmp_path: Path) -> None:
-    """A `from abicheck.finding_identity import x` -- not just a bare
-    `import abicheck.finding_identity` -- must also be caught."""
+    """A `from abicheck.compare.finding_identity import x` -- not just a bare
+    `import abicheck.compare.finding_identity` -- must also be caught."""
     root = _tree(tmp_path)
     _add_package(root, "policy", "")
     _write(
         root / "abicheck/policy/selectors.py",
-        "from abicheck.finding_identity import report_canonical_finding_id\n",
+        "from abicheck.compare.finding_identity import report_canonical_finding_id\n",
     )
 
     assert "selector-leaf-purity" in _rules(root)

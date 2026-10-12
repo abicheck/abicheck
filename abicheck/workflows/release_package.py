@@ -376,7 +376,7 @@ def resolve_release_package_map(
 
     result: dict[str, Path] = {}
     for key, artifact_id, staging_dir, artifact in staged:
-        # `_compare_one_library`'s own `entry["library"] = old_path.name`
+        # `compare_release_member`'s own `entry["library"] = old_path.name`
         # publishes this directory's basename as the release report's
         # display name for this library (JSON/Markdown/JUnit, per-library
         # filenames, removal warnings) -- once `key`'s own uniqueness is

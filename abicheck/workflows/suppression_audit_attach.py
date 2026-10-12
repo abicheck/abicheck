@@ -16,13 +16,11 @@
 """Attach one comparison's suppression audit trail to its ``DiffResult``.
 
 ``DiffResult.suppression_audit`` (report schema 2.24) used to be computed
-only by the native single-pair ``compare`` CLI, after its own post-
-classification scoping. A typed-API (``run_compare_request``) report and a
+only by the native single-pair ``compare`` CLI. A typed-API report and a
 release member's report rendered the *same* suppression file with no audit
-block at all, so stale and high-risk rules were invisible on those routes
-(F2 route-parity harness) -- the ADR-067 record-before-disposing rule the
-field exists for held on one front end only. The computation now lives here
-and every pairwise Tier-2 path calls it.
+block at all (F2 route-parity harness) -- the ADR-067 record-before-disposing
+rule held on one front end only. The computation lives here: a typed request
+audits in ``compare_finalize``, the CLI after its ``--used-by`` scoping.
 """
 
 from __future__ import annotations

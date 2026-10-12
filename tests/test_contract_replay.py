@@ -24,6 +24,7 @@ import pytest
 
 from abicheck.checker import compare
 from abicheck.checker_policy import ChangeKind
+from abicheck.compare.finding_identity import report_finding_id as _finding_id
 from abicheck.contract_context import (
     build_decision_receipt,
     build_persisted_context,
@@ -51,7 +52,6 @@ from abicheck.contract_replay import (
 )
 from abicheck.elf_metadata import ElfMetadata, ElfSymbol
 from abicheck.export_surface import compute_export_surface
-from abicheck.finding_identity import report_finding_id as _finding_id
 from abicheck.model import (
     AbiSnapshot,
     Function,

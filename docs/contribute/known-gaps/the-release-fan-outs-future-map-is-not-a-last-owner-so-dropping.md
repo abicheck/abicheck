@@ -11,13 +11,13 @@ generated: false
 
 Index: [Known gaps](../known-gaps.md)
 
-**Status (re-verified 2026-10-09 at `456989f`): NEGATIVE_RESULT.** A negative result: dropping futures saves nothing because results_by_key holds the same objects. abicheck/cli_compare_release_pairwise.py still exists.
+**Status (re-verified 2026-10-09 at `456989f`): NEGATIVE_RESULT.** A negative result: dropping futures saves nothing because results_by_key holds the same objects. abicheck/workflows/release_members.py still exists.
 
 
 Checked while looking for lifetime wins after the encoder/archive work above,
 and recorded as a negative result so it is not "fixed" speculatively later.
 
-`cli_compare_release_pairwise.py`'s parallel fan-out builds
+`workflows/release_members.py`'s parallel fan-out builds
 `futures = {executor.submit(...): key for key in matched_keys}` and keeps the
 whole mapping alive until the `with ThreadPoolExecutor(...)` block exits. That
 looks like per-member results being retained for the length of the run, and it

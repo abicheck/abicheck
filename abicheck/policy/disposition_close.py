@@ -45,6 +45,7 @@ from .disposition_ledger import (
     _kept_disposition,
     record_suppressed_change,
 )
+from .disposition_types import CONSUMER_ONLY_APPLICATION_POINTS
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from datetime import date
@@ -87,7 +88,7 @@ def record_kept_change(
 #: total must not move when one appears (adding a rule redistributes
 #: dispositions; it never changes what was observed).
 #:
-#: Every kind ``post_processing``'s ``_build_suppression_*`` helpers
+#: Every kind ``finding_disposition.suppression``'s ``*_diagnostic`` builders
 #: synthesize belongs here, not only the one a review happened to report:
 #: both exist solely because a rule was written, so either one counted as a
 #: detection makes the raw total depend on the rule set.
@@ -169,6 +170,24 @@ def _is_policy_overlay(change: object) -> bool:
     return getattr(kind, "value", kind) in _POLICY_OVERLAY_KINDS
 
 
+def exclude_from_gate(ledger: DispositionLedger, points: frozenset[str]) -> None:
+    """In place: records from *points* never reach the full-library gate
+    (D-S1). A gating one becomes ``non_gating``; a suppressed one stays
+    suppressed but is marked gate-excluded, so ``recommend_release`` does not
+    advise a major bump for a finding that gate never scored (it still counts
+    in the detected/suppressed audit)."""
+    records = ledger._records
+    for i, r in enumerate(records):
+        if r.application_point not in points:
+            continue
+        if r.disposition is Disposition.GATING:
+            records[i] = replace(
+                r, disposition=Disposition.NON_GATING, gate_excluded=True
+            )
+        elif r.disposition is Disposition.SUPPRESSED:
+            records[i] = replace(r, gate_excluded=True)
+
+
 def record_consumer_overlay(
     ledger: DispositionLedger | None,
     change: Change,
@@ -199,7 +218,7 @@ def record_consumer_overlay(
     can tell the two apart the same way it already names every other
     suppression application point.
     """
-    from ..finding_identity import report_finding_id
+    from ..compare.finding_identity import report_finding_id
 
     key = report_finding_id(change)
     if rule is None and suppression is None:
@@ -281,9 +300,9 @@ def record_and_maybe_suppress_overlay(
     # `would_withhold_unknown_reachability` only ever fires on `UNKNOWN`.
     if outcome.withheld_rule is None:
         return True, None
-    from ..post_processing import _build_suppression_overreach_change
+    from .finding_disposition.suppression import overreach_diagnostic
 
-    return True, _build_suppression_overreach_change(change, outcome.withheld_rule)
+    return True, overreach_diagnostic(change, outcome.withheld_rule)
 
 
 def _record_bucket(
@@ -454,8 +473,25 @@ def close_consumer_scope(
     *,
     gating: Iterable[object],
     also_detected: Iterable[Change] = (),
+    scope_decides_exit: bool,
 ) -> None:
     """Close the ledger again after a consumer-scoping pass added to it.
+
+    *scope_decides_exit* names which gate decides the run, so the audit's
+    ``gating`` set is always the set that gate scores (D3: the audit
+    reconciles with the exit code printed beside it):
+
+    * ``True`` -- the standalone ``check_appcompat``/
+      ``check_plugin_host_contract`` APIs, whose verdict *is* the consumer's
+      scoped one. The gating set narrows to *gating* (the relevant union).
+    * ``False`` -- ``compare --used-by``/``--required-symbol``. Workstream
+      D-S1 (``docs/reference/exit-codes.md``, "Application- and
+      plugin-scoped comparisons"): the exit is always the full-library
+      ``ExitDecision``; the consumer's assessment is reported beside it. No
+      library finding is narrowed, and every consumer-only finding (a late
+      ``also_detected`` one, or a pre-recorded consumer overlay) is
+      gate-excluded, since none of them reaches ``result.changes``. Narrowing
+      here is what made the one-line audit read "0 gating" beside exit 4.
 
     Call this **once per run**, from whatever resolves the whole scoped gate
     -- not once per consumer: ``apply_scope`` only demotes, so a per-consumer
@@ -481,6 +517,9 @@ def close_consumer_scope(
     # finding and the union entry for it can be two objects of one
     # observation, and asking by raw identity would read the finding as out
     # of scope while the scoped gate fails on the alias the union holds.
+    if not scope_decides_exit:
+        # Nothing a consumer contributes reaches the full-library gate.
+        gating = ()
     gating_ids = {id(c) for c in gating}
     gating_indices = ledger.indices_for(gating)
     gate = _GateContext.of(result)
@@ -530,7 +569,10 @@ def close_consumer_scope(
     # The order is what makes the result well-defined -- a finding promoted
     # into the contract but not used by this consumer is still excluded.
     ledger.refresh_promoted(result)
-    ledger.apply_scope(result, gating)
+    if scope_decides_exit:
+        ledger.apply_scope(result, gating)
+    else:
+        exclude_from_gate(ledger, CONSUMER_ONLY_APPLICATION_POINTS)
     ledger.resolve_verdict_classes(result)
     ledger.resolve_reclassifications(result)
     _resolve_acknowledgments(

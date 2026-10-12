@@ -693,10 +693,9 @@ def collect_metadata(path: Path) -> LibraryMetadata | None:
         # `resolve_input` resolves rather than rejecting) is not a single
         # hashable file -- the same "not a binary" no-op the text-format
         # branches below already apply, without `read_bytes()` raising
-        # `IsADirectoryError` first. `frontends/cli/runtime.py`'s own
-        # `_collect_metadata` guards this for the CLI path; the typed
-        # Python API (`service.run_compare_request`) calls this function
-        # directly and needs the identical guard (Codex review).
+        # `IsADirectoryError` first. Both the CLI and the typed Python API
+        # reach this through `compare_classify._attach_pair_report_fields`
+        # (Codex review).
         return None
     text_fmt = sniff_text_format(path)
     if text_fmt in ("json", "symvers"):

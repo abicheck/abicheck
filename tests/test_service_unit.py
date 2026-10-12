@@ -3231,8 +3231,9 @@ class TestDiagnosticComparisonThreading:
         # 2-header declared set: a single header's own name is no longer
         # load-bearing scope identity (Codex review, PR #624 follow-up —
         # the CI-red incident once the gate went live on real dumps at
-        # scale), so this needs a genuine multi-header declared-surface
-        # difference to still trigger the gate.
+        # scale). A changed header set alone is API evolution, not a
+        # scope mismatch (oneDAL 2026.0 header removal), so the drift that
+        # still triggers the gate here is manifest translation-unit drift.
         a_old = tmp_path / "old" / "a.h"
         a_new = tmp_path / "new" / "a.h"
         old_h = tmp_path / "old" / "foo.h"
@@ -3244,7 +3245,7 @@ class TestDiagnosticComparisonThreading:
         old_h.write_text("int f(void);\n")
         new_h.write_text("int f(void);\n")
 
-        def _snap(version, headers):
+        def _snap(version, headers, tu):
             return AbiSnapshot(
                 library="libtest.so",
                 version=version,
@@ -3257,13 +3258,15 @@ class TestDiagnosticComparisonThreading:
                         is_extern_c=True,
                     )
                 ],
-                contract=compute_extraction_contract(declared_headers=headers),
+                contract=compute_extraction_contract(
+                    declared_headers=headers, manifest_tu_scope=tu
+                ),
             )
 
         old_p = tmp_path / "old.json"
         new_p = tmp_path / "new.json"
-        save_snapshot(_snap("1.0", [a_old, old_h]), old_p)
-        save_snapshot(_snap("2.0", [a_new, new_h]), new_p)
+        save_snapshot(_snap("1.0", [a_old, old_h], '[{"name": "core"}]'), old_p)
+        save_snapshot(_snap("2.0", [a_new, new_h], '[{"name": "core2"}]'), new_p)
         return old_p, new_p
 
     def test_compare_snapshots_raises_by_default(self, tmp_path):
@@ -3692,7 +3695,7 @@ class TestRenderOutput:
         unchanged by this -- it passed ``True`` before and gets ``True`` now,
         verified byte-for-byte across all seven ``--format`` values against
         the pre-change revision."""
-        from abicheck.frontends.cli.runtime import _render_output
+        from abicheck.frontends.cli.compare_report import _render_output
 
         default_markdown = render_output("markdown", diff_result, snap)
         explicit_true = render_output(

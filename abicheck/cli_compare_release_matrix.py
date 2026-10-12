@@ -13,33 +13,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""``compare-release``'s matrix-result/output/gating engine (split from
-:mod:`abicheck.cli_compare_release`).
+"""The release report's CLI-side rendering helpers.
 
-Input discovery (:func:`_discover_files`/:func:`_prepare_compare_release_inputs`),
-per-library matrix-result collection (:func:`_collect_matrix_result`),
-release-output finalization (:func:`_finalize_release_output`/
+Release-output finalization (:func:`_finalize_release_output`/
 :func:`_write_release_summary_file`), early suppression validation
-(:func:`_validate_suppression_early`), and severity-bucket/finding-dict
-computation feeding the aggregate release verdict
-(:func:`_release_gating_buckets` (removed)/:func:`_release_finding_dicts`/
-:func:`_strip_diff_results_and_adjust_verdict`).
-
-Extracted purely to keep :mod:`abicheck.cli_compare_release` itself under
-the AI-readiness 2000-line hard cap -- see this module's own sibling,
-:mod:`abicheck.cli_compare_release_pairwise` (the per-pair/per-library
-comparison engine -- the *other* half of what
-:func:`abicheck.cli_compare_release.compare_release_cmd` calls but does
-not itself define), for the fuller rationale: `architecture/debt.yaml`
-pins :mod:`abicheck.cli_compare_release` (and its pre-existing sibling
-:mod:`abicheck.cli_compare_release_helpers`) at their exact adoption-time
-line count, and a single combined engine module would itself have landed
-over the AI-readiness 800-line production cap for a *new* file. A
-mechanical extraction (unchanged function bodies).
-:mod:`abicheck.cli_compare_release` re-exports every name here that an
-existing test or caller imports directly (``from
-abicheck.cli_compare_release import ...``) for back-compat -- new code
-should import from here directly.
+(:func:`_validate_suppression_early`), and the per-member finding projection
+every renderer reads (:func:`_release_finding_dicts`/
+:func:`_strip_diff_results_and_adjust_verdict`). The release itself --
+member pairing and comparison, bundle and build-configuration matrix
+analysis, the exit folds -- is :mod:`abicheck.workflows.release_compare`;
+:func:`abicheck.cli_compare_release.compare_release_cmd` runs it and hands
+the outcome here to render.
 """
 
 from __future__ import annotations
@@ -86,10 +70,8 @@ from .workflows.gate import (
     fold_release_outcome,
     incomplete_scope_diagnostic,
     release_global_verdicts,
-    worse_release_verdict,
 )
 from .workflows.release_exit_fold import release_compatibility_base_exit
-from .workflows.snapshot_factory import new_snapshot
 
 if TYPE_CHECKING:
     from .model.package_inventory import PackageInventory  # noqa: F401
@@ -116,86 +98,6 @@ from .workflows import release_inputs as _release_inputs  # noqa: E402
 # `cli_compare_release_helpers.py`'s own re-exports give.
 _discover_files = _release_inputs.discover_files
 _prepare_compare_release_inputs = _release_inputs.prepare_release_inputs
-
-
-def _collect_matrix_result(
-    probe_matrix_old: Path | None,
-    probe_matrix_new: Path | None,
-    policy: str,
-    worst_verdict: str,
-    *,
-    suppress: Path | None = None,
-    policy_file_path: Path | None = None,
-    old_version: str = "",
-    new_version: str = "",
-    pack_application: PackApplication | None = None,
-    project_policy_overrides: Any = None,
-) -> tuple[DiffResult | None, str]:
-    """Load probe-matrix snapshots, run them through the compare pipeline, fold.
-
-    Returns (matrix_result, worst_verdict). When no matrix snapshots are
-    given, matrix_result is None and the verdict is unchanged. The matrix
-    findings are release-global build-configuration changes
-    (CXX_STANDARD_FLOOR_RAISED, API_DEPENDS_ON_CONSUMER_ENV,
-    BEHAVIOURAL_DEFAULT_CHANGED).
-
-    Rather than re-deriving a verdict, the changes are fed to
-    :func:`checker.compare` as ``extra_changes`` over a pair of empty
-    snapshots — exactly the path the single-pair ``compare`` command uses.
-    This routes them through the *whole* pipeline uniformly: ``--suppress``
-    rules, ``--policy-file`` per-kind overrides, and verdict composition all
-    apply, so a suppression like ``cxx_standard_floor_raised`` or a policy
-    override is honoured identically on both commands. The returned
-    :class:`DiffResult` carries the post-suppression kept findings, which the
-    report (JSON / markdown / JUnit) renders.
-
-    *pack_application* (CLI cleanup phase two, "PR B" slice 1) folds the
-    release's already-resolved ``--pack`` contribution into this pair's own
-    ``PolicyFile`` too -- these matrix findings go through the same
-    ``--policy-file`` per-kind overrides every other library does, so a
-    pack overriding e.g. ``cxx_standard_floor_raised`` must apply here
-    identically, not only to the per-library comparisons. *project_policy_
-    overrides* (round 9 finding) is the analogous ``.abicheck.yml``
-    ``policy.overrides`` fold at the weaker PROJECT_CONFIG tier -- this
-    function used to build its own ``PolicyFile`` by hand
-    (``_load_suppression_and_policy`` + a manual pack fold) instead of
-    calling :func:`~abicheck.pack_application.resolve_bundle_policy_file`,
-    the shared resolver its own sibling bundle-result call already uses,
-    which is why the matrix path alone never picked up a project override
-    the bundle path already honored.
-    """
-    from .frontends.cli.runtime import _load_probe_matrix_changes
-
-    matrix_changes = _load_probe_matrix_changes(probe_matrix_old, probe_matrix_new)
-    if not matrix_changes:
-        return None, worst_verdict
-
-    from .pack_application import resolve_bundle_policy_file
-    from .service import compare_snapshots
-
-    suppression, _ = _load_suppression_and_policy(suppress, policy, policy_file_path)
-    pf = resolve_bundle_policy_file(
-        suppress,
-        policy,
-        policy_file_path,
-        pack_application,
-        project_policy_overrides,
-    )
-    # Empty snapshots contribute no per-binary changes; the matrix findings
-    # ride in as extra_changes and inherit the full post-processing pipeline.
-    name = "<build-config matrix>"
-    result = compare_snapshots(
-        new_snapshot(library=name, version=old_version or "old"),
-        new_snapshot(library=name, version=new_version or "new"),
-        suppression=suppression,
-        policy=policy,
-        policy_file=pf,
-        scope_to_public_surface=False,
-        extra_changes=matrix_changes,
-    )
-    matrix_verdict = result.verdict.value
-    worst_verdict = worse_release_verdict(worst_verdict, matrix_verdict)
-    return result, worst_verdict
 
 
 def _finalize_release_output(
@@ -526,16 +428,11 @@ def _release_display_buckets(
             "potential_breaking": categorized.potential_breaking,
             "quality_issues": categorized.quality_issues,
             "addition": categorized.addition,
+            # ADR-078: never gates, but a finding is never dropped from the
+            # release listing for that.
+            "informational": categorized.informational,
         }
-        return [
-            (name, cat_changes_by_name[name])
-            for name in (
-                "abi_breaking",
-                "potential_breaking",
-                "quality_issues",
-                "addition",
-            )
-        ]
+        return [(name, changes) for name, changes in cat_changes_by_name.items()]
     from .workflows.gate import evaluate
 
     classified = evaluate(diff)

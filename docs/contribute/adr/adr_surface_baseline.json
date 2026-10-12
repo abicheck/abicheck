@@ -675,6 +675,22 @@
       "disposition": "internal",
       "surfaces": [],
       "use_cases": []
+    },
+    "ADR-077": {
+      "disposition": "gap",
+      "surfaces": [],
+      "use_cases": []
+    },
+    "ADR-078": {
+      "disposition": "surfaced",
+      "surfaces": [
+        "cli: compare --severity-preset",
+        "report: compare_report.severity",
+        "report: compare_report.summary"
+      ],
+      "use_cases": [
+        "UC-WF-compare"
+      ]
     }
   },
   "multichannel_without_family": [
@@ -782,7 +798,6 @@
     "ADR-059 cli: dump --compression",
     "ADR-062 api: abicheck.storage",
     "ADR-064 action: severity-preset",
-    "ADR-064 cli: compare --severity-preset",
     "ADR-064 report: compare_report.exit",
     "ADR-065 cli: compare --select --select-required --dry-run",
     "ADR-065 report: compare_report.comparison_scope",
@@ -799,6 +814,8 @@
     "ADR-073 action: actions/report",
     "ADR-073 action: actions/verify-source-run",
     "ADR-074 cli: compare --define",
-    "ADR-074 cli: dump --define"
+    "ADR-074 cli: dump --define",
+    "ADR-078 report: compare_report.severity",
+    "ADR-078 report: compare_report.summary"
   ]
 }

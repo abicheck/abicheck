@@ -109,6 +109,7 @@ def _sweep_case(bucket, relevance, promote, scoped, severity, restore):
             result,
             gating=[change] if scoped == "in" else [],
             also_detected=[change],
+            scope_decides_exit=True,
         )
     if restore and bucket not in ("changes", "suppressed"):
         # What `scope.show_redundant` does: restore the row into the list the
@@ -328,7 +329,12 @@ def test_a_restored_row_inside_the_consumer_scope_rejoins_the_gate() -> None:
 
         # …then `show_redundant` restores it, and the scope rules on it.
         result.changes = [restored]
-        close_consumer_scope(ledger, result, gating=[restored] if in_scope else [])
+        close_consumer_scope(
+            ledger,
+            result,
+            gating=[restored] if in_scope else [],
+            scope_decides_exit=True,
+        )
         gated = ledger.with_gate(result, strict)
         assert gated.effective_total == int(in_scope), (
             "in scope: the scoped severity gate scores the restored row, so "
@@ -372,7 +378,9 @@ def test_a_scoped_alias_resolves_to_its_canonical_record() -> None:
 
         # The union holds exactly one of them — the orchestrator keeps the
         # last it saw, but the rule cannot depend on which.
-        close_consumer_scope(ledger, result, gating=[aliases[union_position]])
+        close_consumer_scope(
+            ledger, result, gating=[aliases[union_position]], scope_decides_exit=True
+        )
         record = ledger.record_for(aliases[0])
         assert record.disposition is Disposition.GATING, (
             f"alias {union_position} names this finding in the scoped gating "
@@ -408,7 +416,7 @@ def test_an_alias_absent_from_the_union_is_still_excluded() -> None:
         record_consumer_overlay(ledger, overlay, result)
     assert ledger.detected_total == 2
 
-    close_consumer_scope(ledger, result, gating=[used])
+    close_consumer_scope(ledger, result, gating=[used], scope_decides_exit=True)
     assert ledger.record_for(used).disposition is Disposition.GATING
     excluded = ledger.record_for(unused_aliases[1])
     assert excluded.disposition is Disposition.NON_GATING
@@ -496,6 +504,7 @@ def test_a_late_policy_overlay_is_not_a_detection_either() -> None:
         result,
         gating=[missing, advisory],
         also_detected=[missing, advisory],
+        scope_decides_exit=True,
     )
     assert ledger.detected_total == 1
     assert conservation_holds(ledger)

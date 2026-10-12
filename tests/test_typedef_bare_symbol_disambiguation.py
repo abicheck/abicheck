@@ -28,7 +28,7 @@ from __future__ import annotations
 
 from abicheck.checker import compare
 from abicheck.checker_policy import ChangeKind
-from abicheck.finding_identity import report_canonical_finding_id
+from abicheck.compare.finding_identity import report_canonical_finding_id
 from abicheck.model import AbiSnapshot
 
 _OWNERS = [

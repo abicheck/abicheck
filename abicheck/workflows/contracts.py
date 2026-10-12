@@ -48,7 +48,7 @@ was split into its two phases (``service_compare_pipeline``), which gave the
 CLI's ADR-049 configuration step (``compare_configuration``) a seam to run in —
 the thing that had made a shared resolution look impossible — and
 ``_resolve_compare_snapshots`` now builds one of these requests and
-delegates. So this really is the one resolution every front end uses.
+delegates, and the CLI classifies through ``workflows.compare_classify`` too.
 ADR-055's "Two-resolution-path finding", first answered as option (b), is
 recorded as settled the other way in D1's "Structural half" note.
 
@@ -183,7 +183,7 @@ class CompareRequest:
     # ``public_header_dirs`` as real fields here: both need a genuine
     # channel into the directory/package release fan-out's per-library
     # ``compare_snapshots`` call (``service_compare_pipeline.run_compare`` /
-    # ``cli_compare_release_pairwise._run_compare_pair``), which a config-
+    # ``workflows.release_members.compare_member_pair``), which a config-
     # only value with no request field cannot reach.
     env_matrix: EnvironmentMatrix | None = None
     # ADR-050 D2: force a tentative diff through a genuine comparability-

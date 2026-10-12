@@ -56,6 +56,7 @@ __all__ = [
 #: cannot hide outside the catalogue.
 HEURISTIC_OWNER_MODULES: tuple[str, ...] = (
     "abicheck.compare.enum_sentinel",
+    "abicheck.compare.finding_redundancy",
     "abicheck.compare.naming_conventions",
     "abicheck.compare.typedef_respelling",
     "abicheck.diff_filtering",

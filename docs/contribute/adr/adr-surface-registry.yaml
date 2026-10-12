@@ -645,3 +645,12 @@ adrs:
     use_cases: []
     surfaces: []
     missing: Proposed, not yet implemented; no exposure-mode or sensitivity surface exists.
+
+  - id: ADR-078
+    file: 078-informational-severity-category.md
+    disposition: surfaced
+    use_cases: [UC-WF-compare]
+    surfaces:
+      - cli: compare --severity-preset
+      - report: compare_report.summary
+      - report: compare_report.severity

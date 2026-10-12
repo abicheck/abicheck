@@ -129,7 +129,7 @@ class _AllSuppression:
         return True
 
     def evaluate(self, change: Change) -> SuppressionOutcome:
-        # _merge_findings_respecting_suppression (post_processing.py) calls
+        # merge_late_findings (post_processing.py) calls
         # evaluate(), not is_suppressed(), so this duck-typed double needs a
         # matching method too.
         return SuppressionOutcome(suppressed=True, withheld_rule=None)
@@ -600,7 +600,8 @@ class TestDetectInternalLeaksStep:
         return old, new
 
     def test_leak_finding_added(self) -> None:
-        from abicheck.post_processing import DetectInternalLeaks, PipelineContext
+        from abicheck.policy.finding_disposition import PipelineContext
+        from abicheck.post_processing import DetectInternalLeaks
 
         old, new = self._leak_snaps()
         changes = [_change(ChangeKind.TYPE_SIZE_CHANGED, "ns::detail::Impl", "size")]
@@ -610,7 +611,8 @@ class TestDetectInternalLeaksStep:
 
     def test_leak_finding_suppressed(self) -> None:
         # Lines 613-614: synthetic leak finding respects suppression.
-        from abicheck.post_processing import DetectInternalLeaks, PipelineContext
+        from abicheck.policy.finding_disposition import PipelineContext
+        from abicheck.post_processing import DetectInternalLeaks
 
         old, new = self._leak_snaps()
         changes = [_change(ChangeKind.TYPE_SIZE_CHANGED, "ns::detail::Impl", "size")]
@@ -625,7 +627,8 @@ class TestDetectInternalLeaksStep:
         )
 
     def test_no_leak_returns_unchanged(self) -> None:
-        from abicheck.post_processing import DetectInternalLeaks, PipelineContext
+        from abicheck.policy.finding_disposition import PipelineContext
+        from abicheck.post_processing import DetectInternalLeaks
 
         old = _snap(functions=[_public_fn("foo", "int", [])])
         new = _snap(functions=[_public_fn("foo", "int", [])])
@@ -636,7 +639,8 @@ class TestDetectInternalLeaksStep:
 
     def test_leak_finding_dedup_when_already_present(self) -> None:
         # Branch 615->611: a pre-existing leak finding is not duplicated.
-        from abicheck.post_processing import DetectInternalLeaks, PipelineContext
+        from abicheck.policy.finding_disposition import PipelineContext
+        from abicheck.post_processing import DetectInternalLeaks
 
         old, new = self._leak_snaps()
         changes = [
@@ -682,7 +686,8 @@ class TestDetectNamespacePatternsStep:
         return old, new
 
     def test_namespace_finding_added(self) -> None:
-        from abicheck.post_processing import DetectNamespacePatterns, PipelineContext
+        from abicheck.policy.finding_disposition import PipelineContext
+        from abicheck.post_processing import DetectNamespacePatterns
 
         old, new = self._ns_snaps()
         ctx = PipelineContext(old=old, new=new)
@@ -691,7 +696,8 @@ class TestDetectNamespacePatternsStep:
 
     def test_namespace_finding_suppressed(self) -> None:
         # Lines 570-571: namespace finding respects suppression.
-        from abicheck.post_processing import DetectNamespacePatterns, PipelineContext
+        from abicheck.policy.finding_disposition import PipelineContext
+        from abicheck.post_processing import DetectNamespacePatterns
 
         old, new = self._ns_snaps()
         ctx = PipelineContext(old=old, new=new, suppression=_AllSuppression())  # type: ignore[arg-type]
@@ -703,7 +709,8 @@ class TestDetectNamespacePatternsStep:
 
     def test_namespace_finding_deduped(self) -> None:
         # Lines 573-574: a finding whose (kind, symbol) already exists is dropped.
-        from abicheck.post_processing import DetectNamespacePatterns, PipelineContext
+        from abicheck.policy.finding_disposition import PipelineContext
+        from abicheck.post_processing import DetectNamespacePatterns
 
         old, new = self._ns_snaps()
         ctx = PipelineContext(old=old, new=new)
@@ -722,10 +729,8 @@ class TestDetectNamespacePatternsStep:
 
 class TestDemoteUnreachableInternalChurn:
     def test_demotes_unreachable_internal_change(self) -> None:
-        from abicheck.post_processing import (
-            DemoteUnreachableInternalChurn,
-            PipelineContext,
-        )
+        from abicheck.policy.finding_disposition import PipelineContext
+        from abicheck.post_processing import DemoteUnreachableInternalChurn
 
         old, new = _snap(), _snap()
         c = _change(ChangeKind.TYPE_SIZE_CHANGED, "ns::detail::Private", "size")
@@ -735,10 +740,8 @@ class TestDemoteUnreachableInternalChurn:
         assert ctx.out_of_surface == [c]
 
     def test_frozen_internal_namespace_kept(self) -> None:
-        from abicheck.post_processing import (
-            DemoteUnreachableInternalChurn,
-            PipelineContext,
-        )
+        from abicheck.policy.finding_disposition import PipelineContext
+        from abicheck.post_processing import DemoteUnreachableInternalChurn
 
         old, new = _snap(), _snap()
         c = _change(ChangeKind.TYPE_SIZE_CHANGED, "ns::detail::Frozen", "size")
@@ -755,10 +758,8 @@ class TestDemoteUnreachableInternalChurn:
 
 class TestEscalateFrozenNamespaceViolations:
     def test_tags_frozen_violation(self) -> None:
-        from abicheck.post_processing import (
-            EscalateFrozenNamespaceViolations,
-            PipelineContext,
-        )
+        from abicheck.policy.finding_disposition import PipelineContext
+        from abicheck.post_processing import EscalateFrozenNamespaceViolations
 
         old, new = _snap(), _snap()
         c = _change(ChangeKind.FUNC_REMOVED, "ns::detail::r1::foo")
@@ -772,10 +773,8 @@ class TestEscalateFrozenNamespaceViolations:
         assert c.description.startswith("[frozen-namespace violation")
 
     def test_no_frozen_namespaces_returns_early(self) -> None:
-        from abicheck.post_processing import (
-            EscalateFrozenNamespaceViolations,
-            PipelineContext,
-        )
+        from abicheck.policy.finding_disposition import PipelineContext
+        from abicheck.post_processing import EscalateFrozenNamespaceViolations
 
         old, new = _snap(), _snap()
         c = _change(ChangeKind.FUNC_REMOVED, "ns::detail::r1::foo")
@@ -785,10 +784,8 @@ class TestEscalateFrozenNamespaceViolations:
         assert c.frozen_namespace_violation is None
 
     def test_redundant_findings_also_tagged(self) -> None:
-        from abicheck.post_processing import (
-            EscalateFrozenNamespaceViolations,
-            PipelineContext,
-        )
+        from abicheck.policy.finding_disposition import PipelineContext
+        from abicheck.post_processing import EscalateFrozenNamespaceViolations
 
         old, new = _snap(), _snap()
         kept = _change(ChangeKind.FUNC_REMOVED, "ns::frozen::a")
@@ -800,10 +797,8 @@ class TestEscalateFrozenNamespaceViolations:
         assert redundant.frozen_namespace_violation == "ns::frozen::*"
 
     def test_already_tagged_change_not_reprefixed(self) -> None:
-        from abicheck.post_processing import (
-            EscalateFrozenNamespaceViolations,
-            PipelineContext,
-        )
+        from abicheck.policy.finding_disposition import PipelineContext
+        from abicheck.post_processing import EscalateFrozenNamespaceViolations
 
         old, new = _snap(), _snap()
         c = _change(ChangeKind.FUNC_REMOVED, "ns::frozen::x")
@@ -818,15 +813,13 @@ class TestEscalateFrozenNamespaceViolations:
 class TestPipelineFallbackKept:
     def test_pipeline_sets_kept_when_filter_redundant_absent(self) -> None:
         # Line 868: ctx.kept fallback when FilterRedundant didn't run.
-        from abicheck.post_processing import (
-            EnrichSourceLocations,
-            PostProcessingPipeline,
-        )
+        from abicheck.policy.finding_disposition.pipeline import DispositionPipeline
+        from abicheck.post_processing import EnrichSourceLocations
 
         old = _snap(functions=[_public_fn("foo")])
         new = _snap(functions=[_public_fn("foo")])
         changes = [_change(ChangeKind.FUNC_ADDED, "bar")]
-        pipeline = PostProcessingPipeline([EnrichSourceLocations()])
+        pipeline = DispositionPipeline([EnrichSourceLocations()])
         ctx = pipeline.run(list(changes), old, new)
         assert [c.symbol for c in ctx.kept] == ["bar"]
         assert [s.name for s in pipeline.steps] == ["enrich_source_locations"]

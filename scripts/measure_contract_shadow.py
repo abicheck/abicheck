@@ -87,6 +87,7 @@ from contract_platform_corpus import (  # noqa: E402
 from abicheck.change_registry import API_BREAK_KINDS, BREAKING_KINDS
 from abicheck.checker import compare  # noqa: E402
 from abicheck.checker_types import DiffResult  # noqa: E402
+from abicheck.compare.finding_identity import report_finding_id as _finding_id
 from abicheck.contract_context import finding_key, relevance_map  # noqa: E402
 from abicheck.contract_evidence_collect import validate_decision_evidence  # noqa: E402
 from abicheck.contract_relevance_types import (  # noqa: E402
@@ -96,7 +97,6 @@ from abicheck.contract_relevance_types import (  # noqa: E402
     evaluation_status_for,
 )
 from abicheck.export_surface import observed_exports_by_platform  # noqa: E402
-from abicheck.finding_identity import report_finding_id as _finding_id  # noqa: E402
 from abicheck.model.change import Change
 
 #: Every domain is measured, not only the one Phase 7 will default to: an

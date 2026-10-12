@@ -157,6 +157,7 @@ def to_stat_json(
             "risk_changes": summary.risk_count,
             "compatible_additions": summary.compatible_additions,
             "quality_issues": summary.quality_issues,
+            "informational": summary.informational,
             "total_changes": summary.total_changes,
             "binary_compatibility_pct": round(summary.binary_compatibility_pct, 1),
             "affected_pct": round(summary.affected_pct, 1),
@@ -646,6 +647,7 @@ def _build_json_base(result: DiffResult) -> dict[str, object]:
         "risk_changes": summary.risk_count,
         "compatible_additions": summary.compatible_additions,
         "quality_issues": summary.quality_issues,
+        "informational": summary.informational,
         "total_changes": summary.total_changes,
         "binary_compatibility_pct": round(summary.binary_compatibility_pct, 1),
         "affected_pct": round(summary.affected_pct, 1),
@@ -1110,8 +1112,8 @@ def _recommended_action_for_change(
     - ``BREAKING`` → ``recompile_and_relink_required`` (binary ABI break)
     - ``API_BREAK`` → ``recompile_required`` (source-level break only)
     - ``COMPATIBLE_WITH_RISK`` → ``verify_deployment_compatibility``
-    - ``COMPATIBLE`` additions → ``no_action_required``
-    - ``COMPATIBLE`` non-additions (quality issues) → ``review_recommended``
+    - ``COMPATIBLE`` additions and informational outcomes → ``no_action_required``
+    - ``COMPATIBLE`` quality issues → ``review_recommended``
     """
     from .policy.severity import (
         IssueCategory,
@@ -1139,9 +1141,10 @@ def _recommended_action_for_change(
         policy_file=policy_file,
         today=today,
     )
+    # An informational outcome (ADR-078) records that nothing changed.
     return (
         "no_action_required"
-        if category == IssueCategory.ADDITION
+        if category in (IssueCategory.ADDITION, IssueCategory.INFORMATIONAL)
         else "review_recommended"
     )
 
@@ -1483,7 +1486,7 @@ def _change_to_dict(
         d["entity"] = entity_for_change(c, kind.value)
         d["finding_id"] = _finding_id(c)
         # Backend-independent sibling of finding_id (schema 2.36).
-        from .finding_identity import report_canonical_finding_id
+        from .compare.finding_identity import report_canonical_finding_id
 
         d["canonical_finding_id"] = report_canonical_finding_id(c)
         d["recommended_action"] = _recommended_action_for_change(
@@ -1607,6 +1610,12 @@ def _build_severity_json(
         "addition": {
             "severity": config_dict["addition"],
             "count": len(categorized.addition),
+        },
+        # ADR-078: fixed at ``info`` -- not in ``config``, never in
+        # ``blocking_categories``; reported so no finding leaves the block.
+        "informational": {
+            "severity": SeverityLevel.INFO.value,
+            "count": len(categorized.informational),
         },
     }
 

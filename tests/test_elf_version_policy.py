@@ -577,7 +577,7 @@ class TestDeduplication:
     def test_version_node_removed_deduplicates_defined_removed(self):
         """SYMBOL_VERSION_NODE_REMOVED and SYMBOL_VERSION_DEFINED_REMOVED
         for the same version string should be deduplicated."""
-        from abicheck.diff_filtering import _deduplicate_cross_detector
+        from abicheck.compare.finding_dedup import deduplicate_cross_detector
 
         changes = [
             Change(
@@ -593,14 +593,14 @@ class TestDeduplication:
                 old_value="LIBFOO_1.0",
             ),
         ]
-        result = _deduplicate_cross_detector(changes)
+        result = deduplicate_cross_detector(changes)
         # First one wins — should keep SYMBOL_VERSION_NODE_REMOVED
         assert len(result) == 1
         assert result[0].kind == ChangeKind.SYMBOL_VERSION_NODE_REMOVED
 
     def test_different_version_strings_not_deduplicated(self):
         """Different version strings should NOT be deduplicated."""
-        from abicheck.diff_filtering import _deduplicate_cross_detector
+        from abicheck.compare.finding_dedup import deduplicate_cross_detector
 
         changes = [
             Change(
@@ -614,7 +614,7 @@ class TestDeduplication:
                 description="def removed",
             ),
         ]
-        result = _deduplicate_cross_detector(changes)
+        result = deduplicate_cross_detector(changes)
         assert len(result) == 2
 
 
@@ -924,7 +924,7 @@ class TestVersionNodeBumpDeduplication:
     """A version-node bump must not be double-counted per symbol."""
 
     def test_moved_node_and_alias_change_deduplicated(self) -> None:
-        from abicheck.diff_filtering import _deduplicate_cross_detector
+        from abicheck.compare.finding_dedup import deduplicate_cross_detector
 
         changes = [
             Change(
@@ -947,14 +947,14 @@ class TestVersionNodeBumpDeduplication:
                 new_value="LLVM_18.1",
             ),
         ]
-        kept = _deduplicate_cross_detector(changes)
+        kept = deduplicate_cross_detector(changes)
         kinds = [c.kind for c in kept]
         # The alias-change duplicate is dropped; the node-level change is kept
         # (one finding for one version-node bump, not two).
         assert kinds == [ChangeKind.SYMBOL_MOVED_VERSION_NODE]
 
     def test_retained_alias_change_survives_matching_node_move(self) -> None:
-        from abicheck.diff_filtering import _deduplicate_cross_detector
+        from abicheck.compare.finding_dedup import deduplicate_cross_detector
 
         # Old default is RETAINED as a non-default alias: the alias-change is
         # compatible and distinct from the node move's "will not find" wording,
@@ -975,14 +975,14 @@ class TestVersionNodeBumpDeduplication:
                 new_value="LIBA_2",
             ),
         ]
-        kept = _deduplicate_cross_detector(changes)
+        kept = deduplicate_cross_detector(changes)
         kinds = {c.kind for c in kept}
         assert ChangeKind.SYMBOL_MOVED_VERSION_NODE in kinds
         assert ChangeKind.SYMBOL_VERSION_ALIAS_CHANGED in kinds
         assert len(kept) == 2
 
     def test_moved_node_kept_without_matching_alias(self) -> None:
-        from abicheck.diff_filtering import _deduplicate_cross_detector
+        from abicheck.compare.finding_dedup import deduplicate_cross_detector
 
         # No alias change for this transition → the node move stands on its own.
         changes = [
@@ -994,11 +994,11 @@ class TestVersionNodeBumpDeduplication:
                 new_value="LIBA_2",
             ),
         ]
-        kept = _deduplicate_cross_detector(changes)
+        kept = deduplicate_cross_detector(changes)
         assert [c.kind for c in kept] == [ChangeKind.SYMBOL_MOVED_VERSION_NODE]
 
     def test_moved_node_kept_when_alias_transition_differs(self) -> None:
-        from abicheck.diff_filtering import _deduplicate_cross_detector
+        from abicheck.compare.finding_dedup import deduplicate_cross_detector
 
         # Alias change exists for the symbol but a different transition → keep both.
         changes = [
@@ -1017,7 +1017,7 @@ class TestVersionNodeBumpDeduplication:
                 new_value="LIBA_3",
             ),
         ]
-        kept = _deduplicate_cross_detector(changes)
+        kept = deduplicate_cross_detector(changes)
         kinds = {c.kind for c in kept}
         # Transitions differ, so both findings are kept (no de-duplication).
         assert ChangeKind.SYMBOL_MOVED_VERSION_NODE in kinds

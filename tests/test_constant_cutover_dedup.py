@@ -26,7 +26,7 @@ from __future__ import annotations
 
 from abicheck.checker_policy import ChangeKind
 from abicheck.compare.constants import diff_constants
-from abicheck.finding_identity import report_finding_id
+from abicheck.compare.finding_identity import report_finding_id
 from abicheck.model.fact import Fact
 from abicheck.model.identity import Anonymous, Namespace, entity_id_for_constant
 from abicheck.model.occurrence import OccurrenceId
@@ -116,13 +116,13 @@ class TestWholeGroupRemovalSurvivesPostProcessingDedup:
     TestWholeGroupRemovalSurvivesPostProcessingDedup`` exactly; see that
     class's own docstring for the full account. ``diff_constants`` emits one
     ``CONSTANT_REMOVED`` per contributing entity when a whole colliding
-    group vanishes, but the public pipeline's ``diff_filtering._dedup_exact``
+    group vanishes, but the public pipeline's ``finding_dedup._dedup_exact``
     used to key only on ``(kind, description)`` -- identical for every
     entity in the group -- silently collapsing them back to one.
     """
 
     def test_two_colliding_removals_both_survive_dedup_exact(self) -> None:
-        from abicheck.diff_filtering import _dedup_exact
+        from abicheck.compare.finding_dedup import _dedup_exact
 
         first = entity_id_for_constant((Anonymous("namespace", 0),), "X")
         second = entity_id_for_constant((Anonymous("namespace", 1),), "X")
@@ -155,7 +155,7 @@ class TestOdrDuplicateRemovalsSurviveDedupExact:
     def test_two_odr_duplicate_removals_with_the_same_value_both_survive(
         self,
     ) -> None:
-        from abicheck.diff_filtering import _dedup_exact
+        from abicheck.compare.finding_dedup import _dedup_exact
 
         eid = entity_id_for_constant((Namespace("ns"),), "X")
         old_index = SemanticIRIndex(
@@ -185,7 +185,7 @@ class TestCollisionSafeDisambiguatorClosesReportFindingIdGap:
     blank source disambiguator -- the common case for two anonymous-scope
     entities -- used to both carry ``Change.disambiguator=None`` and so
     collide on ``finding_identity.report_finding_id`` even though
-    ``diff_filtering._dedup_exact`` already told them apart via
+    ``finding_dedup._dedup_exact`` already told them apart via
     ``entity_id.key``. Fixed at the source: ``compare.constants.
     _collision_safe_disambiguator`` (used everywhere this module emits a
     per-occurrence finding for a colliding group) now falls back to the
@@ -329,13 +329,13 @@ class TestPartialRemovalsPreserveMultiplicityAcrossDedup:
     shrinking to one -- three independent removals, not one repeated
     three times), each used to get `entity_id=None`/`disambiguator=None`
     alike, making them byte-identical and collapsing to one via
-    `diff_filtering._dedup_exact` -- silently losing two of the three real
+    `finding_dedup._dedup_exact` -- silently losing two of the three real
     removals. Each ambiguous residual now gets its own synthetic,
     non-identity-claiming disambiguator so multiplicity survives dedup.
     """
 
     def test_three_ambiguous_removals_all_survive_dedup_exact(self) -> None:
-        from abicheck.diff_filtering import _dedup_exact
+        from abicheck.compare.finding_dedup import _dedup_exact
 
         old_ids = [
             entity_id_for_constant((Anonymous("namespace", i),), "X") for i in range(4)

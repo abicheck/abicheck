@@ -18,7 +18,7 @@
 must agree with what the identical one-library comparison's scalar
 ``compare`` report would show for the same :class:`DiffResult` -- both are
 now computed by the same :func:`abicheck.report_summary.build_summary`
-(``cli_compare_release_pairwise._compare_one_library``), rather than the
+(``workflows.release_members.compare_release_member``), rather than the
 release path re-implementing its own raw-``ADDITION_KINDS`` formula that
 (before this fix) silently disagreed with the scalar report's own
 effective-category classification for the exact scenario the bug report
@@ -26,7 +26,7 @@ named: a ``COMPATIBLE`` finding whose raw kind is not an addition (e.g.
 ``public_surface_shrank``, modeled here with ``branch_protection_improved``
 -- any ``QUALITY_KINDS`` member reproduces the same gap).
 
-Exercises ``_compare_one_library`` directly with ``abicheck.service.
+Exercises ``compare_release_member`` directly with ``abicheck.service.
 run_compare`` monkeypatched to return a synthetic, hand-built
 :class:`DiffResult` -- no real compiled binary is needed since the bug is
 entirely about which formula the release path applies to an already-computed
@@ -40,15 +40,16 @@ from unittest.mock import patch
 
 from abicheck.checker_policy import ChangeKind
 from abicheck.checker_types import DiffResult
-from abicheck.cli_compare_release_pairwise import (
-    ReleaseMemberContext,
-    _compare_one_library,
-    release_parent_request,
-)
 from abicheck.model import AbiSnapshot
 from abicheck.model.change import Change
+from abicheck.report.release_member_entry import ReleaseMemberEntryProjection
 from abicheck.report_summary import build_summary
 from abicheck.service import CompareResult
+from abicheck.workflows.release_members import (
+    ReleaseMemberContext,
+    compare_release_member,
+    release_parent_request,
+)
 
 
 def _synthetic_diff_result() -> DiffResult:
@@ -94,7 +95,7 @@ def test_release_pairwise_compatible_additions_matches_scalar_build_summary(
             old_snapshot=AbiSnapshot(library="libdemo.so.1", version="1"),
             new_snapshot=AbiSnapshot(library="libdemo.so.1", version="2"),
         )
-        entry = _compare_one_library(
+        entry = compare_release_member(
             "libdemo.so.1",
             ReleaseMemberContext(
                 request=release_parent_request(
@@ -103,6 +104,7 @@ def test_release_pairwise_compatible_additions_matches_scalar_build_summary(
                 old_map={"libdemo.so.1": old_path},
                 new_map={"libdemo.so.1": new_path},
                 resolve_debug_info=lambda *_a, **_kw: None,
+                reporter=ReleaseMemberEntryProjection(),
             ),
         )
 

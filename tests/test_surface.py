@@ -1860,7 +1860,8 @@ class TestWideningOverlay:
     public surface even when header provenance/export would demote it."""
 
     def _run(self, changes, old, new, force_public):
-        from abicheck.post_processing import FilterNonPublicSurface, PipelineContext
+        from abicheck.policy.finding_disposition import PipelineContext
+        from abicheck.post_processing import FilterNonPublicSurface
 
         ctx = PipelineContext(
             old=old,
