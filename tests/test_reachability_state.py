@@ -1535,31 +1535,6 @@ class TestCheckerFilterSuppressedChangesUnknownDiagnostic:
     since exercising them via the full compare() pipeline needs a real
     binary)."""
 
-    def test_filter_suppressed_changes_emits_unknown_diagnostic(self) -> None:
-        from abicheck.checker import _filter_suppressed_changes
-
-        change = Change(
-            kind=ChangeKind.SONAME_BUMP_UNNECESSARY,
-            symbol="libfoo.so.1",
-            description="soname bumped unnecessarily",
-        )
-        suppression = SuppressionList(
-            [
-                Suppression(
-                    symbol="libfoo.so.1",
-                    reachability="proven-unreachable-only",
-                    reason="wants proof",
-                )
-            ]
-        )
-        suppressed: list[Change] = []
-        visible = _filter_suppressed_changes([change], suppression, suppressed)
-        assert change in visible
-        assert not suppressed
-        assert any(
-            c.kind == ChangeKind.SUPPRESSION_REACHABILITY_UNKNOWN for c in visible
-        )
-
     def test_filter_pattern_synthetic_emits_unknown_diagnostic(self) -> None:
         from abicheck.checker import _filter_pattern_synthetic
 

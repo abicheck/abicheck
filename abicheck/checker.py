@@ -134,10 +134,8 @@ from .model.header_exclusion_record import comparison_exclusion_identity
 from .model.surface_facts import is_abi_visible
 from .policy.classification import Verdict, compute_verdict
 from .policy.disposition_close import finalize_ledger
-from .policy.disposition_ledger import (
-    DispositionLedger,
-    record_suppressed_change,
-)
+from .policy.disposition_ledger import DispositionLedger
+from .policy.finding_disposition.suppression import dispose_by_suppression
 from .policy.persistent_hygiene import drop_persistent_hygiene
 from .policy.policy_file_namespaces import (
     experimental_namespaces as _experimental_namespaces,
@@ -247,51 +245,19 @@ def _filter_suppressed_changes(
     ledger: DispositionLedger | None = None,
 ) -> list[Change]:
     """Remove suppressed advisories (SONAME/platform-floor) from *changes*,
-    appending them to *suppressed* in-place. Returns the visible subset.
-
-    Uses :meth:`SuppressionList.evaluate` (not the cheaper ``is_suppressed``)
-    so a broad rule whose selectors matched a public-reachable change but was
-    withheld by the reachability/``allow_public_break`` gate still produces
-    the same ``SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK`` diagnostic
-    ``ApplySuppression`` produces for changes it sees directly (ADR-044 D4;
-    P1 item 6) — mirrors ``_filter_pattern_synthetic``'s established pattern
-    for this same plain-``SuppressionList``-plus-``list[Change]`` shape.
+    appending them to *suppressed* in-place. Returns the visible subset
+    (kept findings, then any ADR-044 D4 withheld-rule diagnostics).
     """
     if suppression is None or not changes:
         return changes
-    from .post_processing import (
-        _build_suppression_overreach_change,
-        _build_suppression_unknown_reachability_change,
+    outcome = dispose_by_suppression(
+        changes,
+        suppression,
+        ledger=ledger,
+        application_point="filter_suppressed_changes",
     )
-
-    visible: list[Change] = []
-    diagnostics: list[Change] = []
-    for c in changes:
-        outcome = suppression.evaluate(c)
-        if outcome.suppressed:
-            c.suppression_rule = outcome.rule_label()
-            record_suppressed_change(
-                ledger,
-                c,
-                rule=outcome.matched_rule,
-                application_point="filter_suppressed_changes",
-                suppression=suppression,
-            )
-            suppressed.append(c)
-            continue
-        visible.append(c)
-        if outcome.withheld_rule is not None:
-            diagnostics.append(
-                _build_suppression_overreach_change(c, outcome.withheld_rule)
-            )
-        if outcome.withheld_unknown_rule is not None:
-            diagnostics.append(
-                _build_suppression_unknown_reachability_change(
-                    c, outcome.withheld_unknown_rule
-                )
-            )
-    visible.extend(diagnostics)
-    return visible
+    suppressed.extend(outcome.suppressed)
+    return outcome.visible
 
 
 def _apply_surface_metrics(
@@ -390,44 +356,19 @@ def _filter_pattern_synthetic(
     after ``post_processing.DEFAULT_PIPELINE`` runs, so nothing else would
     ever emit that diagnostic for them.
     """
-    from .post_processing import (
-        _build_suppression_overreach_change,
-        _build_suppression_unknown_reachability_change,
+    outcome = dispose_by_suppression(
+        kept[pre_pattern_count:],
+        suppression,
+        ledger=ledger,
+        application_point="filter_pattern_synthetic",
     )
-
-    retained = kept[:pre_pattern_count]
-    diagnostics: list[Change] = []
-    suppressed_synthetic: set[tuple[str, str | None]] = set()
-    for c in kept[pre_pattern_count:]:
-        outcome = suppression.evaluate(c)
-        if outcome.suppressed:
-            c.suppression_rule = outcome.rule_label()
-            record_suppressed_change(
-                ledger,
-                c,
-                rule=outcome.matched_rule,
-                application_point="filter_pattern_synthetic",
-                suppression=suppression,
-            )
-            suppressed.append(c)
-            # Drop this synthetic finding's disclosure row too, so a
-            # fully-suppressed handle/opaque/anti-pattern transition does
-            # not linger in the pattern_modulations ledger while it is
-            # absent from `changes` and the verdict (ADR-027 review).
-            suppressed_synthetic.add((c.symbol, c.modulation_rule))
-            continue
-        retained.append(c)
-        if outcome.withheld_rule is not None:
-            diagnostics.append(
-                _build_suppression_overreach_change(c, outcome.withheld_rule)
-            )
-        if outcome.withheld_unknown_rule is not None:
-            diagnostics.append(
-                _build_suppression_unknown_reachability_change(
-                    c, outcome.withheld_unknown_rule
-                )
-            )
-    retained.extend(diagnostics)
+    suppressed.extend(outcome.suppressed)
+    retained = [*kept[:pre_pattern_count], *outcome.visible]
+    # Drop each suppressed synthetic finding's disclosure row too, so a
+    # fully-suppressed handle/opaque/anti-pattern transition does not linger
+    # in the pattern_modulations ledger while it is absent from `changes` and
+    # the verdict (ADR-027 review).
+    suppressed_synthetic = {(c.symbol, c.modulation_rule) for c in outcome.suppressed}
     if suppressed_synthetic:
         pattern_modulations = [
             m

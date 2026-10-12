@@ -26,8 +26,9 @@ from __future__ import annotations
 from collections.abc import Iterable, Sequence
 from typing import TYPE_CHECKING, Protocol
 
-from .policy.disposition_ledger import Disposition, record_suppressed_change
+from .policy.disposition_ledger import Disposition
 from .policy.export_existence_fold import FoldExportHygieneIntoExistence
+from .policy.finding_disposition.suppression import dispose_by_suppression
 
 # Split out when this module reached the 2000-line hard cap (see each new
 # module's own docstring). `PipelineContext` is re-exported rather than
@@ -43,7 +44,7 @@ if TYPE_CHECKING:
     from .model import AbiSnapshot
     from .model.change import Change
     from .policy.disposition_ledger import DispositionLedger
-    from .suppression import Suppression, SuppressionList
+    from .suppression import SuppressionList
 
 
 class PipelineStep(Protocol):
@@ -623,122 +624,14 @@ class ApplySuppression:
     def run(self, changes: list[Change], ctx: PipelineContext) -> list[Change]:
         if ctx.suppression is None:
             return changes
-        filtered: list[Change] = []
-        diagnostics: list[Change] = []
-        for c in changes:
-            outcome = ctx.suppression.evaluate(c)
-            if outcome.suppressed:
-                c.suppression_rule = outcome.rule_label()
-                record_suppressed_change(
-                    ctx.disposition_ledger,
-                    c,
-                    rule=outcome.matched_rule,
-                    application_point=self.name,
-                    suppression=ctx.suppression,
-                )
-                ctx.suppressed.append(c)
-                continue
-            filtered.append(c)
-            if outcome.withheld_rule is not None:
-                diagnostics.append(
-                    _build_suppression_overreach_change(c, outcome.withheld_rule)
-                )
-            if outcome.withheld_unknown_rule is not None:
-                diagnostics.append(
-                    _build_suppression_unknown_reachability_change(
-                        c, outcome.withheld_unknown_rule
-                    )
-                )
-        filtered.extend(diagnostics)
-        return filtered
-
-
-def _build_suppression_overreach_change(change: Change, rule: Suppression) -> Change:
-    """Build the ``SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK`` diagnostic for *change*.
-
-    ADR-044 D4. *rule* is the suppression whose selectors matched *change* but
-    whose reachability/``allow_public_break`` gate withheld the match.
-    """
-    from .model.change import Change
-    from .model.change_catalog.kinds import ChangeKind
-
-    # would_withhold() only ever returns True for a *broad* rule (namespace/
-    # entity_namespace/cause_namespace/source_location, no primary narrow
-    # selector — see Suppression._is_broad_selector): a rule with symbol/
-    # symbol_pattern/type_pattern set has _is_broad_selector=False, so
-    # _passes_public_break_gate short-circuits True and would_withhold can
-    # never fire for it. The selector fallback below only needs the three
-    # broad-shaped fields; entity_namespace is the canonical spelling of
-    # namespace (self-review finding: it was missing here even though the
-    # equivalent SuppressionAudit string-building was already fixed).
-    selector = (
-        rule.namespace
-        or rule.entity_namespace
-        or rule.cause_namespace
-        or rule.source_location
-        or "?"
-    )
-    proof = (
-        f" via {change.reachability_proof_path}"
-        if change.reachability_proof_path
-        else ""
-    )
-    return Change(
-        kind=ChangeKind.SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK,
-        symbol=change.symbol,
-        description=(
-            f"Suppression rule {selector!r} matched {change.symbol!r} "
-            f"({change.kind.value}) but was not applied: the symbol is "
-            f"public-reachable{proof}. Add `allow_public_break: true` to this "
-            "rule to suppress it anyway."
-        ),
-        caused_by_type=change.symbol,
-    )
-
-
-def _build_suppression_unknown_reachability_change(
-    change: Change, rule: Suppression
-) -> Change:
-    """Build the ``SUPPRESSION_REACHABILITY_UNKNOWN`` diagnostic for *change*.
-
-    impact-analysis-layer P0 slice. *rule* is the suppression whose selectors
-    matched *change*, whose resolved ``reachability`` is
-    ``"proven-unreachable-only"``, but whose graph coverage could not prove
-    *change* unreachable (``Change.reachability_state`` is ``UNKNOWN``).
-    """
-    from .model.change import Change
-    from .model.change_catalog.kinds import ChangeKind
-
-    selector = (
-        rule.symbol
-        or rule.symbol_pattern
-        or rule.type_pattern
-        or rule.namespace
-        or rule.entity_namespace
-        or rule.cause_namespace
-        # Canonical (backend-independent) identity selector (Codex review,
-        # fresh evidence, PR #753): mirrors the identical fix in
-        # cli_compare_fold.py's _suppression_rule_label -- a finding_id-only
-        # rule with no other selector previously rendered as the bare
-        # fallback "?" here, indistinguishable from every other unlabeled
-        # rule's diagnostic.
-        or rule.finding_id
-        or rule.source_location
-        or "?"
-    )
-    return Change(
-        kind=ChangeKind.SUPPRESSION_REACHABILITY_UNKNOWN,
-        symbol=change.symbol,
-        description=(
-            f"Suppression rule {selector!r} matched {change.symbol!r} "
-            f"({change.kind.value}) but was not applied: graph coverage was "
-            "insufficient to prove the change unreachable from the public ABI "
-            "surface (reachability: proven-unreachable-only). Add "
-            "`allow_unknown_reachability: true` to this rule to suppress it "
-            "anyway once you have manually confirmed it is safe."
-        ),
-        caused_by_type=change.symbol,
-    )
+        outcome = dispose_by_suppression(
+            changes,
+            ctx.suppression,
+            ledger=ctx.disposition_ledger,
+            application_point=self.name,
+        )
+        ctx.suppressed.extend(outcome.suppressed)
+        return outcome.visible
 
 
 #: The answer for a step that does not declare one: most steps that drop a
@@ -878,32 +771,15 @@ def _merge_findings_respecting_suppression(
     hidden, had it been reachable earlier, is silently kept with no
     explanation of why the matching rule didn't apply.
     """
+    outcome = dispose_by_suppression(
+        new_findings,
+        ctx.suppression,
+        ledger=ctx.disposition_ledger,
+        application_point="merge_late_findings",
+    )
+    ctx.suppressed.extend(outcome.suppressed)
     seen_keys = {(c.kind, c.symbol) for c in changes}
-    diagnostics: list[Change] = []
-    for c in new_findings:
-        if ctx.suppression is not None:
-            outcome = ctx.suppression.evaluate(c)
-            if outcome.suppressed:
-                c.suppression_rule = outcome.rule_label()
-                record_suppressed_change(
-                    ctx.disposition_ledger,
-                    c,
-                    rule=outcome.matched_rule,
-                    application_point="merge_late_findings",
-                    suppression=ctx.suppression,
-                )
-                ctx.suppressed.append(c)
-                continue
-            if outcome.withheld_rule is not None:
-                diagnostics.append(
-                    _build_suppression_overreach_change(c, outcome.withheld_rule)
-                )
-            if outcome.withheld_unknown_rule is not None:
-                diagnostics.append(
-                    _build_suppression_unknown_reachability_change(
-                        c, outcome.withheld_unknown_rule
-                    )
-                )
+    for c in outcome.kept:
         key = (c.kind, c.symbol)
         if key in seen_keys:
             # ADR-067 D1: a late finding a *second* detector produced for an
@@ -921,7 +797,7 @@ def _merge_findings_respecting_suppression(
             continue
         changes.append(c)
         seen_keys.add(key)
-    changes.extend(diagnostics)
+    changes.extend(outcome.diagnostics)
 
 
 class SuppressRenamedPairs:

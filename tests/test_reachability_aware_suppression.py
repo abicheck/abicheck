@@ -1735,58 +1735,11 @@ class TestCheckerLevelSuppressionDiagnostic:
     surface roll-ups) build/receive Change objects directly — outside
     DEFAULT_PIPELINE entirely — so they had the same is_suppressed()-only gap
     the post_processing.py late-detector fixes (TestLateDetectorSyntheticFindings
-    above) already closed for findings built inside the pipeline. Both now
-    route through SuppressionList.evaluate() too."""
-
-    def test_filter_suppressed_changes_emits_withheld_diagnostic(self) -> None:
-        from abicheck.checker import _filter_suppressed_changes
-
-        c = Change(
-            kind=ChangeKind.FUNC_REMOVED,
-            symbol="oneapi::dal::kmeans::detail::train_ops_dispatcher",
-            description="removed",
-            public_reachable=True,
-        )
-        suppression = SuppressionList(
-            [Suppression(namespace="oneapi::dal::**::detail::**", reason="broad rule")]
-        )
-        suppressed: list[Change] = []
-        visible = _filter_suppressed_changes([c], suppression, suppressed)
-        assert c in visible
-        assert c not in suppressed
-        diag = [
-            v
-            for v in visible
-            if v.kind == ChangeKind.SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK
-        ]
-        assert len(diag) == 1
-        assert "train_ops_dispatcher" in diag[0].symbol
-
-    def test_filter_suppressed_changes_still_suppresses_narrow_rule(self) -> None:
-        """Unchanged behavior for the common case: a narrow symbol: waiver
-        still suppresses outright, with no diagnostic."""
-        from abicheck.checker import _filter_suppressed_changes
-
-        c = Change(
-            kind=ChangeKind.FUNC_REMOVED,
-            symbol="lib::internal_helper",
-            description="removed",
-        )
-        suppression = SuppressionList(
-            [Suppression(symbol="lib::internal_helper", reason="exact waiver")]
-        )
-        suppressed: list[Change] = []
-        visible = _filter_suppressed_changes([c], suppression, suppressed)
-        assert visible == []
-        assert suppressed == [c]
-
-    def test_filter_suppressed_changes_noop_without_suppression(self) -> None:
-        from abicheck.checker import _filter_suppressed_changes
-
-        c = Change(kind=ChangeKind.FUNC_REMOVED, symbol="foo", description="removed")
-        suppressed: list[Change] = []
-        assert _filter_suppressed_changes([c], None, suppressed) == [c]
-        assert suppressed == []
+    above) already closed for findings built inside the pipeline. Every site
+    now routes through `policy.finding_disposition.dispose_by_suppression`,
+    whose partition/diagnostic contract is pinned in
+    `test_finding_disposition_suppression.py`; this class keeps the wiring
+    test for the surface-metrics site."""
 
     def test_apply_surface_metrics_emits_withheld_diagnostic(self, monkeypatch) -> None:
         """Wiring test: _apply_surface_metrics now filters
