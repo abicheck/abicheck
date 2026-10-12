@@ -89,9 +89,9 @@ def _render_output(
     """Render comparison result in the requested output format.
 
     No ``stat``/``show_recommendation`` parameters: the one-line summary is
-    reached only via ``fmt == service_render.ONELINE_FORMAT``
+    reached only via ``fmt == frontends.render.ONELINE_FORMAT``
     (``-o oneline=...``), and the summary-only JSON via
-    ``service.to_stat_json``.
+    ``reporter.to_stat_json``.
 
     ``show_recommendation=True`` is still passed explicitly below even though
     :func:`~abicheck.frontends.render.render_output`'s own default is now ``True`` as well. It is
@@ -203,7 +203,7 @@ def _render_compare_report(
     they share this one function rather than keeping two copies that can drift.
 
     No ``stat``/``recommend`` parameters (CLI cleanup phase two, PR 1): see
-    ``_render_output``/``service_render.render_output`` for where the
+    ``_render_output``/``frontends.render.render_output`` for where the
     one-line format and the unconditional recommendation now live.
 
     ADR-061 Phase 2 item 5: this used to be a four-fold pipeline -- the
