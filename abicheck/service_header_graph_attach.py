@@ -154,11 +154,16 @@ def _attach_header_graph(
 
     cc = compile if compile is not None else CompileContext()
     _is_c = (lang or "").lower() == "c"
-    acquired = (
-        prefetched.result()
-        if prefetched is not None
-        else acquire_header_graph_ast(headers, includes, lang, compile)
-    )
+    # The primary pass decided C/C++ with the binary's mangled exports too; a
+    # prefetch had only header text, so a C++ header without a marker ran as C.
+    primary_mode = (snap.ast_toolchain or {}).get("resolved_lang_mode")
+    acquired = prefetched.result() if prefetched is not None else None
+    if acquired is None or (
+        not lang and primary_mode == "c++" and acquired.resolved_force_cpp is not True
+    ):
+        acquired = acquire_header_graph_ast(
+            headers, includes, lang, compile, resolved_lang_mode=primary_mode
+        )
     projection = acquired.projection
     ast_failure = acquired.ast_failure
     resolved_headers = acquired.resolved_headers
@@ -294,6 +299,9 @@ class HeaderGraphAst:
     resolved_headers: list[Path]
     eff_includes: list[Path]
     eff_tokens: tuple[str, ...]
+    #: Whether the whole-tree parse ran -- or, when it failed, was attempted
+    #: -- as C++. ``None`` when no parse ran at all.
+    resolved_force_cpp: bool | None = None
 
 
 def acquire_header_graph_ast(
@@ -301,6 +309,7 @@ def acquire_header_graph_ast(
     includes: list[Path],
     lang: str | None,
     compile: CompileContext | None,
+    resolved_lang_mode: str | None = None,
 ) -> HeaderGraphAst:
     """The header graph's own clang parse, projected; independent of the snapshot.
 
@@ -324,6 +333,7 @@ def acquire_header_graph_ast(
     )
     from .extract.headers.clang.backend import clang_header_dump
     from .extract.headers.clang.streaming import suppress_streaming_prune
+    from .extract.headers.toolchain import _resolve_force_cpp
     from .extract.unparseable_header_fallback import attribute_failing_headers
     from .storage.derived_ast import DerivedAstArtifact, derived_ast_scope
 
@@ -395,6 +405,7 @@ def acquire_header_graph_ast(
     # the main pass wrote (CodeRabbit review, Codex review).
     _is_c = (lang or "").lower() == "c"
     ast_root: dict[str, Any] | None = None
+    resolved_force_cpp: bool | None = None
     resolved_headers: list[Path] = []
     eff_includes: list[Path] = list(includes)
     eff_tokens: tuple[str, ...] = cc.gcc_option_tokens
@@ -520,7 +531,7 @@ def acquire_header_graph_ast(
             memory_trace.phase("dump.header_graph.clang_ast"),
             derived_ast_scope(_projection_for) as derived_projection,
         ):
-            ast_root, _resolved_kind, _resolved_force_cpp = clang_header_dump(
+            ast_root, _resolved_kind, resolved_force_cpp = clang_header_dump(
                 resolved_headers,
                 eff_includes,
                 compiler="cc" if _is_c else "c++",
@@ -533,6 +544,7 @@ def acquire_header_graph_ast(
                 lang=lang,
                 extra_hash_dirs=deferred_dirs,
                 frontend_context=cc.frontend_context,
+                resolved_lang_mode=resolved_lang_mode,
                 # This is the *final* consumer of this AST -- writing it into
                 # the in-process memo here would have no further same-process
                 # reader to hand off to (Codex review). A memo entry the
@@ -541,6 +553,11 @@ def acquire_header_graph_ast(
                 memoize=False,
             )
     except (SnapshotError, ValidationError) as exc:
+        # The mode it attempted (`clang_header_dump`'s own decision), so the
+        # attach re-parses only a parse that tried C.
+        resolved_force_cpp = (
+            not lang and resolved_lang_mode == "c++"
+        ) or _resolve_force_cpp(lang, resolved_headers, cc.gcc_options, eff_tokens)
         # Not silent: the graph below falls back to declaration-only, and
         # the call-graph pass is recorded as *attempted and failed* so the
         # comparison's `graph_completeness` reads "degraded" rather than a
@@ -580,6 +597,7 @@ def acquire_header_graph_ast(
                         lang=lang,
                         extra_hash_dirs=deferred_dirs,
                         frontend_context=cc.frontend_context,
+                        resolved_lang_mode=resolved_lang_mode,
                         memoize=False,
                     )
                 return project_header_graph_ast(tree)
@@ -691,7 +709,12 @@ def acquire_header_graph_ast(
     ast_root = None
     memory_trace.mark("dump.header_graph.ast_released")
     return HeaderGraphAst(
-        projection, ast_failure, resolved_headers, eff_includes, eff_tokens
+        projection,
+        ast_failure,
+        resolved_headers,
+        eff_includes,
+        eff_tokens,
+        resolved_force_cpp,
     )
 
 

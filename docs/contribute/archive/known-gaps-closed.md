@@ -16,6 +16,12 @@ re-verification status line (2026-10-09, `456989f`). Do not re-open an
 entry from here without reproducing it on current `main`; record a new
 gap on the main page instead.
 
+### The header-graph parse picks C mode for C++ headers without a recognised C++ construct (closed 2026-10-12)
+
+**Status (2026-10-12): CLOSED.** With no explicit `--lang`, the header graph's own clang parse now follows the language mode the primary pass resolved from header text and the binary's mangled exports (`ast_toolchain["resolved_lang_mode"]` -> `clang_header_dump(resolved_lang_mode=...)`); a prefetched parse that ran or failed as C under a C++ decision is re-parsed once. `tests/test_header_graph_language_mode.py` covers four C++ headers with no textual C++ marker and two C controls, under both frontends.
+
+[Full write-up](../known-gaps/header-graph-parse-picks-c-mode-for-cxx-headers.md)
+
 ### The default L2 header projection drops template/override/callback facts (closed 2026-10-12)
 
 **Status (2026-10-12): CLOSED.** `buildsource/semantic_fact_folds.py` is the one owner that parses, merges and folds the override, template and callback families for both the L5 pass and the default L2 header pass; the header projection (whole-tree, streamed, cached) carries them from the same parse and stamps `header_*` passes, and a graph that never ran a family is a coverage gap in `diff_source_graph`, not a removal. Headers-only == L5 parity is asserted on four C++ fixtures (`tests/test_header_graph_semantic_facts.py`).

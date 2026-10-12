@@ -141,11 +141,6 @@ void subscribe(std::function<void(int)> f) { f(1); }
 """,
 )
 
-# The callback and std::function headers are wrapped in a namespace: the
-# header-graph parse picks C or C++ mode from header text alone
-# (`extract.headers.ast_config._detect_cpp_headers`), and neither a
-# non-const reference nor `std::` counts as C++ there, so without one the
-# parse fails in C mode and the graph is (honestly) degraded.
 FIXTURES = {
     "templates": TEMPLATES,
     "overrides": OVERRIDES,
