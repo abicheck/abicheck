@@ -38,7 +38,6 @@ from abicheck.buildsource.cross_source_checks import (
     CHECK_PUBLIC_TO_INTERNAL_DEPENDENCY,
     CHECK_RTTI_FOR_INTERNAL_TYPE,
     CHECK_SOURCE_SURFACE_DSO_MISMATCH,
-    CHECK_UNVERSIONED_EXPORTED_SYMBOL,
     CROSSCHECK_VERSION,
     PROVIDER_BINARY_EXPORTS,
     PROVIDER_BUILD_CONFIG,
@@ -1988,95 +1987,8 @@ def test_public_to_internal_dependency_soft_advisory_on_structural_only_graph():
     assert _findings_of(res, ChangeKind.PUBLIC_TO_INTERNAL_DEPENDENCY) == []
 
 
+# unversioned_exported_symbol: tests/test_unversioned_exported_symbol.py
 # --------------------------------------------------------------------------- #
-# unversioned_exported_symbol (ADR-035 D8 audit)
-# --------------------------------------------------------------------------- #
-
-
-def _velf(symbols, versions_defined=()) -> ElfMetadata:
-    return ElfMetadata(
-        symbols=[
-            ElfSymbol(name=n, version=v, visibility=vis) for (n, v, vis) in symbols
-        ],
-        versions_defined=list(versions_defined),
-    )
-
-
-def test_unversioned_exported_symbol_flags_unversioned_under_scheme():
-    snap = _snap(
-        elf=_velf(
-            [("_Z3apiv", "FOO_1.0", "default"), ("_Z6legacyv", "", "default")],
-            versions_defined=["FOO_1.0"],
-        )
-    )
-    res = run_crosschecks(snap)
-    hits = _findings_of(res, ChangeKind.UNVERSIONED_EXPORTED_SYMBOL)
-    assert [c.symbol for c in hits] == ["_Z6legacyv"]
-    assert ChangeKind.UNVERSIONED_EXPORTED_SYMBOL not in _api_break_kinds()
-    assert res.providers[CHECK_UNVERSIONED_EXPORTED_SYMBOL] == [PROVIDER_BINARY_EXPORTS]
-
-
-def test_unversioned_exported_symbol_silent_without_scheme():
-    snap = _snap(elf=_velf([("_Z3apiv", "", "default")], versions_defined=[]))
-    res = run_crosschecks(snap)
-    assert _findings_of(res, ChangeKind.UNVERSIONED_EXPORTED_SYMBOL) == []
-    assert _coverage(res, CHECK_UNVERSIONED_EXPORTED_SYMBOL)["status"] == "present"
-
-
-def test_unversioned_exported_symbol_silent_under_unattached_private_marker_only():
-    """An unattached ``*PRIVATE*``-only version node is linker bookkeeping, not
-    a real versioning scheme (``diff_versioning._is_unattached_private_version_node``'s
-    own definition, reused here) -- an unversioned export must not be flagged
-    purely because such a marker exists. Regression for the false positive
-    ``checker.compare()``'s automatic cross-source stage surfaced against
-    ``tests/test_sprint2_elf.py::test_marker_only_private_version_script_removed_emits_no_warning``'s
-    exact fixture shape once the check started running on an ordinary compare.
-    """
-    snap = _snap(
-        elf=_velf([("_Z3apiv", "", "default")], versions_defined=["LIBFOO_PRIVATE"])
-    )
-    res = run_crosschecks(snap)
-    assert _findings_of(res, ChangeKind.UNVERSIONED_EXPORTED_SYMBOL) == []
-    assert _coverage(res, CHECK_UNVERSIONED_EXPORTED_SYMBOL)["status"] == "present"
-
-
-def test_unversioned_exported_symbol_still_flags_alongside_unattached_private_marker():
-    """The unattached-marker exemption is scoped to the marker node itself --
-    a real, attached scheme flags an unversioned export exactly as before even
-    when an unattached private marker also happens to be present."""
-    snap = _snap(
-        elf=_velf(
-            [
-                ("_Z3apiv", "FOO_1.0", "default"),
-                ("_Z6legacyv", "", "default"),
-            ],
-            versions_defined=["FOO_1.0", "LIBFOO_PRIVATE"],
-        )
-    )
-    res = run_crosschecks(snap)
-    hits = _findings_of(res, ChangeKind.UNVERSIONED_EXPORTED_SYMBOL)
-    assert [c.symbol for c in hits] == ["_Z6legacyv"]
-
-
-def test_unversioned_exported_symbol_skips_hidden_and_structors():
-    snap = _snap(
-        elf=_velf(
-            [
-                ("_Z3apiv", "FOO_1.0", "default"),
-                ("_Z6hiddenv", "", "hidden"),  # not exported-visible
-                ("_ZN6WidgetC1Ev", "", "default"),  # ctor artifact
-            ],
-            versions_defined=["FOO_1.0"],
-        )
-    )
-    res = run_crosschecks(snap)
-    assert _findings_of(res, ChangeKind.UNVERSIONED_EXPORTED_SYMBOL) == []
-
-
-def test_unversioned_exported_symbol_skipped_on_non_elf():
-    snap = _snap(elf=None)
-    res = run_crosschecks(snap)
-    assert _coverage(res, CHECK_UNVERSIONED_EXPORTED_SYMBOL)["status"] == "skipped"
 
 
 # --------------------------------------------------------------------------- #
