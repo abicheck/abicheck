@@ -61,10 +61,6 @@ from .workflows import memory_trace
 _log = logging.getLogger(__name__)
 
 
-class _MemoizedParseFailure(SnapshotError):
-    """A whole-tree header-graph parse already known (memoized) to fail."""
-
-
 # G29 Phase A: the L2 header-only semantic graph (ADR-041 addendum) and its
 # include-file extension used to be strictly opt-in via ``--header-graph``/
 # ``--header-graph-includes``. They are now always attempted whenever headers
@@ -315,6 +311,7 @@ def acquire_header_graph_ast(
     from .buildsource.header_graph_ast_projection import (
         HEADER_GRAPH_BISECTION_MEMO,
         HeaderGraphAstProjection,
+        MemoizedParseFailure,
         header_graph_memo_key,
         merge_header_graph_ast_projections,
         parse_header_groups_bisecting,
@@ -504,12 +501,8 @@ def acquire_header_graph_ast(
             memo_key = header_graph_memo_key(
                 resolved_headers, eff_includes, eff_tokens, deferred_dirs, lang, cc
             )
-            memo_scope.enter_context(HEADER_GRAPH_BISECTION_MEMO.slot(memo_key))
-            memo_hit = HEADER_GRAPH_BISECTION_MEMO.get(memo_key)
-            if memo_hit is not None:
-                # A sibling library already learned this whole-tree parse
-                # fails; skip straight to the recovery below with its answer.
-                raise _MemoizedParseFailure(memo_hit[1])
+            # A sibling's known failure skips straight to the recovery below.
+            HEADER_GRAPH_BISECTION_MEMO.enter(memo_scope, memo_key)
         # ADR-050 D5 (Codex review): this internal semantic header graph
         # (G29 Phase A) must be built from the SAME frontend_context as the
         # primary snapshot it's attached to -- a device-context dump's
@@ -570,7 +563,8 @@ def acquire_header_graph_ast(
         ast_failure = (
             str(exc).strip().splitlines()[0] if str(exc).strip() else type(exc).__name__
         )
-        if isinstance(exc, _MemoizedParseFailure):
+        if isinstance(exc, MemoizedParseFailure):
+            memo_hit = exc.hit
             memory_trace.mark("dump.header_graph.clang_ast:memo_hit")
         memory_trace.mark("dump.header_graph.clang_ast:failed")
         if len(resolved_headers) < 2:

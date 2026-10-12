@@ -82,11 +82,12 @@ from __future__ import annotations
 
 import threading
 from collections.abc import Callable, Hashable, Iterator, Sequence
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypeVar
 
+from ..errors import SnapshotError
 from ..model import ScopeOrigin
 from ..model.graph_facts import (
     CONF_HIGH,
@@ -452,6 +453,15 @@ def seed_ast_graph(
     _mark_role_coverage(graph.extractor_passes, HEADER_TYPE_GRAPH_PASS)
 
 
+class MemoizedParseFailure(SnapshotError):
+    """A whole-tree header-graph parse already known (memoized) to fail;
+    ``hit`` is the memoized ``(failed_headers, failure_line)``."""
+
+    def __init__(self, hit: tuple[tuple[Path, ...], str]) -> None:
+        super().__init__(hit[1])
+        self.hit = hit
+
+
 class HeaderGraphBisectionMemo:
     """Process-wide memo of which headers a header-graph clang parse loses.
 
@@ -485,6 +495,15 @@ class HeaderGraphBisectionMemo:
     def get(self, key: Hashable) -> tuple[tuple[Path, ...], str] | None:
         with self._lock:
             return self._outcomes.get(key)
+
+    def enter(self, scope: ExitStack, key: Hashable) -> None:
+        """Hold *key*'s slot for the rest of *scope*; raise
+        :class:`MemoizedParseFailure` when a sibling already learned this
+        whole-tree parse fails."""
+        scope.enter_context(self.slot(key))
+        hit = self.get(key)
+        if hit is not None:
+            raise MemoizedParseFailure(hit)
 
     def put(self, key: Hashable, failed: Sequence[Path], failure: str) -> None:
         with self._lock:
