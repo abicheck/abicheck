@@ -53,13 +53,9 @@ except ImportError:  # pragma: no cover - rich-click is a declared dependency
 # import for two value types.
 from ...checker_types import DiffResult
 from ...cli_audit import echo_filtered_surface, echo_reconciled
-from ...cli_helpers_compare import (  # noqa: F401  — re-exported to keep cli import sites stable
-    _canonical_library_key as _canonical_library_key,
-    _collect_force_public_symbols as _collect_force_public_symbols,
-    _merge_redundant_changes as _merge_redundant_changes,
-    _provenance_timestamp as _provenance_timestamp,
-    _version_sort_key as _version_sort_key,
-    _warn_ignored_flags as _warn_ignored_flags,
+from ...cli_helpers_compare import (
+    _merge_redundant_changes,
+    _provenance_timestamp,
 )
 from ...cli_resolve import (
     _detect_binary_format,

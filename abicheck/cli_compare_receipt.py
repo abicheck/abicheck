@@ -31,7 +31,7 @@ about after the fact.
 
 **Values and provenance come from different places for the gate, on purpose.**
 The scheme and the four severity levels are resolved by
-``cli_helpers_compare.resolve_compare_config`` *before* this runs, and that
+``workflows.compare_configuration.resolve_compare_config`` *before* this runs, and that
 resolution is what the run's verdict and exit code were computed from -- so
 those are the values a receipt must report, and they are written through
 :func:`~abicheck.contract_context.with_resolved_gate` unchanged. The

@@ -27,7 +27,6 @@ import dataclasses
 
 from hypothesis import given, strategies as st
 
-from abicheck.cli_helpers_compare import resolve_compare_config
 from abicheck.pack_application import PackApplication, apply_to_compare_config
 from abicheck.policy.gate_pack_fold import (
     GATE_SEVERITY_CATEGORIES,
@@ -35,6 +34,7 @@ from abicheck.policy.gate_pack_fold import (
 )
 from abicheck.policy.release_gate_options import apply_release_gate_pack
 from abicheck.policy.severity import SeverityLevel
+from abicheck.workflows.compare_configuration import resolve_compare_config
 
 _PRESETS = (None, "default", "strict", "info-only")
 

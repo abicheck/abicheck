@@ -31,15 +31,38 @@ directory's ``compare`` (Codex review, P1).
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import click
 
-if TYPE_CHECKING:
-    from ...cli_helpers_compare import ResolvedCompareConfig
+from ...workflows.compare_configuration import CompareSettingsError
 
-__all__ = ["enter_performance_profile", "resolve_project_compare_config"]
+if TYPE_CHECKING:
+    from ...workflows.compare_configuration import ResolvedCompareConfig
+
+__all__ = [
+    "compare_settings_usage_errors",
+    "enter_performance_profile",
+    "resolve_project_compare_config",
+]
+
+
+@contextmanager
+def compare_settings_usage_errors() -> Iterator[None]:
+    """Report a :class:`CompareSettingsError` as a Click usage error (exit 64).
+
+    The compare-settings resolution lives in
+    :mod:`abicheck.workflows.compare_configuration`, which may not import
+    ``click``; this is the CLI's one translation of its error, with the
+    message unchanged.
+    """
+    try:
+        yield
+    except CompareSettingsError as exc:
+        raise click.UsageError(str(exc)) from exc
 
 
 def resolve_project_compare_config(
@@ -73,23 +96,14 @@ def resolve_project_compare_config(
     built-in ``True``) decides header-origin scoping for a run with no
     ``--contract``. ``--contract all`` replaces the opt-out flag.
     """
-    from ...cli_helpers_compare import resolve_compare_config
     from ...config_paths import resolve_project_config
-    from ...workflows.extraction import load_build_config_with_digest
+    from ...workflows.compare_configuration import load_and_resolve_compare_config
 
     cfg_path = resolve_project_config(config, search_from=Path.cwd()).path
-    cfg_sha: str | None = None
-    try:
-        project_cfg = None
-        if cfg_path is not None:
-            project_cfg, cfg_sha = load_build_config_with_digest(cfg_path)
-    except ValueError as exc:
-        raise click.UsageError(str(exc)) from exc
-
-    resolved_cfg = resolve_compare_config(
-        project_cfg,
-        cli_severity_preset=severity_preset,
-    )
+    with compare_settings_usage_errors():
+        project_cfg, resolved_cfg, cfg_sha = load_and_resolve_compare_config(
+            cfg_path, severity_preset=severity_preset
+        )
     return cfg_path, project_cfg, resolved_cfg, cfg_sha
 
 

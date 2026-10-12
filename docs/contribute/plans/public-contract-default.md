@@ -947,7 +947,7 @@ provenance-receipt entry per resolved field.
   stated choice.** An explicit `--exit-code-scheme auto` contributes a
   candidate carrying the answer to "is a severity setting in effect?", so it
   outranks a lower layer's concrete scheme exactly as any other explicit
-  value would — matching `cli_helpers_compare.resolve_compare_config`, where
+  value would — matching `workflows.compare_configuration.resolve_compare_config`, where
   the CLI value wins whatever it is. (A first cut treated `auto` as "not
   stated" at every layer, which let a project config's concrete scheme beat
   an explicitly typed `--exit-code-scheme auto`; caught in review.) A
