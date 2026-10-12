@@ -238,14 +238,23 @@ closures above, plus the negative) and `tests/test_closure_respelling.py`
 (property tests on the helper, and filter cases including a missing export
 fact) pin this. The insertion tests fail on the pre-fix tree, pass after.
 
-What remains open: `make_guard`, `arena_fn<int>::make` and the synthetic
-ctor keys have no exported symbol, so nothing in the binary proves their
-spelling change harmless, and the filter fails closed on them. They still
-produce the four gating `func_return_changed` findings in the insertion case.
-Deciding whether a closure-only respelling of an unexported declaration is
-source-level only, rather than an ABI break, is a policy decision, not a
-detector fix. A raw hand-built `AbiSnapshot` with no export facts also still
-churns, because the same fail-closed rule applies.
+Residuals after this fix, each with its disposition:
+
+- **Unexported/inline declarations** (`make_guard`, `arena_fn<int>::make`,
+  synthetic ctor keys) keep their gating `func_return_changed`/`func_added`
+  findings: the filter fails closed on them. Downgrading a closure-only
+  respelling of an unexported declaration to source-level changes the
+  verdict and exit code, so it is proposed in ADR-079 (D1), not implemented
+  here. Status: waiting on that decision.
+- **`exported_not_public` on statically linked libstdc++ symbols**
+  (`std::once_flag::_Prepare_execution`) appears on identical sources, so it
+  is not churn from a lambda. Suppressing an identical-both-sides observation
+  narrows ADR-068 §D3, proposed in ADR-079 (D2). Status: waiting on that
+  decision.
+- **A raw hand-built `AbiSnapshot` with no export facts** still churns. No
+  public entry point (`dump`, `load_snapshot`, `run_compare`, `dumper.dump`)
+  produces such a snapshot, and every caller that does is fail-closed. Not
+  changed: recorded as out of scope rather than an open defect.
 
 (2) *A constructor key rendering a literal `?` parameter.* Traced to two
 legitimate "type not recoverable" sentinels rather than to a formatting
