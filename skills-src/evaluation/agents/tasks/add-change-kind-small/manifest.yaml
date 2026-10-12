@@ -18,13 +18,14 @@ description: >-
   Add detection for a class/struct/union gaining or losing the C++17
   [[nodiscard]] attribute, and follow CLAUDE.md's "Adding a new ChangeKind"
   procedure end to end.
-base_commit: 83972cb8f761a8a6efd8c9f030a427e120e74e01
+base_commit: f5a40556945dcdfa1d7c5edd6939fbd2307b1cff
 
 prompt: |
   abicheck does not currently detect a class/struct/union gaining or losing
   the C++17 `[[nodiscard]]` attribute (verify: `RecordType` in
-  `abicheck/model.py` has no `nodiscard` field, and grepping the codebase for
-  "nodiscard" turns up nothing — compare this to `RecordType.deprecated`,
+  `abicheck/model.py` has no `nodiscard` field, and grepping `abicheck/` for
+  "nodiscard" finds only a comment in `abicheck/buildsource/pattern_scan.py` —
+  compare this to `RecordType.deprecated`,
   which already detects the analogous `[[deprecated]]` case).
 
   Add this detection, following the "Adding a new ChangeKind" procedure in
