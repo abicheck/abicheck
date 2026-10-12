@@ -17,15 +17,17 @@ from __future__ import annotations
 
 import dataclasses
 import inspect
+from pathlib import Path
 
 import pytest
 from _family_f2_routes import CORPUS
 
-from abicheck import checker
+from abicheck import checker, service_compare_pipeline
 from abicheck.service_compare_pipeline import run_compare
 from abicheck.workflows.compare_policy import compare_snapshots
 from abicheck.workflows.contracts import CompareRequest
 from abicheck.workflows.history import HistoryEntry, build_longitudinal_history
+from abicheck.workflows.request_inputs import InputSpec
 
 #: ``scope_mismatch`` is a refused comparison (comparability gate), not a verdict.
 _COMPARABLE = sorted(c for c in CORPUS if c != "scope_mismatch")
@@ -53,13 +55,33 @@ def test_history_pair_matches_the_chokepoint(case: str) -> None:
     assert pair.change_count == len(expected.changes)
 
 
-@pytest.mark.parametrize("name", ["pattern_verdicts", "contract_evaluation"])
-def test_chokepoint_and_run_compare_default_like_compare_request(name: str) -> None:
-    # S1 pin: `run_compare` and the chokepoint repeat `CompareRequest`'s
-    # defaults as literals; this test is what keeps those literals honest.
-    expected = _request_default(name)
-    assert inspect.signature(run_compare).parameters[name].default == expected
-    assert inspect.signature(compare_snapshots).parameters[name].default == expected
+def test_run_compare_builds_the_default_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Behavior-level pin: with no options given, the request `run_compare`
+    # builds equals a bare `CompareRequest`. Catches a shim default that drifts
+    # from its field, and a mapping slip (e.g. `scope_to_public_surface` onto
+    # `scope_public`) that a signature comparison would not see.
+    captured: list[CompareRequest] = []
+
+    def _capture(request: CompareRequest) -> object:
+        captured.append(request)
+        return None
+
+    monkeypatch.setattr(service_compare_pipeline, "run_compare_request", _capture)
+    old, new = Path("old.so"), Path("new.so")
+    run_compare(old, new)
+    assert captured == [
+        CompareRequest(old=InputSpec(path=old), new=InputSpec(path=new))
+    ]
+
+
+def test_chokepoint_defaults_like_compare_request() -> None:
+    # The chokepoint still restates these two defaults as literals; this keeps
+    # them equal to the request's until it derives them the same way.
+    for name in ("pattern_verdicts", "contract_evaluation"):
+        expected = _request_default(name)
+        assert inspect.signature(compare_snapshots).parameters[name].default == expected
 
 
 def test_core_compare_keeps_its_raw_defaults() -> None:
