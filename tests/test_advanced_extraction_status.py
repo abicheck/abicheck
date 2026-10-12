@@ -27,6 +27,7 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -89,7 +90,9 @@ def test_predicate_follows_the_recorded_status(
     assert advanced_facts_collected(meta) is expected
 
 
+# parse_dwarf reads ELF only; gcc on macOS emits Mach-O, which reads as FAILED.
 @pytest.mark.integration
+@pytest.mark.skipif(sys.platform != "linux", reason="needs an ELF-emitting gcc")
 def test_real_parse_records_completed_and_presence_records_not_run(tmp_path: Path):
     if shutil.which("gcc") is None:
         pytest.skip("needs gcc to build a real shared library")
@@ -112,6 +115,7 @@ def test_real_parse_records_completed_and_presence_records_not_run(tmp_path: Pat
 
 
 @pytest.mark.integration
+@pytest.mark.skipif(sys.platform != "linux", reason="needs an ELF-emitting gcc")
 def test_binary_without_dwarf_records_completed_not_failed(tmp_path: Path):
     if shutil.which("gcc") is None:
         pytest.skip("needs gcc to build a real shared library")
