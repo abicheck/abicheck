@@ -619,3 +619,25 @@ def closure_discriminator_free_identity(identity: str) -> str:
         for index, part in enumerate(parts)
     ]
     return closure_location_free_identity("".join(stripped))
+
+
+#: The ordinal of each closure marker in *identity*, in left-to-right order,
+#: outside ``"..."`` literals. Used to check that a respelling is a uniform
+#: renumbering of the header's closures, not a reordering.
+_CLOSURE_ORDINAL_CAPTURE_RE = re.compile(
+    r"\b(?:lambda|unnamed\s+\w+|anonymous\s+\w+):[^():\"]*#(\d+)\b"
+)
+
+
+def closure_ordinals(identity: str) -> tuple[int, ...]:
+    """The per-header ordinal of every closure/anonymous-tag marker in
+    *identity* carrying one, in order of appearance, quoted literals
+    excluded. A coordinate-spelled marker carries no ordinal and contributes
+    nothing, so this is only meaningful on dump-renumbered spellings."""
+    parts = re.split(r'("[^"]*")', identity)
+    return tuple(
+        int(match.group(1))
+        for index, part in enumerate(parts)
+        if index % 2 == 0
+        for match in _CLOSURE_ORDINAL_CAPTURE_RE.finditer(part)
+    )

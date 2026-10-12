@@ -646,6 +646,13 @@ adrs:
     surfaces: []
     missing: Proposed, not yet implemented; no exposure-mode or sensitivity surface exists.
 
+  - id: ADR-079
+    file: 079-closure-respelling-and-persistent-export-observations.md
+    disposition: gap
+    use_cases: []
+    surfaces: []
+    missing: Proposed, not yet implemented; D1 and D2 would change verdicts, exit codes and the cross-source report surface, pending acceptance.
+
   - id: ADR-078
     file: 078-informational-severity-category.md
     disposition: surfaced

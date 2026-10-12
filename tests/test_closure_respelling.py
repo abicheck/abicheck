@@ -28,13 +28,17 @@ import pytest
 from abicheck.checker_policy import ChangeKind
 from abicheck.compare.closure_respelling import (
     RESPELLING_KINDS,
+    closure_ordinal_map_is_uniform,
     drop_closure_respellings,
     is_closure_respelling,
 )
 from abicheck.model.change import Change
 from abicheck.model.declarations import Function
 from abicheck.model.fact import Fact
-from abicheck.model.graph_identity import closure_discriminator_free_identity as ident
+from abicheck.model.graph_identity import (
+    closure_discriminator_free_identity as ident,
+    closure_ordinals,
+)
 from abicheck.model.snapshot import AbiSnapshot
 
 _KEY = "_Z8run_task10raii_guardIZN8tbb_like8arena_fnIiE4makeEvEUlvE_E"
@@ -208,3 +212,61 @@ class TestRespellingFilter:
             [c], _snapshot(_KEY), _snapshot(_KEY, exported=False)
         )
         assert out == [c]
+
+
+class TestOrdinalMapIsUniform:
+    """Oracle: the order-preserving rule written out per case, not the
+    implementation's own map."""
+
+    @staticmethod
+    def _c(old: str, new: str) -> Change:
+        return _change(ChangeKind.FUNC_PARAMS_CHANGED, old, new)
+
+    @pytest.mark.parametrize("shift", [1, 2, 7])
+    def test_a_uniform_shift_is_accepted(self, shift: int) -> None:
+        cands = [
+            self._c("f<(lambda:h#1)>", f"f<(lambda:h#{1 + shift})>"),
+            self._c("g<(lambda:h#1)>", f"g<(lambda:h#{1 + shift})>"),
+        ]
+        assert closure_ordinal_map_is_uniform(cands)
+
+    def test_reordering_two_closures_across_functions_is_rejected(self) -> None:
+        cands = [
+            self._c("run_one<(lambda:h#1)>", "run_one<(lambda:h#2)>"),
+            self._c("run_two<(lambda:h#2)>", "run_two<(lambda:h#1)>"),
+        ]
+        assert not closure_ordinal_map_is_uniform(cands)
+
+    def test_swapping_two_closures_inside_one_signature_is_rejected(self) -> None:
+        cands = [
+            self._c("f<(lambda:h#1),(lambda:h#2)>", "f<(lambda:h#2),(lambda:h#1)>")
+        ]
+        assert not closure_ordinal_map_is_uniform(cands)
+
+    def test_one_closure_mapped_to_two_different_ordinals_is_rejected(self) -> None:
+        cands = [
+            self._c("f<(lambda:h#1)>", "f<(lambda:h#2)>"),
+            self._c("g<(lambda:h#1)>", "g<(lambda:h#3)>"),
+        ]
+        assert not closure_ordinal_map_is_uniform(cands)
+
+    def test_mismatched_marker_counts_are_rejected(self) -> None:
+        assert not closure_ordinal_map_is_uniform(
+            [self._c("f<(lambda:h#1)>", "f<(lambda:h#1),(lambda:h#2)>")]
+        )
+
+
+class TestClosureOrdinals:
+    @pytest.mark.parametrize(
+        ("spelling", "expected"),
+        [
+            ("f<(lambda:h#2),(lambda:h#1)>", (2, 1)),
+            ('Tag<"lambda:x.h#9">', ()),
+            ("plain<int>", ()),
+            ("f<(lambda:h:5:27)>", ()),
+        ],
+    )
+    def test_ordinals_in_order_outside_quoted_literals(
+        self, spelling: str, expected: tuple[int, ...]
+    ) -> None:
+        assert closure_ordinals(spelling) == expected

@@ -12,5 +12,5 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   from `#1` to `#2`. The linker symbol is unchanged, so such a finding is now dropped
   when the old and new spellings differ only in closure discriminators and the
   function is exported under the same real Itanium key on both sides. An export-table
-  change, a changed closure encoding inside the function, or an unexported symbol
-  still reports as before.
+  change, a changed closure encoding inside the function, an unexported symbol, or a
+  reordering of two closures (which maps the ordinals non-uniformly) still reports as before.

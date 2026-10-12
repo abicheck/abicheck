@@ -206,6 +206,11 @@ STRING_PROBES: tuple[Probe, ...] = (
         distinguishes_same_header_lambdas=False,
     ),
     Probe(
+        "abicheck.model.graph_identity:closure_discriminator_free_identity",
+        lambda s: gid_mod.closure_discriminator_free_identity(s),
+        distinguishes_same_header_lambdas=False,
+    ),
+    Probe(
         "abicheck.model.graph_entity_identity:signature_key",
         lambda s: gei_mod.signature_key(f"int ({s})"),
     ),

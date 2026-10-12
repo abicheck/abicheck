@@ -8,7 +8,7 @@ Which public surface reaches each ADR, which use cases it serves, and whether a 
 |---|---|
 | surfaced | 45 |
 | partial | 13 |
-| gap | 3 |
+| gap | 4 |
 | internal | 19 |
 
 ## ADRs
@@ -94,6 +94,7 @@ Which public surface reaches each ADR, which use cases it serves, and whether a 
 | [ADR-075](../adr/075-target-ownership-and-extraction-scope.md) | gap | — | — | Accepted, not yet implemented; no ownership/extraction-scope surface exists. |
 | [ADR-076](../adr/076-adr-use-case-surface-traceability.md) | internal | — | — | Repository traceability contract and gate; not a product surface. |
 | [ADR-077](../adr/077-exposure-modes-and-change-sensitive-propagation.md) | gap | — | — | Proposed, not yet implemented; no exposure-mode or sensitivity surface exists. |
+| [ADR-079](../adr/079-closure-respelling-and-persistent-export-observations.md) | gap | — | — | Proposed, not yet implemented; D1 and D2 would change verdicts, exit codes and the cross-source report surface, pending acceptance. |
 | [ADR-078](../adr/078-informational-severity-category.md) | surfaced | UC-WF-compare | `cli: compare --severity-preset`<br>`report: compare_report.summary`<br>`report: compare_report.severity` | — |
 
 ## Use cases by user task

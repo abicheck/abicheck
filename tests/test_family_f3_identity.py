@@ -540,6 +540,7 @@ COVERAGE: dict[str, str] = {
     "abicheck.name_classification:canonicalize_type_name": "string probe x path transforms",
     "abicheck.model.graph_identity:checkout_stable_spelling": "string probe x path transforms",
     "abicheck.model.graph_identity:closure_location_free_identity": "string probe x path transforms",
+    "abicheck.model.graph_identity:closure_discriminator_free_identity": "string probe x path transforms; tests/test_closure_respelling.py property tests",
     "abicheck.model.graph_entity_identity:signature_key": "string probe x path transforms; mutant M1",
     "abicheck.model.graph_entity_identity:type_identity": "string probe x path transforms",
     "abicheck.model.graph_entity_identity:unresolved_identity": "string probe x path transforms",

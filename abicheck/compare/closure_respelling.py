@@ -46,7 +46,10 @@ from collections.abc import Collection, Iterable
 from ..model.availability import FactStatus
 from ..model.change import Change
 from ..model.change_catalog.kinds import ChangeKind
-from ..model.graph_identity import closure_discriminator_free_identity
+from ..model.graph_identity import (
+    closure_discriminator_free_identity,
+    closure_ordinals,
+)
 from ..model.snapshot import AbiSnapshot
 from ..model.surface_facts import binary_exported
 
@@ -61,6 +64,10 @@ RESPELLING_KINDS: frozenset[ChangeKind] = frozenset(
     }
 )
 
+#: Cheap pre-test: a spelling without one of these markers cannot be a
+#: closure respelling, so the identity helper is never called for it.
+_MARKER_HINTS: tuple[str, ...] = ("lambda", "unnamed", "anonymous")
+
 
 def is_closure_respelling(
     change: Change,
@@ -74,13 +81,17 @@ def is_closure_respelling(
     symbol = change.symbol or ""
     if not symbol or symbol not in old_exported or symbol not in new_exported:
         return False
-    if change.old_value is None or change.new_value is None:
+    old, new = change.old_value, change.new_value
+    if old is None or new is None or old == new:
         return False
-    if change.old_value == change.new_value:
+    if not (
+        any(hint in old for hint in _MARKER_HINTS)
+        and any(hint in new for hint in _MARKER_HINTS)
+    ):
         return False
     return closure_discriminator_free_identity(
-        change.old_value
-    ) == closure_discriminator_free_identity(change.new_value)
+        old
+    ) == closure_discriminator_free_identity(new)
 
 
 def exported_function_keys(snapshot: AbiSnapshot) -> frozenset[str]:
@@ -89,13 +100,44 @@ def exported_function_keys(snapshot: AbiSnapshot) -> frozenset[str]:
     (``binary_exported_fact``, ``PRESENT(True)`` only). Anything else --
     absent, partial, or never collected -- is not evidence, so it is not
     listed: fail closed."""
-    return frozenset(
-        f.mangled
-        for f in snapshot.declarations.functions
-        if f.mangled
-        and binary_exported(f).status is FactStatus.PRESENT
-        and binary_exported(f).value is True
-    )
+    keys: set[str] = set()
+    for f in snapshot.declarations.functions:
+        if not f.mangled:
+            continue
+        fact = binary_exported(f)
+        if fact.status is FactStatus.PRESENT and fact.value is True:
+            keys.add(f.mangled)
+    return frozenset(keys)
+
+
+def closure_ordinal_map_is_uniform(candidates: Iterable[Change]) -> bool:
+    """Whether the closure ordinals the candidate findings spell form one
+    strictly increasing old-to-new map.
+
+    An unrelated closure inserted above shifts every ordinal by the same
+    amount: a uniform, order-preserving renumbering. Reordering two closures
+    maps ``1 -> 2`` in one function and ``2 -> 1`` in another, and each
+    finding looks like a shift on its own. So the map is built across all
+    candidates together. A map that is not a function, or not strictly
+    increasing, means the ordinals do not name the same closures on both
+    sides, and nothing is dropped (fail closed).
+
+    Only the candidates' own spellings are used. Other matched functions can
+    carry an ordinal that is not renumbered consistently with the rest of the
+    dump (an implicit copy constructor spells the guarded closure as ``#1`` on
+    both sides), so they are not evidence about the mapping.
+    """
+    mapping: dict[int, int] = {}
+    for change in candidates:
+        old_ords = closure_ordinals(change.old_value or "")
+        new_ords = closure_ordinals(change.new_value or "")
+        if len(old_ords) != len(new_ords):
+            return False
+        for a, b in zip(old_ords, new_ords, strict=True):
+            if mapping.setdefault(a, b) != b:
+                return False
+    pairs = sorted(mapping.items())
+    return all(pairs[i][1] > pairs[i - 1][1] for i in range(1, len(pairs)))
 
 
 def drop_closure_respellings(
@@ -105,13 +147,27 @@ def drop_closure_respellings(
 ) -> list[Change]:
     """Return *changes* without the closure-only re-spellings, in order.
 
-    Nothing is recorded: a finding that is dropped here is one the spelling
-    alone cannot distinguish from an unchanged declaration, not a fact the
-    user needs to see. The exported-key condition is what makes that safe,
-    and it is what the tests pin.
+    A candidate must pass :func:`is_closure_respelling`, and the candidates
+    together must map their closure ordinals uniformly
+    (:func:`closure_ordinal_map_is_uniform`).
+    If the uniform check fails, nothing is dropped. Nothing is recorded: a
+    dropped finding is one the spelling alone cannot tell from an unchanged
+    declaration, not a fact the user needs to see.
     """
+    change_list = list(changes)
+    if not any(
+        c.kind in RESPELLING_KINDS
+        and c.old_value is not None
+        and any(hint in c.old_value for hint in _MARKER_HINTS)
+        for c in change_list
+    ):
+        return change_list
     old_exported = exported_function_keys(old)
     new_exported = exported_function_keys(new)
-    return [
-        c for c in changes if not is_closure_respelling(c, old_exported, new_exported)
+    candidates = [
+        c for c in change_list if is_closure_respelling(c, old_exported, new_exported)
     ]
+    if not candidates or not closure_ordinal_map_is_uniform(candidates):
+        return change_list
+    dropped = {id(c) for c in candidates}
+    return [c for c in change_list if id(c) not in dropped]
