@@ -18,12 +18,15 @@ import pytest
 
 from abicheck.checker import DiffResult
 from abicheck.checker_policy import Verdict
+from abicheck.checker_types import Change
+from abicheck.model.change_catalog.kinds import ChangeKind
 from abicheck.policy.effective_gate import EffectiveGate
 from abicheck.policy.exit_decision import ExitReason
 from abicheck.policy.exit_decision_precedence import (
     resolve_compare_exit_decision_with_abort_axes,
     resolve_release_exit_decision,
 )
+from abicheck.policy.severity import SeverityConfig
 
 # Compatibility-axis exit per verdict under the legacy scheme, as documented in
 # docs/reference/exit-codes.md (not read back from severity.py).
@@ -82,6 +85,7 @@ _RELEASE_VERDICT_CONTRIBUTIONS = (0, 1, 2, 4)
 _RELEASE_OPERATIONAL = (0, 4)
 _RELEASE_COVERAGE = (0, 1)
 _RELEASE_EVIDENCE = (0, 7)
+_RELEASE_FLOOR = (0, 1)
 
 
 def _release_expected(
@@ -93,6 +97,10 @@ def _release_expected(
     operational: int,
     coverage: int,
     evidence: int,
+    assurance: int = 0,
+    incomplete: int = 0,
+    no_comparison: int = 0,
+    additions: int = 0,
 ) -> tuple[int, frozenset[ExitReason]]:
     """Literal precedence for the release path (see the resolver's docstring).
 
@@ -119,6 +127,10 @@ def _release_expected(
         ExitReason.COMPATIBILITY_GATE: verdict_or_severity,
         ExitReason.CONTRACT_COVERAGE: coverage,
         ExitReason.OPERATIONAL_ERROR: operational,
+        ExitReason.ANALYSIS_ASSURANCE: assurance,
+        ExitReason.INCOMPLETE_SCOPE: incomplete,
+        ExitReason.NO_COMPARISON_COMPLETED: no_comparison,
+        ExitReason.ADDITIONS_REVIEW: additions,
     }
     code = max(axes.values())
     if code == 0:
@@ -138,6 +150,10 @@ class TestReleaseExitMatrix:
             "operational",
             "coverage",
             "evidence",
+            "assurance",
+            "incomplete",
+            "no_comparison",
+            "additions",
         ),
         list(
             itertools.product(
@@ -148,6 +164,10 @@ class TestReleaseExitMatrix:
                 _RELEASE_OPERATIONAL,
                 _RELEASE_COVERAGE,
                 _RELEASE_EVIDENCE,
+                _RELEASE_FLOOR,
+                _RELEASE_FLOOR,
+                _RELEASE_FLOOR,
+                _RELEASE_FLOOR,
             )
         ),
     )
@@ -160,6 +180,10 @@ class TestReleaseExitMatrix:
         operational: int,
         coverage: int,
         evidence: int,
+        assurance: int,
+        incomplete: int,
+        no_comparison: int,
+        additions: int,
     ) -> None:
         expected_code, expected_reasons = _release_expected(
             not_comparable=not_comparable,
@@ -169,6 +193,10 @@ class TestReleaseExitMatrix:
             operational=operational,
             coverage=coverage,
             evidence=evidence,
+            assurance=assurance,
+            incomplete=incomplete,
+            no_comparison=no_comparison,
+            additions=additions,
         )
         decision = resolve_release_exit_decision(
             not_comparable=not_comparable,
@@ -178,9 +206,30 @@ class TestReleaseExitMatrix:
             contract_coverage_contribution=coverage,
             operational_error_contribution=operational,
             evidence_contract_error_contribution=evidence,
+            analysis_assurance_contribution=assurance,
+            incomplete_scope_contribution=incomplete,
+            no_comparison_completed_contribution=no_comparison,
+            additions_review_contribution=additions,
         )
         assert decision.code == expected_code
         assert frozenset(decision.reasons) == expected_reasons
+        # The ADR-064 invariant: the code is the largest contribution it reports.
+        assert (
+            decision.code
+            == max(
+                decision.compatibility_contribution,
+                decision.contract_coverage_contribution,
+                decision.analysis_assurance_contribution,
+                decision.operational_error_contribution,
+                decision.evidence_contract_error_contribution,
+                decision.not_comparable_contribution,
+                decision.removed_required_library_contribution,
+                decision.incomplete_scope_contribution,
+                decision.no_comparison_completed_contribution,
+                decision.additions_review_contribution,
+            )
+            or decision.code == 0
+        )
 
 
 class TestSharedAxesAgreeAtOneMember:
@@ -236,3 +285,48 @@ class TestEvidenceOwnerKeepsOrdinaryContributions:
         assert decision.code == 7
         assert decision.reasons == (ExitReason.EVIDENCE_CONTRACT_ERROR,)
         assert decision.compatibility_contribution == 4
+
+
+class TestScalarCompareUnderSeverityScheme:
+    """Characterization: the scalar path under the default severity map.
+
+    The severity code comes from the change list, not the verdict, so these
+    cases carry real `Change`s. The expected values were read off the current
+    code and are pinned as-is; they are not derived from the severity table.
+    """
+
+    @staticmethod
+    def _severity_result(kind: str, *, evidence: bool = False) -> DiffResult:
+        return DiffResult(
+            old_version="1.0",
+            new_version="2.0",
+            library="libtest.so",
+            changes=[Change(kind=ChangeKind[kind], symbol="f", description="x")],
+            verdict=Verdict.BREAKING,
+            evidence_contract_error=evidence,
+        )
+
+    @pytest.mark.parametrize(
+        ("kind", "code", "reason"),
+        [
+            ("FUNC_REMOVED", 4, ExitReason.COMPATIBILITY_GATE),
+            ("FUNC_ADDED", 0, ExitReason.CLEAN),
+        ],
+    )
+    def test_severity_code_follows_the_change_list(
+        self, kind: str, code: int, reason: ExitReason
+    ) -> None:
+        decision = resolve_compare_exit_decision_with_abort_axes(
+            self._severity_result(kind),
+            EffectiveGate.from_severity(SeverityConfig()),
+        )
+        assert decision.code == code
+        assert decision.reasons == (reason,)
+
+    def test_evidence_dominates_a_severity_break(self) -> None:
+        decision = resolve_compare_exit_decision_with_abort_axes(
+            self._severity_result("FUNC_REMOVED", evidence=True),
+            EffectiveGate.from_severity(SeverityConfig()),
+        )
+        assert decision.code == 7
+        assert decision.reasons == (ExitReason.EVIDENCE_CONTRACT_ERROR,)
