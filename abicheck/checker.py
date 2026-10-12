@@ -35,6 +35,9 @@ from .checker_types import DiffResult
 from .comparability import check_contracts_comparable, comparability_outcome
 from .compare.debug_layout_view import debug_layout_view as _debug_layout_view
 from .compare.edge_query import edge_coverage_report
+from .compare.finding_redundancy import (
+    ROOT_TYPE_CHANGE_KINDS as _ROOT_TYPE_CHANGE_KINDS,
+)
 from .compare.surface_reconcile import releases_reconciliation
 from .confidence import _compute_confidence
 from .contract_pipeline import (
@@ -45,19 +48,6 @@ from .contract_pipeline import (
 from .detector_registry import registry as _detector_registry
 from .diff_elf_layout import (  # noqa: F401 — triggers detector registration
     _diff_elf_layout,
-)
-from .diff_filtering import (  # noqa: F401
-    _ROOT_TYPE_CHANGE_KINDS,
-    _deduplicate_ast_dwarf,
-    _deduplicate_cross_detector,
-    _downgrade_opaque_struct_changes,
-    _downgrade_opaque_type_changes,
-    _enrich_affected_symbols,
-    _enrich_source_locations,
-    _filter_opaque_size_changes,
-    _filter_redundant,
-    _filter_reserved_field_renames,
-    _match_root_type,
 )
 from .diff_kabi import (  # noqa: F401 — triggers detector registration
     _diff_kabi,

@@ -19,10 +19,7 @@ import pytest
 from abicheck.checker import _ROOT_TYPE_CHANGE_KINDS, Change, DiffResult, compare
 from abicheck.checker_policy import ChangeKind, Verdict
 from abicheck.confidence import _compute_confidence
-from abicheck.diff_filtering import (
-    _enrich_affected_symbols,
-    _enrich_source_locations,
-)
+from abicheck.diff_filtering import _enrich_affected_symbols, _enrich_source_locations
 from abicheck.dwarf_advanced import AdvancedDwarfMetadata
 from abicheck.dwarf_metadata import DwarfMetadata
 from abicheck.model import (
@@ -303,7 +300,7 @@ class TestAffectedSymbolsComputation:
 
 
 class TestRedundantChangeFiltering:
-    """Exercise _filter_redundant (lines 2005-2087)."""
+    """Exercise split_redundant."""
 
     def test_type_change_cascades_to_function_param_redundancy(self):
         """A struct size change causes func_params_changed to be redundant."""
@@ -367,9 +364,9 @@ class TestRedundantChangeFiltering:
             new_value="MyStruct",
         )
         # Use compare internals by constructing changes and filtering
-        from abicheck.checker import _filter_redundant
+        from abicheck.compare.finding_redundancy import split_redundant
 
-        kept, redundant = _filter_redundant([root_change, derived_change])
+        kept, redundant = split_redundant([root_change, derived_change])
         assert len(redundant) == 1
         assert redundant[0].kind == ChangeKind.FUNC_PARAMS_CHANGED
         assert redundant[0].caused_by_type == "MyStruct"
@@ -378,13 +375,13 @@ class TestRedundantChangeFiltering:
 
     def test_no_root_types_means_no_redundancy(self):
         """No root type changes -> all changes kept, no redundancy."""
-        from abicheck.checker import _filter_redundant
+        from abicheck.compare.finding_redundancy import split_redundant
 
         changes = [
             Change(kind=ChangeKind.FUNC_REMOVED, symbol="foo", description="removed"),
             Change(kind=ChangeKind.FUNC_ADDED, symbol="bar", description="added"),
         ]
-        kept, redundant = _filter_redundant(changes)
+        kept, redundant = split_redundant(changes)
         assert len(kept) == 2
         assert len(redundant) == 0
 

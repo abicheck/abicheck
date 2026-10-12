@@ -23,11 +23,11 @@ Two independent pieces make this work, tested separately (primitive level,
 per CLAUDE.md's "Primitive-level property tests" guidance) and together
 (through ``compare()``):
 
-* ``diff_filtering._enum_canonical_names``/``_canonicalize_enum_symbol``
+* ``finding_dedup.enum_canonical_names``/``canonicalize_enum_symbol``
   bridge the bare-vs-qualified spelling mismatch so
   ``finding_identity.resolve_change_identity`` resolves the same identity
   for both tiers' findings.
-* ``diff_filtering._deduplicate_cross_detector``'s own ``_DEDUP_CATEGORIES``
+* ``finding_dedup.deduplicate_cross_detector``'s own ``_DEDUP_CATEGORIES``
   gate must actually include the four enum kinds -- reaching a matching
   identity is not enough if the dedup step never even attempts to resolve
   one for these kinds at all, which was the deeper, previously-missing
@@ -38,12 +38,12 @@ from __future__ import annotations
 
 from abicheck.checker import compare
 from abicheck.checker_policy import ChangeKind
-from abicheck.diff_filtering import (
-    _canonicalize_enum_symbol,
-    _deduplicate_cross_detector,
-    _enrich_source_locations,
-    _enum_canonical_names,
+from abicheck.compare.finding_dedup import (
+    canonicalize_enum_symbol,
+    deduplicate_cross_detector,
+    enum_canonical_names,
 )
+from abicheck.diff_filtering import _enrich_source_locations
 from abicheck.dwarf_metadata import DwarfMetadata, EnumInfo
 from abicheck.finding_identity import resolve_change_identity
 from abicheck.model import AbiSnapshot, EnumMember, EnumType
@@ -90,7 +90,7 @@ def _snap(
 class TestEnumCanonicalNames:
     def test_bare_and_qualified_both_map_to_the_qualified_form(self) -> None:
         snap = _snap("1", [("SUM", 0)])
-        names = _enum_canonical_names(snap)
+        names = enum_canonical_names(snap)
         assert names["reduction"] == "ccl::v1::reduction"
         assert names["ccl::v1::reduction"] == "ccl::v1::reduction"
 
@@ -106,11 +106,11 @@ class TestEnumCanonicalNames:
             version="1",
             enums=[EnumType(name="Color", members=[EnumMember(name="RED", value=0)])],
         )
-        names = _enum_canonical_names(snap)
+        names = enum_canonical_names(snap)
         assert "Color" not in names
 
     def test_none_snapshot_is_empty(self) -> None:
-        assert _enum_canonical_names(None) == {}
+        assert enum_canonical_names(None) == {}
 
     def test_ambiguous_bare_name_across_two_enums_is_not_registered(self) -> None:
         """Codex review, fresh evidence: ``a::Color`` and ``b::Color`` share
@@ -128,7 +128,7 @@ class TestEnumCanonicalNames:
                 _enum_type("Color", "b::Color", [("BLUE", 1)]),
             ],
         )
-        names = _enum_canonical_names(snap)
+        names = enum_canonical_names(snap)
         assert "Color" not in names
         assert names["a::Color"] == "a::Color"
         assert names["b::Color"] == "b::Color"
@@ -147,7 +147,7 @@ class TestEnumCanonicalNames:
                 _enum_type("Color", "ns::Color", [("BLUE", 1)]),
             ],
         )
-        names = _enum_canonical_names(snap)
+        names = enum_canonical_names(snap)
         assert "Color" not in names
         assert names["ns::Color"] == "ns::Color"
 
@@ -172,7 +172,7 @@ class TestEnumCanonicalNames:
                 },
             ),
         )
-        names = _enum_canonical_names(snap)
+        names = enum_canonical_names(snap)
         assert "Color" not in names
         assert names["ns::Color"] == "ns::Color"
 
@@ -192,34 +192,34 @@ class TestEnumCanonicalNames:
                 _enum_type("Color", "a::Color", [("RED", 0), ("BLUE", 1)]),
             ],
         )
-        names = _enum_canonical_names(snap)
+        names = enum_canonical_names(snap)
         assert names["Color"] == "a::Color"
 
 
 class TestCanonicalizeEnumSymbol:
     def test_bare_member_symbol_resolves_to_qualified(self) -> None:
-        names = _enum_canonical_names(_snap("1", [("SUM", 0)]))
+        names = enum_canonical_names(_snap("1", [("SUM", 0)]))
         assert (
-            _canonicalize_enum_symbol("reduction::SUM", names)
+            canonicalize_enum_symbol("reduction::SUM", names)
             == "ccl::v1::reduction::SUM"
         )
 
     def test_qualified_member_symbol_resolves_to_itself(self) -> None:
-        names = _enum_canonical_names(_snap("1", [("SUM", 0)]))
+        names = enum_canonical_names(_snap("1", [("SUM", 0)]))
         assert (
-            _canonicalize_enum_symbol("ccl::v1::reduction::SUM", names)
+            canonicalize_enum_symbol("ccl::v1::reduction::SUM", names)
             == "ccl::v1::reduction::SUM"
         )
 
     def test_bare_enum_level_symbol_resolves_too(self) -> None:
         """ENUM_UNDERLYING_SIZE_CHANGED/ENUM_BECAME_SCOPED use the bare enum
         name itself as ``symbol``, with no ``::member`` suffix at all."""
-        names = _enum_canonical_names(_snap("1", [("SUM", 0)]))
-        assert _canonicalize_enum_symbol("reduction", names) == "ccl::v1::reduction"
+        names = enum_canonical_names(_snap("1", [("SUM", 0)]))
+        assert canonicalize_enum_symbol("reduction", names) == "ccl::v1::reduction"
 
     def test_unrelated_symbol_resolves_to_none(self) -> None:
-        names = _enum_canonical_names(_snap("1", [("SUM", 0)]))
-        assert _canonicalize_enum_symbol("unrelated::Thing", names) is None
+        names = enum_canonical_names(_snap("1", [("SUM", 0)]))
+        assert canonicalize_enum_symbol("unrelated::Thing", names) is None
 
 
 # ── Primitive-level: resolve_change_identity agrees once bridged ─────────
@@ -268,7 +268,7 @@ class TestResolveChangeIdentityAgreesAcrossTiers:
         )
 
 
-# ── _deduplicate_cross_detector must actually attempt it ─────────────────
+# ── deduplicate_cross_detector must actually attempt it ─────────────────
 
 
 class TestDeduplicateCrossDetectorCollapsesEnumFindings:
@@ -287,7 +287,7 @@ class TestDeduplicateCrossDetectorCollapsesEnumFindings:
         )
         old = _snap("1", [("SUM", 0), ("PROD", 3)])
         new = _snap("2", [("SUM", 0)])
-        result = _deduplicate_cross_detector([bare, qualified], old, new)
+        result = deduplicate_cross_detector([bare, qualified], old, new)
         assert len(result) == 1
 
     def test_without_snapshots_degrades_to_no_dedup(self) -> None:
@@ -306,7 +306,7 @@ class TestDeduplicateCrossDetectorCollapsesEnumFindings:
             description="d",
             old_value="3",
         )
-        assert len(_deduplicate_cross_detector([bare, qualified])) == 2
+        assert len(deduplicate_cross_detector([bare, qualified])) == 2
 
 
 # ── End-to-end through compare() ──────────────────────────────────────────
@@ -388,7 +388,7 @@ class TestEndToEndOnlyOneFindingSurvives:
 
 class TestEnumQualificationDoesNotLeakIntoUnrelatedKinds:
     """Codex review, fresh evidence: the bare/qualified enum bridge, applied
-    at the top of ``_deduplicate_cross_detector``, was gated on
+    at the top of ``deduplicate_cross_detector``, was gated on
     ``c.kind in _DEDUP_CATEGORIES`` -- a much broader set covering
     function/variable/version dedup categories too, not just the four enum
     kinds. An unrelated finding whose bare `symbol` happened to coincide
@@ -408,7 +408,7 @@ class TestEnumQualificationDoesNotLeakIntoUnrelatedKinds:
             symbol="Color",
             description="removed",
         )
-        _deduplicate_cross_detector([change], snap, snap)
+        deduplicate_cross_detector([change], snap, snap)
         assert change.qualified_name is None
 
     def test_a_same_named_function_removal_is_not_qualified_by_enrichment_either(
@@ -416,7 +416,7 @@ class TestEnumQualificationDoesNotLeakIntoUnrelatedKinds:
     ) -> None:
         """The identical collision risk existed at a SECOND, independent
         call site: `_enrich_source_locations` (the later pipeline step)
-        called `_canonicalize_enum_symbol` unconditionally for any change
+        called `canonicalize_enum_symbol` unconditionally for any change
         still missing a `qualified_name`, not just the four enum kinds."""
         snap = AbiSnapshot(
             library="lib.so",

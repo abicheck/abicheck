@@ -561,9 +561,9 @@ class TestTypedefIndexPair:
         occurrence's own disambiguator when wrapping it in a fresh,
         collision-safe synthetic identity, so both bare-projected
         occurrences collapsed right back together in
-        ``diff_filtering._dedup_exact`` -- silently reporting only one of
+        ``finding_dedup._dedup_exact`` -- silently reporting only one of
         the two real removals."""
-        from abicheck.diff_filtering import _dedup_exact
+        from abicheck.compare.finding_dedup import _dedup_exact
 
         eid = entity_id_for_typedef((Namespace("ns"),), "Alias")
         # A genuinely pre-v25 side (non-empty bare `typedefs`, no
@@ -615,7 +615,7 @@ class TestTypedefIndexPair:
         `disambiguator=None` alike, colliding right back together in
         `_dedup_exact` -- the ordinal must be included unconditionally, not
         just when the source disambiguator happens to be real."""
-        from abicheck.diff_filtering import _dedup_exact
+        from abicheck.compare.finding_dedup import _dedup_exact
 
         a_eid = entity_id_for_typedef((Namespace("a"),), "Alias")
         b_eid = entity_id_for_typedef((Namespace("b"),), "Alias")

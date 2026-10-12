@@ -1063,7 +1063,7 @@ class TestFindingIdSuppressionSelector:
 class TestReportFindingIdDisambiguator:
     """Regression coverage for Codex review, PR #1078, eighteenth round:
     two ODR/multi-TU occurrence findings that now legitimately survive
-    `diff_filtering._dedup_exact` (distinguished only by `Change.
+    `finding_dedup._dedup_exact` (distinguished only by `Change.
     disambiguator`) would otherwise collide on the same `report_finding_id`
     too, since that function never looked at `disambiguator` at all.
     """

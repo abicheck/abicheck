@@ -994,7 +994,7 @@ def _is_batch_shaped_change(change: Change, kind_value: str) -> bool:
 #: distinct field-level fact, matching this module's ambiguity-safe bias.
 #:
 #: The three enum entries (self-mapped: same kind on both sides, not a
-#: kind pair) mirror ``diff_filtering._dedup_enum_same_kind``'s own
+#: kind pair) mirror ``finding_dedup._dedup_enum_same_kind``'s own
 #: ``(kind, symbol)`` dedup key exactly (Codex review): its AST detector
 #: (``diff_types.py``) uses the registry description template with no
 #: embedded values, while its DWARF detector (``diff_platform.py``) passes
@@ -1044,7 +1044,7 @@ _EQUIVALENT_CHANGE_CATEGORIES = {
     # dict key) both emit this same kind for the same enum's underlying-type
     # size change — self-mapped so its discriminator collapses across
     # producers the same way the three sibling enum-member kinds above
-    # already do; see diff_filtering._deduplicate_cross_detector's own
+    # already do; see finding_dedup.deduplicate_cross_detector's own
     # docstring for the qualified-name bridge this also depends on.
     "enum_underlying_size_changed": "enum_underlying_size_changed",
     # diff_symbols._detect_newly_deleted_functions emits FUNC_DELETED
@@ -1793,7 +1793,7 @@ def report_finding_id(c: object) -> str:
     "delimiter" finding). Conditional append costs nothing for a pre-
     existing finding while resolving the real, newly-reachable collision:
     two ODR-duplicate occurrences now legitimately both survive
-    ``diff_filtering._dedup_exact`` with otherwise-identical fields.
+    ``finding_dedup._dedup_exact`` with otherwise-identical fields.
 
     **Deliberately does NOT also fold in ``entity_id``** (tried and
     reverted, Codex review, PR #1078, twentieth round): unlike

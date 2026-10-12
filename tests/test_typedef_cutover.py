@@ -802,7 +802,7 @@ class TestWholeGroupRemovalSurvivesPostProcessingDedup:
     ``diff_typedefs`` emits one ``TYPEDEF_REMOVED`` per contributing entity
     when a whole colliding group vanishes (twelfth round), but the public
     ``checker.compare()`` pipeline's own post-processing used to run
-    ``diff_filtering._dedup_exact`` keyed only on ``(kind, description)`` --
+    ``finding_dedup._dedup_exact`` keyed only on ``(kind, description)`` --
     identical text for every entity in a colliding group by construction --
     silently collapsing these independently-provable removals back down to
     one before a caller ever saw them. This is checked at the seam between
@@ -812,7 +812,7 @@ class TestWholeGroupRemovalSurvivesPostProcessingDedup:
     """
 
     def test_two_colliding_removals_both_survive_dedup_exact(self) -> None:
-        from abicheck.diff_filtering import _dedup_exact
+        from abicheck.compare.finding_dedup import _dedup_exact
 
         first = entity_id_for_typedef((Anonymous("namespace", 0),), "Alias")
         second = entity_id_for_typedef((Anonymous("namespace", 1),), "Alias")
@@ -852,7 +852,7 @@ class TestOdrDuplicateRemovalsSurviveDedupExact:
     def test_two_odr_duplicate_removals_with_the_same_value_both_survive(
         self,
     ) -> None:
-        from abicheck.diff_filtering import _dedup_exact
+        from abicheck.compare.finding_dedup import _dedup_exact
 
         eid = entity_id_for_typedef((Namespace("ns"),), "Alias")
         old_index = SemanticIRIndex(
@@ -1067,7 +1067,7 @@ class TestPartialRemovalsPreserveMultiplicityAcrossDedup:
     class's own docstring for the full account."""
 
     def test_three_ambiguous_removals_all_survive_dedup_exact(self) -> None:
-        from abicheck.diff_filtering import _dedup_exact
+        from abicheck.compare.finding_dedup import _dedup_exact
 
         old_ids = [
             entity_id_for_typedef((Anonymous("namespace", i),), "Alias")

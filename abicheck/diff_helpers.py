@@ -512,7 +512,7 @@ def depth_aware_bare_name(qualified: str) -> str:
 
 def record_canonical_names(snap: AbiSnapshot | None) -> dict[str, str]:
     """Bare/qualified record-type name -> canonical (qualified-if-known)
-    spelling, mirroring ``diff_filtering._enum_canonical_names`` exactly
+    spelling, mirroring ``finding_dedup.enum_canonical_names`` exactly
     but for ``RecordType`` (struct/class/union) instead of ``EnumType``.
 
     Bridges two independent, individually-correct conventions this
@@ -528,8 +528,8 @@ def record_canonical_names(snap: AbiSnapshot | None) -> dict[str, str]:
     ``STRUCT_ALIGNMENT_CHANGED`` (DWARF, qualified) and
     ``TYPE_SIZE_CHANGED``/``TYPE_ALIGNMENT_CHANGED`` (header, bare) never
     resolve to the same identity, so neither
-    ``diff_filtering._dedup_cross_kind``'s exact-symbol match nor
-    ``_deduplicate_cross_detector``'s ``resolve_change_identity``-keyed
+    ``finding_dedup._dedup_cross_kind``'s exact-symbol match nor
+    ``finding_dedup.deduplicate_cross_detector``'s ``resolve_change_identity``-keyed
     dedup can recognize them as the same finding — exactly the class of
     duplicate the enum bridge above was built to close, left open for
     every other kind pair ``_DWARF_TO_AST_EQUIV`` maps (struct size/
@@ -538,7 +538,7 @@ def record_canonical_names(snap: AbiSnapshot | None) -> dict[str, str]:
 
     A bare name is registered only when it uniquely identifies one
     qualified type — the same disambiguation rule
-    ``_enum_canonical_names`` uses, for the identical reason: two distinct
+    ``finding_dedup.enum_canonical_names`` uses, for the identical reason: two distinct
     types sharing a bare name (e.g. ``a::Widget`` and ``b::Widget``) must
     never have one silently bridged to the other's qualified spelling. An
     unqualified (global-namespace) record sharing that bare name is itself
@@ -593,7 +593,7 @@ def canonicalize_record_symbol(
 
     Handles both a whole-type symbol (``"Widget"``) and a field-qualified
     one (``"Widget::x"``, for the three field-level kinds in
-    ``diff_filtering._DWARF_TO_AST_EQUIV``) — only the type-name portion
+    ``finding_dedup._DWARF_TO_AST_EQUIV``) — only the type-name portion
     is ever rewritten, never the field name itself.
 
     *field_name* (``Change.field_name``) is the ONLY signal used to decide

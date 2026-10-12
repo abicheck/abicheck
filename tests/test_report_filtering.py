@@ -14,13 +14,13 @@ from abicheck.checker import (
     ChangeKind,
     DiffResult,
     Verdict,
-    _filter_redundant,
-    _match_root_type,
 )
-from abicheck.diff_filtering import (
-    _filter_reserved_field_renames,
-    _root_type_name,
+from abicheck.compare.finding_redundancy import (
+    match_root_type,
+    root_type_name,
+    split_redundant,
 )
+from abicheck.diff_filtering import _filter_reserved_field_renames
 from abicheck.policy.evaluate import effective_kind_sets
 from abicheck.reporter import (
     ShowOnlyFilter,
@@ -55,7 +55,7 @@ def _make_result(
 
 
 # ---------------------------------------------------------------------------
-# _filter_redundant tests
+# split_redundant tests
 # ---------------------------------------------------------------------------
 
 
@@ -66,7 +66,7 @@ class TestFilterRedundant:
             Change(ChangeKind.FUNC_REMOVED, "foo", "removed"),
             Change(ChangeKind.FUNC_ADDED, "bar", "added"),
         ]
-        kept, redundant = _filter_redundant(changes)
+        kept, redundant = split_redundant(changes)
         assert len(kept) == 2
         assert len(redundant) == 0
 
@@ -86,7 +86,7 @@ class TestFilterRedundant:
                 new_value="Config (72 bytes)",
             ),
         ]
-        kept, redundant = _filter_redundant(changes)
+        kept, redundant = split_redundant(changes)
         assert len(kept) == 1
         assert kept[0].kind == ChangeKind.TYPE_SIZE_CHANGED
         assert len(redundant) == 1
@@ -110,7 +110,7 @@ class TestFilterRedundant:
                 new_value="Point (16 bytes)",
             ),
         ]
-        kept, redundant = _filter_redundant(changes)
+        kept, redundant = split_redundant(changes)
         root = kept[0]
         assert root.kind == ChangeKind.TYPE_SIZE_CHANGED
         assert root.caused_count == 2
@@ -124,7 +124,7 @@ class TestFilterRedundant:
                 ChangeKind.FUNC_REMOVED, "config_init", "removed", old_value="Config*"
             ),
         ]
-        kept, redundant = _filter_redundant(changes)
+        kept, redundant = split_redundant(changes)
         assert len(kept) == 2
         assert len(redundant) == 0
 
@@ -140,7 +140,7 @@ class TestFilterRedundant:
                 new_value="int, int",
             ),
         ]
-        kept, redundant = _filter_redundant(changes)
+        kept, redundant = split_redundant(changes)
         assert len(kept) == 2
         assert len(redundant) == 0
 
@@ -156,7 +156,7 @@ class TestFilterRedundant:
                 new_value="Point (16 bytes)",
             ),
         ]
-        kept, redundant = _filter_redundant(changes)
+        kept, redundant = split_redundant(changes)
         assert len(kept) == 1
         assert len(redundant) == 1
 
@@ -167,7 +167,7 @@ class TestFilterRedundant:
             Change(ChangeKind.SONAME_CHANGED, "libfoo.so", "SONAME changed"),
             Change(ChangeKind.NEEDED_ADDED, "libbar.so", "new dep added"),
         ]
-        kept, redundant = _filter_redundant(changes)
+        kept, redundant = split_redundant(changes)
         assert len(kept) == 3
         assert len(redundant) == 0
 
@@ -183,7 +183,7 @@ class TestFilterRedundant:
                 new_value="Status",
             ),
         ]
-        kept, redundant = _filter_redundant(changes)
+        kept, redundant = split_redundant(changes)
         assert len(kept) == 1
         assert len(redundant) == 1
 
@@ -198,7 +198,7 @@ class TestFilterRedundant:
                 old_value="Container (64)",
             ),
         ]
-        kept, redundant = _filter_redundant(changes)
+        kept, redundant = split_redundant(changes)
         # Container::flags root type name is "Container"
         assert len(kept) == 1
         assert len(redundant) == 1
@@ -208,7 +208,7 @@ class TestMatchRootType:
     def test_matches_in_old_value(self):
         c = Change(ChangeKind.FUNC_PARAMS_CHANGED, "foo", "desc", old_value="Config*")
         assert (
-            _match_root_type(
+            match_root_type(
                 c, {"Config": Change(ChangeKind.TYPE_SIZE_CHANGED, "Config", "")}
             )
             == "Config"
@@ -217,7 +217,7 @@ class TestMatchRootType:
     def test_matches_in_description(self):
         c = Change(ChangeKind.FUNC_RETURN_CHANGED, "bar", "return type changed: Config")
         assert (
-            _match_root_type(
+            match_root_type(
                 c, {"Config": Change(ChangeKind.TYPE_SIZE_CHANGED, "Config", "")}
             )
             == "Config"
@@ -231,7 +231,7 @@ class TestMatchRootType:
             old_value="int",
         )
         assert (
-            _match_root_type(
+            match_root_type(
                 c, {"Config": Change(ChangeKind.TYPE_SIZE_CHANGED, "Config", "")}
             )
             is None
@@ -249,13 +249,13 @@ class TestMatchRootType:
             for name in root_types
         }
         c = Change(ChangeKind.FUNC_PARAMS_CHANGED, "foo", "desc", old_value="Config*")
-        assert _match_root_type(c, root_types, compiled) == "Config"
+        assert match_root_type(c, root_types, compiled) == "Config"
 
     def test_without_compiled_patterns_fallback(self):
         """When compiled_patterns is None, function still works (fallback)."""
         c = Change(ChangeKind.FUNC_PARAMS_CHANGED, "foo", "desc", new_value="Config*")
         assert (
-            _match_root_type(
+            match_root_type(
                 c, {"Config": Change(ChangeKind.TYPE_SIZE_CHANGED, "Config", "")}, None
             )
             == "Config"
@@ -266,7 +266,7 @@ class TestMatchRootType:
         c = Change(ChangeKind.FUNC_RETURN_CHANGED, "bar", "return type changed: Config")
         # Empty dict — type_name not in compiled_patterns, should compile on the fly
         assert (
-            _match_root_type(
+            match_root_type(
                 c, {"Config": Change(ChangeKind.TYPE_SIZE_CHANGED, "Config", "")}, {}
             )
             == "Config"
@@ -982,33 +982,33 @@ class TestHtmlRedundancy:
 
 
 # ---------------------------------------------------------------------------
-# _root_type_name: namespace preservation (architecture review fix #1)
+# root_type_name: namespace preservation (architecture review fix #1)
 # ---------------------------------------------------------------------------
 
 
 class TestRootTypeNameNamespace:
-    """Verify _root_type_name uses rsplit (not split) to preserve namespaces."""
+    """Verify root_type_name uses rsplit (not split) to preserve namespaces."""
 
     def test_simple_field(self):
         c = Change(ChangeKind.TYPE_FIELD_REMOVED, "Container::flags", "removed")
-        assert _root_type_name(c) == "Container"
+        assert root_type_name(c) == "Container"
 
     def test_namespaced_field(self):
         """ns::Container::flags → ns::Container (not just 'ns')."""
         c = Change(ChangeKind.TYPE_FIELD_REMOVED, "ns::Container::flags", "removed")
-        assert _root_type_name(c) == "ns::Container"
+        assert root_type_name(c) == "ns::Container"
 
     def test_deeply_nested_namespace_field(self):
         c = Change(ChangeKind.STRUCT_FIELD_REMOVED, "a::b::Container::flags", "removed")
-        assert _root_type_name(c) == "a::b::Container"
+        assert root_type_name(c) == "a::b::Container"
 
     def test_non_field_kind_preserves_full_symbol(self):
         c = Change(ChangeKind.TYPE_SIZE_CHANGED, "ns::Container", "size changed")
-        assert _root_type_name(c) == "ns::Container"
+        assert root_type_name(c) == "ns::Container"
 
     def test_no_namespace(self):
         c = Change(ChangeKind.TYPE_SIZE_CHANGED, "Container", "size changed")
-        assert _root_type_name(c) == "Container"
+        assert root_type_name(c) == "Container"
 
 
 # ---------------------------------------------------------------------------

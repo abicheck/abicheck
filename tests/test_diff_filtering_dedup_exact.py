@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""`diff_filtering._dedup_exact`'s own key contract, stated directly rather
+"""`finding_dedup._dedup_exact`'s own key contract, stated directly rather
 than only through one caller (root `AGENTS.md`'s "Primitive-level property
 tests" guidance).
 
@@ -36,7 +36,7 @@ detector as a known, then-unaddressed concern.
 from __future__ import annotations
 
 from abicheck.checker_policy import ChangeKind
-from abicheck.diff_filtering import _dedup_exact
+from abicheck.compare.finding_dedup import _dedup_exact
 from abicheck.model.change import Change
 from abicheck.model.identity import Namespace, entity_id_for_typedef
 

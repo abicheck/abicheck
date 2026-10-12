@@ -145,9 +145,9 @@ class DeduplicateAstDwarf:
         if ctx.old is None:
             return changes
 
-        from .diff_filtering import _deduplicate_ast_dwarf
+        from .compare.finding_dedup import deduplicate_ast_dwarf
 
-        return _deduplicate_ast_dwarf(changes, ctx.old, ctx.new)
+        return deduplicate_ast_dwarf(changes, ctx.old, ctx.new)
 
 
 class DeduplicateCrossDetector:
@@ -156,12 +156,12 @@ class DeduplicateCrossDetector:
     name = "deduplicate_cross_detector"
 
     def run(self, changes: list[Change], ctx: PipelineContext) -> list[Change]:
-        from .diff_filtering import _deduplicate_cross_detector
+        from .compare.finding_dedup import deduplicate_cross_detector
 
         # Pass the snapshots so the enum bare/qualified-name bridge can run
         # here (before EnrichSourceLocations, which runs later in this
-        # pipeline) — see _deduplicate_cross_detector's own docstring.
-        return _deduplicate_cross_detector(changes, ctx.baseline_or_empty, ctx.new)
+        # pipeline) — see compare.finding_dedup.deduplicate_cross_detector's own docstring.
+        return deduplicate_cross_detector(changes, ctx.baseline_or_empty, ctx.new)
 
 
 class DowngradeOpaqueTypeChanges:
@@ -761,9 +761,9 @@ class FilterRedundant:
     establishes_kept_alias = True
 
     def run(self, changes: list[Change], ctx: PipelineContext) -> list[Change]:
-        from .diff_filtering import _filter_redundant
+        from .compare.finding_redundancy import split_redundant
 
-        kept, redundant = _filter_redundant(changes)
+        kept, redundant = split_redundant(changes)
         ctx.redundant.extend(redundant)
         # opaque_filtered are kept separate - they are compatible changes that should not affect verdict
         ctx.kept = kept
