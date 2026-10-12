@@ -264,8 +264,8 @@ class GateOptions:
         """This object, projected onto the plan's shared
         :class:`~abicheck.policy.effective_gate.EffectiveGate` shape
         (duplication-and-convergence-assessment P0) -- the same shape
-        ``cli_helpers_compare.ResolvedCompareConfig.effective_gate`` exposes
-        for single-pair ``compare``, so a caller holding either object can
+        ``workflows.gate.effective_gate_for_resolved_compare_config`` builds from a
+        ``ResolvedCompareConfig`` for single-pair ``compare``, so a caller holding either object can
         ask the identical question. The release fan-out resolves no
         ``--require-complete-analysis``/scoped-gate (``--used-by``/
         ``--required-symbol``) concept of its own at this object's scope --

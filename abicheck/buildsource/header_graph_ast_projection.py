@@ -38,7 +38,12 @@ compact projections of it:
   declared identity -> declaring file, consulted only to resolve the
   *source* side of a ``DECL_REFERENCES_DECL`` edge.
 
-Taking all four **before** the graph exists lets the caller drop its
+It also carries, from the same parse, the override, template and callback
+facts (``semantic_facts``, :mod:`~abicheck.buildsource.semantic_fact_folds`
+-- the owner the L5 pass folds those families through too), so a
+headers-only graph has the facts its AST holds rather than none of them.
+
+Taking all of it **before** the graph exists lets the caller drop its
 reference to the AST first, so the two never occupy memory at the same time
 and the graph's own long-lived objects land in arenas the AST parse has
 already released rather than pinning them.
@@ -98,6 +103,12 @@ from ..model.source_graph_coverage import (
 from .ast_special_members import collect_special_member_names
 from .call_graph import augment_graph_with_calls, parse_clang_ast_calls
 from .inline_graph_fold import _mark_role_coverage
+from .semantic_fact_folds import (
+    SemanticFacts,
+    fold_header_semantic_facts,
+    merge_semantic_facts,
+    parse_semantic_facts,
+)
 from .type_graph import (
     ast_derived_scope,
     augment_graph_with_types,
@@ -155,6 +166,11 @@ class HeaderGraphAstProjection:
     #: (``ast_special_members``) -- binary-independent identity evidence for
     #: castxml's unmangled ctor/dtor placeholders.
     special_member_names: frozenset[str] = frozenset()
+    #: The override, template and callback facts of the same parse
+    #: (``semantic_fact_folds``). ``None`` when they were not projected --
+    #: a hand-built projection -- so the header passes for those families
+    #: stay unstamped (unknown), never "ran and found nothing".
+    semantic_facts: SemanticFacts | None = None
 
 
 def project_header_graph_ast(ast_root: dict[str, Any]) -> HeaderGraphAstProjection:
@@ -168,6 +184,9 @@ def project_header_graph_ast(ast_root: dict[str, Any]) -> HeaderGraphAstProjecti
         entity_files = (
             index_declared_entity_files(ast_root) if needs_entity_files else {}
         )
+        # Inside the same scope, and handed the type edges just parsed: the
+        # override facts read the inheritance edges, never a second walk.
+        semantic_facts = parse_semantic_facts(ast_root, type_edges)
     call_edges = parse_clang_ast_calls(ast_root)
     special: set[str] = set()
     collect_special_member_names(ast_root, special)
@@ -177,6 +196,7 @@ def project_header_graph_ast(ast_root: dict[str, Any]) -> HeaderGraphAstProjecti
         call_edges=call_edges,
         entity_files=entity_files,
         special_member_names=frozenset(special),
+        semantic_facts=semantic_facts,
     )
 
 
@@ -206,12 +226,18 @@ def merge_header_graph_ast_projections(
         type_edges.update(dict.fromkeys(part.type_edges))
         call_edges.update(dict.fromkeys(part.call_edges))
         special.update(part.special_member_names)
+    facts = [p.semantic_facts for p in parts]
     return HeaderGraphAstProjection(
         type_files=type_files,
         type_edges=list(type_edges),
         call_edges=list(call_edges),
         entity_files=entity_files,
         special_member_names=frozenset(special),
+        semantic_facts=(
+            merge_semantic_facts(f for f in facts if f is not None)
+            if facts and all(f is not None for f in facts)
+            else None
+        ),
     )
 
 
@@ -394,6 +420,10 @@ def seed_ast_graph(
         )
     augment_graph_with_types(graph, type_edges)
     augment_graph_with_calls(graph, call_edges)
+    if projection.semantic_facts is not None:
+        # After the call and type edges, which the virtual-dispatch and
+        # callback joins read -- the same order the L5 folds run in.
+        fold_header_semantic_facts(graph, projection.semantic_facts)
     # A header-only pass is a single parse over the whole header aggregate —
     # never narrowed/scoped like a per-compile-unit build-integrated pass, and
     # ``clang_header_dump`` raises on a failed/empty parse rather than

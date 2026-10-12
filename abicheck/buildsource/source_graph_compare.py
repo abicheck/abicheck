@@ -32,8 +32,14 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..model.graph_facts import GraphEdge
+from ..model.graph_facts import GraphEdge, GraphNode
 from ..model.source_graph import GraphSummaryDiff, SourceGraphSummary, _symbol_node_id
+from ..model.source_graph_coverage import (
+    SEMANTIC_FAMILIES,
+    SemanticFamily,
+    family_collected,
+    graph_records_passes,
+)
 
 
 def _label_map(graph: SourceGraphSummary) -> dict[str, str]:
@@ -132,6 +138,50 @@ def localize_symbol(graph: SourceGraphSummary, symbol: str) -> dict[str, Any]:
     }
 
 
+def _family_looked_for(
+    graph: SourceGraphSummary, family: SemanticFamily, flagged: bool
+) -> bool:
+    """Whether *graph* looked for *family*: its pass flag, or -- only on a
+    graph that records no pass flags at all -- an edge of the family."""
+    if family_collected(graph, family):
+        return True
+    return not flagged and any(e.kind in family.edge_kinds for e in graph.edges)
+
+
+def _uncollected_families(
+    old: SourceGraphSummary, new: SourceGraphSummary
+) -> tuple[SemanticFamily, ...]:
+    """The semantic fact families (override, template, callback, virtual
+    dispatch) either side never looked for.
+
+    A header graph stored before the header pass projected those families
+    carries neither their facts nor their flags; next to a fresh graph,
+    every such fact would read as added, or the other way round removed. Two
+    graphs that record no pass flags at all (hand-built) keep the plain
+    structural diff they always had."""
+    old_flagged = graph_records_passes(old)
+    new_flagged = graph_records_passes(new)
+    if not (old_flagged or new_flagged):
+        return ()
+    return tuple(
+        f
+        for f in SEMANTIC_FAMILIES
+        if not (
+            _family_looked_for(old, f, old_flagged)
+            and _family_looked_for(new, f, new_flagged)
+        )
+    )
+
+
+def _only_from(
+    node: GraphNode, node_kinds: frozenset[str], provenances: frozenset[str]
+) -> bool:
+    if node.kind in node_kinds:
+        return True
+    producers = {f.producer for f in node.facts} or {node.provenance}
+    return producers <= provenances
+
+
 def diff_source_graph(
     old: SourceGraphSummary, new: SourceGraphSummary
 ) -> GraphSummaryDiff:
@@ -143,13 +193,31 @@ def diff_source_graph(
     kind)`` (e.g. a function that both returns and takes the same private
     type), only one is a "representative" for this structural added/removed
     comparison — role-level diff granularity is not implemented here.
+
+    A semantic fact family one side never looked for
+    (:func:`_uncollected_families`) is left out of the delta -- its edges,
+    and the nodes only it produced -- and named in ``coverage_gaps``
+    instead: a coverage gap, never a removal or an addition.
     """
+    gaps = _uncollected_families(old, new)
+    edge_kinds = frozenset().union(*(f.edge_kinds for f in gaps))
+    provenances = frozenset(f.provenance for f in gaps)
+    node_kinds = frozenset().union(*(f.node_kinds for f in gaps))
     old_nodes = {n.id: n for n in old.nodes}
     new_nodes = {n.id: n for n in new.nodes}
-    old_edges = {e.key(): e for e in old.edges}
-    new_edges = {e.key(): e for e in new.edges}
+    old_edges = {e.key(): e for e in old.edges if e.kind not in edge_kinds}
+    new_edges = {e.key(): e for e in new.edges if e.kind not in edge_kinds}
+    if gaps:
+        # A node only an unlooked-for family produced exists on one side
+        # for the same reason its edges do.
+        for nodes in (old_nodes, new_nodes):
+            for node_id in [
+                i for i, n in nodes.items() if _only_from(n, node_kinds, provenances)
+            ]:
+                del nodes[node_id]
 
     return GraphSummaryDiff(
+        coverage_gaps=[f.name for f in gaps],
         added_nodes=[new_nodes[i] for i in sorted(new_nodes.keys() - old_nodes.keys())],
         removed_nodes=[
             old_nodes[i] for i in sorted(old_nodes.keys() - new_nodes.keys())

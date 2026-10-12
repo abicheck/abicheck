@@ -44,10 +44,11 @@ shared fold-time type", the literal target this plan section names.
 gate configuration a caller actually runs with, not merely the fold's
 intermediate state. Both :class:`~abicheck.policy.release_gate_options.
 GateOptions` (the release fan-out's resolved object) and
-``abicheck.cli_helpers_compare.ResolvedCompareConfig`` (single-pair
-``compare``'s) expose an ``effective_gate`` property built through
-:meth:`EffectiveGate.from_severity`, so a caller holding either object can
-ask for the same-shaped answer. This is deliberately narrower than the
+``abicheck.workflows.compare_configuration.ResolvedCompareConfig`` (single-pair
+``compare``'s) project onto it through :meth:`EffectiveGate.from_severity` --
+the first through its ``effective_gate`` property, the second through
+``workflows.gate.effective_gate_for_resolved_compare_config`` -- so a caller
+holding either object can ask for the same-shaped answer. This is deliberately narrower than the
 plan's full ``EffectiveEvaluationConfig`` (which would also carry policy/
 contract/assurance/surface/evidence/suppressions namespaces no release-fan-
 out-facing object resolves today) -- see that section's own "Target" text;

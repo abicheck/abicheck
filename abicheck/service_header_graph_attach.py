@@ -152,6 +152,7 @@ def _attach_header_graph(
         build_header_only_graph,
     )
     from .buildsource.include_graph import augment_graph_with_includes
+    from .buildsource.semantic_fact_folds import HEADER_SEMANTIC_PASSES
     from .dumper import _resolve_clang_bin
     from .model.source_graph_coverage import HEADER_CALL_GRAPH_PASS
 
@@ -192,6 +193,10 @@ def _attach_header_graph(
     projection = None
     if ast_failure is not None:
         graph.degraded_passes[HEADER_CALL_GRAPH_PASS] = True
+        # The semantic families came from the same partial parse.
+        for pass_name in HEADER_SEMANTIC_PASSES:
+            if pass_name in graph.extractor_passes:
+                graph.degraded_passes[pass_name] = True
         graph.finalize()
     memory_trace.mark("dump.header_graph.build:done")
     if header_graph_includes and resolved_headers and cc.frontend_context == "host":
