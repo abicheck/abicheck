@@ -18,7 +18,7 @@ description: >-
   Add detection for a class/struct/union gaining or losing the C++17
   [[nodiscard]] attribute, and follow CLAUDE.md's "Adding a new ChangeKind"
   procedure end to end.
-base_commit: 83972cb8f761a8a6efd8c9f030a427e120e74e01
+base_commit: f5a40556945dcdfa1d7c5edd6939fbd2307b1cff
 
 prompt: |
   abicheck does not currently detect a class/struct/union gaining or losing
