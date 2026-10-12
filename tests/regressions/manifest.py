@@ -380,6 +380,12 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
             # to `symbol` (still correct for `unversioned_exported_symbol`)
             # and registering `(symbol, new_value)` for `private_header_leak`.
             "tests/test_cross_source_evolution.py",
+            # Graph identity reconciliation picked a redeclared entity's
+            # declaring file by edge order (last SOURCE_DECLARES edge wins),
+            # so one file set read as unchanged or as a RISK-tier move
+            # depending on run; pinned under permuted edges/inputs and
+            # several PYTHONHASHSEED values.
+            "tests/test_graph_reconcile_order_invariance.py",
         ),
         # Phase 5's own two originally-tracked gaps here (a compare()-level
         # collision test, and an adversarial generator over the shapes
