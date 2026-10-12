@@ -128,6 +128,65 @@ class TestCompareReleaseLibrariesMemoryClamp:
         assert "reduced" not in capsys.readouterr().err
 
 
+class TestReleaseWorkerLimitCause:
+    """The fan-out notice names the limit that actually bound the pool.
+
+    A 64-CPU host with ample RAM is bound by the interpreter's member cap,
+    not memory: it must not be announced as a memory clamp, and the pure-JSON
+    stdout contract means the designed default stays silent.
+    """
+
+    def test_interpreter_bound_pool_is_attributed_to_gil(self, monkeypatch) -> None:
+        monkeypatch.setattr("os.cpu_count", lambda: 64)
+        monkeypatch.setattr(process_resources, "available_mem_gib", lambda: None)
+        monkeypatch.setattr(process_resources, "python_parallelism", lambda: 2)
+        monkeypatch.delenv("ABICHECK_RELEASE_JOB_MEM_GIB", raising=False)
+        plan = release_jobs.plan_release_workers(0, depth="headers")
+        assert (plan.initial_jobs, plan.limited_by) == (2, "gil")
+
+    def test_memory_bound_pool_below_the_interpreter_is_attributed_to_memory(
+        self, monkeypatch
+    ) -> None:
+        monkeypatch.setattr("os.cpu_count", lambda: 64)
+        monkeypatch.setattr(process_resources, "python_parallelism", lambda: 4)
+        monkeypatch.setattr(
+            release_jobs, "release_jobs_mem_cap", lambda depth=None, **kw: 1
+        )
+        monkeypatch.delenv("ABICHECK_RELEASE_JOB_MEM_GIB", raising=False)
+        plan = release_jobs.plan_release_workers(0, depth="headers")
+        assert (plan.initial_jobs, plan.limited_by, plan.clamped_from) == (
+            1,
+            "memory",
+            64,
+        )
+
+    def test_interpreter_bound_run_prints_no_memory_note(
+        self, monkeypatch, capsys
+    ) -> None:
+        monkeypatch.setattr("os.cpu_count", lambda: 64)
+        monkeypatch.setattr(process_resources, "python_parallelism", lambda: 2)
+        monkeypatch.setattr(
+            release_jobs, "release_jobs_mem_cap", lambda depth=None, **kw: 100
+        )
+        monkeypatch.setattr(
+            "abicheck.process_resources.available_mem_gib", lambda: 12.0
+        )
+        monkeypatch.delenv("ABICHECK_RELEASE_JOB_MEM_GIB", raising=False)
+        captured: list[int] = []
+
+        def _fake_parallel(matched_keys, ctx, max_workers, admission=None):
+            captured.append(max_workers)
+            return []
+
+        monkeypatch.setattr(release_pairwise, "_compare_parallel", _fake_parallel)
+        monkeypatch.setattr(release_pairwise, "_compare_sequential", lambda k, c: [])
+        TestCompareReleaseLibrariesMemoryClamp()._run(
+            ["a", "b"], {"a": None, "b": None}, {"a": None, "b": None}, jobs=0
+        )
+        assert captured == [2]
+        assert "reduced" not in capsys.readouterr().err
+
+
 class TestReleaseAdmissionReserve:
     """The reserve's own invariants, stated independently of any one host.
 
