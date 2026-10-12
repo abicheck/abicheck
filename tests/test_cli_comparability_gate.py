@@ -42,6 +42,7 @@ from abicheck.errors import ProfileMismatchError, ScopeMismatchError
 from abicheck.model import AbiSnapshot
 from abicheck.reporter import to_json
 from abicheck.serialization import snapshot_to_json
+from tests._fake_compare_resolution import fake_resolved_pair
 
 
 def _write_placeholder_inputs(tmp_path: Path) -> tuple[Path, Path]:
@@ -66,7 +67,9 @@ class TestNotComparableExitCode:
                 "the old side"
             )
 
-        monkeypatch.setattr("abicheck.service.compare_snapshots", _raise)
+        monkeypatch.setattr(
+            "abicheck.workflows.compare_policy.compare_snapshots", _raise
+        )
 
         result = CliRunner().invoke(main, ["compare", str(old_p), str(new_p)])
         assert result.exit_code == 16
@@ -83,7 +86,9 @@ class TestNotComparableExitCode:
         def _raise(*_a, **_kw):
             raise ProfileMismatchError("profile_fingerprint mismatch: dep.h changed")
 
-        monkeypatch.setattr("abicheck.service.compare_snapshots", _raise)
+        monkeypatch.setattr(
+            "abicheck.workflows.compare_policy.compare_snapshots", _raise
+        )
 
         result = CliRunner().invoke(main, ["compare", str(old_p), str(new_p)])
         assert result.exit_code == 16
@@ -126,7 +131,9 @@ class TestNotComparableExitCode:
         def _raise(*_a, **_kw):
             raise ScopeMismatchError("scope drift")
 
-        monkeypatch.setattr("abicheck.service.compare_snapshots", _raise)
+        monkeypatch.setattr(
+            "abicheck.workflows.compare_policy.compare_snapshots", _raise
+        )
 
         out_p = tmp_path / "report.json"
         result = CliRunner().invoke(
@@ -151,7 +158,9 @@ class TestNotComparableExitCode:
         def _raise(*_a, **_kw):
             raise ScopeMismatchError("scope drift")
 
-        monkeypatch.setattr("abicheck.service.compare_snapshots", _raise)
+        monkeypatch.setattr(
+            "abicheck.workflows.compare_policy.compare_snapshots", _raise
+        )
 
         out_p = tmp_path / "report.sarif"
         result = CliRunner().invoke(
@@ -179,7 +188,9 @@ class TestNotComparableExitCode:
         def _raise(*_a, **_kw):
             raise ProfileMismatchError("dep.h changed")
 
-        monkeypatch.setattr("abicheck.service.compare_snapshots", _raise)
+        monkeypatch.setattr(
+            "abicheck.workflows.compare_policy.compare_snapshots", _raise
+        )
 
         out_p = tmp_path / "report.xml"
         result = CliRunner().invoke(
@@ -220,7 +231,8 @@ class TestNotComparableExitCode:
             )
 
         monkeypatch.setattr(
-            "abicheck.service.compare_snapshots", _fake_compare_snapshots
+            "abicheck.workflows.compare_policy.compare_snapshots",
+            _fake_compare_snapshots,
         )
         monkeypatch.setattr(
             "abicheck.frontends.render.to_markdown", lambda _r, **_kw: "REPORT"
@@ -253,13 +265,13 @@ class TestNotComparableExitCode:
 
         def _fake_resolve(*_a, **kw):
             captured["include_labels"] = kw.get("include_labels")
-            return snap, snap
+            return fake_resolved_pair(snap)
 
         monkeypatch.setattr(
-            "abicheck.cli_compare_helpers._resolve_compare_snapshots", _fake_resolve
+            "abicheck.cli_compare_helpers._resolve_compare_pair", _fake_resolve
         )
         monkeypatch.setattr(
-            "abicheck.service.compare_snapshots",
+            "abicheck.workflows.compare_policy.compare_snapshots",
             lambda *_a, **_kw: DiffResult(
                 old_version="1",
                 new_version="1",
@@ -318,11 +330,11 @@ class TestNotComparableExitCode:
         )
         snap = AbiSnapshot(library="libfoo.so.1", version="1.0")
         monkeypatch.setattr(
-            "abicheck.cli_compare_helpers._resolve_compare_snapshots",
-            lambda *_a, **_kw: (snap, snap),
+            "abicheck.cli_compare_helpers._resolve_compare_pair",
+            lambda *_a, **_kw: fake_resolved_pair(snap),
         )
         monkeypatch.setattr(
-            "abicheck.service.compare_snapshots",
+            "abicheck.workflows.compare_policy.compare_snapshots",
             lambda *_a, **_kw: DiffResult(
                 old_version="1",
                 new_version="1",
@@ -504,7 +516,9 @@ class TestRefusalReachesEverySecondaryOutput:
         def _raise(*_a, **_kw):
             raise exc
 
-        monkeypatch.setattr("abicheck.service.compare_snapshots", _raise)
+        monkeypatch.setattr(
+            "abicheck.workflows.compare_policy.compare_snapshots", _raise
+        )
         args = ["compare", str(old_p), str(new_p)]
         for fmt, path in targets:
             args += ["-o", f"{fmt}={path}"]

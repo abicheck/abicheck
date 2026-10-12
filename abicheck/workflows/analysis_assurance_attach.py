@@ -16,8 +16,9 @@
 """Attach one comparison's ``AnalysisAssurance`` to its ``DiffResult``.
 
 The two pairwise entry points -- ``checker.compare`` (Tier 1) and
-``service_compare_pipeline.classify_compare_pair`` (Tier 2) -- had
-byte-identical copies of this call. That was survivable while it was three
+``workflows.compare_classify.classify_resolved_pair`` (Tier 2, the one
+classification every scalar ``compare`` route runs) -- had byte-identical
+copies of this call. That was survivable while it was three
 arguments; it stopped being so once the call had to carry the content-
 identity projection too (Codex review, PR #1229): ``analysis_assurance``
 sits in ``policy``, which may not import ``storage``
@@ -47,9 +48,8 @@ def attach_analysis_assurance(
     """Compute *result*'s assurance rollup from *old*/*new* and store it.
 
     The packs are read off the snapshots rather than taken as parameters:
-    both call sites passed exactly this, and a caller holding a *different*
-    pack (the native ``compare`` CLI, which reloads an uncapped one) calls
-    ``compute_analysis_assurance`` directly and passes it explicitly.
+    an out-of-band ``--build-info``/``--sources`` pack is attached onto the
+    snapshot before classification, so the depth-capped view carries it.
     """
     from ..analysis_assurance import compute_analysis_assurance
     from ..evidence_depth import embedded_evidence_pack
@@ -79,9 +79,9 @@ def attach_evidence_depths(
 
     Owned here rather than by a front end: the native ``compare`` CLI used to
     be the only route that set these two report fields, so a typed-API
-    (``run_compare_request``) report and every release member's report
-    carried ``null`` for the identical comparison (F2 route-parity harness).
-    Both pairwise Tier-2 paths now call this one function.
+    report and every release member's report carried ``null`` for the
+    identical comparison (F2 route-parity harness). Every scalar route now
+    reaches it through the one classification core.
     """
     from ..evidence_depth import reported_depth_label
 
