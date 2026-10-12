@@ -483,7 +483,15 @@ def _check_inline_transitions(
     """Detect inline/non-inline transitions for functions present in both
     snapshots -- including a ctor/dtor pair only visible via synthetic-key
     format-drift reconciliation (``iter_matched_function_pairs``, PR #761
-    finding 2)."""
+    finding 2).
+
+    Declined, not reported, when either side's ``is_inline`` is a stale
+    header-backend value (``inline`` fact family): the wrong value is what
+    would otherwise surface as a spurious FUNC_BECAME_INLINE. The coverage
+    record names the family via ``analysis_assurance_degraded_facts``.
+    """
+    if not (family_reliable(old_snapshot, "inline") and family_reliable(new_snapshot, "inline")):
+        return []
     old_index = function_signature_index(old_snapshot.canonical_ir, old_map.values())
     new_index = function_signature_index(new_snapshot.canonical_ir, new_map.values())
     new_elf = new_snapshot.elf
