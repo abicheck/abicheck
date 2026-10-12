@@ -249,6 +249,10 @@ REQUEST_ROUTING: dict[str, tuple[str, Any]] = {
     "collapse_versioned_symbols": (_UC, "config-only; needs versioned ELF symbols"),
     "allow_build_query": (_UC, "needs a build tree"),
     "performance_profile": (_UC, "resource use only"),
+    "resolved_collect_mode": (
+        _UC,
+        "needs a source tree; the CLI resolves it from source.method/--since",
+    ),
 }
 
 

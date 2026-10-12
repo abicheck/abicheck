@@ -31,26 +31,13 @@ InputSpec` -- the per-side operand these build on -- lives in the sibling
 module :mod:`abicheck.workflows.request_inputs`, split out purely to keep
 each module under the 800-line new-file ceiling.
 
-ADR-055 D1 (``InputSpec.sources``/``build_info``/``dump_manifest``/
-``compile``/``public_header_dirs`` and ``CompareRequest.depth``/
-``frontend_context``) closes the gap that ADR's own Gap 1 documents:
-``CompareRequest`` previously had no way to express ``compare``'s
-``--depth``/``--sources``/``--build-info``/``--dump-manifest``/per-side
-``CompileContext`` feature set at all, so a Python caller wanting that had
-to fall back to loose keyword arguments on lower-level functions.
-``service.run_compare_request`` reads these new fields directly (see its own
-docstring for exactly how). A second D1 slice then closed the rest of the
-gap against the CLI's own, then separately-maintained
-``cli_resolve._resolve_compare_snapshots`` — ``dwarf_only``,
-``debug_format``, ``include_labels``, and ``--follow-deps``. A third slice
-then removed that second implementation outright: ``run_compare_request``
-was split into its two phases (``service_compare_pipeline``), which gave the
-CLI's ADR-049 configuration step (``compare_configuration``) a seam to run in —
-the thing that had made a shared resolution look impossible — and
-``_resolve_compare_snapshots`` now builds one of these requests and
-delegates, and the CLI classifies through ``workflows.compare_classify`` too.
-ADR-055's "Two-resolution-path finding", first answered as option (b), is
-recorded as settled the other way in D1's "Structural half" note.
+ADR-055 D1 gave ``CompareRequest``/``InputSpec`` the CLI's whole
+``compare`` feature set (``depth``, ``sources``/``build_info``,
+``dump_manifest``, per-side ``CompileContext``, debug and dependency
+options), so the CLI builds one of these requests and resolves it through
+``service_compare_pipeline`` and classifies it through
+``workflows.compare_classify`` -- one resolution and one classification for
+every front end (D1's "Structural half" note).
 
 ADR-055 D2 adds :class:`CompareResult`, the result side of the same pair, and
 D4 adds ``InputSpec.follow_linker_scripts`` — see each one's own docstring.
@@ -382,6 +369,11 @@ class CompareRequest:
     #: module. ``False`` (the default) reproduces every pre-existing
     #: request's behavior unchanged.
     collapse_versioned_symbols: bool = field(default=False, kw_only=True)
+    #: The build-source collect mode a front end already resolved for the pair
+    #: (the CLI's ``.abicheck.yml`` ``source.method`` and ``--since``
+    #: localization); wins over ``collect_mode_for``'s depth/input inference,
+    #: like ``DumpRequest.resolved_collect_mode``. ``None``: infer it.
+    resolved_collect_mode: str | None = field(default=None, kw_only=True)
     #: One-comparison-product Phase 4 (ADR-068, ADR-055 amendment): absorbed from ``ScanRequest.allow_build_query`` -- the one field that amendment's field-by-field audit listed as a real, open ``CompareRequest`` gap and that survived ADR-068's second 2026-09-09 ruling table (``risk_rules_path``/``build_targets``/``bundle_system_providers``/``bundle_manifest``/``enabled_checks``/``severities`` are all ruled (b), dropped rather than absorbed). ``resolve_side_snapshot`` has accepted the pass-through since PR 3A; only the request had no way to state it, so a typed caller with a trusted ``.abicheck.yml`` ``build.query`` could not authorize running it. ``False`` (the default) is the Tier-2 "never execute a build system as a side effect of resolving an input" rule, so every pre-existing request is unchanged -- and under it ``_gated_build_query_inputs`` nulls the whole per-side ``InputSpec.build_config``, *including* passive keys such as ``build.compile_db``, exactly as it does for ``dump``'s own typed pipeline. That is not a narrowing: nothing on the ``compare`` path read ``build_config`` at all before this field existed. Keeping a config's passive half readable without that consent (the split the retired ``scan`` had) would be a separate change with its own behavioural blast radius, not part of absorbing this field (Codex review, PR #1186). ``True`` asserts the same operator consent ``dump --allow-build-query`` expresses, and makes the whole config -- executable ``build.query`` included -- readable.
     allow_build_query: bool = field(default=False, kw_only=True)
     #: The memory/speed trade-off to execute under (``performance.profile``,
@@ -538,6 +530,7 @@ class CompareRequest:
                         f"{field_name} kind {kind.value!r} may not target Verdict.NO_CHANGE"
                     )
         errors += _acknowledgment_errors(self)
+        errors += _resolved_collect_mode_errors(self.resolved_collect_mode)
         for label, side in (("old", self.old), ("new", self.new)):
             errors += _path_required_errors(label, side, source_only_allowed=False)
             errors += _side_errors(label, side)
@@ -674,6 +667,8 @@ class DumpRequest:
         errors += _path_required_errors("input", self.input, source_only_allowed=True)
         errors += _source_only_binary_depth_errors(self.input, self.depth)
         errors += _side_errors("input", self.input)
+        if self.input.execution is not None:  # a dump states it on its resolved request
+            errors.append("InputSpec.execution applies to a compare side only")
         return errors
 
     def validate(self) -> DumpRequest:

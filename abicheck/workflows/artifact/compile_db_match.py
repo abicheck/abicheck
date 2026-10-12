@@ -33,11 +33,16 @@ what either caller gets; this module only gives the existing match one owner.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-__all__ = ["CompileDbMatch", "match_compile_db", "try_match_compile_db"]
+__all__ = [
+    "CompileDbMatch",
+    "match_compile_db",
+    "match_side_compile_db",
+    "try_match_compile_db",
+]
 
 
 @dataclass(frozen=True)
@@ -101,3 +106,39 @@ def try_match_compile_db(
         return match_compile_db(compile_db, headers, source_filter)
     except (AbicheckError, OSError, ValueError):
         return CompileDbMatch()
+
+
+def match_side_compile_db(
+    compile_db: Path | None,
+    headers: Sequence[Path],
+    source_filter: str | None,
+    notify: Callable[[str], None] | None,
+) -> CompileDbMatch:
+    """:func:`match_compile_db` for one side's ``DumpExecutionOptions``, with
+    the progress note -- ``CompileDbMatch()`` when no database was given.
+
+    An unreadable or malformed database is an operational failure
+    (``SnapshotError``, exit 1), not a usage error (exit 64), which a bare
+    ``ValidationError`` would map to. Shared by ``execute_dump_request`` and
+    ``resolve_compare_request`` so a dump and a compare side match one
+    database the same way.
+    """
+    from ...errors import AbicheckError, SnapshotError
+
+    if compile_db is None:
+        return CompileDbMatch()
+    try:
+        match = match_compile_db(compile_db, headers, source_filter)
+    except (AbicheckError, OSError) as exc:
+        raise SnapshotError(f"cannot use compile database {compile_db}: {exc}") from exc
+    if notify is not None and match.tokens:
+        notify(
+            f"Build context: {match.entry_count} entries from {compile_db}, "
+            f"{len(match.tokens)} flags derived"
+        )
+        if match.has_conflicts:
+            notify(
+                "Warning: conflicting flags detected in compile database; "
+                "using first-match values. See --verbose for details."
+            )
+    return match

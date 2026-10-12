@@ -2226,6 +2226,17 @@ class TestCompareRequestAdr055Evidence:
         save_snapshot(snap, p)
         return p
 
+    def _keep_raw_evidence_on_snapshot_operands(self, monkeypatch):
+        """These cells pin how a side's ``sources``/``build_info`` are wired
+        into extraction, using stored-snapshot operands for speed. A real run
+        ignores a raw tree on a snapshot operand (nothing to re-extract it
+        from -- ``test_compare_request_inline_evidence.py`` pins that rule),
+        so it is switched off here to reach the wiring."""
+        monkeypatch.setattr(
+            "abicheck.service_compare_evidence.without_unusable_raw_evidence",
+            lambda request, notify=None: request,
+        )
+
     def _spy_resolve_input(self, monkeypatch):
         import abicheck.workflows.input_resolution as _input_resolution
         from abicheck import service as service_mod
@@ -2383,6 +2394,7 @@ class TestCompareRequestAdr055Evidence:
         assert calls_by_path[new_p]["compile"].frontend_context == "device"
 
     def test_sources_triggers_embed_build_source(self, tmp_path, monkeypatch):
+        self._keep_raw_evidence_on_snapshot_operands(monkeypatch)
         old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
         new_p = self._make_snap_file(tmp_path, "libtest", "2.0")
         src_dir = tmp_path / "src"
@@ -2520,6 +2532,7 @@ class TestCompareRequestAdr055Evidence:
         same eff_backend resolve_input/run_dump use internally (an explicit
         compile.frontend wins over the bare header_backend), not silently
         default to "auto" while L2 used a different frontend."""
+        self._keep_raw_evidence_on_snapshot_operands(monkeypatch)
         from abicheck.compile_context import CompileContext
 
         old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
@@ -2556,6 +2569,7 @@ class TestCompareRequestAdr055Evidence:
         default (dumper._resolve_header_backend), so the common default-
         frontend case would otherwise silently run L2/L4 through different
         tools."""
+        self._keep_raw_evidence_on_snapshot_operands(monkeypatch)
         old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
         new_p = self._make_snap_file(tmp_path, "libtest", "2.0")
         src_dir = tmp_path / "src"
@@ -2608,6 +2622,7 @@ class TestCompareRequestAdr055Evidence:
         embed_build_source leaves source replay's own public-header set
         empty, so the L4 extractor can classify every declaration as non-API
         and emit an empty surface, silently hiding source-only breaks."""
+        self._keep_raw_evidence_on_snapshot_operands(monkeypatch)
         old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
         new_p = self._make_snap_file(tmp_path, "libtest", "2.0")
         src_dir = tmp_path / "src"
@@ -2649,6 +2664,7 @@ class TestCompareRequestAdr055Evidence:
         the manifest's own roots (public_header_paths/public_header_dirs)
         must still reach source replay, or it can classify the manifest's
         API declarations as non-public and omit source-only breaks."""
+        self._keep_raw_evidence_on_snapshot_operands(monkeypatch)
         from types import SimpleNamespace
 
         old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
@@ -2690,6 +2706,7 @@ class TestCompareRequestAdr055Evidence:
         L4 source replay's own public-header set would make the extractors
         treat every declaration under a private support dir as API-relevant,
         false-flagging private-header churn as a source break."""
+        self._keep_raw_evidence_on_snapshot_operands(monkeypatch)
         from types import SimpleNamespace
 
         old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
@@ -2722,11 +2739,14 @@ class TestCompareRequestAdr055Evidence:
         run_compare_request(request)
         assert "/proj/private_support" not in embed_calls[0]["public_header_dirs"]
 
-    def test_hybrid_frontend_rejected_for_explicit_source_depth(self, tmp_path):
+    def test_hybrid_frontend_rejected_for_explicit_source_depth(
+        self, tmp_path, monkeypatch
+    ):
         """Codex review (P1): mirror cli.py's own --depth source +
         --ast-frontend hybrid UsageError -- L4 source-ABI replay has no
         dual-backend hybrid extractor, so this combination must be rejected
         rather than silently reach an artifact-only verdict."""
+        self._keep_raw_evidence_on_snapshot_operands(monkeypatch)
         from abicheck.compile_context import CompileContext
 
         old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
@@ -2744,11 +2764,12 @@ class TestCompareRequestAdr055Evidence:
         with pytest.raises(ValidationError, match="hybrid"):
             run_compare_request(request)
 
-    def test_android_frontend_rejected_for_raw_source_tree(self, tmp_path):
+    def test_android_frontend_rejected_for_raw_source_tree(self, tmp_path, monkeypatch):
         """Codex review (P2): frontend="android" combined with a genuine raw
         source tree must be rejected -- embed_build_source's inline
         collection pipeline has no real Android extractor and would
         otherwise silently substitute Clang."""
+        self._keep_raw_evidence_on_snapshot_operands(monkeypatch)
         old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
         new_p = self._make_snap_file(tmp_path, "libtest", "2.0")
         src_dir = tmp_path / "src"
@@ -2917,6 +2938,7 @@ class TestCompareRequestAdr055Evidence:
         lowercase -- _make_source_extractor only recognizes lowercase
         frontend names and silently falls back to Clang otherwise, making L2
         and L4 use different frontends."""
+        self._keep_raw_evidence_on_snapshot_operands(monkeypatch)
         old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
         new_p = self._make_snap_file(tmp_path, "libtest", "2.0")
         src_dir = tmp_path / "src"

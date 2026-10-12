@@ -55,6 +55,7 @@ A fully-specified comparison request — the single input to ``run_compare``.
 | `changed_paths` | `tuple[str, ...]` | `()` |
 | `abi3_floor` | `tuple[int, int] \| None` | `None` |
 | `collapse_versioned_symbols` | `bool` | `False` |
+| `resolved_collect_mode` | `str \| None` | `None` |
 | `allow_build_query` | `bool` | `False` |
 | `performance_profile` | `PerformanceProfile \| None` | `None` |
 
@@ -158,6 +159,7 @@ One side of a comparison: a binary/snapshot path plus its build context.
 | `compile_db_filter` | `str \| None` | `None` |
 | `build_config` | `Path \| None` | `None` |
 | `ownership` | `OwnershipRequest \| None` | `None` |
+| `execution` | `DumpExecutionOptions \| None` | `None` |
 
 ## `OutputSpec`
 

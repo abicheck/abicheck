@@ -49,7 +49,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from ...buildsource.source_inputs import granting_live_source_licence
-from ...errors import AbicheckError, SnapshotError, ValidationError
+from ...errors import ValidationError
 from ...workflows.artifact import ResolvedArtifactPlan
 from ...workflows.artifact.compile_context_gate import side_effective_compile_context
 from ...workflows.artifact.dump_execution_options import (
@@ -80,7 +80,6 @@ if TYPE_CHECKING:
     from ...compile_context import CompileContext
     from ...model import AbiSnapshot
     from ...service_compare_evidence import SideEvidence
-    from ...workflows.artifact.compile_db_match import CompileDbMatch
     from ...workflows.contracts import DumpRequest
     from ...workflows.resolved_execution_context import ResolvedExecutionContext
 
@@ -381,24 +380,6 @@ def resolve_dump_request(request: DumpRequest) -> ResolvedDumpRequest:
     )
 
 
-def _announce_compile_db_match(
-    notify: Callable[[str], None] | None, path: Path, match: CompileDbMatch
-) -> None:
-    """The progress note the CLI printed for a compile database that derived
-    flags, now emitted through the pipeline's own *notify*."""
-    if notify is None or not match.tokens:
-        return
-    notify(
-        f"Build context: {match.entry_count} entries from {path}, "
-        f"{len(match.tokens)} flags derived"
-    )
-    if match.has_conflicts:
-        notify(
-            "Warning: conflicting flags detected in compile database; "
-            "using first-match values. See --verbose for details."
-        )
-
-
 def execute_dump_request(
     resolved: ResolvedDumpRequest,
     *,
@@ -437,10 +418,7 @@ def execute_dump_request(
     """
     from ...dependency_info import populate_side_dependency_info
     from ...evidence_depth import depth_rank, gated_source_label
-    from ...workflows.artifact.compile_db_match import (
-        CompileDbMatch as _CompileDbMatch,
-        match_compile_db,
-    )
+    from ...workflows.artifact.compile_db_match import match_side_compile_db
 
     if options is None:
         options = resolved.execution_options or DumpExecutionOptions()
@@ -475,20 +453,9 @@ def execute_dump_request(
 
     # ADR-063 Phase 10: the `-p`/`--compile-db` match is the pipeline's own,
     # not a set of tokens a front end pre-derived (see compile_db_match).
-    compile_db = _CompileDbMatch()
-    if options.compile_db is not None:
-        try:
-            compile_db = match_compile_db(
-                options.compile_db, side.headers, options.compile_db_filter
-            )
-        except (AbicheckError, OSError) as exc:
-            # An unreadable or malformed database is an operational failure
-            # (exit 1), as it was when the CLI ran this match itself -- not a
-            # usage error (exit 64), which a bare ValidationError maps to.
-            raise SnapshotError(
-                f"cannot use compile database {options.compile_db}: {exc}"
-            ) from exc
-        _announce_compile_db_match(notify, options.compile_db, compile_db)
+    compile_db = match_side_compile_db(
+        options.compile_db, side.headers, options.compile_db_filter, notify
+    )
     resolution = _resolve_side_snapshot_impl(
         side,
         resolved.evidence,
