@@ -64,10 +64,6 @@ RESPELLING_KINDS: frozenset[ChangeKind] = frozenset(
     }
 )
 
-#: Cheap pre-test: a spelling without one of these markers cannot be a
-#: closure respelling, so the identity helper is never called for it.
-_MARKER_HINTS: tuple[str, ...] = ("lambda", "unnamed", "anonymous")
-
 
 def is_closure_respelling(
     change: Change,
@@ -84,25 +80,23 @@ def is_closure_respelling(
     old, new = change.old_value, change.new_value
     if old is None or new is None or old == new:
         return False
-    if not (
-        any(hint in old for hint in _MARKER_HINTS)
-        and any(hint in new for hint in _MARKER_HINTS)
-    ):
-        return False
     return closure_discriminator_free_identity(
         old
     ) == closure_discriminator_free_identity(new)
 
 
-def exported_function_keys(snapshot: AbiSnapshot) -> frozenset[str]:
-    """The real Itanium keys of *snapshot*'s functions that the binary
-    export table carries, read from the surface's own export fact
+def exported_function_keys(
+    snapshot: AbiSnapshot, wanted: Collection[str]
+) -> frozenset[str]:
+    """The keys among *wanted* that *snapshot*'s own functions carry and the
+    binary export table carries too, read from the surface's export fact
     (``binary_exported_fact``, ``PRESENT(True)`` only). Anything else --
     absent, partial, or never collected -- is not evidence, so it is not
-    listed: fail closed."""
+    listed: fail closed. Only *wanted* keys are looked up, so the fact is read
+    once per candidate rather than once per function."""
     keys: set[str] = set()
     for f in snapshot.declarations.functions:
-        if not f.mangled:
+        if f.mangled not in wanted:
             continue
         fact = binary_exported(f)
         if fact.status is FactStatus.PRESENT and fact.value is True:
@@ -155,15 +149,11 @@ def drop_closure_respellings(
     declaration, not a fact the user needs to see.
     """
     change_list = list(changes)
-    if not any(
-        c.kind in RESPELLING_KINDS
-        and c.old_value is not None
-        and any(hint in c.old_value for hint in _MARKER_HINTS)
-        for c in change_list
-    ):
+    if not any(c.kind in RESPELLING_KINDS for c in change_list):
         return change_list
-    old_exported = exported_function_keys(old)
-    new_exported = exported_function_keys(new)
+    wanted = {c.symbol for c in change_list if c.kind in RESPELLING_KINDS and c.symbol}
+    old_exported = exported_function_keys(old, wanted)
+    new_exported = exported_function_keys(new, wanted)
     candidates = [
         c for c in change_list if is_closure_respelling(c, old_exported, new_exported)
     ]

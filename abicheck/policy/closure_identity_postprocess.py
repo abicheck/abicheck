@@ -43,6 +43,9 @@ def apply_closure_identity_postprocess(
     old: AbiSnapshot,
     new: AbiSnapshot,
 ) -> None:
-    kept[:] = drop_closure_respellings(kept, old, new)
-    verdict_redundant[:] = drop_closure_respellings(verdict_redundant, old, new)
+    survivors = {
+        id(c) for c in drop_closure_respellings([*kept, *verdict_redundant], old, new)
+    }
+    kept[:] = [c for c in kept if id(c) in survivors]
+    verdict_redundant[:] = [c for c in verdict_redundant if id(c) in survivors]
     demote_lambda_closure_unexported_findings(kept + verdict_redundant, old, new)

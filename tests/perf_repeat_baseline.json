@@ -231,7 +231,7 @@
     "abicheck/model/signature_normalization.py(_strip_cv_tokens_outside_nesting)": 35,
     "abicheck/model/signature_normalization.py(canonicalize_function_signature_param_type)": 563,
     "abicheck/model/snapshot.py(AbiSnapshot.canonical_ir)": 488,
-    "abicheck/model/snapshot.py(AbiSnapshot.declarations)": 4496,
+    "abicheck/model/snapshot.py(AbiSnapshot.declarations)": 4506,
     "abicheck/model/snapshot.py(AbiSnapshot.function_map)": 196,
     "abicheck/model/snapshot.py(AbiSnapshot.index)": 196,
     "abicheck/model/snapshot.py(AbiSnapshot.variable_map)": 28,
@@ -240,7 +240,7 @@
     "abicheck/model/stdlib_surface.py(stdlib_namespaces_excluded)": 256,
     "abicheck/model/surface_facts.py(_legacy_header_evidence)": 560,
     "abicheck/model/surface_facts.py(_tri)": 328,
-    "abicheck/model/surface_facts.py(binary_exported)": 6232,
+    "abicheck/model/surface_facts.py(binary_exported)": 6428,
     "abicheck/model/surface_facts.py(declaration_confirmed_absent)": 2682,
     "abicheck/model/surface_facts.py(declared_in_headers)": 6096,
     "abicheck/model/surface_facts.py(in_public_contract)": 7810,
@@ -294,5 +294,5 @@
   },
   "mode": "default",
   "n": 40,
-  "total": 244845
+  "total": 245051
 }

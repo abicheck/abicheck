@@ -32,7 +32,7 @@ from typing import Any
 
 import abicheck.name_classification as _name_classification
 
-from .execution_cache import request_key
+from .execution_cache import memoized, request_key
 from .execution_cache_scoped import SharedScopedCache
 
 # ── decl/type identity normalization (ADR-031/ADR-048) ─────────────────────
@@ -591,6 +591,7 @@ _CLOSURE_ORDINAL_RE = re.compile(
 )
 
 
+@memoized(maxsize=8192)
 def closure_discriminator_free_identity(identity: str) -> str:
     """*identity*, with every closure/anonymous-tag marker's discriminator
     removed, whether that discriminator is the source ``:<line>:<col>``
