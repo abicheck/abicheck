@@ -263,6 +263,15 @@ class TestValidateInputs:
             tmp_path,
         )
         assert result.returncode == 64
+        # The message is the user-facing reason. The baseline half of
+        # per-member header staging now exists (resolve-baseline's
+        # stage-member-snapshots), so the reason must name what is actually
+        # missing -- the candidate side's per-member header selection -- and
+        # must not repeat the retired claim that no historical header
+        # snapshot exists for a bundle's baseline.
+        assert "::error::" in result.stdout
+        assert "per-member header selection" in result.stdout
+        assert "no historical header snapshot" not in result.stdout
 
     def test_bundle_kind_allows_binary_depth(self, tmp_path: Path) -> None:
         result = _run(
