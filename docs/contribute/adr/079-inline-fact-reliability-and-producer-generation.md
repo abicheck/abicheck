@@ -1,7 +1,7 @@
 # ADR-079: Inline-Fact Reliability for `FUNC_BECAME_INLINE` / `FUNC_LOST_INLINE`
 
 **Date:** 2026-10-12
-**Status:** Implemented in PR #1570 (D1, D2, D3′, D4′, D6); D5 rejected. Not yet accepted by a maintainer. The branch was implemented at the user's direction before acceptance. No schema version bump was required.
+**Status:** Proposed — implemented in PR #1570 (D1, D2, D3′, D4′, D6); D5 rejected. Not yet accepted by a maintainer. The branch was implemented at the user's direction before acceptance. No schema version bump was required.
 **Governs:** the gap in [known-gaps/a-pre-fix-clang-backend-baseline-compares-against-a-post-fix.md](../known-gaps/a-pre-fix-clang-backend-baseline-compares-against-a-post-fix.md).
 **Relates to:** [062](062-project-snapshot-storage-v2.md) (storage version axes), [063](063-one-semantic-pipeline.md) (retirement of the `*_facts_reliable` booleans in favour of `stale_fact_families`).
 
