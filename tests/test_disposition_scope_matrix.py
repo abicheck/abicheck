@@ -1109,7 +1109,7 @@ def test_a_scoped_run_gates_on_the_scoped_set_not_on_result_changes() -> None:
     asserts that a severity-gating record is in `result.changes` — true for
     an ordinary run, because `gate_decision_for_result` scores exactly that
     list. A `--used-by`/`--required-symbol` run has a *different* gate:
-    `cli_helpers_compare._scoped_exit_code` computes the severity exit over
+    `workflows.consumer_scope_gate._scoped_exit_code` computes the severity exit over
     the consumer's own relevant set, which legitimately contains findings
     that never reach `result.changes` (a synthesized missing entrypoint, a PE
     ordinal retarget, a promoted out-of-surface finding).

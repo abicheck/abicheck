@@ -39,7 +39,7 @@ def pair_wide_cxx20_std_override(
     gcc_option_tokens: tuple[str, ...],
 ) -> tuple[str, ...] | None:
     """Pair-wide C++20 dialect decision, shared by every compare front-end
-    (P0 fix — CLI ``compare`` via ``cli_helpers_compare._pair_wide_dialect_override``,
+    (P0 fix — CLI ``compare`` via ``workflows.compare_configuration._pair_wide_dialect_override``,
     the Python-API/MCP ``run_compare_request`` path).
 
     ``dumper.py``'s C++20 ``requires``/``concept`` heuristic only ever sees ONE

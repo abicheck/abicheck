@@ -1209,7 +1209,7 @@ class TestCompareReleaseCommand:
 # was deleted; its full-mode (old/new pair) scoping behavior folded into
 # `compare --used-by APP` (repeatable), which floors the exit code/verdict on the
 # worst app-scoped result while keeping the full diff as informational context
-# (`cli_compare_helpers._apply_used_by_scoping`, confirmed by direct CLI experiment).
+# (`workflows.consumer_scope_gate._apply_used_by_scoping`, confirmed by direct CLI experiment).
 #
 # Dropped, no equivalent surface:
 # - `_validate_appcompat_args`/`_handle_list_required_symbols` -- functions are

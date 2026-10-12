@@ -27,7 +27,7 @@ directive lines, so this ``#error`` line alone was enough to make it believe
 the header needed C++20, silently forcing ``-std=gnu++20`` onto a project
 that only ever declared C++11 support. That is now fixed at two levels
 (``dumper_ast_config_cpp20._detect_cpp20_headers`` skips directive lines
-entirely; ``cli_helpers_compare._pair_wide_dialect_override`` resolves the
+entirely; ``workflows.compare_configuration._pair_wide_dialect_override`` resolves the
 dialect once over the union of both sides so old/new can never disagree) —
 both already have direct unit coverage. This test is the missing outer
 layer: a real compile + real ``abicheck dump``/``compare`` invocations
