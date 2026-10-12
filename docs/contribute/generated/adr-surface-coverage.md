@@ -8,8 +8,8 @@ Which public surface reaches each ADR, which use cases it serves, and whether a 
 |---|---|
 | surfaced | 45 |
 | partial | 13 |
-| gap | 4 |
-| internal | 19 |
+| gap | 3 |
+| internal | 20 |
 
 ## ADRs
 
@@ -95,7 +95,7 @@ Which public surface reaches each ADR, which use cases it serves, and whether a 
 | [ADR-076](../adr/076-adr-use-case-surface-traceability.md) | internal | — | — | Repository traceability contract and gate; not a product surface. |
 | [ADR-077](../adr/077-exposure-modes-and-change-sensitive-propagation.md) | gap | — | — | Proposed, not yet implemented; no exposure-mode or sensitivity surface exists. |
 | [ADR-078](../adr/078-informational-severity-category.md) | surfaced | UC-WF-compare | `cli: compare --severity-preset`<br>`report: compare_report.summary`<br>`report: compare_report.severity` | — |
-| [ADR-079](../adr/079-declared-header-order-independent-extraction.md) | gap | — | — | Proposed, not yet implemented; the aggregate driver TU still parses declared headers in declared order, and no option (per-header TU or dependency-ordered aggregate) has been chosen. |
+| [ADR-079](../adr/079-declared-header-order-independent-extraction.md) | internal | — | — | Dump-time proof of declared-header order and the stored header_canonical contract field; users reach it only through dump/compare, and the change is a schema v59 contract field, not a flag, report field or exit code. |
 
 ## Use cases by user task
 

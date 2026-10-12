@@ -40,7 +40,7 @@ from pathlib import Path
 import pytest
 
 from abicheck.comparability import check_contracts_comparable
-from abicheck.errors import ProfileMismatchError
+from abicheck.errors import ProfileMismatchError, SnapshotError
 from abicheck.extract.castxml_header_compat import castxml_aggregate_text
 from abicheck.extract.headers.ast_config import clang_aggregate_text
 
@@ -147,18 +147,24 @@ def test_declared_order_changes_the_extracted_declarations(tmp_path, backend):
     assert z_first != a_first
 
 
-@pytest.mark.integration
-@pytest.mark.parametrize("backend", ["castxml", "clang"])
-def test_reordering_existing_headers_still_refuses_on_real_dumps(tmp_path, backend):
-    from abicheck.dumper import dump
-
-    # Two self-contained headers, so both orders parse and the refusal is what
-    # is under test rather than an extraction failure.
-    so = _build_fixture(tmp_path)
-    inc = tmp_path / "inc"
+def _self_contained_pair(root: Path) -> tuple[Path, list[Path]]:
+    so = _build_fixture(root)
+    inc = root / "inc"
     (inc / "z_base.h").write_text("typedef struct Base { int x; } Base;\n")
     (inc / "a_user.h").write_text("int base_x(int v);\n")
-    headers = [inc / "z_base.h", inc / "a_user.h"]
+    return so, [inc / "z_base.h", inc / "a_user.h"]
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("backend", ["castxml", "clang"])
+def test_reordering_self_contained_headers_is_comparable_on_real_dumps(
+    tmp_path, backend
+):
+    """ADR-079: both orders prove the same canonical extraction, so a reorder of
+    an identical header set is comparable (the carve-out the gap asked for)."""
+    from abicheck.dumper import dump
+
+    so, headers = _self_contained_pair(tmp_path)
     old = dump(
         so, headers, version="1", compiler="cc", lang="C", header_backend=backend
     )
@@ -170,5 +176,116 @@ def test_reordering_existing_headers_still_refuses_on_real_dumps(tmp_path, backe
         lang="C",
         header_backend=backend,
     )
+    assert old.contract.header_canonical is not None
+    assert old.contract.header_canonical == new.contract.header_canonical
+    check_contracts_comparable(old, new)
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("backend", ["castxml", "clang"])
+def test_reordering_dependent_headers_still_refuses_on_real_dumps(tmp_path, backend):
+    """Negative control: the z-first order is unproven (its sorted parse fails),
+    so a reorder against it keeps refusing; the refusal is not lifted by sorting."""
+    from abicheck.dumper import dump
+
+    so = _build_fixture(tmp_path)
+    inc = tmp_path / "inc"
+    z_first = [inc / "z_base.h", inc / "a_user.h"]
+    old = dump(
+        so, z_first, version="1", compiler="cc", lang="C", header_backend=backend
+    )
+    assert old.contract.header_canonical is None
+    try:
+        new = dump(
+            so,
+            list(reversed(z_first)),
+            version="2",
+            compiler="cc",
+            lang="C",
+            header_backend=backend,
+        )
+    except SnapshotError:
+        # clang fails loudly on the a_user-first parse before any comparison.
+        assert backend == "clang"
+        return
     with pytest.raises(ProfileMismatchError, match="header_sequence"):
         check_contracts_comparable(old, new)
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("backend", ["castxml", "clang"])
+def test_adding_a_header_to_an_unsorted_declared_set_is_still_comparable(
+    tmp_path, backend
+):
+    """Growth is unchanged by the proof: a trailing append to an unsorted declared
+    set stays comparable under the existing header_sequence rule."""
+    from abicheck.dumper import dump
+
+    so, headers = _self_contained_pair(tmp_path)
+    (tmp_path / "inc" / "m_extra.h").write_text("int extra_fn(void);\n")
+    old = dump(
+        so, headers, version="1", compiler="cc", lang="C", header_backend=backend
+    )
+    new = dump(
+        so,
+        [*headers, tmp_path / "inc" / "m_extra.h"],
+        version="2",
+        compiler="cc",
+        lang="C",
+        header_backend=backend,
+    )
+    check_contracts_comparable(old, new)
+
+
+# ---------------------------------------------------------------------------
+# The witness's own invariants (ADR-079)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("names", list(itertools.permutations(["c.h", "a.h", "b.h"])))
+def test_canonical_order_is_sorted_by_path_for_every_declared_permutation(
+    tmp_path, names
+):
+    """Oracle: the expected order is the name-sorted list, not the helper's output."""
+    from abicheck.extract.header_order_witness import canonical_header_order
+
+    headers = _write_headers(tmp_path, list(names))
+    assert [h.name for h in canonical_header_order(headers)] == sorted(names)
+
+
+def test_a_proven_snapshot_round_trips_its_canonical_sequence(tmp_path):
+    """The proof is written with the snapshot and read back; absent means unproven."""
+    from abicheck.dumper import dump
+    from abicheck.serialization import snapshot_from_dict
+    from abicheck.storage.snapshot_encode import snapshot_to_dict
+
+    so, headers = _self_contained_pair(tmp_path)
+    snap = dump(so, list(reversed(headers)), version="1", compiler="cc", lang="C")
+    proven = snap.contract.header_canonical
+    assert proven is not None
+    loaded = snapshot_from_dict(snapshot_to_dict(snap))
+    assert loaded.contract.header_canonical == proven
+
+    raw = snapshot_to_dict(snap)
+    raw["contract"].pop("header_canonical", None)
+    assert snapshot_from_dict(raw).contract.header_canonical is None
+
+
+@pytest.mark.parametrize(
+    ("raw_value", "expected"),
+    [
+        (["a.h", "b.h"], ["a.h", "b.h"]),
+        ("a.h", None),
+        (["a.h", 1], None),
+        (None, None),
+    ],
+)
+def test_a_malformed_canonical_proof_loads_as_unproven(raw_value, expected):
+    """Only a list of identity strings counts as a proof; anything else is unproven."""
+    from abicheck.storage.snapshot_load_normalization import (
+        extraction_contract_from_dict,
+    )
+
+    contract = extraction_contract_from_dict({"header_canonical": raw_value})
+    assert contract is not None
+    assert contract.header_canonical == expected

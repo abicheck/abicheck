@@ -1,12 +1,12 @@
 # ADR-079: Declared Header Order in the Aggregate Driver Translation Unit
 
 **Date:** 2026-10-12
-**Status:** Proposed — not implemented. Amended 2026-10-12 to the witness design
-(option 2 below), which changes the stored extraction contract and the comparison
-gate. Acceptance is the maintainer's decision, so no `abicheck/**/*.py` change may
-land until it is Accepted.
-**Decision maker:** pending (maintainer to accept or reject the schema addition in
-"Consequences").
+**Status:** Accepted — implemented. Adds a dump-time witness (`extract/header_order_witness.py`,
+`header_order_proof`) and the optional stored field `ExtractionContract.header_canonical`
+(schema v59). A reorder of an identical header set is comparable only when both dumps
+carry the same proof; everything unproven keeps refusing. The declared order still governs
+extraction and every add/remove rule.
+**Decision maker:** Nikolay Petrov (repository maintainer), accepted in session 2026-10-12.
 
 ## Context
 

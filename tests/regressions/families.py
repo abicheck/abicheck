@@ -345,6 +345,7 @@ OTHER_REASONS: dict[str, str] = {
     "storage.third_party_contract_at_scale": "third-party codec contracts",
     "serialization.str_enum_downcast_via_generic_rewrite": "serialization codec",
     "policy.disposition_conservation": "policy disposition audit (ADR-067)",
+    "compare.order_independent_reorder_refused": "comparability gate header-order proof (ADR-079)",
 }
 
 FAMILY_OF: dict[str, str] = {}

@@ -1163,4 +1163,28 @@ EVIDENCE_BUG_CLASSES: tuple[BugClass, ...] = (
             ),
         ),
     ),
+    BugClass(
+        id="compare.order_independent_reorder_refused",
+        invariant=(
+            "Two dumps of the same header set, declared in different orders, "
+            "are comparable whenever each dump proved its declarations equal "
+            "the canonical (sorted) order's; the gate refuses only when a "
+            "side's order is unproven or the sets differ. Adding or removing "
+            "a header keeps its existing rule, and a reorder whose declarations "
+            "cannot be proven stays refused."
+        ),
+        fixed_by=(1573,),
+        seed_tests=("tests/test_driver_tu_declared_order.py",),
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "The witness compares extracted declarations only. A macro "
+                    "or pragma leak that changes no declaration is not visible "
+                    "to it, so a reorder across such a leak is accepted when it "
+                    "should not be. Recorded in ADR-079, not claimed as proven."
+                ),
+                reference="docs/contribute/adr/079-declared-header-order-independent-extraction.md",
+            ),
+        ),
+    ),
 )

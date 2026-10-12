@@ -205,7 +205,7 @@ Each entry's status line says what is still open. A PARTIAL entry's write-up als
 
 #### Declared-header order is still load-bearing because the driver TU is sequential
 
-**Status (re-verified 2026-10-12 at `b694ccc2f`): OPEN, decision needed.** The scope-confirmed header growth waiver landed (comparability.py:845,1298 reference _header_sequence_is_scope_confirmed_growth). Still open: the sequential aggregate driver TU itself, so reordering an existing header still refuses. Canonical sorting of the driver TU is measured unsound; the remaining options are in ADR-079.  
+**Status (2026-10-12): PARTIAL.** A reorder of a header set is now comparable when both dumps prove the canonical order (ADR-079). Still refused: an unproven declared order, and a macro/pragma leak that changes no declaration (not visible to the witness). The scope-confirmed header growth waiver landed (comparability.py:845,1298 reference _header_sequence_is_scope_confirmed_growth). Still open: the sequential aggregate driver TU itself, so reordering an existing header still refuses. Canonical sorting of the driver TU is measured unsound; the remaining options are in ADR-079.  
 `false-positive` — The scope-confirmed header-growth waiver landed, but the aggregate driver TU is still sequential, so reordering an existing header refuses the comparison. Sorting the driver TU is measured unsound (it breaks a valid declared order); removing the refusal alone reports a false BREAKING. [Full write-up](known-gaps/declared-header-order-is-still-load-bearing-because-the-driver.md)
 
 #### Export-loss ownership: inline-copy proxy and template-specialization owner remain open (see export-loss-ownership-root-cause.md)

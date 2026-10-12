@@ -128,6 +128,23 @@ def _platform_identity_confirmed(
     return all(_field_verified(field) for field in platform_candidate)
 
 
+def _canonical_orders_proven_equal(
+    old_contract: ExtractionContract, new_contract: ExtractionContract
+) -> bool:
+    """Whether both sides carry a dump-time proof of the same canonical order.
+
+    ``header_canonical`` is None unless the dump's witness proved it (ADR-079),
+    so an unproven side -- including every pre-v59 snapshot -- never matches.
+    """
+    old_canonical = old_contract.header_canonical
+    new_canonical = new_contract.header_canonical
+    return (
+        old_canonical is not None
+        and new_canonical is not None
+        and old_canonical == new_canonical
+    )
+
+
 def _unexplained_profile_fields(
     old: AbiSnapshot,
     new: AbiSnapshot,
@@ -255,6 +272,16 @@ def _unexplained_profile_fields(
         # own docstring: waived wherever an added header sorts and whichever
         # declared headers were removed, never for a reordered survivor.
         unexplained -= header_seq_candidate
+
+    # ADR-079 reorder carve-out: a header set declared in a different order is
+    # comparable when both dumps proved their declarations equal the canonical
+    # (sorted) order's. Equal proven canonical sequences mean both sides are the
+    # canonical extraction of the same header set, so the only difference is the
+    # order the user declared. Unproven on either side keeps the refusal.
+    if unexplained & _HEADER_SEQUENCE_FIELDS and _canonical_orders_proven_equal(
+        old_contract, new_contract
+    ):
+        unexplained -= _HEADER_SEQUENCE_FIELDS
 
     include_seq_candidate = unexplained & _INCLUDE_SEQUENCE_FIELDS
     if include_seq_candidate and include_sequence_is_scope_confirmed_evolution(
