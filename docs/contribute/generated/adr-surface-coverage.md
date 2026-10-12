@@ -7,8 +7,8 @@ Which public surface reaches each ADR, which use cases it serves, and whether a 
 | Disposition | ADRs |
 |---|---|
 | surfaced | 45 |
-| partial | 13 |
-| gap | 4 |
+| partial | 14 |
+| gap | 3 |
 | internal | 19 |
 
 ## ADRs
@@ -94,7 +94,7 @@ Which public surface reaches each ADR, which use cases it serves, and whether a 
 | [ADR-075](../adr/075-target-ownership-and-extraction-scope.md) | gap | — | — | Accepted, not yet implemented; no ownership/extraction-scope surface exists. |
 | [ADR-076](../adr/076-adr-use-case-surface-traceability.md) | internal | — | — | Repository traceability contract and gate; not a product surface. |
 | [ADR-077](../adr/077-exposure-modes-and-change-sensitive-propagation.md) | gap | — | — | Proposed, not yet implemented; no exposure-mode or sensitivity surface exists. |
-| [ADR-079](../adr/079-inline-fact-reliability-and-producer-generation.md) | gap | — | — | Proposed, design only; no inline-fact reliability family or persisted marker exists yet (the marker needs the SCHEMA_VERSION 59 bump in D4). |
+| [ADR-079](../adr/079-inline-fact-reliability-and-producer-generation.md) | partial | — | — | Implemented for the stale-load gate (inline family, detector decline, coverage via the assurance status). Not surfaced as a CLI or report option of its own. Conversion of Function.is_inline to a Fact[bool] is deferred (case (a) baseline). |
 | [ADR-078](../adr/078-informational-severity-category.md) | surfaced | UC-WF-compare | `cli: compare --severity-preset`<br>`report: compare_report.summary`<br>`report: compare_report.severity` | — |
 
 ## Use cases by user task

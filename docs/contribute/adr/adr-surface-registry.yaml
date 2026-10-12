@@ -648,10 +648,10 @@ adrs:
 
   - id: ADR-079
     file: 079-inline-fact-reliability-and-producer-generation.md
-    disposition: gap
+    disposition: partial
     use_cases: []
     surfaces: []
-    missing: Proposed, design only; no inline-fact reliability family or persisted marker exists yet (the marker needs the SCHEMA_VERSION 59 bump in D4).
+    missing: Implemented for the stale-load gate (inline family, detector decline, coverage via the assurance status). Not surfaced as a CLI or report option of its own. Conversion of Function.is_inline to a Fact[bool] is deferred (case (a) baseline).
 
   - id: ADR-078
     file: 078-informational-severity-category.md
