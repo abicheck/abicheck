@@ -128,7 +128,7 @@ def source_replay_extractor(compile: CompileContext | None, header_backend: str)
     macros and inline/template/constexpr bodies.
 
     A stated frontend is an explicit `compile.frontend`, a non-``auto``
-    *header_backend*, or ``ABICHECK_AST_FRONTEND``, resolved as
+    *header_backend*, or an ``ABICHECK_AST_FRONTEND`` L2 honors, resolved as
     :func:`effective_frontend` resolves it for L2. Only a bare ``auto``
     differs: L2's ``auto`` means castxml (the layout reference), which
     replays a translation unit's declarations but none of its macros, so an
@@ -138,7 +138,9 @@ def source_replay_extractor(compile: CompileContext | None, header_backend: str)
 
     if (
         requested_frontend_override(compile, header_backend).lower() == "auto"
-        and not os.environ.get("ABICHECK_AST_FRONTEND", "").strip()
+        # The only env values L2 honors; any other (`auto`, a typo) is unset.
+        and os.environ.get("ABICHECK_AST_FRONTEND", "").strip().lower()
+        not in ("castxml", "clang", "hybrid")
     ):
         return "clang"
     return effective_frontend(compile, header_backend)

@@ -33,14 +33,18 @@ from abicheck.service_compare_evidence import source_replay_extractor
 
 _COMPILE = (None, "auto", "AUTO", "castxml", "Clang", "hybrid")
 _BACKEND = ("auto", "castxml", "clang")
-_ENV = ("", "castxml", "clang")
+_ENV = ("", "castxml", "clang", "auto", "AUTO", "nonsense")
 
 
 def _oracle(compile_frontend: str | None, backend: str, env: str) -> str:
     """First stated frontend in precedence order, lowercased; else clang."""
-    for stated in (compile_frontend, backend, env):
+    for stated in (compile_frontend, backend):
         if stated and stated.lower() != "auto":
             return stated.lower()
+    # L2 honors only a concrete backend name in the env var; anything else
+    # (`auto`, a typo) leaves it unset.
+    if env.lower() in ("castxml", "clang", "hybrid"):
+        return env.lower()
     return "clang"
 
 
