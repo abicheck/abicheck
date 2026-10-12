@@ -178,7 +178,10 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
             "under the confirmed one."
         ),
         fixed_by=(1283,),
-        seed_tests=("tests/test_bundle.py",),
+        seed_tests=(
+            "tests/test_bundle.py",
+            "tests/test_bundle_self_compare_invariant.py",
+        ),
         known_gaps=(
             KnownGap(
                 description=(

@@ -192,6 +192,62 @@ def _confirmed_provider_symbols(
     return confirmed
 
 
+def _byte_identical_members(
+    old: BundleSnapshot, per_library_results: Iterable[DiffResult]
+) -> set[str]:
+    """Bundle-canonical keys of members whose old and new files are
+    byte-identical (``LibraryMetadata.sha256`` recorded on both sides of
+    that member's own comparison and equal).
+
+    A byte-identical provider cannot have changed the signature of any
+    symbol it exports: there is no old/new difference for evidence to
+    confirm or deny. Without this, a self-compare (``compare(X, X)``) of a
+    binary-only multi-library package reported one "unverified" finding per
+    intra-package call edge -- a static property of the evidence level of
+    one side, not a change between sides.
+    """
+    basename_to_key = _basename_to_bundle_key(old)
+    identical: set[str] = set()
+    for result in per_library_results:
+        old_meta, new_meta = result.old_metadata, result.new_metadata
+        if old_meta is None or new_meta is None:
+            continue
+        if old_meta.sha256 and old_meta.sha256 == new_meta.sha256:
+            basename = Path(result.library).name
+            identical.add(basename_to_key.get(basename, basename))
+    return identical
+
+
+def _provider_symbol_code_identical(
+    old: BundleSnapshot, new: BundleSnapshot, provider_entry: ProviderEntry, symbol: str
+) -> bool:
+    """Does the provider's definition of *symbol* (at *provider_entry*'s
+    exact version) carry the same, non-empty ``ElfSymbol.code_hash`` on
+    both sides?
+
+    Equal code hashes mean the function's machine code is byte-identical
+    (``extract/elf_code_hash.py``), so how it receives arguments and
+    returns its value is unchanged -- the binary-level signature agrees.
+    Unequal or missing hashes are no evidence either way (the unverified
+    finding still fires). Works for stored snapshots too, which carry no
+    file ``sha256``.
+    """
+
+    def _hash(snapshot: BundleSnapshot) -> str:
+        meta = snapshot.metadata.get(provider_entry.library)
+        if meta is None:
+            return ""
+        hashes = {
+            sym.code_hash
+            for sym in meta.symbols
+            if sym.name == symbol and sym.version == provider_entry.version
+        }
+        return next(iter(hashes)) if len(hashes) == 1 else ""
+
+    old_hash = _hash(old)
+    return bool(old_hash) and old_hash == _hash(new)
+
+
 def _consumer_matches_provider(
     consumer: ConsumerEntry, provider_entry: ProviderEntry, new: BundleSnapshot
 ) -> bool:
@@ -387,6 +443,7 @@ def find_unverified_signature_findings(
     """
     results = list(per_library_results)
     confirmed = _confirmed_provider_symbols(old, results)
+    identical_members = _byte_identical_members(old, results)
     findings: list[BundleFinding] = []
     seen: set[tuple[str, str, str]] = set()
     reachable_cache: dict[str, set[str]] = {}
@@ -492,6 +549,14 @@ def find_unverified_signature_findings(
                 old_sufficient = _symbol_evidence_sufficient(symbol, old_snap)
                 new_sufficient = _symbol_evidence_sufficient(symbol, new_snap)
             if old_sufficient and new_sufficient:
+                continue
+            if provider_lib in identical_members or _provider_symbol_code_identical(
+                old, new, provider_entry, symbol
+            ):
+                # The same state on both sides is not a change: the
+                # provider's code for this symbol is byte-identical, so its
+                # binary-level signature cannot have moved -- however thin
+                # the type evidence is on either side.
                 continue
 
             if not old_sufficient and not new_sufficient:
