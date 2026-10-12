@@ -15,7 +15,7 @@
 """Extra CLI coverage tests for private helper functions.
 
 Covers: _expand_header_inputs, _setup_verbosity, _safe_write_output,
-_stamp_provenance, _sniff_text_format, _detect_binary_format,
+stamp_provenance, _sniff_text_format, _detect_binary_format,
 and _write_snapshot_output.
 """
 
@@ -37,9 +37,9 @@ from abicheck.cli_resolve import (
 from abicheck.frontends.cli.runtime import (
     _safe_write_output,
     _setup_verbosity,
-    _stamp_provenance,
 )
 from abicheck.model import AbiSnapshot
+from abicheck.workflows.provenance import stamp_provenance
 
 # ---------------------------------------------------------------------------
 # _expand_header_inputs
@@ -221,12 +221,12 @@ class TestSafeWriteOutput:
 
 
 # ---------------------------------------------------------------------------
-# _stamp_provenance
+# stamp_provenance
 # ---------------------------------------------------------------------------
 
 
 class TestStampProvenance:
-    """Tests for _stamp_provenance."""
+    """Tests for workflows.provenance.stamp_provenance."""
 
     def test_with_git(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """When git is available, git_commit is set."""
@@ -238,7 +238,7 @@ class TestStampProvenance:
             "subprocess.run",
             lambda *_a, **_kw: fake_result,
         )
-        _stamp_provenance(snap, git_tag="v1.0", build_id="42", no_git=False)
+        stamp_provenance(snap, git_tag="v1.0", build_id="42", no_git=False)
         assert snap.git_commit == "abc123"
         assert snap.git_tag == "v1.0"
         assert snap.build_id == "42"
@@ -247,7 +247,7 @@ class TestStampProvenance:
     def test_no_git_flag(self) -> None:
         """When no_git=True, git_commit remains None."""
         snap = AbiSnapshot(library="lib.so", version="1.0")
-        _stamp_provenance(snap, git_tag=None, build_id=None, no_git=True)
+        stamp_provenance(snap, git_tag=None, build_id=None, no_git=True)
         assert snap.git_commit is None
         assert snap.created_at is not None
 
@@ -259,7 +259,7 @@ class TestStampProvenance:
             raise FileNotFoundError("git not found")
 
         monkeypatch.setattr("subprocess.run", _raise_fnf)
-        _stamp_provenance(snap, git_tag=None, build_id=None, no_git=False)
+        stamp_provenance(snap, git_tag=None, build_id=None, no_git=False)
         assert snap.git_commit is None
 
 

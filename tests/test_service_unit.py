@@ -3692,7 +3692,7 @@ class TestRenderOutput:
         unchanged by this -- it passed ``True`` before and gets ``True`` now,
         verified byte-for-byte across all seven ``--format`` values against
         the pre-change revision."""
-        from abicheck.frontends.cli.runtime import _render_output
+        from abicheck.frontends.cli.compare_report import _render_output
 
         default_markdown = render_output("markdown", diff_result, snap)
         explicit_true = render_output(

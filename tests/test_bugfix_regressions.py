@@ -214,10 +214,10 @@ class TestBug2ParamFormat:
 
 
 class TestBug3MetadataCollection:
-    """_collect_metadata must return None for JSON/Perl snapshots."""
+    """collect_metadata must return None for JSON/Perl snapshots."""
 
     def test_binary_file_returns_metadata(self):
-        from abicheck.frontends.cli.runtime import _collect_metadata
+        from abicheck.workflows.input_resolution import collect_metadata
 
         with tempfile.NamedTemporaryFile(suffix=".so", delete=False) as f:
             content = b"fake binary content"
@@ -225,7 +225,7 @@ class TestBug3MetadataCollection:
             f.flush()
             path = Path(f.name)
         try:
-            meta = _collect_metadata(path)
+            meta = collect_metadata(path)
             assert meta is not None
             assert meta.sha256 == hashlib.sha256(content).hexdigest()
             assert meta.size_bytes == len(content)
@@ -233,13 +233,13 @@ class TestBug3MetadataCollection:
             path.unlink()
 
     def test_json_snapshot_returns_none(self):
-        from abicheck.frontends.cli.runtime import _collect_metadata
+        from abicheck.workflows.input_resolution import collect_metadata
 
         with tempfile.NamedTemporaryFile(suffix=".json", mode="w", delete=False) as f:
             json.dump({"library": "lib.so", "version": "1.0"}, f)
             path = Path(f.name)
         try:
-            meta = _collect_metadata(path)
+            meta = collect_metadata(path)
             assert meta is None
         finally:
             path.unlink()

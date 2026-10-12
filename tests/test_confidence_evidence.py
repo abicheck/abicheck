@@ -1000,7 +1000,7 @@ class TestNoteIfSameBinaryCompared:
         `old_input`/`new_input` to a temporary embedded-snapshot `.abi.json`
         path *before* `_report_compare_result` calls `_finalize_compare_
         result` -- which must still hash the two real, original binaries,
-        not the rewritten JSON snapshot path `_collect_metadata` always
+        not the rewritten JSON snapshot path `collect_metadata` always
         reads as non-hashable, or the warning silently vanishes for every
         deep-compare-folded-into-compare run even when both real binaries
         are byte-identical. Exercised through the real `compare` CLI entry
@@ -1063,8 +1063,8 @@ class TestNoteIfSameBinaryCompared:
         assert "byte-identical" in result.stdout, result.output
 
     def test_native_compare_cli_excludes_symvers_manifests(self, tmp_path):
-        """Codex review, fresh evidence: `_finalize_compare_result`'s own
-        `_collect_metadata` (a separate, frontends-layer copy of
+        """Codex review, fresh evidence: `_finalize_compare_result`'s
+        metadata step (then a separate, frontends-layer copy of
         `service.collect_metadata`) still excluded only JSON/Perl -- two
         identical `Module.symvers` manifests, not binaries at all, still
         produced a false "old and new binaries are byte-identical" claim
@@ -1086,7 +1086,7 @@ class TestNoteIfSameBinaryCompared:
         assert "byte-identical" not in result.output, result.output
 
     def test_finalize_compare_result_does_not_hash_a_json_snapshot_path(self, tmp_path):
-        """Sanity check for the fix above: confirms `_collect_metadata`
+        """Sanity check for the fix above: confirms `collect_metadata`
         really does treat a `.abi.json` snapshot path as non-hashable (the
         precondition that makes the bug this fix closes possible), so a
         caller that mistakenly passed the post-embed operand here would see

@@ -308,12 +308,11 @@ class TestWriteLegacySnapshotPackageRefusesNonemptyRoot:
 
 
 class TestCollectMetadataSkipsDirectories:
-    """`workflows.input_resolution.collect_metadata` is the typed-API
-    counterpart of `frontends/cli/runtime._collect_metadata` -- both must
-    treat a `ProjectSnapshot` package directory as non-hashable rather than
-    calling `Path.read_bytes()` on it (Codex review: the CLI path already
-    had this guard, `service.run_compare_request`'s typed-API path did
-    not)."""
+    """`workflows.input_resolution.collect_metadata` -- the one owner both
+    the CLI and `service.run_compare_request`'s typed-API path hash operands
+    through -- must treat a `ProjectSnapshot` package directory as
+    non-hashable rather than calling `Path.read_bytes()` on it (Codex review:
+    the CLI path once had this guard and the typed-API path did not)."""
 
     def test_returns_none_for_a_project_snapshot_directory(
         self, tmp_path: Path

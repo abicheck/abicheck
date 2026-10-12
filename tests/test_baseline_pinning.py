@@ -97,35 +97,35 @@ class TestSchemaV4:
 
 
 # ---------------------------------------------------------------------------
-# Provenance stamping (_stamp_provenance)
+# Provenance stamping (stamp_provenance)
 # ---------------------------------------------------------------------------
 
 
 class TestStampProvenance:
     def test_stamp_sets_created_at(self):
-        from abicheck.frontends.cli.runtime import _stamp_provenance
+        from abicheck.workflows.provenance import stamp_provenance
 
         snap = _sample_snap()
-        _stamp_provenance(snap, git_tag=None, build_id=None, no_git=True)
+        stamp_provenance(snap, git_tag=None, build_id=None, no_git=True)
         assert snap.created_at is not None
         # Verify ISO 8601 format
         assert "T" in snap.created_at
 
     def test_stamp_sets_git_tag_and_build_id(self):
-        from abicheck.frontends.cli.runtime import _stamp_provenance
+        from abicheck.workflows.provenance import stamp_provenance
 
         snap = _sample_snap()
-        _stamp_provenance(snap, git_tag="v1.0", build_id="run-99", no_git=True)
+        stamp_provenance(snap, git_tag="v1.0", build_id="run-99", no_git=True)
         assert snap.git_tag == "v1.0"
         assert snap.build_id == "run-99"
 
     def test_stamp_auto_detects_git_commit(self):
-        from abicheck.frontends.cli.runtime import _stamp_provenance
+        from abicheck.workflows.provenance import stamp_provenance
 
         snap = _sample_snap()
         fake_result = mock.Mock(returncode=0, stdout="abc1234\n", stderr="")
         with mock.patch("subprocess.run", return_value=fake_result) as m:
-            _stamp_provenance(snap, git_tag=None, build_id=None, no_git=False)
+            stamp_provenance(snap, git_tag=None, build_id=None, no_git=False)
         assert snap.git_commit == "abc1234"
         m.assert_called_once_with(
             ["git", "rev-parse", "HEAD"],
@@ -136,29 +136,29 @@ class TestStampProvenance:
         )
 
     def test_stamp_no_git_skips_detection(self):
-        from abicheck.frontends.cli.runtime import _stamp_provenance
+        from abicheck.workflows.provenance import stamp_provenance
 
         snap = _sample_snap()
         with mock.patch("subprocess.run") as m:
-            _stamp_provenance(snap, git_tag=None, build_id=None, no_git=True)
+            stamp_provenance(snap, git_tag=None, build_id=None, no_git=True)
         m.assert_not_called()
         assert snap.git_commit is None
 
     def test_stamp_git_not_found_graceful(self):
-        from abicheck.frontends.cli.runtime import _stamp_provenance
+        from abicheck.workflows.provenance import stamp_provenance
 
         snap = _sample_snap()
         with mock.patch("subprocess.run", side_effect=FileNotFoundError):
-            _stamp_provenance(snap, git_tag=None, build_id=None, no_git=False)
+            stamp_provenance(snap, git_tag=None, build_id=None, no_git=False)
         assert snap.git_commit is None
 
     def test_stamp_git_timeout_graceful(self):
-        from abicheck.frontends.cli.runtime import _stamp_provenance
+        from abicheck.workflows.provenance import stamp_provenance
 
         snap = _sample_snap()
         with mock.patch(
             "subprocess.run",
             side_effect=subprocess.TimeoutExpired(cmd="git", timeout=5),
         ):
-            _stamp_provenance(snap, git_tag=None, build_id=None, no_git=False)
+            stamp_provenance(snap, git_tag=None, build_id=None, no_git=False)
         assert snap.git_commit is None

@@ -27,7 +27,62 @@ if TYPE_CHECKING:
     from ..model import AbiSnapshot
     from .resolved_execution_context import ResolvedExecutionContext
 
-__all__ = ["finalize_classified_pair"]
+__all__ = ["attach_operand_identity", "finalize_classified_pair"]
+
+
+def attach_operand_identity(
+    result: DiffResult,
+    old_path: Path,
+    new_path: Path,
+    *,
+    old_snapshot: AbiSnapshot | None = None,
+    new_snapshot: AbiSnapshot | None = None,
+) -> None:
+    """Stamp ``old_metadata``/``new_metadata`` and the same-binary note.
+
+    The one owner both the typed API (:func:`finalize_classified_pair`) and
+    the native CLI's compare finalization call, so the two cannot drift on
+    what makes two operands "the same binary".
+
+    *old_path*/*new_path* must be the *original* operand paths -- from
+    before any rewrite to a temporary embedded-snapshot ``.abi.json`` --
+    since :func:`collect_metadata` deliberately returns ``None`` for a
+    JSON/text path. Each is hashed through the full GNU ld linker-script
+    chain to its final resolved target, so a (possibly multi-hop) script vs.
+    its target DSO given as the other side still reads as byte-identical; a
+    text snapshot/manifest can coincidentally match the INPUT()/GROUP()
+    probe, so linker-script resolution is skipped for it.
+
+    When neither side yields real metadata (a snapshot-vs-snapshot compare)
+    and both snapshots are given, the note falls back to a snapshot-content
+    digest. The fallback requires *both* sides missing metadata (`and`, not
+    `or`): a mixed live-binary-vs-snapshot compare has one side absent by
+    design.
+    """
+    from ..binary_utils import resolve_linker_script_chain
+
+    def _hashable_path(p: Path) -> Path:
+        return (
+            p
+            if sniff_text_format(p) in ("json", "symvers")
+            else resolve_linker_script_chain(p)
+        )
+
+    result.old_metadata = collect_metadata(_hashable_path(old_path))
+    result.new_metadata = collect_metadata(_hashable_path(new_path))
+    old_digest = new_digest = None
+    if (
+        result.old_metadata is None
+        and result.new_metadata is None
+        and old_snapshot is not None
+        and new_snapshot is not None
+    ):
+        from .gate import snapshot_identity_digests
+
+        old_digest, new_digest = snapshot_identity_digests(old_snapshot, new_snapshot)
+    note_if_same_binary_compared(
+        result, old_snapshot_digest=old_digest, new_snapshot_digest=new_digest
+    )
 
 
 def finalize_classified_pair(
@@ -46,41 +101,12 @@ def finalize_classified_pair(
     *pack_application* is the request's selected ``pack_paths`` contribution
     (``RequestPolicyInputs.pack_application``): a gate pack's severity levels
     fold into the gate here, as the native CLI folds them into its own."""
-    # Hash through the full GNU ld linker-script chain to its final resolved
-    # target -- resolve_side_snapshot() already followed the identical chain
-    # to produce `old`/`new` above -- so a (possibly multi-hop) script vs.
-    # its target DSO given as the other `CompareRequest` side still reads as
-    # byte-identical (mirrors the same fix on the retired
-    # `cli_scan_baseline._run_baseline_compare`).
-    from ..binary_utils import resolve_linker_script_chain
-
-    # A text snapshot/manifest can coincidentally match the INPUT()/GROUP()
-    # probe -- skip linker-script resolution for it.
-    def _hashable_path(p: Path) -> Path:
-        return (
-            p
-            if sniff_text_format(p) in ("json", "symvers")
-            else resolve_linker_script_chain(p)
-        )
-
-    result.old_metadata = collect_metadata(
-        _hashable_path(required_path(request.old, "old"))
-    )
-    result.new_metadata = collect_metadata(
-        _hashable_path(required_path(request.new, "new"))
-    )
-    # Item 4 fix: collect_metadata() is a no-op for a JSON/text snapshot
-    # path, so a snapshot-input compare left note_if_same_binary_compared
-    # unable to fire on content-identical snapshots. Digest fallback below
-    # requires *both* sides missing metadata (`and`, not `or`): a mixed
-    # live-binary-vs-snapshot compare has one side absent by design.
-    old_digest = new_digest = None
-    if result.old_metadata is None and result.new_metadata is None:
-        from .gate import snapshot_identity_digests
-
-        old_digest, new_digest = snapshot_identity_digests(old, new)
-    note_if_same_binary_compared(
-        result, old_snapshot_digest=old_digest, new_snapshot_digest=new_digest
+    attach_operand_identity(
+        result,
+        required_path(request.old, "old"),
+        required_path(request.new, "new"),
+        old_snapshot=old,
+        new_snapshot=new,
     )
 
     # P0.4 follow-up (P2 review, discussion_r3787839902): stamps

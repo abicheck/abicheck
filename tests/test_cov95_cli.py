@@ -3368,31 +3368,6 @@ class TestLinkerScriptKeywordSkip:
         assert resolved is None
 
 
-# ── cli.py: _resolve_debug_artifact ────────────────────────────────────────
-
-
-class TestResolveDebugArtifact:
-    def test_delegates_to_resolver(self, tmp_path, monkeypatch) -> None:
-        from types import SimpleNamespace
-
-        import abicheck.frontends.cli.runtime as cli_mod
-
-        binary = tmp_path / "lib.so"
-        binary.write_bytes(b"\x7fELF" + b"\x00" * 50)
-        sentinel = SimpleNamespace(source="x.debug")
-        monkeypatch.setattr(
-            "abicheck.workflows.extraction.resolve_debug_info",
-            lambda *a, **k: sentinel,
-        )
-        out = cli_mod._resolve_debug_artifact(
-            binary,
-            (tmp_path,),
-            False,
-            None,
-        )
-        assert out is sentinel
-
-
 # ── cli.py: _log_debug_resolution drives both sides when requested ────────────
 
 
