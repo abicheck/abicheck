@@ -44,6 +44,7 @@ or a CLI flag directly is in the wrong layer.
   `SeverityConfig`, `SeverityLevel`, ...).
 - `exit_decision.py` — `ExitDecision`/`ExitReason`, the orthogonal-axis
   exit-code fold shared by `compare`/`scan`.
+- `finding_disposition/` — what happens to a finding after diff (ADR-067 record-before-disposing): `dispose_findings` runs the default step order with an always-present ledger; `dispose_by_suppression` is the one suppression primitive.
 - `release_outcome.py` — the one release verdict ordering and fold
   (`fold_release_outcome` -> `ReleaseOutcome`, `worse_release_verdict`,
   the removed-member floor, the derived compatibility/consumer ranks).
