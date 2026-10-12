@@ -223,6 +223,7 @@ _F2 = (
 _F3 = (
     "config.location_dependent_fingerprint",
     "extract.aggregate_layout_header_attribution",
+    "identity.edge_matched_on_coarse_key",
     "identity.environment_taint",
     "identity.name_and_referent_compared_as_one",
     "identity.pe_x86_c_decoration_alias",
