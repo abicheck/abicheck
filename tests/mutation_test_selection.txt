@@ -193,6 +193,7 @@ tests/test_compare_release_lockstep_soname.py
 tests/test_compare_request_configuration_parity.py
 tests/test_compare_request_probe_matrix.py
 tests/test_compare_request_suppression_strictness.py
+tests/test_compare_settings_cli_translation.py
 tests/test_compare_surface_graph.py
 tests/test_compare_workloads_valid.py
 tests/test_comparison_memo.py
@@ -596,6 +597,7 @@ tests/test_schema_compat.py
 tests/test_section_codec_freeze_fast_paths.py
 tests/test_selectors.py
 tests/test_selectors_namespace_glob.py
+tests/test_semantic_fact_folds.py
 tests/test_semantic_ir_legacy_adapter.py
 tests/test_semantic_ir_projection_not_persisted.py
 tests/test_semantic_ir_projection_reads_declarations.py
@@ -634,6 +636,7 @@ tests/test_source_extractors.py
 tests/test_source_extractors_clang.py
 tests/test_source_extractors_clang_concepts.py
 tests/test_source_graph.py
+tests/test_source_graph_diff_semantic_coverage.py
 tests/test_source_graph_directory_taint.py
 tests/test_source_graph_findings_impact.py
 tests/test_source_graph_identity_scheme.py
@@ -698,6 +701,7 @@ tests/test_typedef_version_sentinel.py
 tests/test_typefield_case_a_facts.py
 tests/test_undeclared_export_additions.py
 tests/test_undocumented_export_surface_scope.py
+tests/test_unversioned_exported_symbol.py
 tests/test_use_case_impact.py
 tests/test_use_case_per_finding.py
 tests/test_use_cases.py

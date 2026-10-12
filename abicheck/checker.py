@@ -49,17 +49,6 @@ from .detector_registry import registry as _detector_registry
 from .diff_elf_layout import (  # noqa: F401 — triggers detector registration
     _diff_elf_layout,
 )
-
-# isort: split
-# Registration order is detector priority order (cross-detector dedup keeps
-# the first finding), so `diff_symbols`' detectors must register here, after
-# `diff_elf_layout`'s and before `diff_kabi`'s -- where the former
-# `diff_filtering` re-export import used to pull them in.
-from .diff_symbols import (  # noqa: F401 — triggers detector registration
-    _public_functions,
-)
-
-# isort: split
 from .diff_kabi import (  # noqa: F401 — triggers detector registration
     _diff_kabi,
 )
@@ -94,6 +83,9 @@ from .diff_stdlib_impl import (  # noqa: F401 — triggers detector registration
     _diff_stdlib_implementation,
 )
 from .diff_sycl import _diff_sycl  # noqa: F401 — triggers detector registration
+from .diff_symbols import (  # noqa: F401 — triggers detector registration
+    _public_functions,
+)
 from .diff_time64 import (  # noqa: F401 — triggers detector registration
     _diff_time64_abi,
 )
