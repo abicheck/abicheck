@@ -190,6 +190,10 @@ def test_entity_id_constructors_keep_similar_shapes_distinct() -> None:
     assert cat.entity_id_collisions() == []
 
 
+def test_graph_edges_keep_role_distinct_relations_distinct() -> None:
+    assert cat.edge_role_collisions() == []
+
+
 # ---------------------------------------------------------------------------
 # Snapshot level (default lane): load path + compare
 # ---------------------------------------------------------------------------

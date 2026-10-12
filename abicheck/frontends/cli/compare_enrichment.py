@@ -114,35 +114,9 @@ def resolve_compare_enrichment_inputs(
     return CompareEnrichmentInputs(seed.paths, seed.source, floor)
 
 
-def report_abi3_evidence_contract_error(result: Any, failure: str | None) -> None:
-    """Stamp ADR-064's exit-7 axis for a failed ``--abi3`` precondition and
-    say so on stderr (so the message survives ``-o json=...`` on stdout)."""
-    from ...workflows.abi3_audit import record_abi3_evidence_contract_error
-
-    record_abi3_evidence_contract_error(result, failure)
+def echo_abi3_evidence_contract_error(failure: str | None) -> None:
+    """Say on stderr that ``--abi3``'s precondition failed (so the message
+    survives ``-o json=...`` on stdout). The shared classification already
+    recorded ADR-064's exit-7 axis on the result."""
     if failure is not None:
         click.echo(f"error: {failure}", err=True)
-
-
-def report_depth_evidence_contract_error(
-    result: Any,
-    depth: str | None,
-    old: Any,
-    new: Any,
-    *,
-    old_is_live: bool,
-    new_is_live: bool,
-) -> None:
-    """Stamp ADR-064's exit-7 axis for an unsatisfied ``--depth build``/``--depth
-    source`` pin (ADR-068 §3 #28). Same shape as
-    :func:`report_abi3_evidence_contract_error` just above -- a thin
-    ``frontends``-legal bind of the ``workflows`` re-export of the
-    ``policy``-layer check (ADR-061 dependency direction:
-    ``frontends -> workflows``, never ``frontends -> policy`` directly)."""
-    from ...workflows.depth_evidence_contract import (
-        record_depth_evidence_contract_error,
-    )
-
-    record_depth_evidence_contract_error(
-        result, depth, old, new, old_is_live=old_is_live, new_is_live=new_is_live
-    )

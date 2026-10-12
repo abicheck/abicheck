@@ -171,7 +171,8 @@
         "abicheck/tu_merge.py",
         "abicheck/tu_merge_provenance.py",
         "abicheck/type_metadata.py",
-        "abicheck/dumper_contract.py"
+        "abicheck/dumper_contract.py",
+        "abicheck/buildsource/header_graph_ast_projection.py"
       ]
     },
     "compare": {

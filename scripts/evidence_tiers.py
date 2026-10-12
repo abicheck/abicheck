@@ -455,6 +455,8 @@ EVIDENCE_TIER_BY_KIND: dict[str, str] = {
     # reaching an internal decl, a new inter-target dependency, or an exported
     # symbol's owning source moving are all derived from the L5 graph.
     "public_api_internal_dependency_added": "L5",
+    "public_dependency_role_changed": "L5",
+    "public_dependency_role_unknown": "L5",
     "target_dependency_added": "L5",
     "exported_symbol_source_owner_changed": "L5",
     "declaration_renamed": "L5",

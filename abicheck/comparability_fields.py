@@ -253,7 +253,7 @@ def _header_identities(
     root narrower than the scope side's, so the SAME physical file gets two
     different identity strings across the two fields (e.g. scope
     ``"foo/c.h"`` vs. sequence ``"c.h"``) — and the header/include-sequence
-    carve-outs' specific-correspondence check (``_scope_newly_added_headers``)
+    carve-outs' specific-correspondence check (``scope_header_delta``)
     compares these by exact string equality, so a genuinely safe, purely
     additive header change spuriously hard-fails with ``ProfileMismatchError``
     the moment any ``public_header_paths`` entry reaches outside that

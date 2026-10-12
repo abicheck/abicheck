@@ -423,8 +423,9 @@ def scope_diff_to_consumer_facts(
         diff, overlay_ledger, breaking_for_app, policy=policy, policy_file=policy_file
     )
     # ADR-067: the ledger is *not* closed here. This runs once per `--used-by`
-    # consumer and `apply_scope` only ever demotes, so closing per consumer
-    # would intersect the consumers' relevant sets instead of unioning them.
+    # consumer, and under a scoped gate (`scope_decides_exit=True`)
+    # `apply_scope` only ever demotes, so closing per consumer would
+    # intersect the consumers' relevant sets instead of unioning them.
     # The scoped gate's orchestrator (`cli_helpers_compare.
     # _apply_used_by_scoping`, or `check_appcompat` below) makes the single
     # `close_consumer_scope` call.

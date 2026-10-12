@@ -57,13 +57,9 @@ from abicheck.comparability import (
     check_contracts_comparable,
     compute_extraction_contract,
 )
-from abicheck.comparability_sequences import (
-    _header_sequence_is_additive_reorder_free,
-    _header_sequence_is_interior_insertion,
-    _header_sequence_is_scope_confirmed_growth,
-)
 from abicheck.errors import ProfileMismatchError
 from abicheck.model import AbiSnapshot
+from tests._comparability_gate_helpers import seq_growth
 
 _OLD_HEADERS = ("data.h", "log.h", "version.h")
 
@@ -113,11 +109,6 @@ def test_middle_sorting_public_header_addition_is_fully_comparable(tmp_path):
         "log.h",
         "version.h",
     ]
-    assert not _header_sequence_is_additive_reorder_free(
-        old.contract.profile_fields["header_sequence"],
-        new.contract.profile_fields["header_sequence"],
-        {"json.h"},
-    )
 
     assert check_contracts_comparable(old, new) is None
 
@@ -211,7 +202,7 @@ def test_reordering_an_existing_header_still_refuses(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Primitive-level property tests for _header_sequence_is_interior_insertion
+# Primitive-level property tests for the header_sequence waiver
 # (AGENTS.md "Primitive-level property tests"): the contract as invariants,
 # decoupled from any one caller, with an oracle that is not the
 # implementation's own formula.
@@ -232,138 +223,13 @@ def _is_order_preserving_supersequence(old: list[str], new: list[str]) -> bool:
     return i == len(old)
 
 
-class TestInteriorInsertionProperties:
-    _BASE = ["a.h", "b.h", "c.h", "d.h"]
-
-    def test_every_single_insertion_position_except_trailing_is_accepted(self):
-        """Exhaustive over the small domain: inserting one confirmed-new entry
-        at every index. Every position but the last is an interior insertion;
-        the last is the trailing append the other waiver owns."""
-        disagreeing = []
-        for pos in range(len(self._BASE) + 1):
-            new = [*self._BASE[:pos], "new.h", *self._BASE[pos:]]
-            got = _header_sequence_is_interior_insertion(
-                _seq(self._BASE), _seq(new), {"new.h"}
-            )
-            expected = pos != len(self._BASE)
-            if got != expected:
-                disagreeing.append((pos, got, expected))
-        assert not disagreeing
-
-    def test_accepts_every_multi_insertion_placement(self):
-        """Two new entries, every distinct placement -- the result must depend
-        only on whether existing entries kept their order, never on how many
-        entries were added or how they interleave."""
-        bad = []
-        for positions in itertools.combinations_with_replacement(
-            range(len(self._BASE) + 1), 2
-        ):
-            new = list(self._BASE)
-            for offset, pos in enumerate(sorted(positions)):
-                new.insert(pos + offset, f"n{offset}.h")
-            if new[: len(self._BASE)] == self._BASE:
-                continue  # trailing append: the other waiver's shape
-            if not _header_sequence_is_interior_insertion(
-                _seq(self._BASE), _seq(new), {"n0.h", "n1.h"}
-            ):
-                bad.append(new)
-        assert not bad
-
-    def test_rejects_every_reordering_permutation(self):
-        """Adversarial half: no permutation that moves an existing entry is
-        ever accepted, with or without an added header."""
-        accepted = []
-        for perm in itertools.permutations(self._BASE):
-            if list(perm) == self._BASE:
-                continue
-            for extra in ([], ["new.h"]):
-                for pos in range(len(perm) + 1):
-                    new = [*list(perm)[:pos], *extra, *list(perm)[pos:]]
-                    if _header_sequence_is_interior_insertion(
-                        _seq(self._BASE), _seq(new), {"new.h"}
-                    ):
-                        accepted.append(new)
-        assert not accepted
-
-    def test_agrees_with_the_independent_subsequence_oracle(self):
-        """Over every generated pair, acceptance implies the oracle's own
-        order-preserving-supersequence verdict. Stated as an implication
-        rather than equality because the predicate additionally requires
-        growth, confirmed-new entries and no trailing-append shape -- an
-        equality oracle would have to re-derive those, i.e. re-derive the
-        implementation."""
-        for perm in itertools.permutations(self._BASE):
-            for pos in range(len(perm) + 1):
-                new = [*list(perm)[:pos], "new.h", *list(perm)[pos:]]
-                if _header_sequence_is_interior_insertion(
-                    _seq(self._BASE), _seq(new), {"new.h"}
-                ):
-                    assert _is_order_preserving_supersequence(self._BASE, new)
-
-    def test_oracle_is_not_vacuous(self):
-        """Guard on the oracle itself: it must distinguish its two answers, or
-        the implication test above asserts nothing."""
-        assert _is_order_preserving_supersequence(["a.h", "b.h"], ["a.h", "x.h", "b.h"])
-        assert not _is_order_preserving_supersequence(["a.h", "b.h"], ["b.h", "a.h"])
-
-    @pytest.mark.parametrize(
-        "old_list,new_list,scope_new",
-        [
-            # An added entry the declared surface never confirms as new.
-            (["a.h", "b.h"], ["a.h", "x.h", "b.h"], set()),
-            (["a.h", "b.h"], ["a.h", "x.h", "b.h"], {"other.h"}),
-            # No scope evidence at all.
-            (["a.h", "b.h"], ["a.h", "x.h", "b.h"], None),
-            # Shrinking, not growing.
-            (["a.h", "b.h", "c.h"], ["a.h", "c.h"], {"x.h"}),
-            # Same length, one entry swapped for another.
-            (["a.h", "b.h"], ["a.h", "x.h"], {"x.h"}),
-            # A duplicate entry: never a real header_sequence value, so never
-            # usable evidence (the trailing-append waiver fails closed the
-            # same way).
-            (["a.h", "b.h"], ["a.h", "x.h", "b.h", "b.h"], {"x.h"}),
-            (["a.h", "a.h"], ["a.h", "a.h", "x.h", "b.h"], {"x.h"}),
-            # The single-header sentinel carries no order to reason about.
-            (["<single-header>"], ["a.h", "x.h", "b.h"], {"x.h"}),
-        ],
-    )
-    def test_fails_closed_on_unusable_evidence(self, old_list, new_list, scope_new):
-        assert not _header_sequence_is_interior_insertion(
-            _seq(old_list), _seq(new_list), scope_new
-        )
-
-    @pytest.mark.parametrize("old_value,new_value", [(None, "[]"), ("[]", None)])
-    def test_declines_when_either_side_is_absent(self, old_value, new_value):
-        assert not _header_sequence_is_interior_insertion(old_value, new_value, {"x.h"})
-
-    def test_declines_malformed_json(self):
-        assert not _header_sequence_is_interior_insertion(
-            "not-json", _seq(["a.h"]), {"a.h"}
-        )
-
-    def test_is_disjoint_from_the_trailing_append_waiver(self):
-        """The two predicates partition the growth shapes between them: each
-        placement is accepted by exactly one, so the composite below is a
-        union with no overlap to make the outcome order-dependent."""
-        both = []
-        for pos in range(len(self._BASE) + 1):
-            new = [*self._BASE[:pos], "new.h", *self._BASE[pos:]]
-            if _header_sequence_is_interior_insertion(
-                _seq(self._BASE), _seq(new), {"new.h"}
-            ) and _header_sequence_is_additive_reorder_free(
-                _seq(self._BASE), _seq(new), {"new.h"}
-            ):
-                both.append(new)
-        assert not both
-
-
 # ---------------------------------------------------------------------------
 # The composite predicate the carve-out is actually stated in terms of
 # ---------------------------------------------------------------------------
 
 
 class TestScopeConfirmedGrowthProperties:
-    """`_header_sequence_is_scope_confirmed_growth` is the union of the two
+    """`seq_growth` is the union of the two
     placement predicates, and the union is what the gate may act on.
 
     The oracle here is deliberately independent of the implementation's
@@ -391,9 +257,7 @@ class TestScopeConfirmedGrowthProperties:
         disagreeing = []
         for pos in range(len(self._BASE) + 1):
             new = [*self._BASE[:pos], "new.h", *self._BASE[pos:]]
-            got = _header_sequence_is_scope_confirmed_growth(
-                _seq(self._BASE), _seq(new), {"new.h"}
-            )
+            got = seq_growth(_seq(self._BASE), _seq(new), {"new.h"})
             expected = self._oracle(self._BASE, new, {"new.h"})
             if got != expected:
                 disagreeing.append((pos, got, expected))
@@ -405,7 +269,7 @@ class TestScopeConfirmedGrowthProperties:
         rejected = [
             pos
             for pos in range(len(self._BASE) + 1)
-            if not _header_sequence_is_scope_confirmed_growth(
+            if not seq_growth(
                 _seq(self._BASE),
                 _seq([*self._BASE[:pos], "new.h", *self._BASE[pos:]]),
                 {"new.h"},
@@ -418,9 +282,7 @@ class TestScopeConfirmedGrowthProperties:
         for perm in itertools.permutations(self._BASE):
             for pos in range(len(perm) + 1):
                 new = [*list(perm)[:pos], "new.h", *list(perm)[pos:]]
-                got = _header_sequence_is_scope_confirmed_growth(
-                    _seq(self._BASE), _seq(new), {"new.h"}
-                )
+                got = seq_growth(_seq(self._BASE), _seq(new), {"new.h"})
                 expected = self._oracle(self._BASE, new, {"new.h"})
                 if got != expected:
                     disagreeing.append((new, got, expected))
@@ -445,9 +307,7 @@ class TestScopeConfirmedGrowthProperties:
         ],
     )
     def test_fails_closed_on_unusable_evidence(self, old_list, new_list, scope_new):
-        assert not _header_sequence_is_scope_confirmed_growth(
-            _seq(old_list), _seq(new_list), scope_new
-        )
+        assert not seq_growth(_seq(old_list), _seq(new_list), scope_new)
 
 
 # ---------------------------------------------------------------------------

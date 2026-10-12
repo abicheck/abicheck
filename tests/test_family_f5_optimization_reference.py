@@ -159,6 +159,7 @@ COVERAGE: dict[str, str] = {
     # ---- request-scoped and instance memos ----
     "abicheck.buildsource.type_graph::scoped_cache::_AST_DERIVED": H,
     "abicheck.comparability_fields::scoped_cache::_PATH_MEMO": H,
+    "abicheck.buildsource.header_graph_ast_projection::scoped_cache::_BISECTION_SCOPE": _NEEDS_L5,
     "abicheck.buildsource.export_account_decision::scoped_cache::_CONTEXTS": H,
     "abicheck.compare.detection_memo::scoped_cache::_MEMO": R,
     "abicheck.model.comparison_memo::scoped_cache::_MEMO": R,
@@ -186,6 +187,8 @@ COVERAGE: dict[str, str] = {
     "abicheck.buildsource.include_graph_workers::pool::_shared_pool->BudgetedExecutor": _NEEDS_L5,
     "abicheck.buildsource.include_graph_workers::pool::_shared_pool->BudgetedExecutor#2": _NEEDS_L5,
     "abicheck.buildsource.pattern_facts::pool::find_pattern_facts->ProcessPoolExecutor": "UNCOVERED: process pool for large L4 pattern scans (threshold-gated); build-source path only",
+    "abicheck.extract.unparseable_header_fallback::pool::_probe_remaining->BudgetedExecutor": "UNCOVERED: parallel half-probes of an unparseable-header run; reference parity (exclusions == one-header-per-round loop) is held by tests/test_unparseable_header_round_bounds.py with a mocked frontend",
+    "abicheck.extract.unparseable_header_fallback::pool::_confirm_in_context->BudgetedExecutor": "UNCOVERED: in-context re-check of probe-blamed headers; reference parity is held by tests/test_unparseable_header_round_bounds.py with a mocked frontend",
     "abicheck.extract.headers.manifest::pool::_run_tu_fragments->BudgetedExecutor": "UNCOVERED: per-TU pool of a --dump-manifest dump; needs a manifest + castxml",
     # The one pool behind the environment-matrix probes and, since #1425,
     # every L5 clang graph pass (buildsource/l5_ast_pass.run_ast_passes) --

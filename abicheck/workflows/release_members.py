@@ -34,6 +34,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from ..buildsource.header_graph_ast_projection import header_graph_bisection_scope
 from ..checker_types import DiffResult
 from ..model.symbol_inventory import SymbolInventory
 from . import cache_counters, memory_trace, release_snapshot_retention
@@ -456,9 +457,10 @@ def compare_release_members(
 
     # `workflows.crosscheck_ownership`: the whole-product cross-source check
     # is answered once at release level, entered around the dispatch so each
-    # parallel worker inherits it. A one-member release has no union to take.
+    # parallel worker inherits it (as it does the header-graph bisection memo).
+    # A one-member release has no union to take.
     owned = release_owned_crosschecks() if len(compare_keys) > 1 else frozenset()
-    with release_owned_checks_scope(owned):
+    with release_owned_checks_scope(owned), header_graph_bisection_scope():
         if plan.pool_size > 1 and len(compare_keys) > 1:
             library_results = _compare_parallel(
                 compare_keys, ctx, plan.pool_size, plan.admission
