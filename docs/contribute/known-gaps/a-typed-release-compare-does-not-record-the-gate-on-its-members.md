@@ -3,15 +3,15 @@ doc_type: contributor
 audience:
   - contributor
 level: advanced
-lifecycle: active
+lifecycle: historical
 generated: false
 ---
 
 # A typed release compare does not record the gate on its members (2026-10-12)
 
-Index: [Known gaps](../known-gaps.md)
+Index: [Known gaps — closed and moot](../archive/known-gaps-closed.md)
 
-**Status (re-verified 2026-10-12 at `f25eddcdd`): OPEN.** Typed route only; the CLI is unaffected.
+**Status (2026-10-12): CLOSED.** See the [archive entry](../archive/known-gaps-closed.md). Kept for history.
 
 `workflows.release_compare.execute_release_compare` is the release compare
 owner, reachable without Click. A release member records its resolved

@@ -60,17 +60,6 @@ _COMPARABLE = sorted(c for c in CORPUS if c != "scope_mismatch")
 _AXES = ("default", "policy_sdk_vendor", "policy_file", "suppress", "severity_strict")
 _REQUEST_FIELDS = {"severity_preset"}
 
-#: Divergences of the *typed* release route from the typed scalar route,
-#: each asserted to still diverge (strict xfail) and recorded in
-#: docs/contribute/known-gaps.md, so a fix turns its cell red until removed.
-_KNOWN_DIVERGENCES = {
-    "severity_strict": "a member records the gate on its contract context "
-    "only from the release's resolved PackApplication, which only the CLI "
-    "builds (cli_compare_receipt.resolve_release_pack_application); the "
-    "typed scalar API resolves it from the request itself -- known gap "
-    "'A typed release compare does not record the gate on its members'",
-}
-
 #: Every cardinality 1..3, each a rotation of the corpus so every case
 #: appears at every position.
 _ASSIGNMENTS = [
@@ -140,18 +129,7 @@ def _member_outcome(
     return Outcome("release-workflow", report, exit_code)
 
 
-@pytest.mark.parametrize(
-    "axis",
-    [
-        pytest.param(
-            a,
-            marks=pytest.mark.xfail(strict=True, reason=_KNOWN_DIVERGENCES[a]),
-        )
-        if a in _KNOWN_DIVERGENCES
-        else a
-        for a in _AXES
-    ],
-)
+@pytest.mark.parametrize("axis", _AXES)
 @pytest.mark.parametrize(
     "assignment", _ASSIGNMENTS, ids=lambda a: f"n{len(a)}-" + "+".join(a)
 )
