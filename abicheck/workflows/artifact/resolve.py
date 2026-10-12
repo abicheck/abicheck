@@ -96,7 +96,7 @@ def reject_hybrid_source_frontend(
                 "depth='source' is incompatible with the 'hybrid' AST "
                 "frontend: L4 source-ABI replay has no dual-backend hybrid "
                 "extractor. Use 'castxml' or 'clang' for a depth='source' "
-                "request."
+                "request (compile.frontend: castxml in .abicheck.yml)."
             )
 
 

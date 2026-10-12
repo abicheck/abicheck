@@ -39,6 +39,7 @@ from .errors import SnapshotError
 from .workflows.extraction import PRUNED_HEADER_DIR_SEGMENTS, iter_directory_headers
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
     from .dry_run_estimate import CompileContext
@@ -427,6 +428,7 @@ def _resolve_compare_pair(
     # callers (`api.positional_slot_rebinding`, tests/regressions/manifest.py).
     exclude_headers: tuple[str, ...] = (),
     ownership: OwnershipRequest | None = None,  # ADR-075: both sides share it
+    prepare: Callable[[CompareRequest], CompareRequest] | None = None,
 ) -> tuple[CompareRequest, ResolvedComparePair]:
     """Load both ABI snapshots and (optionally) populate ELF dependency info.
 
@@ -576,6 +578,11 @@ def _resolve_compare_pair(
     from . import service
 
     try:
+        if prepare is not None:
+            # The caller's own per-side additions (`compare`'s raw `--sources`
+            # sides: `frontends.cli.compare_inline_evidence`), folded onto the
+            # request this function built before anything resolves it.
+            request = prepare(request)
         pair = service.resolve_compare_request(
             request, notify=_click_notify, allow_parallel=False
         )

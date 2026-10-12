@@ -187,7 +187,7 @@ class TestResolvedRequestAgreesWithTheCliLocals:
 
         header, sources, compile_db = _project(tmp_path)
         cli_mode, cli_headers = resolve_dump_collect_context(
-            depth, None, sources, compile_db, (header,)
+            depth, sources, compile_db, (header,)
         )
         so_path = _binary(tmp_path) if depth == "binary" else None
         resolved = resolve_dump_request_for_cli(
@@ -246,7 +246,7 @@ class TestResolvedRequestAgreesWithTheCliLocals:
 
         header, sources, compile_db = _project(tmp_path)
         _mode, cli_headers = resolve_dump_collect_context(
-            "binary", None, sources, compile_db, (header,)
+            "binary", sources, compile_db, (header,)
         )
         resolved = resolve_dump_request_for_cli(
             _request(
@@ -312,7 +312,6 @@ def _request(
         follow_deps=False,
         search_paths=(),
         ld_library_path="",
-        include_labels=None,
     )
 
 
