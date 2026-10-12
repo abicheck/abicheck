@@ -100,12 +100,10 @@ def requested_frontend_override(
 def effective_frontend(compile: CompileContext | None, header_backend: str) -> str:
     """The L2 frontend `resolve_input`/`run_dump` actually use for *compile*
     (an explicit `compile.frontend` wins over the bare `header_backend`
-    default), resolved to a concrete backend -- reused so `embed_build_
-    source`'s `extractor` matches instead of silently diverging (Codex
-    review, three rounds: an explicit override wasn't case-normalized in the
-    first pass; "auto" itself was forwarded unresolved in the second --
-    `_make_source_extractor` doesn't special-case "auto" and falls back to
-    Clang, while L2's own "auto" resolves to castxml by default; and the
+    default), resolved to a concrete backend. L4's extractor follows it for
+    every stated frontend (:func:`source_replay_extractor`; Codex review,
+    three rounds: an explicit override wasn't case-normalized in the first
+    pass; "auto" itself was forwarded unresolved in the second; and the
     "is this actually 'auto'" check itself was still case-sensitive in the
     third -- `compile.frontend="AUTO"` is an accepted spelling
     (`frontend_value_errors` validates case-insensitively) that used to be
@@ -121,6 +119,29 @@ def effective_frontend(compile: CompileContext | None, header_backend: str) -> s
     from .dumper import _resolve_header_backend
 
     return _resolve_header_backend(requested_frontend_override(compile, header_backend))
+
+
+def source_replay_extractor(compile: CompileContext | None, header_backend: str) -> str:
+    """The L4 source-replay extractor for *compile*: the requested frontend
+    when one is stated, else clang -- L4's documented default
+    (``docs/learn/build-source-data.md``), the only extractor that records
+    macros and inline/template/constexpr bodies.
+
+    A stated frontend is an explicit `compile.frontend`, a non-``auto``
+    *header_backend*, or ``ABICHECK_AST_FRONTEND``, resolved as
+    :func:`effective_frontend` resolves it for L2. Only a bare ``auto``
+    differs: L2's ``auto`` means castxml (the layout reference), which
+    replays a translation unit's declarations but none of its macros, so an
+    L4 replay under it never saw a `#define` change.
+    """
+    import os
+
+    if (
+        requested_frontend_override(compile, header_backend).lower() == "auto"
+        and not os.environ.get("ABICHECK_AST_FRONTEND", "").strip()
+    ):
+        return "clang"
+    return effective_frontend(compile, header_backend)
 
 
 def effective_frontend_for_context(

@@ -114,7 +114,7 @@ def embed_side_build_source(
             build_targets=side.build_targets,
             collect_mode=evidence.collect_mode,
             changed_paths=changed_paths,
-            extractor=_sce.effective_frontend(evidence.compile, header_backend),
+            extractor=_sce.source_replay_extractor(evidence.compile, header_backend),
             # L4 source-ABI replay must invoke the compiler this input's own L2
             # header AST was pointed at (`gcc_path`/`gcc_prefix`), not
             # `embed_build_source`'s bare "clang" default -- the same fix

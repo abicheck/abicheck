@@ -2559,16 +2559,14 @@ class TestCompareRequestAdr055Evidence:
         run_compare_request(request)
         assert embed_calls[0]["extractor"] == "castxml"
 
-    def test_default_auto_frontend_resolves_to_castxml_for_extractor(
-        self, tmp_path, monkeypatch
-    ):
-        """Codex review (P2, second round): the default frontend="auto" must
-        not be forwarded to embed_build_source's extractor as the literal
-        string "auto" -- _make_source_extractor doesn't special-case "auto"
-        and falls back to Clang, while L2's own "auto" resolves to castxml by
-        default (dumper._resolve_header_backend), so the common default-
-        frontend case would otherwise silently run L2/L4 through different
-        tools."""
+    def test_default_auto_frontend_replays_l4_with_clang(self, tmp_path, monkeypatch):
+        """The default frontend="auto" replays L4 with clang, L4's documented
+        default -- not castxml, L2's ``auto``, which records no macros, so a
+        `#define` change under ``depth="source"`` went unseen (the
+        evidence-depth workflow example). Still forwarded resolved, never as
+        the literal "auto" (Codex review, P2, second round);
+        ``tests/test_source_replay_extractor.py`` pins the full rule."""
+        monkeypatch.delenv("ABICHECK_AST_FRONTEND", raising=False)
         self._keep_raw_evidence_on_snapshot_operands(monkeypatch)
         old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
         new_p = self._make_snap_file(tmp_path, "libtest", "2.0")
@@ -2589,7 +2587,7 @@ class TestCompareRequestAdr055Evidence:
             old=InputSpec.of(old_p, sources=src_dir), new=InputSpec.of(new_p)
         )
         run_compare_request(request)
-        assert embed_calls[0]["extractor"] == "castxml"
+        assert embed_calls[0]["extractor"] == "clang"
 
     def test_uppercase_auto_compile_frontend_is_not_treated_as_explicit(
         self, monkeypatch
