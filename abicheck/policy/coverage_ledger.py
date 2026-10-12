@@ -182,7 +182,9 @@ class CoverageFailure:
         }
 
 
-def _failure_reason(record: EvidenceSearchRecord) -> str | None:
+def _failure_reason(
+    record: EvidenceSearchRecord, *, count_identity: bool = True
+) -> str | None:
     """Why *record* fails to close its domain, or ``None`` if it does close it.
 
     Two independent ways to fail, kept distinct because they need different
@@ -200,7 +202,7 @@ def _failure_reason(record: EvidenceSearchRecord) -> str | None:
         return "search_incomplete"
     if record.completeness is EvidenceCompleteness.NOT_STARTED:
         return "search_not_started"
-    if record.identity_coverage is EvidenceCompleteness.PARTIAL:
+    if count_identity and record.identity_coverage is EvidenceCompleteness.PARTIAL:
         # A complete search whose *identity* coverage is partial cannot
         # support a proven exclusion for the ambiguous spellings, which is
         # exactly the closed-world requirement Section 4.2 states
@@ -243,7 +245,15 @@ def coverage_failures(
         record = entry.record
         if record.provider not in required:
             continue
-        reason = _failure_reason(record)
+        # Identity coverage is partial "for affected entities" (ADR-049 D5,
+        # plan Section 4.2), not for the whole domain: the evaluator already
+        # marks each finding whose own symbol or type resolves ambiguously
+        # ``UNKNOWN_UNRESOLVED``/``identity_ambiguous``, and
+        # :func:`unresolved_finding_failures` turns exactly those into
+        # failures. Counting the facet here too failed every run whose
+        # surface merely *contains* an ambiguous spelling -- an unchanged
+        # library exited 1 over ``byte`` vs ``std::byte`` it never touched.
+        reason = _failure_reason(record, count_identity=False)
         if reason is None:
             continue
         failures.append(
