@@ -2077,7 +2077,7 @@
       "category": "risk",
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
-      "min_evidence": "unspecified",
+      "min_evidence": "L5",
       "doc_slug": "public_dependency_role_changed",
       "examples": ""
     },
@@ -2086,7 +2086,7 @@
       "category": "quality",
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
-      "min_evidence": "unspecified",
+      "min_evidence": "L5",
       "doc_slug": "public_dependency_role_unknown",
       "examples": ""
     },
