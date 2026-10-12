@@ -208,4 +208,18 @@ CACHING_BUG_CLASSES: tuple[BugClass, ...] = (
             ),
         ),
     ),
+    BugClass(
+        id="cache.hit_identity_follows_the_requested_path",
+        invariant=(
+            "A content-keyed cache entry is served for every path holding the "
+            "same bytes, so a hit must report the identity of the path it was "
+            "asked for -- the fields a cold run derives from that path -- and "
+            "must equal what an uncached run of the same path would report. "
+            "The oracle is the uncached run, not the cache's own helper."
+        ),
+        fixed_by=(1569,),
+        seed_tests=("tests/test_snapshot_hit_binary_identity.py",),
+        public_surfaces=("python-api", "cli"),
+        axes={"rename": ("same-dir-new-basename", "other-dir", "symlink")},
+    ),
 )

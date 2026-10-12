@@ -83,4 +83,6 @@ def test_hit_identity_matches_a_cold_dump_of_the_same_path(
     cold = run_dump(alias, "elf")
 
     assert calls == [warm], "the second call must be served from the cache"
+    # Must-not-merge: the hit names the requested path, not the one that populated it.
+    assert hit.library == alias.name != warm.name
     assert _identity(hit) == _identity(cold)
