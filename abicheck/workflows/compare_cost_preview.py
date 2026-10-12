@@ -60,7 +60,7 @@ def _resolve_compare_estimate_level(
     new_build_info: Path | None,
 ) -> tuple[SourceMethod, EvidenceDepth]:
     """The (S-method, L-depth) pair a compare's cost-preview probes are priced
-    at -- mirrors ``cli_compare_helpers._resolve_compare_collect_mode``'s own
+    at -- mirrors ``workflows.compare_configuration.resolve_compare_collect_mode``'s own
     precedence (explicit ``--depth`` > ``.abicheck.yml`` ``source.method`` >
     inferred from ``--sources``/``--build-info`` > off), but returns the
     resolved ``(SourceMethod, EvidenceDepth)`` pair rather than a

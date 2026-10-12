@@ -84,10 +84,10 @@ from __future__ import annotations
 
 from hypothesis import given, strategies as st
 
-from abicheck.cli_helpers_compare import resolve_compare_config
 from abicheck.pack_application import PackApplication, apply_to_compare_config
 from abicheck.policy.release_gate_options import resolve_release_gate_options
 from abicheck.policy.severity import SeverityLevel
+from abicheck.workflows.compare_configuration import resolve_compare_config
 
 _SEVERITY_CATEGORIES = (
     "abi_breaking",

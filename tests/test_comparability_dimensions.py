@@ -53,15 +53,23 @@ def _scoped_snap(
 
 
 def test_scope_mismatch_dimensions_are_declaration_only(tmp_path):
-    # A genuine, non-additive declared-header-set drift: only the
-    # "headers" scope field differs, so only "declaration" is affected --
+    # Manifest translation-unit drift (a changed header set alone is API
+    # evolution, not a scope mismatch): only declaration is affected --
     # a scope mismatch says nothing about runtime behavior or the binary's
     # own exported-symbol identity.
     a = _write(tmp_path / "v1" / "a.h", "int g(void);\n")
     old_h = _write(tmp_path / "v1" / "foo.h", "int f(void);\n")
     new_h = _write(tmp_path / "v2" / "bar.h", "int f(void);\n")
-    old = _snap(compute_extraction_contract(declared_headers=[a, old_h]))
-    new = _snap(compute_extraction_contract(declared_headers=[a, new_h]))
+    old = _snap(
+        compute_extraction_contract(
+            declared_headers=[a, old_h], manifest_tu_scope='[{"name": "core"}]'
+        )
+    )
+    new = _snap(
+        compute_extraction_contract(
+            declared_headers=[a, new_h], manifest_tu_scope='[{"name": "core2"}]'
+        )
+    )
     result = check_contracts_comparable(old, new, diagnostic=True)
     assert isinstance(result, ComparabilityMismatch)
     assert result.kind == "scope"
@@ -172,8 +180,16 @@ def test_every_reported_dimension_is_in_the_published_vocabulary(tmp_path):
     a = _write(tmp_path / "v1" / "a.h", "int g(void);\n")
     old_h = _write(tmp_path / "v1" / "foo.h", "int f(void);\n")
     new_h = _write(tmp_path / "v2" / "bar.h", "int f(void);\n")
-    old = _snap(compute_extraction_contract(declared_headers=[a, old_h]))
-    new = _snap(compute_extraction_contract(declared_headers=[a, new_h]))
+    old = _snap(
+        compute_extraction_contract(
+            declared_headers=[a, old_h], manifest_tu_scope='[{"name": "core"}]'
+        )
+    )
+    new = _snap(
+        compute_extraction_contract(
+            declared_headers=[a, new_h], manifest_tu_scope='[{"name": "core2"}]'
+        )
+    )
     result = check_contracts_comparable(old, new, diagnostic=True)
     assert isinstance(result, ComparabilityMismatch)
     assert result.dimensions <= COMPARABILITY_DIMENSIONS

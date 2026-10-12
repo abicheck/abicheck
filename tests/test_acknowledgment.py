@@ -930,7 +930,9 @@ def test_resolving_acknowledgments_twice_is_idempotent(tmp_path: Path) -> None:
     before = ledger.record_for(change)
     assert before is not None and before.acknowledged_by == "*::*::*::foo"
 
-    close_consumer_scope(ledger, diff, gating=[change])  # resolves again
+    close_consumer_scope(
+        ledger, diff, gating=[change], scope_decides_exit=True
+    )  # resolves again
     after = ledger.record_for(change)
     assert after is not None
     assert after.acknowledged_by == before.acknowledged_by

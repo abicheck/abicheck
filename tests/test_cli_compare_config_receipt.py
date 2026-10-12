@@ -422,7 +422,7 @@ class TestGateParityWithTheLiveRun:
     ):
         from abicheck.buildsource.inline import BuildConfig
         from abicheck.cli_compare_receipt import resolve_cli_config
-        from abicheck.cli_helpers_compare import resolve_compare_config
+        from abicheck.workflows.compare_configuration import resolve_compare_config
 
         full = {
             "contract_mode": None,

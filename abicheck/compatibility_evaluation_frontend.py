@@ -877,7 +877,7 @@ def _explicit_scope(
     """Resolve ``surface.explicit_scope`` -- an *additive* overlay field.
 
     ``--public-symbol``, ``--public-symbols-list`` and ``scope.public_symbols``
-    are documented (ADR-037 D4, ``cli_helpers_compare.resolve_compare_config``)
+    are documented (ADR-037 D4, ``workflows.compare_configuration.resolve_compare_config``)
     as merging, not overriding: the CLI list widens the project's rather than
     replacing it. Each of the three is recorded as its own ``selected_by``
     entry, with the path of the file it came from where there is one. That is a genuine exception to D7's per-field
@@ -1012,7 +1012,7 @@ def resolve_compatibility_evaluation_config(
     any more (CLI cleanup phase two PR G2 deleted the manual algorithm
     selector everywhere): the gate algorithm is fully determined by whether
     a severity setting is in effect, resolved the identical way
-    ``cli_helpers_compare.resolve_compare_config`` computes it, so there is
+    ``workflows.compare_configuration.resolve_compare_config`` computes it, so there is
     nothing left for this D7 resolution to decide about it.
 
     Raises :class:`~abicheck.compatibility_evaluation_resolver.FieldResolutionError`
@@ -1557,7 +1557,7 @@ def _severity_active(
 ) -> bool:
     """Whether *any* severity setting is in effect (drives ``auto``).
 
-    Mirrors ``cli_helpers_compare.resolve_compare_config``'s own
+    Mirrors ``workflows.compare_configuration.resolve_compare_config``'s own
     ``severity_active`` -- a preset or any per-category value, from the CLI
     or the project config -- and additionally counts a ``kind: gate`` pack
     that assigns a category, since a pack-supplied severity is no less "in

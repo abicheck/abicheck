@@ -270,6 +270,7 @@ def test_scope_and_gate_agree_with_the_oracle(
         result,
         gating=[companion, *([change] if in_scope else [])],
         also_detected=[change] if not pre_recorded else [],
+        scope_decides_exit=True,
     )
 
     expected_disposition, expected_excluded = _oracle(
@@ -321,6 +322,7 @@ def test_the_effective_total_is_the_gating_count(
         result,
         gating=[companion, *([change] if in_scope else [])],
         also_detected=[change] if not pre_recorded else [],
+        scope_decides_exit=True,
     )
 
     config = _INVERTING_SEVERITY if severity else None
@@ -369,7 +371,9 @@ def test_scoping_never_relabels_a_non_evaluated_finding() -> None:
         )
         late.contract_relevance = relevance
         ledger = DispositionLedger()
-        close_consumer_scope(ledger, result, gating=[], also_detected=[late])
+        close_consumer_scope(
+            ledger, result, gating=[], also_detected=[late], scope_decides_exit=True
+        )
         record = ledger.record_for(late)
         assert record.disposition is expected
         assert record.gate_excluded is False, (
@@ -388,9 +392,21 @@ def test_a_second_close_is_idempotent() -> None:
     for change in (kept, dropped):
         _record_initially(ledger, change, Disposition.GATING, result)
 
-    close_consumer_scope(ledger, result, gating=[kept], also_detected=[kept, dropped])
+    close_consumer_scope(
+        ledger,
+        result,
+        gating=[kept],
+        also_detected=[kept, dropped],
+        scope_decides_exit=True,
+    )
     first = [(r.disposition, r.gate_excluded) for r in ledger._records]
-    close_consumer_scope(ledger, result, gating=[kept], also_detected=[kept, dropped])
+    close_consumer_scope(
+        ledger,
+        result,
+        gating=[kept],
+        also_detected=[kept, dropped],
+        scope_decides_exit=True,
+    )
     assert [(r.disposition, r.gate_excluded) for r in ledger._records] == first
     assert ledger.detected_total == 2
     assert ledger.effective_total == 1
@@ -405,7 +421,9 @@ def test_a_gate_excluded_finding_survives_repeated_gate_projections() -> None:
     ledger = DispositionLedger()
     excluded = _fixture_change(Disposition.GATING, 0)
     _record_initially(ledger, excluded, Disposition.GATING, result)
-    close_consumer_scope(ledger, result, gating=[], also_detected=[])
+    close_consumer_scope(
+        ledger, result, gating=[], also_detected=[], scope_decides_exit=True
+    )
 
     for config in (None, _INVERTING_SEVERITY, None):
         record = ledger.with_gate(result, config).record_for(excluded)
@@ -423,7 +441,9 @@ def test_the_ledger_a_projection_reads_is_never_mutated_by_scoping_twice() -> No
     change = _fixture_change(Disposition.GATING, 0)
     _record_initially(ledger, change, Disposition.GATING, result)
     result.disposition_ledger = ledger
-    close_consumer_scope(ledger_for(result), result, gating=[change])
+    close_consumer_scope(
+        ledger_for(result), result, gating=[change], scope_decides_exit=True
+    )
     assert ledger_for(result) is ledger
     assert ledger_for(result).effective_total == 1
 
@@ -745,7 +765,13 @@ def test_a_contract_promotion_refreshes_a_stale_exclusion() -> None:
     # replaced.
     stamp_explicit_scope_contract_evaluation(promoted)
 
-    close_consumer_scope(ledger, result, gating=[promoted], also_detected=[promoted])
+    close_consumer_scope(
+        ledger,
+        result,
+        gating=[promoted],
+        also_detected=[promoted],
+        scope_decides_exit=True,
+    )
     record = ledger.record_for(promoted)
     assert record.disposition is Disposition.GATING
     assert record.application_point == "contract_promotion"
@@ -762,7 +788,9 @@ def test_a_promotion_outside_the_consumer_scope_is_still_excluded() -> None:
     _record_initially(ledger, promoted, Disposition.OUT_OF_CONTRACT, result)
     stamp_explicit_scope_contract_evaluation(promoted)
 
-    close_consumer_scope(ledger, result, gating=[], also_detected=[])
+    close_consumer_scope(
+        ledger, result, gating=[], also_detected=[], scope_decides_exit=True
+    )
     record = ledger.record_for(promoted)
     assert record.disposition is Disposition.NON_GATING
     assert record.gate_excluded is True
@@ -880,7 +908,9 @@ def test_an_unstamped_out_of_surface_finding_is_not_a_promotion() -> None:
     ledger = finalize_ledger(DispositionLedger(), result)
     assert ledger.record_for(change).disposition is Disposition.OUT_OF_CONTRACT
 
-    close_consumer_scope(ledger, result, gating=[], also_detected=[])
+    close_consumer_scope(
+        ledger, result, gating=[], also_detected=[], scope_decides_exit=True
+    )
     record = ledger.record_for(change)
     assert record.disposition is Disposition.OUT_OF_CONTRACT, (
         "an out-of-surface exclusion is not a contract promotion"
@@ -1098,7 +1128,9 @@ def test_a_scoped_run_gates_on_the_scoped_set_not_on_result_changes() -> None:
 
     # An explicit consumer contract promotes it and gates on it.
     stamp_explicit_scope_contract_evaluation(change)
-    close_consumer_scope(ledger, result, gating=[change], also_detected=[change])
+    close_consumer_scope(
+        ledger, result, gating=[change], also_detected=[change], scope_decides_exit=True
+    )
 
     strict = SeverityConfig(abi_breaking=SeverityLevel.ERROR)
     for config in (None, strict):
@@ -1111,3 +1143,36 @@ def test_a_scoped_run_gates_on_the_scoped_set_not_on_result_changes() -> None:
         "the precondition that makes this case distinct from the unscoped "
         "invariant next door"
     )
+
+
+@pytest.mark.parametrize(
+    "point", ["consumer_overlay", "required_symbol_overlay", "consumer_scope"]
+)
+@pytest.mark.parametrize("scope_decides_exit", [False, True])
+def test_full_library_gate_drops_suppressed_consumer_only_breaks_from_release_advice(
+    point: str, scope_decides_exit: bool
+) -> None:
+    """A suppressed consumer-only major break never reaches the full-library
+    gate (`compare --used-by`, D-S1), so release advice must not score it --
+    while it still counts as detected and suppressed. Under a scoped gate it
+    does gate, so it stays a waived major break. A library-level suppressed
+    break is unaffected in both modes (independent negative control)."""
+    from abicheck.checker import Verdict
+    from abicheck.policy.disposition_close import close_consumer_scope
+    from abicheck.policy.disposition_ledger import record_suppressed_change
+
+    result = _empty_result()
+    consumer = Change(kind=ChangeKind.FUNC_REMOVED, symbol="c", description="c")
+    library = Change(kind=ChangeKind.FUNC_REMOVED, symbol="l", description="l")
+    ledger = DispositionLedger()
+    for change, where in ((consumer, point), (library, "matrix_suppression")):
+        change.effective_verdict = Verdict.BREAKING
+        record_suppressed_change(ledger, change, rule=None, application_point=where)
+    close_consumer_scope(
+        ledger, result, gating=[], scope_decides_exit=scope_decides_exit
+    )
+    points = {r.application_point for r in ledger.suppressed_gating_records()}
+    assert "matrix_suppression" in points
+    assert (point in points) is scope_decides_exit
+    assert ledger.record_for(consumer).disposition is Disposition.SUPPRESSED
+    assert len(ledger) == 2

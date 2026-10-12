@@ -1,4 +1,4 @@
-"""ADR-050 D2 (G32 Phase A, slice 1) -- _include_sequence_is_additive_owned_growth.
+"""ADR-050 D2 (G32 Phase A, slice 1) -- incl_growth.
 
 Split out of test_comparability_gate.py (Codex review, PR #641 follow-up:
 the parent file crossed the file-size hard cap once this round's hdrs:
@@ -6,7 +6,7 @@ payload-shape regression tests landed) -- see that file's own module
 docstring for the rest of the gate's carve-out tests this one doesn't
 repeat.
 
-Scope here is exactly `_include_sequence_is_additive_owned_growth` (PR #641
+Scope here is exactly `incl_growth` (PR #641
 follow-up, fourth round): resolve_inferred_header_roots (cli_dump_helpers.py)
 auto-adds a header-owning include directory, whose slot token in
 include_sequence encodes the declared-header set IT owns -- so a pure
@@ -18,28 +18,31 @@ from __future__ import annotations
 import json
 
 from abicheck.comparability import (
-    _include_sequence_is_additive_owned_growth,
     _sha256_of,
 )
 from abicheck.comparability_json import _OWNED_HEADER_SINGLE_SENTINEL
-from tests._comparability_gate_helpers import _ANY_NEW_HEADERS, _hdrs_slot
+from tests._comparability_gate_helpers import (
+    _ANY_NEW_HEADERS,
+    _hdrs_slot,
+    incl_growth,
+)
 
 
 def test_include_sequence_additive_owned_growth_true_for_pure_append():
     old = json.dumps([_hdrs_slot(0, [("a.h", "a.h"), ("b.h", "b.h")])])
     new = json.dumps([_hdrs_slot(0, [("a.h", "a.h"), ("b.h", "b.h"), ("c.h", "c.h")])])
-    assert _include_sequence_is_additive_owned_growth(old, new, _ANY_NEW_HEADERS)
+    assert incl_growth(old, new, _ANY_NEW_HEADERS)
 
 
 def test_include_sequence_additive_owned_growth_true_when_unchanged():
     same = json.dumps([_hdrs_slot(0, [("a.h", "a.h")])])
-    assert _include_sequence_is_additive_owned_growth(same, same, _ANY_NEW_HEADERS)
+    assert incl_growth(same, same, _ANY_NEW_HEADERS)
 
 
 def test_include_sequence_additive_owned_growth_false_for_removal():
     old = json.dumps([_hdrs_slot(0, [("a.h", "a.h"), ("b.h", "b.h")])])
     new = json.dumps([_hdrs_slot(0, [("a.h", "a.h")])])
-    assert not _include_sequence_is_additive_owned_growth(old, new, _ANY_NEW_HEADERS)
+    assert not incl_growth(old, new, _ANY_NEW_HEADERS)
 
 
 def test_include_sequence_additive_owned_growth_false_for_non_owned_slot_drift():
@@ -47,25 +50,25 @@ def test_include_sequence_additive_owned_growth_false_for_non_owned_slot_drift()
     # profile drift -- this carve-out has no business waiving it.
     old = json.dumps(["0:ext:" + "a" * 16])
     new = json.dumps(["0:ext:" + "b" * 16])
-    assert not _include_sequence_is_additive_owned_growth(old, new, _ANY_NEW_HEADERS)
+    assert not incl_growth(old, new, _ANY_NEW_HEADERS)
 
 
 def test_include_sequence_additive_owned_growth_false_for_slot_count_change():
     old = json.dumps([_hdrs_slot(0, [("a.h", "a.h")])])
     new = json.dumps([_hdrs_slot(0, [("a.h", "a.h")]), "1:ext:" + "a" * 16])
-    assert not _include_sequence_is_additive_owned_growth(old, new, _ANY_NEW_HEADERS)
+    assert not incl_growth(old, new, _ANY_NEW_HEADERS)
 
 
 def test_include_sequence_additive_owned_growth_false_for_single_header_sentinel():
     old = json.dumps(["0:hdrs:<single-header>"])
     new = json.dumps([_hdrs_slot(0, [("a.h", "a.h"), ("b.h", "b.h")])])
-    assert not _include_sequence_is_additive_owned_growth(old, new, _ANY_NEW_HEADERS)
+    assert not incl_growth(old, new, _ANY_NEW_HEADERS)
 
 
 def test_include_sequence_additive_owned_growth_declines_on_none():
     some = json.dumps([_hdrs_slot(0, [("a.h", "a.h")])])
-    assert not _include_sequence_is_additive_owned_growth(None, some, _ANY_NEW_HEADERS)
-    assert not _include_sequence_is_additive_owned_growth(some, None, _ANY_NEW_HEADERS)
+    assert not incl_growth(None, some, _ANY_NEW_HEADERS)
+    assert not incl_growth(some, None, _ANY_NEW_HEADERS)
 
 
 def test_include_sequence_additive_owned_growth_true_when_one_slot_unchanged():
@@ -78,7 +81,7 @@ def test_include_sequence_additive_owned_growth_true_when_one_slot_unchanged():
     ext_slot = "0:ext:" + _sha256_of("dir-contents")
     old = json.dumps([ext_slot, _hdrs_slot(1, [("a.h", "a.h")])])
     new = json.dumps([ext_slot, _hdrs_slot(1, [("a.h", "a.h"), ("b.h", "b.h")])])
-    assert _include_sequence_is_additive_owned_growth(old, new, _ANY_NEW_HEADERS)
+    assert incl_growth(old, new, _ANY_NEW_HEADERS)
 
 
 def test_include_sequence_additive_owned_growth_false_for_index_mismatch():
@@ -86,7 +89,7 @@ def test_include_sequence_additive_owned_growth_false_for_index_mismatch():
     # positionally) can never be safely verified.
     old = json.dumps(['0:hdrs:[["a.h", "a.h"]]'])
     new = json.dumps(['1:hdrs:[["a.h", "a.h"], ["b.h", "b.h"]]'])
-    assert not _include_sequence_is_additive_owned_growth(old, new, _ANY_NEW_HEADERS)
+    assert not incl_growth(old, new, _ANY_NEW_HEADERS)
 
 
 def test_include_sequence_additive_owned_growth_false_for_non_positional_index():
@@ -98,7 +101,7 @@ def test_include_sequence_additive_owned_growth_false_for_non_positional_index()
     # genuine additive owned-header growth.
     old = json.dumps(['bogus:hdrs:[["a.h", "a.h"]]'])
     new = json.dumps(['bogus:hdrs:[["a.h", "a.h"], ["b.h", "b.h"]]'])
-    assert not _include_sequence_is_additive_owned_growth(old, new, _ANY_NEW_HEADERS)
+    assert not incl_growth(old, new, _ANY_NEW_HEADERS)
 
 
 def test_include_sequence_additive_owned_growth_true_with_unchanged_trailing_sys_bucket():
@@ -117,7 +120,7 @@ def test_include_sequence_additive_owned_growth_true_with_unchanged_trailing_sys
     new = json.dumps(
         [_hdrs_slot(0, [("a.h", "a.h"), ("b.h", "b.h"), ("c.h", "c.h")]), sys_bucket]
     )
-    assert _include_sequence_is_additive_owned_growth(old, new, _ANY_NEW_HEADERS)
+    assert incl_growth(old, new, _ANY_NEW_HEADERS)
 
 
 def test_include_sequence_additive_owned_growth_false_when_sys_bucket_not_trailing():
@@ -128,7 +131,7 @@ def test_include_sequence_additive_owned_growth_false_when_sys_bucket_not_traili
     new = json.dumps(
         ["sys:" + "a" * 16, _hdrs_slot(1, [("a.h", "a.h"), ("b.h", "b.h")])]
     )
-    assert not _include_sequence_is_additive_owned_growth(old, new, _ANY_NEW_HEADERS)
+    assert not incl_growth(old, new, _ANY_NEW_HEADERS)
 
 
 def test_include_sequence_additive_owned_growth_false_for_unchanged_delimiterless_slot():
@@ -142,7 +145,7 @@ def test_include_sequence_additive_owned_growth_false_for_unchanged_delimiterles
     # any fix: this was accepted as safe growth.
     old = json.dumps(["0", _hdrs_slot(1, [("a.h", "a.h")])])
     new = json.dumps(["0", _hdrs_slot(1, [("a.h", "a.h"), ("b.h", "b.h")])])
-    assert not _include_sequence_is_additive_owned_growth(old, new, _ANY_NEW_HEADERS)
+    assert not incl_growth(old, new, _ANY_NEW_HEADERS)
 
 
 def test_include_sequence_additive_owned_growth_false_for_unchanged_malformed_ext_payload():
@@ -155,7 +158,7 @@ def test_include_sequence_additive_owned_growth_false_for_unchanged_malformed_ex
     # fix: this was accepted as safe growth.
     old = json.dumps(["0:ext:bogus", _hdrs_slot(1, [("a.h", "a.h")])])
     new = json.dumps(["0:ext:bogus", _hdrs_slot(1, [("a.h", "a.h"), ("b.h", "b.h")])])
-    assert not _include_sequence_is_additive_owned_growth(old, new, _ANY_NEW_HEADERS)
+    assert not incl_growth(old, new, _ANY_NEW_HEADERS)
 
 
 def test_include_sequence_additive_owned_growth_false_for_unchanged_malformed_sys_payload():
@@ -164,7 +167,7 @@ def test_include_sequence_additive_owned_growth_false_for_unchanged_malformed_sy
     new = json.dumps(
         [_hdrs_slot(0, [("a.h", "a.h"), ("b.h", "b.h")]), "sys:not-a-sha256"]
     )
-    assert not _include_sequence_is_additive_owned_growth(old, new, _ANY_NEW_HEADERS)
+    assert not incl_growth(old, new, _ANY_NEW_HEADERS)
 
 
 def test_include_sequence_additive_owned_growth_false_for_unchanged_malformed_hdrs_payload():
@@ -181,7 +184,7 @@ def test_include_sequence_additive_owned_growth_false_for_unchanged_malformed_hd
     new = json.dumps(
         ["0:hdrs:not-json", _hdrs_slot(1, [("a.h", "a.h"), ("b.h", "b.h")])]
     )
-    assert not _include_sequence_is_additive_owned_growth(old, new, _ANY_NEW_HEADERS)
+    assert not incl_growth(old, new, _ANY_NEW_HEADERS)
 
 
 def test_include_sequence_additive_owned_growth_true_for_unchanged_single_header_sentinel_slot():
@@ -191,7 +194,7 @@ def test_include_sequence_additive_owned_growth_true_for_unchanged_single_header
     sentinel_slot = "0:" + _OWNED_HEADER_SINGLE_SENTINEL
     old = json.dumps([sentinel_slot, _hdrs_slot(1, [("a.h", "a.h")])])
     new = json.dumps([sentinel_slot, _hdrs_slot(1, [("a.h", "a.h"), ("b.h", "b.h")])])
-    assert _include_sequence_is_additive_owned_growth(old, new, _ANY_NEW_HEADERS)
+    assert incl_growth(old, new, _ANY_NEW_HEADERS)
 
 
 def test_include_sequence_additive_owned_growth_declines_when_scope_new_headers_is_none():
@@ -200,7 +203,7 @@ def test_include_sequence_additive_owned_growth_declines_when_scope_new_headers_
     # newly-added scope headers to check the newly-owned pair against.
     old = json.dumps([_hdrs_slot(0, [("a.h", "a.h"), ("b.h", "b.h")])])
     new = json.dumps([_hdrs_slot(0, [("a.h", "a.h"), ("b.h", "b.h"), ("c.h", "c.h")])])
-    assert not _include_sequence_is_additive_owned_growth(old, new, None)
+    assert not incl_growth(old, new, None)
 
 
 def test_include_sequence_additive_owned_growth_declines_when_new_pair_not_in_scope_new_headers():
@@ -210,13 +213,13 @@ def test_include_sequence_additive_owned_growth_declines_when_new_pair_not_in_sc
     # the shape itself (owned-pair superset growth) is otherwise valid.
     old = json.dumps([_hdrs_slot(0, [("a.h", "a.h"), ("b.h", "b.h")])])
     new = json.dumps([_hdrs_slot(0, [("a.h", "a.h"), ("b.h", "b.h"), ("c.h", "c.h")])])
-    assert not _include_sequence_is_additive_owned_growth(old, new, frozenset({"d.h"}))
+    assert not incl_growth(old, new, frozenset({"d.h"}))
 
 
 def test_include_sequence_additive_owned_growth_true_when_new_pair_matches_scope_new_headers():
     old = json.dumps([_hdrs_slot(0, [("a.h", "a.h"), ("b.h", "b.h")])])
     new = json.dumps([_hdrs_slot(0, [("a.h", "a.h"), ("b.h", "b.h"), ("c.h", "c.h")])])
-    assert _include_sequence_is_additive_owned_growth(old, new, frozenset({"c.h"}))
+    assert incl_growth(old, new, frozenset({"c.h"}))
 
 
 def test_include_sequence_additive_owned_growth_false_for_duplicated_newly_owned_pair():
@@ -232,7 +235,7 @@ def test_include_sequence_additive_owned_growth_false_for_duplicated_newly_owned
     new = json.dumps(
         [f"0:hdrs:{json.dumps([['a.h', 'a.h'], ['c.h', 'c.h'], ['c.h', 'c.h']])}"]
     )
-    assert not _include_sequence_is_additive_owned_growth(old, new, frozenset({"c.h"}))
+    assert not incl_growth(old, new, frozenset({"c.h"}))
 
 
 def test_include_sequence_additive_owned_growth_false_for_duplicated_old_pair():
@@ -241,7 +244,7 @@ def test_include_sequence_additive_owned_growth_false_for_duplicated_old_pair():
     new = json.dumps(
         [f"0:hdrs:{json.dumps([['a.h', 'a.h'], ['a.h', 'a.h'], ['c.h', 'c.h']])}"]
     )
-    assert not _include_sequence_is_additive_owned_growth(old, new, frozenset({"c.h"}))
+    assert not incl_growth(old, new, frozenset({"c.h"}))
 
 
 def test_include_sequence_additive_owned_growth_false_for_unchanged_slot_with_duplicate_pairs():
@@ -257,4 +260,4 @@ def test_include_sequence_additive_owned_growth_false_for_unchanged_slot_with_du
     malformed_slot0 = "0:hdrs:" + json.dumps([["x.h", "x.h"], ["x.h", "x.h"]])
     old = json.dumps([malformed_slot0, _hdrs_slot(1, [("a.h", "a.h")])])
     new = json.dumps([malformed_slot0, _hdrs_slot(1, [("a.h", "a.h"), ("c.h", "c.h")])])
-    assert not _include_sequence_is_additive_owned_growth(old, new, frozenset({"c.h"}))
+    assert not incl_growth(old, new, frozenset({"c.h"}))

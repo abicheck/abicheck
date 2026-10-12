@@ -1995,7 +1995,8 @@ class TestUsedByScoping:
         # pattern for the other surface-metrics-affected tests in this file.
         # public_surface_shrank is QUALITY_ISSUES, not an addition (defect 4).
         assert result.stdout.strip().startswith("BREAKING: 1 breaking (2 total)")
-        assert "2 detected, 0 gating, 2 non_gating" in result.stdout
+        # D-S1: the audit counts what the full-library exit (4) is decided on.
+        assert "2 detected, 1 gating, 1 non_gating" in result.stdout
 
     def test_oneline_format_does_not_count_a_scoped_only_finding(
         self, tmp_path, monkeypatch
@@ -2037,7 +2038,8 @@ class TestUsedByScoping:
         )
         assert result.exit_code == 0
         assert result.stdout.strip().startswith("NO_CHANGE: no changes (0 total)")
-        assert "1 detected, 1 gating" in result.stdout
+        # The scoped-only consumer finding never reaches the exit-0 gate.
+        assert "1 detected, 0 gating, 1 non_gating" in result.stdout
 
     def test_oneline_format_unaffected_by_show_only(
         self, tmp_path, monkeypatch
@@ -2074,7 +2076,8 @@ class TestUsedByScoping:
         )
         assert result.exit_code == 0
         assert result.stdout.strip().startswith("NO_CHANGE: no changes (0 total)")
-        assert "1 detected, 1 gating" in result.stdout
+        # The scoped-only consumer finding never reaches the exit-0 gate.
+        assert "1 detected, 0 gating, 1 non_gating" in result.stdout
 
     def test_oneline_format_counts_an_ordinary_in_scope_removal(
         self, tmp_path, monkeypatch

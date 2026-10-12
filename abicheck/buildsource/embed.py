@@ -95,9 +95,8 @@ def embed_build_source(
     *on_warning* receives this function's own advisory messages (e.g. the
     "no compile_commands.json found" warning). It is ``None`` by default --
     an engine module owns no stream; the CLI adapter passes a stderr writer,
-    and a Tier-2 caller passes nothing. This replaced a ``quiet`` flag for a
-    non-CLI caller (``service.run_compare_request``) with no stream to write
-    to and no way to suppress it otherwise.
+    and a Tier-2 caller passes nothing (it replaced a ``quiet`` flag a caller
+    with no stream had to set just to stay silent).
     """
     from .build_config import discover_build_config, load_build_config
     from .inline import collect_inline_pack, is_pack_dir

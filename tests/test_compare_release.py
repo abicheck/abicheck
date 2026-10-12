@@ -15,11 +15,6 @@ from abicheck.cli_compare_release import (
     _discover_include_roots,
     _prepare_compare_release_inputs,
 )
-from abicheck.cli_helpers_compare import (
-    _canonical_library_key,
-    _version_sort_key,
-    strip_vendor_hash,
-)
 from abicheck.frontends.cli.release_report import render_release_summary
 from abicheck.model import (
     AbiSnapshot,
@@ -29,8 +24,11 @@ from abicheck.model import (
     TypeField,
     Visibility,
 )
+from abicheck.model.binary_naming import strip_vendor_hash
 from abicheck.serialization import snapshot_to_json
 from abicheck.workflows.extraction import (
+    _canonical_library_key,
+    _version_sort_key,
     is_supported_compare_input as _is_supported_compare_input,
 )
 

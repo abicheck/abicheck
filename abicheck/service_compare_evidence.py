@@ -172,7 +172,7 @@ def collect_mode_for(depth: str | None, *sides: InputSpec) -> str:
     """The build-source collect mode *depth* (or the inputs) implies.
 
     Mirrors the CLI's own --depth-omitted inference
-    (cli_compare_helpers._resolve_compare_collect_mode): explicit depth
+    (workflows.compare_configuration.resolve_compare_collect_mode): explicit depth
     always wins; else sources infers "source", build_info infers "build",
     nothing at all stays "off". Variadic in *sides* so ``compare`` asks over
     both of its inputs and ``dump`` over its single one — the rule is the
@@ -192,7 +192,7 @@ def dump_collect_mode_for(depth: str | None) -> str:
 
     Deliberately **not** :func:`collect_mode_for` (CLI cleanup phase two, PR 3A
     blocker 5, sub-issue 2). That function mirrors ``compare``'s own rule
-    (``cli_compare_helpers._resolve_compare_collect_mode``): omitted depth is
+    (``workflows.compare_configuration.resolve_compare_collect_mode``): omitted depth is
     *inferred* from whichever inputs were supplied, defaulting to ``"off"``.
     The ``dump`` CLI has always resolved omitted depth differently — one fixed
     default, ``"source-target"``, regardless of inputs

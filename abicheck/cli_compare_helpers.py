@@ -21,9 +21,9 @@ AI-readiness file-size cap. Not the leaf helper module ``cli_helpers_compare``
 (plain, cli-independent utilities): ``run_compare`` drives the full
 single-pair compare flow and reuses the option-parsing/render/exit helpers
 still in :mod:`abicheck.cli` (imported back below -- the by-design sibling
-cycle, allow-listed in ``check_ai_readiness``). Verdict routing stays through
-the Tier-2 service (``service.compare_snapshots``), never a direct
-``checker.compare`` call (cli-contract, ADR-037 D10.1).
+cycle, allow-listed in ``check_ai_readiness``). Classification goes through
+the shared ``workflows.compare_classify`` core every scalar route runs, never
+a direct ``checker.compare`` call (cli-contract, ADR-037 D10.1).
 """
 
 from __future__ import annotations
@@ -49,7 +49,7 @@ from .cli_compare_options import (
     _warn_force_public_ignored,
     echo_coverage_warnings,
 )
-from .cli_dump_helpers import resolve_dump_debug_format, resolve_dump_depth
+from .cli_dump_helpers import resolve_dump_debug_format
 from .cli_helpers_compare import (
     _app_compat_summary as _app_compat_summary,
     _pair_wide_dialect_override,
@@ -58,8 +58,6 @@ from .cli_helpers_compare import (
     _scoped_exit_code as _scoped_exit_code,
     _scoped_severity_summary as _scoped_severity_summary,
     _warn_ignored_flags,
-    load_required_symbols,
-    resolve_force_public_scope,
 )
 from .cli_options import (
     resolve_compile_context,
@@ -67,12 +65,17 @@ from .cli_options import (
     resolve_contract_evaluation,
 )
 from .cli_resolve import (
-    _resolve_compare_snapshots,
+    _resolve_compare_pair,
     classify_compare_operand,
     resolve_directory_compile_context,
 )
 from .contract_scoped_promotion import stamp_scoped_result_findings
-from .errors import ProfileMismatchError, ScopeMismatchError, SnapshotError
+from .errors import (
+    ProfileMismatchError,
+    ScopeMismatchError,
+    SnapshotError,
+    ValidationError,
+)
 from .frontends.cli import compare_enrichment as _enrichment
 from .frontends.cli.acknowledgment_config import (
     compare_acknowledgments_for,
@@ -100,11 +103,14 @@ from .frontends.cli.contract_overlays import (
 )
 from .frontends.cli.options.params import _load_suppression_and_policy
 from .frontends.cli.ownership_config import project_ownership_request
+from .frontends.cli.project_config import (
+    compare_settings_usage_errors,
+    resolve_project_compare_config,
+)
 from .frontends.cli.runtime import (
     _announce_exit_scheme,
     _exit_with_severity_or_verdict,
     _finalize_compare_result,
-    _load_probe_matrix_changes,
     _log_debug_resolution,
     _setup_verbosity,
     _write_or_echo,
@@ -113,6 +119,11 @@ from .frontends.render import ONELINE_FORMAT, resolve_demangle_for_format
 from .model.sided_inputs import resolve_per_side_inputs
 from .report.report_modes import normalize_report_mode
 from .serialization import run_scoped_digest_cache
+from .workflows.compare_configuration import (
+    load_required_symbols,
+    resolve_compare_collect_mode,
+    resolve_force_public_scope,
+)
 from .workflows.header_exclusion_audit import unmatched_exclusion_warning
 from .workflows.ownership_request import project_ownership_scope
 from .workflows.public_header_boundary import (
@@ -120,81 +131,10 @@ from .workflows.public_header_boundary import (
 )
 
 if TYPE_CHECKING:
-    from .cli_helpers_compare import ResolvedCompareConfig
     from .model.consumer_spec import ConsumerAppInput
+    from .workflows.compare_configuration import ResolvedCompareConfig
     from .workflows.extraction import DumpManifest
     from .workflows.policy_file import PolicyFile
-
-
-def _resolve_compare_config(
-    *,
-    config: Path | None,
-    severity_preset: str | None,
-) -> tuple[Path | None, object, ResolvedCompareConfig, str | None]:
-    """This module's long-standing name for `frontends.cli.project_config.
-    resolve_project_compare_config`.
-
-    The implementation moved so the ``--no-baseline`` audit -- which
-    dispatches before this module runs -- can reach the same resolution
-    without closing an import cycle back through it. Call sites unchanged.
-    """
-    from .frontends.cli.project_config import resolve_project_compare_config
-
-    return resolve_project_compare_config(
-        config=config,
-        severity_preset=severity_preset,
-    )
-
-
-def _resolve_compare_collect_mode(
-    depth: str | None,
-    source_method: str | None,
-    old_sources: Path | None,
-    new_sources: Path | None,
-    old_build_info: Path | None,
-    new_build_info: Path | None,
-) -> tuple[str, str]:
-    """Resolve compare's source/build collect mode, plus a human label for it.
-
-    Precedence (ADR-037 D4/D5, extended by the P1 CLI-contract fix below):
-    explicit ``--depth`` > ``.abicheck.yml`` ``source.method`` > inferred from
-    raw ``--old/new-sources``/``--old/new-build-info`` given with neither of
-    the above > off.
-
-    The inferred rung closes a gap where passing ``--sources``/``--build-info``
-    with no ``--depth`` (and no ``source.method`` in config) silently resolved
-    to "off" and the inputs were ignored with a warning: an explicit
-    source/build-info input is itself a request to use it, so omitted depth
-    should not default to discarding it. This mirrors ``scan``'s own
-    "auto" depth, which is likewise input-driven rather than a fixed default.
-    The label is shown verbatim in ``compare --dry-run``'s "Resolved depth and
-    source scope" section so a dry run reports the *effective* depth, not just
-    the raw ``--depth`` string the user passed (or omitted).
-    """
-    if depth is not None:
-        return resolve_dump_depth(depth, "off"), f"--depth {depth}"
-    if source_method:
-        from .model.evidence_depth_levels import SourceMethod, method_to_collect_mode
-
-        try:
-            mode = method_to_collect_mode(SourceMethod(source_method))
-        except ValueError:
-            raise click.UsageError(
-                f"source.method in .abicheck.yml is invalid: "
-                f"{source_method!r} (expected s0..s6 or auto)."
-            ) from None
-        return mode, f"source.method={source_method} (.abicheck.yml)"
-    if old_sources is not None or new_sources is not None:
-        return (
-            resolve_dump_depth("source", "off"),
-            "source (inferred: --sources old=/new= given, no --depth)",
-        )
-    if old_build_info is not None or new_build_info is not None:
-        return (
-            resolve_dump_depth("build", "off"),
-            "build (inferred: --build-info old=/new= given, no --depth)",
-        )
-    return "off", "off -- no L3-L5 source/build evidence (no --depth, no --sources/--build-info, no source.method)"  # fmt: skip
 
 
 def _normalize_compare_options(
@@ -216,14 +156,15 @@ def _normalize_compare_options(
     # Fold the --depth dial into the internal collect mode (ADR-037 D5), the
     # same way `dump` does; when omitted, infer it from --sources/--build-info
     # (or config source.method) rather than defaulting to "off" (P1 fix).
-    collect_mode, _ = _resolve_compare_collect_mode(
-        depth,
-        resolved_cfg.source_method,
-        old_sources,
-        new_sources,
-        old_build_info,
-        new_build_info,
-    )
+    with compare_settings_usage_errors():
+        collect_mode, _ = resolve_compare_collect_mode(
+            depth,
+            resolved_cfg.source_method,
+            old_sources,
+            new_sources,
+            old_build_info,
+            new_build_info,
+        )
     if depth == "binary":
         headers, old_headers_only, new_headers_only = (), (), ()
 
@@ -814,9 +755,6 @@ def _report_compare_result(
     resolved_cfg: Any,
     evaluation_config: Any,
     report_severity: Any,
-    layer_coverage_rows: Any,
-    evidence_metrics: Any,
-    extra_changes: Any,
     show_redundant: bool,
     contract_evaluation: bool,
     policy: str,
@@ -835,7 +773,6 @@ def _report_compare_result(
     secondary_writes: tuple[tuple[str, Path], ...],
     require_complete_analysis: bool = False,
     require_complete_analysis_stated: bool = False,
-    depth: str | None = None,
     use_cases_manifest: Path | None = None,
     project_config_path: Path | None = None,
     project_config_sha256: str | None = None,
@@ -848,7 +785,7 @@ def _report_compare_result(
 
     *project_config_path*/*project_config_sha256* are ``run_compare``'s own
     already-resolved ``cfg_path``/``cfg_sha`` (the ``.abicheck.yml``
-    ``_resolve_compare_config`` loaded for this same invocation) -- forwarded
+    ``resolve_project_compare_config`` loaded for this same invocation) -- forwarded
     to :func:`~abicheck.cli_compare_receipt.record_resolved_config` so a
     ``gate.require_complete_analysis`` receipt entry can name the real
     document/digest that supplied ``assurance.require_complete``, the same
@@ -863,7 +800,6 @@ def _report_compare_result(
     own module docstring (Codex review, fresh evidence, PR #1222 fourth
     round, second finding).
     """
-    from .cli_buildsource import attach_evidence_metrics
     from .cli_compare_receipt import record_resolved_config
 
     record_resolved_config(
@@ -875,65 +811,6 @@ def _report_compare_result(
         require_complete_analysis_stated=require_complete_analysis_stated,
     )
 
-    # P0.4 (P1 review, round 9): `DiffResult.requested_depth` -- the G30
-    # report-identity field `analysis_assurance.compute_analysis_assurance`
-    # reads to gate `depth_satisfied` -- was never actually populated by any
-    # front end (see that field's own comment in checker_types.py), so an
-    # explicit `compare --depth source` that never reached source evidence
-    # (e.g. both sides lack a compile database, so the effective depth stays
-    # `headers`) silently read `requested_depth=None`, `depth_satisfied=None`,
-    # and could still report `status="complete"` under
-    # `assurance.require_complete`. `depth` here is `run_compare`'s own
-    # raw, Click-validated `--depth` string (one of
-    # `checker_types.EVIDENCE_DEPTH_VALUES`, `None` when the flag was
-    # omitted) -- copy it onto the result before recomputing
-    # `analysis_assurance` below so the requested-vs-effective gate actually
-    # has something to check. Only ever set when the flag was explicitly
-    # given, mirroring the same "explicit override, never inferred"
-    # discipline `_resolve_compare_collect_mode` already applies to `depth`
-    # itself for collect-mode resolution -- an inferred depth (from
-    # `--sources`/`--build-info` alone, or `.abicheck.yml`'s `source.method`)
-    # is not this comparison's stated request in the same on-the-record way
-    # an explicit `--depth` flag is.
-    if depth is not None:
-        result.requested_depth = depth
-    if layer_coverage_rows:
-        result.layer_coverage = layer_coverage_rows
-    # Pass all injected findings (probe-matrix + evidence) so artifact-backed
-    # excludes them — none come from L0-L2 diffing.
-    attach_evidence_metrics(result, evidence_metrics, extra_changes or [])
-
-    # P0.4 (P1 review): recompute analysis_assurance now that the *real*
-    # evidence pack behind this comparison's findings is known. An
-    # out-of-band --old/new-build-info / --old/new-sources pack is now
-    # attached onto old.build_source/new.build_source, already capped to
-    # --depth, by run_compare's resolve-and-cap step above -- so reading it
-    # straight off old/new here (not re-resolving the raw paths, which would
-    # reload the uncapped pack and defeat the ceiling here) is correct at
-    # any --depth (Codex review, PR #1020, second round).
-    from functools import partial
-
-    from .evidence_depth import embedded_evidence_pack
-    from .workflows.analysis_assurance_attach import attach_evidence_depths
-    from .workflows.gate import compute_analysis_assurance, same_persisted_content
-
-    result.analysis_assurance = compute_analysis_assurance(
-        result,
-        old,
-        new,
-        old_pack=embedded_evidence_pack(old),  # header graph stands in (ADR-063)
-        new_pack=embedded_evidence_pack(new),
-        same_content=partial(same_persisted_content, old, new),
-    )
-    # ADR-061 Phase 2 item 5 (post-render mutation): resolved here, before
-    # any report is rendered, and attached directly onto `result` -- mirrors
-    # `analysis_assurance` immediately above.
-    # `reporter.to_json`'s JSON builders read these two fields straight off
-    # `result` now, instead of `_fold_evidence_depth_into_json` re-parsing
-    # this function's own already-rendered JSON text afterwards to splice
-    # them in (see that field's own docstring in checker_types.py).
-    attach_evidence_depths(result, old, new)
-
     # Plan slice 7o: unconditional. The pattern-modulation ledger used to be
     # gated on `--view patterns`; ADR-067's record-before-disposing rule makes
     # a disposition's own reason part of the result, not a display preference.
@@ -944,16 +821,11 @@ def _report_compare_result(
     if result.pattern_modulations:
         echo_pattern_modulations(result)
 
-    # used_by_old_input/used_by_new_input are the *original* library paths, captured before _embed_inline_source_sides may have rewritten old_input/new_input to a temporary embedded-snapshot .abi.json path (Codex review) -- passing the post-embed operands here would silently drop the same-binary coverage warning for a --old/new-sources or raw --build-info comparison even when the two real binaries are identical.
     _finalize_compare_result(
         result,
-        used_by_old_input,
-        used_by_new_input,
         show_redundant=show_redundant,
         severity_config=report_severity,
         contract_evaluation=contract_evaluation,
-        old_snapshot=old,
-        new_snapshot=new,
     )
 
     # Workstream D-S1 (vision-api-abi-evolution.md "D. Optional
@@ -1244,12 +1116,13 @@ def run_compare(
         )
         used_by_apps = (*used_by_apps, *manifest_specs)
 
-    (
-        required_symbols,
-        required_symbols_from_file,
-        required_symbols_sha,
-        required_symbols_path,
-    ) = load_required_symbols(required_symbols_opt)
+    with compare_settings_usage_errors():
+        (
+            required_symbols,
+            required_symbols_from_file,
+            required_symbols_sha,
+            required_symbols_path,
+        ) = load_required_symbols(required_symbols_opt)
     if used_by_apps and required_symbols:
         raise click.UsageError(
             "--used-by and --required-symbol are mutually "
@@ -1269,7 +1142,7 @@ def run_compare(
     # ADR-037 D4: load the project config and merge CLI flags over it
     # (precedence CLI > config > built-in default) *before* dispatch, so both the
     # single-file and the directory/package fan-out paths share one resolution.
-    cfg_path, project_cfg, resolved_cfg, cfg_sha = _resolve_compare_config(
+    cfg_path, project_cfg, resolved_cfg, cfg_sha = resolve_project_compare_config(
         config=config,
         severity_preset=severity_preset,
     )
@@ -1505,14 +1378,15 @@ def run_compare(
         # just echo `--depth` back; `frontends/cli/compare_dry_run.py`'s
         # docstring explains why it takes the resolved pair as parameters.
         # The parsed manifests say which operands parse headers without -H.
-        collect_mode_dr, effective_depth_label_dr = _resolve_compare_collect_mode(
-            depth,
-            resolved_cfg.source_method,
-            old_sources,
-            new_sources,
-            old_build_info,
-            new_build_info,
-        )
+        with compare_settings_usage_errors():
+            collect_mode_dr, effective_depth_label_dr = resolve_compare_collect_mode(
+                depth,
+                resolved_cfg.source_method,
+                old_sources,
+                new_sources,
+                old_build_info,
+                new_build_info,
+            )
         emit_dry_run(
             build_compare_dry_run_result(
                 # ADR-074: the effective macro set, resolved through the very
@@ -1872,7 +1746,7 @@ def run_compare(
     # is needed, not a second `deadline_scope` entry (which would reset it).
     try:
         deadline.check()
-        old, new = _resolve_compare_snapshots(
+        resolution_request, pair = _resolve_compare_pair(
             old_input,
             new_input,
             old_fmt,
@@ -1922,18 +1796,6 @@ def run_compare(
             output=output,
             secondary_writes=secondary_writes,
         )
-
-    # ADR-063 Phase 8's "--depth floor vs ceiling" gap (Codex review, PR
-    # #1020): this native CLI path calls `compare_snapshots()` directly, not
-    # `classify_compare_pair`, so it needs the identical capped view applied
-    # here too -- before every subsequent reader of `old`/`new` below
-    # (`fold_l0_hard_removals`, the build-source diff, `compare_snapshots`
-    # itself). Imported from `service_compare_pipeline` (`workflows`), not
-    # `.policy.depth_projection` directly: ADR-061 forbids `frontends ->
-    # policy`, and this CLI module is `frontends`.
-    from .service_compare_pipeline import project_pair_to_depth
-
-    old, new = project_pair_to_depth(old, new, depth)
 
     suppression, pf = _load_suppression_and_policy(
         suppress,
@@ -1998,56 +1860,22 @@ def run_compare(
     pf = project_fold.policy_file
     for w in project_fold.warnings:  # round 9/10
         click.echo(f"Warning: {w}", err=True)
-    extra_changes = _load_probe_matrix_changes(probe_matrix_old, probe_matrix_new)
 
-    # ADR-063 Phase 8 "--depth" ceiling (Codex review, PR #1020, second
-    # round): an out-of-band --old/new-sources/-build-info pack never lives
-    # on old/new until prepare_embedded_build_source diffs it, so
-    # project_pair_to_depth above can't cap it. Resolve + cap it ourselves,
-    # attach onto old/new, then pass None below so resolve_side_pack falls
-    # back to the now-capped embedded payload instead of the raw pack.
-    from .cli_buildsource_helpers import _resolve_side_pack
-    from .service_compare_pipeline import project_build_source_pack_to_depth
+    # An out-of-band --old/new-build-info/--sources pack overrides the
+    # snapshot's embedded payload per layer (`resolve_side_pack`). Attached
+    # here, before classification, so the shared depth projection caps it
+    # exactly as it caps an embedded pack -- the typed route's order, where
+    # resolution embeds the pack (Codex review, PR #1020).
+    from .cli_buildsource_helpers import _with_out_of_band_packs
 
-    old.build_source = project_build_source_pack_to_depth(
-        _resolve_side_pack(old_build_info, old_sources, old), depth
+    pair = _with_out_of_band_packs(
+        pair, old_build_info, old_sources, new_build_info, new_sources
     )
-    new.build_source = project_build_source_pack_to_depth(
-        _resolve_side_pack(new_build_info, new_sources, new), depth
-    )
-
-    # Build-info + source facts (ADR-028/033): the helper times inline diffing
-    # for the D6/D9 metrics and returns coverage/metrics to attach post-compare.
-    # ADR-068 D3 (Phase 2d): the candidate-only --abi3 audit rides the same extra_changes channel every other externally-produced finding uses, so policy/suppression/verdict score it (security review of PR #1123).
-    # Both folds run through the evidence fold every compare route shares.
-    from .cli_buildsource_helpers import _echo as _evidence_echo
-    from .workflows.pair_evidence import fold_pair_evidence
-
-    try:
-        folded = fold_pair_evidence(
-            old,
-            new,
-            collect_mode=collect_mode,
-            extra_changes=extra_changes,
-            policy_file=pf,
-            lang=lang,
-            abi3_floor=_enrich.abi3_floor,
-            candidate_name=new_input.name,
-            on_output=_evidence_echo,
-        )
-    except SnapshotError as exc:
-        raise click.ClickException(str(exc)) from exc
-    extra_changes, layer_coverage_rows = (
-        folded.extra_changes,
-        folded.layer_coverage_rows,
-    )
-    evidence_metrics, _abi3_failure = folded.evidence_metrics, folded.abi3_failure
-
     # contract.overlays.post_manifest: scope the comparison to the POST
     # manifest's committed `pp_*`/ufunc-loop surface. Narrowing, so only an
     # explicitly named --config is trusted to apply it.
     post_manifest_allowlist = post_manifest_allowlist_for(
-        project_cfg, cfg_path, old, new, config_explicit=config is not None
+        project_cfg, cfg_path, pair.old, pair.new, config_explicit=config is not None
     )
     # ADR-067 D5/D6: `.abicheck.yml`'s `acknowledgment:` block (records only
     # from an explicit --config; see acknowledgment_config.py).
@@ -2083,71 +1911,87 @@ def run_compare(
     resolved_contract_mode = stated_contract_mode(
         evaluation_config, contract_mode, contract_evaluation=contract_evaluation
     )
-    from .service import compare_snapshots
-
     # ADR-020b / ADR-068 D5: `deployment:` (former `--env-matrix FILE`) is
-    # config-only now -- `resolved_cfg.deployment` is the single already-
-    # resolved `EnvironmentMatrix`, sourced straight from `.abicheck.yml`,
-    # no CLI override, no separate file to load here.
-    env_matrix = resolved_cfg.deployment
+    # config-only -- `resolved_cfg.deployment` is the resolved matrix.
+    request = dataclasses.replace(
+        resolution_request,
+        policy=policy,
+        policy_file_path=policy_file_path,
+        suppress=suppress,
+        strict_suppressions=strict_suppressions,
+        require_justification=require_justification,
+        scope_public=scope_public_headers,
+        force_public_symbols=frozenset(force_public) if force_public else None,
+        public_surface_allowlist=(
+            frozenset(post_manifest_allowlist)
+            if post_manifest_allowlist is not None
+            else None
+        ),
+        pattern_verdicts=True,
+        collapse_versioned_symbols=collapse_versioned_symbols,
+        env_matrix=resolved_cfg.deployment,
+        diagnostic_comparison=diagnostic_comparison,
+        contract_evaluation=contract_evaluation,
+        contract_mode=resolved_contract_mode,
+        depth=depth,
+        old_probe_matrix=probe_matrix_old,
+        new_probe_matrix=probe_matrix_new,
+        abi3_floor=_enrich.abi3_floor,
+    )
+    # ADR-068 §3 #28's floor; `side_is_live` owns "did this run extract it?"
+    # for both `compare` forms. The operand paths are the pre-embed ones, so
+    # metadata and the same-binary note describe the user's real binaries.
+    from .cli_buildsource_helpers import _echo as _evidence_echo
+    from .workflows.compare_classify import ComparedOperands, classify_resolved_pair
+    from .workflows.compare_request_policy import RequestPolicyInputs
+    from .workflows.input_resolution import side_is_live
+
+    operands = ComparedOperands(
+        old_path=used_by_old_input,
+        new_path=used_by_new_input,
+        old_live=side_is_live(old_input, had_raw_evidence=old_had_raw_evidence),
+        new_live=side_is_live(new_input, had_raw_evidence=new_had_raw_evidence),
+        candidate_name=new_input.name,
+    )
     try:
-        deadline.check()  # same boundary check as the resolve stage above
-        result = compare_snapshots(
-            old,
-            new,
-            suppression=suppression,
-            policy=policy,
-            policy_file=pf,
-            env_matrix=env_matrix,
-            scope_to_public_surface=scope_public_headers,
-            force_public_symbols=force_public,
-            extra_changes=extra_changes,
-            pattern_verdicts=True,
-            collapse_versioned_symbols=collapse_versioned_symbols,
-            public_surface_allowlist=post_manifest_allowlist,
-            diagnostic_comparison=diagnostic_comparison,
-            contract_evaluation=contract_evaluation,
-            contract_mode=resolved_contract_mode,
-            acknowledgments=acks.records,
-            acknowledgment_policy=acks.policy,
+        classified = classify_resolved_pair(
+            request,
+            pair,
+            RequestPolicyInputs(suppression, pf, evaluation_config, acks),
+            operands=operands,
+            collect_mode=collect_mode,
+            on_output=_evidence_echo,
         )
+    except ValidationError as exc:  # a one-sided --build-info probe matrix
+        raise click.UsageError(str(exc)) from exc
+    except SnapshotError as exc:  # an unloadable build-source pack: exit 1
+        raise click.ClickException(str(exc)) from exc
     except (ProfileMismatchError, ScopeMismatchError) as exc:
         report_not_comparable_and_exit(
-            exc, old, new, fmt=fmt, output=output, secondary_writes=secondary_writes
-        )
-    except deadline.DeadlineExceeded as exc:
-        # ADR-068 §3 #19: budget expired during classification itself (the
-        # automatic cross-source/pattern/preprocessor scans, ADR-068 D4/D5,
-        # can still run `clang -E`) rather than during resolution above --
-        # same axis, same exit code, caught separately only because `old`/
-        # `new` already resolved by this point and resolution's own except
-        # above cannot see this call.
-        _exit_on_budget_overflow(
             exc,
-            budget,
-            f"'{old.library}'",
-            old.library,
-            old.version,
-            new.version,
+            pair.old,
+            pair.new,
             fmt=fmt,
             output=output,
             secondary_writes=secondary_writes,
         )
-    _enrichment.report_abi3_evidence_contract_error(
-        result, _abi3_failure
-    )  # ADR-068 exit-7 axis
-    # ADR-068 §3 #28's floor; `side_is_live` owns "did this run extract it?"
-    # for both `compare` forms -- its docstring has the whole account.
-    from .workflows.input_resolution import side_is_live
-
-    _enrichment.report_depth_evidence_contract_error(
-        result,
-        depth,
-        old,
-        new,
-        old_is_live=side_is_live(old_input, had_raw_evidence=old_had_raw_evidence),
-        new_is_live=side_is_live(new_input, had_raw_evidence=new_had_raw_evidence),
-    )
+    except deadline.DeadlineExceeded as exc:
+        # ADR-068 §3 #19: the budget expired during classification (the
+        # automatic cross-source/pattern/preprocessor scans can still run
+        # `clang -E`) rather than during resolution -- same axis, same exit.
+        _exit_on_budget_overflow(
+            exc,
+            budget,
+            f"'{pair.old.library}'",
+            pair.old.library,
+            pair.old.version,
+            pair.new.version,
+            fmt=fmt,
+            output=output,
+            secondary_writes=secondary_writes,
+        )
+    result, old, new = classified.result, classified.old, classified.new
+    _enrichment.echo_abi3_evidence_contract_error(classified.abi3_failure)
     _report_compare_result(
         ctx,
         result,
@@ -2158,9 +2002,6 @@ def run_compare(
         resolved_cfg=resolved_cfg,
         evaluation_config=evaluation_config,
         report_severity=report_severity,
-        layer_coverage_rows=layer_coverage_rows,
-        evidence_metrics=evidence_metrics,
-        extra_changes=extra_changes,
         show_redundant=show_redundant,
         contract_evaluation=contract_evaluation,
         policy=policy,
@@ -2179,7 +2020,6 @@ def run_compare(
         secondary_writes=secondary_writes,
         require_complete_analysis=require_complete_analysis,
         require_complete_analysis_stated=require_complete_analysis_stated,
-        depth=depth,
         use_cases_manifest=use_cases_manifest,
         project_config_path=cfg_path,
         project_config_sha256=cfg_sha,

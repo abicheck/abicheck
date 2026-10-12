@@ -8,21 +8,21 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import click
 import pytest
 
 from abicheck.checker_policy import ChangeKind, Verdict
 from abicheck.checker_types import DiffResult
-from abicheck.cli_helpers_compare import (
-    _pair_wide_dialect_override,
-    load_required_symbols,
-)
+from abicheck.cli_helpers_compare import _pair_wide_dialect_override
 from abicheck.config_paths import discover_project_config
 from abicheck.dry_run_estimate import CompileContext
 from abicheck.errors import AbicheckError
 from abicheck.l0_export_delta import fold_l0_hard_removals
 from abicheck.model import AbiSnapshot
 from abicheck.model.change import Change
+from abicheck.workflows.compare_configuration import (
+    CompareSettingsError,
+    load_required_symbols,
+)
 
 
 def _write_compile_db(directory, entries):
@@ -612,7 +612,7 @@ def test_load_required_symbols_rejects_more_than_one_file(tmp_path):
     f2 = tmp_path / "two.txt"
     f1.write_text("a\n", encoding="utf-8")
     f2.write_text("b\n", encoding="utf-8")
-    with pytest.raises(click.UsageError, match="at most one"):
+    with pytest.raises(CompareSettingsError, match="at most one"):
         load_required_symbols((f"@{f1}", f"@{f2}"))
 
 
@@ -620,7 +620,7 @@ def test_load_required_symbols_rejects_a_missing_file(tmp_path):
     """A named ``@FILE`` that does not exist on disk is a usage error, not a
     silent empty contribution."""
     missing = tmp_path / "does-not-exist.txt"
-    with pytest.raises(click.UsageError, match="no such file"):
+    with pytest.raises(CompareSettingsError, match="no such file"):
         load_required_symbols((f"@{missing}",))
 
 

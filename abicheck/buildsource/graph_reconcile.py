@@ -112,6 +112,10 @@ from abicheck.model.entity_identity import (
 )
 
 from ..model.root_relative_path import project_layout_spelling
+from ..model.source_graph_query import (
+    decl_declaring_file_sets,
+    representative_declaring_files,
+)
 from .graph_reconcile_outcome import (
     _OUTCOME_PROSE,
     COORDINATE_EVIDENCE_PARTIAL_DECLARING_FILE,
@@ -343,8 +347,7 @@ def _all_structural_contexts(
         src_wanted = e.src in ctx
         if not (dst_wanted or src_wanted):
             continue
-        role = str(e.attrs.get("role", ""))
-        tag = f"{e.kind}:{role}" if role else e.kind
+        tag = f"{e.kind}:{e.role}" if e.role else e.kind
         if dst_wanted:
             ctx[e.dst].add(("in", tag, identity(e.src)))
         if src_wanted:
@@ -354,35 +357,18 @@ def _all_structural_contexts(
 
 def _declaring_files(
     graph: SourceGraphSummary, node_ids: AbstractSet[str] | None = None
-) -> dict[str, str]:
-    """Every node's declaring-file project-relative path, resolved via an
-    incoming ``SOURCE_DECLARES`` edge.
-
-    ``resolve_identity_for_node``'s ``source_relative`` alias needs a
-    ``def_file``/``file`` attr on the declaration node itself, but real
-    header-only-graph ``source_decl`` nodes (``header_graph.py``'s
-    ``seed_decl``) carry no such attr -- the declaring header is only
-    recorded as the source end of a ``SOURCE_DECLARES`` edge. Without this,
-    :func:`_classify_outcome` never sees a declaring file for those nodes
-    and a real cross-header move is misclassified as
-    ``declaration_identity_reconciled`` instead of ``OUTCOME_MOVED``
-    (Codex review, fresh evidence).
-
-    *node_ids*, when given, restricts the result to those declaration ids;
-    each restricted entry equals the unrestricted one (the last matching
-    edge wins either way, since edges are scanned in the same order).
+) -> dict[str, tuple[str, ...]]:
+    """Every node's declaring-file project-relative paths, sorted, from its
+    incoming ``SOURCE_DECLARES`` edges (header-only-graph ``source_decl``
+    nodes carry no ``def_file`` attr, so without these a real cross-header
+    move would never be seen -- Codex review). All of them, not the last edge
+    scanned: see :func:`decl_declaring_file_sets` for why edge order must not
+    pick the file.
     """
-    label_by_id = {n.id: n.label for n in graph.nodes}
-    result: dict[str, str] = {}
-    for e in graph.edges:
-        if e.kind != "SOURCE_DECLARES":
-            continue
-        if node_ids is not None and e.dst not in node_ids:
-            continue
-        label = label_by_id.get(e.src)
-        if label:
-            result[e.dst] = project_layout_spelling(str(label))
-    return result
+    return {
+        nid: tuple(sorted({project_layout_spelling(f) for f in files}))
+        for nid, files in decl_declaring_file_sets(graph, node_ids).items()
+    }
 
 
 #: One node kind's structural-context index: context -> the new-side node ids
@@ -453,19 +439,27 @@ class _Reconciler:
         """
         oid = old_node.id
         new_node = next(n for n in kind_pass.new_list if n.id == new_id)
-        old_declaring = self.old_declaring_files.get(oid) or own_file(old_node)
-        new_declaring = self.new_declaring_files.get(new_id) or own_file(new_node)
+        old_files = self.old_declaring_files.get(oid, ())
+        new_files = self.new_declaring_files.get(new_id, ())
+        old_edge_file, new_edge_file = representative_declaring_files(
+            old_files, new_files
+        )
+        shared = bool(set(old_files) & set(new_files))
+        old_declaring = old_edge_file or own_file(old_node)
+        new_declaring = new_edge_file or own_file(new_node)
         classification = classify(
             kind_pass.old_ident[oid],
             kind_pass.new_ident[new_id],
             old_declaring_file=old_declaring,
             new_declaring_file=new_declaring,
+            declaring_file_shared=shared,
         )
         evidence = coordinate_evidence(
             kind_pass.old_ident[oid],
             kind_pass.new_ident[new_id],
             old_declaring_file=old_declaring,
             new_declaring_file=new_declaring,
+            declaring_file_shared=shared,
         )
         self.result.reconciled.append(
             ReconciledPair(
@@ -685,6 +679,12 @@ def reconcile_added_removed(
     ambiguity-safe, and each only ever considering what the previous ones left
     unmatched. See :class:`_Reconciler` for the tiers themselves.
     """
+    # Canonical order first. Every tier is greedy -- a pair recorded earlier
+    # removes its nodes from every later candidate list -- so the pairing a
+    # caller's list order happened to produce would otherwise be the answer.
+    # Node ids are unique within one graph, so sorting by id is total.
+    removed_nodes = sorted(removed_nodes, key=lambda n: n.id)
+    added_nodes = sorted(added_nodes, key=lambda n: n.id)
     true_removed: list[GraphNode] = []
     true_added: list[GraphNode] = []
     removed_by_kind = _group_reconcilable_by_kind(removed_nodes, true_removed)

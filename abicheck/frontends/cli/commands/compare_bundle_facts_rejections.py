@@ -507,7 +507,7 @@ def reject_unsupported_options(
             _unsupported_config_blocks.append("debug:")
         if _bc.source_method is not None:
             # Codex review: source.method (s1-s6) drives run_compare's own
-            # _resolve_compare_collect_mode, which this dispatcher never
+            # resolve_compare_collect_mode, which this dispatcher never
             # calls -- same root cause as --depth build/source above, this
             # driver has no channel for L3-L5 build/source evidence
             # collection on either side, config-declared or not.
