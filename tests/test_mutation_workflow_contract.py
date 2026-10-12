@@ -117,8 +117,19 @@ def _test_globs() -> set[str]:
     wait for the weekly run (Codex review). Derived from `source_paths` rather
     than listed, so a module added there without its tests fails the contract
     below instead of silently losing its trigger.
+
+    A module inside a sub-package below a layer
+    (``abicheck/<layer>/<package>/<module>.py``) is keyed by its *package*:
+    ``compare/finding_identity/change.py``'s tests are
+    ``tests/test_finding_identity*.py``, and a per-file stem (``change``,
+    ``symbols``) would both miss them and match unrelated test files.
     """
-    return {f"tests/test_{PurePosixPath(p).stem}*.py" for p in _only_mutate()}
+    globs = set()
+    for path in _only_mutate():
+        parts = PurePosixPath(path).parts
+        name = parts[-2] if len(parts) >= 4 else PurePosixPath(path).stem
+        globs.add(f"tests/test_{name}*.py")
+    return globs
 
 
 def test_paths_filter_covers_every_mutated_modules_tests() -> None:
