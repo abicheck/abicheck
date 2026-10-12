@@ -38,7 +38,8 @@ from abicheck.checker import ChangeKind, Verdict, compare
 from abicheck.compare.elf_alias_pairs import pair_elf_aliases
 from abicheck.elf_metadata import ElfMetadata, ElfSymbol, SymbolBinding, SymbolType
 from abicheck.extract.elf_symbol_classify import _populate_elf_visibility
-from abicheck.model import AbiSnapshot, Function
+from abicheck.model import AbiSnapshot, Function, Variable
+from abicheck.model.fact import Fact
 
 
 def _snap(elf: ElfMetadata, functions: list[Function] | None = None) -> AbiSnapshot:
@@ -616,3 +617,117 @@ def test_stored_and_fresh_mixed_declarations_have_equal_binding_fact(
 
     assert loaded.elf_binding is None and fresh.elf_binding is None
     assert loaded.elf_binding_fact == fresh.elf_binding_fact
+
+
+def test_one_to_one_rename_with_matching_is_default_pairs_among_other_aliases() -> None:
+    # Old: VER1 (default) and VER2. New: VER2 and VER3 (default). VER2 pairs by
+    # version; the leftover VER1 and VER3 are a rename with matching is_default.
+    old = ElfMetadata(
+        symbols=[
+            _named("foo", "VER1", is_default=True),
+            _named("foo", "VER2", is_default=False),
+        ]
+    )
+    new = ElfMetadata(
+        symbols=[
+            _named("foo", "VER2", is_default=False),
+            _named("foo", "VER3", is_default=True),
+        ]
+    )
+    got = sorted((o.version, n.version) for _, o, n in pair_elf_aliases(old, new))
+    assert got == [("VER1", "VER3"), ("VER2", "VER2")]
+
+
+def test_unambiguous_symbol_of_an_absent_name_is_none() -> None:
+    elf = ElfMetadata(symbols=[_named("foo", "VER1")])
+    assert elf.unambiguous_symbol("missing") is None
+
+
+def test_variable_takes_binding_and_visibility_from_agreeing_aliases() -> None:
+    elf = ElfMetadata(
+        symbols=[
+            _named(
+                "tv", "VER2", sym_type=SymbolType.OBJECT, binding=SymbolBinding.GLOBAL
+            ),
+            _named(
+                "tv",
+                "VER1",
+                is_default=False,
+                sym_type=SymbolType.OBJECT,
+                binding=SymbolBinding.GLOBAL,
+            ),
+        ]
+    )
+    var = Variable(name="tv", mangled="tv", type="int")
+    snap = AbiSnapshot(library="libx.so", version="1.0", elf=elf)
+    snap.declarations.variables.append(var)
+    _populate_elf_visibility(snap)
+    assert var.elf_binding is SymbolBinding.GLOBAL
+    assert var.elf_visibility is not None
+
+
+def test_load_normalization_clears_a_variable_with_disagreeing_aliases() -> None:
+    from abicheck.storage.snapshot_load_normalization import (
+        backfill_missing_elf_binding,
+    )
+
+    elf = ElfMetadata(
+        symbols=[
+            _named(
+                "tv", "VER2", sym_type=SymbolType.OBJECT, binding=SymbolBinding.GLOBAL
+            ),
+            _named(
+                "tv",
+                "VER1",
+                is_default=False,
+                sym_type=SymbolType.OBJECT,
+                binding=SymbolBinding.WEAK,
+            ),
+        ]
+    )
+    var = Variable(name="tv", mangled="tv", type="int")
+    var.elf_binding = SymbolBinding.GLOBAL  # legacy last-wins value
+    snap = AbiSnapshot(library="libx.so", version="1.0", elf=elf)
+    snap.declarations.variables.append(var)
+    backfill_missing_elf_binding(snap)
+    assert var.elf_binding is None
+    assert var.elf_binding_fact == Fact.not_collected()
+
+
+def test_load_normalization_backfills_a_variable_with_agreeing_aliases() -> None:
+    from abicheck.storage.snapshot_load_normalization import (
+        backfill_missing_elf_binding,
+    )
+
+    elf = ElfMetadata(
+        symbols=[
+            _named(
+                "tv", "VER2", sym_type=SymbolType.OBJECT, binding=SymbolBinding.WEAK
+            ),
+            _named(
+                "tv",
+                "VER1",
+                is_default=False,
+                sym_type=SymbolType.OBJECT,
+                binding=SymbolBinding.WEAK,
+            ),
+        ]
+    )
+    var = Variable(name="tv", mangled="tv", type="int")
+    snap = AbiSnapshot(library="libx.so", version="1.0", elf=elf)
+    snap.declarations.variables.append(var)
+    backfill_missing_elf_binding(snap)
+    assert var.elf_binding is SymbolBinding.WEAK
+
+
+def test_load_normalization_without_an_elf_block_is_a_no_op() -> None:
+    from abicheck.storage.snapshot_load_normalization import (
+        backfill_missing_elf_binding,
+    )
+
+    snap = AbiSnapshot(library="libx.so", version="1.0", elf=None)
+    snap.declarations.functions.append(
+        Function(name="foo", mangled="foo", return_type="int")
+    )
+    backfill_missing_elf_binding(snap)
+    assert snap.declarations.functions[0].elf_binding is None

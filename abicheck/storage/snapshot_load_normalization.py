@@ -156,11 +156,8 @@ def _strip_anonymous_type_locations(
             _set_identity_container(snapshot, field_name, new_container)
 
 
-def _clear_ambiguous_elf_facts(snap: AbiSnapshot) -> None:
+def _clear_ambiguous_elf_facts(snap: AbiSnapshot, elf: Any) -> None:
     """Unset binding/visibility for names whose versioned aliases disagree."""
-    elf = snap.elf
-    if elf is None:
-        return
     for func in snap.declarations.functions:
         if _has_disagreeing_aliases(elf, func.mangled):
             func.elf_binding = None
@@ -206,7 +203,7 @@ def backfill_missing_elf_binding(snap: AbiSnapshot) -> None:
     if snap.elf is None:
         return
     elf = snap.elf
-    _clear_ambiguous_elf_facts(snap)
+    _clear_ambiguous_elf_facts(snap, elf)
     for func in snap.declarations.functions:
         if func.elf_binding is None:
             elf_sym = elf.unambiguous_symbol(func.mangled)
