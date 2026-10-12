@@ -627,12 +627,18 @@ _ACCEPTED_KILL_LOSS = {
     # its pyproject --ignore comment. Surfaced by PR #1505.
     "tests/test_compare_cost_budgets.py": frozenset(
         {
+            "abicheck.compare.finding_dedup",
+            "abicheck.compare.finding_redundancy",
             "abicheck.diff_filtering",
             "abicheck.diff_platform",
             "abicheck.diff_symbols",
             "abicheck.diff_types",
             "abicheck.diff_vtable_layout",
-            "abicheck.finding_identity",
+            "abicheck.compare.finding_identity.change",
+            "abicheck.compare.finding_identity.change_kinds",
+            "abicheck.compare.finding_identity.mangled",
+            "abicheck.compare.finding_identity.report_ids",
+            "abicheck.compare.finding_identity.symbols",
             "abicheck.idioms",
             "abicheck.model.evidence_status",
             "abicheck.name_classification",
@@ -668,12 +674,18 @@ _ACCEPTED_KILL_LOSS = {
     # config -- the same class as the entries above. Surfaced by PR #1356.
     "tests/test_action_analysis_context.py": frozenset(
         {
+            "abicheck.compare.finding_dedup",
+            "abicheck.compare.finding_redundancy",
             "abicheck.diff_filtering",
             "abicheck.diff_platform",
             "abicheck.diff_symbols",
             "abicheck.diff_types",
             "abicheck.diff_vtable_layout",
-            "abicheck.finding_identity",
+            "abicheck.compare.finding_identity.change",
+            "abicheck.compare.finding_identity.change_kinds",
+            "abicheck.compare.finding_identity.mangled",
+            "abicheck.compare.finding_identity.report_ids",
+            "abicheck.compare.finding_identity.symbols",
             "abicheck.idioms",
             "abicheck.name_classification",
             "abicheck.pattern_verdicts",
@@ -712,7 +724,11 @@ _ACCEPTED_KILL_LOSS = {
         {
             "abicheck.policy.classification",
             "abicheck.model.evidence_status",
-            "abicheck.finding_identity",
+            "abicheck.compare.finding_identity.change",
+            "abicheck.compare.finding_identity.change_kinds",
+            "abicheck.compare.finding_identity.mangled",
+            "abicheck.compare.finding_identity.report_ids",
+            "abicheck.compare.finding_identity.symbols",
             "abicheck.name_classification",
             "abicheck.policy.selectors",
             "abicheck.policy.selectors_namespace_glob",
@@ -728,7 +744,7 @@ _ACCEPTED_KILL_LOSS = {
     # (whose own imports are just `bundle_manifest`/`model.snapshot`), not
     # the old flat `bundle_facts.py`, whose function-scoped imports of
     # `bundle_analysis.py`/`bundle.py`/etc. used to drag in the
-    # checker_policy/diff_symbols/finding_identity/policy.selectors chain
+    # checker_policy/diff_symbols/compare.finding_identity/policy.selectors chain
     # transitively. `name_classification`/`serialization`/`snapshot_io`
     # were already reached independently of that chain and still are.
     # Widened (ADR-061 gap E closure package 6): `serialization.py`'s real
@@ -777,7 +793,7 @@ _ACCEPTED_KILL_LOSS = {
     # Narrowed by one entry (ADR-061 gap E, same reasoning as the two
     # entries above): this file's own other import paths (not through
     # `serialization.py`'s `BundleFacts` reference) still reach
-    # checker_policy/finding_identity/policy.selectors/suppression, but no
+    # checker_policy/compare.finding_identity/policy.selectors/suppression, but no
     # longer reach diff_symbols now that the `BundleFacts` chain is gone.
     # Widened (ADR-061 gap E closure package 6), same reason as the two
     # entries above: this file's own `abicheck.serialization` reachability
@@ -786,7 +802,11 @@ _ACCEPTED_KILL_LOSS = {
         {
             "abicheck.policy.classification",
             "abicheck.model.evidence_status",
-            "abicheck.finding_identity",
+            "abicheck.compare.finding_identity.change",
+            "abicheck.compare.finding_identity.change_kinds",
+            "abicheck.compare.finding_identity.mangled",
+            "abicheck.compare.finding_identity.report_ids",
+            "abicheck.compare.finding_identity.symbols",
             "abicheck.name_classification",
             "abicheck.policy.selectors",
             "abicheck.policy.selectors_namespace_glob",

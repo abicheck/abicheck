@@ -246,4 +246,39 @@ INTEGRATION_BUG_CLASSES: tuple[BugClass, ...] = (
             "persisted_encoding": ("schema1", "schema2"),
         },
     ),
+    BugClass(
+        id="imports.side_effect_import_reorders_registration",
+        invariant=(
+            "Detector registration order is detector priority order (the "
+            "order findings are produced and reported in, and the tie-break "
+            "cross-detector dedup keeps), and it must not change when an "
+            "import that only *looks* unused is removed or moved: the "
+            "symbol-level `diff_symbols*` detectors register after "
+            "`elf_layout` and before `kabi`/`layout_descriptor`, whatever "
+            "`checker.py` imports for other reasons. The reported instance: "
+            "the finding-disposition refactor deleted `checker.py`'s "
+            "re-export import of `diff_filtering`, whose side effect was "
+            "importing `diff_symbols` at that position, and every report's "
+            "`detectors`/`not_evaluated_detectors` order moved."
+        ),
+        fixed_by=(1564,),
+        seed_tests=(
+            # Fresh interpreter (in-suite, whichever test imported a detector
+            # module first would decide the order) against a stated priority
+            # list, not the registry's own bookkeeping; fails on the commit
+            # that dropped the import.
+            "tests/test_detector_registration_order.py",
+        ),
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "The test pins the relative order of eight anchor pairs, "
+                    "not the full 70-detector sequence: a full pin would fail "
+                    "on every new detector. A reorder among detectors no pair "
+                    "names is caught only by a before/after report comparison."
+                ),
+                reference="PR #1564",
+            ),
+        ),
+    ),
 )
