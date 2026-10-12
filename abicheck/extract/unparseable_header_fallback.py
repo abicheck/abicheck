@@ -273,12 +273,14 @@ def _confirm_in_context(
 ) -> list[Path]:
     """Suspects that parse after the active headers preceding them.
 
-    One concurrent wave: suspect ``s`` is parsed as the active headers that
-    precede it in input order followed by ``s`` -- the context it has in the
-    full parse. Returned in input order.
+    Concurrent waves to a fixed point: suspect ``s`` is parsed as the
+    context headers (active plus suspects already restored) that precede it
+    in input order, followed by ``s`` -- the context it has in the full
+    parse. A restored suspect joins the context of the next wave, so a chain
+    ``h0 -> h1 -> h2`` whose middle link was also a suspect restores every
+    link. At most ``len(suspects)`` waves. Returned in input order.
     """
     position = {h: i for i, h in enumerate(headers)}
-    groups = [[h for h in active if position[h] < position[s]] + [s] for s in suspects]
 
     def ok(group: list[Path]) -> bool:
         try:
@@ -287,9 +289,26 @@ def _confirm_in_context(
             return False
         return True
 
+    context = set(active)
+    pending = list(suspects)
+    restored: list[Path] = []
     with BudgetedExecutor(_probe_jobs()) as pool:
-        passed = list(pool.map(ok, groups))
-    restored = [s for s, good in zip(suspects, passed, strict=True) if good]
+        while pending:
+            groups = [
+                sorted(
+                    (h for h in context if position[h] < position[s]),
+                    key=position.__getitem__,
+                )
+                + [s]
+                for s in pending
+            ]
+            passed = list(pool.map(ok, groups))
+            wave = [s for s, good in zip(pending, passed, strict=True) if good]
+            if not wave:
+                break
+            restored.extend(wave)
+            context.update(wave)
+            pending = [s for s in pending if s not in context]
     return sorted(restored, key=position.__getitem__)
 
 

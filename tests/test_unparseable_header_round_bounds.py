@@ -135,6 +135,10 @@ def test_single_fatal_failure_costs_one_clean_probe_wave(
         (10, {0}, {5: 2}),
         (16, {0, 11}, {9: 3, 14: 1}),
         (32, {4, 20, 27}, {8: 1, 30: 22}),
+        # Transitive chains whose middle links are suspects too (h0->h1->h2).
+        (4, {3}, {1: 0, 2: 1}),
+        (12, {0, 9}, {3: 2, 4: 3, 5: 4, 6: 5}),
+        (20, {7}, {10: 9, 11: 10, 15: 11, 18: 15}),
     ],
 )
 def test_header_failing_alone_but_parsing_in_context_is_not_excluded(
