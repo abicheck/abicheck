@@ -90,7 +90,7 @@ will reach for most often:
 | `scope_to_public_surface` | `bool` | `True` | Restrict findings to the public ABI surface |
 | `enable_debuginfod` | `bool` | `False` | Resolve debug info via debuginfod |
 | `pattern_verdicts` | `bool` | `True` | Score findings with pattern verdicts (the CLI default). `False` returns raw detector output. |
-| `contract_evaluation` | `bool` | `True` | Judge each finding's contract relevance (ADR-049; the CLI default). `False` skips it. |
+| `contract_evaluation` | `bool` | `True` | Judge each finding's contract relevance (the CLI default). `False` skips it. |
 
 Both defaults are the same on `run_compare` and on `CompareRequest`, and
 `run_compare_request` and the history workflow use them too. The Tier-1
