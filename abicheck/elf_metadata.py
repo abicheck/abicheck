@@ -57,8 +57,8 @@ from .extract.elf_static_tls import has_static_tls_relocation
 # ``from abicheck.elf_metadata import ElfImport`` spelling keeps resolving.
 from .extract.elf_string_table import buffered_string_table, string_table_of
 from .extract.elf_symbol_versions import (
-    apply_versions_to_symbols,
-    decode_versym,
+    build_verdef_index,
+    correlate_symbol_versions,
     symbols_of,
 )
 from .extract.mangled_foreign_template_args import has_foreign_template_argument
@@ -182,7 +182,7 @@ def _parse(f: IO[bytes], so_path: Path) -> ElfMetadata:
     )
 
     # Correlate per-symbol version entries using sections captured above.
-    _correlate_symbol_versions(
+    correlate_symbol_versions(
         ver_sym_section, dynsym_section, meta, ver_index_map, so_path
     )
 
@@ -498,7 +498,7 @@ def _process_section(
         _parse_dynamic(section, meta)
     elif isinstance(section, GNUVerDefSection):
         _parse_version_def(section, meta)
-        _build_verdef_index(section, verdef_index_map)
+        build_verdef_index(section, verdef_index_map)
     elif isinstance(section, GNUVerNeedSection):
         _parse_version_need(section, meta)
         _build_verneed_index(section, verneed_index_map)
@@ -1065,22 +1065,6 @@ def _parse_dynsym_entries(
         )
 
 
-def _build_verdef_index(
-    section: GNUVerDefSection,
-    ver_index_map: dict[int, tuple[str, str, bool]],
-) -> None:
-    """Build version-index → (lib="", version_name, is_defined=True) from .gnu.version_d."""
-    VER_FLG_BASE = 0x1  # noqa: N806
-    for verdef, verdaux_iter in section.iter_versions():
-        is_base = bool(verdef.entry.vd_flags & VER_FLG_BASE)
-        idx = verdef.entry.vd_ndx
-        for verdaux in verdaux_iter:
-            name = verdaux.name
-            if name and not is_base:
-                ver_index_map[idx] = ("", name, True)
-            break  # only first verdaux is the version name
-
-
 def _build_verneed_index(
     section: GNUVerNeedSection,
     ver_index_map: dict[int, tuple[str, str, bool]],
@@ -1095,74 +1079,3 @@ def _build_verneed_index(
             name = vernaux.name
             if name:
                 ver_index_map[idx] = (lib, name, False)
-
-
-def _parse_ver_entries(
-    ver_sym_section: object,
-    num_vers: int,
-    so_path: Path,
-) -> list[tuple[int, bool]] | None:
-    """Parse .gnu.version into a list of (version_index, is_hidden) per symbol."""
-    ver_entries: list[tuple[int, bool]] = []
-    try:
-        for i in range(num_vers):
-            entry = ver_sym_section.get_symbol(i)
-            raw = entry.entry["ndx"]
-            if isinstance(raw, str):
-                if raw == "VER_NDX_LOCAL":
-                    ver_entries.append((0, False))
-                else:
-                    ver_entries.append((1, False))
-                continue
-            is_hidden = bool(raw & 0x8000)
-            idx = raw & 0x7FFF
-            ver_entries.append((idx, is_hidden))
-    except Exception as exc:  # noqa: BLE001
-        log.warning(
-            "parse_elf_metadata: failed to read .gnu.version from %s: %s", so_path, exc
-        )
-        note_export_read_failure(f"malformed .gnu.version section: {exc}")
-        return None
-    return ver_entries
-
-
-def _correlate_symbol_versions(
-    ver_sym_section: GNUVerSymSection | None,
-    dynsym: SymbolTableSection | None,
-    meta: ElfMetadata,
-    ver_index_map: dict[int, tuple[str, str, bool]],
-    so_path: Path,
-) -> None:
-    """Correlate .gnu.version entries with exports and imports.
-
-    The .gnu.version section contains one Elf_Half per .dynsym entry,
-    mapping each symbol to a version index. Index 0 = VER_NDX_LOCAL,
-    1 = VER_NDX_GLOBAL (unversioned). Higher indices come from
-    .gnu.version_d (defined) or .gnu.version_r (required).
-    Bit 15 (0x8000) indicates a hidden (non-default) version.
-
-    Accepts pre-captured sections from the main iteration loop to avoid
-    redundant ``elf.iter_sections()`` calls.
-    """
-    if ver_sym_section is None or not ver_index_map:
-        return
-
-    try:
-        num_vers = ver_sym_section.num_symbols()
-    except Exception as exc:  # noqa: BLE001
-        note_export_read_failure(f"malformed .gnu.version section: {exc}")
-        return
-
-    ver_entries = decode_versym(ver_sym_section, num_vers)
-    if ver_entries is None:
-        ver_entries = _parse_ver_entries(ver_sym_section, num_vers, so_path)
-    if ver_entries is None:
-        return
-
-    if dynsym is None:
-        return
-
-    # Same buffering as `_parse_dynsym`: this is a second full walk of the
-    # identical symbol table, so it pays the identical per-name stream cost.
-    with buffered_string_table(string_table_of(dynsym)):
-        apply_versions_to_symbols(dynsym, ver_entries, ver_index_map, meta)

@@ -13,7 +13,7 @@ Two halves:
   projection helper; checked over several independent edits (return type,
   parameter type, noexcept, variable type);
 * the persisted shape #1486 briefly wrote is refused per storage's
-  schema-version rules: a v57 snapshot as newer than this build (57 is never
+  schema-version rules: a v57 snapshot as a retired number (57 is never
   reused), an IR document version 3 as unknown, and an IR entity carrying a
   projection fact as a stale copy that must never be read.
 """
@@ -127,8 +127,8 @@ def test_loaded_then_edited_snapshot_compares_like_a_fresh_one(edit) -> None:
     assert _findings(old, snapshot_from_dict(snapshot_to_dict(loaded))) == expected
 
 
-def test_v57_snapshot_is_refused_as_newer_than_this_build() -> None:
-    assert SCHEMA_VERSION == 56, "57 must never be reused: bump straight to 58"
+def test_v57_snapshot_is_refused_as_a_retired_number() -> None:
+    assert SCHEMA_VERSION != 57, "57 must never be reused"
     doc = copy.deepcopy(snapshot_to_dict(_snap(_fn(), _var())))
     doc["schema_version"] = 57
     with pytest.raises(IncompatibleSnapshotSchemaError, match="57"):

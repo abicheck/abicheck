@@ -9,9 +9,9 @@ generated: false
 
 # `unversioned_exported_symbol` false-positives on base-version (VER_FLG_BASE) symbols of versioned libraries: the model cannot tell base-bound from unversioned
 
-Index: [Known gaps](../known-gaps.md)
+Index: [Known gaps — closed and moot](../archive/known-gaps-closed.md)
 
-**Status (re-verified 2026-10-11 at `46c127111`): OPEN.** `extract/elf_symbol_versions.py::_apply_version_to_symbol` still returns early for `ver_idx < 2`, and `buildsource/cross_source_checks.py:1065` still skips only `not sym.is_default or sym.version`, so base-version symbols are still flagged.
+**Status (2026-10-12): CLOSED.** Fixed by recording the binding as its own fact, `ElfSymbol.version_binding` (snapshot schema v58), the "next step" this entry named; the check flags only `unversioned`. See the [closed entry](../archive/known-gaps-closed.md) for what landed and the residual it leaves. The text below is the original write-up.
 
 Found once ADR-068 §3
 row 3's first slice made `checker.compare()` run this check

@@ -67,6 +67,7 @@ from abicheck.model import (  # noqa: E402
     Visibility,
 )
 from abicheck.model.change_catalog.kinds import ChangeKind  # noqa: E402
+from abicheck.model.elf_facts import ElfVersionBinding  # noqa: E402
 
 # Verdicts that mean "this is a public-ABI break".
 _BREAKING_VERDICTS = {Verdict.API_BREAK, Verdict.BREAKING}
@@ -1406,15 +1407,27 @@ def _cc_public_to_internal_dependency_clean() -> AbiSnapshot:
 # -- unversioned_exported_symbol (ADR-035 D8) -------------------------------- #
 
 
-def _cc_unversioned_exported_symbol_fire() -> AbiSnapshot:
-    elf = ElfMetadata(
+def _versioned_elf(legacy_binding: ElfVersionBinding) -> ElfMetadata:
+    return ElfMetadata(
         symbols=[
-            ElfSymbol(name="_Z3apiv", version="FOO_1.0"),
-            ElfSymbol(name="_Z6legacyv", version=""),
+            ElfSymbol(
+                "_Z3apiv", version="FOO_1.0", version_binding=ElfVersionBinding.NAMED
+            ),
+            ElfSymbol("_Z6legacyv", version_binding=legacy_binding),
         ],
         versions_defined=["FOO_1.0"],
     )
-    return _hsnap(elf=elf)
+
+
+def _cc_unversioned_exported_symbol_fire() -> AbiSnapshot:
+    # No version at all (`.gnu.version` index 0) under a real scheme.
+    return _hsnap(elf=_versioned_elf(ElfVersionBinding.UNVERSIONED))
+
+
+def _cc_unversioned_exported_symbol_base_clean() -> AbiSnapshot:
+    # Bound to the VER_FLG_BASE definition (objdump -T: Base) -- the
+    # permanent home of the pre-versioning API, never a finding.
+    return _hsnap(elf=_versioned_elf(ElfVersionBinding.BASE))
 
 
 def _cc_unversioned_exported_symbol_clean() -> AbiSnapshot:
@@ -1538,6 +1551,12 @@ CROSSCHECK_CORPUS: list[CrosscheckCase] = [
         ChangeKind.UNVERSIONED_EXPORTED_SYMBOL,
         False,
         _cc_unversioned_exported_symbol_clean,
+    ),
+    CrosscheckCase(
+        "unversioned_exported_symbol_base_clean",
+        ChangeKind.UNVERSIONED_EXPORTED_SYMBOL,
+        False,
+        _cc_unversioned_exported_symbol_base_clean,
     ),
     CrosscheckCase(
         "rtti_for_internal_type_fire",
