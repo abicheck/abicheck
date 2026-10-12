@@ -36,13 +36,11 @@ than to a new flat ``cli_*`` sibling, which ``architecture/modules.yaml``'s
 own accounting-flags/``--view`` work with a parallel CONFIG-demotion phase
 pushed ``cli_compare_helpers.py`` past the 2000-line hard cap with no
 ``architecture/debt.yaml`` baseline room to absorb the combined growth.
-Its depth/collect-mode resolution (``cli_compare_helpers.
-_resolve_compare_collect_mode``) stays put and is now a caller-supplied
+Its depth/collect-mode resolution (``workflows.compare_configuration.
+resolve_compare_collect_mode``) is a caller-supplied
 ``collect_mode``/``effective_depth_label`` pair rather than something this
-function resolves itself -- this module may not import a ``frontends``
-*legacy* sibling like ``cli_compare_helpers`` (only ``model``/``workflows``/
-``report``), so passing the already-resolved values in is what keeps this a
-pure render step, the same reasoning ``add_compare_cost_preview_section``
+function resolves itself, which keeps this a pure render step -- the same
+reasoning ``add_compare_cost_preview_section``
 above already follows for its own caller-supplied ``estimates``.
 """
 
@@ -146,7 +144,7 @@ def build_compare_dry_run_result(
     """Build the ``compare --dry-run`` report (ADR-043 D4): resolve, never diff.
 
     *collect_mode*/*effective_depth_label* are the caller's own already-
-    resolved ``cli_compare_helpers._resolve_compare_collect_mode()`` result
+    resolved ``workflows.compare_configuration.resolve_compare_collect_mode()`` result
     (this module's own docstring explains why they're a parameter here
     rather than resolved locally). *since*/*changed_paths_opt* are narrowed
     into it here through the run's own seed resolution, and *config* is the

@@ -253,7 +253,7 @@ REQUEST_ROUTING: dict[str, tuple[str, Any]] = {
 
 
 def _cli_built_in_config() -> Any:
-    from abicheck.cli_helpers_compare import resolve_compare_config
+    from abicheck.workflows.compare_configuration import resolve_compare_config
 
     return resolve_compare_config(None, cli_severity_preset=None)
 
