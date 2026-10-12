@@ -729,6 +729,7 @@ class TestParseFull:
         verdef = MagicMock(spec=GNUVerDefSection)
         verdef_vd = MagicMock()
         verdef_vd.entry.vd_flags = 0  # not VER_FLG_BASE — real version node
+        verdef_vd.entry.vd_ndx = 2
         verdef.iter_versions.return_value = [(verdef_vd, [verdef_aux])]
 
         verneed_entry = MagicMock()

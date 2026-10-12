@@ -41,6 +41,27 @@ from __future__ import annotations
 from typing import Any
 
 
+def elf_symbol_binding(sym: dict[str, Any]) -> Any:
+    """An encoded ``ElfSymbol``'s ``version_binding`` (schema v58).
+
+    Absent means *named* when ``version`` is set -- a version name was only
+    ever written for a resolved node -- and *unknown* otherwise: a pre-v58
+    snapshot recorded nothing that tells a base-bound symbol from an
+    unversioned one, so neither is guessed.
+    """
+    from .model.elf_facts import ElfVersionBinding
+
+    raw = sym.get("version_binding")
+    if raw is None:
+        return (
+            ElfVersionBinding.NAMED if sym.get("version") else ElfVersionBinding.UNKNOWN
+        )
+    try:
+        return ElfVersionBinding(raw)
+    except ValueError:
+        return ElfVersionBinding.UNKNOWN
+
+
 def elf_from_dict(elf: dict[str, Any], schema_version: int) -> Any:
     from dataclasses import replace
 
@@ -78,6 +99,7 @@ def elf_from_dict(elf: dict[str, Any], schema_version: int) -> Any:
             visibility=s.get("visibility", "default"),
             value_alignment=s.get("value_alignment", 0),
             code_hash=s.get("code_hash", ""),
+            version_binding=elf_symbol_binding(s),
             origin_lib=s.get("origin_lib"),
         )
         for s in elf.get("symbols", [])

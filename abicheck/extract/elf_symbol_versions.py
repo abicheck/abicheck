@@ -30,21 +30,39 @@ owned module, never to trim the file to fit"). Reading a binary is
 
 from __future__ import annotations
 
+import logging
 import struct
 from collections.abc import Iterator
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from elftools.elf.enums import ENUM_VERSYM
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
+    from elftools.elf.gnuversions import GNUVerDefSection, GNUVerSymSection
     from elftools.elf.sections import SymbolTableSection
 
     from ..model.elf_facts import ElfMetadata
 
-from ..model.elf_facts import SymbolBinding
+from ..model.elf_facts import ElfVersionBinding, SymbolBinding
+from .elf_string_table import buffered_string_table, string_table_of
 from .elf_symbol_tables import _BINDING_MAP, _HIDDEN_VISIBILITIES
+from .parse_failures import note_export_read_failure
 
-__all__ = ["apply_versions_to_symbols", "decode_versym", "symbols_of"]
+__all__ = [
+    "apply_versions_to_symbols",
+    "build_verdef_index",
+    "correlate_symbol_versions",
+    "decode_versym",
+    "parse_ver_entries",
+    "symbols_of",
+]
+
+log = logging.getLogger(__name__)
+
+#: ``VER_NDX_GLOBAL``: the index the ``VER_FLG_BASE`` definition carries, and
+#: the one every exported symbol a version script names in no node gets.
+_BASE_INDEX = 1
 
 #: Attribute holding a symbol table's fully-walked entries on the section
 #: object itself. A parse walks ``.dynsym`` twice -- once to build the
@@ -176,36 +194,126 @@ def _apply_version_to_symbol(
     export_idx: int,
     import_idx: int,
 ) -> tuple[int, int]:
-    """Apply version info to a single symbol, returning updated indices."""
-    if ver_idx < 2:
-        if _is_import_sym(sym):
-            import_idx += 1
-        elif _is_export_sym(sym):
-            export_idx += 1
-        return export_idx, import_idx
+    """Apply version info to a single symbol, returning updated indices.
 
+    An export always gets its ``version_binding``; a version *name* is
+    written only for an index >= 2 that resolves -- the base definition
+    ``build_verdef_index`` records at index 1 is a binding, never a name.
+    """
     entry = ver_index_map.get(ver_idx)
-    if entry is None:
-        if _is_import_sym(sym):
-            import_idx += 1
-        elif _is_export_sym(sym):
-            export_idx += 1
-        return export_idx, import_idx
-
-    _lib_name, ver_name, _is_defined = entry
-
     if _is_import_sym(sym):
-        if import_idx < len(meta.imports):
+        if ver_idx >= 2 and entry is not None and import_idx < len(meta.imports):
+            lib_name, ver_name, _is_defined = entry
             meta.imports[import_idx].version = ver_name
             meta.imports[import_idx].is_default = not is_hidden
             # Record the verneed provider soname so consumers can resolve which
             # DSO satisfies this import even when a version label collides.
-            meta.imports[import_idx].version_soname = _lib_name
-        import_idx += 1
-    elif _is_export_sym(sym):
-        if export_idx < len(meta.symbols):
-            meta.symbols[export_idx].version = ver_name
-            meta.symbols[export_idx].is_default = not is_hidden
-        export_idx += 1
+            meta.imports[import_idx].version_soname = lib_name
+        return export_idx, import_idx + 1
+    if not _is_export_sym(sym):
+        return export_idx, import_idx
+    if export_idx < len(meta.symbols):
+        out = meta.symbols[export_idx]
+        if ver_idx >= 2:
+            if entry is not None:
+                out.version = entry[1]
+                out.is_default = not is_hidden
+                out.version_binding = ElfVersionBinding.NAMED
+            # else: dangling index -- left UNKNOWN, never guessed.
+        elif ver_idx == _BASE_INDEX and entry is not None:
+            out.version_binding = ElfVersionBinding.BASE
+        else:
+            out.version_binding = ElfVersionBinding.UNVERSIONED
+    return export_idx + 1, import_idx
 
-    return export_idx, import_idx
+
+def build_verdef_index(
+    section: GNUVerDefSection,
+    ver_index_map: dict[int, tuple[str, str, bool]],
+) -> None:
+    """Build version-index → (lib="", version_name, is_defined=True) from .gnu.version_d.
+
+    The ``VER_FLG_BASE`` definition (the SONAME node) is recorded too, at
+    ``_BASE_INDEX`` only: its presence is what makes an index-1 symbol
+    *base-bound* rather than unversioned. ``_apply_version_to_symbol`` never
+    writes it as a version name.
+    """
+    VER_FLG_BASE = 0x1  # noqa: N806
+    for verdef, verdaux_iter in section.iter_versions():
+        is_base = bool(verdef.entry.vd_flags & VER_FLG_BASE)
+        idx = verdef.entry.vd_ndx
+        for verdaux in verdaux_iter:
+            name = verdaux.name
+            if name and (idx >= 2 or (is_base and idx == _BASE_INDEX)):
+                ver_index_map[idx] = ("", name, True)
+            break  # only first verdaux is the version name
+
+
+def parse_ver_entries(
+    ver_sym_section: Any,
+    num_vers: int,
+    so_path: Path,
+) -> list[tuple[int, bool]] | None:
+    """Parse .gnu.version into a list of (version_index, is_hidden) per symbol."""
+    ver_entries: list[tuple[int, bool]] = []
+    try:
+        for i in range(num_vers):
+            entry = ver_sym_section.get_symbol(i)
+            raw = entry.entry["ndx"]
+            if isinstance(raw, str):
+                if raw == "VER_NDX_LOCAL":
+                    ver_entries.append((0, False))
+                else:
+                    ver_entries.append((1, False))
+                continue
+            is_hidden = bool(raw & 0x8000)
+            idx = raw & 0x7FFF
+            ver_entries.append((idx, is_hidden))
+    except Exception as exc:  # noqa: BLE001
+        log.warning(
+            "parse_elf_metadata: failed to read .gnu.version from %s: %s", so_path, exc
+        )
+        note_export_read_failure(f"malformed .gnu.version section: {exc}")
+        return None
+    return ver_entries
+
+
+def correlate_symbol_versions(
+    ver_sym_section: GNUVerSymSection | None,
+    dynsym: SymbolTableSection | None,
+    meta: ElfMetadata,
+    ver_index_map: dict[int, tuple[str, str, bool]],
+    so_path: Path,
+) -> None:
+    """Correlate .gnu.version entries with exports and imports.
+
+    The .gnu.version section contains one Elf_Half per .dynsym entry,
+    mapping each symbol to a version index. Index 0 = VER_NDX_LOCAL,
+    1 = VER_NDX_GLOBAL (the base definition when the library has one).
+    Higher indices come from .gnu.version_d (defined) or .gnu.version_r
+    (required). Bit 15 (0x8000) indicates a hidden (non-default) version.
+
+    With no ``.gnu.version`` at all every export is ``UNVERSIONED``; a
+    section that cannot be read leaves every export ``UNKNOWN``.
+    """
+    if ver_sym_section is None:
+        for sym in meta.symbols:
+            sym.version_binding = ElfVersionBinding.UNVERSIONED
+        return
+
+    try:
+        num_vers = ver_sym_section.num_symbols()
+    except Exception as exc:  # noqa: BLE001
+        note_export_read_failure(f"malformed .gnu.version section: {exc}")
+        return
+
+    ver_entries = decode_versym(ver_sym_section, num_vers)
+    if ver_entries is None:
+        ver_entries = parse_ver_entries(ver_sym_section, num_vers, so_path)
+    if ver_entries is None or dynsym is None:
+        return
+
+    # Same buffering as `_parse_dynsym`: this is a second full walk of the
+    # identical symbol table, so it pays the identical per-name stream cost.
+    with buffered_string_table(string_table_of(dynsym)):
+        apply_versions_to_symbols(dynsym, ver_entries, ver_index_map, meta)

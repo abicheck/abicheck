@@ -287,15 +287,26 @@ _SNAPSHOT_SKIP_FIELDS = frozenset(
 _DWARF_ODR_KEYS = ("struct_odr_conflicts", "enum_odr_conflicts")
 
 
-def _drop_unhashed_elf_symbols(d: dict[str, Any]) -> None:
-    """v56: ``ElfSymbol.code_hash`` is written only when computed, so a
-    snapshot without hashes encodes exactly as v55."""
+def _compact_elf_symbols(d: dict[str, Any]) -> None:
+    """Drop the per-symbol keys a decoder restores on its own.
+
+    v56: ``ElfSymbol.code_hash`` is written only when computed, so a
+    snapshot without hashes encodes exactly as v55. v58:
+    ``version_binding`` is written only where ``version`` cannot say it --
+    ``unknown`` is the decoder's default and ``named`` is implied by a
+    non-empty ``version`` (``snapshot_platform_blocks.elf_symbol_binding``).
+    """
     elf = d.get("elf")
     if not isinstance(elf, dict):
         return
     for sym in elf.get("symbols") or ():
-        if isinstance(sym, dict) and not sym.get("code_hash"):
+        if not isinstance(sym, dict):
+            continue
+        if not sym.get("code_hash"):
             sym.pop("code_hash", None)
+        binding = sym.get("version_binding")
+        if binding == "unknown" or (binding == "named" and sym.get("version")):
+            sym.pop("version_binding", None)
 
 
 def _drop_unobserved_odr_conflicts(d: dict[str, Any]) -> None:
@@ -430,7 +441,7 @@ def _snapshot_to_dict(snap: AbiSnapshot, encode: Any) -> dict[str, Any]:
     # ElfMetadata/PeMetadata/MachoMetadata enums -> strings (storage/enum_codec.py).
     encode_platform_enums(d)
     _drop_unobserved_odr_conflicts(d)
-    _drop_unhashed_elf_symbols(d)
+    _compact_elf_symbols(d)
     _drop_uncaptured_type_identities(d)
 
     # ADR-063 Phase 0 (schema v26): see storage/fact_codec.py.

@@ -34,8 +34,11 @@ from elftools.elf.elffile import ELFFile
 from elftools.elf.gnuversions import GNUVerSymSection
 from elftools.elf.sections import SymbolTableSection
 
-from abicheck.elf_metadata import _parse_ver_entries
-from abicheck.extract.elf_symbol_versions import decode_versym, symbols_of
+from abicheck.extract.elf_symbol_versions import (
+    decode_versym,
+    parse_ver_entries,
+    symbols_of,
+)
 
 pytestmark = pytest.mark.skipif(
     sys.platform != "linux", reason="needs ELF shared objects and an ELF linker"
@@ -100,7 +103,7 @@ def test_decode_versym_equals_the_per_entry_read(
                     continue
                 n = sec.num_symbols()
                 fast = decode_versym(sec, n)
-                assert fast == _parse_ver_entries(sec, n, lib), lib
+                assert fast == parse_ver_entries(sec, n, lib), lib
                 checked += 1
                 hidden_bits += sum(hidden for _, hidden in fast or [])
     assert checked, "no .gnu.version section was exercised"
@@ -162,10 +165,11 @@ def test_parse_falls_back_to_the_per_entry_read_with_identical_output(
     monkeypatch: pytest.MonkeyPatch, hidden_version_lib: Path | None
 ) -> None:
     import abicheck.elf_metadata as elf_metadata
+    import abicheck.extract.elf_symbol_versions as elf_symbol_versions
 
     lib = hidden_version_lib or _libs(None)[0]
     fast = elf_metadata.parse_elf_metadata(lib)
-    monkeypatch.setattr(elf_metadata, "decode_versym", lambda _s, _n: None)
+    monkeypatch.setattr(elf_symbol_versions, "decode_versym", lambda _s, _n: None)
     slow = elf_metadata.parse_elf_metadata(lib)
     # Dataclass equality, not ``repr``: a ``frozenset`` field (e.g. the
     # CET feature set) renders in iteration order, which can differ between
