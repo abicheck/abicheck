@@ -261,4 +261,41 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
             "header_backend": ("hybrid",),
         },
     ),
+    BugClass(
+        id="extraction.default_extractor_lacks_the_promised_fact_family",
+        invariant=(
+            "A depth that promises a fact family runs, by default, an "
+            "extractor that records it, and runs it in the mode its input's "
+            "language needs: L4 source replay under the default frontend "
+            "runs clang (macros, inline/template/constexpr bodies), not "
+            "L2's castxml, which records none of them; a stated frontend "
+            "still selects the extractor, resolved as L2 resolves it. "
+            "castxml replays a C unit in C emulation (`--castxml-cc-gnu-c`), "
+            "never C++ emulation, which fails it outright. A capability "
+            "that holds only because a later, hidden re-run with another "
+            "extractor overwrote a failed first one is not a capability."
+        ),
+        fixed_by=(1569,),
+        seed_tests=(
+            "tests/test_source_replay_extractor.py",
+            "tests/test_castxml_source_emulation_mode.py",
+            "tests/test_l4_default_extractor_end_to_end.py",
+        ),
+        public_surfaces=("cli", "python-api"),
+        axes={
+            "language": ("C", "C++"),
+            "frontend": ("default", "castxml", "clang", "env"),
+            "compiler_mode": ("gnu", "gnu-c", "msvc"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "Without clang on PATH, a default-frontend L4 replay "
+                    "degrades to partial coverage rather than falling back "
+                    "to castxml's declaration-only facts."
+                ),
+                reference="docs/learn/build-source-data.md",
+            ),
+        ),
+    ),
 )
