@@ -1094,6 +1094,9 @@ EVIDENCE_BUG_CLASSES: tuple[BugClass, ...] = (
             # and streamed reader; family changes surface in the graph diff;
             # a real v1 graph with the families stripped is a gap.
             "tests/test_header_graph_semantic_facts.py",
+            # compiler-free: a committed clang capture through the owner, the
+            # stream, the cache, and both routes (L5 dump replaced).
+            "tests/test_semantic_fact_folds.py",
             # F2 harness cell: one header through both routes, plus a mutant.
             "tests/test_family_f2_route_parity.py",
             # every family x {stored old, stored new, both looked, degraded/
