@@ -44,7 +44,7 @@ if TYPE_CHECKING:
     from .checker_types import DiffResult
     from .model import AbiSnapshot
     from .model.change import Change
-    from .service_compare_pipeline import ResolvedComparePair
+    from .workflows.compare_classify import ResolvedComparePair
     from .workflows.policy_file import PolicyFile
 
 

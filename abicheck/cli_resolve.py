@@ -44,7 +44,7 @@ if TYPE_CHECKING:
     from .dry_run_estimate import CompileContext
     from .model import AbiSnapshot
     from .model.ownership_rules import OwnershipRequest
-    from .service_compare_pipeline import ResolvedComparePair
+    from .workflows.compare_classify import ResolvedComparePair
     from .workflows.contracts import CompareRequest
     from .workflows.extraction import DumpManifest
 

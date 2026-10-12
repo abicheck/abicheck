@@ -49,7 +49,6 @@ Two mechanical notes:
 from __future__ import annotations
 
 import contextvars
-import dataclasses
 import functools
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -72,16 +71,15 @@ from .workflows.artifact.compile_context_gate import (
     resolved_pair_compile_contexts,
 )
 from .workflows.artifact.execute import _resolve_side_snapshot_impl
+from .workflows.compare_classify import ResolvedComparePair
 from .workflows.contracts import CompareRequest, CompareResult
 from .workflows.request_inputs import InputSpec, required_path
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from .model import AbiSnapshot
     from .service_compare_evidence import SideEvidence
     from .workflows.artifact.execute import SideResolution
-    from .workflows.resolved_execution_context import ResolvedExecutionContext
 
 __all__ = [
     "ResolvedComparePair",
@@ -94,31 +92,6 @@ __all__ = [
     "run_compare",
     "run_compare_request",
 ]
-
-
-@dataclasses.dataclass(frozen=True)
-class ResolvedComparePair:
-    """Both sides of a comparison, resolved and ready to classify.
-
-    The seam between :func:`resolve_compare_request` and
-    :func:`classify_compare_pair`: the detected binary formats, and each
-    side's resolved ``SideEvidence`` (``collect_mode`` drives the embed diff).
-
-    ``resolved_execution_context`` (One Semantic Pipeline plan, sub-phase 4B)
-    is the :class:`~abicheck.workflows.resolved_execution_context.
-    ResolvedExecutionContext` built from this request's own AnalysisPlan,
-    plus each side's resolved ``CompileContext`` when ``compile_context_gate``
-    judges it safe — still no ``evaluation_config`` (resolves one layer up).
-
-    """
-
-    old: AbiSnapshot
-    new: AbiSnapshot
-    old_fmt: str | None
-    new_fmt: str | None
-    old_evidence: SideEvidence
-    new_evidence: SideEvidence
-    resolved_execution_context: ResolvedExecutionContext | None = None
 
 
 def resolve_sides_sequentially(request: CompareRequest) -> bool:

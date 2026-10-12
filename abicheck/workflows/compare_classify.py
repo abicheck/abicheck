@@ -29,7 +29,7 @@ What the module takes is everything a front end may legitimately decide:
 
 * the :class:`~abicheck.workflows.contracts.CompareRequest` (the classification
   settings: policy, scope, depth, probe matrices, ``abi3_floor``, ...);
-* the :class:`~abicheck.service_compare_pipeline.ResolvedComparePair` from
+* the :class:`ResolvedComparePair` from
   ``resolve_compare_request``;
 * its resolved :class:`~abicheck.workflows.compare_request_policy.
   RequestPolicyInputs` -- the typed route resolves them from the request
@@ -62,11 +62,42 @@ if TYPE_CHECKING:
 
     from ..checker_types import DiffResult
     from ..model import AbiSnapshot
-    from ..service_compare_pipeline import ResolvedComparePair
+    from ..service_compare_evidence import SideEvidence
     from .compare_request_policy import RequestPolicyInputs
     from .contracts import CompareRequest
+    from .resolved_execution_context import ResolvedExecutionContext
 
-__all__ = ["ClassifiedPair", "ComparedOperands", "classify_resolved_pair"]
+__all__ = [
+    "ClassifiedPair",
+    "ComparedOperands",
+    "ResolvedComparePair",
+    "classify_resolved_pair",
+]
+
+
+@dataclass(frozen=True)
+class ResolvedComparePair:
+    """Both sides of a comparison, resolved and ready to classify.
+
+    The seam between ``service_compare_pipeline.resolve_compare_request`` and
+    :func:`classify_resolved_pair`: the detected binary formats, and each
+    side's resolved ``SideEvidence`` (``collect_mode`` drives the embed diff).
+
+    ``resolved_execution_context`` (One Semantic Pipeline plan, sub-phase 4B)
+    is the :class:`~abicheck.workflows.resolved_execution_context.
+    ResolvedExecutionContext` built from this request's own AnalysisPlan,
+    plus each side's resolved ``CompileContext`` when ``compile_context_gate``
+    judges it safe — still no ``evaluation_config`` (resolves one layer up).
+
+    """
+
+    old: AbiSnapshot
+    new: AbiSnapshot
+    old_fmt: str | None
+    new_fmt: str | None
+    old_evidence: SideEvidence
+    new_evidence: SideEvidence
+    resolved_execution_context: ResolvedExecutionContext | None = None
 
 
 @dataclass(frozen=True)
