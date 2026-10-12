@@ -541,9 +541,16 @@ def load_required_symbols(
             raise CompareSettingsError(f"--required-symbol @{candidate}: no such file.")
         data = candidate.read_bytes()
         digest, path = hashlib.sha256(data).hexdigest(), str(candidate)
+        try:
+            text = data.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise CompareSettingsError(
+                f"--required-symbol @{candidate}: not UTF-8 text ({exc.reason} "
+                f"at byte {exc.start})."
+            ) from None
         from_file = [
             s
-            for line in data.decode("utf-8").splitlines()
+            for line in text.splitlines()
             if (s := line.strip()) and not s.startswith("#")
         ]
     # De-duplicate while preserving first-seen order.

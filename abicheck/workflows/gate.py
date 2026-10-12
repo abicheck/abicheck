@@ -277,9 +277,7 @@ def effective_gate_for_resolved_compare_config(
     require_complete_analysis: bool = False,
 ) -> EffectiveGate:
     """*cfg* (a ``workflows.compare_configuration.ResolvedCompareConfig``, taken as
-    ``Any`` rather than imported -- that module is ``frontends``-classified,
-    and ``workflows -> frontends`` is exactly the reverse of the permitted
-    direction), projected onto the plan's shared ``EffectiveGate`` shape
+    ``Any`` so this module needs no import of it), projected onto the plan's shared ``EffectiveGate`` shape
     (duplication-and-convergence-assessment P0's "Effective configuration
     and pack application" target). ``policy.release_gate_options.
     GateOptions.effective_gate`` exposes the identical shape for the

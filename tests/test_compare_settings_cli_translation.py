@@ -100,11 +100,21 @@ def _two_required_files(tmp_path: Path) -> tuple[list[str], Callable[[], object]
     )
 
 
+def _non_utf8_required_file(tmp_path: Path) -> tuple[list[str], Callable[[], object]]:
+    listed = tmp_path / "latin1.txt"
+    listed.write_bytes("caf\u00e9_sym\n".encode("latin-1"))
+    return (
+        ["--required-symbol", f"@{listed}"],
+        lambda: cc.load_required_symbols((f"@{listed}",)),
+    )
+
+
 _CASES = {
     "invalid source.method": _bad_source_method,
     "malformed .abicheck.yml": _malformed_config,
     "missing @FILE": _missing_required_file,
     "two @FILE values": _two_required_files,
+    "non-UTF-8 @FILE": _non_utf8_required_file,
 }
 
 
