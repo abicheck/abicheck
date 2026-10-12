@@ -30,6 +30,7 @@ from typing import Any
 
 from .. import deadline
 from .._compiler_options import CLANG_GCC_HEADER_COMPAT_DEFINES
+from ..extract.headers.clang.locations import materialize_locations
 
 #: Per-TU wall-clock ceiling for one AST dump. Folded against the scan's own
 #: remaining ``--budget`` so one hung TU can never eat the whole scan.
@@ -119,4 +120,8 @@ def run_clang_ast_dump(
     except deadline.DeadlineExceeded as exc:
         diagnostics.append(f"scan deadline exceeded before walking clang AST: {exc}")
         return None
-    return ast
+    # Explicit locations, as every L2 header tree has them
+    # (`dumper_clang_errors`): a reader tracking clang's sticky file from
+    # the nodes it visits drifts, and the L5 and L2 passes must read the
+    # same tree to derive the same facts (`semantic_fact_folds`).
+    return materialize_locations(ast)

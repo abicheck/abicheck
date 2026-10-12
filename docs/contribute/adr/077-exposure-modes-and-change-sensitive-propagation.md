@@ -133,8 +133,8 @@ body is not `PRESENT` and shows no edge stays `unknown`.
 
 New modes and families come from compact projections of the existing L2
 AST parse ([`l4-l2-extraction-convergence.md`](../plans/l4-l2-extraction-convergence.md)).
-That includes the template/override/callback facts the projection drops
-today ([known gap](../known-gaps/l2-header-projection-drops-template-override-callback-facts.md)).
+The template/override/callback facts already come that way
+(`buildsource/semantic_fact_folds.py`; [closed gap](../known-gaps/l2-header-projection-drops-template-override-callback-facts.md)).
 No rule may add its own clang invocation.
 
 ## Prerequisites (tracked elsewhere, not reopened here)

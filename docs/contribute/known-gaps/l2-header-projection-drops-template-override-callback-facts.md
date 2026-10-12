@@ -11,11 +11,17 @@ generated: false
 
 Index: [Known gaps](../known-gaps.md)
 
-**Status (recorded 2026-10-11 at `2a1ccb0c8`): OPEN.** `buildsource/header_graph_ast_projection.py` builds its graph from four projections (declared type files, `parse_clang_ast_types`, `parse_clang_ast_calls`, declared entity files), plus a separate `special_member_names` collection (`collect_special_member_names`). None of them projects template, override or callback facts. `fold_template_graph` (and the callback/override folds) run only from the L5 pass (`buildsource/l5_ast_pass.py:266`), never from the header-only attach path.
+**Status (2026-10-12): CLOSED.** One owner, `buildsource/semantic_fact_folds.py`, now parses (`parse_semantic_facts`, and `SemanticFactStream` for the streamed reader), merges and folds the override, template and callback families for both producers. `HeaderGraphAstProjection.semantic_facts` carries them from the same parse (whole-tree and streamed, and through the projection cache, schema `/4`); `seed_ast_graph` folds them after the type/call edges in the L5 order, and stamps `header_override_graph`/`header_template_graph`/`header_callback_graph`/`header_virtual_dispatch_graph` (degraded with the call pass on a partial parse). The L5 folds in `inline_graph_fold` call the same owner. A graph that never ran a family (one stored before this) is a coverage gap in `diff_source_graph` (`GraphSummaryDiff.coverage_gaps`), not a removal or addition. `tests/test_header_graph_semantic_facts.py` asserts headers-only == L5 family edges on four C++ fixtures, whole-tree and streamed, and that changes in each family surface in the graph diff.
 
 `false-clean` — With headers only (the default L2 path), the graph has no `template_instantiation`/`DECL_INSTANTIATES_TEMPLATE`/`TEMPLATE_USES_TYPE` facts, no override and no callback edges. This holds even though the same `clang -ast-dump=json` document contains them. An external review (2026-10-11) ran `template_graph`'s parser on a fixture and got an instantiation that the L2 projection did not keep.
 
-## Constraints on a fix
+## How the fix met the constraints
+
+- No second clang run and no resident tree: the families are read from the same parse, inside the projection's existing `ast_derived_scope` (the override facts reuse its type edges). The streamed reader runs the template parse's third walk as one extra read of the document that decodes only elements naming a `FunctionTemplateDecl`; complete specializations are kept as compact records (`template_graph._compact_full_node`), not whole subtrees. Measured on a 114 MB `<functional>` AST: streamed peak 110 -> 128 MiB, whole-tree template parse 0.44 -> 0.28 s.
+- Same AST, same facts: the L2 header tree has explicit (materialized) locations while the streamed document and each L5 TU had clang's sticky ones, and the template parser's file attribution differs between the two. The streamed reader now materializes each element with the writer state carried across elements (`LocationMaterializer`), and `clang_ast_run` materializes each L5 tree, so all three read one representation. This also removed a latent stream-vs-whole divergence in the existing type/entity-file projection on STL-heavy headers.
+- Coverage stays honest: a hand-built projection (`semantic_facts=None`) stamps nothing, and a graph without the flags is `unknown` for those families.
+
+## Constraints on a fix (as recorded)
 
 - Keep the projection's reason for existing: the AST must not stay resident while the graph is built (measured peak on oneDAL, `docs/contribute/measurements/header-graph-attach-memory.md`). Any new family must be another compact, streaming projection of the *same* parse, not a second clang run.
 - Coverage must stay honest. A family the header pass does not project must stay `unknown` for header-only graphs, never `proven_absent`.
