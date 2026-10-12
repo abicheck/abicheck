@@ -33,7 +33,6 @@ from click.testing import CliRunner
 
 from abicheck.buildsource.inline import BuildConfig, load_build_config
 from abicheck.cli import main
-from abicheck.cli_helpers_compare import resolve_compare_config
 from abicheck.cli_options import (
     COMPARE_FLAG_BUDGET,
     DUMP_FLAG_BUDGET,
@@ -43,6 +42,7 @@ from abicheck.frontends.cli.options.rulings import OptionRuling
 from abicheck.model import AbiSnapshot, Function, Param, Visibility
 from abicheck.policy.severity import SeverityLevel
 from abicheck.serialization import snapshot_to_json
+from abicheck.workflows.compare_configuration import resolve_compare_config
 
 
 def _write_snap(path: Path, snap: AbiSnapshot) -> Path:

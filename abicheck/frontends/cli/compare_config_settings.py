@@ -33,7 +33,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from ...cli_helpers_compare import ResolvedCompareConfig
+    from ...workflows.compare_configuration import ResolvedCompareConfig
 
 __all__ = ["ConfigRunSettings", "config_run_settings"]
 
@@ -56,7 +56,7 @@ class ConfigRunSettings:
     #: (``compare_pdb_config``), one candidate uses it as its PDB.
     pdb_path: str | None
     #: ``source.method``, one rung of the collect-mode precedence
-    #: (``cli_compare_helpers._resolve_compare_collect_mode``).
+    #: (``workflows.compare_configuration.resolve_compare_collect_mode``).
     source_method: str | None
 
     @property

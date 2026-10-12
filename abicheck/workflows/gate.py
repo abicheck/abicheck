@@ -276,7 +276,7 @@ def effective_gate_for_resolved_compare_config(
     result: Any = None,
     require_complete_analysis: bool = False,
 ) -> EffectiveGate:
-    """*cfg* (a ``cli_helpers_compare.ResolvedCompareConfig``, taken as
+    """*cfg* (a ``workflows.compare_configuration.ResolvedCompareConfig``, taken as
     ``Any`` rather than imported -- that module is ``frontends``-classified,
     and ``workflows -> frontends`` is exactly the reverse of the permitted
     direction), projected onto the plan's shared ``EffectiveGate`` shape

@@ -227,8 +227,8 @@ class TestCollectModeParity:
     def test_compare_keeps_its_own_inference_rule(self, tmp_path: Path) -> None:
         """`compare`'s rule is deliberately NOT changed by the dump fix.
 
-        `collect_mode_for` mirrors `cli_compare_helpers.
-        _resolve_compare_collect_mode`, where an omitted depth is *inferred*
+        `collect_mode_for` mirrors `workflows.compare_configuration.
+        resolve_compare_collect_mode`, where an omitted depth is *inferred*
         from the supplied inputs and defaults to "off" -- correct for that
         front end, and a different question from `dump`'s fixed default.
         """

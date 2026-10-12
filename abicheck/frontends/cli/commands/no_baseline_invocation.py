@@ -358,22 +358,26 @@ def resolve_no_baseline_invocation(
     # reads them through, so the two shapes cannot differ. `--lang`, the
     # debug flags and `--source-method` have no CLI spelling left; reading
     # the removed `lang` kwarg here audited a `compile.lang: c` project as C++.
-    from ....cli_compare_helpers import _resolve_compare_collect_mode
     from ....cli_compare_options import _warn_force_public_ignored
-    from ....cli_helpers_compare import resolve_force_public_scope
+    from ....workflows.compare_configuration import (
+        resolve_compare_collect_mode,
+        resolve_force_public_scope,
+    )
     from ..compare_config_settings import config_run_settings
+    from ..project_config import compare_settings_usage_errors
 
     run_settings = config_run_settings(resolved_cfg)
     force_public, _ = resolve_force_public_scope(resolved_cfg.public_symbols, None)
     _warn_force_public_ignored(force_public, bool(resolved_cfg.scope_public))
-    collect_mode, _ = _resolve_compare_collect_mode(
-        kwargs.get("depth"),
-        run_settings.source_method,
-        None,
-        kwargs.get("new_sources"),
-        None,
-        kwargs.get("new_build_info"),
-    )
+    with compare_settings_usage_errors():
+        collect_mode, _ = resolve_compare_collect_mode(
+            kwargs.get("depth"),
+            run_settings.source_method,
+            None,
+            kwargs.get("new_sources"),
+            None,
+            kwargs.get("new_build_info"),
+        )
     scope = _ScopeChoices(
         scope_to_public_surface=bool(resolved_cfg.scope_public),
         collapse_versioned_symbols=bool(

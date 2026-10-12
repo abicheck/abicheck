@@ -173,9 +173,9 @@ class BuildConfig:
     (precise S-axis), plus the top-level ``version:``. CLI cleanup phase two
     PR G2 removed the top-level ``exit_code_scheme:`` key -- the one
     automatic gate algorithm (ADR-064) is no longer user-selectable; see
-    :func:`abicheck.cli_helpers_compare.resolve_compare_config`'s own
+    :func:`abicheck.workflows.compare_configuration.resolve_compare_config`'s own
     ``exit_code_scheme`` field docstring for the replacement, purely-derived
-    computation. CLI flags override these; see :func:`abicheck.cli_helpers_compare.resolve_compare_config`
+    computation. CLI flags override these; see :func:`abicheck.workflows.compare_configuration.resolve_compare_config`
     for the precedence resolver (CLI > config > built-in default).
 
     A field left at its ``None`` / ``""`` / empty default means "unset — inherit

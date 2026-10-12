@@ -301,7 +301,7 @@ class TestCompareOldBundleFactsEarlyRejections:
 
     def test_config_source_method_is_rejected(self, tmp_path: Path) -> None:
         # Codex review: source.method (s1-s6) drives run_compare's own
-        # _resolve_compare_collect_mode, which this dispatcher never calls
+        # resolve_compare_collect_mode, which this dispatcher never calls
         # -- same root cause as --depth build/source, no channel for L3-L5
         # build/source evidence collection, config-declared or not.
         facts_path = tmp_path / "old.bundlefacts.json"
