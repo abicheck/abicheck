@@ -608,7 +608,7 @@ def _release_summary_effective_config_block(
     resolving it once more here the same way
     (:func:`~abicheck.frontends.cli.options.params._load_suppression_and_policy`,
     folding *pack_application* like
-    :func:`~abicheck.cli_compare_release_matrix._collect_matrix_result`
+    :func:`~abicheck.workflows.release_compare.collect_matrix_result`
     does) reproduces what any one library's own report shows for these
     fields; reloaded rather than threaded down since no per-library
     ``PolicyFile`` is retained at this scope (the reload runs inside the

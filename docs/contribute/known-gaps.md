@@ -68,6 +68,11 @@ Next, unranked (the `--no-baseline` one-sided-detector gap, the target-platform 
 **Status (re-verified 2026-10-11 at `46c127111`): OPEN, narrowed.** #1532 moved the release compatibility-axis fold into `workflows/release_exit_fold.py`, which folds each member's scalar-resolver contribution. Two precedence resolvers still exist: `policy/exit_decision.py::resolve_compare_exit_decision` and `policy/exit_decision_precedence.py::resolve_release_exit_decision`, the latter still owning the release-only axes listed below.  
 `hygiene` — Scalar and release `compare` still use two precedence resolvers (`resolve_compare_exit_decision` and `resolve_release_exit_decision`), so the exit-code rules can drift between the two paths. [Full write-up](known-gaps/scalar-and-release-compare-still-fold-the-exit-code-in-two.md)
 
+### A typed release compare does not record the gate on its members (2026-10-12)
+
+**Status (re-verified 2026-10-12 at `f25eddcdd`): OPEN.** Typed route only. `execute_release_compare` stamps a member's resolved config from the release's `PackApplication`, which only the CLI resolves; a typed caller without one gets the default gate on each member's `contract_context` receipt. Verdicts and exit codes are unaffected.  
+`hygiene` — A release run through the typed workflow records a different gate receipt (and `effective_config_digest`) on its members than the typed scalar API does for the same pair. [Full write-up](known-gaps/a-typed-release-compare-does-not-record-the-gate-on-its-members.md)
+
 ### `unversioned_exported_symbol` false-positives on base-version (VER_FLG_BASE) symbols of versioned libraries: the model cannot tell base-bound from unversioned
 
 **Status (re-verified 2026-10-11 at `46c127111`): OPEN.** `extract/elf_symbol_versions.py::_apply_version_to_symbol` still returns early for `ver_idx < 2`, and `buildsource/cross_source_checks.py:1065` still skips only `not sym.is_default or sym.version`, so base-version symbols are still flagged.  
@@ -371,7 +376,7 @@ Each entry's status line says what is still open. A PARTIAL entry's write-up als
 
 #### Release-fan-out CLI tests JSON-parse `CliRunner.output`, which the memory-clamp note can join
 
-**Status (re-verified 2026-10-09 at `456989f`): OPEN.** cli_compare_release_pairwise.py:621-628 still echoes the clamp note with err=True. tests/test_release_package_inventory_cli.py:92-99 still does `json.loads(CliRunner().invoke(...).output)`, as do test_release_evaluation_config.py:712,730.  
+**Status (re-verified 2026-10-09 at `456989f`): OPEN.** The clamp note is still a stderr line: `workflows/release_members.compare_release_members` emits it through the reporter's `notice`, which the CLI echoes with `err=True`. tests/test_release_package_inventory_cli.py:92-99 still does `json.loads(CliRunner().invoke(...).output)`, as do test_release_evaluation_config.py:712,730.  
 `hygiene` — The memory-clamp note goes to stderr, and several release CLI tests `json.loads(CliRunner(...).output)`, which can mix the two streams. [Full write-up](known-gaps/release-fan-out-cli-tests-json-parse-clirunneroutput-which-the.md)
 
 #### Source-read licence: enforced at the one consumer, not repo-wide (2026-09-12)

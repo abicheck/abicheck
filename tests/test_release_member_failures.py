@@ -13,11 +13,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""`member_error_entry`'s classification: four outcomes, and their order.
+"""A failed release member's classification: four outcomes, and their order.
 
-Extracted from `_compare_one_library`'s inline `except` cascade in PR #1195,
-which left it exercised only incidentally through whole-CLI tests (codecov
-put the new module at 34.78%). The classification carries real ADR
+`workflows.release_member_failures.classify_member_failure`, driven through
+the member worker that owns it (`workflows.release_members.
+compare_release_member`, with its comparison made to raise) and the CLI's
+reporter, which writes a `not_comparable` member's `--output-dir` document. The classification carries real ADR
 consequences per branch -- `not_comparable` (ADR-050 D2) and `unsupported`
 (ADR-065 D6) are deliberately *not* the `ERROR`/exit-4 bucket a crash uses,
 because one is an expected contract outcome, one is an incompleteness signal
@@ -43,17 +44,29 @@ from abicheck.errors import (
     ScopeMismatchError,
     UnsupportedArtifactError,
 )
-from abicheck.frontends.cli.release_member_errors import member_error_entry
+from abicheck.frontends.cli.release_member_reporter import CliReleaseReporter
+from abicheck.workflows.release_members import (
+    ReleaseMemberContext,
+    compare_release_member,
+    release_parent_request,
+)
 
 
 def _entry(exc: BaseException, output_dir: Path | None = None) -> dict[str, object]:
-    return member_error_entry(
-        exc,
-        old_path=Path("/rel/libfoo.so"),
-        old_version="1.0",
-        new_version="2.0",
-        output_dir=output_dir,
-    )
+    def _raise(*_a: object, **_k: object) -> object:
+        raise exc
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr("abicheck.workflows.release_members.compare_member_pair", _raise)
+        return compare_release_member(
+            "libfoo.so",
+            ReleaseMemberContext(
+                request=release_parent_request(old_version="1.0", new_version="2.0"),
+                old_map={"libfoo.so": Path("/rel/libfoo.so")},
+                new_map={"libfoo.so": Path("/rel2/libfoo.so")},
+                reporter=CliReleaseReporter(output_dir=output_dir),
+            ),
+        )
 
 
 class TestEachOutcomeIsItsOwnVerdict:

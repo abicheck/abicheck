@@ -1065,7 +1065,7 @@ def _release_lib_row(
     # (round 11) confirms this document was written after the correction;
     # its absence is ambiguous (see `RELEASE_SCHEMA_VERSION`'s own
     # docstring), so this reader assumes the current writer's semantics
-    # either way, matching `cli_compare_release_pairwise.py`'s own values.
+    # either way, matching `workflows/release_members.py`'s own values.
     quality = _as_int(lib.get("quality_issues"))
     additions = _as_int(lib.get("compatible_additions"))
     pot_err = levels.get("potential_breaking") == "error"

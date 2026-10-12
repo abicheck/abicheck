@@ -1594,7 +1594,7 @@ def compute_review_digest(
         # (report_schema_version 4.0) already counts only genuine additions
         # -- use it directly, no second `quality_issues` subtraction (that
         # is `pr_comment.py`'s own release-field derivation, a separate,
-        # differently-scoped field -- `cli_compare_release_pairwise.py`).
+        # differently-scoped field -- `workflows/release_members.py`).
         additions_count=summary.compatible_additions,
         quality_issues_count=summary.quality_issues,
         scoped=bool(scoped),

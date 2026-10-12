@@ -351,7 +351,7 @@ def member_pass_scope(expected_members: Collection[str]) -> Iterator[None]:
 
     Entered around a driver's *member loop*, in the thread that runs it: a
     copy of that thread's ``contextvars.Context`` is what reaches a parallel
-    worker (see ``cli_compare_release_pairwise._compare_release_parallel``),
+    worker (see ``workflows.release_members._compare_parallel``),
     so entering it inside a worker would not propagate.
     """
     owned = release_level_checks() if len(set(expected_members)) > 1 else frozenset()

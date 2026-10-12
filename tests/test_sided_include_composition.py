@@ -48,7 +48,7 @@ import pytest
 from click.testing import CliRunner
 
 from abicheck.cli import main
-from abicheck.cli_compare_release import _resolve_release_headers
+from abicheck.cli_compare_release_helpers import _resolve_release_headers
 from abicheck.model.sided_inputs import compose_sided_paths, resolve_per_side_inputs
 
 

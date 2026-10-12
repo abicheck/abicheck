@@ -13,18 +13,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""CLI — compare-release command and its helpers.
+"""CLI adapter for the directory/package release compare.
 
-Split out of :mod:`abicheck.cli` to keep that module under the
-AI-readiness file-size limit. Imported for side-effect at the bottom
-of :mod:`abicheck.cli` so the ``@main.command("compare-release")``
-decorator runs.
-
-The per-pair/per-library comparison engine and the matrix-result/output/
-gating engine this command calls live in the sibling modules
-:mod:`abicheck.cli_compare_release_pairwise` and
-:mod:`abicheck.cli_compare_release_matrix`, split out purely to stay under
-the AI-readiness 2000-line hard cap -- see either module's own docstring.
+``compare_release_cmd`` is the unregistered engine command ``compare``'s
+directory/package dispatch invokes. It parses and validates options,
+resolves the release plan (:mod:`abicheck.workflows.release_request`), runs
+it through the release compare owner
+(:func:`abicheck.workflows.release_compare.execute_release_compare`) with
+the CLI's reporter (:mod:`abicheck.frontends.cli.release_member_reporter`),
+and renders the outcome. Pairing, member iteration, per-member comparison,
+bundle/matrix analysis and every exit-axis fold live in the workflow, not
+here.
 """
 
 from __future__ import annotations
@@ -35,40 +34,15 @@ from typing import TYPE_CHECKING, Any
 
 import click
 
-from .cli_compare_release_helpers import (  # noqa: F401
+from .cli_compare_release_helpers import (
     _cleanup_temp_dirs,
-    _collect_bundle_result,
-    _debian_symbols_warning,
-    _discover_include_roots,
-    _exit_compare_release,
-    _extract_if_package,
-    _match_release_keys,
-    _resolve_bundle_manifest,
-    _resolve_release_headers,
-    _resolve_release_severity_config as _resolve_release_severity_config,  # re-exported, ADR-064
-    _run_bundle_analysis,
-    apply_release_gate_pack as apply_release_gate_pack,  # re-exported, ADR-064
     reject_bundle_facts_out_collision,
     reject_bundle_facts_out_dir_collision,
-    resolve_release_gate_options as resolve_release_gate_options,  # re-exported, ADR-064
-    write_bundle_facts_out,
 )
 from .cli_compare_release_matrix import (
-    _collect_matrix_result,
     _finalize_release_output,
-    _prepare_compare_release_inputs as _prepare_compare_release_inputs,  # re-exported, direct tests still call it
-    _release_finding_dicts as _release_finding_dicts,
     _strip_diff_results_and_adjust_verdict,
     _validate_suppression_early,
-    _write_release_summary_file as _write_release_summary_file,
-)
-from .cli_compare_release_pairwise import (
-    _compare_one_library as _compare_one_library,
-    _compare_release_libraries,
-    _compare_release_parallel as _compare_release_parallel,
-    _compare_release_sequential as _compare_release_sequential,
-    _run_compare_pair as _run_compare_pair,
-    _suppress_lockstep_soname_findings as _suppress_lockstep_soname_findings,
 )
 from .cli_options import (
     include_dependencies_option,
@@ -78,56 +52,29 @@ from .cli_options import (
     severity_options,
     verbose_option,
 )
-from .errors import SnapshotError
+from .errors import (
+    ReleaseOperandContentError,
+    ReleaseOperandUsageError,
+    SnapshotError,
+)
+from .frontends.cli.release_member_reporter import CliReleaseReporter
 from .frontends.cli.release_report import render_release_summary
 from .frontends.cli.runtime import _setup_verbosity, _write_or_echo
-from .model.header_exclusion_record import (
-    canonical_exclusion_identity,
-    release_exclusion_identity,
-)
 from .model.release_selection import ReleaseSelection
-from .model.scope_acquisition import AcquisitionState
-from .pack_application import resolve_bundle_policy_file
-from .report.comparison_scope import (
-    comparison_scope_terms,
-    release_scope_warnings,
-)
+from .report.comparison_scope import comparison_scope_terms
 from .report.release_assurance import release_assurance_terms
 from .report.release_public_surface import assemble_release_public_surface
-from .workflows.gate import resolve_scope_decision, worse_release_verdict
-from .workflows.header_exclusion_audit import (
-    observed_member_exclusion_identities,
+from .workflows.release_compare import (
+    ReleaseCompareOptions,
+    ReleaseCompareOutcome,
+    execute_release_compare,
 )
-from .workflows.release_assurance_members import release_assurance_from_entries
-from .workflows.release_exit_fold import (
-    fold_release_global_severity,
-    release_severity_exit_code,
-)
-from .workflows.release_public_surface import (
-    reconcile_release_public_surface,
-    release_surface_severity_exit,
-    release_surface_verdict,
-)
-from .workflows.release_scope import (
-    DIRECT_PAIR_KEY,
-    StrandedLibraryResolution,
-    build_release_scope_record,
-    out_of_scope_provider_names,
-    resolve_release_scope_result,
-    scoped_bundle_maps,
-)
-from .workflows.release_snapshot_retention import (
-    release_old_snapshot_pairs,
-    resolve_snapshot_retention,
-)
-from .workflows.release_stored_inventory import stored_side_degraded_members
-from .workflows.release_support_promise import support_promise_results
-from .workflows.snapshot_factory import new_snapshot
 
 if TYPE_CHECKING:
     from .compile_context import CompileContext
     from .environment_matrix import EnvironmentMatrix
     from .pack_application import PackApplication
+    from .workflows.release_request import ReleaseComparePlan
 
 
 #: The formats the release fan-out actually produces.
@@ -546,19 +493,12 @@ def compare_release_cmd(
           --debug-info2 libfoo-debuginfo-1.1.rpm
     """
 
-    from .workflows.extraction import (
-        resolve_package_debug_info as resolve_debug_info,
-    )
-
     # ADR-062 A1.7: --old-variant/--new-variant are declared on `compare`
     # itself (`cli_options.variant_options`, `expose_value=False` + a
     # `ctx.meta` stash) rather than on this unregistered internal command,
     # so a caller reaching this function via `.callback(**kwargs)` -- every
-    # real caller -- never has them in `kwargs` at all; recovered here from
-    # the still-current Click context instead, so `frontends/cli/commands/
-    # compare.py`'s own already-capped `_dispatch_release_compare` doesn't
-    # have to grow to inject them (Codex review: keep the variant-plumbing
-    # responsibility off that file's own line budget).
+    # real caller -- never has them in `kwargs`; recovered here from the
+    # still-current Click context instead.
     if old_variant is None and new_variant is None:
         from .cli_options import variant_kwargs_from_context
 
@@ -570,16 +510,8 @@ def compare_release_cmd(
 
     _setup_verbosity(verbose)
 
-    # G26/G27: a wheel's own tag and METADATA become the deployment contract
-    # its members are checked against, unless `runtime_floors` was declared.
-    from .workflows.release_inputs import wheel_release_env_matrix
-
-    env_matrix = wheel_release_env_matrix(env_matrix, new_dir)
-
-    # ADR-065 S1: an explicit, identity-keyed release member selection --
-    # see abicheck.model.release_selection's own docstring. `None` (no
-    # --select/--select-required given) is a true no-op: every discovered
-    # member is compared exactly as it was before this parameter existed.
+    # ADR-065 S1: an explicit, identity-keyed release member selection.
+    # `None` (no --select/--select-required) compares every discovered member.
     release_selection: ReleaseSelection | None = None
     if select or select_required:
         try:
@@ -589,17 +521,14 @@ def compare_release_cmd(
         except ValueError as exc:
             raise click.UsageError(str(exc)) from exc
 
-    # Plan slice 7m: no export-vs-export collision check here any more --
-    # every destination this engine receives came from one already-validated
-    # export set (`frontends.cli.options.export`), which checks collisions
-    # across all targets before any work starts. `--bundle-facts-out` is not
-    # part of that set, so its own collision check stays.
+    # Every export destination came from one already-validated export set
+    # (`frontends.cli.options.export`); `--bundle-facts-out` is not part of
+    # it, so its own collision check stays.
     reject_bundle_facts_out_collision(
         bundle_facts_out, output, *(path for _, path in secondary_writes)
     )
     secondary_formats = {f for f, _ in secondary_writes}
 
-    # Track temporary directory paths for cleanup
     _temp_dir_paths: list[str] = []
 
     def _make_temp_dir(prefix: str) -> Path:
@@ -607,37 +536,22 @@ def compare_release_cmd(
         _temp_dir_paths.append(path)
         return Path(path)
 
-    # dedup_validate_overrides_warnings(): this whole release run reloads
-    # the same --policy-file several times over -- the early strict-
-    # suppression validation just below, the per-library fan-out (including
-    # its auto-detected (`jobs=0`) ThreadPoolExecutor parallel path -- see
-    # _compare_release_parallel's own docstring for how the dedup scope
-    # reaches those worker threads), and (when a probe matrix is given) the
-    # matrix-result path all load it independently, so without this a
-    # single risky override would log its validate_overrides() warning
-    # once per load instead of once for the whole run (Codex review).
-    from .workflows.extraction import ast_acquisition_scope
+    # One warning-dedup scope for the whole run (early validation, every
+    # member, the release-level stages): a risky override warns once.
     from .workflows.policy_file import dedup_validate_overrides_warnings
 
-    with dedup_validate_overrides_warnings(), ast_acquisition_scope() as ast_scope:
-        # Validate suppression file early (before per-library loop)
-        _validate_suppression_early(
-            suppress,
-            policy,
-            policy_file_path,
-            strict_suppressions,
-            require_justification,
-        )
-
-        # ADR-061 gap D / DoD item 8, closure package 4: the release fan-out's
-        # entire pre-execution resolution (input discovery, ADR-065 scope/
-        # inventory evidence, the ReleaseScopePlan, the resolved GateOptions,
-        # and each side's stored-degraded markers) as one typed request/plan
-        # pair -- ``ReleaseCompareRequest``/``ReleaseComparePlan`` -- rather
-        # than the dozen independent locals this block used to thread by
-        # hand across four separate calls. See that module's own docstring
-        # for exactly what this closes and what remains open.
+    with dedup_validate_overrides_warnings():
         try:
+            _validate_suppression_early(
+                suppress,
+                policy,
+                policy_file_path,
+                strict_suppressions,
+                require_justification,
+            )
+            # The plan (`workflows.release_request`), through the CLI boundary
+            # translating its typed errors; imported here so a test can patch
+            # that boundary's own binding.
             from .frontends.cli.release_compare_request import (
                 ReleaseCompareRequest,
                 resolve_release_compare_plan,
@@ -678,750 +592,208 @@ def compare_release_cmd(
             except SnapshotError as exc:  # a damaged composition/marker (fail closed)
                 raise click.UsageError(str(exc)) from exc
 
-            scope_plan = plan.scope
-            old_map, new_map, matched_keys = (
-                dict(scope_plan.old_map),
-                dict(scope_plan.new_map),
-                list(scope_plan.matched_keys),
-            )
-            old_debug_dir, new_debug_dir = plan.old_debug_dir, plan.new_debug_dir
-            old_h, new_h = list(plan.old_headers), list(plan.new_headers)
-            old_inc, new_inc = list(plan.old_includes), list(plan.new_includes)
-            warning_msgs = list(plan.warnings)
-            old_unclassified, new_unclassified = (
-                plan.old_unclassified,
-                plan.new_unclassified,
-            )
-            old_inventory, new_inventory = plan.old_inventory, plan.new_inventory
-
             if fmt != "json":
-                for msg in warning_msgs:
+                for msg in plan.warnings:
                     click.echo(msg, err=True)
-
-            reject_bundle_facts_out_dir_collision(bundle_facts_out, output_dir, old_map)
+            reject_bundle_facts_out_dir_collision(
+                bundle_facts_out, output_dir, dict(plan.scope.old_map)
+            )
             if output_dir:
                 output_dir.mkdir(parents=True, exist_ok=True)
 
-            # Resolved before the compare pass (its inputs are plain CLI values, no
-            # dependency on compare results) so persisted per-library annotations
-            # (schema 2.43/2.44, computed inside _compare_release_libraries's
-            # primary pass and read by the Action, not the CLI) reflect the same
-            # severity-aware gate as the exit code below, instead of the legacy
-            # kind-set mapping. `None` when no severity setting was in effect.
-            gate = plan.gate
-            severity_config = gate.severity
-            severity_preset = gate.severity_preset
-
-            # JUnit, bundle analysis, and annotations all reuse the
-            # _diff_result (and, for JUnit, _old_snapshot) stashed in each
-            # library entry from this single primary pass -- no independent
-            # re-run.
-            #
-            # This fan-out reloads the same --policy-file once per library;
-            # the enclosing dedup_validate_overrides_warnings() scope above
-            # is what keeps a single risky override from logging its
-            # validate_overrides() warning once per library (Codex review).
-            # ADR-065 D8 (Codex review): a matched member either stored
-            # package marks degraded is not compared -- its snapshot is the
-            # ELF-only stand-in -- but recorded `failed` on the scope axis.
-            # An unmatched one is `failed` on the record too (below), so a
-            # proven inventory on the other side never turns a degraded
-            # capture into a removal or an addition (twenty-seventh round).
-            degraded = plan.degraded
-            assert (
-                degraded is not None
-            )  # always resolved by resolve_release_compare_plan
-            degraded_matched = degraded.matched
-            # ADR-065 S1: with an explicit selection, a matched key the
-            # caller did not declare is never run through the (expensive)
-            # per-library dump/compare pass at all -- it is reported
-            # `OUT_OF_SCOPE` on the scope record below, not silently
-            # compared anyway. `matched_keys` is already selection-narrowed
-            # (folded into `scope_plan` above), so no second filter is
-            # needed here.
-            compare_keys = plan.compare_keys
-            library_results, worst_verdict, diff_pairs = _compare_release_libraries(
-                compare_keys,
-                old_map,
-                new_map,
-                old_debug_dir,
-                new_debug_dir,
-                resolve_debug_info,
-                old_h,
-                new_h,
-                old_inc,
-                new_inc,
-                old_version,
-                new_version,
-                lang,
-                suppress,
-                policy,
-                policy_file_path,
-                output_dir,
-                # Phase 7d (one-comparison-product.md §4.1): bundle-level
-                # cross-library analysis always runs now (--no-bundle-analysis
-                # is gone), and it needs each library's own diff results
-                # (G38 Phase 4, _compare_one_library's docstring) -- so this
-                # is unconditionally True rather than only for JUnit/
-                # --bundle-facts-out.
-                collect_diff_results=True,
-                # Phase 9 kept the full AbiSnapshot only for JUnit/
-                # --bundle-facts-out; the memory work made that a *per-side*
-                # answer, since both of those consumers read the OLD side
-                # only and nothing reads a stashed NEW snapshot at all. See
-                # `workflows.release_snapshot_retention`.
-                retention=resolve_snapshot_retention(
-                    junit=(fmt == "junit" or "junit" in secondary_formats),
-                    bundle_facts_out=bundle_facts_out is not None,
-                ),
-                # ADR-068 D5 / plan Phase 7h: -j/--jobs removed outright --
-                # always auto-detect (and memory-clamp), never a manual
-                # override.
-                jobs=0,
-                scope_to_public_surface=scope_public_headers,
-                include_dependencies=include_dependencies,
-                severity_config=severity_config,
-                contract_evaluation=contract_evaluation,
-                contract_mode=contract_mode,
-                require_complete_analysis=require_complete_analysis,
-                pack_application=pack_application,
-                compile_context=compile_context,
-                depth=depth,
-                show_only=show_only,
-                public_header_dirs=public_header_dirs,
-                collapse_versioned_symbols=collapse_versioned_symbols,
-                project_policy_overrides=project_policy_overrides,
-                env_matrix=env_matrix,
-                exclude_headers=exclude_headers,
-                lang_explicit=lang_explicit,
-                acknowledgments_path=acknowledgments_path,
-                acknowledgment_unacknowledged_additions=acknowledgment_unacknowledged_additions,
-            )
-
-            for key in matched_keys:
-                if key in degraded_matched:
-                    library_results.append(
-                        {
-                            "library": old_map[key].name,
-                            "verdict": "failed",
-                            "reason": degraded_matched[key],
-                        }
-                    )
-                    click.echo(
-                        f"Failed: {old_map[key].name}: {degraded_matched[key]}",
-                        err=True,
-                    )
-
-            # ADR-065 D1/D2/D6/D7 (S2): the per-member acquisition record.
-            # From here on `removed_keys`/`added_keys` are the *proven*
-            # sets (empty unless the lacking side's inventory is proven
-            # complete) -- what exit 8, the verdict bump, and the Markdown
-            # removed/added sections read; the raw set difference stays in
-            # the record and is reported as `unmatched_old`/`unmatched_new`.
-            _scope_failed = {
-                "old_failed": {**degraded.old_unmatched, **old_unclassified},
-                "new_failed": {**degraded.new_unmatched, **new_unclassified},
-                # ADR-065 S3: declared by the package inventory, absent after
-                # extraction -- `expected_not_produced`, never an absence a
-                # proven-complete inventory on the other side may read as a
-                # removal (the state D1 reserved and S2 left unproduced).
-                "old_unproduced": dict(old_inventory.unproduced)
-                if old_inventory is not None
-                else {},
-                "new_unproduced": dict(new_inventory.unproduced)
-                if new_inventory is not None
-                else {},
-            }
-            if release_selection is not None and not (
-                scope_plan.evidence.direct_pair
-                or list(matched_keys) == [DIRECT_PAIR_KEY]
-            ):
-                # ADR-065 S1: an explicit selection overrides D9's inference
-                # entirely -- built by workflows.release_plan, which is not
-                # release_scope's own no_growth-budgeted module.
-                from .workflows.release_plan import build_declared_selection_record
-
-                scope_record = build_declared_selection_record(
-                    scope_plan.old_map,
-                    scope_plan.new_map,
-                    scope_plan.matched_keys,
-                    library_results,
-                    scope_plan.evidence,
-                    release_selection,
-                    **_scope_failed,
-                )
-            else:
-                scope_record = build_release_scope_record(
-                    scope_plan.old_map,
-                    scope_plan.new_map,
-                    scope_plan.matched_keys,
-                    library_results,
-                    scope_plan.evidence,
-                    **_scope_failed,
-                )
-            # ADR-061 gap D / DoD item 8, closure package 4 (Codex review,
-            # PR #1192): the release fan-out's realized scope outcome, paired
-            # with the plan it was resolved against -- from here on this run
-            # reads the acquisition record through `scope_result.record`
-            # exclusively, not a bare `ScopeAcquisitionRecord` threaded
-            # alongside an independent, un-paired plan.
-            scope_result = resolve_release_scope_result(scope_plan, scope_record)
-            # A member --dso-only could not classify is this run's own
-            # acquisition failure: an operational `ERROR` library result
-            # (the same rank a failed extraction takes, floored at exit 4
-            # under either --on-incomplete-scope policy), unless D9 narrowed
-            # it out of scope -- then it is listed on the record only (Codex
-            # review, twentieth round).
-            scope_states = {m.member: m.state for m in scope_result.record.members}
-            for key in sorted(set(old_unclassified) | set(new_unclassified)):
-                reason = old_unclassified.get(key) or new_unclassified[key]
-                if scope_states.get(key) is AcquisitionState.OUT_OF_SCOPE:
-                    continue
-                library_results.append(
-                    {"library": key, "verdict": "ERROR", "error": reason}
-                )
-                worst_verdict = worse_release_verdict(worst_verdict, "ERROR")
-                click.echo(f"Failed: {key}: {reason}", err=True)
-            # Decided by policy once; every consumer below (the writers, the
-            # sidecar, the stderr notice, the exit) reads this one decision.
-            scope_terms = comparison_scope_terms(
-                resolve_scope_decision(scope_result.record, on_incomplete_scope)
-            )
-            removed_keys = [
-                m.member for m in scope_result.record.proven_removed_members
-            ]
-            added_keys = [m.member for m in scope_result.record.proven_added_members]
-            # ADR-065 S4: the fan-out's unmatched/removed/added stderr notices,
-            # now written from the acquisition record instead of the deleted
-            # `_match_release_keys` set difference -- so one line can say
-            # "removed" only when the lacking side's inventory proves it, and
-            # says "unmatched" (naming why the proof is missing) otherwise.
-            # Emitted here, not with the discovery-time warnings above, because
-            # the record does not exist until the fan-out has run.
-            scope_notices = release_scope_warnings(scope_result.record)
-            warning_msgs.extend(scope_notices)
-            if fmt != "json":
-                for msg in scope_notices:
-                    click.echo(msg, err=True)
-            # ADR-065 D1/S3: a *support-promise* change -- what the release
-            # promises to ship, not what this run happened to acquire. Emitted
-            # only under the contract policy that asks for it, and only for a
-            # member whose absence the other side's proven-complete inventory
-            # establishes (`support_promise_changes` reads nothing else). Each
-            # one becomes an ordinary per-component result so the existing
-            # verdict fold, severity aggregation, report renderers and
-            # disposition audit see it without a parallel pipeline.
-            for entry in support_promise_results(scope_result.record, support_promise):
-                library_results.append(entry)
-                worst_verdict = worse_release_verdict(
-                    worst_verdict, str(entry["verdict"])
-                )
-
-            # One product contract, many binary providers: acquire each
-            # side's public surface once and reconcile it against the union
-            # of the bundle's exports (`cli_compare_release_surface`), while
-            # the per-member export evidence is still stashed. The two
-            # whole-product cross-source check was taken off the member pass
-            # for exactly this (`workflows.crosscheck_ownership`), so this
-            # stage is where it is answered -- once. Run before the
-            # `--bundle-facts-out` write below so the stored baseline
-            # records the very surface this run reconciled against, rather
-            # than a second, separately-acquired one.
-            # Resolved once, and the one object every release-level
-            # scoring path reads: the release-surface verdict, its severity
-            # exit, and the bundle comparison below. Resolving it only for
-            # the bundle left the two release-surface paths scoring against
-            # the bare `policy` profile, so a `--policy` document (or a
-            # pack/project override folded into it) moved a member's
-            # finding and not the release-level finding that replaced it
-            # (CodeRabbit review).
-            _release_policy_file = resolve_bundle_policy_file(
-                suppress,
-                policy,
-                policy_file_path,
-                pack_application,
-                project_policy_overrides,
-            )
-            release_surface_stage = reconcile_release_public_surface(
-                library_results,
-                # The DSOs this release expected to compare -- `library_results`
-                # also carries entries that are not members at all (a
-                # support-promise finding is keyed by the promise, not a DSO).
-                # Keyed by the OLD path's basename, which is the spelling
-                # `_compare_one_library` stamps as each entry's `library`.
-                expected_members=[
-                    (old_map[key] if key in old_map else new_map[key]).name
-                    for key in compare_keys
-                ],
-                old_headers=old_h,
-                new_headers=new_h,
-                old_includes=old_inc,
-                new_includes=new_inc,
-                lang=lang,
-                lang_explicit=lang_explicit,
-                exclude_headers=exclude_headers,
-                public_header_dirs=public_header_dirs,
-                compile_context=compile_context,
-                depth=depth,
-                include_dependencies=include_dependencies,
-            )
-            # The last consumer of this request's parsed header ASTs was the
-            # reconciliation above; everything below is compare/report work
-            # over snapshots and findings. Flush the acquisition table so the
-            # tail -- where a 28-member release measured its peak RSS -- does
-            # not carry roots nobody will read again. A pure cache flush:
-            # anything still in flight stays, and a later ask re-parses.
-            ast_scope.release_completed()
-            # Folded with the same `policy.release_outcome` ranking every
-            # other release-global contributor (bundle findings, the probe
-            # matrix, a removed library) uses, so a release-level contract
-            # finding can never rank differently from a bundle one.
-            _surface_verdict = release_surface_verdict(
-                release_surface_stage,
-                policy=policy,
-                policy_file=_release_policy_file,
-            )
-            worst_verdict = worse_release_verdict(worst_verdict, _surface_verdict)
-            for _msg in release_surface_stage.warnings:
-                warning_msgs.append(_msg)
-
-            if bundle_facts_out is not None:
-                # Resolved here, not in the leaf write_bundle_facts_out() (see its docstring).
-                #
-                # ADR-063 D1's second named exception: this used to call
-                # `cli_resolve._resolve_input()` directly -- the same Tier-2
-                # resolution `resolve_dump_request`/`execute_dump_request`
-                # wrap, but reached independently, with its own hand-rolled
-                # `depth=binary` header-clearing special-case (duplicating
-                # what `service_compare_evidence`'s shared evidence
-                # resolution already does for every matched pair) and no
-                # `AnalysisPlan` pre-flight check at all. Migrated onto the
-                # same `DumpRequest -> resolve_dump_request ->
-                # execute_dump_request` pipeline `dump`/`scan` already
-                # converge on: this stranded library is exactly one dump-
-                # shaped input, so building a real `DumpRequest` for it and
-                # running the shared pipeline both gets it the
-                # `AnalysisPlanner.resolve()` pre-flight check ADR-063 Phase 4
-                # already provides and drops the manual `is_binary_depth`
-                # special-case -- `DumpRequest.depth` feeds the identical
-                # evidence-resolution machinery a matched pair's own
-                # `CompareRequest` side does, so headers are cleared
-                # consistently by the one shared mechanism instead of a
-                # second, hand-copied rule that could drift from it.
-                #
-                # The "deliberately-degrading stranded-library fallback"
-                # ADR-063's own text names as the reason this isn't "the same
-                # shape of check" as an ordinary comparison is preserved
-                # exactly: a `PlanningError`/`ValidationError`/`SnapshotError`
-                # from either resolve or execute step still degrades to an
-                # ELF-only entry with a warning, not a hard failure -- the
-                # migration changes *how* the input resolves, not this
-                # function's own degrade-rather-than-abort contract.
-                def _resolve_stranded_library(
-                    old_path: Path,
-                ) -> StrandedLibraryResolution:
-                    from .workflows import extraction
-                    from .workflows.contracts import DumpRequest
-                    from .workflows.dump.pipeline import (
-                        execute_dump_request,
-                        resolve_dump_request,
-                    )
-                    from .workflows.request_inputs import InputSpec
-
-                    old_dbg = (
-                        resolve_debug_info(old_path, old_debug_dir)
-                        if old_debug_dir
-                        else None
-                    )
-                    try:
-                        dump_request = DumpRequest(
-                            input=InputSpec.of(
-                                old_path,
-                                headers=old_h,
-                                includes=old_inc,
-                                version=old_version,
-                                pdb=old_dbg,
-                                compile=compile_context,
-                                include_dependencies=include_dependencies,
-                                public_header_dirs=public_header_dirs,
-                                # The same canonical rules every matched pair
-                                # is narrowed by: a stranded library reads the
-                                # identical `old_h` header tree, so without
-                                # them its capture is the one place in the
-                                # fan-out that still tries to parse the tree
-                                # whole -- and degrades to an ELF-only entry
-                                # for a reason the run had already been told
-                                # how to avoid.
-                                exclude_headers=exclude_headers,
-                            ),
-                            lang=lang,
-                            lang_explicit=lang_explicit,
-                            depth=depth,
-                        )
-                        resolved = resolve_dump_request(dump_request)
-                        return StrandedLibraryResolution(
-                            execute_dump_request(resolved).snapshot
-                        )
-                    except Exception as exc:
-                        # Degrade rather than abort, but warn: lossy entry
-                        # (Codex review) -- and, since ADR-065 D8, carry the
-                        # failure with the snapshot so `write_bundle_facts_
-                        # out` persists this member as `failed` in-band
-                        # (`BundleFacts.degraded_members`), never as a
-                        # silently impoverished old side.
-                        click.echo(f"{old_path.name}: ELF-only ({exc})", err=True)
-                        return StrandedLibraryResolution(
-                            new_snapshot(
-                                library=old_path.name,
-                                version="",
-                                elf=extraction.parse_elf_metadata(old_path),
-                                # ADR-065 D8: this snapshot carries no header/
-                                # DWARF evidence at all -- every downstream
-                                # detector that special-cases elf_only_mode
-                                # (diff_symbols.py, diff_types.py, diff_vtable_
-                                # layout.py, bundle_signature_evidence.py,
-                                # confidence.py) must see the same reduced
-                                # evidence tier every other ELF-only snapshot
-                                # declares, not silently read as a fully-dumped
-                                # one on a later comparison against it.
-                                elf_only_mode=True,
-                            ),
-                            failure=f"ELF-only degraded capture: {exc}",
-                        )
-
-                write_bundle_facts_out(
-                    bundle_facts_out,
-                    # Not `diff_pairs` -- that carries the compact JUnit
-                    # inventory. A baseline document needs the whole OLD
-                    # snapshot, which `old_full` retention kept on the
-                    # member entries (still present here: the strip runs
-                    # further below).
-                    release_old_snapshot_pairs(library_results),
-                    manifest_path,
-                    old_map,
-                    resolve_stranded_library=_resolve_stranded_library,
-                    # ADR-065 D8 (Codex review): a stored OLD package's own
-                    # marker survives the recapture, matched or stranded.
-                    inherited_degraded=stored_side_degraded_members(
-                        old_dir, variant_id=old_variant
-                    ),
-                    # ADR-065 D2: this capture walked every member the
-                    # release enumerated on OLD (matched or stranded, a
-                    # degraded one marked), so it asserts a complete
-                    # inventory -- unless --dso-only left a member
-                    # unclassified, which the assertion must not paper over.
-                    inventory_complete=not old_unclassified,
-                    # The OLD side's own acquired public contract (schema 4).
-                    public_surface=release_surface_stage.old_surface,
-                    # ADR-062 A1.7: the same explicit-or-embedded manifest
-                    # resolution the bundle-analysis call below applies, so
-                    # a stored OLD side's own manifest-drift contract is
-                    # captured into this baseline too -- old_side_only=True
-                    # (Codex review, fresh evidence): this baseline
-                    # describes OLD alone, so NEW's own embedded manifest
-                    # must never be attributed to it.
-                    resolved_manifest=_resolve_bundle_manifest(
-                        manifest_path,
-                        old_dir,
-                        new_dir,
-                        old_map,
-                        new_map,
-                        old_variant=old_variant,
-                        new_variant=new_variant,
-                        old_side_only=True,
-                    ),
-                )
-
-            # ADR-049 Phase 7's orthogonal contract-coverage floor, aggregated
-            # across every library with max() -- one library's incomplete
-            # evidence must still raise the release's exit code, the same rule
-            # ExitDecision applies to a single pair.
-            # `0` (the default fold value) when --contract was never
-            # given, or every library's own selected domain closed cleanly.
-            contract_coverage_exit_contribution = max(
-                (
-                    contribution
-                    for entry in library_results
-                    if isinstance(entry, dict)
-                    and isinstance(
-                        contribution := entry.get(
-                            "contract_coverage_exit_contribution", 0
-                        ),
-                        int,
-                    )
-                ),
-                default=0,
-            )
-            # Summed, not max()'d: unlike the exit-code floor above (a 0/1
-            # gate, where max is the right fold), this is a plain count of
-            # how many failures exist across the whole release -- real even
-            # when `contract.unresolved: warn` zeroed every library's own
-            # exit contribution. Stays 0 (not omitted) for a run that never
-            # passed --contract, same as the count field above.
-            contract_coverage_failure_count = sum(
-                count
-                for entry in library_results
-                if isinstance(entry, dict)
-                and isinstance(
-                    count := entry.get("contract_coverage_failure_count", 0), int
-                )
-            )
-
-            # ADR-071 D1/D2: the assurance axis, `max`-folded across every
-            # compared member -- one member's incomplete analysis must still
-            # raise the release's exit code, and cannot be masked by a
-            # complete sibling. `0` for every run without
-            # `assurance.require_complete`, since no member entry carries the
-            # key at all then (D4). Decided once, by policy, and read by the
-            # report section, the stderr notice and the exit alike.
-            # The release contract's own shortfall (an unacquired public
-            # surface checked no export obligation) joins the same fold.
-            assurance_terms = release_assurance_terms(
-                release_assurance_from_entries(
-                    library_results,
-                    require_complete=require_complete_analysis,
-                    release_shortfalls=release_surface_stage.assurance_shortfalls(),
-                )
-            )
-
-            # Compute the severity-aware exit code while per-library DiffResults
-            # are still stashed (before _strip_diff_results_and_adjust_verdict).
-            # `gate.severity is None` already covers both "legacy" and
-            # "nothing configured" -- see GateOptions's own docstring.
-            severity_exit_code = (
-                None
-                if gate.severity is None
-                else release_severity_exit_code(library_results, gate)
-            )
-
-            # Phase 7d (one-comparison-product.md §4.1): bundle-level
-            # cross-library analysis always runs now -- --no-bundle-analysis
-            # was the "escape hatch that disables real analysis" D4/D5 rule
-            # out; a suppression-policy override is the supported route for
-            # a bundle finding a user doesn't want.
-            #
-            # ADR-065 D2: the bundle graph sees matched members and
-            # *proven* removals/additions only -- an unchecked member
-            # is absent from it, not a deleted provider (Codex review).
-            bundle_old_map, bundle_new_map = scoped_bundle_maps(
-                old_map, new_map, scope_result.record
-            )
-            bundle_result, worst_verdict = _collect_bundle_result(
-                library_results,
-                bundle_old_map,
-                bundle_new_map,
-                worst_verdict,
-                manifest_path=manifest_path,
-                bundle_system_providers=(
-                    *bundle_system_providers,
-                    *out_of_scope_provider_names(scope_result.record),
-                ),
-                bundle_cohorts=bundle_cohorts,
-                policy=policy,
-                policy_file=_release_policy_file,
-                old_root=old_dir,
-                new_root=new_dir,
-                old_variant=old_variant,
-                new_variant=new_variant,
-                scope_record=scope_result.record,
-            )
-
-            # Read each completed member's *observed* exclusion identity
-            # before the `_diff_result` carrying it is stripped below. The
-            # request is not this fact: a stored snapshot is never
-            # restamped with the current `--exclude-header`, so a
-            # stored-package comparison would otherwise report the
-            # request's "excluded nothing" for two packages that were in
-            # truth narrowed differently (CodeRabbit review). Kept as the
-            # release's one identity in `release_excluded_header_patterns`
-            # further down, where the receipt is assembled.
-            observed_member_exclusions = observed_member_exclusion_identities(
-                library_results
-            )
-
-            # Read before the strip below discards every `_`-prefixed key.
-            type_attribution_by_library: dict[str, dict[str, str]] = {
-                str(entry.get("library", "")): dict(attribution)
-                for entry in library_results
-                if isinstance(entry, dict)
-                and isinstance(attribution := entry.get("_type_attribution"), dict)
-            }
-
-            # Strip _diff_result from entries and bump verdict for removed libraries.
-            worst_verdict = _strip_diff_results_and_adjust_verdict(
-                library_results,
-                removed_keys,
-                worst_verdict,
-                severity_config,
-                needs_annotations=(fmt == "json" or "json" in secondary_formats),
-                show_only=show_only,
-                show_impact=show_impact,
-            )
-
-            # Both halves of "one product fact, reported once": fold the
-            # findings several members reported identically out of the
-            # per-library tables (a reporting-layer de-duplication -- no
-            # count, verdict or exit code changes) and assemble the release
-            # public-surface section every format then reads.
-            release_public_surface_terms = assemble_release_public_surface(
-                release_surface_stage,
-                library_results,
-                type_attribution=type_attribution_by_library,
-            )
-
-            # Build-configuration matrix findings (G2: probe -> compare-release).
-            # These are release-global, not per-library, so they fold into the
-            # worst-of verdict and surface as their own report section.
-            matrix_result, worst_verdict = _collect_matrix_result(
-                probe_matrix_old,
-                probe_matrix_new,
-                policy,
-                worst_verdict,
-                suppress=suppress,
-                policy_file_path=policy_file_path,
-                old_version=old_version,
-                new_version=new_version,
-                pack_application=pack_application,
-                project_policy_overrides=project_policy_overrides,
-            )
-
-            # Fold release-global bundle/matrix findings into the severity exit so a
-            # clean-per-library release with a bundle/matrix break is not masked.
-            if severity_exit_code is not None:
-                severity_exit_code = fold_release_global_severity(
-                    severity_exit_code,
-                    bundle_result,
-                    matrix_result,
-                    gate,
-                )
-                # The same blind spot, for the release-level contract
-                # findings: the severity exit is aggregated per library and
-                # a release-level finding belongs to no library.
-                severity_exit_code = max(
-                    severity_exit_code,
-                    release_surface_severity_exit(
-                        release_surface_stage,
-                        gate.severity,
-                        policy=policy,
-                        policy_file=_release_policy_file,
-                    ),
-                )
-
-            # Codex review, P2 follow-up: the release-wide deployment-floor
-            # digest, computed once here directly from the resolved
-            # `env_matrix` this function already has -- not inferred after
-            # the fact from whichever per-library entry happens to carry
-            # `env_matrix_source_sha256`. The earlier round's per-library
-            # inference is indistinguishable from "no deployment contract
-            # at all" whenever a release has no matched pairs, or every
-            # pair fails before producing a `DiffResult`; computing it here
-            # means the envelope-level field and `effective_config_fields
-            # ["policy.env_matrix"]` are correct regardless of how many
-            # library comparisons actually completed.
-            from .frontends.render import resolve_demangle_for_format
-            from .workflows.comparison_input_receipt import env_matrix_content_digest
-
-            env_matrix_source_sha256 = env_matrix_content_digest(env_matrix)
-            # The release's one canonical `--exclude-header` identity.
-            # Two releases differing only in their exclusion rules parsed
-            # genuinely different surfaces and must not share a
-            # configuration digest -- so this is read off what the member
-            # comparisons *observed* (captured above, before their
-            # `DiffResult`s were stripped), falling back to the request
-            # only when no member completed and there is nothing to
-            # observe. See `release_exclusion_identity`.
-            release_excluded_header_patterns = release_exclusion_identity(
-                observed_member_exclusions,
-                canonical_exclusion_identity(exclude_headers),
-            )
-
-            for secondary_fmt, secondary_output in secondary_writes:
-                # CLI cleanup phase two, PR E, generalized: `-o` is
-                # repeatable for a directory/package (release) compare, the
-                # same as on `compare`. Every artifact is rendered from the
-                # exact same already-computed library_results/diff_pairs/
-                # bundle_result/matrix_result -- one analysis, several
-                # artifacts, no second per-library comparison pass.
-                #
-                # Plan slice 7m: `show_only` IS forwarded here now. It used
-                # not to be -- a `-o` artifact was contracted to be
-                # full/unfiltered while the `--format` one honoured
-                # `--view show=` -- but that asymmetry only had an answer
-                # while the two were different flags. Under one repeatable
-                # export request there is no principled way to say which of
-                # two `-o` targets is the unfiltered one, so a display
-                # selector now means the same thing for every export, here
-                # exactly as in single-pair `compare`
-                # (`cli_compare_helpers._report_compare_result`).
-                secondary_text = render_release_summary(
-                    secondary_fmt,
-                    worst_verdict,
-                    old_dir,
-                    new_dir,
-                    library_results,
-                    removed_keys,
-                    added_keys,
-                    old_map,
-                    new_map,
-                    warning_msgs,
-                    diff_pairs=diff_pairs if secondary_fmt == "junit" else None,
-                    bundle_result=bundle_result,
-                    matrix_result=matrix_result,
-                    severity_config=severity_config,
-                    severity_exit_code=severity_exit_code,
-                    contract_coverage_exit_contribution=contract_coverage_exit_contribution,
-                    contract_coverage_failure_count=contract_coverage_failure_count,
-                    fail_on_removed=fail_on_removed,
+            severity_config = plan.gate.severity
+            outcome = _execute_release_compare(
+                plan,
+                ReleaseCompareOptions(
+                    old_version=old_version,
+                    new_version=new_version,
+                    lang=lang,
+                    lang_explicit=lang_explicit,
+                    suppress=suppress,
                     policy=policy,
                     policy_file_path=policy_file_path,
-                    suppress=suppress,
-                    pack_application=pack_application,
                     scope_public_headers=scope_public_headers,
-                    scope_terms=scope_terms,
-                    assurance_terms=assurance_terms,
-                    demangle=resolve_demangle_for_format(secondary_fmt),
-                    show_only=show_only,
-                    env_matrix_source_sha256=env_matrix_source_sha256,
+                    include_dependencies=include_dependencies,
+                    contract_evaluation=contract_evaluation,
+                    contract_mode=contract_mode,
                     require_complete_analysis=require_complete_analysis,
-                    excluded_header_patterns=release_excluded_header_patterns,
-                    public_surface=release_public_surface_terms,
-                )
-                _write_or_echo(secondary_output, secondary_text)
-
-            _finalize_release_output(
-                fmt,
-                worst_verdict,
-                old_dir,
-                new_dir,
-                library_results,
-                removed_keys,
-                added_keys,
-                old_map,
-                new_map,
-                warning_msgs,
-                diff_pairs,
-                bundle_result,
-                output,
-                output_dir,
-                fail_on_removed,
-                matrix_result=matrix_result,
-                severity_exit_code=severity_exit_code,
-                severity_config=severity_config,
-                contract_coverage_exit_contribution=contract_coverage_exit_contribution,
-                contract_coverage_failure_count=contract_coverage_failure_count,
+                    pack_application=pack_application,
+                    compile_context=compile_context,
+                    depth=depth,
+                    public_header_dirs=public_header_dirs,
+                    collapse_versioned_symbols=collapse_versioned_symbols,
+                    project_policy_overrides=project_policy_overrides,
+                    env_matrix=env_matrix,
+                    exclude_headers=exclude_headers,
+                    acknowledgments_path=acknowledgments_path,
+                    acknowledgment_unacknowledged_additions=acknowledgment_unacknowledged_additions,
+                    support_promise=support_promise,
+                    manifest_path=manifest_path,
+                    bundle_system_providers=bundle_system_providers,
+                    bundle_cohorts=bundle_cohorts,
+                    probe_matrix_old=probe_matrix_old,
+                    probe_matrix_new=probe_matrix_new,
+                    bundle_facts_out=bundle_facts_out,
+                    junit_inventory=(fmt == "junit" or "junit" in secondary_formats),
+                ),
+                reporter=CliReleaseReporter(
+                    severity_config=severity_config,
+                    require_complete_analysis=require_complete_analysis,
+                    contract_evaluation=contract_evaluation,
+                    output_dir=output_dir,
+                    echo_warnings=fmt != "json",
+                ),
+            )
+            _render_release_outcome(
+                outcome,
+                fmt=fmt,
+                output=output,
+                output_dir=output_dir,
+                secondary_writes=secondary_writes,
+                fail_on_removed=fail_on_removed,
                 policy=policy,
                 policy_file_path=policy_file_path,
                 suppress=suppress,
                 pack_application=pack_application,
                 scope_public_headers=scope_public_headers,
-                scope_terms=scope_terms,
-                assurance_terms=assurance_terms,
-                demangle=resolve_demangle_for_format(fmt),
                 show_only=show_only,
-                env_matrix_source_sha256=env_matrix_source_sha256,
+                show_impact=show_impact,
                 require_complete_analysis=require_complete_analysis,
-                excluded_header_patterns=release_excluded_header_patterns,
-                public_surface=release_public_surface_terms,
+                old_dir=old_dir,
+                new_dir=new_dir,
             )
         finally:
             _cleanup_temp_dirs(_temp_dir_paths)
+
+
+def _execute_release_compare(
+    plan: ReleaseComparePlan,
+    options: ReleaseCompareOptions,
+    *,
+    reporter: CliReleaseReporter,
+) -> ReleaseCompareOutcome:
+    """:func:`abicheck.workflows.release_compare.execute_release_compare`,
+    with its typed operand errors (a bad ``--manifest``, an undecodable
+    embedded manifest, an unwritable ``--bundle-facts-out``, a one-sided
+    probe matrix) turned into the ``click`` types -- and so the exit codes
+    and messages -- this command always produced."""
+    try:
+        return execute_release_compare(plan, options, reporter=reporter)
+    except ReleaseOperandUsageError as exc:
+        raise click.UsageError(str(exc)) from exc
+    except ReleaseOperandContentError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+
+def _render_release_outcome(
+    outcome: ReleaseCompareOutcome,
+    *,
+    fmt: str,
+    output: Path | None,
+    output_dir: Path | None,
+    secondary_writes: tuple[tuple[str, Path], ...],
+    fail_on_removed: bool,
+    policy: str,
+    policy_file_path: Path | None,
+    suppress: Path | None,
+    pack_application: PackApplication | None,
+    scope_public_headers: bool,
+    show_only: str | None,
+    show_impact: bool,
+    require_complete_analysis: bool,
+    old_dir: Path,
+    new_dir: Path,
+) -> None:
+    """Render *outcome*: the display projection and strip of every member
+    entry, the release public-surface section, each ``-o`` export, then the
+    primary format, its sidecars and the exit."""
+    from .frontends.render import resolve_demangle_for_format
+
+    secondary_formats = {f for f, _ in secondary_writes}
+    library_results = outcome.library_results
+    severity_config = outcome.severity_config
+    scope_terms = comparison_scope_terms(outcome.scope_decision)
+    assurance_terms = release_assurance_terms(outcome.assurance_decision)
+    # The last point each member's live DiffResult exists: project the
+    # findings every renderer reads, then strip every private key. The
+    # verdict already carries the proven-removed floor, so this is a no-op
+    # on it.
+    worst_verdict = _strip_diff_results_and_adjust_verdict(
+        library_results,
+        outcome.removed_keys,
+        outcome.worst_verdict,
+        severity_config,
+        needs_annotations=(fmt == "json" or "json" in secondary_formats),
+        show_only=show_only,
+        show_impact=show_impact,
+    )
+    # "One product fact, reported once": fold findings several members
+    # reported identically out of the per-library tables and assemble the
+    # release public-surface section every format reads.
+    public_surface = assemble_release_public_surface(
+        outcome.surface_stage,
+        library_results,
+        type_attribution=outcome.type_attribution,
+    )
+    common: dict[str, Any] = {
+        "bundle_result": outcome.bundle_result,
+        "matrix_result": outcome.matrix_result,
+        "severity_config": severity_config,
+        "severity_exit_code": outcome.severity_exit_code,
+        "contract_coverage_exit_contribution": outcome.contract_coverage_exit_contribution,
+        "contract_coverage_failure_count": outcome.contract_coverage_failure_count,
+        "policy": policy,
+        "policy_file_path": policy_file_path,
+        "suppress": suppress,
+        "pack_application": pack_application,
+        "scope_public_headers": scope_public_headers,
+        "scope_terms": scope_terms,
+        "assurance_terms": assurance_terms,
+        "show_only": show_only,
+        "env_matrix_source_sha256": outcome.env_matrix_source_sha256,
+        "require_complete_analysis": require_complete_analysis,
+        "excluded_header_patterns": outcome.excluded_header_patterns,
+        "public_surface": public_surface,
+    }
+    for secondary_fmt, secondary_output in secondary_writes:
+        # `-o` is repeatable: every artifact renders the same computed
+        # outcome -- one analysis, several artifacts -- and a display
+        # selector means the same thing for every export, as in a
+        # single-pair `compare`.
+        secondary_text = render_release_summary(
+            secondary_fmt,
+            worst_verdict,
+            old_dir,
+            new_dir,
+            library_results,
+            outcome.removed_keys,
+            outcome.added_keys,
+            outcome.old_map,
+            outcome.new_map,
+            outcome.warnings,
+            diff_pairs=outcome.junit_pairs if secondary_fmt == "junit" else None,
+            fail_on_removed=fail_on_removed,
+            demangle=resolve_demangle_for_format(secondary_fmt),
+            **common,
+        )
+        _write_or_echo(secondary_output, secondary_text)
+
+    _finalize_release_output(
+        fmt,
+        worst_verdict,
+        old_dir,
+        new_dir,
+        library_results,
+        outcome.removed_keys,
+        outcome.added_keys,
+        outcome.old_map,
+        outcome.new_map,
+        outcome.warnings,
+        outcome.junit_pairs,
+        outcome.bundle_result,
+        output,
+        output_dir,
+        fail_on_removed,
+        demangle=resolve_demangle_for_format(fmt),
+        **{k: v for k, v in common.items() if k != "bundle_result"},
+    )

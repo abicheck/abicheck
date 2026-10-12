@@ -1215,8 +1215,10 @@ def test_compare_release_matches_service_run_compare(tmp_path: Path) -> None:
     """``compare-release``'s per-pair runner classifies identically to
     ``service.run_compare`` — they share the one chokepoint (ADR-037 D1)."""
     from abicheck import service
-    from abicheck.cli_compare_release import _run_compare_pair
-    from abicheck.cli_compare_release_pairwise import release_parent_request
+    from abicheck.workflows.release_members import (
+        compare_member_pair as _run_compare_pair,
+        release_parent_request,
+    )
 
     old_p = _make_snap_file(tmp_path, "libfoo", "1.0", [_func("foo"), _func("bar")])
     new_p = _make_snap_file(tmp_path, "libfoo", "2.0", [_func("foo")])

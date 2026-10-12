@@ -28,7 +28,7 @@ worker-sizing pattern through the same shared, dependency-free
 :mod:`abicheck.process_resources` probe -- one RAM-probing/pool-sizing
 implementation, not two independently maintained copies. Lives under
 ``workflows/`` (a thin ``workflows -> extract`` wrapper) rather than being
-called directly from :mod:`abicheck.cli_compare_release_pairwise`: that
+called directly from :mod:`abicheck.workflows.release_members`: that
 module is ``frontends``-classified, and ``frontends -> extract`` is a
 forbidden edge (`architecture/modules.yaml`) -- sizing a release's own
 worker pool is exactly the kind of "coordinate release behavior" concern

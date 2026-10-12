@@ -45,7 +45,7 @@ from pathlib import Path
 
 import pytest
 
-from abicheck.cli_compare_release_pairwise import (
+from abicheck.workflows.release_members import (
     ReleaseMemberContext,
     release_parent_request,
 )
@@ -308,16 +308,16 @@ class TestConcurrentReleaseWorkflow:
         # configuration with itself and passes no matter what the other
         # would have done (AGENTS.md, "A differential test must prove both
         # of its configurations actually ran").
-        import abicheck.cli_compare_release_pairwise as pairwise  # noqa: PLC0415
+        import abicheck.workflows.release_members as pairwise  # noqa: PLC0415
 
-        real_parallel = pairwise._compare_release_parallel
+        real_parallel = pairwise._compare_parallel
         parallel_calls: list[int] = []
 
-        def spy_parallel(matched_keys, ctx, old_map, workers, admission=None):  # type: ignore[no-untyped-def]
+        def spy_parallel(matched_keys, ctx, workers, admission=None):  # type: ignore[no-untyped-def]
             parallel_calls.append(workers)
-            return real_parallel(matched_keys, ctx, old_map, workers, admission)
+            return real_parallel(matched_keys, ctx, workers, admission)
 
-        monkeypatch.setattr(pairwise, "_compare_release_parallel", spy_parallel)
+        monkeypatch.setattr(pairwise, "_compare_parallel", spy_parallel)
 
         # An operator budget turns the AST-costed admission gate off, so a
         # small runner cannot serialize the 2/4-worker runs this compares.
@@ -380,7 +380,7 @@ class TestInstrumentedParallelReleaseMatchesStored:
     ) -> None:
         import threading  # noqa: PLC0415
 
-        import abicheck.cli_compare_release_pairwise as pairwise  # noqa: PLC0415
+        import abicheck.workflows.release_members as pairwise  # noqa: PLC0415
         from abicheck.workflows import memory_trace, release_jobs  # noqa: PLC0415
         from abicheck.workflows.dump import native  # noqa: PLC0415
         from tests.test_compare_release import _invoke_combined  # noqa: PLC0415
@@ -414,14 +414,14 @@ class TestInstrumentedParallelReleaseMatchesStored:
             return (workers_now[0], None, *resolved[2:])
 
         monkeypatch.setattr(release_jobs, "resolve_release_worker_count", pinned)
-        real_parallel = pairwise._compare_release_parallel
+        real_parallel = pairwise._compare_parallel
         parallel_calls: list[int] = []
 
-        def spy_parallel(matched_keys, ctx, old_map, workers, admission=None):  # type: ignore[no-untyped-def]
+        def spy_parallel(matched_keys, ctx, workers, admission=None):  # type: ignore[no-untyped-def]
             parallel_calls.append(workers)
-            return real_parallel(matched_keys, ctx, old_map, workers, admission)
+            return real_parallel(matched_keys, ctx, workers, admission)
 
-        monkeypatch.setattr(pairwise, "_compare_release_parallel", spy_parallel)
+        monkeypatch.setattr(pairwise, "_compare_parallel", spy_parallel)
 
         live_report = tmp_path / "live.json"
         live_code, live_out = _invoke_combined(
@@ -475,17 +475,11 @@ class TestMemberFailureIsReportedNotLaundered:
     """Failure injection at the fan-out's own exception boundary."""
 
     def _entry_for(self, exc: BaseException, tmp_path: Path) -> dict:
-        from abicheck.frontends.cli.release_member_errors import (  # noqa: PLC0415
-            member_error_entry,
+        from abicheck.workflows.release_member_failures import (  # noqa: PLC0415
+            classify_member_failure,
         )
 
-        return member_error_entry(
-            exc,
-            old_path=tmp_path / "libmock_core.so",
-            old_version="1.0",
-            new_version="2.0",
-            output_dir=None,
-        )
+        return classify_member_failure(exc, library="libmock_core.so").entry
 
     def test_an_internal_failure_keeps_member_identity_and_its_class(
         self, tmp_path: Path
@@ -547,26 +541,27 @@ class TestMemberFailureIsReportedNotLaundered:
         assert not [r for r in caplog.records if r.name == "abicheck.release"]
 
     def test_the_outer_dispatch_boundary_reports_the_same_way(
-        self, caplog: pytest.LogCaptureFixture, capsys: pytest.CaptureFixture[str]
+        self, caplog: pytest.LogCaptureFixture
     ) -> None:
         """The fan-out's *second* boundary owes the same account.
 
-        `_compare_one_library` classifies anything raised inside its own
+        `compare_release_member` classifies anything raised inside its own
         body; a failure reaching the executor loop escaped that -- in the
         dispatch, the context copy, or the classification itself. It is
         still an internal failure, so it must not degrade to a bare
-        `str(exc)`, and it must still echo to stderr, which is what a user
-        watching a long release run actually sees.
+        `str(exc)`, and it still owes a notice, which is what a user
+        watching a long release run actually sees (the CLI's reporter
+        echoes it to stderr).
         """
         import logging  # noqa: PLC0415
 
-        from abicheck.frontends.cli.release_member_errors import (  # noqa: PLC0415
-            member_dispatch_failure_entry,
+        from abicheck.workflows.release_member_failures import (  # noqa: PLC0415
+            dispatch_failure_entry,
         )
 
         exc = KeyError((138821602538640, "const dense&", 0, 12))
         with caplog.at_level(logging.ERROR, logger="abicheck.release"):
-            entry = member_dispatch_failure_entry(exc, "libmock_core.so")
+            entry, notice = dispatch_failure_entry(exc, "libmock_core.so")
 
         assert entry["library"] == "libmock_core.so"
         assert entry["verdict"] == "ERROR"
@@ -580,9 +575,8 @@ class TestMemberFailureIsReportedNotLaundered:
         # The stderr line names the exception class too -- the original
         # report's `Error comparing <lib>: (<tuple>)` named neither the
         # class nor the subsystem, which is why it was undiagnosable.
-        stderr = capsys.readouterr().err
-        assert "libmock_core.so" in stderr
-        assert "KeyError" in stderr
+        assert "libmock_core.so" in notice
+        assert "KeyError" in notice
 
     def test_a_failed_member_cannot_produce_a_clean_release_exit(self) -> None:
         """The aggregation contract, stated directly.
@@ -614,8 +608,8 @@ class TestMemberFailureIsReportedNotLaundered:
 class TestFanOutExceptionBoundaryInSitu:
     """The outer boundary as the fan-out itself reaches it.
 
-    The sibling test above calls `member_dispatch_failure_entry` directly.
-    This one drives `_compare_release_parallel`, so the `except` arm in the
+    The sibling test above calls `dispatch_failure_entry` directly.
+    This one drives `workflows.release_members._compare_parallel`, so the `except` arm in the
     executor loop -- the exact path the reported oneDAL failure took, and
     the one place a worker's exception becomes a member result -- is
     executed rather than assumed. It also states the release-level contract
@@ -642,8 +636,8 @@ class TestFanOutExceptionBoundaryInSitu:
     def test_one_worker_failure_does_not_lose_its_siblings(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from abicheck.cli_compare_release_pairwise import (  # noqa: PLC0415
-            _compare_release_parallel,
+        from abicheck.workflows.release_members import (  # noqa: PLC0415
+            _compare_parallel,
         )
 
         # The reported shape: a match-cache key escaping as a bare KeyError
@@ -654,13 +648,13 @@ class TestFanOutExceptionBoundaryInSitu:
             return {"library": f"{key}.so", "verdict": "NO_CHANGE"}
 
         monkeypatch.setattr(
-            "abicheck.cli_compare_release_pairwise._compare_one_library",
+            "abicheck.workflows.release_members.compare_release_member",
             fake_compare_one_library,
         )
 
         keys = ("a", "b", "c")
         ctx = self._member_context(tmp_path, keys)
-        results = _compare_release_parallel(list(keys), ctx, ctx.old_map, 3)
+        results = _compare_parallel(list(keys), ctx, 3)
 
         by_library = {str(entry["library"]): entry for entry in results}
         # Every selected member is still accounted for -- a failure must not

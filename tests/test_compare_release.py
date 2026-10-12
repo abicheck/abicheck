@@ -11,10 +11,6 @@ from click.testing import CliRunner
 
 from abicheck.binary_utils import build_match_map as _build_match_map
 from abicheck.cli import main
-from abicheck.cli_compare_release import (
-    _discover_include_roots,
-    _prepare_compare_release_inputs,
-)
 from abicheck.cli_helpers_compare import (
     _canonical_library_key,
     _version_sort_key,
@@ -32,6 +28,10 @@ from abicheck.model import (
 from abicheck.serialization import snapshot_to_json
 from abicheck.workflows.extraction import (
     is_supported_compare_input as _is_supported_compare_input,
+)
+from abicheck.workflows.release_inputs import (
+    discover_include_roots as _discover_include_roots,
+    prepare_release_inputs as _prepare_compare_release_inputs,
 )
 
 # ── helpers ──────────────────────────────────────────────────────────────────

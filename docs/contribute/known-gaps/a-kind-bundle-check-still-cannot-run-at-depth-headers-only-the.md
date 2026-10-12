@@ -126,7 +126,7 @@ exactly as before.
 **This is still not the receipt, for a specific and measurable reason.**
 Admission control bounds the *concurrent* half of the peak only. The
 other half is retention, and it is bounded on the default path but not on
-all of them: `cli_compare_release_pairwise` keeps a compact
+all of them: `workflows.release_members` keeps a compact
 `BundleSignatureEvidence` per member normally, but under
 `need_full_snapshots` -- which JUnit output and `--bundle-facts-out` both
 set -- it retains **every** member's full old *and* new snapshot

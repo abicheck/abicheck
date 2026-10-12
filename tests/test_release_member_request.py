@@ -15,7 +15,8 @@ from typing import Any
 
 import pytest
 
-from abicheck import cli_compare_release_pairwise as pairwise, service_compare_pipeline
+from abicheck import service_compare_pipeline
+from abicheck.workflows import release_members as pairwise
 from abicheck.workflows.release_member_request import (
     MemberDelta,
     ReleaseMemberCompareRequest,
@@ -80,10 +81,10 @@ def test_synthetic_new_field_reaches_every_member(
     import abicheck.workflows.member_compare as service
 
     monkeypatch.setattr(service, "run_compare", fake_run_compare)
-    monkeypatch.setattr(pairwise, "_normalize_binary_input", lambda p: (p, None))
+    monkeypatch.setattr(pairwise, "normalize_member_operand", lambda p, _notice: p)
     for i in range(3):
         with pytest.raises(RuntimeError):
-            pairwise._run_compare_pair(member_request(parent, _delta(i)))
+            pairwise.compare_member_pair(member_request(parent, _delta(i)))
     assert [k["synthetic_setting"] for k in seen] == ["stated-by-caller"] * 3
     assert [k["old_input"] for k in seen] == [Path(f"old{i}.so") for i in range(3)]
     assert all(k["old_version"] == "1" for k in seen)

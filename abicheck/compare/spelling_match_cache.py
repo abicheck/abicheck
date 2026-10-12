@@ -50,7 +50,7 @@ Concurrency contract
 
 Both caches are process-wide module globals read and written by every
 worker of a directory/package ``compare``'s release fan-out (real threads,
-one process -- see ``cli_compare_release_pairwise``). They are therefore
+one process -- see ``workflows.release_members``). They are therefore
 **thread-safe**, under one narrow lock each, with these invariants:
 
 * *Every* multi-step state transition is atomic: lookup-plus-recency-

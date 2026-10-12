@@ -317,7 +317,7 @@ Core pipeline (in order of data flow):
      nothing, which is the single failure all of these guard. `compare`
      takes all three kinds (`scan --against`, which also took all three,
      was deleted by ADR-068 Phase 6). The directory/package
-     release fan-out (`cli_compare_release.py`) takes all three kinds too,
+     release fan-out (`workflows/release_compare.py`) takes all three kinds too,
      since CLI cleanup phase two's "PR B" slice 2 — a `kind: gate` pack's
      `gate.severity.*` folds into the fan-out's own
      resolved `GateOptions` (`policy.release_gate_options.
@@ -519,7 +519,7 @@ Core pipeline (in order of data flow):
    `reconcile_member_sets` is the driver-agnostic core and
    `member_pass_scope` the one place the ">1 member" rule lives, so a new
    multi-member driver wires to those rather than restating either: the
-   live directory/package fan-out (`cli_compare_release*.py`), a stored
+   live directory/package fan-out (`workflows/release_compare.py`), a stored
    `BundleFacts` baseline against a live release
    (`stored_old_live_new_reconciliation`), and two stored documents
    (`workflows/bundle_stored_pair_compare.py`). Only the live path

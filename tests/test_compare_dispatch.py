@@ -32,13 +32,13 @@ import pytest
 from _package_fixtures import _make_tar_mode
 from click.testing import CliRunner
 
-from abicheck import cli_compare_release
 from abicheck.cli import main
 from abicheck.cli_resolve import _looks_like_application, classify_compare_operand
 from abicheck.frontends.cli.commands import compare_routing as climod
 from abicheck.frontends.cli.commands.dump import dump_cmd
 from abicheck.model import AbiSnapshot, Function, Visibility
 from abicheck.serialization import snapshot_to_json
+from abicheck.workflows import release_members
 
 #: Placeholder snapshots for CompareResult stubs — these tests only read
 #: the diff, but the struct requires both sides.
@@ -1359,8 +1359,8 @@ class TestCompareDispatch:
     ) -> None:
         """Codex review: a directory/package ``compare`` used to drop
         ``--include-system-declarations`` entirely on its way through
-        ``_dispatch_release_compare`` -> ``_compare_release_libraries`` ->
-        ``_run_compare_pair``, so set comparisons stayed unfiltered
+        ``_dispatch_release_compare`` -> ``compare_release_members`` ->
+        ``compare_member_pair``, so set comparisons stayed unfiltered
         regardless of the flag. Assert it now reaches the per-library engine
         with the same value a single-pair ``compare`` would use."""
         old_dir = tmp_path / "old"
@@ -1371,14 +1371,14 @@ class TestCompareDispatch:
         _write_snap(new_dir / "libfoo.json", _snap())
 
         seen: list[bool] = []
-        real_run_compare_pair = cli_compare_release._run_compare_pair
+        real_run_compare_pair = release_members.compare_member_pair
 
         def _capture(request, *args: object, **kwargs: object) -> object:  # type: ignore[no-untyped-def]
             seen.append(bool(request.include_dependencies))
             return real_run_compare_pair(request, *args, **kwargs)
 
         monkeypatch.setattr(
-            "abicheck.cli_compare_release_pairwise._run_compare_pair", _capture
+            "abicheck.workflows.release_members.compare_member_pair", _capture
         )
 
         extra = [flag] if flag else []

@@ -35,8 +35,8 @@ from typing import Any
 import pytest
 from click.testing import CliRunner
 
-from abicheck import cli_compare_release_pairwise as pairwise
 from abicheck.cli import main
+from abicheck.workflows import release_members as pairwise
 
 
 @pytest.mark.parametrize("explicit", [False, True])
@@ -51,7 +51,7 @@ def test_member_compare_forwards_lang_explicit(
 
     monkeypatch.setattr("abicheck.workflows.member_compare.run_compare", _fake)
     with pytest.raises(RuntimeError):
-        pairwise._run_compare_pair(
+        pairwise.compare_member_pair(
             pairwise.release_parent_request(old_input=Path("old.so"), new_input=Path("new.so"),
                 lang="c++", lang_explicit=explicit, include_dependencies=True),
         )  # fmt: skip

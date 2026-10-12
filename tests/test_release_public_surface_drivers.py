@@ -568,7 +568,7 @@ class TestTheResolvedPolicyDocumentReachesReleaseScoring:
         parameter cannot quietly stop being forwarded."""
         import inspect
 
-        from abicheck import cli_compare_release
+        from abicheck.workflows import release_compare
         from abicheck.workflows.release_public_surface import (
             release_surface_severity_exit,
         )
@@ -576,9 +576,10 @@ class TestTheResolvedPolicyDocumentReachesReleaseScoring:
         assert (
             "policy_file" in inspect.signature(release_surface_severity_exit).parameters
         )
-        source = inspect.getsource(cli_compare_release)
-        # Both release-level scoring paths read one resolved object.
-        assert source.count("_release_policy_file") >= 3
+        source = inspect.getsource(release_compare)
+        # Every release-level scoring path (surface verdict, bundle, severity
+        # exit) reads one resolved object.
+        assert source.count("policy_file=release_policy_file") >= 3
 
 
 class TestTheOutputDirectorySummaryCarriesTheContract:

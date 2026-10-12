@@ -1012,7 +1012,7 @@ def dedup_validate_overrides_warnings() -> Iterator[None]:
     propagate this scope itself (nothing in this codebase currently does).
     `compare-release`'s own parallel fan-out uses a `ThreadPoolExecutor`
     (real OS threads, not separate processes) precisely so this scope
-    *can* reach it -- see `cli_compare_release._compare_release_parallel`'s
+    *can* reach it -- see `workflows.release_members._compare_parallel`'s
     own docstring for how it explicitly propagates a `contextvars.Context`
     copy into each worker thread, since `ThreadPoolExecutor` does not do
     that automatically either.

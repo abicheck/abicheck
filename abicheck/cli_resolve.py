@@ -596,7 +596,7 @@ def _resolve_compare_snapshots(
 # ADR-074's -D/--define) *is* threaded through the fan-out
 # (cli_compare_helpers.run_compare resolves one CompileContext for the whole release, the same way a
 # single-pair compare resolves its own, and forwards it to every library pair
-# — see cli_compare_release._run_compare_pair's compile_context parameter).
+# — see workflows.release_members.compare_member_pair's compile_context parameter).
 # Only the *sided* --ast-frontend old=/new= override has no home here: it
 # means "parse the old headers with a different frontend than the new ones",
 # which has no per-library-pair-within-a-release equivalent to mirror (a release fan-out already compares each library's own old vs. new

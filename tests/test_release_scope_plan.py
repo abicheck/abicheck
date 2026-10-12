@@ -240,7 +240,7 @@ class TestReleaseScopeResultWiredIntoRealProductionFlow:
             return real(plan, record)
 
         with patch(
-            "abicheck.cli_compare_release.resolve_release_scope_result",
+            "abicheck.workflows.release_compare.resolve_release_scope_result",
             side_effect=_spy,
         ):
             code, out = _invoke("compare", str(old_dir), str(new_dir))

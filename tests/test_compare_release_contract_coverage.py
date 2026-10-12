@@ -35,19 +35,20 @@ from pathlib import Path
 import pytest
 
 from abicheck.bundle_models import BundleSignatureEvidence
-from abicheck.cli_compare_release import (
-    _compare_one_library,
+from abicheck.cli_compare_release_matrix import (
     _finalize_release_output,
     _strip_diff_results_and_adjust_verdict,
-)
-from abicheck.cli_compare_release_pairwise import (
-    ReleaseMemberContext,
-    release_parent_request,
 )
 from abicheck.frontends.cli.release_report import render_release_summary
 from abicheck.model.symbol_inventory import (
     SymbolInventory,
     build_symbol_inventory,
+)
+from abicheck.report.release_member_entry import ReleaseMemberEntryProjection
+from abicheck.workflows.release_members import (
+    ReleaseMemberContext,
+    compare_release_member as _compare_one_library,
+    release_parent_request,
 )
 from abicheck.workflows.release_snapshot_retention import resolve_snapshot_retention
 
@@ -141,7 +142,7 @@ def test_compare_one_library_stamps_contract_coverage_failure_count(
         return CompareResult(diff=result, old_snapshot=old_snap, new_snapshot=new_snap)
 
     monkeypatch.setattr(
-        "abicheck.cli_compare_release_pairwise._run_compare_pair",
+        "abicheck.workflows.release_members.compare_member_pair",
         _fake_run_compare_pair,
     )
     entry = _compare_one_library(
@@ -158,6 +159,7 @@ def test_compare_one_library_stamps_contract_coverage_failure_count(
             old_map={"libfoo.so": old_path},
             new_map={"libfoo.so": new_path},
             resolve_debug_info=lambda _old, _dbg: None,
+            reporter=ReleaseMemberEntryProjection(),
         ),
     )
     assert entry["contract_coverage_exit_contribution"] == 0
@@ -194,7 +196,7 @@ def test_compare_one_library_stamps_coverage_warnings_onto_the_entry(
         return CompareResult(diff=result, old_snapshot=old_snap, new_snapshot=new_snap)
 
     monkeypatch.setattr(
-        "abicheck.cli_compare_release_pairwise._run_compare_pair",
+        "abicheck.workflows.release_members.compare_member_pair",
         _fake_run_compare_pair,
     )
     entry = _compare_one_library(
@@ -210,6 +212,7 @@ def test_compare_one_library_stamps_coverage_warnings_onto_the_entry(
             old_map={"libfoo.so": old_path},
             new_map={"libfoo.so": new_path},
             resolve_debug_info=lambda _old, _dbg: None,
+            reporter=ReleaseMemberEntryProjection(),
         ),
     )
     assert entry["coverage_warnings"] == [
@@ -241,7 +244,7 @@ def test_compare_one_library_omits_coverage_warnings_key_when_none(
         return CompareResult(diff=result, old_snapshot=old_snap, new_snapshot=new_snap)
 
     monkeypatch.setattr(
-        "abicheck.cli_compare_release_pairwise._run_compare_pair",
+        "abicheck.workflows.release_members.compare_member_pair",
         _fake_run_compare_pair,
     )
     entry = _compare_one_library(
@@ -257,6 +260,7 @@ def test_compare_one_library_omits_coverage_warnings_key_when_none(
             old_map={"libfoo.so": old_path},
             new_map={"libfoo.so": new_path},
             resolve_debug_info=lambda _old, _dbg: None,
+            reporter=ReleaseMemberEntryProjection(),
         ),
     )
     assert "coverage_warnings" not in entry
@@ -395,7 +399,7 @@ def test_compare_one_library_stashes_old_snapshot_only_when_requested(
         return CompareResult(diff=result, old_snapshot=old_snap, new_snapshot=new_snap)
 
     monkeypatch.setattr(
-        "abicheck.cli_compare_release_pairwise._run_compare_pair",
+        "abicheck.workflows.release_members.compare_member_pair",
         _fake_run_compare_pair,
     )
     common = ReleaseMemberContext(
@@ -405,6 +409,7 @@ def test_compare_one_library_stashes_old_snapshot_only_when_requested(
         old_map={"libfoo.so": old_path},
         new_map={"libfoo.so": new_path},
         resolve_debug_info=lambda _old, _dbg: None,
+        reporter=ReleaseMemberEntryProjection(),
     )
     default_entry = _compare_one_library("libfoo.so", common)
     assert "_old_snapshot" not in default_entry

@@ -72,7 +72,7 @@ def supersede_as_suppressed(
     DispositionLedger.with_suppressed` -- see that method's own docstring
     for the full rationale: a release-level policy decision made strictly
     after a per-comparison ledger already closed, e.g.
-    ``cli_compare_release_pairwise._suppress_lockstep_soname_findings``).
+    ``workflows.release_members.suppress_lockstep_soname_findings``).
     *rule_id*/*reason* name the synthetic policy decision responsible (there
     is no real ``Suppression`` from a ``--suppress`` document behind it) --
     without a rule, the audit's own ``rules()`` tally silently omits the row
