@@ -333,6 +333,36 @@ CLASSIFICATION_BUG_CLASSES: tuple[BugClass, ...] = (
         ),
     ),
     BugClass(
+        id="policy.informational_outcome_gates",
+        invariant=(
+            "A finding that records that nothing a consumer can act on "
+            "changed (a reconciliation proving a declaration identical, or "
+            "an aggregate roll-up of findings reported on their own) never "
+            "contributes to the exit code under any severity preset or "
+            "override, and stays in every report. A COMPATIBLE finding "
+            "gates iff the configured level of the category its catalog "
+            "flags imply (is_addition -> addition, is_informational -> "
+            "none, else quality_issues) is `error`; a category defined as a "
+            "residue must not absorb a population with the opposite meaning."
+        ),
+        # PR #1321 split `declaration_identity_unchanged` out of the RISK
+        # reconciliation kinds as COMPATIBLE; the `quality_issues` residue
+        # then absorbed it and `--severity-preset strict` failed the build
+        # on a proof that nothing changed. Fixed by ADR-078.
+        fixed_by=(1321,),
+        seed_tests=(
+            "tests/test_informational_never_gates.py",
+            "tests/test_scenarios.py",
+        ),
+        public_surfaces=("cli",),
+        axes={
+            "gate_scheme": ("legacy", "default", "strict", "info-only"),
+            "quality_level": ("error", "warning", "info"),
+            "addition_level": ("error", "warning", "info"),
+            "output": ("json", "markdown"),
+        },
+    ),
+    BugClass(
         id="release.cartesian_product_contract",
         invariant=(
             "A comparison whose candidate is a *set* of artifacts sharing one "

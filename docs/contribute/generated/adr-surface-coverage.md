@@ -6,7 +6,7 @@ Which public surface reaches each ADR, which use cases it serves, and whether a 
 
 | Disposition | ADRs |
 |---|---|
-| surfaced | 44 |
+| surfaced | 45 |
 | partial | 13 |
 | gap | 3 |
 | internal | 19 |
@@ -94,6 +94,7 @@ Which public surface reaches each ADR, which use cases it serves, and whether a 
 | [ADR-075](../adr/075-target-ownership-and-extraction-scope.md) | gap | — | — | Accepted, not yet implemented; no ownership/extraction-scope surface exists. |
 | [ADR-076](../adr/076-adr-use-case-surface-traceability.md) | internal | — | — | Repository traceability contract and gate; not a product surface. |
 | [ADR-077](../adr/077-exposure-modes-and-change-sensitive-propagation.md) | gap | — | — | Proposed, not yet implemented; no exposure-mode or sensitivity surface exists. |
+| [ADR-078](../adr/078-informational-severity-category.md) | surfaced | UC-WF-compare | `cli: compare --severity-preset`<br>`report: compare_report.summary`<br>`report: compare_report.severity` | — |
 
 ## Use cases by user task
 
@@ -203,7 +204,6 @@ Which public surface reaches each ADR, which use cases it serves, and whether a 
 - ADR-059 cli: dump --compression
 - ADR-062 api: abicheck.storage
 - ADR-064 action: severity-preset
-- ADR-064 cli: compare --severity-preset
 - ADR-064 report: compare_report.exit
 - ADR-065 cli: compare --select --select-required --dry-run
 - ADR-065 report: compare_report.comparison_scope
@@ -221,6 +221,8 @@ Which public surface reaches each ADR, which use cases it serves, and whether a 
 - ADR-073 action: actions/verify-source-run
 - ADR-074 cli: compare --define
 - ADR-074 cli: dump --define
+- ADR-078 report: compare_report.severity
+- ADR-078 report: compare_report.summary
 
 ## cli+api+action use cases without a shared scenario family
 

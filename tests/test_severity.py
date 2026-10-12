@@ -22,6 +22,7 @@ import pytest
 
 from abicheck.checker_policy import ChangeKind
 from abicheck.policy.severity import (
+    CONFIGURABLE_CATEGORIES,
     PRESET_DEFAULT,
     PRESET_INFO_ONLY,
     PRESET_STRICT,
@@ -105,6 +106,7 @@ class TestClassifyChange:
             ADDITION_KINDS,
             API_BREAK_KINDS,
             BREAKING_KINDS,
+            INFORMATIONAL_KINDS,
             QUALITY_KINDS,
             RISK_KINDS,
         )
@@ -118,6 +120,8 @@ class TestClassifyChange:
             assert cat == IssueCategory.POTENTIAL_BREAKING
         elif kind in ADDITION_KINDS:
             assert cat == IssueCategory.ADDITION
+        elif kind in INFORMATIONAL_KINDS:
+            assert cat == IssueCategory.INFORMATIONAL
         elif kind in QUALITY_KINDS:
             assert cat == IssueCategory.QUALITY_ISSUES
         else:
@@ -141,8 +145,10 @@ class TestSeverityConfig:
 
     def test_strict_preset_all_error(self) -> None:
         cfg = PRESET_STRICT
-        for cat in IssueCategory:
+        for cat in CONFIGURABLE_CATEGORIES:
             assert cfg.level_for(cat) == SeverityLevel.ERROR
+        # ADR-078: the fixed informational category never gates.
+        assert cfg.level_for(IssueCategory.INFORMATIONAL) == SeverityLevel.INFO
 
     def test_info_only_preset_all_info(self) -> None:
         cfg = PRESET_INFO_ONLY

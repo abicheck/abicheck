@@ -114,6 +114,7 @@ def _restamp(
     entry["risk_changes"] = len(classified.risk)
     entry["compatible_additions"] = summary.compatible_additions
     entry["quality_issues"] = summary.quality_issues
+    entry["informational"] = summary.informational
     add_member_review_summary(entry, result, severity_config)
     entry.update(disposition_ledger_blocks(result))
     stamp_member_exit_contributions(

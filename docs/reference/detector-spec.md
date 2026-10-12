@@ -59,10 +59,10 @@ One row per `ChangeKind` (415 total). Columns fuse the verdict partition (`check
 | `ctor_explicit_removed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `ctor_explicit_removed` | — |
 | `ctor_overload_ambiguity_risk` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L2 | `ctor_overload_ambiguity_risk` | — |
 | `cxx_standard_floor_raised` | api_break | `API_BREAK` | `warning` | unspecified | `cxx_standard_floor_raised` | — |
-| `declaration_coordinates_shifted` | quality | `COMPATIBLE` | `warning` | L5 | `declaration_coordinates_shifted` | — |
+| `declaration_coordinates_shifted` | informational | `COMPATIBLE` | `warning` | L5 | `declaration_coordinates_shifted` | — |
 | `declaration_identity_reconciled` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L5 | `declaration_identity_reconciled` | — |
 | `declaration_identity_reconciled_unresolved` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L5 | `declaration_identity_reconciled_unresolved` | [case197](examples/case197_header_graph_identity_reconciled.md) |
-| `declaration_identity_unchanged` | quality | `COMPATIBLE` | `warning` | L5 | `declaration_identity_unchanged` | — |
+| `declaration_identity_unchanged` | informational | `COMPATIBLE` | `warning` | L5 | `declaration_identity_unchanged` | — |
 | `declaration_moved` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L5 | `declaration_moved` | [case196](examples/case196_header_graph_move_reconciled.md) |
 | `declaration_renamed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L5 | `declaration_renamed` | [case194](examples/case194_header_graph_rename_reconciled.md) |
 | `default_argument_changed` | api_break | `API_BREAK` | `warning` | unspecified | `default_argument_changed` | — |
@@ -240,8 +240,8 @@ One row per `ChangeKind` (415 total). Columns fuse the verdict partition (`check
 | `public_macro_value_changed` | api_break | `API_BREAK` | `warning` | unspecified | `public_macro_value_changed` | — |
 | `public_not_exported` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L2 | `public_not_exported` | [case150](examples/case150_xcheck_export_public_pair.md) |
 | `public_reachability_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `public_reachability_changed` | — |
-| `public_surface_grew` | quality | `COMPATIBLE` | `warning` | unspecified | `public_surface_grew` | — |
-| `public_surface_shrank` | quality | `COMPATIBLE` | `warning` | unspecified | `public_surface_shrank` | — |
+| `public_surface_grew` | informational | `COMPATIBLE` | `warning` | unspecified | `public_surface_grew` | — |
+| `public_surface_shrank` | informational | `COMPATIBLE` | `warning` | unspecified | `public_surface_shrank` | — |
 | `public_to_internal_dependency` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L5 | `public_to_internal_dependency` | [case181](examples/case181_xcheck_public_to_internal_dependency.md) |
 | `public_typedef_removed` | api_break | `API_BREAK` | `warning` | L4 | `public_typedef_removed` | [case158](examples/case158_public_typedef_removed.md) |
 | `public_typedef_target_changed` | api_break | `API_BREAK` | `warning` | unspecified | `public_typedef_target_changed` | — |

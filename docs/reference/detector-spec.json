@@ -481,7 +481,7 @@
     },
     {
       "kind": "declaration_coordinates_shifted",
-      "category": "quality",
+      "category": "informational",
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
       "min_evidence": "L5",
@@ -508,7 +508,7 @@
     },
     {
       "kind": "declaration_identity_unchanged",
-      "category": "quality",
+      "category": "informational",
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
       "min_evidence": "L5",
@@ -2110,7 +2110,7 @@
     },
     {
       "kind": "public_surface_grew",
-      "category": "quality",
+      "category": "informational",
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
       "min_evidence": "unspecified",
@@ -2119,7 +2119,7 @@
     },
     {
       "kind": "public_surface_shrank",
-      "category": "quality",
+      "category": "informational",
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
       "min_evidence": "unspecified",

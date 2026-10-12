@@ -177,6 +177,7 @@ def _legacy_level_for_category(
     if annotate_additions and category in (
         _IssueCategory.ADDITION,
         _IssueCategory.QUALITY_ISSUES,
+        _IssueCategory.INFORMATIONAL,
     ):
         return "notice"
     return None
@@ -250,6 +251,8 @@ def _title_for_change(
             return f"Quality Issue: {kind_label}"
         if category == _IssueCategory.ADDITION:
             return f"ABI Addition: {kind_label}"
+        if category == _IssueCategory.INFORMATIONAL:
+            return f"Informational: {kind_label}"
         # POTENTIAL_BREAKING: distinguish API Break from Deployment Risk via
         # the finding's actual effective verdict when available (falling
         # back to the kind sets only if it wasn't supplied), since

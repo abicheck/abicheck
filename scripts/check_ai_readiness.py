@@ -683,6 +683,38 @@ def check_changekind_partition(f: Findings) -> None:
                     f"ChangeKinds appear in both {n1} and {n2}: {names}",
                 )
 
+    # ADR-078: COMPATIBLE_KINDS is itself partitioned into additions,
+    # informational outcomes and the quality residue -- the severity
+    # categories `policy.severity` buckets a COMPATIBLE finding into.
+    try:
+        from abicheck.policy.classification import (
+            ADDITION_KINDS,
+            INFORMATIONAL_KINDS,
+            QUALITY_KINDS,
+        )
+    except Exception as e:  # noqa: BLE001 — surface ANY import failure
+        f.err("changekind-partition", f"failed to import COMPATIBLE sub-sets: {e}")
+        return
+    subs = {
+        "ADDITION_KINDS": set(ADDITION_KINDS),
+        "INFORMATIONAL_KINDS": set(INFORMATIONAL_KINDS),
+        "QUALITY_KINDS": set(QUALITY_KINDS),
+    }
+    if set().union(*subs.values()) != buckets["COMPATIBLE_KINDS"]:
+        f.err(
+            "changekind-partition",
+            "ADDITION_KINDS | INFORMATIONAL_KINDS | QUALITY_KINDS != COMPATIBLE_KINDS",
+        )
+    sub_pairs = list(subs.items())
+    for i, (n1, s1) in enumerate(sub_pairs):
+        for n2, s2 in sub_pairs[i + 1 :]:
+            if s1 & s2:
+                names = ", ".join(sorted(k.name for k in s1 & s2))
+                f.err(
+                    "changekind-partition",
+                    f"ChangeKinds appear in both {n1} and {n2}: {names}",
+                )
+
 
 # ---------------------------------------------------------------------------
 # Check: every ABI/API taxonomy leaf carries exactly one coverage status

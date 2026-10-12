@@ -144,6 +144,7 @@ SOURCE_ENTRIES: list[ChangeKindMeta] = [
         "graph diff, the same way its RISK-tier siblings do.",
         entity=_ENT.SOURCE,
         operation=_OP.MODIFIED,
+        is_informational=True,
     ),
     _E(
         "declaration_identity_reconciled_unresolved",
@@ -193,6 +194,7 @@ SOURCE_ENTRIES: list[ChangeKindMeta] = [
         "remove-then-add pair in the graph diff.",
         entity=_ENT.ANALYSIS,
         operation=_OP.MODIFIED,
+        is_informational=True,
     ),
     _E(
         "declaration_identity_reconciled",
@@ -503,6 +505,7 @@ SOURCE_ENTRIES: list[ChangeKindMeta] = [
         description_template="public surface grew: {old} → {new} declarations (+{detail})",
         entity=_ENT.ANALYSIS,
         operation=_OP.MODIFIED,
+        is_informational=True,
     ),
     _E(
         "public_surface_shrank",
@@ -516,6 +519,7 @@ SOURCE_ENTRIES: list[ChangeKindMeta] = [
         description_template="public surface shrank: {old} → {new} declarations ({detail})",
         entity=_ENT.ANALYSIS,
         operation=_OP.MODIFIED,
+        is_informational=True,
     ),
     _E(
         "public_to_internal_dependency",

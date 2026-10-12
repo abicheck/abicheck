@@ -231,10 +231,16 @@ class TestStoredVersusLiveReleaseParity:
         # addition itself -- two compatible findings, not one. Split across
         # compatible_additions/quality_issues since report_schema_version
         # 4.0's compatible_additions correction (findings-fixes round 10/11):
-        # PUBLIC_SURFACE_GREW is not in ADDITION_KINDS, so it counts as a
-        # quality issue, not an addition.
+        # PUBLIC_SURFACE_GREW is not in ADDITION_KINDS; since ADR-078 it is
+        # an informational roll-up, counted apart from quality issues.
         assert outcomes["libb.so"][4] == 1  # baz added
-        assert outcomes["libb.so"][5] == 1  # public_surface_grew
+        assert outcomes["libb.so"][5] == 0  # no quality issue
+        libb = next(
+            e
+            for e in json.loads(out)["libraries"]
+            if str(e["library"]).startswith("libb.so")
+        )
+        assert libb["informational"] == 1  # public_surface_grew
         assert outcomes["libc.so"][0] == "NO_CHANGE"
 
     def test_stored_stored_matches_live_live(self, tmp_path: Path) -> None:

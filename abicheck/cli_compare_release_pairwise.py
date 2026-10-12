@@ -242,15 +242,13 @@ def _compare_one_library(
                 f"\n== {old_path.name} ==\n{render_pattern_modulations(result)}"
             )
         v = result.verdict.value
-        # compatible_additions/quality_issues must agree with the scalar
-        # `compare` report's own split (`build_summary`'s effective-category
-        # logic), not a raw `c.kind not in ADDITION_KINDS` test -- the two
-        # previously disagreed on the same one-library comparison (Codex
-        # review, findings-fixes round 10/11).
+        # compatible_additions/quality_issues/informational must agree with
+        # the scalar `compare` report's own split (`build_summary`'s
+        # effective-category logic), not a raw kind-set test (Codex review,
+        # findings-fixes round 10/11).
         from .report_summary import build_summary
 
         _summary = build_summary(result)
-        n_quality = _summary.quality_issues
         # ADR-067 C-S2: this library's own raw-versus-effective disposition
         # audit, the same shape scalar `compare`'s JSON report carries
         # (`report.disposition_audit.compute_disposition_audit`/`.to_dict()`)
@@ -269,7 +267,8 @@ def _compare_one_library(
             "source_breaks": len(classified.source_breaks),
             "risk_changes": len(classified.risk),
             "compatible_additions": _summary.compatible_additions,
-            "quality_issues": n_quality,
+            "quality_issues": _summary.quality_issues,
+            "informational": _summary.informational,
             "_diff_result": result,
             **(
                 {"coverage_warnings": list(result.coverage_warnings)}
@@ -543,6 +542,7 @@ def _suppress_lockstep_soname_findings(
         entry["risk_changes"] = len(classified.risk)
         entry["compatible_additions"] = _summary.compatible_additions
         entry["quality_issues"] = _summary.quality_issues
+        entry["informational"] = _summary.informational
         if output_dir is not None:
             lib_report_path = output_dir / f"{Path(str(entry['library'])).stem}.json"
             # Codex review, fresh evidence ("Keep per-library output-dir
