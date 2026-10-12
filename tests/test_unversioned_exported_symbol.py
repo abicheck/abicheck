@@ -401,3 +401,158 @@ def test_a_stored_dump_keeps_the_binding(tmp_path: Path) -> None:
     )
     assert proc.returncode == 0, proc.stderr
     assert _audit(snap) == _audit(lib) == ["other_fn"]
+
+
+# --------------------------------------------------------------------------- #
+# The extractor's correlation, one ``.gnu.version`` state at a time
+# --------------------------------------------------------------------------- #
+
+
+def _sym(name: str, *, undefined: bool = False):
+    from types import SimpleNamespace
+
+    return SimpleNamespace(
+        name=name,
+        entry=SimpleNamespace(
+            st_shndx="SHN_UNDEF" if undefined else 12,
+            st_info=SimpleNamespace(bind="STB_GLOBAL"),
+            st_other=SimpleNamespace(visibility="STV_DEFAULT"),
+        ),
+    )
+
+
+class _Table:
+    """A ``.dynsym`` stand-in: ``iter_symbols`` and nothing else."""
+
+    def __init__(self, *syms) -> None:
+        self._syms = list(syms)
+
+    def iter_symbols(self):
+        return iter(self._syms)
+
+
+def _meta(exports: tuple[str, ...], imports: tuple[str, ...] = ()) -> ElfMetadata:
+    from abicheck.model.elf_facts import ElfImport
+
+    return ElfMetadata(
+        symbols=[ElfSymbol(n) for n in exports],
+        imports=[ElfImport(n) for n in imports],
+    )
+
+
+def test_each_versym_index_maps_to_its_binding():
+    from abicheck.extract.elf_symbol_versions import apply_versions_to_symbols
+
+    table = _Table(
+        _sym("", undefined=True),  # the null entry: neither import nor export
+        _sym("local0"),
+        _sym("base1"),
+        _sym("named2"),
+        _sym("dangling9"),
+        _sym("puts", undefined=True),
+        _sym("hidden3"),
+    )
+    entries = [(0, False), (0, False), (1, False), (2, False), (9, False)]
+    entries += [(4, False), (3, True)]
+    index = {
+        1: ("", "libx.so.1", True),
+        2: ("", "V1", True),
+        3: ("", "V2", True),
+        4: ("libc.so.6", "GLIBC_2.2.5", False),
+    }
+    meta = _meta(("local0", "base1", "named2", "dangling9", "hidden3"), ("puts",))
+    apply_versions_to_symbols(table, entries, index, meta)
+
+    got = {s.name: (s.version_binding, s.version, s.is_default) for s in meta.symbols}
+    assert got == {
+        "local0": (_B.UNVERSIONED, "", True),
+        "base1": (_B.BASE, "", True),  # the base node is a binding, never a name
+        "named2": (_B.NAMED, "V1", True),
+        "dangling9": (_B.UNKNOWN, "", True),  # never guessed
+        "hidden3": (_B.NAMED, "V2", False),
+    }
+    (imp,) = meta.imports
+    assert (imp.version, imp.version_soname) == ("GLIBC_2.2.5", "libc.so.6")
+
+
+def test_index_one_without_a_base_definition_is_unversioned():
+    from abicheck.extract.elf_symbol_versions import apply_versions_to_symbols
+
+    meta = _meta(("f",))
+    apply_versions_to_symbols(_Table(_sym("f")), [(1, False)], {}, meta)
+    assert meta.symbols[0].version_binding is _B.UNVERSIONED
+
+
+class _Versym:
+    """A ``.gnu.version`` stand-in read through the per-entry path."""
+
+    def __init__(self, raws, *, fail_count: bool = False, fail_at: int = -1):
+        self.raws = raws
+        self.fail_count = fail_count
+        self.fail_at = fail_at
+
+    def num_symbols(self) -> int:
+        if self.fail_count:
+            raise ValueError("bad sh_size")
+        return len(self.raws)
+
+    def get_symbol(self, i: int):
+        from types import SimpleNamespace
+
+        if i == self.fail_at:
+            raise ValueError("truncated")
+        return SimpleNamespace(entry={"ndx": self.raws[i]})
+
+
+def test_per_entry_read_decodes_named_and_hidden_values():
+    from abicheck.extract.elf_symbol_versions import parse_ver_entries
+
+    raws = ["VER_NDX_LOCAL", "VER_NDX_GLOBAL", 2, 0x8003]
+    assert parse_ver_entries(_Versym(raws), 4, Path("x.so")) == [
+        (0, False),
+        (1, False),
+        (2, False),
+        (3, True),
+    ]
+    assert parse_ver_entries(_Versym(raws, fail_at=2), 4, Path("x.so")) is None
+
+
+@pytest.mark.parametrize(
+    "versym",
+    [
+        _Versym([1], fail_count=True),  # the entry count itself is unreadable
+        _Versym([1], fail_at=0),  # an entry is unreadable
+    ],
+)
+def test_an_unreadable_version_table_leaves_every_binding_unknown(versym):
+    from abicheck.extract.elf_symbol_versions import correlate_symbol_versions
+
+    meta = _meta(("f",))
+    correlate_symbol_versions(versym, _Table(_sym("f")), meta, {}, Path("x.so"))
+    assert meta.symbols[0].version_binding is _B.UNKNOWN
+
+
+def test_no_version_table_means_unversioned_and_no_dynsym_means_unknown():
+    from abicheck.extract.elf_symbol_versions import correlate_symbol_versions
+
+    meta = _meta(("f",))
+    correlate_symbol_versions(None, _Table(_sym("f")), meta, {}, Path("x.so"))
+    assert meta.symbols[0].version_binding is _B.UNVERSIONED
+
+    meta = _meta(("f",))
+    correlate_symbol_versions(_Versym([1]), None, meta, {}, Path("x.so"))
+    assert meta.symbols[0].version_binding is _B.UNKNOWN
+
+    meta = _meta(("f",))
+    correlate_symbol_versions(
+        _Versym([1]), _Table(_sym("f")), meta, {1: ("", "x", True)}, Path("x.so")
+    )
+    assert meta.symbols[0].version_binding is _B.BASE
+
+
+def test_compaction_ignores_a_symbol_that_is_not_an_object():
+    from abicheck.storage.snapshot_encode import _compact_elf_symbols
+
+    doc = {"elf": {"symbols": ["junk", {"name": "f", "version_binding": "unknown"}]}}
+    _compact_elf_symbols(doc)
+    assert doc["elf"]["symbols"] == ["junk", {"name": "f"}]
