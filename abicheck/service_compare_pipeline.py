@@ -53,6 +53,7 @@ import functools
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from .buildsource.header_graph_ast_projection import header_graph_bisection_scope
 from .compile_context import CompileContext
 from .dependency_info import populate_pair_dependency_info
 from .environment_matrix import EnvironmentMatrix
@@ -400,7 +401,9 @@ def resolve_compare_request(
     # `allow_parallel` permits two *threads*; two live binaries may still go
     # to two concurrent child processes without it (`concurrent_children_apply`).
     concurrent = not tuning.sequential_sides and not resolve_sides_sequentially(request)
-    with ast_acquisition_scope():
+    # One header-graph bisection memo per request, joined by an enclosing
+    # release fan-out's; the side workers below inherit it (copy_context).
+    with ast_acquisition_scope(), header_graph_bisection_scope():
         if tuning.isolate_sides or (
             concurrent and concurrent_children_apply(tuning, old_fmt, new_fmt)
         ):

@@ -40,7 +40,7 @@ import logging
 import os
 from collections.abc import Iterator
 from concurrent.futures import Future
-from contextlib import contextmanager, suppress
+from contextlib import ExitStack, contextmanager, suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -310,6 +310,9 @@ def acquire_header_graph_ast(
     """
     from .buildsource.header_graph_ast_projection import (
         HeaderGraphAstProjection,
+        MemoizedParseFailure,
+        current_bisection_memo,
+        header_graph_memo_key,
         merge_header_graph_ast_projections,
         parse_header_groups_bisecting,
         project_header_graph_ast,
@@ -450,6 +453,11 @@ def acquire_header_graph_ast(
 
     ast_failure: str | None = None
     projection_from_groups: HeaderGraphAstProjection | None = None
+    # Libraries sharing a header tree and flags share a failed parse's
+    # outcome within one request; the slot spans parse + bisect.
+    memo_key: tuple[Any, ...] | None = None
+    memo_hit: tuple[tuple[Path, ...], str] | None = None
+    memo_scope, bisection_memo = ExitStack(), current_bisection_memo()
     try:
         resolved_headers = expand_header_inputs(headers)
         if resolved_headers:
@@ -490,6 +498,11 @@ def acquire_header_graph_ast(
             deferred_dirs = tuple(
                 deferred_token_dirs(deferred)
             ) + cache_relevant_operand_paths(cc.gcc_option_tokens)
+            memo_key = header_graph_memo_key(
+                resolved_headers, eff_includes, eff_tokens, deferred_dirs, lang, cc
+            )
+            # A sibling's known failure skips straight to the recovery below.
+            bisection_memo.enter(memo_scope, memo_key)
         # ADR-050 D5 (Codex review): this internal semantic header graph
         # (G29 Phase A) must be built from the SAME frontend_context as the
         # primary snapshot it's attached to -- a device-context dump's
@@ -550,6 +563,9 @@ def acquire_header_graph_ast(
         ast_failure = (
             str(exc).strip().splitlines()[0] if str(exc).strip() else type(exc).__name__
         )
+        if isinstance(exc, MemoizedParseFailure):
+            memo_hit = exc.hit
+            memory_trace.mark("dump.header_graph.clang_ast:memo_hit")
         memory_trace.mark("dump.header_graph.clang_ast:failed")
         if len(resolved_headers) < 2:
             _log.warning(
@@ -590,11 +606,15 @@ def acquire_header_graph_ast(
                     _parse_group,
                     (SnapshotError, ValidationError, *_MALFORMED_AST_ERRORS),
                     known_failed=(
-                        attribute_failing_headers(exc, resolved_headers)
+                        memo_hit[0]
+                        if memo_hit is not None
+                        else attribute_failing_headers(exc, resolved_headers)
                         if isinstance(exc, SnapshotError)
                         else ()
                     ),
                 )
+            if memo_key is not None and memo_hit is None:
+                bisection_memo.put(memo_key, failed, ast_failure)
             if parts:
                 projection_from_groups = merge_header_graph_ast_projections(parts)
             names = ", ".join(p.name for p in failed[:5])
@@ -613,6 +633,8 @@ def acquire_header_graph_ast(
                 f"{recovered}: {ast_failure}"
             )
             _log.warning("header graph: %s", ast_failure)
+    finally:
+        memo_scope.close()
     # Reduce the AST to the four compact projections the graph builder
     # actually reads, then drop the tree BEFORE the graph is allocated, so
     # the two are never resident together.

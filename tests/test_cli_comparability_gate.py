@@ -379,23 +379,24 @@ class TestCompareReleaseNotComparable:
         new_dir = tmp_path / "new"
         old_dir.mkdir()
         new_dir.mkdir()
+        # Manifest translation-unit drift: a changed header set alone is API
+        # evolution, not a scope mismatch.
         a = tmp_path / "v1" / "a.h"
-        old_h = tmp_path / "v1" / "foo.h"
-        new_h = tmp_path / "v2" / "bar.h"
-        old_h.parent.mkdir(parents=True)
-        new_h.parent.mkdir(parents=True)
+        a.parent.mkdir(parents=True)
         a.write_text("int g(void);\n")
-        old_h.write_text("int f(void);\n")
-        new_h.write_text("int f(void);\n")
         old = AbiSnapshot(
             library="libtest.so",
             version="1.0",
-            contract=compute_extraction_contract(declared_headers=[a, old_h]),
+            contract=compute_extraction_contract(
+                declared_headers=[a], manifest_tu_scope='[{"name": "core"}]'
+            ),
         )
         new = AbiSnapshot(
             library="libtest.so",
             version="2.0",
-            contract=compute_extraction_contract(declared_headers=[a, new_h]),
+            contract=compute_extraction_contract(
+                declared_headers=[a], manifest_tu_scope='[{"name": "core2"}]'
+            ),
         )
         (old_dir / "libtest.json").write_text(snapshot_to_json(old), encoding="utf-8")
         (new_dir / "libtest.json").write_text(snapshot_to_json(new), encoding="utf-8")

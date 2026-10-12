@@ -107,6 +107,34 @@ def own_file(node: GraphNode) -> str:
     )
 
 
+def _pair_files(
+    old_identity: CanonicalIdentity,
+    new_identity: CanonicalIdentity,
+    old_declaring_file: str,
+    new_declaring_file: str,
+    declaring_file_shared: bool,
+) -> tuple[str, str]:
+    """Each side's declaring file for the move comparison.
+
+    When both sides declare the entity in a common file
+    (*declaring_file_shared*, the shared file passed as both declaring
+    files), that shared evidence says it did not move, and it overrides each
+    identity's own ``def_file`` prefix -- otherwise old ``def_file=a.h`` vs
+    new ``def_file=b.h``, both declared in ``{a.h, b.h}``, read as a move.
+    """
+    if declaring_file_shared and old_declaring_file:
+        return old_declaring_file, new_declaring_file
+    old_file = (
+        project_layout_spelling(old_identity.source_relative.split("\x1f", 1)[0])
+        or old_declaring_file
+    )
+    new_file = (
+        project_layout_spelling(new_identity.source_relative.split("\x1f", 1)[0])
+        or new_declaring_file
+    )
+    return old_file, new_file
+
+
 def _signature_tail(identity: CanonicalIdentity) -> str:
     # normalized_signature's kind/arity/param-types tail, qn field stripped
     # off (that field alone carries coordinate churn) -- comparable across
@@ -160,6 +188,7 @@ def _classify_outcome(
     *,
     old_declaring_file: str = "",
     new_declaring_file: str = "",
+    declaring_file_shared: bool = False,
 ) -> str:
     """The reconciliation outcome for this pair. See :func:`classify`."""
     return classify(
@@ -167,6 +196,7 @@ def _classify_outcome(
         new_identity,
         old_declaring_file=old_declaring_file,
         new_declaring_file=new_declaring_file,
+        declaring_file_shared=declaring_file_shared,
     ).outcome
 
 
@@ -194,19 +224,19 @@ def classify(
     *,
     old_declaring_file: str = "",
     new_declaring_file: str = "",
+    declaring_file_shared: bool = False,
 ) -> Classification:
     old_qn = old_identity.qualified_name
     new_qn = new_identity.qualified_name
     # source_relative is file#scope#name; the file prefix says "did the
     # declaring file change" (falls back to _declaring_files' edge-derived
     # file when the node carries none of its own).
-    old_file = (
-        project_layout_spelling(old_identity.source_relative.split("\x1f", 1)[0])
-        or old_declaring_file
-    )
-    new_file = (
-        project_layout_spelling(new_identity.source_relative.split("\x1f", 1)[0])
-        or new_declaring_file
+    old_file, new_file = _pair_files(
+        old_identity,
+        new_identity,
+        old_declaring_file,
+        new_declaring_file,
+        declaring_file_shared,
     )
     old_key = closure_location_free_identity(old_qn)
     new_key = closure_location_free_identity(new_qn)
@@ -441,6 +471,7 @@ def coordinate_evidence(
     *,
     old_declaring_file: str = "",
     new_declaring_file: str = "",
+    declaring_file_shared: bool = False,
 ) -> str | None:
     """Which provider carried the location half of this pair's
     :data:`OUTCOME_COORDINATES_ONLY` classification, or ``None`` when the
@@ -463,17 +494,17 @@ def coordinate_evidence(
             new_identity,
             old_declaring_file=old_declaring_file,
             new_declaring_file=new_declaring_file,
+            declaring_file_shared=declaring_file_shared,
         )
         != OUTCOME_COORDINATES_ONLY
     ):
         return None
-    old_file = (
-        project_layout_spelling(old_identity.source_relative.split("\x1f", 1)[0])
-        or old_declaring_file
-    )
-    new_file = (
-        project_layout_spelling(new_identity.source_relative.split("\x1f", 1)[0])
-        or new_declaring_file
+    old_file, new_file = _pair_files(
+        old_identity,
+        new_identity,
+        old_declaring_file,
+        new_declaring_file,
+        declaring_file_shared,
     )
     if old_file and new_file:
         return COORDINATE_EVIDENCE_DECLARING_FILE

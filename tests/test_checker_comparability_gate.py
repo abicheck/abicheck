@@ -34,18 +34,24 @@ def _snap(version: str, contract=None) -> AbiSnapshot:
 
 
 def test_compare_raises_scope_mismatch_by_default(tmp_path):
-    # 2-header declared set: a single header's own name is no longer
-    # load-bearing scope identity (Codex review, PR #624 follow-up).
+    # Manifest translation-unit drift. A changed header set is not a scope
+    # mismatch any more (it is API evolution -- see
+    # tests/test_comparability_gate_header_removal.py).
     a = tmp_path / "v1" / "a.h"
-    old_h = tmp_path / "v1" / "foo.h"
-    new_h = tmp_path / "v2" / "bar.h"
-    old_h.parent.mkdir(parents=True)
-    new_h.parent.mkdir(parents=True)
+    a.parent.mkdir(parents=True)
     a.write_text("int g(void);\n")
-    old_h.write_text("int f(void);\n")
-    new_h.write_text("int f(void);\n")
-    old = _snap("1.0", compute_extraction_contract(declared_headers=[a, old_h]))
-    new = _snap("2.0", compute_extraction_contract(declared_headers=[a, new_h]))
+    old = _snap(
+        "1.0",
+        compute_extraction_contract(
+            declared_headers=[a], manifest_tu_scope='[{"name": "core"}]'
+        ),
+    )
+    new = _snap(
+        "2.0",
+        compute_extraction_contract(
+            declared_headers=[a], manifest_tu_scope='[{"name": "core2"}]'
+        ),
+    )
     with pytest.raises(ScopeMismatchError):
         compare(old, new)
 
@@ -91,18 +97,24 @@ def test_compare_with_no_contract_on_either_side_is_unaffected():
 def test_compare_diagnostic_comparison_downgrades_mismatch_to_tentative_diff(
     tmp_path,
 ):
-    # 2-header declared set: a single header's own name is no longer
-    # load-bearing scope identity (Codex review, PR #624 follow-up).
+    # Manifest translation-unit drift. A changed header set is not a scope
+    # mismatch any more (it is API evolution -- see
+    # tests/test_comparability_gate_header_removal.py).
     a = tmp_path / "v1" / "a.h"
-    old_h = tmp_path / "v1" / "foo.h"
-    new_h = tmp_path / "v2" / "bar.h"
-    old_h.parent.mkdir(parents=True)
-    new_h.parent.mkdir(parents=True)
+    a.parent.mkdir(parents=True)
     a.write_text("int g(void);\n")
-    old_h.write_text("int f(void);\n")
-    new_h.write_text("int f(void);\n")
-    old = _snap("1.0", compute_extraction_contract(declared_headers=[a, old_h]))
-    new = _snap("2.0", compute_extraction_contract(declared_headers=[a, new_h]))
+    old = _snap(
+        "1.0",
+        compute_extraction_contract(
+            declared_headers=[a], manifest_tu_scope='[{"name": "core"}]'
+        ),
+    )
+    new = _snap(
+        "2.0",
+        compute_extraction_contract(
+            declared_headers=[a], manifest_tu_scope='[{"name": "core2"}]'
+        ),
+    )
     result = compare(old, new, diagnostic_comparison=True)
     assert result.assurance == "none"
     # CodeRabbit review (PR #624): the escape hatch's stated purpose is "the

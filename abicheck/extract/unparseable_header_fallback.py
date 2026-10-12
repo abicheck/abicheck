@@ -45,12 +45,14 @@ re-raises the original failure unchanged.
 from __future__ import annotations
 
 import logging
+import os
 import re
 from pathlib import Path
 from typing import TYPE_CHECKING, TypeVar
 
 from ..errors import SnapshotError
 from ..model.header_exclusion_record import EXCLUDED_HEADERS_TOOLCHAIN_KEY
+from ..process_resources import BudgetedExecutor
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -198,6 +200,10 @@ def parse_excluding_unparseable_headers(
     """
     active = list(headers)
     excluded: list[Path] = []
+    # Headers blamed only by an isolated probe, not yet confirmed in the
+    # context (preceding headers) a full parse gives them.
+    unconfirmed: list[Path] = []
+    probing = True
     while True:
         try:
             result = attempt(active)
@@ -223,5 +229,159 @@ def parse_excluding_unparseable_headers(
             )
             excluded.extend(dropped)
             active = [h for h in active if h not in dropped]
+            if probing and _stopped_at_fatal(exc) and len(active) >= 2:
+                # A fatal error ends the frontend run, so the diagnostics
+                # above can only ever name one header per fatal; dropping
+                # them one round at a time costs one full parse per bad
+                # header (21 rounds on oneDAL). Probe the rest in halving
+                # waves instead: rounds scale with log(n), not with f.
+                found = _probe_remaining(active, attempt, is_header_specific)
+                if found:
+                    log.warning(
+                        "L2 header parse: probing found %d more unparseable "
+                        "header(s); excluding them (reduced evidence): %s",
+                        len(found),
+                        ", ".join(str(p) for p in found),
+                    )
+                    excluded.extend(found)
+                    unconfirmed.extend(found)
+                    blamed = set(found)
+                    active = [h for h in active if h not in blamed]
             continue
+        if unconfirmed:
+            # A probe parsed its group without the headers before it, so a
+            # header that needs an earlier one (its context in the full TU)
+            # fails there but not here. Re-check each in its real context;
+            # the restored set then goes through one full parse, and any
+            # failure there is attributed by the ordinary full-context rules.
+            restored = _confirm_in_context(headers, active, unconfirmed, attempt)
+            unconfirmed = []
+            probing = False
+            if restored:
+                keep = set(active) | set(restored)
+                active = [h for h in headers if h in keep]
+                excluded = [h for h in excluded if h not in set(restored)]
+                continue
         return result, excluded
+
+
+def _confirm_in_context(
+    headers: Sequence[Path],
+    active: Sequence[Path],
+    suspects: Sequence[Path],
+    attempt: Callable[[list[Path]], object],
+) -> list[Path]:
+    """Suspects that parse after the active headers preceding them.
+
+    Concurrent waves to a fixed point: suspect ``s`` is parsed as the
+    context headers (active plus suspects already restored) that precede it
+    in input order, followed by ``s`` -- the context it has in the full
+    parse. A restored suspect joins the context of the next wave, so a chain
+    ``h0 -> h1 -> h2`` whose middle link was also a suspect restores every
+    link. At most ``len(suspects)`` waves. Returned in input order.
+    """
+    position = {h: i for i, h in enumerate(headers)}
+
+    def ok(group: list[Path]) -> bool:
+        try:
+            attempt(group)
+        except SnapshotError:
+            return False
+        return True
+
+    context = set(active)
+    pending = list(suspects)
+    restored: list[Path] = []
+    with BudgetedExecutor(_probe_jobs()) as pool:
+        while pending:
+            groups = [
+                sorted(
+                    (h for h in context if position[h] < position[s]),
+                    key=position.__getitem__,
+                )
+                + [s]
+                for s in pending
+            ]
+            passed = list(pool.map(ok, groups))
+            wave = [s for s, good in zip(pending, passed, strict=True) if good]
+            if not wave:
+                break
+            restored.extend(wave)
+            context.update(wave)
+            pending = [s for s in pending if s not in context]
+    return sorted(restored, key=position.__getitem__)
+
+
+def _stopped_at_fatal(exc: SnapshotError) -> bool:
+    """Whether *exc*'s frontend run ended at a fatal error (or the error
+    limit), so headers after it were never checked."""
+    text = exc.attribution_stderr or exc.stderr or str(exc)
+    return "fatal error:" in text or "too many errors emitted" in text
+
+
+def _probe_jobs() -> int:
+    try:
+        jobs = int(os.environ.get("ABICHECK_UNPARSEABLE_PROBE_JOBS", "0"))
+    except ValueError:
+        jobs = 0
+    return jobs if jobs > 0 else max(1, min(4, os.cpu_count() or 1))
+
+
+def _probe_remaining(
+    active: Sequence[Path],
+    attempt: Callable[[list[Path]], object],
+    is_header_specific: Callable[[SnapshotError], bool],
+) -> list[Path]:
+    """Headers in *active* that fail, found in halving waves of probes.
+
+    Each wave parses disjoint, order-preserving groups concurrently; a group
+    that fails is attributed by the same rules as the main loop, its blamed
+    headers recorded, and its remainder split again while its run stopped at
+    a fatal error. A group whose failure attributes to nothing is split too;
+    a single header failing in isolation is recorded only when its own
+    diagnostics blame it. Sequential waves are ``O(log n)`` for any number
+    of independent failures. Returned in input order; a probe result is
+    discarded (the caller re-runs the reduced full set, so the result it
+    returns comes from the same full-context parse as before).
+    """
+    order = {h: i for i, h in enumerate(active)}
+    found: set[Path] = set()
+    mid = len(active) // 2
+    groups: list[list[Path]] = [list(active[:mid]), list(active[mid:])]
+
+    def run(group: list[Path]) -> SnapshotError | None:
+        try:
+            attempt(group)
+        except SnapshotError as exc:
+            return exc
+        return None
+
+    with BudgetedExecutor(_probe_jobs()) as pool:
+        while groups:
+            outcomes = list(pool.map(run, groups))
+            nxt: list[list[Path]] = []
+            for group, exc in zip(groups, outcomes, strict=True):
+                if exc is None or not is_header_specific(exc):
+                    continue
+                stderr = exc.attribution_stderr or exc.stderr or str(exc)
+                bad, conflicts = _scan_diagnostics(stderr, group)
+                if conflicts:
+                    continue
+                blamed = [group[i] for i in sorted(bad)]
+                if len(group) == 1:
+                    found.update(blamed)
+                    continue
+                if len(blamed) >= len(group):
+                    blamed = []
+                found.update(blamed)
+                rest = [h for h in group if h not in set(blamed)]
+                if blamed and not _stopped_at_fatal(exc):
+                    # Every error was reported; the rest is clean here.
+                    continue
+                if len(rest) >= 2:
+                    half = len(rest) // 2
+                    nxt += [rest[:half], rest[half:]]
+                elif rest:
+                    nxt.append(rest)
+            groups = nxt
+    return sorted(found, key=order.__getitem__)

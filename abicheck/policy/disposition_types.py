@@ -29,6 +29,13 @@ from enum import StrEnum
 
 from .rule_provenance import RuleProvenance
 
+#: Application points of the consumer-scoping producers. A finding recorded
+#: there lives only in a consumer's scoped view and never reaches
+#: ``result.changes``, so the full-library gate never scores it.
+CONSUMER_ONLY_APPLICATION_POINTS = frozenset(
+    {"consumer_overlay", "required_symbol_overlay", "consumer_scope"}
+)
+
 
 class Disposition(StrEnum):
     """ADR-067 D2's terminal effective-gate disposition of one change.

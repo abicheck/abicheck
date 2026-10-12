@@ -662,7 +662,12 @@ EVIDENCE_BUG_CLASSES: tuple[BugClass, ...] = (
             "one reported header name. What the order fact still refuses is "
             "unchanged: an EXISTING header that moved, growth the declared "
             "surface does not confirm as new, and any other diverging "
-            "profile field alongside it."
+            "profile field alongside it. The same holds for a SHRINKING "
+            "declared set: removed public headers (pure removal, removal "
+            "plus addition, all but one, all of them, a removal that moves "
+            "the common header root) are API evolution the diff engine "
+            "reports as removals, never extraction drift -- while a header "
+            "declared on both sides but parsed on only one stays refused."
         ),
         # Real integration evidence: a project whose public headers are
         # discovered by a sorted directory sweep added one header named
@@ -676,6 +681,11 @@ EVIDENCE_BUG_CLASSES: tuple[BugClass, ...] = (
         seed_tests=(
             "tests/test_comparability_gate_header_insertion.py",
             "tests/test_cli_compare_added_public_header_live.py",
+            # oneDAL 2026.0 removed 122 public headers and was refused as
+            # "CLI-flag drift" (exit 16): every header-set waiver was
+            # growth-only.
+            "tests/test_comparability_gate_header_removal.py",
+            "tests/test_cli_compare_removed_public_header_live.py",
         ),
         # The gate-level seed tests call `check_contracts_comparable`/
         # `checker.compare` directly; the live sibling runs the reported
@@ -692,6 +702,9 @@ EVIDENCE_BUG_CLASSES: tuple[BugClass, ...] = (
                 "multi-insertion",
                 "reorder",
                 "shrink",
+                "removal+addition",
+                "all-removed",
+                "root-shifting-removal",
                 "duplicate",
                 "sentinel",
             ),
