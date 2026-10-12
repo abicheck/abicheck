@@ -36,7 +36,7 @@ from dataclasses import dataclass, field
 
 from .change_registry import API_BREAK_KINDS, BREAKING_KINDS, RISK_KINDS
 from .model.change_catalog.kinds import ChangeKind
-from .policy.classification import ADDITION_KINDS
+from .policy.classification import ADDITION_KINDS, INFORMATIONAL_KINDS
 from .report.change_summary import ChangeSummary
 from .report.evidence_summary import EvidenceSummary
 
@@ -45,6 +45,8 @@ from .report.evidence_summary import EvidenceSummary
 # that don't end in "_added" (e.g. type_field_added_compatible,
 # experimental_graduated) are classified correctly.
 _ADDITION_KIND_VALUES = frozenset(k.value for k in ADDITION_KINDS)
+# The severity "informational" category (ADR-078): never gates.
+_INFORMATIONAL_KIND_VALUES = frozenset(k.value for k in INFORMATIONAL_KINDS)
 
 
 # Severity tokens emitted in the JSON report (`reporter._effective_severity_label`)
@@ -626,6 +628,8 @@ def _finding_category(severity: str, kind: str) -> str:
         return "potential_breaking"
     if kind in _ADDITION_KIND_VALUES:
         return "addition"
+    if kind in _INFORMATIONAL_KIND_VALUES:
+        return "informational"
     return "quality_issues"
 
 

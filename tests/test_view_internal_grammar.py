@@ -569,7 +569,8 @@ class TestPublishedSchemaDeclaresTheNewContract:
         the schema's own policy reserves MAJOR for removing a key."""
         from abicheck.schemas import REPORT_SCHEMA_VERSION
 
-        assert REPORT_SCHEMA_VERSION.split(".")[0] == "5"
+        # >= 5: ADR-078's `quality_issues` narrowing bumped it again to 6.
+        assert int(REPORT_SCHEMA_VERSION.split(".")[0]) >= 5
 
     def test_a_real_report_validates_against_the_published_schema(self, tmp_path):
         from abicheck.schemas import load_compare_report_schema

@@ -210,6 +210,7 @@ def test_release_html_states_exactly_what_the_release_json_records(
                 "risk_changes",
                 "compatible_additions",
                 "quality_issues",
+                "informational",
             )
         ]
 
@@ -279,7 +280,7 @@ def test_release_json_records_per_side_dependency_facts(tmp_path: Path) -> None:
     out = tmp_path / "r.json"
     _run("compare", str(old_dir), str(new_dir), "-o", f"json={out}")
     doc = json.loads(out.read_text())
-    assert doc["release_schema_version"] == "1.13"
+    assert doc["release_schema_version"] == "2.0"
     by_name = {m["library"]: m for m in doc["libraries"]}
     checked = 0
     for member, sides in _SPEC.items():

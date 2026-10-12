@@ -162,6 +162,10 @@ Display filtering is cosmetic; exit codes are authoritative.
   only when the severity system is active and `addition` or `quality_issues`
   are at error level. The `compat` command never returns exit code 4 (uses 1
   for BREAKING instead).
+  [ADR-078](078-informational-severity-category.md) (2026-10-12) amends
+  this: a finding in the fixed `informational` category (a record that
+  nothing changed) never contributes exit code 1, whatever level
+  `quality_issues` is set to.
   See [severity guide](../../use/severity.md) for the four-category
   severity model that supersedes `--fail-on-additions`
 

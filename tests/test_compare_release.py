@@ -816,7 +816,8 @@ class TestDirVsDir:
         findings_by_kind = {f["kind"]: f for f in lib["findings"]}
         assert findings_by_kind["func_added"]["symbol"] == "_Z6new_apiv"
         assert findings_by_kind["func_added"]["bucket"] == "addition"
-        assert findings_by_kind["public_surface_grew"]["bucket"] == "quality_issues"
+        # ADR-078: an aggregate roll-up is informational, still listed.
+        assert findings_by_kind["public_surface_grew"]["bucket"] == "informational"
 
     def test_breaking_overrides_api_break(self, tmp_path: Path) -> None:
         """Aggregate verdict is BREAKING even when another lib has API_BREAK."""

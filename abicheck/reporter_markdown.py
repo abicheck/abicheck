@@ -129,6 +129,7 @@ def to_stat(
             "risk_changes": summary.risk_count,
             "compatible_additions": summary.compatible_additions,
             "quality_issues": summary.quality_issues,
+            "informational": summary.informational,
             "total_changes": summary.total_changes,
             "change_inventory": render_change_inventory_json(summary.inventory),
         },
@@ -1035,6 +1036,7 @@ _RISK_ICON = "⚠️"  # ⚠️
 _HYGIENE_ICON = "\U0001f9f9"  # 🧹
 _QUALITY_ICON = "\U0001f50d"  # 🔍
 _ADDITION_ICON = "✅"  # ✅
+_INFORMATIONAL_ICON = "ℹ️"  # ℹ️
 
 
 def _hygiene_evolution_counts_line(hygiene: list[Change]) -> str:
@@ -1214,6 +1216,23 @@ def compute_severity_summary(
                 impact=impact,
             )
         )
+    # ADR-078: the informational category has no configurable level and
+    # never gates; it gets a row only when it holds something to disclose.
+    info_count = (
+        scoped_counts.get("informational", 0)
+        if scoped_counts is not None
+        else len(categorized.informational)
+    )
+    if info_count:
+        rows.append(
+            _rmd.SeverityRow(
+                label="Informational (no material change)",
+                emoji=_SEVERITY_EMOJI.get(SeverityLevel.INFO.value, ""),
+                level_upper=SeverityLevel.INFO.value.upper(),
+                count=info_count,
+                impact="no exit impact",
+            )
+        )
 
     return _rmd.SeveritySummary(rows=tuple(rows))
 
@@ -1332,10 +1351,18 @@ def compute_severity_sections(
             )
 
     if compatible:
-        from .policy.classification import ADDITION_KINDS as _ADDITION_KINDS
+        from .policy.classification import (
+            ADDITION_KINDS as _ADDITION_KINDS,
+            INFORMATIONAL_KINDS as _INFORMATIONAL_KINDS,
+        )
 
-        quality = [c for c in compatible if c.kind not in _ADDITION_KINDS]
+        quality = [
+            c
+            for c in compatible
+            if c.kind not in _ADDITION_KINDS and c.kind not in _INFORMATIONAL_KINDS
+        ]
         additions_list = [c for c in compatible if c.kind in _ADDITION_KINDS]
+        informational = [c for c in compatible if c.kind in _INFORMATIONAL_KINDS]
         if quality:
             sev_label = _section_severity_label(severity_config, "quality_issues")
             quality_items, quality_rollups = roll_up_large_kinds(
@@ -1365,6 +1392,20 @@ def compute_severity_sections(
                     heading=f"## {_ADDITION_ICON} Additions{sev_label}",
                     changes=tuple(additions_list),
                     oneline=False,
+                )
+            )
+        if informational:
+            # ADR-078: recorded, never gated -- no configurable level, so the
+            # heading carries no severity label.
+            info_items, info_rollups = roll_up_large_kinds(
+                informational, severity_level=None
+            )
+            groups.append(
+                _rmd.ChangeGroup(
+                    heading=f"## {_INFORMATIONAL_ICON} Informational (no material change)",
+                    changes=tuple(info_items),
+                    rollups=info_rollups,
+                    oneline=True,
                 )
             )
 
@@ -1597,6 +1638,7 @@ def compute_review_digest(
         # differently-scoped field -- `cli_compare_release_pairwise.py`).
         additions_count=summary.compatible_additions,
         quality_issues_count=summary.quality_issues,
+        informational_count=summary.informational,
         scoped=bool(scoped),
         out_of_surface_count=result.out_of_surface_count,
         bump_value=rec.bump.value,

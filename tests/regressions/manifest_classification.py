@@ -308,6 +308,12 @@ CLASSIFICATION_BUG_CLASSES: tuple[BugClass, ...] = (
             # which called the shared fold and discarded the half carrying
             # the answer.
             "tests/test_dependency_include_root_ownership.py",
+            # Third instance, one layer up (ADR-078): `classify_effective_
+            # change`'s final `return QUALITY_ISSUES` -- the residue of
+            # COMPATIBLE minus additions -- claimed "a quality problem" for
+            # findings proving nothing changed, and strict gated on it.
+            # Informational outcomes now get their own category.
+            "tests/test_informational_never_gates.py",
         ),
         public_surfaces=("cli",),
         axes={

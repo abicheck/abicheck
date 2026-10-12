@@ -144,7 +144,9 @@ def test_build_summary_quality_issues_splits_out_public_surface_shrank() -> None
     summary = build_summary(result)
     assert summary.risk_count == 0
     assert summary.compatible_additions == 0
-    assert summary.quality_issues == 1
+    # ADR-078: a roll-up is informational, not a quality issue.
+    assert summary.quality_issues == 0
+    assert summary.informational == 1
 
 
 def test_build_summary_quality_issues_does_not_shadow_real_additions() -> None:
@@ -162,6 +164,7 @@ def test_build_summary_quality_issues_does_not_shadow_real_additions() -> None:
         library="libx.so",
         changes=[
             Change(ChangeKind.FUNC_ADDED, "_Z3barv", "New function added"),
+            Change(ChangeKind.VISIBILITY_LEAK, "_Z4leakv", "Internal symbol exported"),
             Change(
                 ChangeKind.PUBLIC_SURFACE_SHRANK,
                 symbol="<surface>",
@@ -173,7 +176,9 @@ def test_build_summary_quality_issues_does_not_shadow_real_additions() -> None:
     summary = build_summary(result)
     assert summary.compatible_additions == 1
     assert summary.quality_issues == 1
-    assert summary.compatible_additions + summary.quality_issues == 2
+    assert summary.informational == 1  # ADR-078: the shrink roll-up
+    total = summary.compatible_additions + summary.quality_issues
+    assert total + summary.informational == 3
 
 
 def test_build_summary_quality_issues_derives_from_effective_category(
@@ -244,6 +249,7 @@ def test_review_digest_additions_count_excludes_quality_issues() -> None:
         library="libx.so",
         changes=[
             Change(ChangeKind.FUNC_ADDED, "_Z3barv", "New function added"),
+            Change(ChangeKind.VISIBILITY_LEAK, "_Z4leakv", "Internal symbol exported"),
             Change(
                 ChangeKind.PUBLIC_SURFACE_SHRANK,
                 symbol="<surface>",
@@ -255,3 +261,4 @@ def test_review_digest_additions_count_excludes_quality_issues() -> None:
     digest = compute_review_digest(result)
     assert digest.additions_count == 1
     assert digest.quality_issues_count == 1
+    assert digest.informational_count == 1

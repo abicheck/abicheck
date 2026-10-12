@@ -313,6 +313,7 @@ def _scoped_severity_summary(
         "potential_breaking": len(categorized.potential_breaking),
         "quality_issues": len(categorized.quality_issues),
         "addition": len(categorized.addition),
+        "informational": len(categorized.informational),
     }
     gate = compute_gate_decision(
         relevant_changes,

@@ -223,6 +223,7 @@ def format_release_oneline(
             counts[key] += _count(entry, key)
         total += sum(_count(entry, key) for key in _COUNT_KEYS)
         total += _count(entry, "quality_issues")
+        total += _count(entry, "informational")
     if release_global:
         for key in _COUNT_KEYS:
             counts[key] += _count(release_global, key)

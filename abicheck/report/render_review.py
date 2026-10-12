@@ -46,6 +46,8 @@ class ReviewDigest:
     disposition_audit: DispositionAudit | None = None
     surface_changes: SurfaceChangeSection | None = None  #: workstream G S1
     quality_issues_count: int = 0  #: non-addition compatible findings, own row
+    #: ADR-078: informational outcomes (nothing changed), own row; never gate.
+    informational_count: int = 0
     env_matrix_source_sha256: str | None = None
     #: ADR-067: the rules that reclassified findings, as
     #: `PatternModulation.to_dict()` rows. The digest is the summary a
@@ -150,6 +152,10 @@ def render_review_digest(digest: ReviewDigest) -> str:
     ]
     if digest.quality_issues_count:  # own row, not part of Additions above
         lines.append(f"| ℹ️ Quality issues | {digest.quality_issues_count} |")
+    if digest.informational_count:  # ADR-078: recorded, never gated
+        lines.append(
+            f"| ℹ️ Informational (no material change) | {digest.informational_count} |"
+        )
     if digest.scoped:
         lines.append(
             f"| 🔒 Filtered (internal/private) | {digest.out_of_surface_count} |"

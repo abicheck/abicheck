@@ -3,15 +3,15 @@ doc_type: contributor
 audience:
   - contributor
 level: advanced
-lifecycle: active
+lifecycle: historical
 generated: false
 ---
 
 # An informational, no-material-change reconciliation outcome gates the build under `--severity-preset strict` (2026-09-12)
 
-Index: [Known gaps](../known-gaps.md)
+Index: [Known gaps — closed and moot](../archive/known-gaps-closed.md)
 
-**Status (re-verified 2026-10-11 at `46c127111`): OPEN.** `declaration_coordinates_shifted` and `declaration_identity_unchanged` are still in `COMPATIBLE_KINDS` and not in `ADDITION_KINDS`, so `policy/severity.py` still buckets them as `quality_issues`, and `PRESET_STRICT` still sets that category to `ERROR`. No informational category exists.
+**Status (2026-10-12): CLOSED.** ADR-078 gives these findings a home of their own. `ChangeKindMeta.is_informational` marks a kind whose finding records that nothing a consumer can act on changed. Two shapes qualify: a reconciliation that proves a declaration identical (`declaration_identity_unchanged`, `declaration_coordinates_shifted`), and an aggregate roll-up of findings that are each reported and gated on their own (`public_surface_grew`, `public_surface_shrank`). The flag derives `INFORMATIONAL_KINDS`, a third COMPATIBLE sub-partition beside `ADDITION_KINDS` and `QUALITY_KINDS`. The partition is asserted at import, by `changekind-partition`, and by the tests. Those findings land in `IssueCategory.INFORMATIONAL`, which has no `SeverityConfig` field. Its level is fixed at `info`, so no preset or override gates on it. The findings stay in every report: `summary.informational`, `severity.categories.informational`, a Markdown section, the release count and bucket, and the PR comment, which no longer says "Quality policy violation" for them. `summary.quality_issues` narrows, so the report schema is now 6.0 and the release schema 2.0. Regression test: `tests/test_informational_never_gates.py`. Through the CLI it covers every informational kind under every preset and the legacy scheme, the full `quality_issues`×`addition` level domain, and every COMPATIBLE kind under `strict` as a control. It also covers the whole `SeverityConfig` domain through the typed API, and the catalog validation. Kinds deliberately left in `quality_issues` (hardening improvements, metadata drift, `typedef_version_sentinel`, `abi_surface_explosion`) are listed with the reasons in ADR-078 D2.
 
 
 Raised as a triage question ("is `quality_issues` the right bucket for a

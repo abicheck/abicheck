@@ -98,9 +98,9 @@ class TestChangeKindRegistry:
         registry_additions = {ChangeKind(v) for v in REGISTRY.addition_kinds()}
         assert ADDITION_KINDS == registry_additions
 
-    def test_quality_kinds_is_compatible_minus_additions(self):
-        """QUALITY_KINDS = COMPATIBLE_KINDS - ADDITION_KINDS."""
-        assert QUALITY_KINDS == frozenset(COMPATIBLE_KINDS - ADDITION_KINDS)
+    def test_quality_kinds_is_compatible_minus_additions_and_informational(self):
+        info = {ChangeKind(v) for v in REGISTRY.informational_kinds()}  # ADR-078
+        assert QUALITY_KINDS == frozenset(COMPATIBLE_KINDS - ADDITION_KINDS - info)
 
     def test_impact_text_derived_from_registry(self):
         """IMPACT_TEXT dict matches registry impact fields."""
