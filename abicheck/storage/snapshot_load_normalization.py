@@ -178,10 +178,10 @@ def backfill_missing_elf_binding(snap: AbiSnapshot) -> None:
     """
     if snap.elf is None:
         return
-    sym_map = snap.elf.symbol_map
+    elf = snap.elf
     for func in snap.declarations.functions:
         if func.elf_binding is None:
-            elf_sym = sym_map.get(func.mangled)
+            elf_sym = elf.unambiguous_symbol(func.mangled)
             if elf_sym is not None:
                 func.elf_binding = elf_sym.binding
                 # Plain attribute assignment never re-runs __post_init__, so
@@ -191,7 +191,7 @@ def backfill_missing_elf_binding(snap: AbiSnapshot) -> None:
                 func.elf_binding_fact = Fact.present(elf_sym.binding)
     for var in snap.declarations.variables:
         if var.elf_binding is None:
-            elf_sym = sym_map.get(var.mangled)
+            elf_sym = elf.unambiguous_symbol(var.mangled)
             if elf_sym is not None:
                 var.elf_binding = elf_sym.binding
                 var.elf_binding_fact = Fact.present(elf_sym.binding)

@@ -26,6 +26,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from .compare.elf_alias_pairs import pair_elf_aliases
 from .diff_helpers import make_change
 from .diff_versioning import (  # noqa: F401 — re-exported for existing callers
     _UNPARSEABLE_VERSION as _UNPARSEABLE_VERSION,
@@ -306,10 +307,7 @@ def _diff_elf_symbol_metadata(
     old_syms = old_elf.symbol_map
     new_syms = new_elf.symbol_map
 
-    for sym_name, s_old in old_syms.items():
-        s_new = new_syms.get(sym_name)
-        if s_new is None:
-            continue
+    for sym_name, s_old, s_new in pair_elf_aliases(old_elf, new_elf):
         changes.extend(_diff_elf_symbol_pair(old, new, sym_name, s_old, s_new))
 
     for sym_name, s_new in new_syms.items():
