@@ -28,6 +28,7 @@ WRITER = 3
 
 
 def _snap(ret: str, version: str) -> AbiSnapshot:
+    """A one-library snapshot whose function returns *ret*."""
     from abicheck.model import Function, Visibility
 
     return AbiSnapshot(
@@ -43,6 +44,7 @@ def _snap(ret: str, version: str) -> AbiSnapshot:
 
 
 def _facts(ret: str) -> BundleFacts:
+    """A captured BundleFacts of one library returning int."""
     return capture_bundle_facts({"liba.so": _snap(ret, "1")})
 
 
@@ -70,6 +72,7 @@ def _store_with(
 def test_bundle_notice_matches_the_project_snapshot_surface(
     axis: str, state: str, ret: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """The BundleFacts drift notice matches the ProjectSnapshot surface and never moves the verdict."""
     monkeypatch.setattr(versioning, "EXTRACTOR_GENERATION", WRITER)
     monkeypatch.setattr(versioning, "RESOLVER_GENERATION", WRITER)
     stated: int | None = {
@@ -108,4 +111,5 @@ def test_bundle_notice_matches_the_project_snapshot_surface(
 
 
 def _snap_of(facts: BundleFacts) -> AbiSnapshot:
+    """The single per-library snapshot of *facts*."""
     return facts.per_library_snapshots["liba.so"]

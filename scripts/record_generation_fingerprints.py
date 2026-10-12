@@ -28,6 +28,7 @@ from abicheck.storage import generation_scope as scope, versioning
 
 
 def _entry(axis: str, generation: int, reason: str) -> dict[str, object]:
+    """The record entry for *axis* at *generation*: digests, fingerprint and reason."""
     files = scope.file_digests(scope.scope_files(axis))
     return {
         "generation": generation,
@@ -38,6 +39,7 @@ def _entry(axis: str, generation: int, reason: str) -> dict[str, object]:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Re-record one axis after a bump or a reviewed no-semantic-change; returns the exit code."""
     parser = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
     parser.add_argument("--axis", required=True, choices=["extractor", "resolver"])
     mode = parser.add_mutually_exclusive_group(required=True)

@@ -28,14 +28,17 @@ REPO_ROOT = scope.REPO_ROOT
 
 
 def _recorded() -> dict:
+    """The committed fingerprint record."""
     return json.loads(scope.RECORD_PATH.read_text(encoding="utf-8"))
 
 
 def _live(axis: str) -> dict[str, str]:
+    """The current per-file digests of *axis*'s scope."""
     return scope.file_digests(scope.scope_files(axis))
 
 
 def _fix_hint(axis: str) -> str:
+    """The two re-record commands a failing author needs."""
     return (
         f"\n  If extraction/resolution semantics changed: bump the {axis.upper()}_"
         f"GENERATION constant in abicheck/storage/versioning.py, then run\n"
@@ -49,6 +52,7 @@ def _fix_hint(axis: str) -> str:
 
 @pytest.mark.parametrize("axis", ["extractor", "resolver"])
 def test_recorded_fingerprint_matches_the_scoped_source(axis: str) -> None:
+    """A scoped edit without a re-record fails with the changed files named."""
     recorded = _recorded()[axis]
     live = _live(axis)
     if recorded["files"] == live:
@@ -67,6 +71,7 @@ def test_recorded_fingerprint_matches_the_scoped_source(axis: str) -> None:
 
 @pytest.mark.parametrize("axis", ["extractor", "resolver"])
 def test_recorded_generation_is_the_constant_in_versioning(axis: str) -> None:
+    """The recorded generation equals the versioning constant."""
     constant = getattr(versioning, f"{axis.upper()}_GENERATION")
     recorded = _recorded()[axis]["generation"]
     assert recorded == constant, (
@@ -122,6 +127,7 @@ def test_fingerprint_moves_for_any_scoped_edit_and_not_for_an_unscoped_one() -> 
     base = scope.file_digests(axis_files)
 
     def oracle(digests: dict[str, str]) -> str:
+        """Fingerprint over *digests* computed independently of the implementation."""
         h = hashlib.sha256(b"abicheck-generation-fingerprint-v1\0")
         for path in sorted(digests):
             h.update(path.encode() + b"\0" + digests[path].encode() + b"\0")
@@ -138,6 +144,7 @@ def test_fingerprint_moves_for_any_scoped_edit_and_not_for_an_unscoped_one() -> 
 
 
 def test_record_file_is_present_and_well_formed() -> None:
+    """Each record carries its fields, a consistent fingerprint and repo-relative paths."""
     data = _recorded()
     for axis in ("extractor", "resolver"):
         entry = data[axis]
@@ -146,3 +153,28 @@ def test_record_file_is_present_and_well_formed() -> None:
         assert isinstance(entry["files"], dict) and entry["files"]
         # Stored paths are repo-relative, never absolute.
         assert all(not Path(p).is_absolute() for p in entry["files"])
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        b"def f():\n    return 1\n",
+        b"def f():\r\n    return 1\r\n",
+        b"def f():\r\n    return 1\n",
+        b"x = '\r'\n",  # a lone CR is content, not a line ending
+    ],
+)
+def test_digest_is_the_same_for_any_checkout_line_endings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, raw: bytes
+) -> None:
+    """Oracle: sha256 of the LF-normalized bytes, computed here directly.
+
+    A Windows checkout with autocrlf rewrites every LF to CRLF. The recorded
+    fingerprint must not move for that, or the gate reports drift that is not
+    a semantic change.
+    """
+    monkeypatch.setattr(scope, "REPO_ROOT", tmp_path)
+    (tmp_path / "mod.py").write_bytes(raw)
+    lf = raw.replace(b"\r\n", b"\n")
+    expected = hashlib.sha256(lf).hexdigest()
+    assert scope.file_digests(["mod.py"]) == {"mod.py": expected}

@@ -113,10 +113,12 @@ RESOLVER_NON_SEMANTIC_FILES: dict[str, str] = {
 
 
 def _rel(path: Path) -> str:
+    """Repo-relative POSIX path of *path*."""
     return path.relative_to(REPO_ROOT).as_posix()
 
 
 def _extractor_files() -> tuple[str, ...]:
+    """Every extractor-scope file, repo-relative and sorted."""
     found: set[Path] = set((PACKAGE_ROOT / "extract").rglob("*.py"))
     for pattern in EXTRACTOR_ROOT_GLOBS:
         found.update(PACKAGE_ROOT.glob(pattern))
@@ -140,16 +142,20 @@ def scope_files(axis: str) -> tuple[str, ...]:
 
 
 def file_digests(paths: Iterable[str]) -> dict[str, str]:
-    """``{repo-relative path: sha256 of its bytes}``, ``"MISSING"`` if absent.
+    """``{repo-relative path: sha256 of its content}``, ``"MISSING"`` if absent.
 
-    A missing file is recorded rather than dropped, so a deleted or renamed
-    scoped module is a change, not a silently smaller scope.
+    Content is hashed with CRLF folded to LF, so a checkout that converts line
+    endings (Windows with autocrlf) yields the same digest as the LF original.
+    A lone CR is content and is left alone. A missing file is recorded rather
+    than dropped, so a deleted or renamed scoped module is a change, not a
+    silently smaller scope.
     """
     digests: dict[str, str] = {}
     for rel in paths:
         path = REPO_ROOT / rel
         if path.is_file():
-            digests[rel] = hashlib.sha256(path.read_bytes()).hexdigest()
+            content = path.read_bytes().replace(b"\r\n", b"\n")
+            digests[rel] = hashlib.sha256(content).hexdigest()
         else:
             digests[rel] = "MISSING"
     return digests
