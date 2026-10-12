@@ -151,3 +151,98 @@ class TestRealParamTypeChangeIsStillReported:
     ) -> None:
         kinds = _param_kinds(guard_dumps["at_line_6"], guard_dumps["int_param"])
         assert ChangeKind.FUNC_PARAMS_CHANGED in kinds, kinds
+
+
+# ---------------------------------------------------------------------------
+# Insertion case: an unrelated closure added to the SAME header, outside the
+# function that spells the guarded closure. Ordinals are per header and per
+# marker kind, so the guarded closure's ordinal moves from #1 to #2 on the new
+# side -- the spelling changes, but the linker symbol does not (the closure's
+# Itanium encoding is scoped to ``arena_fn<int>::make()``, not the header).
+# ---------------------------------------------------------------------------
+
+_CPP_HEADER = """\
+#pragma once
+template <class F> struct raii_guard {{ F f; }};
+{pre}
+namespace tbb_like {{
+template <class T> struct arena_fn {{
+  static auto make() {{ {make_body} }}
+}};
+}}
+inline auto make_guard() {{ return tbb_like::arena_fn<int>::make(); }}
+void run_task(decltype(make_guard()) g);
+"""
+
+_PLAIN_MAKE = "return raii_guard<decltype([] {})>{};"
+_EXTRA_BEFORE_MAKE = (
+    "\ninline auto unrelated_guard() {{ return raii_guard<decltype([] {{}})>{{}}; }}\n"
+)
+_TWO_EXTRA_BEFORE_MAKE = _EXTRA_BEFORE_MAKE + (
+    "inline auto unrelated_guard2() {{ return raii_guard<decltype([] {{}})>{{}}; }}\n"
+)
+_CPP_IMPL = "void run_task(decltype(make_guard()) g) {}"
+
+_CPP_PARAM_KINDS = {
+    ChangeKind.FUNC_PARAMS_CHANGED,
+    ChangeKind.TEMPLATE_PARAM_TYPE_CHANGED,
+}
+
+
+def _cpp_header(pre: str = "", make_body: str = _PLAIN_MAKE) -> str:
+    return _CPP_HEADER.format(pre=pre, make_body=make_body)
+
+
+@pytest.fixture(scope="module")
+def insertion_dumps(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
+    _need_toolchain()
+    root = tmp_path_factory.mktemp("closure_insertion")
+    shapes = {
+        "base": (_cpp_header(), _CPP_IMPL),
+        "one_unrelated_above": (_cpp_header(pre=_EXTRA_BEFORE_MAKE), _CPP_IMPL),
+        "two_unrelated_above": (_cpp_header(pre=_TWO_EXTRA_BEFORE_MAKE), _CPP_IMPL),
+        # A lambda added INSIDE make(), before the guarded one, changes the
+        # closure's own Itanium encoding (Ul...E_ -> Ul...E0_): a real linker
+        # symbol change, which must stay a removal/addition.
+        "extra_inside_make": (
+            _cpp_header(
+                make_body="auto unused = [] {}; " + _PLAIN_MAKE,
+            ),
+            _CPP_IMPL,
+        ),
+    }
+    return {
+        name: _build_and_dump(root, name, header, impl, root / f"{name}.json")
+        for name, (header, impl) in shapes.items()
+    }
+
+
+class TestUnrelatedClosureInsertedAboveIsNoFinding:
+    @pytest.mark.parametrize("shifted", ["one_unrelated_above", "two_unrelated_above"])
+    def test_inserted_closure_above_does_not_churn_the_exported_function(
+        self, insertion_dumps: dict[str, Path], shifted: str
+    ) -> None:
+        result = compare(
+            load_snapshot(insertion_dumps["base"]),
+            load_snapshot(insertion_dumps[shifted]),
+        )
+        churned = [
+            (c.kind, c.symbol)
+            for c in result.changes
+            if c.kind in _CPP_PARAM_KINDS and c.symbol and "run_task" in c.symbol
+        ]
+        assert not churned, churned
+
+
+class TestClosureInsideMakeIsStillAReportedBreak:
+    def test_removed_exported_key_is_reported_when_the_closure_encoding_changes(
+        self, insertion_dumps: dict[str, Path]
+    ) -> None:
+        old = load_snapshot(insertion_dumps["base"])
+        new = load_snapshot(insertion_dumps["extra_inside_make"])
+        old_key = next(
+            f.mangled for f in old.declarations.functions if f.name == "run_task"
+        )
+        result = compare(old, new)
+        removed = [c for c in result.changes if c.kind == ChangeKind.FUNC_REMOVED]
+        assert any(c.symbol == old_key for c in removed), [c.symbol for c in removed]

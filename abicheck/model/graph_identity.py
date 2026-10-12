@@ -578,3 +578,44 @@ def path_basename(path: str) -> str:
 
 #: Internal spelling kept for this module's own call sites.
 _basename = path_basename
+
+
+#: A closure/anonymous-tag marker carrying the per-header ordinal
+#: ``storage.closure_identity.renumber_anonymous_closure_identities`` writes
+#: in place of the source coordinates (``(lambda:lib.h#1)``), up to its
+#: closing ``#<digits>`` (the basename may not contain ``"``, ``(``, ``)``
+#: or ``:``, the same shape :data:`_NORMALIZED_CLOSURE_DISCRIMINATOR_RE`
+#: already relies on).
+_CLOSURE_ORDINAL_RE = re.compile(
+    r"\b(lambda|unnamed\s+\w+|anonymous\s+\w+):[^():\"]*#\d+\b"
+)
+
+
+def closure_discriminator_free_identity(identity: str) -> str:
+    """*identity*, with every closure/anonymous-tag marker's discriminator
+    removed, whether that discriminator is the source ``:<line>:<col>``
+    spelling or the per-header ordinal ``#<n>`` the dump renumbering writes.
+
+    :func:`closure_location_free_identity` handles only the coordinate
+    spelling. A closure that an unrelated edit pushed down the header is
+    renumbered from ``#1`` to ``#2`` on the new side, and that text would
+    compare unequal under the coordinate-only helper. This helper is the
+    comparison for the one question "do two spellings differ only in which
+    closure a marker names?". It must only be used where something other
+    than the spelling proves the two sides name the same symbol (see
+    :mod:`abicheck.compare.closure_respelling`), never as a key.
+
+    Idempotent, a no-op on any identity with no closure marker, and never
+    touches a ``"..."`` quoted literal (both helpers it composes already
+    protect quoted spans).
+    """
+    if "#" not in identity and ":" not in identity:
+        return identity
+    # Only unquoted text: a ``"..."`` span is a C++20 fixed-string argument
+    # whose content is literal, never a closure marker (see the docstring).
+    parts = re.split(r'("[^"]*")', identity)
+    stripped = [
+        part if index % 2 else _CLOSURE_ORDINAL_RE.sub(r"\1", part)
+        for index, part in enumerate(parts)
+    ]
+    return closure_location_free_identity("".join(stripped))
