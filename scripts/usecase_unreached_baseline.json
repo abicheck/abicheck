@@ -4,7 +4,7 @@
   "scenarios"
  ],
  "revision": "f898220fd8c87165e2edfe2773c88d3e5aac42be",
- "count": 6806,
+ "count": 6804,
  "unreached": [
   "abicheck/_compiler_options.py::_forwarded_driver_mode_override",
   "abicheck/_compiler_options.py::_opaque_option_source_tokens",
@@ -5732,7 +5732,6 @@
   "abicheck/service_compare_evidence.py::resolve_dump_request_evidence",
   "abicheck/service_compare_pipeline.py::_deadline_bound_side_worker",
   "abicheck/service_compare_pipeline.py::classify_compare_pair",
-  "abicheck/service_compare_pipeline.py::classify_compare_pair.<locals>._hashable_path",
   "abicheck/service_compare_pipeline.py::run_compare",
   "abicheck/service_compare_pipeline.py::run_compare_request",
   "abicheck/service_dump_cache.py::_compile_context_is_keyable",
@@ -6569,7 +6568,6 @@
   "abicheck/workflows/crosscheck_ownership.py::release_level_checks",
   "abicheck/workflows/crosscheck_ownership.py::release_owned_checks",
   "abicheck/workflows/crosscheck_ownership.py::release_owned_checks_scope",
-  "abicheck/workflows/depth_evidence_contract.py::record_for_compare_request",
   "abicheck/workflows/disposition.py::supersede_as_suppressed",
   "abicheck/workflows/dwarf_snapshot_assembly.py::build_snapshot_from_dwarf",
   "abicheck/workflows/env_matrix_audit.py::env_matrix_candidate_findings",

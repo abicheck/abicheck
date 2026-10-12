@@ -44,6 +44,7 @@ if TYPE_CHECKING:
     from .checker_types import DiffResult
     from .model import AbiSnapshot
     from .model.change import Change
+    from .workflows.compare_classify import ResolvedComparePair
     from .workflows.policy_file import PolicyFile
 
 
@@ -80,6 +81,39 @@ def _resolve_side_pack(
         return resolve_side_pack(build_info, sources, snap, on_warning=_echo)
     except SnapshotError as exc:
         raise click.ClickException(str(exc)) from exc
+
+
+def _with_out_of_band_packs(
+    pair: ResolvedComparePair,
+    old_build_info: Path | None,
+    old_sources: Path | None,
+    new_build_info: Path | None,
+    new_sources: Path | None,
+) -> ResolvedComparePair:
+    """*pair* with each side's explicit ``--build-info``/``--sources`` pack
+    folded over its embedded payload (:func:`_resolve_side_pack`).
+
+    A side with neither flag is returned as-is. Otherwise the side is a
+    shallow copy with only ``build_source`` rebound, so the resolved snapshot
+    itself is never mutated.
+    """
+    import copy
+    import dataclasses
+
+    def _side(
+        snap: AbiSnapshot, build_info: Path | None, sources: Path | None
+    ) -> AbiSnapshot:
+        if build_info is None and sources is None:
+            return snap
+        out = copy.copy(snap)
+        out.build_source = _resolve_side_pack(build_info, sources, snap)
+        return out
+
+    return dataclasses.replace(
+        pair,
+        old=_side(pair.old, old_build_info, old_sources),
+        new=_side(pair.new, new_build_info, new_sources),
+    )
 
 
 def diff_embedded_build_source(

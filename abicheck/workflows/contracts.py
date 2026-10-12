@@ -48,7 +48,7 @@ was split into its two phases (``service_compare_pipeline``), which gave the
 CLI's ADR-049 configuration step (``compare_configuration``) a seam to run in —
 the thing that had made a shared resolution look impossible — and
 ``_resolve_compare_snapshots`` now builds one of these requests and
-delegates. So this really is the one resolution every front end uses.
+delegates, and the CLI classifies through ``workflows.compare_classify`` too.
 ADR-055's "Two-resolution-path finding", first answered as option (b), is
 recorded as settled the other way in D1's "Structural half" note.
 

@@ -108,7 +108,8 @@ class TestResolvedContractModeWiring:
             return _real_compare_snapshots(*args, **kwargs)
 
         monkeypatch.setattr(
-            "abicheck.service.compare_snapshots", _capturing_compare_snapshots
+            "abicheck.workflows.compare_policy.compare_snapshots",
+            _capturing_compare_snapshots,
         )
 
         result = CliRunner().invoke(
@@ -140,7 +141,8 @@ class TestResolvedContractModeWiring:
             return _real_compare_snapshots(*args, **kwargs)
 
         monkeypatch.setattr(
-            "abicheck.service.compare_snapshots", _capturing_compare_snapshots
+            "abicheck.workflows.compare_policy.compare_snapshots",
+            _capturing_compare_snapshots,
         )
 
         result = CliRunner().invoke(
@@ -183,7 +185,8 @@ class TestResolvedContractModeWiring:
             return _real_compare_snapshots(*args, **kwargs)
 
         monkeypatch.setattr(
-            "abicheck.service.compare_snapshots", _capturing_compare_snapshots
+            "abicheck.workflows.compare_policy.compare_snapshots",
+            _capturing_compare_snapshots,
         )
 
         result = CliRunner().invoke(

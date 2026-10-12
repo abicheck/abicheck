@@ -270,4 +270,40 @@ INTEGRATION_BUG_CLASSES: tuple[BugClass, ...] = (
             "tests/test_detector_registration_order.py",
         ),
     ),
+    BugClass(
+        id="identity.edge_matched_on_coarse_key",
+        invariant=(
+            "A graph diff matches edges on their full identity "
+            "(`GraphEdge.relation_key()`: src, dst, kind, role), never on a "
+            "coarser projection: a dependency kept on both sides whose role "
+            "set differs is reported as a changed relation, never dropped "
+            "and never split into a removed+added pair, and identical role "
+            "sets report nothing. When exactly one side carries no role "
+            "data (a graph stored before roles were stamped) the relation "
+            "is a coverage gap, never a fabricated change. The reported "
+            "instance was `diff_source_graph` keying on `(src, dst, kind)`, "
+            "so `param` -> `return` on a public declaration diffed empty."
+        ),
+        fixed_by=(1557,),
+        seed_tests=(
+            # Exhaustive domain: every pair of role sets of size 0-2 over
+            # each role-bearing kind's roles plus the role-less case, against
+            # the raw per-side relation_key() sets as oracle; plus real gcc
+            # libraries through `abicheck dump`/`compare`.
+            "tests/test_source_graph_role_diff.py",
+            # Harness H3 cell: role-distinct relations keep distinct keys.
+            "tests/test_family_f3_identity.py",
+        ),
+        public_surfaces=("cli",),
+        axes={
+            "edge_kind": (
+                "DECL_HAS_TYPE",
+                "TYPE_HAS_FIELD_TYPE",
+                "TYPE_INHERITS",
+                "DECL_REFERENCES_DECL",
+            ),
+            "role_data": ("stamped", "role_less_one_side", "role_less_both_sides"),
+            "entry_visibility": ("public", "private"),
+        },
+    ),
 )

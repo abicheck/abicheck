@@ -40,6 +40,7 @@ reports it.
 from __future__ import annotations
 
 import copy
+import itertools
 import json
 import re
 from collections.abc import Callable
@@ -882,3 +883,37 @@ def entity_id_collisions() -> list[str]:
         ),
     }
     return [f"{label}: {a}" for label, (a, b) in cases.items() if a == b]
+
+
+# ---------------------------------------------------------------------------
+# Negative control over graph edge identity (identity.edge_matched_on_coarse_key)
+# ---------------------------------------------------------------------------
+
+
+def edge_role_collisions() -> list[str]:
+    """Two edges that differ only by role are two relations: their
+    ``relation_key()`` differs, and a diff from one to the other is reported
+    (as a changed relation), never read as no change."""
+    from abicheck.buildsource.source_graph_compare import diff_source_graph
+    from abicheck.model.graph_facts import GraphEdge, GraphNode
+    from abicheck.model.source_graph import SourceGraphSummary
+    from abicheck.model.source_graph_coverage import ROLE_COVERAGE_MATRIX
+
+    def graph(kind: str, role: str) -> SourceGraphSummary:
+        g = SourceGraphSummary()
+        g.add_node(GraphNode(id="decl://f", kind="source_decl"))
+        g.add_node(GraphNode(id="type://T", kind="record_type"))
+        g.add_edge(
+            GraphEdge(src="decl://f", dst="type://T", kind=kind, attrs={"role": role})
+        )
+        return g
+
+    out: list[str] = []
+    for kind, roles in ROLE_COVERAGE_MATRIX.items():
+        for a, b in itertools.combinations(roles, 2):
+            old, new = graph(kind, a), graph(kind, b)
+            if old.edges[0].relation_key() == new.edges[0].relation_key():
+                out.append(f"{kind} {a}/{b}: one relation key")
+            if not diff_source_graph(old, new).changed:
+                out.append(f"{kind} {a} -> {b}: diffs as no change")
+    return out
