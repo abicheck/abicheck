@@ -88,7 +88,6 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Literal
 
-from ..checker import compare
 from ..checker_types import DiffResult
 from ..compare.finding_identity import report_finding_id
 from ..model.change import Change
@@ -100,6 +99,7 @@ from ..policy.finding_evolution import apply_finding_evolution
 from ..policy.versioning_policy import VersioningPolicy, stated_versioning_policy_of
 from ..policy_file import PolicyFile
 from ..serialization import load_snapshot
+from .compare_policy import compare_snapshots
 from .history_deprecation import (
     DeprecationComplianceFinding,
     evaluate_deprecation_compliance,
@@ -588,7 +588,11 @@ def build_longitudinal_history(
     # pairwise engine (module docstring). Not recorded in `pairwise`, and its
     # confidence is not consulted for `evidence_uncertain`: nothing was removed.
     def _pair(a: AbiSnapshot, b: AbiSnapshot) -> DiffResult:
-        return compare(
+        # The Tier-2 chokepoint, not the Tier-1 core: it carries the same
+        # defaults `compare` runs under (pattern verdicts, contract
+        # evaluation, surface metrics), so a history's pairwise verdicts and
+        # findings match the pair's own `compare` result.
+        return compare_snapshots(
             a, b, policy=policy, policy_file=policy_file, scope_to_public_surface=True
         )
 
