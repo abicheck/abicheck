@@ -27,9 +27,11 @@ from typing import TYPE_CHECKING
 
 from ..model.dwarf_facts import (
     AdvancedDwarfMetadata,
+    AdvancedExtractionStatus,
     DwarfMetadata,
     EnumInfo,
     StructLayout,
+    advanced_extraction_status,
     advanced_facts_collected,
     debug_info_present,
 )
@@ -37,7 +39,12 @@ from ..model.dwarf_facts import (
 if TYPE_CHECKING:
     from ..model.snapshot import AbiSnapshot
 
-__all__ = ["DebugLayoutView", "debug_layout_view", "restrict_debug_layout"]
+__all__ = [
+    "DebugLayoutView",
+    "advanced_dwarf_support",
+    "debug_layout_view",
+    "restrict_debug_layout",
+]
 
 
 @dataclass(frozen=True)
@@ -54,6 +61,8 @@ class DebugLayoutView:
     base_type_sizes: Mapping[str, int]
     #: The advanced channel's facts were genuinely parsed (not presence-only).
     advanced_collected: bool
+    #: What the advanced extraction recorded (``UNRECORDED`` when it did not).
+    advanced_status: AdvancedExtractionStatus
     #: Whole layout payload for the layout detector family; an empty one when
     #: the side carries none, so a detector never branches on ``None``.
     layout: DwarfMetadata
@@ -78,6 +87,7 @@ def debug_layout_view(snap: AbiSnapshot) -> DebugLayoutView:
         enums=layout.enums,
         base_type_sizes=layout.base_types,
         advanced_collected=advanced_facts_collected(advanced),
+        advanced_status=advanced_extraction_status(advanced),
         layout=layout,
         advanced=advanced or AdvancedDwarfMetadata(),
     )
@@ -99,3 +109,25 @@ def restrict_debug_layout(
         dwarf.structs = {k: v for k, v in dwarf.structs.items() if k in record_scope}
     if enum_scope is not None:
         dwarf.enums = {k: v for k, v in dwarf.enums.items() if k in enum_scope}
+
+
+def advanced_dwarf_support(old: AbiSnapshot, new: AbiSnapshot) -> tuple[bool, str]:
+    """Support gate for the ``advanced_dwarf`` detector.
+
+    A side whose advanced extraction failed, or never ran, has no usable facts,
+    so the detector is *not evaluated* on that pair. The reason names the state:
+    a failure must never read like a side that simply has no debug info.
+    """
+    sides = (("old", debug_layout_view(old)), ("new", debug_layout_view(new)))
+    if all(view.advanced_collected for _side, view in sides):
+        return True, "DWARF advanced extraction completed on both sides"
+    for side, view in sides:
+        if view.advanced_status is AdvancedExtractionStatus.FAILED:
+            return False, (
+                f"DWARF advanced extraction failed on the {side} side; its facts "
+                "are unknown, not absent"
+            )
+    for side, view in sides:
+        if view.advanced_status is AdvancedExtractionStatus.NOT_RUN:
+            return False, f"DWARF advanced extraction did not run on the {side} side"
+    return False, "missing DWARF advanced metadata"
