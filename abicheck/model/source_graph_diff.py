@@ -63,10 +63,9 @@ class GraphRelationChange:
 class GraphSummaryDiff:
     """Structural delta between two :class:`SourceGraphSummary` snapshots.
 
-    A pure structural diff (which nodes/edges entered or left the graph) — the
-    foundation the ``graph compare`` command renders and that a later phase maps
-    onto the ADR-031 D6 secondary findings. Per ADR-028 D3 / ADR-031 D6 these
-    deltas *explain and prioritize*; they never decide an ABI break on their own.
+    A pure structural diff (which nodes/edges entered or left the graph). Per
+    ADR-028 D3 / ADR-031 D6 these deltas *explain and prioritize*; they never
+    decide an ABI break on their own.
 
     ``added_edges``/``removed_edges`` are keyed on the coarse
     ``GraphEdge.key()`` (ADR-046 D1's promise to existing callers). A
@@ -84,6 +83,8 @@ class GraphSummaryDiff:
     removed_edges: list[GraphEdge] = field(default_factory=list)
     changed_edges: list[GraphRelationChange] = field(default_factory=list)
     role_unknown_edges: list[GraphRelationChange] = field(default_factory=list)
+    #: ``SEMANTIC_FAMILIES`` one side never looked for: unknown, not diffed.
+    coverage_gaps: list[str] = field(default_factory=list)
 
     @property
     def changed(self) -> bool:
@@ -103,6 +104,7 @@ class GraphSummaryDiff:
             "removed_edges": [e.to_dict() for e in self.removed_edges],
             "changed_edges": [c.to_dict() for c in self.changed_edges],
             "role_unknown_edges": [c.to_dict() for c in self.role_unknown_edges],
+            "coverage_gaps": list(self.coverage_gaps),
             "counts": {
                 "added_nodes": len(self.added_nodes),
                 "removed_nodes": len(self.removed_nodes),
