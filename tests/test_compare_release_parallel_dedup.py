@@ -29,9 +29,9 @@ from pathlib import Path
 
 import pytest
 
-from abicheck.cli_compare_release import _compare_release_parallel
-from abicheck.cli_compare_release_pairwise import (
+from abicheck.workflows.release_members import (
     ReleaseMemberContext,
+    _compare_parallel as _compare_release_parallel,
     release_parent_request,
 )
 
@@ -78,16 +78,14 @@ class TestParallelFanOutDedupPropagation:
             return {"library": f"{key}.so", "verdict": "NO_CHANGE"}
 
         monkeypatch.setattr(
-            "abicheck.cli_compare_release_pairwise._compare_one_library",
+            "abicheck.workflows.release_members.compare_release_member",
             _fake_compare_one_library,
         )
 
         ctx = self._member_context(tmp_path, pf)
         with caplog.at_level(logging.WARNING, logger="abicheck.service"):
             with dedup_validate_overrides_warnings():
-                results = _compare_release_parallel(
-                    ["a", "b"], ctx, ctx.old_map, max_workers=4
-                )
+                results = _compare_release_parallel(["a", "b"], ctx, max_workers=4)
         assert len(results) == 2
         # Deduped across both worker threads -- not one warning per library.
         assert caplog.text.count("HIGH RISK") == 1
@@ -109,15 +107,13 @@ class TestParallelFanOutDedupPropagation:
             return {"library": f"{key}.so", "verdict": "NO_CHANGE"}
 
         monkeypatch.setattr(
-            "abicheck.cli_compare_release_pairwise._compare_one_library",
+            "abicheck.workflows.release_members.compare_release_member",
             _fake_compare_one_library,
         )
 
         ctx = self._member_context(tmp_path, pf)
         with caplog.at_level(logging.WARNING, logger="abicheck.service"):
-            results = _compare_release_parallel(
-                ["a", "b"], ctx, ctx.old_map, max_workers=4
-            )
+            results = _compare_release_parallel(["a", "b"], ctx, max_workers=4)
         assert len(results) == 2
         assert caplog.text.count("HIGH RISK") == 2
 
@@ -145,7 +141,7 @@ class TestParallelFanOutDedupPropagation:
             return {"library": f"{key}.so", "verdict": "NO_CHANGE"}
 
         monkeypatch.setattr(
-            "abicheck.cli_compare_release_pairwise._compare_one_library",
+            "abicheck.workflows.release_members.compare_release_member",
             _fake_compare_one_library,
         )
 
@@ -153,8 +149,6 @@ class TestParallelFanOutDedupPropagation:
         ctx = self._member_context(tmp_path, pf, keys)
         with caplog.at_level(logging.WARNING, logger="abicheck.service"):
             with dedup_validate_overrides_warnings():
-                results = _compare_release_parallel(
-                    list(keys), ctx, ctx.old_map, max_workers=16
-                )
+                results = _compare_release_parallel(list(keys), ctx, max_workers=16)
         assert len(results) == 40
         assert caplog.text.count("HIGH RISK") == 1

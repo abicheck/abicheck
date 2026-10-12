@@ -63,7 +63,7 @@ opaque hash.
 **Closed: the directory/package release fan-out's own *per-library* digests
 now reach the rich tier under ``--pack``** (Codex review, PR #803, fresh
 evidence; closed in CLI cleanup phase two, "PR B" first slice).
-``cli_compare_release._run_compare_pair`` used to forward only
+``workflows.release_members.compare_member_pair`` used to forward only
 ``PackApplication.policy_overrides``/``internal_namespaces`` to
 ``service.run_compare`` for each library -- it never stamped the resolved
 ``CompatibilityEvaluationConfig`` onto that library's own ``DiffResult`` the

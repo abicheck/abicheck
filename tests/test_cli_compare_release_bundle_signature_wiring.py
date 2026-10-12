@@ -36,10 +36,6 @@ import abicheck.bundle as bundle_mod
 from abicheck.bundle_models import BundleSnapshot
 from abicheck.checker_policy import ChangeKind, Verdict
 from abicheck.checker_types import DiffResult
-from abicheck.cli_compare_release_helpers import (
-    _collect_bundle_result,
-    _run_bundle_analysis,
-)
 from abicheck.elf_metadata import ElfImport, ElfMetadata, ElfSymbol
 from abicheck.frontends.cli.release_report import render_release_summary
 from abicheck.model import AbiSnapshot, Function, Visibility
@@ -48,6 +44,10 @@ from abicheck.report.render_release_markdown import (
 )
 from abicheck.workflows.bundle_symbol_status import (
     build_bundle_signature_evidence,
+)
+from abicheck.workflows.release_bundle import (
+    collect_bundle_result as _collect_bundle_result,
+    run_bundle_analysis as _run_bundle_analysis,
 )
 
 

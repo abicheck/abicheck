@@ -25,9 +25,12 @@ Phase 3) is the shared, dependency-free `contracts.py` half of the dump/scan
 artifact-resolution contract — a session type owning cleanup-thunk lifetime
 across a resolve/execute pipeline.
 
-`member_compare.compare_member` is the one per-member compare primitive (a
-release member scores as the scalar compare of its pair; pinned by
-`tests/test_compare_cardinality_invariance.py`) -- extend it, not the frontend.
+`release_compare.execute_release_compare` runs a resolved release plan
+(member fan-out: `release_members`; bundle stage: `release_bundle`), reporting
+through the `release_compare_reporter` port; the CLI only parses and renders.
+Each member goes through `member_compare.compare_member`, the one per-member
+compare primitive (a member scores as the scalar compare of its pair; pinned by
+`tests/test_release_compare_workflow.py`) -- extend these, not the frontend.
 
 `workflows.artifact` is now complete as a `Request -> ResolvedPlan -> Result`
 trio (ADR-061 Phase 3): `resolve.py` decides what an extraction will do

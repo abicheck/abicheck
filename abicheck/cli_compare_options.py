@@ -169,7 +169,7 @@ def _reject_set_input_flags(
     # reject here. `--suppress` itself stays supported on a release
     # comparison exactly as it was without the token -- and the per-library
     # fan-out now *does* disclose an audit section per library
-    # (`cli_compare_release_pairwise`), which it did not when this rejection
+    # (`workflows.release_members`), which it did not when this rejection
     # was first removed. Dropping the rejection without that would have let
     # a passing release report hide which breaking findings a rule disposed
     # of, which ADR-067 makes part of the result rather than a display

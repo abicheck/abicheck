@@ -65,6 +65,8 @@ from typing import TYPE_CHECKING, Any
 from ..contract_relevance_types import SelectorLayer
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from ..compatibility_evaluation_config import CompatibilityEvaluationConfig
     from ..compatibility_evaluation_frontend import ProjectCompatibilityInputs
     from ..policy.release_gate_options import GateOptions
@@ -108,19 +110,26 @@ def _project_inputs_for_request(
     request states no project overrides, so an unaffected request builds
     the identical config it always has.
     """
-    if not request.project_policy_overrides:
-        return None
+    return project_inputs_for_overrides(request.project_policy_overrides or ())
+
+
+def project_inputs_for_overrides(
+    overrides: Iterable[tuple[Any, Any]],
+) -> ProjectCompatibilityInputs | None:
+    """Already-parsed ``ChangeKind -> Verdict`` project overrides as the
+    resolver's ``PROJECT_CONFIG`` input (``None`` when there are none), the
+    one projection every typed route -- a request, a release -- shares."""
     from ..compatibility_evaluation_frontend import ProjectCompatibilityInputs
     from ..policy_file import severity_value_for_verdict
 
-    overrides = {
+    raw = {
         kind.value: severity
-        for kind, verdict in request.project_policy_overrides
+        for kind, verdict in overrides
         if (severity := severity_value_for_verdict(verdict)) is not None
     }
-    if not overrides:
+    if not raw:
         return None
-    return ProjectCompatibilityInputs(policy_overrides=overrides)
+    return ProjectCompatibilityInputs(policy_overrides=raw)
 
 
 def resolve_request_evaluation_config(

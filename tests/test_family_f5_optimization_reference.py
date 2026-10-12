@@ -764,7 +764,8 @@ def test_mutant_parallel_path_dropping_a_member_is_caught(
 ) -> None:
     """A narrowed fast path returning a subset (#1336's lost members): only
     the parallel configuration drops the last member."""
-    from abicheck import cli_compare_release_pairwise as pairwise, process_resources
+    from abicheck import process_resources
+    from abicheck.workflows import release_members as pairwise
 
     old, new = _release_dirs(tmp_path / "rel", members=8)
     orig = pairwise.run_keyed_in_threads

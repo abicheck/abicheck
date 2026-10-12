@@ -505,7 +505,7 @@ class TestReleaseOutputDirSummaryCarriesDigest:
     neither field, unlike the primary release JSON."""
 
     def test_output_dir_summary_carries_digest(self, tmp_path):
-        from abicheck.cli_compare_release import _write_release_summary_file
+        from abicheck.frontends.cli.release_summary import _write_release_summary_file
 
         _write_release_summary_file(tmp_path, "NO_CHANGE", [], [], [], {}, {})
         data = json.loads((tmp_path / "summary.json").read_text())
@@ -515,8 +515,8 @@ class TestReleaseOutputDirSummaryCarriesDigest:
     def test_output_dir_summary_digest_matches_primary_release_json(self, tmp_path):
         """The two release-level summary documents must never independently
         drift -- both route through the same shared helper."""
-        from abicheck.cli_compare_release import _write_release_summary_file
         from abicheck.frontends.cli.release_report import render_release_summary
+        from abicheck.frontends.cli.release_summary import _write_release_summary_file
 
         severity = resolve_severity_config("strict")
         _write_release_summary_file(

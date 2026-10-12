@@ -50,7 +50,7 @@ that: every check still runs, exactly once, with its conclusions
 owns this check", which is a property of the enclosing comparison, not of
 any one pair. The release fan-out already propagates a copy of the calling
 thread's ``contextvars.Context`` into each parallel worker
-(``cli_compare_release_pairwise._compare_release_parallel``, for
+(``workflows.release_members._compare_parallel``, for
 ``policy_file``'s dedup scope), so the same mechanism reaches every member
 comparison sequentially and in parallel, without threading a parameter
 through five layers of an otherwise untouched call chain. Outside such a

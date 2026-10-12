@@ -657,7 +657,7 @@ def run_compare(
     no-op, matching every pre-existing caller.
 
     ``depth`` forwards straight onto :class:`CompareRequest.depth` -- the
-    release fan-out's ``_run_compare_pair`` needed a way to forward its own
+    release fan-out's ``compare_member_pair`` needed a way to forward its own
     resolved ``--depth binary`` per pair; every other caller passes ``None``.
 
     ``severity_preset`` (Codex review): forwards onto ``CompareRequest``'s
@@ -666,7 +666,7 @@ def run_compare(
     ``public_header_dirs`` (CodeRabbit review, PR #1138): a project's
     ``scope.public_header_dirs``, folded unchanged into both sides'
     ``InputSpec.public_header_dirs`` -- closes the release fan-out's own
-    gap, since ``cli_compare_release_pairwise._run_compare_pair`` calls
+    gap, since ``workflows.release_members.compare_member_pair`` calls
     this shim rather than ``cli_resolve._resolve_compare_snapshots``
     (which already threads this config key for a single-pair compare).
     ``None`` is a no-op, matching every pre-existing caller.
@@ -688,7 +688,7 @@ def run_compare(
 
     This shim is the release fan-out's only route to the exclusion rules: a
     directory/package ``compare`` reaches it through
-    ``cli_compare_release_pairwise._run_compare_pair``, not through
+    ``workflows.release_members.compare_member_pair``, not through
     ``cli_resolve._resolve_compare_snapshots`` (which already threaded them
     for a single-pair compare). Without this parameter the patterns were
     accepted on the command line, dropped at the directory branch, and every

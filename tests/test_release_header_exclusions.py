@@ -209,8 +209,8 @@ class TestExclusionRulesAreThreadedToEveryReleaseConsumer:
     def test_the_pairwise_primitive_forwards_them_to_the_service(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        import abicheck.cli_compare_release_pairwise as pairwise
         import abicheck.workflows.member_compare as service
+        import abicheck.workflows.release_members as pairwise
 
         seen: dict[str, Any] = {}
 
@@ -224,7 +224,7 @@ class TestExclusionRulesAreThreadedToEveryReleaseConsumer:
         monkeypatch.setattr(service, "run_compare", _fake_run_compare)
         if True:
             with pytest.raises(_Stop):
-                pairwise._run_compare_pair(
+                pairwise.compare_member_pair(
                     pairwise.release_parent_request(
                         old_input=Path("old.so"),
                         new_input=Path("new.so"),
@@ -584,11 +584,23 @@ class TestTheReleaseIdentityIsReadFromItsMembers:
         import inspect
 
         from abicheck import cli_compare_release
+        from abicheck.workflows import release_compare
 
-        src = inspect.getsource(cli_compare_release)
-        capture = src.index("observed_member_exclusion_identities(")
-        strip = src.index("_strip_diff_results_and_adjust_verdict(\n")
-        assert capture < strip, (
+        # The capture is the workflow's: it runs inside
+        # `execute_release_compare`, which strips nothing...
+        workflow = inspect.getsource(release_compare)
+        assert "observed_member_exclusion_identities(" in workflow
+        assert "strip_internal_keys" not in workflow
+        assert "_strip_diff_results_and_adjust_verdict(" not in workflow
+        # ...and the strip is the renderer's, which runs on the outcome the
+        # workflow already returned (the capture inside it).
+        cli = inspect.getsource(cli_compare_release)
+        assert "observed_member_exclusion_identities(" not in cli
+        render = inspect.getsource(cli_compare_release._render_release_outcome)
+        assert "_strip_diff_results_and_adjust_verdict(" in render
+        assert cli.index("outcome = _execute_release_compare(") < cli.index(
+            "_render_release_outcome(\n                outcome,"
+        ), (
             "the observed-member capture must run before the DiffResults "
             "it reads are stripped"
         )

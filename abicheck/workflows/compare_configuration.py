@@ -99,6 +99,7 @@ __all__ = [
     "resolve_compare_config",
     "resolve_compare_configuration",
     "resolve_force_public_scope",
+    "resolve_release_pack_application",
 ]
 
 
@@ -200,6 +201,49 @@ def resolve_compare_configuration(
         config,
         policy_file_with_packs(policy_file, application, base_policy=base_policy),
         application,
+    )
+
+
+def resolve_release_pack_application(
+    explicit: ExplicitCompatibilityInputs,
+    *,
+    front_end: FrontEnd,
+    project: ProjectCompatibilityInputs | None,
+    policy_file: PolicyFile | None,
+    base_policy: str,
+    contract_evaluation: bool,
+) -> PackApplication:
+    """A release's resolved configuration, as the one ``PackApplication``
+    every member and release-level stage reads.
+
+    Always resolved (a release records it on every member under contract
+    evaluation or a pack), through :func:`resolve_compare_configuration` --
+    the scalar compare's own resolution. With no pack selected it is an
+    *inert* application carrying only ``resolved_config``, so a project's
+    ``policy.overrides`` and the stated gate still reach each member's
+    receipt. Each front end supplies only its *explicit*/*project* inputs:
+    the CLI's from the flags the user typed
+    (``cli_compare_receipt.resolve_release_pack_application``), a typed
+    caller's from its ``ReleaseCompareOptions`` (``release_compare``).
+
+    Raises :class:`ConfigurationConflictError` or
+    :class:`ProjectPolicyOverridesError`.
+    """
+    from ..pack_application import PackApplication
+
+    configuration = resolve_compare_configuration(
+        explicit,
+        front_end=front_end,
+        project=project,
+        policy_file=policy_file,
+        base_policy=base_policy,
+        contract_evaluation=contract_evaluation,
+        always_resolve=True,
+    )
+    if configuration.pack_application is not None:
+        return configuration.pack_application
+    return PackApplication(
+        policy_overrides={}, resolved_config=configuration.evaluation_config
     )
 
 

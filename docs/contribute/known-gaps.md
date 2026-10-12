@@ -356,7 +356,7 @@ Each entry's status line says what is still open. A PARTIAL entry's write-up als
 
 #### Release-fan-out CLI tests JSON-parse `CliRunner.output`, which the memory-clamp note can join
 
-**Status (re-verified 2026-10-09 at `456989f`): OPEN.** cli_compare_release_pairwise.py:621-628 still echoes the clamp note with err=True. tests/test_release_package_inventory_cli.py:92-99 still does `json.loads(CliRunner().invoke(...).output)`, as do test_release_evaluation_config.py:712,730.  
+**Status (re-verified 2026-10-09 at `456989f`): OPEN.** The clamp note is still a stderr line: `workflows/release_members.compare_release_members` emits it through the reporter's `notice`, which the CLI echoes with `err=True`. tests/test_release_package_inventory_cli.py:92-99 still does `json.loads(CliRunner().invoke(...).output)`, as do test_release_evaluation_config.py:712,730.  
 `hygiene` — The memory-clamp note goes to stderr, and several release CLI tests `json.loads(CliRunner(...).output)`, which can mix the two streams. [Full write-up](known-gaps/release-fan-out-cli-tests-json-parse-clirunneroutput-which-the.md)
 
 #### Source-read licence: enforced at the one consumer, not repo-wide (2026-09-12)

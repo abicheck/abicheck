@@ -140,7 +140,7 @@ class TestReleaseAnnotationsPersistence:
         `entry["_old_snapshot"]`, so `_run_compare_pair` is called exactly
         once per library, unconditionally.
         """
-        import abicheck.cli_compare_release_pairwise as release_mod
+        import abicheck.workflows.release_members as release_mod
 
         old_dir = tmp_path / "old"
         old_dir.mkdir()
@@ -151,7 +151,7 @@ class TestReleaseAnnotationsPersistence:
         _write_snap(new_dir / "libfoo.json", new_foo)
 
         monkeypatch.setenv("GITHUB_ACTIONS", "true")
-        real_run_compare_pair = release_mod._run_compare_pair
+        real_run_compare_pair = release_mod.compare_member_pair
         calls: list[object] = []
 
         def _counting_run_compare_pair(*args: object, **kwargs: object) -> object:
@@ -159,7 +159,7 @@ class TestReleaseAnnotationsPersistence:
             return real_run_compare_pair(*args, **kwargs)
 
         monkeypatch.setattr(
-            release_mod, "_run_compare_pair", _counting_run_compare_pair
+            release_mod, "compare_member_pair", _counting_run_compare_pair
         )
         result = CliRunner().invoke(
             main,
@@ -213,7 +213,7 @@ class TestReleaseSeveralExports:
         """`--write` renders the secondary format from the same
         already-computed per-library results as the primary format --
         `_run_compare_pair` must be called exactly once per library."""
-        import abicheck.cli_compare_release_pairwise as release_mod
+        import abicheck.workflows.release_members as release_mod
 
         old_dir = tmp_path / "old"
         old_dir.mkdir()
@@ -223,7 +223,7 @@ class TestReleaseSeveralExports:
         _write_snap(old_dir / "libfoo.json", old_foo)
         _write_snap(new_dir / "libfoo.json", new_foo)
 
-        real_run_compare_pair = release_mod._run_compare_pair
+        real_run_compare_pair = release_mod.compare_member_pair
         calls: list[object] = []
 
         def _counting_run_compare_pair(*args: object, **kwargs: object) -> object:
@@ -231,7 +231,7 @@ class TestReleaseSeveralExports:
             return real_run_compare_pair(*args, **kwargs)
 
         monkeypatch.setattr(
-            release_mod, "_run_compare_pair", _counting_run_compare_pair
+            release_mod, "compare_member_pair", _counting_run_compare_pair
         )
         write_path = tmp_path / "release.json"
         code, _out = _invoke(

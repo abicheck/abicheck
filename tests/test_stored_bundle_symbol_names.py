@@ -225,12 +225,13 @@ class TestTheHumanLedgersDemangleToo:
         disposition differently from a single comparison."""
         import inspect
 
-        from abicheck import cli_audit, cli_compare_release_pairwise
+        from abicheck import cli_audit
+        from abicheck.frontends.cli import release_member_reporter
 
         for fn in (cli_audit.echo_filtered_surface, cli_audit.echo_reconciled):
             src = inspect.getsource(fn)
             assert "_ledger_line(" in src or "ledger_lines_for(" in src, fn.__name__
-        assert "ledger_lines_for(" in inspect.getsource(cli_compare_release_pairwise), (
+        assert "ledger_lines_for(" in inspect.getsource(release_member_reporter), (
             "the release fan-out must reuse the same rows"
         )
 

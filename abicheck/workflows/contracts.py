@@ -183,7 +183,7 @@ class CompareRequest:
     # ``public_header_dirs`` as real fields here: both need a genuine
     # channel into the directory/package release fan-out's per-library
     # ``compare_snapshots`` call (``service_compare_pipeline.run_compare`` /
-    # ``cli_compare_release_pairwise._run_compare_pair``), which a config-
+    # ``workflows.release_members.compare_member_pair``), which a config-
     # only value with no request field cannot reach.
     env_matrix: EnvironmentMatrix | None = None
     # ADR-050 D2: force a tentative diff through a genuine comparability-

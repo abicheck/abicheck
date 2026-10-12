@@ -267,7 +267,8 @@ def test_resolve_release_header_ownership_sides(
 def test_release_pass_moves_only_scoped_sibling_owned_findings(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from abicheck.frontends.cli import release_member_restamp as rr
+    from abicheck.workflows.release_compare_reporter import SilentReleaseReporter
+    from abicheck.workflows.release_members import dispose_release_unreached_types
 
     def result(library: str, *, scoped: bool) -> DiffResult:
         return DiffResult(
@@ -280,9 +281,12 @@ def test_release_pass_moves_only_scoped_sibling_owned_findings(
         )
 
     restamped: list[str] = []
-    monkeypatch.setattr(
-        rr, "_restamp", lambda entry, res, **kw: restamped.append(entry["library"])
-    )
+
+    class _Recording(SilentReleaseReporter):
+        def reproject(self, entry, result, *, scope_changed):  # type: ignore[no-untyped-def]
+            assert scope_changed
+            restamped.append(str(entry["library"]))
+
     entries: list[dict[str, object]] = [
         {"library": "liba.so", "_type_attribution": {"Widget": REACHES},
          "_diff_result": result("liba.so", scoped=True)},
@@ -292,40 +296,58 @@ def test_release_pass_moves_only_scoped_sibling_owned_findings(
          "_diff_result": result("libc.so", scoped=False)},  # scoping off: kept
         {"library": "libd.so", "_type_attribution": "not a dict"},
     ]  # fmt: skip
-    moved = rr.dispose_release_unreached_types(
+    moved = dispose_release_unreached_types(
         entries,
+        _Recording(),
         severity_config=None,
         require_complete_analysis=False,
         contract_evaluation=False,
-        output_dir=None,
     )
     assert moved == 1 and restamped == ["libb.so"]
     assert entries[2]["_diff_result"].changes  # type: ignore[union-attr]
 
 
 def test_restamp_rederives_the_member_entry(tmp_path: Path) -> None:
-    from abicheck.frontends.cli.release_member_restamp import _restamp
+    from abicheck.frontends.cli.release_member_reporter import CliReleaseReporter
+    from abicheck.workflows.release_members import dispose_release_unreached_types
 
-    res = DiffResult(
-        old_version="1",
-        new_version="2",
-        library="libb.so",
-        changes=[_change(ChangeKind.FUNC_ADDED, "b_new")],
-        verdict=Verdict.COMPATIBLE,
-        scope_to_public_surface=True,
-    )
-    dispose_unreached_type_findings(res, {"Widget": ("liba.so",)})
-    entry: dict[str, object] = {"library": "libb.so", "verdict": "BREAKING"}
-    _restamp(
-        entry,
-        res,
+    def result(library: str) -> DiffResult:
+        return DiffResult(
+            old_version="1",
+            new_version="2",
+            library=library,
+            changes=[
+                _change(ChangeKind.TYPE_SIZE_CHANGED, "Widget"),
+                _change(ChangeKind.FUNC_ADDED, f"{library}_new"),
+            ],
+            verdict=Verdict.BREAKING,
+            scope_to_public_surface=True,
+        )
+
+    res = result("libb.so")
+    entry: dict[str, object] = {
+        "library": "libb.so",
+        "verdict": "BREAKING",
+        "_type_attribution": {"Widget": PROVEN_UNREACHABLE},
+        "_diff_result": res,
+    }
+    sibling: dict[str, object] = {
+        "library": "liba.so",
+        "verdict": "BREAKING",
+        "_type_attribution": {"Widget": REACHES},
+        "_diff_result": result("liba.so"),
+    }
+    moved = dispose_release_unreached_types(
+        [sibling, entry],
+        CliReleaseReporter(output_dir=tmp_path),
         severity_config=None,
         require_complete_analysis=False,
         contract_evaluation=False,
-        output_dir=tmp_path,
     )
+    assert moved == 1
     assert entry["verdict"] == res.verdict.value
     assert entry["breaking"] == 0
+    assert entry["filtered_internal_count"] == res.out_of_surface_count == 1
     assert "Filtered as non-public ABI surface in libb.so" in str(
         entry["_scope_ledger_text"]
     )

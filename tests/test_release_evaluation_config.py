@@ -134,12 +134,12 @@ class TestReleaseFanOutStampsResolvedConfig:
                 return_value=fake_result,
             ),
             patch(
-                "abicheck.cli_compare_release_pairwise._normalize_binary_input",
-                side_effect=lambda p: (p, None),
+                "abicheck.workflows.release_members.normalize_member_operand",
+                side_effect=lambda p, _notice: p,
             ),
         ):
-            from abicheck.cli_compare_release_pairwise import (
-                _run_compare_pair as _rcp,
+            from abicheck.workflows.release_members import (
+                compare_member_pair as _rcp,
                 release_parent_request,
             )
 

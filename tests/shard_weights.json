@@ -961,7 +961,7 @@
   "tests/test_release_header_exclusions.py": 0.08,
   "tests/test_release_html_report.py": 0.47,
   "tests/test_release_lang_explicit.py": 0.02,
-  "tests/test_release_member_errors.py": 0.04,
+  "tests/test_release_member_failures.py": 0.04,
   "tests/test_release_member_export_read.py": 0.07,
   "tests/test_release_package_inventory_cli.py": 0.66,
   "tests/test_release_public_surface.py": 0.23,

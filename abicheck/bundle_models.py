@@ -689,7 +689,7 @@ class BundleDiffResult:
     #: G38 stabilization Phase 11: structured record of a partial-analysis
     #: degradation (``compare_bundle`` itself raising, or
     #: ``find_unverified_signature_findings`` raising) that
-    #: `cli_compare_release_helpers._run_bundle_analysis` previously only
+    #: `workflows.release_bundle.run_bundle_analysis` previously only
     #: ever reported as a stderr warning -- an empty list here is a real,
     #: positive claim that analysis completed cleanly, not merely "nothing
     #: to say"; a report consumer (CI, a downstream tool) can now

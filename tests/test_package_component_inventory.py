@@ -64,7 +64,7 @@ from abicheck.policy.support_promise import (
     support_promise_changes,
     validate_support_promise_policy,
 )
-from abicheck.report.comparison_scope import release_scope_warnings
+from abicheck.workflows.release_scope_notices import release_scope_warnings
 
 # A minimal but genuinely ELF-shaped shared object, so `discover_shared_
 # libraries`' own `_is_elf_shared_object` test (not just the filename) accepts

@@ -96,7 +96,7 @@ class ReportSummary:
     #: first shipped as a MINOR 3.15 bump; a field's own meaning changing is
     #: breaking under this schema's own policy, so it was renumbered to the
     #: MAJOR 4.0 -- see ``schemas/__init__.py``'s own history comment).
-    #: ``cli_compare_release_pairwise.py``'s per-library
+    #: ``workflows/release_members.py``'s per-library
     #: ``"compatible_additions"`` entry now calls :func:`build_summary`
     #: directly to stay consistent with this field (Codex review, findings-
     #: fixes round 10/11 -- it previously computed its own, still-inflated

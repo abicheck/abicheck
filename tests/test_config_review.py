@@ -661,7 +661,7 @@ class TestCompareReleaseExitFloors:
     def test_error_verdict_floors_severity_exit(self):
         import pytest
 
-        from abicheck.cli_compare_release import _exit_compare_release
+        from abicheck.frontends.cli.release_exit import _exit_compare_release
 
         # A per-library ERROR (failed dump/extract) produces no changes, so the
         # severity aggregation sees 0 — but it must still exit 4, not 0.
@@ -672,7 +672,7 @@ class TestCompareReleaseExitFloors:
     def test_removed_library_precedence_under_severity(self):
         import pytest
 
-        from abicheck.cli_compare_release import _exit_compare_release
+        from abicheck.frontends.cli.release_exit import _exit_compare_release
 
         with pytest.raises(SystemExit) as exc:
             _exit_compare_release("BREAKING", True, ["libgone"], severity_exit_code=0)
@@ -681,14 +681,14 @@ class TestCompareReleaseExitFloors:
     def test_severity_code_passthrough(self):
         import pytest
 
-        from abicheck.cli_compare_release import _exit_compare_release
+        from abicheck.frontends.cli.release_exit import _exit_compare_release
 
         with pytest.raises(SystemExit) as exc:
             _exit_compare_release("API_BREAK", False, [], severity_exit_code=2)
         assert exc.value.code == 2
 
     def test_clean_severity_does_not_exit(self):
-        from abicheck.cli_compare_release import _exit_compare_release
+        from abicheck.frontends.cli.release_exit import _exit_compare_release
 
         # severity says clean and no operational error -> returns without exiting.
         assert (
@@ -1001,12 +1001,12 @@ class TestReleaseSeverityPolicyAndGlobal:
         assert fold_release_global_severity(2, None, None, _gate("default")) == 2
 
     def test_resolve_config_none_without_flags(self):
-        from abicheck.cli_compare_release import _resolve_release_severity_config
+        from abicheck.workflows.gate import _resolve_release_severity_config
 
         assert _resolve_release_severity_config(None, None, None, None, None) is None
 
     def test_resolve_config_set_with_flag(self):
-        from abicheck.cli_compare_release import _resolve_release_severity_config
+        from abicheck.workflows.gate import _resolve_release_severity_config
 
         assert (
             _resolve_release_severity_config("strict", None, None, None, None)
@@ -1021,12 +1021,12 @@ class TestCompareReleaseParallelOrdering:
     def test_parallel_results_in_matched_keys_order(self, monkeypatch):
         from pathlib import Path as _P
 
-        import abicheck.cli_compare_release_pairwise as _cr
+        import abicheck.workflows.release_members as _cr
 
-        monkeypatch.setattr(_cr, "_compare_one_library", lambda key, *a: {"key": key})
+        monkeypatch.setattr(_cr, "compare_release_member", lambda key, *a: {"key": key})
         keys = ["libc", "liba", "libb"]
         old_map = {k: _P(k) for k in keys}
         ctx = _cr.ReleaseMemberContext(_cr.release_parent_request(), old_map, {})
-        out = _cr._compare_release_parallel(keys, ctx, old_map, 4)
+        out = _cr._compare_parallel(keys, ctx, 4)
         # Deterministic: emitted in matched_keys order, not completion order.
         assert [r["key"] for r in out] == keys

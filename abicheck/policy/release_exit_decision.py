@@ -162,7 +162,7 @@ def _compute_release_legacy_exit_code(
     *library_results* alone, though, misses the opposite case (Codex
     review, fresh evidence): a bundle or probe-matrix break with every
     library itself ``NO_CHANGE`` raises the *aggregate* ``worst_verdict``
-    (``cli_compare_release._collect_bundle_result``/``_collect_matrix_
+    (``workflows.release_bundle.collect_bundle_result``/``_collect_matrix_
     result``) without ever setting any library's own ``"verdict"`` key, so
     the per-library scan alone would find ``0``. Folding in *worst_verdict*
     itself (when it names a real ``Verdict``, i.e. not ``"ERROR"``/

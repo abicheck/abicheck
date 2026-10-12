@@ -34,10 +34,6 @@ from click.testing import CliRunner
 from abicheck.checker import Change, DiffResult
 from abicheck.checker_policy import ChangeKind, Verdict
 from abicheck.cli import main
-from abicheck.cli_compare_release import (
-    _exit_compare_release,
-    _resolve_release_severity_config,
-)
 from abicheck.cli_helpers_compare import (
     _warn_ignored_flags,
 )
@@ -48,6 +44,7 @@ from abicheck.cli_resolve import (
 )
 from abicheck.elf_metadata import ElfMetadata, ElfSymbol
 from abicheck.frontends.cli.options.params import _load_suppression_and_policy
+from abicheck.frontends.cli.release_exit import _exit_compare_release
 from abicheck.frontends.cli.release_report import render_release_summary
 from abicheck.frontends.cli.runtime import (
     _announce_exit_scheme,
@@ -63,11 +60,16 @@ from abicheck.report.render_release_markdown import (
     _release_md_matrix_findings,
 )
 from abicheck.serialization import snapshot_to_json
+from abicheck.workflows.gate import _resolve_release_severity_config
+from abicheck.workflows.release_compare_reporter import SilentReleaseReporter
 from abicheck.workflows.release_exit_fold import fold_release_global_severity
+from abicheck.workflows.release_members import suppress_lockstep_soname_findings
 from tests._dump_format_fakes import fake_format_adapter
 from tests.schema_validation import validate_instance
 
 # ── snapshot helpers (mirror tests/test_compare_release.py) ───────────────────
+
+_SILENT = SilentReleaseReporter()
 
 
 def _snap(version: str = "1.0", funcs=None, library: str = "libfoo.so") -> AbiSnapshot:
@@ -105,7 +107,7 @@ def _gate(preset, abi=None, potential=None, quality=None, addition=None):
     ``SeverityConfig``, a combination the resolver can never produce. -- since
     ADR-064's rewrite, ``fold_release_global_severity`` takes the resolved
     object, not the six raw preset/category/scheme strings directly."""
-    from abicheck.cli_compare_release_helpers import GateOptions
+    from abicheck.workflows.gate import GateOptions
 
     severity = _resolve_release_severity_config(
         preset, abi, potential, quality, addition
@@ -3185,13 +3187,9 @@ class TestFoldReleaseGlobalSeverityBundle:
 
 class TestSuppressLockstepSoname:
     def test_non_breaking_returns_zero(self) -> None:
-        from abicheck.cli_compare_release import _suppress_lockstep_soname_findings
-
-        assert _suppress_lockstep_soname_findings([], "NO_CHANGE", None) == 0
+        assert suppress_lockstep_soname_findings([], "NO_CHANGE", _SILENT) == 0
 
     def test_suppresses_unnecessary_soname_bump(self) -> None:
-        from abicheck.cli_compare_release import _suppress_lockstep_soname_findings
-
         result = DiffResult(
             old_version="1",
             new_version="2",
@@ -3213,7 +3211,7 @@ class TestSuppressLockstepSoname:
             "risk_changes": 0,
             "compatible_additions": 0,
         }
-        n = _suppress_lockstep_soname_findings([entry], "BREAKING", None)
+        n = suppress_lockstep_soname_findings([entry], "BREAKING", _SILENT)
         assert n == 1
         # The finding was stripped from the diff result.
         assert all(c.kind != ChangeKind.SONAME_BUMP_UNNECESSARY for c in result.changes)
@@ -3300,12 +3298,12 @@ class TestCompareReleaseExtraFlows:
         _write_snap(old_dir / "libfoo.json", _snap())
         _write_snap(new_dir / "libfoo.json", _snap())
 
-        import abicheck.cli_compare_release_pairwise as cr_mod
+        import abicheck.workflows.release_members as cr_mod
 
         def boom(*a, **k):
             raise ValueError("corrupt snapshot")
 
-        monkeypatch.setattr(cr_mod, "_run_compare_pair", boom)
+        monkeypatch.setattr(cr_mod, "compare_member_pair", boom)
         result = _invoke(
             "compare",
             str(old_dir),

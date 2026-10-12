@@ -43,7 +43,7 @@ being pinned until the release-level JUnit fold at the end of the run.
 remaining reason ``old_full`` is ever true.
 
 Nothing anywhere reads a stashed ``_new_snapshot``: the one reader that
-looks for it (``_collect_bundle_result``) falls back to the compact
+looks for it (``collect_bundle_result``) falls back to the compact
 evidence and is satisfied by it. So requesting JUnit or a baseline pinned a
 second full snapshot graph per member that no code path ever opened.
 
@@ -155,7 +155,7 @@ def stash_member_evidence(
     Each side gets the full :class:`~abicheck.model.AbiSnapshot` when a
     consumer reads it and the compact
     :class:`~abicheck.bundle_models.BundleSignatureEvidence` otherwise --
-    never both, so the reader (``_collect_bundle_result``) sees exactly one
+    never both, so the reader (``collect_bundle_result``) sees exactly one
     shape per side. ``None`` retention means compact on both sides.
 
     Lives beside the decision rather than at the release fan-out's call

@@ -351,8 +351,8 @@ class DispositionLedger:
         For a release-level policy decision applied strictly *after* the
         per-comparison ledger closed -- a cross-member decision an individual
         comparison cannot make on its own, since it depends on every
-        sibling's own outcome (e.g. ``cli_compare_release_pairwise.
-        _suppress_lockstep_soname_findings``'s lockstep-SONAME-bump
+        sibling's own outcome (e.g. ``workflows.release_members.
+        suppress_lockstep_soname_findings``'s lockstep-SONAME-bump
         downgrade, which only fires once the *release's* worst verdict is
         known, long after this library's own ledger finalized). Without
         this, mutating ``result.changes`` alone leaves the finding's

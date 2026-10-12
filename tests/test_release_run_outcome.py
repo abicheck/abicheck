@@ -206,7 +206,7 @@ class TestReleaseJsonRunOutcome:
         this same sibling document."""
         import json
 
-        from abicheck.cli_compare_release import _write_release_summary_file
+        from abicheck.frontends.cli.release_summary import _write_release_summary_file
 
         _write_release_summary_file(
             tmp_path,

@@ -11,14 +11,14 @@ generated: false
 
 Index: [Known gaps](../known-gaps.md)
 
-**Status (re-verified 2026-10-09 at `456989f`): OPEN.** cli_compare_release_pairwise.py:621-628 still echoes the clamp note with err=True. tests/test_release_package_inventory_cli.py:92-99 still does `json.loads(CliRunner().invoke(...).output)`, as do test_release_evaluation_config.py:712,730.
+**Status (re-verified 2026-10-09 at `456989f`): OPEN.** The clamp note is still a stderr line: `workflows/release_members.compare_release_members` emits it through the reporter's `notice`, which the CLI echoes with `err=True`. tests/test_release_package_inventory_cli.py:92-99 still does `json.loads(CliRunner().invoke(...).output)`, as do test_release_evaluation_config.py:712,730.
 
 
 Found while verifying an unrelated change, reproduced on a clean tree, not
 fixed here (it is nobody's feature and touches eight tests across two
 modules that the change under review did not otherwise touch).
 
-`cli_compare_release_pairwise.py` echoes one note to **stderr** when the
+`workflows/release_members.py` echoes one note to **stderr** when the
 per-worker memory budget clamps the release fan-out's parallelism ("Note:
 parallel release workers reduced 4 -> 3 to fit available memory ..."). Several
 release CLI tests capture with a bare `CliRunner()` -- which merges stderr
