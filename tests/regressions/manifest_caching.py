@@ -218,7 +218,10 @@ CACHING_BUG_CLASSES: tuple[BugClass, ...] = (
             "The oracle is the uncached run, not the cache's own helper."
         ),
         fixed_by=(1579,),
-        seed_tests=("tests/test_snapshot_hit_binary_identity.py",),
+        seed_tests=(
+            "tests/test_snapshot_hit_binary_identity.py",
+            "tests/test_family_f5_optimization_reference.py",
+        ),
         public_surfaces=("python-api", "cli"),
         axes={"rename": ("same-dir-new-basename", "other-dir", "symlink")},
     ),

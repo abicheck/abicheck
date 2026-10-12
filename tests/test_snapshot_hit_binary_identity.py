@@ -65,10 +65,8 @@ def _alias(kind: str, warm: Path, root: Path) -> Path:
     raise AssertionError(kind)
 
 
-@pytest.mark.parametrize("kind", ["same-dir-new-basename", "other-dir", "symlink"])
-def test_hit_identity_matches_a_cold_dump_of_the_same_path(
-    tmp_path: Path, kind: str
-) -> None:
+def check_hit_matches_cold(kind: str, tmp_path: Path) -> None:
+    """Warm the cache from one path, hit it through *kind* of rename, compare to cold."""
     warm = _build_library(tmp_path / "warm" / "libfoo.so.1")
     alias = _alias(kind, warm, tmp_path / kind)
 
@@ -86,3 +84,10 @@ def test_hit_identity_matches_a_cold_dump_of_the_same_path(
     # Must-not-merge: the hit names the requested path, not the one that populated it.
     assert hit.library == alias.name != warm.name
     assert _identity(hit) == _identity(cold)
+
+
+@pytest.mark.parametrize("kind", ["same-dir-new-basename", "other-dir", "symlink"])
+def test_hit_identity_matches_a_cold_dump_of_the_same_path(
+    tmp_path: Path, kind: str
+) -> None:
+    check_hit_matches_cold(kind, tmp_path)
