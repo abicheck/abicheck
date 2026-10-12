@@ -41,6 +41,16 @@ sys.modules["check_bugfix_test_contract"] = gate
 _spec.loader.exec_module(gate)
 
 
+@pytest.fixture(autouse=True)
+def _no_inherited_body_file(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The gate reads BUGFIX_CONTRACT_BODY_FILE from the environment when
+    # main() runs. A caller that validates a real PR description (verify.py's
+    # bugfix-test-contract step) exports it, and every test here that expects
+    # "no body file" would then read the real PR body instead. Each test that
+    # needs a body file sets its own.
+    monkeypatch.delenv("BUGFIX_CONTRACT_BODY_FILE", raising=False)
+
+
 COMPLETE_BODY = """\
 ## Bug-fix test contract
 
