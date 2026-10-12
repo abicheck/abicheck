@@ -47,12 +47,12 @@ from __future__ import annotations
 import logging
 import os
 import re
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import TYPE_CHECKING, TypeVar
 
 from ..errors import SnapshotError
 from ..model.header_exclusion_record import EXCLUDED_HEADERS_TOOLCHAIN_KEY
+from ..process_resources import BudgetedExecutor
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -287,7 +287,7 @@ def _confirm_in_context(
             return False
         return True
 
-    with ThreadPoolExecutor(max_workers=_probe_jobs()) as pool:
+    with BudgetedExecutor(_probe_jobs()) as pool:
         passed = list(pool.map(ok, groups))
     restored = [s for s, good in zip(suspects, passed, strict=True) if good]
     return sorted(restored, key=position.__getitem__)
@@ -337,7 +337,7 @@ def _probe_remaining(
             return exc
         return None
 
-    with ThreadPoolExecutor(max_workers=_probe_jobs()) as pool:
+    with BudgetedExecutor(_probe_jobs()) as pool:
         while groups:
             outcomes = list(pool.map(run, groups))
             nxt: list[list[Path]] = []

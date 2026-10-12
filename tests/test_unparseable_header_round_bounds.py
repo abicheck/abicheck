@@ -91,7 +91,7 @@ def _cases():
 def test_fatal_errors_cost_logarithmic_rounds_and_exclude_exactly_the_bad(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(fallback, "ThreadPoolExecutor", _SerialPool)
+    monkeypatch.setattr(fallback, "BudgetedExecutor", _SerialPool)
     for headers, bad in _cases():
         _reset()
         calls: list[list[Path]] = []
@@ -116,7 +116,7 @@ def test_fatal_errors_cost_logarithmic_rounds_and_exclude_exactly_the_bad(
 def test_single_fatal_failure_costs_one_clean_probe_wave(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(fallback, "ThreadPoolExecutor", _SerialPool)
+    monkeypatch.setattr(fallback, "BudgetedExecutor", _SerialPool)
     _reset()
     hs = [Path(f"/inc/h{i}.h") for i in range(64)]
     calls: list[list[Path]] = []
@@ -143,7 +143,7 @@ def test_header_failing_alone_but_parsing_in_context_is_not_excluded(
     """``needs[d] = p``: header d parses only when header p precedes it in the
     TU (it relies on p's declarations), so an isolated probe blames d although
     the full-context parse accepts it. Only the genuinely bad are excluded."""
-    monkeypatch.setattr(fallback, "ThreadPoolExecutor", _SerialPool)
+    monkeypatch.setattr(fallback, "BudgetedExecutor", _SerialPool)
     _reset()
     hs = [Path(f"/inc/h{i}.h") for i in range(n)]
     bad_paths = {hs[i] for i in bad}
@@ -168,7 +168,7 @@ def test_header_failing_alone_but_parsing_in_context_is_not_excluded(
 
 def test_non_fatal_diagnostics_never_probe(monkeypatch: pytest.MonkeyPatch) -> None:
     """Every error was reported, so the classic single retry is enough."""
-    monkeypatch.setattr(fallback, "ThreadPoolExecutor", _SerialPool)
+    monkeypatch.setattr(fallback, "BudgetedExecutor", _SerialPool)
     _reset()
     hs = [Path(f"/inc/h{i}.h") for i in range(20)]
     bad = {hs[3], hs[7], hs[15]}
