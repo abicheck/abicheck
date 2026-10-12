@@ -265,36 +265,62 @@ def _collect_class_methods(ast: dict[str, Any]) -> dict[str, list[_MethodInfo]]:
     same ``"::".join(scope)`` convention ``type_graph.py``'s own resolution
     produces, so the two data sources' class identities line up without a
     second resolution pass)."""
-    result: dict[str, list[_MethodInfo]] = {}
+    inputs = OverrideInputs()
+    inputs.collect(ast)
+    return inputs.methods_by_class
 
-    def walk(node: Any, scope: list[str]) -> None:
+
+class OverrideInputs:
+    """What the override facts read from a TU besides its type edges, from
+    one walk: each class's own methods and the classes declaring a virtual
+    destructor. :meth:`collect` takes the whole tree or, in document order,
+    each top-level declaration (``header_graph_ast_stream``): the walk keeps
+    no state across siblings beyond these two accumulators."""
+
+    def __init__(self) -> None:
+        self.methods_by_class: dict[str, list[_MethodInfo]] = {}
+        self.virtual_destructor_owners: set[str] = set()
+
+    def collect(self, node: Any, scope: list[str] | None = None) -> None:
         if not isinstance(node, dict):
             return
+        scope = scope or []
         kind = node.get("kind")
         name = str(node.get("name") or "")
+        children = node.get("inner", []) or []
         if kind in _RECORD_DECL_KINDS and name:
             qname = "::".join([*scope, name])
-            methods = [
-                info
-                for child in node.get("inner", []) or []
-                if isinstance(child, dict)
-                and child.get("kind") in _OVERRIDE_CANDIDATE_KINDS
-                for info in [_method_info(child, [*scope, name])]
-                if info is not None
-            ]
-            result.setdefault(qname, []).extend(methods)
             child_scope = [*scope, name]
-            for child in node.get("inner", []) or []:
-                walk(child, child_scope)
+            methods = self.methods_by_class.setdefault(qname, [])
+            for child in children:
+                if not isinstance(child, dict):
+                    continue
+                child_kind = child.get("kind")
+                if child_kind in _OVERRIDE_CANDIDATE_KINDS:
+                    info = _method_info(child, child_scope)
+                    if info is not None:
+                        methods.append(info)
+                elif child_kind == "CXXDestructorDecl" and child.get("virtual"):
+                    self.virtual_destructor_owners.add(qname)
+            for child in children:
+                self.collect(child, child_scope)
             return
         child_scope = (
             [*scope, name] if kind in _NAMESPACE_SCOPE_KINDS and name else scope
         )
-        for child in node.get("inner", []) or []:
-            walk(child, child_scope)
+        for child in children:
+            self.collect(child, child_scope)
 
-    walk(ast, [])
-    return result
+    def facts(
+        self, type_edges: Iterable[Any]
+    ) -> tuple[list[OverrideEdge], frozenset[str], frozenset[str]]:
+        """The TU's three override facts, given its type edges."""
+        bases_of = _bases_of(type_edges)
+        return (
+            _override_edges(bases_of, self.methods_by_class),
+            _virtual_methods(bases_of, self.methods_by_class),
+            frozenset(self.virtual_destructor_owners),
+        )
 
 
 _SlotKey = tuple[str, tuple[str, str]]
@@ -384,12 +410,22 @@ def parse_clang_ast_overrides(ast: dict[str, Any]) -> list[OverrideEdge]:
     """Pure function: a ``clang -ast-dump=json`` tree -> possible-override
     edges. See this module's own docstring for the full algorithm/scope.
     """
+    return _override_edges(
+        _bases_of(parse_clang_ast_types(ast)), _collect_class_methods(ast)
+    )
+
+
+def _bases_of(type_edges: Iterable[Any]) -> dict[str, list[str]]:
     bases_of: dict[str, list[str]] = {}
-    for e in parse_clang_ast_types(ast):
+    for e in type_edges:
         if e.kind == EDGE_TYPE_INHERITS:
             bases_of.setdefault(e.src, []).append(e.dst)
+    return bases_of
 
-    methods_by_class = _collect_class_methods(ast)
+
+def _override_edges(
+    bases_of: dict[str, list[str]], methods_by_class: dict[str, list[_MethodInfo]]
+) -> list[OverrideEdge]:
     declared: dict[_SlotKey, _MethodInfo] = {
         (qname, m.sig_key): m
         for qname, methods in methods_by_class.items()
@@ -484,12 +520,14 @@ def parse_clang_ast_virtual_methods(ast: dict[str, Any]) -> frozenset[str]:
     over every class :func:`_collect_class_methods` found (no ``bases_of``
     membership gate) and every one of its methods.
     """
-    bases_of: dict[str, list[str]] = {}
-    for e in parse_clang_ast_types(ast):
-        if e.kind == EDGE_TYPE_INHERITS:
-            bases_of.setdefault(e.src, []).append(e.dst)
+    return _virtual_methods(
+        _bases_of(parse_clang_ast_types(ast)), _collect_class_methods(ast)
+    )
 
-    methods_by_class = _collect_class_methods(ast)
+
+def _virtual_methods(
+    bases_of: dict[str, list[str]], methods_by_class: dict[str, list[_MethodInfo]]
+) -> frozenset[str]:
     declared: dict[_SlotKey, _MethodInfo] = {
         (qname, m.sig_key): m
         for qname, methods in methods_by_class.items()
@@ -543,34 +581,9 @@ def parse_clang_ast_virtual_destructor_owners(ast: dict[str, Any]) -> frozenset[
     owning class's own ``record_type`` node, by contrast, always exists once
     ``type_graph.py`` has walked the class at all.
     """
-    owners: set[str] = set()
-
-    def walk(node: Any, scope: list[str]) -> None:
-        if not isinstance(node, dict):
-            return
-        kind = node.get("kind")
-        name = str(node.get("name") or "")
-        if kind in _RECORD_DECL_KINDS and name:
-            qname = "::".join([*scope, name])
-            if any(
-                isinstance(child, dict)
-                and child.get("kind") == "CXXDestructorDecl"
-                and child.get("virtual")
-                for child in node.get("inner", []) or []
-            ):
-                owners.add(qname)
-            child_scope = [*scope, name]
-            for child in node.get("inner", []) or []:
-                walk(child, child_scope)
-            return
-        child_scope = (
-            [*scope, name] if kind in _NAMESPACE_SCOPE_KINDS and name else scope
-        )
-        for child in node.get("inner", []) or []:
-            walk(child, child_scope)
-
-    walk(ast, [])
-    return frozenset(owners)
+    inputs = OverrideInputs()
+    inputs.collect(ast)
+    return frozenset(inputs.virtual_destructor_owners)
 
 
 def augment_graph_with_overrides(
@@ -678,11 +691,9 @@ def parse_clang_ast_override_facts(
     """This pass's three per-TU facts from one AST: override edges, every
     virtual-method identity, and every class declaring its own virtual
     destructor."""
-    return (
-        parse_clang_ast_overrides(ast),
-        parse_clang_ast_virtual_methods(ast),
-        parse_clang_ast_virtual_destructor_owners(ast),
-    )
+    inputs = OverrideInputs()
+    inputs.collect(ast)
+    return inputs.facts(parse_clang_ast_types(ast))
 
 
 def merge_override_facts(

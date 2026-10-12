@@ -396,7 +396,7 @@ class _ParamInfo:
 
 @dataclass(frozen=True)
 class _CallbackIndexes:
-    """The whole-TU indexes :func:`_index_callback_targets` builds and
+    """The whole-TU indexes :meth:`CallbackParse.index` builds and
     :func:`_walk_emit` reads, mirroring ``type_graph._AstIndexes``'s bundling
     pattern (one argument instead of three, all mutated in place)."""
 
@@ -424,18 +424,6 @@ class CallbackEdge:
     #: The slot's own (desugared-preferred) qualType spelling — feeds
     #: FUNCTION_POINTER_HAS_SIGNATURE (see module docstring).
     signature: str = ""
-
-
-def _index_callback_targets(ast: dict[str, Any]) -> _CallbackIndexes:
-    """First pass: index every function-like declaration's identity/params
-    and every field declaration, across the whole TU, before any edge is
-    built — mirrors ``type_graph``'s/``macro_graph``'s established
-    two-pass shape (index everything, then walk for edges)."""
-    id_index: dict[str, str] = {}
-    callee_params: dict[str, list[_ParamInfo]] = {}
-    field_by_id: dict[str, dict[str, Any]] = {}
-    _index_walk(ast, [], id_index, callee_params, field_by_id)
-    return _CallbackIndexes(id_index, callee_params, field_by_id)
 
 
 def _index_walk(
@@ -787,10 +775,35 @@ def parse_clang_ast_callbacks(ast: dict[str, Any]) -> list[CallbackEdge]:
     two edge kinds, the identity design, and the empirical AST-shape
     findings this is grounded in.
     """
-    idx = _index_callback_targets(ast)
-    edges: list[CallbackEdge] = []
-    _walk_emit(ast, idx, edges)
-    return _dedupe_callback_edges(edges)
+    parse = CallbackParse()
+    parse.index(ast)
+    parse.emit(ast)
+    return parse.result()
+
+
+class CallbackParse:
+    """:func:`parse_clang_ast_callbacks`'s two walks, fed in document order:
+    :meth:`index` over the whole TU first, then :meth:`emit`. Either takes the
+    whole tree or each top-level declaration in turn
+    (``header_graph_ast_stream``); neither walk carries state across
+    siblings beyond the shared indexes."""
+
+    def __init__(self) -> None:
+        self._idx = _CallbackIndexes({}, {}, {})
+        self._edges: list[CallbackEdge] = []
+
+    def index(self, node: dict[str, Any]) -> None:
+        """First pass: every function-like declaration's identity/params and
+        every field declaration, across the whole TU, before any edge is
+        built -- ``type_graph``'s/``macro_graph``'s two-pass shape."""
+        idx = self._idx
+        _index_walk(node, [], idx.id_index, idx.callee_params, idx.field_by_id)
+
+    def emit(self, node: dict[str, Any]) -> None:
+        _walk_emit(node, self._idx, self._edges)
+
+    def result(self) -> list[CallbackEdge]:
+        return _dedupe_callback_edges(self._edges)
 
 
 # ── Part A: CALLBACK_MAY_INVOKE ─────────────────────────────────────────────

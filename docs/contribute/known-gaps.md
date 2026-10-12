@@ -68,11 +68,6 @@ Next, unranked (the `--no-baseline` one-sided-detector gap, the target-platform 
 **Status (re-verified 2026-10-11 at `46c127111`): OPEN, narrowed.** #1532 moved the release compatibility-axis fold into `workflows/release_exit_fold.py`, which folds each member's scalar-resolver contribution. Two precedence resolvers still exist: `policy/exit_decision.py::resolve_compare_exit_decision` and `policy/exit_decision_precedence.py::resolve_release_exit_decision`, the latter still owning the release-only axes listed below.  
 `hygiene` — Scalar and release `compare` still use two precedence resolvers (`resolve_compare_exit_decision` and `resolve_release_exit_decision`), so the exit-code rules can drift between the two paths. [Full write-up](known-gaps/scalar-and-release-compare-still-fold-the-exit-code-in-two.md)
 
-### `unversioned_exported_symbol` false-positives on base-version (VER_FLG_BASE) symbols of versioned libraries: the model cannot tell base-bound from unversioned
-
-**Status (re-verified 2026-10-11 at `46c127111`): OPEN.** `extract/elf_symbol_versions.py::_apply_version_to_symbol` still returns early for `ver_idx < 2`, and `buildsource/cross_source_checks.py:1065` still skips only `not sym.is_default or sym.version`, so base-version symbols are still flagged.  
-`false-positive` — Symbols bound to a versioned library's base version (`VER_FLG_BASE`) look unversioned in the model, so `unversioned_exported_symbol` flags them. [Full write-up](known-gaps/unversioned-exported-symbol-false-positives-on-base-version-ver.md)
-
 ## Open and partially open gaps
 
 Each entry's status line says what is still open. A PARTIAL entry's write-up also describes the half that is already fixed; the status line is authoritative where they disagree.
@@ -89,10 +84,10 @@ Each entry's status line says what is still open. A PARTIAL entry's write-up als
 **Status (recorded 2026-10-11 at `2a1ccb0c8`): OPEN.** source_graph_compare.diff_source_graph keys edges on (src, dst, kind), not relation_key(); a param→return role change reads as no change.  
 `false-clean` — A public declaration that changes how it uses a type (param → return, field → base) produces an empty structural edge diff. [Full write-up](known-gaps/source-graph-structural-diff-is-role-blind.md)
 
-#### The default L2 header projection drops template/override/callback facts (2026-10-11)
+#### The header-graph parse picks C mode for C++ headers without a recognised C++ construct (2026-10-12)
 
-**Status (recorded 2026-10-11 at `2a1ccb0c8`): OPEN.** header_graph_ast_projection's graph projections (types, calls, type/entity files) and its special_member_names collection carry no template, override or callback facts; fold_template_graph and the callback/override folds run only from l5_ast_pass.  
-`false-clean` — Headers-only graphs carry no template-instantiation, override or callback facts, although the same AST holds them. [Full write-up](known-gaps/l2-header-projection-drops-template-override-callback-facts.md)
+**Status (recorded 2026-10-12 at `f25eddcdd`): OPEN.** `extract/headers/ast_config._detect_cpp_headers` decides the header graph's clang mode from header text alone; a non-const reference (`Slot&`) or `std::` is not in `_CPP_ONLY_PATTERNS`, so such a `.h` header parses as `-x c -std=gnu11`, fails, and the header graph degrades to declaration-only.  
+`hygiene` — A C++ `.h` header whose only C++ markers are non-const references or `std::` names gets a degraded (declaration-only) header graph although the binary's exports are C++-mangled. Coverage stays honest (`header_call_graph` is degraded), but the graph loses its edges. [Full write-up](known-gaps/header-graph-parse-picks-c-mode-for-cxx-headers.md)
 
 #### Header-pass body coverage is one blanket unit, not per body (2026-10-11)
 

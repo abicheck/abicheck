@@ -21,9 +21,9 @@ AI-readiness file-size cap. Not the leaf helper module ``cli_helpers_compare``
 (plain, cli-independent utilities): ``run_compare`` drives the full
 single-pair compare flow and reuses the option-parsing/render/exit helpers
 still in :mod:`abicheck.cli` (imported back below -- the by-design sibling
-cycle, allow-listed in ``check_ai_readiness``). Verdict routing stays through
-the Tier-2 service (``service.compare_snapshots``), never a direct
-``checker.compare`` call (cli-contract, ADR-037 D10.1).
+cycle, allow-listed in ``check_ai_readiness``). Classification goes through
+the shared ``workflows.compare_classify`` core every scalar route runs, never
+a direct ``checker.compare`` call (cli-contract, ADR-037 D10.1).
 """
 
 from __future__ import annotations
@@ -49,7 +49,7 @@ from .cli_compare_options import (
     _warn_force_public_ignored,
     echo_coverage_warnings,
 )
-from .cli_dump_helpers import resolve_dump_debug_format, resolve_dump_depth
+from .cli_dump_helpers import resolve_dump_debug_format
 from .cli_helpers_compare import (
     _app_compat_summary as _app_compat_summary,
     _pair_wide_dialect_override,
@@ -58,8 +58,6 @@ from .cli_helpers_compare import (
     _scoped_exit_code as _scoped_exit_code,
     _scoped_severity_summary as _scoped_severity_summary,
     _warn_ignored_flags,
-    load_required_symbols,
-    resolve_force_public_scope,
 )
 from .cli_options import (
     resolve_compile_context,
@@ -105,6 +103,10 @@ from .frontends.cli.contract_overlays import (
 )
 from .frontends.cli.options.params import _load_suppression_and_policy
 from .frontends.cli.ownership_config import project_ownership_request
+from .frontends.cli.project_config import (
+    compare_settings_usage_errors,
+    resolve_project_compare_config,
+)
 from .frontends.cli.runtime import (
     _announce_exit_scheme,
     _exit_with_severity_or_verdict,
@@ -117,6 +119,11 @@ from .frontends.render import ONELINE_FORMAT, resolve_demangle_for_format
 from .model.sided_inputs import resolve_per_side_inputs
 from .report.report_modes import normalize_report_mode
 from .serialization import run_scoped_digest_cache
+from .workflows.compare_configuration import (
+    load_required_symbols,
+    resolve_compare_collect_mode,
+    resolve_force_public_scope,
+)
 from .workflows.header_exclusion_audit import unmatched_exclusion_warning
 from .workflows.ownership_request import project_ownership_scope
 from .workflows.public_header_boundary import (
@@ -124,81 +131,10 @@ from .workflows.public_header_boundary import (
 )
 
 if TYPE_CHECKING:
-    from .cli_helpers_compare import ResolvedCompareConfig
     from .model.consumer_spec import ConsumerAppInput
+    from .workflows.compare_configuration import ResolvedCompareConfig
     from .workflows.extraction import DumpManifest
     from .workflows.policy_file import PolicyFile
-
-
-def _resolve_compare_config(
-    *,
-    config: Path | None,
-    severity_preset: str | None,
-) -> tuple[Path | None, object, ResolvedCompareConfig, str | None]:
-    """This module's long-standing name for `frontends.cli.project_config.
-    resolve_project_compare_config`.
-
-    The implementation moved so the ``--no-baseline`` audit -- which
-    dispatches before this module runs -- can reach the same resolution
-    without closing an import cycle back through it. Call sites unchanged.
-    """
-    from .frontends.cli.project_config import resolve_project_compare_config
-
-    return resolve_project_compare_config(
-        config=config,
-        severity_preset=severity_preset,
-    )
-
-
-def _resolve_compare_collect_mode(
-    depth: str | None,
-    source_method: str | None,
-    old_sources: Path | None,
-    new_sources: Path | None,
-    old_build_info: Path | None,
-    new_build_info: Path | None,
-) -> tuple[str, str]:
-    """Resolve compare's source/build collect mode, plus a human label for it.
-
-    Precedence (ADR-037 D4/D5, extended by the P1 CLI-contract fix below):
-    explicit ``--depth`` > ``.abicheck.yml`` ``source.method`` > inferred from
-    raw ``--old/new-sources``/``--old/new-build-info`` given with neither of
-    the above > off.
-
-    The inferred rung closes a gap where passing ``--sources``/``--build-info``
-    with no ``--depth`` (and no ``source.method`` in config) silently resolved
-    to "off" and the inputs were ignored with a warning: an explicit
-    source/build-info input is itself a request to use it, so omitted depth
-    should not default to discarding it. This mirrors ``scan``'s own
-    "auto" depth, which is likewise input-driven rather than a fixed default.
-    The label is shown verbatim in ``compare --dry-run``'s "Resolved depth and
-    source scope" section so a dry run reports the *effective* depth, not just
-    the raw ``--depth`` string the user passed (or omitted).
-    """
-    if depth is not None:
-        return resolve_dump_depth(depth, "off"), f"--depth {depth}"
-    if source_method:
-        from .model.evidence_depth_levels import SourceMethod, method_to_collect_mode
-
-        try:
-            mode = method_to_collect_mode(SourceMethod(source_method))
-        except ValueError:
-            raise click.UsageError(
-                f"source.method in .abicheck.yml is invalid: "
-                f"{source_method!r} (expected s0..s6 or auto)."
-            ) from None
-        return mode, f"source.method={source_method} (.abicheck.yml)"
-    if old_sources is not None or new_sources is not None:
-        return (
-            resolve_dump_depth("source", "off"),
-            "source (inferred: --sources old=/new= given, no --depth)",
-        )
-    if old_build_info is not None or new_build_info is not None:
-        return (
-            resolve_dump_depth("build", "off"),
-            "build (inferred: --build-info old=/new= given, no --depth)",
-        )
-    return "off", "off -- no L3-L5 source/build evidence (no --depth, no --sources/--build-info, no source.method)"  # fmt: skip
 
 
 def _normalize_compare_options(
@@ -220,14 +156,15 @@ def _normalize_compare_options(
     # Fold the --depth dial into the internal collect mode (ADR-037 D5), the
     # same way `dump` does; when omitted, infer it from --sources/--build-info
     # (or config source.method) rather than defaulting to "off" (P1 fix).
-    collect_mode, _ = _resolve_compare_collect_mode(
-        depth,
-        resolved_cfg.source_method,
-        old_sources,
-        new_sources,
-        old_build_info,
-        new_build_info,
-    )
+    with compare_settings_usage_errors():
+        collect_mode, _ = resolve_compare_collect_mode(
+            depth,
+            resolved_cfg.source_method,
+            old_sources,
+            new_sources,
+            old_build_info,
+            new_build_info,
+        )
     if depth == "binary":
         headers, old_headers_only, new_headers_only = (), (), ()
 
@@ -848,7 +785,7 @@ def _report_compare_result(
 
     *project_config_path*/*project_config_sha256* are ``run_compare``'s own
     already-resolved ``cfg_path``/``cfg_sha`` (the ``.abicheck.yml``
-    ``_resolve_compare_config`` loaded for this same invocation) -- forwarded
+    ``resolve_project_compare_config`` loaded for this same invocation) -- forwarded
     to :func:`~abicheck.cli_compare_receipt.record_resolved_config` so a
     ``gate.require_complete_analysis`` receipt entry can name the real
     document/digest that supplied ``assurance.require_complete``, the same
@@ -1179,12 +1116,13 @@ def run_compare(
         )
         used_by_apps = (*used_by_apps, *manifest_specs)
 
-    (
-        required_symbols,
-        required_symbols_from_file,
-        required_symbols_sha,
-        required_symbols_path,
-    ) = load_required_symbols(required_symbols_opt)
+    with compare_settings_usage_errors():
+        (
+            required_symbols,
+            required_symbols_from_file,
+            required_symbols_sha,
+            required_symbols_path,
+        ) = load_required_symbols(required_symbols_opt)
     if used_by_apps and required_symbols:
         raise click.UsageError(
             "--used-by and --required-symbol are mutually "
@@ -1204,7 +1142,7 @@ def run_compare(
     # ADR-037 D4: load the project config and merge CLI flags over it
     # (precedence CLI > config > built-in default) *before* dispatch, so both the
     # single-file and the directory/package fan-out paths share one resolution.
-    cfg_path, project_cfg, resolved_cfg, cfg_sha = _resolve_compare_config(
+    cfg_path, project_cfg, resolved_cfg, cfg_sha = resolve_project_compare_config(
         config=config,
         severity_preset=severity_preset,
     )
@@ -1440,14 +1378,15 @@ def run_compare(
         # just echo `--depth` back; `frontends/cli/compare_dry_run.py`'s
         # docstring explains why it takes the resolved pair as parameters.
         # The parsed manifests say which operands parse headers without -H.
-        collect_mode_dr, effective_depth_label_dr = _resolve_compare_collect_mode(
-            depth,
-            resolved_cfg.source_method,
-            old_sources,
-            new_sources,
-            old_build_info,
-            new_build_info,
-        )
+        with compare_settings_usage_errors():
+            collect_mode_dr, effective_depth_label_dr = resolve_compare_collect_mode(
+                depth,
+                resolved_cfg.source_method,
+                old_sources,
+                new_sources,
+                old_build_info,
+                new_build_info,
+            )
         emit_dry_run(
             build_compare_dry_run_result(
                 # ADR-074: the effective macro set, resolved through the very

@@ -71,7 +71,7 @@ def release_options(func: F) -> F:
     ``.abicheck.yml``'s ``bundle:`` block now
     (:data:`abicheck.buildsource.build_config.BuildConfig.bundle_system_providers`/
     ``bundle_cohorts``, resolved onto
-    :class:`abicheck.cli_helpers_compare.ResolvedCompareConfig`).
+    :class:`abicheck.workflows.compare_configuration.ResolvedCompareConfig`).
 
     Phase 7d (one-comparison-product.md §4.1, ADR-068 D5): ``--fail-on-
     removed-library``/``--on-incomplete-scope``/``--include-private-dso``
@@ -275,7 +275,7 @@ def app_usage_scope_options(func: F) -> F:
     one of its repeatable values -- two spellings of "name a required
     symbol" collapse into one flag, matching how the file form and the
     inline form always fed the identical contract (see
-    :func:`~abicheck.cli_helpers_compare.load_required_symbols`).
+    :func:`~abicheck.workflows.compare_configuration.load_required_symbols`).
     """
     func = click.option(
         "--used-by-manifest",
