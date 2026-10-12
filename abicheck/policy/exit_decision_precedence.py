@@ -374,10 +374,15 @@ def resolve_compare_exit_decision_with_abort_axes(
     # `resolve_scan_exit_decision` only returns `None` when none of its four
     # axes apply -- unreachable here, since at least one of the two we pass
     # is always `True` by the guard above.
+    # The evidence-contract branch keeps no prior contributions, exactly as
+    # before this owner existed: a scalar `compare --depth` run that misses its
+    # pinned contract already serialized an `exit` block with the ordinary
+    # contributions zeroed, and that report must not change. Budget overflow
+    # alone still preserves the ordinary fold.
     dominant = resolve_scan_exit_decision(
         evidence_contract_error=evidence_contract_error,
         budget_overflow=budget_overflow,
-        prior_decision=ordinary,
+        prior_decision=None if evidence_contract_error else ordinary,
     )
     assert dominant is not None
     return dominant

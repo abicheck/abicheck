@@ -217,11 +217,14 @@ class TestEvidenceOwnerKeepsOrdinaryContributions:
     too. The code itself is unchanged for every input.
     """
 
-    def test_scalar_keeps_the_gate_it_dominated(self) -> None:
+    def test_scalar_zeroes_the_gate_it_dominated_as_before(self) -> None:
+        # Reachable from a real `compare --depth` run (depth_evidence_contract
+        # sets DiffResult.evidence_contract_error), so its serialized `exit`
+        # block must stay exactly what it was before the owner was shared.
         decision = _scalar(Verdict.BREAKING, evidence=True, budget=False)
         assert decision.code == 7
         assert decision.reasons == (ExitReason.EVIDENCE_CONTRACT_ERROR,)
-        assert decision.compatibility_contribution == 4
+        assert decision.compatibility_contribution == 0
 
     def test_release_keeps_the_gate_it_dominated(self) -> None:
         decision = resolve_release_exit_decision(

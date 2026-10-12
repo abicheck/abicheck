@@ -12,8 +12,5 @@ it should read in CHANGELOG.md. Delete the other sections.
   that a failed pinned-evidence contract (`--depth`) takes over the ordinary
   gate/coverage/assurance fold is now decided by one function,
   `resolve_evidence_over_ordinary`, for scalar `compare`, `scan`'s resolver
-  and the directory/package release. No exit code changes for any input.
-  The one difference is the explainability fields of a scalar `compare`
-  whose `DiffResult` carries `evidence_contract_error`: its `exit` block now
-  keeps the ordinary gate/coverage/assurance contributions, as the release
-  path already did. The release's removed-library ladder stays separate.
+  and the directory/package release. No exit code and no report field
+  changes for any input. The release's removed-library ladder stays separate.
