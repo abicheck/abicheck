@@ -327,4 +327,13 @@ def read_bundle_facts_package(
     document = export_bundle_facts(
         manifest, store=store, variant_id=variant_id, on_document=_charge
     )
-    return bundle_facts_from_dict(document)
+    facts = bundle_facts_from_dict(document)
+    # ADR-062 D2: a generation drift is read, never refused. Stamp it on each
+    # per-library snapshot, the same runtime-only `load_notices` a ProjectSnapshot
+    # package carries, so it reaches `DiffResult.coverage_warnings` through
+    # `confidence.snapshot_load_notices` and moves neither verdict nor exit code.
+    if compatibility.semantics_differ:
+        notice = f"stored bundle facts '{variant_id}': {compatibility.reason}"
+        for snapshot in facts.per_library_snapshots.values():
+            snapshot.load_notices = (notice,)
+    return facts
