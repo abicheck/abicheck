@@ -11,7 +11,7 @@ generated: false
 
 Index: [Known gaps](../known-gaps.md)
 
-**Status (re-verified 2026-10-09 at `456989f`): OPEN.** grep for inline_facts_reliable in abicheck/ finds nothing. diff_symbols.py:477 _check_inline_transitions has no reliability or producer gate.
+**Status (re-verified 2026-10-12): OPEN — design in [ADR-079](../adr/079-inline-fact-reliability-and-producer-generation.md), no code change.** `_check_inline_transitions` declines through the existing `Fact` path when `is_inline` is absent, so nothing is missing there. What is missing is a staleness signal for a *present*, wrong `is_inline` fact. The fix commit `5ba6a5c84` landed at `SCHEMA_VERSION` 52, the same version as the pre-fix snapshots, so the boundary is v52/v53: v<53 is treated as possibly pre-fix. The fix also touched castxml out-of-line inline recovery, so both producers are in scope. A persisted marker needs a `SCHEMA_VERSION` 59 bump, which is blocked on ADR-079's acceptance.
 
 The implicit-inline fix
 (`extract/headers/clang/inline_semantics.py`) changed what the clang
@@ -40,7 +40,7 @@ snapshot below a `_MIN_SCHEMA_VERSION_FOR_*` threshold from the affected
 producer, and read by the consuming detector, which then declines rather
 than fabricating a finding. Adding `clang_inline_facts_reliable` the same
 way is the complete fix. It is **not** folded into the fix PR because it
-cannot work without bumping `SCHEMA_VERSION` (a pre-fix snapshot is v46,
+cannot work without bumping `SCHEMA_VERSION` (a pre-fix snapshot is v52,
 and so is a post-fix one — there is otherwise no way to tell them apart),
 and this file's own contract is that a schema change gets its own ADR and
 migration rather than riding along with a behavior fix. It also lands in
