@@ -1,7 +1,7 @@
 # Copyright 2026 Nikolay Petrov
 # SPDX-License-Identifier: Apache-2.0
 
-"""`workflows.compare_finalize.attach_operand_identity`: one owner for the
+"""`workflows.compare_finalize.attach_operand_metadata`: one owner for the
 operand metadata and the same-binary note.
 
 The native CLI (`frontends.cli.runtime._finalize_compare_result`) and the
@@ -25,7 +25,7 @@ from abicheck.checker_types import DiffResult
 from abicheck.confidence import SAME_BINARY_WARNING_MARKER
 from abicheck.frontends.cli.runtime import _finalize_compare_result
 from abicheck.model import AbiSnapshot
-from abicheck.workflows.compare_finalize import attach_operand_identity
+from abicheck.workflows.compare_finalize import attach_operand_metadata
 
 _ELF = b"\x7fELF" + b"\x00" * 60
 
@@ -125,7 +125,7 @@ def test_owner_matches_hash_oracle_and_cli_matches_owner(
     old_snap, new_snap = _snapshots(same_snapshots)
 
     owner = _fresh()
-    attach_operand_identity(
+    attach_operand_metadata(
         owner, old_path, new_path, old_snapshot=old_snap, new_snapshot=new_snap
     )
 
@@ -162,6 +162,6 @@ def test_digest_fallback_needs_both_snapshots(tmp_path: Path) -> None:
 
     for kwargs in ({}, {"old_snapshot": old_snap}, {"new_snapshot": old_snap}):
         result = _fresh()
-        attach_operand_identity(result, old_path, new_path, **kwargs)
+        attach_operand_metadata(result, old_path, new_path, **kwargs)
         assert result.old_metadata is None and result.new_metadata is None
         assert result.coverage_warnings == []

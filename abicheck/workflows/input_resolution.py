@@ -694,7 +694,7 @@ def collect_metadata(path: Path) -> LibraryMetadata | None:
         # hashable file -- the same "not a binary" no-op the text-format
         # branches below already apply, without `read_bytes()` raising
         # `IsADirectoryError` first. Both the CLI and the typed Python API
-        # reach this through `compare_finalize.attach_operand_identity`
+        # reach this through `compare_finalize.attach_operand_metadata`
         # (Codex review).
         return None
     text_fmt = sniff_text_format(path)

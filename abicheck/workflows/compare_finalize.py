@@ -27,10 +27,10 @@ if TYPE_CHECKING:
     from ..model import AbiSnapshot
     from .resolved_execution_context import ResolvedExecutionContext
 
-__all__ = ["attach_operand_identity", "finalize_classified_pair"]
+__all__ = ["attach_operand_metadata", "finalize_classified_pair"]
 
 
-def attach_operand_identity(
+def attach_operand_metadata(
     result: DiffResult,
     old_path: Path,
     new_path: Path,
@@ -101,7 +101,7 @@ def finalize_classified_pair(
     *pack_application* is the request's selected ``pack_paths`` contribution
     (``RequestPolicyInputs.pack_application``): a gate pack's severity levels
     fold into the gate here, as the native CLI folds them into its own."""
-    attach_operand_identity(
+    attach_operand_metadata(
         result,
         required_path(request.old, "old"),
         required_path(request.new, "new"),

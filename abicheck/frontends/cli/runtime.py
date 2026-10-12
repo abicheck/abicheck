@@ -21,7 +21,7 @@ which is why that file could not become a registration facade while they
 lived there. Work that is not a terminal concern lives with its owner, so the
 typed API reaches the same code: snapshot provenance in
 :mod:`abicheck.workflows.provenance`, operand metadata and the same-binary
-note in :func:`abicheck.workflows.compare_finalize.attach_operand_identity`.
+note in :func:`abicheck.workflows.compare_finalize.attach_operand_metadata`.
 
 The exit path is the one worth reading: ``_exit_with_severity_or_verdict``
 folds three orthogonal axes -- the compatibility verdict, the ADR-049
@@ -523,9 +523,9 @@ def _finalize_compare_result(
     # ADR-061 (abicheck/frontends/AGENTS.md). The typed API's
     # `finalize_classified_pair` calls the same owner, so the two front ends
     # cannot drift on what makes two operands "the same binary".
-    from ...workflows.compare_finalize import attach_operand_identity
+    from ...workflows.compare_finalize import attach_operand_metadata
 
-    attach_operand_identity(
+    attach_operand_metadata(
         result,
         metadata_old_input,
         metadata_new_input,
