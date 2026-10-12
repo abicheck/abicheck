@@ -24,26 +24,14 @@ before the fix, compared against a freshly-dumped candidate, reports
 `FUNC_BECAME_INLINE` (RISK) for every such declaration. The findings are
 spurious: nothing about the library changed.
 
-**Bounded, with a one-step remedy.** castxml is the default header
-backend and always recorded these as inline, so only a baseline captured
-under the opt-in `--ast-frontend clang` / `ABICHECK_AST_FRONTEND=clang` is
-affected, and re-dumping that baseline clears it permanently. The findings
-are RISK-class, never breaking, so no gate flips from pass to fail.
-
-**The proper fix is the established one, and it is a schema change.** This
-codebase already has the mechanism for exactly this situation — a fact
-whose stored value is wrong in snapshots from an earlier generation:
-`clang_restrict_facts_reliable`, `clang_va_list_facts_reliable`,
-`param_kind_facts_reliable` and their siblings
-(`model/snapshot_reliability.py`), each set `False` at load time for a
-snapshot below a `_MIN_SCHEMA_VERSION_FOR_*` threshold from the affected
-producer, and read by the consuming detector, which then declines rather
-than fabricating a finding. Adding `clang_inline_facts_reliable` the same
-way is the complete fix. It is **not** folded into the fix PR because it
-cannot work without bumping `SCHEMA_VERSION` (a pre-fix snapshot is v52,
-and so is a post-fix one — there is otherwise no way to tell them apart),
-and this file's own contract is that a schema change gets its own ADR and
-migration rather than riding along with a behavior fix. It also lands in
+**Bounded, with a conservative load-time remedy.** Both clang and castxml
+producers are in scope: the same fix commit changed castxml's out-of-line inline
+recovery. A snapshot loaded below v53 can contain stale `is_inline` facts, so the
+loader demotes them and the existing detector declines the comparison instead of
+reporting a finding. The findings are RISK-class, never breaking, so no gate flips
+from pass to fail. This load-time fix needs no schema bump. Only persisting the
+marker across load-and-save needs `SCHEMA_VERSION` 59, a migration note and
+older-reader handling, and that is blocked on ADR-079 acceptance. It also lands in
 `policy/analysis_assurance_degraded_facts.py`'s `consulted_when` map,
 whose every-flag-has-a-key invariant is enforced by a `KeyError` rather
 than a check, and — if `is_inline` is converted to a `Fact[bool]` at the

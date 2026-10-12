@@ -79,11 +79,13 @@ cannot distinguish the two sides, since the fix did not bump the stamp. The
 generation stamps belong to the concurrent change and are not touched here.
 
 **D6. Tests, written with the implementation.**
-(a) An old-producer snapshot against a new-producer snapshot with identical
-inline facts yields zero `FUNC_BECAME_INLINE`, and the coverage record
-names the declined pairs.
+(a) A pre-fix snapshot (`is_inline=False`, stale) against a post-fix snapshot
+(`is_inline=True`, the truth) yields zero `FUNC_BECAME_INLINE`, and the coverage
+record names the declined pair. Without the stale load the same pair reports
+the spurious change.
 (b) A genuine inline change with both sides reliable is still reported.
-(c) A current-version snapshot is never marked stale by this family.
+(c) A newly produced current-version snapshot is never marked stale by this family.
+(d) A stale old baseline remains stale after it is re-saved at schema v59 (D4).
 
 ## Consequences
 
