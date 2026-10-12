@@ -654,3 +654,10 @@ adrs:
       - cli: compare --severity-preset
       - report: compare_report.summary
       - report: compare_report.severity
+
+  - id: ADR-079
+    file: 079-declared-header-order-independent-extraction.md
+    disposition: gap
+    use_cases: []
+    surfaces: []
+    missing: Proposed, not yet implemented; the aggregate driver TU still parses declared headers in declared order, and no option (per-header TU or dependency-ordered aggregate) has been chosen.
