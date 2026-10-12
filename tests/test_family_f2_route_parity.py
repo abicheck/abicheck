@@ -1043,3 +1043,92 @@ def test_member_and_release_routes_agree_on_obligation_confidence(
     surface = surface_from_snapshot(snap, acquisition_key="k", side="new")
     release = [c.confidence for c in _release_findings(surface).findings]
     assert member == release == [Confidence.LOW if narrowed else Confidence.HIGH]
+
+
+# ── evidence.producer_drops_facts_its_input_holds ───────────────────────────
+
+_SEMANTIC_HEADER = """\
+#pragma once
+namespace cell {
+struct Impl { int v; };
+template <typename T> struct Box { T value; T get() const { return value; } };
+struct Base { virtual ~Base(); virtual int f(int) const; };
+struct Derived : Base { int f(int) const override; };
+typedef void (*handler_t)(int);
+void reg(handler_t h);
+void on_event(int);
+struct Api { Box<Impl> held; };
+inline int call(const Base& b) { return b.f(1); }
+inline void setup() { reg(&on_event); }
+}
+"""
+
+
+def _semantic_route_edges(tmp_path: Path) -> tuple[frozenset, frozenset]:
+    """One header through the default L2 header route and the L5 route;
+    each route's override/template/callback/dispatch edges (full domain in
+    tests/test_header_graph_semantic_facts.py)."""
+    from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
+    from abicheck.buildsource.header_graph import build_header_only_graph
+    from abicheck.buildsource.l5_ast_pass import fold_semantic_graphs
+    from abicheck.extract.headers.sysinc import _resolve_clang_system_includes
+    from abicheck.model import AbiSnapshot
+    from abicheck.model.source_graph import SourceGraphSummary
+    from abicheck.model.source_graph_coverage import SEMANTIC_FAMILIES
+    from abicheck.service_header_graph_attach import acquire_header_graph_ast
+
+    kinds = frozenset().union(*(f.edge_kinds for f in SEMANTIC_FAMILIES))
+    header = tmp_path / "api.h"
+    header.write_text(_SEMANTIC_HEADER, encoding="utf-8")
+    acquired = acquire_header_graph_ast([header], [], None, None)
+    assert acquired.ast_failure is None, acquired.ast_failure
+    l2 = build_header_only_graph(
+        AbiSnapshot(library="l", version="1"), ast_projection=acquired.projection
+    )
+    tu = tmp_path / "tu.cpp"
+    tu.write_text('#include "api.h"\n', encoding="utf-8")
+    system_dirs = _resolve_clang_system_includes(
+        "c++", gcc_path=None, gcc_prefix=None, sysroot=None, nostdinc=False,
+        force_cpp=True,
+    )  # fmt: skip
+    l5 = SourceGraphSummary()
+    unit = CompileUnit(
+        id="cu://tu", source=str(tu), directory=str(tmp_path), language="CXX",
+        include_paths=[str(tmp_path)], system_include_paths=list(system_dirs),
+    )  # fmt: skip
+    fold_semantic_graphs(l5, BuildEvidence(compile_units=[unit]), "clang++", [])
+
+    def edges(g: SourceGraphSummary) -> frozenset:
+        return frozenset((e.kind, e.src, e.dst) for e in g.edges if e.kind in kinds)
+
+    return edges(l2), edges(l5)
+
+
+@pytest.mark.skipif(shutil.which("clang++") is None, reason="needs clang++")
+def test_header_and_l5_routes_derive_the_same_semantic_facts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    l2, l5 = _semantic_route_edges(tmp_path)
+    assert {k for k, _s, _d in l5} >= {
+        "METHOD_POSSIBLE_OVERRIDE",
+        "DECL_INSTANTIATES_TEMPLATE",
+        "DECL_REGISTERS_CALLBACK",
+    }
+    assert l2 == l5, (sorted(l2 - l5)[:10], sorted(l5 - l2)[:10])
+
+
+@pytest.mark.skipif(shutil.which("clang++") is None, reason="needs clang++")
+def test_mutant_header_route_drops_the_semantic_folds(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The pre-fix shape: the header route keeps type/call edges only."""
+    from abicheck.buildsource import header_graph_ast_projection
+
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    monkeypatch.setattr(
+        header_graph_ast_projection, "fold_header_semantic_facts", lambda *_a: None
+    )
+    l2, l5 = _semantic_route_edges(tmp_path)
+    assert l5 and not l2
+    assert l2 != l5

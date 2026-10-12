@@ -1094,6 +1094,8 @@ EVIDENCE_BUG_CLASSES: tuple[BugClass, ...] = (
             # and streamed reader; family changes surface in the graph diff;
             # a real v1 graph with the families stripped is a gap.
             "tests/test_header_graph_semantic_facts.py",
+            # F2 harness cell: one header through both routes, plus a mutant.
+            "tests/test_family_f2_route_parity.py",
             # every family x {stored old, stored new, both looked, degraded/
             # narrowed, unflagged legacy} against the family's own flags.
             "tests/test_source_graph_diff_semantic_coverage.py",
