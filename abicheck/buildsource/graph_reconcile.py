@@ -343,8 +343,7 @@ def _all_structural_contexts(
         src_wanted = e.src in ctx
         if not (dst_wanted or src_wanted):
             continue
-        role = str(e.attrs.get("role", ""))
-        tag = f"{e.kind}:{role}" if role else e.kind
+        tag = f"{e.kind}:{e.role}" if e.role else e.kind
         if dst_wanted:
             ctx[e.dst].add(("in", tag, identity(e.src)))
         if src_wanted:
