@@ -232,6 +232,7 @@ CLASSIFICATION_BUG_CLASSES: tuple[BugClass, ...] = (
             "tests/test_surface_breakdown.py",
             "tests/test_policy_experimental_namespaces.py",
             "tests/test_diff_namespaces.py",
+            "tests/test_cxx_artifact_symbol_kind.py",
         ),
         known_gaps=(
             KnownGap(
