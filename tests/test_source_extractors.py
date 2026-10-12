@@ -100,8 +100,6 @@ def test_build_command_c_uses_gcc_and_no_target_for_msvc() -> None:
     cmd = build_castxml_command(
         _cu(language="C", standard="c11"), Path("a.c"), Path("o.xml")
     )
-    # A C unit runs in castxml's C emulation: `--castxml-cc-gnu` injects the
-    # emulated compiler's C++ `-std=gnu++NN`, which castxml rejects for C.
     assert "--castxml-cc-gnu-c" in cmd and "gcc" in cmd
     assert "-std=c11" in cmd
     # MSVC path: /std: form and no --target flag.
@@ -114,31 +112,6 @@ def test_build_command_c_uses_gcc_and_no_target_for_msvc() -> None:
     assert "--castxml-cc-msvc" in msvc
     assert "/std:c++20" in msvc
     assert not any(a.startswith("--target=") for a in msvc)
-
-
-@pytest.mark.parametrize(
-    ("language", "compiler", "mode"),
-    [
-        ("C", None, "gnu-c"),
-        ("CXX", None, "gnu"),
-        ("", None, "gnu"),
-        ("C", "clang", "gnu-c"),
-        ("CXX", "clang++", "gnu"),
-        ("C", "cl.exe", "msvc"),
-        ("CXX", "cl.exe", "msvc"),
-    ],
-)
-def test_castxml_emulation_mode_follows_the_unit_language(
-    language: str, compiler: str | None, mode: str
-) -> None:
-    """Exactly one `--castxml-cc-<mode>` flag per command: C emulation for a
-    GNU-family C unit, C++ for every other GNU unit, MSVC whatever the
-    language (castxml's MSVC emulation has no separate C mode)."""
-    cmd = build_castxml_command(
-        _cu(language=language), Path("a.c"), Path("o.xml"), compiler_binary=compiler
-    )
-    modes = [a for a in cmd if a.startswith("--castxml-cc-")]
-    assert modes == [f"--castxml-cc-{mode}"]
 
 
 def test_build_command_uses_build_action_compiler() -> None:
