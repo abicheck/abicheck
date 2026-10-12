@@ -1075,4 +1075,39 @@ EVIDENCE_BUG_CLASSES: tuple[BugClass, ...] = (
             ),
         ),
     ),
+    BugClass(
+        id="evidence.distinct_encoded_states_collapsed_to_one_value",
+        invariant=(
+            "Two states a binary format encodes differently stay two states "
+            "in the model when a check reads the difference: an export bound "
+            "to a versioned ELF library's VER_FLG_BASE definition (index 1, "
+            "objdump -T 'Base') and one with no version at all (no "
+            ".gnu.version, or index 0) both left ElfSymbol.version empty, so "
+            "unversioned_exported_symbol flagged every base-API symbol of "
+            "zlib. The distinguishing fact is recorded beside the shared "
+            "field (ElfSymbol.version_binding), never by changing that "
+            "field's value, which other detectors read; and a stored document "
+            "that never recorded it decodes as unknown, which the check "
+            "reports as not evaluated rather than resolving either way."
+        ),
+        fixed_by=(1556,),
+        seed_tests=("tests/test_unversioned_exported_symbol.py",),
+        public_surfaces=("cli",),
+        axes={
+            "linker": ("GNU ld", "gold", "lld"),
+            "binding": ("base", "named", "unversioned", "unknown"),
+            "operand": ("live", "stored v58", "pre-v58 stored"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "An export a version script forgot to name is bound to "
+                    "the base version by every linker tested, so it is "
+                    "indistinguishable in the binary from intended base API "
+                    "and is not flagged."
+                ),
+                reference="docs/contribute/archive/known-gaps-closed.md",
+            ),
+        ),
+    ),
 )

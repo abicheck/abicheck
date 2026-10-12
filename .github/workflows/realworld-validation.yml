@@ -130,15 +130,24 @@ jobs:
           python - <<'PY'
           import json
           data = json.load(open("reports/realworld/zlib-deb-self.json"))
-          # ADR-068 D3/D4/D5: compare() now runs the unversioned_exported_symbol
-          # cross-source check automatically. zlib's own base-API symbols are
-          # legitimately bound to the anonymous/base GNU symbol-version node
-          # (real, correct, permanent upstream convention -- see readelf -V),
-          # so a self-compare now reports COMPATIBLE_WITH_RISK with advisory
-          # RISK findings alongside NO_CHANGE/COMPATIBLE -- never BREAKING, and
-          # never a real ABI change (ADR-035 D4: these findings are advisory/
-          # suppressible by design, not part of the compatibility verdict).
+          # ADR-068 D3/D4/D5: compare() runs the cross-source checks
+          # automatically, whose advisory RISK findings may lift a self-compare
+          # to COMPATIBLE_WITH_RISK -- never BREAKING (ADR-035 D4).
           assert data["verdict"] in {"NO_CHANGE", "COMPATIBLE", "COMPATIBLE_WITH_RISK"}
+          # zlib's base API is bound to its VER_FLG_BASE version node (objdump
+          # -T: Base) -- the correct, permanent upstream convention, not an
+          # unversioned export. Schema v58 records that binding, so the check
+          # must not flag one of them (it flagged every one before).
+          def kinds(node):
+              if isinstance(node, dict):
+                  if isinstance(node.get("kind"), str):
+                      yield node["kind"]
+                  for value in node.values():
+                      yield from kinds(value)
+              elif isinstance(node, list):
+                  for value in node:
+                      yield from kinds(value)
+          assert "unversioned_exported_symbol" not in set(kinds(data))
           # Phase 7d (one-comparison-product.md §4.1): --no-bundle-analysis
           # is gone -- bundle-level analysis always runs now, so these keys
           # are always present (a clean self-compare, so an empty list).
@@ -168,10 +177,7 @@ jobs:
           python - <<'PY'
           import json
           data = json.load(open("reports/realworld/zlib-deb-self-contract.json"))
-          # See the same note on the plain self-compare step above:
-          # compare()'s automatic unversioned_exported_symbol check now
-          # reports advisory RISK findings for zlib's own (correct, upstream)
-          # base-version-bound API symbols.
+          # See the same note on the plain self-compare step above.
           assert data["verdict"] in {"NO_CHANGE", "COMPATIBLE", "COMPATIBLE_WITH_RISK"}, data["verdict"]
           # ADR-049 Phase 7's orthogonal coverage axis must resolve cleanly
           # against a real package's real export table/headers -- 0, not
