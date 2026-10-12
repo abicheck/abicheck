@@ -280,6 +280,7 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
             "tests/test_source_replay_extractor.py",
             "tests/test_castxml_source_emulation_mode.py",
             "tests/test_l4_default_extractor_end_to_end.py",
+            "tests/test_family_f2_route_parity.py",
         ),
         public_surfaces=("cli", "python-api"),
         axes={

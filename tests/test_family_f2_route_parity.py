@@ -1136,3 +1136,23 @@ def test_mutant_header_route_drops_the_semantic_folds(
     l2, l5 = _semantic_route_edges(tmp_path)
     assert l5 and not l2
     assert l2 != l5
+
+
+@pytest.mark.parametrize("header_backend", ["auto", "castxml", "clang"])
+def test_dump_write_and_resolution_routes_replay_l4_alike(
+    header_backend: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Bug class ``extraction.default_extractor_lacks_the_promised_fact_family``:
+    ``dump``'s write-time embed (``_make_source_extractor(header_backend)``)
+    and the shared resolution's (``source_replay_extractor``) instantiate the
+    same L4 extractor. Under ``auto`` the first was clang and the second
+    castxml, so a C tree's macros reached ``dump`` and not the typed API."""
+    from abicheck.buildsource.inline import _make_source_extractor
+    from abicheck.service_compare_evidence import source_replay_extractor
+
+    monkeypatch.delenv("ABICHECK_AST_FRONTEND", raising=False)
+    written, _ = _make_source_extractor(header_backend, "clang")
+    resolved, _ = _make_source_extractor(
+        source_replay_extractor(None, header_backend), "clang"
+    )
+    assert type(written) is type(resolved)
