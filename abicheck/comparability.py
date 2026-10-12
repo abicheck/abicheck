@@ -155,16 +155,6 @@ from .comparability_language_mode import (
 )
 from .comparability_sequences import (
     HeaderSetDelta,
-    # `_header_sequence_is_additive_reorder_free`/
-    # `_include_sequence_is_additive_owned_growth`/`_scope_newly_added_headers`
-    # are used only by comparability_profile.py's own code now (the
-    # profile-fingerprint axis moved there), but
-    # tests/test_comparability_gate*.py still import them from this module --
-    # same re-export idiom as the comparability_fields/comparability_language_mode
-    # aliases above.
-    _header_sequence_is_additive_reorder_free as _header_sequence_is_additive_reorder_free,
-    _include_sequence_is_additive_owned_growth as _include_sequence_is_additive_owned_growth,
-    _scope_newly_added_headers as _scope_newly_added_headers,
     scope_header_delta,
 )
 from .errors import AbicheckError, ProfileMismatchError, ScopeMismatchError
@@ -807,7 +797,7 @@ class ComparabilityMismatch:
     the macro/pragma-leak hazard it priced is compared at full assurance
     whenever an existing header's content evolves) and is gone -- the
     growth is now waived outright by the ``header_sequence`` carve-out, see
-    :func:`comparability_sequences._header_sequence_is_scope_confirmed_growth`.
+    :func:`comparability_sequences.header_sequence_is_scope_confirmed_evolution`.
     The machinery here stays because the rule it expresses is general: a
     future axis whose divergence is bounded rather than disqualifying sets
     ``fatal=False`` and is priced per dimension, with no further wiring.
