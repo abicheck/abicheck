@@ -17,36 +17,36 @@
 
 from __future__ import annotations
 
-from abicheck.cli_helpers_compare import _provenance_timestamp
+from abicheck.workflows.provenance import provenance_timestamp
 
 
 def test_source_date_epoch_fixed() -> None:
     # 2021-01-01T00:00:00Z
-    assert _provenance_timestamp("1609459200") == "2021-01-01T00:00:00+00:00"
+    assert provenance_timestamp("1609459200") == "2021-01-01T00:00:00+00:00"
 
 
 def test_source_date_epoch_deterministic() -> None:
-    assert _provenance_timestamp("1700000000") == _provenance_timestamp("1700000000")
+    assert provenance_timestamp("1700000000") == provenance_timestamp("1700000000")
 
 
 def test_source_date_epoch_whitespace_tolerated() -> None:
-    assert _provenance_timestamp("  1609459200\n") == "2021-01-01T00:00:00+00:00"
+    assert provenance_timestamp("  1609459200\n") == "2021-01-01T00:00:00+00:00"
 
 
 def test_malformed_epoch_falls_back_to_now() -> None:
     # Non-numeric → current time (just assert it produces a valid ISO string,
     # not the fixed epoch).
-    out = _provenance_timestamp("not-a-number")
+    out = provenance_timestamp("not-a-number")
     assert out and out != "2021-01-01T00:00:00+00:00"
 
 
 def test_out_of_range_epoch_falls_back_to_now() -> None:
     # An absurd out-of-range epoch makes datetime.fromtimestamp raise
     # OverflowError/OSError; it must fall back rather than abort the dump.
-    out = _provenance_timestamp("99999999999999999999")
+    out = provenance_timestamp("99999999999999999999")
     assert out and out != "2021-01-01T00:00:00+00:00"
 
 
 def test_unset_epoch_uses_now() -> None:
-    out = _provenance_timestamp(None)
+    out = provenance_timestamp(None)
     assert out  # current wall-clock ISO timestamp

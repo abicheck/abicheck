@@ -61,9 +61,7 @@ if TYPE_CHECKING:
 
 
 from ....cli import main
-from ..runtime import (
-    _validate_view,
-)
+from ..options.view import validate_view
 
 #: `oneline` and `html` render the aggregate release document alone
 #: (`report/release_oneline.py`, `report/render_release_html.py`); the two still
@@ -139,7 +137,7 @@ from .compare_routing import _RELEASE_FORMATS
     "--view",
     "view",
     multiple=True,
-    callback=_validate_view,
+    callback=validate_view,
     expose_value=True,
     metavar="TOKEN",
     help="Repeatable rendering selector: never changes the "

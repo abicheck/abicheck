@@ -46,21 +46,6 @@ if TYPE_CHECKING:
     from .workflows.policy_file import PolicyFile
 
 
-def _provenance_timestamp(source_date_epoch: str | None) -> str:
-    """ISO-8601 UTC timestamp, honouring ``SOURCE_DATE_EPOCH`` when valid."""
-    import datetime
-
-    if source_date_epoch:
-        try:
-            epoch = int(source_date_epoch.strip())
-            return datetime.datetime.fromtimestamp(epoch, tz=datetime.UTC).isoformat()
-        except (ValueError, OverflowError, OSError):
-            # Non-numeric or out-of-range epoch — fall back to wall clock
-            # rather than aborting the dump.
-            pass
-    return datetime.datetime.now(datetime.UTC).isoformat()
-
-
 def _pair_wide_dialect_override(
     lang: str,
     old_h: list[Path],

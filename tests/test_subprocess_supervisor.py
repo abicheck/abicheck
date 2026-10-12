@@ -58,9 +58,9 @@ DIRECT_CALL_ALLOWLIST: dict[str, tuple[int, str]] = {
     # ADR-061 migrated layers may not import the unclassified root
     # ``deadline`` module (architecture/dispositions.yaml); both are short
     # git queries with their own timeout and no grandchildren.
-    "abicheck/frontends/cli/runtime.py": (
+    "abicheck/workflows/provenance.py": (
         1,
-        "frontends cannot import unclassified deadline yet",
+        "workflows cannot import unclassified deadline yet",
     ),
     "abicheck/workflows/changed_paths.py": (
         1,

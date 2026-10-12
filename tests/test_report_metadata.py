@@ -382,7 +382,7 @@ class TestHtmlEnrichments:
 
 class TestCliMetadataCollection:
     def test_collect_metadata(self):
-        from abicheck.frontends.cli.runtime import _collect_metadata
+        from abicheck.workflows.input_resolution import collect_metadata
 
         with tempfile.NamedTemporaryFile(suffix=".so", delete=False) as f:
             f.write(b"fake ELF content for testing")
@@ -390,7 +390,7 @@ class TestCliMetadataCollection:
             path = Path(f.name)
 
         try:
-            meta = _collect_metadata(path)
+            meta = collect_metadata(path)
             assert meta.path == str(path)
             expected_sha = hashlib.sha256(b"fake ELF content for testing").hexdigest()
             assert meta.sha256 == expected_sha
@@ -399,7 +399,7 @@ class TestCliMetadataCollection:
             path.unlink()
 
     def test_collect_metadata_large_file(self):
-        from abicheck.frontends.cli.runtime import _collect_metadata
+        from abicheck.workflows.input_resolution import collect_metadata
 
         content = b"x" * 100_000
         with tempfile.NamedTemporaryFile(suffix=".so", delete=False) as f:
@@ -408,7 +408,7 @@ class TestCliMetadataCollection:
             path = Path(f.name)
 
         try:
-            meta = _collect_metadata(path)
+            meta = collect_metadata(path)
             assert meta.size_bytes == 100_000
             assert len(meta.sha256) == 64  # SHA-256 hex digest length
         finally:
