@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -146,10 +147,9 @@ def _unverified(result) -> list:
     ]
 
 
-# Two independent identity signals; either alone must suffice.
+# Whole-file sha256 identity is the identity signal; code hashes are not.
 _IDENTITY = {
     "file-sha256": dict(sha=("s", "s"), hash=("", "")),
-    "code-hash-only (stored, no sha256)": dict(sha=("", ""), hash=("h", "h")),
     "both": dict(sha=("s", "s"), hash=("h", "h")),
 }
 
@@ -207,6 +207,27 @@ def test_no_identity_signal_keeps_uncertainty() -> None:
     assert len(_unverified(result)) == 2
 
 
+@pytest.mark.parametrize("shape_name", sorted(_SHAPES))
+def test_equal_code_hash_alone_does_not_prove_signature(shape_name: str) -> None:
+    # int f(int) -> int f(double) ignoring the argument can compile to the
+    # same machine code: equal per-symbol code hashes without file identity
+    # must keep the unverified finding.
+    shape = _SHAPES[shape_name]
+    result = analyze_bundle(
+        _bundle(shape, code_hash="h"),
+        _bundle(shape, code_hash="h"),
+        _results(shape, sha_old="a", sha_new="b"),
+        old_signature_evidence=_evidence(shape),
+        new_signature_evidence=_evidence(shape),
+    )
+    edges = {
+        (consumer, imp)
+        for consumer, (_e, imports, _n) in shape.items()
+        for imp in imports
+    }
+    assert {(f.consumer_library, f.symbol) for f in _unverified(result)} == edges
+
+
 # ---------------------------------------------------------------------------
 # Real ELF libraries through the CLI
 # ---------------------------------------------------------------------------
@@ -248,6 +269,7 @@ def _build_package(root: Path, *, debug: bool) -> Path:
 
 
 @pytest.mark.integration
+@pytest.mark.skipif(sys.platform != "linux", reason="builds ELF .so with -soname")
 @pytest.mark.parametrize("debug", [True, False], ids=["dwarf", "stripped-of-dwarf"])
 def test_cli_self_compare_of_binary_only_package_is_no_change(
     tmp_path: Path, debug: bool

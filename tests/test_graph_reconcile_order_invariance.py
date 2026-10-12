@@ -39,6 +39,7 @@ import subprocess
 import sys
 from typing import Any
 
+import pytest
 from hypothesis import given, settings, strategies as st
 
 from abicheck.buildsource.graph_reconcile import (
@@ -61,7 +62,10 @@ def _graph(nodes: list[GraphNode], edges: list[GraphEdge]) -> SourceGraphSummary
 
 
 def _side(
-    decls: list[tuple[str, str, list[str]]], *, edge_order_seed: int
+    decls: list[tuple[str, str, list[str]]],
+    *,
+    edge_order_seed: int,
+    def_file: str = "",
 ) -> tuple[SourceGraphSummary, list[GraphNode]]:
     """A graph declaring each ``(id, qualified name, files)`` in every one of
     its files, with the edges listed in a seed-shuffled order."""
@@ -71,7 +75,15 @@ def _side(
         for f in files
     }
     nodes = [
-        GraphNode(id=nid, kind="record_type", label=qn, attrs={"qualified_name": qn})
+        GraphNode(
+            id=nid,
+            kind="record_type",
+            label=qn,
+            attrs={
+                "qualified_name": qn,
+                **({"def_file": def_file} if def_file else {}),
+            },
+        )
         for nid, qn, _ in decls
     ]
     edges = [
@@ -141,6 +153,28 @@ def test_same_file_set_listed_in_opposite_order_is_not_a_move() -> None:
     new, added = _side(new_edges_rev, edge_order_seed=2)
     got = _summary(old, new, removed, added)
     assert [p[3] for p in got["pairs"]] == ["declaration_identity_unchanged"]
+
+
+@pytest.mark.parametrize(
+    ("old_def", "new_def"), [("a.h", "b.h"), ("b.h", "a.h"), ("a.h", "a.h")]
+)
+@pytest.mark.parametrize("files", [["a.h", "b.h"], ["b.h", "a.h"]])
+def test_shared_declaring_header_beats_differing_def_file(
+    old_def: str, new_def: str, files: list[str]
+) -> None:
+    """Each side's own def_file differs, but both declare the entity in a
+    shared header set: shared declaring evidence means it did not move."""
+    old, removed = _side(
+        [("type://o", "ns::W", files)], edge_order_seed=1, def_file=old_def
+    )
+    new, added = _side(
+        [("type://n", "ns::W", list(reversed(files)))],
+        edge_order_seed=2,
+        def_file=new_def,
+    )
+    got = _summary(old, new, removed, added)
+    assert [p[3] for p in got["pairs"]] != ["declaration_moved"]
+    assert len(got["pairs"]) == 1
 
 
 def test_pairing_ignores_caller_list_order() -> None:

@@ -218,36 +218,6 @@ def _byte_identical_members(
     return identical
 
 
-def _provider_symbol_code_identical(
-    old: BundleSnapshot, new: BundleSnapshot, provider_entry: ProviderEntry, symbol: str
-) -> bool:
-    """Does the provider's definition of *symbol* (at *provider_entry*'s
-    exact version) carry the same, non-empty ``ElfSymbol.code_hash`` on
-    both sides?
-
-    Equal code hashes mean the function's machine code is byte-identical
-    (``extract/elf_code_hash.py``), so how it receives arguments and
-    returns its value is unchanged -- the binary-level signature agrees.
-    Unequal or missing hashes are no evidence either way (the unverified
-    finding still fires). Works for stored snapshots too, which carry no
-    file ``sha256``.
-    """
-
-    def _hash(snapshot: BundleSnapshot) -> str:
-        meta = snapshot.metadata.get(provider_entry.library)
-        if meta is None:
-            return ""
-        hashes = {
-            sym.code_hash
-            for sym in meta.symbols
-            if sym.name == symbol and sym.version == provider_entry.version
-        }
-        return next(iter(hashes)) if len(hashes) == 1 else ""
-
-    old_hash = _hash(old)
-    return bool(old_hash) and old_hash == _hash(new)
-
-
 def _consumer_matches_provider(
     consumer: ConsumerEntry, provider_entry: ProviderEntry, new: BundleSnapshot
 ) -> bool:
@@ -550,13 +520,13 @@ def find_unverified_signature_findings(
                 new_sufficient = _symbol_evidence_sufficient(symbol, new_snap)
             if old_sufficient and new_sufficient:
                 continue
-            if provider_lib in identical_members or _provider_symbol_code_identical(
-                old, new, provider_entry, symbol
-            ):
+            if provider_lib in identical_members:
                 # The same state on both sides is not a change: the
-                # provider's code for this symbol is byte-identical, so its
-                # binary-level signature cannot have moved -- however thin
-                # the type evidence is on either side.
+                # provider file is byte-identical, so its signature cannot
+                # have moved -- however thin the type evidence is. Equal
+                # per-symbol code hashes are NOT used: int f(int) and
+                # int f(double) ignoring the argument can compile to the
+                # same machine code while the signature changed.
                 continue
 
             if not old_sufficient and not new_sufficient:

@@ -51,7 +51,7 @@ def seq_growth(old_value, new_value, added) -> bool:
 
 def incl_growth(old_value, new_value, added) -> bool:
     return include_sequence_is_scope_confirmed_evolution(
-        old_value, new_value, HeaderSetDelta(frozenset(added or ()), frozenset())
+        old_value, new_value, _growth_delta(added)
     )
 
 

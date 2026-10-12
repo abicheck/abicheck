@@ -1143,3 +1143,36 @@ def test_a_scoped_run_gates_on_the_scoped_set_not_on_result_changes() -> None:
         "the precondition that makes this case distinct from the unscoped "
         "invariant next door"
     )
+
+
+@pytest.mark.parametrize(
+    "point", ["consumer_overlay", "required_symbol_overlay", "consumer_scope"]
+)
+@pytest.mark.parametrize("scope_decides_exit", [False, True])
+def test_full_library_gate_drops_suppressed_consumer_only_breaks_from_release_advice(
+    point: str, scope_decides_exit: bool
+) -> None:
+    """A suppressed consumer-only major break never reaches the full-library
+    gate (`compare --used-by`, D-S1), so release advice must not score it --
+    while it still counts as detected and suppressed. Under a scoped gate it
+    does gate, so it stays a waived major break. A library-level suppressed
+    break is unaffected in both modes (independent negative control)."""
+    from abicheck.checker import Verdict
+    from abicheck.policy.disposition_close import close_consumer_scope
+    from abicheck.policy.disposition_ledger import record_suppressed_change
+
+    result = _empty_result()
+    consumer = Change(kind=ChangeKind.FUNC_REMOVED, symbol="c", description="c")
+    library = Change(kind=ChangeKind.FUNC_REMOVED, symbol="l", description="l")
+    ledger = DispositionLedger()
+    for change, where in ((consumer, point), (library, "matrix_suppression")):
+        change.effective_verdict = Verdict.BREAKING
+        record_suppressed_change(ledger, change, rule=None, application_point=where)
+    close_consumer_scope(
+        ledger, result, gating=[], scope_decides_exit=scope_decides_exit
+    )
+    points = {r.application_point for r in ledger.suppressed_gating_records()}
+    assert "matrix_suppression" in points
+    assert (point in points) is scope_decides_exit
+    assert ledger.record_for(consumer).disposition is Disposition.SUPPRESSED
+    assert len(ledger) == 2

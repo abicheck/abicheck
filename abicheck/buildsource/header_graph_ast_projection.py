@@ -462,8 +462,10 @@ class HeaderGraphBisectionMemo:
 
     def clear(self) -> None:
         with self._lock:
+            # Only the outcomes: a key lock may be held by an in-flight
+            # computation, and dropping it would let a second caller mint a
+            # fresh lock for the same key and compute it concurrently.
             self._outcomes.clear()
-            self._key_locks.clear()
 
 
 def header_tree_signature(headers: Sequence[Path]) -> tuple[tuple[str, int, int], ...]:

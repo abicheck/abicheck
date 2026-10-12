@@ -605,3 +605,42 @@ def test_clang_failure_carries_full_diagnostics_for_attribution(tmp_path, width)
         )
     assert info.value.stderr == stderr
     assert attribute_failing_headers(info.value, headers) == [headers[2]]
+
+
+@pytest.mark.parametrize("bad_index", [0, 1, 3])
+def test_castxml_selected_meta_comes_from_the_returned_full_parse(tmp_path, bad_index):
+    """Probe and confirmation attempts parse other header sets (concurrently);
+    only the final full-set parse that produced the returned root may report
+    its selected tool/metadata. Oracle: each fake call tags its metadata with
+    the exact header set it parsed."""
+    from xml.etree.ElementTree import Element
+
+    from abicheck.extract.headers.castxml.probe import (
+        castxml_dump_excluding_unparseable,
+    )
+
+    headers = [tmp_path / f"h{i}.h" for i in range(5)]
+    bad = headers[bad_index]
+
+    def fake_dump(active, *, _selected_tool_out=None, _selected_meta_out=None):
+        tag = ",".join(p.name for p in active)
+        _selected_tool_out.append(f"tool:{tag}")
+        _selected_meta_out.append((f"cc:{tag}", False))
+        if bad in active:
+            exc = SnapshotError("castxml failed")
+            exc.stderr = f"{bad}:1:2: fatal error: nope\n"
+            raise exc
+        root = Element("root")
+        root.set("set", tag)
+        return root
+
+    tools: list = []
+    metas: list = []
+    root, excluded = castxml_dump_excluding_unparseable(
+        fake_dump, headers, _selected_tool_out=tools, _selected_meta_out=metas
+    )
+    assert excluded == [bad]
+    final = ",".join(p.name for p in headers if p != bad)
+    assert root.get("set") == final
+    assert tools == [f"tool:{final}"]
+    assert metas == [(f"cc:{final}", False)]

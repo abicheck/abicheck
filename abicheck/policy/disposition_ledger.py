@@ -68,6 +68,7 @@ from .disposition_gate import (
     _reset_dated_overlays as _reset_dated_overlays,
 )
 from .disposition_types import (
+    CONSUMER_ONLY_APPLICATION_POINTS as _CONSUMER_ONLY,
     Disposition as Disposition,
     DispositionRecord as DispositionRecord,
 )
@@ -726,13 +727,6 @@ class DispositionLedger:
                 # is still the true reason it is not a finding of its own.
                 self._records[index] = replace(record, gate_excluded=True)
 
-    def exclude_from_gate(self, points: frozenset[str]) -> None:
-        """In place: gating records from *points* never reach the gate (D-S1)."""
-        for i, r in enumerate(self._records):
-            if r.application_point in points and r.disposition is Disposition.GATING:
-                excluded = Disposition.NON_GATING
-                self._records[i] = replace(r, disposition=excluded, gate_excluded=True)
-
     def index_for(self, change: object) -> int | None:
         """The index of *change*'s record, resolving an alias to its anchor.
 
@@ -768,13 +762,15 @@ class DispositionLedger:
 
         ``semver.recommend_release``'s conserved-delta input (ADR-067's
         consequences section): a major-class break that a rule hid is still a
-        major-class break.
+        major-class break -- unless a consumer-only one the full-library gate
+        never scored (``disposition_close.exclude_from_gate``).
         """
         return tuple(
             r
             for r in self._records
             if r.disposition is Disposition.SUPPRESSED
             and r.verdict_class in {v.value for v in _GATING_VERDICTS}
+            and not (r.gate_excluded and r.application_point in _CONSUMER_ONLY)
         )
 
     def rules(self) -> tuple[tuple[RuleProvenance, int], ...]:

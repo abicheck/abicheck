@@ -440,10 +440,12 @@ class _Reconciler:
         """
         oid = old_node.id
         new_node = next(n for n in kind_pass.new_list if n.id == new_id)
+        old_files = self.old_declaring_files.get(oid, ())
+        new_files = self.new_declaring_files.get(new_id, ())
         old_edge_file, new_edge_file = representative_declaring_files(
-            self.old_declaring_files.get(oid, ()),
-            self.new_declaring_files.get(new_id, ()),
+            old_files, new_files
         )
+        shared = bool(set(old_files) & set(new_files))
         old_declaring = old_edge_file or own_file(old_node)
         new_declaring = new_edge_file or own_file(new_node)
         classification = classify(
@@ -451,12 +453,14 @@ class _Reconciler:
             kind_pass.new_ident[new_id],
             old_declaring_file=old_declaring,
             new_declaring_file=new_declaring,
+            declaring_file_shared=shared,
         )
         evidence = coordinate_evidence(
             kind_pass.old_ident[oid],
             kind_pass.new_ident[new_id],
             old_declaring_file=old_declaring,
             new_declaring_file=new_declaring,
+            declaring_file_shared=shared,
         )
         self.result.reconciled.append(
             ReconciledPair(

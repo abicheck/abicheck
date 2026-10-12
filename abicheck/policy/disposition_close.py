@@ -45,6 +45,7 @@ from .disposition_ledger import (
     _kept_disposition,
     record_suppressed_change,
 )
+from .disposition_types import CONSUMER_ONLY_APPLICATION_POINTS
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from datetime import date
@@ -169,12 +170,22 @@ def _is_policy_overlay(change: object) -> bool:
     return getattr(kind, "value", kind) in _POLICY_OVERLAY_KINDS
 
 
-#: Application points of the consumer-scoping producers. A finding recorded
-#: there lives only in a consumer's scoped view and never reaches
-#: ``result.changes``, so the full-library gate never scores it.
-CONSUMER_ONLY_APPLICATION_POINTS = frozenset(
-    {"consumer_overlay", "required_symbol_overlay", "consumer_scope"}
-)
+def exclude_from_gate(ledger: DispositionLedger, points: frozenset[str]) -> None:
+    """In place: records from *points* never reach the full-library gate
+    (D-S1). A gating one becomes ``non_gating``; a suppressed one stays
+    suppressed but is marked gate-excluded, so ``recommend_release`` does not
+    advise a major bump for a finding that gate never scored (it still counts
+    in the detected/suppressed audit)."""
+    records = ledger._records
+    for i, r in enumerate(records):
+        if r.application_point not in points:
+            continue
+        if r.disposition is Disposition.GATING:
+            records[i] = replace(
+                r, disposition=Disposition.NON_GATING, gate_excluded=True
+            )
+        elif r.disposition is Disposition.SUPPRESSED:
+            records[i] = replace(r, gate_excluded=True)
 
 
 def record_consumer_overlay(
@@ -561,7 +572,7 @@ def close_consumer_scope(
     if scope_decides_exit:
         ledger.apply_scope(result, gating)
     else:
-        ledger.exclude_from_gate(CONSUMER_ONLY_APPLICATION_POINTS)
+        exclude_from_gate(ledger, CONSUMER_ONLY_APPLICATION_POINTS)
     ledger.resolve_verdict_classes(result)
     ledger.resolve_reclassifications(result)
     _resolve_acknowledgments(

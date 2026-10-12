@@ -275,11 +275,35 @@ def castxml_dump_excluding_unparseable(
         parse_excluding_unparseable_headers,
     )
 
-    return parse_excluding_unparseable_headers(
+    # Each attempt -- full parse, isolated probe or in-context confirmation,
+    # some of them concurrent -- records its selected tool/metadata into its
+    # OWN lists; only the attempt whose result is returned (the final
+    # full-set parse) forwards them to the caller's out-lists. Sharing the
+    # caller's lists let a probe's metadata for a different header set land
+    # first and be stamped on the result.
+    tool_out = kwargs.pop("_selected_tool_out", None)
+    meta_out = kwargs.pop("_selected_meta_out", None)
+
+    def attempt(active: list[Path]) -> tuple[Element, list[Any], list[Any]]:
+        tools: list[Any] = []
+        metas: list[Any] = []
+        call_kwargs = dict(kwargs)
+        if tool_out is not None:
+            call_kwargs["_selected_tool_out"] = tools
+        if meta_out is not None:
+            call_kwargs["_selected_meta_out"] = metas
+        return castxml_dump(active, *args, **call_kwargs), tools, metas
+
+    (root, tools, metas), excluded = parse_excluding_unparseable_headers(
         headers,
-        lambda active: castxml_dump(active, *args, **kwargs),
+        attempt,
         is_header_specific=castxml_failure_is_header_specific,
     )
+    if tool_out is not None:
+        tool_out.extend(tools)
+    if meta_out is not None:
+        meta_out.extend(metas)
+    return root, excluded
 
 
 def castxml_failure_is_header_specific(exc: SnapshotError) -> bool:
