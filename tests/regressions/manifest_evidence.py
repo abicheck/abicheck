@@ -1090,7 +1090,7 @@ EVIDENCE_BUG_CLASSES: tuple[BugClass, ...] = (
             "that never recorded it decodes as unknown, which the check "
             "reports as not evaluated rather than resolving either way."
         ),
-        fixed_by=(1556,),
+        fixed_by=(1558,),
         seed_tests=(
             "tests/test_unversioned_exported_symbol.py",
             "tests/test_family_f1_evidence_ablation.py",
