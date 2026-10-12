@@ -23,8 +23,8 @@ from abicheck.comparability import (
     _fingerprint_matches_fields,
     _header_sequence_is_additive_reorder_free,
     _include_sequence_is_additive_owned_growth,
-    _scope_field_is_additive_superset,
-    _scope_growth_corroborated,
+    _scope_evolution_delta,
+    _scope_field_is_set_evolution,
     _scope_newly_added_headers,
     _sha256_of,
     check_contracts_comparable,
@@ -49,6 +49,12 @@ def _snap(contract: ExtractionContract | None, **kwargs) -> AbiSnapshot:
     return AbiSnapshot(library="libfoo.so", version="1.0", contract=contract, **kwargs)
 
 
+# Two manifest translation-unit scopes differing in one TU's name -- the
+# manifest drift a scope mismatch is still refused for.
+_TU_OLD = json.dumps([{"name": "core"}])
+_TU_NEW = json.dumps([{"name": "core2"}])
+
+
 def _real_scope_fingerprint(scope_fields: dict[str, str]) -> str:
     """The genuine scope_fingerprint compute_extraction_contract would
     produce for a hand-built scope_fields dict -- needed once
@@ -64,17 +70,37 @@ def _real_scope_fingerprint(scope_fields: dict[str, str]) -> str:
 # ---------------------------------------------------------------------------
 
 
-def test_gate_raises_scope_mismatch_error_on_scope_drift(tmp_path):
-    # A single declared header's own name is no longer load-bearing scope
-    # identity (Codex review, PR #624 follow-up), so this needs a genuine
-    # multi-header declared-surface difference to still trigger the gate.
-    a = _write(tmp_path / "v1" / "a.h", "int g(void);\n")
-    old_h = _write(tmp_path / "v1" / "foo.h", "int f(void);\n")
-    new_h = _write(tmp_path / "v2" / "bar.h", "int f(void);\n")
-    old = _snap(compute_extraction_contract(declared_headers=[a, old_h]))
-    new = _snap(compute_extraction_contract(declared_headers=[a, new_h]))
-    with pytest.raises(ScopeMismatchError):
-        check_contracts_comparable(old, new)
+@pytest.mark.parametrize(
+    ("old_names", "new_names"),
+    [
+        (("a.h", "foo.h"), ("a.h", "bar.h")),  # rename: removal + addition
+        (("a.h", "b.h", "c.h"), ("a.h", "b.h")),  # pure removal
+        (("a.h",), ("a.h", "b.h")),  # single-header sentinel side
+        (("a.h", "b.h"), ("a.h",)),  # shrink to the sentinel
+    ],
+)
+def test_gate_header_set_evolution_is_not_scope_drift(tmp_path, old_names, new_names):
+    # Header-set evolution (oneDAL 2026.0 removed 122 public headers) used to
+    # raise ScopeMismatchError here as "manifest/CLI-flag drift". The declared
+    # set changing is API evolution the diff engine reports; extraction drift
+    # is the profile fingerprint's job. Full matrix:
+    # tests/test_comparability_gate_header_removal.py.
+    old = _snap(
+        compute_extraction_contract(
+            declared_headers=[
+                _write(tmp_path / "v1" / n, "int f(void);\n") for n in old_names
+            ]
+        )
+    )
+    new = _snap(
+        compute_extraction_contract(
+            declared_headers=[
+                _write(tmp_path / "v2" / n, "int f(void);\n") for n in new_names
+            ]
+        )
+    )
+    assert old.contract.scope_fingerprint != new.contract.scope_fingerprint
+    assert check_contracts_comparable(old, new) is None
 
 
 def test_gate_additive_header_set_carve_out_allows_pure_addition(tmp_path):
@@ -92,50 +118,6 @@ def test_gate_additive_header_set_carve_out_allows_pure_addition(tmp_path):
     new = _snap(compute_extraction_contract(declared_headers=[a2, b2, json_h]))
     assert old.contract.scope_fingerprint != new.contract.scope_fingerprint
     check_contracts_comparable(old, new)  # must not raise
-
-
-def test_gate_additive_header_set_carve_out_still_raises_when_a_header_is_also_removed(
-    tmp_path,
-):
-    # A header removed alongside one added is NOT a pure addition -- must
-    # still raise, exactly as it did before this carve-out existed.
-    a = _write(tmp_path / "v1" / "a.h", "int f(void);\n")
-    b = _write(tmp_path / "v1" / "b.h", "int g(void);\n")
-    a2 = _write(tmp_path / "v2" / "a.h", "int f(void);\n")
-    c2 = _write(tmp_path / "v2" / "c.h", "int h(void);\n")
-    old = _snap(compute_extraction_contract(declared_headers=[a, b]))
-    new = _snap(compute_extraction_contract(declared_headers=[a2, c2]))
-    with pytest.raises(ScopeMismatchError):
-        check_contracts_comparable(old, new)
-
-
-def test_gate_additive_header_set_carve_out_still_raises_on_pure_removal(tmp_path):
-    a = _write(tmp_path / "v1" / "a.h", "int f(void);\n")
-    b = _write(tmp_path / "v1" / "b.h", "int g(void);\n")
-    c = _write(tmp_path / "v1" / "c.h", "int h(void);\n")
-    a2 = _write(tmp_path / "v2" / "a.h", "int f(void);\n")
-    b2 = _write(tmp_path / "v2" / "b.h", "int g(void);\n")
-    old = _snap(compute_extraction_contract(declared_headers=[a, b, c]))
-    new = _snap(compute_extraction_contract(declared_headers=[a2, b2]))
-    with pytest.raises(ScopeMismatchError):
-        check_contracts_comparable(old, new)
-
-
-def test_gate_additive_header_set_carve_out_declines_when_a_side_is_single_header_sentinel(
-    tmp_path,
-):
-    # A lone declared header collapses to a "<single-header>" sentinel with
-    # no real per-file identity (Codex review, PR #624 follow-up) -- there
-    # is nothing to verify a true superset against, so the carve-out must
-    # decline and the gate must still raise, exactly as it did before this
-    # carve-out existed.
-    a = _write(tmp_path / "v1" / "a.h", "int f(void);\n")
-    a2 = _write(tmp_path / "v2" / "a.h", "int f(void);\n")
-    b2 = _write(tmp_path / "v2" / "b.h", "int g(void);\n")
-    old = _snap(compute_extraction_contract(declared_headers=[a]))
-    new = _snap(compute_extraction_contract(declared_headers=[a2, b2]))
-    with pytest.raises(ScopeMismatchError):
-        check_contracts_comparable(old, new)
 
 
 def test_gate_additive_header_set_carve_out_covers_public_header_dirs_growth(tmp_path):
@@ -165,13 +147,13 @@ def test_gate_additive_header_set_carve_out_covers_public_header_dirs_growth(tmp
     check_contracts_comparable(old, new)  # must not raise
 
 
-def test_gate_additive_header_set_carve_out_requires_every_differing_field_to_grow(
+def test_gate_header_set_carve_out_accepts_dir_shrink_alongside_header_growth(
     tmp_path,
 ):
-    # headers grows (a,b -> a,b,c) but public_header_dirs SHRINKS
-    # (dir1,dir2,dir3 -> dir1,dir2) at the same time -- not a pure addition
-    # overall, so the gate must still raise even though the headers field
-    # alone would have qualified.
+    # headers grows (a,b -> a,b,c) while public_header_dirs SHRINKS
+    # (dir1,dir2,dir3 -> dir1,dir2). Before header-set evolution was
+    # recognized (oneDAL 2026.0 removal case) this raised as drift; both
+    # fields are verifiable declared-set changes, so the pair is comparable.
     a = _write(tmp_path / "v1" / "a.h", "int f(void);\n")
     b = _write(tmp_path / "v1" / "b.h", "int g(void);\n")
     a2 = _write(tmp_path / "v2" / "a.h", "int f(void);\n")
@@ -196,8 +178,7 @@ def test_gate_additive_header_set_carve_out_requires_every_differing_field_to_gr
             declared_headers=[a2, b2, c2], public_header_dirs=[dir1b, dir2b]
         )
     )
-    with pytest.raises(ScopeMismatchError):
-        check_contracts_comparable(old, new)
+    assert check_contracts_comparable(old, new) is None
 
 
 def test_gate_additive_header_set_carve_out_applies_in_diagnostic_mode_too(tmp_path):
@@ -311,11 +292,11 @@ def test_gate_additive_header_set_carve_out_ignores_unchanged_single_dir_sentine
     assert check_contracts_comparable(old, new) is None  # must not raise either error
 
 
-def test_scope_field_additive_superset_true_for_unchanged_single_entry_sentinel():
+def test_scope_field_set_evolution_true_for_unchanged_single_entry_sentinel():
     # The pure-function-level pin for the same fix: an unchanged sentinel
     # value must be treated as trivially satisfied, not declined.
     sentinel = json.dumps(["<single-header-dir>"])
-    assert _scope_field_is_additive_superset(sentinel, sentinel)
+    assert _scope_field_is_set_evolution(sentinel, sentinel)
 
 
 def test_scope_newly_added_headers_returns_the_added_set():
@@ -367,9 +348,12 @@ def test_gate_header_sequence_carve_out_still_raises_when_existing_headers_reord
         check_contracts_comparable(old, new)
 
 
-def test_gate_header_sequence_carve_out_declines_when_a_side_is_single_header_sentinel(
+def test_gate_header_sequence_carve_out_accepts_a_fully_parsed_single_header_side(
     tmp_path,
 ):
+    # A <single-header> side has no per-file identity, but when each side parsed
+    # exactly the headers it declares no header can have been re-routed between
+    # provenance and -H, so the set change is evolution, not drift.
     a = _write(tmp_path / "v1" / "a.h", "int f(void);\n")
     a2 = _write(tmp_path / "v2" / "a.h", "int f(void);\n")
     b2 = _write(tmp_path / "v2" / "b.h", "int g(void);\n")
@@ -377,13 +361,12 @@ def test_gate_header_sequence_carve_out_declines_when_a_side_is_single_header_se
     new = _snap(
         compute_extraction_contract(declared_headers=[a2, b2], l2_frontend_ran=True)
     )
-    with pytest.raises((ScopeMismatchError, ProfileMismatchError)):
-        check_contracts_comparable(old, new)
+    assert check_contracts_comparable(old, new) is None
 
 
 # ---------------------------------------------------------------------------
 # _header_sequence_is_additive_reorder_free: unit-tested directly (mirrors
-# how _scope_field_is_additive_superset is only exercised through the gate
+# how _scope_field_is_set_evolution is only exercised through the gate
 # above, but the reorder-detection logic here is intricate enough to also
 # warrant pinning as a pure function)
 #
@@ -592,22 +575,14 @@ def test_gate_composes_header_addition_with_corroborated_build_context_change(
     assert check_contracts_comparable(old, new) is None  # must not raise either error
 
 
-def test_gate_still_raises_when_a_new_header_lands_outside_the_old_common_root(
+def test_gate_realigns_when_a_new_header_lands_outside_the_old_common_root(
     tmp_path,
 ):
-    # Known, accepted limitation (Codex review, PR #641 follow-up, fourth
-    # round), NOT a correctness bug: the scope "headers" field's identity
-    # strings are computed relative to a common root derived independently
-    # per side. A header added OUTSIDE the old side's common ancestor
-    # directory (e.g. existing headers under include/foo/, new one under a
-    # sibling include/bar/) shifts the common root upward, so the EXISTING
-    # headers' own identity strings change shape too (["a.h","b.h"] ->
-    # ["foo/a.h","foo/b.h"]) even though nothing was removed or renamed.
-    # This is the conservative, SAFE failure mode (a real hard-fail, never
-    # a silently wrong verdict) for a case genuinely outside the real pvxs
-    # F8 scenario (which adds a header in the SAME directory as the
-    # existing ones) -- --diagnostic-comparison remains the correct
-    # workaround, same as any other case this carve-out declines.
+    # Formerly a "known, accepted limitation" (Codex review, PR #641 follow-up,
+    # fourth round): a header added OUTSIDE the old side's common ancestor
+    # directory shifts the common root, respelling every existing identity
+    # (["a.h","b.h"] -> ["foo/a.h","foo/b.h"]). scope_header_delta now
+    # realigns the sides by directory prefix, so this is plain growth.
     a = _write(tmp_path / "include" / "foo" / "a.h", "int f(void);\n")
     b = _write(tmp_path / "include" / "foo" / "b.h", "int g(void);\n")
     a2 = _write(tmp_path / "v2" / "include" / "foo" / "a.h", "int f(void);\n")
@@ -615,8 +590,7 @@ def test_gate_still_raises_when_a_new_header_lands_outside_the_old_common_root(
     c2 = _write(tmp_path / "v2" / "include" / "bar" / "c.h", "int h(void);\n")
     old = _snap(compute_extraction_contract(declared_headers=[a, b]))
     new = _snap(compute_extraction_contract(declared_headers=[a2, b2, c2]))
-    with pytest.raises(ScopeMismatchError):
-        check_contracts_comparable(old, new)
+    assert check_contracts_comparable(old, new) is None
 
 
 def test_gate_still_raises_when_appended_header_pulls_in_new_external_dependency(
@@ -803,15 +777,15 @@ def test_gate_is_lenient_on_mixed_pair_for_a_given_fingerprint(tmp_path):
 
 def test_gate_still_checks_scope_when_profile_is_mixed(tmp_path):
     # A symbols-only side (scope_fingerprint only) compared against a full
-    # L2 side (both fingerprints) must still get its scope checked. Uses a
-    # 2-header declared set (a single header's own name is no longer
-    # load-bearing scope identity — Codex review, PR #624 follow-up).
+    # L2 side (both fingerprints) must still get its scope checked. A
+    # header-set change is evolution, not drift, so the still-refused scope
+    # mismatch here is manifest translation-unit drift.
     a = _write(tmp_path / "v1" / "a.h", "int g(void);\n")
-    old_h = _write(tmp_path / "v1" / "foo.h", "int f(void);\n")
-    new_h = _write(tmp_path / "v2" / "bar.h", "int f(void);\n")
-    symbols_only = compute_extraction_contract(public_header_paths=[a, old_h])
+    symbols_only = compute_extraction_contract(
+        public_header_paths=[a], manifest_tu_scope=_TU_OLD
+    )
     full_l2 = compute_extraction_contract(
-        declared_headers=[a, new_h], l2_frontend_ran=True
+        declared_headers=[a], l2_frontend_ran=True, manifest_tu_scope=_TU_NEW
     )
     with pytest.raises(ScopeMismatchError):
         check_contracts_comparable(_snap(symbols_only), _snap(full_l2))
@@ -1024,13 +998,15 @@ def test_gate_carve_out_riscv_word_size_change_verified_via_full_axis():
 
 
 def test_gate_diagnostic_mode_returns_descriptor_instead_of_raising_on_scope(tmp_path):
-    # 2-header declared set: a single header's own name is no longer
-    # load-bearing scope identity (Codex review, PR #624 follow-up).
+    # Manifest translation-unit drift: a scope mismatch that is still refused
+    # (a header-set change no longer is -- it is API evolution).
     a = _write(tmp_path / "v1" / "a.h", "int g(void);\n")
-    old_h = _write(tmp_path / "v1" / "foo.h", "int f(void);\n")
-    new_h = _write(tmp_path / "v2" / "bar.h", "int f(void);\n")
-    old = _snap(compute_extraction_contract(declared_headers=[a, old_h]))
-    new = _snap(compute_extraction_contract(declared_headers=[a, new_h]))
+    old = _snap(
+        compute_extraction_contract(declared_headers=[a], manifest_tu_scope=_TU_OLD)
+    )
+    new = _snap(
+        compute_extraction_contract(declared_headers=[a], manifest_tu_scope=_TU_NEW)
+    )
     result = check_contracts_comparable(old, new, diagnostic=True)
     assert isinstance(result, ComparabilityMismatch)
     assert result.kind == "scope"
@@ -1169,7 +1145,7 @@ def test_gate_header_sequence_carve_out_declines_when_only_public_header_dirs_gr
     # ALL of SCOPE_FIELD_KEYS together (headers AND public_header_dirs), so
     # an unrelated public_header_dirs addition alone -- with the declared
     # "headers" set completely unchanged -- makes scope_fingerprint differ
-    # and trivially satisfies _scope_growth_corroborated's all(...) check
+    # and trivially satisfied the old growth corroboration check
     # (an unchanged field is a same-value "superset" of itself). That let a
     # header_sequence growth get corroborated even though the "headers"
     # field the carve-out actually needs evidence about never moved at all
@@ -1209,7 +1185,7 @@ def test_gate_header_sequence_carve_out_declines_when_only_public_header_dirs_gr
     )
     assert old.contract.scope_fields["headers"] == new.contract.scope_fields["headers"]
     assert old.contract.scope_fingerprint != new.contract.scope_fingerprint
-    assert not _scope_growth_corroborated(old.contract, new.contract)
+    assert _scope_evolution_delta(old.contract, new.contract) is None
     with pytest.raises(ProfileMismatchError):
         check_contracts_comparable(old, new)
 
@@ -1257,7 +1233,7 @@ def test_gate_header_sequence_carve_out_declines_when_appended_header_is_not_the
     assert new.contract.profile_fields["header_sequence"] == json.dumps(
         ["a.h", "b.h", "d.h"]
     )
-    assert _scope_growth_corroborated(old.contract, new.contract)
+    assert _scope_evolution_delta(old.contract, new.contract) is not None
     with pytest.raises(ProfileMismatchError):
         check_contracts_comparable(old, new)
 
@@ -1430,16 +1406,16 @@ def test_gate_rejects_unknown_profile_delta_alone_too():
 # ---------------------------------------------------------------------------
 
 
-def test_scope_field_additive_superset_declines_on_malformed_json():
-    assert not _scope_field_is_additive_superset("not-json", json.dumps(["a.h"]))
-    assert not _scope_field_is_additive_superset(json.dumps(["a.h"]), "not-json")
+def test_scope_field_set_evolution_declines_on_malformed_json():
+    assert not _scope_field_is_set_evolution("not-json", json.dumps(["a.h"]))
+    assert not _scope_field_is_set_evolution(json.dumps(["a.h"]), "not-json")
 
 
-def test_scope_field_additive_superset_declines_on_non_list_json():
-    assert not _scope_field_is_additive_superset('{"a": 1}', json.dumps(["a.h"]))
+def test_scope_field_set_evolution_declines_on_non_list_json():
+    assert not _scope_field_is_set_evolution('{"a": 1}', json.dumps(["a.h"]))
 
 
-def test_scope_field_additive_superset_false_for_duplicated_new_identity():
+def test_scope_field_set_evolution_false_for_duplicated_new_identity():
     # Codex review, PR #641 follow-up (fourteenth P2): compute_extraction_
     # contract always emits a sorted, deduplicated identity list for this
     # field, so a duplicated identity (e.g. "c.h" listed twice) is never
@@ -1449,13 +1425,13 @@ def test_scope_field_additive_superset_false_for_duplicated_new_identity():
     # accepted as safe growth.
     old = json.dumps(["a.h", "b.h"])
     new = json.dumps(["a.h", "b.h", "c.h", "c.h"])
-    assert not _scope_field_is_additive_superset(old, new)
+    assert not _scope_field_is_set_evolution(old, new)
 
 
-def test_scope_field_additive_superset_false_for_duplicated_old_identity():
+def test_scope_field_set_evolution_false_for_duplicated_old_identity():
     old = json.dumps(["a.h", "a.h", "b.h"])
     new = json.dumps(["a.h", "a.h", "b.h", "c.h"])
-    assert not _scope_field_is_additive_superset(old, new)
+    assert not _scope_field_is_set_evolution(old, new)
 
 
 def test_header_sequence_additive_reorder_free_declines_on_malformed_json():
@@ -1574,13 +1550,13 @@ def test_gate_rejects_unknown_scope_delta_even_with_additive_known_fields():
         check_contracts_comparable(old, new)
 
 
-def test_scope_field_additive_superset_declines_on_non_string_list_members():
+def test_scope_field_set_evolution_declines_on_non_string_list_members():
     # Codex review, PR #641 follow-up (second P2): valid JSON can decode to
     # a list whose members aren't plain strings (e.g. a dict) -- downstream
     # `in _SCOPE_SINGLE_ENTRY_SENTINELS`/`set(...)` checks require hashable
     # strings, so this must decline rather than raise TypeError.
-    assert not _scope_field_is_additive_superset(json.dumps([{}]), json.dumps(["a.h"]))
-    assert not _scope_field_is_additive_superset(json.dumps(["a.h"]), json.dumps([{}]))
+    assert not _scope_field_is_set_evolution(json.dumps([{}]), json.dumps(["a.h"]))
+    assert not _scope_field_is_set_evolution(json.dumps(["a.h"]), json.dumps([{}]))
 
 
 def test_header_sequence_additive_reorder_free_declines_on_non_string_list_members():

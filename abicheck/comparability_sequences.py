@@ -25,6 +25,8 @@ the gate's carve-outs (scope, platform-identity, build-context).
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from .comparability_json import (
     _OWNED_HEADER_SINGLE_SENTINEL,
     _OWNED_HEADER_TOKEN_PREFIX,
@@ -308,87 +310,21 @@ def _owned_header_pairs(token_rest: str) -> set[tuple[str, ...]] | None:
     return owned
 
 
-def _owned_slot_growth_is_additive(
-    old_slot: str, new_slot: str, scope_new_headers: set[str] | None
-) -> bool:
-    """Whether one differing ``"<slot-index>:<token>"`` pair differs only in its
-    owned header list growing to include headers *scope_new_headers* confirms
-    were genuinely newly added.
-
-    Declines when the slot index moved, when either side's token isn't a
-    decodable owned pair list (see :func:`_owned_header_pairs`), when the new
-    list isn't a superset of the old, or when a newly-owned pair's global
-    identity (its first element; see ``_slot_token_for_ancestor``) isn't among
-    the scope-confirmed new headers.
-    """
-    old_idx, _, old_rest = old_slot.partition(":")
-    new_idx, _, new_rest = new_slot.partition(":")
-    if old_idx != new_idx:
-        return False
-    old_owned = _owned_header_pairs(old_rest)
-    new_owned = _owned_header_pairs(new_rest)
-    if old_owned is None or new_owned is None:
-        return False
-    if not new_owned >= old_owned:
-        return False
-    newly_owned = new_owned - old_owned
-    if not newly_owned:
-        return True
-    if scope_new_headers is None:
-        return False
-    return all(pair[0] in scope_new_headers for pair in newly_owned)
-
-
 def _include_sequence_is_additive_owned_growth(
     old_value: str | None, new_value: str | None, scope_new_headers: set[str] | None
 ) -> bool:
-    """Whether *new_value* (``profile_fields["include_sequence"]``, a
-    json-encoded list of ``"<slot-index>:<token>"`` strings) differs from
-    *old_value* only in an OWNED-root ``"hdrs:..."`` token growing to
-    include newly-added headers, in the same additive-only sense
-    :func:`abicheck.comparability._scope_field_is_additive_superset` already
-    applies to the scope ``"headers"`` field -- AND every newly-added owned
-    pair's global identity (a pair's first element; see
-    ``_slot_token_for_ancestor``) is itself in *scope_new_headers*
-    (:func:`_scope_newly_added_headers`; Codex review, PR #641 follow-up,
-    ninth P1), the same specific-correspondence requirement
-    :func:`_header_sequence_is_additive_reorder_free` now applies to
-    ``header_sequence`` -- an owned-pair addition that merely looks
-    additive can still coincide with an unrelated scope addition rather
-    than reflecting the same genuinely-new header (see that function's
-    docstring for the concrete scenario).
-
-    Declines (returns False) for any slot whose token isn't the owned
-    ``"hdrs:"`` form (an ``"ext:"``/``"label:"`` slot differing is real,
-    unrelated profile drift this carve-out has no business waiving), whose
-    header list collapsed to the ``<single-header>`` sentinel (no real
-    per-header identity to verify a superset against, mirroring the
-    scope-side carve-out's own sentinel handling), or whose slot *count*
-    changed (a different ``-I``/``--header`` topology, not merely a header
-    addition within an existing one).
+    """Whether *new_value* (``profile_fields["include_sequence"]``) differs from
+    *old_value* only in OWNED ``"hdrs:..."`` slots growing by headers
+    *scope_new_headers* confirms as newly declared (Codex review, PR #641
+    follow-up, ninth P1) -- the growth-only case (nothing removed) of
+    :func:`include_sequence_is_scope_confirmed_evolution`, which owns the
+    shape checks: an ``"ext:"``/``"label:"`` slot differing, a
+    ``<single-header>`` sentinel, a slot count change, or a malformed slot
+    all decline.
     """
-    if old_value is None or new_value is None:
-        return False
-    if old_value == new_value:
-        return True
-    old_slots = _json_load_str_list(old_value)
-    new_slots = _json_load_str_list(new_value)
-    if old_slots is None or new_slots is None:
-        return False
-    if len(old_slots) != len(new_slots):
-        return False
-    if not (
-        _slot_indices_match_position(old_slots)
-        and _slot_indices_match_position(new_slots)
-    ):
-        return False
-    return all(
-        old_slot == new_slot
-        or _owned_slot_growth_is_additive(old_slot, new_slot, scope_new_headers)
-        # strict=True documents the invariant the length check above already
-        # enforces -- zip cannot truncate here, and if that check is ever
-        # weakened this raises rather than silently skipping trailing slots.
-        for old_slot, new_slot in zip(old_slots, new_slots, strict=True)
+    added = frozenset(scope_new_headers or ())
+    return include_sequence_is_scope_confirmed_evolution(
+        old_value, new_value, HeaderSetDelta(added, frozenset())
     )
 
 
@@ -516,3 +452,260 @@ def _header_sequence_is_scope_confirmed_growth(
     return _header_sequence_is_additive_reorder_free(
         old_value, new_value, scope_new_headers
     ) or _header_sequence_is_interior_insertion(old_value, new_value, scope_new_headers)
+
+
+# ---------------------------------------------------------------------------
+# Header-set EVOLUTION (additions and removals), not only growth
+# ---------------------------------------------------------------------------
+#
+# oneDAL 2026.0 deleted 122 public headers. Every waiver above was stated over
+# *growth* only, so a release that removed public headers -- flags, defines and
+# include topology unchanged -- was refused as "manifest/CLI-flag drift" (exit
+# 16), after both sides had already been parsed. A removed public header is
+# evidence of an API removal, not of a misconfigured extraction (AGENTS.md
+# "Absent is not removed" / "Record before disposing"): the comparison must run
+# so the diff engine reports the removed declarations.
+#
+# What the order/ownership facts guard is unchanged and is now stated for both
+# directions: a header the scope declares on BOTH sides but that is parsed on
+# only one (re-routed between public-header provenance and ``-H``) is refused,
+# since its content would be compared against nothing; an EXISTING header that
+# moved relative to another is refused; and every non-header profile field
+# (compiler, standard, macros, ``ext:``/``label:`` include slots, the ``sys:``
+# bucket, slot topology) still has to match.
+
+
+@dataclass(frozen=True)
+class HeaderSetDelta:
+    """The verified header-set change between two ``scope_fields["headers"]``
+    values, expressed in ONE identity coordinate system.
+
+    Identities are paths relative to each side's common header root, so a
+    removal (or addition) that moves that root respells every surviving
+    identity (``"y/b.h"`` -> ``"b.h"``). :func:`scope_header_delta` realigns
+    the sides by a directory prefix first; :meth:`canon` maps a side's
+    identity into the shared coordinates.
+
+    ``opaque`` marks a delta where a side collapsed to the ``<single-header>``
+    sentinel (no per-file identity): added/removed are then unknown, and
+    callers accept it only when both sides parsed exactly their declared scope.
+    """
+
+    added: frozenset[str]
+    removed: frozenset[str]
+    old_prefix: str = ""
+    new_prefix: str = ""
+    opaque: bool = False
+
+    def canon(self, identity: str, *, side: str) -> str:
+        return (self.old_prefix if side == "old" else self.new_prefix) + identity
+
+
+def _dir_prefixes(identities: list[str]) -> set[str]:
+    out: set[str] = set()
+    for ident in identities:
+        parts = ident.split("/")[:-1]
+        for i in range(1, len(parts) + 1):
+            out.add("/".join(parts[:i]) + "/")
+    return out
+
+
+def _realign(old_list: list[str], new_list: list[str]) -> tuple[str, str]:
+    """``(old_prefix, new_prefix)`` putting both lists in one coordinate system:
+    empty when they already share an identity (or either is empty); otherwise
+    the directory prefix that maximizes shared identities when prepended to the
+    side whose root moved deeper. No overlap under any prefix is a complete
+    replacement, compared as-is."""
+    old_set, new_set = set(old_list), set(new_list)
+    if not old_set or not new_set or old_set & new_set:
+        return "", ""
+    best: tuple[int, str, str] = (0, "", "")
+    for prefix in sorted(_dir_prefixes(old_list)):
+        hits = len(old_set & {prefix + n for n in new_set})
+        if hits > best[0]:
+            best = (hits, "", prefix)
+    for prefix in sorted(_dir_prefixes(new_list)):
+        hits = len(new_set & {prefix + o for o in old_set})
+        if hits > best[0]:
+            best = (hits, prefix, "")
+    return best[1], best[2]
+
+
+def _decode_identities(value: str | None) -> list[str] | None:
+    """A duplicate-free identity list (a sentinel kept verbatim), or ``None``."""
+    if value is None:
+        return None
+    decoded = _json_load_str_list(value)
+    if decoded is None or len(decoded) != len(set(decoded)):
+        return None
+    return decoded
+
+
+def _is_sentinel(identities: list[str]) -> bool:
+    return len(identities) == 1 and identities[0] in _SCOPE_SINGLE_ENTRY_SENTINELS
+
+
+def scope_header_delta(
+    old_value: str | None, new_value: str | None
+) -> HeaderSetDelta | None:
+    """The verified change between two ``scope_fields["headers"]`` values
+    (``"[]"`` for a side declaring no header), or ``None`` when either side is
+    absent, malformed, or holds a duplicate."""
+    old_list = _decode_identities(old_value)
+    new_list = _decode_identities(new_value)
+    if old_list is None or new_list is None:
+        return None
+    if _is_sentinel(old_list) or _is_sentinel(new_list):
+        return HeaderSetDelta(frozenset(), frozenset(), opaque=True)
+    old_prefix, new_prefix = _realign(old_list, new_list)
+    old_set = {old_prefix + o for o in old_list}
+    new_set = {new_prefix + n for n in new_list}
+    return HeaderSetDelta(
+        frozenset(new_set - old_set),
+        frozenset(old_set - new_set),
+        old_prefix=old_prefix,
+        new_prefix=new_prefix,
+    )
+
+
+def _side_is_fully_parsed(scope_value: str | None, sequence_value: str | None) -> bool:
+    """Whether one side parsed exactly the headers its scope declares, so no
+    declared header can have been re-routed between provenance and ``-H``."""
+    scope = _decode_identities(scope_value)
+    sequence = _decode_identities(sequence_value)
+    return scope is not None and sequence is not None and set(scope) == set(sequence)
+
+
+def header_sequence_is_scope_confirmed_evolution(
+    old_value: str | None,
+    new_value: str | None,
+    delta: HeaderSetDelta | None,
+    *,
+    old_scope: str | None = None,
+    new_scope: str | None = None,
+) -> bool:
+    """Whether ``header_sequence`` changed only by headers the declared scope
+    independently confirms as added or removed, every surviving header keeping
+    its relative order.
+
+    Generalizes :func:`_header_sequence_is_scope_confirmed_growth` (its
+    ``removed == {}`` case) to removals: an entry no longer parsed must be one
+    the scope removed, an entry newly parsed one the scope added. A header
+    still declared on both sides but parsed on only one is neither, and stays
+    refused. An *opaque* delta (a ``<single-header>`` side) is accepted only
+    when both sides parsed exactly their declared scope (*old_scope*/
+    *new_scope*).
+    """
+    if delta is None:
+        return False
+    old_list = _decode_identities(old_value)
+    new_list = _decode_identities(new_value)
+    if old_list is None or new_list is None:
+        return False
+    if delta.opaque:
+        return _side_is_fully_parsed(old_scope, old_value) and _side_is_fully_parsed(
+            new_scope, new_value
+        )
+    if _is_sentinel(old_list) or _is_sentinel(new_list):
+        return False
+    old_c = [delta.canon(o, side="old") for o in old_list]
+    new_c = [delta.canon(n, side="new") for n in new_list]
+    old_set, new_set = set(old_c), set(new_c)
+    if not (old_set - new_set) <= delta.removed:
+        return False
+    if not (new_set - old_set) <= delta.added:
+        return False
+    return [o for o in old_c if o in new_set] == [n for n in new_c if n in old_set]
+
+
+def _owned_token_evolution_is_confirmed(
+    old_rest: str, new_rest: str, delta: HeaderSetDelta
+) -> bool:
+    """One differing owned ``hdrs:`` token changed only by scope-confirmed
+    added/removed headers."""
+    if delta.opaque:
+        # Only a <single-header> side makes a delta opaque, and that side's
+        # owning slot is the sentinel too; the header_sequence check already
+        # required both sides to parse exactly their declared scope.
+        return _OWNED_HEADER_SINGLE_SENTINEL in (old_rest, new_rest) and all(
+            rest == _OWNED_HEADER_SINGLE_SENTINEL
+            or _owned_header_pairs(rest) is not None
+            for rest in (old_rest, new_rest)
+        )
+    old_owned = _owned_header_pairs(old_rest)
+    new_owned = _owned_header_pairs(new_rest)
+    if old_owned is None or new_owned is None:
+        return False
+    old_c = {(delta.canon(p[0], side="old"), p[1]) for p in old_owned}
+    new_c = {(delta.canon(p[0], side="new"), p[1]) for p in new_owned}
+    return all(p[0] in delta.removed for p in old_c - new_c) and all(
+        p[0] in delta.added for p in new_c - old_c
+    )
+
+
+def _owned_slot_only_holds(rest: str, delta: HeaderSetDelta, *, side: str) -> bool:
+    """Whether an owned ``hdrs:`` slot owns nothing but headers the scope
+    confirms as removed (``side="old"``) or added (``side="new"``) -- the
+    header-owning root ``resolve_inferred_header_roots`` adds exists only
+    because those headers do, so it appears or disappears with them."""
+    if rest == _OWNED_HEADER_SINGLE_SENTINEL:
+        return delta.opaque
+    owned = _owned_header_pairs(rest)
+    if not owned or delta.opaque:
+        return False
+    confirmed = delta.removed if side == "old" else delta.added
+    return all(delta.canon(p[0], side=side) in confirmed for p in owned)
+
+
+def _split_slots(slots: list[str]) -> tuple[list[str], str | None]:
+    """(numbered slots' tokens without their index, trailing ``sys:`` entry)."""
+    if slots and slots[-1].startswith("sys:"):
+        return [s.partition(":")[2] for s in slots[:-1]], slots[-1]
+    return [s.partition(":")[2] for s in slots], None
+
+
+def include_sequence_is_scope_confirmed_evolution(
+    old_value: str | None, new_value: str | None, delta: HeaderSetDelta | None
+) -> bool:
+    """Whether ``include_sequence`` differs only in owned ``hdrs:`` slots whose
+    owned headers were scope-confirmed added/removed -- the evolution
+    generalization of :func:`_include_sequence_is_additive_owned_growth`.
+
+    A slot may appear or disappear only when it owns nothing but
+    scope-confirmed added/removed headers (an inferred header root whose whole
+    subtree was added/deleted); the remaining slots must then line up in
+    order. Every other shape -- an ``ext:``/``label:`` slot differing, the
+    ``sys:`` bucket differing, any other slot count or position change, a
+    malformed slot -- stays refused: that is include configuration drift, not
+    header-set evolution."""
+    if old_value is None or new_value is None or delta is None:
+        return False
+    if old_value == new_value:
+        return True
+    old_slots = _json_load_str_list(old_value)
+    new_slots = _json_load_str_list(new_value)
+    if old_slots is None or new_slots is None:
+        return False
+    if not (
+        _slot_indices_match_position(old_slots)
+        and _slot_indices_match_position(new_slots)
+    ):
+        return False
+    old_rests, old_sys = _split_slots(old_slots)
+    new_rests, new_sys = _split_slots(new_slots)
+    if old_sys != new_sys:
+        return False
+    if len(old_rests) != len(new_rests):
+        old_rests = [
+            r for r in old_rests if not _owned_slot_only_holds(r, delta, side="old")
+        ]
+        new_rests = [
+            r for r in new_rests if not _owned_slot_only_holds(r, delta, side="new")
+        ]
+        if len(old_rests) != len(new_rests):
+            return False
+    return all(
+        old_rest == new_rest
+        or _owned_token_evolution_is_confirmed(old_rest, new_rest, delta)
+        for old_rest, new_rest in zip(old_rests, new_rests, strict=True)
+    )
