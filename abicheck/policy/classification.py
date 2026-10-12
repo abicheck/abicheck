@@ -26,10 +26,13 @@ Hierarchy (5-tier)::
     BREAKING_KINDS      -> category 1: binary ABI incompatibilities
     API_BREAK_KINDS     -> category 2a: source-level breaks (recompilation required)
     RISK_KINDS          -> category 2b: binary-compatible but deployment risk present
-    QUALITY_KINDS       -> category 3: problematic behaviors (COMPATIBLE minus additions)
+    QUALITY_KINDS       -> category 3: problematic behaviors (COMPATIBLE minus
+                           additions and informational kinds)
     ADDITION_KINDS      -> category 4: new API surface (subset of COMPATIBLE_KINDS)
+    INFORMATIONAL_KINDS -> category 5: nothing a consumer can act on changed
+                           (ADR-078; never gates under any severity preset)
 
-    COMPATIBLE_KINDS    = ADDITION_KINDS | QUALITY_KINDS
+    COMPATIBLE_KINDS    = ADDITION_KINDS | QUALITY_KINDS | INFORMATIONAL_KINDS
 
 This is the real owner of what used to be ``abicheck/checker_policy.py``'s
 verdict/kind-set half (see :mod:`abicheck.model.evidence_status` for the
@@ -84,8 +87,19 @@ ADDITION_KINDS: frozenset[ChangeKind] = frozenset(
     ChangeKind(v) for v in _REGISTRY.addition_kinds()
 )
 
-#: Quality / behavioral issues — COMPATIBLE_KINDS that are NOT additions.
-QUALITY_KINDS: frozenset[ChangeKind] = frozenset(COMPATIBLE_KINDS - ADDITION_KINDS)
+#: Informational outcomes (ADR-078) — COMPATIBLE kinds whose finding records
+#: that nothing a consumer can act on changed: a reconciliation proving a
+#: declaration identical, or an aggregate roll-up of findings reported (and
+#: gated) individually. Declared per kind by ``ChangeKindMeta.is_informational``.
+INFORMATIONAL_KINDS: frozenset[ChangeKind] = frozenset(
+    ChangeKind(v) for v in _REGISTRY.informational_kinds()
+)
+
+#: Quality / behavioral issues — COMPATIBLE_KINDS that are neither additions
+#: nor informational outcomes.
+QUALITY_KINDS: frozenset[ChangeKind] = frozenset(
+    COMPATIBLE_KINDS - ADDITION_KINDS - INFORMATIONAL_KINDS
+)
 
 # ---------------------------------------------------------------------------
 # Policy-specific downgrade sets — DERIVED from change_registry policy_overrides
@@ -127,11 +141,20 @@ if not ADDITION_KINDS <= COMPATIBLE_KINDS:
         "ADDITION_KINDS must be a subset of COMPATIBLE_KINDS; "
         f"offending kinds: {ADDITION_KINDS - COMPATIBLE_KINDS}"
     )
-if ADDITION_KINDS | QUALITY_KINDS != COMPATIBLE_KINDS:
+if not INFORMATIONAL_KINDS <= COMPATIBLE_KINDS or (
+    INFORMATIONAL_KINDS & ADDITION_KINDS
+):
     raise AssertionError(
-        "ADDITION_KINDS | QUALITY_KINDS must equal COMPATIBLE_KINDS; "
-        f"missing: {COMPATIBLE_KINDS - (ADDITION_KINDS | QUALITY_KINDS)}, "
-        f"extra: {(ADDITION_KINDS | QUALITY_KINDS) - COMPATIBLE_KINDS}"
+        "INFORMATIONAL_KINDS must be a subset of COMPATIBLE_KINDS disjoint "
+        f"from ADDITION_KINDS; offending kinds: "
+        f"{(INFORMATIONAL_KINDS - COMPATIBLE_KINDS) | (INFORMATIONAL_KINDS & ADDITION_KINDS)}"
+    )
+if ADDITION_KINDS | QUALITY_KINDS | INFORMATIONAL_KINDS != COMPATIBLE_KINDS:
+    raise AssertionError(
+        "ADDITION_KINDS | QUALITY_KINDS | INFORMATIONAL_KINDS must equal "
+        "COMPATIBLE_KINDS; "
+        f"missing: {COMPATIBLE_KINDS - (ADDITION_KINDS | QUALITY_KINDS | INFORMATIONAL_KINDS)}, "
+        f"extra: {(ADDITION_KINDS | QUALITY_KINDS | INFORMATIONAL_KINDS) - COMPATIBLE_KINDS}"
     )
 
 if not RISK_KINDS.isdisjoint(BREAKING_KINDS):

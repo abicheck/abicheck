@@ -453,7 +453,9 @@ only_mutate = [
     "abicheck/diff_types.py",  # type/enum/union/typedef detectors
     "abicheck/diff_platform.py",  # ELF/DWARF/PE/Mach-O detectors
     "abicheck/diff_vtable_layout.py",  # G23 B2 vtable-group reconstruction
-    "abicheck/diff_filtering.py",  # deduplication and redundancy logic
+    "abicheck/diff_filtering.py",  # source/affected-symbol enrichment, opaque filtering
+    "abicheck/compare/finding_redundancy.py",  # root-type redundancy (moved out of diff_filtering.py)
+    "abicheck/compare/finding_dedup.py",  # cross-tier/cross-detector dedup (moved out of diff_filtering.py)
     # verdict classification -- moved from abicheck/checker_policy.py to
     # abicheck/policy/classification.py by ADR-061 gap B; checker_policy.py
     # is now a re-export facade with no logic of its own, so mutating it
@@ -468,7 +470,12 @@ only_mutate = [
     "abicheck/idioms.py",  # ADR-027 idiom & anti-pattern recognisers
     "abicheck/pattern_verdicts.py",  # ADR-027 A4 verdict modulation
     "abicheck/surface_graph.py",  # ADR-027 declaration-graph substrate
-    "abicheck/finding_identity.py",  # canonical/normalized finding identity
+    # canonical/normalized finding identity (the former finding_identity.py)
+    "abicheck/compare/finding_identity/mangled.py",
+    "abicheck/compare/finding_identity/symbols.py",
+    "abicheck/compare/finding_identity/change_kinds.py",
+    "abicheck/compare/finding_identity/change.py",
+    "abicheck/compare/finding_identity/report_ids.py",
     "abicheck/name_classification.py",  # internal/public name classification
     "abicheck/suppression.py",  # suppression rule matching
     "abicheck/policy/selectors.py",  # ADR-063 D10: shared selector-matching grammar (moved out of suppression.py)

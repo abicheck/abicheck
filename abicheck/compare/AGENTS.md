@@ -27,6 +27,13 @@ severity, or a CLI flag is in the wrong layer.
 - `dedup_key.py` — `hashable_value()`, the shared rule for turning an
   arbitrary finding value into something a `set` can hold. A leaf: it
   imports nothing, so any layer may depend on it.
+- `finding_identity/` — tiered finding identity (ADR-049 Phase 2). The
+  package `__init__` is the interface (`resolve_*_identity`,
+  `SymbolIdentityIndex`, `report_finding_id`/`report_canonical_finding_id`);
+  import a submodule only for a private table a test pins.
+- `finding_redundancy.py` / `finding_dedup.py` — root-type redundancy
+  (`split_redundant`) and exact/enum/DWARF-vs-AST/cross-detector dedup,
+  moved out of the legacy `diff_filtering.py`.
 - `fact_comparison.py` — `compare_facts()`/`FactComparison`/
   `FactComparability` (ADR-063 Phase 5B): decides whether an
   `(old_fact, new_fact)` pair of `model.Fact[T]`s may be compared at all,

@@ -145,8 +145,8 @@ def dump_source_only(
     either), forwarded to ``_write_snapshot_output`` so L4 source-ABI replay
     honors the same compiler override a binary dump would.
     """
-    from .frontends.cli.runtime import _stamp_provenance
     from .workflows.extraction import resolve_source_frontend_clang_bin
+    from .workflows.provenance import stamp_provenance
 
     if sources is None and build_info is None:
         raise click.UsageError(
@@ -158,7 +158,7 @@ def dump_source_only(
     hint = sources if sources is not None else build_info
     library = hint.name if hint is not None else "source"
     snap = new_snapshot(library=library, version=version)
-    _stamp_provenance(snap, git_tag=git_tag, build_id=build_id, no_git=no_git)
+    stamp_provenance(snap, git_tag=git_tag, build_id=build_id, no_git=no_git)
     _write_snapshot_output(
         snap,
         output,

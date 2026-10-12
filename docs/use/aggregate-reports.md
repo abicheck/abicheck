@@ -233,7 +233,7 @@ it answers "is this break universal, or specific to one compiler/platform?"
 ### How two findings from different profiles become one entry
 
 A finding's identity for reconciliation is the same tiered
-canonical/normalized/reduced identity `diff_filtering.py` already uses as
+canonical/normalized/reduced identity `compare/finding_dedup.py` already uses as
 its own cross-detector dedup key — computed from `kind`,
 `symbol`, `description`, `old_value`/`new_value`, `source_location`, and
 `affected_symbols`, read back off each report's `changes[]` entries. Two

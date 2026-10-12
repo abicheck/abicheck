@@ -187,7 +187,7 @@ def compute_finding_evolution_summary(result: DiffResult) -> FindingEvolutionSum
     way: a report path may hand this a duck-typed stand-in rather than a
     real ``DiffResult``/``Change``.
     """
-    from ..finding_identity import report_finding_id
+    from ..compare.finding_identity import report_finding_id
 
     counts: dict[str, int] = {e.value: 0 for e in FindingEvolution}
     for change in getattr(result, "changes", None) or ():

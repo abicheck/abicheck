@@ -428,16 +428,11 @@ def _release_display_buckets(
             "potential_breaking": categorized.potential_breaking,
             "quality_issues": categorized.quality_issues,
             "addition": categorized.addition,
+            # ADR-078: never gates, but a finding is never dropped from the
+            # release listing for that.
+            "informational": categorized.informational,
         }
-        return [
-            (name, cat_changes_by_name[name])
-            for name in (
-                "abi_breaking",
-                "potential_breaking",
-                "quality_issues",
-                "addition",
-            )
-        ]
+        return [(name, changes) for name, changes in cat_changes_by_name.items()]
     from .workflows.gate import evaluate
 
     classified = evaluate(diff)

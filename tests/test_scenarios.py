@@ -412,6 +412,31 @@ def test_sc_ci_severity_gate(tmp_path: Path) -> None:
     assert _compare(tmp_path, old, new, "--config", str(cfg)).exit_code == 0
 
 
+def test_sc_ci_strict_informational(tmp_path: Path) -> None:
+    # ADR-078: `public_surface_grew` (an informational roll-up of the
+    # additions) must not gate through `quality_issues` when the additions
+    # themselves are configured `info`.
+    old, new = _lib("1", [_fn("a")]), _lib("2", [_fn("a"), _fn("b")])
+    cfg = tmp_path / "additions-info.abicheck.yml"
+    cfg.write_text("severity:\n  addition: info\n", encoding="utf-8")
+    res = _compare(
+        tmp_path,
+        old,
+        new,
+        "--severity-preset",
+        "strict",
+        "--config",
+        str(cfg),
+        "-o",
+        "json=-",
+    )
+    assert res.exit_code == 0, res.output
+    doc = json.loads(res.stdout)
+    assert doc["summary"]["informational"] == 1
+    assert doc["severity"]["blocking_categories"] == []
+    assert {c["kind"] for c in doc["changes"]} >= {"func_added", "public_surface_grew"}
+
+
 def test_sc_ci_oneline_format(tmp_path: Path) -> None:
     # CLI cleanup phase two, PR 1: --stat removed, --format oneline is its
     # sole surviving one-line-summary use (originally reached only via the

@@ -431,7 +431,7 @@ def test_suppressed_advisory_is_attributed_to_its_matching_rule():
     # Codex review: DetectVersionedSymbolScheme used the cheaper `is_suppressed`
     # and appended the advisory straight to `ctx.suppressed` with no
     # `suppression_rule` stamp, unlike every other late-finding suppression
-    # path (ApplySuppression, _merge_findings_respecting_suppression) -- a
+    # path (ApplySuppression, merge_late_findings) -- a
     # labelled rule matching this advisory left no attribution behind.
     from abicheck.suppression import Suppression, SuppressionList
 

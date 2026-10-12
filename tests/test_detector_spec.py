@@ -38,7 +38,7 @@ def test_every_changekind_in_spec():
 
 def test_every_row_has_a_known_category():
     gen = _load_gen()
-    valid = {"breaking", "api_break", "risk", "addition", "quality"}
+    valid = {"breaking", "api_break", "risk", "addition", "informational", "quality"}
     bad = [r["kind"] for r in gen.build_spec() if r["category"] not in valid]
     assert not bad, f"rows with unknown category (unpartitioned?): {bad}"
 

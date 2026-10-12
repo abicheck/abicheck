@@ -32,9 +32,15 @@ import string
 import pytest
 from hypothesis import given, strategies as st
 
-import abicheck.finding_identity_ctor_dtor as ctor_dtor_mod
+import abicheck.compare.finding_identity.ctor_dtor as ctor_dtor_mod
 from abicheck.checker import compare
 from abicheck.checker_policy import ChangeKind, Verdict
+from abicheck.compare.finding_identity.ctor_dtor import (
+    CtorDtorCanonicalKey,
+    canonicalize_synthetic_ctor_dtor_key,
+    find_ctor_dtor_key_drift_matches,
+    iter_matched_function_pairs,
+)
 from abicheck.diff_symbols import (
     _detect_newly_deleted_functions,
     _diff_access_levels,
@@ -43,12 +49,6 @@ from abicheck.diff_symbols import (
     _diff_param_defaults,
 )
 from abicheck.fact_provenance import func_fact_key
-from abicheck.finding_identity_ctor_dtor import (
-    CtorDtorCanonicalKey,
-    canonicalize_synthetic_ctor_dtor_key,
-    find_ctor_dtor_key_drift_matches,
-    iter_matched_function_pairs,
-)
 from abicheck.model import (
     AbiSnapshot,
     AccessLevel,

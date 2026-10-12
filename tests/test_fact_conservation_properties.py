@@ -19,7 +19,7 @@
 D9's rule -- "every detector fact must be conserved in exactly one visible
 outcome" -- is checked here at the full pipeline level (matching, detection,
 and the identity-based cross-detector dedup wired into
-``diff_filtering._deduplicate_cross_detector`` this same Phase 2 session):
+``finding_dedup.deduplicate_cross_detector`` this same Phase 2 session):
 an old-side public function that disappears from the new side must always
 surface as a removal finding referencing it (never silently vanish), and a
 function that survives unchanged must never spuriously appear as a removal.

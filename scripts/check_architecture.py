@@ -61,8 +61,8 @@ DEBT_DISPOSITIONS = frozenset({"migrate", "accept"})
 # to work around that with a runtime `importlib.import_module` call). That
 # only holds if the leaf itself never imports back into any module on that
 # cycle -- and this denylist is strictly narrower than the general
-# `policy -> compare` layer edge already permits (`finding_identity.py` is
-# classified into the `compare` layer, which `policy` may otherwise import),
+# `policy -> compare` layer edge already permits (`compare.finding_identity` is
+# owned by the `compare` layer, which `policy` may otherwise import),
 # so the general dependency-direction check below would not catch a
 # regression here on its own. Checked directly against each leaf file's own
 # imports, not modeled as a layer.
@@ -80,7 +80,7 @@ _SELECTOR_LEAF_DENYLIST: tuple[str, ...] = (
     "abicheck.checker_types",
     "abicheck.suppression",
     "abicheck.policy.reclassify",
-    "abicheck.finding_identity",
+    "abicheck.compare.finding_identity",
 )
 
 

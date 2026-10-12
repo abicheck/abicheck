@@ -36,7 +36,7 @@ from .policy.evaluate import effective_kind_sets
 if TYPE_CHECKING:
     from datetime import date
 
-    from .finding_identity import MissingContractFinding
+    from .compare.finding_identity import MissingContractFinding
     from .policy.severity import IssueCategory, KindSets, SeverityConfig
 
 
@@ -177,6 +177,7 @@ def _legacy_level_for_category(
     if annotate_additions and category in (
         _IssueCategory.ADDITION,
         _IssueCategory.QUALITY_ISSUES,
+        _IssueCategory.INFORMATIONAL,
     ):
         return "notice"
     return None
@@ -250,6 +251,8 @@ def _title_for_change(
             return f"Quality Issue: {kind_label}"
         if category == _IssueCategory.ADDITION:
             return f"ABI Addition: {kind_label}"
+        if category == _IssueCategory.INFORMATIONAL:
+            return f"Informational: {kind_label}"
         # POTENTIAL_BREAKING: distinguish API Break from Deployment Risk via
         # the finding's actual effective verdict when available (falling
         # back to the kind sets only if it wasn't supplied), since
@@ -452,7 +455,10 @@ def _collect_annotations_detailed(
     # *present* scope-synthesized finding).
     gate_scope = getattr(diff_result, "gate_scope", None)
     if gate_scope is not None:
-        from .finding_identity import missing_contract_finding, missing_contract_kind
+        from .compare.finding_identity import (
+            missing_contract_finding,
+            missing_contract_kind,
+        )
         from .policy.severity import SeverityLevel
 
         # A missing contract member is the same failure class as

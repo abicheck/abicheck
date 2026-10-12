@@ -210,18 +210,18 @@ from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
-from .model.synthetic_key import (
+from ...model.synthetic_key import (
     _SYNTHETIC_DTOR_KEY_PREFIX,
     SYNTHETIC_CTOR_KEY_PREFIX,
     is_synthetic_ctor_key,
     is_synthetic_dtor_key,
 )
-from .name_classification import canonicalize_type_name
-from .type_reachability import _bare_type_name
+from ...name_classification import canonicalize_type_name
+from ...type_reachability import _bare_type_name
 
 if TYPE_CHECKING:
-    from .model import Function
-    from .model.change import Change
+    from ...model import Function
+    from ...model.change import Change
 
 _logger = logging.getLogger(__name__)
 

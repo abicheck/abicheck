@@ -47,6 +47,7 @@ def stamp_member_counts(entry: dict[str, object], result: DiffResult) -> None:
     entry["risk_changes"] = len(classified.risk)
     entry["compatible_additions"] = summary.compatible_additions
     entry["quality_issues"] = summary.quality_issues
+    entry["informational"] = summary.informational
 
 
 class ReleaseMemberEntryProjection(SilentReleaseReporter):

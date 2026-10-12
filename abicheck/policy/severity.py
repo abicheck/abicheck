@@ -22,7 +22,8 @@ The canonical kind-set classification lives in ``checker_policy`` (single
 source of truth).  This module provides:
 
 - **SeverityLevel** — ``error`` / ``warning`` / ``info``.
-- **IssueCategory** — the four high-level categories users interact with.
+- **IssueCategory** — the four configurable high-level categories users
+  interact with, plus the fixed ``informational`` category (ADR-078).
 - **SeverityConfig** — maps each category to a severity level.
 - **Presets** — ``default``, ``strict``, ``info-only``.
 - **classify_change** / **categorize_changes** — thin wrappers over the
@@ -35,13 +36,20 @@ The four categories map to the canonical kind sets as follows:
    Default: ``error``.
 2. **potential_breaking** → ``API_BREAK_KINDS ∪ RISK_KINDS`` — potential
    incompatibilities that need manual review.  Default: ``warning``.
-3. **quality_issues** → ``QUALITY_KINDS`` (= ``COMPATIBLE_KINDS − ADDITION_KINDS``)
+3. **quality_issues** → ``QUALITY_KINDS`` (= ``COMPATIBLE_KINDS − ADDITION_KINDS
+   − INFORMATIONAL_KINDS``)
    — problematic behaviors such as exposing std symbols, missing SONAME,
    toolchain flag drift.  Default: ``warning``.
 4. **addition** → ``ADDITION_KINDS`` — new public symbols, types, enum
    members.  Default: ``info``.
+5. **informational** → ``INFORMATIONAL_KINDS`` — findings recording that
+   nothing a consumer can act on changed (a reconciliation proving a
+   declaration identical, an aggregate roll-up of findings reported on their
+   own). Fixed at ``info`` and **not configurable**: it has no
+   ``SeverityConfig`` field, so no preset or override can make it gate
+   (ADR-078). It stays in every report.
 
-Each category can be set to ``error``, ``warning``, or ``info``:
+Each configurable category can be set to ``error``, ``warning``, or ``info``:
 
 - ``error`` — flagged prominently in the report, contributes to non-zero exit code.
 - ``warning`` — shown as a warning in the report, does NOT affect exit code.
@@ -58,7 +66,7 @@ Built-in presets:
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 from enum import StrEnum
 
@@ -66,7 +74,11 @@ from ..errors import PolicyError as PolicyError
 from ..model.change_catalog.kinds import ChangeKind as ChangeKind, HasKind as HasKind
 from ..model.contract_finding_relevance import is_evaluated as is_evaluated
 from ..model.evidence_status import is_cross_source_resolved as is_cross_source_resolved
-from .classification import ADDITION_KINDS as ADDITION_KINDS, Verdict as Verdict
+from .classification import (
+    ADDITION_KINDS as ADDITION_KINDS,
+    INFORMATIONAL_KINDS as INFORMATIONAL_KINDS,
+    Verdict as Verdict,
+)
 
 # ADR-061 Phase 2: the per-change effective-verdict resolver, its disclosure
 # sibling, and the kind-set alias/resolver they share now live in
@@ -109,12 +121,28 @@ class SeverityLevel(StrEnum):
 
 
 class IssueCategory(StrEnum):
-    """The four high-level issue categories."""
+    """The high-level issue categories.
+
+    The first four are configurable through :class:`SeverityConfig`.
+    ``INFORMATIONAL`` (ADR-078) is not: its level is fixed at ``info``, so a
+    finding recording that nothing changed can never gate.
+    """
 
     ABI_BREAKING = "abi_breaking"
     POTENTIAL_BREAKING = "potential_breaking"
     QUALITY_ISSUES = "quality_issues"
     ADDITION = "addition"
+    INFORMATIONAL = "informational"
+
+
+#: The categories a :class:`SeverityConfig` assigns a level to, in display
+#: order. Every category except ``INFORMATIONAL``.
+CONFIGURABLE_CATEGORIES: tuple[IssueCategory, ...] = (
+    IssueCategory.ABI_BREAKING,
+    IssueCategory.POTENTIAL_BREAKING,
+    IssueCategory.QUALITY_ISSUES,
+    IssueCategory.ADDITION,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -132,7 +160,7 @@ def classify_change(
     policy: str | None = None,
     kind_sets: KindSets | None = None,
 ) -> IssueCategory:
-    """Classify a ChangeKind into one of the four issue categories.
+    """Classify a ChangeKind into one of the issue categories.
 
     Uses the canonical kind sets from ``checker_policy`` by default.
 
@@ -143,8 +171,8 @@ def classify_change(
 
     Unknown kinds default to ``ABI_BREAKING`` (fail-safe).
 
-    Note: ``ADDITION_KINDS`` and ``QUALITY_KINDS`` are disjoint by
-    construction (``QUALITY_KINDS = COMPATIBLE_KINDS - ADDITION_KINDS``),
+    Note: ``ADDITION_KINDS``, ``INFORMATIONAL_KINDS`` and ``QUALITY_KINDS``
+    are disjoint by construction (``classification`` asserts the partition),
     so the check order between them does not matter.
     """
     breaking, api_break, compatible, risk = _resolve_kind_sets(policy, kind_sets)
@@ -155,6 +183,8 @@ def classify_change(
     # Within compatible, split into additions vs quality issues.
     if kind in ADDITION_KINDS:
         return IssueCategory.ADDITION
+    if kind in INFORMATIONAL_KINDS and kind in compatible:
+        return IssueCategory.INFORMATIONAL
     if kind in compatible:
         return IssueCategory.QUALITY_ISSUES
     # Fail-safe: unclassified kinds are treated as breaking.
@@ -245,6 +275,13 @@ def classify_effective_change(
         or _reclassify_resolved_to_compatible(change, policy_file, today)
     ):
         return IssueCategory.ADDITION
+    # ADR-078: a COMPATIBLE finding of an informational kind records that
+    # nothing changed, whichever rule produced the COMPATIBLE verdict -- the
+    # kind's meaning, not the route to COMPATIBLE, decides it is not a
+    # quality problem. Only a COMPATIBLE verdict lands here; an override
+    # raising the kind to RISK/API_BREAK/BREAKING is honoured above.
+    if change.kind in INFORMATIONAL_KINDS:
+        return IssueCategory.INFORMATIONAL
     return IssueCategory.QUALITY_ISSUES
 
 
@@ -294,8 +331,12 @@ class SeverityConfig:
     def level_for(self, category: IssueCategory) -> SeverityLevel:
         """Return the configured severity level for *category*.
 
-        Works because SeverityConfig field names match IssueCategory values.
+        Works because SeverityConfig field names match the configurable
+        IssueCategory values. ``INFORMATIONAL`` has no field: it is always
+        ``INFO`` (ADR-078), which is what keeps it out of every gate.
         """
+        if category is IssueCategory.INFORMATIONAL:
+            return SeverityLevel.INFO
         result: SeverityLevel = getattr(self, category.value)
         return result
 
@@ -333,7 +374,7 @@ class SeverityConfig:
         lines: list[str] = []
         if title is not None:
             lines.append(f"{prefix}{title}")
-        for cat in IssueCategory:
+        for cat in CONFIGURABLE_CATEGORIES:
             lines.append(f"{prefix}  {cat.value}: {self.level_for(cat).value}")
         return "\n".join(lines)
 
@@ -456,6 +497,8 @@ _CATEGORY_EXIT_CODES: dict[IssueCategory, int] = {
     IssueCategory.POTENTIAL_BREAKING: 2,
     IssueCategory.QUALITY_ISSUES: 1,
     IssueCategory.ADDITION: 1,
+    # Never reached: ``level_for`` pins INFORMATIONAL to INFO (ADR-078).
+    IssueCategory.INFORMATIONAL: 0,
 }
 
 
@@ -603,7 +646,7 @@ def gate_contribution_for_change(
 
 @dataclass(frozen=True)
 class CategorizedChanges:
-    """Changes partitioned into the four issue categories.
+    """Changes partitioned into the issue categories.
 
     Fields use ``list[HasKind]`` intentionally so that any object with a
     ``.kind`` attribute can be categorized (e.g. ``Change``, ``AbiChange``,
@@ -615,6 +658,9 @@ class CategorizedChanges:
     potential_breaking: list[HasKind]
     quality_issues: list[HasKind]
     addition: list[HasKind]
+    #: ADR-078: findings recording that nothing changed. Defaulted so a
+    #: caller constructing the four-field shape keeps working.
+    informational: list[HasKind] = field(default_factory=list)
 
 
 def categorize_changes(
@@ -625,7 +671,7 @@ def categorize_changes(
     policy_file: object | None = None,
     today: date | None = None,
 ) -> CategorizedChanges:
-    """Partition changes into the four issue categories.
+    """Partition changes into the issue categories.
 
     *today* (ADR-061 gap C) pins a dated ``reclassify`` rule's expiry to an
     envelope's own ``resolved_today`` instead of a fresh ``date.today()`` at
@@ -635,6 +681,7 @@ def categorize_changes(
     potential: list[HasKind] = []
     quality: list[HasKind] = []
     adds: list[HasKind] = []
+    info: list[HasKind] = []
 
     for c in changes:
         cat = classify_effective_change(
@@ -650,6 +697,8 @@ def categorize_changes(
             potential.append(c)
         elif cat == IssueCategory.QUALITY_ISSUES:
             quality.append(c)
+        elif cat == IssueCategory.INFORMATIONAL:
+            info.append(c)
         else:
             adds.append(c)
 
@@ -658,6 +707,7 @@ def categorize_changes(
         potential_breaking=potential,
         quality_issues=quality,
         addition=adds,
+        informational=info,
     )
 
 

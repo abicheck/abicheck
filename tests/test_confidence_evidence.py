@@ -1000,7 +1000,7 @@ class TestNoteIfSameBinaryCompared:
         `old_input`/`new_input` to a temporary embedded-snapshot `.abi.json`
         path *before* `_report_compare_result` calls `_finalize_compare_
         result` -- which must still hash the two real, original binaries,
-        not the rewritten JSON snapshot path `_collect_metadata` always
+        not the rewritten JSON snapshot path `collect_metadata` always
         reads as non-hashable, or the warning silently vanishes for every
         deep-compare-folded-into-compare run even when both real binaries
         are byte-identical. Exercised through the real `compare` CLI entry

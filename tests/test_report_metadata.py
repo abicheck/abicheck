@@ -382,7 +382,7 @@ class TestHtmlEnrichments:
 
 class TestCliMetadataCollection:
     def test_collect_metadata(self):
-        from abicheck.frontends.cli.runtime import _collect_metadata
+        from abicheck.workflows.input_resolution import collect_metadata
 
         with tempfile.NamedTemporaryFile(suffix=".so", delete=False) as f:
             f.write(b"fake ELF content for testing")
@@ -390,7 +390,7 @@ class TestCliMetadataCollection:
             path = Path(f.name)
 
         try:
-            meta = _collect_metadata(path)
+            meta = collect_metadata(path)
             assert meta.path == str(path)
             expected_sha = hashlib.sha256(b"fake ELF content for testing").hexdigest()
             assert meta.sha256 == expected_sha
@@ -399,7 +399,7 @@ class TestCliMetadataCollection:
             path.unlink()
 
     def test_collect_metadata_large_file(self):
-        from abicheck.frontends.cli.runtime import _collect_metadata
+        from abicheck.workflows.input_resolution import collect_metadata
 
         content = b"x" * 100_000
         with tempfile.NamedTemporaryFile(suffix=".so", delete=False) as f:
@@ -408,7 +408,7 @@ class TestCliMetadataCollection:
             path = Path(f.name)
 
         try:
-            meta = _collect_metadata(path)
+            meta = collect_metadata(path)
             assert meta.size_bytes == 100_000
             assert len(meta.sha256) == 64  # SHA-256 hex digest length
         finally:
@@ -423,7 +423,7 @@ class TestCliMetadataCollection:
 class TestDeduplication:
     def test_ast_dwarf_dedup(self):
         """DWARF findings that duplicate AST findings are removed."""
-        from abicheck.checker import _deduplicate_ast_dwarf
+        from abicheck.compare.finding_dedup import deduplicate_ast_dwarf
 
         # TYPE_SIZE_CHANGED (AST tier) is bit-based (RecordType.size_bits);
         # STRUCT_SIZE_CHANGED (DWARF tier) is byte-based (DW_AT_byte_size) --
@@ -444,7 +444,7 @@ class TestDeduplication:
                 new_value="16",
             ),
         ]
-        result = _deduplicate_ast_dwarf(changes)
+        result = deduplicate_ast_dwarf(changes)
         assert len(result) == 1
         assert result[0].kind == ChangeKind.TYPE_SIZE_CHANGED
 
@@ -454,7 +454,7 @@ class TestDeduplication:
         stale header or inconsistent extractor evidence can make the two
         tiers report genuinely different old/new values for the same kind
         and symbol, and hiding one is worse than showing both."""
-        from abicheck.checker import _deduplicate_ast_dwarf
+        from abicheck.compare.finding_dedup import deduplicate_ast_dwarf
 
         changes = [
             Change(
@@ -475,7 +475,7 @@ class TestDeduplication:
                 new_value="12",
             ),
         ]
-        result = _deduplicate_ast_dwarf(changes)
+        result = deduplicate_ast_dwarf(changes)
         assert len(result) == 2
 
     def test_field_type_transition_disagreeing_on_indirection_not_deduped(self):
@@ -485,7 +485,7 @@ class TestDeduplication:
         hiding a genuine indirection-level disagreement between the two
         tiers. `cross_tier_transition` must preserve `*`/`&` for this
         comparison even though it still bridges tag-keyword spelling."""
-        from abicheck.checker import _deduplicate_ast_dwarf
+        from abicheck.compare.finding_dedup import deduplicate_ast_dwarf
 
         changes = [
             Change(
@@ -505,14 +505,14 @@ class TestDeduplication:
                 new_value="Bar *",
             ),
         ]
-        result = _deduplicate_ast_dwarf(changes)
+        result = deduplicate_ast_dwarf(changes)
         assert len(result) == 2
 
     def test_field_type_transition_agreeing_modulo_tag_keyword_still_deduped(self):
         """The bridge this whole comparison exists for must still work:
         a tag-keyword spelling difference ("struct Foo" vs "Foo") alone
         is not a real disagreement and still collapses to one finding."""
-        from abicheck.checker import _deduplicate_ast_dwarf
+        from abicheck.compare.finding_dedup import deduplicate_ast_dwarf
 
         changes = [
             Change(
@@ -530,7 +530,7 @@ class TestDeduplication:
                 new_value="struct Bar",
             ),
         ]
-        result = _deduplicate_ast_dwarf(changes)
+        result = deduplicate_ast_dwarf(changes)
         assert len(result) == 1
 
     def test_field_type_transition_agreeing_modulo_indirection_whitespace_still_deduped(
@@ -541,7 +541,7 @@ class TestDeduplication:
         normalized, or a pure extractor-spelling difference ("Foo*" vs
         "Foo *" vs "struct Foo * ") reads as a false indirection-level
         disagreement and blocks a dedup that should still happen."""
-        from abicheck.checker import _deduplicate_ast_dwarf
+        from abicheck.compare.finding_dedup import deduplicate_ast_dwarf
 
         changes = [
             Change(
@@ -559,7 +559,7 @@ class TestDeduplication:
                 new_value="struct Bar * ",
             ),
         ]
-        result = _deduplicate_ast_dwarf(changes)
+        result = deduplicate_ast_dwarf(changes)
         assert len(result) == 1
 
     def test_a_kind_carrying_list_valued_old_new_does_not_crash(self):
@@ -571,7 +571,7 @@ class TestDeduplication:
         so building the lookup set raised `TypeError: unhashable type:
         'list'` for any comparison containing such a finding. Only the
         AST-tier kinds this dedup actually looks up need indexing at all."""
-        from abicheck.checker import _deduplicate_ast_dwarf
+        from abicheck.compare.finding_dedup import deduplicate_ast_dwarf
 
         changes = [
             Change(
@@ -581,34 +581,34 @@ class TestDeduplication:
                 new_value=["PyObject_Foo"],
             ),
         ]
-        result = _deduplicate_ast_dwarf(changes)
+        result = deduplicate_ast_dwarf(changes)
         assert len(result) == 1
 
     def test_exact_dedup_same_kind(self):
         """Exact duplicates by (kind, description) are removed."""
-        from abicheck.checker import _deduplicate_ast_dwarf
+        from abicheck.compare.finding_dedup import deduplicate_ast_dwarf
 
         changes = [
             Change(ChangeKind.FUNC_REMOVED, "foo", "Public function removed: foo"),
             Change(ChangeKind.FUNC_REMOVED, "foo", "Public function removed: foo"),
         ]
-        result = _deduplicate_ast_dwarf(changes)
+        result = deduplicate_ast_dwarf(changes)
         assert len(result) == 1
 
     def test_different_descriptions_kept(self):
         """Changes with same kind but different descriptions are kept."""
-        from abicheck.checker import _deduplicate_ast_dwarf
+        from abicheck.compare.finding_dedup import deduplicate_ast_dwarf
 
         changes = [
             Change(ChangeKind.FUNC_REMOVED, "foo", "Public function removed: foo"),
             Change(ChangeKind.FUNC_REMOVED, "bar", "Public function removed: bar"),
         ]
-        result = _deduplicate_ast_dwarf(changes)
+        result = deduplicate_ast_dwarf(changes)
         assert len(result) == 2
 
     def test_different_fields_not_collapsed(self):
         """DWARF findings for different fields of the same struct must not be collapsed."""
-        from abicheck.checker import _deduplicate_ast_dwarf
+        from abicheck.compare.finding_dedup import deduplicate_ast_dwarf
 
         changes = [
             # AST found offset change for field S::a
@@ -628,7 +628,7 @@ class TestDeduplication:
                 new_value="16",
             ),
         ]
-        result = _deduplicate_ast_dwarf(changes)
+        result = deduplicate_ast_dwarf(changes)
         assert len(result) == 2
         symbols = {c.symbol for c in result}
         assert "S::a" in symbols
@@ -636,7 +636,7 @@ class TestDeduplication:
 
     def test_same_field_ast_dwarf_collapsed(self):
         """DWARF finding for same field as AST should be collapsed."""
-        from abicheck.checker import _deduplicate_ast_dwarf
+        from abicheck.compare.finding_dedup import deduplicate_ast_dwarf
 
         # TYPE_FIELD_OFFSET_CHANGED (AST tier) is bit-based (offset_bits);
         # STRUCT_FIELD_OFFSET_CHANGED (DWARF tier) is byte-based
@@ -657,14 +657,14 @@ class TestDeduplication:
                 new_value="8",
             ),
         ]
-        result = _deduplicate_ast_dwarf(changes)
+        result = deduplicate_ast_dwarf(changes)
         assert len(result) == 1
         assert result[0].kind == ChangeKind.TYPE_FIELD_OFFSET_CHANGED
 
     def test_conflicting_field_offset_transition_not_deduped(self):
         """Same field-offset symbol, disagreeing transitions -> keep both
         (Codex review), mirroring the whole-struct-size case above."""
-        from abicheck.checker import _deduplicate_ast_dwarf
+        from abicheck.compare.finding_dedup import deduplicate_ast_dwarf
 
         changes = [
             Change(
@@ -683,7 +683,7 @@ class TestDeduplication:
                 new_value="4",
             ),
         ]
-        result = _deduplicate_ast_dwarf(changes)
+        result = deduplicate_ast_dwarf(changes)
         assert len(result) == 2
 
 

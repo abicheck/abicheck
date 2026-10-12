@@ -192,7 +192,7 @@ interact.
 
 Each detected change is classified into exactly one **`ChangeKind`**, which
 belongs to one **severity category** (`abi_breaking`, `potential_breaking`,
-`quality_issues`, or `addition`). The run's **verdict** is the worst
+`quality_issues`, `addition`, or the fixed, never-gating `informational`). The run's **verdict** is the worst
 classification across all changes, and the verdict (or, in severity-aware mode,
 the severity of the findings) becomes the process **exit code** your CI reads:
 
@@ -201,7 +201,7 @@ the severity of the findings) becomes the process **exit code** your CI reads:
 | Verdict | Meaning | Severity category | Legacy exit code | Severity-aware exit code | Typical CI action |
 |---------|---------|-------------------|:----------------:|:------------------------:|-------------------|
 | `NO_CHANGE` | Snapshots are identical — no differences. | *(none)* | `0` | `0` | Pass. |
-| `COMPATIBLE` | Backwards-compatible change — additions or hygiene signals; existing binaries and source unaffected. | `addition` / `quality_issues` | `0` | `0`–`1`* | Pass (warn). Promote to error only if policy forbids the change. |
+| `COMPATIBLE` | Backwards-compatible change — additions or hygiene signals; existing binaries and source unaffected. | `addition` / `quality_issues` / `informational` | `0` | `0`–`1`* | Pass (warn). Promote to error only if policy forbids the change. |
 | `COMPATIBLE_WITH_RISK` | Binary-compatible, but a deployment risk that needs manual review (e.g. a newer glibc requirement, `noexcept` removed). | `potential_breaking` | `0` | `0`–`2`* | Warn and review; do not fail automatically. |
 | `API_BREAK` | Source-level API break — headers changed incompatibly; already-compiled binaries still work, recompilation may fail. | `potential_breaking` | `2` | `0`–`2`* | Fail in source-strict / build-from-source pipelines; warn in ABI-only gates. |
 | `BREAKING` | Binary ABI break — existing compiled consumers can crash, fail to load, or misbehave. | `abi_breaking` | `4` | `4` | Always fail; do not ship. |
@@ -242,8 +242,9 @@ exit code is the verdict itself, mapped `0/2/4`:
 
 The severity categories map directly onto the verdict tiers: `abi_breaking`
 covers `BREAKING`; `potential_breaking` covers both `API_BREAK` and
-`COMPATIBLE_WITH_RISK`; `quality_issues` and `addition` are the two halves of
-`COMPATIBLE`. Configuring severity is covered in the
+`COMPATIBLE_WITH_RISK`; `quality_issues`, `addition` and `informational` split
+`COMPATIBLE`. `informational` holds findings that record that nothing changed.
+It has no configurable level and never contributes to the exit code. Configuring severity is covered in the
 [Severity](../use/severity.md) guide.
 
 > **`64` means "not a verdict at all".** A bad invocation — unknown flags, an

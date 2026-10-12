@@ -930,7 +930,7 @@ class TestFindingIdentityIsCheckoutPathInvariant:
         result_a = compare(old_a, new_a, cross_source_checks=False)
         result_b = compare(old_b, new_b, cross_source_checks=False)
 
-        from abicheck.finding_identity import report_canonical_finding_id
+        from abicheck.compare.finding_identity import report_canonical_finding_id
 
         def _added_lambda_canonical_ids(changes: object) -> set[str]:
             candidates = [
@@ -1030,7 +1030,7 @@ class TestFindingIdentityIsCheckoutPathInvariant:
         )
 
         from abicheck.checker_policy import ChangeKind
-        from abicheck.finding_identity import report_canonical_finding_id
+        from abicheck.compare.finding_identity import report_canonical_finding_id
         from abicheck.model.change import Change
 
         def _template_param_change(spelling: str) -> Change:

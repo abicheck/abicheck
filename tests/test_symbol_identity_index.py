@@ -28,7 +28,7 @@ import pytest
 
 from abicheck.checker import compare
 from abicheck.checker_policy import ChangeKind
-from abicheck.finding_identity import (
+from abicheck.compare.finding_identity import (
     SymbolIdentityIndex,
     resolve_function_identity,
 )

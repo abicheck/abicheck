@@ -88,7 +88,7 @@ def record_kept_change(
 #: total must not move when one appears (adding a rule redistributes
 #: dispositions; it never changes what was observed).
 #:
-#: Every kind ``post_processing``'s ``_build_suppression_*`` helpers
+#: Every kind ``finding_disposition.suppression``'s ``*_diagnostic`` builders
 #: synthesize belongs here, not only the one a review happened to report:
 #: both exist solely because a rule was written, so either one counted as a
 #: detection makes the raw total depend on the rule set.
@@ -218,7 +218,7 @@ def record_consumer_overlay(
     can tell the two apart the same way it already names every other
     suppression application point.
     """
-    from ..finding_identity import report_finding_id
+    from ..compare.finding_identity import report_finding_id
 
     key = report_finding_id(change)
     if rule is None and suppression is None:
@@ -300,9 +300,9 @@ def record_and_maybe_suppress_overlay(
     # `would_withhold_unknown_reachability` only ever fires on `UNKNOWN`.
     if outcome.withheld_rule is None:
         return True, None
-    from ..post_processing import _build_suppression_overreach_change
+    from .finding_disposition.suppression import overreach_diagnostic
 
-    return True, _build_suppression_overreach_change(change, outcome.withheld_rule)
+    return True, overreach_diagnostic(change, outcome.withheld_rule)
 
 
 def _record_bucket(

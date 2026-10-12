@@ -481,6 +481,11 @@ is computed from the severity configuration rather than the verdict:
 The highest applicable code wins. For example, if both `abi_breaking=error` and
 `quality_issues=error` have findings, the exit code is `4`.
 
+A finding in the fixed `informational` category never contributes, under any
+preset or override. That category holds findings that record that nothing
+changed, such as `declaration_identity_unchanged` or the `public_surface_grew`
+roll-up.
+
 > **ℹ️ The two exit code paths are mutually exclusive.** Without `--severity-*`
 > flags, the legacy verdict-based path runs. With any `--severity-*` flag, the
 > severity-aware path runs. They never both execute.
@@ -495,7 +500,8 @@ The highest applicable code wins. For example, if both `abi_breaking=error` and
 
 Per-category overrides — `.abicheck.yml`'s `severity:` block
 (`abi_breaking`/`potential_breaking`/`quality_issues`/`addition`) — take
-precedence over the preset.
+precedence over the preset. `informational` is fixed at `info` in every preset
+and has no override.
 
 ### CI gate patterns
 

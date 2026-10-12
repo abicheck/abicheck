@@ -46,12 +46,7 @@ Each open entry below has its status line, a risk tag and a short summary; the f
 
 Open correctness gaps, in the order of the maintainer ruling of 2026-10-01 (closed items from that ruling are in the archive):
 
-Next, unranked (the `--no-baseline` one-sided-detector gap, the target-platform gap and the untagged `dependency_scope` gap were closed on 2026-10-10; see the archive). Each of these can let a run read as cleaner or more comparable than its evidence supports:
-
-### An informational, no-material-change reconciliation outcome gates the build under `--severity-preset strict` (2026-09-12)
-
-**Status (re-verified 2026-10-11 at `46c127111`): OPEN.** `declaration_coordinates_shifted` and `declaration_identity_unchanged` are still in `COMPATIBLE_KINDS` and not in `ADDITION_KINDS`, so `policy/severity.py` still buckets them as `quality_issues`, and `PRESET_STRICT` still sets that category to `ERROR`. No informational category exists.  
-`false-positive` — `declaration_coordinates_shifted`/`declaration_identity_unchanged` are bucketed as `quality_issues`, which `--severity-preset strict` sets to `ERROR`, so a no-change outcome fails the build. [Full write-up](known-gaps/an-informational-no-material-change-reconciliation-outcome.md)
+Next, unranked (the `--no-baseline` one-sided-detector gap, the target-platform gap and the untagged `dependency_scope` gap were closed on 2026-10-10, and the informational-outcome strict-gate gap on 2026-10-12; see the archive). Each of these can let a run read as cleaner or more comparable than its evidence supports:
 
 ### A snapshot's `build_mode` is captured only for ELF, and only from the main image
 

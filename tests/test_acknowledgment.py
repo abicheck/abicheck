@@ -243,7 +243,7 @@ def test_expires_datetime_is_normalized_to_a_date_on_direct_construction() -> No
 def test_matches_via_finding_id_selector(tmp_path: Path) -> None:
     """The `finding_id`-selector branch of `matches()` (as opposed to every
     other test here, which matches via `symbol`)."""
-    from abicheck.finding_identity import report_canonical_finding_id
+    from abicheck.compare.finding_identity import report_canonical_finding_id
 
     change = Change(kind=ChangeKind.FUNC_REMOVED, symbol="foo", description="x")
     fid = report_canonical_finding_id(change)
