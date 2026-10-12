@@ -24,7 +24,7 @@ ELF export table's own version metadata, nothing from DWARF or headers:
 
 | Source in the snapshot | What it records |
 |---|---|
-| Binary export table (L0, `elf.symbols[].version`) | `demo_init` → `"DEMO_1.0"`, `demo_run` → `"DEMO_1.0"`, `demo_experimental` → `null` (no version) |
+| Binary export table (L0, `elf.symbols[].version`/`version_binding`) | `demo_init` → `"DEMO_1.0"`, `demo_run` → `"DEMO_1.0"`, `demo_experimental` → `null` with binding `"unversioned"` (no version node, not even the base one) |
 | Version-definition scheme (L0, `elf.versions_defined`) | `["DEMO_1.0"]` — the library does define a scheme |
 
 ## abicheck command
@@ -80,6 +80,15 @@ export consistently; a symbol sitting outside that scheme is what the check
 flags. Reading the export table alone (without also reading the version
 metadata attached to each symbol) can't tell "no versioning used" from
 "versioning used inconsistently" — the check has to look at both.
+
+A symbol the version script names in no node is **not** flagged: the linker
+binds it to the library's base version definition (`VER_FLG_BASE`, the
+SONAME node `objdump -T` prints as `Base`), the permanent home of an API
+that predates the version script — zlib's `deflate`/`inflate` are the
+textbook case, and retagging one would itself break consumers. The check
+flags only an export carrying no version at all (`.gnu.version` index 0).
+A snapshot from before schema v58 did not record which of the two an
+export is, so its candidates are reported as not evaluated, never flagged.
 
 ## Why this matters for a real release
 

@@ -41,9 +41,9 @@ import yaml
 from click.testing import CliRunner
 
 from abicheck.cli import main as abicheck_main
-from abicheck.cli_helpers_compare import ResolvedCompareConfig
 from abicheck.model.evidence_depth_levels import SourceMethod, method_to_collect_mode
 from abicheck.workflows import no_baseline_compare as nbc
+from abicheck.workflows.compare_configuration import ResolvedCompareConfig
 
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT / "scripts") not in sys.path:

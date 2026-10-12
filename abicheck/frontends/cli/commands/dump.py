@@ -35,14 +35,6 @@ from ....cli_dump_helpers import (
     resolve_dump_collect_context,
     resolve_dump_debug_format,
 )
-from ....cli_helpers_compare import (  # noqa: F401  — re-exported to keep cli import sites stable
-    _canonical_library_key as _canonical_library_key,
-    _collect_force_public_symbols as _collect_force_public_symbols,
-    _merge_redundant_changes as _merge_redundant_changes,
-    _provenance_timestamp as _provenance_timestamp,
-    _version_sort_key as _version_sort_key,
-    _warn_ignored_flags as _warn_ignored_flags,
-)
 from ....cli_options import (
     LANG_DEFAULT,
     apply_compile_config_env_toggles,
