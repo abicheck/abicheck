@@ -39,9 +39,9 @@ from abicheck.buildsource.pack import BuildSourcePack
 from abicheck.buildsource.source_graph import GraphEdge, GraphNode, SourceGraphSummary
 from abicheck.checker import compare
 from abicheck.checker_policy import ChangeKind, CrossSourceEvolution
-from abicheck.elf_metadata import ElfMetadata, ElfSymbol
 from abicheck.model import AbiSnapshot, Function, RecordType, ScopeOrigin
 from abicheck.model.change import Change
+from abicheck.model.elf_facts import ElfMetadata, ElfSymbol, ElfVersionBinding
 from abicheck.workflows.cross_source_evolution import compute_cross_source_evolution
 
 
@@ -55,7 +55,10 @@ def _versioned_elf(unversioned_names: tuple[str, ...]) -> ElfMetadata:
     """
     symbols = [ElfSymbol(name="_Z3okv", version="FOO_1.0", visibility="default")]
     symbols += [
-        ElfSymbol(name=n, version="", visibility="default") for n in unversioned_names
+        ElfSymbol(
+            n, visibility="default", version_binding=ElfVersionBinding.UNVERSIONED
+        )
+        for n in unversioned_names
     ]
     return ElfMetadata(symbols=symbols, versions_defined=["FOO_1.0"])
 

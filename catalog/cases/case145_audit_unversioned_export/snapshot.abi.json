@@ -113,6 +113,7 @@
         "sym_type": "func",
         "value_alignment": 0,
         "version": null,
+        "version_binding": "unversioned",
         "visibility": "default"
       }
     ],
@@ -144,7 +145,7 @@
   "platform": null,
   "python_api": null,
   "python_ext": null,
-  "schema_version": 56,
+  "schema_version": 58,
   "scope_fallback": null,
   "source_mtime": null,
   "source_mtime_epoch": false,

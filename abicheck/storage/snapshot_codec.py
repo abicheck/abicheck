@@ -108,6 +108,7 @@ from .snapshot_load_normalization import (
 from .snapshot_reliability_flags import decode_reliability_flags
 from .snapshot_schema_versions import (
     _MIN_SCHEMA_VERSION_REQUIRING_HARD_REJECTION,
+    _RETIRED_SCHEMA_VERSIONS,
     SCHEMA_VERSION as SCHEMA_VERSION,
 )
 from .surface_graph_codec import decode_surface_graph
@@ -153,6 +154,11 @@ def decode_snapshot(
     # Currently only v1 and v2 exist and have the same on-disk layout, so no
     # migration is required.  This baseline lets future PRs add migration logic here.
     _schema_version: int = int(d.get("schema_version", 1))
+    if _schema_version in _RETIRED_SCHEMA_VERSIONS:
+        raise IncompatibleSnapshotSchemaError(
+            f"Snapshot schema_version {_schema_version} was written by an "
+            "unreleased, reverted abicheck build and is never read. Re-dump it."
+        )
     if (
         _schema_version > max_known_schema_version
         and _schema_version >= _MIN_SCHEMA_VERSION_REQUIRING_HARD_REJECTION

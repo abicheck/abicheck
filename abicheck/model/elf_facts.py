@@ -51,6 +51,28 @@ class SymbolType(StrEnum):
     OTHER = "other"
 
 
+class ElfVersionBinding(StrEnum):
+    """Which ``.gnu.version`` node an exported symbol is bound to.
+
+    ``version == ""`` alone cannot say this: a symbol bound to a versioned
+    library's base definition (``VER_FLG_BASE``, index 1 -- the SONAME node
+    every symbol present before the library adopted versioning stays on) and
+    a symbol carrying no version at all both leave it empty.
+    """
+
+    #: Not recorded: a pre-v58 snapshot, a non-ELF producer, or a
+    #: ``.gnu.version`` entry that could not be read or resolved.
+    UNKNOWN = "unknown"
+    #: No ``.gnu.version`` section, ``VER_NDX_LOCAL`` (0), or index 1 in a
+    #: library that defines no base version.
+    UNVERSIONED = "unversioned"
+    #: Index 1 in a library whose ``.gnu.version_d`` carries the
+    #: ``VER_FLG_BASE`` definition (``objdump -T`` prints ``Base``).
+    BASE = "base"
+    #: A named version node (``version`` holds its name).
+    NAMED = "named"
+
+
 @dataclass
 class ElfSymbol:
     name: str
@@ -71,6 +93,8 @@ class ElfSymbol:
     # unreadable, or a pre-v56 snapshot). Equal hashes mean identical bytes;
     # unequal hashes are no evidence (PC-relative displacements move).
     code_hash: str = ""
+    # What ``version == ""`` cannot say on its own (``ElfVersionBinding``).
+    version_binding: ElfVersionBinding = ElfVersionBinding.UNKNOWN
 
 
 @dataclass

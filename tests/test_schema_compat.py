@@ -22,6 +22,7 @@ from abicheck.serialization import (
     snapshot_from_dict,
     snapshot_to_dict,
 )
+from abicheck.storage.snapshot_schema_versions import _RETIRED_SCHEMA_VERSIONS
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures" / "schema"
 
@@ -312,7 +313,9 @@ class TestReserialization:
         warning regardless of whether that gap ever mattered would be
         exactly the noise this fix is not meant to introduce."""
         d = _load_fixture("v4.json")
-        d["schema_version"] = SCHEMA_VERSION - 1
+        d["schema_version"] = max(
+            v for v in range(SCHEMA_VERSION) if v not in _RETIRED_SCHEMA_VERSIONS
+        )
         d["from_headers"] = False
         with warnings.catch_warnings():
             warnings.simplefilter("error")

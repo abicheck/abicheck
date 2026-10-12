@@ -63,11 +63,6 @@ Next, unranked (the `--no-baseline` one-sided-detector gap, the target-platform 
 **Status (re-verified 2026-10-11 at `46c127111`): OPEN, narrowed.** #1532 moved the release compatibility-axis fold into `workflows/release_exit_fold.py`, which folds each member's scalar-resolver contribution. Two precedence resolvers still exist: `policy/exit_decision.py::resolve_compare_exit_decision` and `policy/exit_decision_precedence.py::resolve_release_exit_decision`, the latter still owning the release-only axes listed below.  
 `hygiene` — Scalar and release `compare` still use two precedence resolvers (`resolve_compare_exit_decision` and `resolve_release_exit_decision`), so the exit-code rules can drift between the two paths. [Full write-up](known-gaps/scalar-and-release-compare-still-fold-the-exit-code-in-two.md)
 
-### `unversioned_exported_symbol` false-positives on base-version (VER_FLG_BASE) symbols of versioned libraries: the model cannot tell base-bound from unversioned
-
-**Status (re-verified 2026-10-11 at `46c127111`): OPEN.** `extract/elf_symbol_versions.py::_apply_version_to_symbol` still returns early for `ver_idx < 2`, and `buildsource/cross_source_checks.py:1065` still skips only `not sym.is_default or sym.version`, so base-version symbols are still flagged.  
-`false-positive` — Symbols bound to a versioned library's base version (`VER_FLG_BASE`) look unversioned in the model, so `unversioned_exported_symbol` flags them. [Full write-up](known-gaps/unversioned-exported-symbol-false-positives-on-base-version-ver.md)
-
 ## Open and partially open gaps
 
 Each entry's status line says what is still open. A PARTIAL entry's write-up also describes the half that is already fixed; the status line is authoritative where they disagree.
