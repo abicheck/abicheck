@@ -68,11 +68,6 @@ Next, unranked (the `--no-baseline` one-sided-detector gap, the target-platform 
 **Status (re-verified 2026-10-11 at `46c127111`): OPEN, narrowed.** #1532 moved the release compatibility-axis fold into `workflows/release_exit_fold.py`, which folds each member's scalar-resolver contribution. Two precedence resolvers still exist: `policy/exit_decision.py::resolve_compare_exit_decision` and `policy/exit_decision_precedence.py::resolve_release_exit_decision`, the latter still owning the release-only axes listed below.  
 `hygiene` — Scalar and release `compare` still use two precedence resolvers (`resolve_compare_exit_decision` and `resolve_release_exit_decision`), so the exit-code rules can drift between the two paths. [Full write-up](known-gaps/scalar-and-release-compare-still-fold-the-exit-code-in-two.md)
 
-### A typed release compare does not record the gate on its members (2026-10-12)
-
-**Status (re-verified 2026-10-12 at `f25eddcdd`): OPEN.** Typed route only. `execute_release_compare` stamps a member's resolved config from the release's `PackApplication`, which only the CLI resolves; a typed caller without one gets the default gate on each member's `contract_context` receipt. Verdicts and exit codes are unaffected.  
-`hygiene` — A release run through the typed workflow records a different gate receipt (and `effective_config_digest`) on its members than the typed scalar API does for the same pair. [Full write-up](known-gaps/a-typed-release-compare-does-not-record-the-gate-on-its-members.md)
-
 ## Open and partially open gaps
 
 Each entry's status line says what is still open. A PARTIAL entry's write-up also describes the half that is already fixed; the status line is authoritative where they disagree.

@@ -16,6 +16,9 @@ re-verification status line (2026-10-09, `456989f`). Do not re-open an
 entry from here without reproducing it on current `main`; record a new
 gap on the main page instead.
 
+### A typed release compare did not record the gate on its members (closed 2026-10-12)
+
+**Status (2026-10-12): CLOSED.** A release run through the typed workflow (`workflows.release_compare.execute_release_compare`) without a `pack_application` now resolves its own configuration. It uses the resolver the CLI's release route and the scalar compare share, `workflows.compare_configuration.resolve_release_pack_application`. The plan's gate, the policy, the suppression and the project overrides are stated at the `API_REQUEST`/`PROJECT_CONFIG` tiers, so each member records the gate the identical typed scalar compare records. The CLI route now goes through the same function and supplies only its own inputs. Regression: `tests/test_release_compare_workflow.py`'s `severity_strict` cells, previously a strict xfail, pass for cardinality 1–3. The former write-up is [here](../known-gaps/a-typed-release-compare-does-not-record-the-gate-on-its-members.md).
 ### The default L2 header projection drops template/override/callback facts (closed 2026-10-12)
 
 **Status (2026-10-12): CLOSED.** `buildsource/semantic_fact_folds.py` is the one owner that parses, merges and folds the override, template and callback families for both the L5 pass and the default L2 header pass; the header projection (whole-tree, streamed, cached) carries them from the same parse and stamps `header_*` passes, and a graph that never ran a family is a coverage gap in `diff_source_graph`, not a removal. Headers-only == L5 parity is asserted on four C++ fixtures (`tests/test_header_graph_semantic_facts.py`).

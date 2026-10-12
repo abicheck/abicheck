@@ -317,11 +317,20 @@ def execute_release_compare(
     # G26/G27: a wheel's own tag and METADATA become the deployment contract
     # its members are checked against, unless `runtime_floors` was declared.
     env_matrix = wheel_release_env_matrix(o.env_matrix, new_dir)
+    # The release's resolved configuration: the caller's (the CLI resolves it
+    # from the flags the user typed), or resolved here from the typed options
+    # through the same resolver, so a typed release records on each member
+    # what the identical typed scalar compare records.
+    pack_application = (
+        o.pack_application
+        if o.pack_application is not None
+        else _resolve_typed_release_configuration(plan, o)
+    )
 
     with ast_acquisition_scope() as ast_scope:
         member_ctx = ReleaseMemberContext(
             request=release_parent_request(
-                o.pack_application,
+                pack_application,
                 old_headers=old_h,
                 new_headers=new_h,
                 old_includes=old_inc,
@@ -355,7 +364,7 @@ def execute_release_compare(
             resolve_debug_info=resolve_package_debug_info,
             require_complete_analysis=o.require_complete_analysis,
             severity_config=severity_config,
-            pack_application=o.pack_application,
+            pack_application=pack_application,
             # Bundle analysis always runs and reads each member's diff
             # results and evidence (G38 Phase 4).
             collect_diff_results=True,
@@ -463,7 +472,7 @@ def execute_release_compare(
             o.suppress,
             o.policy,
             o.policy_file_path,
-            o.pack_application,
+            pack_application,
             o.project_policy_overrides,
         )
         surface_stage = reconcile_release_public_surface(
@@ -606,7 +615,7 @@ def execute_release_compare(
             policy_file_path=o.policy_file_path,
             old_version=o.old_version,
             new_version=o.new_version,
-            pack_application=o.pack_application,
+            pack_application=pack_application,
             project_policy_overrides=o.project_policy_overrides,
         )
 
@@ -655,6 +664,64 @@ def execute_release_compare(
         ),
         bundle_result=bundle_result,
         matrix_result=matrix_result,
+    )
+
+
+def _resolve_typed_release_configuration(
+    plan: ReleaseComparePlan, options: ReleaseCompareOptions
+) -> PackApplication:
+    """The release's configuration for a typed caller: *options* and the
+    plan's gate stated at the ``API_REQUEST`` tier, the way
+    ``compatibility_evaluation_frontend.compare_request_inputs`` states a
+    typed scalar request, plus the project overrides at ``PROJECT_CONFIG``.
+    """
+    from ..compatibility_evaluation_frontend import (
+        ExplicitCompatibilityInputs,
+        FrontEnd,
+        SuppressionSource,
+        stated_policy_base,
+    )
+    from .compare_configuration import resolve_release_pack_application
+    from .compare_gate_receipt import project_inputs_for_overrides
+    from .ownership_contract_inputs import header_dir_spellings
+    from .policy_file import PolicyFile
+
+    policy_file = (
+        PolicyFile.load(options.policy_file_path)
+        if options.policy_file_path is not None
+        else None
+    )
+    request = plan.request
+    explicit = ExplicitCompatibilityInputs(
+        contract_mode=options.contract_mode,
+        # Like a typed request: only `False` (the legacy alias for `all`)
+        # states a domain.
+        scope_public_headers=None if options.scope_public_headers else False,
+        policy_base=stated_policy_base(options.policy, policy_file),
+        policy_file=policy_file,
+        suppression=(
+            SuppressionSource.from_file(options.suppress)
+            if options.suppress is not None
+            else None
+        ),
+        severity_preset=request.severity_preset,
+        severity_abi_breaking=request.severity_abi_breaking,
+        severity_potential_breaking=request.severity_potential_breaking,
+        severity_quality_issues=request.severity_quality_issues,
+        severity_addition=request.severity_addition,
+        header_dirs=header_dir_spellings(
+            (*plan.new_headers, *(options.public_header_dirs or ()))
+        ),
+    )
+    return resolve_release_pack_application(
+        explicit,
+        front_end=FrontEnd.API,
+        project=project_inputs_for_overrides(
+            (options.project_policy_overrides or {}).items()
+        ),
+        policy_file=policy_file,
+        base_policy=options.policy,
+        contract_evaluation=options.contract_evaluation,
     )
 
 
