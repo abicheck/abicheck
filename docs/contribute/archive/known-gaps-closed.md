@@ -16,6 +16,12 @@ re-verification status line (2026-10-09, `456989f`). Do not re-open an
 entry from here without reproducing it on current `main`; record a new
 gap on the main page instead.
 
+### The default L2 header projection drops template/override/callback facts (closed 2026-10-12)
+
+**Status (2026-10-12): CLOSED.** `buildsource/semantic_fact_folds.py` is the one owner that parses, merges and folds the override, template and callback families for both the L5 pass and the default L2 header pass; the header projection (whole-tree, streamed, cached) carries them from the same parse and stamps `header_*` passes, and a graph that never ran a family is a coverage gap in `diff_source_graph`, not a removal. Headers-only == L5 parity is asserted on four C++ fixtures (`tests/test_header_graph_semantic_facts.py`).
+
+[Full write-up](../known-gaps/l2-header-projection-drops-template-override-callback-facts.md)
+
 ### A lost return-pointee qualifier was judged by the C++ conversion rule, not C's (closed 2026-10-11)
 
 **Status (2026-10-11): CLOSED.** `compare/parameter_facts.py`'s `_qualification_converts` now takes the C rule (C11 6.5.16.1: only the first pointed-to type may gain qualifiers, deeper levels must match) for a function C can call -- C linkage or an unmangled name (`diff_symbols._c_callable`) -- and keeps C++ [conv.qual] for a C++-only (mangled) one. So `const char * const *f()` -> `char * const *f()` is `func_return_pointee_qualifier_changed` (API break) for a C library and stays the `_removed` risk for a C++-only function. Checked against the compilers: `tests/test_return_pointee_qualifier_compiler_integration.py` runs a gcc `-x c` matrix (also under clang) beside the g++ one, and `tests/test_header_backend_parity_probes_integration.py` runs real C libraries through both header backends. The former write-up is [here](../known-gaps/return-pointee-qualifier-loss-is-judged-by-the-c-plus-plus-conversion-rule.md).
