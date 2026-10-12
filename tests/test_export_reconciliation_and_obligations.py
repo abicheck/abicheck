@@ -658,7 +658,7 @@ def test_the_two_evidence_tiers_of_one_removal_share_an_identity() -> None:
     """Must-merge: the same lost data symbol, seen once with header evidence
     and once without, is one event -- so a suppression written against either
     spelling keeps matching the other."""
-    from abicheck.finding_identity import resolve_change_identity
+    from abicheck.compare.finding_identity import resolve_change_identity
 
     weak = resolve_change_identity(_removal_change("var_removed_elf_only", "_ZTV3Foo"))
     strong = resolve_change_identity(_removal_change("var_removed", "_ZTV3Foo"))
@@ -707,7 +707,7 @@ def test_genuinely_distinct_losses_keep_distinct_identities(
     class's own export loss must not be erased because a related object also
     changed.
     """
-    from abicheck.finding_identity import resolve_change_identity
+    from abicheck.compare.finding_identity import resolve_change_identity
 
     a = resolve_change_identity(_removal_change(*left))
     b = resolve_change_identity(_removal_change(*right))
@@ -719,14 +719,14 @@ def test_dedup_collapses_the_tier_pair_and_keeps_distinct_losses() -> None:
     identity resolver, since that is the consumer whose behaviour users see:
     one symbol reported at both tiers collapses to one finding, while two
     genuinely different lost symbols both survive."""
-    from abicheck.diff_filtering import _deduplicate_cross_detector
+    from abicheck.compare.finding_dedup import deduplicate_cross_detector
 
     duplicated = [
         _removal_change("var_removed", "_ZTV3Foo"),
         _removal_change("var_removed_elf_only", "_ZTV3Foo"),
         _removal_change("var_removed_elf_only", "_ZTV3Bar"),
     ]
-    kept = _deduplicate_cross_detector(duplicated)
+    kept = deduplicate_cross_detector(duplicated)
     symbols = [c.symbol for c in kept]
     assert sorted(symbols) == ["_ZTV3Bar", "_ZTV3Foo"], symbols
 

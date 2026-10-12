@@ -107,7 +107,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
-from ..finding_identity import SymbolIdentityIndex, resolve_function_identity
+from .finding_identity import SymbolIdentityIndex, resolve_function_identity
 
 if TYPE_CHECKING:
     from ..model import AbiSnapshot, Function

@@ -62,12 +62,12 @@ def add_contract_evaluation_fields(
     # this after the early return instead, silently skipping it on every
     # default-run audit-ledger entry).
     if "finding_id" not in d:
-        from ..finding_identity import report_finding_id
+        from ..compare.finding_identity import report_finding_id
 
         d["finding_id"] = report_finding_id(c)
     # Same reasoning, for finding_id's backend-independent sibling (2.36).
     if "canonical_finding_id" not in d:
-        from ..finding_identity import report_canonical_finding_id
+        from ..compare.finding_identity import report_canonical_finding_id
 
         d["canonical_finding_id"] = report_canonical_finding_id(c)
 

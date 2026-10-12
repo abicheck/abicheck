@@ -51,8 +51,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
+from abicheck.compare.finding_identity import FindingIdentity, resolve_change_identity
 from abicheck.diff_cxx_rules import itanium_qualified_name, msvc_qualified_name
-from abicheck.finding_identity import FindingIdentity, resolve_change_identity
 
 if TYPE_CHECKING:
     from abicheck.model.change import Change

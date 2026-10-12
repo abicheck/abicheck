@@ -97,7 +97,7 @@ def test_reason_counts_conserve_any_mix(seed: int) -> None:
 
 def test_every_redundant_producer_has_a_reason() -> None:
     """Adding a fourth producer must add its reason, not inherit "root type"."""
-    known = {"diff_filtering.py", "export_existence_fold.py", "post_processing.py"}
+    known = {"finding_redundancy.py", "export_existence_fold.py", "post_processing.py"}
     producers = set()
     for path in Path("abicheck").rglob("*.py"):
         tree = ast.parse(path.read_text(encoding="utf-8"))

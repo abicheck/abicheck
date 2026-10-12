@@ -195,7 +195,9 @@ class TestIdentityAndDedupRegistration:
     """
 
     def test_it_shares_the_addition_dedup_category(self) -> None:
-        from abicheck.finding_identity import _EQUIVALENT_CHANGE_CATEGORIES
+        from abicheck.compare.finding_identity.change_kinds import (
+            _EQUIVALENT_CHANGE_CATEGORIES,
+        )
 
         assert (
             _EQUIVALENT_CHANGE_CATEGORIES["func_added_elf_only"]
@@ -211,7 +213,7 @@ class TestIdentityAndDedupRegistration:
         addition would satisfy the first claim completely. Two genuinely
         different added exports must resolve to different identities.
         """
-        from abicheck.finding_identity import resolve_change_identity
+        from abicheck.compare.finding_identity import resolve_change_identity
 
         a = Change(
             kind=ChangeKind.FUNC_ADDED_ELF_ONLY, symbol="added_a", description=""
@@ -225,7 +227,7 @@ class TestIdentityAndDedupRegistration:
         """And the must-merge half, stated on real identities rather than on
         the category table alone: the same symbol reported by the
         header-aware and export-only tiers is one addition, not two."""
-        from abicheck.finding_identity import resolve_change_identity
+        from abicheck.compare.finding_identity import resolve_change_identity
 
         header_tier = Change(
             kind=ChangeKind.FUNC_ADDED, symbol="gained", description=""
@@ -238,21 +240,21 @@ class TestIdentityAndDedupRegistration:
         )
 
     def test_it_is_in_the_cross_detector_dedup_table(self) -> None:
-        """The sibling table in ``diff_filtering`` -- a separate map that has
-        to agree with the identity one, and the exact shape of "listed in one
-        place, missed in another"."""
-        import abicheck.diff_filtering as df
+        """The sibling table in ``compare.finding_dedup`` -- a separate map
+        that has to agree with the identity one, and the exact shape of
+        "listed in one place, missed in another"."""
+        from abicheck.compare.finding_dedup import deduplicate_cross_detector
 
-        src = df._deduplicate_cross_detector.__doc__ or ""
+        src = deduplicate_cross_detector.__doc__ or ""
         assert "FUNC_ADDED_ELF_ONLY" in src
 
     def test_it_is_treated_as_always_independent(self) -> None:
-        from abicheck.diff_filtering import _ALWAYS_INDEPENDENT_KINDS
+        from abicheck.compare.finding_redundancy import ALWAYS_INDEPENDENT_KINDS
 
-        assert ChangeKind.FUNC_ADDED_ELF_ONLY in _ALWAYS_INDEPENDENT_KINDS
+        assert ChangeKind.FUNC_ADDED_ELF_ONLY in ALWAYS_INDEPENDENT_KINDS
         # Vacuity guard: its sibling is there too, so this is not asserting a
         # set that happens to contain everything.
-        assert ChangeKind.FUNC_ADDED in _ALWAYS_INDEPENDENT_KINDS
+        assert ChangeKind.FUNC_ADDED in ALWAYS_INDEPENDENT_KINDS
 
     def test_the_detector_is_auto_discovered(self) -> None:
         """``diff_*`` modules are discovered by name, so the module had to be

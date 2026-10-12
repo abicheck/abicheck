@@ -808,7 +808,8 @@ class TestInlineNamespaceVersionBumpTakesItsEntityFromTheFinding:
     def _changes(*, funcs=(), types=()):
         """Through the real pipeline stage, the way the existing
         `inline_namespace_version_bumped` tests reach this detector."""
-        from abicheck.post_processing import DetectNamespacePatterns, PipelineContext
+        from abicheck.policy.finding_disposition import PipelineContext
+        from abicheck.post_processing import DetectNamespacePatterns
         from tests.test_diff_namespaces import _fn, _rec, _snap
 
         old = _snap(

@@ -104,6 +104,19 @@ member's contribution with `max`; `CompareRequest.acknowledgments_path`/
 [Change acknowledgment](../../use/acknowledgments.md) for the user-facing
 format and gate contract.
 
+**Owner (2026-10, behavior-preserving refactor).** D1's "record before
+disposing" is now owned by one module rather than by caller discipline:
+`abicheck/policy/finding_disposition/` runs the disposition steps in their
+default order (`dispose_findings`, `default_pipeline.py`), always with a
+disposition ledger (one is created when the caller supplies none), and every
+suppression application point named above shares one primitive,
+`dispose_by_suppression`. Root-type redundancy and deduplication live in
+`abicheck/compare/finding_redundancy.py`/`finding_dedup.py`, finding identity
+in `abicheck/compare/finding_identity/`. References above to
+`post_processing.ApplySuppression`, `checker._filter_suppressed_changes` and
+`finding_identity.py` describe where those mechanisms lived when each slice
+landed.
+
 Implementation is sequenced in
 [`plans/vision-api-abi-evolution.md`](../plans/vision-api-abi-evolution.md)
 (workstream "Policy-disposition audit and change acknowledgment").

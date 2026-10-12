@@ -533,7 +533,7 @@ topics:
       - abicheck/junit_report.py
       - abicheck/schemas/__init__.py
       - abicheck/frontends/cli/options/export.py
-      - abicheck/finding_identity.py
+      - abicheck/compare/finding_identity/report_ids.py
       - abicheck/cli_compare_fold.py
       - abicheck/effective_config_digest.py
       - abicheck/confidence.py

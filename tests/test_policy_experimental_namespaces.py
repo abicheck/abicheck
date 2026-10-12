@@ -35,10 +35,10 @@ from abicheck.diff_namespaces import (
     DEFAULT_EXPERIMENTAL_NAMESPACES,
     _strip_experimental,
 )
+from abicheck.policy.finding_disposition import PipelineContext
 from abicheck.policy.policy_file_top_level import KNOWN_POLICY_FILE_KEYS
 from abicheck.policy_file import PolicyError, PolicyFile
 from abicheck.post_processing import DetectNamespacePatterns
-from abicheck.post_processing_context import PipelineContext
 
 
 def _load(tmp_path, text: str) -> PolicyFile:

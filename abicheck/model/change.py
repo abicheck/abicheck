@@ -52,7 +52,7 @@ if TYPE_CHECKING:
 # default symbol version is NOT retained as a non-default alias (so consumers of
 # the old version fail to resolve). Shared between the producer
 # (``diff_platform._diff_symbol_version_aliases``) and the cross-detector dedup
-# (``diff_filtering._deduplicate_cross_detector``), which only collapses an
+# (``finding_dedup.deduplicate_cross_detector``), which only collapses an
 # alias-change into a co-reported node-move in this not-retained case — when the
 # old alias IS retained the alias-change is compatible and must survive.
 SYMBOL_VERSION_ALIAS_NOT_RETAINED_MARKER = "old version NOT retained as alias"
@@ -382,7 +382,7 @@ class Change:
     symbol_binding: str | None = field(default=None, kw_only=True)
     # Structured field identity for a field-level Change ("x" in "Widget::x"),
     # stamped by the six TYPE_FIELD_*/STRUCT_FIELD_* emitters
-    # (diff_types.py/diff_platform.py) so diff_filtering._dedup_cross_kind's
+    # (diff_types.py/diff_platform.py) so finding_dedup._dedup_cross_kind's
     # parent-type match can require field agreement instead of dropping any
     # DWARF field finding whose *type* has an AST-tier finding, regardless of
     # *which* field changed (Codex review). None for every other kind.

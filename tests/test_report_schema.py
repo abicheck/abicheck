@@ -590,7 +590,7 @@ class TestReportValidatesAgainstSchema:
     def _stage_for(old: AbiSnapshot, new: AbiSnapshot) -> ContractEvaluationStage:
         """The contract-evaluation stage `checker.compare` builds internally."""
         from abicheck.contract_pipeline import build_contract_stage
-        from abicheck.post_processing import PipelineContext
+        from abicheck.policy.finding_disposition import PipelineContext
 
         return build_contract_stage(
             old,

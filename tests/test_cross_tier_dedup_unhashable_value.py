@@ -2,7 +2,7 @@
 # Copyright The abicheck Authors
 """The cross-tier dedup must key any finding a detector can produce.
 
-`diff_filtering._dedup_cross_kind` puts `cross_tier_transition(change)` into
+`finding_dedup._dedup_cross_kind` puts `cross_tier_transition(change)` into
 a `set`. `Change.old_value`/`new_value` are annotated `str | None`, but the
 annotation is not enforced: `diff_python.py` stores lists there at seven
 sites, and `reporter.py` serializes those as JSON arrays, so the list is the
@@ -39,7 +39,7 @@ Two distinct engine-level layers, closed by two distinct classes below
   post-processing step `compare()` runs (`_dedup_exact`'s (kind,
   description) key, `_deduplicate_cross_detector`'s identity-based key,
   and anything downstream), which a test that only calls
-  `_deduplicate_ast_dwarf`/`cross_tier_transition` directly cannot rule out
+  `deduplicate_ast_dwarf`/`cross_tier_transition` directly cannot rule out
   either mishandling or re-merging the same list value.
 """
 
@@ -49,7 +49,7 @@ import pytest
 
 from abicheck.checker import compare
 from abicheck.checker_policy import ChangeKind
-from abicheck.diff_filtering import _deduplicate_ast_dwarf
+from abicheck.compare.finding_dedup import deduplicate_ast_dwarf
 from abicheck.diff_helpers import cross_tier_transition
 from abicheck.model import AbiSnapshot
 from abicheck.model.change import Change
@@ -85,7 +85,7 @@ def _change(
 )
 def test_dedup_survives_a_non_scalar_value_slot(value: object) -> None:
     """The reported crash: dedup aborted the entire comparison."""
-    result = _deduplicate_ast_dwarf([_change("sym", value, None)])
+    result = deduplicate_ast_dwarf([_change("sym", value, None)])
 
     assert [c.symbol for c in result] == ["sym"]
 
@@ -99,7 +99,7 @@ def test_findings_differing_only_in_a_list_value_stay_distinct() -> None:
     """Keying must not over-merge: two real findings, two survivors."""
     # Distinct descriptions, so the earlier exact-dedup pass (which keys on
     # kind+description) cannot be what merges them -- the value slot is.
-    result = _deduplicate_ast_dwarf(
+    result = deduplicate_ast_dwarf(
         [
             _change("sym", ["a"], None, description="a"),
             _change("sym", ["b"], None, description="b"),
@@ -118,7 +118,7 @@ class TestListValuedFindingSurvivesTheRealDedupCrossKind:
 
     Unlike the module-level tests above (which use the default
     ``FUNC_PARAMS_CHANGED`` -- a kind `_dedup_cross_kind` never indexes at
-    all, so those tests exercise `_deduplicate_ast_dwarf`'s outer dedup
+    all, so those tests exercise `deduplicate_ast_dwarf`'s outer dedup
     passes and `cross_tier_transition` directly, not this specific
     function's own transition-set logic), these use
     ``TYPE_SIZE_CHANGED``/``STRUCT_SIZE_CHANGED`` -- a real key/value pair
@@ -155,7 +155,7 @@ class TestListValuedFindingSurvivesTheRealDedupCrossKind:
         tier tag) would silently drop the DWARF finding as "redundant" when
         the two tiers were never actually shown to agree.
         """
-        result = _deduplicate_ast_dwarf(
+        result = deduplicate_ast_dwarf(
             [
                 _change(
                     "Widget",
@@ -186,7 +186,7 @@ class TestListValuedFindingSurvivesTheRealDedupCrossKind:
         AST-tier finding for the same symbol must survive independently --
         collapsing it here would be the over-merge this whole class exists
         to prevent."""
-        result = _deduplicate_ast_dwarf(
+        result = deduplicate_ast_dwarf(
             [
                 _change(
                     "Widget",
@@ -216,7 +216,7 @@ class TestListValuedFindingSurvivesTheRealDedupCrossKind:
         """The crash-safety half, isolated from the unit-tagging half above:
         a single malformed byte-value finding must not crash and must not
         vanish, even with no AST-tier counterpart present at all."""
-        result = _deduplicate_ast_dwarf(
+        result = deduplicate_ast_dwarf(
             [
                 _change(
                     "Widget",
@@ -235,7 +235,7 @@ class TestRealCollisionReachesCompareOutput:
     (``diff_python._diff_stable_abi_violations``/``_diff_abi3_floor_raised``,
     both PEP-Limited-API "abi3" detectors) run through the actual
     ``checker.compare()`` entry point, not a hand-built `Change` fed
-    directly into `_deduplicate_ast_dwarf`.
+    directly into `deduplicate_ast_dwarf`.
 
     Deliberately does NOT claim to reach `_dedup_cross_kind`'s own
     `cross_tier_transition` calls -- `PYTHON_STABLE_ABI_VIOLATION` is not

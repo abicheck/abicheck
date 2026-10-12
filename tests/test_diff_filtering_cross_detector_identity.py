@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""ADR-049 Phase 2: tests for the identity-based ``_deduplicate_cross_detector``.
+"""ADR-049 Phase 2: tests for the identity-based ``deduplicate_cross_detector``.
 
 Covers the wiring landed in ``diff_filtering.py`` -- the dedup key is now
 ``finding_identity.resolve_change_identity(c).primary_id`` instead of a
@@ -28,7 +28,7 @@ special case (independent of this dedup key) is unaffected.
 from __future__ import annotations
 
 from abicheck.checker_policy import ChangeKind
-from abicheck.diff_filtering import _deduplicate_cross_detector
+from abicheck.compare.finding_dedup import deduplicate_cross_detector
 from abicheck.model.change import SYMBOL_VERSION_ALIAS_NOT_RETAINED_MARKER, Change
 
 
@@ -42,7 +42,7 @@ class TestSameCategorySameSymbolCollapses:
             _change(ChangeKind.FUNC_REMOVED, "_Z3foov", "rich"),
             _change(ChangeKind.FUNC_REMOVED_ELF_ONLY, "_Z3foov", "l0"),
         ]
-        result = _deduplicate_cross_detector(changes)
+        result = deduplicate_cross_detector(changes)
         assert len(result) == 1
         assert result[0].description == "rich"  # first occurrence wins
 
@@ -51,7 +51,7 @@ class TestSameCategorySameSymbolCollapses:
             _change(ChangeKind.FUNC_ADDED, "_Z3barv", "first"),
             _change(ChangeKind.FUNC_ADDED, "_Z3barv", "second"),
         ]
-        result = _deduplicate_cross_detector(changes)
+        result = deduplicate_cross_detector(changes)
         assert len(result) == 1
         assert result[0].description == "first"
 
@@ -60,21 +60,21 @@ class TestSameCategorySameSymbolCollapses:
             _change(ChangeKind.VAR_REMOVED, "g_x"),
             _change(ChangeKind.VAR_REMOVED, "g_x"),
         ]
-        assert len(_deduplicate_cross_detector(changes)) == 1
+        assert len(deduplicate_cross_detector(changes)) == 1
 
     def test_duplicate_var_added_collapses(self) -> None:
         changes = [
             _change(ChangeKind.VAR_ADDED, "g_y"),
             _change(ChangeKind.VAR_ADDED, "g_y"),
         ]
-        assert len(_deduplicate_cross_detector(changes)) == 1
+        assert len(deduplicate_cross_detector(changes)) == 1
 
     def test_version_node_and_defined_removal_collapse(self) -> None:
         changes = [
             _change(ChangeKind.SYMBOL_VERSION_NODE_REMOVED, "GLIBC_2.17", "node"),
             _change(ChangeKind.SYMBOL_VERSION_DEFINED_REMOVED, "GLIBC_2.17", "defined"),
         ]
-        result = _deduplicate_cross_detector(changes)
+        result = deduplicate_cross_detector(changes)
         assert len(result) == 1
         assert result[0].description == "node"
 
@@ -85,7 +85,7 @@ class TestDistinctFindingsAreConserved:
             _change(ChangeKind.FUNC_REMOVED, "_Z3foov"),
             _change(ChangeKind.FUNC_REMOVED, "_Z3barv"),
         ]
-        assert len(_deduplicate_cross_detector(changes)) == 2
+        assert len(deduplicate_cross_detector(changes)) == 2
 
     def test_different_category_same_symbol_both_kept(self) -> None:
         # FUNC_REMOVED ("func_removal") and FUNC_ADDED ("func_addition") never
@@ -94,7 +94,7 @@ class TestDistinctFindingsAreConserved:
             _change(ChangeKind.FUNC_REMOVED, "_Z3foov"),
             _change(ChangeKind.FUNC_ADDED, "_Z3foov"),
         ]
-        assert len(_deduplicate_cross_detector(changes)) == 2
+        assert len(deduplicate_cross_detector(changes)) == 2
 
     def test_non_dedup_eligible_kind_never_collapses(self) -> None:
         changes = [
@@ -104,10 +104,10 @@ class TestDistinctFindingsAreConserved:
         # Not one of the cross-detector-equivalent kinds this dedup targets --
         # both survive (a duplicate here would be a different detector's own
         # responsibility to avoid, not this stage's).
-        assert len(_deduplicate_cross_detector(changes)) == 2
+        assert len(deduplicate_cross_detector(changes)) == 2
 
     def test_empty_list_returns_empty(self) -> None:
-        assert _deduplicate_cross_detector([]) == []
+        assert deduplicate_cross_detector([]) == []
 
 
 class TestSymbolVersionAliasSpecialCaseUnaffected:
@@ -132,7 +132,7 @@ class TestSymbolVersionAliasSpecialCaseUnaffected:
                 new_value="GLIBC_2.28",
             ),
         ]
-        result = _deduplicate_cross_detector(changes)
+        result = deduplicate_cross_detector(changes)
         assert len(result) == 1
         assert result[0].kind is ChangeKind.SYMBOL_MOVED_VERSION_NODE
 
@@ -153,5 +153,5 @@ class TestSymbolVersionAliasSpecialCaseUnaffected:
                 new_value="GLIBC_2.28",
             ),
         ]
-        result = _deduplicate_cross_detector(changes)
+        result = deduplicate_cross_detector(changes)
         assert len(result) == 2

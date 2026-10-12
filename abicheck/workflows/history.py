@@ -90,7 +90,7 @@ from typing import Literal
 
 from ..checker import compare
 from ..checker_types import DiffResult
-from ..finding_identity import report_finding_id
+from ..compare.finding_identity import report_finding_id
 from ..model.change import Change
 from ..model.change_catalog.kinds import ChangeKind
 from ..model.evidence_status import Confidence, FindingEvolution

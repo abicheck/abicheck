@@ -1897,7 +1897,7 @@ class TestEmittedSymbolStaysBare:
     """The qualified matching key introduced for FP-1 must stay internal to
     old/new type matching. Every emitted ``Change.symbol`` for a namespaced
     type must still be the bare declaration name — the identity every other
-    consumer already keys on: ``diff_filtering._dedup_cross_kind``'s DWARF<->
+    consumer already keys on: ``finding_dedup._dedup_cross_kind``'s DWARF<->
     AST redundancy correlation matches a DWARF field symbol's *bare* parent
     type name against the AST-level type symbol (FIX-F), so a qualified
     symbol here would silently defeat that correlation for any namespaced

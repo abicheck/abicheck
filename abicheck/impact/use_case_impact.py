@@ -116,7 +116,7 @@ class UseCaseImpact:
         ``unattributed_changes`` describe what the reader is looking at
         instead of a set they cannot see.
         """
-        from ..finding_identity import report_finding_id
+        from ..compare.finding_identity import report_finding_id
 
         displayed = {report_finding_id(c) for c in changes}
         by_use_case = {
@@ -284,7 +284,7 @@ def build_use_case_impact(
     never looked. The caller turns that into its own usage error or silence,
     as fits its surface.
     """
-    from ..finding_identity import report_finding_id
+    from ..compare.finding_identity import report_finding_id
     from .use_cases import explain_use_case_impact, resolve_use_case_entrypoints
 
     old_graph = _source_graph(old_snapshot)

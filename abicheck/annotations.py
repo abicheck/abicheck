@@ -36,7 +36,7 @@ from .policy.evaluate import effective_kind_sets
 if TYPE_CHECKING:
     from datetime import date
 
-    from .finding_identity import MissingContractFinding
+    from .compare.finding_identity import MissingContractFinding
     from .policy.severity import IssueCategory, KindSets, SeverityConfig
 
 
@@ -452,7 +452,10 @@ def _collect_annotations_detailed(
     # *present* scope-synthesized finding).
     gate_scope = getattr(diff_result, "gate_scope", None)
     if gate_scope is not None:
-        from .finding_identity import missing_contract_finding, missing_contract_kind
+        from .compare.finding_identity import (
+            missing_contract_finding,
+            missing_contract_kind,
+        )
         from .policy.severity import SeverityLevel
 
         # A missing contract member is the same failure class as

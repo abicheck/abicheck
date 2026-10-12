@@ -40,8 +40,15 @@ from abicheck.model import (
     Visibility,
 )
 from abicheck.model.change import Change
-from abicheck.post_processing import DEFAULT_PIPELINE
+from abicheck.policy.finding_disposition import DispositionRules, dispose_findings
 from abicheck.suppression import Suppression, SuppressionList
+
+
+def _dispose(changes, old, new, suppression=None):
+    """The default disposition order under *suppression* alone."""
+    return dispose_findings(
+        changes, old, new, DispositionRules(suppression=suppression)
+    )
 
 
 def _snap(*, functions=None, types=None) -> AbiSnapshot:
@@ -145,9 +152,7 @@ def _needs_evidence_suppression() -> SuppressionList:
 class TestMarkReachability:
     def test_tags_reachable_internal_change(self) -> None:
         old, new, raw_change = _reachable_scenario()
-        ctx = DEFAULT_PIPELINE.run(
-            [raw_change], old, new, suppression=_needs_evidence_suppression()
-        )
+        ctx = _dispose([raw_change], old, new, _needs_evidence_suppression())
         found = [c for c in ctx.kept if c.kind == ChangeKind.TYPE_SIZE_CHANGED]
         assert len(found) == 1
         assert found[0].public_reachable is True
@@ -186,9 +191,7 @@ class TestMarkReachability:
             symbol="lib::Widget",
             description="size changed",
         )
-        ctx = DEFAULT_PIPELINE.run(
-            [raw_change], old, new, suppression=_needs_evidence_suppression()
-        )
+        ctx = _dispose([raw_change], old, new, _needs_evidence_suppression())
         found = [c for c in ctx.kept if c.kind == ChangeKind.TYPE_SIZE_CHANGED]
         assert len(found) == 1
         assert found[0].public_reachable is True
@@ -227,9 +230,7 @@ class TestMarkReachability:
             symbol="lib::kFlag",
             description="type changed",
         )
-        ctx = DEFAULT_PIPELINE.run(
-            [raw_change], old, new, suppression=_needs_evidence_suppression()
-        )
+        ctx = _dispose([raw_change], old, new, _needs_evidence_suppression())
         found = [c for c in ctx.kept if c.kind == ChangeKind.VAR_TYPE_CHANGED]
         assert len(found) == 1
         assert found[0].public_reachable is True
@@ -268,9 +269,7 @@ class TestMarkReachability:
             symbol=mangled,
             description="removed",
         )
-        ctx = DEFAULT_PIPELINE.run(
-            [raw_change], old, new, suppression=_needs_evidence_suppression()
-        )
+        ctx = _dispose([raw_change], old, new, _needs_evidence_suppression())
         found = [c for c in ctx.kept if c.kind == ChangeKind.FUNC_REMOVED]
         assert len(found) == 1
         assert found[0].public_reachable is True
@@ -302,9 +301,7 @@ class TestMarkReachability:
             symbol=mangled,
             description="removed",
         )
-        ctx = DEFAULT_PIPELINE.run(
-            [raw_change], old, new, suppression=_needs_evidence_suppression()
-        )
+        ctx = _dispose([raw_change], old, new, _needs_evidence_suppression())
         found = [c for c in ctx.kept if c.kind == ChangeKind.VAR_REMOVED]
         assert len(found) == 1
         assert found[0].public_reachable is True
@@ -350,9 +347,7 @@ class TestMarkReachability:
             symbol=mangled,
             description="type changed",
         )
-        ctx = DEFAULT_PIPELINE.run(
-            [raw_change], old, new, suppression=_needs_evidence_suppression()
-        )
+        ctx = _dispose([raw_change], old, new, _needs_evidence_suppression())
         found = [c for c in ctx.kept if c.kind == ChangeKind.VAR_TYPE_CHANGED]
         assert len(found) == 1
         assert found[0].qualified_name == "ns::detail::var"
@@ -391,9 +386,7 @@ class TestMarkReachability:
             symbol=mangled,
             description="removed",
         )
-        ctx = DEFAULT_PIPELINE.run(
-            [raw_change], old, new, suppression=_needs_evidence_suppression()
-        )
+        ctx = _dispose([raw_change], old, new, _needs_evidence_suppression())
         found = [c for c in ctx.kept if c.kind == ChangeKind.VAR_REMOVED]
         assert len(found) == 1
         assert found[0].qualified_name == "ns::detail::var"
@@ -426,9 +419,7 @@ class TestMarkReachability:
             symbol=mangled,
             description="removed",
         )
-        ctx = DEFAULT_PIPELINE.run(
-            [raw_change], old, new, suppression=_needs_evidence_suppression()
-        )
+        ctx = _dispose([raw_change], old, new, _needs_evidence_suppression())
         found = [c for c in ctx.kept if c.kind == ChangeKind.FUNC_REMOVED]
         assert len(found) == 1
         assert found[0].qualified_name == "ns::detail::api"
@@ -464,9 +455,7 @@ class TestMarkReachability:
             symbol="lib::Color::RED",
             description="member removed",
         )
-        ctx = DEFAULT_PIPELINE.run(
-            [raw_change], old, new, suppression=_needs_evidence_suppression()
-        )
+        ctx = _dispose([raw_change], old, new, _needs_evidence_suppression())
         found = [c for c in ctx.kept if c.kind == ChangeKind.ENUM_MEMBER_REMOVED]
         assert len(found) == 1
         assert found[0].public_reachable is True
@@ -483,9 +472,7 @@ class TestMarkReachability:
             symbol="lib::Widget",
             description="size changed",
         )
-        ctx = DEFAULT_PIPELINE.run(
-            [raw_change], old, new, suppression=_needs_evidence_suppression()
-        )
+        ctx = _dispose([raw_change], old, new, _needs_evidence_suppression())
         found = [c for c in ctx.kept if c.kind == ChangeKind.TYPE_SIZE_CHANGED]
         assert len(found) == 1
         assert found[0].public_reachable is False
@@ -501,7 +488,8 @@ class TestMarkReachability:
         test_policy_internal_namespaces_reaches_mark_reachability below for
         the ADR-044 P1 item 5 end-to-end PolicyFile.internal_namespaces path
         that now also reaches this step via ctx.internal_namespaces."""
-        from abicheck.post_processing import MarkReachability, PipelineContext
+        from abicheck.policy.finding_disposition import PipelineContext
+        from abicheck.post_processing_reachability import MarkReachability
 
         old = _snap(
             functions=[_public_fn("make", "ns::Widget*")],
@@ -541,7 +529,7 @@ class TestMarkReachability:
         assert raw_change2.public_reachable is True
 
     def test_pipeline_internal_namespaces_reaches_mark_reachability(self) -> None:
-        """ADR-044 P1 item 5: DEFAULT_PIPELINE.run(internal_namespaces=...) —
+        """ADR-044 P1 item 5: DispositionRules(internal_namespaces=...) —
         the value PolicyFile.internal_namespaces feeds via checker.py's
         _run_post_processing — must reach MarkReachability's walk through
         PipelineContext.internal_namespaces, without requiring a bespoke
@@ -566,9 +554,7 @@ class TestMarkReachability:
             description="size changed",
         )
         # Without internal_namespaces, "priv" is not recognized as internal.
-        DEFAULT_PIPELINE.run(
-            [raw_change], old, new, suppression=_needs_evidence_suppression()
-        )
+        _dispose([raw_change], old, new, _needs_evidence_suppression())
         assert raw_change.public_reachable is False
 
         raw_change2 = Change(
@@ -576,12 +562,13 @@ class TestMarkReachability:
             symbol="ns::priv::Base",
             description="size changed",
         )
-        ctx2 = DEFAULT_PIPELINE.run(
+        ctx2 = dispose_findings(
             [raw_change2],
             old,
             new,
-            suppression=_needs_evidence_suppression(),
-            internal_namespaces=("priv",),
+            DispositionRules(
+                suppression=_needs_evidence_suppression(), internal_namespaces=("priv",)
+            ),
         )
         found = [c for c in ctx2.kept if c.kind == ChangeKind.TYPE_SIZE_CHANGED]
         assert len(found) == 1
@@ -611,7 +598,7 @@ class TestMarkReachability:
         # Without internal_namespaces: "priv" isn't recognized as internal at
         # all, so DemoteUnreachableInternalChurn never considers it for
         # demotion — the raw churn stays in ctx.kept.
-        ctx = DEFAULT_PIPELINE.run([raw_change], old, new)
+        ctx = dispose_findings([raw_change], old, new)
         assert raw_change in ctx.kept
 
         raw_change2 = Change(
@@ -621,8 +608,8 @@ class TestMarkReachability:
         )
         # With internal_namespaces=("priv",): recognized as internal,
         # unreachable from the public surface -> demoted out of ctx.kept.
-        ctx2 = DEFAULT_PIPELINE.run(
-            [raw_change2], old, new, internal_namespaces=("priv",)
+        ctx2 = dispose_findings(
+            [raw_change2], old, new, DispositionRules(internal_namespaces=("priv",))
         )
         assert raw_change2 not in ctx2.kept
         assert raw_change2 in ctx2.out_of_surface
@@ -643,14 +630,16 @@ class TestMarkReachability:
 
         # Without internal_namespaces: "priv" is not in
         # _INTERNAL_TEMPLATE_NAMESPACES, so no finding.
-        ctx = DEFAULT_PIPELINE.run([], old, new)
+        ctx = dispose_findings([], old, new)
         assert not any(
             c.kind == ChangeKind.INTERNAL_TEMPLATE_LEAKS_VIA_PUBLIC_API
             for c in ctx.kept
         )
 
         # With internal_namespaces=("priv",): recognized, finding fires.
-        ctx2 = DEFAULT_PIPELINE.run([], old, new, internal_namespaces=("priv",))
+        ctx2 = dispose_findings(
+            [], old, new, DispositionRules(internal_namespaces=("priv",))
+        )
         found = [
             c
             for c in ctx2.kept
@@ -659,11 +648,11 @@ class TestMarkReachability:
         assert len(found) == 1
 
     def test_policy_file_internal_namespaces_reaches_checker_pipeline(self) -> None:
-        """ADR-044 P1 item 5, full glue: checker._run_post_processing must
-        read PolicyFile.internal_namespaces and thread it into
-        DEFAULT_PIPELINE.run — this is the one hop not exercised by the
-        DEFAULT_PIPELINE.run(internal_namespaces=...)-level tests above."""
-        from abicheck.checker import _run_post_processing
+        """ADR-044 P1 item 5, full glue: the rules ``compare()`` builds
+        (``DispositionRules.from_policy_file``) must read
+        PolicyFile.internal_namespaces and thread it into the pipeline — the
+        one hop not exercised by the ``DispositionRules(internal_namespaces=...)``
+        tests above."""
         from abicheck.policy_file import PolicyFile
 
         old = _snap(
@@ -686,16 +675,14 @@ class TestMarkReachability:
             description="size changed",
         )
         policy_file = PolicyFile(internal_namespaces=["priv"])
-        kept, *_rest = _run_post_processing(
+        kept = dispose_findings(
             [raw_change],
             old,
             new,
-            suppression=_needs_evidence_suppression(),
-            policy_file=policy_file,
-            scope_to_public_surface=False,
-            force_public_symbols=None,
-            collapse_versioned_symbols=False,
-        )
+            DispositionRules.from_policy_file(
+                policy_file, suppression=_needs_evidence_suppression()
+            ),
+        ).kept
         found = [c for c in kept if c.kind == ChangeKind.TYPE_SIZE_CHANGED]
         assert len(found) == 1
         assert found[0].public_reachable is True
@@ -704,9 +691,7 @@ class TestMarkReachability:
         old, new, raw_change = _unreachable_scenario()
         # DemoteUnreachableInternalChurn removes truly-unreachable internal
         # churn from ctx.kept — check the tag directly on the object instead.
-        DEFAULT_PIPELINE.run(
-            [raw_change], old, new, suppression=_needs_evidence_suppression()
-        )
+        _dispose([raw_change], old, new, _needs_evidence_suppression())
         assert raw_change.public_reachable is False
         assert raw_change.reachability_kind is None
 
@@ -731,7 +716,7 @@ class TestMarkReachability:
             ]
         )
         assert suppression.needs_reachability_evidence() is False
-        DEFAULT_PIPELINE.run([raw_change], old, new, suppression=suppression)
+        _dispose([raw_change], old, new, suppression)
         assert raw_change.public_reachable is False
         assert raw_change.reachability_kind is None
 
@@ -746,7 +731,7 @@ class TestMarkReachability:
             ]
         )
         assert suppression.needs_reachability_evidence() is True
-        ctx = DEFAULT_PIPELINE.run([raw_change], old, new, suppression=suppression)
+        ctx = _dispose([raw_change], old, new, suppression)
         found = [c for c in ctx.kept if c.kind == ChangeKind.TYPE_SIZE_CHANGED]
         assert len(found) == 1
         assert found[0].public_reachable is True
@@ -763,7 +748,7 @@ class TestMarkReachability:
             ]
         )
         assert suppression.needs_reachability_evidence() is True
-        ctx = DEFAULT_PIPELINE.run([raw_change], old, new, suppression=suppression)
+        ctx = _dispose([raw_change], old, new, suppression)
         found = [c for c in ctx.kept if c.kind == ChangeKind.TYPE_SIZE_CHANGED]
         assert len(found) == 1
         assert found[0].public_reachable is True
@@ -779,7 +764,7 @@ class TestMarkReachability:
         DetectInternalLeaks already pays (caught by CI's baseline-regression
         gate)."""
         old, new, raw_change = _reachable_scenario()
-        DEFAULT_PIPELINE.run([raw_change], old, new)  # no suppression passed
+        dispose_findings([raw_change], old, new)  # no suppression passed
         assert raw_change.public_reachable is False
         assert raw_change.reachability_kind is None
 
@@ -846,7 +831,7 @@ class TestMarkReachability:
         suppression = SuppressionList(
             [Suppression(namespace="oneapi::dal::**::detail::**", reason="private")]
         )
-        ctx = DEFAULT_PIPELINE.run([raw_change], old, new, suppression=suppression)
+        ctx = _dispose([raw_change], old, new, suppression)
         assert raw_change.public_reachable is False
         assert raw_change in ctx.suppressed
         assert ChangeKind.SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK not in [
@@ -887,7 +872,7 @@ class TestMarkReachability:
         suppression = SuppressionList(
             [Suppression(source_location="*/internal/*", reason="internal headers")]
         )
-        ctx = DEFAULT_PIPELINE.run([raw_change], old, new, suppression=suppression)
+        ctx = _dispose([raw_change], old, new, suppression)
         assert raw_change.public_reachable is False
         assert raw_change in ctx.suppressed
 
@@ -945,9 +930,7 @@ class TestCallGraphReachability:
             symbol="ns::detail::train_ops_dispatcher",
             description="removed",
         )
-        ctx = DEFAULT_PIPELINE.run(
-            [raw_change], old, new, suppression=_needs_evidence_suppression()
-        )
+        ctx = _dispose([raw_change], old, new, _needs_evidence_suppression())
         found = [c for c in ctx.kept if c.kind == ChangeKind.FUNC_REMOVED]
         assert len(found) == 1
         assert found[0].public_reachable is True
@@ -981,9 +964,7 @@ class TestCallGraphReachability:
             qualified_name="ns::detail::train_ops_dispatcher",
             description="removed",
         )
-        ctx = DEFAULT_PIPELINE.run(
-            [raw_change], old, new, suppression=_needs_evidence_suppression()
-        )
+        ctx = _dispose([raw_change], old, new, _needs_evidence_suppression())
         found = [c for c in ctx.kept if c.kind == ChangeKind.FUNC_REMOVED]
         assert len(found) == 1
         assert found[0].public_reachable is True
@@ -1008,9 +989,7 @@ class TestCallGraphReachability:
             symbol="ns::detail::train_ops_dispatcher",
             description="removed",
         )
-        ctx = DEFAULT_PIPELINE.run(
-            [raw_change], old, new, suppression=_needs_evidence_suppression()
-        )
+        ctx = _dispose([raw_change], old, new, _needs_evidence_suppression())
         overlay = [
             c
             for c in ctx.kept
@@ -1053,7 +1032,7 @@ class TestCallGraphReachability:
                 )
             ]
         )
-        ctx = DEFAULT_PIPELINE.run([raw_change], old, new, suppression=suppression)
+        ctx = _dispose([raw_change], old, new, suppression)
         found = [c for c in ctx.kept if c.kind == ChangeKind.FUNC_REMOVED]
         assert len(found) == 1
         assert found[0] not in ctx.suppressed
@@ -1068,7 +1047,7 @@ class TestCallGraphReachability:
         # — the raw FUNC_REMOVED (tagged reachable by MarkReachability's
         # call-graph fallback, withheld by ApplySuppression) and the
         # synthetic overlay finding DetectInternalLeaks builds afterwards
-        # (withheld via _merge_findings_respecting_suppression) — mirroring
+        # (withheld via merge_late_findings) — mirroring
         # the layout case's identical two-diagnostic shape above.
         diag = [
             c
@@ -1081,9 +1060,7 @@ class TestCallGraphReachability:
         """No --sources/--build-info/--header-graph evidence: behaves exactly
         as before this P1 slice — degrades cleanly, no crash."""
         old, new, raw_change = _unreachable_scenario()
-        DEFAULT_PIPELINE.run(
-            [raw_change], old, new, suppression=_needs_evidence_suppression()
-        )
+        _dispose([raw_change], old, new, _needs_evidence_suppression())
         assert raw_change.public_reachable is False
 
 
@@ -1126,7 +1103,7 @@ class TestLateSyntheticLeakFindingsNotSuppressible:
                 )
             ]
         )
-        ctx = DEFAULT_PIPELINE.run([], old, new, suppression=suppression)
+        ctx = _dispose([], old, new, suppression)
         kinds = [c.kind for c in ctx.kept]
         assert ChangeKind.INTERNAL_TEMPLATE_LEAKS_VIA_PUBLIC_API in kinds
         leak = next(
@@ -1151,7 +1128,7 @@ class TestSuppressionPipelineOrderFix:
                 )
             ]
         )
-        ctx = DEFAULT_PIPELINE.run([raw_change], old, new, suppression=suppression)
+        ctx = _dispose([raw_change], old, new, suppression)
 
         # The raw layout evidence must survive — this is the bug: it used to
         # be removed by ApplySuppression before DetectInternalLeaks ran.
@@ -1188,7 +1165,7 @@ class TestSuppressionPipelineOrderFix:
                 )
             ]
         )
-        ctx = DEFAULT_PIPELINE.run([raw_change], old, new, suppression=suppression)
+        ctx = _dispose([raw_change], old, new, suppression)
         diag = next(
             c
             for c in ctx.kept
@@ -1232,7 +1209,7 @@ class TestSuppressionPipelineOrderFix:
                 )
             ]
         )
-        ctx = DEFAULT_PIPELINE.run([raw_change], old, new, suppression=suppression)
+        ctx = _dispose([raw_change], old, new, suppression)
 
         found = [c for c in ctx.kept if c.kind == ChangeKind.VAR_REMOVED]
         assert len(found) == 1
@@ -1284,7 +1261,7 @@ class TestSuppressionPipelineOrderFix:
                 )
             ]
         )
-        ctx = DEFAULT_PIPELINE.run([raw_change], old, new, suppression=suppression)
+        ctx = _dispose([raw_change], old, new, suppression)
 
         found = [c for c in ctx.kept if c.kind == ChangeKind.VAR_TYPE_CHANGED]
         assert len(found) == 1
@@ -1305,7 +1282,7 @@ class TestSuppressionPipelineOrderFix:
                 )
             ]
         )
-        ctx = DEFAULT_PIPELINE.run([raw_change], old, new, suppression=suppression)
+        ctx = _dispose([raw_change], old, new, suppression)
         assert raw_change in ctx.suppressed
         assert ChangeKind.SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK not in [
             c.kind for c in ctx.kept
@@ -1322,7 +1299,7 @@ class TestSuppressionPipelineOrderFix:
                 )
             ]
         )
-        ctx = DEFAULT_PIPELINE.run([raw_change], old, new, suppression=suppression)
+        ctx = _dispose([raw_change], old, new, suppression)
         assert raw_change in ctx.suppressed
         assert ChangeKind.SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK not in [
             c.kind for c in ctx.kept
@@ -1347,7 +1324,7 @@ class TestSuppressionPipelineOrderFix:
                 )
             ]
         )
-        ctx = DEFAULT_PIPELINE.run([raw_change], old, new, suppression=suppression)
+        ctx = _dispose([raw_change], old, new, suppression)
         assert raw_change in ctx.suppressed
         assert ChangeKind.SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK not in [
             c.kind for c in ctx.kept
@@ -1372,7 +1349,7 @@ class TestSuppressionPipelineOrderFix:
                 )
             ]
         )
-        ctx = DEFAULT_PIPELINE.run([raw_change], old, new, suppression=suppression)
+        ctx = _dispose([raw_change], old, new, suppression)
         assert raw_change in ctx.suppressed
         assert ChangeKind.SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK not in [
             c.kind for c in ctx.kept
@@ -1396,7 +1373,7 @@ class TestSuppressionPipelineOrderFix:
                 )
             ]
         )
-        ctx = DEFAULT_PIPELINE.run([raw_change], old, new, suppression=suppression)
+        ctx = _dispose([raw_change], old, new, suppression)
         assert raw_change not in ctx.suppressed
         assert ChangeKind.SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK in [
             c.kind for c in ctx.kept
@@ -1424,7 +1401,7 @@ class TestSuppressionPipelineOrderFix:
                 )
             ]
         )
-        ctx = DEFAULT_PIPELINE.run([raw_change], old, new, suppression=suppression)
+        ctx = _dispose([raw_change], old, new, suppression)
         assert raw_change.public_reachable is True
         assert raw_change in ctx.suppressed
 
@@ -1446,9 +1423,7 @@ class TestSuppressionPipelineOrderFix:
                 )
             ]
         )
-        ctx = DEFAULT_PIPELINE.run(
-            [reachable_change, unreachable_change], old, new, suppression=suppression
-        )
+        ctx = _dispose([reachable_change, unreachable_change], old, new, suppression)
         assert reachable_change in ctx.suppressed
         assert unreachable_change not in ctx.suppressed
         # Codex review: a public-only rule correctly declining to match
@@ -1474,7 +1449,7 @@ class TestSuppressionPipelineOrderFix:
         suppression = SuppressionList(
             [Suppression(namespace="oneapi::dal::**::detail::**", reason="private")]
         )
-        ctx = DEFAULT_PIPELINE.run([raw_change], old, new, suppression=suppression)
+        ctx = _dispose([raw_change], old, new, suppression)
         assert raw_change.public_reachable is True
         assert raw_change not in ctx.suppressed
         assert raw_change in ctx.kept
@@ -1579,7 +1554,7 @@ class TestLateDetectorSyntheticFindings:
         suppression = SuppressionList(
             [Suppression(namespace="lib::experimental::*", reason="experimental churn")]
         )
-        ctx = DEFAULT_PIPELINE.run([], old, new, suppression=suppression)
+        ctx = _dispose([], old, new, suppression)
         found = [
             c
             for c in ctx.kept
@@ -1638,7 +1613,7 @@ class TestLateDetectorSyntheticFindings:
         suppression = SuppressionList(
             [Suppression(namespace="lib::detail::*", reason="detail namespace churn")]
         )
-        ctx = DEFAULT_PIPELINE.run([], old, new, suppression=suppression)
+        ctx = _dispose([], old, new, suppression)
         found = [c for c in ctx.kept if c.kind == ChangeKind.CPO_KIND_CHANGED]
         assert len(found) == 1
         assert found[0].public_reachable is True
@@ -1659,7 +1634,7 @@ class TestLateDetectorSuppressionDiagnostic:
     which silently drops the SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK diagnostic
     ApplySuppression itself would have produced for a broad rule that
     matched but was withheld by the reachability gate. All four now route
-    through the shared _merge_findings_respecting_suppression() helper
+    through the shared merge_late_findings() helper
     (post_processing.py), which uses evaluate() instead."""
 
     def test_internal_leak_finding_gets_withheld_diagnostic(self) -> None:
@@ -1676,7 +1651,7 @@ class TestLateDetectorSuppressionDiagnostic:
                 )
             ]
         )
-        ctx = DEFAULT_PIPELINE.run([raw_change], old, new, suppression=suppression)
+        ctx = _dispose([raw_change], old, new, suppression)
         found = [
             c
             for c in ctx.kept
@@ -1703,13 +1678,11 @@ class TestLateDetectorSuppressionDiagnostic:
         DetectNamespacePatterns) that a rule actually suppresses -- not just
         withholds -- must also get Change.suppression_rule stamped, the
         same as ApplySuppression's own direct suppressions. This exercises
-        _merge_findings_respecting_suppression (the shared helper all three
+        merge_late_findings (the shared helper all three
         late detectors route through) directly with a narrow, non-broad
         rule that suppresses outright rather than being gated."""
-        from abicheck.post_processing import (
-            PipelineContext,
-            _merge_findings_respecting_suppression,
-        )
+        from abicheck.policy.finding_disposition import PipelineContext
+        from abicheck.policy.finding_disposition.pipeline import merge_late_findings
 
         old, new = _snap(), _snap()
         suppression = SuppressionList(
@@ -1722,7 +1695,7 @@ class TestLateDetectorSuppressionDiagnostic:
             symbol="late::finding",
             description="late synthetic finding",
         )
-        _merge_findings_respecting_suppression(changes, [new_finding], ctx)
+        merge_late_findings(changes, [new_finding], ctx)
 
         assert changes == []
         assert ctx.suppressed == [new_finding]
@@ -1735,58 +1708,11 @@ class TestCheckerLevelSuppressionDiagnostic:
     surface roll-ups) build/receive Change objects directly — outside
     DEFAULT_PIPELINE entirely — so they had the same is_suppressed()-only gap
     the post_processing.py late-detector fixes (TestLateDetectorSyntheticFindings
-    above) already closed for findings built inside the pipeline. Both now
-    route through SuppressionList.evaluate() too."""
-
-    def test_filter_suppressed_changes_emits_withheld_diagnostic(self) -> None:
-        from abicheck.checker import _filter_suppressed_changes
-
-        c = Change(
-            kind=ChangeKind.FUNC_REMOVED,
-            symbol="oneapi::dal::kmeans::detail::train_ops_dispatcher",
-            description="removed",
-            public_reachable=True,
-        )
-        suppression = SuppressionList(
-            [Suppression(namespace="oneapi::dal::**::detail::**", reason="broad rule")]
-        )
-        suppressed: list[Change] = []
-        visible = _filter_suppressed_changes([c], suppression, suppressed)
-        assert c in visible
-        assert c not in suppressed
-        diag = [
-            v
-            for v in visible
-            if v.kind == ChangeKind.SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK
-        ]
-        assert len(diag) == 1
-        assert "train_ops_dispatcher" in diag[0].symbol
-
-    def test_filter_suppressed_changes_still_suppresses_narrow_rule(self) -> None:
-        """Unchanged behavior for the common case: a narrow symbol: waiver
-        still suppresses outright, with no diagnostic."""
-        from abicheck.checker import _filter_suppressed_changes
-
-        c = Change(
-            kind=ChangeKind.FUNC_REMOVED,
-            symbol="lib::internal_helper",
-            description="removed",
-        )
-        suppression = SuppressionList(
-            [Suppression(symbol="lib::internal_helper", reason="exact waiver")]
-        )
-        suppressed: list[Change] = []
-        visible = _filter_suppressed_changes([c], suppression, suppressed)
-        assert visible == []
-        assert suppressed == [c]
-
-    def test_filter_suppressed_changes_noop_without_suppression(self) -> None:
-        from abicheck.checker import _filter_suppressed_changes
-
-        c = Change(kind=ChangeKind.FUNC_REMOVED, symbol="foo", description="removed")
-        suppressed: list[Change] = []
-        assert _filter_suppressed_changes([c], None, suppressed) == [c]
-        assert suppressed == []
+    above) already closed for findings built inside the pipeline. Every site
+    now routes through `policy.finding_disposition.dispose_by_suppression`,
+    whose partition/diagnostic contract is pinned in
+    `test_finding_disposition_suppression.py`; this class keeps the wiring
+    test for the surface-metrics site."""
 
     def test_apply_surface_metrics_emits_withheld_diagnostic(self, monkeypatch) -> None:
         """Wiring test: _apply_surface_metrics now filters

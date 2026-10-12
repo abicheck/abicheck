@@ -27,7 +27,7 @@ than by any test, which is what makes this a class rather than two slips:
   moved ``source_only_findings`` from positional index 7 to 9, so an existing
   8th positional argument bound to ``experimental_namespaces``: the namespace
   findings changed *and* the intended evidence policy was silently dropped.
-* ``PostProcessingPipeline.run`` -- a parameter slotted next to
+* ``DispositionPipeline.run`` -- a parameter slotted next to
   ``internal_namespaces`` (where it reads better) displaced
   ``disposition_ledger``, so a positional caller's ledger became the
   namespace collection: auditing off, and a non-iterable ``DispositionLedger``
@@ -50,26 +50,20 @@ import inspect
 
 import pytest
 
+from abicheck.policy.finding_disposition.pipeline import DispositionPipeline
 from abicheck.policy_file import PolicyFile
-from abicheck.post_processing import PostProcessingPipeline
 
-#: Positional parameters of ``PostProcessingPipeline.run``, in order.
-#: Append here when a parameter is added at the END; never reorder or insert.
+#: Positional parameters of ``DispositionPipeline.run``, in order. The
+#: rules it once took as eleven trailing positionals are one
+#: ``DispositionRules`` value now and the ledger is keyword-only, which
+#: retires the rebinding this file was written for; the pin stays so a new
+#: positional parameter is a deliberate choice.
 EXPECTED_PIPELINE_RUN_POSITIONAL = (
     "self",
     "changes",
     "old",
     "new",
-    "suppression",
-    "frozen_namespaces",
-    "scope_to_public_surface",
-    "force_public_symbols",
-    "collapse_versioned_symbols",
-    "public_surface_allowlist",
-    "internal_namespaces",
-    "disposition_ledger",
-    "experimental_namespaces",
-    "absent_baseline",
+    "rules",
 )
 
 #: Positional fields of ``PolicyFile``, in order. Same rule; a new field
@@ -125,7 +119,7 @@ def _positional_fields(cls: type) -> tuple[str, ...]:
 class TestPositionalOrderIsAppendOnly:
     def test_pipeline_run_signature(self) -> None:
         assert (
-            _positional_parameters(PostProcessingPipeline.run)
+            _positional_parameters(DispositionPipeline.run)
             == EXPECTED_PIPELINE_RUN_POSITIONAL
         )
 
@@ -163,14 +157,17 @@ class TestTheTwoConcreteRebindings:
         assert pf.source_only_findings == "error"
         assert pf.experimental_namespaces == []
 
-    def test_twelfth_pipeline_positional_is_the_ledger(self) -> None:
+    def test_pipeline_ledger_cannot_be_passed_positionally(self) -> None:
         from abicheck.model import AbiSnapshot
         from abicheck.policy.disposition_ledger import DispositionLedger
+        from abicheck.policy.finding_disposition import DispositionRules
 
         snap = AbiSnapshot(library="libtest.so.1", version="1.0")
         ledger = DispositionLedger()
-        ctx = PostProcessingPipeline([]).run(
-            [], snap, snap, None, None, False, None, False, None, None, ledger
-        )
+        with pytest.raises(TypeError):
+            DispositionPipeline([]).run(  # type: ignore[misc]
+                [], snap, snap, DispositionRules(), ledger
+            )
+        ctx = DispositionPipeline([]).run([], snap, snap, ledger=ledger)
         assert ctx.disposition_ledger is ledger
         assert ctx.experimental_namespaces is None

@@ -55,6 +55,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from .compare.finding_identity import IDENTITY_TIER_REDUCED, resolve_change_identity
 from .contract_relevance_types import (
     CONTRACT_REASON_CODES,
     NON_ENTITY_RELEVANCE,
@@ -64,7 +65,6 @@ from .contract_relevance_types import (
     coerce_contract_mode,
 )
 from .export_surface import ExportSurface
-from .finding_identity import IDENTITY_TIER_REDUCED, resolve_change_identity
 from .model import ScopeOrigin
 from .model.change import Change
 from .model.change_catalog.kinds import ChangeKind
@@ -77,7 +77,8 @@ from .policy.finding_type_candidates import (
     qualified_type_candidates as _qualified_type_candidates,
     type_candidates as _type_candidates,
 )
-from .post_processing import _PUBLIC_SOURCE_ABI_KINDS, _change_matches_symbols
+from .post_processing import _change_matches_symbols
+from .post_processing_reachability import _PUBLIC_SOURCE_ABI_KINDS
 from .surface import (
     _HIDDEN_FRIEND_KIND_NAMES,
     _MEMBER_LEVEL_TYPE_KIND_NAMES,

@@ -29,6 +29,13 @@ from .compare.elf_only_demangle import (
     elf_only_demangled_name,
     prewarm_elf_only_demangling,
 )
+from .compare.finding_identity import SymbolIdentityIndex
+from .compare.finding_identity.ctor_dtor import (
+    ctor_dtor_drift_old_by_new_key,
+    iter_matched_function_pairs,
+    reconcile_ctor_dtor_key_drift,
+    synthetic_ctor_scope as _synthetic_ctor_scope,
+)
 from .compare.function_lifecycle import (
     converting_ctor_signature,
     deletion_kind,
@@ -132,13 +139,6 @@ from .fact_provenance import (
     both_known_backed_fact,
     fact_producer,
     func_fact_key,
-)
-from .finding_identity import SymbolIdentityIndex
-from .finding_identity_ctor_dtor import (
-    ctor_dtor_drift_old_by_new_key,
-    iter_matched_function_pairs,
-    reconcile_ctor_dtor_key_drift,
-    synthetic_ctor_scope as _synthetic_ctor_scope,
 )
 from .model import (
     AbiSnapshot,

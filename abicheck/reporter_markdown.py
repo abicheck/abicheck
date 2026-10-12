@@ -51,7 +51,7 @@ from .checker import (
     LibraryMetadata,
     Verdict,
 )
-from .finding_identity import missing_contract_kind, report_finding_id
+from .compare.finding_identity import missing_contract_kind, report_finding_id
 from .impact.use_case_impact import use_cases_by_finding_for as use_cases_by_finding_for
 from .model.change_catalog.kinds import HasKind
 from .model.contract_finding_relevance import is_evaluated

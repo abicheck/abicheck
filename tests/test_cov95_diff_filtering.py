@@ -17,11 +17,11 @@
 from __future__ import annotations
 
 from abicheck.checker_policy import ChangeKind, Confidence, EvidenceTier
+from abicheck.compare.finding_dedup import _dedup_enum_same_kind
 from abicheck.confidence import _compute_confidence, _determine_confidence_level
 from abicheck.detectors import DetectorResult
 from abicheck.diff_filtering import (
     _build_location_index,
-    _dedup_enum_same_kind,
     _downgrade_opaque_struct_changes,
     _downgrade_opaque_type_changes,
     _enrich_affected_symbols,

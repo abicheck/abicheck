@@ -136,7 +136,8 @@ def test_manifest_allowlist_matches_exactly_not_by_suffix() -> None:
     # uncommitted namespaced helper that merely shares the leaf name
     # (`internal::pp_foo` vs committed `pp_foo`) must be demoted, not kept —
     # suffix tolerance belongs only to the user force_public overlay.
-    from abicheck.post_processing import FilterNonPublicSurface, PipelineContext
+    from abicheck.policy.finding_disposition import PipelineContext
+    from abicheck.post_processing import FilterNonPublicSurface
 
     # Both symbols must be *real exports* in the snapshot to be subject to the
     # committed-surface filter at all.
@@ -157,7 +158,8 @@ def test_force_public_ignored_in_manifest_scope_without_header_scoping() -> None
     # --no-scope-public-headers. The allowlist branch must honor that — a
     # force_public private symbol is NOT re-added when header scoping is off, but
     # IS when it is on.
-    from abicheck.post_processing import FilterNonPublicSurface, PipelineContext
+    from abicheck.policy.finding_disposition import PipelineContext
+    from abicheck.post_processing import FilterNonPublicSurface
 
     snap = _snap([_cfn("pp_foo"), _cfn("__pp_impl")])
     finding = Change(kind=ChangeKind.FUNC_REMOVED, symbol="__pp_impl", description="")
@@ -256,7 +258,8 @@ def test_loader_level_finding_survives_manifest_scope() -> None:
     # Codex: a SONAME/NEEDED change (symbol is a pseudo-name like DT_SONAME, not
     # a real export) breaks linked clients regardless of the POST export set, so
     # the exact-export-name filter must never demote it.
-    from abicheck.post_processing import FilterNonPublicSurface, PipelineContext
+    from abicheck.policy.finding_disposition import PipelineContext
+    from abicheck.post_processing import FilterNonPublicSurface
 
     snap = _snap([_cfn("pp_foo")])
     ctx = PipelineContext(old=snap, new=snap, public_surface_allowlist={"pp_foo"})
@@ -277,7 +280,8 @@ def test_hidden_friend_removal_survives_manifest_scope() -> None:
     # export_ids" both come back True, so the removal reads as "a real
     # export missing from the committed manifest" and gets silently
     # demoted -- hiding a genuine public ADL break.
-    from abicheck.post_processing import FilterNonPublicSurface, PipelineContext
+    from abicheck.policy.finding_disposition import PipelineContext
+    from abicheck.post_processing import FilterNonPublicSurface
 
     snap_old = _snap([_cfn("pp_foo")])
     hidden_friend = Function(
@@ -310,7 +314,8 @@ def test_metadata_only_private_export_is_demoted() -> None:
     # (ELF .dynsym) — not in DWARF functions/variables — must still be
     # recognized as a concrete export and demoted, not kept.
     from abicheck.elf_metadata import ElfMetadata, ElfSymbol, SymbolType
-    from abicheck.post_processing import FilterNonPublicSurface, PipelineContext
+    from abicheck.policy.finding_disposition import PipelineContext
+    from abicheck.post_processing import FilterNonPublicSurface
 
     elf = ElfMetadata(
         soname="libpost.so",

@@ -328,7 +328,7 @@ def _diff_types(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         # use internally. Keeping emitted symbols bare preserves the identity
         # every other consumer already keys on: dumper_hybrid's per-fact
         # provenance dict (type_fact_key/field_fact_key, Codex review PR #608)
-        # and diff_filtering._dedup_cross_kind's DWARF<->AST redundancy
+        # and finding_dedup._dedup_cross_kind's DWARF<->AST redundancy
         # correlation (FIX-F), which bridges a namespaced type's bare-vs-
         # qualified spelling via the separate ``qualified_name`` field rather
         # than requiring ``symbol`` itself to be qualified.

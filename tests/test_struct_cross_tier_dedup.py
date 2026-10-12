@@ -24,7 +24,7 @@ Item 5 of the abicheck code-review report ("Bare-vs-qualified duplicate
 keys survive outside enum kinds") -- this is exactly the enum bridge
 (``tests/test_enum_cross_tier_dedup.py``) generalized to struct/type
 kinds, which had no equivalent bridge at all before this fix: neither
-``diff_filtering._dedup_cross_kind``'s exact ``(kind, symbol)`` match nor
+``finding_dedup._dedup_cross_kind``'s exact ``(kind, symbol)`` match nor
 ``_deduplicate_cross_detector``'s identity-keyed dedup (which never even
 included these kinds in ``_DEDUP_CATEGORIES``) could recognize a
 namespaced struct's two differently-qualified spellings as the same
@@ -37,7 +37,7 @@ from hypothesis import given, strategies as st
 
 from abicheck.checker import compare
 from abicheck.checker_policy import ChangeKind
-from abicheck.diff_filtering import _dedup_cross_kind, _deduplicate_ast_dwarf
+from abicheck.compare.finding_dedup import _dedup_cross_kind, deduplicate_ast_dwarf
 from abicheck.diff_helpers import canonicalize_record_symbol, record_canonical_names
 from abicheck.dwarf_metadata import DwarfMetadata, FieldInfo, StructLayout
 from abicheck.model import AbiSnapshot, RecordType, TypeField
@@ -226,7 +226,7 @@ class TestCanonicalizeRecordSymbol:
         assert canonicalize_record_symbol("Widget", names, None) == "ns::Widget"
 
 
-# ── _dedup_cross_kind / _deduplicate_ast_dwarf must actually bridge it ────
+# ── _dedup_cross_kind / deduplicate_ast_dwarf must actually bridge it ────
 
 
 class TestDedupCrossKindBridgesBareAndQualified:
@@ -264,7 +264,7 @@ class TestDedupCrossKindBridgesBareAndQualified:
         dwarf_tier = Change(
             kind=ChangeKind.STRUCT_SIZE_CHANGED, symbol="ns::Widget", description="d"
         )
-        result = _deduplicate_ast_dwarf([header_tier, dwarf_tier], old, new)
+        result = deduplicate_ast_dwarf([header_tier, dwarf_tier], old, new)
         assert len(result) == 1
 
     def test_deduplicate_ast_dwarf_without_snapshots_degrades_to_no_dedup(self) -> None:
@@ -276,7 +276,7 @@ class TestDedupCrossKindBridgesBareAndQualified:
         dwarf_tier = Change(
             kind=ChangeKind.STRUCT_SIZE_CHANGED, symbol="ns::Widget", description="d"
         )
-        assert len(_deduplicate_ast_dwarf([header_tier, dwarf_tier])) == 2
+        assert len(deduplicate_ast_dwarf([header_tier, dwarf_tier])) == 2
 
     def test_field_level_parent_match_bridges_too(self) -> None:
         """FIX-F parent-type matching (STRUCT_FIELD_* naming a bare parent

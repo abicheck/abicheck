@@ -62,10 +62,66 @@ if TYPE_CHECKING:
     SupportFn = Callable[[AbiSnapshot, AbiSnapshot], tuple[bool, str | None]]
 
 
+#: Detector priority order, by owning module. Detectors run -- and are listed in
+#: every report -- module by module in this order, and within a module in the
+#: order they are declared. Cross-detector dedup keeps the first of two
+#: equivalent findings, so this order is part of the result, not presentation.
+#:
+#: It used to be *implied* by which module a process imported first
+#: (``checker.py``'s import block), so a process that imported, say,
+#: ``diff_symbols`` before ``checker`` -- any test file, a script, a library
+#: consumer -- ran the detectors in a different order and rendered different
+#: reports (bug class ``imports.side_effect_import_reorders_registration``).
+#: Stated here instead, it holds whatever the import order.
+#: ``tests/test_detector_registration_order.py`` fails when a module hosting a
+#: detector is missing from this tuple; a module absent from it would rank
+#: after every listed one (by module name), which is never what a new
+#: detector's author means.
+DETECTOR_MODULE_ORDER: tuple[str, ...] = (
+    "abicheck.diff_abi_tags",
+    "abicheck.diff_atomic",
+    "abicheck.diff_bit_int",
+    "abicheck.diff_char8t",
+    "abicheck.diff_integer_model",
+    "abicheck.diff_elf_layout",
+    "abicheck.diff_symbols_renames",
+    "abicheck.diff_symbols",
+    "abicheck.diff_kabi",
+    "abicheck.diff_layout",
+    "abicheck.diff_layout_coherence",
+    "abicheck.diff_long_double",
+    "abicheck.diff_platform_templates",
+    "abicheck.diff_platform",
+    "abicheck.diff_python",
+    "abicheck.diff_python_api",
+    "abicheck.diff_stdlib_impl",
+    "abicheck.diff_sycl",
+    "abicheck.diff_time64",
+    "abicheck.diff_types_abicc_parity",
+    "abicheck.diff_types_field_facts",
+    "abicheck.diff_types",
+    "abicheck.diff_unnamed_types",
+    "abicheck.diff_vtable_layout",
+    "abicheck.checker",
+    "abicheck.compare.undeclared_exports",
+    "abicheck.compare.overload_ambiguity",
+)
+
+_MODULE_RANK = {name: rank for rank, name in enumerate(DETECTOR_MODULE_ORDER)}
+
+
 class _DetectorEntry:
     """Internal representation of a registered detector."""
 
-    __slots__ = ("name", "fn", "support_fn", "support_is_trigger", "order", "one_sided")
+    __slots__ = (
+        "name",
+        "fn",
+        "support_fn",
+        "support_is_trigger",
+        "order",
+        "one_sided",
+        "priority",
+    )
 
     def __init__(
         self,
@@ -111,13 +167,20 @@ class _DetectorEntry:
         #: fails when a detector that ignores ``new`` is not declared so.
         self.one_sided = one_sided
         self.order = order
+        #: Sort key: the owning module's place in :data:`DETECTOR_MODULE_ORDER`
+        #: (unlisted modules after every listed one, by name), then declaration
+        #: order. Never the bare registration counter, which reflects import
+        #: order across modules.
+        module = getattr(fn, "__module__", "") or ""
+        rank = _MODULE_RANK.get(module, len(DETECTOR_MODULE_ORDER))
+        self.priority = (rank, "" if module in _MODULE_RANK else module, order)
 
 
 class DetectorRegistry:
     """Registry for self-registering ABI change detectors.
 
-    Detectors are stored in registration order and executed sequentially
-    by ``run_all()``.
+    Detectors execute sequentially in :data:`DETECTOR_MODULE_ORDER` priority
+    (see :attr:`_DetectorEntry.priority`), independent of import order.
     """
 
     def __init__(self) -> None:
@@ -161,11 +224,11 @@ class DetectorRegistry:
         never imported ``checker`` first.
 
         When called from inside ``compare()`` the modules are already in
-        ``sys.modules`` (checker's explicit imports fixed the canonical
-        registration order), so it is a no-op there; re-import does not
-        re-register. A *new* ``diff_*`` module is discovered automatically,
-        appended after the existing detectors in deterministic (sorted-by-name)
-        order — no ``checker`` edit required. Idempotent and cheap after the
+        ``sys.modules``, so it is a no-op there; re-import does not
+        re-register. Execution order never depends on import order (see
+        :data:`DETECTOR_MODULE_ORDER`); a *new* ``diff_*`` module is discovered
+        automatically and, until it is listed there, ranks after every listed
+        module in deterministic (sorted-by-name) order. Idempotent and cheap after the
         first call.
 
         Thread-safe: concurrent callers (e.g. the MCP server handling parallel
@@ -292,7 +355,7 @@ class DetectorRegistry:
         changes: list[Change] = []
         detector_results: list[DetectorResult] = []
 
-        for entry in sorted(self._detectors, key=lambda e: e.order):
+        for entry in sorted(self._detectors, key=lambda e: e.priority):
             if only is not None and not only(entry):
                 continue
             # Check support gate
@@ -347,8 +410,8 @@ class DetectorRegistry:
 
     @property
     def detector_names(self) -> list[str]:
-        """Registered detector names in registration order."""
-        return [e.name for e in sorted(self._detectors, key=lambda e: e.order)]
+        """Registered detector names in priority (execution) order."""
+        return [e.name for e in sorted(self._detectors, key=lambda e: e.priority)]
 
     def __len__(self) -> int:
         return len(self._detectors)
