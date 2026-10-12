@@ -11,7 +11,9 @@ generated: false
 
 Index: [Known gaps](../known-gaps.md)
 
-**Status (re-verified 2026-10-09 at `456989f`): PARTIAL.** compare/opaque_types.py:74-130 now uses OpaqueTypeIndex carrying stable EntityIds plus a bare-name 'local' tier. contains(strict=True) narrows the bare-name collision only when intersect() proves the pairing is complete, and otherwise falls back to the old bare RecordType.name matching. diff_filtering.py:854 _root_type_name now prefers Change.qualified_name.
+**Status (updated 2026-10-12): PARTIAL, narrowed.** Under an incomplete stable pairing, the spelling tier no longer matches a spelling that also names a visible (non-opaque) declaration (`OpaqueTypeIndex.shared_with_visible`, applied in `intersect()`); a finding about the visible type is kept. Still open: (1) a complete-pairing change with no `entity_id` still falls back to the bare spelling; (2) the struct sibling `compare/opaque_struct_types.py` (`find_opaque_struct_types`) still matches by bare name with `strict=False`; (3) two entries sharing one stable id on an opaque declaration still suppress a visible namesake via the stable tier.
+
+**Previous status (re-verified 2026-10-09 at `456989f`): PARTIAL.** compare/opaque_types.py:74-130 now uses OpaqueTypeIndex carrying stable EntityIds plus a bare-name 'local' tier. contains(strict=True) narrows the bare-name collision only when intersect() proves the pairing is complete, and otherwise falls back to the old bare RecordType.name matching. diff_filtering.py:854 _root_type_name now prefers Change.qualified_name.
 
 `diff_filtering._find_opaque_types()` (and its
 siblings `_find_by_value_types()`/`_downgrade_opaque_type_changes()`) index

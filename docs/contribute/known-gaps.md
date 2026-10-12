@@ -81,7 +81,7 @@ Each entry's status line says what is still open. A PARTIAL entry's write-up als
 
 #### Opaque-type suppression still falls back to bare RecordType.name when stable identities are incomplete
 
-**Status (re-verified 2026-10-09 at `456989f`): PARTIAL.** compare/opaque_types.py:74-130 now uses OpaqueTypeIndex carrying stable EntityIds plus a bare-name 'local' tier. contains(strict=True) narrows the bare-name collision only when intersect() proves the pairing is complete, and otherwise falls back to the old bare RecordType.name matching. diff_filtering.py:854 _root_type_name now prefers Change.qualified_name.  
+**Status (updated 2026-10-12): PARTIAL, narrowed.** Under an incomplete stable pairing the spelling tier no longer matches a spelling that also names a visible (non-opaque) declaration. Still open: complete-pairing no-identity bare-name matches, the struct sibling `opaque_struct_types.py`, and shared-stable-id namesakes. Earlier status (2026-10-09): compare/opaque_types.py:74-130 uses OpaqueTypeIndex carrying stable EntityIds plus a bare-name 'local' tier. contains(strict=True) narrows the bare-name collision only when intersect() proves the pairing is complete, and otherwise falls back to the old bare RecordType.name matching. diff_filtering.py:854 _root_type_name now prefers Change.qualified_name.  
 `false-clean` — Opaque-type suppression keys on stable `EntityId`s only when the pairing is proven complete; otherwise it falls back to bare `RecordType.name`, so same-named types in different scopes can suppress each other. [Full write-up](known-gaps/opaque-type-suppression-still-falls-back-to-bare-recordtypename.md)
 
 #### Type identity: typedef and tag names keyed by bare spelling
