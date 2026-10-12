@@ -876,7 +876,7 @@ class TestSuppressionReachabilityUnknownDiagnostic:
         the ambiguous bare "?" fallback (Codex review, PR #753 round 5 —
         mirrors the identical fix already made to cli_compare_fold.py's
         _suppression_rule_label)."""
-        from abicheck.finding_identity import report_canonical_finding_id
+        from abicheck.compare.finding_identity import report_canonical_finding_id
 
         old, new, raw_change = _degraded_call_graph_scenario()
         finding_id = report_canonical_finding_id(raw_change)

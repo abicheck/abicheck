@@ -199,7 +199,7 @@ def record_consumer_overlay(
     can tell the two apart the same way it already names every other
     suppression application point.
     """
-    from ..finding_identity import report_finding_id
+    from ..compare.finding_identity import report_finding_id
 
     key = report_finding_id(change)
     if rule is None and suppression is None:

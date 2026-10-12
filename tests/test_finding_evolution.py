@@ -34,7 +34,7 @@ from hypothesis import given, strategies as st
 from abicheck.checker import compare
 from abicheck.checker_policy import ChangeKind, FindingEvolution
 from abicheck.checker_types import DiffResult
-from abicheck.finding_identity import report_finding_id
+from abicheck.compare.finding_identity import report_finding_id
 from abicheck.model import AbiSnapshot, Function, Visibility
 from abicheck.model.change import Change
 from abicheck.policy.finding_evolution import (

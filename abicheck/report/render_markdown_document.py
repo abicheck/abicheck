@@ -234,7 +234,7 @@ def _change_row(
     every pre-existing caller -- which has no evidence_tiers to hand --
     byte-identical to before this parameter existed.
     """
-    from ..finding_identity import report_finding_id
+    from ..compare.finding_identity import report_finding_id
     from ..policy.classification import evidence_status_for_result, impact_for
 
     kind = getattr(c, "kind", None)

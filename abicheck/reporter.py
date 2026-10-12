@@ -1483,7 +1483,7 @@ def _change_to_dict(
         d["entity"] = entity_for_change(c, kind.value)
         d["finding_id"] = _finding_id(c)
         # Backend-independent sibling of finding_id (schema 2.36).
-        from .finding_identity import report_canonical_finding_id
+        from .compare.finding_identity import report_canonical_finding_id
 
         d["canonical_finding_id"] = report_canonical_finding_id(c)
         d["recommended_action"] = _recommended_action_for_change(

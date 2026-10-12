@@ -243,7 +243,7 @@ Follow the pointer whose trigger matches your task:
 4. Add a unit test.
 5. Classify the kind in `tests/canonical_identity_contract.py` — exactly one
    of `TYPE_BEARING` (also add it to
-   `finding_identity._TYPE_BEARING_DISCRIMINATOR_KINDS`), `VALUE_INSENSITIVE`,
+   `compare/finding_identity/change_kinds._TYPE_BEARING_DISCRIMINATOR_KINDS`), `VALUE_INSENSITIVE`,
    or `UNVERIFIED`. `tests/test_canonical_finding_id_completeness.py` fails
    until you do.
 

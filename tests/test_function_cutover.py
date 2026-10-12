@@ -36,8 +36,8 @@ infrastructure that did land: ``legacy_function_ir``.
 from __future__ import annotations
 
 from abicheck.checker import compare
+from abicheck.compare.finding_identity import SymbolIdentityIndex
 from abicheck.compare.functions import function_identity_index
-from abicheck.finding_identity import SymbolIdentityIndex
 from abicheck.model import AbiSnapshot, Function, Param, Visibility
 from abicheck.model.fact import Fact
 from abicheck.model.identity import EntityKind, Namespace, entity_id_for_function

@@ -57,7 +57,7 @@ from __future__ import annotations
 from dataclasses import replace
 
 from ..checker_types import DiffResult
-from ..finding_identity import report_finding_id
+from ..compare.finding_identity import report_finding_id
 from ..model.change import Change
 from ..model.evidence_status import FindingEvolution
 

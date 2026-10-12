@@ -91,17 +91,22 @@ UNCATEGORIZED_CEILING = 0
 #: surface.py and export_surface*.py: the 16 sites it found are all
 #: non-heuristic (ChangeKind-value prefixes, frozen-namespace user globs,
 #: mangling, C++ keywords, ``std::``).
+#: Raised again when identity moved from the unscanned flat
+#: ``finding_identity*.py`` into ``compare/finding_identity/``: twelve
+#: pre-existing sites entered the scan, none of them a naming heuristic
+#: (Itanium/MSVC mangling grammar, C cv/_Atomic spelling, ChangeKind-slug
+#: prefixes and abicheck's own synthetic-key format).
 EXEMPTION_CEILINGS: dict[str, int] = {
-    "spelling": 65,
+    "spelling": 68,
     # 44: the merge with main brought model/symbol_ownership.py into the scan
     # (main made it the vocabulary owner) and main's shared
     # match_frozen_namespace -- both one pre-existing `_Z` mangling check.
     # 41: minus three sites the Phase 3 decoration codecs deleted
     # (export_join._macho_shifted, the rename parser's ctor/dtor scan).
-    "grammar": 41,
+    "grammar": 46,
     # 43: minus outcome_release.unclassified_release_contribution_fields,
     # moved into its test (dead-code plan, Stage D).
-    "own_format": 43,
+    "own_format": 47,
     "platform": 21,
     # 9: main replaced the two fnmatch frozen-namespace matchers with one
     # policy.frozen_namespace helper.

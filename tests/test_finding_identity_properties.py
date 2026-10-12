@@ -50,7 +50,7 @@ import pytest
 from hypothesis import HealthCheck, assume, given, settings, strategies as st
 
 from abicheck.checker_policy import ChangeKind
-from abicheck.finding_identity import (
+from abicheck.compare.finding_identity import (
     resolve_change_identity,
     resolve_function_identity,
     resolve_variable_identity,

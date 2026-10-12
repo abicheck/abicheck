@@ -55,6 +55,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from .compare.finding_identity import IDENTITY_TIER_REDUCED, resolve_change_identity
 from .contract_relevance_types import (
     CONTRACT_REASON_CODES,
     NON_ENTITY_RELEVANCE,
@@ -64,7 +65,6 @@ from .contract_relevance_types import (
     coerce_contract_mode,
 )
 from .export_surface import ExportSurface
-from .finding_identity import IDENTITY_TIER_REDUCED, resolve_change_identity
 from .model import ScopeOrigin
 from .model.change import Change
 from .model.change_catalog.kinds import ChangeKind

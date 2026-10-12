@@ -43,9 +43,9 @@ from abicheck.compare.finding_dedup import (
     deduplicate_cross_detector,
     enum_canonical_names,
 )
+from abicheck.compare.finding_identity import resolve_change_identity
 from abicheck.diff_filtering import _enrich_source_locations
 from abicheck.dwarf_metadata import DwarfMetadata, EnumInfo
-from abicheck.finding_identity import resolve_change_identity
 from abicheck.model import AbiSnapshot, EnumMember, EnumType
 from abicheck.model.change import Change
 

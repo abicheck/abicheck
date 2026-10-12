@@ -53,8 +53,13 @@ import dataclasses
 import inspect
 from collections.abc import Iterator
 
-from abicheck import finding_identity
 from abicheck.checker_policy import ChangeKind
+from abicheck.compare.finding_identity import (
+    change as identity_change,
+    change_kinds,
+    mangled,
+    symbols,
+)
 from abicheck.model.change import Change
 from abicheck.model.identity import EntityId, EntityKind
 from abicheck.reporter import _change_to_dict
@@ -592,11 +597,16 @@ def test_report_change_view_covers_every_attribute_resolve_change_identity_reads
     None
 ):
     """Structural enforcement of this module's own stated bug class: parse
-    `finding_identity.py`'s real source (not a hand-copied attribute list
+    the `compare.finding_identity` package's real source (not a hand-copied attribute list
     that could itself go stale) and fail if `resolve_change_identity` --
     transitively, through its own same-module helpers -- reads any `Change`
     attribute `_ReportChangeView` does not declare."""
-    tree = ast.parse(inspect.getsource(finding_identity))
+    tree = ast.parse(
+        "\n".join(
+            inspect.getsource(m)
+            for m in (identity_change, change_kinds, mangled, symbols)
+        )
+    )
     funcs_by_name = _group_funcs_by_name(tree)
     attrs_read = _change_attrs_read(
         "resolve_change_identity", "change", funcs_by_name, set()

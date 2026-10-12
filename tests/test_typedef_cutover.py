@@ -30,12 +30,12 @@ from __future__ import annotations
 from hypothesis import given, settings, strategies as st
 
 from abicheck.checker_policy import ChangeKind
+from abicheck.compare.finding_identity import report_finding_id
 from abicheck.compare.typedefs import (
     diff_typedefs,
     is_version_stamped_typedef,
     typedef_index_pair,
 )
-from abicheck.finding_identity import report_finding_id
 from abicheck.model import AbiSnapshot
 from abicheck.model.fact import Fact
 from abicheck.model.identity import (

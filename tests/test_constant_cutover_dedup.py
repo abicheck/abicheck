@@ -26,7 +26,7 @@ from __future__ import annotations
 
 from abicheck.checker_policy import ChangeKind
 from abicheck.compare.constants import diff_constants
-from abicheck.finding_identity import report_finding_id
+from abicheck.compare.finding_identity import report_finding_id
 from abicheck.model.fact import Fact
 from abicheck.model.identity import Anonymous, Namespace, entity_id_for_constant
 from abicheck.model.occurrence import OccurrenceId

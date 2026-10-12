@@ -38,12 +38,12 @@ from ..diff_helpers import (
     depth_aware_bare_name,
     record_canonical_names,
 )
-from ..finding_identity import resolve_change_identity
 from ..model import AbiSnapshot
 from ..model.change import SYMBOL_VERSION_ALIAS_NOT_RETAINED_MARKER, Change
 from ..model.change_catalog.kinds import ChangeKind
 from ..model.identity import EntityId
 from .dedup_key import hashable_value
+from .finding_identity import resolve_change_identity
 
 # Mapping from DWARF change kinds to their AST equivalents for deduplication.
 _DWARF_TO_AST_EQUIV: dict[ChangeKind, set[ChangeKind]] = {

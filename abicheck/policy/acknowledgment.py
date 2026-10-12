@@ -239,7 +239,7 @@ class Acknowledgment:
         """
         canonical_finding_id: str | None = None
         if self.finding_id is not None:
-            from ..finding_identity import report_canonical_finding_id
+            from ..compare.finding_identity import report_canonical_finding_id
 
             canonical_finding_id = report_canonical_finding_id(change)
         if not self._selector.matches_selectors(

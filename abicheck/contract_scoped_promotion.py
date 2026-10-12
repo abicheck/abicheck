@@ -405,7 +405,10 @@ def _missing_contract_findings(result: Any) -> list[Any]:
     every report format's synthesized entry carries, so the receipt and the
     emitted findings key alike.
     """
-    from .finding_identity import missing_contract_finding, missing_contract_kind
+    from .compare.finding_identity import (
+        missing_contract_finding,
+        missing_contract_kind,
+    )
 
     kind = missing_contract_kind(getattr(result, "gate_scope", None))
     return [

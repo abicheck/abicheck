@@ -18,14 +18,11 @@
 from __future__ import annotations
 
 from abicheck.checker_policy import ChangeKind
-from abicheck.finding_identity import (
+from abicheck.compare.finding_identity import (
     IDENTITY_TIER_CANONICAL,
     IDENTITY_TIER_NORMALIZED,
     IDENTITY_TIER_REDUCED,
     FindingIdentity,
-    _looks_like_itanium_encoding,
-    _source_name_end,
-    _stringify_change_value,
     is_real_mangled_name,
     normalize_mangled_name,
     normalized_signature,
@@ -33,6 +30,11 @@ from abicheck.finding_identity import (
     resolve_function_identity,
     resolve_symbol_identity,
     resolve_variable_identity,
+)
+from abicheck.compare.finding_identity.change import _stringify_change_value
+from abicheck.compare.finding_identity.mangled import (
+    _looks_like_itanium_encoding,
+    _source_name_end,
 )
 from abicheck.model import Function, Param, Variable
 from abicheck.model.change import Change

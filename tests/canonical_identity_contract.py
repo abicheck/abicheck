@@ -73,7 +73,9 @@ not been observed:
 
 from __future__ import annotations
 
-from abicheck.finding_identity import _TYPE_BEARING_DISCRIMINATOR_KINDS
+from abicheck.compare.finding_identity.change_kinds import (
+    _TYPE_BEARING_DISCRIMINATOR_KINDS,
+)
 
 #: Values are type spellings and are canonicalized for identity.
 #: Single source of truth: the runtime set itself.

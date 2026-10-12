@@ -549,9 +549,9 @@ COVERAGE: dict[str, str] = {
     "abicheck.extract.headers.clang.context:strip_darwin_itanium_decoration": "Mach-O codec",
     "abicheck.extract.export_symbol_identity:msvc_export_function": "x86 PE codec",
     "abicheck.model.special_member_identity:special_member_variant_aliases": "ctor/dtor codec; mutant M6",
-    "abicheck.finding_identity:resolve_function_identity": "string probe + snapshot level",
-    "abicheck.finding_identity:resolve_variable_identity": "snapshot level identity keys",
-    "abicheck.finding_identity:resolve_change_identity": "snapshot level report finding ids (via report_canonical_finding_id); path probe",
+    "abicheck.compare.finding_identity.symbols:resolve_function_identity": "string probe + snapshot level",
+    "abicheck.compare.finding_identity.symbols:resolve_variable_identity": "snapshot level identity keys",
+    "abicheck.compare.finding_identity.change:resolve_change_identity": "snapshot level report finding ids (via report_canonical_finding_id); path probe",
     "abicheck.model.identity:entity_id_for_function": "negative control + castxml dumps; mutant M4",
     "abicheck.model.identity:entity_id_for_variable": "negative control",
     "abicheck.model.identity:entity_id_for_type": "negative control",
@@ -561,7 +561,7 @@ COVERAGE: dict[str, str] = {
     # -- path probes (Phase 3: identity takes a RootRelativePath) ---------
     "abicheck.model.entity_identity:source_relative_identity": "path probe x path transforms",
     "abicheck.model.entity_identity:resolve_canonical_identity": "path probe (graph def_file) x path transforms",
-    "abicheck.finding_identity:resolve_symbol_identity": "path probe x path transforms",
+    "abicheck.compare.finding_identity.symbols:resolve_symbol_identity": "path probe x path transforms",
     "abicheck.workflows.aggregate.reconcile:resolve_report_change_identity": "path probe (report entry) x path transforms",
     # -- environment cells (tests/test_family_f3_identity_cells.py) -------
     "abicheck.model.identity_tiers:snapshot_local_identity": "cell: decoded spelling joins",
@@ -619,8 +619,8 @@ def test_covered_rows_are_really_registered_in_the_catalogue() -> None:
         | set(cat.ENVIRONMENT_CELLS)
         | {
             "abicheck.model.special_member_identity:special_member_variant_aliases",
-            "abicheck.finding_identity:resolve_variable_identity",
-            "abicheck.finding_identity:resolve_change_identity",
+            "abicheck.compare.finding_identity.symbols:resolve_variable_identity",
+            "abicheck.compare.finding_identity.change:resolve_change_identity",
         }
         | {
             f"abicheck.model.identity:entity_id_for_{k}"

@@ -195,7 +195,9 @@ class TestIdentityAndDedupRegistration:
     """
 
     def test_it_shares_the_addition_dedup_category(self) -> None:
-        from abicheck.finding_identity import _EQUIVALENT_CHANGE_CATEGORIES
+        from abicheck.compare.finding_identity.change_kinds import (
+            _EQUIVALENT_CHANGE_CATEGORIES,
+        )
 
         assert (
             _EQUIVALENT_CHANGE_CATEGORIES["func_added_elf_only"]
@@ -211,7 +213,7 @@ class TestIdentityAndDedupRegistration:
         addition would satisfy the first claim completely. Two genuinely
         different added exports must resolve to different identities.
         """
-        from abicheck.finding_identity import resolve_change_identity
+        from abicheck.compare.finding_identity import resolve_change_identity
 
         a = Change(
             kind=ChangeKind.FUNC_ADDED_ELF_ONLY, symbol="added_a", description=""
@@ -225,7 +227,7 @@ class TestIdentityAndDedupRegistration:
         """And the must-merge half, stated on real identities rather than on
         the category table alone: the same symbol reported by the
         header-aware and export-only tiers is one addition, not two."""
-        from abicheck.finding_identity import resolve_change_identity
+        from abicheck.compare.finding_identity import resolve_change_identity
 
         header_tier = Change(
             kind=ChangeKind.FUNC_ADDED, symbol="gained", description=""

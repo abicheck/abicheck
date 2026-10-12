@@ -108,10 +108,10 @@ or a CLI flag directly is in the wrong layer.
   `binding`/`finding_id`/`expires`) instead of two independently-maintained
   copies. **Genuinely dependency-free leaves** — zero import of
   `checker_types.py`/`suppression.py`/`reclassify.py`/`policy_file.py`/
-  `finding_identity.py`, checked directly by
+  `compare/finding_identity/`, checked directly by
   `scripts/check_architecture.py` (narrower than the general
   `policy -> compare` layer edge, which would otherwise permit
-  `finding_identity.py`) — which is what lets `reclassify.py` import
+  `compare.finding_identity`) — which is what lets `reclassify.py` import
   `selectors.py` **statically**: before this phase it built a `Suppression`
   instance purely for its selector grammar, resolved via a runtime
   `importlib.import_module` call to dodge the cycle a static import would

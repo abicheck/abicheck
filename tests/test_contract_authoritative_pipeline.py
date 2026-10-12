@@ -1245,8 +1245,8 @@ class TestExplicitConsumerEvidencePromotesAFinding:
         return change
 
     def test_promotion_carries_status_and_decision(self) -> None:
+        from abicheck.compare.finding_identity import report_finding_id
         from abicheck.contract_scoped_promotion import stamp_scoped_result_findings
-        from abicheck.finding_identity import report_finding_id
         from abicheck.model.contract_finding_relevance import is_evaluated
 
         change = self._unresolved_removal()
