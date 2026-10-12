@@ -70,6 +70,8 @@ from .workflows.artifact.compile_context_gate import (
     SideCompileInput,
     resolved_pair_compile_contexts,
 )
+from .workflows.artifact.compile_db_match import match_side_compile_db
+from .workflows.artifact.dump_execution_options import DumpExecutionOptions
 from .workflows.artifact.execute import _resolve_side_snapshot_impl
 from .workflows.compare_classify import ResolvedComparePair
 from .workflows.contracts import CompareRequest, CompareResult
@@ -243,6 +245,27 @@ def _reject_unsupported_frontends(
     )
 
 
+def _side_execution(request: CompareRequest, side: InputSpec) -> DumpExecutionOptions:
+    """*side*'s execution plan: its own ``InputSpec.execution``, else the
+    request-level defaults.
+
+    The defaults are ADR-068 Phase 4's absorption of
+    ``ScanRequest.allow_build_query``: ``None`` (not ``False``) when unset, so
+    the primitive keeps its own documented default -- under which
+    ``_gated_build_query_inputs`` nulls ``build_config`` outright, passive
+    keys included, so a request that states no consent resolves as if it
+    passed no ``build_config`` at all (see
+    ``CompareRequest.allow_build_query``'s own docstring).
+    """
+    if side.execution is not None:
+        return side.execution
+    return DumpExecutionOptions(
+        build_config=side.build_config,
+        changed_paths=request.changed_paths,
+        allow_build_query=request.allow_build_query or None,
+    )
+
+
 def resolve_compare_request(
     request: CompareRequest,
     *,
@@ -286,6 +309,10 @@ def resolve_compare_request(
     from .workflows.plan import AnalysisPlanner
 
     request.validate()
+    # Raw sources/build_info this run cannot collect from (depth binary/
+    # headers, or a non-binary operand) are ignored with a note, before the
+    # planner or any extraction sees them.
+    request = _sce.without_unusable_raw_evidence(request, notify)
     # Codex review (fresh evidence, PR #1178): a stored-snapshot-only pair
     # needs no subprocess/extraction work at all, so nothing inside this
     # resolution would otherwise ever call `deadline.check()` -- an
@@ -347,6 +374,10 @@ def resolve_compare_request(
         public_headers: list[Path],
         public_header_dirs: list[Path],
     ) -> SideResolution:
+        options = _side_execution(request, side)
+        compile_db = match_side_compile_db(
+            options.compile_db, evidence.headers, options.compile_db_filter, notify
+        )
         return _resolve_side_snapshot_impl(
             side,
             evidence,
@@ -362,10 +393,16 @@ def resolve_compare_request(
             debug_format=debug_format,
             include_labels=dict(request.include_labels) or None,
             notify=notify,
-            changed_paths=request.changed_paths,  # ADR-043 D7 POI scoping
-            # ADR-068 Phase 4, absorbed from `ScanRequest.allow_build_query` (with `ScanRequest.build_config`'s own already-present `InputSpec.build_config` counterpart, which nothing on this path read before). `None` (not `False`) when unset, so the primitive keeps its own documented default rather than this request restating it -- and under that default `_gated_build_query_inputs` nulls `build_config` outright, passive keys included, so every pre-existing request resolves exactly as it did (it passed no `build_config` here at all). `compare` deliberately keeps the whole config behind that consent: reading a discovered config's passive settings without it would newly let them affect a comparison -- a behaviour change this field's absorption does not carry. See `CompareRequest.allow_build_query`'s own docstring.
-            build_config=side.build_config,
-            allow_build_query=request.allow_build_query or None,
+            build_config=options.build_config,
+            build_config_explicit=options.build_config_explicit,
+            build_query=options.build_query,
+            build_compile_db=options.build_compile_db,
+            changed_paths=options.changed_paths,  # ADR-043 D7 POI scoping
+            allow_build_query=options.allow_build_query,
+            compile_db_tokens=compile_db.tokens,
+            compile_db_matched=compile_db.matched,
+            seed_collect_mode=options.seed_collect_mode,
+            source_frontend_from_folded_context=options.source_frontend_from_folded_context,
         )
 
     def _resolve_old_side() -> SideResolution:

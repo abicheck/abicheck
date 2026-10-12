@@ -40,6 +40,7 @@ collect_mode_for_depth``, the one depth->collect-mode mapping.
 from __future__ import annotations
 
 import dataclasses
+import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -47,8 +48,10 @@ from .compile_context import CompileContext
 from .model.evidence_depth_levels import collect_mode_for_depth
 from .workflows.changed_paths import localized_collect_mode
 
+_logger = logging.getLogger(__name__)
+
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Callable, Iterable
 
     from .dump_manifest import DumpManifest
     from .workflows.contracts import CompareRequest, DumpRequest
@@ -57,7 +60,9 @@ if TYPE_CHECKING:
 __all__ = [
     "SideEvidence",
     "collect_mode_for",
+    "compare_collect_mode",
     "dump_collect_mode_for",
+    "without_unusable_raw_evidence",
     "effective_frontend",
     "localized_collect_mode",
     "effective_frontend_for_context",
@@ -388,6 +393,91 @@ def resolve_dump_request_evidence(request: DumpRequest) -> SideEvidence:
     )
 
 
+def compare_collect_mode(request: CompareRequest) -> str:
+    """The build-source collect mode *request*'s pair runs under.
+
+    A front end's own already-resolved mode (``resolved_collect_mode``: the
+    CLI's ``.abicheck.yml`` ``source.method`` and ``--since``) wins, as
+    ``DumpRequest.resolved_collect_mode`` does. Otherwise ADR-043 D7 (plan
+    §3 #12): a changed-path seed narrows the L4/L5 replay to the changed TUs;
+    with no seed the resolved mode stands unchanged, so a source-depth run
+    still covers the current library target rather than collapsing to zero
+    TUs. One owner for the rule, shared with the CLI.
+    """
+    if request.resolved_collect_mode is not None:
+        return request.resolved_collect_mode
+    return localized_collect_mode(
+        collect_mode_for(request.depth, request.old, request.new),
+        request.changed_paths,
+    )
+
+
+def without_unusable_raw_evidence(
+    request: CompareRequest, notify: Callable[[str], None] | None = None
+) -> CompareRequest:
+    """*request* with every side's raw ``sources``/``build_info`` dropped
+    where this run cannot collect from it.
+
+    A raw source tree or build directory (not a pack: ``is_raw_evidence_input``)
+    is collected inline by extracting its side's binary at the pair's collect
+    mode. Two cases make that impossible, and the raw input is ignored with a
+    note rather than silently deepening or changing the run:
+
+    * the collect mode is ``"off"`` (``depth`` ``binary``/``headers``): this
+      depth collects no build/source evidence;
+    * the side's operand is a recognized text operand rather than a native
+      binary (a stored JSON snapshot, a ``Module.symvers``): there is nothing
+      to re-extract it from. An operand of no recognized format is left to
+      resolution, which reports it.
+
+    Pre-built packs are kept either way -- they are evidence already
+    collected, applied as is.
+    """
+    from .workflows.extraction import is_raw_evidence_input
+    from .workflows.input_resolution import sniff_text_format
+
+    off = compare_collect_mode(request) == "off"
+
+    def _side(label: str, side: InputSpec) -> InputSpec:
+        raw = [
+            name
+            for name in ("sources", "build_info")
+            if is_raw_evidence_input(getattr(side, name))
+        ]
+        if not raw or side.path is None:
+            return side
+        # A JSON snapshot or symvers manifest is never a native binary.
+        if sniff_text_format(side.path) != "unknown":
+            reason = (
+                f"the {label} input {side.path} is not a native binary, so "
+                "there is nothing to extract it from"
+            )
+        elif off:
+            reason = (
+                "the selected depth collects no build/source evidence (use "
+                "depth build or source to collect from it)"
+            )
+        else:
+            return side
+        message = (
+            f"Warning: the {label} side's raw {' and '.join(raw)} is ignored: {reason}."
+        )
+        if notify is not None:
+            notify(message)
+        else:
+            _logger.warning("%s", message)
+        return dataclasses.replace(
+            side,
+            sources=None if "sources" in raw else side.sources,
+            build_info=None if "build_info" in raw else side.build_info,
+        )
+
+    old, new = _side("old", request.old), _side("new", request.new)
+    if old is request.old and new is request.new:
+        return request
+    return dataclasses.replace(request, old=old, new=new)
+
+
 def resolve_compare_request_evidence(
     request: CompareRequest,
     pair_compile: CompileContext | None,
@@ -404,10 +494,7 @@ def resolve_compare_request_evidence(
     # to the changed TUs; with no seed the resolved mode stands unchanged, so
     # a source-depth run still covers the current library target rather than
     # collapsing to zero TUs. One owner for the rule, shared with the CLI.
-    collect_mode = localized_collect_mode(
-        collect_mode_for(request.depth, request.old, request.new),
-        request.changed_paths,
-    )
+    collect_mode = compare_collect_mode(request)
     # Codex review: validate() accepts frontend_context case-insensitively,
     # but every real consumer compares against the lowercase "host"/"device"
     # literals -- normalize once here so an accepted "DEVICE" doesn't

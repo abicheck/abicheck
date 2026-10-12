@@ -18,9 +18,9 @@ import pytest
 from abicheck.errors import AbicheckError
 from abicheck.workflows.artifact.compile_db_match import (
     match_compile_db,
+    match_side_compile_db,
     try_match_compile_db,
 )
-from abicheck.workflows.dump.pipeline import _announce_compile_db_match
 
 
 def _write_compile_db(directory, entries):
@@ -43,7 +43,7 @@ def _dry(db, headers, source_filter):
 
 def _announced(db, headers) -> str:
     lines: list[str] = []
-    _announce_compile_db_match(lines.append, db, match_compile_db(db, headers, None))
+    match_side_compile_db(db, headers, None, lines.append)
     return "\n".join(lines)
 
 

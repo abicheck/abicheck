@@ -155,8 +155,7 @@ class SidePlan:
     build_info: Path | None
     build_targets: tuple[str, ...]
     gcc_path: str | None
-    #: ``DumpRequest.resolved_collect_mode`` (``None`` for every ``compare``
-    #: side, which has no such field) -- when set, it is what actually runs,
+    #: ``DumpRequest``/``CompareRequest.resolved_collect_mode`` -- when set, it is what actually runs,
     #: overriding whatever ``requested_depth`` alone would resolve to.
     resolved_collect_mode: str | None = None
     #: The raw, requested ``InputSpec.headers`` -- *not* the effective
@@ -211,7 +210,13 @@ def _side_plan(
         gcc_path=gcc_path,
         resolved_collect_mode=resolved_collect_mode,
         headers=side.headers,
-        build_config=side.build_config,
+        # The planner checks an *explicit* config only; an execution plan's
+        # discovered config is not one (``build_config_explicit``).
+        build_config=(
+            side.execution.build_config
+            if side.execution is not None and side.execution.build_config_explicit
+            else side.build_config
+        ),
     )
 
 
@@ -522,12 +527,16 @@ class AnalysisPlanner:
             operation = "compare"
             sides = (
                 _replace_lang_frontend(
-                    _side_plan("old", request.old, request.depth),
+                    _side_plan(
+                        "old", request.old, request.depth, request.resolved_collect_mode
+                    ),
                     request.lang,
                     request.frontend,
                 ),
                 _replace_lang_frontend(
-                    _side_plan("new", request.new, request.depth),
+                    _side_plan(
+                        "new", request.new, request.depth, request.resolved_collect_mode
+                    ),
                     request.lang,
                     request.frontend,
                 ),
