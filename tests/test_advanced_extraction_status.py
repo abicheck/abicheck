@@ -198,3 +198,81 @@ def test_status_is_not_persisted_so_the_stored_document_is_unchanged():
     assert loaded.declarations.debug_advanced.extraction is S.UNRECORDED
     # Provenance, not content: the decoded copy still compares equal.
     assert loaded.declarations.debug_advanced == recorded.declarations.debug_advanced
+
+
+def test_non_regular_path_records_not_run():
+    # /dev/null opens but is a character device: nothing was read, so the
+    # extraction did not run. Not a failure, and not "no DWARF".
+    dev_null = Path("/dev/null")
+    if not dev_null.exists() or dev_null.is_file():
+        pytest.skip("needs a character device such as /dev/null")
+    _meta, adv = parse_dwarf(dev_null)
+    assert adv.has_dwarf is False
+    assert adv.extraction is S.NOT_RUN
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="needs an ELF-emitting gcc")
+def test_failure_inside_the_walk_records_failed(monkeypatch, tmp_path: Path):
+    # A real session whose walk raises must not leak out as "no DWARF": the
+    # outer guard records the failure. The session is opened for real so the
+    # guard, not the open path, is what is exercised.
+    import abicheck.dwarf_unified as dwarf_unified
+
+    if shutil.which("gcc") is None:
+        pytest.skip("needs gcc to build a real shared library")
+    src = tmp_path / "a.c"
+    src.write_text("int x = 1;\n")
+    so = tmp_path / "liba.so"
+    subprocess.run(
+        ["gcc", "-g", "-shared", "-fPIC", "-o", str(so), str(src)], check=True
+    )
+
+    def _boom(_session):
+        raise RuntimeError("walk failed")
+
+    monkeypatch.setattr(dwarf_unified, "parse_dwarf_from_session", _boom)
+    _meta, adv = dwarf_unified.parse_dwarf(so)
+    assert adv.has_dwarf is False
+    assert adv.extraction is S.FAILED
+    assert advanced_facts_collected(adv) is False
+
+
+def test_every_failed_side_is_named_and_a_missing_payload_is_not_failed():
+    failed_old = AdvancedDwarfMetadata(has_dwarf=True, extraction=S.FAILED)
+    failed_new = AdvancedDwarfMetadata(has_dwarf=True, extraction=S.FAILED)
+    status, notes = _dwarf_context_status(
+        _snap(dwarf_advanced=failed_old), _snap(dwarf_advanced=failed_new)
+    )
+    assert status == "asymmetric"
+    assert len(notes) == 2
+    assert any("old side" in note for note in notes)
+    assert any("new side" in note for note in notes)
+
+    # A side with no advanced payload at all is not a failed read.
+    status, notes = _dwarf_context_status(_snap(), _snap(dwarf_advanced=failed_new))
+    assert status == "asymmetric"
+    assert len(notes) == 1
+    assert "new side" in notes[0]
+
+
+def test_snapshot_without_advanced_payload_reads_as_unrecorded_and_unsupported():
+    from abicheck.compare.debug_layout_view import advanced_dwarf_support
+
+    collected = AdvancedDwarfMetadata(
+        has_dwarf=True, target_arch="x86_64", extraction=S.COMPLETED, **_PAYLOAD
+    )
+    supported, reason = advanced_dwarf_support(_snap(dwarf_advanced=collected), _snap())
+    assert supported is False
+    assert "missing DWARF advanced metadata" in reason
+
+
+@pytest.mark.parametrize("make_input", ["missing", "not_elf"])
+def test_open_dwarf_session_returns_none_for_unreadable_input(
+    make_input, tmp_path: Path
+):
+    from abicheck.dwarf_unified import open_dwarf_session
+
+    path = tmp_path / "input.so"
+    if make_input == "not_elf":
+        path.write_bytes(b"not an ELF file" * 8)
+    assert open_dwarf_session(path) is None
