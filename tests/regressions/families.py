@@ -187,6 +187,8 @@ _F1 = (
     "guard.absent_capability_vs_real_failure",
     "registry.kind_completeness",
     "evidence.optional_layer_prerequisite_for_a_stated_fact",
+    # An empty `ElfSymbol.version` stood for both "base-bound" and "no version".
+    "evidence.distinct_encoded_states_collapsed_to_one_value",
 )
 _F2 = (
     "report.cross_producer_disagreement_on_one_symbol",

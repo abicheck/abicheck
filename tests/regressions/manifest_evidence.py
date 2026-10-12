@@ -1091,7 +1091,10 @@ EVIDENCE_BUG_CLASSES: tuple[BugClass, ...] = (
             "reports as not evaluated rather than resolving either way."
         ),
         fixed_by=(1556,),
-        seed_tests=("tests/test_unversioned_exported_symbol.py",),
+        seed_tests=(
+            "tests/test_unversioned_exported_symbol.py",
+            "tests/test_family_f1_evidence_ablation.py",
+        ),
         public_surfaces=("cli",),
         axes={
             "linker": ("GNU ld", "gold", "lld"),

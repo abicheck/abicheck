@@ -597,3 +597,51 @@ def test_unmutated_pipeline_passes_the_mutant_cells() -> None:
         ["Function.binary_exported_fact", "Variable.binary_exported_fact"],
         ["identical", "func_removed"],
     )
+
+
+# ``ElfSymbol.version_binding`` (bug class
+# ``evidence.distinct_encoded_states_collapsed_to_one_value``): an unknown
+# binding -- what a pre-v58 snapshot loads as -- is ablated evidence too. It
+# must never add an ``unversioned_exported_symbol`` finding, and never let
+# the check read as evaluated-clean.
+@pytest.mark.parametrize("side", ["old", "new", "both"])
+@pytest.mark.parametrize("binding", ["unversioned", "base", "named"])
+def test_unknown_version_binding_never_adds_a_finding(side: str, binding: str) -> None:
+    from abicheck.buildsource.cross_source_checks import (
+        CHECK_UNVERSIONED_EXPORTED_SYMBOL,
+        run_crosschecks,
+    )
+    from abicheck.checker import compare
+    from abicheck.model import AbiSnapshot
+    from abicheck.model.elf_facts import ElfMetadata, ElfSymbol, ElfVersionBinding
+
+    def snap(ablate: bool) -> AbiSnapshot:
+        state = ElfVersionBinding.UNKNOWN if ablate else ElfVersionBinding(binding)
+        version = "V1" if binding == "named" else ""
+        elf = ElfMetadata(
+            symbols=[
+                ElfSymbol("api", version="V1", version_binding=ElfVersionBinding.NAMED),
+                ElfSymbol("legacy", version=version, version_binding=state),
+            ],
+            versions_defined=["V1"],
+        )
+        return AbiSnapshot(library="libx.so", version="1", elf=elf)
+
+    def flagged(old: AbiSnapshot, new: AbiSnapshot) -> set[str]:
+        return {
+            c.symbol
+            for c in compare(old, new).changes
+            if c.kind.value == "unversioned_exported_symbol"
+        }
+
+    full = flagged(snap(False), snap(False))
+    old, new = snap(side in ("old", "both")), snap(side in ("new", "both"))
+    assert flagged(old, new) <= full
+    if binding != "named":  # an empty version left nothing to evaluate
+        ablated = new if side != "old" else old
+        row = next(
+            r
+            for r in run_crosschecks(ablated).coverage
+            if r["layer"] == f"crosscheck:{CHECK_UNVERSIONED_EXPORTED_SYMBOL}"
+        )
+        assert row["status"] != "present", row
