@@ -195,8 +195,8 @@ Each entry's status line says what is still open. A PARTIAL entry's write-up als
 
 #### Closure-parameterized non-ctor functions still churn (func_params_changed) on lambda line shifts; '?' ctor param unexplained
 
-**Status (re-verified 2026-10-09 at `456989f`): PARTIAL.** Type-level marker fix, ctor/dtor binary-evidence fix and L5 declaration_renamed fix (model.graph_identity.closure_location_free_identity) are recorded as landed. Still open: non-ctor func_params_changed/template_param_type_changed on closure-parameterized symbols, the mangled-only surface filter gap, and residual (2), the literal '?' ctor parameter.  
-`false-positive` — Non-ctor symbols parameterized over a lambda still churn `func_params_changed`/`template_param_type_changed` when the lambda's line shifts; the mangled-only surface filter gap and the literal `?` ctor parameter are also open. [Full write-up](known-gaps/closure-parameterized-non-ctor-functions-still-churn-func.md)
+**Status (re-verified 2026-10-12 at `b694ccc2f`): PARTIAL.** Type-level marker fix, ctor/dtor binary-evidence fix and L5 declaration_renamed fix (model.graph_identity.closure_location_free_identity) are recorded as landed. The non-ctor func_params_changed/template_param_type_changed churn does not reproduce through any dump, load or public-API path; only raw, un-renumbered in-memory snapshots still churn. Still open: that raw-snapshot residual, the mangled-only surface filter gap, and residual (2), the literal '?' ctor parameter.  
+`false-positive` — Non-ctor symbols parameterized over a lambda churn `func_params_changed`/`template_param_type_changed` only when a caller passes un-renumbered raw snapshots to `compare()`; the real dump/load paths already give a line shift no finding. The mangled-only surface filter gap and the literal `?` ctor parameter are also open. [Full write-up](known-gaps/closure-parameterized-non-ctor-functions-still-churn-func.md)
 
 #### The L5 source graph's own node identities are never renumbered alongside the flat snapshot's closure markers (Codex review on PR #868, fresh evidence)
 

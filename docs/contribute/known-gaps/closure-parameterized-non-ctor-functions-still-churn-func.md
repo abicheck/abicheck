@@ -11,7 +11,7 @@ generated: false
 
 Index: [Known gaps](../known-gaps.md)
 
-**Status (re-verified 2026-10-09 at `456989f`): PARTIAL.** Type-level marker fix, ctor/dtor binary-evidence fix and L5 declaration_renamed fix (model.graph_identity.closure_location_free_identity) are recorded as landed. Still open: non-ctor func_params_changed/template_param_type_changed on closure-parameterized symbols, the mangled-only surface filter gap, and residual (2), the literal '?' ctor parameter.
+**Status (re-verified 2026-10-12 at `b694ccc2f`): PARTIAL.** Type-level marker fix, ctor/dtor binary-evidence fix and L5 declaration_renamed fix (model.graph_identity.closure_location_free_identity) are recorded as landed. The non-ctor func_params_changed/template_param_type_changed half no longer reproduces through any dump, load or public-API path (see the 2026-10-12 update below). Still open: the same churn when a caller hands `compare()` snapshots whose closure spellings were never renumbered, the mangled-only surface filter gap, and residual (2), the literal '?' ctor parameter.
 
 `name_classification._ANONYMOUS_TYPE_MARKERS` did not
 recognize clang's own closure spelling (`(lambda at <path>:<line>:<col>)`,
@@ -209,6 +209,34 @@ such as `std::once_flag::_Prepare_execution<lambda>`'s internal guard
 thunks, which `surface.py` cannot scope-classify because it never
 demangles) is a separate detector, not this one, and is likewise not
 addressed here.
+
+**Update 2026-10-12: the non-ctor func_params_changed/template_param_type_changed half does not reproduce on any real path.** The
+ordinal renumbering (`storage/closure_identity.renumber_anonymous_closure_identities`,
+landed before `456989f`) already maps every closure in a dumped or loaded
+snapshot to `#N` per header, so the parameter spelling a shifted lambda
+produces is identical on both sides. Checked end to end at `b694ccc2f`
+with `g++ -std=c++20` and castxml 0.7.0, each pair differing only by unrelated header
+lines above the closure: a closure spelled as a named variable's
+`decltype`, a closure inside a function-template body (the
+`raii_guard<(lambda:…)>` shape), and that same shape reached through
+`abicheck dump` + `abicheck compare`, plus `dumper.dump()` + `compare()` —
+all produce zero findings for the shift, and a real parameter type change
+on the same `extern "C"` symbol still reports `func_params_changed`. So no
+location-free comparison was added to the parameter path: it would hide only
+this one kind, and the raw churn it targets spreads across `func_added`,
+`inline_function_removed`, `overload_set_rerouted` and
+`template_return_type_changed` too, a collision-prone trade for a path no
+caller reaches. `tests/test_closure_param_churn_pipeline.py` pins the
+real-pipeline behavior (a shift of 2 and 40 lines gives no parameter
+finding; a real parameter change still does), and its sensitivity was
+checked: deferring renumbering on both sides makes the same shift churn
+`func_params_changed` and `template_param_type_changed` again, so the test
+fails when the invariant is removed. The residual that remains is narrower:
+a snapshot that never went through a dump or a load (`compare()` on raw
+hand-built `AbiSnapshot` objects, or under `defer_closure_identity_renumbering`)
+still carries `(lambda:file:line:col)` spellings and churns. No public
+entry point produces such a snapshot, so this is recorded here rather than
+changed in `compare()`.
 
 (2) *A constructor key rendering a literal `?` parameter.* Traced to two
 legitimate "type not recoverable" sentinels rather than to a formatting
