@@ -726,6 +726,13 @@ class DispositionLedger:
                 # is still the true reason it is not a finding of its own.
                 self._records[index] = replace(record, gate_excluded=True)
 
+    def exclude_from_gate(self, points: frozenset[str]) -> None:
+        """In place: gating records from *points* never reach the gate (D-S1)."""
+        for i, r in enumerate(self._records):
+            if r.application_point in points and r.disposition is Disposition.GATING:
+                excluded = Disposition.NON_GATING
+                self._records[i] = replace(r, disposition=excluded, gate_excluded=True)
+
     def index_for(self, change: object) -> int | None:
         """The index of *change*'s record, resolving an alias to its anchor.
 

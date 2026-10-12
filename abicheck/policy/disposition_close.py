@@ -169,6 +169,14 @@ def _is_policy_overlay(change: object) -> bool:
     return getattr(kind, "value", kind) in _POLICY_OVERLAY_KINDS
 
 
+#: Application points of the consumer-scoping producers. A finding recorded
+#: there lives only in a consumer's scoped view and never reaches
+#: ``result.changes``, so the full-library gate never scores it.
+CONSUMER_ONLY_APPLICATION_POINTS = frozenset(
+    {"consumer_overlay", "required_symbol_overlay", "consumer_scope"}
+)
+
+
 def record_consumer_overlay(
     ledger: DispositionLedger | None,
     change: Change,
@@ -454,8 +462,25 @@ def close_consumer_scope(
     *,
     gating: Iterable[object],
     also_detected: Iterable[Change] = (),
+    scope_decides_exit: bool,
 ) -> None:
     """Close the ledger again after a consumer-scoping pass added to it.
+
+    *scope_decides_exit* names which gate decides the run, so the audit's
+    ``gating`` set is always the set that gate scores (D3: the audit
+    reconciles with the exit code printed beside it):
+
+    * ``True`` -- the standalone ``check_appcompat``/
+      ``check_plugin_host_contract`` APIs, whose verdict *is* the consumer's
+      scoped one. The gating set narrows to *gating* (the relevant union).
+    * ``False`` -- ``compare --used-by``/``--required-symbol``. Workstream
+      D-S1 (``docs/reference/exit-codes.md``, "Application- and
+      plugin-scoped comparisons"): the exit is always the full-library
+      ``ExitDecision``; the consumer's assessment is reported beside it. No
+      library finding is narrowed, and every consumer-only finding (a late
+      ``also_detected`` one, or a pre-recorded consumer overlay) is
+      gate-excluded, since none of them reaches ``result.changes``. Narrowing
+      here is what made the one-line audit read "0 gating" beside exit 4.
 
     Call this **once per run**, from whatever resolves the whole scoped gate
     -- not once per consumer: ``apply_scope`` only demotes, so a per-consumer
@@ -481,6 +506,9 @@ def close_consumer_scope(
     # finding and the union entry for it can be two objects of one
     # observation, and asking by raw identity would read the finding as out
     # of scope while the scoped gate fails on the alias the union holds.
+    if not scope_decides_exit:
+        # Nothing a consumer contributes reaches the full-library gate.
+        gating = ()
     gating_ids = {id(c) for c in gating}
     gating_indices = ledger.indices_for(gating)
     gate = _GateContext.of(result)
@@ -530,7 +558,10 @@ def close_consumer_scope(
     # The order is what makes the result well-defined -- a finding promoted
     # into the contract but not used by this consumer is still excluded.
     ledger.refresh_promoted(result)
-    ledger.apply_scope(result, gating)
+    if scope_decides_exit:
+        ledger.apply_scope(result, gating)
+    else:
+        ledger.exclude_from_gate(CONSUMER_ONLY_APPLICATION_POINTS)
     ledger.resolve_verdict_classes(result)
     ledger.resolve_reclassifications(result)
     _resolve_acknowledgments(

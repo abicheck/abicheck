@@ -860,9 +860,9 @@ def _apply_used_by_scoping(
     )
     # ADR-067: close the disposition ledger once, here, over the *union* of
     # every consumer's relevant findings. `scope_diff_to_app` deliberately
-    # does not close it per app -- `apply_scope` only demotes, so a
-    # per-consumer close would intersect the consumers' relevant sets and
-    # exclude a finding only the second consumer uses. `scoped_only_changes`
+    # does not close it per app. The union does not narrow the audit's
+    # gating set (D-S1: the exit is the full-library decision, so the audit
+    # must count what that decision scores). `scoped_only_changes`
     # are passed as newly detected: they are real consumer findings that
     # never reach `result.changes`, so without them the scoped views would
     # count a population the audit does not.
@@ -871,6 +871,8 @@ def _apply_used_by_scoping(
         result,
         gating=list(relevant_changes_by_id.values()),
         also_detected=result.scoped_only_changes,
+        # D-S1: the exit is the full-library decision, not the scoped one.
+        scope_decides_exit=False,
     )
 
     if severity is not None:
@@ -952,6 +954,8 @@ def _apply_required_symbol_scoping(
         result,
         gating=scoped.breaking_for_host,
         also_detected=result.scoped_only_changes,
+        # D-S1: the exit is the full-library decision, not the scoped one.
+        scope_decides_exit=False,
     )
 
     exit_code = _scoped_exit_code(
