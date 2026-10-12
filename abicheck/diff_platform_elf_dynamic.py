@@ -99,16 +99,17 @@ def _diff_leaked_dependency_symbols(old_elf: Any, new_elf: Any) -> list[Change]:
     Consider applying ``-fvisibility=hidden`` to prevent this.
     """
     changes: list[Change] = []
-    old_syms = old_elf.symbol_map
-    new_syms = new_elf.symbol_map
+    old_aliases = old_elf.symbol_aliases
+    new_aliases = new_elf.symbol_aliases
 
-    # Symbols that were *removed* (present in old, absent in new)
-    for sym_name, s_old in old_syms.items():
-        if sym_name in new_syms:
-            # Symbol still exists — skip to avoid double-annotation with
-            # _diff_elf_symbol_metadata which handles changed symbols.
-            continue
-        origin = s_old.origin_lib
+    # Aliases removed: a bare name can survive while one of its versioned
+    # aliases is gone, and that removal is still a real ABI change. Matching by
+    # version tag keeps a surviving alias from hiding the removed one.
+    for sym_name, old_list in old_aliases.items():
+        new_list = new_aliases.get(sym_name, [])
+        new_versions = {s.version for s in new_list}
+        gone = [s for s in old_list if s.version not in new_versions]
+        origin = next((s.origin_lib for s in gone if s.origin_lib is not None), None)
         if origin is None:
             continue
         changes.append(
@@ -126,11 +127,13 @@ def _diff_leaked_dependency_symbols(old_elf: Any, new_elf: Any) -> list[Change]:
             )
         )
 
-    # Symbols that were *added* (absent in old, present in new with origin_lib)
-    for sym_name, s_new in new_syms.items():
-        if sym_name in old_syms:
-            continue  # Already present in old — not a pure addition
-        if s_new.origin_lib is None:
+    # Aliases added: the same version-tag matching, on the new side.
+    for sym_name, new_list in new_aliases.items():
+        old_list = old_aliases.get(sym_name, [])
+        old_versions = {s.version for s in old_list}
+        fresh = [s for s in new_list if s.version not in old_versions]
+        origin = next((s.origin_lib for s in fresh if s.origin_lib is not None), None)
+        if origin is None:
             continue
         changes.append(
             make_change(
@@ -138,12 +141,12 @@ def _diff_leaked_dependency_symbols(old_elf: Any, new_elf: Any) -> list[Change]:
                 symbol=sym_name,
                 description=(
                     f"Symbol '{sym_name}' was added but appears to originate from "
-                    f"'{s_new.origin_lib}' (a dependency of this library). This is a real "
+                    f"'{origin}' (a dependency of this library). This is a real "
                     f"ABI change — the library is leaking dependency symbols into its public "
                     f"ABI surface. Consider applying -fvisibility=hidden."
                 ),
                 old_value=None,
-                new_value=s_new.origin_lib,
+                new_value=origin,
             )
         )
 

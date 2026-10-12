@@ -141,7 +141,7 @@ COVERAGE: dict[str, str] = {
     "abicheck.compare.edge_query::memoized_property::EdgeEvidence.debug_types": R,
     "abicheck.compare.edge_query::memoized_property::EdgeEvidence.export_records": R,
     "abicheck.compare.edge_query::memoized_property::EdgeEvidence.exports": R,
-    "abicheck.model.elf_facts::memoized_property::ElfMetadata.symbol_map": B,
+    "abicheck.model.elf_facts::memoized_property::ElfMetadata.symbol_map": "UNCOVERED: no in-tree reader remains (the alias fix moved every reader to symbol_aliases); kept for external callers and guarded by test_no_new_code_reader_of_the_collapsed_symbol_map",
     "abicheck.model.elf_facts::memoized_property::ElfMetadata.symbol_aliases": B,
     "abicheck.model.macho_facts::memoized_property::MachoMetadata.export_map": "UNCOVERED: Mach-O only; no Mach-O toolchain on the Linux lanes",
     "abicheck.model.pe_facts::memoized_property::PeMetadata.export_map": "UNCOVERED: PE only; no PE toolchain on the Linux lanes",

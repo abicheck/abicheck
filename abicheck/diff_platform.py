@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, Any, TypeVar
 
 from .compare.debug_type_scope import debug_layout_scope
 from .compare.edge_query import export_table_covered
+from .compare.elf_alias_pairs import pair_elf_aliases
 from .compare.enum_sentinel import is_confirmed_enum_sentinel
 from .compare.naming_conventions import INLINE_NAMESPACE_MOVE, _strip_inline_ns
 from .compare.platform_export_delta import (
@@ -978,14 +979,8 @@ def _diff_tls_symbols(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     n: ElfMetadata = getattr(new, "elf", None) or ElfMetadata()
     changes: list[Change] = []
 
-    old_syms = o.symbol_map
-    new_syms = n.symbol_map
-
-    for sym_name, s_old in old_syms.items():
-        if s_old.sym_type != SymbolType.TLS:
-            continue
-        s_new = new_syms.get(sym_name)
-        if s_new is None or s_new.sym_type != SymbolType.TLS:
+    for sym_name, s_old, s_new in pair_elf_aliases(o, n):
+        if s_old.sym_type != SymbolType.TLS or s_new.sym_type != SymbolType.TLS:
             continue
         if s_old.size > 0 and s_new.size > 0 and s_old.size != s_new.size:
             changes.append(
@@ -1014,10 +1009,7 @@ def _diff_protected_visibility(old: AbiSnapshot, new: AbiSnapshot) -> list[Chang
     n: ElfMetadata = getattr(new, "elf", None) or ElfMetadata()
     changes: list[Change] = []
 
-    for sym_name, s_old in o.symbol_map.items():
-        s_new = n.symbol_map.get(sym_name)
-        if s_new is None:
-            continue
+    for sym_name, s_old, s_new in pair_elf_aliases(o, n):
         old_vis = s_old.visibility or "default"
         new_vis = s_new.visibility or "default"
         if old_vis == new_vis:
@@ -1325,10 +1317,8 @@ def _diff_vtable_identity(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
 
     # Also check existing RTTI symbols for visibility or version changes
     if common_rtti:
-        for sym_name in common_rtti:
-            s_old = o.symbol_map.get(sym_name)
-            s_new = n.symbol_map.get(sym_name)
-            if not s_old or not s_new:
+        for sym_name, s_old, s_new in pair_elf_aliases(o, n):
+            if sym_name not in common_rtti:
                 continue
             old_vis = s_old.visibility or "default"
             new_vis = s_new.visibility or "default"

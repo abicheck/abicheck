@@ -284,8 +284,8 @@ def _diff_thunks(
     """Detect thunk offset / set drift (B1)."""
     old_t = _thunks_by_base(old, skip_runtime=skip_runtime)
     new_t = _thunks_by_base(new, skip_runtime=skip_runtime)
-    old_syms = old.elf.symbol_map if old.elf else {}
-    new_syms = new.elf.symbol_map if new.elf else {}
+    old_syms = old.elf.symbol_aliases if old.elf else {}
+    new_syms = new.elf.symbol_aliases if new.elf else {}
     changes: list[Change] = []
 
     # Offset change: the target method has a thunk on both sides but the encoded

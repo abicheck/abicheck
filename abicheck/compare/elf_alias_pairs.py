@@ -24,6 +24,7 @@ sides, which is the old/new matching the symbol diff needs.
 from __future__ import annotations
 
 from ..model.elf_facts import ElfMetadata, ElfSymbol
+from .declined_comparisons import record_declined
 
 
 def pair_elf_aliases(
@@ -36,8 +37,10 @@ def pair_elf_aliases(
     counterpart and the order of ``.dynsym`` cannot change the result.
 
     A version tag present on one side only pairs when exactly one alias is left
-    unpaired on each side, which reads as a version rename. Any other leftover is
-    ambiguous, so it is skipped rather than matched to an arbitrary alias.
+    unpaired on each side and both share ``is_default``, which reads as a version
+    rename. Any other leftover is ambiguous: it is skipped rather than matched to
+    an arbitrary alias, and recorded as a declined comparison so the report shows
+    it instead of dropping it silently.
     """
     new_aliases = new_elf.symbol_aliases
     pairs: list[tuple[str, ElfSymbol, ElfSymbol]] = []
@@ -63,7 +66,16 @@ def pair_elf_aliases(
             if ver not in old_by_ver:
                 new_left.extend(new_group)
         if len(old_left) == 1 and len(new_left) == 1:
-            pairs.append((name, old_left[0], new_left[0]))
+            old_alias, new_alias = old_left[0], new_left[0]
+            if old_alias.is_default == new_alias.is_default:
+                pairs.append((name, old_alias, new_alias))
+                continue
+        if old_left or new_left:
+            record_declined(
+                name,
+                "symbol-versioned aliases could not be paired by version tag "
+                f"(old: {len(old_left)} unmatched, new: {len(new_left)} unmatched)",
+            )
     return pairs
 
 

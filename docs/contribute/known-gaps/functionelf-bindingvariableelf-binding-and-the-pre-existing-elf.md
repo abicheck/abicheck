@@ -11,22 +11,27 @@ generated: false
 
 Index: [Known gaps](../known-gaps.md)
 
-**Status (re-verified 2026-10-12): PARTIAL.** Fixed for the ELF symbol diff and the declaration `elf_binding`/`elf_visibility`; the remaining `symbol_map` readers are still open (see the last section).
+**Status (closed 2026-10-12): CLOSED.** Every ELF reader that compared a binding, visibility, size, COMMON or UNIQUE state, origin, or presence per bare name now pairs symbol-versioned aliases. Nothing under `abicheck/` reads `ElfMetadata.symbol_map` any more, and `tests/test_elf_version_alias_binding.py::test_no_new_code_reader_of_the_collapsed_symbol_map` keeps it that way.
 
-**What this pass changed.** Reproduced first: a two-version library built with `.symver` (`foo@VER1` WEAK, `foo@@VER2` GLOBAL in `.dynsym` order, so the changed alias is the non-last entry) went GLOBAL→WEAK on `foo@@VER2`, and `abicheck compare` exited 0 with no finding for `foo`.
-- `model/elf_facts.py`: `ElfMetadata.symbol_aliases` keeps every versioned entry per bare name. `unambiguous_symbol(name)` returns the symbol only when all of its aliases agree on binding and visibility, otherwise None. `symbol_map` is unchanged and still last-wins.
-- `compare/elf_alias_pairs.py` (new): `pair_elf_aliases` pairs old and new aliases by version tag. One entry per side pairs as before; a version renamed 1:1 pairs; any other leftover is skipped rather than matched to an arbitrary alias.
-- `diff_platform_elf_symbols.py`: `_diff_elf_symbol_metadata` compares the pairs from `pair_elf_aliases` instead of `symbol_map` items.
-- `extract/elf_symbol_classify.py` (`_populate_elf_visibility`) and `storage/snapshot_load_normalization.py` (`backfill_missing_elf_binding`): a declaration takes binding and visibility from `unambiguous_symbol`, so a mixed-alias name leaves them unset instead of inheriting the last alias.
+**What changed.** Reproduced first: a two-version library built with `.symver` (`foo@VER1` WEAK, `foo@@VER2` GLOBAL in `.dynsym` order, so the changed alias is the non-last entry) went GLOBAL→WEAK on `foo@@VER2`, and `abicheck compare` exited 0 with no finding for `foo`.
+- `model/elf_facts.py`: `ElfMetadata.symbol_aliases` keeps every versioned entry per bare name. `unambiguous_symbol(name)` returns the symbol only when all aliases agree on binding and visibility, otherwise None. `symbol_map` is unchanged, for external callers that want one entry per name.
+- `compare/elf_alias_pairs.py` (new): `pair_elf_aliases` pairs old and new aliases by version tag. One entry per side pairs as before. A 1:1 version rename pairs only when both aliases share `is_default`. Any other unmatched alias is recorded with `record_declined`, so it appears in the report's declined list and never vanishes.
+- Symbol diff (`diff_platform_elf_symbols.py`): `_diff_elf_symbol_metadata` pairs aliases for the per-symbol checks; the COMMON check and the gained-GNU_UNIQUE check look at every alias.
+- Other readers converted (`diff_platform.py`): `_diff_tls_symbols` (`TLS_VAR_SIZE_CHANGED`), `_diff_protected_visibility` (`PROTECTED_VISIBILITY_CHANGED`), and the RTTI visibility/version loop in `_diff_vtable_identity` (`VTABLE_SYMBOL_IDENTITY_CHANGED`).
+- Leaked-dependency check (`diff_platform_elf_dynamic.py`): a removed or added alias is matched by version tag, so a surviving bare name no longer hides a removed `SYMBOL_LEAKED_FROM_DEPENDENCY_CHANGED`.
+- Layout thunk check (`diff_elf_layout.py`): name presence now reads `symbol_aliases`; the result is identical, and the last `symbol_map` read in the code is gone.
+- Declarations: `_populate_elf_visibility` and `backfill_missing_elf_binding` take values from `unambiguous_symbol`. On load, a declaration whose aliases disagree has its binding and visibility cleared, so a snapshot written by an older last-wins writer does not keep the wrong value.
+- `snapshot_cache.py` bumped to v36, since declaration output changed. A warm cache would otherwise replay the last-alias values.
 
-**Verified.** `tests/test_elf_version_alias_binding.py` (17 tests): binding and visibility changes on either alias are reported (fail before the fix, pass after); pairing by version tag gives the same result for any `.dynsym` order; single-version libraries report exactly one change as before; declarations inherit values only when their aliases agree; a real gcc-built library (`dump` then `compare`) reports `foo` as SYMBOL_BINDING_CHANGED.
+**Verified.** `tests/test_elf_version_alias_binding.py` (34 tests):
+- A table covers each converted reader (TLS size, protected visibility, COMMON, UNIQUE, RTTI visibility, leaked removal) with the change on the non-last and on the last alias. On the first-fix commit (`98314ad`) the non-last cases for TLS, protected, COMMON, RTTI and leaked fail; the last-alias controls pass.
+- Declined leftovers, the `is_default` rule for renames, and the reader guard fail on `98314ad` and pass now.
+- A real gcc-built library is dumped, saved, loaded through the storage codec, and compared. Alias versions survive the round trip, and `foo` is reported.
+- A stored snapshot with a disagreeing declaration comes back with binding and visibility unset, while an agreeing one keeps its value.
+- Single-version libraries are unchanged; the existing ELF, binding, visibility and diff-platform test files pass (1,813 tests before the table and round-trip additions).
 
-**Still open (why PARTIAL).**
-- `_diff_tls_symbols`, `_diff_vtable_identity` (`diff_platform.py`), `_diff_leaked_dependency_symbols` (`diff_platform_elf_dynamic.py`) and the layout reads in `diff_elf_layout.py` still use `symbol_map`, so they can hide a change on a non-last alias. Not audited alias by alias in this pass.
-- A version renamed on one side with several unmatched aliases on each side is skipped, not reported. A reporting path for that ambiguity needs its own ChangeKind decision.
-- COMMON and GNU_UNIQUE checks in `_diff_elf_symbol_metadata` still read `symbol_map`.
+**Residual by design.** `symbol_map` remains for external callers and is documented as one entry per bare name. The rule-based declines are accounting only: they never change a finding, a verdict or an exit code.
 
-The mixed-alias declaration rule treats an absent name and a mixed name the same (both None), which matches how the code already handled an absent name.
 
 `ElfMetadata.symbol_map` is a `name -> ElfSymbol` dict
 built from `elf.symbols`, last-entry-wins; `elf_metadata.py`'s own parser

@@ -103,11 +103,6 @@ Each entry's status line says what is still open. A PARTIAL entry's write-up als
 **Status (re-verified 2026-10-09 at `456989f`): OPEN.** model/dwarf_facts.py:181 advanced_facts_collected still infers that extraction ran. The comment at line 229 says an explicit 'advanced extraction completed' status is still future work.  
 `false-clean` — Whether advanced DWARF extraction ran is inferred from its output, so a run that produced nothing is indistinguishable from one that never ran. [Full write-up](known-gaps/advanced-facts-collected-infers-advanced-dwarf-extraction-ran.md)
 
-#### `Function.elf_binding`/`Variable.elf_binding` (and the pre-existing `elf_visibility` it mirrors) collapse mixed bindings across symbol-versioned aliases sharing one bare name — partly fixed (Codex review, fresh evidence)
-
-**Status (re-verified 2026-10-12): PARTIAL.** The ELF symbol diff and the declaration binding/visibility now pair every versioned alias (`compare/elf_alias_pairs.py`, `ElfMetadata.symbol_aliases`/`unambiguous_symbol`). Still last-wins: `_diff_tls_symbols`, `_diff_vtable_identity`, `_diff_leaked_dependency_symbols` and the layout reads, which still use `symbol_map`.  
-`false-clean` — Those remaining `symbol_map` readers still collapse aliases to one entry per bare name, so a change on a non-last alias can be hidden there. [Full write-up](known-gaps/functionelf-bindingvariableelf-binding-and-the-pre-existing-elf.md)
-
 #### L4 SYCL replay via a resolved `--gcc-path icpx`/`dpcpp` override — flag vocabulary fixed, the two-pass JSON-document crash fixed, real host+device dual-context replay still not implemented
 
 **Status (re-verified 2026-10-09 at `456989f`): PARTIAL.** Fixed: -fsycl flag vocabulary (buildsource/adapters/base.py:160) and the two-pass JSON crash. Still open, as the entry says: host+device dual-context L4 replay.  

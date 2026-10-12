@@ -263,3 +263,258 @@ def test_pair_elf_aliases_ignores_names_absent_on_one_side() -> None:
     old = ElfMetadata(symbols=[_alias("VER1")])
     new = ElfMetadata(symbols=[ElfSymbol(name="bar", version="VER1")])
     assert pair_elf_aliases(old, new) == []
+
+
+def _named(
+    name: str,
+    version: str,
+    is_default: bool = True,
+    **kw: object,
+) -> ElfSymbol:
+    return ElfSymbol(name=name, version=version, is_default=is_default, **kw)  # type: ignore[arg-type]
+
+
+# Each detector reads one attribute per bare name. For every case the change
+# lands on either the non-last alias (index 0) or the last alias (index 1);
+# both must be reported. The expected kind is written out by hand.
+def _detector_case(
+    kind: str, name: str, changed: int
+) -> tuple[ElfMetadata, ElfMetadata]:
+    base = [
+        _named(name, "VER2", sym_type=SymbolType.OBJECT),
+        _named(name, "VER1", is_default=False, sym_type=SymbolType.OBJECT),
+    ]
+    old = ElfMetadata(symbols=list(base))
+    new_list = list(base)
+    if kind == "tls_size":
+        base = [
+            _named(name, "VER2", sym_type=SymbolType.TLS, size=8),
+            _named(name, "VER1", is_default=False, sym_type=SymbolType.TLS, size=8),
+        ]
+        old = ElfMetadata(symbols=list(base))
+        new_list = list(base)
+        new_list[changed] = _named(
+            name,
+            base[changed].version,
+            base[changed].is_default,
+            sym_type=SymbolType.TLS,
+            size=16,
+        )
+    elif kind == "protected":
+        new_list[changed] = _named(
+            name,
+            base[changed].version,
+            base[changed].is_default,
+            sym_type=SymbolType.OBJECT,
+            visibility="protected",
+        )
+    elif kind == "common":
+        new_list[changed] = _named(
+            name,
+            base[changed].version,
+            base[changed].is_default,
+            sym_type=SymbolType.COMMON,
+        )
+    elif kind == "unique":
+        new_list[changed] = _named(
+            name,
+            base[changed].version,
+            base[changed].is_default,
+            sym_type=SymbolType.OBJECT,
+            binding=SymbolBinding.UNIQUE,
+        )
+    elif kind == "rtti_visibility":
+        base = [
+            _named("_ZTV3Foo", "VER2", sym_type=SymbolType.OBJECT),
+            _named("_ZTV3Foo", "VER1", is_default=False, sym_type=SymbolType.OBJECT),
+        ]
+        old = ElfMetadata(symbols=list(base))
+        new_list = list(base)
+        new_list[changed] = _named(
+            "_ZTV3Foo",
+            base[changed].version,
+            base[changed].is_default,
+            sym_type=SymbolType.OBJECT,
+            visibility="protected",
+        )
+    elif kind == "leaked_removed":
+        base = [
+            _named(name, "VER2", sym_type=SymbolType.FUNC, origin_lib="libdep.so"),
+            _named(
+                name,
+                "VER1",
+                is_default=False,
+                sym_type=SymbolType.FUNC,
+                origin_lib="libdep.so",
+            ),
+        ]
+        old = ElfMetadata(symbols=list(base))
+        new_list = [a for i, a in enumerate(base) if i != changed]
+    else:
+        raise AssertionError(kind)
+    return old, ElfMetadata(symbols=new_list)
+
+
+_DETECTOR_CASES = [
+    ("tls_size", "foo", ChangeKind.TLS_VAR_SIZE_CHANGED),
+    ("protected", "foo", ChangeKind.PROTECTED_VISIBILITY_CHANGED),
+    ("common", "foo", ChangeKind.COMMON_SYMBOL_RISK),
+    ("unique", "foo", ChangeKind.SYMBOL_BINDING_BECAME_UNIQUE),
+    ("rtti_visibility", "_ZTV3Foo", ChangeKind.VTABLE_SYMBOL_IDENTITY_CHANGED),
+    ("leaked_removed", "foo", ChangeKind.SYMBOL_LEAKED_FROM_DEPENDENCY_CHANGED),
+]
+
+
+@pytest.mark.parametrize("changed", [0, 1], ids=["non_last", "last"])
+@pytest.mark.parametrize(
+    ("kind", "name", "expected"),
+    _DETECTOR_CASES,
+    ids=[c[0] for c in _DETECTOR_CASES],
+)
+def test_each_alias_reader_reports_a_change_on_any_alias(
+    kind: str, name: str, expected: ChangeKind, changed: int
+) -> None:
+    old, new = _detector_case(kind, name, changed)
+    kinds = _changed_kinds(compare(_snap(old), _snap(new)), name)
+    assert expected in kinds, f"{kind} on alias {changed} not reported: {kinds}"
+
+
+def test_unpairable_aliases_are_recorded_as_declined() -> None:
+    from abicheck.compare.declined_comparisons import declined_scope
+    from abicheck.compare.elf_alias_pairs import pair_elf_aliases
+
+    old = _elf("VER1", "VER2")
+    new = _elf("VER3", "VER4")
+    with declined_scope() as declined:
+        pairs = pair_elf_aliases(old, new)
+    assert pairs == []
+    assert [d.entity for d in declined] == ["foo"]
+
+
+def test_single_version_leftover_pairs_only_with_matching_is_default() -> None:
+    old = ElfMetadata(
+        symbols=[
+            _named("foo", "VER1", is_default=True),
+            _named("foo", "VER2", is_default=True),
+        ]
+    )
+    new = ElfMetadata(
+        symbols=[
+            _named("foo", "VER3", is_default=False),
+            _named("foo", "VER2", is_default=True),
+        ]
+    )
+    # VER1 is the only unmatched old alias and VER3 the only unmatched new one,
+    # but their is_default differs, so they are not paired as a rename.
+    got = {(o.version, n.version) for _, o, n in pair_elf_aliases(old, new)}
+    assert got == {("VER2", "VER2")}
+
+
+@pytest.mark.repo_scan
+def test_no_new_code_reader_of_the_collapsed_symbol_map() -> None:
+    """A new ``.symbol_map`` read would reintroduce the last-wins collapse.
+
+    ``ElfMetadata.symbol_map`` stays for callers that really want one entry per
+    bare name. Every other reader must go through ``symbol_aliases`` or
+    ``pair_elf_aliases``. The allowlist is empty: the only definition is in
+    ``model/elf_facts.py``, which is not a read.
+    """
+    import ast
+
+    root = Path(__file__).resolve().parents[1] / "abicheck"
+    readers: list[str] = []
+    for path in sorted(root.rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Attribute) and node.attr == "symbol_map":
+                readers.append(f"{path.relative_to(root.parent)}:{node.lineno}")
+    assert readers == [], "new symbol_map reader(s); use symbol_aliases:\n" + "\n".join(
+        readers
+    )
+
+
+def test_stored_snapshot_keeps_versions_and_clears_ambiguous_facts(
+    tmp_path: Path,
+) -> None:
+    """Round-trip through the storage codec keeps alias versions.
+
+    Declarations with agreeing aliases keep their binding. A declaration with
+    disagreeing aliases must come back unset, even when the stored snapshot
+    still carries a value from an older last-wins writer.
+    """
+    from abicheck.serialization import load_snapshot
+    from abicheck.storage.snapshot_codec import save_snapshot
+
+    elf = ElfMetadata(
+        symbols=[
+            _named(
+                "foo", "VER2", sym_type=SymbolType.FUNC, binding=SymbolBinding.GLOBAL
+            ),
+            _named(
+                "foo",
+                "VER1",
+                is_default=False,
+                sym_type=SymbolType.FUNC,
+                binding=SymbolBinding.WEAK,
+            ),
+            _named(
+                "bar", "VER1", sym_type=SymbolType.FUNC, binding=SymbolBinding.GLOBAL
+            ),
+        ]
+    )
+    snap = AbiSnapshot(library="libx.so", version="1.0", elf=elf)
+    snap.declarations.functions.extend(
+        [
+            Function(name="foo", mangled="foo", return_type="int"),
+            Function(name="bar", mangled="bar", return_type="int"),
+        ]
+    )
+    snap.declarations.functions[0].elf_binding = SymbolBinding.GLOBAL  # legacy value
+    snap.declarations.functions[1].elf_binding = SymbolBinding.GLOBAL
+
+    path = tmp_path / "snap.json"
+    save_snapshot(snap, path)
+    loaded = load_snapshot(path)
+
+    assert {(s.name, s.version) for s in loaded.elf.symbols} == {
+        ("foo", "VER2"),
+        ("foo", "VER1"),
+        ("bar", "VER1"),
+    }
+    by_name = {f.mangled: f for f in loaded.declarations.functions}
+    assert by_name["foo"].elf_binding is None
+    assert by_name["bar"].elf_binding is SymbolBinding.GLOBAL
+
+
+@pytest.mark.skipif(
+    shutil.which("gcc") is None and shutil.which("cc") is None,
+    reason="needs a C compiler to build symbol-versioned fixtures",
+)
+def test_real_library_alias_change_survives_a_stored_baseline(tmp_path: Path) -> None:
+    from abicheck.dumper import dump
+    from abicheck.serialization import load_snapshot
+    from abicheck.storage.snapshot_codec import save_snapshot
+
+    cc = shutil.which("gcc") or shutil.which("cc")
+    assert cc is not None
+    (tmp_path / "v.map").write_text("VER1 { };\nVER2 { } VER1;\n")
+    old_src = (
+        "__attribute__((weak)) int foo_v1(void){return 1;}\n"
+        "int foo_v2(void){return 2;}\n"
+        '__asm__(".symver foo_v1,foo@VER1");\n'
+        '__asm__(".symver foo_v2,foo@@VER2");\n'
+    )
+    new_src = (
+        "__attribute__((weak)) int foo_v1(void){return 1;}\n"
+        "__attribute__((weak)) int foo_v2(void){return 2;}\n"
+        '__asm__(".symver foo_v1,foo@VER1");\n'
+        '__asm__(".symver foo_v2,foo@@VER2");\n'
+    )
+    old_so = _build(cc, tmp_path, "old", old_src)
+    new_so = _build(cc, tmp_path, "new", new_src)
+    stored = tmp_path / "baseline.json"
+    save_snapshot(dump(old_so, [], version="1"), stored)
+    baseline = load_snapshot(stored)
+    new = dump(new_so, [], version="2")
+    kinds = _changed_kinds(compare(baseline, new), "foo")
+    assert ChangeKind.SYMBOL_BINDING_CHANGED in kinds
