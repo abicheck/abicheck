@@ -200,6 +200,34 @@ EXIT_RELEASE_NOT_COMPARABLE = 16
 EXIT_REMOVED_REQUIRED_LIBRARY = 8
 
 
+def resolve_evidence_over_ordinary(
+    *,
+    code: int = EXIT_EVIDENCE_CONTRACT_ERROR,
+    ordinary: ExitDecision | None = None,
+) -> ExitDecision:
+    """The one owner of the evidence-contract precedence both paths share.
+
+    A pinned evidence contract the run never reached (ADR-064's exit-7 axis)
+    dominates the ordinary gate/coverage/assurance/... fold: the run never
+    established what changed, so no lower axis can be trusted to decide the
+    exit. ``scan``'s evidence branch (:func:`resolve_scan_exit_decision`),
+    native ``compare``'s wrapper, and the directory/package release's evidence
+    branch (:func:`resolve_release_exit_decision`) all call this one function,
+    so the rule cannot drift between them. Only the release's own removed-
+    library ladder, which is mode-dependent, is decided outside it.
+
+    *ordinary* is the caller's already-computed fold (an
+    :class:`ExitDecision` from :func:`~.exit_decision.resolve_exit_decision`),
+    when one exists. Its contributions are carried through for explainability
+    -- they did not decide *code* -- and the result's ``reasons`` names only
+    this axis. ``None`` means nothing was computed (``scan``'s evidence-
+    contract error fires before any ``DiffResult`` exists), so no other
+    contribution is recorded. *code* is the axis's exit number; it must
+    strictly exceed every carried contribution (see :func:`_dominant_decision`).
+    """
+    return _dominant_decision(code, ExitReason.EVIDENCE_CONTRACT_ERROR, prior=ordinary)
+
+
 def resolve_scan_exit_decision(
     *,
     budget_overflow_before_evidence_check: bool = False,
@@ -283,8 +311,8 @@ def resolve_scan_exit_decision(
     if budget_overflow_before_evidence_check:
         return _dominant_decision(budget_overflow_code, ExitReason.BUDGET_OVERFLOW)
     if evidence_contract_error:
-        return _dominant_decision(
-            evidence_contract_error_code, ExitReason.EVIDENCE_CONTRACT_ERROR
+        return resolve_evidence_over_ordinary(
+            code=evidence_contract_error_code, ordinary=prior_decision
         )
     if budget_overflow:
         return _dominant_decision(
@@ -582,16 +610,17 @@ def resolve_release_exit_decision(
                 no_comparison_completed_contribution=no_comparison_completed_contribution,
                 additions_review_contribution=additions_review_contribution,
             )
-        return _dominant_decision(
-            evidence_contract_error_contribution,
-            ExitReason.EVIDENCE_CONTRACT_ERROR,
-            compatibility_contribution=verdict_or_severity_contribution,
-            contract_coverage_contribution=contract_coverage_contribution,
-            analysis_assurance_contribution=analysis_assurance_contribution,
-            operational_error_contribution=operational_error_contribution,
-            incomplete_scope_contribution=incomplete_scope_contribution,
-            no_comparison_completed_contribution=no_comparison_completed_contribution,
-            additions_review_contribution=additions_review_contribution,
+        return resolve_evidence_over_ordinary(
+            code=evidence_contract_error_contribution,
+            ordinary=resolve_exit_decision(
+                compatibility_contribution=verdict_or_severity_contribution,
+                contract_coverage_contribution=contract_coverage_contribution,
+                analysis_assurance_contribution=analysis_assurance_contribution,
+                operational_error_contribution=operational_error_contribution,
+                incomplete_scope_contribution=incomplete_scope_contribution,
+                no_comparison_completed_contribution=no_comparison_completed_contribution,
+                additions_review_contribution=additions_review_contribution,
+            ),
         )
 
     if severity_scheme_active:
