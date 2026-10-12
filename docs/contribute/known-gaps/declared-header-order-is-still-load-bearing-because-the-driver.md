@@ -129,9 +129,4 @@ backends, and reordering existing headers on real dumps still refuses with
 `header_sequence`. A change that makes extraction order-independent must update
 these tests deliberately.
 
-**Decision needed.** [ADR-079](../adr/079-declared-header-order-independent-extraction.md)
-(Proposed) sets out option C (one TU per header) and option D (a
-dependency-ordered aggregate). The recommendation is D, measured first on a
-real multi-header project, because it leaves extraction output unchanged for
-any header set whose declared order already matches its dependency order. No
-behaviour changed in this pass, so the refusal stays.
+**Decision needed.** [ADR-079](../adr/079-declared-header-order-independent-extraction.md) (Proposed, amended 2026-10-12) sets out the chosen design. The declared order stays; a dump proves a canonical order by parsing both orders and comparing the extracted declarations, and records the canonical order as a separate `header_canonical` field only when proven. That field is a stored-contract schema addition and needs the maintainer's acceptance before any code change. Include-graph ordering was measured unsound and is withdrawn.

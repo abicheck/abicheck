@@ -1,11 +1,12 @@
 # ADR-079: Declared Header Order in the Aggregate Driver Translation Unit
 
 **Date:** 2026-10-12
-**Status:** Proposed — not implemented. Decides how the header AST is built when
-the declared order of `-H` headers matters. Blocks the behaviour change that the
-known gap "Declared-header order is still load-bearing because the driver TU is
-sequential" asks for. Governs extraction output, so it must be accepted before
-any code change to the aggregate TU.
+**Status:** Proposed — not implemented. Amended 2026-10-12 to the witness design
+(option 2 below), which changes the stored extraction contract and the comparison
+gate. Acceptance is the maintainer's decision, so no `abicheck/**/*.py` change may
+land until it is Accepted.
+**Decision maker:** pending (maintainer to accept or reject the schema addition in
+"Consequences").
 
 ## Context
 
@@ -13,74 +14,96 @@ The castxml and clang backends parse every declared public header in one
 aggregate translation unit, `#include`-ing them in the caller's declared order
 (`extract/headers/ast_config.py::clang_aggregate_text`,
 `extract/castxml_header_compat.py::castxml_aggregate_text`). A header's macros,
-pragmas and typedefs therefore affect how every later header parses.
-`comparability_fields._declared_header_sequence` records that order in
-`profile_fingerprint`, and the comparison gate refuses a reorder of existing
-headers. Adding or removing headers is handled separately (scope-confirmed
-growth is waived, see `comparability_sequences._header_sequence_is_scope_confirmed_growth`).
+pragmas and typedefs therefore affect how every later header parses, so the
+declared order is part of the extraction. `comparability_fields._declared_header_sequence`
+records it in `profile_fingerprint`, and the gate refuses a reorder of existing
+headers.
 
-The gap asks that reordering existing headers stop refusing. Measured on
-2026-10-12 with two headers, `z_base.h` (defines `Base`) and `a_user.h`
-(declares functions over `Base`, no include), built into one shared library:
+Measured on 2026-10-12 with two headers, `z_base.h` (defines `Base`) and
+`a_user.h` (declares two functions over `Base`, no `#include`), built into one
+shared library:
 
 | Declared order | castxml | clang |
 |---|---|---|
 | `z_base.h, a_user.h` | both functions extracted | both functions extracted |
-| `a_user.h, z_base.h` | L2 header parse fails for `a_user.h`; header excluded with reduced evidence; **zero** declarations | `SnapshotError`: unknown type name `Base` |
-| `a_user.h` alone | — | `SnapshotError` (the same unknown type) |
+| `a_user.h, z_base.h` | zero declarations (reduced evidence) | `SnapshotError` (unknown type `Base`) |
 
-Two facts follow from the measurements:
+`a_user.h` has no `#include` edge to `z_base.h` (`clang -M` confirms it), so
+the include graph cannot order these headers. Two consequences:
 
-1. **Sorting the header set is not output-neutral.** A canonical sorted order
-   (`a_user.h` < `z_base.h`) is the second row, so sorting turns a valid declared
-   order into a failed or empty extraction for any header that depends on an
-   earlier one. Canonicalising the order is rejected.
-2. **Removing the refusal alone is unsound.** Dumping the same unchanged library
-   in both orders and comparing them with the gate bypassed reports
-   `BREAKING`, with `func_removed make_base` and `func_removed base_x`. The
-   refusal is what keeps an order-dependent extraction from becoming a false
-   break.
+1. **Sorting the header set is not output-neutral.** A sorted order can be the
+   failing order (it is here), so it breaks a declared order that works.
+2. **Removing the refusal alone is unsound.** The same unchanged library dumped
+   in both orders, with the gate bypassed, reports `BREAKING` with
+   `func_removed make_base` and `func_removed base_x`.
 
-## Options
+An include-graph ordering (the earlier option D) inherits the first problem: it
+cannot see use-without-include, so it can rewrite a working order into the
+failing one. It is withdrawn.
 
-**A. Keep declared order and the refusal (status quo).** Sound. Every reorder of
-an existing header still refuses, and the user must re-dump under the old order
-to compare.
+## Decision (option 2: witness, with a separately recorded proof)
 
-**B. Canonical (sorted) aggregate order.** Rejected: see fact 1. It converts a
-valid declared order into a failed or empty extraction.
+The extraction stays in declared order. Order-independence is proved per dump,
+not assumed from a rule.
 
-**C. One independently scoped TU per declared header.** Removes declared order
-from the extraction for every header that is self-contained. The cost is that
-a header which depends on another declared header (as `a_user.h` does) no longer
-parses at all. Under clang that is a loud `SnapshotError`; under castxml it
-falls back to reduced evidence. The per-header TU also multiplies parse cost by
-the header count, which the known-gap write-up already records as the reason it
-was not attempted with the disposition fixes. Changes extraction output for
-every project with a dependent header set.
+**At dump time**, for a declared header set `H` with canonical order `C` (headers
+sorted by their root-relative identity):
 
-**D. Dependency-ordered aggregate.** Order the aggregate topologically from the
-header `#include` graph, falling back to declared order for cycles and
-undeclared dependencies. Keeps one TU and the current cost. Order-dependence
-remains wherever the graph is incomplete (an include that is reached through a
-macro, or a dependency outside the declared set), so the refusal cannot be
-removed on this option alone.
+1. If `H` is already in canonical order, the declared extraction *is* the
+   canonical extraction. Nothing is parsed twice.
+2. Otherwise parse `H` (as today) and parse `C`. If the two extractions agree on
+   every declaration and type (the comparison in "Witness equivalence" below), the
+   declared extraction is proven equal to the canonical extraction.
+3. If the orders disagree, or the canonical parse fails, nothing is proven.
 
-## Decision needed
+**Recorded in the snapshot's extraction contract:**
 
-Accept one of C or D, or keep A. Recommendation: **D first**, measured on a real
-multi-header project, because it keeps extraction output identical for every
-header set whose declared order already matches its dependency order. Adopt C
-only if D's residual cases are shown to be common. Whichever is chosen, the
-refusal may be narrowed only for the headers the chosen option proves
-order-independent. The gate's `header_sequence` field must keep refusing every
-other reorder.
+- `profile_fields["header_sequence"]` is unchanged: it is still the declared order.
+  Every existing rule for adding and removing headers keeps working on it, which
+  is what preserves the required behaviour for growth and removal.
+- A new field, `header_canonical`, carries the canonical identity sequence, and is
+  present **only** when step 1 or 2 proved it. Absent means unproven, which is
+  exactly today's behaviour.
+
+**Comparison rule** (added to `comparability.py`'s carve-outs, checked after the
+existing `header_sequence` rules):
+
+- If `header_sequence` differs only by a permutation, the pair is comparable
+  **iff** both sides carry `header_canonical` and the two values are equal. Equal
+  canonical sequences mean both extractions are the canonical extraction of the
+  same header set, so their difference is only the order the user declared.
+- If both sides carry `header_canonical` and the header sets differ, the
+  canonical sequences are checked by the existing insertion/removal waiver
+  (`comparability_sequences.header_sequence_is_scope_confirmed_evolution`), which
+  already accepts a scope-confirmed insertion in sorted order. Canonical sequences
+  are sorted, so this is the case the waiver was written for.
+- If either side lacks `header_canonical`, the rules are exactly today's.
+
+**Witness equivalence.** Two extractions agree when their declaration and type
+sets are equal as multisets of canonical JSON records (sorted keys), with
+provenance fields excluded. A record that carries an order-dependent identifier
+makes the witness fail closed: the result is "unproven", which keeps today's
+refusal. This is a conservative test, and it has a known gap: a macro or pragma
+leak that changes no declaration is invisible to it. That is recorded as a
+residual, not claimed as proven.
 
 ## Consequences
 
-- No default, exit code, schema or public interface changes under this ADR
-  until one option is accepted and implemented.
-- Option C or D changes extraction output for some header sets. That needs a
-  changelog fragment, and `tests/test_driver_tu_declared_order.py` pins the
-  current behaviour and must be updated deliberately with the change.
-- The known-gap entry stays OPEN until an option is implemented.
+- **Schema:** `header_canonical` is a new field in the stored extraction contract.
+  It is optional, so snapshots without it stay valid, but it is a schema addition
+  under the snapshot contract. The maintainer must decide whether that needs a
+  schema version bump (ADR-050 D2 governs the contract's compatibility) before any
+  code is written.
+- **Behaviour:** a reorder of existing headers stops refusing only when both sides
+  proved the canonical order. A declared order that is unsorted and does not
+  prove, or any reorder where either side is unproven, keeps refusing. Adding or
+  removing headers keeps today's rules, because `header_sequence` is unchanged.
+- **Cost:** a second parse only when the declared order is unsorted. The canonical
+  parse goes through the existing header-AST cache, since the aggregate text is
+  part of its key.
+- **Pin tests:** `tests/test_driver_tu_declared_order.py` keeps its extraction pins
+  (declared order still changes the declarations). The refusal test on
+  self-contained headers becomes comparable on proof. A new test covers an unproven
+  pair refusing, and a proven pair with a flipped order comparing equal.
+- **Known gap:** the known-gap entry stays OPEN until this ADR is Accepted and
+  implemented.
