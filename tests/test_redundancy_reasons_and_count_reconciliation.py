@@ -31,8 +31,8 @@ from abicheck.report.redundancy_reasons import (
     redundancy_reason_text,
 )
 from abicheck.report.result_counts import held_out_non_gating
+from abicheck.report.section_notes import compute_redundancy_note
 from abicheck.reporter import to_json
-from abicheck.reporter_markdown import compute_redundancy_note
 from tests.test_export_existence_reconciliation import _run
 
 _EXISTENCE = "folded into their symbol's existence finding"

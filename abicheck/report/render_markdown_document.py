@@ -152,6 +152,12 @@ from .review_digest_document import (
     render_review_digest_document as render_review_digest_document,
 )
 from .review_groups import build_review_groups
+from .section_notes import (
+    compute_out_of_surface_note,
+    compute_redundancy_note,
+    compute_rtti_note,
+    compute_suppression_note,
+)
 from .surface_changes import (
     SurfaceChangeSection,
     compute_surface_changes,
@@ -503,7 +509,7 @@ def build_markdown_document(
         "report_mode": "full",
         "demangle": demangle,
         "headline": asdict(headline_table),
-        "rtti_note": _opt_asdict(rm.compute_rtti_note(breaking)),
+        "rtti_note": _opt_asdict(compute_rtti_note(breaking)),
         "confidence": _opt_asdict(rm.compute_confidence_section(result)),
         "edge_coverage": _opt_asdict(compute_edge_coverage_section(result)),
         "contract_conflicts": _opt_asdict(
@@ -601,9 +607,9 @@ def build_markdown_document(
                 )
             ]
         ),
-        "redundancy_note": _opt_asdict(rm.compute_redundancy_note(result)),
-        "suppression_note": _opt_asdict(rm.compute_suppression_note(result)),
-        "out_of_surface_note": _opt_asdict(rm.compute_out_of_surface_note(result)),
+        "redundancy_note": _opt_asdict(compute_redundancy_note(result)),
+        "suppression_note": _opt_asdict(compute_suppression_note(result)),
+        "out_of_surface_note": _opt_asdict(compute_out_of_surface_note(result)),
         "show_impact": show_impact,
         "impact_table": (
             _opt_asdict(
