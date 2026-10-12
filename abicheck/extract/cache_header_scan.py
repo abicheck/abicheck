@@ -15,9 +15,9 @@
 """The include-tree scan behind every header-parse cache key (ADR-061 ``extract``).
 
 One owner for "which files under this include root can change what the parser
-sees, and in what order do we hash them" -- read by ``dumper_ast_config.
-_cache_key`` (the header-AST cache) and ``snapshot_cache._cache_key``/
-``_hash_include_dir_headers`` (the whole-snapshot cache). Both fold the result
+sees, and in what order do we hash them" -- read by
+``extract.headers.ast_config._cache_key`` (the header-AST cache) and
+``snapshot_cache._cache_key`` (the whole-snapshot cache). Both fold the result
 into a hash *in the returned order*, which is why the ordering contract is
 stated as part of the function's own docstring rather than left implicit in
 whatever ``sorted()`` happened to be called.
@@ -217,8 +217,7 @@ def _cache_header_rel_parts(directory: Path) -> list[tuple[str, ...]]:
             # missing or unreadable *root*) contributes nothing rather than
             # propagating. Verified against ``Path("nope").rglob("*")``, which
             # yields nothing rather than raising; the ``except OSError`` guards
-            # around the callers (``snapshot_cache._hash_include_dir_headers``,
-            # ``snapshot_cache._cache_key``) stay correct either way.
+            # around the caller (``snapshot_cache._cache_key``) stay correct either way.
             continue
         for entry in batch:
             name = entry.name
@@ -241,14 +240,14 @@ def iter_cache_header_files(directory: Path) -> list[Path]:
     Recurses *directory* and returns the files whose suffix is in
     :data:`CACHE_HEADER_SUFFIXES` (the generous superset — includes ``.inl``/
     ``.tcc`` template bodies), sorted for a deterministic cache key. Used by
-    ``dumper._cache_key``'s include-dir mtime walk.
+    ``extract.headers.ast_config._cache_key``'s include-dir mtime walk.
 
     The order is **component-wise**, matching ``sorted(directory.rglob("*"))``
     exactly -- ``PurePath`` compares normcased *parts*, not whole path
     strings, so ``a/b/c.h`` sorts before ``a/b.h`` (``"b" < "b.h"``) where a
     plain string sort would place it after. Consumers fold these paths into a
-    hash in this order (``dumper_ast_config._cache_key``,
-    ``snapshot_cache._hash_include_dir_headers``), so a "simplification" to
+    hash in this order (``extract.headers.ast_config._cache_key``,
+    ``snapshot_cache._cache_key``), so a "simplification" to
     ``sorted(str(p) ...)`` would change every existing cache key on disk
     while looking like a no-op.
     """
