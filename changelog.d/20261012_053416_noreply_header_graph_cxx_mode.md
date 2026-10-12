@@ -7,5 +7,5 @@
   constructs are a non-const reference, a `std::` name, an overload or a
   default argument was parsed as C, failed, and left a declaration-only graph
   (`header_call_graph` degraded). The graph's parse now follows the mode the
-  primary pass resolved; under `--ast-frontend clang` it reuses that pass's
+  primary pass resolved (for `--ast-frontend hybrid`, the mode both legs agree on); under `--ast-frontend clang` it reuses that pass's
   AST instead of running clang a second time.

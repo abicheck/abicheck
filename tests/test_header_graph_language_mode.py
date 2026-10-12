@@ -137,8 +137,21 @@ def _dump(
 
 
 #: castxml (the default) prefetches the graph's parse beside the primary
-#: pass; the clang frontend hands its own AST to the graph instead.
-FRONTENDS = ("castxml", "clang")
+#: pass; the clang frontend hands its own AST to the graph instead; hybrid
+#: merges one leg of each and attaches the graph once, to the merge.
+FRONTENDS = ("castxml", "clang", "hybrid")
+
+
+def _modes(snap: object) -> set[str]:
+    """Every mode the stored snapshot records: the bare key, or a hybrid
+    merge's one key per leg."""
+    tc = snap.ast_toolchain  # type: ignore[attr-defined]
+    keys = (
+        "resolved_lang_mode",
+        "castxml_resolved_lang_mode",
+        "clang_resolved_lang_mode",
+    )
+    return {tc[k] for k in keys if k in tc}
 
 
 @pytest.mark.parametrize("frontend", FRONTENDS)
@@ -148,7 +161,7 @@ def test_a_cxx_header_without_a_recognised_marker_gets_a_full_graph(
 ) -> None:
     _require("g++", "clang++", "castxml")
     snap = _dump(tmp_path, *CXX_HEADERS[name], cxx=True, frontend=frontend)
-    assert snap.ast_toolchain.get("resolved_lang_mode") == "c++", name
+    assert _modes(snap) == {"c++"}, name
     graph = snap.surface_graph
     assert graph is not None
     assert "header_call_graph" not in graph.degraded_passes, (
@@ -171,7 +184,7 @@ def test_a_cxx_header_without_a_recognised_marker_gets_a_full_graph(
 def test_a_c_header_stays_a_c_parse(tmp_path: Path, name: str, frontend: str) -> None:
     _require("gcc", "clang", "castxml")
     snap = _dump(tmp_path, *C_HEADERS[name], cxx=False, frontend=frontend)
-    assert snap.ast_toolchain.get("resolved_lang_mode") == "c", name
+    assert _modes(snap) == {"c"}, name
     graph = snap.surface_graph
     assert graph is not None
     assert "header_call_graph" not in graph.degraded_passes, (

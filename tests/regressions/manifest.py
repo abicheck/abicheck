@@ -1226,7 +1226,7 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
             "even one prefetched before the decision existed) follows the "
             "resolved mode rather than re-deciding from header text."
         ),
-        fixed_by=(1138, 1559),
+        fixed_by=(1138, 1565),
         seed_tests=(
             "tests/test_dumper_language_mode_export_evidence.py",
             "tests/test_crosscheck_language_mode_export_evidence.py",
@@ -1237,7 +1237,7 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
         ),
         public_surfaces=("python-api", "cli"),
         axes={
-            "frontend": ("castxml", "clang"),
+            "frontend": ("castxml", "clang", "hybrid"),
             "declaration_shape": ("function", "ns_function", "extern_c", "variable"),
             "export_mangling": ("itanium", "macho_itanium", "msvc", "bare_c"),
             "excluded_text_source": ("comment", "string_literal", "if_zero_block"),

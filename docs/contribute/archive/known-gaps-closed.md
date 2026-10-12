@@ -18,7 +18,7 @@ gap on the main page instead.
 
 ### The header-graph parse picks C mode for C++ headers without a recognised C++ construct (closed 2026-10-12)
 
-**Status (2026-10-12): CLOSED.** With no explicit `--lang`, the header graph's own clang parse now follows the language mode the primary pass resolved from header text and the binary's mangled exports (`ast_toolchain["resolved_lang_mode"]` -> `clang_header_dump(resolved_lang_mode=...)`); a prefetched parse that ran or failed as C under a C++ decision is re-parsed once. `tests/test_header_graph_language_mode.py` covers four C++ headers with no textual C++ marker and two C controls, under both frontends.
+**Status (2026-10-12): CLOSED.** With no explicit `--lang`, the header graph's own clang parse now follows the language mode the primary pass resolved from header text and the binary's mangled exports (`ast_toolchain["resolved_lang_mode"]`, or a hybrid merge's agreeing legs -> `clang_header_dump(resolved_lang_mode=...)`); a prefetched parse that ran or failed as C under a C++ decision is re-parsed once. `tests/test_header_graph_language_mode.py` covers four C++ headers with no textual C++ marker and two C controls, under the castxml, clang and hybrid frontends.
 
 [Full write-up](../known-gaps/header-graph-parse-picks-c-mode-for-cxx-headers.md)
 

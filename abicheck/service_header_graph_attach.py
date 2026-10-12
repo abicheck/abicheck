@@ -150,13 +150,14 @@ def _attach_header_graph(
     from .buildsource.include_graph import augment_graph_with_includes
     from .buildsource.semantic_fact_folds import HEADER_SEMANTIC_PASSES
     from .dumper import _resolve_clang_bin
+    from .model.header_lang_mode import recorded_lang_mode
     from .model.source_graph_coverage import HEADER_CALL_GRAPH_PASS
 
     cc = compile if compile is not None else CompileContext()
     _is_c = (lang or "").lower() == "c"
-    # The primary pass decided C/C++ with the binary's mangled exports too; a
-    # prefetch had only header text, so a C++ header without a marker ran as C.
-    primary_mode = (snap.ast_toolchain or {}).get("resolved_lang_mode")
+    # The primary pass decided C/C++ with the binary's mangled exports too (a
+    # hybrid snapshot: both legs); a prefetch had header text only, so ran as C.
+    primary_mode = recorded_lang_mode(snap.ast_toolchain)
     acquired = prefetched.result() if prefetched is not None else None
     if acquired is None or (
         not lang and primary_mode == "c++" and acquired.resolved_force_cpp is not True

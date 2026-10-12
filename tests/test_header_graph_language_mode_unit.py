@@ -108,7 +108,7 @@ def _attach_with(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     *,
-    primary_mode: str | None,
+    primary_mode: str | dict[str, str] | None,
     prefetched_cpp: bool | None,
     lang: str | None = None,
 ) -> list[str | None]:
@@ -125,7 +125,9 @@ def _attach_with(
     future: Future[attach.HeaderGraphAst] = Future()
     future.set_result(_acquired(prefetched_cpp, "prefetched"))
     snap = AbiSnapshot(library="l", version="1")
-    if primary_mode is not None:
+    if isinstance(primary_mode, dict):
+        snap.ast_toolchain = primary_mode
+    elif primary_mode is not None:
         snap.ast_toolchain = {"resolved_lang_mode": primary_mode}
     attach._attach_header_graph(
         snap,
@@ -181,6 +183,59 @@ def test_a_prefetch_in_the_wrong_mode_is_reparsed(
         lang=lang,
     )
     assert calls == reparsed_with
+
+
+def _hybrid(castxml: str | None, clang: str | None) -> dict[str, str]:
+    """A hybrid merge's toolchain: each leg's keys prefixed, no bare key."""
+    legs = {"castxml": castxml, "clang": clang}
+    return {f"{leg}_resolved_lang_mode": m for leg, m in legs.items() if m}
+
+
+@pytest.mark.parametrize(
+    ("toolchain", "reparsed_with"),
+    [
+        # Both legs resolved C++: the merge's C prefetch is re-parsed as C++.
+        (_hybrid("c++", "c++"), ["c++"]),
+        # One leg recorded a mode: that is the decision.
+        (_hybrid("c++", None), ["c++"]),
+        (_hybrid("c", "c"), []),
+        # Legs disagree: no decision to follow, the prefetch stands.
+        (_hybrid("c++", "c"), []),
+    ],
+    ids=["agree-cxx", "one-leg", "agree-c", "disagree"],
+)
+def test_a_hybrid_merge_follows_its_legs_decision(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    toolchain: dict[str, str],
+    reparsed_with: list[str | None],
+) -> None:
+    calls = _attach_with(
+        monkeypatch, tmp_path, primary_mode=toolchain, prefetched_cpp=False
+    )
+    assert calls == reparsed_with
+
+
+@pytest.mark.parametrize(
+    ("toolchain", "expected"),
+    [
+        (None, None),
+        ({}, None),
+        ({"resolved_lang_mode": "c"}, "c"),
+        ({"resolved_lang_mode": "heterogeneous"}, "heterogeneous"),
+        # The bare key is the snapshot's own decision; legs never override it.
+        ({"resolved_lang_mode": "c", **_hybrid("c++", "c++")}, "c"),
+        (_hybrid("c++", "c++"), "c++"),
+        (_hybrid(None, "c"), "c"),
+        (_hybrid("c++", "c"), None),
+    ],
+)
+def test_recorded_lang_mode_reads_a_plain_or_hybrid_toolchain(
+    toolchain: dict[str, str] | None, expected: str | None
+) -> None:
+    from abicheck.model.header_lang_mode import recorded_lang_mode
+
+    assert recorded_lang_mode(toolchain) == expected
 
 
 def test_no_prefetch_acquires_once_with_the_primary_decision(
