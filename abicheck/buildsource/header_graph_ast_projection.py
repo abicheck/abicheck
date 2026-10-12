@@ -75,8 +75,11 @@ fallback) stays there -- it touches no AST at all.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+import threading
+from collections.abc import Callable, Hashable, Iterator, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypeVar
 
 from ..model import ScopeOrigin
@@ -417,3 +420,82 @@ def seed_ast_graph(
     # through as a false `PUBLIC_API_INTERNAL_DEPENDENCY_ADDED` the same way
     # the build-integrated pass's own pre-D3-consumer gap did.
     _mark_role_coverage(graph.extractor_passes, HEADER_TYPE_GRAPH_PASS)
+
+
+class HeaderGraphBisectionMemo:
+    """Process-wide memo of which headers a header-graph clang parse loses.
+
+    The header-graph parse runs once per library per side, and libraries of
+    one package usually share one header tree and one compile context. When
+    that whole-tree parse fails, the per-group bisect is the expensive part
+    (~455 s per library on oneDAL), and its answer depends only on the
+    headers, their content and the parse flags -- so every library sharing
+    the key reuses the first one's answer instead of failing the whole-tree
+    parse and bisecting again. :meth:`slot` serializes concurrent callers on
+    one key, so two prefetches of the same tree bisect once, not twice.
+
+    The memo holds the outcome (the headers that failed alone, plus the
+    first line of the original failure for the degraded-graph record), never
+    a projection: a hit still parses the surviving headers, so the graph is
+    built from the same parse a first run makes.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._key_locks: dict[Hashable, threading.Lock] = {}
+        self._outcomes: dict[Hashable, tuple[tuple[Path, ...], str]] = {}
+
+    @contextmanager
+    def slot(self, key: Hashable) -> Iterator[None]:
+        with self._lock:
+            key_lock = self._key_locks.setdefault(key, threading.Lock())
+        with key_lock:
+            yield
+
+    def get(self, key: Hashable) -> tuple[tuple[Path, ...], str] | None:
+        with self._lock:
+            return self._outcomes.get(key)
+
+    def put(self, key: Hashable, failed: Sequence[Path], failure: str) -> None:
+        with self._lock:
+            self._outcomes[key] = (tuple(failed), failure)
+
+    def clear(self) -> None:
+        with self._lock:
+            self._outcomes.clear()
+            self._key_locks.clear()
+
+
+def header_tree_signature(headers: Sequence[Path]) -> tuple[tuple[str, int, int], ...]:
+    """``(path, size, mtime_ns)`` per header, so an edited header misses."""
+    sig: list[tuple[str, int, int]] = []
+    for h in headers:
+        try:
+            st = h.stat()
+            sig.append((str(h), st.st_size, st.st_mtime_ns))
+        except OSError:
+            sig.append((str(h), -1, -1))
+    return tuple(sig)
+
+
+def header_graph_memo_key(
+    headers: Sequence[Path],
+    includes: Sequence[Path],
+    tokens: Sequence[str],
+    hash_dirs: Sequence[Path],
+    lang: str | None,
+    compile_context: object,
+) -> tuple[Any, ...]:
+    """Everything a header-graph parse's outcome depends on."""
+    return (
+        header_tree_signature(headers),
+        tuple(str(p) for p in includes),
+        tuple(tokens),
+        tuple(str(p) for p in hash_dirs),
+        (lang or "").lower(),
+        repr(compile_context),
+    )
+
+
+#: The one memo the header-graph attach uses (tests ``clear()`` it).
+HEADER_GRAPH_BISECTION_MEMO = HeaderGraphBisectionMemo()

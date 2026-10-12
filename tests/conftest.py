@@ -265,6 +265,17 @@ def _isolate_snapshot_cache(tmp_path_factory: pytest.TempPathFactory, monkeypatc
 
 
 @pytest.fixture(autouse=True)
+def _reset_header_graph_bisection_memo():
+    """The header-graph bisection memo is process-wide by design (libraries of
+    one run share it); between tests it would replay one test's fake clang
+    outcome into another that parses the same committed header files."""
+    yield
+    module = sys.modules.get("abicheck.buildsource.header_graph_ast_projection")
+    if module is not None:
+        module.HEADER_GRAPH_BISECTION_MEMO.clear()
+
+
+@pytest.fixture(autouse=True)
 def _side_resolution_in_process(monkeypatch: pytest.MonkeyPatch) -> None:
     """Resolve a comparison's two live-binary sides in this process.
 
