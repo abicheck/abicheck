@@ -45,12 +45,13 @@ from .compare.namespace_move import (  # noqa: F401  (public-surface re-exports)
     emit_namespace_move_batches as emit_namespace_move_batches,
     find_namespace_move_groups as find_namespace_move_groups,
 )
+from .compare.public_surface import should_filter_transitive_runtime_symbols
 from .compare.rename_evidence import all_constituents_elf_bound
 from .demangle import demangle, demangle_batch
 from .detector_registry import registry
 from .diff_helpers import make_change
 from .elf_symbol_filter import is_abi_relevant_elf_symbol
-from .model import AbiSnapshot, Function, is_cxx_runtime_library
+from .model import AbiSnapshot, Function
 from .model.change import Change
 from .model.change_catalog.kinds import ChangeKind
 from .model.elf_facts import SymbolType
@@ -58,19 +59,6 @@ from .model.execution_cache import memoized
 from .model.name_decoration import itanium_structors
 
 _log = logging.getLogger(__name__)
-
-
-def _should_filter_transitive_runtime_symbols(snap: AbiSnapshot) -> bool:
-    """Return True when transitive C++ runtime symbols should be filtered.
-
-    Returns False when ``snap.library`` or the ELF SONAME identifies *snap* as
-    the C++ runtime itself, where runtime-owned symbols are the inspected ABI.
-    """
-    elf = getattr(snap, "elf", None)
-    return not (
-        is_cxx_runtime_library(snap.library)
-        or is_cxx_runtime_library(getattr(elf, "soname", ""))
-    )
 
 
 _FUNC_LIKE_TYPES = frozenset({SymbolType.FUNC, SymbolType.IFUNC, SymbolType.NOTYPE})
@@ -428,7 +416,7 @@ def _fingerprints_from_elf(snap: AbiSnapshot) -> dict[str, FunctionFingerprint]:
     """
     if snap.elf is None:
         return {}
-    filter_transitive_runtime_symbols = _should_filter_transitive_runtime_symbols(snap)
+    filter_transitive_runtime_symbols = should_filter_transitive_runtime_symbols(snap)
     result: dict[str, FunctionFingerprint] = {}
     for sym in snap.elf.symbols:
         if sym.sym_type not in _FUNC_LIKE_TYPES:
@@ -478,10 +466,10 @@ def _diff_fingerprint_renames(old: AbiSnapshot, new: AbiSnapshot) -> list[Change
 
     old_elf = getattr(old, "elf", None)
     new_elf = getattr(new, "elf", None)
-    old_filter_transitive_runtime_symbols = _should_filter_transitive_runtime_symbols(
+    old_filter_transitive_runtime_symbols = should_filter_transitive_runtime_symbols(
         old
     )
-    new_filter_transitive_runtime_symbols = _should_filter_transitive_runtime_symbols(
+    new_filter_transitive_runtime_symbols = should_filter_transitive_runtime_symbols(
         new
     )
     old_exported_funcs = {

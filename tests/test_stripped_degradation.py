@@ -298,7 +298,7 @@ class TestPartialMetadata:
         """A DWARF-deleted export that also leaves .dynsym is one event.
 
         When a function gains ``= delete`` (DW_AT_deleted) and disappears from
-        .dynsym while the DSO still exports other functions, _public_functions
+        .dynsym while the DSO still exports other functions, public_functions
         drops it from new_map (no longer exported). Without deduplication the
         old exported peer would be flagged FUNC_REMOVED *and*
         _detect_newly_deleted_functions would flag FUNC_DELETED_DWARF for the

@@ -407,8 +407,7 @@ class TestReconciliationIsComputedOncePerPair:
     def test_one_reconciliation_per_declaration_kind(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from abicheck import diff_symbols
-        from abicheck.compare import surface_reconcile
+        from abicheck.compare import public_surface, surface_reconcile
 
         calls: list[int] = []
         real = surface_reconcile.reconcile_surfaces
@@ -417,7 +416,7 @@ class TestReconciliationIsComputedOncePerPair:
             calls.append(1)
             return real(*args, **kwargs)  # type: ignore[arg-type]
 
-        monkeypatch.setattr(diff_symbols, "reconcile_surfaces", _counting)
+        monkeypatch.setattr(public_surface, "reconcile_surfaces", _counting)
 
         names = ["_Z3foov", "_Z3barv"]
         compare(_snapshot(names, evidence=True), _snapshot(names, evidence=False))

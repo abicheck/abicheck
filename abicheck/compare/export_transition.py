@@ -94,7 +94,7 @@ def survives_export_narrowing(
 ) -> bool:
     """Whether *decl* survives narrowing a snapshot to its observed exports.
 
-    ``diff_symbols._public_functions`` restricts a snapshot that carries ELF
+    ``public_surface.public_functions`` restricts a snapshot that carries ELF
     symbols to the declarations the binary actually exports, which is right
     for the DWARF-recorded internal subprograms it exists to exclude. Four
     things legitimately escape it, and they belong on the export axis rather
@@ -324,7 +324,7 @@ def surface_exit_is_evidence_gap(
     """Whether *old*'s disappearance from the compared public surface is an
     asymmetry in this run's *evidence*, not an observed change.
 
-    ``diff_symbols._public_functions``/``_public_variables`` build each side's
+    ``public_surface.public_functions``/``public_variables`` build each side's
     public surface from that side's own facts, and one of the facts they read
     -- ``in_public_contract`` (b) -- is only ever *established* by a producer
     the run actually gave a public-header set to. So two snapshots of the same

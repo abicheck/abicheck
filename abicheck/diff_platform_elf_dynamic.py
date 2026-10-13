@@ -31,8 +31,8 @@ from .compare.naming_conventions import (  # noqa: F401 -- re-exported
     ELF_INTERNAL_SYMBOL_NAME,
     _looks_internal as _looks_internal,
 )
+from .compare.public_surface import should_filter_transitive_runtime_symbols
 from .diff_helpers import make_change
-from .diff_symbols import _should_filter_transitive_runtime_symbols
 from .elf_symbol_filter import is_abi_relevant_elf_symbol
 from .model import AbiSnapshot
 from .model.binary_naming import strip_vendor_hash
@@ -47,7 +47,7 @@ def _diff_visibility_leak(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     if not getattr(old, "elf_only_mode", False):
         return []
 
-    filter_transitive_runtime_symbols = _should_filter_transitive_runtime_symbols(old)
+    filter_transitive_runtime_symbols = should_filter_transitive_runtime_symbols(old)
     leaked = [
         f
         for f in old.declarations.functions

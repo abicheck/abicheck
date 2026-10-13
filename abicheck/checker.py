@@ -24,6 +24,7 @@ from . import (
     diff_bit_int,  # noqa: F401 — triggers detector registration
     diff_char8t,  # noqa: F401 — triggers detector registration
     diff_integer_model,  # noqa: F401 — triggers detector registration
+    diff_symbols as _diff_symbols,  # noqa: F401 — triggers detector registration
 )
 from .change_registry import (
     API_BREAK_KINDS as _API_BREAK_KINDS,
@@ -88,9 +89,6 @@ from .diff_stdlib_impl import (  # noqa: F401 — triggers detector registration
     _diff_stdlib_implementation,
 )
 from .diff_sycl import _diff_sycl  # noqa: F401 — triggers detector registration
-from .diff_symbols import (  # noqa: F401 — triggers detector registration
-    _public_functions,
-)
 from .diff_time64 import (  # noqa: F401 — triggers detector registration
     _diff_time64_abi,
 )

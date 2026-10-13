@@ -641,24 +641,13 @@
     },
     {
       "path": "abicheck/diff_symbols.py",
-      "baseline_lines": 1975,
+      "baseline_lines": 1430,
       "target": "compare",
       "rule": "no_growth",
       "disposition": "migrate",
       "category": "legacy_compare_monolith",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Raised 1957 -> 1972: this module's public-surface filters (`_PUBLIC_VIS`, the two `!= Visibility.ELF_ONLY` gates, the removal/visibility-change classification) now each name the question they ask -- `is_abi_visible`, `declaration_confirmed_absent`, `is_export_confirmed_absent` from `model/surface_facts.py` -- rather than matching a conflated enum against a tuple, and removal findings carry the three facts they rest on (`surface_facts=surface_fact_summary(...)`). The new detector this split required did *not* land here: `check_export_lost` (the binary-axis finding for a matched pair whose export vanished while its declaration stayed) lives in the new `compare/export_transition.py`, since it belongs to the export axis rather than the signature axis every other check in this file compares. What remains is call-site wiring plus the import block. Raised again 1972 -> 1975 in the same change (Codex review, P1): `_check_variable` now also folds in the variable half of the export-transition detector, which had to run before that function's several early returns (an unknown \"?\" type on a stripped side says nothing about export presence). The detector itself, both halves, lives in `compare/export_transition.py`; these three lines are the call plus its comment.",
-      "review_by": "2026-11-30"
-    },
-    {
-      "path": "abicheck/diff_symbols_renames.py",
-      "baseline_lines": 834,
-      "target": "compare",
-      "rule": "no_growth",
-      "disposition": "migrate",
-      "category": "legacy_compare_monolith",
-      "owner": "abicheck maintainers",
-      "rationale": "Namespace-move batch-rename detection moved to compare/namespace_move.py; the remainder (prefix-rename detection, ELF fingerprint-based rename detector) still predates ADR-061 and awaits its own behavior-preserving compare-package slice. Raised from 807 for emit_prefix_batch_rename's old_map-aware evidence aggregation (Codex review, Finding C(i)): SYMBOL_RENAMED_BATCH now stamps symbol_binding from the weakest-link ELF-backing of its constituent pairs instead of leaving it unset unconditionally. Raised 854 -> 872 (Codex review, fresh evidence): the evidence-aggregation lookup was matching find_prefix_rename_pairs's demangled Function.name output against old_map's mangled-symbol keys, which vacuously resolved to always-bound regardless of real evidence -- fixed by resolving through a name -> Function reverse index built from old_map's own values, with an ambiguous or unresolved name treated as unbound. Lowered 872 -> 834 (Codex review: growing this no_growth monolith to hold new aggregation logic bypassed the migration rule instead of following it): the reverse-index resolution helper moved to the new leaf module abicheck/compare/rename_evidence.py (all_constituents_elf_bound, parametrized by a per-shape key_fn), which compare/namespace_move.py's own near-duplicate helper now shares too -- this file keeps only the thin call site.",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Lowered 1975 -> 1430 (public-function-surface slice): the surface join (`public_functions`, `reconciled_function_surfaces`/`reconciled_variable_surfaces`, `observed_exports`, `public_variables`, the transitive-runtime filter, `is_extern_c_function`) moved to `compare/public_surface.py`, and `both_header_aware` to `model/snapshot_reliability.py`; detectors and sibling diff modules now import those owners instead of this module's privates. The remaining detectors stay here. Raised 1957 -> 1972: this module's public-surface filters (`_PUBLIC_VIS`, the two `!= Visibility.ELF_ONLY` gates, the removal/visibility-change classification) now each name the question they ask -- `is_abi_visible`, `declaration_confirmed_absent`, `is_export_confirmed_absent` from `model/surface_facts.py` -- rather than matching a conflated enum against a tuple, and removal findings carry the three facts they rest on (`surface_facts=surface_fact_summary(...)`). The new detector this split required did *not* land here: `check_export_lost` (the binary-axis finding for a matched pair whose export vanished while its declaration stayed) lives in the new `compare/export_transition.py`, since it belongs to the export axis rather than the signature axis every other check in this file compares. What remains is call-site wiring plus the import block. Raised again 1972 -> 1975 in the same change (Codex review, P1): `_check_variable` now also folds in the variable half of the export-transition detector, which had to run before that function's several early returns (an unknown \"?\" type on a stripped side says nothing about export presence). The detector itself, both halves, lives in `compare/export_transition.py`; these three lines are the call plus its comment.",
       "review_by": "2026-11-30"
     },
     {
