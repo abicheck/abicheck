@@ -85,8 +85,8 @@ class TestAssuranceOverlayPromotesSourcesRootCompileSourceDebugBlocks:
     reverses the fourth round's own conclusion above): `compile:` is now
     treated like `source:`/`debug:`, not merged from the sources root, for
     `mode: compare`'s own single-sided shape (``SOURCES_MERGE_COMPILE:
-    true``) either. `frontends/cli/commands/compare.py`'s
-    ``_embed_inline_source_side`` already, unconditionally, folds the live
+    true``) either. `frontends/cli/compare_inline_evidence.py`'s
+    ``_side`` already, unconditionally, folds the live
     NEW side's own ``--sources`` tree's ``compile:`` block onto the CLI's
     already-resolved compile context the moment ``--new-sources`` names a
     raw tree -- regardless of whether ``--config``/``build-config`` was
@@ -118,7 +118,7 @@ class TestAssuranceOverlayPromotesSourcesRootCompileSourceDebugBlocks:
         round): with no checkout-root ``.abicheck.yml`` at all, the
         overlay must carry NO ``compile:`` key whatsoever -- neither
         promoted nor merged from the sources-root document, which the CLI's
-        own ``_embed_inline_source_side`` will fold in on its own, exactly
+        own ``compare_inline_evidence._side`` will fold in on its own, exactly
         once, when "Run analysis" actually runs. ``build:``/``sources:``
         stay promoted (unaffected by this fix); ``source:``/``debug:``
         stay absent, as before."""
@@ -381,7 +381,7 @@ class TestAssuranceOverlayPromotesSourcesRootCompileSourceDebugBlocks:
         (fourth) merged the two per-field here, believing this step needed
         to reproduce the real pipeline's SECOND merge stage itself; the CLI
         already performs that second stage, unconditionally, inside
-        ``_embed_inline_source_side`` when "Run analysis" actually runs --
+        ``compare_inline_evidence._side`` when "Run analysis" actually runs --
         this step supplies only the checkout-side FIRST stage now."""
         workspace = make_workspace(tmp_path)
         (workspace / ".abicheck.yml").write_text(
@@ -685,14 +685,14 @@ class TestAssuranceOverlayDoesNotDoubleFoldRepeatSensitiveCompileFlags:
     ``compile:`` merge itself, because forwarding the overlay as an
     explicit ``--config`` would otherwise suppress the second stage.
 
-    It doesn't: ``frontends/cli/commands/compare.py``'s
-    ``_embed_inline_source_side`` performs that second stage
+    It doesn't: ``frontends/cli/compare_inline_evidence.py``'s
+    ``_side`` performs that second stage
     UNCONDITIONALLY whenever ``--new-sources`` names a raw tree, via its
     own ``cli_options.merge_compile_config`` call, regardless of whether
     ``--config``/``build-config`` was explicit. So the old overlay-level
     merge folded the SAME sources-root document's ``compile:`` block in
     TWICE -- once via the overlay's own promotion, once again inside
-    ``_embed_inline_source_side``'s always-running merge -- and a
+    ``compare_inline_evidence._side``'s always-running merge -- and a
     repeat-sensitive raw compiler flag like ``-include shim.h``
     (``compile.options``) ended up applied TWICE in the final resolved
     compiler invocation purely because ``analysis.assurance: complete``
@@ -705,7 +705,7 @@ class TestAssuranceOverlayDoesNotDoubleFoldRepeatSensitiveCompileFlags:
     (exactly as ``TestAssuranceOverlayPromotesSourcesRootCompileSourceDebugBlocks``
     above does), then the REAL ``cli_options.merge_compile_config`` --
     the exact function both ``resolve_compile_context`` (stage 1, the
-    checkout side) and ``_embed_inline_source_side`` (stage 2, the
+    checkout side) and ``compare_inline_evidence._side`` (stage 2, the
     sources-root side) call -- is invoked twice against that generated
     overlay and the sources-root tree, in the identical shape ``compare``'s
     own real dispatch invokes it, so a regression reintroducing the
@@ -758,7 +758,7 @@ class TestAssuranceOverlayDoesNotDoubleFoldRepeatSensitiveCompileFlags:
             overlay_config,
             sources=None,
         )
-        # Stage 2: what `_embed_inline_source_side` does for the live NEW
+        # Stage 2: what `compare_inline_evidence._side` does for the live NEW
         # side -- fold the SAME sources-root tree's own document on top of
         # the already-resolved stage-1 context, unconditionally.
         stage2_ctx, _stage2_includes = merge_compile_config(

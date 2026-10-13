@@ -57,7 +57,6 @@ from ....service_compare_evidence import (
     dump_cli_compile_db_path,
 )
 from ..dump_debug_config import (
-    DumpDebugConfig,
     resolve_dump_compile_context,
     resolve_dump_project_config,
 )
@@ -66,7 +65,7 @@ from ..options.params import (
 )
 
 if TYPE_CHECKING:
-    from ....dry_run_estimate import CompileContext
+    pass
 
 
 # `main` is the Click group this command registers on; importing it here and
@@ -258,14 +257,6 @@ def dump_cmd(
     # and is never populated from the CLI. ADR-074's -D/--define is NOT this: it
     # is a typed macro list (`defines` above), folded by name in the resolver.
     gcc_options: str | None = None,
-    _resolved_compile_context: CompileContext | None = None,
-    _resolved_collect_mode: str | None = None,
-    _resolved_include_labels: dict[Path, str] | None = None,
-    _resolved_lang_explicit: bool | None = None,
-    _resolved_changed_paths: tuple[str, ...] = (),
-    # Phase 7: no CLI spelling; compare's inline embed still forwards these.
-    lang: str | None = None,
-    _resolved_debug: DumpDebugConfig | None = None,
 ) -> None:
     """Dump ABI snapshot of a shared library to JSON.
 
@@ -308,11 +299,11 @@ def dump_cmd(
         click.get_current_context(),
         build_config=build_config,
         sources=sources,
-        lang=lang,
+        lang=None,
         lang_default=LANG_DEFAULT,
         apply_env_toggles=apply_compile_config_env_toggles,
         exclude_headers=tuple(exclude_headers),
-        resolved_debug=_resolved_debug,
+        resolved_debug=None,
         debug_roots=debug_roots,
     )
     config_path, lang, _config_lang_explicit = (
@@ -345,20 +336,10 @@ def dump_cmd(
     # bookkeeping, and threaded through so the primary snapshot pass and the
     # header-graph pass agree on the same explicit-vs-auto-detected decision.
     #
-    # `_resolved_lang_explicit` (Codex review): the private hook
-    # `_embed_inline_source_side`'s nested `ctx.invoke(dump_cmd, ...)` uses to
-    # hand in an explicitness already computed against *compare*'s own real
-    # ctx -- mirrors `_resolved_compile_context`/`_resolved_collect_mode`/
-    # `_resolved_include_labels` immediately above. Phase 7 removed `--lang`
-    # from `dump`'s CLI entirely, so `resolve_dump_lang_and_env_toggles`
-    # above is now the only source of an explicit request (`compile.lang`);
-    # `_resolved_lang_explicit` still wins when the caller (compare's inline
-    # embed) forwards its own already-resolved value.
-    lang_explicit = (
-        _resolved_lang_explicit
-        if _resolved_lang_explicit is not None
-        else _config_lang_explicit
-    )
+    # `--lang` has no CLI spelling on `dump` (Phase 7):
+    # `resolve_dump_lang_and_env_toggles` above is the only source of an
+    # explicit request (`compile.lang`).
+    lang_explicit = _config_lang_explicit
 
     # ADR-050 D3: parsed before the collect/compile-context resolution below so
     # a bad manifest fails fast, and validated against the *raw* CLI values
@@ -375,7 +356,6 @@ def dump_cmd(
     # suppression, and warn on an explicitly-requested deep depth without sources.
     collect_mode, headers = resolve_dump_collect_context(
         depth,
-        _resolved_collect_mode,
         sources,
         build_info,
         headers,
@@ -457,7 +437,6 @@ def dump_cmd(
     # Phase 7: every argument below is now a fixed "nothing explicit" input
     # (compile: config only, no escape hatch, ADR-068 D5 guard #2).
     _cc, includes = resolve_dump_compile_context(
-        _resolved_compile_context,
         gcc_options=gcc_options,
         sysroot=None,
         nostdinc=False,
@@ -610,8 +589,6 @@ def dump_cmd(
         follow_deps=follow_deps,
         search_paths=search_paths,
         ld_library_path=ld_library_path,
-        include_labels=_resolved_include_labels,
-        resolved_collect_mode=_resolved_collect_mode,
         compile_db_filter=compile_db_filter,
         build_config=build_config,
         ownership=dump_ownership_request(config_path),
@@ -647,12 +624,6 @@ def dump_cmd(
             compile_db_filter=compile_db_filter,
             seed_collect_mode=_resolved.collect_mode,
             source_frontend_from_folded_context=True,
-            # `_resolved_changed_paths` (ADR-068 Phase 2c): the changed-path
-            # seed `compare`'s own inline `--sources` embed resolved, so this
-            # nested dump's L4/L5 collection narrows by the same seed the
-            # caller narrowed its collect mode by. `()` -- every direct `dump`
-            # invocation -- is the pre-existing behaviour unchanged.
-            changed_paths=_resolved_changed_paths,
         ),
     )
 

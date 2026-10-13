@@ -30,9 +30,9 @@ default view), and `render_markdown_alternate.py` (Markdown's `--report-mode lea
 Phase 2's Markdown item is closed in full.** JSON, SARIF, JUnit, `--stat`,
 HTML, and every Markdown view (default, review digest, leaf, root-cause)
 construct a `ReportDocument` and project it purely; `reporter_markdown.py`
-builds no report section directly any more — `_to_markdown_leaf`/
-`_to_markdown_root_cause` are thin `build_*`/`render_*` delegates, same
-shape as `to_markdown`'s full-mode branch. Markdown's per-`Change` sections
+renders no report section: its `compute_*` functions return section data
+only, and the per-mode glue (`_to_markdown_root_cause` and friends) lives in
+`dispatch_markdown.py`. Markdown's per-`Change` sections
 need a JSON-safe row `Change` isn't, mirroring HTML's `ChangeRow`:
 `render_markdown_document.py`'s `_change_row`/`_row_contract_tag` family
 resolves `impact_for` compute-side and is shared (imported, not duplicated)
@@ -102,11 +102,11 @@ history); a name with a real surviving caller (e.g. `_abbr_symbol_text`/
 
 ADR-061 Phase 2 item 5 is closed: `scoped_gate.py`'s `apply_scoped_gate`
 folds scoped-gate JSON natively (pre-render), not a render -> parse -> patch
--> render pass. It and both `render_markdown_*.py` document modules reach
-legacy, still-flat `reporter`/`reporter_markdown` via `importlib`, never a
-static import (`modules.yaml`'s `frozen_root_families` forbids a new
-`abicheck/reporter_*.py` sibling, and a static import would close a real
-import-cycle-growth violation).
+-> render pass. Legacy `reporter_markdown` is imported at module level by
+`render_markdown_document.py` and `review_digest_document.py`, and
+function-locally by `scoped_gate.py`; no `importlib` load remains. That is
+acyclic only while `reporter_markdown.py` never imports them back
+(`modules.yaml`'s `frozen_root_families` forbids a new `abicheck/reporter_*.py`).
 
 ## Tests
 

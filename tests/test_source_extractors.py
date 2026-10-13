@@ -100,7 +100,7 @@ def test_build_command_c_uses_gcc_and_no_target_for_msvc() -> None:
     cmd = build_castxml_command(
         _cu(language="C", standard="c11"), Path("a.c"), Path("o.xml")
     )
-    assert "--castxml-cc-gnu" in cmd and "gcc" in cmd
+    assert "--castxml-cc-gnu-c" in cmd and "gcc" in cmd
     assert "-std=c11" in cmd
     # MSVC path: /std: form and no --target flag.
     msvc = build_castxml_command(

@@ -71,7 +71,7 @@ Each entry's status line says what is still open. A PARTIAL entry's write-up als
 
 #### A `kind: bundle` check still cannot run at `depth: headers`: only the *baseline* half of per-member header staging is wired (2026-09-12)
 
-**Status (re-verified 2026-10-09 at `456989f`): OPEN.** actions/check-target/action.yml:1828 still routes bundle old-library to `steps.resolve.outputs.binaries-dir`, not `member-snapshots-dir`. BUNDLE_CHECK_DEPTHS is unchanged (abicheck/buildsource/bundle_member_snapshots.py:18,69). So (a) routing and (b) candidate-side per-member headers are still open.  
+**Status (re-verified 2026-10-12): OPEN, partly narrowed.** actions/check-target/action.yml:1828 still routes bundle old-library to `steps.resolve.outputs.binaries-dir`, not `member-snapshots-dir`. BUNDLE_CHECK_DEPTHS is unchanged (abicheck/buildsource/project_targets.py:151). The fail-early requirement for `depth: headers` on a bundle is met at input validation, with a corrected reason. So (a) routing and (b) candidate-side per-member headers are still open.  
 `false-clean` — Bundle checks can stage per-member *baseline* header snapshots, but the Action still routes the old side to binaries and the candidate side has no per-member headers, so a bundle check cannot run at `depth: headers`. [Full write-up](known-gaps/a-kind-bundle-check-still-cannot-run-at-depth-headers-only-the.md)
 
 #### Header-pass body coverage is one blanket unit, not per body (2026-10-11)
@@ -100,8 +100,8 @@ Each entry's status line says what is still open. A PARTIAL entry's write-up als
 
 #### `advanced_facts_collected` infers "advanced DWARF extraction ran" from its output rather than recording it
 
-**Status (re-verified 2026-10-09 at `456989f`): OPEN.** model/dwarf_facts.py:181 advanced_facts_collected still infers that extraction ran. The comment at line 229 says an explicit 'advanced extraction completed' status is still future work.  
-`false-clean` — Whether advanced DWARF extraction ran is inferred from its output, so a run that produced nothing is indistinguishable from one that never ran. [Full write-up](known-gaps/advanced-facts-collected-infers-advanced-dwarf-extraction-ran.md)
+**Status (2026-10-12): PARTIAL.** The in-memory half is fixed: `AdvancedDwarfMetadata.extraction` is set by the extraction (`completed`, `failed`, `not_run`), `advanced_facts_collected` reads it, and the `advanced_dwarf` detector names a failed or not-run side in its not-evaluated reason. Still open: the status is not persisted, so a stored snapshot reads `unrecorded` and falls back to the inference. Persisting it is a schema change; [ADR-080](adr/080-persisting-the-advanced-dwarf-extraction-status.md) is drafted and Proposed.  
+`false-clean` — The extraction records its own outcome, so a completed empty parse is no longer read as not run. A stored snapshot still carries no outcome and uses the old inference until ADR-080 is decided. [Full write-up](known-gaps/advanced-facts-collected-infers-advanced-dwarf-extraction-ran.md)
 
 #### `Function.elf_binding`/`Variable.elf_binding` (and the pre-existing `elf_visibility` it mirrors) collapse mixed bindings across symbol-versioned aliases sharing one bare name — investigated, not fixed (Codex review, fresh evidence)
 
@@ -163,8 +163,8 @@ Each entry's status line says what is still open. A PARTIAL entry's write-up als
 
 #### A stored snapshot keeps no record of a partial export-table read
 
-**Status (re-verified 2026-10-09 at `456989f`): PARTIAL.** The entry says closed, but it also says the partial read is still open. Fixed: FAILED import reads; tests/unit/workflows/test_failed_consumer_read.py exists. Open: a stored snapshot cannot record a partial export-table read (needs a schema field and ADR).  
-`false-clean` — FAILED import reads are fixed, but a stored snapshot cannot record that its export-table read was partial (needs a schema field and ADR). [Full write-up](known-gaps/a-stored-snapshot-keeps-no-record-of-a-partial-export-table-read.md)
+**Status (2026-10-12): PARTIAL.** Fixed: FAILED import reads; tests/unit/workflows/test_failed_consumer_read.py exists. Open: a stored snapshot cannot record a partial export-table read. [ADR-079](adr/079-partial-export-table-read-in-the-stored-snapshot.md) is drafted and Proposed; the schema field waits on its decision, so the schema stays at v58.  
+`false-clean` — FAILED import reads are fixed. A stored snapshot still cannot record that its export-table read was partial; ADR-079 is drafted (Proposed) and needs a schema decision. [Full write-up](known-gaps/a-stored-snapshot-keeps-no-record-of-a-partial-export-table-read.md)
 
 ### False-positive risk
 
@@ -276,6 +276,21 @@ Each entry's status line says what is still open. A PARTIAL entry's write-up als
 
 **Status (re-verified 2026-10-09 at `456989f`): PARTIAL.** The 'currently ungated' clause is closed: scripts/check_header_graph_perf.py:267 defines MEMORY_METRICS attach_peak_rss_mib/attach_end_rss_mib. The peak from materialising the clang JSON AST is still open, and the empty-list reduction is a recorded negative result.  
 `perf` — A member's attach peak is the clang JSON document plus its parsed tree, not the header graph; the memory metrics are now gated, the peak itself is not reduced. [Full write-up](known-gaps/a-members-peak-memory-is-the-clang-json-ast-not-the-header.md)
+
+#### The cache keys do not hash system include directories, and a file passed as an include is not content-hashed (2026-10-12)
+
+**Status (2026-10-12): OPEN.** Found by reading `snapshot_cache._cache_key` and `extract/headers/ast_config._cache_key`, not by a toolchain-change probe. The whole-snapshot key hashes the caller's `headers`/`includes`, inferred roots and compile-context inputs. It does not hash auto-probed system include directories that are absent from those inputs. The header-AST key folds those resolved `system_includes` as path strings only, not their contents. A header update inside one of those unchanged directories can therefore reuse both caches. Compiler-option `-isystem` roots are outside this gap: their paths are content-hashed through `compile_context_header_inputs` and `extra_hash_dirs`. Separately, the snapshot key's include walk has no file branch: a file passed as an `includes` entry contributes its path but not its contents, because the directory scan returns no entries for a file. Reachable only through a direct `includes=[file]` call; `-include`/`-imacros` files use the content-hashed `files` channel.
+`false-clean` — A warm snapshot or AST entry can survive an edit to a system header, or to a file passed as an include, under an unchanged path.
+
+#### The cache keys walk include trees only over `CACHE_HEADER_SUFFIXES`, so transitive headers with other suffixes never bust them
+
+**Status (2026-10-12): OPEN, by decision.** `header_utils.py` documents the suffix filter as a deliberate choice (#454). Explicit inputs are hashed whatever their suffix; transitive includes under an `-I` directory with an unlisted suffix (`.def`, `.in`, `.cfg`) are not. Widening the walk re-keys every existing entry and adds walk cost on large include trees, so it needs a measured change rather than a one-line edit.
+`false-clean` — An edit to a transitively included `.def`/`.in` under an include root leaves both cache keys unchanged.
+
+#### The whole-snapshot key mixes mtime into identity, which ADR-062 D11 (Proposed) rules out
+
+**Status (2026-10-12): OPEN, blocked on D11.** `snapshot_cache._cache_key` hashes each header's `st_mtime_ns` alongside its content, so a touched but unchanged header discards the entry. ADR-062 D11 says caches key on content and use size and mtime only to avoid recomputing a digest. D11 is Proposed, so the key is unchanged until D11 is accepted or amended. The header-AST key is the other way round: mtime only, no content. The two caches therefore disagree on the same filesystem facts.
+`perf` — Unchanged headers with fresh mtimes miss the whole-snapshot cache. Keeping content but dropping mtime is safe for correctness because content is hashed.
 
 #### Python-level AST walks, the side boundary and the snapshot cache dominate large runs (2026-10-11)
 

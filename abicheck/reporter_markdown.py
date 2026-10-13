@@ -79,7 +79,7 @@ from .report.render_markdown import (
 from .report_correlation import (
     _suppress_dangling_correlation_notes as _suppress_dangling_correlation_notes,
 )
-from .report_summary import build_summary, surface_breakdown
+from .report_summary import build_summary
 from .semver import recommend_release_for_report
 
 _VERDICT_EMOJI = {
@@ -980,52 +980,6 @@ def _fmt_size(size_bytes: int) -> str:
     return f"{size_bytes / (1024 * 1024):.1f} MB"
 
 
-def compute_redundancy_note(result: DiffResult) -> _rmd.RedundancyNote | None:
-    """The structured intermediate for :func:`~abicheck.report.render_markdown.render_redundancy_note`."""
-    if result.redundant_count > 0:
-        from .report.redundancy_reasons import redundancy_reason_text
-
-        return _rmd.RedundancyNote(
-            redundant_count=result.redundant_count,
-            reasons=redundancy_reason_text(result),
-        )
-    return None
-
-
-def compute_out_of_surface_note(result: DiffResult) -> _rmd.OutOfSurfaceNote | None:
-    """The structured intermediate for :func:`~abicheck.report.render_markdown.render_out_of_surface_note`."""
-    if result.scope_to_public_surface and result.out_of_surface_count:
-        return _rmd.OutOfSurfaceNote(count=result.out_of_surface_count)
-    return None
-
-
-def compute_suppression_note(result: DiffResult) -> _rmd.SuppressionNote | None:
-    """The structured intermediate for :func:`~abicheck.report.render_markdown.render_suppression_note`."""
-    if not result.suppression_file_provided:
-        return None
-    entries: list[_rmd.SuppressedEntry] = []
-    if result.suppressed_count != 0:
-        for sc in result.suppressed_changes:
-            contract_text = None
-            relevance = getattr(sc, "contract_relevance", None)
-            if relevance is not None:
-                reason_code = getattr(sc, "contract_reason_code", None)
-                assurance = getattr(sc, "contract_assurance", None)
-                contract_text = _contract_decision_text(
-                    relevance, reason_code, assurance
-                )
-            entries.append(
-                _rmd.SuppressedEntry(
-                    symbol=sc.symbol,
-                    description=sc.description,
-                    contract_text=contract_text,
-                )
-            )
-    return _rmd.SuppressionNote(
-        suppressed_count=result.suppressed_count, entries=tuple(entries)
-    )
-
-
 # ---------------------------------------------------------------------------
 # Severity section helpers
 # ---------------------------------------------------------------------------
@@ -1675,16 +1629,6 @@ def compute_review_digest(
     )
 
 
-def compute_rtti_note(breaking: list[Change]) -> _rmd.RttiNote | None:
-    """The structured intermediate for :func:`~abicheck.report.render_markdown.render_rtti_note`."""
-    bd = surface_breakdown(breaking)
-    if not (bd.rtti or bd.internal):
-        return None
-    return _rmd.RttiNote(
-        rtti=bd.rtti, internal=bd.internal, total=bd.total, public=bd.public
-    )
-
-
 def compute_headline_table(
     result: DiffResult, emoji: str, label: str
 ) -> _rmd.HeadlineTable:
@@ -1835,33 +1779,3 @@ def compute_recommendation_section(result: DiffResult) -> _rmd.RecommendationSec
             None if rec.policy_acceptance is None else rec.policy_acceptance.to_dict()
         ),
     )
-
-
-# ADR-063 T10: `to_markdown`/`to_review_digest`/`_to_markdown_leaf`/
-# `_to_markdown_root_cause`/`_markdown_alternate_rendering` moved to
-# `report/dispatch_markdown.py` (see that module's own docstring for why --
-# this module used to import them back function-locally, which is exactly
-# the cycle this move retires). This lazy `__getattr__` preserves every
-# existing `from abicheck.reporter_markdown import to_markdown`-shaped call
-# site (tests included) without reintroducing a module-level import back to
-# `report/` here -- the same shim shape `cli_buildsource.py`'s own tail uses
-# when a helper moves out from under a re-exporting module (root
-# `AGENTS.md`'s "Moving helpers out of a module that re-exports them?").
-_DISPATCH_MARKDOWN_NAMES = frozenset(
-    {
-        "to_markdown",
-        "to_review_digest",
-        "_to_markdown_root_cause",
-        "_markdown_alternate_rendering",
-    }
-)
-
-
-def __getattr__(name: str) -> Any:
-    if name in _DISPATCH_MARKDOWN_NAMES:
-        import importlib
-
-        return getattr(
-            importlib.import_module(".report.dispatch_markdown", __package__), name
-        )
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

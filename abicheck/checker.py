@@ -33,7 +33,10 @@ from .change_registry import (
 )
 from .checker_types import DiffResult
 from .comparability import check_contracts_comparable, comparability_outcome
-from .compare.debug_layout_view import debug_layout_view as _debug_layout_view
+from .compare.debug_layout_view import (
+    advanced_dwarf_support,
+    debug_layout_view as _debug_layout_view,
+)
 from .compare.edge_query import edge_coverage_report
 from .compare.finding_redundancy import (
     ROOT_TYPE_CHANGE_KINDS as _ROOT_TYPE_CHANGE_KINDS,
@@ -452,14 +455,7 @@ def _apply_pattern_verdicts_step(
     return kept, current_verdict, pattern_modulations
 
 
-@_detector_registry.detector(
-    "advanced_dwarf",
-    requires_support=lambda o, n: (
-        _debug_layout_view(o).advanced_collected
-        and _debug_layout_view(n).advanced_collected,
-        "missing DWARF advanced metadata",
-    ),
-)
+@_detector_registry.detector("advanced_dwarf", requires_support=advanced_dwarf_support)
 def _diff_advanced_dwarf(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """Sprint 4: calling convention, packing, toolchain flag drift.
 
