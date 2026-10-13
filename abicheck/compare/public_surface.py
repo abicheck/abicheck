@@ -25,8 +25,10 @@ keeps a declaration which left one side's surface only because that run
 established less contract evidence from reading as a removal.
 
 Owning the join here, rather than in ``diff_symbols``, is what lets the
-sibling diff modules (``diff_types``, ``diff_templates``, ``diff_platform``)
-use the same surface without importing another detector's private helpers.
+sibling diff modules (``diff_types``, ``diff_templates``, and, once its split
+lands, ``diff_platform``) use the same surface without importing another
+detector's private helpers. ``diff_platform`` still relies on aliases in
+``diff_symbols`` until then.
 """
 
 from __future__ import annotations

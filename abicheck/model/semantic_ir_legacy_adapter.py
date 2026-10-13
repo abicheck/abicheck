@@ -513,8 +513,8 @@ def legacy_function_ir(functions: Mapping[str, Function]) -> SemanticIR:
     own module docstring for the full account of why this cohort's scope is
     narrower than typedefs'/constants'.
 
-    *functions* is the comparison's own already-selected map (``diff_symbols.
-    public_functions``'s ELF-narrowed result) -- not one this function
+    *functions* is the comparison's own already-selected map (
+    ``abicheck.compare.public_surface.public_functions``'s ELF-narrowed result) -- not one this function
     computes itself: ``SemanticIR`` carries no ELF export-table evidence at
     all, so which functions are public/exported is, as for typedefs'
     alias-map selection, entirely the caller's decision.
