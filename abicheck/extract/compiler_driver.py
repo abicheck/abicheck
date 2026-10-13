@@ -109,7 +109,7 @@ def is_intel_sycl_driver(path: str) -> bool:
     real clang 17/18 install). Deliberately narrower than
     :func:`is_clang_family_binary` (which also matches plain
     "clang"/"clang++") — widening this to that check would make
-    :func:`abicheck.dumper.needs_sycl_host_only` append a flag stock clang
+    :func:`needs_sycl_host_only` append a flag stock clang
     cannot parse, breaking a ``--compiler clang`` + ``-fsycl`` combination
     that previously worked.
     """
@@ -265,7 +265,7 @@ def needs_sycl_host_only(cc_bin: str, tokens: list[str]) -> bool:
     single host-side pass, which is what actually links into the scanned
     binary. Skipped when the caller already pinned a single pass explicitly
     (``-fsycl-host-only``/``-fsycl-device-only``). Also skipped by the one
-    caller (:func:`abicheck.dumper._build_clang_header_command`) when an
+    caller (:func:`abicheck.extract.headers.ast_config._build_clang_header_command`) when an
     explicit multi-context request (``dpcpp_multi_context``, ADR-050 D5) is
     in play -- that request must never be silently collapsed back to a
     single pass by this function's own default-case behavior.
