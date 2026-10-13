@@ -61,6 +61,16 @@ renders with a mutation between them (Codex review). `findings_by_change_id`
 indexes by `id(change)` for O(1) lookup within one render only (`Change` has
 no `__hash__`).
 
+`view.py` is the shared presentation view every format reads its findings
+from: the `--show-only` filter (`apply_show_only`, `ShowOnlyFilter`), the
+display pipeline a renderer runs once (`display_changes`, which filters and
+then clears dangling `correlated_change_kind` references), the stable
+`finding_id`, and root-cause keying (`root_cause_key_and_display`,
+`group_changes_by_root_cause`, `root_cause_id_for_key`). A renderer imports
+these from `view.py`, never from `reporter.py`/`reporter_markdown.py`
+(retired private names are not re-exported). `view.py` decides presentation
+only: a hidden finding keeps its disposition in the ledger (ADR-067 D2).
+
 `envelope.py` is gap C's closure and the whole-*render* counterpart to `document.py`'s whole-report value: `ReportEnvelope` holds one completed evaluation's finalized decisions — the shared `ReportDocument`, the severity `GateDecision`, one `ReportFinding` per `Change` (`scoped_only_changes` included) — plus presentation-only `RenderOptions`. `report.build.build_report_envelope` builds it once above format selection (there, not here, so `envelope.py` stays a leaf: an `envelope -> build` edge closes a real cycle through `reporter.py`); `service_render.render_envelope(fmt, envelope)` projects it. A renderer takes an `envelope` parameter and *reads* decisions from it — `resolved_gate`/`resolved_document` keep a direct Tier-2/test caller without one working as before. **Never resolve a gate, a verdict, or a document inside a renderer handed an envelope.** `sarif_invocation.py` (SARIF's published invocation exit code — an exit decision, not a rendering choice) and `junit_disposition.py` moved out of the legacy monoliths for this; read `envelope.py`'s own docstring before adding a projection.
 
 `release_document.py` is the release (directory/package) counterpart: `build_release_report` takes a live `ReleaseEvaluation` or a stored `StoredReleaseEvaluation` to one typed view, and `render_release_report.py` projects every release format from it. Add a release field or format there, never in the CLI helpers. The frontend resolves the effective-config receipt before calling, because it reloads policy files.

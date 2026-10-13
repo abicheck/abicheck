@@ -36,11 +36,8 @@ import pytest
 from abicheck.change_registry import REGISTRY
 from abicheck.model.change_catalog.kinds import ChangeKind
 from abicheck.model.change_catalog.registry import ChangeEntity, ChangeOperation
-from abicheck.reporter_markdown import (
-    ShowOnlyFilter,
-    entity_for_change,
-    entity_for_kind,
-)
+from abicheck.report.view import ShowOnlyFilter
+from abicheck.reporter_markdown import entity_for_change, entity_for_kind
 
 
 class TestBaseClassLayoutFindingsAreTypeEntities:

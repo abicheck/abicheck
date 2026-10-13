@@ -36,8 +36,8 @@ from abicheck.report.change_operation import (
     ACTION_TOKEN_OPERATIONS,
     operation_for_change,
 )
+from abicheck.report.view import ShowOnlyFilter
 from abicheck.reporter import to_json
-from abicheck.reporter_markdown import ShowOnlyFilter
 from abicheck.schemas import load_compare_report_schema
 from tests.schema_validation import validate_instance
 

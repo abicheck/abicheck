@@ -268,10 +268,8 @@ def _fold_findings_into_changes(
     summary counts are recomputed afterwards from the now-complete array.
     """
     from ..model.evidence_status import EvidenceStatus, ReachabilityState
-    from ..reporter_markdown import (
-        apply_show_only,
-        root_cause_evidence_lookup_for_changes,
-    )
+    from ..reporter_markdown import root_cause_evidence_lookup_for_changes
+    from .view import apply_show_only
 
     _add_entries_to_root_causes = helpers.add_entries_to_root_causes
     _change_to_dict = helpers.change_to_dict

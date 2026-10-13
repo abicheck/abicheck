@@ -131,8 +131,6 @@ def build_report_document(
         _build_json_base,
         _build_severity_json,
         _displayed_with_scoped_only,
-        _suppress_dangling_correlation_notes,
-        apply_show_only,
         prewarm_change_demangling,
     )
     from ..reporter_contract_blocks import (
@@ -150,17 +148,18 @@ def build_report_document(
     from .result_counts import compute_result_counts
     from .review_groups import build_review_groups
     from .surface_changes import add_surface_changes as _add_surface_changes
+    from .view import display_changes
 
     changes = list(result.changes)
     if show_only:
-        changes = apply_show_only(
+        changes = display_changes(
             changes,
             show_only,
             policy=result.policy,
             kind_sets=effective_kind_sets(result),
             policy_file=result.policy_file,
+            today=None,
         )
-        changes = _suppress_dangling_correlation_notes(changes)
 
     d = _build_json_base(result)
     _add_abi_surface_breakdown(d, result)
@@ -567,7 +566,7 @@ def build_report_envelope(
     ``today`` is resolved exactly once here and threaded into every
     verdict resolution below, including the envelope's own later fallback
     (:meth:`ReportEnvelope._resolve`, used for a display-only ``Change``
-    copy `report_correlation._suppress_dangling_correlation_notes` hands a
+    copy `report_correlation.suppress_dangling_correlation_notes` hands a
     renderer under ``--show-only``): a dated ``PolicyFile.reclassify``
     rule's expiry is checked against ``today``, so a render that happens
     after the rule expires but reads an envelope built before it must still

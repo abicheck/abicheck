@@ -163,6 +163,7 @@ from .surface_changes import (
     compute_surface_changes,
     render_surface_changes_section,
 )
+from .view import display_changes, render_show_only_cli_hint
 
 
 def _reporter_markdown() -> Any:
@@ -192,24 +193,22 @@ def _resolve_displayed_changes(
     from it. *today*: an envelope's ``resolved_today`` (ADR-061 gap C,
     Codex, fresh).
     """
-    rm = _reporter_markdown()
     changes = list(result.changes)
     show_only_note: dict[str, Any] | None = None
     if show_only:
-        changes = rm.apply_show_only(
+        changes = display_changes(
             changes,
             show_only,
-            result.policy,
-            effective_kind_sets(result),
-            result.policy_file,
-            today,
+            policy=result.policy,
+            kind_sets=effective_kind_sets(result),
+            policy_file=result.policy_file,
+            today=today,
         )
         show_only_note = {
             "show_only": show_only,
             "shown": len(changes),
             "total": len(result.changes),
         }
-        changes = rm._suppress_dangling_correlation_notes(changes)
     return changes, show_only_note
 
 
@@ -758,7 +757,7 @@ def render_markdown_document(doc: ReportDocument) -> str:
         # groups as repeated view options") -- render each `;`-joined
         # internal group as its own `--view show=...` token rather than
         # echoing the raw internal separator into a suggested invocation.
-        cli_hint = _reporter_markdown().render_show_only_cli_hint(note["show_only"])
+        cli_hint = render_show_only_cli_hint(note["show_only"])
         lines.append(
             f"> Filtered by: `{cli_hint}` "
             f"({note['shown']} of {note['total']} changes shown)"

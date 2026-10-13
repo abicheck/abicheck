@@ -56,11 +56,10 @@ from abicheck.frontends.cli.options.view import (
 )
 from abicheck.model.change_catalog.kinds import ChangeKind
 from abicheck.model.change_catalog.registry import ChangeEntity, ChangeOperation
+from abicheck.report.view import SHOW_ONLY_GROUP_SEP, ShowOnlyFilter
 from abicheck.reporter_markdown import (
     ACTION_TOKEN_OPERATIONS,
     ELEMENT_TOKEN_ENTITIES,
-    SHOW_ONLY_GROUP_SEP,
-    ShowOnlyFilter,
     entity_for_kind,
     operation_for_kind,
 )

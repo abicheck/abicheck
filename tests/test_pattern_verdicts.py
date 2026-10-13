@@ -863,7 +863,7 @@ def test_cross_output_completeness_for_demoted_finding() -> None:
     # 5c. Element filter (--show-only) must not drop ADR-027 kinds that don't
     # match the prefix table (Codex P2). A type-level invariant break is kept
     # under --show-only=types.
-    from abicheck.reporter import ShowOnlyFilter
+    from abicheck.report.view import ShowOnlyFilter
 
     inv = Change(
         kind=ChangeKind.OPAQUE_INVARIANT_BROKEN, symbol="Ctx", description="lost"

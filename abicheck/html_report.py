@@ -481,10 +481,10 @@ def build_html_document(
     # Apply show_only filter (display-only, does not affect metrics)
     if show_only:
         from .checker import Change as _Change
-        from .reporter import _suppress_dangling_correlation_notes, apply_show_only
+        from .report.view import display_changes as _display_changes
 
         typed_changes = [c for c in all_changes if isinstance(c, _Change)]
-        filtered = apply_show_only(
+        filtered = _display_changes(
             typed_changes,
             show_only,
             policy=result.policy,
@@ -494,7 +494,6 @@ def build_html_document(
             policy_file=getattr(result, "policy_file", None),
             today=None if envelope is None else envelope.resolved_today,
         )
-        filtered = _suppress_dangling_correlation_notes(filtered)
         display_changes: list[object] = list(filtered)
     else:
         display_changes = all_changes
@@ -523,7 +522,7 @@ def build_html_document(
         # render (over the same `result.changes`); resolve them here only for
         # a direct caller that supplied none. Read through `findings_for`
         # rather than the bare `.findings` tuple: `display_changes` can hold
-        # `_suppress_dangling_correlation_notes`' own shallow `Change` copies
+        # `suppress_dangling_correlation_notes`' own shallow `Change` copies
         # (a `--show-only` render with a dangling `correlated_change_kind`),
         # which have no entry in an id-keyed index built from `.findings`
         # alone -- `findings_for` is exactly the primitive that resolves

@@ -47,7 +47,7 @@ already-computed canonical result to render, and in what shape:
   Unchanged within one occurrence (AND across dimensions, OR within a
   dimension via comma); repeatable, and each ``show=`` occurrence is its own
   AND-group, ORed against every other occurrence's group -- joined
-  internally with ``reporter_markdown.SHOW_ONLY_GROUP_SEP`` (``";"``), never
+  internally with ``report.view.SHOW_ONLY_GROUP_SEP`` (``";"``), never
   comma: joining with comma would instead AND two different-dimension
   groups together, or widen the OR *within* one dimension for two
   same-dimension groups, either way losing "match either group"
@@ -156,7 +156,7 @@ def parse_view_tokens(tokens: tuple[str, ...]) -> dict[str, object]:
     # two same-dimension groups) rather than OR the groups themselves
     # together, silently breaking the documented "repeat to OR further
     # groups" contract (CodeRabbit/Codex review, PR #1154).
-    from ....reporter_markdown import SHOW_ONLY_GROUP_SEP, parse_show_only_groups
+    from ....report.view import SHOW_ONLY_GROUP_SEP, parse_show_only_groups
 
     show_only = SHOW_ONLY_GROUP_SEP.join(show_only_parts) if show_only_parts else None
     if show_only is not None:
