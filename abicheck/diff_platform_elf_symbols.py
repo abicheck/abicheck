@@ -27,6 +27,7 @@ import re
 from typing import Any
 
 from .compare.elf_alias_pairs import pair_elf_aliases
+from .compare.elf_capture_identity import both_captured_elf_identity
 from .diff_helpers import make_change
 from .diff_versioning import (  # noqa: F401 — re-exported for existing callers
     _UNPARSEABLE_VERSION as _UNPARSEABLE_VERSION,
@@ -729,9 +730,7 @@ def _diff_elf_import_set(old_elf: Any, new_elf: Any) -> list[Change]:
     or dropping the last one must still report; only a header-only or legacy
     baseline (no parsed identity) is skipped.
     """
-    from .diff_platform_elf_dynamic import _both_captured_elf_identity
-
-    if not _both_captured_elf_identity(old_elf, new_elf):
+    if not both_captured_elf_identity(old_elf, new_elf):
         return []
     old_imports = getattr(old_elf, "imports", None) or []
     new_imports = getattr(new_elf, "imports", None) or []
@@ -804,9 +803,7 @@ def _diff_allocator_replacement(old_elf: Any, new_elf: Any) -> list[Change]:
     symbol lists being non-empty — an export table that is empty on one side
     is still evidence about which allocator symbols it (doesn't) export.
     """
-    from .diff_platform_elf_dynamic import _both_captured_elf_identity
-
-    if not _both_captured_elf_identity(old_elf, new_elf):
+    if not both_captured_elf_identity(old_elf, new_elf):
         return []
     old_syms = getattr(old_elf, "symbols", None) or []
     new_syms = getattr(new_elf, "symbols", None) or []

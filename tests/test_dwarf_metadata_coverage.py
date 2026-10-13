@@ -540,7 +540,7 @@ class TestStructWithUnreadableAnonymousMember:
         assert "S" not in meta.structs
 
     def test_unrecorded_side_produces_no_field_finding(self):
-        from abicheck.diff_platform import _diff_struct_layouts
+        from abicheck.compare.type_layout_diff import diff_struct_layouts
 
         full = StructLayout(
             name="S",
@@ -549,7 +549,7 @@ class TestStructWithUnreadableAnonymousMember:
         )
         old = DwarfMetadata(structs={"S": full}, has_dwarf=True)
         new = DwarfMetadata(structs={}, has_dwarf=True)  # S's layout unreadable on NEW
-        assert _diff_struct_layouts(old, new) == []
+        assert diff_struct_layouts(old, new) == []
 
 
 # ── _compute_type_info branches ───────────────────────────────────────

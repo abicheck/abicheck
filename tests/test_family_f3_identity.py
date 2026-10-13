@@ -549,6 +549,7 @@ COVERAGE: dict[str, str] = {
     "abicheck.model.export_index:pe_decoration_aliases": "x86 PE codec (the join's alias table)",
     "abicheck.model.name_decoration.elf_version:unversioned_name": "ELF version codec",
     "abicheck.model.symbol_leaf:symbol_leaf_identifier": "ELF version codec",
+    "abicheck.compare.elf_capture_identity:both_captured_elf_identity": "G23 ELF capture gate (tests/test_g23_elf_facts.py legacy-baseline cases)",
     "abicheck.model.source_graph:function_decl_identity": "string probe x path transforms",
     "abicheck.model.name_decoration.macho:decode_itanium": "Mach-O codec; mutant M2",
     "abicheck.extract.headers.clang.context:strip_darwin_itanium_decoration": "Mach-O codec",
@@ -629,6 +630,9 @@ def test_covered_rows_are_really_registered_in_the_catalogue() -> None:
             "abicheck.model.special_member_identity:special_member_variant_aliases",
             "abicheck.compare.finding_identity.symbols:resolve_variable_identity",
             "abicheck.compare.finding_identity.change:resolve_change_identity",
+            # A capture-state gate, not a catalogue transform: exercised by the
+            # G23 ELF legacy-baseline cases in tests/test_g23_elf_facts.py.
+            "abicheck.compare.elf_capture_identity:both_captured_elf_identity",
         }
         | {
             f"abicheck.model.identity:entity_id_for_{k}"

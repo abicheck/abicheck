@@ -15,7 +15,7 @@
 
 """An enum change reported independently by the L2 header-tier detector
 (``diff_types._diff_enums``, keyed by ``EnumType.name`` -- deliberately
-bare) and the L1 DWARF-tier detector (``diff_platform._diff_enum_layouts``,
+bare) and the L1 DWARF-tier detector (``abicheck.compare.type_layout_diff.diff_enum_layouts``,
 keyed by the DWARF dict's own fully-qualified name) must collapse to one
 finding, not two, once both tiers observe the same enum.
 
@@ -336,7 +336,7 @@ class TestEndToEndOnlyOneFindingSurvives:
         self,
     ) -> None:
         """Unlike the member-level kinds above, ``ENUM_UNDERLYING_SIZE_CHANGED``
-        is emitted ONLY by the DWARF/L1 tier (`diff_platform._diff_enum_layouts`)
+        is emitted ONLY by the DWARF/L1 tier (`abicheck.compare.type_layout_diff.diff_enum_layouts`)
         -- `diff_types._diff_enums` (L2/header) never computes or reports an
         underlying-type byte-size change at all (CodeRabbit review, fresh
         evidence: confirmed by reading `_diff_enums`, which has no

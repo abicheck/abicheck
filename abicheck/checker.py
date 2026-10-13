@@ -42,6 +42,9 @@ from .compare.finding_redundancy import (
     ROOT_TYPE_CHANGE_KINDS as _ROOT_TYPE_CHANGE_KINDS,
 )
 from .compare.surface_reconcile import releases_reconciliation
+from .compare.type_layout_diff import (
+    diff_struct_layouts,  # noqa: F401 — tests import it from here
+)
 from .confidence import _compute_confidence
 from .contract_pipeline import (
     ContractEvaluationStage,
@@ -72,7 +75,6 @@ from .diff_platform import (  # noqa: F401
     _diff_leaked_dependency_symbols,
     _diff_macho,
     _diff_pe,
-    _diff_struct_layouts,
     _diff_template_inner_types,
     _extract_template_args,
     _template_outer,
