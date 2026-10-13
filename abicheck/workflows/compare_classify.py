@@ -35,11 +35,6 @@ What the module takes is everything a front end may legitimately decide:
   RequestPolicyInputs` -- the typed route resolves them from the request
   (``resolve_request_policy_inputs``); the CLI from its ADR-049 configuration
   step, which reads Click parameter sources and the project config;
-* :class:`ComparedOperands` and *collect_mode*, which default to what the
-  request says. The CLI overrides both because it still collects raw
-  ``--old/new-sources``/``--build-info`` evidence inline *before* building
-  the request (rewriting each operand to a temporary snapshot), so the
-  request alone no longer names the user's operands or the collect mode;
 * *on_output*, the sink for the build-source evidence report (``None``: no
   output, the engine default).
 
@@ -108,7 +103,7 @@ class ComparedOperands:
     *old_live*/*new_live* decide whether the ``--depth build|source`` floor
     applies to a side (``input_resolution.side_is_live``);
     *candidate_name* names the candidate in an ``--abi3`` precondition
-    message (``None``: the snapshot's library name).
+    message: the candidate operand's file name, on every route.
     """
 
     old_path: Path
@@ -127,6 +122,7 @@ class ComparedOperands:
             new_path=required_path(request.new, "new"),
             old_live=input_spec_is_live(request.old),
             new_live=input_spec_is_live(request.new),
+            candidate_name=required_path(request.new, "new").name,
         )
 
 
@@ -151,8 +147,6 @@ def classify_resolved_pair(
     pair: ResolvedComparePair,
     policy: RequestPolicyInputs,
     *,
-    operands: ComparedOperands | None = None,
-    collect_mode: str | None = None,
     on_output: Callable[[str], None] | None = None,
 ) -> ClassifiedPair:
     """Classify *pair* under *request* and *policy*; attach the pair's report fields.
@@ -180,8 +174,9 @@ def classify_resolved_pair(
     from .compare_policy import compare_snapshots
     from .pair_evidence import fold_pair_evidence, load_probe_matrix_changes
 
-    if operands is None:
-        operands = ComparedOperands.from_request(request)
+    # The operands as the request names them -- every route builds its
+    # request from the user's real operands, so nothing overrides these.
+    operands = ComparedOperands.from_request(request)
     # A stored-snapshot-only pair may do no extraction work at all, so nothing
     # below would otherwise consult an already-expired `budget_s` (PR #1178).
     check_deadline()
@@ -191,9 +186,7 @@ def classify_resolved_pair(
     folded = fold_pair_evidence(
         old,
         new,
-        collect_mode=(
-            collect_mode if collect_mode is not None else pair.old_evidence.collect_mode
-        ),
+        collect_mode=pair.old_evidence.collect_mode,
         extra_changes=load_probe_matrix_changes(
             request.old_probe_matrix, request.new_probe_matrix
         ),

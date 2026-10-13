@@ -179,7 +179,8 @@ class TestHundredSuppressedRemovals:
         dropping the counts is not."""
         from abicheck import reporter
         from abicheck.pr_comment import build_model, render_comment
-        from abicheck.reporter_markdown import to_review_digest, to_stat
+        from abicheck.report.dispatch_markdown import to_review_digest
+        from abicheck.reporter_markdown import to_stat
 
         one_line = to_stat(result)
         assert "100 detected" in one_line and "0 gating" in one_line
@@ -227,7 +228,7 @@ class TestHundredSuppressedRemovals:
 
         # Every Markdown mode, not only the digest: `--report-mode` is a
         # presentation choice, and D3's counts are not presentation.
-        from abicheck.reporter_markdown import (
+        from abicheck.report.dispatch_markdown import (
             _to_markdown_root_cause,
             to_markdown,
         )

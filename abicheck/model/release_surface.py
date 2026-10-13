@@ -58,7 +58,7 @@ from dataclasses import KW_ONLY, dataclass, replace
 #: Bumped whenever :meth:`SurfaceAcquisitionIdentity.key` changes what it
 #: folds in or how. Part of the key itself, so an abicheck upgrade that
 #: widens the identity can never reuse a surface acquired under the
-#: narrower one -- the same discipline ``dumper_ast_config._cache_key``'s
+#: narrower one -- the same discipline ``extract.headers.ast_config._cache_key``'s
 #: own ``_CLANG_CACHE_SCHEMA_VERSION`` applies to the AST cache.
 SURFACE_ACQUISITION_IDENTITY_VERSION = 2
 

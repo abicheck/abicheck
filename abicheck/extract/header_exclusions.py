@@ -131,7 +131,7 @@ def apply_header_exclusions_to_inputs(
     without the flag passes its header list through untouched and behaves
     byte-for-byte as before, directory entries included. This matters beyond
     tidiness: the resulting list is hashed into both the AST cache key
-    (``dumper_ast_config._cache_key``) and the whole-snapshot cache key
+    (``extract.headers.ast_config._cache_key``) and the whole-snapshot cache key
     (``snapshot_cache._cache_key``), so unconditionally expanding here would
     invalidate every warm cache entry in every existing checkout for no
     behavioural gain. Conversely, that same hashing is what makes the

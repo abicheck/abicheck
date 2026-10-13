@@ -1181,9 +1181,9 @@ EVIDENCE_BUG_CLASSES: tuple[BugClass, ...] = (
                     "The witness compares extracted declarations only. A macro "
                     "or pragma leak that changes no declaration is not visible "
                     "to it, so a reorder across such a leak is accepted when it "
-                    "should not be. Recorded in ADR-079, not claimed as proven."
+                    "should not be. Recorded in ADR-081, not claimed as proven."
                 ),
-                reference="docs/contribute/adr/079-declared-header-order-independent-extraction.md",
+                reference="docs/contribute/adr/081-declared-header-order-independent-extraction.md",
             ),
         ),
     ),

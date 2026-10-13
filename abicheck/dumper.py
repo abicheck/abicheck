@@ -1010,7 +1010,7 @@ def _dump_macho(
     )
 
     _dylib_mtime, _dylib_mtime_epoch = _safe_mtime(dylib_path)
-    _ast_producer = "clang" if isinstance(parser, _ClangAstParser) else "castxml"
+    _ast_producer = _parser_ast_toolchain(parser).get("producer", "castxml")
     _ast = parse_header_ast_fields(parser, producer=_ast_producer)
     return finish_binary_snapshot(
         new_snapshot(
@@ -1148,7 +1148,7 @@ def _dump_pe(
     )
 
     _dll_mtime, _dll_mtime_epoch = _safe_mtime(dll_path)
-    _ast_producer = "clang" if isinstance(parser, _ClangAstParser) else "castxml"
+    _ast_producer = _parser_ast_toolchain(parser).get("producer", "castxml")
     _ast = parse_header_ast_fields(parser, producer=_ast_producer)
     return finish_binary_snapshot(
         new_snapshot(

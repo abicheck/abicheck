@@ -11,7 +11,13 @@ generated: false
 
 Index: [Known gaps](../known-gaps.md)
 
-**Status (re-verified 2026-10-09 at `456989f`): OPEN.** model/dwarf_facts.py:181 advanced_facts_collected still infers that extraction ran. The comment at line 229 says an explicit 'advanced extraction completed' status is still future work.
+**Status (2026-10-12): PARTIAL.** The in-memory half is fixed; the persisted half is open.
+
+**Landed (2026-10-12).** `AdvancedDwarfMetadata.extraction` (`AdvancedExtractionStatus`: `not_run`, `completed`, `failed`, and `unrecorded` for an object that never recorded one) is set by the extraction itself: `dwarf_unified.parse_dwarf` records `completed` after a walk, `failed` when the file cannot be opened or parsed, and `completed` with `has_dwarf=False` when the ELF carries no DWARF. The presence-only paths (`dwarf_presence`) record `not_run`. `advanced_facts_collected` reads the status: `completed` is collected when DWARF was found, `not_run` and `failed` never are, and only `unrecorded` falls back to the payload inference. The `advanced_dwarf` detector's support gate names the state in its not-evaluated reason, and `analysis_assurance._dwarf_context_status` reports a failed side as incomplete coverage. Regression tests: `tests/test_advanced_extraction_status.py`.
+
+**Still open.** The status is not persisted. `storage/snapshot_encode.py` drops it, so the stored document is byte-identical to v58 and a snapshot decoded from a file reads `unrecorded`, which keeps the inference. Persisting it adds a snapshot-schema key and needs [ADR-080](../adr/080-persisting-the-advanced-dwarf-extraction-status.md) (drafted, Proposed). The inference's one unsound shape, a completed empty parse with an empty `target_arch`, therefore still applies to stored snapshots only.
+
+**Historical note (2026-10-09, `456989f`):** the paragraphs below describe the state before the in-memory fix.
 
 The predicate answers by checking
 whether any field `dwarf_advanced.diff_advanced_dwarf` consumes is

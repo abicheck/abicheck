@@ -133,7 +133,7 @@ def _canonical_orders_proven_equal(
 ) -> bool:
     """Whether both sides carry a dump-time proof of the same canonical order.
 
-    ``header_canonical`` is None unless the dump's witness proved it (ADR-079),
+    ``header_canonical`` is None unless the dump's witness proved it (ADR-081),
     so an unproven side -- including every pre-v59 snapshot -- never matches.
     """
     old_canonical = old_contract.header_canonical
@@ -273,7 +273,7 @@ def _unexplained_profile_fields(
         # declared headers were removed, never for a reordered survivor.
         unexplained -= header_seq_candidate
 
-    # ADR-079 reorder carve-out: a header set declared in a different order is
+    # ADR-081 reorder carve-out: a header set declared in a different order is
     # comparable when both dumps proved their declarations equal the canonical
     # (sorted) order's. Equal proven canonical sequences mean both sides are the
     # canonical extraction of the same header set, so the only difference is the

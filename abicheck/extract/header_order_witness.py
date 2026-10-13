@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Dump-time witness for declared-header order (ADR-079).
+"""Dump-time witness for declared-header order (ADR-081).
 
 The aggregate driver TU parses declared headers in declared order, so the
 order is part of the extraction. This module lets a dump *prove* that a
@@ -91,7 +91,7 @@ def extractions_agree(declared: Any, canonical: Any) -> bool:
     A record carrying an order-dependent identifier makes this False, which
     keeps the reorder refused: the witness fails closed. A macro or pragma
     leak that changes no declaration is not visible here; that residual is
-    recorded in ADR-079 rather than claimed as proven.
+    recorded in ADR-081 rather than claimed as proven.
     """
     return _declaration_records(declared) == _declaration_records(canonical)
 
@@ -115,7 +115,7 @@ def _decode_sequence(value: str | None) -> list[str] | None:
 
 
 def header_order_proof(dump_fn: _F) -> _F:
-    """Decorator for :func:`abicheck.dumper.dump` (ADR-079).
+    """Decorator for :func:`abicheck.dumper.dump` (ADR-081).
 
     Dumps in declared order, exactly as before, and records a canonical-order
     proof on the declared snapshot's contract when the declarations provably

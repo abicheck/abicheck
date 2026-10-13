@@ -436,7 +436,7 @@ class TestGnuUniqueBinding:
         # GNU_UNIQUE export must not be reported as newly introduced.
         from abicheck.diff_platform_elf_symbols import _check_gained_gnu_unique
 
-        new_syms = {"inst": _uniq_obj("inst")}
+        new_syms = {"inst": [_uniq_obj("inst")]}
         assert _check_gained_gnu_unique({}, new_syms, old_captured=False) == []
 
     def test_captured_empty_baseline_is_flagged(self):
@@ -444,7 +444,7 @@ class TestGnuUniqueBinding:
         # exports, so the first one added is a real dlclose/uniqueness risk.
         from abicheck.diff_platform_elf_symbols import _check_gained_gnu_unique
 
-        new_syms = {"inst": _uniq_obj("inst")}
+        new_syms = {"inst": [_uniq_obj("inst")]}
         out = _check_gained_gnu_unique({}, new_syms, old_captured=True)
         assert [c.kind for c in out] == [ChangeKind.SYMBOL_BINDING_BECAME_UNIQUE]
 

@@ -656,7 +656,21 @@ adrs:
       - report: compare_report.severity
 
   - id: ADR-079
-    file: 079-declared-header-order-independent-extraction.md
+    file: 079-partial-export-table-read-in-the-stored-snapshot.md
+    disposition: gap
+    use_cases: []
+    surfaces: []
+    missing: Proposed, not yet implemented; no per-platform export_read snapshot field exists.
+
+  - id: ADR-080
+    file: 080-persisting-the-advanced-dwarf-extraction-status.md
+    disposition: gap
+    use_cases: []
+    surfaces: []
+    missing: Proposed, not yet implemented; the advanced-DWARF extraction status is in memory only and is not persisted.
+
+  - id: ADR-081
+    file: 081-declared-header-order-independent-extraction.md
     disposition: internal
     reason: Dump-time proof of declared-header order and the stored header_canonical contract field; users reach it only through dump/compare, and the change is a schema v59 contract field, not a flag, report field or exit code.
     use_cases: []

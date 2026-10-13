@@ -61,7 +61,7 @@ if TYPE_CHECKING:
 _logger = logging.getLogger(__name__)
 
 # Header file extensions recognised during directory expansion. Shared with the
-# AST-cache include walk (dumper._cache_key) via the leaf header_utils module so
+# AST-cache include walk (extract.headers.ast_config._cache_key) via the leaf header_utils module so
 # expansion and cache-invalidation can never drift (Codex review).
 _HEADER_EXTS = HEADER_SUFFIXES
 

@@ -1,4 +1,4 @@
-# ADR-079: Declared Header Order in the Aggregate Driver Translation Unit
+# ADR-081: Declared Header Order in the Aggregate Driver Translation Unit
 
 **Date:** 2026-10-12
 **Status:** Accepted — implemented. Adds a dump-time witness (`extract/header_order_witness.py`,

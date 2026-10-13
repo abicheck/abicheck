@@ -416,7 +416,7 @@ def test_castxml_reversed_header_order_keeps_identity_and_is_comparable_on_proof
     castxml_base,
 ) -> None:
     """Header *order* is part of the parse context, so a reorder is proven
-    before it is compared (ADR-079). Here ``extra.h`` includes ``api.h`` itself,
+    before it is compared (ADR-081). Here ``extra.h`` includes ``api.h`` itself,
     so both orders extract the same declarations: the dump proves the canonical
     order on both sides and the reorder is comparable. Entity identity must not
     change under the reorder, and the comparison must not manufacture a finding."""
@@ -535,6 +535,7 @@ _EXTRA_REGISTERED = {
 _U = "UNCOVERED: "
 COVERAGE: dict[str, str] = {
     # -- exercised --------------------------------------------------------
+    "abicheck.extract.binary_identity:stamp_binary_identity": "symlink x rename transforms (test_snapshot_hit_binary_identity)",
     "abicheck.name_classification:strip_anonymous_type_location": "string probe x path transforms",
     "abicheck.name_classification:canonicalize_type_name": "string probe x path transforms",
     "abicheck.model.graph_identity:checkout_stable_spelling": "string probe x path transforms",
@@ -621,6 +622,9 @@ def test_covered_rows_are_really_registered_in_the_catalogue() -> None:
         | set(cat._path_probes())
         | set(cat.ENVIRONMENT_CELLS)
         | {
+            # Exercised by the symlink and rename cells in
+            # tests/test_snapshot_hit_binary_identity.py, not a catalogue transform.
+            "abicheck.extract.binary_identity:stamp_binary_identity",
             "abicheck.model.special_member_identity:special_member_variant_aliases",
             "abicheck.compare.finding_identity.symbols:resolve_variable_identity",
             "abicheck.compare.finding_identity.change:resolve_change_identity",

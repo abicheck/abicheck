@@ -128,8 +128,8 @@ exact per-field precedence reproduced.
 ``"compile"`` in *blocks* at all any more -- reversing the fourth round's
 own conclusion just above, which believed this promotion needed to
 reproduce BOTH stages of the real pipeline's own two-stage merge itself.
-It doesn't: ``frontends/cli/commands/compare_routing.py``'s
-``_embed_inline_source_side`` performs the second stage (folding the live
+It doesn't: ``frontends/cli/compare_inline_evidence.py``'s
+``_side`` performs the second stage (folding the live
 side's own ``--sources`` tree's ``compile:`` block onto the CLI's
 already-resolved compile context) UNCONDITIONALLY, regardless of whether
 ``--config``/``build-config`` was explicit -- unlike ``build:``/
@@ -138,7 +138,7 @@ short-circuited by an explicit ``--config`` (see the "Sources-root
 promotion" paragraph above), which is what makes promoting THOSE two
 blocks necessary. A caller that also promotes ``compile:`` therefore folds
 the sources-root document's ``compile:`` block in TWICE -- once via this
-promotion, once again inside ``_embed_inline_source_side``'s own
+promotion, once again inside ``compare_inline_evidence._side``'s own
 always-running merge -- applying a repeat-sensitive flag
 (``compile.options: [-include, foo.h]``) twice in the final compiler
 invocation purely because the overlay-generating feature
@@ -158,9 +158,9 @@ eighth round, Codex review) -- unlike every block above, they are never
 safe to promote from a sources-root document for a caller whose single-
 sided resolution is `compare`'s own shape (``merge_compile=True``): the
 real ``compare`` pipeline always resolves both from the CHECKOUT project
-config alone (``frontends/cli/commands/compare_routing.py``'s
-``_embed_inline_source_side`` receives them as already-frozen
-``_resolved_collect_mode``/``_resolved_debug`` arguments, computed once
+config alone (``frontends/cli/compare_inline_evidence.py``'s
+``_side`` receives them as already-frozen
+``InlineEvidenceRun.collect_mode``/``.debug`` values, computed once
 from the checkout-side ``resolved_cfg`` before any per-side ``--sources``
 tree is even considered) and NEVER re-resolves them from a per-side tree's
 own document, unlike ``compile:``'s genuine two-stage merge. So for a
@@ -521,7 +521,7 @@ def apply_sources_root_config_blocks(
     ``sources:``/``source:``/``debug:`` above, so ``merge_compile=False``
     (REPLACE, the default) with ``"compile"`` included in *blocks* is
     correct there. ``compare``'s own per-side inline embed
-    (``frontends/cli/commands/compare_routing.py``'s ``_embed_inline_source_side``)
+    (``frontends/cli/compare_inline_evidence.py``'s ``_side``)
     is different: it always independently resolves the checkout-root
     document's ``compile:`` block FIRST, unconditionally, via
     ``cli_compare_helpers.py``'s own ``resolve_compile_context(...,
@@ -538,7 +538,7 @@ def apply_sources_root_config_blocks(
     So a ``compare``-shaped caller must NOT also include ``"compile"`` in
     *blocks* -- doing so would fold the sources-root document's own
     ``compile:`` block in a SECOND time, on top of what
-    ``_embed_inline_source_side`` is about to fold in a second time anyway.
+    ``compare_inline_evidence._side`` is about to fold in a second time anyway.
     ``merge_compile=True`` still names this shape (for callers that reach
     this function with ``"compile"`` in *blocks* for some other reason —
     the parameter combination is not itself forbidden), but neither current
@@ -583,9 +583,9 @@ def apply_sources_root_config_blocks(
     (`compare`'s own single-sided shape), the two must be left OUT of
     *blocks* entirely (Codex review, P1, fresh evidence, PR #1222 eighth
     round): `compare`'s real pipeline resolves both EXCLUSIVELY from the
-    CHECKOUT project config (``frontends/cli/commands/compare_routing.py``'s
-    ``_embed_inline_source_side`` receives them as already-frozen
-    ``_resolved_collect_mode``/``_resolved_debug`` arguments, computed once
+    CHECKOUT project config (``frontends/cli/compare_inline_evidence.py``'s
+    ``_side`` receives them as already-frozen
+    ``InlineEvidenceRun.collect_mode``/``.debug`` values, computed once
     from the checkout-side ``resolved_cfg`` before any per-side
     ``--sources`` tree is even considered) and never re-resolves them from
     a per-side tree's own document at all -- unlike ``compile:``'s genuine
@@ -607,7 +607,7 @@ def apply_sources_root_config_blocks(
     current caller reaches this function with ``"compile"`` in *blocks*
     while ALSO passing ``merge_compile=True`` any more** -- ``compare``'s
     own single-sided shape already gets that second stage for free,
-    unconditionally, from ``_embed_inline_source_side`` itself, so
+    unconditionally, from ``compare_inline_evidence._side`` itself, so
     reproducing it here too would fold the sources-root document in twice;
     both callers now compute their own ``sources_merge_compile``/
     ``_sources_merge_compile`` flag to EXCLUDE ``"compile"`` from *blocks*

@@ -16,6 +16,12 @@ re-verification status line (2026-10-09, `456989f`). Do not re-open an
 entry from here without reproducing it on current `main`; record a new
 gap on the main page instead.
 
+### `Function.elf_binding`/`Variable.elf_binding` (and the pre-existing `elf_visibility`) collapsed mixed bindings across symbol-versioned aliases (closed 2026-10-12)
+
+**Status (2026-10-12): CLOSED.** Every ELF reader that compared a binding, visibility, size, COMMON or UNIQUE state, origin, or presence per bare name now pairs symbol-versioned aliases by version tag (`compare/elf_alias_pairs.py`, `ElfMetadata.symbol_aliases`, `ElfMetadata.unambiguous_symbol`). Nothing under `abicheck/` reads `symbol_map` any more, and a repo-scan test keeps it that way. Unpairable leftovers are recorded as declined comparisons, not dropped.
+
+[Full write-up](../known-gaps/functionelf-bindingvariableelf-binding-and-the-pre-existing-elf.md)
+
 ### The header-graph parse picks C mode for C++ headers without a recognised C++ construct (closed 2026-10-12)
 
 **Status (2026-10-12): CLOSED.** With no explicit `--lang`, the header graph's own clang parse now follows the language mode the primary pass resolved from header text and the binary's mangled exports (`ast_toolchain["resolved_lang_mode"]`, or a hybrid merge's agreeing legs -> `clang_header_dump(resolved_lang_mode=...)`); a prefetched parse that ran or failed as C under a C++ decision is re-parsed once. `tests/test_header_graph_language_mode.py` covers four C++ headers with no textual C++ marker and two C controls, under the castxml, clang and hybrid frontends.
