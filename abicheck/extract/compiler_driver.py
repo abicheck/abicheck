@@ -433,8 +433,8 @@ def is_default_clang_bin(clang_bin: str, compiler: str) -> bool:
     directory portion of the path -- only a genuinely different
     invocation NAME changes Clang's own target-selection behavior.
 
-    Also strips a trailing numeric version suffix (:func:`
-    _strip_trailing_version_suffix`, ``clang-18`` -> ``clang``) before
+    Also strips a trailing numeric version suffix (:func:`_strip_trailing_version_suffix`,
+    ``clang-18`` -> ``clang``) before
     comparing -- a native, versioned Clang driver `resolve_clang_bin`
     genuinely runs (LLVM/Debian packaging commonly ships one) is still
     the plain host default in every way that matters here (Codex review,

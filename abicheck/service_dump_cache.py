@@ -528,7 +528,6 @@ def _dump_cache_extra_key(
     import shutil
 
     from .errors import SnapshotError
-    from .extract.compiler_driver import resolve_clang_bin
 
     header_graph_clang = ""
     try:
