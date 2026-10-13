@@ -37,7 +37,7 @@ from abicheck.model.declarations import Function
 from abicheck.model.fact import Fact
 from abicheck.model.graph_identity import (
     closure_discriminator_free_identity as ident,
-    closure_ordinals,
+    closure_ordinal_keys,
 )
 from abicheck.model.snapshot import AbiSnapshot
 
@@ -269,7 +269,7 @@ class TestClosureOrdinals:
     def test_ordinals_in_order_outside_quoted_literals(
         self, spelling: str, expected: tuple[int, ...]
     ) -> None:
-        assert closure_ordinals(spelling) == expected
+        assert tuple(k[2] for k in closure_ordinal_keys(spelling)) == expected
 
 
 class TestOrdinalNamespaces:

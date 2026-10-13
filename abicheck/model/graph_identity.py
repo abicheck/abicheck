@@ -642,8 +642,3 @@ def closure_ordinal_keys(identity: str) -> tuple[tuple[str, str, int], ...]:
         if index % 2 == 0
         for match in _CLOSURE_ORDINAL_KEY_RE.finditer(part)
     )
-
-
-def closure_ordinals(identity: str) -> tuple[int, ...]:
-    """The ordinal of each marker :func:`closure_ordinal_keys` finds, in order."""
-    return tuple(key[2] for key in closure_ordinal_keys(identity))
