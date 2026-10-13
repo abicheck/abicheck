@@ -93,6 +93,7 @@ COVERAGE: dict[str, str] = {
     "abicheck.storage.code_identity::memoized::abicheck_code_fingerprint": B,
     "abicheck.model.semantic_ir_function_signature::memoized::_shared_present": B,
     "abicheck.storage.code_identity::memoized::abicheck_modules_fingerprint": H,
+    "abicheck.model.graph_identity::memoized::closure_discriminator_free_identity": "UNCOVERED: pure string memo over closure spellings; no reference-mode bypass cell applies. Its behaviour is pinned by tests/test_closure_respelling.py property tests instead",
     "abicheck.buildsource.header_compile_context::memoized::_include_pattern": _NEEDS_L5,
     "abicheck.buildsource.source_extractors.castxml::memoized::_castxml_tool_version": "UNCOVERED: L4 castxml source extractor tool probe; build-source path only",
     "abicheck.buildsource.source_extractors.clang::memoized::_clang_compiler_family": "UNCOVERED: L4 clang source extractor tool probe; build-source path only",

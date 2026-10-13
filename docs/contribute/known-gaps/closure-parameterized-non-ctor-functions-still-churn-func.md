@@ -11,7 +11,7 @@ generated: false
 
 Index: [Known gaps](../known-gaps.md)
 
-**Status (re-verified 2026-10-09 at `456989f`): PARTIAL.** Type-level marker fix, ctor/dtor binary-evidence fix and L5 declaration_renamed fix (model.graph_identity.closure_location_free_identity) are recorded as landed. Still open: non-ctor func_params_changed/template_param_type_changed on closure-parameterized symbols, the mangled-only surface filter gap, and residual (2), the literal '?' ctor parameter.
+**Status (re-verified 2026-10-12 at `b694ccc2f`): PARTIAL.** Type-level marker fix, ctor/dtor binary-evidence fix and L5 declaration_renamed fix (model.graph_identity.closure_location_free_identity) are recorded as landed. Non-ctor func_params/return churn on an inserted unrelated closure is fixed for exported symbols (see the 2026-10-12 update below). Still open: the same churn on unexported/inline declarations, which fails closed, the mangled-only surface filter gap, and residual (2), the literal '?' ctor parameter.
 
 `name_classification._ANONYMOUS_TYPE_MARKERS` did not
 recognize clang's own closure spelling (`(lambda at <path>:<line>:<col>)`,
@@ -209,6 +209,52 @@ such as `std::once_flag::_Prepare_execution<lambda>`'s internal guard
 thunks, which `surface.py` cannot scope-classify because it never
 demangles) is a separate detector, not this one, and is likewise not
 addressed here.
+
+**Update 2026-10-12: the non-ctor half reproduces on a real path after all, and is fixed for exported symbols.** The first
+check (a lambda shifted by unrelated lines above it) gives no finding: the
+ordinal renumbering already maps both sides to the same `#1`. An insertion
+does reproduce. Adding a second, unrelated closure type earlier in the same
+header renumbers the guarded closure from `#1` to `#2` on the new side. Real
+dumps of `arena_fn<T>::make()` with a C++ `run_task(decltype(make_guard()) g)`
+(g++ `-std=c++20`, castxml 0.7.0) then reported `func_params_changed` and
+`template_param_type_changed` on `run_task`, and `func_return_changed` on
+`make_guard`, `arena_fn<int>::make` and synthetic ctor keys: 20 findings,
+4 gating. The real linker symbol of `run_task` is identical on both sides
+(`_Z8run_task10raii_guardIZN8tbb_like8arena_fnIiE4makeEvEUlvE_E`), because the
+closure's Itanium encoding is scoped to `make()`, not to the header.
+
+The fix (`compare/closure_respelling.py`, called from
+`policy/closure_identity_postprocess.py`) drops a signature finding only when
+both hold: the old and new spellings differ only in closure discriminators
+(`model.graph_identity.closure_discriminator_free_identity`, which strips the
+`#N` ordinal and the `:line:col` form, never inside a `"..."` literal), and
+the finding's symbol is exported under that same real key on both sides, read
+from the surface's own `binary_exported_fact` (`PRESENT(True)` only). A
+changed closure encoding changes the key, so it is not dropped; the negative
+case (a lambda added inside `make()`, which really changes the symbol) is
+still a removal and an addition. `extern "C"` closure→`int` is still reported.
+`tests/test_closure_param_churn_pipeline.py` (insertion of one and of two
+closures above, plus the negative) and `tests/test_closure_respelling.py`
+(property tests on the helper, and filter cases including a missing export
+fact) pin this. The insertion tests fail on the pre-fix tree, pass after.
+
+Residuals after this fix, each with its disposition:
+
+- **Unexported/inline declarations** (`make_guard`, `arena_fn<int>::make`,
+  synthetic ctor keys) keep their gating `func_return_changed`/`func_added`
+  findings: the filter fails closed on them. Downgrading a closure-only
+  respelling of an unexported declaration to source-level changes the
+  verdict and exit code, so it is proposed in ADR-083 (D1), not implemented
+  here. Status: waiting on that decision.
+- **`exported_not_public` on statically linked libstdc++ symbols**
+  (`std::once_flag::_Prepare_execution`) appears on identical sources, so it
+  is not churn from a lambda. Suppressing an identical-both-sides observation
+  narrows ADR-068 §D3, proposed in ADR-083 (D2). Status: waiting on that
+  decision.
+- **A raw hand-built `AbiSnapshot` with no export facts** still churns. No
+  public entry point (`dump`, `load_snapshot`, `run_compare`, `dumper.dump`)
+  produces such a snapshot, and every caller that does is fail-closed. Not
+  changed: recorded as out of scope rather than an open defect.
 
 (2) *A constructor key rendering a literal `?` parameter.* Traced to two
 legitimate "type not recoverable" sentinels rather than to a formatting

@@ -653,6 +653,13 @@ adrs:
     surfaces: []
     missing: Implemented for the stale-load gate (inline family, detector decline, coverage via the assurance status). Not surfaced as a CLI or report option of its own. Conversion of Function.is_inline to a Fact[bool] is deferred (case (a) baseline).
 
+  - id: ADR-083
+    file: 083-closure-respelling-and-persistent-export-observations.md
+    disposition: gap
+    use_cases: []
+    surfaces: []
+    missing: Proposed, not yet implemented; D1 and D2 would change verdicts, exit codes and the cross-source report surface, pending acceptance.
+
   - id: ADR-078
     file: 078-informational-severity-category.md
     disposition: surfaced
