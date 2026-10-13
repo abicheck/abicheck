@@ -1017,3 +1017,12 @@ def test_disk_cache_version_label_alone_keys_apart(
     assert spy.hits >= 1 and spy.misses >= 1, spy
     assert "9.0" in fresh, "the version label does not reach the report"
     _assert_same(warm, fresh, "disk.version_label")
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(shutil.which("cc") is None, reason="needs a C compiler")
+def test_cache_hit_identity_matches_cold_dump_for_a_symlink(tmp_path: Path) -> None:
+    """A warm whole-snapshot hit reached through a symlink equals an uncached dump."""
+    from tests.test_snapshot_hit_binary_identity import check_hit_matches_cold
+
+    check_hit_matches_cold("symlink", tmp_path)

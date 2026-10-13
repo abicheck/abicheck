@@ -287,6 +287,7 @@ _F5 = tuple(
         "concurrency.forked_child_unbounded_reap",
         "serialization.pure_projection_mutates_its_own_input",
         "serialization.whole_document_materialised_to_write_it",
+        "cache.hit_identity_follows_the_requested_path",
     ]
 )
 _F8 = (

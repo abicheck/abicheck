@@ -277,6 +277,21 @@ Each entry's status line says what is still open. A PARTIAL entry's write-up als
 **Status (re-verified 2026-10-09 at `456989f`): PARTIAL.** The 'currently ungated' clause is closed: scripts/check_header_graph_perf.py:267 defines MEMORY_METRICS attach_peak_rss_mib/attach_end_rss_mib. The peak from materialising the clang JSON AST is still open, and the empty-list reduction is a recorded negative result.  
 `perf` — A member's attach peak is the clang JSON document plus its parsed tree, not the header graph; the memory metrics are now gated, the peak itself is not reduced. [Full write-up](known-gaps/a-members-peak-memory-is-the-clang-json-ast-not-the-header.md)
 
+#### The cache keys do not hash system include directories, and a file passed as an include is not content-hashed (2026-10-12)
+
+**Status (2026-10-12): OPEN.** Found by reading `snapshot_cache._cache_key` and `extract/headers/ast_config._cache_key`, not by a toolchain-change probe. The whole-snapshot key hashes the caller's `headers`/`includes`, inferred roots and compile-context inputs. It does not hash auto-probed system include directories that are absent from those inputs. The header-AST key folds those resolved `system_includes` as path strings only, not their contents. A header update inside one of those unchanged directories can therefore reuse both caches. Compiler-option `-isystem` roots are outside this gap: their paths are content-hashed through `compile_context_header_inputs` and `extra_hash_dirs`. Separately, the snapshot key's include walk has no file branch: a file passed as an `includes` entry contributes its path but not its contents, because the directory scan returns no entries for a file. Reachable only through a direct `includes=[file]` call; `-include`/`-imacros` files use the content-hashed `files` channel.
+`false-clean` — A warm snapshot or AST entry can survive an edit to a system header, or to a file passed as an include, under an unchanged path.
+
+#### The cache keys walk include trees only over `CACHE_HEADER_SUFFIXES`, so transitive headers with other suffixes never bust them
+
+**Status (2026-10-12): OPEN, by decision.** `header_utils.py` documents the suffix filter as a deliberate choice (#454). Explicit inputs are hashed whatever their suffix; transitive includes under an `-I` directory with an unlisted suffix (`.def`, `.in`, `.cfg`) are not. Widening the walk re-keys every existing entry and adds walk cost on large include trees, so it needs a measured change rather than a one-line edit.
+`false-clean` — An edit to a transitively included `.def`/`.in` under an include root leaves both cache keys unchanged.
+
+#### The whole-snapshot key mixes mtime into identity, which ADR-062 D11 (Proposed) rules out
+
+**Status (2026-10-12): OPEN, blocked on D11.** `snapshot_cache._cache_key` hashes each header's `st_mtime_ns` alongside its content, so a touched but unchanged header discards the entry. ADR-062 D11 says caches key on content and use size and mtime only to avoid recomputing a digest. D11 is Proposed, so the key is unchanged until D11 is accepted or amended. The header-AST key is the other way round: mtime only, no content. The two caches therefore disagree on the same filesystem facts.
+`perf` — Unchanged headers with fresh mtimes miss the whole-snapshot cache. Keeping content but dropping mtime is safe for correctness because content is hashed.
+
 #### Python-level AST walks, the side boundary and the snapshot cache dominate large runs (2026-10-11)
 
 **Status (2026-10-11): OPEN.** Location-pass, cache trace and cache write switch landed; threads-on-free-threaded, a faster `json_compact` and pickle protocol 5 were measured on oneDAL and rejected; walk fusion is smaller than profiled (cProfile ~7x); closure renumbering after scoping and the cold GIL member-parallelism A/B remain.  
