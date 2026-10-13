@@ -622,23 +622,28 @@ def closure_discriminator_free_identity(identity: str) -> str:
     return closure_location_free_identity("".join(stripped))
 
 
-#: The ordinal of each closure marker in *identity*, in left-to-right order,
-#: outside ``"..."`` literals. Used to check that a respelling is a uniform
-#: renumbering of the header's closures, not a reordering.
-_CLOSURE_ORDINAL_CAPTURE_RE = re.compile(
-    r"\b(?:lambda|unnamed\s+\w+|anonymous\s+\w+):[^():\"]*#(\d+)\b"
+#: A marker carrying its per-header ordinal, capturing the marker kind, the
+#: header basename and the ordinal. The ordinal is numbered per (kind, header),
+#: so the same ordinal in two different headers names two different closures.
+_CLOSURE_ORDINAL_KEY_RE = re.compile(
+    r"\b(lambda|unnamed\s+\w+|anonymous\s+\w+):([^():\"]*)#(\d+)\b"
 )
 
 
-def closure_ordinals(identity: str) -> tuple[int, ...]:
-    """The per-header ordinal of every closure/anonymous-tag marker in
-    *identity* carrying one, in order of appearance, quoted literals
-    excluded. A coordinate-spelled marker carries no ordinal and contributes
-    nothing, so this is only meaningful on dump-renumbered spellings."""
+def closure_ordinal_keys(identity: str) -> tuple[tuple[str, str, int], ...]:
+    """``(marker kind, header basename, ordinal)`` for every closure marker in
+    *identity* carrying a dump-renumbered ordinal, in order of appearance,
+    quoted literals excluded. A coordinate-spelled marker carries no ordinal
+    and contributes nothing."""
     parts = re.split(r'("[^"]*")', identity)
     return tuple(
-        int(match.group(1))
+        (match.group(1), match.group(2), int(match.group(3)))
         for index, part in enumerate(parts)
         if index % 2 == 0
-        for match in _CLOSURE_ORDINAL_CAPTURE_RE.finditer(part)
+        for match in _CLOSURE_ORDINAL_KEY_RE.finditer(part)
     )
+
+
+def closure_ordinals(identity: str) -> tuple[int, ...]:
+    """The ordinal of each marker :func:`closure_ordinal_keys` finds, in order."""
+    return tuple(key[2] for key in closure_ordinal_keys(identity))

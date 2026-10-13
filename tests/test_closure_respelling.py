@@ -270,3 +270,37 @@ class TestClosureOrdinals:
         self, spelling: str, expected: tuple[int, ...]
     ) -> None:
         assert closure_ordinals(spelling) == expected
+
+
+class TestOrdinalNamespaces:
+    """Ordinals are numbered per (marker kind, header). The same number in two
+    headers names two different closures, so the uniform-map check must not
+    merge them. Oracle: the namespace each marker names, written by hand."""
+
+    @staticmethod
+    def _c(old: str, new: str) -> Change:
+        return _change(ChangeKind.FUNC_PARAMS_CHANGED, old, new)
+
+    def test_same_ordinal_in_two_headers_is_independent(self) -> None:
+        # a.h's closure shifts 1 -> 2; b.h's closure stays 1 -> 1. One map
+        # keyed by the bare number would see 1 -> 2 and 1 -> 1 and reject.
+        cands = [
+            self._c("f<(lambda:a.h#1)>", "f<(lambda:a.h#2)>"),
+            self._c("g<(lambda:b.h#1)>", "g<(lambda:b.h#1)>"),
+        ]
+        assert closure_ordinal_map_is_uniform(cands)
+
+    def test_a_pair_that_changes_header_is_rejected(self) -> None:
+        cands = [self._c("f<(lambda:a.h#1)>", "f<(lambda:b.h#2)>")]
+        assert not closure_ordinal_map_is_uniform(cands)
+
+    def test_a_pair_that_changes_marker_kind_is_rejected(self) -> None:
+        cands = [self._c("f<(lambda:a.h#1)>", "f<(unnamed struct:a.h#2)>")]
+        assert not closure_ordinal_map_is_uniform(cands)
+
+    def test_reordering_within_one_header_is_still_rejected(self) -> None:
+        cands = [
+            self._c("f<(lambda:a.h#1)>", "f<(lambda:a.h#2)>"),
+            self._c("g<(lambda:a.h#2)>", "g<(lambda:a.h#1)>"),
+        ]
+        assert not closure_ordinal_map_is_uniform(cands)

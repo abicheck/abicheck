@@ -48,7 +48,7 @@ from ..model.change import Change
 from ..model.change_catalog.kinds import ChangeKind
 from ..model.graph_identity import (
     closure_discriminator_free_identity,
-    closure_ordinals,
+    closure_ordinal_keys,
 )
 from ..model.snapshot import AbiSnapshot
 from ..model.surface_facts import binary_exported
@@ -121,17 +121,27 @@ def closure_ordinal_map_is_uniform(candidates: Iterable[Change]) -> bool:
     dump (an implicit copy constructor spells the guarded closure as ``#1`` on
     both sides), so they are not evidence about the mapping.
     """
-    mapping: dict[int, int] = {}
+    # One map per closure namespace (marker kind and header): the same ordinal
+    # in two headers names two different closures.
+    mappings: dict[tuple[str, str], dict[int, int]] = {}
     for change in candidates:
-        old_ords = closure_ordinals(change.old_value or "")
-        new_ords = closure_ordinals(change.new_value or "")
-        if len(old_ords) != len(new_ords):
+        old_keys = closure_ordinal_keys(change.old_value or "")
+        new_keys = closure_ordinal_keys(change.new_value or "")
+        if len(old_keys) != len(new_keys):
             return False
-        for a, b in zip(old_ords, new_ords, strict=True):
+        for (kind_a, file_a, a), (kind_b, file_b, b) in zip(
+            old_keys, new_keys, strict=True
+        ):
+            if (kind_a, file_a) != (kind_b, file_b):
+                return False
+            mapping = mappings.setdefault((kind_a, file_a), {})
             if mapping.setdefault(a, b) != b:
                 return False
-    pairs = sorted(mapping.items())
-    return all(pairs[i][1] > pairs[i - 1][1] for i in range(1, len(pairs)))
+    for mapping in mappings.values():
+        pairs = sorted(mapping.items())
+        if not all(pairs[i][1] > pairs[i - 1][1] for i in range(1, len(pairs))):
+            return False
+    return True
 
 
 def drop_closure_respellings(
