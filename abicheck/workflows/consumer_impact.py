@@ -56,7 +56,7 @@ def _library_source_graph(
     Hence *snapshot*, the ADR-057 follow-up (Codex review, fresh evidence):
     when OLD is a real binary, every caller passes the ``Path`` as *lib* even
     though it is holding the snapshot it just dumped or loaded from that same
-    path (``cli_compare_helpers._apply_used_by_scoping``'s
+    path (``workflows.consumer_scope_gate._apply_used_by_scoping``'s
     ``old_input if detect_binary_format(...) else old_snapshot``,
     ``mcp_server``'s identical line, ``workflows.consumer_scope_standalone.check_appcompat``'s own
     ``dump``). Reading the graph only off *lib* therefore made the consumer

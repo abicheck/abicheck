@@ -53,11 +53,6 @@ Next, unranked (the `--no-baseline` one-sided-detector gap, the target-platform 
 **Status (re-verified 2026-10-11 at `46c127111`): PARTIAL.** Unchanged since 2026-10-10: `extract/build_mode_capture.py` is ELF-only and its only caller is `workflows/snapshot_factory.py`. PE/Mach-O get no `build_mode`, detached debuginfo is not read, and nothing compares compiler family across snapshots.  
 `false-clean` — `build_mode` comes only from an ELF main image; PE/Mach-O snapshots and detached debuginfo carry none, and compiler family is never compared across snapshots, so a toolchain switch reads as comparable. [Full write-up](known-gaps/a-snapshots-build-mode-is-captured-only-for-elf-and-only-from.md)
 
-### A stored package's generation drift is reported only for `ProjectSnapshot` packages, and generations are bumped by hand
-
-**Status (re-verified 2026-10-11 at `46c127111`): PARTIAL.** Unchanged since 2026-10-10. `EXTRACTOR_GENERATION`/`RESOLVER_GENERATION` now exist (`storage/versioning.py`), every package writer stamps them, `project_snapshot_store` passes them to `check_reader_compatibility`, and drift appears in `coverage_warnings` without changing verdict or exit code; an unrecorded generation is unknown. Importers stamp the generations of the build that extracted the facts: this build's only for facts it just dumped (`bundle variants` capture from binaries), a caller-supplied pair when known, else unstated (`StorageVersions.written_by_this_build`'s `generations`). Still open: the `BundleFacts` reader passes them but has no report surface; nothing enforces a bump when extraction or resolution semantics change.  
-`false-clean` — Extractor/resolver generation drift is surfaced only for `ProjectSnapshot` packages (`BundleFacts` has no report surface), and nothing forces a generation bump when extraction semantics change. [Full write-up](known-gaps/a-stored-packages-generation-drift-is-reported-only-for.md)
-
 ### Scalar and release `compare` still fold the exit code in two places (2026-10-07)
 
 **Status (2026-10-12): PARTIAL, narrowed further.** The evidence-contract precedence (exit 7) is decided by one owner, `policy/exit_decision_precedence.py::resolve_evidence_over_ordinary`, for both paths; `tests/test_exit_precedence_matrix.py` pins both resolvers' exit codes over their per-axis matrices. Two resolvers remain: `policy/exit_decision.py::resolve_compare_exit_decision` (scalar) and `policy/exit_decision_precedence.py::resolve_release_exit_decision` (release), which keeps the release-only axes (`not_comparable`, the mode-dependent removed-library rank, the operational floor, the release-global fold) separate.  
@@ -158,8 +153,8 @@ Each entry's status line says what is still open. A PARTIAL entry's write-up als
 
 #### A stored snapshot keeps no record of a partial export-table read
 
-**Status (2026-10-12): PARTIAL.** Fixed: FAILED import reads; tests/unit/workflows/test_failed_consumer_read.py exists. Open: a stored snapshot cannot record a partial export-table read. [ADR-079](adr/079-partial-export-table-read-in-the-stored-snapshot.md) is drafted and Proposed; the schema field waits on its decision, so the schema stays at v58.  
-`false-clean` — FAILED import reads are fixed. A stored snapshot still cannot record that its export-table read was partial; ADR-079 is drafted (Proposed) and needs a schema decision. [Full write-up](known-gaps/a-stored-snapshot-keeps-no-record-of-a-partial-export-table-read.md)
+**Status (2026-10-12): PARTIAL.** Fixed: FAILED import reads; tests/unit/workflows/test_failed_consumer_read.py exists. Open: a stored snapshot cannot record a partial export-table read. [ADR-081](adr/079-partial-export-table-read-in-the-stored-snapshot.md) is drafted and Proposed; the schema field waits on its decision, so the schema stays at v58.  
+`false-clean` — FAILED import reads are fixed. A stored snapshot still cannot record that its export-table read was partial; ADR-081 is drafted (Proposed) and needs a schema decision. [Full write-up](known-gaps/a-stored-snapshot-keeps-no-record-of-a-partial-export-table-read.md)
 
 ### False-positive risk
 
@@ -175,7 +170,7 @@ Each entry's status line says what is still open. A PARTIAL entry's write-up als
 
 #### A pre-fix clang-backend baseline compares against a post-fix candidate as a wave of `FUNC_BECAME_INLINE` — no reliability flag guards `Function.is_inline`
 
-**Status (re-verified 2026-10-09 at `456989f`): OPEN.** grep for inline_facts_reliable in abicheck/ finds nothing. diff_symbols.py:477 _check_inline_transitions has no reliability or producer gate.  
+**Status (re-verified 2026-10-12): PARTLY FIXED — see [ADR-081](adr/081-inline-fact-reliability-and-producer-generation.md).** Stale header-backend `is_inline` values now decline the transition, recorded as `inline_facts_reliable`. A baseline re-saved by a pre-change build still reads as reliable until re-dumped.  
 `false-positive` — A baseline from the pre-fix clang backend compared against a post-fix candidate reports a wave of `FUNC_BECAME_INLINE`; no reliability flag gates `Function.is_inline`. [Full write-up](known-gaps/a-pre-fix-clang-backend-baseline-compares-against-a-post-fix.md)
 
 #### type_base_changed declines on incomplete bases facts but still fires on a PRESENT-but-empty capture gap
@@ -200,7 +195,7 @@ Each entry's status line says what is still open. A PARTIAL entry's write-up als
 
 #### Declared-header order is still load-bearing because the driver TU is sequential
 
-**Status (2026-10-12): PARTIAL.** A reorder of a header set is now comparable when both dumps prove the canonical order (ADR-081). Still refused: an unproven declared order, and a macro/pragma leak that changes no declaration (not visible to the witness). The scope-confirmed header growth waiver landed (comparability.py:845,1298 reference _header_sequence_is_scope_confirmed_growth). Still open: the sequential aggregate driver TU itself, so reordering an existing header still refuses. Canonical sorting of the driver TU is measured unsound; the remaining options are in ADR-081.  
+**Status (2026-10-12): PARTIAL.** A reorder of a header set is now comparable when both dumps prove the canonical order (ADR-082). Still refused: an unproven declared order, and a macro/pragma leak that changes no declaration (not visible to the witness). The scope-confirmed header growth waiver landed (comparability.py:845,1298 reference _header_sequence_is_scope_confirmed_growth). Still open: the sequential aggregate driver TU itself, so reordering an existing header still refuses. Canonical sorting of the driver TU is measured unsound; the remaining options are in ADR-082.  
 `false-positive` — The scope-confirmed header-growth waiver landed, but the aggregate driver TU is still sequential, so reordering an existing header refuses the comparison. Sorting the driver TU is measured unsound (it breaks a valid declared order); removing the refusal alone reports a false BREAKING. [Full write-up](known-gaps/declared-header-order-is-still-load-bearing-because-the-driver.md)
 
 #### Export-loss ownership: inline-copy proxy and template-specialization owner remain open (see export-loss-ownership-root-cause.md)
@@ -398,6 +393,11 @@ Each entry's status line says what is still open. A PARTIAL entry's write-up als
 
 **Status (re-verified 2026-10-09 at `456989f`): OPEN.** abicheck/extract/headers/clang/error_header_retry.py:69-79 still maps the aggregate line index to the header. The entry notes it is latent: not broken unless a preamble is added. The writers are now in extract/headers/clang/backend.py:304 and clang_layout_tool.py:203.  
 `hygiene` — The clang backend's guard retry maps an aggregate-TU line index straight to a header; latent until a preamble is added to the aggregate. [Full write-up](known-gaps/the-clang-backends-guard-retry-still-maps-an-aggregate-line-to.md)
+
+#### The agent-eval `base_commit` test checks object presence, not ancestry from the default branch (2026-10-12)
+
+**Status (2026-10-12): OPEN.** `test_manifest_base_commit_exists_in_history` runs `git cat-file -e` only; a manifest pinned to a fetchable but unmerged commit passes.  
+`hygiene` — The test named "exists in history" does not check that a task's `base_commit` is reachable from the default branch. [Full write-up](known-gaps/agent-eval-base-commit-test-checks-presence-not-ancestry.md)
 
 ## Do not re-attempt
 

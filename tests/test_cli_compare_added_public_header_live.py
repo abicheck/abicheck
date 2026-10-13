@@ -237,7 +237,7 @@ def test_the_rendered_report_claims_no_reduced_assurance(tmp_path: Path) -> None
 def test_a_reordered_header_surface_compares_through_the_cli(
     tmp_path: Path,
 ) -> None:
-    """A reorder of self-contained existing headers is comparable (ADR-081):
+    """A reorder of self-contained existing headers is comparable (ADR-082):
     each header declares its own function and nothing depends on another, so
     both dumps prove the same canonical extraction and the CLI must not refuse
     with exit 16. Refusal for a reorder whose declarations are unproven is

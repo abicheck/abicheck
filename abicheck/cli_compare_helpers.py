@@ -51,12 +51,6 @@ from .cli_compare_options import (
 )
 from .cli_dump_helpers import resolve_dump_debug_format
 from .cli_helpers_compare import (
-    _app_compat_summary as _app_compat_summary,
-    _pair_wide_dialect_override,
-    _plugin_contract_summary as _plugin_contract_summary,
-    _require_used_by_binary_evidence as _require_used_by_binary_evidence,
-    _scoped_exit_code as _scoped_exit_code,
-    _scoped_severity_summary as _scoped_severity_summary,
     _warn_ignored_flags,
 )
 from .cli_options import (
@@ -120,6 +114,7 @@ from .model.sided_inputs import resolve_per_side_inputs
 from .report.report_modes import normalize_report_mode
 from .serialization import run_scoped_digest_cache
 from .workflows.compare_configuration import (
+    _pair_wide_dialect_override,
     load_required_symbols,
     resolve_compare_collect_mode,
     resolve_force_public_scope,
@@ -1411,7 +1406,7 @@ def run_compare(
         new_inc = list(new_inc) + list(config_includes)
 
     # Pair-wide C++20 dialect resolution (P0 fix) — see
-    # cli_helpers_compare._pair_wide_dialect_override's docstring. Applied to
+    # workflows.compare_configuration._pair_wide_dialect_override's docstring. Applied to
     # both `compile_context` (used by the inline-source-embed path below) and
     # `side_compile_context` (used by `_resolve_compare_snapshots`).
     compile_context, side_compile_context = _pair_wide_dialect_override(

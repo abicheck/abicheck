@@ -11,7 +11,7 @@ generated: false
 
 Index: [Known gaps](../known-gaps.md)
 
-**Status (2026-10-12): PARTIAL.** The scope-confirmed header growth waiver landed (comparability.py:845,1298 reference _header_sequence_is_scope_confirmed_growth). Still open: the sequential aggregate driver TU itself, so reordering an existing header still refuses. Canonical sorting is measured unsound and rejected; the remaining options are recorded in [ADR-081](../adr/081-declared-header-order-independent-extraction.md).
+**Status (2026-10-12): PARTIAL.** The scope-confirmed header growth waiver landed (comparability.py:845,1298 reference _header_sequence_is_scope_confirmed_growth). Still open: the sequential aggregate driver TU itself, so reordering an existing header still refuses. Canonical sorting is measured unsound and rejected; the remaining options are recorded in [ADR-082](../adr/082-declared-header-order-independent-extraction.md).
 
 
 `profile_fingerprint`'s `header_sequence` field records declared-header
@@ -129,7 +129,7 @@ backends, and reordering existing headers on real dumps still refuses with
 `header_sequence`. A change that makes extraction order-independent must update
 these tests deliberately.
 
-**What changed (ADR-081, accepted and implemented).** The declared order still governs
+**What changed (ADR-082, accepted and implemented).** The declared order still governs
 extraction. A dump now proves, per snapshot, whether its declarations equal the sorted
 order's, by parsing both orders and comparing the extracted declarations record for record.
 A proven snapshot records the canonical order in `ExtractionContract.header_canonical`
@@ -139,4 +139,4 @@ carry the same proof. Adding or removing headers keeps the existing `header_sequ
 **Still refused, by design.** A reorder whose declarations are unproven (for example
 `a_user.h` before `z_base.h`, where the sorted parse fails), any side without the proof
 (including every pre-v59 snapshot), and a macro or pragma leak that changes no declaration:
-the witness cannot see it, and the residual is recorded in ADR-081.
+the witness cannot see it, and the residual is recorded in ADR-082.

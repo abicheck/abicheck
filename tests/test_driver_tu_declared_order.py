@@ -160,7 +160,7 @@ def _self_contained_pair(root: Path) -> tuple[Path, list[Path]]:
 def test_reordering_self_contained_headers_is_comparable_on_real_dumps(
     tmp_path, backend
 ):
-    """ADR-081: both orders prove the same canonical extraction, so a reorder of
+    """ADR-082: both orders prove the same canonical extraction, so a reorder of
     an identical header set is comparable (the carve-out the gap asked for)."""
     from abicheck.dumper import dump
 
@@ -238,7 +238,7 @@ def test_adding_a_header_to_an_unsorted_declared_set_is_still_comparable(
 
 
 # ---------------------------------------------------------------------------
-# The witness's own invariants (ADR-081)
+# The witness's own invariants (ADR-082)
 # ---------------------------------------------------------------------------
 
 

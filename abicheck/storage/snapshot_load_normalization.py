@@ -290,7 +290,7 @@ def extraction_contract_from_dict(raw: Any) -> ExtractionContract | None:
         compiler_identity_status=compiler_identity_status
         if isinstance(compiler_identity_status, str)
         else None,
-        # ADR-081: a proof only counts when it is a list of identity strings;
+        # ADR-082: a proof only counts when it is a list of identity strings;
         # anything else (absent on a pre-v59 snapshot, or malformed) is unproven.
         header_canonical=list(header_canonical)
         if isinstance(header_canonical, list)

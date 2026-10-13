@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Branch-level tests for the dump-time header-order witness (ADR-081).
+"""Branch-level tests for the dump-time header-order witness (ADR-082).
 
 These use a fake ``dump`` that returns snapshot-shaped objects, so every
 branch of the witness is exercised without a compiler. The oracle is the

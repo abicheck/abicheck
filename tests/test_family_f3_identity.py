@@ -416,7 +416,7 @@ def test_castxml_reversed_header_order_keeps_identity_and_is_comparable_on_proof
     castxml_base,
 ) -> None:
     """Header *order* is part of the parse context, so a reorder is proven
-    before it is compared (ADR-081). Here ``extra.h`` includes ``api.h`` itself,
+    before it is compared (ADR-082). Here ``extra.h`` includes ``api.h`` itself,
     so both orders extract the same declarations: the dump proves the canonical
     order on both sides and the reorder is comparable. Entity identity must not
     change under the reorder, and the comparison must not manufacture a finding."""

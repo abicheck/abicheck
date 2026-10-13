@@ -128,7 +128,7 @@ class DispositionRecord:
     #:
     #: It marks which *gate* decided the record, which is why it is separate
     #: from :attr:`gate_excluded` (whether that gate excluded it). A scoped
-    #: run is gated by ``cli_helpers_compare._scoped_exit_code`` over the
+    #: run is gated by ``workflows.consumer_scope_gate._scoped_exit_code`` over the
     #: consumer's own relevant set, not by ``gate_decision_for_result`` over
     #: ``result.changes`` -- so :meth:`with_gate`'s re-read of
     #: ``result.changes`` membership, which is what lets a restored redundant

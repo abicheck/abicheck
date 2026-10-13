@@ -166,6 +166,7 @@ _SECTION_FIELDS: Mapping[str, tuple[str, ...]] = {
         "clang_va_list_facts_reliable",
         "castxml_var_access_facts_reliable",
         "param_kind_facts_reliable",
+        "inline_facts_reliable",
         "parsed_with_build_context",
         "build_context_defines",
     ),

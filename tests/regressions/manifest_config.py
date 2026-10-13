@@ -41,21 +41,23 @@ CONFIG_BUG_CLASSES: tuple[BugClass, ...] = (
             # release member, plus a strict xfail on the one default still
             # divergent (`pattern_verdicts`, below).
             "tests/test_family_f2_route_parity.py",
+            # Pins the history route to the chokepoint, and the defaults
+            # `run_compare`, `CompareRequest` and the chokepoint share.
+            "tests/test_compare_entry_defaults.py",
         ),
         known_gaps=(
             KnownGap(
                 description=(
-                    "`pattern_verdicts` still diverges: the native compare CLI "
-                    "and the release fan-out pass True, while CompareRequest/"
-                    "service.run_compare (and compare_snapshots/checker."
-                    "compare/no_baseline_compare) default False. ADR-027 keeps "
-                    "the default-on flip deferred pending release-cycle "
-                    "FP-rate/parity validation, while ADR-068 D4 (accepted) "
-                    "calls modulation automatic; reconciling them is an ADR-027 "
-                    "amendment plus a typed-API default change (and every "
-                    "typed-API effective_config_digest's policy.pattern_verdicts "
-                    "field), not a parity fix. Pinned by "
-                    "test_pattern_verdicts_default_matches_cli's strict xfail."
+                    "The Tier-1 core `checker.compare` still defaults "
+                    "`pattern_verdicts` and `contract_evaluation` to False, "
+                    "while `CompareRequest`, `run_compare` and the Tier-2 "
+                    "chokepoint `compare_snapshots` default True (what the CLI "
+                    "and release fan-out pass). The core default is raw by "
+                    "design (ADR-049); `no_baseline_compare` calls the core "
+                    "directly with its own True defaults. Changing the core "
+                    "default is an ADR-049 amendment, and `pattern_verdicts` "
+                    "additionally needs ADR-027's FP-rate/parity gate. Pinned "
+                    "by tests/test_compare_entry_defaults.py."
                 ),
                 reference="PR #TBD (fix/family-findings-b)",
             ),
