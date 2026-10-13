@@ -27,7 +27,6 @@ from typing import Any
 
 from .compare import export_transition as _export_transition
 from .compare.declaration_facts import alignment_changes
-from .compare.edge_query import ObservedExportTable, observed_export_table
 from .compare.elf_only_demangle import (
     elf_only_demangled_name as _elf_only_demangled_name,
 )
@@ -37,23 +36,13 @@ from .compare.variables import (
     variable_type_index,
 )
 from .diff_helpers import make_change
-from .diff_symbols_renames import _should_filter_transitive_runtime_symbols
-from .elf_symbol_filter import (
-    exported_symbol_names,
-    is_abi_relevant_elf_symbol,
-)
 from .model import AbiSnapshot, AccessLevel, Function, Variable
 from .model.change import Change
 from .model.change_catalog.kinds import ChangeKind
 from .model.semantic_ir_variable_payload import variable_canonical_entity
 from .model.surface_facts import (
-    is_abi_visible,
     is_export_confirmed_absent,
-    is_export_table_only_record,
     surface_fact_summary,
-)
-from .name_classification import (
-    is_local_rtti_symbol,
 )
 
 
@@ -191,53 +180,6 @@ def _var_added(mangled: str, v_new: Variable) -> list[Change]:
             **addition_evidence(v_new, "variable"),
         )
     ]
-
-
-def _observed_exports(snap: AbiSnapshot, types: frozenset[str]) -> ObservedExportTable:
-    """The names *snap*'s own export table carries (empty when it has none),
-    with the table's ``exports`` coverage, so a reader can ask whether a
-    missing name is proven absent (``compare.edge_query``, I4).
-
-    The removal paths cross-check against this rather than trusting a
-    declaration's own, possibly legacy-bridged, ``binary_exported`` fact --
-    see ``export_transition.surface_exit_is_evidence_gap``.
-    """
-    return observed_export_table(
-        snap,
-        exported_symbol_names(
-            getattr(snap, "elf", None),
-            types,
-            abi_relevant_only=True,
-            filter_transitive_runtime_symbols=(
-                _should_filter_transitive_runtime_symbols(snap)
-            ),
-        ),
-    )
-
-
-def _public_variables(snap: AbiSnapshot) -> dict[str, Variable]:
-    """Return public/ELF-only variables from *snap*.
-
-    Excludes RTTI/vtable symbols of function-local types (lambda closures and
-    other in-function types): they are not nameable public ABI and only churn
-    across builds (RD2-4).
-    """
-    filter_transitive_runtime_symbols = _should_filter_transitive_runtime_symbols(snap)
-    return {
-        k: v
-        for k, v in snap.variable_map.items()
-        if (
-            is_abi_visible(v)
-            and (
-                not is_export_table_only_record(v)
-                or is_abi_relevant_elf_symbol(
-                    k,
-                    filter_transitive_runtime_symbols=filter_transitive_runtime_symbols,
-                )
-            )
-            and not is_local_rtti_symbol(k)
-        )
-    }
 
 
 def _check_variable(

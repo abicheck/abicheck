@@ -41,7 +41,7 @@ from .compare.opaque_types import (
     find_opaque_types,
     is_impl_source,
 )
-from .diff_symbols import _public_functions
+from .compare.public_surface import public_functions
 from .model import AbiSnapshot, Function
 from .model.change import Change
 from .model.change_catalog.kinds import ChangeKind
@@ -493,7 +493,7 @@ def _enrich_affected_symbols(
     if not affected_types:
         return
 
-    old_pub = _public_functions(old)
+    old_pub = public_functions(old)
 
     # One Aho-Corasick matcher over the affected type names, shared by both
     # index builders below — built once so neither pays the former

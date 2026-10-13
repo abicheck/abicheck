@@ -514,7 +514,7 @@ def legacy_function_ir(functions: Mapping[str, Function]) -> SemanticIR:
     narrower than typedefs'/constants'.
 
     *functions* is the comparison's own already-selected map (``diff_symbols.
-    _public_functions``'s ELF-narrowed result) -- not one this function
+    public_functions``'s ELF-narrowed result) -- not one this function
     computes itself: ``SemanticIR`` carries no ELF export-table evidence at
     all, so which functions are public/exported is, as for typedefs'
     alias-map selection, entirely the caller's decision.

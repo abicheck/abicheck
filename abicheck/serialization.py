@@ -201,7 +201,7 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
     # CONFIRMED (non-inferred) header awareness on this side before it ever
     # reads the flag at all: clang_restrict/clang_va_list/
     # castxml_var_access's detectors each exit through
-    # diff_symbols._both_header_aware before consulting their flag, and
+    # snapshot_reliability.both_header_aware before consulting their flag, and
     # clang_deprecation/clang_field_initializer's shared consumer
     # (fact_provenance.fact_producer) opens with the identical
     # ``from_headers and not from_headers_inferred`` check. A schema-v1..v5

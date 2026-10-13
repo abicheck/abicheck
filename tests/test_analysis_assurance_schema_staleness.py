@@ -320,7 +320,7 @@ class TestSchemaStalenessStatus:
     def test_other_side_only_inferred_header_awareness_never_taints(self) -> None:
         """Codex review, PR #1209 round 5: the other side matching the
         exact producer is not enough on its own -- ``_diff_param_va_list``
-        also requires ``_both_header_aware`` (confirmed, non-inferred
+        also requires ``both_header_aware`` (confirmed, non-inferred
         header awareness on BOTH sides). An ``other`` side that is
         ``ast_producer == "clang"`` but only ever had its ``from_headers``
         *inferred* (``from_headers_inferred=True`` -- a legacy pre-explicit-
@@ -383,7 +383,7 @@ class TestSchemaStalenessStatus:
         flags' own "same producer still taints" case, generalized to both
         header-only-gated flags. When ``other`` is confirmed header-
         aware (any producer -- these two detectors are cross-producer-safe
-        once both sides clear ``_both_header_aware``), a degraded flag on
+        once both sides clear ``both_header_aware``), a degraded flag on
         the OTHER side must still taint the reported status."""
         for flag_name in self._HEADER_ONLY_GATED_FLAGS:
             old = AbiSnapshot(
@@ -415,7 +415,7 @@ class TestSchemaStalenessStatus:
     ) -> None:
         """The other half of round 7's fresh evidence: an ``other`` side
         that is confirmed header-aware on paper but only ever had its
-        ``from_headers`` *inferred* still fails ``_both_header_aware``, so
+        ``from_headers`` *inferred* still fails ``both_header_aware``, so
         each of these two detectors never runs for this pair -- the
         degraded flag must not taint the reported status, the identical
         shape :func:`test_other_side_only_inferred_header_awareness_never_

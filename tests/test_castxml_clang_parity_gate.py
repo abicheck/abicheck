@@ -387,7 +387,7 @@ class TestDestructorVisibility:
         snapshot carries real ELF metadata (the normal case for `dump()` on
         a compiled .so — every test above except this one only inspected
         `snap.declarations.functions` directly, never the real diff pipeline),
-        `_public_functions()` additionally narrows to keys that match a
+        `public_functions()` additionally narrows to keys that match a
         real export, are `is_deleted`, or are explicitly allow-listed via
         `is_synthetic_ctor_key()`. A synthetic destructor key ("~ClassName")
         matched none of those, so a removed virtual destructor was STILL

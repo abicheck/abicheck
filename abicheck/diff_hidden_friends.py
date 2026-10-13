@@ -49,7 +49,7 @@ def diff_inline_hidden_friends(
     compiler emits them as `linkonce_odr`, often inlined into callers).
     They show up in the castxml snapshot with ``visibility=HIDDEN`` and
     ``is_hidden_friend=True``, so the public-symbol diff (which only
-    matches on *old_public*/*new_public*, i.e. ``_public_functions()``'s
+    matches on *old_public*/*new_public*, i.e. ``public_functions()``'s
     PUBLIC/ELF_ONLY filter) never even considers them. This pass compares
     across the full function map (*old_all*/*new_all*) instead, so it
     covers three shapes:
