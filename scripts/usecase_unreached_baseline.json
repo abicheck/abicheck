@@ -3,8 +3,8 @@
  "sources": [
   "scenarios"
  ],
- "revision": "dd38cb8ce3b77ef17a2f18c12d3d301f6c8da017",
- "count": 7113,
+ "revision": "375a1acf4bfa928476befd10191ad68dd15b359b",
+ "count": 7114,
  "unreached": [
   "abicheck/_compiler_options.py::_forwarded_driver_mode_override",
   "abicheck/_compiler_options.py::_opaque_option_source_tokens",
@@ -6789,6 +6789,7 @@
   "abicheck/workflows/dump/header_graph_prefetch.py::prefetch_settled_on_failure",
   "abicheck/workflows/dump/header_scoped.py::_has_matched_public_surface",
   "abicheck/workflows/dump/header_scoped.py::_try_header_scoped_dump",
+  "abicheck/workflows/dump/header_scoped.py::_try_header_scoped_dump.<locals>._dump_with_contract",
   "abicheck/workflows/dump/hybrid.py::_forced_backend",
   "abicheck/workflows/dump/hybrid.py::_full_scope_leg",
   "abicheck/workflows/dump/hybrid.py::_full_scope_leg.<locals>.leg",
