@@ -55,7 +55,6 @@ def resolve_dump_depth(
 
 def resolve_dump_collect_context(
     depth: str | None,
-    resolved_collect_mode: str | None,
     sources: Path | None,
     build_info: Path | None,
     headers: tuple[Path, ...],
@@ -71,15 +70,7 @@ def resolve_dump_collect_context(
     # Resolve the --depth preset into the internal collect mode before any dump
     # path runs, so every branch (source-only / PE-Mach-O / ELF) embeds the same
     # evidence depth (G21.1). With no preset, dump embeds at "source-target".
-    # ``compare``'s inline source-tree embed already resolved the mode and hands
-    # it over via the private _resolved_collect_mode hook so we don't re-derive a
-    # different default here (Codex review).
-    if (
-        resolved_collect_mode is not None
-    ):  # pragma: no cover - only via compare's inline embed (integration)
-        collect_mode = resolved_collect_mode
-    else:
-        collect_mode = resolve_dump_depth(depth, "source-target")
+    collect_mode = resolve_dump_depth(depth, "source-target")
     # --depth binary suppresses the L2 header AST (symbols-only dump, ADR-037 D5).
     # A compile DB only feeds the header parse, and the caller derives it from
     # these headers, so dropping them drops it too. Compared case-insensitively

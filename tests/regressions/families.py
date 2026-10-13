@@ -200,6 +200,9 @@ _F2 = (
     # The CLI and `dumper.dump` hybrid routes disagreed on the parse-time
     # dependency skip.
     "extraction.recorded_scope_matches_parse_skip",
+    # L4's default extractor was castxml on the typed path but clang via the
+    # `dump` CLI's re-embed, so the same C tree's macros reached one route only.
+    "extraction.default_extractor_lacks_the_promised_fact_family",
     "serialization.persisted_field_not_decoded",
     "cardinality.member_request_drops_scalar_field",
     "config.front_end_default_divergence",

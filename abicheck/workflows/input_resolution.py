@@ -228,10 +228,9 @@ def side_is_live(path: Path, *, had_raw_evidence: bool = False) -> bool:
 def input_spec_is_live(spec: Any) -> bool:
     """:func:`side_is_live` for a typed :class:`~abicheck.workflows.contracts.InputSpec`.
 
-    The typed API's counterpart to the native CLI's own
-    ``side_is_live(path, had_raw_evidence=_needs_inline_embed(...))`` call --
-    same rule, same owner, so the two front ends cannot answer "did this run
-    extract it?" differently. A stored-snapshot operand handed a raw
+    Both front ends reach it through the shared resolution, so they cannot
+    answer "did this run extract it?" differently. A stored-snapshot operand
+    handed a raw
     ``sources``/``build_info`` tree *is* extracted by this run, so the depth
     floor applies to it even though the operand itself was pre-built.
 
