@@ -60,7 +60,7 @@ Next, unranked (the `--no-baseline` one-sided-detector gap, the target-platform 
 
 ### Scalar and release `compare` still fold the exit code in two places (2026-10-07)
 
-**Status (re-verified 2026-10-11 at `46c127111`): OPEN, narrowed.** #1532 moved the release compatibility-axis fold into `workflows/release_exit_fold.py`, which folds each member's scalar-resolver contribution. Two precedence resolvers still exist: `policy/exit_decision.py::resolve_compare_exit_decision` and `policy/exit_decision_precedence.py::resolve_release_exit_decision`, the latter still owning the release-only axes listed below.  
+**Status (2026-10-12): PARTIAL, narrowed further.** The evidence-contract precedence (exit 7) is decided by one owner, `policy/exit_decision_precedence.py::resolve_evidence_over_ordinary`, for both paths; `tests/test_exit_precedence_matrix.py` pins both resolvers' exit codes over their per-axis matrices. Two resolvers remain: `policy/exit_decision.py::resolve_compare_exit_decision` (scalar) and `policy/exit_decision_precedence.py::resolve_release_exit_decision` (release), which keeps the release-only axes (`not_comparable`, the mode-dependent removed-library rank, the operational floor, the release-global fold) separate.  
 `hygiene` — Scalar and release `compare` still use two precedence resolvers (`resolve_compare_exit_decision` and `resolve_release_exit_decision`), so the exit-code rules can drift between the two paths. [Full write-up](known-gaps/scalar-and-release-compare-still-fold-the-exit-code-in-two.md)
 
 ## Open and partially open gaps
