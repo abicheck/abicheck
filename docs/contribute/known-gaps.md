@@ -71,7 +71,7 @@ Each entry's status line says what is still open. A PARTIAL entry's write-up als
 
 #### A `kind: bundle` check still cannot run at `depth: headers`: only the *baseline* half of per-member header staging is wired (2026-09-12)
 
-**Status (re-verified 2026-10-09 at `456989f`): OPEN.** actions/check-target/action.yml:1828 still routes bundle old-library to `steps.resolve.outputs.binaries-dir`, not `member-snapshots-dir`. BUNDLE_CHECK_DEPTHS is unchanged (abicheck/buildsource/bundle_member_snapshots.py:18,69). So (a) routing and (b) candidate-side per-member headers are still open.  
+**Status (re-verified 2026-10-12): OPEN, partly narrowed.** actions/check-target/action.yml:1828 still routes bundle old-library to `steps.resolve.outputs.binaries-dir`, not `member-snapshots-dir`. BUNDLE_CHECK_DEPTHS is unchanged (abicheck/buildsource/project_targets.py:151). The fail-early requirement for `depth: headers` on a bundle is met at input validation, with a corrected reason. So (a) routing and (b) candidate-side per-member headers are still open.  
 `false-clean` — Bundle checks can stage per-member *baseline* header snapshots, but the Action still routes the old side to binaries and the candidate side has no per-member headers, so a bundle check cannot run at `depth: headers`. [Full write-up](known-gaps/a-kind-bundle-check-still-cannot-run-at-depth-headers-only-the.md)
 
 #### Header-pass body coverage is one blanket unit, not per body (2026-10-11)
