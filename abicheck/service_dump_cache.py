@@ -395,7 +395,7 @@ def _dump_cache_extra_key(
     can't appear in a filesystem path on any supported platform, so it can't
     collide regardless of what the caller's paths contain.
 
-    Hashes the RESOLVED backend (``dumper._resolve_header_backend``), not the
+    Hashes the RESOLVED backend (``header_ast_backend._resolve_header_backend``), not the
     raw ``header_backend`` string as passed: an ``"auto"`` request consults
     ``ABICHECK_AST_FRONTEND`` at dump time, so the raw string is the same
     ``"auto"`` regardless of whether that env var is unset (-> castxml),
@@ -452,7 +452,7 @@ def _dump_cache_extra_key(
     in the same way ``public_headers``/``public_header_dirs`` already are,
     so two calls differing only in it can never share a cache entry.
     """
-    from .dumper import _resolve_header_backend
+    from .extract.header_ast_backend import _resolve_header_backend
 
     header_backend = effective_header_backend(header_backend, compile)
     compile_field = compile_context_cache_field(compile)
@@ -483,7 +483,7 @@ def _dump_cache_extra_key(
         _resolve_compiler_binary,
         _tool_identity,
     )
-    from .dumper_clang import _resolve_clang_bin
+    from .extract.compiler_driver import resolve_clang_bin
 
     auto_may_fallback_to_clang = (
         _auto_ast_fallback_eligible(header_backend) and _ast_fallback_enabled()
@@ -503,7 +503,7 @@ def _dump_cache_extra_key(
     if resolved_backend in ("clang", "hybrid") or auto_may_fallback_to_clang:
         try:
             frontend_tools.append(
-                _tool_identity(_resolve_clang_bin(compiler, gcc_path, gcc_prefix))
+                _tool_identity(resolve_clang_bin(compiler, gcc_path, gcc_prefix))
             )
         except Exception as exc:  # missing optional backend remains key material
             frontend_tools.append(f"clang-unavailable:{type(exc).__name__}:{exc}")
@@ -527,12 +527,11 @@ def _dump_cache_extra_key(
     # snapshot with degraded or stale header-graph coverage (Codex review).
     import shutil
 
-    from .dumper_clang import _resolve_clang_bin
     from .errors import SnapshotError
 
     header_graph_clang = ""
     try:
-        clang_driver = _resolve_clang_bin(
+        clang_driver = resolve_clang_bin(
             "cc" if lang == "c" else "c++", gcc_path, gcc_prefix
         )
         resolved_path = shutil.which(clang_driver) or clang_driver

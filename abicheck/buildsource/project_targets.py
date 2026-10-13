@@ -653,7 +653,7 @@ class BundleSpec:
 #: ``/clang:<arg>`` is clang-cl's (Clang's MSVC-compatible driver mode,
 #: reachable via a Windows toolchain binding whose path stem contains
 #: "clang" -- e.g. ``clang-cl``/``clang-cl.exe``, which
-#: ``dumper_clang._is_clang_family_binary`` recognizes) own escape hatch
+#: ``abicheck.extract.compiler_driver.is_clang_family_binary`` recognizes) own escape hatch
 #: for passing an argument straight to the underlying clang driver,
 #: bypassing clang-cl's normally-MSVC-shaped option parsing entirely --
 #: confirmed **actually exploitable** (unlike ``--castxml-cc-``/``-B``

@@ -353,9 +353,9 @@ def test_castxml_singleflight_binds_producer_to_registered_key(
 
 def _stub_clang_resolution(monkeypatch: pytest.MonkeyPatch, cache: Path) -> None:
     """Pin every input of the clang cache key so the test owns the key."""
-    monkeypatch.setattr(clang_backend, "_resolve_clang_bin", lambda *a, **k: "clang")
+    monkeypatch.setattr(clang_backend, "resolve_clang_bin", lambda *a, **k: "clang")
     monkeypatch.setattr(
-        clang_backend, "_resolve_dpcpp_acquisition", lambda *a, **k: (False, False)
+        clang_backend, "resolve_dpcpp_acquisition", lambda *a, **k: (False, False)
     )
     monkeypatch.setattr(
         clang_backend,

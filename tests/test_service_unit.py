@@ -605,7 +605,7 @@ class TestRunDumpHybridNormalization:
     comparison, so an indirectly-selected hybrid request (case-insensitive
     value, or the documented ABICHECK_AST_FRONTEND=hybrid pin with auto)
     fell through to the single-backend path instead of triggering the merge
-    recursion -- fixed by resolving through dumper._resolve_header_backend.
+    recursion -- fixed by resolving through header_ast_backend._resolve_header_backend.
     """
 
     def _fake_dump_elf(self, castxml_snap, clang_snap):
@@ -4856,7 +4856,7 @@ class TestAttachHeaderGraphCompilerSelection:
     ):
         """CodeRabbit review: the same case-insensitive normalization must
         also apply to the include-graph pass's own driver resolution
-        (_resolve_clang_bin/fallback) and its `language=` argument -- these
+        (resolve_clang_bin/fallback) and its `language=` argument -- these
         three were fixed alongside the compiler selection above but are
         independent code paths, each capable of drifting back to "C++" on
         its own."""
@@ -4872,7 +4872,8 @@ class TestAttachHeaderGraphCompilerSelection:
                 return_value=(ast, None, False),
             ),
             patch(
-                "abicheck.dumper._resolve_clang_bin", return_value="/opt/llvm/clang"
+                "abicheck.extract.compiler_driver.resolve_clang_bin",
+                return_value="/opt/llvm/clang",
             ) as mock_resolve,
             patch(
                 "abicheck.buildsource.header_graph.ClangHeaderIncludeExtractor"

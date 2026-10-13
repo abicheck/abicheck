@@ -145,7 +145,7 @@ def dump_source_only(
     either), forwarded to ``_write_snapshot_output`` so L4 source-ABI replay
     honors the same compiler override a binary dump would.
     """
-    from .workflows.extraction import resolve_source_frontend_clang_bin
+    from .workflows.extraction import resolve_l4_replay_clang_bin
     from .workflows.provenance import stamp_provenance
 
     if sources is None and build_info is None:
@@ -169,9 +169,7 @@ def dump_source_only(
         extractor=extractor,
         depth=depth,
         include_dependencies=include_dependencies,
-        clang_bin=resolve_source_frontend_clang_bin(
-            gcc_path, gcc_prefix, exclude_cl_style=False
-        ),
+        clang_bin=resolve_l4_replay_clang_bin(gcc_path, gcc_prefix),
         snapshot_compression=snapshot_compression,
         build_config_explicit=build_config_explicit,
     )

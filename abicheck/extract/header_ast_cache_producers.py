@@ -45,7 +45,7 @@ CLANG_AST_OUTPUT_MODULES: tuple[str, ...] = (
     "abicheck.sycl_context",
     # DPC++: plans the device/host job replay whose host pass emits the
     # stored document.
-    "abicheck.buildsource.dpcpp_jobs",
+    "abicheck.extract.dpcpp_jobs",
     # Retries with failing headers removed; the stored entry then covers
     # fewer headers than were requested.
     "abicheck.extract.headers.clang.error_header_retry",
@@ -66,6 +66,10 @@ NON_SHAPING_MODULES: dict[str, str] = {
     "abicheck.workflows.memory_trace": "memory telemetry, called through the size observer's hook when installed",
     "abicheck.storage.cache_integrity": "digests the written entry for read-time verification",
     "abicheck.storage.derived_ast": "offers the on-disk document to a derived consumer",
+    # Resolves the clang binary and SYCL mode before clang runs; the failing-header
+    # retry re-resolves the same inputs. The resolved binary is already keyed by
+    # the cache's tool identity, so this decision does not shape the stored entry.
+    "abicheck.extract.compiler_driver": "pure driver and SYCL-mode decision over inputs already in the cache key",
     # The failing-header retry calls back into the run to rebuild clang's
     # input for the reduced header set. That input comes from the same
     # builders the key's invocation digest calls, so it is keyed already.

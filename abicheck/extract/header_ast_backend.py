@@ -40,12 +40,8 @@ flat ``abicheck/dumper_*.py`` sibling) because ``architecture/modules.yaml``'s
 ``frozen_root_families`` closes that flat namespace to new members and
 :mod:`abicheck.dumper`/:mod:`abicheck.extract.headers.toolchain` were both already
 at their own no-growth debt-ledger line-count baseline with no room for a
-new function. Both re-export every name here
-(``abicheck.dumper._resolve_header_backend`` and siblings keep resolving
-unchanged) via the same explicit ``X as X`` re-export
-:mod:`abicheck.dumper` already uses for its other split-out sibling
-modules, so every existing call site, monkeypatch target, and cross-module
-``from .dumper import _resolve_header_backend`` import is unaffected.
+new function. Callers import ``_resolve_header_backend`` from this module
+directly; :mod:`abicheck.dumper` does not re-export it.
 """
 
 from __future__ import annotations

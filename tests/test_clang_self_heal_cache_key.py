@@ -53,7 +53,8 @@ from pathlib import Path
 
 import pytest
 
-from abicheck import dumper, dumper_clang
+from abicheck import dumper
+from abicheck.extract import compiler_driver
 from abicheck.extract.headers import ast_config as dumper_ast_config
 from abicheck.extract.headers.ast_config import _cache_key
 from abicheck.extract.headers.clang.backend import clang_header_dump
@@ -107,7 +108,7 @@ def test_self_healed_dump_never_returns_a_stale_cache_hit(
     call reporting `False` or as only 2 total commands (a false cache hit
     skipping the second call's own self-heal) instead of 4."""
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
-    monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
+    monkeypatch.setattr(compiler_driver, "clang_available", lambda *a, **k: True)
     monkeypatch.setattr(dumper, "_detect_cpp_headers", lambda *a, **k: False)
     monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "0")
     header = tmp_path / "umbrella.h"
@@ -148,7 +149,7 @@ def test_self_heal_preserves_the_memo_handoff_under_the_lookup_key(
     would ever pop it). The memo must stay keyed by the pre-retry `key` --
     safe, since that consumer discards `resolved_force_cpp` entirely."""
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
-    monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
+    monkeypatch.setattr(compiler_driver, "clang_available", lambda *a, **k: True)
     monkeypatch.setattr(dumper, "_detect_cpp_headers", lambda *a, **k: False)
     monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "0")
     header = tmp_path / "umbrella.h"
