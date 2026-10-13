@@ -100,6 +100,7 @@ is the authoritative source for each row.
 | `clang_va_list_facts_reliable` | `Param.is_va_list` |
 | `clang_vtable_facts_reliable` | `RecordType.vtable`, `RecordType.vptr_offset_bits` |
 | `header_cv_facts_reliable` | `TypeField.is_const`, `TypeField.is_volatile`, `TypeField.is_mutable` |
+| `inline_facts_reliable` | `Function.is_inline` |
 | `param_kind_facts_reliable` | `Param.kind` |
 
 ## Eligible but not yet converted
@@ -114,3 +115,4 @@ check fails if a new eligible field appears that isn't named here.
 
 | Field | Converted? |
 |-------|------------|
+| `Function.is_inline` | not yet — tracked gap |

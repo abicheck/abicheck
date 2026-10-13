@@ -284,6 +284,7 @@
   "git_tag": null,
   "header_cv_facts_reliable": true,
   "header_only": false,
+  "inline_facts_reliable": true,
   "kabi": null,
   "language_profile": null,
   "library": "libdemo.so",
