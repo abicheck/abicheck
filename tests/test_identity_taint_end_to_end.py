@@ -185,7 +185,7 @@ int touch_guard() { return uses_guard(); }
 
 def _require_toolchain() -> None:
     # dump()'s default `compiler="c++"` resolves to `clang++`, not the bare
-    # `clang` driver (dumper_clang._resolve_clang_bin) -- checking only
+    # `clang` driver (abicheck.extract.compiler_driver.resolve_clang_bin) -- checking only
     # `clang` both proceeds-then-fails on a minimal toolchain that has
     # `clang` but no `clang++`, and skips (losing real coverage) on a
     # `clang++`-only install with no bare `clang` symlink (Codex review,

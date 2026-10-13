@@ -86,7 +86,7 @@ def embed_side_build_source(
     import abicheck.service_compare_evidence as _sce
 
     from ...buildsource.embed import embed_build_source
-    from ...dumper_clang import resolve_source_frontend_clang_bin
+    from ...extract.compiler_driver import resolve_source_frontend_clang_bin
     from ...extract.dump_manifest_roots import dump_manifest_public_roots
 
     ctx = evidence.compile

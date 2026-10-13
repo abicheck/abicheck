@@ -592,7 +592,7 @@ class TestEffectiveDriverModeIsCl:
     explicit ``--driver-mode=cl`` on an otherwise generically-named
     ``clang`` binary (``buildsource.header_compile_context``'s own
     "Preserve an explicit --driver-mode=cl" docstring) -- a name-only CL
-    check like ``dumper_clang._is_cl_style_driver_name`` misses this shape
+    check like ``abicheck.extract.compiler_driver.is_cl_style_driver_name`` misses this shape
     entirely. Conversely, an explicit ``--driver-mode=g++`` on a
     ``clang-cl``-named binary genuinely switches OUT of CL mode (a real
     ``clang-cl --driver-mode=g++ -print-target-triple`` reports a

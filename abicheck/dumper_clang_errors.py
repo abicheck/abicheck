@@ -384,7 +384,7 @@ def run_clang_to_ast_file(
         os.fdopen(fd, "wb") as out,
         tempfile.TemporaryDirectory(prefix="abicheck-sycl-") as scratch,
     ):
-        from .buildsource.dpcpp_jobs import sycl_host_replay_jobs
+        from .extract.dpcpp_jobs import sycl_host_replay_jobs
 
         replay = sycl_host_replay_jobs(cmd, Path(scratch))
         if replay is not None:
@@ -669,7 +669,7 @@ def _parse_clang_ast_result(
                 # writes each pass's full document to this same stdout stream,
                 # back-to-back with no separator. A bare -fsycl is the known
                 # case (device pass + host pass; handled by auto-appending
-                # -fsycl-host-only, see dumper._needs_sycl_host_only), but any
+                # -fsycl-host-only, see abicheck.extract.compiler_driver.needs_sycl_host_only), but any
                 # other multi-target offload flag (e.g. -fopenmp-targets=) that
                 # this codebase does not yet special-case would fail the same
                 # way — naming the likely cause here turns a cryptic byte-offset

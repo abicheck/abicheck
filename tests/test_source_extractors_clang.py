@@ -627,7 +627,7 @@ def test_build_command_msvc_driver_mode() -> None:
 def test_build_command_dpcpp_cl_driver_mode() -> None:
     """Intel's oneAPI DPC++/C++ CL-compatible driver (``dpcpp-cl``) must be
     driven through ``--driver-mode=cl`` the same as ``clang-cl`` -- without
-    this, ``dumper_clang.resolve_source_frontend_clang_bin``'s
+    this, ``abicheck.extract.compiler_driver.resolve_source_frontend_clang_bin``'s
     ``exclude_cl_style=False`` (L4 source-ABI replay) resolves a
     ``--compiler dpcpp-cl`` override correctly, but this module built a
     GNU-shaped command for it instead (Codex review)."""
@@ -867,7 +867,7 @@ class TestSyclHostOnlyGatedOnInvokedBinary:
     just the one pair a hand-picked example happened to cover.
     """
 
-    #: Clang-family binaries `_is_intel_sycl_driver` recognizes as
+    #: Clang-family binaries `is_intel_sycl_driver` recognizes as
     #: DPC++-capable -- the flag must be appended for every one of these when
     #: actually invoked, regardless of what the compile unit's own argv[0]
     #: recorded.
@@ -973,14 +973,14 @@ class TestSyclHostOnlyGatedOnInvokedBinary:
 
     def test_needs_sycl_host_only_is_the_single_l2_l4_source_of_truth(self) -> None:
         """L4's predicate must be the SAME function object the L2 header-AST
-        backend uses (``dumper_clang._needs_sycl_host_only``), not an
+        backend uses (``abicheck.extract.compiler_driver.needs_sycl_host_only``), not an
         independently reimplemented copy that could silently drift out of
         sync with the last-flag-wins ``-fsycl``/``-fno-sycl`` scan or the
         legacy ``dpcpp``/``dpcpp-cl`` SYCL-implied-by-default handling."""
-        from abicheck import dumper_clang
         from abicheck.buildsource.source_extractors import clang as clang_mod
+        from abicheck.extract.compiler_driver import needs_sycl_host_only
 
-        assert clang_mod._needs_sycl_host_only is dumper_clang._needs_sycl_host_only
+        assert clang_mod.needs_sycl_host_only is needs_sycl_host_only
 
     @pytest.mark.slow
     def test_property_intel_only_sycl_pass_flags_never_reach_a_non_intel_invoked_binary(
@@ -1091,13 +1091,11 @@ class TestSyclHostOnlyGatedOnInvokedBinary:
         ``-fsycl-host-only`` must be appended iff the LAST toggle in the
         ORIGINAL, un-deduped sequence actually enables SYCL (honoring a
         legacy ``dpcpp`` driver's own SYCL-on-by-default), computed here
-        independently of ``_needs_sycl_host_only``'s own implementation so
+        independently of ``needs_sycl_host_only``'s own implementation so
         this test cannot pass merely by re-deriving the same bug. Directly
         exercises the code path an earlier revision of the carry-through
         dedup corrupted (Codex review)."""
         from hypothesis import given, settings, strategies as st
-
-        from abicheck.dumper_clang import _dpcpp_defaults_sycl_on
 
         intel_driver = st.sampled_from(["icpx", "icx", "dpcpp"])
         toggle = st.sampled_from(["-fsycl", "-fno-sycl"])
@@ -1109,7 +1107,9 @@ class TestSyclHostOnlyGatedOnInvokedBinary:
                 argv=[invoked, *toggles, "-c", "foo.cpp"],
                 abi_relevant_flags=list(toggles),
             )
-            enabled = _dpcpp_defaults_sycl_on(invoked)
+            # Intel's legacy dpcpp driver name starts with SYCL on (PR #643,
+            # round 8); icx/icpx start with it off.
+            enabled = invoked == "dpcpp"
             for tok in toggles:
                 if tok == "-fsycl":
                     enabled = True
@@ -2910,7 +2910,7 @@ def test_clang_compiler_family_falls_back_to_name_when_binary_missing(
     # None of these binaries exist on this test host under these bare names,
     # so the primary __INTEL_LLVM_COMPILER macro probe (subprocess spawn)
     # fails with OSError and _clang_compiler_family falls back to
-    # _is_intel_sycl_driver's name-based recognition -- the same fallback
+    # is_intel_sycl_driver's name-based recognition -- the same fallback
     # this function documents using when the probe itself can't run at all.
     # See test_clang_compiler_family_prefers_macro_probe_over_name below for
     # direct coverage of the (now primary) macro-probe path itself.
@@ -2935,7 +2935,7 @@ def test_clang_compiler_family_prefers_macro_probe_over_name(monkeypatch) -> Non
         return _Result(0, "#define __INTEL_LLVM_COMPILER 20260101\n")
 
     monkeypatch.setattr(clang_mod, "run_bounded", fake_run)
-    # A plain "clang++"-named binary -- _is_intel_sycl_driver alone would
+    # A plain "clang++"-named binary -- is_intel_sycl_driver alone would
     # never recognize this as Intel's fork; the macro probe does.
     assert _clang_compiler_family("clang++") == "intel-llvm"
     assert calls and calls[0][:1] == ["clang++"]

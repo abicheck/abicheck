@@ -862,7 +862,7 @@ def dump_cmd(
     )
     from ....workflows.extraction import (
         dump_manifest_header_roots,
-        resolve_source_frontend_clang_bin,
+        resolve_l4_replay_clang_bin,
     )
     from ..dump_execute import execute_and_write_dump_cli_run
 
@@ -891,11 +891,7 @@ def dump_cmd(
         + dump_manifest_header_roots(parsed_dump_manifest)
         + tuple(_resolved.public_headers)
         + tuple(_resolved.public_header_dirs),
-        clang_bin=resolve_source_frontend_clang_bin(
-            gcc_path,
-            gcc_prefix,
-            exclude_cl_style=False,
-        ),
+        clang_bin=resolve_l4_replay_clang_bin(gcc_path, gcc_prefix),
         snapshot_compression=snapshot_compression,
         # L4 replay classifies declarations against these roots; with none it
         # classifies everything private and links nothing (measurement in

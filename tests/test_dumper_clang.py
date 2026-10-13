@@ -32,7 +32,6 @@ import pytest
 
 from abicheck import (
     dumper,
-    dumper_clang,
     dumper_clang_errors,
 )
 from abicheck.dumper import (
@@ -40,25 +39,27 @@ from abicheck.dumper import (
     _build_clang_header_command,
     _configured_target_triple,
     _header_ast_parser,
-    _needs_sycl_host_only,
     _parse_gnu_include_search_dirs,
     _resolve_clang_system_includes,
-    _resolve_header_backend,
     _resolve_probe_compiler,
 )
 from abicheck.dumper_clang import (
     _ClangAstParser,
     _Decl,
-    _dpcpp_defaults_sycl_on,
     _function_qualifiers,
-    _is_clang_family_binary,
-    _is_intel_sycl_driver,
     _pointer_depth,
     _return_type,
-    _user_explicitly_disabled_sycl,
 )
 from abicheck.dumper_clang_errors import _parse_clang_ast_result
 from abicheck.errors import SnapshotError
+from abicheck.extract import compiler_driver
+from abicheck.extract.compiler_driver import (
+    is_clang_family_binary,
+    is_intel_sycl_driver,
+    needs_sycl_host_only,
+    resolve_source_frontend_clang_bin,
+)
+from abicheck.extract.header_ast_backend import _resolve_header_backend
 from abicheck.extract.headers import toolchain as dumper_toolchain
 from abicheck.extract.headers.castxml import backend as cxb
 from abicheck.extract.headers.clang import backend as clang_backend
@@ -3051,7 +3052,9 @@ def test_resolve_header_backend_auto_stays_castxml_without_env(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.delenv("ABICHECK_AST_FRONTEND", raising=False)
-    monkeypatch.setattr("abicheck.dumper_clang._clang_available", lambda *a, **k: True)
+    monkeypatch.setattr(
+        "abicheck.extract.compiler_driver.clang_available", lambda *a, **k: True
+    )
     assert _resolve_header_backend("auto") == "castxml"
     # Do not silently fall back to clang: clang AST lacks computed layout
     # evidence, so auto must fail closed through the castxml path.
@@ -3123,79 +3126,7 @@ def test_build_clang_header_command_cpp_and_c(tmp_path: Path) -> None:
     ],
 )
 def test_needs_sycl_host_only(cc_bin: str, tokens: list[str], expected: bool) -> None:
-    assert _needs_sycl_host_only(cc_bin, tokens) is expected
-
-
-@pytest.mark.parametrize(
-    "cc_bin,expected",
-    [
-        ("dpcpp", True),
-        ("dpcpp-cl", True),
-        ("/opt/oneapi/bin/dpcpp", True),
-        ("DPCPP", True),
-        ("dpcpp.exe", True),
-        ("icx", False),
-        ("icpx", False),
-        ("clang", False),
-        ("clang++", False),
-        ("gcc", False),
-    ],
-)
-def test_dpcpp_defaults_sycl_on(cc_bin: str, expected: bool) -> None:
-    assert _dpcpp_defaults_sycl_on(cc_bin) is expected
-
-
-@pytest.mark.parametrize(
-    "tokens,expected",
-    [
-        ([], False),
-        (["-fsycl"], False),
-        (["-fno-sycl"], True),
-        (["-fsycl", "-fno-sycl"], True),
-        # Last-flag-wins: a later -fsycl re-enables it (Codex review, P2).
-        (["-fno-sycl", "-fsycl"], False),
-        (["-fsycl", "-fno-sycl", "-fsycl"], False),
-        (["-DFOO=1"], False),
-    ],
-)
-def test_user_explicitly_disabled_sycl(tokens: list[str], expected: bool) -> None:
-    assert _user_explicitly_disabled_sycl(tokens) is expected
-
-
-@pytest.mark.parametrize(
-    "clang_bin,frontend_context,tokens,expected",
-    [
-        ("icpx", "host", [], True),
-        ("icpx", "host", ["-fno-sycl"], False),
-        ("clang++", "host", [], False),
-        ("icpx", "device", [], True),
-    ],
-)
-def test_resolve_dpcpp_multi_context(
-    clang_bin: str, frontend_context: str, tokens: list[str], expected: bool
-) -> None:
-    assert (
-        dumper_clang._resolve_dpcpp_multi_context(
-            clang_bin, frontend_context, None, tuple(tokens)
-        )
-        is expected
-    )
-
-
-def test_resolve_dpcpp_multi_context_device_on_plain_clang_raises() -> None:
-    from abicheck.errors import AstContextMissingError
-
-    with pytest.raises(AstContextMissingError, match="DPC\\+\\+-capable"):
-        dumper_clang._resolve_dpcpp_multi_context("clang++", "device", None, ())
-
-
-def test_resolve_dpcpp_multi_context_device_with_fno_sycl_raises() -> None:
-    from abicheck.errors import AstContextMissingError
-
-    with pytest.raises(AstContextMissingError, match="-fno-sycl"):
-        dumper_clang._resolve_dpcpp_multi_context(
-            "icpx", "device", None, ("-fno-sycl",)
-        )
+    assert needs_sycl_host_only(cc_bin, tokens) is expected
 
 
 def test_build_clang_header_command_dpcpp_defaults_sycl_on(tmp_path: Path) -> None:
@@ -3213,7 +3144,7 @@ def test_build_clang_header_command_dpcpp_multi_context_skips_host_only(
 ) -> None:
     """PR #643 / ADR-050 D5 interaction: a legacy "dpcpp" driver name defaults
     to SYCL-on (test_build_clang_header_command_dpcpp_defaults_sycl_on above),
-    so _needs_sycl_host_only would normally pin -fsycl-host-only -- but an
+    so needs_sycl_host_only would normally pin -fsycl-host-only -- but an
     explicit dpcpp_multi_context request (Phase D host/device selection)
     wants BOTH passes and must never have that collapsed back to one by
     this default-case behavior."""
@@ -3329,7 +3260,9 @@ def test_clang_header_dump_missing_clang_raises(
     from abicheck.errors import SnapshotError
     from abicheck.extract.headers.clang.backend import clang_header_dump
 
-    monkeypatch.setattr("abicheck.dumper_clang._clang_available", lambda *a, **k: False)
+    monkeypatch.setattr(
+        "abicheck.extract.compiler_driver.clang_available", lambda *a, **k: False
+    )
     header = tmp_path / "foo.h"
     header.write_text("int foo(void);\n")
     with pytest.raises(SnapshotError, match="not found in PATH"):
@@ -3834,7 +3767,7 @@ def test_header_ast_parser_clang_branch_records_msvc_abi_dialect(
         clang_backend, "clang_header_dump", lambda *a, **k: (ast, None, False)
     )
     monkeypatch.setattr(
-        clang_backend, "_resolve_clang_bin", lambda *a, **k: "/opt/llvm/bin/cl.exe"
+        clang_backend, "resolve_clang_bin", lambda *a, **k: "/opt/llvm/bin/cl.exe"
     )
     parser = _header_ast_parser(
         [],
@@ -4074,7 +4007,7 @@ def test_header_graph_attach_reuses_primary_snapshot_ast(
     header = tmp_path / "api.h"
     header.write_text("int f(void);\n")
     cache = tmp_path / "cache.json"
-    monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
+    monkeypatch.setattr(compiler_driver, "clang_available", lambda *a, **k: True)
     monkeypatch.setattr(clang_backend, "_cache_path", lambda *a, **k: cache)
     monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "0")
     calls = {"n": 0}
@@ -4290,7 +4223,7 @@ def test_clang_header_dump_streams_stdout_to_file_not_memory(
     # str on top of the dict this function builds.
     header = tmp_path / "foo.h"
     header.write_text("int foo(void);\n")
-    monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
+    monkeypatch.setattr(compiler_driver, "clang_available", lambda *a, **k: True)
     monkeypatch.setattr(
         clang_backend, "_cache_path", lambda *a, **k: tmp_path / "c.json"
     )
@@ -4348,7 +4281,7 @@ def test_resolve_header_backend_neither_tool_defaults_castxml(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.delenv("ABICHECK_AST_FRONTEND", raising=False)
-    monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: False)
+    monkeypatch.setattr(compiler_driver, "clang_available", lambda *a, **k: False)
     # Falls back to castxml so the existing "install castxml" error surfaces.
     assert _resolve_header_backend("auto") == "castxml"
 
@@ -4928,8 +4861,8 @@ def test_is_clang_family_binary(path: str, expected: bool) -> None:
     """Pure-function unit test for the --compiler clang-family classifier,
     directly exercising both the "clang" substring branch and the vendor
     alias-set branch (icx/icpx/dpcpp/dpcpp-cl) in isolation from the larger
-    clang_header_dump/_resolve_clang_bin call chain the tests below cover."""
-    assert _is_clang_family_binary(path) is expected
+    clang_header_dump/resolve_clang_bin call chain the tests below cover."""
+    assert is_clang_family_binary(path) is expected
 
 
 @pytest.mark.parametrize(
@@ -4953,7 +4886,7 @@ def test_is_clang_family_binary(path: str, expected: bool) -> None:
     ],
 )
 def test_is_intel_sycl_driver(path: str, expected: bool) -> None:
-    assert _is_intel_sycl_driver(path) is expected
+    assert is_intel_sycl_driver(path) is expected
 
 
 def test_clang_header_dump_gcc_path_not_used_as_clang(
@@ -4968,7 +4901,7 @@ def test_clang_header_dump_gcc_path_not_used_as_clang(
         seen["bin"] = b
         return False  # force the missing-tool error so we can inspect the bin
 
-    monkeypatch.setattr(dumper_clang, "_clang_available", _avail)
+    monkeypatch.setattr(compiler_driver, "clang_available", _avail)
     with pytest.raises(SnapshotError):
         clang_header_dump([header], [], gcc_path="/usr/bin/g++")
     # Fell back to a clang driver, NOT the supplied g++ binary.
@@ -4987,7 +4920,7 @@ def test_clang_header_dump_explicit_clang_path_honored(
         seen["bin"] = b
         return False
 
-    monkeypatch.setattr(dumper_clang, "_clang_available", _avail)
+    monkeypatch.setattr(compiler_driver, "clang_available", _avail)
     with pytest.raises(SnapshotError):
         clang_header_dump([header], [], gcc_path="/opt/llvm/bin/clang-18")
     assert seen["bin"] == "/opt/llvm/bin/clang-18"
@@ -5018,7 +4951,7 @@ def test_clang_header_dump_gcc_path_recognizes_icx_family(
         seen["bin"] = b
         return False
 
-    monkeypatch.setattr(dumper_clang, "_clang_available", _avail)
+    monkeypatch.setattr(compiler_driver, "clang_available", _avail)
     with pytest.raises(SnapshotError):
         clang_header_dump([header], [], gcc_path=gcc_path)
     assert seen["bin"] == gcc_path
@@ -5036,7 +4969,7 @@ def test_clang_header_dump_gcc_path_gcc_binary_not_mistaken_for_icx(
         seen["bin"] = b
         return False
 
-    monkeypatch.setattr(dumper_clang, "_clang_available", _avail)
+    monkeypatch.setattr(compiler_driver, "clang_available", _avail)
     with pytest.raises(SnapshotError):
         clang_header_dump([header], [], gcc_path="/usr/bin/x86_64-linux-gnu-gcc-13")
     assert seen["bin"] != "/usr/bin/x86_64-linux-gnu-gcc-13"
@@ -5054,7 +4987,7 @@ def test_clang_header_dump_gcc_prefix_maps_to_prefixed_clang(
         seen["bin"] = b
         return False
 
-    monkeypatch.setattr(dumper_clang, "_clang_available", _avail)
+    monkeypatch.setattr(compiler_driver, "clang_available", _avail)
     with pytest.raises(SnapshotError):
         clang_header_dump([header], [], gcc_prefix="aarch64-linux-gnu-", compiler="c++")
     assert seen["bin"] == "aarch64-linux-gnu-clang++"
@@ -5518,7 +5451,7 @@ def test_pointer_typedef_own_volatile_marks_field_volatile() -> None:
 
 
 def test_resolve_source_frontend_clang_bin_no_overrides() -> None:
-    from abicheck.dumper_clang import resolve_source_frontend_clang_bin
+    from abicheck.extract.compiler_driver import resolve_source_frontend_clang_bin
 
     assert resolve_source_frontend_clang_bin(None, None) == "clang"
     assert (
@@ -5530,13 +5463,13 @@ def test_resolve_source_frontend_clang_bin_honors_clang_family_gcc_path() -> Non
     """A ``--compiler`` pointing at a clang-family binary (e.g. an Intel oneAPI
     ``icpx`` symlink) is used directly for L4/S2 replay, not a plain fallback —
     otherwise a non-default toolchain's real compiler is silently ignored."""
-    from abicheck.dumper_clang import resolve_source_frontend_clang_bin
+    from abicheck.extract.compiler_driver import resolve_source_frontend_clang_bin
 
     assert resolve_source_frontend_clang_bin("/opt/bin/icpx", None) == "/opt/bin/icpx"
 
 
 def test_resolve_source_frontend_clang_bin_ignores_non_clang_gcc_path() -> None:
-    from abicheck.dumper_clang import resolve_source_frontend_clang_bin
+    from abicheck.extract.compiler_driver import resolve_source_frontend_clang_bin
 
     assert (
         resolve_source_frontend_clang_bin("g++", None, fallback="clang++") == "clang++"
@@ -5544,7 +5477,7 @@ def test_resolve_source_frontend_clang_bin_ignores_non_clang_gcc_path() -> None:
 
 
 def test_resolve_source_frontend_clang_bin_excludes_cl_style_driver() -> None:
-    from abicheck.dumper_clang import resolve_source_frontend_clang_bin
+    from abicheck.extract.compiler_driver import resolve_source_frontend_clang_bin
 
     assert (
         resolve_source_frontend_clang_bin("clang-cl", None, fallback="clang++")
@@ -5559,7 +5492,7 @@ def test_resolve_source_frontend_clang_bin_keeps_cl_style_when_not_excluded() ->
     ``clang``/``clang++`` for a ``--compiler clang-cl``/``dpcpp-cl`` build,
     or an Intel DPC++/SYCL context parsed at L2 gets replayed through stock
     Clang at L4 and silently loses source-ABI coverage."""
-    from abicheck.dumper_clang import resolve_source_frontend_clang_bin
+    from abicheck.extract.compiler_driver import resolve_source_frontend_clang_bin
 
     assert (
         resolve_source_frontend_clang_bin(
@@ -5581,7 +5514,7 @@ def test_resolve_source_frontend_clang_bin_excludes_versioned_cl_driver() -> Non
     must not hide it from CL-style exclusion, or the S2 pre-scan drives it
     with GNU-only flags (``-dM``/``-M``) it silently ignores instead of
     falling back to plain ``clang++`` (Codex review)."""
-    from abicheck.dumper_clang import resolve_source_frontend_clang_bin
+    from abicheck.extract.compiler_driver import resolve_source_frontend_clang_bin
 
     assert (
         resolve_source_frontend_clang_bin("clang-cl-20", None, fallback="clang++")
@@ -5596,15 +5529,14 @@ def test_resolve_source_frontend_clang_bin_excludes_versioned_cl_driver() -> Non
 
 
 def test_resolve_source_frontend_clang_bin_prefix_when_available(monkeypatch) -> None:
-    from abicheck import dumper_clang
 
     monkeypatch.setattr(
-        dumper_clang.shutil,
+        shutil,
         "which",
         lambda name: name if name.endswith("clang") else None,
     )
     assert (
-        dumper_clang.resolve_source_frontend_clang_bin(None, "/opt/x86_64-linux-gnu-")
+        resolve_source_frontend_clang_bin(None, "/opt/x86_64-linux-gnu-")
         == "/opt/x86_64-linux-gnu-clang"
     )
 
@@ -5612,10 +5544,6 @@ def test_resolve_source_frontend_clang_bin_prefix_when_available(monkeypatch) ->
 def test_resolve_source_frontend_clang_bin_prefix_missing_falls_back(
     monkeypatch,
 ) -> None:
-    from abicheck import dumper_clang
 
-    monkeypatch.setattr(dumper_clang.shutil, "which", lambda name: None)
-    assert (
-        dumper_clang.resolve_source_frontend_clang_bin(None, "aarch64-linux-gnu-")
-        == "clang"
-    )
+    monkeypatch.setattr(shutil, "which", lambda name: None)
+    assert resolve_source_frontend_clang_bin(None, "aarch64-linux-gnu-") == "clang"

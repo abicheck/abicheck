@@ -29,13 +29,7 @@ if TYPE_CHECKING:
 
 from .dumper_ast_config_cpp20 import _detect_cpp20_headers as _detect_cpp20_headers
 from .dumper_clang import (
-    _clang_available as _clang_available,
     _ClangAstParser as _ClangAstParser,
-    _is_cl_style_driver_name as _is_cl_style_driver_name,
-    _is_default_clang_bin as _is_default_clang_bin,
-    _is_dpcpp_family_binary as _is_dpcpp_family_binary,
-    _needs_sycl_host_only as _needs_sycl_host_only,
-    _resolve_clang_bin as _resolve_clang_bin,
 )
 from .dumper_clang_errors import (
     _is_direct_include_guard_failure,
@@ -52,6 +46,7 @@ from .errors import (
     ValidationError,
 )
 from .extract.binary_format import _FormatHandler
+from .extract.compiler_driver import resolve_clang_bin
 from .extract.debug_dump import (
     # DWARF/BTF/CTF format resolution + the kernel-binary heuristic live in the
     # sibling module (dumper.py is at the file-size cap); re-exported here so
@@ -92,7 +87,6 @@ from .extract.header_ast_backend import (
     HEADER_BACKENDS as HEADER_BACKENDS,
     _is_hybrid_request,
     _resolve_effective_ast_backend as _resolve_effective_ast_backend,
-    _resolve_header_backend as _resolve_header_backend,
     _resolve_single_ast_backend as _resolve_single_ast_backend,
     lang_to_profile,
 )
@@ -220,7 +214,7 @@ def _castxml_fallback_reason(
     # review).
     def _clang_fallback_ready() -> bool:
         try:
-            _resolve_clang_bin(compiler, gcc_path, gcc_prefix)
+            resolve_clang_bin(compiler, gcc_path, gcc_prefix)
             return True
         except SnapshotError:
             return False

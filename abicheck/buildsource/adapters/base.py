@@ -688,7 +688,7 @@ def _msvc_driver_scan(
     scan returned no driver token at all -- :func:`~abicheck.buildsource.
     header_compile_context._derived_gcc_path` then fell back to ``argv[0]``
     (the launcher, ``sccache``), which
-    ``dumper_clang._resolve_clang_bin``/``resolve_source_frontend_clang_bin``
+    ``abicheck.extract.compiler_driver.resolve_clang_bin``/``resolve_source_frontend_clang_bin``
     reject as not clang-family, silently falling back to plain ``clang++``
     even though a real, supported CL-style driver was named right there in
     argv.

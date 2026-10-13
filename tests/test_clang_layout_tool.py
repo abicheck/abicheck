@@ -128,7 +128,7 @@ class TestRunLayoutTool:
         header = tmp_path / "a.h"
         header.write_text("struct Foo {};")
         with patch(
-            "abicheck.extract.headers.clang.layout_tool._resolve_clang_bin",
+            "abicheck.extract.headers.clang.layout_tool.resolve_clang_bin",
             side_effect=Exception("no clang"),
         ):
             assert run_layout_tool("some-binary", [header], []) is None
@@ -138,7 +138,7 @@ class TestRunLayoutTool:
         header.write_text("struct Foo {};")
         with (
             patch(
-                "abicheck.extract.headers.clang.layout_tool._resolve_clang_bin",
+                "abicheck.extract.headers.clang.layout_tool.resolve_clang_bin",
                 return_value="clang++",
             ),
             patch(
@@ -160,7 +160,7 @@ class TestRunLayoutTool:
         )
         with (
             patch(
-                "abicheck.extract.headers.clang.layout_tool._resolve_clang_bin",
+                "abicheck.extract.headers.clang.layout_tool.resolve_clang_bin",
                 return_value="clang++",
             ),
             patch(
@@ -185,7 +185,7 @@ class TestRunLayoutTool:
         )
         with (
             patch(
-                "abicheck.extract.headers.clang.layout_tool._resolve_clang_bin",
+                "abicheck.extract.headers.clang.layout_tool.resolve_clang_bin",
                 return_value="clang++",
             ),
             patch(
@@ -219,7 +219,7 @@ class TestRunLayoutTool:
         )
         with (
             patch(
-                "abicheck.extract.headers.clang.layout_tool._resolve_clang_bin",
+                "abicheck.extract.headers.clang.layout_tool.resolve_clang_bin",
                 return_value="clang++",
             ),
             patch(
@@ -252,7 +252,7 @@ class TestRunLayoutTool:
 
         with (
             patch(
-                "abicheck.extract.headers.clang.layout_tool._resolve_clang_bin",
+                "abicheck.extract.headers.clang.layout_tool.resolve_clang_bin",
                 return_value="clang++",
             ),
             patch(
@@ -297,7 +297,7 @@ class TestRunLayoutTool:
 
         with (
             patch(
-                "abicheck.extract.headers.clang.layout_tool._resolve_clang_bin",
+                "abicheck.extract.headers.clang.layout_tool.resolve_clang_bin",
                 return_value="clang++",
             ),
             patch(
@@ -354,7 +354,7 @@ class TestRunLayoutTool:
 
         with (
             patch(
-                "abicheck.extract.headers.clang.layout_tool._resolve_clang_bin",
+                "abicheck.extract.headers.clang.layout_tool.resolve_clang_bin",
                 return_value="clang++",
             ),
             patch(
@@ -412,7 +412,7 @@ class TestRunLayoutTool:
 
         with (
             patch(
-                "abicheck.extract.headers.clang.layout_tool._resolve_clang_bin",
+                "abicheck.extract.headers.clang.layout_tool.resolve_clang_bin",
                 return_value="clang++",
             ),
             patch(

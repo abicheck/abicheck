@@ -116,7 +116,7 @@ def effective_frontend(compile: CompileContext | None, header_backend: str) -> s
     _header_ast_parser routes ANY such context to clang unconditionally).
     See :func:`effective_frontend_for_context` for the context-aware
     prediction `service_dump_pipeline.resolve_dump_request` needs."""
-    from .dumper import _resolve_header_backend
+    from .extract.header_ast_backend import _resolve_header_backend
 
     return _resolve_header_backend(requested_frontend_override(compile, header_backend))
 
@@ -335,7 +335,7 @@ def _header_ast_frontend_only(base: CompileContext) -> CompileContext:
     ``header_backend`` (anything outside ``HEADER_AST_FRONTENDS`` falls back to
     ``"auto"``) — but ``service._run_dump_uncached`` gives an explicit
     ``compile.frontend`` *precedence* over that argument, and
-    ``dumper._resolve_header_backend`` raises ``ValidationError`` for anything
+    ``header_ast_backend._resolve_header_backend`` raises ``ValidationError`` for anything
     outside ``castxml``/``clang``/``hybrid``/``auto``. So a resolved context
     still carrying ``"android"`` made the whole extraction fail with "Unknown
     AST frontend 'android'" before any build/source evidence was embedded —
@@ -355,7 +355,7 @@ def _header_ast_frontend_only(base: CompileContext) -> CompileContext:
     if frontend in HEADER_AST_FRONTENDS:
         return base
     # Only a *known* frontend with no header path is downgraded. An unknown
-    # value falls through untouched so `dumper._resolve_header_backend` still
+    # value falls through untouched so `header_ast_backend._resolve_header_backend` still
     # raises `Unknown AST frontend` for it: rewriting a typo like "clnag" to
     # "auto" would turn it into a successful default-backend run, trading the
     # bug this function fixes for a worse one (Codex review). Both request

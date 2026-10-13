@@ -62,7 +62,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from ...errors import ValidationError
-from ..extraction import embed_build_source, resolve_source_frontend_clang_bin
+from ...extract.compiler_driver import resolve_source_frontend_clang_bin
+from ..extraction import embed_build_source
 from ..snapshot_factory import new_snapshot
 from .dump_execution_options import DumpExecutionOptions, _DumpAssuranceView
 from .dump_request import ResolvedDumpRequest
