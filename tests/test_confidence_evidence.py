@@ -996,23 +996,17 @@ class TestNoteIfSameBinaryCompared:
 
     def test_native_compare_cli_hashes_the_pre_embed_paths(self, tmp_path, monkeypatch):
         """Codex review: `--old/new-sources` naming a raw checkout (or a raw
-        `--build-info`) makes `_embed_inline_source_sides` rewrite
-        `old_input`/`new_input` to a temporary embedded-snapshot `.abi.json`
-        path *before* `_report_compare_result` calls `_finalize_compare_
-        result` -- which must still hash the two real, original binaries,
-        not the rewritten JSON snapshot path `collect_metadata` always
-        reads as non-hashable, or the warning silently vanishes for every
-        deep-compare-folded-into-compare run even when both real binaries
-        are byte-identical. Exercised through the real `compare` CLI entry
-        point (`run_compare`'s actual call-site wiring), with only the
-        inline-embed dump itself stubbed out -- the wiring under test is
-        which path pair reaches `_finalize_compare_result`, not the dump
-        machinery `_embed_inline_source_side` would otherwise invoke."""
+        `--build-info`) used to make the native CLI rewrite that operand to a
+        temporary embedded-snapshot `.abi.json` path, which `collect_metadata`
+        reads as non-hashable -- so the byte-identical warning silently
+        vanished for every source-folded compare even when both real binaries
+        were identical. The tree is now collected by the shared resolution
+        and the operand is never rewritten; this pins, through the real
+        `compare` CLI, that the two real binaries are what is hashed."""
         from unittest.mock import MagicMock
 
         from click.testing import CliRunner
 
-        import abicheck.cli_compare_helpers as cch
         from abicheck import dumper as dumper_mod
         from abicheck.cli import main
 
@@ -1020,31 +1014,6 @@ class TestNoteIfSameBinaryCompared:
         real_so.write_bytes(b"\x7fELF" + b"\x00" * 200)
         old_sources = tmp_path / "old-src"
         old_sources.mkdir()
-        embedded = tmp_path / "old.abi.json"
-        embedded.write_text(
-            json.dumps(
-                {
-                    "library": "libfoo.so",
-                    "version": "1.0",
-                    "functions": [],
-                }
-            )
-        )
-
-        def _fake_embed(ctx, *, old_input, new_input, **kwargs):
-            # Simulates the real _embed_inline_source_side rewriting the
-            # --old-sources side's operand to a temporary snapshot path,
-            # without needing a real inline dump toolchain.
-            return (
-                embedded,
-                None,
-                None,
-                new_input,
-                kwargs["new_sources"],
-                kwargs["new_build_info"],
-            )
-
-        monkeypatch.setattr(cch, "_embed_inline_source_sides", _fake_embed)
 
         snap = AbiSnapshot(library="libfoo.so", version="1.0", functions=[])
         monkeypatch.setattr(dumper_mod, "dump", MagicMock(side_effect=[snap, snap]))

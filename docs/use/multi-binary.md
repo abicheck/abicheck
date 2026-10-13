@@ -930,7 +930,8 @@ new = build_bundle_snapshot({p.name: p for p in Path("new/").glob("*.so")})
 manifest = load_manifest(Path("manifest.yaml"))   # optional
 
 # per_library_results is the list of DiffResult returned by
-# abicheck.checker.compare() for each library pair.
+# abicheck.service.compare_snapshots() for each library pair -- the same
+# defaults `compare` runs under, not the raw core.
 result = compare_bundle(old, new, per_library_results, manifest=manifest)
 print(result.bundle_verdict)        # Verdict.BREAKING / COMPATIBLE / ...
 for f in result.bundle_findings:

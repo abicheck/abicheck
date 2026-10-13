@@ -627,19 +627,9 @@ class DumpRequest:
     lang_explicit: bool = field(default=False, kw_only=True)
     # An already-resolved collect mode, overriding what
     # `service_compare_evidence.dump_collect_mode_for` would otherwise derive
-    # from `depth` alone (Codex review, PR 3A blocker 5). `compare`'s own
-    # implicit-dump path (`cli_compare_helpers._embed_inline_source_side`)
-    # resolves collect mode from the *pair* (`collect_mode_for`, a materially
-    # different rule from `dump`'s own default — see that function's own
-    # docstring) and forwards it into `dump_cmd`'s private
-    # `_resolved_collect_mode` hook so the real run doesn't re-derive a
-    # possibly-different mode from `depth` in isolation. Without this field,
-    # a `DumpRequest` built for that invocation (e.g. by `--dry-run`) could
-    # only record `depth`, and `resolve_dump_request()` would silently
-    # recompute a different collect mode than the one the real run actually
-    # uses — the exact "preview describes a run that never happened" hazard
-    # this whole request object exists to foreclose. `None` (the default)
-    # means "derive from `depth`", unchanged for every other caller.
+    # from `depth` alone, so a `--dry-run` preview and the real run record the
+    # same mode (Codex review). `None` (the default) means "derive from
+    # `depth`".
     resolved_collect_mode: str | None = field(default=None, kw_only=True)
 
     def validation_errors(self) -> list[str]:

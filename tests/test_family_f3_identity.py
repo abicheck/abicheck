@@ -412,17 +412,15 @@ def test_castxml_redundant_path_segments_are_no_change(castxml_base) -> None:
 
 
 @pytest.mark.integration
-def test_castxml_reversed_header_order_keeps_identity_and_refuses_explicitly(
+def test_castxml_reversed_header_order_keeps_identity_and_is_comparable_on_proof(
     castxml_base,
 ) -> None:
-    """Header *order* is part of the parse context (a header's macros change
-    how every later one parses -- ``comparability_sequences.
-    _header_sequence_is_additive_reorder_free``), so it is not a
-    ``must_not_change`` transform for the *verdict*: the comparison is
-    refused as not comparable. What must not change is entity identity, and
-    a refusal must never surface as a manufactured finding."""
+    """Header *order* is part of the parse context, so a reorder is proven
+    before it is compared (ADR-082). Here ``extra.h`` includes ``api.h`` itself,
+    so both orders extract the same declarations: the dump proves the canonical
+    order on both sides and the reorder is comparable. Entity identity must not
+    change under the reorder, and the comparison must not manufacture a finding."""
     from abicheck.checker import compare
-    from abicheck.errors import ProfileMismatchError
 
     so, api, extra, base = castxml_base
     reordered = _dump(so, [extra, api])
@@ -430,8 +428,9 @@ def test_castxml_reversed_header_order_keeps_identity_and_refuses_explicitly(
     ids_b = Counter(f.entity_id for f in reordered.declarations.functions)
     assert ids_a == ids_b
     assert all(n == 1 for n in ids_b.values())
-    with pytest.raises(ProfileMismatchError, match="header_sequence"):
-        compare(base, reordered, cross_source_checks=False)
+    assert base.contract.header_canonical is not None
+    assert base.contract.header_canonical == reordered.contract.header_canonical
+    compare(base, reordered, cross_source_checks=False)
 
 
 # ---------------------------------------------------------------------------
@@ -536,6 +535,7 @@ _EXTRA_REGISTERED = {
 _U = "UNCOVERED: "
 COVERAGE: dict[str, str] = {
     # -- exercised --------------------------------------------------------
+    "abicheck.extract.binary_identity:stamp_binary_identity": "symlink x rename transforms (test_snapshot_hit_binary_identity)",
     "abicheck.name_classification:strip_anonymous_type_location": "string probe x path transforms",
     "abicheck.name_classification:canonicalize_type_name": "string probe x path transforms",
     "abicheck.model.graph_identity:checkout_stable_spelling": "string probe x path transforms",
@@ -622,6 +622,9 @@ def test_covered_rows_are_really_registered_in_the_catalogue() -> None:
         | set(cat._path_probes())
         | set(cat.ENVIRONMENT_CELLS)
         | {
+            # Exercised by the symlink and rename cells in
+            # tests/test_snapshot_hit_binary_identity.py, not a catalogue transform.
+            "abicheck.extract.binary_identity:stamp_binary_identity",
             "abicheck.model.special_member_identity:special_member_variant_aliases",
             "abicheck.compare.finding_identity.symbols:resolve_variable_identity",
             "abicheck.compare.finding_identity.change:resolve_change_identity",

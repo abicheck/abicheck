@@ -16,6 +16,12 @@ re-verification status line (2026-10-09, `456989f`). Do not re-open an
 entry from here without reproducing it on current `main`; record a new
 gap on the main page instead.
 
+### `Function.elf_binding`/`Variable.elf_binding` (and the pre-existing `elf_visibility`) collapsed mixed bindings across symbol-versioned aliases (closed 2026-10-12)
+
+**Status (2026-10-12): CLOSED.** Every ELF reader that compared a binding, visibility, size, COMMON or UNIQUE state, origin, or presence per bare name now pairs symbol-versioned aliases by version tag (`compare/elf_alias_pairs.py`, `ElfMetadata.symbol_aliases`, `ElfMetadata.unambiguous_symbol`). Nothing under `abicheck/` reads `symbol_map` any more, and a repo-scan test keeps it that way. Unpairable leftovers are recorded as declined comparisons, not dropped.
+
+[Full write-up](../known-gaps/functionelf-bindingvariableelf-binding-and-the-pre-existing-elf.md)
+
 ### The header-graph parse picks C mode for C++ headers without a recognised C++ construct (closed 2026-10-12)
 
 **Status (2026-10-12): CLOSED.** With no explicit `--lang`, the header graph's own clang parse now follows the language mode the primary pass resolved from header text and the binary's mangled exports (`ast_toolchain["resolved_lang_mode"]`, or a hybrid merge's agreeing legs -> `clang_header_dump(resolved_lang_mode=...)`); a prefetched parse that ran or failed as C under a C++ decision is re-parsed once. `tests/test_header_graph_language_mode.py` covers four C++ headers with no textual C++ marker and two C controls, under the castxml, clang and hybrid frontends.
@@ -6173,3 +6179,6 @@ either `--include-system-declarations` on both `dump` invocations, or comparing
 two default-scoped persisted snapshots against each other rather than
 mixing a persisted baseline JSON with a live-binary operand.
 
+### A stored package's generation drift is reported only for `ProjectSnapshot` packages, and generations are bumped by hand (2026-10-11)
+
+**Status: CLOSED 2026-10-12.** Two defects, both fixed. (a) A `BundleFacts` package's reader computed `semantics_differ` and dropped it; `storage/bundle_facts_package.read_bundle_facts_package` now stamps the same runtime-only notice a drifted `ProjectSnapshot` package carries onto each per-library snapshot (`load_notices`), so it reaches each `DiffResult.coverage_warnings` through `confidence.snapshot_load_notices`. Verdict and exit code are unchanged (`tests/unit/storage/test_bundle_facts_generation_drift.py`). (b) Nothing forced a generation bump when extraction or resolution semantics changed. `storage/generation_scope.py` names the extractor scope (`abicheck/extract/**` plus the root parse-stage modules) and the resolver scope, and `storage/generation_fingerprints.json` records a content fingerprint of each at the generation it was recorded at. `tests/unit/storage/test_generation_fingerprint.py` fails when a scoped module changes without a re-record, names the changed files, and prints both fix commands; `scripts/record_generation_fingerprints.py --bump` or `--no-semantic-change --reason` is the only way to re-record. Edits outside those scopes do not move the gate. **Residual, by design:** a hash cannot tell a refactor from a semantic change, so `--no-semantic-change` is a reviewed claim, not a proof; a resolver-named module outside the explicit list must be classified, which the test enforces. Extraction code outside the named root-level globs is not in scope and would need its own entry if it starts to shape recorded facts.

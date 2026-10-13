@@ -401,7 +401,6 @@ def resolve_dump_project_config(
 
 
 def resolve_dump_compile_context(
-    resolved_compile_context: CompileContext | None,
     *,
     gcc_options: str | None,
     sysroot: Path | None,
@@ -419,18 +418,8 @@ def resolve_dump_compile_context(
 ) -> tuple[CompileContext, tuple[Path, ...]]:
     """Resolve the L2 compile context for a dump, folding the config compile: block.
 
-    Returns ``(compile_context, includes)``. When the caller (compare's inline
-    source-tree embed) already resolved the context it is used verbatim; do NOT
-    re-discover/re-merge the tree's .abicheck.yml here. *defines* is ADR-074's
+    Returns ``(compile_context, includes)``. *defines* is ADR-074's
     ``-D/--define``, folded with ``compile.defines`` by macro name downstream."""
-    if resolved_compile_context is not None:
-        # Caller (compare's inline source-tree embed) already resolved the compile
-        # context with CLI-over-config explicitness honored; use it verbatim and do
-        # NOT re-discover/re-merge the tree's .abicheck.yml here — re-running the
-        # resolver under ctx.invoke would lose that explicitness (the kwargs are not
-        # COMMANDLINE param-sources), clobbering e.g. --no-nostdinc / --ast-frontend
-        # auto on the source-tree path only (Codex review).
-        return resolved_compile_context, includes
     from ...cli_options import resolve_compile_context
 
     return resolve_compile_context(

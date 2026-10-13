@@ -163,7 +163,7 @@ def scoped_gate_selection_from_result(result: Any) -> ScopedGateSelection | None
     already reads for the digest (duplicated rather than shared, since that
     function returns a JSON-encoded string for hashing while this returns a
     typed value; both are intentionally kept in sync with the same source
-    fields -- ``cli_helpers_compare._apply_used_by_scoping``/
+    fields -- ``workflows.consumer_scope_gate._apply_used_by_scoping``/
     ``_apply_required_symbol_scoping`` stamp ``DiffResult.gate_scope``/
     ``used_by``/``required_symbols`` before either reads them).
     """

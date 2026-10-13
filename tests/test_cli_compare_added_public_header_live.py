@@ -234,11 +234,14 @@ def test_the_rendered_report_claims_no_reduced_assurance(tmp_path: Path) -> None
     assert not any("reduced assurance" in n for n in notes), notes
 
 
-def test_a_reordered_header_surface_still_refuses_through_the_cli(
+def test_a_reordered_header_surface_compares_through_the_cli(
     tmp_path: Path,
 ) -> None:
-    """The negative control at the same public surface: a genuine reorder of
-    the existing headers must still reach the user as exit 16.
+    """A reorder of self-contained existing headers is comparable (ADR-082):
+    each header declares its own function and nothing depends on another, so
+    both dumps prove the same canonical extraction and the CLI must not refuse
+    with exit 16. Refusal for a reorder whose declarations are unproven is
+    covered at the python-API level in ``test_driver_tu_declared_order.py``.
 
     Explicit `--header old=<file> ...` operands, since a directory operand
     cannot express a reorder at all -- expansion always sorts.
@@ -255,5 +258,5 @@ def test_a_reordered_header_surface_still_refuses_through_the_cli(
         argv += ["--header", f"new={new_dir / name}"]
 
     result = CliRunner().invoke(main, argv)
-    assert result.exit_code == 16, result.output
-    assert "not comparable" in result.output
+    assert result.exit_code == 0, result.output
+    assert "not comparable" not in result.output

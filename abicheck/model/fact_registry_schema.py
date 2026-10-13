@@ -273,6 +273,7 @@ REFERENCE_FLAG_COVERAGE: dict[str, tuple[tuple[str, str], ...]] = {
     "clang_va_list_facts_reliable": (("Param", "is_va_list"),),
     "castxml_var_access_facts_reliable": (("Variable", "access"),),
     "param_kind_facts_reliable": (("Param", "kind"),),
+    "inline_facts_reliable": (("Function", "is_inline"),),
 }
 
 
@@ -298,7 +299,11 @@ REFERENCE_FLAG_COVERAGE: dict[str, tuple[tuple[str, str], ...]] = {
 #: not an absent constant a future contributor would have to reinvent. An
 #: entry that no longer matches a real, still-unconverted field fails the
 #: same check, so neither half can quietly go stale.
-_CASE_A_UNCONVERTED: tuple[tuple[str, str], ...] = ()
+# Function.is_inline is guarded by the stale 'inline' family (ADR-081, gap: a pre-fix clang/castxml
+# header baseline) but is still a plain bool, not a Fact[bool] sibling. Converting it
+# needs a persisted Fact codec and a schema decision; deferred and listed here so the
+# deferral is visible in review.
+_CASE_A_UNCONVERTED: tuple[tuple[str, str], ...] = (("Function", "is_inline"),)
 
 #: Case (b) — see the note above; emptied in Phase 5's seventh batch
 #: (schema v37), when the last five binary-format fields on ``ElfMetadata``/

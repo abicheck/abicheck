@@ -51,12 +51,6 @@ from .cli_compare_options import (
 )
 from .cli_dump_helpers import resolve_dump_debug_format
 from .cli_helpers_compare import (
-    _app_compat_summary as _app_compat_summary,
-    _pair_wide_dialect_override,
-    _plugin_contract_summary as _plugin_contract_summary,
-    _require_used_by_binary_evidence as _require_used_by_binary_evidence,
-    _scoped_exit_code as _scoped_exit_code,
-    _scoped_severity_summary as _scoped_severity_summary,
     _warn_ignored_flags,
 )
 from .cli_options import (
@@ -120,6 +114,7 @@ from .model.sided_inputs import resolve_per_side_inputs
 from .report.report_modes import normalize_report_mode
 from .serialization import run_scoped_digest_cache
 from .workflows.compare_configuration import (
+    _pair_wide_dialect_override,
     load_required_symbols,
     resolve_compare_collect_mode,
     resolve_force_public_scope,
@@ -192,28 +187,6 @@ def _normalize_compare_options(
         demangle_resolved,
         report_mode,
         show_impact,
-    )
-
-
-def _needs_inline_embed(
-    old_sources: Path | None,
-    new_sources: Path | None,
-    old_build_info: Path | None,
-    new_build_info: Path | None,
-) -> bool:
-    """True when a side points at a raw checkout / build dir (not a `collect` pack).
-
-    Those sides get dumped inline at --depth so their L3-L5 facts ride embedded in
-    the snapshot; pre-built packs fall through to prepare_embedded_build_source.
-    """
-    from .frontends.cli.commands.compare_routing import _source_is_pack
-
-    def _raw_evidence(p: Path | None) -> bool:
-        return p is not None and not _source_is_pack(p)
-
-    return any(
-        _raw_evidence(p)
-        for p in (old_sources, new_sources, old_build_info, new_build_info)
     )
 
 
@@ -427,187 +400,6 @@ def _reject_manifest_non_elf(
                 f"--dump-manifest {side}=... requires the {side} input to be an "
                 f"ELF binary; got {fmt or 'a non-binary input'}."
             )
-
-
-def _embed_inline_source_sides(
-    ctx: click.Context,
-    *,
-    old_input: Path,
-    new_input: Path,
-    old_sources: Path | None,
-    new_sources: Path | None,
-    old_build_info: Path | None,
-    new_build_info: Path | None,
-    old_h: Any,
-    new_h: Any,
-    old_inc: Any,
-    new_inc: Any,
-    old_version: str,
-    new_version: str,
-    lang: str,
-    lang_explicit: bool = False,
-    header_backend: str,
-    old_header_backend: str | None,
-    new_header_backend: str | None,
-    compile_context: Any,
-    follow_deps: bool,
-    search_paths: tuple[Path, ...],
-    ld_library_path: str,
-    dwarf_only: bool,
-    effective_debug_format: str | None,
-    pdb_path: Path | None,
-    old_pdb_path: Path | None,
-    new_pdb_path: Path | None,
-    resolved_old_debug: Any,
-    resolved_new_debug: Any,
-    debuginfod: bool,
-    debuginfod_url: str | None,
-    collect_mode: str,
-    depth: str | None,
-    include_labels: dict[Path, str] | None,
-    include_dependencies: bool,
-    build_config: Path | None = None,
-    changed_paths: tuple[str, ...] = (),  # ADR-068 Phase 2c: ADR-043 D7 POI scoping
-) -> tuple[Path, Path | None, Path | None, Path, Path | None, Path | None]:
-    """Dump each raw source/build-dir side inline, returning the rewritten inputs.
-
-    Inline source-tree collection (deep-compare folded into compare): when a
-    side's ``--old/new-sources`` points at a raw checkout, or
-    ``--old/new-build-info`` at a raw build dir / ``compile_commands.json`` (not
-    a ``collect`` pack), dump that side at ``--depth`` so its L3-L5 facts ride
-    embedded in the snapshot, the way the standalone deep-compare command used
-    to. Pre-built packs fall through unchanged to
-    ``prepare_embedded_build_source``.
-
-    Returns ``(old_input, old_sources, old_build_info, new_input, new_sources,
-    new_build_info)`` -- an embedded side has its input rewritten to a temporary
-    JSON snapshot.
-    """
-    # G29 Phase A: the L2 header-only semantic graph is no longer a flag
-    # a user can request here, so there is nothing to reject loudly. The
-    # inline dump below runs through `dump_cmd` (which has no L2-graph
-    # attach step of its own — that only lives on compare's own
-    # resolve_input calls / dump's own perform_elf_dump/
-    # handle_non_elf_dump path), and the rewritten old_input/new_input
-    # become a temporary JSON snapshot that _resolve_compare_snapshots
-    # below loads via resolve_input's JSON branch, which never attaches
-    # a graph either. So a raw --old/new-sources tree or raw
-    # --old/new-build-info combination structurally skips the L2 graph
-    # (silent, not_collected) — same behavior as before this change,
-    # just without a flag to have explicitly asked for it. See
-    # docs/contribute/plans/g31-header-graph-default-on-followup.md for
-    # extending graph coverage to this path.
-    import shutil
-    import tempfile
-
-    from .frontends.cli.commands.compare_routing import _embed_inline_source_side
-
-    # CLI-over-config explicitness read from compare's *real* ctx (where
-    # --ast-frontend/--nostdinc are genuine COMMANDLINE params); the inline
-    # dump runs under ctx.invoke where that signal is lost, so we compute it
-    # here and thread it through (Codex review). A per-side --ast-frontend old=/new=
-    # is itself an explicit frontend for that side.
-    _nostdinc_explicit = (
-        ctx.get_parameter_source("nostdinc") == click.core.ParameterSource.COMMANDLINE
-    )
-    # No command registers a frontend flag any more (ADR-037 D8.1): an
-    # explicit frontend can only come from `compile.frontend` in the
-    # config, which `merge_compile_config` already reads as explicit.
-    _frontend_explicit = False
-    # G31 Phase C follow-up: --lang had the identical
-    # ctx.invoke-loses-COMMANDLINE-source problem as --ast-frontend/
-    # --nostdinc immediately above -- without forwarding the caller's
-    # already-resolved explicitness, a raw `--old/new-sources` tree side
-    # would silently resolve `lang_explicit=False` in the nested
-    # `dump_cmd` invocation below regardless of what the caller actually
-    # requested, discarding the explicit request on a language-ambiguous
-    # header. Phase 7 removed `--lang` from `compare`'s CLI entirely, so
-    # the only remaining source of an explicit request is `compile.lang`
-    # in `.abicheck.yml` -- already resolved by the caller (run_compare)
-    # into *lang_explicit* above, since `ctx.get_parameter_source("lang")`
-    # can never report COMMANDLINE any more.
-    _lang_explicit = lang_explicit
-
-    _src_tmp = tempfile.mkdtemp(prefix="abicheck-compare-src-")
-    # Cleanup on context teardown so the temp dir never leaks, even if an
-    # inline dump or _resolve_compare_snapshots raises before we return.
-    ctx.call_on_close(lambda: shutil.rmtree(_src_tmp, ignore_errors=True))
-    old_input, old_sources, old_build_info = _embed_inline_source_side(
-        ctx,
-        input_path=old_input,
-        sources=old_sources,
-        headers=old_h,
-        includes=old_inc,
-        version=old_version,
-        lang=lang,
-        lang_explicit=_lang_explicit,
-        header_backend=old_header_backend or header_backend,
-        compile_context=compile_context,
-        frontend_explicit=_frontend_explicit or old_header_backend is not None,
-        # A nostdinc already resolved True (from --config) must survive the
-        # tree-config merge even when the tree omits it (Codex review); False
-        # is the default and indistinguishable from "unset", so only True needs
-        # preserving.
-        nostdinc_explicit=_nostdinc_explicit or compile_context.nostdinc,
-        build_info=old_build_info,
-        follow_deps=follow_deps,
-        search_paths=search_paths,
-        ld_library_path=ld_library_path,
-        dwarf_only=dwarf_only,
-        debug_format=effective_debug_format,
-        pdb_path=old_pdb_path or pdb_path,
-        debug_roots=tuple(resolved_old_debug),
-        debuginfod=debuginfod,
-        debuginfod_url=debuginfod_url,
-        collect_mode=collect_mode,
-        out_dir=Path(_src_tmp),
-        label="old",
-        depth=depth,
-        include_labels=include_labels,
-        changed_paths=changed_paths,
-        include_dependencies=include_dependencies,
-        build_config=build_config,
-    )
-    new_input, new_sources, new_build_info = _embed_inline_source_side(
-        ctx,
-        input_path=new_input,
-        sources=new_sources,
-        headers=new_h,
-        includes=new_inc,
-        version=new_version,
-        lang=lang,
-        lang_explicit=_lang_explicit,
-        header_backend=new_header_backend or header_backend,
-        compile_context=compile_context,
-        frontend_explicit=_frontend_explicit or new_header_backend is not None,
-        nostdinc_explicit=_nostdinc_explicit or compile_context.nostdinc,
-        build_info=new_build_info,
-        follow_deps=follow_deps,
-        search_paths=search_paths,
-        debug_roots=tuple(resolved_new_debug),
-        debuginfod=debuginfod,
-        debuginfod_url=debuginfod_url,
-        ld_library_path=ld_library_path,
-        dwarf_only=dwarf_only,
-        debug_format=effective_debug_format,
-        pdb_path=new_pdb_path or pdb_path,
-        collect_mode=collect_mode,
-        out_dir=Path(_src_tmp),
-        label="new",
-        depth=depth,
-        include_labels=include_labels,
-        changed_paths=changed_paths,
-        include_dependencies=include_dependencies,
-        build_config=build_config,
-    )
-    return (
-        old_input,
-        old_sources,
-        old_build_info,
-        new_input,
-        new_sources,
-        new_build_info,
-    )
 
 
 def _resolve_evaluation_config(
@@ -1614,93 +1406,14 @@ def run_compare(
         new_inc = list(new_inc) + list(config_includes)
 
     # Pair-wide C++20 dialect resolution (P0 fix) — see
-    # cli_helpers_compare._pair_wide_dialect_override's docstring. Applied to
+    # workflows.compare_configuration._pair_wide_dialect_override's docstring. Applied to
     # both `compile_context` (used by the inline-source-embed path below) and
     # `side_compile_context` (used by `_resolve_compare_snapshots`).
     compile_context, side_compile_context = _pair_wide_dialect_override(
         lang, old_h, new_h, compile_context, side_compile_context
     )
 
-    # Preserve the original library paths from before any inline-embed rewrite
-    # below, for --used-by/--required-symbol scoping (which needs the real
-    # OLD/NEW binaries to parse app import/export requirements, not a rewritten
-    # temporary .abi.json snapshot — Codex review).
-    used_by_old_input, used_by_new_input = old_input, new_input
-
-    # Inline source-tree collection (deep-compare folded into compare): when a
-    # side's --old/new-sources points at a raw checkout, or --old/new-build-info
-    # at a raw build dir / compile_commands.json (not a `collect` pack), dump that
-    # side at --depth so its L3-L5 facts ride embedded in the snapshot, the way
-    # the standalone deep-compare command used to. Pre-built packs fall through
-    # unchanged to prepare_embedded_build_source below.
     from . import deadline
-
-    # ADR-068 §3 #28 (CodeRabbit review): captured before the embed below
-    # rewrites old_input/new_input to a temp .abi.json -- a raw --sources/
-    # --build-info side is genuinely live-extracted, so it stays blamable.
-    old_had_raw_evidence = _needs_inline_embed(old_sources, None, old_build_info, None)
-    new_had_raw_evidence = _needs_inline_embed(None, new_sources, None, new_build_info)
-
-    if _needs_inline_embed(old_sources, new_sources, old_build_info, new_build_info):
-        try:
-            (
-                old_input,
-                old_sources,
-                old_build_info,
-                new_input,
-                new_sources,
-                new_build_info,
-            ) = _embed_inline_source_sides(
-                ctx,
-                old_input=old_input,
-                new_input=new_input,
-                old_sources=old_sources,
-                new_sources=new_sources,
-                old_build_info=old_build_info,
-                new_build_info=new_build_info,
-                old_h=old_h,
-                new_h=new_h,
-                old_inc=old_inc,
-                new_inc=new_inc,
-                old_version=old_version,
-                new_version=new_version,
-                lang=lang,
-                lang_explicit=lang_explicit,
-                header_backend=header_backend,
-                old_header_backend=old_header_backend,
-                new_header_backend=new_header_backend,
-                compile_context=compile_context,
-                follow_deps=follow_deps,
-                search_paths=search_paths,
-                ld_library_path=ld_library_path,
-                dwarf_only=dwarf_only,
-                effective_debug_format=effective_debug_format,
-                pdb_path=pdb_path,
-                old_pdb_path=old_pdb_path,
-                new_pdb_path=new_pdb_path,
-                resolved_old_debug=resolved_old_debug,
-                resolved_new_debug=resolved_new_debug,
-                debuginfod=debuginfod,
-                debuginfod_url=debuginfod_url,
-                collect_mode=collect_mode,
-                depth=depth,
-                include_labels=include_labels,
-                changed_paths=_enrich.changed_paths,
-                include_dependencies=include_dependencies,
-                build_config=config,
-            )
-        except deadline.DeadlineExceeded as exc:
-            _exit_on_budget_overflow(
-                exc,
-                budget,
-                f"'{old_input}'/'{new_input}'",
-                old_input.stem,
-                str(old_input),
-                str(new_input),
-                fmt=fmt,
-                output=output,
-                secondary_writes=secondary_writes,
-            )
 
     # Follow GNU ld linker scripts up front so the resolved DSO (not the text
     # script) drives format detection, metadata, and dependency analysis.
@@ -1709,13 +1422,6 @@ def run_compare(
     # did not, and that alias table no longer exists.)
     old_input, old_fmt = cli_resolve._normalize_binary_input(old_input)
     new_input, new_fmt = cli_resolve._normalize_binary_input(new_input)
-    # Same linker-script resolution for the paths --used-by/--required-symbol
-    # scoping will parse — these were captured before the inline-embed rewrite
-    # above may have replaced old_input/new_input with a temporary snapshot, so
-    # they need their own normalization rather than inheriting it from old_input/
-    # new_input (which, in that case, no longer point at the original library).
-    used_by_old_input, _ = cli_resolve._normalize_binary_input(used_by_old_input)
-    used_by_new_input, _ = cli_resolve._normalize_binary_input(used_by_new_input)
     _reject_manifest_non_elf(old_manifest_obj, new_manifest_obj, old_fmt, new_fmt)
     _reject_debug_format_for_non_elf(effective_debug_format, old_fmt, new_fmt)
     _warn_ignored_flags(
@@ -1738,6 +1444,38 @@ def run_compare(
         debuginfod_url=debuginfod_url,
     )
 
+    # A raw --old/new-sources checkout or --build-info build dir (not a pack)
+    # is collected by the shared resolution itself, at the run's collect
+    # mode, under the config/compile/execution decisions `dump` would make for
+    # it (`frontends.cli.compare_inline_evidence`); prebuilt packs it does not
+    # consume stay on the out-of-band path below.
+    from .frontends.cli.compare_inline_evidence import (
+        InlineEvidence,
+        InlineEvidenceRun,
+    )
+    from .frontends.cli.dump_debug_config import DumpDebugConfig
+
+    _inline = InlineEvidence(old_sources, old_build_info, new_sources, new_build_info)
+    _inline_run = InlineEvidenceRun(
+        ctx=ctx,
+        compile_context=compile_context,
+        old_header_backend=old_header_backend,
+        new_header_backend=new_header_backend,
+        collect_mode=collect_mode,
+        depth=depth,
+        changed_paths=_enrich.changed_paths,
+        config=config,
+        lang=lang,
+        debug=DumpDebugConfig(
+            format=effective_debug_format,
+            dwarf_only=dwarf_only,
+            debuginfod=debuginfod,
+            debuginfod_url=debuginfod_url,
+            pdb_path=pdb_path,
+        ),
+        old_debug_roots=tuple(resolved_old_debug),
+        new_debug_roots=tuple(resolved_new_debug),
+    )
     # ADR-068 §3 #19: `--budget`'s deadline is already ambient (entered once,
     # early, by `enter_budget_scope` above) -- `deadline.check()`/
     # `bounded_timeout()` consult it however deep the call stack; the explicit
@@ -1783,6 +1521,7 @@ def run_compare(
             config_public_header_dirs=project_config_public_header_dirs(project_cfg),
             exclude_headers=tuple(exclude_headers or ()),
             ownership=project_ownership_request(project_cfg, cfg_path),
+            prepare=lambda request: _inline.apply(request, _inline_run),
         )
     except deadline.DeadlineExceeded as exc:
         _exit_on_budget_overflow(
@@ -1868,8 +1607,13 @@ def run_compare(
     # resolution embeds the pack (Codex review, PR #1020).
     from .cli_buildsource_helpers import _with_out_of_band_packs
 
+    _packs = _inline.out_of_band(resolution_request)
     pair = _with_out_of_band_packs(
-        pair, old_build_info, old_sources, new_build_info, new_sources
+        pair,
+        _packs.old_build_info,
+        _packs.old_sources,
+        _packs.new_build_info,
+        _packs.new_sources,
     )
     # contract.overlays.post_manifest: scope the comparison to the POST
     # manifest's committed `pp_*`/ufunc-loop surface. Narrowing, so only an
@@ -1938,28 +1682,15 @@ def run_compare(
         new_probe_matrix=probe_matrix_new,
         abi3_floor=_enrich.abi3_floor,
     )
-    # ADR-068 §3 #28's floor; `side_is_live` owns "did this run extract it?"
-    # for both `compare` forms. The operand paths are the pre-embed ones, so
-    # metadata and the same-binary note describe the user's real binaries.
     from .cli_buildsource_helpers import _echo as _evidence_echo
-    from .workflows.compare_classify import ComparedOperands, classify_resolved_pair
+    from .workflows.compare_classify import classify_resolved_pair
     from .workflows.compare_request_policy import RequestPolicyInputs
-    from .workflows.input_resolution import side_is_live
 
-    operands = ComparedOperands(
-        old_path=used_by_old_input,
-        new_path=used_by_new_input,
-        old_live=side_is_live(old_input, had_raw_evidence=old_had_raw_evidence),
-        new_live=side_is_live(new_input, had_raw_evidence=new_had_raw_evidence),
-        candidate_name=new_input.name,
-    )
     try:
         classified = classify_resolved_pair(
             request,
             pair,
             RequestPolicyInputs(suppression, pf, evaluation_config, acks),
-            operands=operands,
-            collect_mode=collect_mode,
             on_output=_evidence_echo,
         )
     except ValidationError as exc:  # a one-sided --build-info probe matrix
@@ -2008,8 +1739,8 @@ def run_compare(
         pf=pf,
         used_by_apps=used_by_apps,
         required_symbols=required_symbols,
-        used_by_old_input=used_by_old_input,
-        used_by_new_input=used_by_new_input,
+        used_by_old_input=old_input,
+        used_by_new_input=new_input,
         suppression=suppression,
         fmt=fmt,
         output=output,

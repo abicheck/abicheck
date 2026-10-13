@@ -437,7 +437,7 @@ def compare_release_members(
     # is announced. The interpreter's member cap is the designed default on
     # every run and stays silent; a memory note there would name the wrong
     # limit and break the pure-JSON stdout contract.
-    if plan.limited_by == "memory" and plan.clamped_from is not None:
+    if plan.limited_by == "memory":
         reporter.notice(
             f"Note: parallel release workers reduced {plan.clamped_from} -> "
             f"{plan.initial_jobs} to fit available memory (~{plan.budget_gib:.1f} "

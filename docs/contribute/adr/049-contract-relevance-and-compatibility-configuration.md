@@ -52,9 +52,11 @@ coverage ledger into its own exit axis
 (`workflows/aggregate/fold.py`'s `contract_coverage_exit`). **Still
 open:** flipping `--contract` (a resolved contract mode) on by default for
 every run — see `docs/contribute/plans/public-contract-default.md`'s
-"Work breakdown" for per-phase detail. Without `--contract`,
-`contract_evaluation` stays `False` and `compare()`'s behavior is
-unchanged, same as before Phase 7.
+"Work breakdown" for per-phase detail. The CLI passes
+`contract_evaluation=True` on every run (`resolve_contract_evaluation`
+always returns `True`, `abicheck/frontends/cli/options/contract.py`); the
+Tier-1 core `checker.compare()` keeps its `False` default, unchanged from
+before Phase 7, so a direct caller opts in explicitly.
 **Verified:** main@21428eff on 2026-09-12
 
 Re-read against the code at that commit, claim by claim. Every module this
