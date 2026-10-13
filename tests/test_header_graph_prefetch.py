@@ -9,14 +9,17 @@ prefetch engages only where it cannot parse the same headers twice.
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
+import sys
 from concurrent.futures import Future
 from pathlib import Path
 
 import pytest
 
 from abicheck import service_header_graph_attach as attach
+from abicheck.deadline import CancelToken
 from abicheck.serialization import snapshot_to_dict
 from abicheck.workflows.dump import header_graph_prefetch as prefetch, native
 
@@ -139,9 +142,9 @@ def test_prefetch_engages_only_where_it_cannot_parse_twice(
 ) -> None:
     started: list[object] = []
 
-    def fake_prefetch(*args: object) -> Future[attach.HeaderGraphAst]:
+    def fake_prefetch(*args: object) -> prefetch.HeaderGraphPrefetch:
         started.append(args)
-        return Future()
+        return prefetch.HeaderGraphPrefetch(Future(), CancelToken())
 
     monkeypatch.setattr(prefetch, "prefetch_header_graph_ast", fake_prefetch)
     result = prefetch.prefetch_graph_if_useful(
@@ -172,10 +175,10 @@ def test_prefetch_runs_the_acquisition_on_its_own_thread_and_returns_it(
         return sentinel
 
     monkeypatch.setattr(attach, "acquire_header_graph_ast", fake_acquire)
-    future = prefetch.prefetch_header_graph_ast(
+    pending = prefetch.prefetch_header_graph_ast(
         [Path("a.h")], [Path("inc")], "c++", None
     )
-    assert future.result(timeout=10) is sentinel
+    assert pending.future.result(timeout=10) is sentinel
     ((thread_name, args),) = seen
     assert args == ([Path("a.h")], [Path("inc")], "c++", None)
     # A fresh budget always has a thread for it ("0"/unset mean unlimited).
@@ -198,9 +201,9 @@ def test_a_spent_budget_runs_the_prefetch_inline(
         lambda *a: names.append(threading.current_thread().name),
     )
     with pr.BudgetedExecutor(1):  # takes the only budgeted thread
-        prefetch.prefetch_header_graph_ast([Path("a.h")], [], "c++", None).result(
-            timeout=10
-        )
+        prefetch.prefetch_header_graph_ast(
+            [Path("a.h")], [], "c++", None
+        ).future.result(timeout=10)
     assert names == [threading.current_thread().name]
     assert pr.THREAD_BUDGET.in_use == 0
 
@@ -225,13 +228,13 @@ def test_a_failing_dump_settles_its_prefetch_before_returning(
     monkeypatch.setenv("ABICHECK_MAX_THREADS", "")
     monkeypatch.setattr(attach, "acquire_header_graph_ast", slow_acquire)
     before = THREAD_BUDGET.in_use
-    future = prefetch.prefetch_header_graph_ast([Path("a.h")], [], "c++", None)
+    pending = prefetch.prefetch_header_graph_ast([Path("a.h")], [], "c++", None)
     assert THREAD_BUDGET.in_use == before + 1
     threading.Timer(0.05, release.set).start()
     with pytest.raises(type(exc)):
-        with prefetch.prefetch_settled_on_failure(future):
+        with prefetch.prefetch_settled_on_failure(pending):
             raise exc
-    assert future.done()
+    assert pending.future.done()
     # The done-callback's shutdown may run a moment after result() returns.
     for _ in range(100):
         if THREAD_BUDGET.in_use == before:
@@ -246,7 +249,9 @@ def test_a_successful_block_does_not_wait_on_the_prefetch() -> None:
     from concurrent.futures import Future
 
     pending: Future[attach.HeaderGraphAst] = Future()
-    with prefetch.prefetch_settled_on_failure(pending):
+    with prefetch.prefetch_settled_on_failure(
+        prefetch.HeaderGraphPrefetch(pending, CancelToken())
+    ):
         pass
     assert not pending.done()
     with prefetch.prefetch_settled_on_failure(None):
@@ -260,9 +265,12 @@ def test_an_interrupt_never_waits_on_the_prefetch(exc: BaseException) -> None:
 
     never: Future[attach.HeaderGraphAst] = Future()  # would block forever
     with pytest.raises(type(exc)):
-        with prefetch.prefetch_settled_on_failure(never):
+        with prefetch.prefetch_settled_on_failure(
+            prefetch.HeaderGraphPrefetch(never, CancelToken())
+        ):
             raise exc
-    assert not never.done()
+    # A queued parse is cancelled outright; a running one is stopped by its token.
+    assert never.cancelled()
 
 
 def test_a_stuck_prefetch_bounds_the_failure_wait(
@@ -276,6 +284,121 @@ def test_a_stuck_prefetch_bounds_the_failure_wait(
     stuck: Future[attach.HeaderGraphAst] = Future()
     start = time.monotonic()
     with pytest.raises(RuntimeError):
-        with prefetch.prefetch_settled_on_failure(stuck):
+        with prefetch.prefetch_settled_on_failure(
+            prefetch.HeaderGraphPrefetch(stuck, CancelToken())
+        ):
             raise RuntimeError("boom")
     assert time.monotonic() - start < 2.0
+
+
+_SLOW_PARSE_CHILD = [sys.executable, "-c", "import time; time.sleep(60)"]
+
+
+@pytest.mark.skipif(os.name != "posix", reason="process groups are POSIX")
+@pytest.mark.parametrize("exc", [RuntimeError("boom"), KeyboardInterrupt()])
+def test_a_failed_or_interrupted_block_kills_the_running_parse(
+    monkeypatch: pytest.MonkeyPatch, exc: BaseException
+) -> None:
+    """The bug class: a parse still running beside a failed dump must not keep
+    its clang child alive, or hold its thread-budget slot until it finishes."""
+    import threading
+    import time
+
+    from abicheck import deadline, process_resources as pr
+
+    monkeypatch.setenv("ABICHECK_MAX_THREADS", "")
+    monkeypatch.setattr(pr, "THREAD_BUDGET", pr._ThreadBudget())
+    running = threading.Event()
+
+    def parse_that_spawns_clang(*_args: object) -> attach.HeaderGraphAst:
+        running.set()
+        deadline.run_bounded(_SLOW_PARSE_CHILD, timeout=120)
+        raise AssertionError("the child should have been cancelled")
+
+    monkeypatch.setattr(attach, "acquire_header_graph_ast", parse_that_spawns_clang)
+    pending = prefetch.prefetch_header_graph_ast([Path("a.h")], [], "c++", None)
+    assert running.wait(10)
+    assert pr.THREAD_BUDGET.in_use == 1
+
+    start = time.monotonic()
+    with pytest.raises(type(exc)):
+        with prefetch.prefetch_settled_on_failure(pending):
+            raise exc
+    assert pending.token.cancelled
+    # The child sleeps 60 s: finishing this fast means it was killed.
+    raised = pending.future.exception(timeout=15)
+    assert isinstance(raised, deadline.ProcessCancelled)
+    assert time.monotonic() - start < 15
+    for _ in range(100):
+        if pr.THREAD_BUDGET.in_use == 0:
+            break
+        threading.Event().wait(0.01)
+    assert pr.THREAD_BUDGET.in_use == 0
+
+
+def test_a_successful_block_never_cancels_the_prefetch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The consumed prefetch must keep its result: cancel only on failure."""
+    from abicheck import deadline
+
+    monkeypatch.setenv("ABICHECK_MAX_THREADS", "")
+    sentinel = attach.HeaderGraphAst(None, None, [], [], ())
+    outputs: list[str] = []
+
+    def acquire(*_args: object) -> attach.HeaderGraphAst:
+        # A child started now must run to completion: the token is not set.
+        done = deadline.run_bounded(
+            [sys.executable, "-c", "print('finished')"],
+            timeout=30,
+            capture_output=True,
+            text=True,
+        )
+        outputs.append(done.stdout.strip())
+        return sentinel
+
+    monkeypatch.setattr(attach, "acquire_header_graph_ast", acquire)
+    pending = prefetch.prefetch_header_graph_ast([Path("a.h")], [], "c++", None)
+    with prefetch.prefetch_settled_on_failure(pending):
+        pass
+    assert pending.future.result(timeout=10) is sentinel
+    assert not pending.token.cancelled
+    assert outputs == ["finished"]
+
+
+@pytest.mark.skipif(os.name != "posix", reason="process groups are POSIX")
+def test_a_failed_dump_exits_without_waiting_for_its_parse(tmp_path: Path) -> None:
+    """Exit latency, end to end: the interpreter joins its pool workers at
+    exit, so a parse left running after an interrupt delays the whole process
+    by its own length (60 s here). Cancelling it lets the process exit at once."""
+    import time
+
+    started = tmp_path / "started"
+    script = tmp_path / "failing_dump.py"
+    script.write_text(
+        "import sys, time\n"
+        "from pathlib import Path\n"
+        "from abicheck import deadline\n"
+        "from abicheck import service_header_graph_attach as attach\n"
+        "from abicheck.workflows.dump import header_graph_prefetch as prefetch\n"
+        "started = Path(sys.argv[1])\n"
+        "def parse(*_a):\n"
+        "    started.touch()\n"
+        "    deadline.run_bounded(\n"
+        "        [sys.executable, '-c', 'import time; time.sleep(60)'], timeout=120)\n"
+        "attach.acquire_header_graph_ast = parse\n"
+        "pending = prefetch.prefetch_header_graph_ast([Path('a.h')], [], 'c++', None)\n"
+        "while not started.exists():\n"
+        "    time.sleep(0.01)\n"
+        "with prefetch.prefetch_settled_on_failure(pending):\n"
+        "    raise KeyboardInterrupt\n"
+    )
+    start = time.monotonic()
+    subprocess.run(
+        [sys.executable, "-I", str(script), str(started)],
+        capture_output=True,
+        timeout=60,
+    )
+    elapsed = time.monotonic() - start
+    assert started.exists(), "the parse never started, so nothing was tested"
+    assert elapsed < 20, f"exit waited {elapsed:.1f}s for the cancelled parse"

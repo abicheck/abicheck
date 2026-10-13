@@ -25,8 +25,10 @@ from __future__ import annotations
 from collections.abc import Iterator
 from concurrent.futures import Future
 from contextlib import contextmanager, suppress
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from ...deadline import CancelToken, cancel_scope
 from ...service_header_graph_attach import HeaderGraphAst
 
 if TYPE_CHECKING:
@@ -35,12 +37,26 @@ if TYPE_CHECKING:
     from ...compile_context import CompileContext
 
 
+@dataclass(frozen=True)
+class HeaderGraphPrefetch:
+    """A running header-graph parse, and the token that cancels it."""
+
+    future: Future[HeaderGraphAst]
+    token: CancelToken
+
+    def cancel(self) -> None:
+        """Stop the parse: kill its clang child so its thread returns soon."""
+        self.token.cancel()
+        # Stops a parse still queued; a running one is stopped by the token.
+        self.future.cancel()
+
+
 def prefetch_header_graph_ast(
     headers: list[Path],
     includes: list[Path],
     lang: str | None,
     compile: CompileContext | None,
-) -> Future[HeaderGraphAst]:
+) -> HeaderGraphPrefetch:
     """Start ``acquire_header_graph_ast`` on a budgeted thread now.
 
     Lets the header graph's own clang parse run while the primary castxml
@@ -55,44 +71,47 @@ def prefetch_header_graph_ast(
     # Looked up per call, so a patched ``acquire_header_graph_ast`` applies.
     from ...service_header_graph_attach import acquire_header_graph_ast
 
+    token = CancelToken()
+
+    def _acquire() -> HeaderGraphAst:
+        with cancel_scope(token):
+            return acquire_header_graph_ast(headers, includes, lang, compile)
+
     pool = BudgetedExecutor(1, thread_name_prefix="abicheck-hgraph")
     ctx = contextvars.copy_context()
-    future = pool.submit(
-        ctx.run, acquire_header_graph_ast, headers, includes, lang, compile
-    )
+    future = pool.submit(ctx.run, _acquire)
     future.add_done_callback(lambda _f: pool.shutdown(wait=False))
-    return future
+    return HeaderGraphPrefetch(future, token)
 
 
-#: Longest a failed dump waits for its abandoned header-graph prefetch.
+#: Longest a failed dump waits for its cancelled header-graph prefetch.
 _PREFETCH_SETTLE_TIMEOUT_S = 10.0
 
 
 @contextmanager
 def prefetch_settled_on_failure(
-    future: Future[HeaderGraphAst] | None,
+    prefetch: HeaderGraphPrefetch | None,
 ) -> Iterator[None]:
-    """Wait for *future* to finish before re-raising a failure of the block.
+    """Cancel *prefetch* if the block fails, then re-raise the failure.
 
-    A prefetch runs beside the primary dump; if that dump fails, nothing will
-    ever consume the prefetched graph, but its parse keeps running and keeps
-    its thread-budget slot (released only when it completes). Settling it
-    here returns the slot before the failing call returns, so a failed dump
-    never leaves an orphaned parse behind to starve a later pool.
+    A prefetch runs beside the primary dump. If that dump fails, nothing will
+    ever consume the prefetched graph, so it is cancelled: its clang child is
+    killed and its thread-budget slot comes back when its thread returns.
+    An ordinary failure waits a bounded time for that, so the error is not
+    held up by a slow kill. An interrupt cancels and propagates at once.
     """
     try:
         yield
     except Exception:
-        # Bounded: a prefetch stuck in a slow parse must not hold the error
-        # hostage. Past the bound the slot is returned when the parse ends,
-        # exactly the pre-fix behavior, but the common case (a parse that is
-        # finishing or already done) is settled before the error propagates.
-        if future is not None:
+        if prefetch is not None:
+            prefetch.cancel()
             with suppress(BaseException):
-                future.result(timeout=_PREFETCH_SETTLE_TIMEOUT_S)
+                prefetch.future.result(timeout=_PREFETCH_SETTLE_TIMEOUT_S)
         raise
-    # KeyboardInterrupt / SystemExit propagate immediately: an interrupt must
-    # never wait on a background parse (up to clang's own timeout).
+    except BaseException:
+        if prefetch is not None:
+            prefetch.cancel()
+        raise
 
 
 def prefetch_graph_if_useful(
@@ -102,7 +121,7 @@ def prefetch_graph_if_useful(
     includes: list[Path],
     lang: str | None,
     compile: CompileContext | None,
-) -> Future[HeaderGraphAst] | None:
+) -> HeaderGraphPrefetch | None:
     """Start the header graph's clang parse now, when that is worth doing.
 
     The parse depends only on the headers and compile context, never on the

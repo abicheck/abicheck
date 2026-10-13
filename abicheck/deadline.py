@@ -60,7 +60,7 @@ import signal
 import subprocess
 import threading
 import time
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from typing import Any
 
@@ -91,6 +91,69 @@ class DeadlineExceeded(Exception):
             f"scan deadline already exceeded ({-remaining_s:.1f}s over budget); "
             "refusing to start a new subprocess"
         )
+
+
+class ProcessCancelled(BaseException):
+    """A :func:`run_bounded` child was killed because its cancel token was set.
+
+    A ``BaseException`` on purpose, like ``concurrent.futures.CancelledError``:
+    the header-graph path's broad handlers (``except Exception``, the
+    malformed-AST tuple its bisection retries on) must not read a cancelled
+    parse as a failed one, so nothing is memoized, retried or reported for it.
+    """
+
+
+class CancelToken:
+    """Cooperative cancellation for the subprocesses of one piece of work.
+
+    :meth:`cancel` may be called from any thread. Every :func:`run_bounded`
+    call made under :func:`cancel_scope` with this token then kills its
+    child's whole process group and raises :class:`ProcessCancelled`. Not
+    reset: a token is spent once cancelled.
+    """
+
+    def __init__(self) -> None:
+        self._event = threading.Event()
+
+    def cancel(self) -> None:
+        self._event.set()
+
+    @property
+    def cancelled(self) -> bool:
+        return self._event.is_set()
+
+
+_cancel_token: contextvars.ContextVar[CancelToken | None] = contextvars.ContextVar(
+    "abicheck_cancel_token", default=None
+)
+
+
+@contextmanager
+def cancel_scope(token: CancelToken | None) -> Iterator[None]:
+    """Make *token* the active cancel token on the calling thread."""
+    reset = _cancel_token.set(token)
+    try:
+        yield
+    finally:
+        _cancel_token.reset(reset)
+
+
+def carry_cancel_token(fn: Callable[..., Any]) -> Callable[..., Any]:
+    """Bind *fn* to the cancel token active now, for a worker pool.
+
+    ``contextvars`` do not cross a ``ThreadPoolExecutor``, so a pool's workers
+    would spawn children no token can reach. Call this in the submitting
+    thread and submit the returned callable instead of *fn*.
+    """
+    token = _cancel_token.get()
+    if token is None:
+        return fn
+
+    def _under_token(*args: Any, **kwargs: Any) -> Any:
+        with cancel_scope(token):
+            return fn(*args, **kwargs)
+
+    return _under_token
 
 
 _deadline: contextvars.ContextVar[float | None] = contextvars.ContextVar(
@@ -352,6 +415,11 @@ def run_bounded(
     """
     had_deadline = remaining() is not None
     effective_timeout = bounded_timeout(timeout)
+    token = _cancel_token.get()
+    if token is not None and token.cancelled:
+        # Checked before spawning, so a retry or bisect loop that outlives its
+        # cancellation never starts another child.
+        raise ProcessCancelled()
     if capture_output:
         stdout = subprocess.PIPE
         stderr = subprocess.PIPE
@@ -365,7 +433,12 @@ def run_bounded(
         text=text,
     ) as proc:
         try:
-            out, err = proc.communicate(input=input, timeout=effective_timeout)
+            if token is None:
+                out, err = proc.communicate(input=input, timeout=effective_timeout)
+            else:
+                out, err = _communicate_cancellable(
+                    proc, input, effective_timeout, token
+                )
         except subprocess.TimeoutExpired as exc:
             terminate_process_tree(proc)
             # Drain the now-dead process's pipes so it doesn't linger as a zombie;
@@ -381,6 +454,38 @@ def run_bounded(
                 raise DeadlineExceeded(left if left is not None else 0.0) from exc
             raise
     return subprocess.CompletedProcess(cmd, proc.returncode, out, err)
+
+
+#: How often a cancellable child's token is checked while it runs.
+_CANCEL_POLL_S = 0.1
+
+
+def _communicate_cancellable(
+    proc: subprocess.Popen[Any],
+    input: Any,
+    timeout: float,
+    token: CancelToken,
+) -> tuple[Any, Any]:
+    """``proc.communicate`` that also gives up as soon as *token* is cancelled.
+
+    Re-polls in short slices. ``communicate`` keeps the output it has read
+    across a ``TimeoutExpired``, so retrying loses nothing. *input* goes on
+    the first call only: a later call with it raises ``ValueError``.
+    """
+    end = time.monotonic() + timeout
+    pending_input = input
+    while True:
+        if token.cancelled:
+            raise ProcessCancelled()
+        left = end - time.monotonic()
+        if left <= 0:
+            raise subprocess.TimeoutExpired(proc.args, timeout)
+        try:
+            return proc.communicate(
+                input=pending_input, timeout=min(_CANCEL_POLL_S, left)
+            )
+        except subprocess.TimeoutExpired:
+            pending_input = None
 
 
 def _kill_process_tree(proc: subprocess.Popen[Any], use_pgroup: bool) -> None:

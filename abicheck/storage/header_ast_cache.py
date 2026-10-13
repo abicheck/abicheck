@@ -393,6 +393,11 @@ class AstAcquisitionScope:
             left = deadline.remaining()
             try:
                 result = future.result(timeout=left)
+            except deadline.ProcessCancelled:
+                # The producer was cancelled because *its* request's dump
+                # failed, not because this waiter gave up. This waiter still
+                # needs the value, so acquire it again as leader or follower.
+                return self.run(backend, key, producer, group=group)
             except FutureTimeoutError:
                 if future.done():
                     return cast("_T", future.result())

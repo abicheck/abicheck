@@ -1114,3 +1114,40 @@ def test_cold_castxml_acquisition_shares_the_producer_run(
     # `cc`, not the requested `c++`: the producer's own C-mode compiler
     # selection is what both consumers are told.
     assert first_meta == second_meta == [("cc", False)]
+
+
+def test_waiter_reacquires_when_the_shared_producer_was_cancelled() -> None:
+    """A cancelled leader is its own request's business: a waiter that still
+    needs the value must not inherit the cancellation, it must acquire it."""
+    from abicheck.deadline import ProcessCancelled
+
+    entered = threading.Event()
+    release = threading.Event()
+
+    def cancelled_produce() -> str:
+        entered.set()
+        assert release.wait(timeout=2)
+        raise ProcessCancelled()
+
+    def fresh_produce() -> str:
+        return "fresh"
+
+    with ast_acquisition_scope():
+        parent = contextvars.copy_context()
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            leader = pool.submit(
+                _run_in_context, parent.copy(), "same", cancelled_produce
+            )
+            assert entered.wait(timeout=2)
+            waiter = pool.submit(
+                parent.copy().run,
+                run_ast_acquisition,
+                "clang",
+                "same",
+                fresh_produce,
+            )
+            time.sleep(0.05)
+            release.set()
+            with pytest.raises(ProcessCancelled):
+                leader.result(timeout=2)
+            assert waiter.result(timeout=2) == "fresh"
