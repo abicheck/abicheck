@@ -20,6 +20,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from abicheck.extract import header_ast_backend
+
 # ---------------------------------------------------------------------------
 # Helper: produce a minimal valid castxml XML document with some content
 # ---------------------------------------------------------------------------
@@ -690,7 +692,6 @@ def test_header_ast_parser_falls_back_to_clang_on_toolchain_failure(
 ):
     """G16: an auto-selected castxml that fails with a toolchain-version error
     (bundled Clang too old) falls back to the clang backend instead of aborting."""
-    from abicheck import dumper
     from abicheck.dumper import _ClangAstParser, _header_ast_parser
     from abicheck.errors import SnapshotError
     from abicheck.extract.headers.castxml import backend as castxml_backend
@@ -699,9 +700,14 @@ def test_header_ast_parser_falls_back_to_clang_on_toolchain_failure(
         raise SnapshotError("castxml failed: error: unknown type name '_Float128'")
 
     sentinel = object()
-    monkeypatch.setattr(dumper, "_resolve_header_backend", lambda b: "castxml")
+    monkeypatch.setattr(
+        header_ast_backend, "_resolve_header_backend", lambda b: "castxml"
+    )
     monkeypatch.setattr(castxml_backend, "castxml_dump", _boom)
-    monkeypatch.setattr(dumper, "_resolve_clang_bin", lambda *a, **k: "clang")
+    monkeypatch.setattr(
+        "abicheck.extract.headers.clang.backend.resolve_clang_bin",
+        lambda *a, **k: "clang",
+    )
     monkeypatch.setattr(
         "abicheck.extract.headers.clang.backend.clang_header_dump",
         lambda *a, **k: (sentinel, None, False),
@@ -718,7 +724,6 @@ def test_header_ast_parser_falls_back_to_clang_on_guard_error(tmp_path, monkeypa
     """An auto-selected castxml that fails on a direct-include #error guard (a
     -H include-dir swept in an internal/detail header) falls back to clang, whose
     path can granularly exclude the offending header and re-parse the rest."""
-    from abicheck import dumper
     from abicheck.dumper import _ClangAstParser, _header_ast_parser
     from abicheck.errors import SnapshotError
     from abicheck.extract.headers.castxml import backend as castxml_backend
@@ -730,9 +735,14 @@ def test_header_ast_parser_falls_back_to_clang_on_guard_error(tmp_path, monkeypa
         )
 
     sentinel = object()
-    monkeypatch.setattr(dumper, "_resolve_header_backend", lambda b: "castxml")
+    monkeypatch.setattr(
+        header_ast_backend, "_resolve_header_backend", lambda b: "castxml"
+    )
     monkeypatch.setattr(castxml_backend, "castxml_dump", _boom)
-    monkeypatch.setattr(dumper, "_resolve_clang_bin", lambda *a, **k: "clang")
+    monkeypatch.setattr(
+        "abicheck.extract.headers.clang.backend.resolve_clang_bin",
+        lambda *a, **k: "clang",
+    )
     monkeypatch.setattr(
         "abicheck.extract.headers.clang.backend.clang_header_dump",
         lambda *a, **k: (sentinel, None, False),
@@ -748,7 +758,6 @@ def test_header_ast_parser_falls_back_to_clang_on_guard_error(tmp_path, monkeypa
 def test_header_ast_parser_no_fallback_when_castxml_explicit(tmp_path, monkeypatch):
     """An explicit --ast-frontend castxml is honored verbatim — the toolchain
     error surfaces unchanged rather than silently switching to clang."""
-    from abicheck import dumper
     from abicheck.dumper import _header_ast_parser
     from abicheck.errors import SnapshotError
     from abicheck.extract.headers.castxml import backend as castxml_backend
@@ -756,9 +765,10 @@ def test_header_ast_parser_no_fallback_when_castxml_explicit(tmp_path, monkeypat
     def _boom(*a, **k):
         raise SnapshotError("castxml failed: error: unknown type name '_Float128'")
 
-    monkeypatch.setattr(dumper, "_resolve_header_backend", lambda b: "castxml")
+    monkeypatch.setattr(
+        header_ast_backend, "_resolve_header_backend", lambda b: "castxml"
+    )
     monkeypatch.setattr(castxml_backend, "castxml_dump", _boom)
-    monkeypatch.setattr(dumper, "_resolve_clang_bin", lambda *a, **k: "clang")
     monkeypatch.delenv("ABICHECK_AST_FRONTEND", raising=False)
 
     with pytest.raises(SnapshotError):
@@ -774,11 +784,12 @@ def test_header_ast_parser_explicit_castxml_rejects_device_context(
     non-"host" frontend_context fails immediately -- castxml has no SYCL/
     DPC++ context concept at all, so it must never silently hand back an
     ordinary castxml dump the caller could mistake for device-derived."""
-    from abicheck import dumper
     from abicheck.dumper import _header_ast_parser
     from abicheck.errors import AstContextMissingError
 
-    monkeypatch.setattr(dumper, "_resolve_header_backend", lambda b: "castxml")
+    monkeypatch.setattr(
+        header_ast_backend, "_resolve_header_backend", lambda b: "castxml"
+    )
 
     with pytest.raises(AstContextMissingError, match="castxml"):
         _header_ast_parser(
@@ -854,7 +865,6 @@ def test_header_ast_parser_env_pinned_castxml_rejects_device_context(
 def test_header_ast_parser_no_fallback_on_non_toolchain_failure(tmp_path, monkeypatch):
     """A castxml failure that is NOT a toolchain-version signature (e.g. a bad
     header) re-raises — fallback is reserved for the recoverable case."""
-    from abicheck import dumper
     from abicheck.dumper import _header_ast_parser
     from abicheck.errors import SnapshotError
     from abicheck.extract.headers.castxml import backend as castxml_backend
@@ -862,9 +872,10 @@ def test_header_ast_parser_no_fallback_on_non_toolchain_failure(tmp_path, monkey
     def _boom(*a, **k):
         raise SnapshotError("castxml failed: fatal error: 'missing.h' file not found")
 
-    monkeypatch.setattr(dumper, "_resolve_header_backend", lambda b: "castxml")
+    monkeypatch.setattr(
+        header_ast_backend, "_resolve_header_backend", lambda b: "castxml"
+    )
     monkeypatch.setattr(castxml_backend, "castxml_dump", _boom)
-    monkeypatch.setattr(dumper, "_resolve_clang_bin", lambda *a, **k: "clang")
     monkeypatch.delenv("ABICHECK_AST_FRONTEND", raising=False)
 
     with pytest.raises(SnapshotError):
@@ -875,10 +886,11 @@ def test_header_ast_parser_no_fallback_on_non_toolchain_failure(tmp_path, monkey
 
 def test_header_ast_parser_clang_backend_returns_clang_parser(tmp_path, monkeypatch):
     """When the resolved backend is clang, the clang parser is returned directly."""
-    from abicheck import dumper
     from abicheck.dumper import _ClangAstParser, _header_ast_parser
 
-    monkeypatch.setattr(dumper, "_resolve_header_backend", lambda b: "clang")
+    monkeypatch.setattr(
+        header_ast_backend, "_resolve_header_backend", lambda b: "clang"
+    )
     monkeypatch.setattr(
         "abicheck.extract.headers.clang.backend.clang_header_dump",
         lambda *a, **k: ({}, None, False),
@@ -896,11 +908,12 @@ def test_header_ast_parser_castxml_success_returns_castxml_parser(
     """A successful castxml dump returns the castxml parser (no fallback)."""
     from xml.etree.ElementTree import Element
 
-    from abicheck import dumper
     from abicheck.dumper import _CastxmlParser, _header_ast_parser
     from abicheck.extract.headers.castxml import backend as castxml_backend
 
-    monkeypatch.setattr(dumper, "_resolve_header_backend", lambda b: "castxml")
+    monkeypatch.setattr(
+        header_ast_backend, "_resolve_header_backend", lambda b: "castxml"
+    )
     monkeypatch.setattr(
         castxml_backend, "castxml_dump", lambda *a, **k: Element("GCC_XML")
     )

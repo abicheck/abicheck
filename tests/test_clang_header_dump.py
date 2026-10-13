@@ -32,9 +32,10 @@ from typing import Any
 
 import pytest
 
-from abicheck import deadline, dumper, dumper_clang
+from abicheck import deadline, dumper
 from abicheck.dumper_clang import _ClangAstParser
 from abicheck.errors import SnapshotError
+from abicheck.extract import compiler_driver
 from abicheck.extract.headers import ast_config as dumper_ast_config
 from abicheck.extract.headers.clang import backend as clang_backend
 from abicheck.extract.headers.clang.backend import clang_header_dump
@@ -58,7 +59,9 @@ def _stub_clang_self_heal(monkeypatch: pytest.MonkeyPatch) -> Any:
     """
     import subprocess as _sp
 
-    monkeypatch.setattr("abicheck.dumper_clang._clang_available", lambda *a, **k: True)
+    monkeypatch.setattr(
+        "abicheck.extract.compiler_driver.clang_available", lambda *a, **k: True
+    )
     monkeypatch.setattr(
         "abicheck.extract.headers.clang.backend._resolve_clang_system_includes",
         lambda *a, **k: (),
@@ -128,7 +131,7 @@ def test_clang_header_dump_success_and_cache(
     cache = tmp_path / "cache.json"
     ast_json = '{"kind": "TranslationUnitDecl", "inner": []}'
 
-    monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
+    monkeypatch.setattr(compiler_driver, "clang_available", lambda *a, **k: True)
     monkeypatch.setattr(clang_backend, "_cache_path", lambda *a, **k: cache)
     # Isolate the single clang AST-dump call: disable the castxml↔clang
     # system-include probe (itself a separate, best-effort subprocess).
@@ -164,7 +167,7 @@ def test_clang_header_dump_skips_memo_write_on_toolchain_change(
     header = tmp_path / "foo.h"
     header.write_text("int foo(void);\n")
     cache = tmp_path / "cache.json"
-    monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
+    monkeypatch.setattr(compiler_driver, "clang_available", lambda *a, **k: True)
     monkeypatch.setattr(clang_backend, "_cache_path", lambda *a, **k: cache)
     monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "0")
     # First call (frontend_identity) returns "v1"; every later call (the
@@ -207,7 +210,7 @@ def test_clang_header_dump_memoize_false_never_writes_the_memo(
     header = tmp_path / "foo.h"
     header.write_text("int foo(void);\n")
     cache = tmp_path / "cache.json"
-    monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
+    monkeypatch.setattr(compiler_driver, "clang_available", lambda *a, **k: True)
     monkeypatch.setattr(clang_backend, "_cache_path", lambda *a, **k: cache)
     monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "0")
 
@@ -241,7 +244,7 @@ def test_clang_header_dump_direct_caller_never_memoizes(
     header = tmp_path / "foo.h"
     header.write_text("int foo(void);\n")
     cache = tmp_path / "cache.json"
-    monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
+    monkeypatch.setattr(compiler_driver, "clang_available", lambda *a, **k: True)
     monkeypatch.setattr(clang_backend, "_cache_path", lambda *a, **k: cache)
     monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "0")
 
@@ -266,7 +269,7 @@ def test_clang_header_dump_memoizes_inside_ast_memoize_scope(
     header = tmp_path / "foo.h"
     header.write_text("int foo(void);\n")
     cache = tmp_path / "cache.json"
-    monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
+    monkeypatch.setattr(compiler_driver, "clang_available", lambda *a, **k: True)
     monkeypatch.setattr(clang_backend, "_cache_path", lambda *a, **k: cache)
     monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "0")
 
@@ -296,7 +299,7 @@ def test_ast_memoize_scope_cleans_up_its_own_writes_on_exception(
     header = tmp_path / "foo.h"
     header.write_text("int foo(void);\n")
     cache = tmp_path / "cache.json"
-    monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
+    monkeypatch.setattr(compiler_driver, "clang_available", lambda *a, **k: True)
     monkeypatch.setattr(clang_backend, "_cache_path", lambda *a, **k: cache)
     monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "0")
 
@@ -320,7 +323,7 @@ def test_clang_only_dump_does_not_require_gxx_identity(
     header = tmp_path / "foo.h"
     header.write_text("int foo(void);\n")
     cache = tmp_path / "cache.json"
-    monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
+    monkeypatch.setattr(compiler_driver, "clang_available", lambda *a, **k: True)
     monkeypatch.setattr(clang_backend, "_cache_path", lambda *a, **k: cache)
     monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "0")
     # The clang header pass lives in ``abicheck.extract.headers.clang.backend``
@@ -353,7 +356,7 @@ def test_clang_header_dump_rechecks_deadline_on_cache_hit(
     header = tmp_path / "foo.h"
     header.write_text("int foo(void);\n")
     cache = tmp_path / "cache.json"
-    monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
+    monkeypatch.setattr(compiler_driver, "clang_available", lambda *a, **k: True)
     monkeypatch.setattr(clang_backend, "_cache_path", lambda *a, **k: cache)
     monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "0")
     calls = {"n": 0}
@@ -383,7 +386,7 @@ def test_clang_header_dump_rechecks_deadline_after_cache_load(
     header = tmp_path / "foo.h"
     header.write_text("int foo(void);\n")
     cache = tmp_path / "cache.json"
-    monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
+    monkeypatch.setattr(compiler_driver, "clang_available", lambda *a, **k: True)
     monkeypatch.setattr(clang_backend, "_cache_path", lambda *a, **k: cache)
     monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "0")
 
@@ -420,7 +423,7 @@ def test_clang_header_dump_no_output_raises(
 ) -> None:
     header = tmp_path / "foo.h"
     header.write_text("int foo(void);\n")
-    monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
+    monkeypatch.setattr(compiler_driver, "clang_available", lambda *a, **k: True)
     monkeypatch.setattr(
         clang_backend, "_cache_path", lambda *a, **k: tmp_path / "c.json"
     )
@@ -443,7 +446,7 @@ def test_clang_header_dump_rechecks_deadline_before_loading_ast(
     spawned."""
     header = tmp_path / "foo.h"
     header.write_text("int foo(void);\n")
-    monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
+    monkeypatch.setattr(compiler_driver, "clang_available", lambda *a, **k: True)
     monkeypatch.setattr(
         clang_backend, "_cache_path", lambda *a, **k: tmp_path / "c.json"
     )
@@ -472,7 +475,7 @@ def test_clang_header_dump_bad_json_raises(
 ) -> None:
     header = tmp_path / "foo.h"
     header.write_text("int foo(void);\n")
-    monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
+    monkeypatch.setattr(compiler_driver, "clang_available", lambda *a, **k: True)
     monkeypatch.setattr(
         clang_backend, "_cache_path", lambda *a, **k: tmp_path / "c.json"
     )
@@ -494,7 +497,7 @@ def test_clang_header_dump_retries_cpp_on_missing_cpp_stdlib_header(
     # (with -x c++ in the rebuilt command) rather than hard-failing.
     header = tmp_path / "umbrella.h"
     header.write_text('#include "detail/impl.h"\n')
-    monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
+    monkeypatch.setattr(compiler_driver, "clang_available", lambda *a, **k: True)
     monkeypatch.setattr(
         clang_backend, "_cache_path", lambda *a, **k: tmp_path / "c.json"
     )
@@ -533,7 +536,7 @@ def test_clang_header_dump_no_retry_on_other_error(
     # A non-"missing C++ stdlib header" failure must NOT retry — it surfaces as-is.
     header = tmp_path / "foo.h"
     header.write_text("int foo(void);\n")
-    monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
+    monkeypatch.setattr(compiler_driver, "clang_available", lambda *a, **k: True)
     monkeypatch.setattr(
         clang_backend, "_cache_path", lambda *a, **k: tmp_path / "c.json"
     )
@@ -575,12 +578,12 @@ def test_clang_header_dump_device_context_selects_real_fixture(
     header = tmp_path / "foo.h"
     header.write_text("struct Point { int x, y; };\nint add(int, int);\n")
     stdout_text, stderr_text = _dpcpp_fixture_texts()
-    monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
+    monkeypatch.setattr(compiler_driver, "clang_available", lambda *a, **k: True)
     monkeypatch.setattr(
         clang_backend, "_cache_path", lambda *a, **k: tmp_path / "c.json"
     )
     monkeypatch.setattr(
-        clang_backend, "_resolve_clang_bin", lambda *a, **k: "/opt/intel/icpx"
+        clang_backend, "resolve_clang_bin", lambda *a, **k: "/opt/intel/icpx"
     )
     monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "0")
 
@@ -605,12 +608,12 @@ def test_clang_header_dump_host_context_selects_real_fixture(
     header = tmp_path / "foo.h"
     header.write_text("struct Point { int x, y; };\nint add(int, int);\n")
     stdout_text, stderr_text = _dpcpp_fixture_texts()
-    monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
+    monkeypatch.setattr(compiler_driver, "clang_available", lambda *a, **k: True)
     monkeypatch.setattr(
         clang_backend, "_cache_path", lambda *a, **k: tmp_path / "c.json"
     )
     monkeypatch.setattr(
-        clang_backend, "_resolve_dpcpp_acquisition", lambda *a: (True, False)
+        clang_backend, "resolve_dpcpp_acquisition", lambda *a: (True, False)
     )
     monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "0")
 
@@ -636,12 +639,12 @@ def test_clang_header_dump_dpcpp_empty_stream_raises_ast_context_missing(
 
     header = tmp_path / "foo.h"
     header.write_text("int foo(void);\n")
-    monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
+    monkeypatch.setattr(compiler_driver, "clang_available", lambda *a, **k: True)
     monkeypatch.setattr(
         clang_backend, "_cache_path", lambda *a, **k: tmp_path / "c.json"
     )
     monkeypatch.setattr(
-        clang_backend, "_resolve_clang_bin", lambda *a, **k: "/opt/intel/icpx"
+        clang_backend, "resolve_clang_bin", lambda *a, **k: "/opt/intel/icpx"
     )
     monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "0")
 
@@ -666,12 +669,12 @@ def test_clang_header_dump_fno_sycl_skips_multi_context(
     the ordinary single-document path (resolved_kind is None)."""
     header = tmp_path / "foo.h"
     header.write_text("int foo(void);\n")
-    monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
+    monkeypatch.setattr(compiler_driver, "clang_available", lambda *a, **k: True)
     monkeypatch.setattr(
         clang_backend, "_cache_path", lambda *a, **k: tmp_path / "c.json"
     )
     monkeypatch.setattr(
-        clang_backend, "_resolve_clang_bin", lambda *a, **k: "/opt/intel/icpx"
+        clang_backend, "resolve_clang_bin", lambda *a, **k: "/opt/intel/icpx"
     )
     monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "0")
     captured_cmds: list[list[str]] = []
@@ -702,9 +705,9 @@ def test_clang_header_dump_device_context_with_fno_sycl_raises(
 
     header = tmp_path / "foo.h"
     header.write_text("int foo(void);\n")
-    monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
+    monkeypatch.setattr(compiler_driver, "clang_available", lambda *a, **k: True)
     monkeypatch.setattr(
-        clang_backend, "_resolve_clang_bin", lambda *a, **k: "/opt/intel/icpx"
+        clang_backend, "resolve_clang_bin", lambda *a, **k: "/opt/intel/icpx"
     )
     calls = {"n": 0}
 
@@ -736,9 +739,9 @@ def test_clang_header_dump_non_host_on_plain_frontend_raises_immediately(
 
     header = tmp_path / "foo.h"
     header.write_text("int foo(void);\n")
-    monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
+    monkeypatch.setattr(compiler_driver, "clang_available", lambda *a, **k: True)
     monkeypatch.setattr(
-        clang_backend, "_resolve_clang_bin", lambda *a, **k: "/usr/bin/clang++"
+        clang_backend, "resolve_clang_bin", lambda *a, **k: "/usr/bin/clang++"
     )
     calls = {"n": 0}
 
@@ -759,7 +762,7 @@ def test_clang_header_dump_nonzero_exit_raises(
     # JSON — the L2 header AST must be complete to be authoritative.
     header = tmp_path / "foo.h"
     header.write_text("int foo(void);\n")
-    monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
+    monkeypatch.setattr(compiler_driver, "clang_available", lambda *a, **k: True)
     monkeypatch.setattr(
         clang_backend, "_cache_path", lambda *a, **k: tmp_path / "c.json"
     )
@@ -781,7 +784,7 @@ def test_clang_header_dump_timeout_raises(
 
     header = tmp_path / "foo.h"
     header.write_text("int foo(void);\n")
-    monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
+    monkeypatch.setattr(compiler_driver, "clang_available", lambda *a, **k: True)
     monkeypatch.setattr(
         clang_backend, "_cache_path", lambda *a, **k: tmp_path / "c.json"
     )
@@ -803,7 +806,7 @@ def test_clang_header_dump_corrupt_cache_is_discarded(
     cache.write_text("{ this is not valid json")  # corrupt prior cache entry
     ast = '{"kind": "TranslationUnitDecl", "inner": []}'
 
-    monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
+    monkeypatch.setattr(compiler_driver, "clang_available", lambda *a, **k: True)
     monkeypatch.setattr(clang_backend, "_cache_path", lambda *a, **k: cache)
 
     def _run(*a, **k):

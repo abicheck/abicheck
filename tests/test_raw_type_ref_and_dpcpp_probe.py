@@ -18,9 +18,8 @@ from types import SimpleNamespace
 import pytest
 from _strict_process import StrictProcessRunner, proc
 
-from abicheck import dumper_clang
-from abicheck.buildsource import dpcpp_jobs as dumper_dpcpp_jobs
-from abicheck.extract import dwarf_subtree_index as dsi
+from abicheck.extract import dpcpp_jobs as dumper_dpcpp_jobs, dwarf_subtree_index as dsi
+from abicheck.extract.compiler_driver import resolve_dpcpp_acquisition
 
 
 def _uleb(n: int) -> bytes:
@@ -213,7 +212,7 @@ def probe(monkeypatch):
 def test_probe_accepts_a_replayable_device_plus_host_plan(probe):
     install, seen = probe
     install(stderr="clang version x\n" + _DEVICE_JOB + "\n" + _HOST_JOB + "\n")
-    assert dumper_clang._driver_host_only_is_single_pass("icpx", ("-O0",)) is True
+    assert resolve_dpcpp_acquisition("icpx", "host", None, ("-O0",))[1] is True
     assert seen == [["icpx", "-O0", *_PROBE_TAIL]]
 
 
@@ -221,13 +220,13 @@ def test_probe_rejects_a_device_plan_it_cannot_replay(probe):
     install, _ = probe
     second_device = _DEVICE_JOB.replace("spir64", "spir64_gen")
     install(stderr="\n".join([_DEVICE_JOB, second_device, _HOST_JOB]))
-    assert dumper_clang._driver_host_only_is_single_pass("icpx", ()) is False
+    assert resolve_dpcpp_acquisition("icpx", "host", None, ())[1] is False
 
 
 def test_probe_reports_a_single_host_pass(probe):
     install, seen = probe
     install(stderr=_HOST_JOB)
-    assert dumper_clang._driver_host_only_is_single_pass("icpx", ()) is True
+    assert resolve_dpcpp_acquisition("icpx", "host", None, ())[1] is True
     assert seen == [["icpx", *_PROBE_TAIL]]
 
 
@@ -237,7 +236,7 @@ def test_probe_reports_a_single_host_pass(probe):
 def test_probe_that_cannot_run_keeps_the_host_only_request(probe, exc):
     install, seen = probe
     install(exc=exc)
-    assert dumper_clang._driver_host_only_is_single_pass("icpx", ()) is True
+    assert resolve_dpcpp_acquisition("icpx", "host", None, ())[1] is True
     assert seen == [["icpx", *_PROBE_TAIL]]
 
 
@@ -326,19 +325,11 @@ def test_a_failed_device_pass_is_reported_without_running_the_host(monkeypatch):
 
 def test_a_two_pass_driver_routes_the_host_request_to_the_selector(monkeypatch):
     monkeypatch.setattr(
-        dumper_clang, "_driver_host_only_is_single_pass", lambda *_a: False
+        dumper_dpcpp_jobs, "host_only_request_usable", lambda *_a: False
     )
-    assert dumper_clang._resolve_dpcpp_acquisition("icpx", "host", None, ()) == (
-        True,
-        False,
-    )
-    monkeypatch.setattr(
-        dumper_clang, "_driver_host_only_is_single_pass", lambda *_a: True
-    )
-    assert dumper_clang._resolve_dpcpp_acquisition("icpx", "host", None, ()) == (
-        False,
-        True,
-    )
+    assert resolve_dpcpp_acquisition("icpx", "host", None, ()) == (True, False)
+    monkeypatch.setattr(dumper_dpcpp_jobs, "host_only_request_usable", lambda *_a: True)
+    assert resolve_dpcpp_acquisition("icpx", "host", None, ()) == (False, True)
 
 
 # ── memoized parameter trait, undecodable parameter, load-time strip ───────

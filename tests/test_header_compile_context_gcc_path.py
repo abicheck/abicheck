@@ -99,7 +99,7 @@ def test_resolve_derives_gcc_path_behind_launcher_wrapper(tmp_path: Path) -> Non
     launcher wrapper (``sccache``, ``ccache``, ``distcc``, ...) commonly
     precedes the real driver in argv. Before the fix, ``_derived_gcc_path``
     blindly returned ``cu.argv[0]`` (the launcher, ``sccache``) -- not a
-    clang-family binary, so ``_resolve_clang_bin`` rejected it and fell back
+    clang-family binary, so ``resolve_clang_bin`` rejected it and fell back
     to plain ``clang++``, which cannot consume the retained ``/std:`` flags."""
     header = tmp_path / "widget.h"
     header.write_text("struct Widget { int x; };\n", encoding="utf-8")
@@ -255,7 +255,7 @@ def test_resolve_derives_gcc_path_resolves_bare_driver_via_env_path(
     that only exists on that overridden PATH (not abicheck's own inherited
     PATH) must still resolve. Before the fix, ``strip_launchers`` discarded
     the ``PATH=...`` assignment along with every other skipped token,
-    leaving the bare ``clang-cl`` name unresolved -- ``_resolve_clang_bin``
+    leaving the bare ``clang-cl`` name unresolved -- ``resolve_clang_bin``
     would report it missing when it isn't on the *inherited* PATH."""
     header = tmp_path / "widget.h"
     header.write_text("struct Widget { int x; };\n", encoding="utf-8")
@@ -528,7 +528,7 @@ def test_merge_l3_compile_context_explicit_prefix_only_not_overridden_by_derived
 ):
     """P2 review finding (``discussion_r3788073754``): ``gcc_path``/
     ``gcc_prefix`` are one logical compiler selector, not two independent
-    fields -- ``_resolve_clang_bin`` always checks ``gcc_path`` first. A
+    fields -- ``resolve_clang_bin`` always checks ``gcc_path`` first. A
     caller who explicitly set ONLY ``gcc_prefix`` (meaning "use this prefix,
     no path override") must not have a *different* derived ``gcc_path``
     merged in for the unset explicit slot, since that derived path would then

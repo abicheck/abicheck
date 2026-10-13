@@ -44,14 +44,7 @@ from ...._compiler_options import (
     forwards_response_file as _forwards_response_file,
 )
 from ....dumper_ast_config_cpp20 import _detect_cpp20_headers
-from ....dumper_clang import (
-    _ClangAstParser,
-    _is_cl_style_driver_name,
-    _is_default_clang_bin,
-    _resolve_clang_bin,
-    _resolve_dpcpp_acquisition,
-    clang_bin_is_explicitly_configured as _clang_bin_is_explicitly_configured,
-)
+from ....dumper_clang import _ClangAstParser
 from ....dumper_clang_errors import (
     _is_missing_cpp_stdlib_header_error,
     _parse_clang_ast_result,
@@ -77,6 +70,13 @@ from ....storage.header_ast_cache import (
     resolve_request_memoization,
     run_ast_acquisition_offering_entry,
     store_cached_ast,
+)
+from ...compiler_driver import (
+    clang_bin_is_explicitly_configured as _clang_bin_is_explicitly_configured,
+    is_cl_style_driver_name,
+    is_default_clang_bin,
+    resolve_clang_bin,
+    resolve_dpcpp_acquisition,
 )
 from ...path_aliases import absolutize_include_roots
 from ..backend import HeaderParseRequest
@@ -188,8 +188,8 @@ def clang_header_dump(
     # an absolute one on another made two keys (and two full parses) for
     # one header set. Idempotent for absolute roots.
     extra_includes = absolutize_include_roots(list(extra_includes))
-    clang_bin = _resolve_clang_bin(compiler, gcc_path, gcc_prefix)
-    dpcpp_multi_context, dpcpp_host_context = _resolve_dpcpp_acquisition(
+    clang_bin = resolve_clang_bin(compiler, gcc_path, gcc_prefix)
+    dpcpp_multi_context, dpcpp_host_context = resolve_dpcpp_acquisition(
         clang_bin, frontend_context, gcc_options, gcc_option_tokens
     )
     force_cpp, force_cpp20, explicit_c_request, cc_id = resolve_clang_langmode(
@@ -444,7 +444,7 @@ class ClangBackend:
         is the auto-fallback from a failed castxml attempt.
         """
         r = request
-        clang_bin = _resolve_clang_bin(r.compiler, r.gcc_path, r.gcc_prefix)
+        clang_bin = resolve_clang_bin(r.compiler, r.gcc_path, r.gcc_prefix)
         ast_root, resolved_kind, resolved_force_cpp = clang_header_dump(
             r.headers,
             r.extra_includes,
@@ -465,7 +465,7 @@ class ClangBackend:
             run_ast=self.runner,
         )
         is_cl_mode = _effective_driver_mode_is_cl(
-            _is_cl_style_driver_name(clang_bin), r.gcc_options, r.gcc_option_tokens
+            is_cl_style_driver_name(clang_bin), r.gcc_options, r.gcc_option_tokens
         )
         _target_known = not _forwards_response_file(r.gcc_options, r.gcc_option_tokens)
         _bare_reprobe_args = _forwarded_driver_mode_token(
@@ -481,7 +481,7 @@ class ClangBackend:
 
         _guess_ok = (
             _target_known
-            and _is_default_clang_bin(clang_bin, r.compiler)
+            and is_default_clang_bin(clang_bin, r.compiler)
             and not _clang_bin_is_explicitly_configured(r.gcc_path, r.gcc_prefix)
         )
         # ``established_triple`` is what the compiler (or an explicit target

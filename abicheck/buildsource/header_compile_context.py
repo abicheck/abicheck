@@ -1464,7 +1464,7 @@ def _derived_gcc_path(cu: CompileUnit) -> str | None:
     ``_context_flags``/``_STRUCTURED_FIELD_CONDITIONAL_FLAG_PREFIXES`` are
     already careful to retain (see that set's own docstring): with no
     ``gcc_path`` selected alongside it, the direct-clang L2 backend defaults
-    to plain ``clang++`` (``dumper_clang._resolve_clang_bin``'s own
+    to plain ``clang++`` (``abicheck.extract.compiler_driver.resolve_clang_bin``'s own
     fallback), and a real ``clang++`` reads ``/std:c++20`` as a missing
     source file, not a language flag (confirmed empirically) -- turning an
     otherwise-working header parse into a hard failure for evidence that
@@ -1481,7 +1481,7 @@ def _derived_gcc_path(cu: CompileUnit) -> str | None:
     wrapper commonly precedes the real driver.** For ``sccache clang-cl
     /std:c++20 ...``, ``_is_msvc_command`` correctly recognizes ``clang-cl``
     later in the leading tokens, but ``argv[0]`` is ``sccache`` -- not a
-    clang-family binary, so ``dumper_clang._resolve_clang_bin`` rejects it
+    clang-family binary, so ``abicheck.extract.compiler_driver.resolve_clang_bin`` rejects it
     and falls back to plain ``clang++``, which cannot parse the retained
     ``/std:`` survivor at all (the exact failure this whole function exists
     to prevent). Uses :func:`~abicheck.buildsource.adapters.base.
@@ -1511,9 +1511,9 @@ def _derived_gcc_path(cu: CompileUnit) -> str | None:
 
     Deliberately does **not** attempt to validate that ``cu.argv[0]`` is
     itself a clang-family binary (``clang-cl`` vs. a real, literal
-    ``cl.exe``) -- ``dumper_clang._resolve_clang_bin``/
+    ``cl.exe``) -- ``abicheck.extract.compiler_driver.resolve_clang_bin``/
     ``resolve_source_frontend_clang_bin`` already gate a ``gcc_path``
-    override on exactly that (``_is_clang_family_binary``), falling back to
+    override on exactly that (``is_clang_family_binary``), falling back to
     their own existing default otherwise. Handing them a real ``cl.exe``
     path here is therefore safe (ignored, same as today) rather than
     harmful; only a genuinely clang-family unit (``clang-cl``, Intel's
@@ -1526,7 +1526,7 @@ def _derived_gcc_path(cu: CompileUnit) -> str | None:
     Also does not force ``frontend``/``--ast-frontend`` to ``"clang"``: this
     module's contract is "resolve a CompileContext", not "choose which L2
     backend runs it" -- ``"auto"`` never falls back from castxml on its own
-    (``dumper._resolve_header_backend``), so this value only takes effect
+    (``header_ast_backend._resolve_header_backend``), so this value only takes effect
     once a caller (explicitly, or via ``ABICHECK_AST_FRONTEND``) already
     selected the clang backend -- exactly the scenario this finding's own
     repro describes (a caller already on the direct-clang path, whose
@@ -1554,7 +1554,7 @@ def _derived_gcc_path(cu: CompileUnit) -> str | None:
         # (or an `env` prefix) precedes a GENERIC (non-CL-named) driver --
         # e.g. `sccache /opt/llvm/bin/clang --driver-mode=cl /c x.cc`:
         # `argv[0]` is `sccache`, not the real compiler, so
-        # `dumper_clang._resolve_clang_bin` rejects it as not clang-family
+        # `abicheck.extract.compiler_driver.resolve_clang_bin` rejects it as not clang-family
         # and silently substitutes plain `clang++` (Codex review, Finding
         # 5, fresh evidence) -- the exact failure class this whole function
         # exists to prevent. `strip_launchers` unwraps the same
@@ -1573,7 +1573,7 @@ def _derived_gcc_path(cu: CompileUnit) -> str | None:
     # prefix could never have been resolved via a real PATH search by the
     # actual build -- `execvp` has nothing to search with no PATH at all.
     # Trusting it here would let a downstream `shutil.which`-style lookup
-    # (`dumper_clang._resolve_clang_bin`, or the eventual subprocess spawn)
+    # (`abicheck.extract.compiler_driver.resolve_clang_bin`, or the eventual subprocess spawn)
     # resolve it against abicheck's OWN inherited PATH instead, silently
     # substituting an unrelated compiler that merely shares the recorded
     # name. See `env_path_cleared_for_bare_token`'s own docstring. `None`
@@ -1606,7 +1606,7 @@ def _resolve_driver_token(token: str, directory: str) -> str:
     meaningful relative to the compile unit's own ``directory`` -- not
     abicheck's own current working directory, which is what a bare
     ``shutil.which(token)``/subprocess call in
-    ``dumper_clang._resolve_clang_bin`` would otherwise use. Without this,
+    ``abicheck.extract.compiler_driver.resolve_clang_bin`` would otherwise use. Without this,
     such a token was returned verbatim, so a genuinely executable compiler
     (from the real build's own working directory) was reported missing.
 

@@ -27,7 +27,7 @@ from pathlib import Path
 
 import pytest
 
-from abicheck import dumper_clang
+from abicheck.extract import compiler_driver
 from abicheck.model import AbiSnapshot, Function, Visibility
 from abicheck.service_header_graph_attach import _attach_header_graph
 
@@ -52,7 +52,7 @@ def _snap_with_public_function() -> AbiSnapshot:
 def test_surface_graph_is_the_one_home_of_the_header_graph(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: False)
+    monkeypatch.setattr(compiler_driver, "clang_available", lambda *a, **k: False)
     header = tmp_path / "api.h"
     header.write_text("void f(void);\n")
 
@@ -84,7 +84,7 @@ def test_surface_graph_carries_the_l5_builders_own_facts(
     ``build_header_only_graph``) land in the shared graph -- proving the
     assembly step actually threads a real, populated instance into
     ``AbiSnapshot.surface_graph``, not an empty placeholder."""
-    monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: False)
+    monkeypatch.setattr(compiler_driver, "clang_available", lambda *a, **k: False)
     header = tmp_path / "api.h"
     header.write_text("void f(void);\n")
 
@@ -121,7 +121,7 @@ def test_compare_surface_graph_facts_are_not_populated_eagerly(
     47-96% at realistic sizes; this test pins the fix. The shared instance
     is still there for a future consumer to populate explicitly -- see the
     companion test below."""
-    monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: False)
+    monkeypatch.setattr(compiler_driver, "clang_available", lambda *a, **k: False)
     header = tmp_path / "api.h"
     header.write_text("void f(void);\n")
 
@@ -154,7 +154,7 @@ def test_compare_surface_graph_facts_can_still_be_populated_on_the_shared_instan
     inside the always-on dump path."""
     from abicheck.compare.surface_graph import build_public_surface_facts
 
-    monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: False)
+    monkeypatch.setattr(compiler_driver, "clang_available", lambda *a, **k: False)
     header = tmp_path / "api.h"
     header.write_text("void f(void);\n")
 
