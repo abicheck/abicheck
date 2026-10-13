@@ -295,7 +295,7 @@ def has_observed_contract_evidence(decl: SurfaceFactBearing) -> bool:
     """Confirmed (b) from a *producer*, not from the legacy enum bridge.
 
     The narrow predicate an ELF-export narrowing pass needs to know it must
-    not drop a declaration. ``_public_functions``/``_public_variables``
+    not drop a declaration. ``public_functions``/``public_variables``
     restrict a snapshot carrying ELF symbols to declarations whose name is in
     the observed export set, which is right for the DWARF-recorded internal
     subprograms it exists to exclude — their (b) is unknown — but wrong for a

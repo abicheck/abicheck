@@ -474,9 +474,9 @@ def _seed_queue_from_functions(
     queue: collections.deque[tuple[str, list[str]]],
 ) -> None:
     """Enqueue type candidates derived from all public function signatures."""
-    from .diff_symbols import _public_functions
+    from .compare.public_surface import public_functions
 
-    for func in _public_functions(snap).values():
+    for func in public_functions(snap).values():
         # (type-spelling, reached-through-pointer?) for the return + each param.
         # A type reached only through a pointer/reference in a public signature
         # (the opaque-handle pattern ``void use(ns::detail::Impl*)``) does not
@@ -503,9 +503,9 @@ def _seed_queue_from_variables(
     queue: collections.deque[tuple[str, list[str]]],
 ) -> None:
     """Enqueue type candidates derived from all public variable types."""
-    from .diff_symbols_variables import _public_variables
+    from .compare.public_surface import public_variables
 
-    for var in _public_variables(snap).values():
+    for var in public_variables(snap).values():
         if var.type:
             for cand, arg_ptr in _candidate_type_names_indirect(var.type):
                 step = [f"var:{var.name}"]

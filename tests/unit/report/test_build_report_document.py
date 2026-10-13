@@ -1009,7 +1009,7 @@ class TestRendererOrderIndependence:
     def test_resolve_fallback_reuses_the_envelope_s_frozen_today(self) -> None:
         """Codex review, fresh evidence: ``ReportEnvelope._resolve`` -- the
         fallback for a display-only ``Change`` copy
-        ``_suppress_dangling_correlation_notes`` hands a renderer under
+        ``suppress_dangling_correlation_notes`` hands a renderer under
         ``--show-only`` -- called ``build_report_findings`` with no
         ``today``, reading a fresh ``date.today()`` instead of the date
         the rest of the envelope's findings were resolved against.
@@ -1020,7 +1020,7 @@ class TestRendererOrderIndependence:
         old, new = _snapshot("1.0"), _snapshot("2.0")
         envelope = build_report_envelope(result, old, new)
 
-        # Stands in for `_suppress_dangling_correlation_notes`'s own
+        # Stands in for `suppress_dangling_correlation_notes`'s own
         # display-only copy: a different object with no entry in the
         # envelope's identity index, so `findings_for` must fall to
         # `_resolve`.

@@ -229,7 +229,7 @@ class ReportModel:
         ``result.changes``).
 
         The ``show_only`` display filter is applied by the caller (via
-        ``reporter.apply_show_only``) and the filtered list passed in here, so
+        ``report.view.apply_show_only``) and the filtered list passed in here, so
         this module stays free of any ``reporter`` import (no cycle).
 
         *effective_verdicts* (ADR-061 gap C), when given, is a pre-resolved

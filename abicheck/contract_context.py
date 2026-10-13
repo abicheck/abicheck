@@ -790,7 +790,7 @@ def relevance_map(
 
     *finding_id* is injected as a callable rather than imported, for the same
     reason :func:`~abicheck.contract_evaluation.stamp_scoped_result_findings`
-    injects it: importing ``reporter._finding_id`` here would close a
+    injects it: importing ``report.view.finding_id`` here would close a
     ``checker -> contract_context -> reporter -> checker`` import cycle the
     ``import-cycle-growth`` AI-readiness gate rejects. With no callable given,
     findings are keyed by ``"<kind>:<symbol>"``, the same stable pair the

@@ -22,14 +22,8 @@ from abicheck.compare.finding_redundancy import (
 )
 from abicheck.diff_filtering import _filter_reserved_field_renames
 from abicheck.policy.evaluate import effective_kind_sets
-from abicheck.reporter import (
-    ShowOnlyFilter,
-    apply_show_only,
-    to_json,
-    to_markdown,
-    to_stat,
-    to_stat_json,
-)
+from abicheck.report.view import ShowOnlyFilter, apply_show_only
+from abicheck.reporter import to_json, to_markdown, to_stat, to_stat_json
 
 # ---------------------------------------------------------------------------
 # Helpers

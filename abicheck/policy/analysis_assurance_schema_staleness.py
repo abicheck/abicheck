@@ -129,10 +129,10 @@ _PAIR_PRODUCER_GATED_FLAGS: dict[str, str] = {
 }
 
 #: The one flag whose real consumer requires BOTH sides confirmed
-#: (non-inferred) header-aware -- ``_both_header_aware`` -- but, unlike
+#: (non-inferred) header-aware -- ``both_header_aware`` -- but, unlike
 #: :data:`_PAIR_PRODUCER_GATED_FLAGS`, places no further requirement on the
 #: *other* side's producer (Codex review, PR #1209 round 7, fresh evidence):
-#: ``diff_symbols._diff_param_restrict`` exits at ``_both_header_aware``
+#: ``diff_symbols._diff_param_restrict`` exits at ``both_header_aware``
 #: before ever reading ``clang_restrict_facts_reliable``, and (unlike
 #: ``TypeField.default``/``Param.default``) a restrict-qualification bool is
 #: directly cross-comparable once both backends populate it (v22+), so no
@@ -205,7 +205,7 @@ _PAIR_SAME_PRODUCER_AS_SNAP_GATED_FLAGS: frozenset[str] = frozenset(
 
 
 def _other_side_is_header_confirmed(other: AbiSnapshot) -> bool:
-    """Whether *other* alone clears ``_both_header_aware``'s own half of the
+    """Whether *other* alone clears ``both_header_aware``'s own half of the
     gate -- confirmed (non-inferred) header awareness, no producer
     requirement.
     """
@@ -214,7 +214,7 @@ def _other_side_is_header_confirmed(other: AbiSnapshot) -> bool:
 
 def _other_side_confirms_pair_gate(other: AbiSnapshot, producer: str) -> bool:
     """Whether *other* alone would satisfy ``_diff_param_va_list``'s/
-    ``_diff_var_access``'s own ``_both_header_aware`` + exact-producer gate
+    ``_diff_var_access``'s own ``both_header_aware`` + exact-producer gate
     -- confirmed (non-inferred) header awareness AND the exact matching
     *producer*, mirroring ``diff_symbols.py``'s own two checks.
     """
@@ -386,7 +386,7 @@ def _side_is_stripped_symbols_only(snap: AbiSnapshot) -> bool:
     evidence at all) -- see that function's own docstring for the full
     per-field rationale. Duplicated rather than imported, matching this
     module's existing pattern for detector-gate logic (e.g.
-    :func:`_other_side_confirms_pair_gate`'s own ``_both_header_aware``
+    :func:`_other_side_confirms_pair_gate`'s own ``both_header_aware``
     mirror).
     """
     if not getattr(snap, "elf_only_mode", False):

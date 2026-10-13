@@ -25,13 +25,14 @@ from __future__ import annotations
 
 from typing import Any
 
+from .compare.elf_capture_identity import both_captured_elf_identity
 from .compare.naming_conventions import (  # noqa: F401 -- re-exported
     _INTERNAL_NAME_PATTERNS as _INTERNAL_NAME_PATTERNS,
     ELF_INTERNAL_SYMBOL_NAME,
     _looks_internal as _looks_internal,
 )
+from .compare.public_surface import should_filter_transitive_runtime_symbols
 from .diff_helpers import make_change
-from .diff_symbols import _should_filter_transitive_runtime_symbols
 from .elf_symbol_filter import is_abi_relevant_elf_symbol
 from .model import AbiSnapshot
 from .model.binary_naming import strip_vendor_hash
@@ -46,7 +47,7 @@ def _diff_visibility_leak(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     if not getattr(old, "elf_only_mode", False):
         return []
 
-    filter_transitive_runtime_symbols = _should_filter_transitive_runtime_symbols(old)
+    filter_transitive_runtime_symbols = should_filter_transitive_runtime_symbols(old)
     leaked = [
         f
         for f in old.declarations.functions
@@ -305,7 +306,7 @@ def _linker_artifact_fields_captured(old_elf: Any, new_elf: Any) -> bool:
     """True only when BOTH snapshots carry the linker-artifact fields.
 
     ``hash_styles``/``has_dt_relr`` postdate the G23 identity fields, so
-    ``_both_captured_elf_identity`` alone cannot prove they were parsed. A
+    ``both_captured_elf_identity`` alone cannot prove they were parsed. A
     freshly parsed DSO always has at least one symbol hash section, so a
     non-empty ``hash_styles`` on both sides is the generation marker: a legacy
     JSON snapshot (or an ET_REL ``.o``, where neither DT_RELR nor hash-style
@@ -313,7 +314,7 @@ def _linker_artifact_fields_captured(old_elf: Any, new_elf: Any) -> bool:
     of fabricating an "introduced"/"removed" finding.
     """
     return (
-        _both_captured_elf_identity(old_elf, new_elf)
+        both_captured_elf_identity(old_elf, new_elf)
         and bool(getattr(old_elf, "hash_styles", frozenset()))
         and bool(getattr(new_elf, "hash_styles", frozenset()))
     )
@@ -418,7 +419,7 @@ def _diff_loader_contract(old_elf: Any, new_elf: Any) -> list[Change]:
     # Eager→lazy binding flip. When the drop also lowers the RELRO level
     # (full → partial), _diff_security_hardening already reports RELRO_WEAKENED
     # for the same underlying event — don't double-report.
-    if _both_captured_elf_identity(old_elf, new_elf):
+    if both_captured_elf_identity(old_elf, new_elf):
         old_bind = getattr(old_elf, "bind_now", False)
         new_bind = getattr(new_elf, "bind_now", False)
         relro_unchanged = getattr(old_elf, "relro", "none") == getattr(
@@ -671,21 +672,6 @@ _BENIGN_OSABI = frozenset(
 )
 
 
-def _both_captured_elf_identity(old_elf: Any, new_elf: Any) -> bool:
-    """True only when BOTH snapshots were parsed by a G23-aware version.
-
-    Every G23 ELF fact (machine, static-TLS, gnu-property, …) is captured in the
-    same parse pass, so a real ELF parsed by current code always has a non-empty
-    ``machine``. A legacy snapshot serialized before these fields existed — or a
-    header-only / parse-failed side — has machine="" and rehydrates the new
-    booleans to their defaults (``has_static_tls=False``, empty gnu_properties),
-    which would otherwise read as "the feature was absent" rather than "unknown"
-    and fabricate a finding. Gate the new detectors on this so a legacy baseline
-    never triggers e.g. a spurious ``static_tls_introduced``.
-    """
-    return bool(getattr(old_elf, "machine", "") and getattr(new_elf, "machine", ""))
-
-
 def _diff_static_tls(old_elf: Any, new_elf: Any) -> list[Change]:
     """Detect DF_STATIC_TLS drift (G23-A1).
 
@@ -696,7 +682,7 @@ def _diff_static_tls(old_elf: Any, new_elf: Any) -> list[Change]:
     can gate the regression alone. Skipped entirely unless both snapshots
     captured ELF identity (so a legacy baseline never false-positives).
     """
-    if not _both_captured_elf_identity(old_elf, new_elf):
+    if not both_captured_elf_identity(old_elf, new_elf):
         return []
     old_static = getattr(old_elf, "has_static_tls", False)
     new_static = getattr(new_elf, "has_static_tls", False)
@@ -745,7 +731,7 @@ def _diff_gnu_property(old_elf: Any, new_elf: Any) -> list[Change]:
     feature) directions are emitted, mirroring the executable-stack pair, so
     the security policy can gate weakening without failing an improvement.
     """
-    if not _both_captured_elf_identity(old_elf, new_elf):
+    if not both_captured_elf_identity(old_elf, new_elf):
         return []
     # CET (IBT/SHSTK) is x86-only and branch-protection (BTI/PAC) is AArch64-only,
     # so the feature sets are not comparable across machines. A machine change is
@@ -988,7 +974,7 @@ def _diff_symbolic_and_textrel(old_elf: Any, new_elf: Any) -> list[Change]:
     dropping it is an improvement. Gated on both sides having captured ELF
     identity so a legacy baseline never fabricates a finding.
     """
-    if not _both_captured_elf_identity(old_elf, new_elf):
+    if not both_captured_elf_identity(old_elf, new_elf):
         return []
     changes: list[Change] = []
 

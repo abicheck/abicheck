@@ -60,6 +60,7 @@ result instance, since a mutable `DiffResult` cache went stale across two
 renders with a mutation between them (Codex review). `findings_by_change_id`
 indexes by `id(change)` for O(1) lookup within one render only (`Change` has
 no `__hash__`).
+`view.py` is the shared presentation view (show-only filter, `display_changes`, `finding_id`, root-cause keys).
 
 `envelope.py` is gap C's closure and the whole-*render* counterpart to `document.py`'s whole-report value: `ReportEnvelope` holds one completed evaluation's finalized decisions — the shared `ReportDocument`, the severity `GateDecision`, one `ReportFinding` per `Change` (`scoped_only_changes` included) — plus presentation-only `RenderOptions`. `report.build.build_report_envelope` builds it once above format selection (there, not here, so `envelope.py` stays a leaf: an `envelope -> build` edge closes a real cycle through `reporter.py`); `service_render.render_envelope(fmt, envelope)` projects it. A renderer takes an `envelope` parameter and *reads* decisions from it — `resolved_gate`/`resolved_document` keep a direct Tier-2/test caller without one working as before. **Never resolve a gate, a verdict, or a document inside a renderer handed an envelope.** `sarif_invocation.py` (SARIF's published invocation exit code — an exit decision, not a rendering choice) and `junit_disposition.py` moved out of the legacy monoliths for this; read `envelope.py`'s own docstring before adding a projection.
 

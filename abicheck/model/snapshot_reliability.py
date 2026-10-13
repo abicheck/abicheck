@@ -47,6 +47,7 @@ if TYPE_CHECKING:
 __all__ = [
     "FACT_FAMILIES",
     "RELIABILITY_FLAG_NAMES",
+    "both_header_aware",
     "family_reliable",
     "flag_name",
     "raw_unreliable_facts",
@@ -278,6 +279,24 @@ def family_reliable(snap: AbiSnapshot, family: str) -> bool:
     if family not in FACT_FAMILIES:
         raise ValueError(f"unknown fact family {family!r}")
     return family not in snap.stale_fact_families
+
+
+def both_header_aware(old: AbiSnapshot, new: AbiSnapshot) -> bool:
+    """True only when BOTH snapshots carry *confirmed* header-tier evidence.
+
+    ``from_headers_inferred`` is set when a legacy snapshot (one that predates
+    the explicit ``from_headers`` key) is rehydrated and its header-awareness was
+    only *guessed* — such a side may lack default-argument/constant data without
+    it meaning "removed". Header-only detectors must require non-inferred header
+    evidence on both sides so a mixed/legacy comparison never manufactures false
+    ``*_REMOVED`` findings.
+    """
+    return (
+        old.from_headers
+        and not old.from_headers_inferred
+        and new.from_headers
+        and not new.from_headers_inferred
+    )
 
 
 def raw_unreliable_facts(snap: AbiSnapshot) -> list[str]:

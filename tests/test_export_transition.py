@@ -493,7 +493,7 @@ class TestNarrowingToObservedExportsKeepsPromisedDeclarations:
     """The ELF-narrowing path, exercised with real ELF metadata.
 
     Registered because this class's siblings all build snapshots *without*
-    `elf`, so `diff_symbols._public_functions` takes its `elf is None` early
+    `elf`, so `public_surface.public_functions` takes its `elf is None` early
     return and the narrowing pass never runs. That is why they reported the
     gained export correctly while the narrowing was still dropping a promised
     declaration whose name is absent from the export table -- the defect had
@@ -519,7 +519,7 @@ class TestNarrowingToObservedExportsKeepsPromisedDeclarations:
         )
 
     #: Always present in the export table, so the table is never *empty*.
-    #: That matters: `_public_functions` returns early on `not elf.symbols`,
+    #: That matters: `public_functions` returns early on `not elf.symbols`,
     #: so a snapshot whose only distinction is an empty table never reaches
     #: the narrowing at all -- the first version of this class made exactly
     #: that mistake and passed with the fix reverted.

@@ -93,7 +93,6 @@ def render_release_junit(report: ReleaseReport) -> str:
 
 
 def _markdown_body(report: ReleaseReport) -> str:
-    from ..reporter_markdown import render_show_only_cli_hint
     from .comparison_scope import render_comparison_scope_markdown
     from .disposition_audit import (
         DispositionAudit,
@@ -112,6 +111,7 @@ def _markdown_body(report: ReleaseReport) -> str:
         _release_md_pattern_modulations,
         release_md_library_findings,
     )
+    from .view import render_show_only_cli_hint
 
     ev = report.evaluation
     library_results = ev.library_results

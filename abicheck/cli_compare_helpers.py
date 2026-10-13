@@ -676,9 +676,9 @@ def _report_compare_result(
     # result.changes, and mirrors the identical fix already applied to the
     # MCP abi_compare tool (mcp_server.py) -- both share the same traversal (CodeRabbit review: hand-copying it here previously let one call site drift out of sync with the other).
     if contract_evaluation:
-        from .reporter import _finding_id
+        from .report.view import finding_id
 
-        stamp_scoped_result_findings(result, finding_id=_finding_id)
+        stamp_scoped_result_findings(result, finding_id=finding_id)
     # Only the same-binary warning, not every pre-existing coverage_warnings entry ("no binary metadata"/detector-disabled reasons) -- those are deliberately absent from the one-line summary today (existing tests pin exactly zero extra lines).
     # Plan slice 7m: one export request, so one emission loop. Every target
     # -- the stdout one and every file one alike -- renders the *same*

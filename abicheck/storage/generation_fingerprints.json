@@ -67,7 +67,7 @@
       "abicheck/extract/headers/castxml/context.py": "88082848d5fbdc3863c53b9f816c78d245af1bd24661eedc95ee2b34a6f524cf",
       "abicheck/extract/headers/castxml/dumper.py": "b09d4bfe936d52edf4be21060c10c6d0ed74588b477fe6c958a80b0d6e7f857b",
       "abicheck/extract/headers/castxml/enums.py": "e616c768543061d71812378dd92cbcb7b8d00afbb734bcb7b4b5334ee34042aa",
-      "abicheck/extract/headers/castxml/functions.py": "5d00bbbaa91d5d320454e35f71827423a5ef5cd9645b985de9b69fb240bdb520",
+      "abicheck/extract/headers/castxml/functions.py": "c6e19d532a0467cdf05d59465a77021c8dcc9554752e21ebd6812d259e6e3a2d",
       "abicheck/extract/headers/castxml/location.py": "f7d3e994f9a9acadddb7e3a01195758f357a3328556763533df9ba1092b69af7",
       "abicheck/extract/headers/castxml/names.py": "038abc55f72f11185c0a5ec48d57bff95a1ab894380f7978b6187cd76b044796",
       "abicheck/extract/headers/castxml/out_of_line_inline.py": "7f8a77d82dd9f87865163ffda63e6c5a762887800886ea9f70dae40e378cbd89",
@@ -143,9 +143,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "607f4bfc0f74451ea4ad136bf926e4914a55b4b8c1d0900f333762d360ca2042",
+    "fingerprint": "a541d69eeca3127d22f1cb61ea16ac17da6f88d3db6f36e06863404d8f39692d",
     "generation": 2,
-    "reason": "Docstring cross-reference fixes in extract/compiler_driver.py and a non-shaping classification entry in extract/header_ast_cache_producers.py (compiler_driver is recorded as non-shaping; CLANG_AST_OUTPUT_MODULES, which the cache digest reads, is unchanged). No extraction output or cache key changes; no EXTRACTOR_GENERATION bump."
+    "reason": "Compiler-driver resolution and the dpcpp probe move from dumper_clang/buildsource into extract/ (compiler_driver.py, dpcpp_jobs.py) and header_ast_backend is imported from its owner. Pure relocation: no extracted fact or derived graph changes; the generation constant stays put."
   },
   "resolver": {
     "files": {
