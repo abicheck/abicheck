@@ -692,7 +692,6 @@ def test_header_ast_parser_falls_back_to_clang_on_toolchain_failure(
 ):
     """G16: an auto-selected castxml that fails with a toolchain-version error
     (bundled Clang too old) falls back to the clang backend instead of aborting."""
-    from abicheck import dumper
     from abicheck.dumper import _ClangAstParser, _header_ast_parser
     from abicheck.errors import SnapshotError
     from abicheck.extract.headers.castxml import backend as castxml_backend
@@ -705,7 +704,10 @@ def test_header_ast_parser_falls_back_to_clang_on_toolchain_failure(
         header_ast_backend, "_resolve_header_backend", lambda b: "castxml"
     )
     monkeypatch.setattr(castxml_backend, "castxml_dump", _boom)
-    monkeypatch.setattr(dumper, "resolve_clang_bin", lambda *a, **k: "clang")
+    monkeypatch.setattr(
+        "abicheck.extract.headers.clang.backend.resolve_clang_bin",
+        lambda *a, **k: "clang",
+    )
     monkeypatch.setattr(
         "abicheck.extract.headers.clang.backend.clang_header_dump",
         lambda *a, **k: (sentinel, None, False),
@@ -722,7 +724,6 @@ def test_header_ast_parser_falls_back_to_clang_on_guard_error(tmp_path, monkeypa
     """An auto-selected castxml that fails on a direct-include #error guard (a
     -H include-dir swept in an internal/detail header) falls back to clang, whose
     path can granularly exclude the offending header and re-parse the rest."""
-    from abicheck import dumper
     from abicheck.dumper import _ClangAstParser, _header_ast_parser
     from abicheck.errors import SnapshotError
     from abicheck.extract.headers.castxml import backend as castxml_backend
@@ -738,7 +739,10 @@ def test_header_ast_parser_falls_back_to_clang_on_guard_error(tmp_path, monkeypa
         header_ast_backend, "_resolve_header_backend", lambda b: "castxml"
     )
     monkeypatch.setattr(castxml_backend, "castxml_dump", _boom)
-    monkeypatch.setattr(dumper, "resolve_clang_bin", lambda *a, **k: "clang")
+    monkeypatch.setattr(
+        "abicheck.extract.headers.clang.backend.resolve_clang_bin",
+        lambda *a, **k: "clang",
+    )
     monkeypatch.setattr(
         "abicheck.extract.headers.clang.backend.clang_header_dump",
         lambda *a, **k: (sentinel, None, False),
@@ -754,7 +758,6 @@ def test_header_ast_parser_falls_back_to_clang_on_guard_error(tmp_path, monkeypa
 def test_header_ast_parser_no_fallback_when_castxml_explicit(tmp_path, monkeypatch):
     """An explicit --ast-frontend castxml is honored verbatim — the toolchain
     error surfaces unchanged rather than silently switching to clang."""
-    from abicheck import dumper
     from abicheck.dumper import _header_ast_parser
     from abicheck.errors import SnapshotError
     from abicheck.extract.headers.castxml import backend as castxml_backend
@@ -766,7 +769,6 @@ def test_header_ast_parser_no_fallback_when_castxml_explicit(tmp_path, monkeypat
         header_ast_backend, "_resolve_header_backend", lambda b: "castxml"
     )
     monkeypatch.setattr(castxml_backend, "castxml_dump", _boom)
-    monkeypatch.setattr(dumper, "resolve_clang_bin", lambda *a, **k: "clang")
     monkeypatch.delenv("ABICHECK_AST_FRONTEND", raising=False)
 
     with pytest.raises(SnapshotError):
@@ -863,7 +865,6 @@ def test_header_ast_parser_env_pinned_castxml_rejects_device_context(
 def test_header_ast_parser_no_fallback_on_non_toolchain_failure(tmp_path, monkeypatch):
     """A castxml failure that is NOT a toolchain-version signature (e.g. a bad
     header) re-raises — fallback is reserved for the recoverable case."""
-    from abicheck import dumper
     from abicheck.dumper import _header_ast_parser
     from abicheck.errors import SnapshotError
     from abicheck.extract.headers.castxml import backend as castxml_backend
@@ -875,7 +876,6 @@ def test_header_ast_parser_no_fallback_on_non_toolchain_failure(tmp_path, monkey
         header_ast_backend, "_resolve_header_backend", lambda b: "castxml"
     )
     monkeypatch.setattr(castxml_backend, "castxml_dump", _boom)
-    monkeypatch.setattr(dumper, "resolve_clang_bin", lambda *a, **k: "clang")
     monkeypatch.delenv("ABICHECK_AST_FRONTEND", raising=False)
 
     with pytest.raises(SnapshotError):

@@ -120,7 +120,9 @@ from ..dumper_contract import _manifest_declared_includes
 from ..dwarf_snapshot import show_data_sources
 from ..dwarf_unified import parse_dwarf
 from ..elf_metadata import parse_elf_metadata
-from ..extract.compiler_driver import resolve_source_frontend_clang_bin
+from ..extract.compiler_driver import (
+    resolve_source_frontend_clang_bin as _resolve_source_frontend_clang_bin,
+)
 from ..extract.dependency_exclusion import dependency_exclusion_scope
 from ..extract.dump_manifest_roots import dump_manifest_header_roots
 from ..extract.headers.clang.layout_tool import attach_clang_layout
@@ -165,7 +167,7 @@ def resolve_l4_replay_clang_bin(gcc_path: str | None, gcc_prefix: str | None) ->
     them here would silently fall back to a plain ``clang`` that cannot parse
     the real build context.
     """
-    return resolve_source_frontend_clang_bin(
+    return _resolve_source_frontend_clang_bin(
         gcc_path, gcc_prefix, exclude_cl_style=False
     )
 
