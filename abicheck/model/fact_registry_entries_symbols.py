@@ -214,6 +214,30 @@ SYMBOL_FACTS: list[FactDefinition] = [
     ),
     _E(
         owner="Function",
+        field="is_inline",
+        value_type="bool",
+        producing_backends=("castxml", "clang"),
+        persisted=True,
+        identity_relevant=False,
+        comparable=True,
+        suppressible=False,
+        reportable=True,
+        lifecycle=FactLifecycle.CONSUMED,
+        consumed_by=(
+            "abicheck.model.semantic_ir_function_signature:_signature_inputs",
+        ),
+        notes=(
+            "Inline linkage of a declaration. Case (a): guarded by the "
+            "stale 'inline' fact family (model.snapshot_reliability), so the "
+            "omitted-sentinel and Fact[bool] sibling carry availability; False "
+            "is a real answer, not a placeholder. Both header backends produce it "
+            "(extract/headers/clang/inline_semantics.py and castxml's inline "
+            "attribute); the semantic signature reads the bridged value, which "
+            "the bridge keeps equal to the fact."
+        ),
+    ),
+    _E(
+        owner="Function",
         field="is_compiler_generated",
         value_type="bool | None",
         producing_backends=("castxml",),

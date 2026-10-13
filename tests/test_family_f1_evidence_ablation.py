@@ -149,6 +149,11 @@ UNCOVERED: dict[str, str] = {
     "CanonicalEntity.is_extern_c": _DECLARATION_PROJECTION,
     "CanonicalEntity.is_hidden_friend": _DECLARATION_PROJECTION,
     "CanonicalEntity.is_inline": _DECLARATION_PROJECTION,
+    "Function.is_inline_fact": (
+        "persisted Fact[bool] sibling added in schema v60; the H1 corpus has no "
+        "inline-linkage pair that differs across its operands, so the ablation "
+        "cannot reach it yet. The inline-transition detector's own tests cover it"
+    ),
     "CanonicalEntity.is_noexcept": _DECLARATION_PROJECTION,
     "CanonicalEntity.is_override": _DECLARATION_PROJECTION,
     "CanonicalEntity.is_variadic": _DECLARATION_PROJECTION,

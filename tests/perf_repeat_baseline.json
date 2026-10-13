@@ -223,7 +223,7 @@
     "abicheck/model/semantic_ir_declaration_facts.py(_access_value)": 609,
     "abicheck/model/semantic_ir_declaration_facts.py(declaration_inputs.<locals>._respell)": 79,
     "abicheck/model/semantic_ir_function_signature.py(_optional)": 435,
-    "abicheck/model/semantic_ir_function_signature.py(_present)": 749,
+    "abicheck/model/semantic_ir_function_signature.py(_present)": 693,
     "abicheck/model/semantic_ir_function_signature.py(_signature_inputs.<locals>._flag)": 1716,
     "abicheck/model/semantic_ir_legacy_adapter.py(_synthetic_entity_id)": 34,
     "abicheck/model/semantic_ir_record_layout.py(layout_fact)": 116,
@@ -294,5 +294,5 @@
   },
   "mode": "default",
   "n": 40,
-  "total": 245163
+  "total": 245107
 }

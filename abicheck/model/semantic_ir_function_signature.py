@@ -118,6 +118,9 @@ def _present(value: Any) -> Fact[Any]:
         return Fact.present(value)
 
 
+_NOT_COLLECTED: Fact[Any] = Fact.not_collected()
+
+
 def _optional(value: Any) -> Fact[Any]:
     """``PRESENT`` for a captured value, ``NOT_COLLECTED`` for ``None``."""
     return Fact.not_collected() if value is None else _present(value)
@@ -141,6 +144,15 @@ def _signature_inputs(fn: Function) -> tuple[Any, ...]:
             return ""
         return "true" if fact.value else "false"
 
+    # ``Function.is_inline`` when its producer established it, else None (not
+    # collected). Inline, not a helper: this runs once per function.
+    inline_fact = fn.is_inline_fact
+    inline = (
+        bool(inline_fact.value)
+        if inline_fact is not None
+        and inline_fact.status in (FactStatus.PRESENT, FactStatus.PARTIAL)
+        else None
+    )
     params = fn.params
     attrs = fn.contract_attributes
     return (
@@ -155,7 +167,7 @@ def _signature_inputs(fn: Function) -> tuple[Any, ...]:
         fn.exception_spec,
         fn.vtable_index,
         fn.is_override,
-        bool(fn.is_inline),
+        inline,
         bool(fn.is_deleted),
         bool(fn.deleted_from_dwarf),
         tuple(p.name or "" for p in params),
@@ -214,7 +226,7 @@ def _facts_from_inputs(inputs: tuple[Any, ...]) -> dict[str, Any]:
         "exception_spec": _optional(exception_spec),
         "vtable_index": _optional(vtable_index),
         "is_override": _optional(override),
-        "is_inline": _present(inline),
+        "is_inline": _present(inline) if inline is not None else _NOT_COLLECTED,
         "is_deleted": _present(deleted),
         "deleted_from_dwarf": _present(deleted_from_dwarf),
         "parameter_names": _present(names),

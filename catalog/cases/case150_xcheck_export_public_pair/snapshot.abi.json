@@ -164,6 +164,11 @@
         "value": null
       },
       "is_inline": false,
+      "is_inline_fact": {
+        "diagnostics": [],
+        "status": "not_collected",
+        "value": null
+      },
       "is_noexcept": false,
       "is_override": null,
       "is_override_fact": {
@@ -257,6 +262,11 @@
         "value": null
       },
       "is_inline": false,
+      "is_inline_fact": {
+        "diagnostics": [],
+        "status": "not_collected",
+        "value": null
+      },
       "is_noexcept": false,
       "is_override": null,
       "is_override_fact": {
@@ -308,7 +318,7 @@
   "platform": null,
   "python_api": null,
   "python_ext": null,
-  "schema_version": 59,
+  "schema_version": 60,
   "scope_fallback": null,
   "source_mtime": null,
   "source_mtime_epoch": false,
