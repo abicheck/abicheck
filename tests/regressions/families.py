@@ -154,6 +154,20 @@ FAMILIES: dict[str, Family] = {
             ),
         ),
         Family(
+            key="F10",
+            title="Process lifecycle on failure paths",
+            invariant=(
+                "After an owner fails or is interrupted, no child process it started "
+                "outlives it and no shared budget slot stays held; a successful owner "
+                "is never cancelled. The interpreter joins pool workers at exit, so an "
+                "abandoned child delays the whole process, not only the failing call."
+            ),
+            harness_tests=(
+                "tests/test_cancel_token.py",
+                "tests/test_header_graph_prefetch.py",
+            ),
+        ),
+        Family(
             key="OTHER",
             title="CI, tooling, storage and trust-boundary surfaces",
             invariant=(
@@ -330,6 +344,7 @@ _F9 = (
     "serialization.interpreter_dependent_str_subclass_token",
     "concurrency.per_thread_state_in_inherited_context",
 )
+_F10 = ("concurrency.abandoned_child_outlives_failed_owner",)
 
 #: id -> reason it belongs to no shared family.
 OTHER_REASONS: dict[str, str] = {
@@ -368,6 +383,7 @@ for _key, _ids in (
     ("F7", _F7),
     ("F8", _F8),
     ("F9", _F9),
+    ("F10", _F10),
     ("OTHER", tuple(OTHER_REASONS)),
 ):
     for _id in _ids:

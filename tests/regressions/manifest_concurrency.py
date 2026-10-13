@@ -215,4 +215,26 @@ CONCURRENCY_BUG_CLASSES: tuple[BugClass, ...] = (
         ),
         axes={"workers": ("1", "2", "4"), "context": ("fresh", "inherited")},
     ),
+    BugClass(
+        id="concurrency.abandoned_child_outlives_failed_owner",
+        invariant=(
+            "After an owner fails or is interrupted, no child process it "
+            "started stays alive and no thread-budget slot stays held, "
+            "whatever the failure type; a successful owner is never "
+            "cancelled. The interpreter joins pool workers at exit, so a "
+            "parse left running beside a failed dump delays the whole "
+            "process by its own length (60 s in the regression test), not "
+            "only the failing call."
+        ),
+        fixed_by=(1596,),
+        seed_tests=(
+            "tests/test_cancel_token.py",
+            "tests/test_header_graph_prefetch.py",
+        ),
+        public_surfaces=("cli",),
+        axes={
+            "failure": ("error", "interrupt"),
+            "propagation": ("direct", "pool", "uncarried"),
+        },
+    ),
 )
