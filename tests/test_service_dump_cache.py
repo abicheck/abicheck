@@ -32,21 +32,6 @@ def _sample_snap(name: str = "foo") -> AbiSnapshot:
     )
 
 
-def _cacheable_kwargs(**overrides):
-    base = dict(
-        pdb_path=None,
-        dwarf_only=False,
-        debug_roots=None,
-        enable_debuginfod=False,
-        debug_format=None,
-        symbols_only=False,
-        debug_presence_only=False,
-        compile=None,
-    )
-    base.update(overrides)
-    return base
-
-
 class _FakeManifest:
     """Minimal ``.translation_units``-shaped stand-in for a real
     ``DumpManifest`` -- just enough for ``_manifest_all_tus_required`` to
@@ -62,57 +47,57 @@ class _FakeManifest:
 
 class TestDumpIsCacheable:
     def test_plain_shape_is_cacheable(self):
-        assert dump_is_cacheable(**_cacheable_kwargs()) is True
+        assert dump_is_cacheable(**dict()) is True
 
     def test_pdb_path_not_cacheable(self, tmp_path):
-        kwargs = _cacheable_kwargs(pdb_path=tmp_path / "x.pdb")
+        kwargs = dict(pdb_path=tmp_path / "x.pdb")
         assert dump_is_cacheable(**kwargs) is False
 
     def test_dwarf_only_not_cacheable(self):
-        assert dump_is_cacheable(**_cacheable_kwargs(dwarf_only=True)) is False
+        assert dump_is_cacheable(**dict(dwarf_only=True)) is False
 
     def test_debug_roots_not_cacheable(self, tmp_path):
-        kwargs = _cacheable_kwargs(debug_roots=[tmp_path])
+        kwargs = dict(debug_roots=[tmp_path])
         assert dump_is_cacheable(**kwargs) is False
 
     def test_enable_debuginfod_not_cacheable(self):
-        kwargs = _cacheable_kwargs(enable_debuginfod=True)
+        kwargs = dict(enable_debuginfod=True)
         assert dump_is_cacheable(**kwargs) is False
 
     def test_debug_format_not_cacheable(self):
-        kwargs = _cacheable_kwargs(debug_format="dwarf")
+        kwargs = dict(debug_format="dwarf")
         assert dump_is_cacheable(**kwargs) is False
 
     def test_symbols_only_not_cacheable(self):
-        kwargs = _cacheable_kwargs(symbols_only=True)
+        kwargs = dict(symbols_only=True)
         assert dump_is_cacheable(**kwargs) is False
 
     def test_debug_presence_only_not_cacheable(self):
-        kwargs = _cacheable_kwargs(debug_presence_only=True)
+        kwargs = dict(debug_presence_only=True)
         assert dump_is_cacheable(**kwargs) is False
 
     def test_unknown_compile_object_not_cacheable(self):
-        kwargs = _cacheable_kwargs(compile=object())
+        kwargs = dict(compile=object())
         assert dump_is_cacheable(**kwargs) is False
 
     def test_real_compile_context_is_cacheable(self):
         from abicheck.compile_context import CompileContext
 
         for cc in (CompileContext(), CompileContext(sysroot=Path("/s"), nostdinc=True)):
-            assert dump_is_cacheable(**_cacheable_kwargs(compile=cc)) is True
+            assert dump_is_cacheable(**dict(compile=cc)) is True
 
     def test_header_graph_no_longer_a_cacheability_parameter(self):
         """G29 Phase A: header_graph/header_graph_includes are no longer
         run_dump parameters at all (the graph is unconditional), so
         _dump_is_cacheable no longer takes them — the plain shape stays
         cacheable, which is what actually matters here now."""
-        assert dump_is_cacheable(**_cacheable_kwargs()) is True
+        assert dump_is_cacheable(**dict()) is True
 
     def test_dump_manifest_is_cacheable(self):
         # ADR-050 D3/D6 (G32 Phase E): a manifest-driven dump used to be
         # unconditionally excluded; it is now cacheable like any other plain
         # shape once the cache key covers the manifest's own scope.
-        kwargs = _cacheable_kwargs(dump_manifest=_FakeManifest(all_required=True))
+        kwargs = dict(dump_manifest=_FakeManifest(all_required=True))
         assert dump_is_cacheable(**kwargs) is True
 
     def test_dump_manifest_with_optional_tu_not_cacheable(self):
@@ -120,7 +105,7 @@ class TestDumpIsCacheable:
         # logged diagnostic rather than failing the dump, so a transient
         # failure could otherwise get permanently cached as a "successful"
         # but silently-degraded snapshot.
-        kwargs = _cacheable_kwargs(dump_manifest=_FakeManifest(all_required=False))
+        kwargs = dict(dump_manifest=_FakeManifest(all_required=False))
         assert dump_is_cacheable(**kwargs) is False
 
 

@@ -106,7 +106,9 @@ def _read_entry(key: str, binary_path: Path) -> AbiSnapshot | None:
         try:
             snap = load_snapshot(cache_file)
         except Exception:
-            _logger.debug("Cache read error for %s, treating as miss", key[:12])
+            _logger.debug(
+                "Cache read error for %s, treating as miss", key[:12], exc_info=True
+            )
             continue
         # Touch mtime for LRU
         try:
@@ -169,7 +171,7 @@ def _write_entry(snap: AbiSnapshot, key: str, binary_path: Path) -> None:
         # except is deliberate (mirrors lookup()'s "any read problem is a
         # miss" stance): a write-time TypeError from an unusual snapshot is
         # exactly as harmless to swallow as an OSError.
-        _logger.debug("Cache write failed: %s", exc)
+        _logger.debug("Cache write failed: %s", exc, exc_info=True)
 
 
 def _safe_mtime(p: Path) -> float:

@@ -64,7 +64,7 @@ def _dump_is_cacheable(req: DumpCacheRequest) -> bool:
     ``run_dump`` call attempts it identically — so that toggle-mismatch risk
     is gone; the graph is a deterministic function of the same
     headers/includes/public-header inputs already covered by the cache key,
-    and ``snapshot_cache.store``/``lookup`` round-trip the full snapshot
+    and ``store._store_key``/``_lookup_key`` round-trip the full snapshot
     (including ``build_source``) through JSON, so a cache hit still carries
     the graph. A ``CompileContext`` (``--compiler*``/``--sysroot``/
     ``--nostdinc``/``--ast-frontend``/``--frontend-context``) is cacheable:

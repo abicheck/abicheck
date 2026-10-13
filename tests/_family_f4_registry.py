@@ -184,6 +184,8 @@ HEURISTICS: dict[str, str] = {
     "abicheck.compare.edge_query::EdgeEvidence._resolve_linker_name::affix.startswith:'symbol://'": "own_format",
     "abicheck.compare.export_owner_resolution::_placeholder_owner::affix.startswith:_CTOR_PLACEHOLDER_PREFIX": "own_format",
     "abicheck.compare.export_owner_resolution::_placeholder_owner::affix.startswith:_DTOR_PLACEHOLDER_PREFIX": "own_format",
+    "abicheck.compare.manifest_tu_scope::manifest_tu_scope_field._rel::affix.startswith:_base_dir_prefix": "own_format",
+    "abicheck.compare.manifest_tu_scope::manifest_tu_scope_field::affix.endswith:os.sep": "own_format",
     "abicheck.compare.namespace_move::_declaring_entity::affix.endswith:suffix": "spelling",
     "abicheck.compare.namespace_shape_detectors::_batch_demangle_public.compute::affix.startswith:'_Z'": "grammar",
     "abicheck.compare.namespace_shape_detectors::_qualified_function_name::affix.startswith:'_Z'": "grammar",

@@ -120,7 +120,7 @@ when both are set.
 
 | Variable | Values | Default | Effect | Module |
 |----------|--------|---------|--------|--------|
-| `ABICHECK_SNAPSHOT_CACHE_WRITE` | boolean | on | `0` keeps *reading* the whole-snapshot cache (`$XDG_CACHE_HOME/abicheck`) but never populates it. For a one-shot run on a fresh CI runner, which would pay to serialize and write snapshots no later run reads (measured on a 28-member release: ~30% wall, ~37% peak RSS). | `workflows/dump/cache/store.py` (`_write_enabled`), `workflows/dump/cache/api.py` (`cached_run_dump`) |
+| `ABICHECK_SNAPSHOT_CACHE_WRITE` | boolean | on | `0` keeps *reading* the whole-snapshot cache (`$XDG_CACHE_HOME/abi_check/snapshots`) but never populates it. For a one-shot run on a fresh CI runner, which would pay to serialize and write snapshots no later run reads (measured on a 28-member release: ~30% wall, ~37% peak RSS). | `workflows/dump/cache/store.py` (`_write_enabled`), `workflows/dump/cache/api.py` (`cached_run_dump`) |
 
 ---
 
