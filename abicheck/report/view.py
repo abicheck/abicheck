@@ -449,11 +449,8 @@ def resolve_scoped_gate_findings(
     a missing contract member or a scoped-only change like
     ``PE_ORDINAL_RETARGETED`` didn't name either one in the default text
     report, unlike JSON/SARIF/JUnit). Lives here (not ``cli_compare_fold.py``)
-    so ``_to_markdown_root_cause`` below can also call it directly to merge
-    these into its own root-cause groups, without ``cli_compare_fold``
-    importing back into this leaf module -- ``cli_compare_fold.py`` imports
-    it from ``reporter``'s re-export, same as every other name in this
-    module.
+    so the Markdown and JSON root-cause builders can call it directly, without
+    importing back from ``cli_compare_fold.py``, which is its caller.
 
     Returns ``(scoped_only_changes, missing_labels, blocks, missing_kind)``.
     """
