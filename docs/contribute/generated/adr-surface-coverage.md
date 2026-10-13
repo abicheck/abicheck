@@ -8,7 +8,7 @@ Which public surface reaches each ADR, which use cases it serves, and whether a 
 |---|---|
 | surfaced | 45 |
 | partial | 13 |
-| gap | 3 |
+| gap | 5 |
 | internal | 19 |
 
 ## ADRs
@@ -95,6 +95,8 @@ Which public surface reaches each ADR, which use cases it serves, and whether a 
 | [ADR-076](../adr/076-adr-use-case-surface-traceability.md) | internal | — | — | Repository traceability contract and gate; not a product surface. |
 | [ADR-077](../adr/077-exposure-modes-and-change-sensitive-propagation.md) | gap | — | — | Proposed, not yet implemented; no exposure-mode or sensitivity surface exists. |
 | [ADR-078](../adr/078-informational-severity-category.md) | surfaced | UC-WF-compare | `cli: compare --severity-preset`<br>`report: compare_report.summary`<br>`report: compare_report.severity` | — |
+| [ADR-079](../adr/079-partial-export-table-read-in-the-stored-snapshot.md) | gap | — | — | Proposed, not yet implemented; no per-platform export_read snapshot field exists. |
+| [ADR-080](../adr/080-persisting-the-advanced-dwarf-extraction-status.md) | gap | — | — | Proposed, not yet implemented; the advanced-DWARF extraction status is in memory only and is not persisted. |
 
 ## Use cases by user task
 

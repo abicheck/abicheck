@@ -100,8 +100,8 @@ Each entry's status line says what is still open. A PARTIAL entry's write-up als
 
 #### `advanced_facts_collected` infers "advanced DWARF extraction ran" from its output rather than recording it
 
-**Status (re-verified 2026-10-09 at `456989f`): OPEN.** model/dwarf_facts.py:181 advanced_facts_collected still infers that extraction ran. The comment at line 229 says an explicit 'advanced extraction completed' status is still future work.  
-`false-clean` — Whether advanced DWARF extraction ran is inferred from its output, so a run that produced nothing is indistinguishable from one that never ran. [Full write-up](known-gaps/advanced-facts-collected-infers-advanced-dwarf-extraction-ran.md)
+**Status (2026-10-12): PARTIAL.** The in-memory half is fixed: `AdvancedDwarfMetadata.extraction` is set by the extraction (`completed`, `failed`, `not_run`), `advanced_facts_collected` reads it, and the `advanced_dwarf` detector names a failed or not-run side in its not-evaluated reason. Still open: the status is not persisted, so a stored snapshot reads `unrecorded` and falls back to the inference. Persisting it is a schema change; [ADR-080](adr/080-persisting-the-advanced-dwarf-extraction-status.md) is drafted and Proposed.  
+`false-clean` — The extraction records its own outcome, so a completed empty parse is no longer read as not run. A stored snapshot still carries no outcome and uses the old inference until ADR-080 is decided. [Full write-up](known-gaps/advanced-facts-collected-infers-advanced-dwarf-extraction-ran.md)
 
 #### `Function.elf_binding`/`Variable.elf_binding` (and the pre-existing `elf_visibility` it mirrors) collapse mixed bindings across symbol-versioned aliases sharing one bare name — investigated, not fixed (Codex review, fresh evidence)
 
@@ -163,8 +163,8 @@ Each entry's status line says what is still open. A PARTIAL entry's write-up als
 
 #### A stored snapshot keeps no record of a partial export-table read
 
-**Status (re-verified 2026-10-09 at `456989f`): PARTIAL.** The entry says closed, but it also says the partial read is still open. Fixed: FAILED import reads; tests/unit/workflows/test_failed_consumer_read.py exists. Open: a stored snapshot cannot record a partial export-table read (needs a schema field and ADR).  
-`false-clean` — FAILED import reads are fixed, but a stored snapshot cannot record that its export-table read was partial (needs a schema field and ADR). [Full write-up](known-gaps/a-stored-snapshot-keeps-no-record-of-a-partial-export-table-read.md)
+**Status (2026-10-12): PARTIAL.** Fixed: FAILED import reads; tests/unit/workflows/test_failed_consumer_read.py exists. Open: a stored snapshot cannot record a partial export-table read. [ADR-079](adr/079-partial-export-table-read-in-the-stored-snapshot.md) is drafted and Proposed; the schema field waits on its decision, so the schema stays at v58.  
+`false-clean` — FAILED import reads are fixed. A stored snapshot still cannot record that its export-table read was partial; ADR-079 is drafted (Proposed) and needs a schema decision. [Full write-up](known-gaps/a-stored-snapshot-keeps-no-record-of-a-partial-export-table-read.md)
 
 ### False-positive risk
 

@@ -30,7 +30,11 @@ from collections.abc import Callable
 from pathlib import Path
 
 from .model.availability import FactStatus
-from .model.dwarf_facts import AdvancedDwarfMetadata, DwarfMetadata
+from .model.dwarf_facts import (
+    AdvancedDwarfMetadata,
+    AdvancedExtractionStatus,
+    DwarfMetadata,
+)
 from .model.evidence_merge import merge_presence
 from .model.fact import Fact
 
@@ -102,7 +106,11 @@ def cheap_debug_presence_metadata(
 def _section_presence_metadata(
     present: bool,
 ) -> tuple[DwarfMetadata, AdvancedDwarfMetadata]:
-    return DwarfMetadata(has_dwarf=present), AdvancedDwarfMetadata(has_dwarf=present)
+    # A section lookup is not an extraction: no payload is parsed, so the
+    # advanced status records that the extraction did not run.
+    return DwarfMetadata(has_dwarf=present), AdvancedDwarfMetadata(
+        has_dwarf=present, extraction=AdvancedExtractionStatus.NOT_RUN
+    )
 
 
 def _has_section(so_path: Path, *names: str) -> Fact[bool]:
