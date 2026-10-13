@@ -48,8 +48,8 @@ from pathlib import Path
 import conftest  # noqa: E402
 import pytest
 
-from abicheck import snapshot_cache
 from abicheck.storage import header_ast_cache as dumper_cache
+from abicheck.workflows.dump.cache import store as dump_cache_store
 
 # Every assertion below about `0o077`, `0o755` or the sticky bit is a POSIX
 # mode claim. Windows has no such bits -- `stat().st_mode` reports a constant
@@ -70,7 +70,7 @@ _SEEN: list[Path] = []
 
 
 def _current_cache_dir() -> Path:
-    return Path(snapshot_cache._CACHE_DIR)
+    return Path(dump_cache_store._CACHE_DIR)
 
 
 @pytest.mark.parametrize("occurrence", range(12))

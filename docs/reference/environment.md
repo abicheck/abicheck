@@ -120,7 +120,7 @@ when both are set.
 
 | Variable | Values | Default | Effect | Module |
 |----------|--------|---------|--------|--------|
-| `ABICHECK_SNAPSHOT_CACHE_WRITE` | boolean | on | `0` keeps *reading* the whole-snapshot cache (`$XDG_CACHE_HOME/abicheck`) but never populates it. For a one-shot run on a fresh CI runner, which would pay to serialize and write snapshots no later run reads (measured on a 28-member release: ~30% wall, ~37% peak RSS). | `snapshot_cache.py` (`write_enabled`), `service_dump_cache.py` (`cached_run_dump`) |
+| `ABICHECK_SNAPSHOT_CACHE_WRITE` | boolean | on | `0` keeps *reading* the whole-snapshot cache (`$XDG_CACHE_HOME/abicheck`) but never populates it. For a one-shot run on a fresh CI runner, which would pay to serialize and write snapshots no later run reads (measured on a 28-member release: ~30% wall, ~37% peak RSS). | `workflows/dump/cache/store.py` (`_write_enabled`), `workflows/dump/cache/api.py` (`cached_run_dump`) |
 
 ---
 
@@ -145,7 +145,7 @@ resolution, reproducibility, and CI annotations. abicheck does not define them.
 
 | Variable | Read for | Module |
 |----------|----------|--------|
-| `XDG_CACHE_HOME` | Base directory for the snapshot cache, header-AST cache, and debuginfod cache (falls back to `~/.cache`). | `snapshot_cache.py`, `dumper_cache.py`, `debug_resolver.py` |
+| `XDG_CACHE_HOME` | Base directory for the snapshot cache, header-AST cache, and debuginfod cache (falls back to `~/.cache`). | `workflows/dump/cache/store.py`, `dumper_cache.py`, `debug_resolver.py` |
 | `LOCALAPPDATA` | Windows cache base directory for the header-AST cache. | `dumper_cache.py` |
 | `_NT_SYMBOL_PATH` | Windows symbol search path used when resolving PDB / debug info. | `debug_resolver.py` |
 | `SOURCE_DATE_EPOCH` | Reproducible snapshot `created_at` provenance timestamp. | `cli.py` |

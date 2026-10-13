@@ -480,7 +480,7 @@ def _seeded_includes_and_compile_context(
     # individual kwargs above, never literally `ctx` -- so a no-op fold
     # (`applied=False`) with no caller-supplied context would otherwise
     # silently turn a `None` into a default-valued CompileContext() here.
-    # That distinction is load-bearing: service_dump_cache._dump_is_cacheable
+    # That distinction is load-bearing: workflows/dump/cache/api.py's `_dump_is_cacheable`
     # only permits caching when `compile is None` (Codex review, fresh
     # evidence) -- preserve `None` in exactly that case so an otherwise
     # cacheable typed dump/compare operand doesn't lose caching merely

@@ -43,7 +43,7 @@ runs:
     # snapshots. A header-AST entry is a function of the header bytes, the
     # toolchain and the AST cache schema, all of which the key below captures.
     # A whole-snapshot entry is a function of *abicheck's own extraction code*,
-    # which snapshot_cache's key does not capture (binary hash + headers +
+    # which the whole-snapshot cache key does not capture (binary hash + headers +
     # params + hand-bumped version), and the example binaries are
     # reproducible byte for byte (same source, flags and cwd), so a restored
     # snapshot directory would hand a PR the snapshot an older abicheck

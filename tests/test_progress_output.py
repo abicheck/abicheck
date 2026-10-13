@@ -39,6 +39,7 @@ from pathlib import Path
 import pytest
 
 from abicheck.extract import progress
+from abicheck.workflows.dump.cache import store as dump_cache_store
 
 
 @pytest.fixture
@@ -280,16 +281,15 @@ def test_a_cache_hit_reports_itself_and_a_miss_does_not(
 ) -> None:
     """A warm run skips every phase that would report, so the hit itself must
     -- or a redirected log reads exactly like broken progress reporting."""
-    from abicheck import snapshot_cache
 
     sentinel = object()
     monkeypatch.setattr(
-        snapshot_cache.SNAPSHOT_DISK_CACHE, "lookup", lambda read: read()
+        dump_cache_store.SNAPSHOT_DISK_CACHE, "lookup", lambda read: read()
     )
     monkeypatch.setattr(
-        snapshot_cache, "_read_entry", lambda key, path: sentinel if hit else None
+        dump_cache_store, "_read_entry", lambda key, path: sentinel if hit else None
     )
-    got = snapshot_cache.lookup_key("k" * 16, tmp_path / "libwarm.so")
+    got = dump_cache_store._lookup_key("k" * 16, tmp_path / "libwarm.so")
     assert (got is sentinel) == hit
     if hit:
         (line,) = records

@@ -60,7 +60,7 @@ from ..extract.header_exclusions import (
 from ..model import AbiSnapshot, Function
 from ..model.change import LibraryMetadata
 from ..serialization import load_snapshot
-from ..service_dump_cache import cached_run_dump
+from .dump.cache.api import cached_run_dump
 from .dump.formats import emit_notice
 from .header_exclusion_audit import record_achieved_header_exclusions
 from .project_package_input import resolve_project_package

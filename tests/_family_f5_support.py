@@ -46,6 +46,11 @@ from typing import Any
 import pytest
 from _mutmut_names import canonical_def_name, is_mutmut_artifact
 
+from abicheck.workflows.dump.cache import (
+    api as dump_cache_api,
+    store as dump_cache_store,
+)
+
 REPO = Path(__file__).resolve().parent.parent
 PKG = REPO / "abicheck"
 
@@ -362,14 +367,13 @@ class DiskCacheSpy:
     stores: int = 0
 
     def install(self, mp: pytest.MonkeyPatch, root: Path) -> None:
-        from abicheck import snapshot_cache
 
-        mp.setattr(snapshot_cache, "_CACHE_DIR", root)
+        mp.setattr(dump_cache_store, "_CACHE_DIR", root)
         # The header-AST disk cache (dumper_cache._cache_path) derives its
         # root from XDG_CACHE_HOME; give it the same per-configuration root,
         # or a second configuration would be served the first one's AST.
         mp.setenv("XDG_CACHE_HOME", str(root / "xdg"))
-        lookup, store = snapshot_cache.lookup_key, snapshot_cache.store_key
+        lookup, store = dump_cache_store._lookup_key, dump_cache_store._store_key
 
         def spy_lookup(key: str, path: Path) -> Any:
             got = lookup(key, path)
@@ -383,8 +387,8 @@ class DiskCacheSpy:
             self.stores += 1
             store(*a, **k)
 
-        mp.setattr(snapshot_cache, "lookup_key", spy_lookup)
-        mp.setattr(snapshot_cache, "store_key", spy_store)
+        mp.setattr(dump_cache_api, "_lookup_key", spy_lookup)
+        mp.setattr(dump_cache_api, "_store_key", spy_store)
 
 
 def iter_memo_sites(sites: list[Site]) -> Iterator[Site]:

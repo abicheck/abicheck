@@ -13,6 +13,7 @@ import time
 import pytest
 
 from abicheck.storage.ast_size_observer import observe_ast_sizes, report_ast_size
+from abicheck.workflows.dump.cache import store as dump_cache_store
 from abicheck.workflows.release_admission import PEAK_PER_AST_BYTE, MemoryAdmission
 
 _GIB = 1 << 30
@@ -188,7 +189,6 @@ def test_a_real_clang_dump_reports_its_ast_cold_and_warm(tmp_path, monkeypatch):
 
     from click.testing import CliRunner
 
-    from abicheck import snapshot_cache
     from abicheck.cli import main
 
     if shutil.which("clang") is None:
@@ -202,7 +202,7 @@ def test_a_real_clang_dump_reports_its_ast_cold_and_warm(tmp_path, monkeypatch):
     for run in ("cold", "warm"):
         # A fresh whole-snapshot cache each time, so the warm run reaches
         # the AST cache instead of being served the finished snapshot.
-        monkeypatch.setattr(snapshot_cache, "_CACHE_DIR", tmp_path / f"snap-{run}")
+        monkeypatch.setattr(dump_cache_store, "_CACHE_DIR", tmp_path / f"snap-{run}")
         seen: list[int] = []
         with observe_ast_sizes(seen.append):
             result = CliRunner().invoke(

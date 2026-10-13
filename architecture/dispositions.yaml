@@ -80,15 +80,6 @@
       "review_by": "2026-12-15"
     },
     {
-      "path": "abicheck/snapshot_cache.py",
-      "disposition": "migrate",
-      "target_layer": "storage",
-      "slice": "storage/cache.py per ADR-061 D2's end-state layout, alongside storage's other snapshot-cache-shaped modules.",
-      "rationale": "This module's own body imports the extract layer directly and imports serialization.py (itself still unclassified, see its own record above) -- storage may only import model. Trial classification into `storage` measured 5 new violations, including a new extract <-> storage responsibility cycle. Needs its extract-layer reads removed or routed through a model-shared cache key before reclassification, and depends on serialization.py's own disposition closing first.",
-      "owner": "abicheck maintainers",
-      "review_by": "2026-12-15"
-    },
-    {
       "path": "abicheck/stack_binding_diff.py",
       "disposition": "migrate",
       "target_layer": "compare",

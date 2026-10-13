@@ -140,7 +140,7 @@ already used one function over in `cli_compare_helpers._embed_inline_
 source_side` for `--ast-frontend`/`--nostdinc`, extended to `--lang` and
 threaded through `cli_resolve._resolve_compare_snapshots` into
 `CompareRequest`. The whole-snapshot disk cache key
-(`service_dump_cache._dump_cache_extra_key`/`cached_run_dump`) folds
+(`workflows/dump/cache/key.py`'s `_dump_cache_extra_key`/`api.py`'s `cached_run_dump`) folds
 `lang_explicit` in too — the identical `lang` string now legitimately
 resolves to two different parsed ASTs depending on it, so a cache entry
 for one must never serve the other. `scan`/`appcompat`/the

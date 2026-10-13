@@ -16,7 +16,7 @@ from typing import Any
 import pytest
 
 from abicheck.model import AbiSnapshot
-from abicheck.service_dump_cache import cached_run_dump
+from abicheck.workflows.dump.cache.api import cached_run_dump
 from abicheck.workflows.dump.native import run_dump
 
 pytestmark = [

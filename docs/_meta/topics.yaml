@@ -132,7 +132,7 @@ topics:
     fact_sources:
       - abicheck/snapshot_io.py
       - abicheck/serialization.py
-      - abicheck/snapshot_cache.py
+      - abicheck/workflows/dump/cache/store.py
     task_pages:
       - use/baseline-storage.md
 

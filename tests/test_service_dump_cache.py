@@ -6,12 +6,13 @@ from pathlib import Path
 from unittest.mock import patch
 
 from abicheck.model import AbiSnapshot, Function, Visibility
-from abicheck.service_dump_cache import (
+from abicheck.workflows.dump.cache import salt as dump_cache_salt
+from abicheck.workflows.dump.cache.api import cached_run_dump
+from abicheck.workflows.dump.cache.key import (
     _dump_cache_extra_key,
-    _dump_is_cacheable,
     _manifest_cache_paths,
-    cached_run_dump,
 )
+from tests._dump_cache_request import dump_is_cacheable
 
 _NO_CLANG_LAYOUT_TOOL = "abicheck.extract.headers.clang.layout_tool.shutil.which"
 
@@ -61,58 +62,58 @@ class _FakeManifest:
 
 class TestDumpIsCacheable:
     def test_plain_shape_is_cacheable(self):
-        assert _dump_is_cacheable(**_cacheable_kwargs()) is True
+        assert dump_is_cacheable(**_cacheable_kwargs()) is True
 
     def test_pdb_path_not_cacheable(self, tmp_path):
         kwargs = _cacheable_kwargs(pdb_path=tmp_path / "x.pdb")
-        assert _dump_is_cacheable(**kwargs) is False
+        assert dump_is_cacheable(**kwargs) is False
 
     def test_dwarf_only_not_cacheable(self):
-        assert _dump_is_cacheable(**_cacheable_kwargs(dwarf_only=True)) is False
+        assert dump_is_cacheable(**_cacheable_kwargs(dwarf_only=True)) is False
 
     def test_debug_roots_not_cacheable(self, tmp_path):
         kwargs = _cacheable_kwargs(debug_roots=[tmp_path])
-        assert _dump_is_cacheable(**kwargs) is False
+        assert dump_is_cacheable(**kwargs) is False
 
     def test_enable_debuginfod_not_cacheable(self):
         kwargs = _cacheable_kwargs(enable_debuginfod=True)
-        assert _dump_is_cacheable(**kwargs) is False
+        assert dump_is_cacheable(**kwargs) is False
 
     def test_debug_format_not_cacheable(self):
         kwargs = _cacheable_kwargs(debug_format="dwarf")
-        assert _dump_is_cacheable(**kwargs) is False
+        assert dump_is_cacheable(**kwargs) is False
 
     def test_symbols_only_not_cacheable(self):
         kwargs = _cacheable_kwargs(symbols_only=True)
-        assert _dump_is_cacheable(**kwargs) is False
+        assert dump_is_cacheable(**kwargs) is False
 
     def test_debug_presence_only_not_cacheable(self):
         kwargs = _cacheable_kwargs(debug_presence_only=True)
-        assert _dump_is_cacheable(**kwargs) is False
+        assert dump_is_cacheable(**kwargs) is False
 
     def test_unknown_compile_object_not_cacheable(self):
         kwargs = _cacheable_kwargs(compile=object())
-        assert _dump_is_cacheable(**kwargs) is False
+        assert dump_is_cacheable(**kwargs) is False
 
     def test_real_compile_context_is_cacheable(self):
         from abicheck.compile_context import CompileContext
 
         for cc in (CompileContext(), CompileContext(sysroot=Path("/s"), nostdinc=True)):
-            assert _dump_is_cacheable(**_cacheable_kwargs(compile=cc)) is True
+            assert dump_is_cacheable(**_cacheable_kwargs(compile=cc)) is True
 
     def test_header_graph_no_longer_a_cacheability_parameter(self):
         """G29 Phase A: header_graph/header_graph_includes are no longer
         run_dump parameters at all (the graph is unconditional), so
         _dump_is_cacheable no longer takes them — the plain shape stays
         cacheable, which is what actually matters here now."""
-        assert _dump_is_cacheable(**_cacheable_kwargs()) is True
+        assert dump_is_cacheable(**_cacheable_kwargs()) is True
 
     def test_dump_manifest_is_cacheable(self):
         # ADR-050 D3/D6 (G32 Phase E): a manifest-driven dump used to be
         # unconditionally excluded; it is now cacheable like any other plain
         # shape once the cache key covers the manifest's own scope.
         kwargs = _cacheable_kwargs(dump_manifest=_FakeManifest(all_required=True))
-        assert _dump_is_cacheable(**kwargs) is True
+        assert dump_is_cacheable(**kwargs) is True
 
     def test_dump_manifest_with_optional_tu_not_cacheable(self):
         # Codex review, PR #636: a required=False TU's failure degrades to a
@@ -120,7 +121,7 @@ class TestDumpIsCacheable:
         # failure could otherwise get permanently cached as a "successful"
         # but silently-degraded snapshot.
         kwargs = _cacheable_kwargs(dump_manifest=_FakeManifest(all_required=False))
-        assert _dump_is_cacheable(**kwargs) is False
+        assert dump_is_cacheable(**kwargs) is False
 
 
 class TestDumpCacheExtraKey:
@@ -130,7 +131,7 @@ class TestDumpCacheExtraKey:
         assert k1 != k2
 
     def test_binary_only_key_does_not_fingerprint_path_tools(self):
-        with patch("abicheck.dumper._tool_identity") as identity:
+        with patch("abicheck.extract.headers.toolchain._tool_identity") as identity:
             key = _dump_cache_extra_key("elf", "auto", None, None, uses_ast=False)
         assert "\x00no-ast\x00" in key
         identity.assert_not_called()
@@ -162,8 +163,14 @@ class TestDumpCacheExtraKey:
             return ("/toolchain/gcc" if name == "cc" else "/toolchain/g++", name)
 
         with (
-            patch("abicheck.dumper._resolve_compiler_binary", side_effect=compiler_bin),
-            patch("abicheck.dumper._tool_identity", side_effect=lambda value: value),
+            patch(
+                "abicheck.extract.headers.ast_config._resolve_compiler_binary",
+                side_effect=compiler_bin,
+            ),
+            patch(
+                "abicheck.extract.headers.toolchain._tool_identity",
+                side_effect=lambda value: value,
+            ),
         ):
             c_key = _dump_cache_extra_key("elf", "castxml", None, None, "c")
             cpp_key = _dump_cache_extra_key("elf", "castxml", None, None, "c++")
@@ -497,7 +504,6 @@ class TestCachedRunDump:
         directly, without ever calling the passed-in ``run_dump`` (and
         therefore without ever tagging it), so a stale untagged entry would
         otherwise bypass the dependency-scope comparability gate forever."""
-        from abicheck import snapshot_cache as snapshot_cache_mod
 
         binary = tmp_path / "lib.so"
         binary.write_bytes(b"ELF fake content")
@@ -507,11 +513,11 @@ class TestCachedRunDump:
             calls.append(1)
             return _sample_snap()
 
-        monkeypatch.setattr(snapshot_cache_mod, "_SNAPSHOT_CACHE_VERSION", "OLD")
+        monkeypatch.setattr(dump_cache_salt, "SNAPSHOT_CACHE_VERSION", "OLD")
         cached_run_dump(fake_run_dump, binary, "elf", [], [], "1.0", "c++")
         assert len(calls) == 1
 
-        monkeypatch.setattr(snapshot_cache_mod, "_SNAPSHOT_CACHE_VERSION", "NEW")
+        monkeypatch.setattr(dump_cache_salt, "SNAPSHOT_CACHE_VERSION", "NEW")
         cached_run_dump(fake_run_dump, binary, "elf", [], [], "1.0", "c++")
         assert len(calls) == 2  # re-run, not served from the old-version entry
 

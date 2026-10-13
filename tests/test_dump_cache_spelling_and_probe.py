@@ -15,13 +15,13 @@ from pathlib import Path
 import pytest
 
 from abicheck.model import AbiSnapshot
-from abicheck.service_dump_cache import cached_run_dump
 from abicheck.workflows import side_isolation
 from abicheck.workflows.cache_probe import (
     CacheProbeMiss,
     cache_only_probe,
     refuse_dump_while_probing,
 )
+from abicheck.workflows.dump.cache.api import cached_run_dump
 
 
 def _recording_dump(calls: list[tuple[Path, list[Path]]]):
