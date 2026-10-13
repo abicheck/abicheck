@@ -38,7 +38,7 @@ from abicheck.model import (
     Variable,
     Visibility,
 )
-from abicheck.reporter import ShowOnlyFilter
+from abicheck.report.view import ShowOnlyFilter
 from abicheck.serialization import load_snapshot, snapshot_from_dict, snapshot_to_json
 
 pytestmark = pytest.mark.slow

@@ -582,7 +582,7 @@ class TestParamDefaultChanged:
         # different". Comparing it against a genuinely castxml-backed
         # function on a hybrid `new` side is a legitimate same-producer
         # comparison and must still fire, exactly as it did before hybrid
-        # existed (when only _both_header_aware gated this detector at all).
+        # existed (when only both_header_aware gated this detector at all).
         f_old = _pub_func(
             "connect",
             "_Z7connectv",

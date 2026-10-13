@@ -123,7 +123,7 @@ def function_identity_index(
     docstring.
 
     *functions* is the comparison's own already ELF/API-surface-selected map
-    (``diff_symbols._public_functions``'s result) for *snapshot* -- the same
+    (``public_surface.public_functions``'s result) for *snapshot* -- the same
     input ``SymbolIdentityIndex.for_functions`` takes today.
     :func:`~abicheck.finding_identity.resolve_function_identity` still reads
     the flat ``Function`` object directly to compute each identity, for the

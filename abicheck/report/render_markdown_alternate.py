@@ -109,6 +109,7 @@ from .surface_changes import (
     compute_surface_changes,
     render_surface_changes_section,
 )
+from .view import render_show_only_cli_hint, resolve_scoped_gate_findings
 
 # ---------------------------------------------------------------------------
 # Shared preamble (--report-mode leaf / root-cause)
@@ -188,7 +189,7 @@ def _render_view_preamble(d: Mapping[str, Any]) -> list[str]:
         # Codex review (PR #1154 second follow-up: "Render repeated show
         # groups as repeated view options") -- render each `;`-joined
         # internal group as its own `--view show=...` token.
-        cli_hint = _reporter_markdown().render_show_only_cli_hint(note["show_only"])
+        cli_hint = render_show_only_cli_hint(note["show_only"])
         lines.append(
             f"> Filtered by: `{cli_hint}` "
             f"({note['shown']} of {note['total']} changes shown)"
@@ -258,8 +259,8 @@ def build_root_cause_document(
     # reporter_markdown._to_markdown_root_cause's own note) -- resolved
     # before the severity table so a scoped run whose only gating issue is
     # one of these can pass the scoped counts below.
-    scoped_only, missing_labels, blocks, missing_kind = (
-        rm._resolve_scoped_gate_findings(result, severity_config, show_only)
+    scoped_only, missing_labels, blocks, missing_kind = resolve_scoped_gate_findings(
+        result, severity_config, show_only
     )
 
     root_cause_section = rm.compute_root_cause_section(

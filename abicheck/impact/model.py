@@ -107,7 +107,7 @@ class GraphProofPath:
 
     ``occurrence_id`` (ADR-052's stable-identifier follow-up, built on top of
     ADR-046 D1) is a hash over this path's edges' own graph occurrence trail
-    — independent of ``description`` text, unlike ``reporter._finding_id``.
+    — independent of ``description`` text, unlike ``report.view.finding_id``.
     ``None`` whenever no edge on the path carries occurrence-level attrs
     (``buildsource.graph_impact._path_occurrence_id``) — still the common
     case today, since no producer populates them yet. ``root_cause_id``/

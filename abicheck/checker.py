@@ -24,6 +24,7 @@ from . import (
     diff_bit_int,  # noqa: F401 — triggers detector registration
     diff_char8t,  # noqa: F401 — triggers detector registration
     diff_integer_model,  # noqa: F401 — triggers detector registration
+    diff_symbols as _diff_symbols,  # noqa: F401 — triggers detector registration
 )
 from .change_registry import (
     API_BREAK_KINDS as _API_BREAK_KINDS,
@@ -42,6 +43,9 @@ from .compare.finding_redundancy import (
     ROOT_TYPE_CHANGE_KINDS as _ROOT_TYPE_CHANGE_KINDS,
 )
 from .compare.surface_reconcile import releases_reconciliation
+from .compare.type_layout_diff import (
+    diff_struct_layouts,  # noqa: F401 — tests import it from here
+)
 from .confidence import _compute_confidence
 from .contract_pipeline import (
     ContractEvaluationStage,
@@ -72,7 +76,6 @@ from .diff_platform import (  # noqa: F401
     _diff_leaked_dependency_symbols,
     _diff_macho,
     _diff_pe,
-    _diff_struct_layouts,
     _diff_template_inner_types,
     _extract_template_args,
     _template_outer,
@@ -86,9 +89,6 @@ from .diff_stdlib_impl import (  # noqa: F401 — triggers detector registration
     _diff_stdlib_implementation,
 )
 from .diff_sycl import _diff_sycl  # noqa: F401 — triggers detector registration
-from .diff_symbols import (  # noqa: F401 — triggers detector registration
-    _public_functions,
-)
 from .diff_time64 import (  # noqa: F401 — triggers detector registration
     _diff_time64_abi,
 )

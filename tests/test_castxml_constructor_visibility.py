@@ -24,7 +24,7 @@ classify ``Visibility.HIDDEN`` regardless of whether it was genuinely public.
 That silently hid:
 
 - a *removed* constructor overload (case78: ``task_arena(attach_mode_t)``),
-  since ``_public_functions()`` filters to PUBLIC/ELF_ONLY visibility only;
+  since ``public_functions()`` filters to PUBLIC/ELF_ONLY visibility only;
 - an *added* one (case111: the new ``int_factory_t`` overload).
 
 ``ctor_or_dtor_visibility`` restores this signal from source access when
@@ -126,7 +126,7 @@ class TestConstructorVisibilityFallback:
 
 class TestConstructorOverloadKeyExemptFromElfNarrowing:
     def test_public_functions_keeps_synthetic_ctor_key_without_elf_match(self) -> None:
-        from abicheck.diff_symbols import _public_functions
+        from abicheck.compare.public_surface import public_functions
         from abicheck.elf_metadata import ElfMetadata, ElfSymbol
         from abicheck.model import AbiSnapshot
 
@@ -141,7 +141,7 @@ class TestConstructorOverloadKeyExemptFromElfNarrowing:
             functions=funcs,
             elf=ElfMetadata(symbols=[ElfSymbol(name="some_other_export")]),
         )
-        kept = _public_functions(snap)
+        kept = public_functions(snap)
         assert list(kept) == [funcs[0].mangled]
 
 
@@ -181,7 +181,7 @@ def _make_root_with_virtual_destructor(*, mangled: str = "") -> Element:
 class TestDestructorOverloadKeyExemptFromElfNarrowing:
     """Regression guard (Codex review, PR #582): PUBLIC visibility from
     ctor_or_dtor_visibility was necessary but not sufficient — without
-    is_synthetic_dtor_key, _public_functions() still silently dropped a
+    is_synthetic_dtor_key, public_functions() still silently dropped a
     genuinely public virtual destructor whenever ELF metadata was present,
     since its synthesized "~ClassName" key could never match a real export."""
 
@@ -195,7 +195,7 @@ class TestDestructorOverloadKeyExemptFromElfNarrowing:
         assert funcs[0].visibility == Visibility.PUBLIC
 
     def test_public_functions_keeps_synthetic_dtor_key_without_elf_match(self) -> None:
-        from abicheck.diff_symbols import _public_functions
+        from abicheck.compare.public_surface import public_functions
         from abicheck.elf_metadata import ElfMetadata, ElfSymbol
         from abicheck.model import AbiSnapshot
 
@@ -210,7 +210,7 @@ class TestDestructorOverloadKeyExemptFromElfNarrowing:
             functions=funcs,
             elf=ElfMetadata(symbols=[ElfSymbol(name="some_other_export")]),
         )
-        kept = _public_functions(snap)
+        kept = public_functions(snap)
         assert list(kept) == [funcs[0].mangled]
 
     def test_removed_virtual_destructor_reports_func_removed(self) -> None:

@@ -1569,14 +1569,14 @@ class TestScopedProperties:
         # testsuite's own pass/fail always reflects the full-library result.
         # Both real FUNC_REMOVED changes here fail, whether or not the
         # supplied consumer happens to use the symbol.
-        from abicheck.reporter import _finding_id
+        from abicheck.report.view import finding_id
 
         relevant = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed: foo")
         irrelevant = Change(ChangeKind.FUNC_REMOVED, "_Z3barv", "removed: bar")
         r = _make_result([relevant, irrelevant], verdict=Verdict.BREAKING)
         r.scoped_verdict = Verdict.BREAKING  # type: ignore[attr-defined]
         r.gate_scope = "used_by"  # type: ignore[attr-defined]
-        r.scoped_relevant_finding_ids = frozenset({_finding_id(relevant)})  # type: ignore[attr-defined]
+        r.scoped_relevant_finding_ids = frozenset({finding_id(relevant)})  # type: ignore[attr-defined]
         xml_str = to_junit_xml(r)
         root = _parse(xml_str)
         ts = root.find("testsuite")
@@ -1667,7 +1667,7 @@ class TestScopedProperties:
         # but never added to result.changes -- without a testcase for it, a
         # --used-by run that fails solely because of one of these would have
         # no testcase/failure in the XML to explain it.
-        from abicheck.reporter import _finding_id
+        from abicheck.report.view import finding_id
 
         scoped_only = Change(
             kind=ChangeKind.PE_ORDINAL_RETARGETED,
@@ -1679,7 +1679,7 @@ class TestScopedProperties:
         r = _make_result([], verdict=Verdict.COMPATIBLE)
         r.scoped_verdict = Verdict.BREAKING  # type: ignore[attr-defined]
         r.gate_scope = "used_by"  # type: ignore[attr-defined]
-        r.scoped_relevant_finding_ids = frozenset({_finding_id(scoped_only)})  # type: ignore[attr-defined]
+        r.scoped_relevant_finding_ids = frozenset({finding_id(scoped_only)})  # type: ignore[attr-defined]
         r.scoped_only_changes = (scoped_only,)  # type: ignore[attr-defined]
         xml_str = to_junit_xml(r)
         root = _parse(xml_str)

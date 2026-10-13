@@ -362,7 +362,7 @@ def resolve_change_identity(
     unambiguous), this identifies one *finding* -- two distinct findings
     routinely share a symbol. :func:`_change_discriminator` is folded into
     ``primary_id`` at every tier, including CANONICAL, mirroring
-    ``reporter_markdown._finding_id``'s own established minimal
+    ``report.view.finding_id``'s own established minimal
     disambiguating set (Codex review: a bare ``mangled:<symbol>`` canonical
     id would collapse unrelated findings, violating this module's dedup-key
     contract).

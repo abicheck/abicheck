@@ -44,11 +44,12 @@ from typing import TYPE_CHECKING
 from ..detector_registry import registry
 from ..diff_cxx_rules import itanium_qualified_name
 from ..diff_helpers import make_change
-from ..diff_symbols import _both_header_aware, _reconciled_function_surfaces
 from ..model.change_catalog.kinds import ChangeKind
 from ..model.execution_cache import memoized
+from ..model.snapshot_reliability import both_header_aware
 from ..model.synthetic_key import synthetic_ctor_owner
 from ..name_classification import canonicalize_type_name
+from .public_surface import reconciled_function_surfaces
 
 if TYPE_CHECKING:
     from ..model import AbiSnapshot, Function, Param
@@ -283,9 +284,9 @@ def _diff_overload_ambiguity(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]
     Header-tier only: the witness needs each parameter's declared type, which
     a symbol table or a demangled name does not give reliably.
     """
-    if not _both_header_aware(old, new):
+    if not both_header_aware(old, new):
         return []
-    old_map, new_map = _reconciled_function_surfaces(old, new)
+    old_map, new_map = reconciled_function_surfaces(old, new)
     typedefs = {**old.declarations.typedefs, **new.declarations.typedefs}
     enums = frozenset(
         e.name for e in (*old.declarations.enums, *new.declarations.enums)

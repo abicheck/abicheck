@@ -21,9 +21,9 @@ file-size soft cap. Re-exported from ``diff_platform`` for back-compat with
 
 from __future__ import annotations
 
+from .compare.public_surface import reconciled_function_surfaces
 from .detector_registry import registry
 from .diff_helpers import make_change
-from .diff_symbols import _reconciled_function_surfaces
 from .model import AbiSnapshot
 from .model.change import Change
 from .model.change_catalog.kinds import ChangeKind
@@ -131,7 +131,7 @@ def _diff_template_inner_types(old: AbiSnapshot, new: AbiSnapshot) -> list[Chang
     For production ELF-based snapshots, FUNC_PARAMS_CHANGED is the primary signal.
     """
     changes: list[Change] = []
-    old_map, new_map = _reconciled_function_surfaces(old, new)
+    old_map, new_map = reconciled_function_surfaces(old, new)
 
     for mangled in set(old_map) & set(new_map):
         f_old = old_map[mangled]

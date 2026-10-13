@@ -1350,7 +1350,7 @@ def demote_lambda_closure_unexported_findings(
         itanium_standard_substitution_token,
         synthetic_ctor_dtor_template_base_name,
     )
-    from .diff_symbols import _reconciled_function_surfaces
+    from .compare.public_surface import reconciled_function_surfaces
     from .elf_symbol_filter import FUNCTION_SYMBOL_TYPES, exported_symbol_names
     from .model.change_catalog.registry import Verdict
     from .model.synthetic_key import is_synthetic_ctor_key, is_synthetic_dtor_key
@@ -1369,11 +1369,11 @@ def demote_lambda_closure_unexported_findings(
     old_exported = exported_symbol_names(old_elf, FUNCTION_SYMBOL_TYPES)
     new_exported = exported_symbol_names(new_elf, FUNCTION_SYMBOL_TYPES)
     # `change.symbol` (the detector's match key) can differ from a function's
-    # real accepted export spelling, `Function.name` -- `_public_functions`'s
+    # real accepted export spelling, `Function.name` -- `public_functions`'s
     # own bare-name export fallback exists because castxml/DWARF can
     # under-mangle a name the real ELF table still carries correctly, so both
     # spellings must be checked before ever claiming absence.
-    old_map, new_map = _reconciled_function_surfaces(old, new)
+    old_map, new_map = reconciled_function_surfaces(old, new)
 
     for change in changes:
         if change.kind not in _LAMBDA_CLOSURE_DEMOTABLE_KINDS:

@@ -17,7 +17,7 @@
 
 Leaf module (imports only from ``checker``) split out of
 ``reporter_markdown.py`` to keep that file under the AI-readiness file-size
-hard cap -- ``_suppress_dangling_correlation_notes`` is called by every
+hard cap -- ``suppress_dangling_correlation_notes`` is called by every
 report format (markdown, JSON, SARIF, HTML, JUnit), not just markdown, so it
 belongs in its own shared home rather than growing the markdown renderer.
 """
@@ -31,7 +31,7 @@ from collections.abc import Sequence
 from .checker import Change
 
 
-def _suppress_dangling_correlation_notes(changes: Sequence[Change]) -> list[Change]:
+def suppress_dangling_correlation_notes(changes: Sequence[Change]) -> list[Change]:
     """Rendering-local view of *changes* with ``Change.correlated_change_kind``
     cleared on any change whose named target is not itself present in
     *changes*.

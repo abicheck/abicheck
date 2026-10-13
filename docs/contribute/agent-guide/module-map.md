@@ -183,6 +183,7 @@ Core pipeline (in order of data flow):
      it builds for introspection; a test asserts the last two agree
 3. **Diffing** — compare two snapshots
    - `diff_symbols.py` — function/variable/parameter changes
+   - `compare/public_surface.py` — the compared public function and variable surfaces, their evidence-gap reconciliation, and the transitive-runtime filter every per-pair detector joins through
    - `diff_types.py` — struct/enum/union/typedef changes
    - `diff_platform.py` — ELF/PE/Mach-O specific changes
    - `diff_elf_layout.py` — binary-only (no-DWARF/L0) vtable & RTTI layout diff from `_ZTV`/`_ZTI` symbol sizes
@@ -210,7 +211,7 @@ Core pipeline (in order of data flow):
      `resolve_change_identity()`, and `diff_symbols.py`'s own old/new
      function and variable matching joins through `SymbolIdentityIndex` —
      the flat-symbol counterpart of `TypeMap`, a `Mapping` over the same
-     keys `_public_functions`/`_public_variables` return plus one
+     keys `public_functions`/`public_variables` (`compare/public_surface.py`) return plus one
      ambiguity-checked alias tier (`unique_alias_match` answers `None` for
      "no candidate" and "several candidates" alike). Unlike `TypeMap`,
      `__getitem__` never resolves an alias, and variables enable no alias

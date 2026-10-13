@@ -30,7 +30,6 @@ from typing import TYPE_CHECKING
 
 from ..detector_registry import registry
 from ..diff_helpers import make_change
-from ..diff_symbols_renames import _should_filter_transitive_runtime_symbols
 from ..elf_symbol_filter import (
     ALL_SYMBOL_TYPES,
     FUNCTION_SYMBOL_TYPES,
@@ -44,6 +43,7 @@ from ..model.export_entity_name import (
     public_template_scopes,
 )
 from .export_owner_resolution import special_member_export_coverage
+from .public_surface import should_filter_transitive_runtime_symbols
 
 if TYPE_CHECKING:
     from ..model import AbiSnapshot
@@ -139,7 +139,7 @@ def _diff_undeclared_exports(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]
     # ordinary diff never reported it in the first place.
     additions_visible_here = not getattr(new, "elf_only_mode", False)
 
-    filter_transitive = _should_filter_transitive_runtime_symbols(new)
+    filter_transitive = should_filter_transitive_runtime_symbols(new)
 
     # Every ABI-relevant export name OLD carried, across *both* symbol
     # classes, computed once. A name present here is not an addition however
