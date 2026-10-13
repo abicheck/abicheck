@@ -11,7 +11,9 @@ generated: false
 
 Index: [Known gaps](../known-gaps.md)
 
-**Status (re-verified 2026-10-09 at `456989f`): PARTIAL.** compare/opaque_types.py:74-130 now uses OpaqueTypeIndex carrying stable EntityIds plus a bare-name 'local' tier. contains(strict=True) narrows the bare-name collision only when intersect() proves the pairing is complete, and otherwise falls back to the old bare RecordType.name matching. diff_filtering.py:854 _root_type_name now prefers Change.qualified_name.
+**Status (updated 2026-10-13): PARTIAL, narrowed further.** Fixed: a spelling that also names a visible declaration is never used to suppress through the spelling tier (`OpaqueTypeIndex.shared_with_visible`, both opaque-type and opaque-struct paths, complete or incomplete pairing); a stable id that a visible declaration also carries no longer proves opacity. Still open: (1) a change with no identity whose spelling is shared only by opaque declarations is still suppressed by spelling, by design, because no identity or visible namesake contradicts it; (2) the exposure-detection mirror, `find_by_value_types` leaf widening, which pins `test_find_by_value_types_leaf_widening_bare_reference_in_another_scope_is_a_documented_gap` in `tests/test_cov95_diff_filtering.py`; (3) a DWARF-only forward declaration paired with a full definition under the same name keeps the name-based criterion of `find_opaque_struct_types`, since DWARF resolves no identity to tell the two apart.
+
+**Previous status (re-verified 2026-10-09 at `456989f`): PARTIAL.** compare/opaque_types.py:74-130 now uses OpaqueTypeIndex carrying stable EntityIds plus a bare-name 'local' tier. contains(strict=True) narrows the bare-name collision only when intersect() proves the pairing is complete, and otherwise falls back to the old bare RecordType.name matching. diff_filtering.py:854 _root_type_name now prefers Change.qualified_name.
 
 `diff_filtering._find_opaque_types()` (and its
 siblings `_find_by_value_types()`/`_downgrade_opaque_type_changes()`) index
