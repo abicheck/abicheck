@@ -26,7 +26,7 @@ snapshot content; it only moves bytes/text in and out of files, honestly
 and atomically.
 
 Deliberately dependency-free of the rest of ``abicheck`` (a leaf module) so
-it can be imported from ``serialization.py``, ``snapshot_cache.py``, and
+it can be imported from ``serialization.py``, ``workflows/dump/cache/``, and
 CLI/service code without creating an import cycle.
 """
 

@@ -15,6 +15,8 @@ from typing import Any
 
 import pytest
 
+from abicheck.workflows.dump.cache import store as dump_cache_store
+
 try:
     import filelock  # explicit dev dependency; used for xdist cmake locking
 except ImportError:
@@ -228,7 +230,7 @@ def _require_private_dir(path: Path) -> None:
 
 @pytest.fixture(autouse=True)
 def _isolate_snapshot_cache(tmp_path_factory: pytest.TempPathFactory, monkeypatch):
-    """Redirect the whole-snapshot cache (``snapshot_cache.py``) to a fresh
+    """Redirect the whole-snapshot cache (``workflows/dump/cache/``) to a fresh
     per-test directory instead of the real ``~/.cache/abi_check/snapshots/``.
 
     Without this, two tests that happen to dump byte-identical synthetic
@@ -238,7 +240,6 @@ def _isolate_snapshot_cache(tmp_path_factory: pytest.TempPathFactory, monkeypatc
     matters because unrelated tests share one persistent on-disk cache
     directory across the whole run).
     """
-    from abicheck import snapshot_cache
 
     # Test infrastructure intentionally supports distro CastXML builds whose
     # bundled Clang cannot parse the host headers. Keep that portability opt-in
@@ -261,7 +262,7 @@ def _isolate_snapshot_cache(tmp_path_factory: pytest.TempPathFactory, monkeypatc
             dir=_snapshot_cache_bucket(tmp_path_factory),
         )
     )
-    monkeypatch.setattr(snapshot_cache, "_CACHE_DIR", cache_dir)
+    monkeypatch.setattr(dump_cache_store, "_CACHE_DIR", cache_dir)
 
 
 @pytest.fixture(autouse=True)

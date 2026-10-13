@@ -109,15 +109,35 @@ class TestComputeCodeIdentity:
 # -- every computed-output cache misses when only the code changed ------------
 
 
+def _lookup(binary, headers, includes, version, lang, *, extra=""):
+    """The whole-snapshot lookup a dump performs: derive the key, then read it."""
+    from abicheck.workflows.dump.cache import key, store
+
+    return store._lookup_key(
+        key._cache_key(binary, headers, includes, version, lang, extra=extra), binary
+    )
+
+
+def _store(snap, binary, headers, includes, version, lang, *, extra=""):
+    """Store *snap* under the key a dump derives for these inputs."""
+    from abicheck.workflows.dump.cache import key, store
+
+    store._store_key(
+        snap,
+        key._cache_key(binary, headers, includes, version, lang, extra=extra),
+        binary,
+    )
+
+
 @pytest.fixture
 def identity(monkeypatch: pytest.MonkeyPatch):
     """Set the code identity every consumer sees (each imported it by name)."""
     import abicheck.buildsource.build_cache as build_cache
     import abicheck.buildsource.source_replay as source_replay
-    import abicheck.snapshot_cache as snapshot_cache
+    from abicheck.workflows.dump.cache import key as dump_cache_key
 
     def set_to(value: str) -> None:
-        for mod in (snapshot_cache, build_cache, source_replay):
+        for mod in (dump_cache_key, build_cache, source_replay):
             monkeypatch.setattr(mod, "abicheck_code_fingerprint", lambda v=value: v)
 
     return set_to
@@ -127,15 +147,15 @@ class TestCachesMissAcrossCodeIdentity:
     def test_snapshot_cache(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, identity
     ) -> None:
-        import abicheck.snapshot_cache as sc
         from abicheck.model import AbiSnapshot
+        from abicheck.workflows.dump.cache import store as sc
 
         monkeypatch.setattr(sc, "_CACHE_DIR", tmp_path / "cache")
         binary = tmp_path / "lib.so"
         binary.write_bytes(b"reproducible build output")
 
         identity("code-A")
-        sc.store(
+        _store(
             AbiSnapshot(library="libfoo.so", version="1.0"),
             binary,
             [],
@@ -143,11 +163,11 @@ class TestCachesMissAcrossCodeIdentity:
             "1.0",
             "c++",
         )
-        assert sc.lookup(binary, [], [], "1.0", "c++") is not None
+        assert _lookup(binary, [], [], "1.0", "c++") is not None
         identity("code-B")
-        assert sc.lookup(binary, [], [], "1.0", "c++") is None
+        assert _lookup(binary, [], [], "1.0", "c++") is None
         identity("code-A")
-        assert sc.lookup(binary, [], [], "1.0", "c++") is not None
+        assert _lookup(binary, [], [], "1.0", "c++") is not None
 
     def test_build_evidence_cache_key(self, tmp_path: Path, identity) -> None:
         from abicheck.buildsource.build_cache import compute_build_cache_key

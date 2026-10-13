@@ -1252,7 +1252,7 @@ def test_seeded_includes_and_compile_context_preserves_none_on_no_op_fold(
     `evidence.compile`) -- so when the fold finds nothing (`applied=False`)
     and the caller supplied no context of its own, the wrapper must convert
     that fabricated default back to `None` rather than silently promoting a
-    `None` into a real object. `service_dump_cache._dump_is_cacheable` only
+    `None` into a real object. `workflows/dump/cache/api.py's `_dump_is_cacheable`` only
     permits caching when `compile is None`, so losing this distinction would
     silently disable caching for an otherwise-cacheable typed dump/compare
     operand whenever unrelated build evidence was supplied and matched

@@ -1,6 +1,6 @@
 """Golden-key characterization for the whole-snapshot cache key.
 
-``snapshot_cache._cache_key`` decides which warm entry a dump reads. Moving or
+``dump_cache_key._cache_key`` decides which warm entry a dump reads. Moving or
 refactoring its derivation must not silently re-key every existing cache
 entry, and must not change what identifies an input. These goldens pin the
 exact digests of a few fixed input shapes, so any change to the derivation
@@ -29,7 +29,7 @@ from pathlib import Path
 
 import pytest
 
-from abicheck import snapshot_cache
+from abicheck.workflows.dump.cache import key as dump_cache_key
 
 #: Fixed mtime (nanoseconds) applied to every hashed fixture file.
 _FIXED_MTIME_NS = 1_700_000_000_000_000_000
@@ -40,9 +40,9 @@ def pinned_inputs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Write the fixture tree under *tmp_path* and pin the non-input key parts."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(
-        snapshot_cache, "abicheck_code_fingerprint", lambda: "code-pinned"
+        dump_cache_key, "abicheck_code_fingerprint", lambda: "code-pinned"
     )
-    monkeypatch.setattr(snapshot_cache, "_snapshot_schema_version", lambda: 1)
+    monkeypatch.setattr(dump_cache_key, "_snapshot_schema_version", lambda: 1)
 
     files = {
         Path("lib.so"): b"\x7fELF-golden-binary",
@@ -66,12 +66,12 @@ GOLDEN_FULL = "e9905659f5f1dd336ceeca82f6ad75ab528b348d218b294edd2e97c831808197"
 
 
 def test_binary_only_key_is_pinned(pinned_inputs: Path) -> None:
-    key = snapshot_cache._cache_key(Path("lib.so"), [], [], "", "c++")
+    key = dump_cache_key._cache_key(Path("lib.so"), [], [], "", "c++")
     assert key == GOLDEN_BINARY_ONLY, f"binary-only key changed: {key}"
 
 
 def test_full_input_key_is_pinned(pinned_inputs: Path) -> None:
-    key = snapshot_cache._cache_key(
+    key = dump_cache_key._cache_key(
         Path("lib.so"),
         [Path("inc/api.h")],
         [Path("inc")],

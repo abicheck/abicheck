@@ -323,7 +323,6 @@
         "abicheck/resolver.py",
         "abicheck/service_compare_evidence.py",
         "abicheck/service_compare_pipeline.py",
-        "abicheck/service_dump_cache.py",
         "abicheck/dumper.py",
         "abicheck/probe_harness.py",
         "abicheck/header_only_dump.py",
@@ -450,7 +449,6 @@
     "service_": [
       "service_compare_evidence.py",
       "service_compare_pipeline.py",
-      "service_dump_cache.py",
       "workflows/dump/native.py",
       "service_header_graph_attach.py",
       "dry_run_estimate.py"
@@ -753,11 +751,9 @@
     "service.py",
     "service_compare_evidence.py",
     "service_compare_pipeline.py",
-    "service_dump_cache.py",
     "workflows/dump/native.py",
     "service_header_graph_attach.py",
     "dry_run_estimate.py",
-    "snapshot_cache.py",
     "snapshot_io.py",
     "snapshot_platform_blocks.py",
     "stable_abi.py",

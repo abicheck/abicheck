@@ -192,7 +192,9 @@ PERF_SENSITIVE_PATTERNS: tuple[str, ...] = (
     # entirely (no scan-shaped scenario ran under this workflow at all for a
     # change to any of these).
     "abicheck/dry_run_estimate.py",
-    "abicheck/snapshot_cache.py",
+    "abicheck/workflows/dump/cache/api.py",
+    "abicheck/workflows/dump/cache/key.py",
+    "abicheck/workflows/dump/cache/store.py",
     "abicheck/cli_buildsource.py",
     "abicheck/cli_buildsource_helpers.py",
     "abicheck/cli_dump_helpers.py",

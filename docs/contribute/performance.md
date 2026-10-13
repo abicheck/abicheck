@@ -1174,7 +1174,7 @@ owner of oneDAL/SVS/PVXS claims.
 - **Include-tree inventory for cache keys** (`extract/cache_header_scan.py`).
   Every header-parse cache key walks each include root to fold in
   (path, mtime) for every header-like descendant -- `dumper_ast_config.
-  _cache_key` for the AST cache, `snapshot_cache` for the whole-snapshot one.
+  _cache_key` for the AST cache, `workflows/dump/cache` for the whole-snapshot one.
   `Path.rglob("*")` materializes a `Path` per entry *visited* and then sorts
   those objects; carrying path strings through the traversal and building a
   `Path` only for the surviving, already-ordered entries measured **2.4x**

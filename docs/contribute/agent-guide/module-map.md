@@ -151,7 +151,7 @@ Core pipeline (in order of data flow):
      `ABICHECK_AST_FRONTEND=clang`). Both parsers expose the same `parse_*`
      surface behind `dumper._header_ast_parser`.
    - `dwarf_snapshot.py` — DWARF-specific snapshot logic
-   - `snapshot_cache.py` — caching layer
+   - `workflows/dump/cache/` — whole-snapshot dump cache (`api.py` entry point, `key.py`, `salt.py`, `store.py`)
    - `workflows/dump/dependency_scope.py` (with `dependency_retention.py`) — dependency exclusion, on by default (`dump`/
      `compare --include-system-declarations` opts out, both sharing one
      `cli_options.include_dependencies_option` decorator): drops
@@ -649,10 +649,10 @@ Core pipeline (in order of data flow):
    - `snapshot_io.py` — ADR-059's canonical snapshot *storage envelope* I/O:
      plain/gzip/zstd detection (magic bytes), atomic + deterministic
      compressed writes, decompression-bomb limits. A dependency-free leaf
-     module `serialization.py`/`snapshot_cache.py`/CLI code build on it
+     module `serialization.py`/`workflows/dump/cache/`/CLI code build on it
    - `extract/cache_header_scan.py` — the include-tree walk every
      header-parse cache key folds in (`dumper_ast_config._cache_key`,
-     `snapshot_cache`). Its **ordering is part of the cache key**:
+     `workflows/dump/cache/key.py`). Its **ordering is part of the cache key**:
      component-wise, matching `sorted(directory.rglob("*"))`, since consumers
      hash the paths in the order returned. `header_utils.py` still owns the
      suffix vocabulary (`CACHE_HEADER_SUFFIXES`) it filters on; the traversal

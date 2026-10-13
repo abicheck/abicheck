@@ -12,38 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Snapshot-level cache for avoiding redundant binary analysis.
-
-Cache key = SHA-256 of (binary content hash + header mtimes + compiler params
-+ the identity of the abicheck code that produced the snapshot,
-``storage.code_identity.abicheck_code_fingerprint``).
-Cache location = ``$XDG_CACHE_HOME/abi_check/snapshots/<key>.json`` or
-``~/.cache/abi_check/snapshots/<key>.json``.
-"""
+"""The cache-key salt: :data:`SNAPSHOT_CACHE_VERSION` and the history of why
+each bump happened. Folded into every key by :mod:`.key`."""
 
 from __future__ import annotations
-
-import hashlib
-import logging
-import os
-import stat
-import tempfile
-import time
-from pathlib import Path
-from typing import TYPE_CHECKING
-
-from .extract import progress
-from .extract.cache_header_scan import iter_cache_header_files
-from .model.execution_cache_scoped import DiskCache
-from .storage.code_identity import abicheck_code_fingerprint
-
-if TYPE_CHECKING:
-    from .model import AbiSnapshot
-
-_logger = logging.getLogger("abicheck.cache")
-
-#: Maximum number of cached snapshots (LRU eviction by mtime).
-MAX_ENTRIES: int = 100
 
 #: Bumped whenever a change to the dumping/provenance pipeline could alter a
 #: snapshot's content without changing any of the caller-supplied cache-key
@@ -57,7 +29,7 @@ MAX_ENTRIES: int = 100
 #: bare name disagree, where the old last-entry-wins map set them. A warm cache
 #: entry would keep replaying the last-alias values, so the bump forces
 #: re-extraction (the same precedent as v16 for ``elf_binding``).
-_SNAPSHOT_CACHE_VERSION: str = "36"
+SNAPSHOT_CACHE_VERSION: str = "36"
 # v35: header-derived snapshots now carry public_header_identifiers (schema
 # v55, extract/public_header_identifiers.py). The key also folds in the
 # snapshot schema version from this version on, so the next schema bump
@@ -139,12 +111,12 @@ _SNAPSHOT_CACHE_VERSION: str = "36"
 # PR also introduced is additionally covered by AbiSnapshot.SCHEMA_VERSION
 # (serialization.py) for the on-disk snapshot JSON format itself; this
 # constant is specifically for the separate whole-snapshot disk cache
-# (snapshot_cache.py), which persists across process invocations and isn't
+# (workflows/dump/cache.py), which persists across process invocations and isn't
 # gated by that schema version at all.
 #
 # v3 (G29 Phase A): the L2 header-only semantic graph became unconditional
 # (previously gated behind the now-removed --header-graph/--header-graph-includes
-# flags). service_dump_cache._dump_is_cacheable() allows the same plain
+# flags). workflows.dump.cache._dump_is_cacheable() allows the same plain
 # "binary + public headers" shape onto this cache that a pre-upgrade,
 # no-graph dump would already have stored under v2 -- without this bump, a
 # warm cache from before the upgrade would be replayed verbatim and silently
@@ -171,7 +143,7 @@ _SNAPSHOT_CACHE_VERSION: str = "36"
 # order-collapsed cache entry is never replayed as if it were order-aware.
 #
 # v6 (dependency-scope comparability gate, PR #651 follow-up, Codex review):
-# ``cached_run_dump`` (``service_dump_cache.py``) returns a cache hit
+# ``cached_run_dump`` (``workflows/dump/cache.py``) returns a cache hit
 # directly, without ever calling the ``run_dump`` callable it was passed --
 # so a pre-existing cache entry (written before ``service.run_dump`` started
 # tagging its result ``AbiSnapshot.dependency_scope="full"``) would keep
@@ -383,306 +355,3 @@ _SNAPSHOT_CACHE_VERSION: str = "36"
 # v27, since ``SCHEMA_VERSION`` gates the on-disk snapshot JSON format only,
 # not this separate whole-process disk cache. Bumped so upgrading forces
 # re-extraction instead of silently replaying the stale, unstamped facts.
-
-
-def _get_cache_dir() -> Path:
-    """Return the cache directory, deferring Path.home() to call time."""
-    xdg = os.environ.get("XDG_CACHE_HOME", "")
-    if xdg:
-        base = Path(xdg)
-    else:
-        try:
-            base = Path.home() / ".cache"
-        except RuntimeError:
-            base = Path(tempfile.gettempdir())
-    return base / "abi_check" / "snapshots"
-
-
-# Module-level reference (can be monkeypatched in tests).
-_CACHE_DIR: Path = _get_cache_dir()
-
-#: The whole-snapshot disk cache's policy and counters (design-hardening
-#: plan, Phase 4): ``ABICHECK_REFERENCE_MODE=1`` makes every lookup a miss
-#: and every store a no-op, so a reference run always dumps afresh.
-SNAPSHOT_DISK_CACHE = DiskCache("abicheck.snapshot_cache.disk")
-
-
-def absolute_paths(paths: list[Path] | None) -> list[Path] | None:
-    """*paths* made absolute, so ``inc/a.h`` and its absolute spelling of one
-    file share a cache key. Applied to the dump's inputs, not only the key: a
-    snapshot records the spelling it was given (surface-graph node ids), so a
-    key-only fix would let a warm hit return the other spelling's strings.
-    ``abspath``, not ``resolve()``: a symlinked install prefix keeps its name.
-    """
-    return None if paths is None else [Path(os.path.abspath(p)) for p in paths]
-
-
-def _cache_key(
-    binary_path: Path,
-    headers: list[Path],
-    includes: list[Path],
-    version: str,
-    lang: str,
-    *,
-    extra: str = "",
-) -> str:
-    """Compute a deterministic cache key from all inputs that affect the snapshot.
-
-    ``extra`` is an opaque, caller-assembled string folding in any additional
-    inputs that affect the resulting snapshot but aren't one of this
-    function's named parameters (e.g. the binary format, header-AST backend,
-    or public-header scoping set) — kept generic here so this module doesn't
-    need to know every option a caller's dump pipeline exposes.
-    """
-    h = hashlib.sha256()
-    # Binary content hash — chunked to avoid loading huge files into memory
-    try:
-        with open(binary_path, "rb") as f:
-            for chunk in iter(lambda: f.read(65536), b""):
-                h.update(chunk)
-    except OSError:
-        return ""  # uncacheable
-    # Hash contents, not only mtimes: restored timestamps must not resurrect a
-    # stale snapshot. Directory-valued ``-H`` inputs and explicit include roots
-    # contribute every header-like descendant reachable by the parser.
-    hash_files: set[Path] = set()
-    # ADR-050 D1/D2: *not* sorted — headers/includes order is real,
-    # load-bearing search-precedence/preprocessing order (the same "order is
-    # a real compile difference" rule comparability.py's profile_fingerprint
-    # already enforces), not cosmetic. Two dumps requesting the same
-    # headers/includes in a different order can legitimately resolve to a
-    # different snapshot (e.g. -I a -I b vs -I b -I a with a same-named
-    # header in both, or a macro one header defines before another is
-    # included) — sorting here would let a warm cache silently serve the
-    # wrong order's snapshot. `hash_files` (the transitively-discovered
-    # descendants of a directory input) stays a sorted set below: those are
-    # an unordered content aggregate, not a caller-ordered sequence.
-    for hdr in headers:
-        h.update(str(hdr).encode())
-        try:
-            if hdr.is_dir():
-                hash_files.update(iter_cache_header_files(hdr))
-            else:
-                hash_files.add(hdr)
-        except OSError:
-            h.update(b"UNREADABLE_HEADER_INPUT")
-    for inc in includes:
-        h.update(str(inc).encode())
-        try:
-            hash_files.update(iter_cache_header_files(inc))
-        except OSError:
-            h.update(b"UNREADABLE_INCLUDE_DIR")
-    for hdr in sorted(hash_files):
-        h.update(str(hdr).encode())
-        try:
-            fd = os.open(hdr, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0))
-            file_stat = os.fstat(fd)
-            if not stat.S_ISREG(file_stat.st_mode):
-                os.close(fd)
-                h.update(b"NONREGULAR")
-                continue
-            # Preserve the existing mtime invalidation contract as well as
-            # hashing contents. The latter catches restored/coarse timestamps;
-            # the former also treats a touched header as a changed input.
-            h.update(str(file_stat.st_mtime_ns).encode())
-            with os.fdopen(fd, "rb") as f:
-                for chunk in iter(lambda: f.read(65536), b""):
-                    h.update(chunk)
-        except OSError:
-            h.update(b"MISSING")
-    # Compiler params
-    h.update(version.encode())
-    h.update(lang.encode())
-    h.update(extra.encode())
-    h.update(_SNAPSHOT_CACHE_VERSION.encode())
-    # The snapshot schema version too, automatically: a schema bump means a
-    # new field or encoding, and an entry cached before it was written
-    # without that field -- loading it back would present "not captured" as
-    # this build's answer. Folding it in closes that whole class instead of
-    # relying on a hand bump of _SNAPSHOT_CACHE_VERSION for each field.
-    h.update(f"schema={_snapshot_schema_version()}".encode())
-    # And the code that produced it: a snapshot is extraction *output*, so an
-    # extractor change with no matching version bump must still miss.
-    h.update(f"code={abicheck_code_fingerprint()}".encode())
-    return h.hexdigest()
-
-
-def _snapshot_schema_version() -> int:
-    from .storage.snapshot_schema_versions import SCHEMA_VERSION
-
-    return SCHEMA_VERSION
-
-
-def write_enabled() -> bool:
-    """``ABICHECK_SNAPSHOT_CACHE_WRITE`` (default on): ``0`` keeps reading the
-    whole-snapshot cache but never populates it -- for a one-shot run (CI on
-    a fresh runner) that would pay to serialize and write snapshots no later
-    run reads. Measured on a 28-member release: populating cost ~30% wall and
-    ~37% peak RSS."""
-    from .extract.env_flags import env_flag
-
-    return env_flag("ABICHECK_SNAPSHOT_CACHE_WRITE")
-
-
-def lookup(
-    binary_path: Path,
-    headers: list[Path],
-    includes: list[Path],
-    version: str,
-    lang: str,
-    *,
-    extra: str = "",
-) -> AbiSnapshot | None:
-    """Look up a cached snapshot. Returns None on miss."""
-    key = _cache_key(binary_path, headers, includes, version, lang, extra=extra)
-    return lookup_key(key, binary_path)
-
-
-def lookup_key(key: str, binary_path: Path) -> AbiSnapshot | None:
-    """Look up an entry using a key already bound to validated inputs.
-
-    ADR-059: new entries are written zstd-compressed (``<key>.json.zst``);
-    this checks that first, then falls back to a legacy plain ``<key>.json``
-    entry so a cache warmed by an older abicheck is not thrown away wholesale
-    on upgrade. A corrupt/truncated compressed entry is a cache miss, same as
-    any other read problem here -- never a caller-visible failure."""
-    if not key:
-        return None
-    from .workflows import memory_trace
-
-    started = time.monotonic()
-    # Traced: on a hit this load replaces the whole dump, so without it
-    # `ABICHECK_MEMORY_TRACE` would see none of a warm run's `dump.*` marks.
-    with memory_trace.phase("dump.cache.lookup"):
-        snap = SNAPSHOT_DISK_CACHE.lookup(lambda: _read_entry(key, binary_path))
-    if snap is not None:
-        # A hit replaces every extraction phase, each of which reports its own
-        # progress line. Say so, or a warm run's redirected log is silent --
-        # indistinguishable from progress reporting being broken.
-        progress.note(
-            f"{binary_path.name}: snapshot cache hit, extraction skipped "
-            f"(loaded in {time.monotonic() - started:.1f}s)"
-        )
-    return snap
-
-
-def _read_entry(key: str, binary_path: Path) -> AbiSnapshot | None:
-    from .serialization import load_snapshot
-
-    for cache_file in (_CACHE_DIR / f"{key}.json.zst", _CACHE_DIR / f"{key}.json"):
-        if not cache_file.exists():
-            continue
-        try:
-            snap = load_snapshot(cache_file)
-        except Exception:
-            _logger.debug("Cache read error for %s, treating as miss", key[:12])
-            continue
-        # Touch mtime for LRU
-        try:
-            cache_file.touch()
-        except OSError:
-            pass
-        _logger.debug("Cache hit: %s → %s", binary_path.name, key[:12])
-        return snap
-    return None
-
-
-def store(
-    snap: AbiSnapshot,
-    binary_path: Path,
-    headers: list[Path],
-    includes: list[Path],
-    version: str,
-    lang: str,
-    *,
-    extra: str = "",
-) -> None:
-    """Store a snapshot in the cache (atomic write via rename)."""
-    key = _cache_key(binary_path, headers, includes, version, lang, extra=extra)
-    store_key(snap, key, binary_path)
-
-
-def store_key(snap: AbiSnapshot, key: str, binary_path: Path) -> None:
-    """Store under a previously computed, post-execution-validated key.
-
-    ADR-059: written zstd-compressed at the fast, cache-tuned level (this
-    runs on nearly every ``dump``/``compare`` invocation, unlike a baseline/
-    release write) via the canonical atomic writer -- a plain-JSON entry
-    from before this cache was compression-aware is never written again,
-    only read as a fallback by :func:`lookup_key`. If a stale legacy
-    ``<key>.json`` for the same key exists, it's removed so a lookup doesn't
-    keep preferring an old snapshot over a freshly stored one."""
-    if not key:
-        return
-    from .workflows import memory_trace
-
-    with memory_trace.phase("dump.cache.store"):
-        SNAPSHOT_DISK_CACHE.store(lambda: _write_entry(snap, key, binary_path))
-
-
-def _write_entry(snap: AbiSnapshot, key: str, binary_path: Path) -> None:
-    try:
-        _CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        cache_file = _CACHE_DIR / f"{key}.json.zst"
-        from .serialization import write_snapshot
-        from .snapshot_io import ZSTD_LEVEL_CACHE, SnapshotCompression
-
-        write_snapshot(
-            snap,
-            cache_file,
-            compression=SnapshotCompression.ZSTD.value,
-            zstd_level=ZSTD_LEVEL_CACHE,
-            # Streamed: a cache entry is private and any read failure is
-            # already a miss, so the declared-size cross-check a one-shot
-            # zstd frame carries buys nothing here, while holding the whole
-            # JSON text and its bytes cost ~0.5 GiB on a large snapshot.
-            zstd_content_size=False,
-        )
-        legacy_file = _CACHE_DIR / f"{key}.json"
-        if legacy_file.exists():
-            try:
-                legacy_file.unlink()
-            except OSError:
-                pass
-        _logger.debug("Cache store: %s → %s", binary_path.name, key[:12])
-        _evict_if_needed()
-    except Exception as exc:
-        # Caching is a pure optimization layered on top of a real dump that
-        # already succeeded — any failure here (disk full, an unserializable
-        # field, ...) must never surface as a caller-visible error. Broad
-        # except is deliberate (mirrors lookup()'s "any read problem is a
-        # miss" stance): a write-time TypeError from an unusual snapshot is
-        # exactly as harmless to swallow as an OSError.
-        _logger.debug("Cache write failed: %s", exc)
-
-
-def _safe_mtime(p: Path) -> float:
-    """Return file mtime, or 0.0 if stat fails (e.g. concurrent deletion)."""
-    try:
-        return p.stat().st_mtime
-    except OSError:
-        return 0.0
-
-
-def _evict_if_needed() -> None:
-    """Remove oldest entries if cache exceeds MAX_ENTRIES.
-
-    Globs both the current ``*.json.zst`` suffix and the legacy plain
-    ``*.json`` suffix (ADR-059) so LRU eviction accounts for a cache
-    directory that still has pre-upgrade entries mixed in with new ones."""
-    try:
-        entries = sorted(
-            (*_CACHE_DIR.glob("*.json.zst"), *_CACHE_DIR.glob("*.json")),
-            key=_safe_mtime,
-        )
-    except OSError:
-        return
-    excess = len(entries) - MAX_ENTRIES
-    if excess <= 0:
-        return
-    for p in entries[:excess]:
-        try:
-            p.unlink()
-            _logger.debug("Cache evict: %s", p.name[:12])
-        except OSError:
-            pass

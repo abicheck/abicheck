@@ -35,6 +35,7 @@ from abicheck.storage.header_ast_cache import (
     retain_ast_context_object,
     run_ast_acquisition,
 )
+from abicheck.workflows.dump.cache import store as dump_cache_store
 
 
 def _run_in_context(ctx: contextvars.Context, key: str, producer: object) -> object:
@@ -879,7 +880,6 @@ def test_directory_l2_compare_acquires_one_ast_per_key(
 
     from click.testing import CliRunner
 
-    from abicheck import snapshot_cache
     from abicheck.cli import main
 
     def run(tag: str) -> Path:
@@ -891,7 +891,7 @@ def test_directory_l2_compare_acquires_one_ast_per_key(
         # the warm AST-cache path this test is about.
         cache_dir = tmp_path / f"snapshots-{tag}"
         cache_dir.mkdir()
-        monkeypatch.setattr(snapshot_cache, "_CACHE_DIR", cache_dir)
+        monkeypatch.setattr(dump_cache_store, "_CACHE_DIR", cache_dir)
         report = tmp_path / f"{tag}.json"
         result = CliRunner().invoke(
             main,

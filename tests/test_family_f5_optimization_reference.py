@@ -76,6 +76,10 @@ from abicheck.serialization import snapshot_to_json
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 import example_catalog  # noqa: E402
 
+from abicheck.workflows.dump.cache import (
+    api as dump_cache_api,
+)
+
 # ── coverage table: every inventoried site -> the cell that bypasses it ─────
 #
 # A value naming a cell is a *checked* claim: that cell asserts the site's
@@ -178,7 +182,7 @@ COVERAGE: dict[str, str] = {
     "abicheck.storage.header_ast_cache::registered::_AST_SLOT_STATS": "UNCOVERED: the per-thread AST handoff is written only by the clang header backend (--ast-frontend clang); the header cell uses castxml",
     "abicheck.storage.header_ast_cache::registered::_AST_ACQUISITION_STATS": "UNCOVERED: the request-wide AST table is opened by the release fan-out over binaries with headers; no cell builds one",
     # ---- disk caches ----
-    "abicheck.snapshot_cache::disk_cache::SNAPSHOT_DISK_CACHE": B,
+    "abicheck.workflows.dump.cache.store::disk_cache::SNAPSHOT_DISK_CACHE": B,
     "abicheck.storage.ast_cache_location::disk_cache::AST_DISK_CACHE": H,
     "abicheck.buildsource.build_cache::disk_cache::BUILD_EVIDENCE_DISK_CACHE": _NEEDS_L5,
     "abicheck.buildsource.build_cache::disk_cache::SOURCE_ABI_DISK_CACHE": _NEEDS_L5,
@@ -787,13 +791,12 @@ def test_mutant_stale_disk_cache_entry_is_caught(
     monkeypatch: pytest.MonkeyPatch, binaries: tuple[Path, Path], tmp_path: Path
 ) -> None:
     """A warm disk-cache hit serving a stale/partial snapshot (#1340/#1306 shape)."""
-    from abicheck import snapshot_cache
 
     args = tuple(str(p) for p in binaries)
     spy = DiskCacheSpy()
     spy.install(monkeypatch, tmp_path / "cacheM")
     cold = _run(*args)
-    real_lookup = snapshot_cache.lookup_key
+    real_lookup = dump_cache_api._lookup_key
 
     def stale(key: str, path: Path) -> Any:
         snap = real_lookup(key, path)
@@ -801,7 +804,7 @@ def test_mutant_stale_disk_cache_entry_is_caught(
             snap.declarations.functions = snap.declarations.functions[:-1]
         return snap
 
-    monkeypatch.setattr(snapshot_cache, "lookup_key", stale)
+    monkeypatch.setattr(dump_cache_api, "_lookup_key", stale)
     warm = _run(*args)
     assert spy.hits >= 2
     assert warm != cold, "oracle missed a stale disk-cache entry"

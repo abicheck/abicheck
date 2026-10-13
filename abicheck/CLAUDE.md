@@ -17,7 +17,7 @@ Pipeline order (data flow):
    `pe_metadata.py`, `macho_metadata.py`, `dwarf_*.py`, `pdb_*.py`,
    `btf_metadata.py`, `ctf_metadata.py`, `sycl_metadata.py`).
 2. **Snapshot** → `dumper.py` builds `AbiSnapshot` (model in `model/`),
-   optionally cached via `snapshot_cache.py`.
+   optionally cached via `workflows/dump/cache/`.
 3. **Diff** snapshots (`diff_symbols.py`, `diff_types.py`,
    `diff_platform.py`, `diff_filtering.py`, `diff_versioning.py`,
    `diff_sycl.py`).

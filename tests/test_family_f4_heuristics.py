@@ -106,7 +106,10 @@ EXEMPTION_CEILINGS: dict[str, int] = {
     "grammar": 46,
     # 43: minus outcome_release.unclassified_release_contribution_fields,
     # moved into its test (dead-code plan, Stage D).
-    "own_format": 47,
+    # 49: plus the two path-prefix checks in manifest_tu_scope_field, moved
+    # from comparability.py into compare/ (a scanned owner) by the dump-cache
+    # refactor. Path-string handling, not naming heuristics.
+    "own_format": 49,
     "platform": 21,
     # 9: main replaced the two fnmatch frozen-namespace matchers with one
     # policy.frozen_namespace helper.

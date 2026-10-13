@@ -53,6 +53,7 @@ from abicheck.model.symbol_leaf import symbol_leaf_identifier
 from abicheck.model.vocabulary import ScopeOrigin
 from abicheck.policy.public_surface_closure import resolve_public_surface
 from abicheck.serialization import snapshot_from_dict, snapshot_to_dict
+from abicheck.workflows.dump.cache import key as dump_cache_key
 
 # ── scanner ──────────────────────────────────────────────────────────────────
 
@@ -180,13 +181,12 @@ def test_round_trip_and_unknown_stays_unknown():
 
 
 def test_cache_key_follows_the_snapshot_schema_version(tmp_path: Path, monkeypatch):
-    from abicheck import snapshot_cache
 
     so = tmp_path / "lib.so"
     so.write_bytes(b"\x7fELF")
-    first = snapshot_cache._cache_key(so, [], [], "1", "c")
-    monkeypatch.setattr(snapshot_cache, "_snapshot_schema_version", lambda: 10_000)
-    assert snapshot_cache._cache_key(so, [], [], "1", "c") != first
+    first = dump_cache_key._cache_key(so, [], [], "1", "c")
+    monkeypatch.setattr(dump_cache_key, "_snapshot_schema_version", lambda: 10_000)
+    assert dump_cache_key._cache_key(so, [], [], "1", "c") != first
 
 
 # ── the closure rule ─────────────────────────────────────────────────────────

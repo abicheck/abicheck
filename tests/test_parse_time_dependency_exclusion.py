@@ -27,6 +27,7 @@ from click.testing import CliRunner
 
 import abicheck.dumper_clang as dumper_clang
 from abicheck.cli import main
+from abicheck.workflows.dump.cache import store as dump_cache_store
 
 pytestmark = [
     pytest.mark.integration,
@@ -69,13 +70,12 @@ def _dump(
     Both runs read the same inputs, each with its own empty AST and
     whole-snapshot cache, so neither can be served the other's result and
     only the timestamp differs by construction."""
-    from abicheck import snapshot_cache
 
     with monkeypatch.context() as m:
         if not skip:
             m.setattr(dumper_clang, "active_dependency_predicate", lambda: None)
         m.setenv("XDG_CACHE_HOME", str(tmp_path / f"cache-{name}"))
-        m.setattr(snapshot_cache, "_CACHE_DIR", tmp_path / f"snapcache-{name}")
+        m.setattr(dump_cache_store, "_CACHE_DIR", tmp_path / f"snapcache-{name}")
         config = tmp_path / "cfg.yml"
         config.write_text(
             "compile:\n  frontend: clang\n  std: c++17\n", encoding="utf-8"

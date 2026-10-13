@@ -9,13 +9,41 @@ from unittest import mock
 import pytest
 
 from abicheck.model import AbiSnapshot, Function, Visibility
-from abicheck.snapshot_cache import (
-    _cache_key,
-    _get_cache_dir,
-    _safe_mtime,
-    lookup,
-    store,
-)
+from abicheck.workflows.dump.cache.key import _cache_key
+from abicheck.workflows.dump.cache.store import _get_cache_dir, _safe_mtime
+
+
+def lookup(
+    binary: Path,
+    headers: list[Path],
+    includes: list[Path],
+    version: str,
+    lang: str,
+    *,
+    extra: str = "",
+) -> AbiSnapshot | None:
+    """The whole-snapshot lookup a dump performs: derive the key, then read it."""
+    from abicheck.workflows.dump.cache import store
+
+    key = _cache_key(binary, headers, includes, version, lang, extra=extra)
+    return store._lookup_key(key, binary)
+
+
+def store(
+    snap: AbiSnapshot,
+    binary: Path,
+    headers: list[Path],
+    includes: list[Path],
+    version: str,
+    lang: str,
+    *,
+    extra: str = "",
+) -> None:
+    """Store *snap* under the key a dump derives for these inputs."""
+    from abicheck.workflows.dump.cache import store as store_mod
+
+    key = _cache_key(binary, headers, includes, version, lang, extra=extra)
+    store_mod._store_key(snap, key, binary)
 
 
 def _sample_snap() -> AbiSnapshot:
@@ -103,14 +131,14 @@ class TestCacheKey:
         the identical binary/headers/includes/version/lang/extra under the
         current version — otherwise a warm cache from before this upgrade
         would silently replay a no-graph snapshot forever (Codex review on
-        PR #612, service_dump_cache._dump_is_cacheable now allows the plain
+        PR #612, workflows/dump/cache/api.py's `_dump_is_cacheable` now allows the plain
         cacheable shape onto this same cache)."""
-        import abicheck.snapshot_cache as snapshot_cache_mod
+        from abicheck.workflows.dump.cache import salt as snapshot_cache_mod
 
         binary = tmp_path / "lib.so"
         binary.write_bytes(b"ELF content")
 
-        monkeypatch.setattr(snapshot_cache_mod, "_SNAPSHOT_CACHE_VERSION", "2")
+        monkeypatch.setattr(snapshot_cache_mod, "SNAPSHOT_CACHE_VERSION", "2")
         old_key = _cache_key(binary, [], [], "1.0", "c++")
 
         monkeypatch.undo()
@@ -255,7 +283,7 @@ class TestCacheKey:
 
 class TestLookupStore:
     def test_miss_returns_none(self, tmp_path, monkeypatch):
-        import abicheck.snapshot_cache as sc
+        from abicheck.workflows.dump.cache import store as sc
 
         monkeypatch.setattr(sc, "_CACHE_DIR", tmp_path / "empty_cache")
         binary = tmp_path / "lib.so"
@@ -266,7 +294,7 @@ class TestLookupStore:
     def test_store_and_lookup_roundtrip(self, tmp_path, monkeypatch):
         # Use a temp cache dir
         cache_dir = tmp_path / "cache"
-        import abicheck.snapshot_cache as sc
+        from abicheck.workflows.dump.cache import store as sc
 
         monkeypatch.setattr(sc, "_CACHE_DIR", cache_dir)
 
@@ -287,7 +315,7 @@ class TestLookupStore:
 
     def test_invalidation_on_content_change(self, tmp_path, monkeypatch):
         cache_dir = tmp_path / "cache"
-        import abicheck.snapshot_cache as sc
+        from abicheck.workflows.dump.cache import store as sc
 
         monkeypatch.setattr(sc, "_CACHE_DIR", cache_dir)
 
@@ -305,7 +333,7 @@ class TestLookupStore:
     def test_missing_binary_no_op(self, tmp_path, monkeypatch):
         """store/lookup with missing binary should be no-ops, not crash."""
         cache_dir = tmp_path / "cache"
-        import abicheck.snapshot_cache as sc
+        from abicheck.workflows.dump.cache import store as sc
 
         monkeypatch.setattr(sc, "_CACHE_DIR", cache_dir)
 
@@ -318,7 +346,7 @@ class TestLookupStore:
     def test_corrupted_cache_returns_none(self, tmp_path, monkeypatch):
         """Corrupted JSON in cache should be treated as a miss."""
         cache_dir = tmp_path / "cache"
-        import abicheck.snapshot_cache as sc
+        from abicheck.workflows.dump.cache import store as sc
 
         monkeypatch.setattr(sc, "_CACHE_DIR", cache_dir)
 
@@ -340,7 +368,7 @@ class TestLookupStore:
 class TestEviction:
     def test_evicts_oldest_entries(self, tmp_path, monkeypatch):
         cache_dir = tmp_path / "cache"
-        import abicheck.snapshot_cache as sc
+        from abicheck.workflows.dump.cache import store as sc
 
         monkeypatch.setattr(sc, "_CACHE_DIR", cache_dir)
         monkeypatch.setattr(sc, "MAX_ENTRIES", 3)
@@ -391,7 +419,7 @@ class TestSafeMtime:
 class TestStoreErrorPaths:
     def test_store_oserror_on_mkdir(self, tmp_path, monkeypatch):
         """Store gracefully handles OSError on mkdir."""
-        import abicheck.snapshot_cache as sc
+        from abicheck.workflows.dump.cache import store as sc
 
         cache_dir = tmp_path / "cache"
         monkeypatch.setattr(sc, "_CACHE_DIR", cache_dir)
@@ -412,7 +440,7 @@ class TestStoreErrorPaths:
         non-JSON-serializable field) must not propagate: caching sits on top
         of a dump that already succeeded, so a write-time failure here can
         only ever cost a cache miss next time, never break the caller."""
-        import abicheck.snapshot_cache as sc
+        from abicheck.workflows.dump.cache import store as sc
 
         cache_dir = tmp_path / "cache"
         monkeypatch.setattr(sc, "_CACHE_DIR", cache_dir)
@@ -458,7 +486,7 @@ class TestExtraKeyMaterial:
         assert key1 == key2
 
     def test_store_lookup_roundtrip_with_extra(self, tmp_path, monkeypatch):
-        import abicheck.snapshot_cache as sc
+        from abicheck.workflows.dump.cache import store as sc
 
         cache_dir = tmp_path / "cache"
         monkeypatch.setattr(sc, "_CACHE_DIR", cache_dir)

@@ -21,7 +21,7 @@ Index: [Known gaps](../known-gaps.md)
 - Leaked-dependency check (`diff_platform_elf_dynamic.py`): a removed or added alias is matched by version tag, so a surviving bare name no longer hides a removed `SYMBOL_LEAKED_FROM_DEPENDENCY_CHANGED`.
 - Layout thunk check (`diff_elf_layout.py`): name presence now reads `symbol_aliases`; the result is identical, and the last `symbol_map` read in the code is gone.
 - Declarations: `_populate_elf_visibility` and `backfill_missing_elf_binding` take values from `unambiguous_symbol`. On load, a declaration whose aliases disagree has its binding and visibility cleared, so a snapshot written by an older last-wins writer does not keep the wrong value.
-- `snapshot_cache.py` bumped to v36, since declaration output changed. A warm cache would otherwise replay the last-alias values.
+- `workflows/dump/cache/salt.py` bumped to v36, since declaration output changed. A warm cache would otherwise replay the last-alias values.
 
 **Verified.** `tests/test_elf_version_alias_binding.py` (38 tests):
 - A table covers each converted reader (TLS size, protected visibility, COMMON, UNIQUE, RTTI visibility, leaked removal) with the change on the non-last and on the last alias. On the first-fix commit (`98314ad`) the non-last cases for TLS, protected, COMMON, RTTI and leaked fail; the last-alias controls pass.

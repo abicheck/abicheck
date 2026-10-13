@@ -12,152 +12,22 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Whole-snapshot cache wiring for ``service.run_dump()``.
-
-Split out of ``service.py`` to keep that file under the AI-readiness
-line-count cap. A leaf module: it never imports ``service.py`` (that would
-create an import cycle, since ``service.py`` needs to call
-:func:`cached_run_dump`) — instead :func:`cached_run_dump` takes ``run_dump``
-itself as an explicit callable parameter, dependency-injection style, same
-end result as a lazy import without the indirection.
-"""
+"""The cache key: the per-request key material (:func:`_dump_cache_extra_key`)
+and the content-hashed key over binary, headers, includes and salts
+(:func:`_cache_key`). See the package docstring."""
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import stat
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-from .buildsource.source_inputs import extraction_read_source_inputs
-from .extract.binary_identity import stamp_binary_identity
-from .workflows.cache_probe import refuse_dump_while_probing
-
-if TYPE_CHECKING:
-    from collections.abc import Callable
-
-    from .model import AbiSnapshot
-
-
-def _dump_is_cacheable(
-    *,
-    pdb_path: Path | None,
-    dwarf_only: bool,
-    debug_roots: list[Path] | None,
-    enable_debuginfod: bool,
-    debug_format: str | None,
-    symbols_only: bool,
-    debug_presence_only: bool,
-    # Untyped (not `CompileContext | None`): the type lives in dry_run_estimate.py,
-    # and importing it here — even under TYPE_CHECKING — closes an import
-    # cycle back through service.py (and formerly scan_engine.py). Only ever compared to
-    # `None` below, so no real type-safety is lost.
-    compile: object | None,
-    include_labels: dict[Path, str] | None = None,
-    dump_manifest: object | None = None,
-) -> bool:
-    """Whether a ``run_dump`` call is safe to serve from the whole-snapshot
-    cache (:mod:`abicheck.snapshot_cache`).
-
-    Deliberately conservative: only the plain "binary + public headers" shape
-    — the dominant release-baseline/CI comparison case a repeated pipeline
-    re-extracts identically on every run — is cached. A PDB path, a DWARF
-    debug-info root, debuginfod resolution (network-dependent), a forced
-    debug format, a symbols-only/debug-presence-only dump, or a
-    ``CompileContext`` naming an untrackable header input all change what ``run_dump`` produces in ways not
-    folded into the cache key below, so those combinations always fall
-    through to a live dump rather than risk serving a stale/mismatched
-    snapshot.
-
-    G29 Phase A: the L2 header-only semantic graph (and its include-file
-    extension) used to disable caching outright (an opt-in flag meant a cache
-    hit from a plain prior run could silently omit the graph a later
-    graph-requesting call expected). It is no longer flag-gated — every
-    ``run_dump`` call attempts it identically — so that toggle-mismatch risk
-    is gone; the graph is a deterministic function of the same
-    headers/includes/public-header inputs already covered by the cache key,
-    and ``snapshot_cache.store``/``lookup`` round-trip the full snapshot
-    (including ``build_source``) through JSON, so a cache hit still carries
-    the graph. A ``CompileContext`` (``--compiler*``/``--sysroot``/
-    ``--nostdinc``/``--ast-frontend``/``--frontend-context``) is cacheable:
-    its normalized content is folded into the key
-    (:func:`compile_context_cache_field`, :func:`effective_header_backend`),
-    and the compiler/clang identities are resolved with its
-    ``gcc_path``/``gcc_prefix``. A ``None`` context and an all-default one
-    share a key, since they produce identical dumps. The header content a
-    context makes reachable (``sysroot``, ``-I``/``-isystem``/``-include``
-    and siblings in its compiler options) is content-hashed with the same
-    include-tree walk as ``-I`` directories
-    (:func:`compile_context_header_inputs`), so a warm hit never serves a
-    snapshot parsed from stale headers; a context with an input that walk
-    cannot follow is not cached at all.
-
-    A labeled ``--include`` (``include_labels`` non-empty, ADR-050 D1) is
-    likewise excluded: the label rides only into ``AbiSnapshot.contract``
-    (``comparability.compute_extraction_contract``'s ``IncludeDir.label``),
-    not into ``snapshot_cache._cache_key``'s hashed inputs — folding it in
-    there too is real but unbuilt follow-up work, and the labeled form is a
-    narrow escape hatch, not the common path, so falling through to a live
-    dump is the conservative, correct default rather than risk serving a
-    same-key snapshot whose ``contract`` was fingerprinted under a
-    different label.
-
-    A ``dump_manifest`` (ADR-050 D3) is cacheable too, as of G32 Phase E:
-    :func:`_manifest_cache_paths` derives headers/includes-shaped path lists
-    from the manifest for :func:`abicheck.snapshot_cache._cache_key`'s own
-    content-hash walk to reuse unchanged (an edit to any file a
-    manifest-driven dump could actually read still busts the cache), and
-    :func:`abicheck.comparability.manifest_tu_scope_field` folds the
-    manifest's own structural identity (TU names/order/``required``/
-    ``contributes_to_abi``/``project_owned``) into the ``extra`` key
-    material below — the part a filesystem content walk structurally cannot
-    see (renaming a TU, or flipping ``contributes_to_abi``, changes nothing
-    a content hash would notice). See :func:`cached_run_dump`.
-
-    **Only when every translation unit is ``required`` (Codex review, PR
-    #636).** A ``required=False`` TU's failure degrades ``run_tu_loop`` to a
-    logged diagnostic instead of failing the whole dump (ADR-050 D3) — the
-    resulting snapshot then successfully returns with that TU's declarations
-    silently absent, by design. A purely *transient* failure (a flaky
-    castxml crash, momentary resource contention) produces the identical
-    "successful but degraded" snapshot on that one run; caching it would let
-    that transient blip stick around indefinitely — served back on every
-    subsequent identical-input run — instead of self-healing the next time
-    the same manifest happens to dump cleanly. A manifest containing any
-    optional TU is therefore never cached at all (the same conservative
-    "fall through to a live dump" default every other risky shape above
-    already gets), regardless of whether this particular run actually hit a
-    failure — cacheability can't depend on a per-run outcome the cache
-    lookup happens *before* extraction even runs.
-    """
-    return (
-        pdb_path is None
-        and not dwarf_only
-        and not debug_roots
-        and not enable_debuginfod
-        and debug_format is None
-        and not symbols_only
-        and not debug_presence_only
-        and _compile_context_is_keyable(compile)
-        and not include_labels
-        and (dump_manifest is None or _manifest_all_tus_required(dump_manifest))
-    )
-
-
-def _compile_context_is_keyable(compile: object | None) -> bool:
-    """Whether *compile* can be folded into the whole-snapshot cache key:
-    ``None``, or a real ``CompileContext`` whose fields are keyed by
-    :func:`compile_context_cache_field` and whose header inputs are all
-    content-trackable (:func:`compile_context_header_inputs`). Anything else
-    falls through to a live dump."""
-    from .compile_context import CompileContext
-
-    if compile is None:
-        return True
-    return (
-        isinstance(compile, CompileContext)
-        and compile_context_header_inputs(compile) is not None
-    )
+from ....extract.cache_header_scan import iter_cache_header_files
+from ....storage.code_identity import abicheck_code_fingerprint
+from . import salt
 
 
 def compile_context_header_inputs(
@@ -167,8 +37,8 @@ def compile_context_header_inputs(
     ``-I``/``-include``/... in ``gcc_options`` and ``gcc_option_tokens``),
     for :func:`cached_run_dump` to content-hash; ``None`` when one is
     untrackable (see :mod:`abicheck.extract.compile_header_inputs`)."""
-    from ._compiler_options import split_gcc_options
-    from .extract.compile_header_inputs import compile_option_header_inputs
+    from ...._compiler_options import split_gcc_options
+    from ....extract.compile_header_inputs import compile_option_header_inputs
 
     cc = _normalized_compile_context(compile)
     if cc is None:
@@ -182,7 +52,7 @@ def _normalized_compile_context(compile: object | None) -> Any:
     """``None`` for "no customisation" -- a ``None`` context and an
     all-default ``CompileContext()`` produce identical dumps, so they must
     share one cache key."""
-    from .compile_context import CompileContext
+    from ....compile_context import CompileContext
 
     if not isinstance(compile, CompileContext):
         return None
@@ -276,7 +146,7 @@ def _manifest_roots(dump_manifest: Any) -> str:
 
 def _manifest_cache_paths(dump_manifest: Any) -> tuple[list[Path], list[Path]]:
     """Derive ``(headers, includes)``-shaped path lists from *dump_manifest*
-    for :func:`abicheck.snapshot_cache._cache_key`'s existing content-hash
+    for :func:`abicheck.workflows.dump.cache.key._cache_key`'s existing content-hash
     walk to reuse as-is, rather than teaching that function a second,
     manifest-specific file-discovery mechanism.
 
@@ -294,7 +164,7 @@ def _manifest_cache_paths(dump_manifest: Any) -> tuple[list[Path], list[Path]]:
     ``public_header_dirs`` entry can still quote-include an unnamed sibling
     support header from that same directory, and that sibling's own content
     must still bust the cache (Codex review, PR #636). This only feeds
-    :func:`abicheck.snapshot_cache._cache_key`'s *content* hashing (so an
+    :func:`abicheck.workflows.dump.cache.key._cache_key`'s *content* hashing (so an
     edit to any file a manifest-driven dump could actually read busts the
     cache -- including a ``public_header_paths`` entry that names neither a
     root nor any TU's forced-include, e.g. a provenance-only header) — the
@@ -304,7 +174,7 @@ def _manifest_cache_paths(dump_manifest: Any) -> tuple[list[Path], list[Path]]:
     content walk over these same paths cannot see it at all: renaming a TU,
     or flipping ``contributes_to_abi``, changes nothing here hashes.
     """
-    from .header_utils import _implicit_header_includes
+    from ....header_utils import _implicit_header_includes
 
     seen_headers: set[Path] = set()
     headers: list[Path] = []
@@ -386,7 +256,7 @@ def _dump_cache_extra_key(
     """Build the ``extra`` cache-key material for a cacheable dump — every
     input to ``run_dump`` that affects its output besides the binary content
     / headers / includes / version / lang that
-    :func:`abicheck.snapshot_cache._cache_key` already hashes directly.
+    :func:`abicheck.workflows.dump.cache.key._cache_key` already hashes directly.
 
     Joined with NUL (``\\x00``) rather than a printable delimiter like
     ``,``/``|``: a path may legally contain a comma or pipe on POSIX, so a
@@ -395,7 +265,7 @@ def _dump_cache_extra_key(
     can't appear in a filesystem path on any supported platform, so it can't
     collide regardless of what the caller's paths contain.
 
-    Hashes the RESOLVED backend (``header_ast_backend._resolve_header_backend``), not the
+    Hashes the RESOLVED backend (``dumper._resolve_header_backend``), not the
     raw ``header_backend`` string as passed: an ``"auto"`` request consults
     ``ABICHECK_AST_FRONTEND`` at dump time, so the raw string is the same
     ``"auto"`` regardless of whether that env var is unset (-> castxml),
@@ -452,7 +322,7 @@ def _dump_cache_extra_key(
     in the same way ``public_headers``/``public_header_dirs`` already are,
     so two calls differing only in it can never share a cache entry.
     """
-    from .extract.header_ast_backend import _resolve_header_backend
+    from ....extract.header_ast_backend import _resolve_header_backend
 
     header_backend = effective_header_backend(header_backend, compile)
     compile_field = compile_context_cache_field(compile)
@@ -477,20 +347,19 @@ def _dump_cache_extra_key(
             ]
         )
 
-    from .dumper import (
+    from ....extract.headers.ast_config import _resolve_compiler_binary
+    from ....extract.headers.toolchain import (
         _ast_fallback_enabled,
         _auto_ast_fallback_eligible,
-        _resolve_compiler_binary,
         _tool_identity,
     )
-    from .extract.compiler_driver import resolve_clang_bin
 
     auto_may_fallback_to_clang = (
         _auto_ast_fallback_eligible(header_backend) and _ast_fallback_enabled()
     )
     layout_tool = ""
     if resolved_backend in ("clang", "hybrid") or auto_may_fallback_to_clang:
-        from .extract.headers.clang.layout_tool import find_layout_tool_bin
+        from ....extract.headers.clang.layout_tool import find_layout_tool_bin
 
         layout_tool_bin = find_layout_tool_bin()
         layout_tool = _tool_identity(layout_tool_bin) if layout_tool_bin else ""
@@ -503,7 +372,7 @@ def _dump_cache_extra_key(
     if resolved_backend in ("clang", "hybrid") or auto_may_fallback_to_clang:
         try:
             frontend_tools.append(
-                _tool_identity(resolve_clang_bin(compiler, gcc_path, gcc_prefix))
+                _tool_identity(_clang_driver(compiler, gcc_path, gcc_prefix))
             )
         except Exception as exc:  # missing optional backend remains key material
             frontend_tools.append(f"clang-unavailable:{type(exc).__name__}:{exc}")
@@ -527,19 +396,17 @@ def _dump_cache_extra_key(
     # snapshot with degraded or stale header-graph coverage (Codex review).
     import shutil
 
-    from .errors import SnapshotError
+    from ....errors import SnapshotError
 
     header_graph_clang = ""
     try:
-        clang_driver = resolve_clang_bin(
-            "cc" if lang == "c" else "c++", gcc_path, gcc_prefix
-        )
+        clang_driver = _clang_driver(compiler, gcc_path, gcc_prefix)
         resolved_path = shutil.which(clang_driver) or clang_driver
         # The resolved PATH string alone survives an in-place binary swap at
         # the same path (an apt/package upgrade, or a symlink retargeted to a
         # different clang install) -- fold in an mtime+size fingerprint too
         # (Codex review), matching this codebase's existing mtime-based
-        # invalidation style (snapshot_cache._cache_key's header walk) rather
+        # invalidation style (_cache_key's header walk) rather
         # than shelling out to `clang --version` on every cacheable dump's
         # lookup, which would add real latency to the hot path this cache
         # exists to avoid.
@@ -569,228 +436,105 @@ def _dump_cache_extra_key(
     )
 
 
-def cached_run_dump(
-    run_dump: Callable[..., AbiSnapshot],
-    path: Path,
-    binary_fmt: str,
-    headers: list[Path] | None = None,
-    includes: list[Path] | None = None,
-    version: str = "",
-    lang: str = "c++",
+def _clang_driver(compiler: str, gcc_path: str | None, gcc_prefix: str | None) -> str:
+    """The clang driver a dump would run for *compiler*, resolved by its owner
+    ``extract/compiler_driver``. Raises if clang is not on ``PATH``."""
+    from ....extract.compiler_driver import resolve_clang_bin
+
+    return resolve_clang_bin(compiler, gcc_path, gcc_prefix)
+
+
+def _cache_key(
+    binary_path: Path,
+    headers: list[Path],
+    includes: list[Path],
+    version: str,
+    lang: str,
     *,
-    lang_explicit: bool = False,
-    pdb_path: Path | None = None,
-    dwarf_only: bool = False,
-    debug_roots: list[Path] | None = None,
-    enable_debuginfod: bool = False,
-    debuginfod_url: str | None = None,
-    debug_format: str | None = None,
-    symbols_only: bool = False,
-    debug_presence_only: bool = False,
-    public_headers: list[Path] | None = None,
-    public_header_dirs: list[Path] | None = None,
-    header_backend: str = "auto",
-    compile: object | None = None,
-    notify: Callable[[str], None] | None = None,
-    include_labels: dict[Path, str] | None = None,
-    dump_manifest: object | None = None,
-    include_dependencies: bool = True,
-    public_include_search_dirs: list[Path] | None = None,
-) -> AbiSnapshot:
-    """``run_dump(...)``, transparently served from the whole-snapshot cache
-    when the call shape is cacheable (:func:`_dump_is_cacheable`) — avoiding a
-    repeat binary/header extraction entirely (no castxml/DWARF/ELF work, no
-    model construction) on a hit. Falls through to a live ``run_dump`` call
-    on a miss or an uncacheable shape, then populates the cache.
+    extra: str = "",
+) -> str:
+    """Compute a deterministic cache key from all inputs that affect the snapshot.
 
-    ``run_dump`` is passed in by the caller (``service.py``) rather than
-    imported here, so this module never needs to import ``service`` itself
-    (which would be a cycle: ``service.py`` calls this function).
-
-    ``include_dependencies`` is folded into the cache key (see
-    ``_build_extra`` below): a filtered and an unfiltered dump of a
-    header-derived binary/headers pair are genuinely different snapshot
-    content (``dumper_scoping.resolve_dependency_scope``), so they must
-    never share a cache entry. The split is unconditional even though
-    ``resolve_dependency_scope`` is a no-op for a header-less
-    (``from_headers=False``) dump -- e.g. a ``symbols_only`` call -- where
-    two otherwise-identical calls differing only in ``include_dependencies``
-    would produce byte-identical snapshots but still miss each other's cache
-    entry. Correctness requires the split for the header-derived case;
-    accepting the avoidable cache-miss cost for the header-less case is
-    simpler than threading a cheap "will this dump have headers" pre-check
-    through every cacheable call shape.
+    ``extra`` is an opaque, caller-assembled string folding in any additional
+    inputs that affect the resulting snapshot but aren't one of this
+    function's named parameters (e.g. the binary format, header-AST backend,
+    or public-header scoping set) — kept generic here so this module doesn't
+    need to know every option a caller's dump pipeline exposes.
     """
-    from .snapshot_cache import absolute_paths as _abs  # one spelling per input
+    h = hashlib.sha256()
+    # Binary content hash — chunked to avoid loading huge files into memory
+    try:
+        with open(binary_path, "rb") as f:
+            for chunk in iter(lambda: f.read(65536), b""):
+                h.update(chunk)
+    except OSError:
+        return ""  # uncacheable
+    # Hash contents, not only mtimes: restored timestamps must not resurrect a
+    # stale snapshot. Directory-valued ``-H`` inputs and explicit include roots
+    # contribute every header-like descendant reachable by the parser.
+    hash_files: set[Path] = set()
+    # ADR-050 D1/D2: *not* sorted — headers/includes order is real,
+    # load-bearing search-precedence/preprocessing order (the same "order is
+    # a real compile difference" rule comparability.py's profile_fingerprint
+    # already enforces), not cosmetic. Two dumps requesting the same
+    # headers/includes in a different order can legitimately resolve to a
+    # different snapshot (e.g. -I a -I b vs -I b -I a with a same-named
+    # header in both, or a macro one header defines before another is
+    # included) — sorting here would let a warm cache silently serve the
+    # wrong order's snapshot. `hash_files` (the transitively-discovered
+    # descendants of a directory input) stays a sorted set below: those are
+    # an unordered content aggregate, not a caller-ordered sequence.
+    for hdr in headers:
+        h.update(str(hdr).encode())
+        try:
+            if hdr.is_dir():
+                hash_files.update(iter_cache_header_files(hdr))
+            else:
+                hash_files.add(hdr)
+        except OSError:
+            h.update(b"UNREADABLE_HEADER_INPUT")
+    for inc in includes:
+        h.update(str(inc).encode())
+        try:
+            hash_files.update(iter_cache_header_files(inc))
+        except OSError:
+            h.update(b"UNREADABLE_INCLUDE_DIR")
+    for hdr in sorted(hash_files):
+        h.update(str(hdr).encode())
+        try:
+            fd = os.open(hdr, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0))
+            file_stat = os.fstat(fd)
+            if not stat.S_ISREG(file_stat.st_mode):
+                os.close(fd)
+                h.update(b"NONREGULAR")
+                continue
+            # Preserve the existing mtime invalidation contract as well as
+            # hashing contents. The latter catches restored/coarse timestamps;
+            # the former also treats a touched header as a changed input.
+            h.update(str(file_stat.st_mtime_ns).encode())
+            with os.fdopen(fd, "rb") as f:
+                for chunk in iter(lambda: f.read(65536), b""):
+                    h.update(chunk)
+        except OSError:
+            h.update(b"MISSING")
+    # Compiler params
+    h.update(version.encode())
+    h.update(lang.encode())
+    h.update(extra.encode())
+    h.update(salt.SNAPSHOT_CACHE_VERSION.encode())
+    # The snapshot schema version too, automatically: a schema bump means a
+    # new field or encoding, and an entry cached before it was written
+    # without that field -- loading it back would present "not captured" as
+    # this build's answer. Folding it in closes that whole class instead of
+    # relying on a hand bump of SNAPSHOT_CACHE_VERSION for each field.
+    h.update(f"schema={_snapshot_schema_version()}".encode())
+    # And the code that produced it: a snapshot is extraction *output*, so an
+    # extractor change with no matching version bump must still miss.
+    h.update(f"code={abicheck_code_fingerprint()}".encode())
+    return h.hexdigest()
 
-    path = Path(os.path.abspath(path))
-    headers, includes, public_headers, public_header_dirs = map(
-        _abs, (headers, includes, public_headers, public_header_dirs)
-    )
-    public_include_search_dirs = _abs(public_include_search_dirs)
-    _headers = headers or []
-    _includes = includes or []
-    cacheable = _dump_is_cacheable(
-        pdb_path=pdb_path,
-        dwarf_only=dwarf_only,
-        debug_roots=debug_roots,
-        enable_debuginfod=enable_debuginfod,
-        debug_format=debug_format,
-        symbols_only=symbols_only,
-        debug_presence_only=debug_presence_only,
-        compile=compile,
-        include_labels=include_labels,
-        dump_manifest=dump_manifest,
-    )
 
-    def _dump_uncached() -> AbiSnapshot:
-        """The real dump with this call's exact arguments, cache aside -- one
-        spelling for the uncacheable and the miss path alike."""
-        return run_dump(
-            path,
-            binary_fmt,
-            headers,
-            includes,
-            version,
-            lang,
-            lang_explicit=lang_explicit,
-            pdb_path=pdb_path,
-            dwarf_only=dwarf_only,
-            debug_roots=debug_roots,
-            enable_debuginfod=enable_debuginfod,
-            debuginfod_url=debuginfod_url,
-            debug_format=debug_format,
-            symbols_only=symbols_only,
-            debug_presence_only=debug_presence_only,
-            public_headers=public_headers,
-            public_header_dirs=public_header_dirs,
-            header_backend=header_backend,
-            compile=compile,
-            notify=notify,
-            include_labels=include_labels,
-            dump_manifest=dump_manifest,
-            include_dependencies=include_dependencies,
-            public_include_search_dirs=public_include_search_dirs,
-        )
+def _snapshot_schema_version() -> int:
+    from ....storage.snapshot_schema_versions import SCHEMA_VERSION
 
-    if not cacheable:
-        refuse_dump_while_probing()
-        return _dump_uncached()
-
-    from . import snapshot_cache
-
-    if dump_manifest is not None:
-        # ADR-050 D3/D6 (G32 Phase E): a manifest-driven dump passes no
-        # `headers` at all (dump()'s own mutual-exclusivity check enforces
-        # that) -- derive content-hashable path lists from the manifest
-        # itself instead, and fold the manifest's own structural identity
-        # (a content walk over those same paths cannot see a TU rename or a
-        # flipped required/contributes_to_abi/project_owned flag) in as
-        # additional `extra` key material.
-        from .comparability import manifest_tu_scope_field
-
-        _cache_headers, _cache_includes = _manifest_cache_paths(dump_manifest)
-        # ADR-050 D5 (G32 Phase D): the manifest's own frontend_context
-        # ("host"/"device") is authoritative and selects a genuinely
-        # different AST (dumper_manifest.resolve_header_ast_result) --
-        # manifest_tu_scope_field only covers per-TU fields, so without
-        # folding this manifest-level field in too, two manifests differing
-        # only in frontend_context would hash identically and silently
-        # share a cached host/device snapshot across requests (Codex
-        # review).
-        _manifest_extra = (
-            f"{manifest_tu_scope_field(dump_manifest)}\x00"
-            f"{_manifest_frontend_context(dump_manifest)}\x00"
-            f"{_manifest_roots(dump_manifest)}"
-        )
-        _uses_ast = True
-        # dumper.dump() itself replaces the caller-supplied public_headers/
-        # public_header_dirs with the manifest's own public_header_paths/
-        # public_header_dirs for provenance/contract purposes whenever a
-        # manifest is given (dumper.py's `effective_public_headers`) -- the
-        # cache key must classify the same way, or two manifests differing
-        # only in `public_header_paths`/`public_header_dirs` (a real
-        # provenance/ScopeOrigin-affecting difference `dumper.py` acts on)
-        # would hash identically and silently share a cached snapshot whose
-        # declarations were classified public/private under the *other*
-        # manifest's provenance set (Codex review, PR #636).
-        _extra_public_headers: list[Path] | None
-        _extra_public_header_dirs: list[Path] | None
-        _extra_public_headers, _extra_public_header_dirs = _manifest_public_headers(
-            dump_manifest
-        )
-    else:
-        # The dump pipeline independently infers an umbrella header's include
-        # root; fold the same roots into the whole-snapshot key so transitive
-        # edits bust it.
-        from .header_utils import resolve_inferred_header_roots
-
-        _inferred_roots, _ = resolve_inferred_header_roots(_headers, _includes)
-        _cache_headers = _headers
-        _cache_includes = _includes + _inferred_roots
-        _manifest_extra = ""
-        _uses_ast = bool(_headers)
-        _extra_public_headers = public_headers
-        _extra_public_header_dirs = public_header_dirs
-
-    # Header inputs the compile context adds (sysroot, -I/-isystem/-include
-    # in its compiler options) reach the parser too: fold their content into
-    # the same walk, so an edit under any of them busts the key.
-    _cc_inputs = compile_context_header_inputs(compile)
-    if _cc_inputs is None:  # guarded by _dump_is_cacheable; defensive
-        refuse_dump_while_probing()
-        return _dump_uncached()
-    _cache_headers = [*_cache_headers, *_cc_inputs[0]]
-    _cache_includes = [*_cache_includes, *_cc_inputs[1]]
-
-    def _build_extra() -> str:
-        base = _dump_cache_extra_key(
-            binary_fmt,
-            header_backend,
-            _extra_public_headers,
-            _extra_public_header_dirs,
-            lang,
-            uses_ast=_uses_ast,
-            lang_explicit=lang_explicit,
-            public_include_search_dirs=public_include_search_dirs,
-            compile=compile,
-        )
-        # NUL-joined (see _dump_cache_extra_key's own docstring on why NUL,
-        # not a printable delimiter, is the only collision-safe choice here
-        # too): _manifest_extra is "" for a non-manifest dump, so this is a
-        # no-op split for the legacy path. The dependency-scope mode is
-        # appended unconditionally, even for a header-less dump where it has
-        # no effect on the actual output (see this function's own docstring)
-        # -- correctness for the header-derived case requires the split, and
-        # a cheap up-front "will this dump have headers" check isn't
-        # available at this point to skip it for the no-op case.
-        scope_extra = "filtered" if not include_dependencies else "full"
-        return f"{base}\x00{_manifest_extra}\x00{scope_extra}"
-
-    extra = _build_extra()
-    initial_key = snapshot_cache._cache_key(
-        path, _cache_headers, _cache_includes, version, lang, extra=extra
-    )
-    cached = snapshot_cache.lookup_key(initial_key, path)
-    if cached is not None:
-        # A cache hit stands in for the live extraction it replaces, so it needs
-        # the source-read licence stamped here: `run_dump` grants it (see
-        # `buildsource.source_inputs.granting_live_source_licence`), but this
-        # path never calls `run_dump` and the flag is runtime-only. Granting it is
-        # sound: this runs only when the caller named live inputs in *this* run,
-        # and `_cache_key` hashes their content, so the hit is a provenance check.
-        # Same predicate the shared dump applies: a headerless DWARF hit is no
-        # more entitled to re-read DW_AT_decl_file paths (Codex review, P2).
-        stamp_binary_identity(cached, path)
-        if extraction_read_source_inputs(cached):
-            cached.live_source_evidence = True
-        return cached
-    refuse_dump_while_probing()
-    snap = _dump_uncached()
-    final_extra = _build_extra()
-    final_key = snapshot_cache._cache_key(
-        path, _cache_headers, _cache_includes, version, lang, extra=final_extra
-    )
-    if initial_key and initial_key == final_key and snapshot_cache.write_enabled():
-        snapshot_cache.store_key(snap, initial_key, path)
-    return snap
+    return SCHEMA_VERSION

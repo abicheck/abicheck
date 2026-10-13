@@ -466,7 +466,7 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
         known_gaps=(
             KnownGap(
                 description=(
-                    "No archive/bundle-reader (`snapshot_cache.py`, "
+                    "No archive/bundle-reader (`workflows/dump/cache/`, "
                     "the G40 bundle-facts archive path) or python-api/"
                     "CLI-level round trip has yet been generalized to "
                     "the same production scale for a mixed-container "
@@ -509,7 +509,7 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
                     'The same "short read is not EOF" shape exists in '
                     "every other bounded/streamed reader in the tree "
                     "(`workflows/bundle_compare_operand.py`'s own larger-"
-                    "window probe, `snapshot_cache.py`'s archive reader, "
+                    "window probe, `workflows/dump/cache/`'s archive reader, "
                     "the DWARF/PE section readers). Only the snapshot "
                     "storage envelope's prefix primitive has a "
                     "generalized suite; the siblings are untested against "
@@ -679,7 +679,7 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
     # shortcut from scan's own depth/headers logic -- which was deleted with
     # the rest of `cli_scan_helpers.py`. `debug_presence_only` itself is
     # still a real, plumbed-through parameter
-    # (`dumper.py`/`service_dump_cache.py`/`workflows/dump/native.py`/
+    # (`dumper.py`/`workflows/dump/cache/api.py`/`workflows/dump/native.py`/
     # `dumper_layout_backfill.py`/`workflows/input_resolution.py`), but a
     # repo-wide audit at retirement time found no remaining production call
     # site that ever passes `debug_presence_only=True` -- every live caller
