@@ -103,11 +103,6 @@ Each entry's status line says what is still open. A PARTIAL entry's write-up als
 **Status (2026-10-12): PARTIAL.** The in-memory half is fixed: `AdvancedDwarfMetadata.extraction` is set by the extraction (`completed`, `failed`, `not_run`), `advanced_facts_collected` reads it, and the `advanced_dwarf` detector names a failed or not-run side in its not-evaluated reason. Still open: the status is not persisted, so a stored snapshot reads `unrecorded` and falls back to the inference. Persisting it is a schema change; [ADR-080](adr/080-persisting-the-advanced-dwarf-extraction-status.md) is drafted and Proposed.  
 `false-clean` — The extraction records its own outcome, so a completed empty parse is no longer read as not run. A stored snapshot still carries no outcome and uses the old inference until ADR-080 is decided. [Full write-up](known-gaps/advanced-facts-collected-infers-advanced-dwarf-extraction-ran.md)
 
-#### `Function.elf_binding`/`Variable.elf_binding` (and the pre-existing `elf_visibility` it mirrors) collapse mixed bindings across symbol-versioned aliases sharing one bare name — investigated, not fixed (Codex review, fresh evidence)
-
-**Status (re-verified 2026-10-09 at `456989f`): OPEN.** model/elf_facts.py:238-244 symbol_map is still `{s.name: s for s in self.symbols}`, last entry wins, which collapses versioned aliases.  
-`false-clean` — Symbol-versioned aliases sharing one bare name collapse into one binding/visibility (last entry wins), so a binding change on one alias can be hidden. [Full write-up](known-gaps/functionelf-bindingvariableelf-binding-and-the-pre-existing-elf.md)
-
 #### L4 SYCL replay via a resolved `--gcc-path icpx`/`dpcpp` override — flag vocabulary fixed, the two-pass JSON-document crash fixed, real host+device dual-context replay still not implemented
 
 **Status (re-verified 2026-10-09 at `456989f`): PARTIAL.** Fixed: -fsycl flag vocabulary (buildsource/adapters/base.py:160) and the two-pass JSON crash. Still open, as the entry says: host+device dual-context L4 replay.  

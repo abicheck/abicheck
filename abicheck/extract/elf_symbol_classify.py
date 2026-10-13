@@ -50,12 +50,16 @@ def _populate_elf_visibility(snap: AbiSnapshot) -> None:
     ``elf_visibility`` it needs no ``_ELF_VIS_MAP``-style translation, since
     ``ElfSymbol.binding`` is already the same ``elf_metadata.SymbolBinding``
     enum ``model.py`` re-exports and stores it as.
+
+    A name whose versioned aliases disagree on binding or visibility gets
+    neither field set: ``unambiguous_symbol`` returns None, so the
+    declaration never inherits the last alias's value.
     """
     if snap.elf is None:
         return
-    sym_map = snap.elf.symbol_map
+    elf = snap.elf
     for func in snap.declarations.functions:
-        elf_sym = sym_map.get(func.mangled)
+        elf_sym = elf.unambiguous_symbol(func.mangled)
         if elf_sym is not None:
             func.elf_visibility = _ELF_VIS_MAP.get(elf_sym.visibility)
             func.elf_binding = elf_sym.binding
@@ -64,7 +68,7 @@ def _populate_elf_visibility(snap: AbiSnapshot) -> None:
             # (ADR-063 Phase 5) — see the identical Variable fix below.
             func.elf_binding_fact = Fact.present(elf_sym.binding)
     for var in snap.declarations.variables:
-        elf_sym = sym_map.get(var.mangled)
+        elf_sym = elf.unambiguous_symbol(var.mangled)
         if elf_sym is not None:
             var.elf_visibility = _ELF_VIS_MAP.get(elf_sym.visibility)
             var.elf_binding = elf_sym.binding
