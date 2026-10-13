@@ -153,8 +153,8 @@ Each entry's status line says what is still open. A PARTIAL entry's write-up als
 
 #### A stored snapshot keeps no record of a partial export-table read
 
-**Status (2026-10-12): PARTIAL.** Fixed: FAILED import reads; tests/unit/workflows/test_failed_consumer_read.py exists. Open: a stored snapshot cannot record a partial export-table read. [ADR-079](adr/079-partial-export-table-read-in-the-stored-snapshot.md) is drafted and Proposed; the schema field waits on its decision, so the schema stays at v58.  
-`false-clean` — FAILED import reads are fixed. A stored snapshot still cannot record that its export-table read was partial; ADR-079 is drafted (Proposed) and needs a schema decision. [Full write-up](known-gaps/a-stored-snapshot-keeps-no-record-of-a-partial-export-table-read.md)
+**Status (2026-10-12): PARTIAL.** Fixed: FAILED import reads; tests/unit/workflows/test_failed_consumer_read.py exists. Open: a stored snapshot cannot record a partial export-table read. [ADR-081](adr/079-partial-export-table-read-in-the-stored-snapshot.md) is drafted and Proposed; the schema field waits on its decision, so the schema stays at v58.  
+`false-clean` — FAILED import reads are fixed. A stored snapshot still cannot record that its export-table read was partial; ADR-081 is drafted (Proposed) and needs a schema decision. [Full write-up](known-gaps/a-stored-snapshot-keeps-no-record-of-a-partial-export-table-read.md)
 
 ### False-positive risk
 
@@ -170,7 +170,7 @@ Each entry's status line says what is still open. A PARTIAL entry's write-up als
 
 #### A pre-fix clang-backend baseline compares against a post-fix candidate as a wave of `FUNC_BECAME_INLINE` — no reliability flag guards `Function.is_inline`
 
-**Status (re-verified 2026-10-09 at `456989f`): OPEN.** grep for inline_facts_reliable in abicheck/ finds nothing. diff_symbols.py:477 _check_inline_transitions has no reliability or producer gate.  
+**Status (re-verified 2026-10-12): PARTLY FIXED — see [ADR-081](adr/081-inline-fact-reliability-and-producer-generation.md).** Stale header-backend `is_inline` values now decline the transition, recorded as `inline_facts_reliable`. A baseline re-saved by a pre-change build still reads as reliable until re-dumped.  
 `false-positive` — A baseline from the pre-fix clang backend compared against a post-fix candidate reports a wave of `FUNC_BECAME_INLINE`; no reliability flag gates `Function.is_inline`. [Full write-up](known-gaps/a-pre-fix-clang-backend-baseline-compares-against-a-post-fix.md)
 
 #### type_base_changed declines on incomplete bases facts but still fires on a PRESENT-but-empty capture gap

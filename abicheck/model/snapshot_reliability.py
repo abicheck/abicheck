@@ -260,6 +260,7 @@ FACT_FAMILIES: tuple[str, ...] = (
     "clang_va_list",
     "castxml_var_access",
     "param_kind",
+    "inline",
 )
 
 

@@ -106,5 +106,8 @@ def degraded_reliability_facts(snap: AbiSnapshot) -> list[str]:
             header_confirmed and snap.ast_producer == "castxml"
         ),
         "param_kind_facts_reliable": True,
+        # Consulted only for header-derived snapshots: a DWARF or ELF-only
+        # snapshot never carried the header backends' inline recording.
+        "inline_facts_reliable": snap.from_headers,
     }
     return sorted(name for name in raw_unreliable_facts(snap) if consulted_when[name])

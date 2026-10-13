@@ -45,6 +45,7 @@ from abicheck.policy.analysis_assurance_schema_staleness import (
     schema_staleness_status,
 )
 from abicheck.serialization import snapshot_from_dict
+from abicheck.storage.fact_schema_versions import _MIN_SCHEMA_VERSION_FOR_INLINE_FACTS
 from abicheck.storage.snapshot_encode import same_persisted_content
 
 _FIXTURES = Path(__file__).parent / "fixtures" / "schema"
@@ -104,7 +105,9 @@ def test_reload_invariant_is_exercised_on_genuinely_degraded_inputs(
     a = _load(
         "v4.json", schema_version=vintage, from_headers=True, ast_producer="clang"
     )
-    if vintage >= 45:
+    # The inline family's cutoff (fact_schema_versions) is the newest one, so a
+    # header-derived snapshot below it is degraded and at or above it is clean.
+    if vintage >= _MIN_SCHEMA_VERSION_FOR_INLINE_FACTS:
         assert not degraded_reliability_facts(a)
     else:
         assert degraded_reliability_facts(a), vintage

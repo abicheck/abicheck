@@ -646,6 +646,13 @@ adrs:
     surfaces: []
     missing: Proposed, not yet implemented; no exposure-mode or sensitivity surface exists.
 
+  - id: ADR-081
+    file: 081-inline-fact-reliability-and-producer-generation.md
+    disposition: partial
+    use_cases: []
+    surfaces: []
+    missing: Implemented for the stale-load gate (inline family, detector decline, coverage via the assurance status). Not surfaced as a CLI or report option of its own. Conversion of Function.is_inline to a Fact[bool] is deferred (case (a) baseline).
+
   - id: ADR-078
     file: 078-informational-severity-category.md
     disposition: surfaced
