@@ -19,8 +19,6 @@ from __future__ import annotations
 import logging
 import shutil as shutil  # noqa: F401  # legacy test patch target
 import warnings
-from collections.abc import Callable
-from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -53,6 +51,7 @@ from .errors import (
     UnsupportedCastxmlVersionError,
     ValidationError,
 )
+from .extract.binary_format import _FormatHandler
 from .extract.debug_dump import (
     # DWARF/BTF/CTF format resolution + the kernel-binary heuristic live in the
     # sibling module (dumper.py is at the file-size cap); re-exported here so
@@ -98,6 +97,7 @@ from .extract.header_ast_backend import (
     lang_to_profile,
 )
 from .extract.header_ast_fields import parse_header_ast_fields
+from .extract.header_order_witness import header_order_proof
 from .extract.headers.ast_config import (
     _CPP_ONLY_PATTERNS as _CPP_ONLY_PATTERNS,
     _build_castxml_command as _build_castxml_command,
@@ -336,39 +336,6 @@ def _header_ast_parser(
 # castxml parser + helpers moved to dumper_castxml (see top-of-file imports)
 
 
-@dataclass(frozen=True)
-class _FormatHandler:
-    """One binary format: how to recognise it and how to dump it (C3).
-
-    The registry collapses the per-format magic-byte knowledge and the
-    ``dump()`` dispatch into a single declarative entry — adding a new binary
-    format is a new ``_FormatHandler`` in ``_FORMAT_HANDLERS`` rather than edits
-    scattered across ``_detect_format`` and ``dump``'s if/elif chain.
-
-    ``accepts_dwarf_only`` / ``accepts_debug_format`` record which optional
-    kwargs the format's builder takes, so ``dump()`` forwards exactly the same
-    arguments each ``_dump_*`` accepted before (ELF: both; Mach-O: dwarf_only
-    only; PE: neither).
-    """
-
-    name: str
-    builder: Callable[..., AbiSnapshot]
-    magics: tuple[bytes, ...] = ()
-    magic_prefix: bytes | None = None
-    accepts_dwarf_only: bool = False
-    accepts_debug_format: bool = False
-
-    def matches_magic(self, magic: bytes) -> bool:
-        if magic in self.magics:
-            return True
-        if (
-            self.magic_prefix is not None
-            and magic[: len(self.magic_prefix)] == self.magic_prefix
-        ):
-            return True
-        return False
-
-
 def _detect_format(path: Path) -> str:
     """Detect binary format from magic bytes. Returns 'elf', 'macho', 'pe', or 'unknown'."""
     try:
@@ -382,6 +349,7 @@ def _detect_format(path: Path) -> str:
     return "unknown"
 
 
+@header_order_proof
 @reference_scratch_scoped
 def dump(
     so_path: Path,

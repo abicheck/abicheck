@@ -11,7 +11,7 @@ generated: false
 
 Index: [Known gaps](../known-gaps.md)
 
-**Status (re-verified 2026-10-09 at `456989f`): OPEN.** The scope-confirmed header growth waiver landed (comparability.py:845,1298 reference _header_sequence_is_scope_confirmed_growth). Still open: the sequential aggregate driver TU itself, so reordering an existing header still refuses.
+**Status (2026-10-12): PARTIAL.** The scope-confirmed header growth waiver landed (comparability.py:845,1298 reference _header_sequence_is_scope_confirmed_growth). Still open: the sequential aggregate driver TU itself, so reordering an existing header still refuses. Canonical sorting is measured unsound and rejected; the remaining options are recorded in [ADR-082](../adr/082-declared-header-order-independent-extraction.md).
 
 
 `profile_fingerprint`'s `header_sequence` field records declared-header
@@ -94,3 +94,49 @@ carrying a per-header TU cost, and it was deliberately not attempted
 alongside either disposition fix. `--diagnostic-comparison` is explicitly
 **not** the answer to any of this: it downgrades assurance wholesale
 instead of resolving the extraction question.
+
+## What the 2026-10-12 check established
+
+The aggregate TU is built in declared order by both backends
+(`extract/headers/ast_config.py::clang_aggregate_text`,
+`extract/castxml_header_compat.py::castxml_aggregate_text`), so declared order
+changes what is extracted. Measured with `z_base.h` (defines `Base`) and
+`a_user.h` (declares two functions over `Base`, no include), built into one
+shared library and dumped through `dumper.dump`:
+
+* **Declared `z_base.h, a_user.h`:** both functions extracted, under castxml and
+  clang.
+* **Declared `a_user.h, z_base.h`:** castxml excludes `a_user.h` after its L2
+  parse fails, logs "excluding them and retrying (reduced evidence)", and
+  returns **zero** declarations. Clang raises `SnapshotError` (unknown type name
+  `Base`).
+* **Canonical sorting is unsound.** A sorted order puts `a_user.h` before
+  `z_base.h`, which is the second row: it converts a valid declared order into
+  an empty or failed extraction. Sorting is rejected.
+* **Removing the refusal alone is unsound.** Comparing the same unchanged
+  library dumped in the two orders, with `check_contracts_comparable` bypassed,
+  reports `BREAKING`: `func_removed make_base`, `func_removed base_x`, plus
+  `exported_not_public` for both. The refusal is what stops this false break.
+* **A per-header TU is not output-neutral either.** A standalone dump of
+  `a_user.h` fails (clang: unknown type `Base`), so one TU per header turns the
+  order dependence into a loud failure or reduced evidence for every
+  non-self-contained header. It also multiplies parse cost by the header count.
+
+Pinned by `tests/test_driver_tu_declared_order.py`: the aggregate text equals
+the declared order for every permutation (oracle: expected lines written from
+the input list), declared order changes the extracted declarations under both
+backends, and reordering existing headers on real dumps still refuses with
+`header_sequence`. A change that makes extraction order-independent must update
+these tests deliberately.
+
+**What changed (ADR-082, accepted and implemented).** The declared order still governs
+extraction. A dump now proves, per snapshot, whether its declarations equal the sorted
+order's, by parsing both orders and comparing the extracted declarations record for record.
+A proven snapshot records the canonical order in `ExtractionContract.header_canonical`
+(schema v59). The gate accepts a reorder of an identical header set only when both sides
+carry the same proof. Adding or removing headers keeps the existing `header_sequence` rules.
+
+**Still refused, by design.** A reorder whose declarations are unproven (for example
+`a_user.h` before `z_base.h`, where the sorted parse fails), any side without the proof
+(including every pre-v59 snapshot), and a macro or pragma leak that changes no declaration:
+the witness cannot see it, and the residual is recorded in ADR-082.

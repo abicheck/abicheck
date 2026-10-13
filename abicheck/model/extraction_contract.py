@@ -84,6 +84,13 @@ class ExtractionContract:
     # that indistinguishability from "never attempted" is exactly what
     # previously let a mismatched GCC/Clang pair compare silently.
     compiler_identity_status: str | None = None
+    # ADR-082: the canonical (sorted) header identity sequence this snapshot's
+    # declarations were proven equal to by a dump-time witness
+    # (extract/header_order_witness.py). ``None`` means unproven -- the declared
+    # order in ``profile_fields["header_sequence"]`` keeps governing comparison.
+    # Never part of ``profile_fingerprint``; the comparability gate reads it
+    # only to waive a reorder of an identical header set.
+    header_canonical: list[str] | None = None
 
 
 #: Version of the build-identity record :func:`build_identity_of` derives.
