@@ -313,7 +313,9 @@ class TestPairwiseTransparency:
         assert len(result.pairwise) == 1
         summary = result.pairwise[0]
         assert summary.verdict == "BREAKING"
-        assert summary.change_count == 1
+        # The removal plus the public-surface shrink `compare` reports for the
+        # same pair: history scores each pair through the chokepoint.
+        assert summary.change_count == 2
 
     def test_to_dict_round_trips_json_serializable(self, tmp_path: Path) -> None:
         import json
@@ -386,11 +388,13 @@ class TestFindingEvolutionWiring:
         # from pair 1's own diff); `subtract`'s removal from pair 1 no
         # longer appears at all in pair 2's diff (there is nothing left to
         # remove), so it shows up as `resolved` here instead.
+        # Each pair also carries its public-surface grow/shrink finding, so
+        # the counts are 2 rather than 1 (same set `compare` reports).
         second_counts = dict(second.evolution_counts)
-        assert second_counts["introduced"] == 1
-        assert second_counts["resolved"] == 1
-        assert len(second.resolved) == 1
-        assert second.resolved[0].symbol == "subtract"
+        assert second_counts["introduced"] == 2
+        assert second_counts["resolved"] == 2
+        assert len(second.resolved) == 2
+        assert "subtract" in {c.symbol for c in second.resolved}
 
     def test_to_dict_serializes_evolution_fields(self, tmp_path: Path) -> None:
         """``PairwiseSummary.to_dict()`` must round-trip the new
@@ -405,7 +409,7 @@ class TestFindingEvolutionWiring:
         doc = json.loads(json.dumps(result.to_dict()))
         pairwise_doc = doc["pairwise"][0]
         assert "evolution_counts" in pairwise_doc
-        assert pairwise_doc["evolution_counts"]["not_evaluated"] == 1
+        assert pairwise_doc["evolution_counts"]["not_evaluated"] == 2
         assert pairwise_doc["resolved"] == []
 
     def test_to_dict_projects_a_non_empty_resolved_list(self, tmp_path: Path) -> None:
@@ -422,11 +426,11 @@ class TestFindingEvolutionWiring:
 
         result = run_history_request([p1, p2, p3])
         second = result.pairwise[1]
-        assert len(second.resolved) == 1
+        assert len(second.resolved) == 2
 
         doc = json.loads(json.dumps(result.to_dict()))
         resolved_doc = doc["pairwise"][1]["resolved"]
-        assert len(resolved_doc) == 1
+        assert len(resolved_doc) == 2
         entry = resolved_doc[0]
         assert entry["symbol"] == "subtract"
         assert entry["kind"] == second.resolved[0].kind.value
