@@ -1151,3 +1151,37 @@ def test_waiter_reacquires_when_the_shared_producer_was_cancelled() -> None:
             with pytest.raises(ProcessCancelled):
                 leader.result(timeout=2)
             assert waiter.result(timeout=2) == "fresh"
+
+
+def test_a_failed_entry_is_unregistered_before_its_waiters_wake() -> None:
+    """set_exception wakes waiters, and a waiter that retries must find no entry
+    for the failed producer: found, it would re-read that future and recurse.
+    The done-callback runs inside set_exception, so the ordering is checked
+    directly rather than inferred from thread timing."""
+    from abicheck.deadline import ProcessCancelled
+
+    registered_when_woken: list[bool] = []
+    entered = threading.Event()
+    release = threading.Event()
+
+    def cancelled_produce() -> str:
+        entered.set()
+        assert release.wait(timeout=2)
+        raise ProcessCancelled()
+
+    with ast_acquisition_scope() as scope:
+        parent = contextvars.copy_context()
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            leader = pool.submit(
+                _run_in_context, parent.copy(), "same", cancelled_produce
+            )
+            assert entered.wait(timeout=2)
+            scope._entries[("clang", "same")].add_done_callback(
+                lambda _f: registered_when_woken.append(
+                    ("clang", "same") in scope._entries
+                )
+            )
+            release.set()
+            with pytest.raises(ProcessCancelled):
+                leader.result(timeout=2)
+    assert registered_when_woken == [False]
