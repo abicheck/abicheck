@@ -254,7 +254,7 @@ Do not re-attempt token-claiming. A header's export tokens cannot tell whether i
 
 #### Multi-library L2 compare scales quadratically with library count
 
-`perf` — Memoization landed (scaling budget 1.7), and step 2 (2026-10-11) means an ELF member no longer walks the union header set; the scaling budget has not been re-measured since.
+`perf` — Memoization landed (scaling budget 1.7). Step 2 was reverted on 2026-10-12, so every member walks the union header set again; the scaling budget has not been re-measured since the revert.
 
 - [Multi-library L2 compare scales quadratically with library count](known-gaps/multi-library-l2-compare-scales-quadratically-with-library-count.md)  
   **Status (re-verified 2026-10-09 at `456989f`): PARTIAL.** The memoization landed: the libraries budget is 1.7 in scripts/check_l2_scaling_perf.py:103 and header_scan_memo/include memo exist. Still open: every member walks the union header set and runs the per-member field parse (step 2 of entry 73).

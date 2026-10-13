@@ -364,6 +364,8 @@ def plan_release_workers(
     # one worker.
     cap = max_threads()
     if cap is not None:
+        if cap < effective:
+            limited_by = "threads"  # the process-wide thread budget binds last
         effective, pool = min(effective, cap), min(pool, cap)
     return ReleaseWorkerPlan(
         effective, clamped_from, budget, pool, admission, limited_by

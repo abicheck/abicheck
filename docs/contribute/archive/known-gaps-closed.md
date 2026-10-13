@@ -62,7 +62,7 @@ gap on the main page instead.
 
 [Full write-up](../known-gaps/exclude-header-cannot-stop-a-transitively-included-header-being.md)
 
-### A directory `compare` still feeds the union `-H` set to every member (no per-member header operand); unreached type findings still count in member verdicts (closed 2026-10-11, step 2 reopened 2026-10-12)
+### A directory `compare` still feeds the union `-H` set to every member (no per-member header operand) (closed 2026-10-11, step 2 reopened 2026-10-12)
 
 **Status (2026-10-12): step 2 REOPENED.** The per-member header operand below was reverted: it broke oneDAL releases (three of four members refused, exit 4 to 16). Only the verdict half of step 3 stays closed. The description that follows is the 2026-10-11 landing and is kept as history. The live entry is in [known-gaps](../known-gaps.md).
 

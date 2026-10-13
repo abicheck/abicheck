@@ -160,6 +160,19 @@ class TestReleaseWorkerLimitCause:
             64,
         )
 
+    def test_thread_budget_below_memory_is_attributed_to_threads(
+        self, monkeypatch
+    ) -> None:
+        monkeypatch.setattr("os.cpu_count", lambda: 64)
+        monkeypatch.setattr(process_resources, "python_parallelism", lambda: 10)
+        monkeypatch.setattr(
+            release_jobs, "release_jobs_mem_cap", lambda depth=None, **kw: 8
+        )
+        monkeypatch.setattr(process_resources, "max_threads", lambda: 2)
+        monkeypatch.delenv("ABICHECK_RELEASE_JOB_MEM_GIB", raising=False)
+        plan = release_jobs.plan_release_workers(0, depth="headers")
+        assert (plan.initial_jobs, plan.limited_by) == (2, "threads")
+
     def test_interpreter_bound_run_prints_no_memory_note(
         self, monkeypatch, capsys
     ) -> None:
