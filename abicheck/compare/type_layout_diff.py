@@ -34,10 +34,10 @@ from .enum_sentinel import is_confirmed_enum_sentinel
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from collections.abc import Set as AbstractSet
 
-    from ..model.dwarf_facts import FieldInfo, StructLayout
+    from ..model.dwarf_facts import DwarfMetadata, FieldInfo, StructLayout
 
 
-def diff_struct_layouts(o: object, n: object) -> list[Change]:
+def diff_struct_layouts(o: DwarfMetadata, n: DwarfMetadata) -> list[Change]:
     old_structs: dict[str, StructLayout] = getattr(o, "structs", {})
     new_structs: dict[str, StructLayout] = getattr(n, "structs", {})
     changes: list[Change] = []
@@ -287,7 +287,7 @@ def _existing_field_changes(
     return changes
 
 
-def diff_enum_layouts(o: object, n: object) -> list[Change]:
+def diff_enum_layouts(o: DwarfMetadata, n: DwarfMetadata) -> list[Change]:
     from ..model.dwarf_facts import EnumInfo
 
     old_enums: dict[str, EnumInfo] = getattr(o, "enums", {})

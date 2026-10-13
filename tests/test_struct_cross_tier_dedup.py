@@ -16,7 +16,7 @@
 """A namespaced struct's size/alignment change reported independently by
 the L2 header-tier detector (``diff_types._diff_type_pair``, keyed by
 ``RecordType.name`` -- deliberately bare) and the L1 DWARF-tier detector
-(``compare.type_layout_diff.diff_struct_layouts``, keyed by ``dwarf_metadata``'s own
+(``abicheck.compare.type_layout_diff.diff_struct_layouts``, keyed by ``dwarf_metadata``'s own
 fully-qualified ``_process_struct`` key) must collapse to one finding, not
 two, once both tiers observe the same struct.
 

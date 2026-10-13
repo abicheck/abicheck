@@ -82,7 +82,7 @@ class TestNestedStructTagNormalization:
         """'struct Inner' (old) vs 'Inner' (new) must NOT emit STRUCT_FIELD_TYPE_CHANGED."""
         from abicheck.checker import (
             ChangeKind,
-            diff_struct_layouts,  # type: ignore[attr-defined]
+            diff_struct_layouts,
         )
 
         old_meta = self._make_meta("Outer", "child", "struct Inner")
@@ -98,7 +98,7 @@ class TestNestedStructTagNormalization:
         """'class Foo' vs 'Foo' must NOT emit STRUCT_FIELD_TYPE_CHANGED."""
         from abicheck.checker import (
             ChangeKind,
-            diff_struct_layouts,  # type: ignore[attr-defined]
+            diff_struct_layouts,
         )
 
         old_meta = self._make_meta("Container", "item", "class Foo")
@@ -112,7 +112,7 @@ class TestNestedStructTagNormalization:
         """'Inner' vs 'Other' (genuinely different type) must STILL be detected."""
         from abicheck.checker import (
             ChangeKind,
-            diff_struct_layouts,  # type: ignore[attr-defined]
+            diff_struct_layouts,
         )
 
         old_meta = self._make_meta("Outer", "child", "Inner")
@@ -128,7 +128,7 @@ class TestNestedStructTagNormalization:
         """'union U' vs 'U' must NOT emit STRUCT_FIELD_TYPE_CHANGED."""
         from abicheck.checker import (
             ChangeKind,
-            diff_struct_layouts,  # type: ignore[attr-defined]
+            diff_struct_layouts,
         )
 
         old_meta = self._make_meta("Outer", "u_field", "union U")
@@ -146,7 +146,7 @@ class TestNestedStructTagNormalization:
         differs between two MSVC builds.)"""
         from abicheck.checker import (
             ChangeKind,
-            diff_struct_layouts,  # type: ignore[attr-defined]
+            diff_struct_layouts,
         )
 
         old_meta = self._make_meta("_TP_CALLBACK_ENVIRON_V3", "u", "<unnamed-tag>")
@@ -165,7 +165,7 @@ class TestNestedStructTagNormalization:
         name collapse only suppresses unstable-name noise, not real drift)."""
         from abicheck.checker import (
             ChangeKind,
-            diff_struct_layouts,  # type: ignore[attr-defined]
+            diff_struct_layouts,
         )
 
         old_meta = DwarfMetadata(
@@ -215,7 +215,7 @@ class TestNestedStructTagNormalization:
         aggregate keyword, so it is not masked."""
         from abicheck.checker import (
             ChangeKind,
-            diff_struct_layouts,  # type: ignore[attr-defined]
+            diff_struct_layouts,
         )
 
         old_meta = self._make_meta("Outer", "u", "<anonymous union>")
@@ -233,7 +233,7 @@ class TestNestedStructTagNormalization:
         normalization, must still drive the kind so union → struct is reported."""
         from abicheck.checker import (
             ChangeKind,
-            diff_struct_layouts,  # type: ignore[attr-defined]
+            diff_struct_layouts,
         )
 
         old_meta = self._make_meta("Outer", "u", "union <anonymous>")
