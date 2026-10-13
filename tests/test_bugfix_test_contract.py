@@ -31,6 +31,23 @@ from pathlib import Path
 
 import pytest
 
+_GATE_ENV = (
+    "BUGFIX_CONTRACT_BODY_FILE",
+    "BUGFIX_CONTRACT_TITLE",
+    "BUGFIX_CONTRACT_BASE",
+    "BUGFIX_CONTRACT_HEAD",
+)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_gate_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The gate takes its body, title and refs from ``BUGFIX_CONTRACT_*``.
+    A ``verify.py`` run that sets them for its own step must not leak into
+    these tests, which assert the gate's behaviour with no environment."""
+    for name in _GATE_ENV:
+        monkeypatch.delenv(name, raising=False)
+
+
 _PATH = (
     Path(__file__).resolve().parent.parent / "scripts" / "check_bugfix_test_contract.py"
 )

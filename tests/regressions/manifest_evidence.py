@@ -1173,7 +1173,7 @@ EVIDENCE_BUG_CLASSES: tuple[BugClass, ...] = (
             "when the real change is BREAKING. A header present on one side "
             "only must never refuse a member."
         ),
-        fixed_by=(1581,),
+        fixed_by=(1586,),
         seed_tests=(
             "tests/test_release_member_headers_integration.py",
             "tests/test_family_f2_release_member_parity.py",
