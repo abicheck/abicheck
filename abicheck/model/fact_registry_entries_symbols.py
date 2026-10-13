@@ -227,7 +227,7 @@ SYMBOL_FACTS: list[FactDefinition] = [
             "abicheck.model.semantic_ir_function_signature:_signature_inputs",
         ),
         notes=(
-            "Inline linkage of a declaration (ADR-081). Case (a): guarded by the "
+            "Inline linkage of a declaration. Case (a): guarded by the "
             "stale 'inline' fact family (model.snapshot_reliability), so the "
             "omitted-sentinel and Fact[bool] sibling carry availability; False "
             "is a real answer, not a placeholder. Both header backends produce it "
