@@ -244,12 +244,12 @@ Residuals after this fix, each with its disposition:
   synthetic ctor keys) keep their gating `func_return_changed`/`func_added`
   findings: the filter fails closed on them. Downgrading a closure-only
   respelling of an unexported declaration to source-level changes the
-  verdict and exit code, so it is proposed in ADR-079 (D1), not implemented
+  verdict and exit code, so it is proposed in ADR-082 (D1), not implemented
   here. Status: waiting on that decision.
 - **`exported_not_public` on statically linked libstdc++ symbols**
   (`std::once_flag::_Prepare_execution`) appears on identical sources, so it
   is not churn from a lambda. Suppressing an identical-both-sides observation
-  narrows ADR-068 §D3, proposed in ADR-079 (D2). Status: waiting on that
+  narrows ADR-068 §D3, proposed in ADR-082 (D2). Status: waiting on that
   decision.
 - **A raw hand-built `AbiSnapshot` with no export facts** still churns. No
   public entry point (`dump`, `load_snapshot`, `run_compare`, `dumper.dump`)

@@ -150,9 +150,11 @@ if [[ "$KIND" == "bundle" ]]; then
     # input, no per-baseline-version header staging), so a header-only
     # change between baseline and candidate (e.g. an inline function or
     # template removed) would be silently invisible: only one version of
-    # the headers is ever parsed (Codex review). Reject until per-bundle-
-    # member baseline header staging exists.
-    _fail "requested-depth 'headers' is not supported when kind is 'bundle' -- a bundle's baseline is always raw binaries with no historical header snapshot, so a headers-depth bundle compare would parse both sides against the SAME current checkout's headers, silently missing any header-only change. Use requested-depth: binary for a bundle check, or kind: target to compare one library at headers depth."
+    # the headers is ever parsed (Codex review). Reject until the candidate
+    # side has per-member header selection. The baseline half exists
+    # (resolve-baseline's stage-member-snapshots), but check-target does not
+    # route it yet, so a bundle's old side is still binaries-dir.
+    _fail "requested-depth 'headers' is not supported when kind is 'bundle' -- the candidate side has no per-member header selection yet (one project-wide header input would parse every member's new side against the union of all members' headers, which can invent or hide header-level changes), and the bundle's old side is not yet routed to the per-member baseline snapshots. Use requested-depth: binary for a bundle check, or kind: target to compare one library at headers depth."
   fi
   if [[ "$ALLOW_NEW_TARGET" == "true" ]]; then
     # abicheck.buildsource.baseline_set.resolve_bundle never returns

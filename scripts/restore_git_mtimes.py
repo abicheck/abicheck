@@ -17,7 +17,7 @@
 """Restore each tracked file's mtime to its last-commit timestamp.
 
 ``abicheck.dumper``'s on-disk AST cache (``dumper_cache._cache_path``, keyed
-via ``dumper._cache_key``) hashes each header's *mtime*, not its content — a
+via ``extract.headers.ast_config._cache_key``) hashes each header's *mtime*, not its content — a
 deliberate cheap-and-usually-right proxy for "has this file changed" on a
 developer's machine, where editing a file naturally bumps its mtime.
 

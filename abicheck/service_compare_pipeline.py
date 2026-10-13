@@ -49,6 +49,7 @@ Two mechanical notes:
 from __future__ import annotations
 
 import contextvars
+import dataclasses
 import functools
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -608,6 +609,16 @@ def run_compare_request(request: CompareRequest) -> CompareResult:
         return classify_compare_pair(request, pair)
 
 
+def _declared_default(owner: type, name: str) -> Any:
+    """A request field's declared default, read from its dataclass.
+
+    The keyword shim restates the defaults of the ``CompareRequest``/
+    ``InputSpec`` fields it forwards onto; reading them here keeps the shim
+    and the request from disagreeing. The signature shows the same values.
+    """
+    return next(f.default for f in dataclasses.fields(owner) if f.name == name)
+
+
 def run_compare(
     old_input: Path,
     new_input: Path,
@@ -615,30 +626,34 @@ def run_compare(
     new_headers: list[Path] | None = None,
     old_includes: list[Path] | None = None,
     new_includes: list[Path] | None = None,
-    old_version: str = "",
-    new_version: str = "",
-    lang: str = "c++",
-    lang_explicit: bool = False,
-    frontend: str = "auto",
+    old_version: str = _declared_default(InputSpec, "version"),
+    new_version: str = _declared_default(InputSpec, "version"),
+    lang: str = _declared_default(CompareRequest, "lang"),
+    lang_explicit: bool = _declared_default(CompareRequest, "lang_explicit"),
+    frontend: str = _declared_default(CompareRequest, "frontend"),
     suppress: Path | None = None,
-    policy: str = "strict_abi",
+    policy: str = _declared_default(CompareRequest, "policy"),
     policy_file_path: Path | None = None,
     old_pdb_path: Path | None = None,
     new_pdb_path: Path | None = None,
     old_debug_roots: list[Path] | None = None,
     new_debug_roots: list[Path] | None = None,
-    enable_debuginfod: bool = False,
-    scope_to_public_surface: bool = True,
+    enable_debuginfod: bool = _declared_default(CompareRequest, "enable_debuginfod"),
+    scope_to_public_surface: bool = _declared_default(CompareRequest, "scope_public"),
     force_public_symbols: set[str] | None = None,
-    pattern_verdicts: bool = True,
+    pattern_verdicts: bool = _declared_default(CompareRequest, "pattern_verdicts"),
     public_surface_allowlist: set[str] | None = None,
     debuginfod_url: str | None = None,
-    diagnostic_comparison: bool = False,
-    contract_evaluation: bool = True,
+    diagnostic_comparison: bool = _declared_default(
+        CompareRequest, "diagnostic_comparison"
+    ),
+    contract_evaluation: bool = _declared_default(
+        CompareRequest, "contract_evaluation"
+    ),
     # `False` matches the CLI flag and every other typed surface; this one
     # matters most, since it is written into *both* `InputSpec`s below and so
     # overrides their own field default (Codex review, PR #1258).
-    include_dependencies: bool = False,
+    include_dependencies: bool = _declared_default(InputSpec, "include_dependencies"),
     contract_mode: str | None = None,
     pack_policy_overrides: dict[Any, Any] | None = None,
     pack_internal_namespaces: tuple[str, ...] | None = None,
@@ -647,10 +662,12 @@ def run_compare(
     *,
     severity_preset: str | None = None,
     public_header_dirs: list[Path] | None = None,
-    collapse_versioned_symbols: bool = False,
+    collapse_versioned_symbols: bool = _declared_default(
+        CompareRequest, "collapse_versioned_symbols"
+    ),
     project_policy_overrides: dict[Any, Any] | None = None,
     env_matrix: EnvironmentMatrix | None = None,
-    exclude_headers: tuple[str, ...] = (),
+    exclude_headers: tuple[str, ...] = _declared_default(InputSpec, "exclude_headers"),
     acknowledgments_path: Path | None = None,
     acknowledgment_unacknowledged_additions: str | None = None,
 ) -> CompareResult:

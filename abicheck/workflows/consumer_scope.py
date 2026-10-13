@@ -137,7 +137,7 @@ class AppCompatResult:
 
     # Set only for an ADVISORY consumer that could not be read (a REQUIRED
     # one raises instead); left at its NO_CHANGE/empty defaults and excluded
-    # from a scoped gate's worst-wins (cli_helpers_compare._apply_used_by_scoping).
+    # from a scoped gate's worst-wins (workflows.consumer_scope_gate._apply_used_by_scoping).
     unreadable: bool = False
     unreadable_reason: str | None = None
 

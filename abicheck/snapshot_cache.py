@@ -51,7 +51,13 @@ MAX_ENTRIES: int = 100
 #: key invalidates all previously-cached entries on upgrade rather than risk
 #: serving a stale snapshot computed by an older, behaviorally-different
 #: abicheck version.
-_SNAPSHOT_CACHE_VERSION: str = "35"
+#:
+#: v36: ``ElfMetadata.unambiguous_symbol`` now leaves ``Function``/``Variable``
+#: ``elf_binding``/``elf_visibility`` unset when symbol-versioned aliases of one
+#: bare name disagree, where the old last-entry-wins map set them. A warm cache
+#: entry would keep replaying the last-alias values, so the bump forces
+#: re-extraction (the same precedent as v16 for ``elf_binding``).
+_SNAPSHOT_CACHE_VERSION: str = "36"
 # v35: header-derived snapshots now carry public_header_identifiers (schema
 # v55, extract/public_header_identifiers.py). The key also folds in the
 # snapshot schema version from this version on, so the next schema bump

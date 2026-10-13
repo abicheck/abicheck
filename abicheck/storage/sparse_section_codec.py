@@ -598,6 +598,7 @@ class DebugSection(_SparseSectionMixin):
             "clang_va_list_facts_reliable",
             "castxml_var_access_facts_reliable",
             "param_kind_facts_reliable",
+            "inline_facts_reliable",
             "parsed_with_build_context",
             "build_context_defines",
         }
@@ -636,6 +637,7 @@ class DebugSection(_SparseSectionMixin):
         "clang_va_list_facts_reliable": _BOOL,
         "castxml_var_access_facts_reliable": _BOOL,
         "param_kind_facts_reliable": _BOOL,
+        "inline_facts_reliable": _BOOL,
         "parsed_with_build_context": _BOOL,
         "build_context_defines": _UNORDERED_LIST,
     }

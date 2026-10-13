@@ -1,4 +1,4 @@
-# ADR-079: Closure Respelling Disposition and Identical Export Observations
+# ADR-082: Closure Respelling Disposition and Identical Export Observations
 
 **Date:** 2026-10-12
 **Status:** Proposed — drafted for maintainer decision. This ADR changes no behaviour by itself. The exported-symbol half of the respelling bug is fixed separately (`compare/closure_respelling.py`); the two decisions below wait for acceptance.

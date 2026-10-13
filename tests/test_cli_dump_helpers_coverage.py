@@ -10,7 +10,6 @@ concrete return value or raised exception:
   ``--build-info``
 - ``check_dump_debug_format_error``'s PE/Mach-O rejection
 - ``resolve_dump_collect_context``'s warning and ``--depth binary`` branches
-- ``resolve_dump_compile_context``'s pre-resolved-context verbatim return
 - ``extract.dump_manifest_roots.dump_manifest_header_roots``' ownership set
 
 The ``perform_elf_dump``/``handle_non_elf_dump`` execution tests this file
@@ -31,7 +30,6 @@ from abicheck.cli_dump_helpers import (
     resolve_dump_collect_context,
     resolve_dump_debug_format,
 )
-from abicheck.frontends.cli.dump_debug_config import resolve_dump_compile_context
 from abicheck.header_conditionals import compile_db_from_build_info
 
 # Canonical home (``dumper_scoping``), not ``cli_dump_helpers``'s former
@@ -144,10 +142,10 @@ def test_collect_context_warns_without_any_build_or_source_input(
     hdr = tmp_path / "h.h"
     build = tmp_path / "build"
 
-    resolve_dump_collect_context("build", None, None, build, (hdr,))
+    resolve_dump_collect_context("build", None, build, (hdr,))
     assert "only L0-L2 data" not in capsys.readouterr().err
 
-    resolve_dump_collect_context("build", None, None, None, (hdr,))
+    resolve_dump_collect_context("build", None, None, (hdr,))
     assert "only L0-L2 data" in capsys.readouterr().err
 
 
@@ -156,36 +154,13 @@ def test_collect_context_binary_depth_drops_the_headers(tmp_path: Path) -> None:
     database the caller derives from those headers."""
     hdr = tmp_path / "h.h"
 
-    mode, headers = resolve_dump_collect_context("binary", None, None, None, (hdr,))
+    mode, headers = resolve_dump_collect_context("binary", None, None, (hdr,))
     assert headers == ()
     assert compile_db_from_build_info(tmp_path, headers) is None
     assert mode is not None
 
 
 # ── handle_non_elf_dump error handling ──────────────────────────────────────
-
-
-# ── resolve_dump_compile_context pre-resolved passthrough ───────────────────
-
-
-def test_compile_context_preresolved_returned_verbatim() -> None:
-    """When the caller already resolved the compile context it is returned as-is,
-    with no re-discovery/re-merge of the tree's .abicheck.yml (lines 350-357)."""
-    sentinel_ctx = object()
-    includes = (Path("/inc/a"), Path("/inc/b"))
-
-    ctx, out_includes = resolve_dump_compile_context(
-        sentinel_ctx,  # type: ignore[arg-type]
-        gcc_options=None,
-        sysroot=None,
-        nostdinc=True,
-        header_backend="auto",
-        includes=includes,
-        build_config=None,
-        sources=None,
-    )
-    assert ctx is sentinel_ctx
-    assert out_includes == includes
 
 
 # ── perform_elf_dump evidence-attachment branches ───────────────────────────

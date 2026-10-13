@@ -293,16 +293,15 @@ def compare_snapshots(
     # before forcing verdict modulation"): the prior version of this
     # chokepoint forced `pattern_verdicts=True` unconditionally, citing
     # ADR-068 D4/D5's "no legitimate off position" principle the same way
-    # `cross_source_checks` earns it above. That citation doesn't hold:
-    # ADR-068 is "Proposed -- not implemented", not an accepted decision,
-    # and the ADR that *is* accepted here -- ADR-027 -- explicitly defers
-    # flipping `--pattern-verdicts` to default-on until a release cycle's
-    # worth of FP-rate and parity validation
-    # (docs/contribute/adr/027-api-surface-intelligence.md's "Still deferred
-    # by design" note). So `pattern_verdicts` stays a real, forwarded
-    # parameter here -- forcing it on for every typed-API/CLI/Action caller
-    # of this documented Tier-2 verb would be exactly the un-reviewed
-    # default flip that ADR gates. `surface_metrics=True` is kept forced
+    # `cross_source_checks` earns it above. That citation doesn't hold for
+    # the Tier-2 verb: ADR-068 (Accepted, Phase 6 landed) makes pattern
+    # verdicts unconditional on the CLI, but the typed Tier-2 verb is a
+    # separate caller surface, and ADR-027 gates flipping the
+    # `pattern_verdicts` default on FP-rate and parity validation
+    # (docs/contribute/adr/027-api-surface-intelligence.md). So
+    # `pattern_verdicts` stays a real, forwarded parameter here (default
+    # True, matching `CompareRequest`) -- a direct caller can still score raw
+    # detector output. `surface_metrics=True` is kept forced
     # (ADR-027 Phase 5's `--surface-metrics` findings; see the pending
     # follow-up to reconcile the change-catalog/doc text that still
     # describes them as request-only with this forced-on behavior).

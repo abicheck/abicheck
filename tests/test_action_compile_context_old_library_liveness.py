@@ -451,8 +451,8 @@ class TestCompileContextPairwiseOldLibraryClassification:
         real function directly against fixtures shaped exactly like this
         test's own), and NEW's own ``--sources`` tree only folds ON TOP of
         that already-resolved context via a second ``merge_compile_config``
-        call inside ``frontends/cli/commands/compare.py``'s
-        ``_embed_inline_source_side`` -- but (P1 finding, Codex review,
+        call inside ``frontends/cli/compare_inline_evidence.py``'s
+        ``_side`` -- but (P1 finding, Codex review,
         fresh evidence, PR #1222 eleventh round) that second stage runs
         UNCONDITIONALLY, regardless of whether ``--config``/
         ``build-config`` was explicit, so THIS overlay-generation script
@@ -472,9 +472,9 @@ class TestCompileContextPairwiseOldLibraryClassification:
         `scan --against`'s genuine single-document-exclusive resolution of
         these two, `compare`'s own pipeline NEVER re-resolves `source:`/
         `debug:` from NEW's ``--sources`` tree at all --
-        ``frontends/cli/commands/compare.py``'s
-        ``_embed_inline_source_side`` receives both as already-frozen
-        arguments (``_resolved_collect_mode``/``_resolved_debug``) computed
+        ``frontends/cli/compare_inline_evidence.py``'s
+        ``_side`` receives both as already-frozen
+        values (``InlineEvidenceRun.collect_mode``/``.debug``) computed
         once from the CHECKOUT-side ``resolved_cfg``, before the
         ``--sources`` tree is even considered. So the sources-root
         document's own ``source:``/``debug:`` values below must be ignored
@@ -570,7 +570,7 @@ class TestCompileContextPairwiseOldLibraryClassification:
         ``compile.include_dirs``: a previous round's own overlay merged
         the two per-field here (reproducing what it believed was the real
         pipeline's own second merge stage), but that stage already runs,
-        unconditionally, inside the CLI's own ``_embed_inline_source_side``
+        unconditionally, inside the CLI's own ``compare_inline_evidence._side``
         when "Run analysis" actually invokes ``compare`` -- so this
         overlay merging the two ITSELF would fold the sources-root
         document's ``compile:`` block in a second, redundant time. The

@@ -37,7 +37,7 @@ Why a *sidecar* rather than its own keyed cache
 -----------------------------------------------
 The projection is valid for exactly the inputs its AST was, so it must
 invalidate exactly when the AST cache entry does. Re-deriving the AST cache
-key here would mean a second copy of ``dumper_ast_config._cache_key``'s
+key here would mean a second copy of ``extract.headers.ast_config._cache_key``'s
 inputs -- including the ones ``clang_header_dump`` resolves internally
 (system includes, tool identities, the C-vs-C++ decision) -- and a copy that
 missed one of them would serve a *stale projection*, which is silent wrong

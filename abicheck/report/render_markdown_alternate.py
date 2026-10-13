@@ -99,6 +99,11 @@ from .render_markdown_document import (
     _resolve_displayed_changes,
     _suppression_note_from_mapping,
 )
+from .section_notes import (
+    compute_out_of_surface_note,
+    compute_redundancy_note,
+    compute_suppression_note,
+)
 from .surface_changes import (
     SurfaceChangeSection,
     compute_surface_changes,
@@ -312,9 +317,9 @@ def build_root_cause_document(
                 else "_No ABI changes detected._"
             )
         ),
-        "redundancy_note": _opt_asdict(rm.compute_redundancy_note(result)),
-        "suppression_note": _opt_asdict(rm.compute_suppression_note(result)),
-        "out_of_surface_note": _opt_asdict(rm.compute_out_of_surface_note(result)),
+        "redundancy_note": _opt_asdict(compute_redundancy_note(result)),
+        "suppression_note": _opt_asdict(compute_suppression_note(result)),
+        "out_of_surface_note": _opt_asdict(compute_out_of_surface_note(result)),
         "show_impact": show_impact,
         "impact_table": (
             _opt_asdict(rm.compute_impact_table(result, displayed_changes=changes))

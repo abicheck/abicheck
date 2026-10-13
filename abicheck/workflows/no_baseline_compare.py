@@ -478,6 +478,11 @@ def run_no_baseline_compare(
     from .env_matrix_audit import fold as _fold_env_matrix
 
     extra_changes = _fold_env_matrix(None, new, env_matrix)
+    # Calls the Tier-1 core directly, not the chokepoint: the chokepoint takes
+    # a resolved baseline (`old: AbiSnapshot`), and this audit's whole premise
+    # is that there is none (`old=None`). It therefore also does not force
+    # `surface_metrics`, which the chokepoint sets; whether an audit should
+    # carry those findings is an open question, not settled here.
     diff = _diff_pair(
         None,
         new,
