@@ -846,7 +846,7 @@ class TestEveryRendererTellsTheSameStory:
         verdict. (Stated against `leaf` until plan slice 7o retired that
         mode against `root-cause`; the claim is about the *grouped*
         document, which is what the surviving mode produces.)"""
-        from abicheck.reporter_markdown import to_markdown
+        from abicheck.report.dispatch_markdown import to_markdown
 
         result = _compare(
             _unreached_public_type_pair(),
@@ -863,7 +863,7 @@ class TestEveryRendererTellsTheSameStory:
 
     def test_root_cause_markdown_keeps_a_scored_finding_disclosed(self) -> None:
         """The control: the partition only moves excluded findings."""
-        from abicheck.reporter_markdown import to_markdown
+        from abicheck.report.dispatch_markdown import to_markdown
 
         result = _compare(
             _unreached_public_type_pair(),
@@ -938,14 +938,14 @@ class TestEveryRendererTellsTheSameStory:
         """The digest prints its merge advice from the verdict and its
         impacted-symbol list from the raw change set, so it said "safe to
         merge" directly above the symbol it called impacted (Codex review)."""
-        from abicheck.reporter_markdown import to_review_digest
+        from abicheck.report.dispatch_markdown import to_review_digest
 
         digest = to_review_digest(self._excluded())
         assert "safe to merge" in digest
         assert "Top impacted symbols" not in digest
 
     def test_the_review_digest_lists_a_scored_finding(self) -> None:
-        from abicheck.reporter_markdown import to_review_digest
+        from abicheck.report.dispatch_markdown import to_review_digest
 
         digest = to_review_digest(self._scored())
         # The story, not the section heading that happens to carry it.
@@ -1052,7 +1052,7 @@ class TestTheReleaseRecommendationDoesNotOverclaim:
     ) -> None:
         """`Exit Impact` is a claim about the gate, so it has to be
         classified over the set the gate scores — not over every change."""
-        from abicheck.reporter_markdown import to_markdown
+        from abicheck.report.dispatch_markdown import to_markdown
 
         config = SeverityConfig()
         result = _compare(
@@ -1342,7 +1342,7 @@ class TestNothingIsLost:
         assert len(result.not_evaluated) == 1
 
     def test_the_markdown_report_discloses_what_it_did_not_score(self) -> None:
-        from abicheck.reporter_markdown import to_markdown
+        from abicheck.report.dispatch_markdown import to_markdown
 
         result = _compare(
             _unreached_public_type_pair(),

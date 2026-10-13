@@ -386,7 +386,7 @@ def test_compare_dump_manifest_and_release_manifest_coexist(
 
     def _fake_resolve(*_a, **kw):
         captured["old_dump_manifest"] = kw.get("old_dump_manifest")
-        return fake_resolved_pair(snap)
+        return fake_resolved_pair(snap, operands=(_a[0], _a[1]))
 
     monkeypatch.setattr(
         "abicheck.cli_compare_helpers._resolve_compare_pair", _fake_resolve

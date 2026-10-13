@@ -213,7 +213,7 @@ def test_json_report_carries_the_surface_changes_block() -> None:
 
 
 def test_review_digest_and_full_markdown_itemize_every_group() -> None:
-    from abicheck.reporter_markdown import (
+    from abicheck.report.dispatch_markdown import (
         _to_markdown_root_cause,
         to_markdown,
         to_review_digest,
@@ -243,7 +243,7 @@ def test_surface_changes_honors_show_only_like_every_other_section() -> None:
     *displayed* findings the rest of the view shows, not the raw
     ``result.changes``."""
     from abicheck import reporter
-    from abicheck.reporter_markdown import (
+    from abicheck.report.dispatch_markdown import (
         _to_markdown_root_cause,
         to_markdown,
     )
@@ -326,7 +326,7 @@ def test_a_run_with_no_changes_renders_no_surface_changes_section() -> None:
     section = compute_surface_changes(result)
     assert section.total == 0
 
-    from abicheck.reporter_markdown import to_markdown
+    from abicheck.report.dispatch_markdown import to_markdown
 
     assert "## Surface changes" not in to_markdown(result)
 

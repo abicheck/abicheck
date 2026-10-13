@@ -1,4 +1,4 @@
-# ADR-079: Inline-Fact Reliability for `FUNC_BECAME_INLINE` / `FUNC_LOST_INLINE`
+# ADR-081: Inline-Fact Reliability for `FUNC_BECAME_INLINE` / `FUNC_LOST_INLINE`
 
 **Date:** 2026-10-12
 **Status:** Proposed — implemented in PR #1570 (D1, D2, D3′, D4′, D6); D5 rejected. Not yet accepted by a maintainer. The branch was implemented at the user's direction before acceptance. No schema version bump was required.

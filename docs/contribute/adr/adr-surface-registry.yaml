@@ -646,8 +646,8 @@ adrs:
     surfaces: []
     missing: Proposed, not yet implemented; no exposure-mode or sensitivity surface exists.
 
-  - id: ADR-079
-    file: 079-inline-fact-reliability-and-producer-generation.md
+  - id: ADR-081
+    file: 081-inline-fact-reliability-and-producer-generation.md
     disposition: partial
     use_cases: []
     surfaces: []
@@ -661,3 +661,17 @@ adrs:
       - cli: compare --severity-preset
       - report: compare_report.summary
       - report: compare_report.severity
+
+  - id: ADR-079
+    file: 079-partial-export-table-read-in-the-stored-snapshot.md
+    disposition: gap
+    use_cases: []
+    surfaces: []
+    missing: Proposed, not yet implemented; no per-platform export_read snapshot field exists.
+
+  - id: ADR-080
+    file: 080-persisting-the-advanced-dwarf-extraction-status.md
+    disposition: gap
+    use_cases: []
+    surfaces: []
+    missing: Proposed, not yet implemented; the advanced-DWARF extraction status is in memory only and is not persisted.

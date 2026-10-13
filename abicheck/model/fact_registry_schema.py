@@ -299,7 +299,7 @@ REFERENCE_FLAG_COVERAGE: dict[str, tuple[tuple[str, str], ...]] = {
 #: not an absent constant a future contributor would have to reinvent. An
 #: entry that no longer matches a real, still-unconverted field fails the
 #: same check, so neither half can quietly go stale.
-# Function.is_inline is guarded by the stale 'inline' family (ADR-079, gap: a pre-fix clang/castxml
+# Function.is_inline is guarded by the stale 'inline' family (ADR-081, gap: a pre-fix clang/castxml
 # header baseline) but is still a plain bool, not a Fact[bool] sibling. Converting it
 # needs a persisted Fact codec and a schema decision; deferred and listed here so the
 # deferral is visible in review.

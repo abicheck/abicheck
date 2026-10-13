@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Which abicheck code shapes a stored clang header-AST cache entry.
 
-The header-AST cache (``dumper_ast_config._cache_key``) stores an external
+The header-AST cache (``extract.headers.ast_config._cache_key``) stores an external
 tool's output, so its key is the tool's *input* -- the headers, the toolchain,
 and the exact aggregate header and command line abicheck generates (folded in
 as an invocation digest, so a change to how abicheck builds either is a key
