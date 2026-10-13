@@ -20,6 +20,7 @@ wherever L4 got the configured compiler itself, the pre-scan gets it too.
 from __future__ import annotations
 
 import itertools
+import shutil
 from pathlib import Path
 
 import pytest
@@ -57,10 +58,9 @@ def _expected(compiler: str | None, prefix: str | None) -> str:
 
 @pytest.fixture
 def stamped(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
-    import abicheck.dumper_clang as dumper_clang
 
     monkeypatch.setattr(
-        dumper_clang.shutil,
+        shutil,
         "which",
         lambda name: f"/usr/bin/{name}" if name.startswith(_ON_PATH_PREFIX) else None,
     )
