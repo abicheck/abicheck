@@ -50,6 +50,12 @@ _OMITTED_PARAM_KIND: ParamKind = cast("ParamKind", _Omitted())
 # availability is carried by the stale 'clang_deprecation' fact family (model.snapshot_reliability),
 # never by the value.
 _OMITTED_FUNC_DEPRECATED: str | None = cast("str | None", _Omitted())
+# ADR-063 Phase 5 (twelfth batch): Function.is_inline's own omission sentinel.
+# False is both this field's resting value and a real answer (an ordinary
+# external-linkage function), so a bare False cannot mark "no producer ever
+# determined inline linkage"; guarded by the stale 'inline' fact family
+# (model.snapshot_reliability), exactly as _OMITTED_IS_RESTRICT is for Param.
+_OMITTED_FUNC_IS_INLINE: bool = cast(bool, _Omitted())
 _OMITTED_VAR_DEPRECATED: str | None = cast("str | None", _Omitted())
 # ADR-063 Phase 5 (tenth batch): Variable.access's own omission sentinel.
 # AccessLevel.PUBLIC is both this field's resting value and a real answer,
@@ -144,7 +150,9 @@ class Function:
     # (`extract/headers/clang/inline_semantics.py`). It is a fact about the
     # DECLARATION's linkage, not about a definition existing (`inline int f();`
     # is True with no body) and not about what a consumer emitted.
-    is_inline: bool = False
+    # ADR-063 Phase 5 (twelfth batch): private omission sentinel, not a plain
+    # False -- see is_inline_fact below and __post_init__.
+    is_inline: bool = _OMITTED_FUNC_IS_INLINE
     access: AccessLevel = AccessLevel.PUBLIC  # public/protected/private
     return_pointer_depth: int = 0  # T=0, T*=1, T**=2
     elf_visibility: ElfVisibility | None = None  # ELF st_other (populated from .dynsym)
@@ -316,6 +324,8 @@ class Function:
     is_compiler_generated_fact: Fact[bool | None] | None = field(
         default=None, kw_only=True
     )
+    # Fact[bool] sibling of is_inline -- case (a), see the field's comment.
+    is_inline_fact: Fact[bool] | None = field(default=None, kw_only=True)
     # The three facts ``Visibility`` conflated (see
     # ``model/surface_facts.py``, which owns every read of these): (a) a
     # header this run parsed declares this entity, (b) it belongs to the
@@ -373,6 +383,9 @@ class Function:
                 None,
                 None,
             )
+        )
+        self.is_inline, self.is_inline_fact = bridge_legacy_and_fact(
+            self.is_inline, self.is_inline_fact, _OMITTED_FUNC_IS_INLINE, False
         )
 
 

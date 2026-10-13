@@ -118,6 +118,13 @@ _MIN_SCHEMA_VERSION_FOR_PARAM_KIND_FACT = 45
 # would trust a pre-fix value; raising it only declines more comparisons.
 _MIN_SCHEMA_VERSION_FOR_INLINE_FACTS = 53
 
+# ADR-063 Phase 5 (twelfth batch): the schema_version Function.is_inline_fact
+# started being persisted at -- the last case-(a) field fact_registry_schema.py's
+# _CASE_A_UNCONVERTED listed. Guarded by the stale 'inline' family above; a
+# pre-v60 document carries no such key and decodes through the legacy presence
+# bridge, so its availability is still decided by _MIN_SCHEMA_VERSION_FOR_INLINE_FACTS.
+_MIN_SCHEMA_VERSION_FOR_INLINE_FACT = 60
+
 # The schema_version ``Function``/``Variable``'s three surface facts
 # (``declared_in_headers_fact``/``in_public_contract_fact``/
 # ``binary_exported_fact``) started being persisted at -- the split of the

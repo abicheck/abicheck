@@ -49,6 +49,7 @@ from .fact_schema_versions import (
     _MIN_SCHEMA_VERSION_FOR_ENUMTYPE_FACTS,
     _MIN_SCHEMA_VERSION_FOR_FUNCTION_CASE_B_FACTS,
     _MIN_SCHEMA_VERSION_FOR_HEADER_IDENTIFIERS_FACT,
+    _MIN_SCHEMA_VERSION_FOR_INLINE_FACT,
     _MIN_SCHEMA_VERSION_FOR_IS_FINAL_FACT,
     _MIN_SCHEMA_VERSION_FOR_LAST_CASE_A_FACTS,
     _MIN_SCHEMA_VERSION_FOR_PARAM_KIND_FACT,
@@ -161,6 +162,7 @@ _FUNCTION_FACT_KEYS = (
     "in_public_contract_fact",
     "binary_exported_fact",
     "return_type_identities_fact",
+    "is_inline_fact",
 )
 
 # ADR-063 Phase 5 (seventh batch): the three binary-format metadata blocks'
@@ -582,6 +584,12 @@ def decode_function_facts(f: dict[str, Any], schema_version: int) -> dict[str, A
                 "deprecated",
                 schema_version,
                 _MIN_SCHEMA_VERSION_FOR_DEPRECATION_FACTS,
+            ),
+            "is_inline_fact": decode_fact_with_legacy_presence(
+                f,
+                "is_inline",
+                schema_version,
+                _MIN_SCHEMA_VERSION_FOR_INLINE_FACT,
             ),
             "declared_in_headers_fact": decode_fact(
                 f.get("declared_in_headers_fact"),
