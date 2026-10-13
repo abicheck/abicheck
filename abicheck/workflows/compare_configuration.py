@@ -61,12 +61,15 @@ the CLI's convention, not a fact about the comparison.
 
 from __future__ import annotations
 
+import dataclasses
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from ..dry_run_estimate import pair_wide_cxx20_std_override
 from ..errors import PackManifestError, PolicyError, ValidationError
+from .extraction import has_explicit_std
 
 if TYPE_CHECKING:
     from ..change_registry_types import Verdict
@@ -76,6 +79,7 @@ if TYPE_CHECKING:
         ProjectCompatibilityInputs,
         PublicSymbolsList,
     )
+    from ..dry_run_estimate import CompileContext
     from ..environment_matrix import EnvironmentMatrix
     from ..model.change_catalog.kinds import ChangeKind
     from ..pack_application import PackApplication
@@ -678,3 +682,53 @@ def resolve_compare_collect_mode(
             "build (inferred: --build-info old=/new= given, no --depth)",
         )
     return "off", "off -- no L3-L5 source/build evidence (no --depth, no --sources/--build-info, no source.method)"  # fmt: skip
+
+
+def _pair_wide_dialect_override(
+    lang: str,
+    old_h: list[Path],
+    new_h: list[Path],
+    compile_context: CompileContext,
+    side_compile_context: CompileContext,
+) -> tuple[CompileContext, CompileContext]:
+    """Pin ``-std=gnu++20`` for BOTH compare sides at once, or neither (P0 fix).
+
+    Thin wrapper around the shared core
+    (:func:`~abicheck.dry_run_estimate.pair_wide_cxx20_std_override`, also used by
+    ``service.run_compare_request``'s Python-API/MCP path, so the policy can't
+    drift between the two front-ends) that applies the decision to this CLI
+    path's two ``CompileContext`` objects: ``compile_context`` (used by the
+    inline-source-embed path) and ``side_compile_context`` (used by
+    ``_resolve_compare_snapshots``) — the sole call site derives the latter
+    from the former via ``dataclasses.replace(compile_context, frontend="auto")``,
+    so today they always carry identical ``gcc_options``/``gcc_option_tokens``;
+    the explicit-std guard below checks both anyway rather than relying on
+    that invariant holding for every future caller.
+
+    An explicit ``-std=``/``--std=``/``/std:`` from the user always wins and
+    this is then a no-op — auto-detection never overrides an explicit choice.
+    """
+    if has_explicit_std(
+        compile_context.gcc_options, compile_context.gcc_option_tokens
+    ) or has_explicit_std(
+        side_compile_context.gcc_options, side_compile_context.gcc_option_tokens
+    ):
+        return compile_context, side_compile_context
+    override = pair_wide_cxx20_std_override(
+        lang,
+        old_h,
+        new_h,
+        compile_context.gcc_options,
+        compile_context.gcc_option_tokens,
+    )
+    if override is None:
+        return compile_context, side_compile_context
+    compile_context = dataclasses.replace(
+        compile_context,
+        gcc_option_tokens=(*compile_context.gcc_option_tokens, *override),
+    )
+    side_compile_context = dataclasses.replace(
+        side_compile_context,
+        gcc_option_tokens=(*side_compile_context.gcc_option_tokens, *override),
+    )
+    return compile_context, side_compile_context

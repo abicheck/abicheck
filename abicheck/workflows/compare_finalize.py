@@ -21,6 +21,7 @@ from . import gate as gate_workflow
 from .contracts import CompareRequest, CompareResult
 
 if TYPE_CHECKING:
+    from ..checker_types import DiffResult
     from .compare_classify import ClassifiedPair
     from .resolved_execution_context import ResolvedExecutionContext
 
@@ -90,3 +91,14 @@ def finalize_classified_pair(
         severity_config=gate.severity,
         resolved_execution_context=context,
     )
+
+
+def _merge_redundant_changes(result: DiffResult) -> None:
+    """Re-merge redundant changes back into the main change list."""
+    for c in result.changes:
+        c.caused_count = 0
+    for c in result.redundant_changes:
+        c.caused_by_type = None
+    result.changes = result.changes + result.redundant_changes
+    result.redundant_changes = []
+    result.redundant_count = 0

@@ -37,6 +37,7 @@ from __future__ import annotations
 import os
 import sys
 from pathlib import Path
+from typing import Any
 
 import click
 import pytest
@@ -1512,97 +1513,102 @@ def test_dump_pe_explicit_gcc_options_no_longer_warns(
 # command exercises that mapping through the real Click parsing path.
 
 
+def _request_reaching_resolution(
+    monkeypatch: pytest.MonkeyPatch, args: list[str]
+) -> Any:
+    """The ``CompareRequest`` the real ``compare`` CLI hands the shared
+    resolution (stopped there)."""
+    import abicheck.service as service
+
+    seen: list[Any] = []
+
+    class _Stop(Exception):
+        pass
+
+    def _capture(request: Any, *_a: object, **_kw: object) -> Any:
+        seen.append(request)
+        raise _Stop
+
+    monkeypatch.setattr(service, "resolve_compare_request", _capture)
+    with pytest.raises(_Stop):
+        CliRunner().invoke(main, ["compare", *args], catch_exceptions=False)
+    (request,) = seen
+    return request
+
+
 def test_inline_source_side_keeps_its_own_configured_frontend(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Phase 7 (one-comparison-product.md §4.1, ADR-037 D8.1) removed
     ``--ast-frontend`` (sided or not) from ``compare``'s CLI entirely -- there
-    is no CLI spelling left that could mark ``frontend_explicit`` True for an
-    inline source-tree side any more, so each side's own ``.abicheck.yml``
+    is no CLI spelling left that could mark the frontend explicit for an
+    inline source-tree side, so each side's own ``.abicheck.yml``
     ``compile.frontend`` always applies, undisturbed by the other side's
     tree (the same regression this test used to guard via the now-removed
     per-side ``--ast-frontend old=``/``new=`` override).
 
-    Asserted at the boundary the original bug lived on -- what each side is
-    *told* about explicitness -- rather than through a full inline dump, so
-    the test states the contract rather than one downstream consequence of
-    it.
+    Asserted on the side's compile context in the request the CLI hands the
+    shared resolution -- the context that side's collection runs under.
     """
-    import abicheck.frontends.cli.commands.compare_routing as helpers
-
     old_so, new_so, header = _two_elf(tmp_path)
     src = tmp_path / "srctree"
     src.mkdir()
     (src / ".abicheck.yml").write_text(
         "compile:\n  frontend: clang\n", encoding="utf-8"
     )
+    monkeypatch.chdir(tmp_path)
 
-    seen: list[dict[str, object]] = []
-    real = helpers._embed_inline_source_side
-
-    def _spy(*args: object, **kwargs: object) -> object:
-        seen.append(dict(kwargs))
-        return (kwargs["input_path"], kwargs["sources"], kwargs["build_info"])
-
-    monkeypatch.setattr(helpers, "_embed_inline_source_side", _spy)
-    assert real is not _spy  # the symbol really was patched, not shadowed
-    result = CliRunner().invoke(
-        main,
-        [
-            "compare",
-            str(old_so),
-            str(new_so),
-            "-H",
-            str(header),
-            "--sources",
-            f"old={src}",
-        ],
+    request = _request_reaching_resolution(
+        monkeypatch,
+        [str(old_so), str(new_so), "-H", str(header), "--sources", f"old={src}"],
     )
-    assert len(seen) == 2, result.output
-    old_side, new_side = seen
-    # Neither side can be told the frontend was stated on the command line
-    # any more (no CLI spelling exists) -- each side's own source-tree
-    # config, or the lack of one, is what decides.
-    assert old_side["frontend_explicit"] is False, old_side
-    assert new_side["frontend_explicit"] is False, new_side
+
+    assert request.old.compile.frontend == "clang"
+    # The new side has no tree: the other side's config never reaches it.
+    assert request.new.sources is None
+    assert request.new.compile is None or request.new.compile.frontend != "clang"
 
 
 def test_project_config_frontend_never_marked_explicit_on_inline_source_sides(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """A ``.abicheck.yml`` ``compile.frontend`` (even a top-level one
-    discovered via ``--config``) is a *config* value, never CLI-explicit --
-    so it must not mark either inline source side's ``frontend_explicit``
-    True, which would incorrectly suppress that side's own source-tree
-    config in ``merge_compile_config``'s CLI > config precedence."""
-    import abicheck.frontends.cli.commands.compare_routing as helpers
+    """A ``.abicheck.yml`` ``compile.frontend`` (even a top-level one named by
+    ``--config``) is a *config* value, never CLI-explicit -- so it must not
+    suppress an inline side's own source-tree ``compile:`` block in
+    ``merge_compile_config``'s CLI > config precedence: the tree's other
+    fields still merge on that side.
 
+    The frontend itself is the first stage's: the project config already
+    resolved a concrete (non-``auto``) frontend into the run's context, and
+    the tree merge keeps any concrete frontend it is handed -- the same
+    two-stage fold the nested ``dump`` performed."""
     old_so, new_so, header = _two_elf(tmp_path)
     src = tmp_path / "srctree2"
     src.mkdir()
-    cfg = tmp_path / ".abicheck.yml"
+    (src / ".abicheck.yml").write_text(
+        "compile:\n  frontend: clang\n  sysroot: /from/tree\n", encoding="utf-8"
+    )
+    bare = tmp_path / "srctree3"
+    bare.mkdir()
+    cfg = tmp_path / "project.yml"
     cfg.write_text("compile:\n  frontend: castxml\n", encoding="utf-8")
 
-    seen: list[dict[str, object]] = []
-
-    def _spy(*args: object, **kwargs: object) -> object:
-        seen.append(dict(kwargs))
-        return (kwargs["input_path"], kwargs["sources"], kwargs["build_info"])
-
-    monkeypatch.setattr(helpers, "_embed_inline_source_side", _spy)
-    res = CliRunner().invoke(
-        main,
+    request = _request_reaching_resolution(
+        monkeypatch,
         [
-            "compare",
             str(old_so),
             str(new_so),
             "-H",
             str(header),
             "--sources",
             f"old={src}",
+            "--sources",
+            f"new={bare}",
             "--config",
             str(cfg),
         ],
     )
-    assert len(seen) == 2, res.output
-    assert all(s["frontend_explicit"] is False for s in seen), seen
+
+    assert request.old.compile.sysroot == Path("/from/tree")
+    assert request.new.compile.sysroot is None
+    assert request.old.compile.frontend == request.new.compile.frontend == "castxml"

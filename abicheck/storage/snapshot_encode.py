@@ -345,6 +345,15 @@ _TYPE_IDENTITY_KEY = "type_identities_fact"
 _RETURN_TYPE_IDENTITY_KEY = "return_type_identities_fact"
 
 
+def _drop_advanced_extraction_status(d: dict[str, Any]) -> None:
+    # AdvancedDwarfMetadata.extraction is in-memory only: persisting it would
+    # add a key to every stored document, which is a snapshot-schema change
+    # (docs/contribute/adr/080-*). A decoded snapshot reads UNRECORDED instead.
+    dwarf_advanced = d.get("dwarf_advanced")
+    if isinstance(dwarf_advanced, dict):
+        dwarf_advanced.pop("extraction", None)
+
+
 def _drop_uncaptured(entry: dict[str, Any], key: str) -> None:
     """Omit an uncaptured slot fact: ``None``, or a bare ``NOT_COLLECTED``
     (no value, diagnostics or producer) -- which is exactly what the decoder
@@ -441,6 +450,7 @@ def _snapshot_to_dict(snap: AbiSnapshot, encode: Any) -> dict[str, Any]:
     # ElfMetadata/PeMetadata/MachoMetadata enums -> strings (storage/enum_codec.py).
     encode_platform_enums(d)
     _drop_unobserved_odr_conflicts(d)
+    _drop_advanced_extraction_status(d)
     _compact_elf_symbols(d)
     _drop_uncaptured_type_identities(d)
 

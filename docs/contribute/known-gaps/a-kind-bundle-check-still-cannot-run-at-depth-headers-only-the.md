@@ -11,7 +11,7 @@ generated: false
 
 Index: [Known gaps](../known-gaps.md)
 
-**Status (re-verified 2026-10-09 at `456989f`): OPEN.** actions/check-target/action.yml:1828 still routes bundle old-library to `steps.resolve.outputs.binaries-dir`, not `member-snapshots-dir`. BUNDLE_CHECK_DEPTHS is unchanged (abicheck/buildsource/bundle_member_snapshots.py:18,69). So (a) routing and (b) candidate-side per-member headers are still open.
+**Status (re-verified 2026-10-12): OPEN, partly narrowed.** actions/check-target/action.yml:1828 still routes bundle old-library to `steps.resolve.outputs.binaries-dir`, not `member-snapshots-dir`. BUNDLE_CHECK_DEPTHS is unchanged (abicheck/buildsource/project_targets.py:151). (b)'s fail-early requirement is met: `actions/check-target/validate-inputs.sh` rejects `requested-depth: headers` for `kind: bundle` at input validation, before any tool runs, and the message now names the real remaining blockers instead of the retired "no historical header snapshot" reason (pinned by `tests/test_action_check_target.py::TestValidateInputs::test_bundle_kind_rejects_headers_depth`). (a) routing and the candidate-side per-member header selection are still open; see "Why (a) was not routed in this pass" below.
 
 
 `abicheck/buildsource/bundle_member_snapshots.py` now resolves and stages
@@ -186,6 +186,19 @@ command: "write this pipeline stage's artifact" is precisely the shape
 ADR-054's admission bar rejects (`AGENTS.md`, "Adding a new top-level
 command", items 3 and 5). The right slice is an output on the Action
 that already runs the fan-out, not new CLI surface.
+**Why (a) was not routed in this pass (2026-10-12).** Routing the old side
+to `member-snapshots-dir` is only safe at header depth, and header depth is
+still rejected upstream, so the routing would be dead code. Routing it at
+binary depth would change existing binary-depth outcomes (the old side
+would become stored snapshots instead of the binaries the bundle graph
+reads today), which this entry does not license. Two further gaps block
+enabling header depth: `check-target` does not yet pass
+`stage-member-snapshots: true` to `resolve-baseline`, so no
+`member-snapshots-dir` is produced for a bundle run; and (b)'s candidate
+side is unsolved. (c)'s receipt is also still required. Shipping the
+routing before (b) and (c) would replace a loud rejection with a silent
+mismatch, which is the failure mode this entry exists to prevent.
+
 Until these land, a bundle check stays binary-depth, and staging is
 additive: it changes no existing outcome, and every pre-existing
 invocation (which does not pass `stage-member-snapshots`) is unaffected.

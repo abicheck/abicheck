@@ -22,7 +22,7 @@ disposition ledger reaches it through the workflow layer rather than
 importing ``policy/disposition_ledger.py`` directly.
 
 One frontend needed this originally, for one reason: the scoped-gate
-orchestrators (``cli_helpers_compare._apply_used_by_scoping`` and
+orchestrators (``workflows.consumer_scope_gate._apply_used_by_scoping`` and
 ``_apply_required_symbol_scoping``) are the only code that knows the *union*
 of relevant findings across every ``--used-by`` consumer, and
 ``close_consumer_scope`` has to be called once with that union rather than

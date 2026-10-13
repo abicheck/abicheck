@@ -262,7 +262,40 @@ class ElfMetadata:
     def symbol_map(self) -> dict[str, ElfSymbol]:
         """Name → ElfSymbol mapping (built once, cached on first access).
 
+        One entry per bare name, last ``.dynsym`` entry wins. It hides
+        symbol-versioned aliases (``foo@VER1`` and ``foo@@VER2`` share a name),
+        so a reader that must see every alias uses :attr:`symbol_aliases`.
+
         Thread safety: benign race — both threads compute the same dict;
         the last write wins. Functionally correct for read-only use.
         """
         return {s.name: s for s in self.symbols}
+
+    @memoized_property
+    def symbol_aliases(self) -> dict[str, list[ElfSymbol]]:
+        """Bare name → every ElfSymbol carrying it, in ``.dynsym`` order.
+
+        Unlike :attr:`symbol_map`, keeps each symbol-versioned alias. Built
+        once and cached like :attr:`symbol_map`.
+        """
+        out: dict[str, list[ElfSymbol]] = {}
+        for s in self.symbols:
+            out.setdefault(s.name, []).append(s)
+        return out
+
+    def unambiguous_symbol(self, name: str) -> ElfSymbol | None:
+        """The symbol for *name* if every versioned alias agrees, else None.
+
+        Binding and visibility are read from one symbol. When aliases of one
+        bare name disagree, no single value is true of the name, so this
+        returns None instead of the last alias's value. None also covers an
+        absent name.
+        """
+        aliases = self.symbol_aliases.get(name)
+        if not aliases:
+            return None
+        first = aliases[0]
+        for alias in aliases[1:]:
+            if alias.binding != first.binding or alias.visibility != first.visibility:
+                return None
+        return first

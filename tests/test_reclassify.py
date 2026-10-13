@@ -811,7 +811,7 @@ reclassify:
 def test_reclassify_disclosed_in_markdown_report(tmp_path: Path) -> None:
     """Codex review: Markdown must disclose active reclassify: rules the
     same way it already discloses overrides:."""
-    from abicheck.reporter_markdown import to_markdown
+    from abicheck.report.dispatch_markdown import to_markdown
 
     diff = _reclassify_diff_and_policy_path(tmp_path)
     md = to_markdown(diff)
@@ -828,7 +828,7 @@ def test_reclassify_markdown_disclosure_is_code_span_wrapped(
     as emphasis markers, which can mangle a mangled-name selector's
     rendering. Must be code-span-wrapped, same as the `Policy overrides`
     line already wraps its own values."""
-    from abicheck.reporter_markdown import to_markdown
+    from abicheck.report.dispatch_markdown import to_markdown
 
     diff = _reclassify_diff_and_policy_path(tmp_path)
     md = to_markdown(diff)
@@ -933,7 +933,7 @@ def test_expired_reclassify_rule_absent_from_json_report(tmp_path: Path) -> None
 
 
 def test_expired_reclassify_rule_absent_from_markdown_report(tmp_path: Path) -> None:
-    from abicheck.reporter_markdown import to_markdown
+    from abicheck.report.dispatch_markdown import to_markdown
 
     diff = _expired_reclassify_diff(tmp_path)
     assert "Policy reclassify" not in to_markdown(diff)

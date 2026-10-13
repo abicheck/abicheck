@@ -47,10 +47,13 @@ GATED: dict[str, Any] = {
     "debug_presence_only": True,
     "include_labels": "<label>",
 }
+# Keyed by content, but its path still names the snapshot's identity fields
+# (library, source_path, source_mtime, source_size). A hit re-derives them from
+# this call's path; test_snapshot_hit_binary_identity.py holds the real oracle.
+RESTAMPED = {"path"}
 # Cannot change the produced snapshot on a cacheable call.
 INERT = {
     "run_dump",
-    "path",  # its content is the key's base material
     "notify",  # progress callback only
     "debuginfod_url",  # only read when enable_debuginfod (GATED)
     "dump_manifest",  # keyed structurally; covered by the manifest cache tests
@@ -59,7 +62,7 @@ INERT = {
 
 def test_classification_is_exhaustive():
     params = set(inspect.signature(cached_run_dump).parameters)
-    classified = set(KEYED) | set(GATED) | INERT
+    classified = set(KEYED) | set(GATED) | RESTAMPED | INERT
     assert params == classified, (params - classified, classified - params)
 
 

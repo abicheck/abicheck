@@ -65,6 +65,7 @@ from .dwarf_metadata import DwarfMetadata, _process_cu_impl as _meta_process_cu
 from .dwarf_utils import dwarf_low_memory_mode, free_cu_die_cache, has_real_dwarf_info
 from .extract.dwarf_subtree_index import open_indexed_dwarf_info
 from .extract.progress import timed
+from .model.dwarf_facts import AdvancedExtractionStatus
 
 log = logging.getLogger(__name__)
 
@@ -113,33 +114,48 @@ def open_dwarf_session(so_path: Path) -> DwarfSession | None:
     conditions under which :func:`parse_dwarf` yields empty metadata. Never
     raises. The caller must :meth:`~DwarfSession.close` a non-``None`` result.
     """
+    session, _status = _open_dwarf_session_with_status(so_path)
+    return session
+
+
+def _open_dwarf_session_with_status(
+    so_path: Path,
+) -> tuple[DwarfSession | None, AdvancedExtractionStatus]:
+    """:func:`open_dwarf_session`, plus what the attempt established.
+
+    The status says why a ``None`` session came back: ``FAILED`` when the file
+    could not be opened or parsed, ``NOT_RUN`` when it is not a regular file
+    (nothing was read), ``COMPLETED`` when the ELF was read and carries no DWARF.
+    With a session, the status is ``COMPLETED``.
+    """
     try:
         f = open(so_path, "rb")
     except OSError as exc:
         log.warning("parse_dwarf: failed to open/parse %s: %s", so_path, exc)
-        return None
+        return None, AdvancedExtractionStatus.FAILED
     try:
         st = os.fstat(f.fileno())
         if not stat.S_ISREG(st.st_mode):
             log.warning("parse_dwarf: not a regular file: %s", so_path)
             f.close()
-            return None
+            return None, AdvancedExtractionStatus.NOT_RUN
 
         elf = ELFFile(f)  # type: ignore[no-untyped-call]
 
         if not has_real_dwarf_info(elf):
             log.debug("parse_dwarf: no DWARF info in %s", so_path)
             f.close()
-            return None
+            return None, AdvancedExtractionStatus.COMPLETED
 
         dwarf = open_indexed_dwarf_info(elf)
-        return DwarfSession(
+        session = DwarfSession(
             path=Path(so_path),
             _file=f,
             elf=elf,
             dwarf=dwarf,
             arch=_normalize_arch(elf),
         )
+        return session, AdvancedExtractionStatus.COMPLETED
     except Exception as exc:  # noqa: BLE001 - never raise; always release the handle
         # pyelftools can raise beyond (ELFError, OSError, ValueError) on corrupt
         # DWARF (struct.error, KeyError, …). The legacy parse_dwarf used a
@@ -147,7 +163,7 @@ def open_dwarf_session(so_path: Path) -> DwarfSession | None:
         # so the "never raises" contract holds and no descriptor leaks.
         log.warning("parse_dwarf: failed to open/parse %s: %s", so_path, exc)
         f.close()
-        return None
+        return None, AdvancedExtractionStatus.FAILED
 
 
 def parse_dwarf_from_session(
@@ -168,7 +184,9 @@ def parse_dwarf_from_session(
     unaffected either way -- see ``free_cu_die_cache``'s docstring.
     """
     meta = DwarfMetadata(has_dwarf=True, odr_conflicts_observed=True)
-    adv = AdvancedDwarfMetadata(has_dwarf=True)
+    adv = AdvancedDwarfMetadata(
+        has_dwarf=True, extraction=AdvancedExtractionStatus.COMPLETED
+    )
     adv.target_arch = session.arch
     low_memory = dwarf_low_memory_mode(session.dwarf)
 
@@ -213,9 +231,9 @@ def parse_dwarf(
     ``None`` (the default, and every external caller) the session is closed
     before returning, so behaviour is unchanged.
     """
-    session = open_dwarf_session(so_path)
+    session, status = _open_dwarf_session_with_status(so_path)
     if session is None:
-        return DwarfMetadata(), AdvancedDwarfMetadata()
+        return DwarfMetadata(), AdvancedDwarfMetadata(extraction=status)
 
     try:
         meta, adv = parse_dwarf_from_session(session)
@@ -226,7 +244,9 @@ def parse_dwarf(
         # degrades to symbol-only) rather than leaking the handle / aborting.
         log.warning("parse_dwarf: failed to parse CUs in %s: %s", so_path, exc)
         session.close()
-        return DwarfMetadata(), AdvancedDwarfMetadata()
+        return DwarfMetadata(), AdvancedDwarfMetadata(
+            extraction=AdvancedExtractionStatus.FAILED
+        )
 
     if _session_out is not None:
         _session_out.append(session)

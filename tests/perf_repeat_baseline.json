@@ -11,8 +11,8 @@
     "abicheck/buildsource/source_inputs.py(SourceInputSet.sufficient)": 56,
     "abicheck/buildsource/source_inputs.py(SourceReadLicence.to_dict)": 14,
     "abicheck/comparability_profile.py(_toolchain_identity_status)": 14,
-    "abicheck/compare/debug_layout_view.py(_layout_channel)": 126,
-    "abicheck/compare/debug_layout_view.py(debug_layout_view)": 126,
+    "abicheck/compare/debug_layout_view.py(_layout_channel)": 140,
+    "abicheck/compare/debug_layout_view.py(debug_layout_view)": 140,
     "abicheck/compare/declined_comparisons.py(declined_scope)": 677,
     "abicheck/compare/dedup_key.py(hashable_value)": 1661,
     "abicheck/compare/detection_memo.py(detection_memo_scope)": 14,
@@ -165,8 +165,8 @@
     "abicheck/model/contract_finding_relevance.py(is_evaluated)": 756,
     "abicheck/model/debug_evidence.py(debug_info_evidence)": 216,
     "abicheck/model/declarator_qualifiers.py(_split_at_trailing_param_list)": 35,
-    "abicheck/model/dwarf_facts.py(advanced_facts_collected)": 140,
-    "abicheck/model/dwarf_facts.py(debug_info_present)": 628,
+    "abicheck/model/dwarf_facts.py(advanced_facts_collected)": 154,
+    "abicheck/model/dwarf_facts.py(debug_info_present)": 642,
     "abicheck/model/edge_coverage.py(CoverageRecord.covered_units)": 934,
     "abicheck/model/entity_identity.py(source_relative_identity)": 774,
     "abicheck/model/evidence_status.py(is_cross_source_resolved)": 756,
@@ -231,7 +231,7 @@
     "abicheck/model/signature_normalization.py(_strip_cv_tokens_outside_nesting)": 35,
     "abicheck/model/signature_normalization.py(canonicalize_function_signature_param_type)": 563,
     "abicheck/model/snapshot.py(AbiSnapshot.canonical_ir)": 488,
-    "abicheck/model/snapshot.py(AbiSnapshot.declarations)": 4496,
+    "abicheck/model/snapshot.py(AbiSnapshot.declarations)": 4552,
     "abicheck/model/snapshot.py(AbiSnapshot.function_map)": 196,
     "abicheck/model/snapshot.py(AbiSnapshot.index)": 196,
     "abicheck/model/snapshot.py(AbiSnapshot.variable_map)": 28,
@@ -294,5 +294,5 @@
   },
   "mode": "default",
   "n": 40,
-  "total": 244845
+  "total": 244957
 }
