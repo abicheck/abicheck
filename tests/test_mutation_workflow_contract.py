@@ -657,7 +657,6 @@ _ACCEPTED_KILL_LOSS = {
             "abicheck.policy.classification",
             "abicheck.policy.selectors",
             "abicheck.policy.selectors_namespace_glob",
-            "abicheck.snapshot_io",
             "abicheck.storage.snapshot_encode",
             "abicheck.storage.snapshot_schema_versions",
             "abicheck.suppression",
@@ -728,7 +727,6 @@ _ACCEPTED_KILL_LOSS = {
         {
             "abicheck.model.evidence_status",
             "abicheck.name_classification",
-            "abicheck.snapshot_io",
         }
     ),
     "tests/test_action_check_target.py": frozenset(

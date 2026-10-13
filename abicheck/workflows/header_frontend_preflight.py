@@ -104,10 +104,10 @@ def preflight_header_frontend(
     """Resolve *requested* exactly as the dump will, then check its tools.
 
     Tool presence is a ``PATH`` lookup only (no subprocess), matching the
-    dump's own ``_resolve_selected_tool``/``_clang_available`` checks.
+    dump's own ``_resolve_selected_tool``/``clang_available`` checks.
     """
-    from ..dumper_clang import _resolve_clang_bin
     from ..errors import SnapshotError
+    from ..extract.compiler_driver import resolve_clang_bin
     from ..extract.header_ast_backend import _resolve_header_backend
     from ..extract.headers.ast_config import _resolve_compiler_binary
     from ..extract.headers.toolchain import (
@@ -121,7 +121,7 @@ def preflight_header_frontend(
 
     def _clang_tool() -> tuple[str, bool]:
         try:
-            return _resolve_clang_bin(compiler, gcc_path, gcc_prefix), True
+            return resolve_clang_bin(compiler, gcc_path, gcc_prefix), True
         except SnapshotError:
             return ("clang" if lang == "c" else "clang++"), False
 

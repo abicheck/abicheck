@@ -40,8 +40,8 @@ from pathlib import Path
 
 import abicheck.deadline as deadline
 
-from ...dumper_clang import _is_clang_family_binary
 from ...extract.env_flags import env_flag
+from ..compiler_driver import is_clang_family_binary
 
 #: Env knob to disable the castxml↔clang system-include auto-detection. On by
 #: default; set to a falsey value to suppress the host-compiler probe (e.g. for a
@@ -314,7 +314,7 @@ def _resolve_probe_compiler(
     cpp = compiler in ("c++", "g++", "clang++")
     primary = "g++" if cpp else "gcc"
     candidates: list[str] = []
-    if gcc_path and not _is_clang_family_binary(gcc_path):
+    if gcc_path and not is_clang_family_binary(gcc_path):
         candidates.append(gcc_path)
     if gcc_prefix:
         candidates.append(f"{gcc_prefix}{primary}")

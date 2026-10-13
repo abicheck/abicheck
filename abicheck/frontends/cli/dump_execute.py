@@ -324,7 +324,7 @@ def execute_and_write_header_only_dump_cli_run(
     from ...workflows.dump.pipeline import DumpExecutionOptions
     from ...workflows.extraction import (
         dump_manifest_header_roots,
-        resolve_source_frontend_clang_bin,
+        resolve_l4_replay_clang_bin,
     )
 
     exec_resolved = _replace(
@@ -364,9 +364,7 @@ def execute_and_write_header_only_dump_cli_run(
         # prefix is a dependency" -- which deletes a project staged under
         # `usr/include` (Codex review).
         header_roots=scoping_roots,
-        clang_bin=resolve_source_frontend_clang_bin(
-            gcc_path, gcc_prefix, exclude_cl_style=False
-        ),
+        clang_bin=resolve_l4_replay_clang_bin(gcc_path, gcc_prefix),
         snapshot_compression=snapshot_compression,
         public_headers=resolved.public_headers,
         public_header_dirs=resolved.public_header_dirs,

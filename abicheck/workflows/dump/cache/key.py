@@ -437,12 +437,11 @@ def _dump_cache_extra_key(
 
 
 def _clang_driver(compiler: str, gcc_path: str | None, gcc_prefix: str | None) -> str:
-    """The clang driver a dump would run for *compiler* (``dumper_clang``'s own
-    resolution). The one place this module reaches into that legacy module; the
-    compiler-driver extraction should repoint it at its public resolver."""
-    from ....dumper_clang import _resolve_clang_bin
+    """The clang driver a dump would run for *compiler*, resolved by its owner
+    ``extract/compiler_driver``. Raises if clang is not on ``PATH``."""
+    from ....extract.compiler_driver import resolve_clang_bin
 
-    return _resolve_clang_bin(compiler, gcc_path, gcc_prefix)
+    return resolve_clang_bin(compiler, gcc_path, gcc_prefix)
 
 
 def _cache_key(

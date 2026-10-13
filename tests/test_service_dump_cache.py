@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import patch
 
+from abicheck.extract import compiler_driver
 from abicheck.model import AbiSnapshot, Function, Visibility
 from abicheck.workflows.dump.cache import salt as dump_cache_salt
 from abicheck.workflows.dump.cache.api import cached_run_dump
@@ -406,9 +407,9 @@ class TestDumpCacheExtraKey:
         # clang was unavailable must not be replayed once clang becomes
         # available (or vice versa), or the header graph silently keeps
         # whatever degraded/absent coverage the first run saw.
-        with patch("abicheck.dumper_clang._clang_available", return_value=False):
+        with patch.object(compiler_driver, "clang_available", return_value=False):
             k_missing = _dump_cache_extra_key("elf", "castxml", None, None)
-        with patch("abicheck.dumper_clang._clang_available", return_value=True):
+        with patch.object(compiler_driver, "clang_available", return_value=True):
             with patch("shutil.which", return_value="/usr/bin/clang++"):
                 k_present = _dump_cache_extra_key("elf", "castxml", None, None)
         assert k_missing != k_present
@@ -416,7 +417,7 @@ class TestDumpCacheExtraKey:
     def test_differs_by_header_graph_clang_resolved_path(self):
         # Two different clang installs on PATH (e.g. a system upgrade) must
         # produce different keys even though both "are available".
-        with patch("abicheck.dumper_clang._clang_available", return_value=True):
+        with patch.object(compiler_driver, "clang_available", return_value=True):
             with patch("shutil.which", return_value="/usr/bin/clang++"):
                 k1 = _dump_cache_extra_key("elf", "castxml", None, None)
             with patch("shutil.which", return_value="/opt/llvm-18/bin/clang++"):
@@ -433,7 +434,7 @@ class TestDumpCacheExtraKey:
         clang_path = tmp_path / "clang++"
         clang_path.write_bytes(b"fake clang v1")
         with (
-            patch("abicheck.dumper_clang._clang_available", return_value=True),
+            patch.object(compiler_driver, "clang_available", return_value=True),
             patch("shutil.which", return_value=str(clang_path)),
         ):
             k1 = _dump_cache_extra_key("elf", "castxml", None, None)
@@ -451,7 +452,7 @@ class TestDumpCacheExtraKey:
         # `cc`/`c++` resolve to different driver names -- fold `lang` in so a
         # C vs C++ dump (which can genuinely have only one of the two
         # installed) gets a distinct key.
-        with patch("abicheck.dumper_clang._clang_available", return_value=True):
+        with patch.object(compiler_driver, "clang_available", return_value=True):
             with patch("shutil.which", side_effect=lambda name: f"/usr/bin/{name}"):
                 k_cpp = _dump_cache_extra_key("elf", "castxml", None, None, "c++")
                 k_c = _dump_cache_extra_key("elf", "castxml", None, None, "c")

@@ -682,7 +682,7 @@ def test_emit_keeps_default_clang_bin_for_non_clang_family_compiler(
 # generalization — every clang-family alias, crossed with every launcher
 # wrapping shape (bare / ccache / ccache+overrides / chained launchers),
 # checked against the exact same resolver `dump --sources`'s own `--compiler`
-# handling uses (`dumper_clang.resolve_source_frontend_clang_bin`), so this
+# handling uses (`abicheck.extract.compiler_driver.resolve_source_frontend_clang_bin`), so this
 # stays a same-answer check rather than a second, independently-guessable one.
 
 
@@ -701,7 +701,7 @@ def _resolved_clang_bin(command: list[str], tmp_path: Path, monkeypatch) -> str 
     return captured.get("clang_bin")
 
 
-#: Every alias `_is_clang_family_binary` recognizes (dumper_clang.py), plus a
+#: Every alias `is_clang_family_binary` recognizes (dumper_clang.py), plus a
 #: versioned/CL-style spelling of each shape it must also cover.
 _CLANG_FAMILY_COMPILERS = [
     "clang",

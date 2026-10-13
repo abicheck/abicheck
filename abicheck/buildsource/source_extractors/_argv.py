@@ -620,7 +620,7 @@ def _skip_env_prefix(
     never examined the actual compiler: ``_msvc_driver_scan`` found no
     ``cl``/``clang-cl``-basename token at any recognized executable
     position, ``msvc_driver_token`` returned ``None``, ``_derived_gcc_path``
-    fell back to ``argv[0]`` (``"env"``), and ``dumper_clang._resolve_clang_bin``
+    fell back to ``argv[0]`` (``"env"``), and ``abicheck.extract.compiler_driver.resolve_clang_bin``
     rejected that name and silently substituted plain ``clang++`` -- losing
     the recorded toolchain's built-ins, default headers, and target
     defaults.
@@ -656,7 +656,7 @@ def _skip_env_prefix(
       environment override) means a *bare* driver name that follows
       (``env PATH=/opt/llvm/bin clang-cl ...``) may only be resolvable
       through that overridden ``PATH``, not abicheck's own inherited one --
-      every downstream ``shutil.which``-style lookup (``_resolve_clang_bin``,
+      every downstream ``shutil.which``-style lookup (``resolve_clang_bin``,
       replay subprocess spawning) searches the wrong list of directories
       without it.
 
@@ -1428,7 +1428,7 @@ def pick_compiler_binary(compile_unit: CompileUnit, override: str | None) -> str
     correctly leaves a bare token (e.g. ``"cc"`` from ``env -i cc ...``)
     unresolved rather than guessing -- but returning it here unchanged
     would let a downstream ``shutil.which``-style lookup (``dumper_clang.
-    _resolve_clang_bin``, or the eventual subprocess spawn itself) resolve
+    resolve_clang_bin``, or the eventual subprocess spawn itself) resolve
     it against ABICHECK'S OWN inherited ``PATH``, which the real recorded
     command -- genuinely PATH-less under ``env -i`` -- could never have
     done. See :func:`env_path_cleared_for_bare_token`'s own docstring for
@@ -1565,7 +1565,7 @@ def _carry_abi_relevant_flags(
     every occurrence of a flag genuinely repeated within
     ``abi_relevant_flags`` itself is now carried through faithfully, in
     the real build's own order and multiplicity, so last-flag-wins
-    scanning downstream (e.g. ``dumper_clang._needs_sycl_host_only``) sees
+    scanning downstream (e.g. ``abicheck.extract.compiler_driver.needs_sycl_host_only``) sees
     the same sequence the real compiler did.
     """
     i = 0

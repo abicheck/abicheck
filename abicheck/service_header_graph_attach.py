@@ -148,7 +148,7 @@ def _attach_header_graph(
     )
     from .buildsource.include_graph import augment_graph_with_includes
     from .buildsource.semantic_fact_folds import HEADER_SEMANTIC_PASSES
-    from .dumper import _resolve_clang_bin
+    from .extract.compiler_driver import resolve_clang_bin
     from .model.header_lang_mode import recorded_lang_mode
     from .model.source_graph_coverage import HEADER_CALL_GRAPH_PASS
 
@@ -225,7 +225,7 @@ def _attach_header_graph(
         # "not found" via its own .available() check rather than aborting
         # the dump (ADR-028 D3).
         try:
-            include_clang_bin = _resolve_clang_bin(
+            include_clang_bin = resolve_clang_bin(
                 "cc" if _is_c else "c++", cc.gcc_path, cc.gcc_prefix
             )
         except SnapshotError:

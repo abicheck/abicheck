@@ -5,4 +5,4 @@
   which on Windows rewrites `/tmp/icpx-1` to `\tmp\icpx-1`; the textual
   relocation then matched nothing and the replayed jobs kept pointing at the
   driver's temp directory. The directory is now taken from the token's own
-  spelling (`buildsource.dpcpp_jobs.spelled_parent`).
+  spelling (`extract.dpcpp_jobs.spelled_parent`).

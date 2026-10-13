@@ -53,7 +53,7 @@ def _parse_mode(
         lambda *a, **k: (),
     )
     monkeypatch.setattr(
-        "abicheck.extract.headers.clang.backend._resolve_clang_bin",
+        "abicheck.extract.headers.clang.backend.resolve_clang_bin",
         lambda *a, **k: "clang",
     )
     header = tmp_path / "api.h"

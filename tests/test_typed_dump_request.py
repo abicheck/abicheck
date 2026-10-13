@@ -792,7 +792,7 @@ class TestAndroidFrontendIsNotAHeaderBackend:
     only, no header-AST path. Both pipelines already map the bare
     ``header_backend`` to ``"auto"`` for it — but ``workflows.dump.native._run_dump_uncached``
     gives an explicit ``compile.frontend`` *precedence* over that argument, and
-    ``dumper._resolve_header_backend`` raises for anything outside
+    ``header_ast_backend._resolve_header_backend`` raises for anything outside
     castxml/clang/hybrid/auto. So a resolved context still carrying "android"
     failed the whole extraction with "Unknown AST frontend 'android'", before
     any build/source evidence was embedded.
