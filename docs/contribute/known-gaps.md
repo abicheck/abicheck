@@ -245,14 +245,16 @@ Each entry's status line says what is still open. A PARTIAL entry's write-up als
 - [The `clang -M` include pass is unaffected by a warm AST cache — confirmed at `--repeat 3`](known-gaps/the-clang-m-include-pass-is-unaffected-by-a-warm-ast-cache.md)  
   **Status (re-verified 2026-10-09 at `456989f`): OPEN.** header_include_memo.py is a process-wide memo with no persistent/AST-cache tier, so a new run still recomputes the include graph whatever the warm AST cache holds.
 
-#### A directory `compare`'s per-member header narrowing is ELF-only
+#### A directory `compare` feeds the union `-H` set to every member again: per-member header narrowing was reverted (2026-10-12)
 
-**Status (2026-10-11): OPEN.** A PE or Mach-O member of a directory/package `compare` still parses the union `-H` set, because `workflows/release_member_headers.py` reads exports only from ELF. A second, ELF-side limit: an export spelled only through macro token pasting is not matched to its header (see the write-up).
-`perf` — The narrowing reads ELF export tables only (`elf_symbol_filter.exported_symbol_names`). For a PE or Mach-O member it finds no export tokens and falls back to the union operand. That fallback is safe (it over-reports and never hides a finding), but it leaves the per-member union walk and the duplicated type findings in place on those platforms. The parent entry is closed (see the [archive](archive/known-gaps-closed.md)). [Full write-up](known-gaps/a-directory-compare-s-per-member-header-narrowing-is-elf-only.md)
+**Status (2026-10-12): OPEN, reopened.** The narrowing from #1554 (`882482c47`) is reverted. It gave each release member the headers its exported names appeared in, decided per side. On a real oneDAL release (2026.0.0 to 2026.1.0, four members) three members stopped being compared: one got a header subset that did not parse (castxml exit 1), and two were refused as NOT_COMPARABLE because each side's assignment followed that side's exports and header set (scope_fingerprint mismatch). The release exit moved from 4 to 16. The union operand is back, and the release gate is again the one that was proven.
+`perf` — Every member still parses the whole union `-H` set, so release header work grows with members x headers, and a type from one member's header is parsed by its siblings too. The verdict half is closed: a type that a member's own exports prove unreachable is recorded out of that member's contract, and it gates only through a sibling that reaches it (see the [archive](archive/known-gaps-closed.md)).
+
+Do not re-attempt token-claiming. A header's export tokens cannot tell whether it is self-contained: the umbrella header that supplies a prelude is an includer, not an include, so an include-closure does not recover it. Per-side assignment is also not symmetric, so the two sides parse different surfaces. A retry needs include-graph evidence, one assignment shared by both sides, and a castxml failure that is recorded as a FAILED fact, never a silent fall-back. [Full write-up](known-gaps/a-directory-compare-s-per-member-header-narrowing-is-elf-only.md)
 
 #### Multi-library L2 compare scales quadratically with library count
 
-`perf` — Memoization landed (scaling budget 1.7), and step 2 (2026-10-11) means an ELF member no longer walks the union header set; the scaling budget has not been re-measured since.
+`perf` — Memoization landed (scaling budget 1.7). Step 2 was reverted on 2026-10-12, so every member walks the union header set again; the scaling budget has not been re-measured since the revert.
 
 - [Multi-library L2 compare scales quadratically with library count](known-gaps/multi-library-l2-compare-scales-quadratically-with-library-count.md)  
   **Status (re-verified 2026-10-09 at `456989f`): PARTIAL.** The memoization landed: the libraries budget is 1.7 in scripts/check_l2_scaling_perf.py:103 and header_scan_memo/include memo exist. Still open: every member walks the union header set and runs the per-member field parse (step 2 of entry 73).

@@ -1187,4 +1187,38 @@ EVIDENCE_BUG_CLASSES: tuple[BugClass, ...] = (
             ),
         ),
     ),
+    BugClass(
+        id="evidence.per_side_operand_divergence",
+        invariant=(
+            "An operand derived separately for the old and new side of one "
+            "comparison (a per-member header set, an export-driven subset) "
+            "must come out the same for both sides, or the two declared "
+            "surfaces diverge and members are refused as NOT_COMPARABLE even "
+            "when the real change is BREAKING. A header present on one side "
+            "only must never refuse a member."
+        ),
+        fixed_by=(1586,),
+        seed_tests=(
+            "tests/test_release_member_headers_integration.py",
+            "tests/test_family_f2_release_member_parity.py",
+        ),
+        public_surfaces=("cli",),
+        axes={
+            "side": ("old-only header", "new-only header"),
+            "claimant": ("member A's export", "member B's export"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "The synthetic fixture covers the scope-fingerprint "
+                    "divergence only. The castxml failure from a non-self-"
+                    "contained header subset (an umbrella header that an "
+                    "aggregate needs, reached as an includer) is not "
+                    "reproduced here, because the per-member narrowing that "
+                    "produced it is reverted rather than made sound."
+                ),
+                reference="https://github.com/abicheck/abicheck/issues/1580",
+            ),
+        ),
+    ),
 )

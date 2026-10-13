@@ -48,11 +48,6 @@ from .release_compare_reporter import (
     SilentReleaseReporter,
 )
 from .release_member_failures import classify_member_failure, dispatch_failure_entry
-from .release_member_headers import (
-    ReleaseHeaderOwnership,
-    member_header_operand,
-    resolve_release_header_ownership,
-)
 from .release_member_request import (
     MemberDelta,
     ReleaseMemberCompareRequest,
@@ -106,7 +101,6 @@ class ReleaseMemberContext:
     pack_application: PackApplication | None = None
     collect_diff_results: bool = False
     retention: release_snapshot_retention.SnapshotRetention | None = None
-    header_ownership: ReleaseHeaderOwnership | None = None
 
 
 def release_parent_request(
@@ -203,7 +197,6 @@ def compare_release_member(key: str, ctx: ReleaseMemberContext) -> dict[str, obj
                     new_input=new_path,
                     old_pdb_path=old_dbg,
                     new_pdb_path=new_dbg,
-                    **member_header_operand(ctx.header_ownership, key, request),
                 ),
             ),
             ctx.pack_application,
@@ -440,20 +433,17 @@ def compare_release_members(
     reporter = ctx.reporter
     old_h, new_h = ctx.request.old_headers, ctx.request.new_headers
     plan = plan_release_workers(jobs, depth=depth, header_roots=bool(old_h or new_h))
-    if plan.clamped_from is not None:
+    # Only a memory clamp is a degradation the operator can act on, so only it
+    # is announced. The interpreter's member cap is the designed default on
+    # every run and stays silent; a memory note there would name the wrong
+    # limit and break the pure-JSON stdout contract.
+    if plan.limited_by == "memory":
         reporter.notice(
             f"Note: parallel release workers reduced {plan.clamped_from} -> "
             f"{plan.initial_jobs} to fit available memory (~{plan.budget_gib:.1f} "
             "GiB/worker budget, each holding up to two full snapshots resident); "
             "set ABICHECK_RELEASE_JOB_MEM_GIB to tune the per-worker budget."
         )
-    ctx = dataclasses.replace(
-        ctx,
-        # Each member parses the headers it claims, not the union.
-        header_ownership=resolve_release_header_ownership(
-            compare_keys, ctx.old_map, ctx.new_map, list(old_h), list(new_h)
-        ),
-    )
 
     # `workflows.crosscheck_ownership`: the whole-product cross-source check
     # is answered once at release level, entered around the dispatch so each

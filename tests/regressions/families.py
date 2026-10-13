@@ -67,7 +67,10 @@ FAMILIES: dict[str, Family] = {
                 "through every route (CLI, typed API, scalar vs release member, "
                 "stored vs live operand, dry run vs execution)."
             ),
-            harness_tests=("tests/test_family_f2_route_parity.py",),
+            harness_tests=(
+                "tests/test_family_f2_route_parity.py",
+                "tests/test_family_f2_release_member_parity.py",
+            ),
         ),
         Family(
             key="F3",
@@ -227,6 +230,9 @@ _F2 = (
     "adapter.duck_typed_view_attribute_drift",
     "api.positional_slot_rebinding",
     "evidence.compare_dump_inline_routing_parity",
+    # A release member and its scalar pair disagreed when a header existed on one
+    # side only; H2's asymmetric-header cell pins the route parity.
+    "evidence.per_side_operand_divergence",
 )
 _F3 = (
     "config.location_dependent_fingerprint",

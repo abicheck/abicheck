@@ -1,9 +1,9 @@
-"""A directory ``compare`` parses each member with the headers it owns, not
-the union of every member's ``-H`` headers, and a type a member provably
-does not reach stays off that member's verdict (known gap "A directory
-``compare`` still feeds the union ``-H`` set to every member", steps 2 and
-the verdict half of 3; now archived in
-``docs/contribute/archive/known-gaps-closed.md``).
+"""A directory ``compare`` gives every member the union of the release's
+``-H`` headers, and a type a member provably does not reach stays off that
+member's verdict (the verdict half of known gap "A directory ``compare``
+still feeds the union ``-H`` set to every member", step 3; see
+``docs/contribute/known-gaps.md``). Per-member header narrowing was tried
+and reverted, so this file must not assume a narrowed operand.
 
 Built from real gcc binaries and run through the public CLI. The oracle is
 the binaries' own export tables and the fixture's declared header layout,
@@ -130,12 +130,13 @@ def test_a_type_change_in_one_members_header_stays_with_that_member(
     assert "Widget" in _symbols(members["liba.so"])
     # ... and the release exits as a binary break (exit 4).
     assert code == 4, stderr
-    # (1)/(3) libb parsed only the header it owns, so the Widget change is
-    # not a finding of libb's at all -- neither counted nor filtered.
+    # libb parses the union, so it sees liba's Widget change too; no export of
+    # libb reaches Widget, so it is not a libb finding, and the disposal is
+    # recorded as filtered rather than silently dropped.
     libb = members["libb.so"]
     assert libb["verdict"] in {"NO_CHANGE", "COMPATIBLE"}, libb
     assert not any("Widget" in s for s in _symbols(libb))
-    assert libb.get("filtered_internal_count", 0) == 0
+    assert libb.get("filtered_internal_count", 0) >= 1
 
 
 def test_negative_control_no_change_no_finding(tmp_path: Path, toolchain: None) -> None:
@@ -215,3 +216,37 @@ def test_unreached_by_every_member_still_counts(
     for member in _members(report).values():
         ledger = (member.get("surface_scope") or {}).get("out_of_surface_changes", [])
         assert not any("reached by" in str(e.get("reason")) for e in ledger), member
+
+
+@pytest.mark.parametrize("side", ["old", "new"])
+@pytest.mark.parametrize("export", ["a_fn", "b_fn"])
+def test_a_header_naming_one_members_export_on_one_side_keeps_both_comparable(
+    tmp_path: Path, toolchain: None, side: str, export: str
+) -> None:
+    """Regression for the release fan-out: a header that names one member's
+    export (here only in a comment) exists on one side alone. Per-side header
+    narrowing gave that member a different operand on each side, so the two
+    declared surfaces diverged and both members were refused as NOT_COMPARABLE
+    (exit 16). Every member parses the same union on both sides, so both
+    members are compared and the release is not refused. Sibling cases vary
+    the side that carries the header and the member whose export it names."""
+    a_h = "#pragma once\nint a_fn(int v);\n"
+    b_h = "#pragma once\nint b_fn(int v);\n"
+    extra = {"notes.h": f"#pragma once\n/* {export} is documented here */\n"}
+    _build(
+        tmp_path,
+        {
+            "old": {"a.h": a_h, "b.h": b_h, **(extra if side == "old" else {})},
+            "new": {"a.h": a_h, "b.h": b_h, **(extra if side == "new" else {})},
+        },
+        {
+            "liba": '#include "a.h"\nint a_fn(int v){return v;}\n',
+            "libb": '#include "b.h"\nint b_fn(int v){return v+1;}\n',
+        },
+    )
+    code, report, stderr = _compare(tmp_path)
+    members = _members(report)
+    assert set(members) == {"liba.so", "libb.so"}, stderr
+    for member in members.values():
+        assert member["verdict"] != "NOT_COMPARABLE", member
+    assert code != 16, stderr
