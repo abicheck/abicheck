@@ -181,6 +181,49 @@ def test_assignments_cover_every_cardinality_and_case() -> None:
     assert {c for a in _ASSIGNMENTS for c in a} == set(_COMPARABLE)
 
 
+@pytest.mark.parametrize("new_inventory_proven", [True, False])
+def test_a_proven_removal_floors_the_release_verdict(
+    tmp_path: Path, new_inventory_proven: bool
+) -> None:
+    """ADR-065 D2 and the release verdict floor, through the workflow alone.
+
+    OLD holds ``libkeep.so`` and ``libgone.so``; NEW holds only
+    ``libkeep.so``, which is identical on both sides, so the matched member
+    is ``NO_CHANGE``. ``libgone.so`` is a removal only when NEW's inventory
+    is asserted complete -- then the release verdict must be raised to
+    ``COMPATIBLE_WITH_RISK`` even though every compared member is clean.
+    With NEW's inventory unasserted the same layout is an unproven
+    absence: no removal, and the verdict stays ``NO_CHANGE``.
+
+    The oracle is the literal verdict table, not ``apply_removed_member_floor``
+    or ``worse_release_verdict``, so the test would fail if the floor were
+    deleted or applied to unproven absences.
+    """
+    from test_release_scope_completeness import _elf_snap, _write_stored_package
+
+    keep = _elf_snap("libkeep.so")
+    _write_stored_package(
+        tmp_path / "old", {"libkeep.so": keep, "libgone.so": _elf_snap("libgone.so")}
+    )
+    _write_stored_package(
+        tmp_path / "new",
+        {"libkeep.so": keep},
+        inventory_complete=new_inventory_proven,
+    )
+
+    outcome = _run_release(tmp_path, {})
+
+    # Stored-package members are labelled by their package key, not by file
+    # name, so assert on the verdicts: exactly the one matched member, clean.
+    assert [e["verdict"] for e in outcome.library_results] == ["NO_CHANGE"]
+    if new_inventory_proven:
+        assert outcome.removed_keys == ["libgone.so"]
+        assert outcome.worst_verdict == "COMPATIBLE_WITH_RISK"
+    else:
+        assert outcome.removed_keys == []
+        assert outcome.worst_verdict == "NO_CHANGE"
+
+
 def test_mutant_member_dropping_a_setting_is_caught(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
