@@ -12,7 +12,6 @@ import pytest
 
 from abicheck.checker_policy import ChangeKind, Verdict
 from abicheck.checker_types import DiffResult
-from abicheck.cli_helpers_compare import _pair_wide_dialect_override
 from abicheck.config_paths import discover_project_config
 from abicheck.dry_run_estimate import CompileContext
 from abicheck.errors import AbicheckError
@@ -21,6 +20,7 @@ from abicheck.model import AbiSnapshot
 from abicheck.model.change import Change
 from abicheck.workflows.compare_configuration import (
     CompareSettingsError,
+    _pair_wide_dialect_override,
     load_required_symbols,
 )
 

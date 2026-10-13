@@ -56,9 +56,9 @@ except ImportError:  # pragma: no cover - rich-click is a declared dependency
 # import for two value types.
 from ...checker_types import DiffResult
 from ...cli_audit import echo_filtered_surface, echo_reconciled
-from ...cli_helpers_compare import _merge_redundant_changes
 from ...cli_resolve import _detect_binary_format
 from ...frontends.cli import help as cli_help
+from ...workflows.compare_finalize import _merge_redundant_changes
 from .options.export import ExportSet
 from .options.params import (
     _load_suppression_and_policy as _load_suppression_and_policy,  # noqa: F401  — re-exported to keep cli import sites (test suite) stable
