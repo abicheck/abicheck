@@ -253,6 +253,7 @@ def test_canonical_order_is_sorted_by_path_for_every_declared_permutation(
     assert [h.name for h in canonical_header_order(headers)] == sorted(names)
 
 
+@pytest.mark.integration
 def test_a_proven_snapshot_round_trips_its_canonical_sequence(tmp_path):
     """The proof is written with the snapshot and read back; absent means unproven."""
     from abicheck.dumper import dump
