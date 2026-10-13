@@ -130,10 +130,10 @@ class OpaqueTypeIndex:
     #: the snapshot this index was built from. The collision that matters is a
     #: visible ``api::Foo`` sharing its spelling with an opaque ``impl::Foo``;
     #: two opaque namesakes are both opaque, so a match on either is correct.
-    #: :meth:`intersect` drops these from :attr:`local` whenever the pairing is
-    #: not proven :attr:`complete`, so an incomplete comparison never suppresses
-    #: a visible type's finding by a spelling shared with an opaque one
-    #: (known-gaps entry ``opaque-type-suppression-still-falls-back-to-bare-recordtypename``).
+    #: :meth:`intersect` drops these from :attr:`local` for every comparison,
+    #: complete or not, so the spelling tier never suppresses a visible type's
+    #: finding by a spelling it shares with an opaque one (known-gaps entry
+    #: ``opaque-type-suppression-still-falls-back-to-bare-recordtypename``).
     shared_with_visible: frozenset[SnapshotLocalIdentity] = frozenset()
 
     def intersect(self, other: OpaqueTypeIndex) -> OpaqueTypeIndex:
@@ -199,13 +199,12 @@ class OpaqueTypeIndex:
             != frozenset()
             for key in local
         )
+        # The spelling tier may never answer for a spelling that also names a
+        # visible declaration, complete pairing or not: a match on it could be
+        # the visible one, which is not opaque, so it is no evidence that the
+        # change is about an opaque type. A stable-tier hit is unaffected.
         shared = self.shared_with_visible | other.shared_with_visible
-        if not paired:
-            # Without a proven pairing the spelling tier may not answer for a
-            # spelling that also names a visible declaration: a match on it could
-            # be the visible one, which is not opaque, so it is not evidence
-            # that the change is about an opaque type.
-            local = frozenset(key for key in local if key not in shared)
+        local = frozenset(key for key in local if key not in shared)
         return OpaqueTypeIndex(
             stable=self.stable & other.stable,
             local=local,
@@ -304,10 +303,10 @@ class OpaqueTypeIndex:
 
         When the change carries no resolvable stable identity at all
         (``stable_entity_id(change.entity_id) is None``), *strict* has no
-        effect -- there is no miss to be strict about, so this always falls
-        through to the spelling tier, which is the one shape of the bare-
-        name collision this index still cannot close (see
-        ``diff_filtering._downgrade_opaque_type_changes``'s own docstring).
+        effect -- there is no miss to be strict about. The spelling tier then
+        answers only for a spelling no visible declaration shares (see
+        :attr:`shared_with_visible`), so a no-identity change on a shared
+        spelling is kept rather than suppressed.
         """
         stable = stable_entity_id(change.entity_id)
         if stable is not None:
@@ -376,6 +375,15 @@ def find_opaque_types(snap: AbiSnapshot) -> OpaqueTypeIndex:
     by_value_types = find_by_value_types(snap, opaque)
     surviving = opaque - by_value_types
 
+    # A stable id that a visible declaration of this same snapshot also carries
+    # names an entity that is complete here, so no opaque declaration may claim
+    # it through the stable tier.
+    visible_ids = {
+        resolved
+        for t in snap.declarations.types
+        if not (t.is_opaque or is_impl_source(t.source_location))
+        and (resolved := stable_entity_id(t.entity_id)) is not None
+    }
     stable: set[StableEntityId] = set()
     local: set[SnapshotLocalIdentity] = set()
     stable_by_local: dict[SnapshotLocalIdentity, set[StableEntityId]] = {}
@@ -384,7 +392,7 @@ def find_opaque_types(snap: AbiSnapshot) -> OpaqueTypeIndex:
             key = snapshot_local_identity(name, t.entity_id)
             local.add(key)
             resolved = stable_entity_id(t.entity_id)
-            if resolved is not None:
+            if resolved is not None and resolved not in visible_ids:
                 stable.add(resolved)
                 stable_by_local.setdefault(key, set()).add(resolved)
     return OpaqueTypeIndex(

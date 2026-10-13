@@ -34,6 +34,7 @@ second home for either.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from ..model.identity_tiers import StableEntityId, stable_entity_id
@@ -381,4 +382,18 @@ def find_opaque_struct_types(old: AbiSnapshot, new: AbiSnapshot) -> OpaqueTypeIn
         # asymmetric-existence criterion.
         stable_ids.add(resolved)
 
-    return OpaqueTypeIndex.build(declarations, stable_ids=stable_ids)
+    index = OpaqueTypeIndex.build(declarations, stable_ids=stable_ids)
+    # A spelling that also names a visible declaration on either side is not
+    # proof of opacity by spelling alone: a change about that visible type
+    # would match the opaque one here. Only the spelling tier is narrowed; the
+    # stable tier (resolved identities) is left untouched.
+    visible_spellings = {
+        t.name
+        for side in (old, new)
+        for t in side.declarations.types
+        if not t.is_opaque
+    }
+    return replace(
+        index,
+        local=frozenset(k for k in index.local if k.spelling not in visible_spellings),
+    )

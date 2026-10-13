@@ -951,29 +951,16 @@ def _downgrade_opaque_type_changes(
     on DWARF, so a string compare could miss a declaration both sides agree
     on -- where two matching stable ``EntityId``s prove it.
 
-    **Bare-name-collision narrowing (ADR-063 Phase 2's closing slice).** The
-    bare-``RecordType.name`` collision the plan names for this site (two
-    unrelated types sharing a leaf spelling in different scopes, one opaque,
-    both suppressed) is closed **when it is provably safe to close** --
-    ``opaque.complete`` (computed by :meth:`~abicheck.compare.opaque_types.
-    OpaqueTypeIndex.intersect`, see its own docstring) is ``True`` only when
-    every spelling the two sides agree is opaque is *also* backed by a
-    matching stable-id pair between them -- not merely "each side resolved
-    something", which a producer disagreement about the same declaration's
-    own identity can satisfy while still holding no real match (Codex
-    review on PR #1045). That paired precondition is exactly what makes a
-    stable-tier miss elsewhere trustworthy as proof of non-opacity rather
-    than a mere resolution gap. Passed through as
-    ``opaque.contains(c, ..., strict=opaque.complete)`` --
-    ``strict=True`` only narrows a *miss* (the change's own stable identity
-    doesn't match any known-opaque one); it never affects a *hit*, and it
-    has no effect at all when the change carries no resolvable stable
-    identity in the first place (falls through to the spelling tier
-    unconditionally, same as before this slice). Whenever completeness does
-    not hold -- a mixed header-AST/DWARF comparison, or one side loaded from
-    a pre-``entity_id``-population archived baseline -- this degrades to
-    exactly the pre-narrowing permissive behavior, so a false-positive risk
-    against this repo's FP-rate gate is never taken on an incomplete index.
+    **Visible-namesake exclusion (known-gap
+    ``opaque-type-suppression-still-falls-back-to-bare-recordtypename``).** A
+    bare-``RecordType.name`` spelling that also names a visible declaration
+    is never used to suppress a change through the spelling tier
+    (``OpaqueTypeIndex.shared_with_visible``, applied in ``intersect()`` for
+    every comparison). The stable tier still decides on resolved identities,
+    and a stable id that a visible declaration also carries is not proof of
+    opacity. ``opaque.contains(c, ..., strict=opaque.complete)`` only narrows
+    a *miss* on a stable identity; a change with no resolvable identity falls
+    through to the spelling tier, which the rule above already narrows.
     """
     old_opaque = _find_opaque_types(old)
     new_opaque = _find_opaque_types(new)
