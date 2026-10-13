@@ -394,6 +394,11 @@ Each entry's status line says what is still open. A PARTIAL entry's write-up als
 **Status (re-verified 2026-10-09 at `456989f`): OPEN.** abicheck/extract/headers/clang/error_header_retry.py:69-79 still maps the aggregate line index to the header. The entry notes it is latent: not broken unless a preamble is added. The writers are now in extract/headers/clang/backend.py:304 and clang_layout_tool.py:203.  
 `hygiene` — The clang backend's guard retry maps an aggregate-TU line index straight to a header; latent until a preamble is added to the aggregate. [Full write-up](known-gaps/the-clang-backends-guard-retry-still-maps-an-aggregate-line-to.md)
 
+#### The agent-eval `base_commit` test checks object presence, not ancestry from the default branch (2026-10-12)
+
+**Status (2026-10-12): OPEN.** `test_manifest_base_commit_exists_in_history` runs `git cat-file -e` only; a manifest pinned to a fetchable but unmerged commit passes.  
+`hygiene` — The test named "exists in history" does not check that a task's `base_commit` is reachable from the default branch. [Full write-up](known-gaps/agent-eval-base-commit-test-checks-presence-not-ancestry.md)
+
 ## Do not re-attempt
 
 Approaches that were tried, measured or reviewed and did not help. Their value is stopping a re-attempt; read the write-up before trying anything similar.
