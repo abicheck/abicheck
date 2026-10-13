@@ -2,7 +2,7 @@
 
 Reuses `test_golden_output.py`'s own fixture-building helpers so the two
 golden suites can't independently drift in how a case is constructed, but
-pins `reporter_markdown.to_review_digest`'s output rather than
+pins `dispatch_markdown.to_review_digest`'s output rather than
 `to_markdown`'s. Added alongside the ADR-061 Phase 2 structural rewrite of
 `reporter_markdown.py` (see `abicheck/report/render_markdown.py`) --
 `to_review_digest` had no golden coverage before this file, so this is the
@@ -22,7 +22,7 @@ from pathlib import Path
 import pytest
 
 from abicheck.checker import compare
-from abicheck.reporter_markdown import to_review_digest
+from abicheck.report.dispatch_markdown import to_review_digest
 from tests.test_golden_output import _fn, _snap
 
 TESTS_DIR = Path(__file__).parent

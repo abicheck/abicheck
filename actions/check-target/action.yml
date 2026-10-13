@@ -766,8 +766,8 @@ runs:
         # document's own `compile:` is ALREADY independently resolved
         # FIRST, unconditionally, and the live NEW side's own `--sources`
         # tree only folds ON TOP of that via a second `merge_compile_config`
-        # call inside `frontends/cli/commands/compare.py`'s
-        # `_embed_inline_source_side` -- a genuine two-stage MERGE, so this
+        # call inside `frontends/cli/compare_inline_evidence.py`'s
+        # `_side` -- a genuine two-stage MERGE, so this
         # is "true" there. P1 fix (Codex review, fresh evidence, PR #1222
         # eleventh round): that second stage runs UNCONDITIONALLY whenever
         # `--new-sources` names a raw tree, regardless of whether
@@ -1449,8 +1449,8 @@ runs:
             # `compile:` itself is NOT promoted here for a `mode: compare`
             # caller any more (Codex review, P1, fresh evidence, PR #1222
             # eleventh round -- reverses the fourth round's own conclusion
-            # right below): `frontends/cli/commands/compare.py`'s
-            # `_embed_inline_source_side` ALWAYS independently folds the
+            # right below): `frontends/cli/compare_inline_evidence.py`'s
+            # `_side` ALWAYS independently folds the
             # live NEW side's own `--sources` tree's `compile:` block onto
             # the CLI's already-resolved compile context, per field, the
             # moment `--new-sources` names a raw tree -- unconditionally,
@@ -1474,7 +1474,7 @@ runs:
             # itself because an explicit `--config` would otherwise
             # suppress the second one -- folds the sources-root document's
             # `compile:` block in TWICE: once here, once again inside
-            # `_embed_inline_source_side`'s own always-running merge, since
+            # `compare_inline_evidence._side`'s own always-running merge, since
             # that merge is never gated on config explicitness at all. A
             # repeat-sensitive flag (`compile.options: [-include, foo.h]`)
             # then applies twice in the final compiler invocation purely
@@ -1511,14 +1511,12 @@ runs:
             # `compare`'s real pipeline never resolves `source:`/`debug:`
             # from a per-side `--sources` tree's own document at all --
             # unlike `compile:`, which the checkout-then-sources two-stage
-            # MERGE above genuinely folds. `frontends/cli/commands/
-            # compare.py`'s `_embed_inline_source_side` receives BOTH as
-            # already-frozen arguments (`_resolved_collect_mode`/
-            # `_resolved_debug`), computed once from the checkout-side
-            # `resolved_cfg` before any per-side tree is even considered,
-            # and forwards them verbatim to the nested dump invocation via
-            # its private `_resolved_collect_mode`/
-            # `_resolved_debug` hooks -- `frontends/cli/dump_debug_config.
+            # MERGE above genuinely folds. `frontends/cli/
+            # compare_inline_evidence.py`'s `_side` receives BOTH as
+            # already-frozen values (`InlineEvidenceRun.collect_mode`/
+            # `.debug`), computed once from the checkout-side
+            # `resolved_cfg` before any per-side tree is even considered
+            # -- `frontends/cli/dump_debug_config.
             # resolve_dump_debug_fields` only ever falls back to resolving
             # a tree's own document when `resolved_debug` is `None`, which
             # never happens on `compare`'s own call path. So promoting

@@ -404,7 +404,7 @@ def _build_fixture(
 
     Called once per (size, backend, repeat) inside a fresh temp directory
     (see ``_measure_one``) — the resolved header *path* is part of the AST
-    disk-cache key (``dumper_ast_config._cache_key`` hashes each header's
+    disk-cache key (``extract.headers.ast_config._cache_key`` hashes each header's
     resolved path + mtime, not its content), so a fresh directory alone is
     enough to guarantee a cold cache on every call, with no need to vary the
     header content itself (Codex review: a shared fixture reused across

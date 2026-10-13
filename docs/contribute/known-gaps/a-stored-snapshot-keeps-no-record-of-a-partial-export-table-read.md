@@ -11,7 +11,7 @@ generated: false
 
 Index: [Known gaps](../known-gaps.md)
 
-**Status (re-verified 2026-10-09 at `456989f`): PARTIAL.** The entry says closed, but it also says the partial read is still open. Fixed: FAILED import reads; tests/unit/workflows/test_failed_consumer_read.py exists. Open: a stored snapshot cannot record a partial export-table read (needs a schema field and ADR).
+**Status (2026-10-12): PARTIAL.** Fixed: FAILED import reads; tests/unit/workflows/test_failed_consumer_read.py exists. Open: a stored snapshot cannot record a partial export-table read. The design is drafted in [ADR-079](../adr/079-partial-export-table-read-in-the-stored-snapshot.md) (Proposed): one per-platform `export_read` field, a v58 to v59 bump, and two maintainer decisions. The schema is unchanged until those are accepted.
 
 
 **Closed (2026-10, Lane C stage 5).** `workflows.consumer_scope.read_consumer_facts`

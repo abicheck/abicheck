@@ -22,6 +22,7 @@ fill these in; neither shape depends on either parser (ADR-061 Phase 5)."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from enum import StrEnum
 
 
 @dataclass
@@ -112,6 +113,24 @@ class ToolchainInfo:
     )  # -fshort-wchar / -fno-short-wchar
 
 
+class AdvancedExtractionStatus(StrEnum):
+    """What the advanced DWARF extraction did, recorded by the extraction.
+
+    ``NOT_RUN``: only a section-presence lookup was made; no payload was parsed.
+    ``COMPLETED``: the parse ran to the end over the binary's DWARF. An empty
+    payload is a real result, and ``has_dwarf`` says whether any DWARF was found.
+    ``FAILED``: the extraction was invoked and errored; the payload is not usable.
+    ``UNRECORDED``: nothing said. A hand-built object, or a snapshot decoded from
+    a stored document, which carries no status. Readers fall back to the old
+    inference for these.
+    """
+
+    NOT_RUN = "not_run"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    UNRECORDED = "unrecorded"
+
+
 @dataclass
 class AdvancedDwarfMetadata:
     """Sprint 4 metadata extracted from a single .so."""
@@ -148,6 +167,15 @@ class AdvancedDwarfMetadata:
     # All struct/class names seen (for cross-referencing in diff to avoid
     # false "packing removed" when a struct was simply deleted)
     all_struct_names: set[str] = field(default_factory=set)
+    # What the extraction did; see AdvancedExtractionStatus. In memory only:
+    # snapshot_encode drops it, so the stored document is unchanged and a
+    # decoded snapshot reads UNRECORDED (docs/contribute/known-gaps/
+    # advanced-facts-collected-infers-advanced-dwarf-extraction-ran.md).
+    # compare=False: a decoded snapshot never carries it, so equality must not
+    # read a recorded status as a content difference.
+    extraction: AdvancedExtractionStatus = field(
+        default=AdvancedExtractionStatus.UNRECORDED, compare=False
+    )
 
 
 def debug_info_present(*metadata: DwarfMetadata | AdvancedDwarfMetadata | None) -> bool:
@@ -190,15 +218,22 @@ def advanced_facts_collected(meta: AdvancedDwarfMetadata | None) -> bool:
     row wants, and not "advanced facts are available", which is what a
     detector consuming those fields needs.
 
-    Answered from the payload the detector actually reads -- every field, see
-    the per-sub-diff list below -- so a presence-only snapshot
-    reports its ``advanced_dwarf`` detector as *not evaluated* rather than as
-    having run and found nothing. Deliberately conservative in one direction:
-    a real parse that genuinely established nothing is indistinguishable from
-    one that never ran, and this answers ``False`` for both -- understating
-    assurance, never overstating it.
+    When the extraction recorded its outcome (:class:`AdvancedExtractionStatus`),
+    that status decides: a ``COMPLETED`` parse is collected even when its
+    payload is empty, and ``NOT_RUN``/``FAILED`` are never collected, whatever
+    the payload holds. Only ``UNRECORDED`` (a hand-built object, or a snapshot
+    decoded from a stored document) falls back to inferring from the payload,
+    which is the one case where an empty parse cannot be told from a parse that
+    never ran.
     """
-    if meta is None or not meta.has_dwarf:
+    if meta is None:
+        return False
+    status = meta.extraction
+    if status is AdvancedExtractionStatus.COMPLETED:
+        return meta.has_dwarf
+    if status is not AdvancedExtractionStatus.UNRECORDED:
+        return False
+    if not meta.has_dwarf:
         return False
     # Every field `dwarf_advanced.diff_advanced_dwarf` reads, one per sub-diff:
     #   _diff_calling_conventions  -> calling_conventions
@@ -226,10 +261,9 @@ def advanced_facts_collected(meta: AdvancedDwarfMetadata | None) -> bool:
     # field below empty -- is still distinguishable from "never parsed", and no
     # longer silently disables the detector on both sides (Codex review).
     #
-    # An explicit "advanced extraction completed" status on the dataclass would
-    # be better than inferring it, and is the durable fix; it is a persisted-
-    # model change with its own schema bump, so it is recorded in
-    # docs/contribute/known-gaps.md rather than folded in here.
+    # Reached only for UNRECORDED. The recorded status is not persisted (see
+    # ``AdvancedDwarfMetadata.extraction``), so every snapshot decoded from a
+    # stored document still takes this path until the schema decision lands.
     if meta.target_arch:
         return True
     return bool(

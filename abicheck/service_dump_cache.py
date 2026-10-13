@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from .buildsource.source_inputs import extraction_read_source_inputs
+from .extract.binary_identity import stamp_binary_identity
 from .workflows.cache_probe import refuse_dump_while_probing
 
 if TYPE_CHECKING:
@@ -773,19 +774,15 @@ def cached_run_dump(
     )
     cached = snapshot_cache.lookup_key(initial_key, path)
     if cached is not None:
-        # A cache hit stands in for the live extraction it replaces, and needs
-        # the source-read licence stamped explicitly: `run_dump` grants it (see
-        # `buildsource.source_inputs.granting_live_source_licence`) but this
-        # path never calls `run_dump`, and the flag is runtime-only so it did
-        # not survive the cache's own serialization round trip. Without this, a warm cache
-        # would answer differently from a cold one. Granting it here is sound
-        # rather than convenient: this function is only reached because the
-        # caller named live inputs in *this* run, and `_cache_key` hashes those
-        # inputs' content, so the hit is itself a provenance check. Loading a
-        # *stored* snapshot never comes through here.
-        # Same predicate the shared dump applies: a cache hit of a headerless
-        # DWARF dump is no more entitled to re-read its DW_AT_decl_file paths
-        # than the uncached dump was (Codex review, P2).
+        # A cache hit stands in for the live extraction it replaces, so it needs
+        # the source-read licence stamped here: `run_dump` grants it (see
+        # `buildsource.source_inputs.granting_live_source_licence`), but this
+        # path never calls `run_dump` and the flag is runtime-only. Granting it is
+        # sound: this runs only when the caller named live inputs in *this* run,
+        # and `_cache_key` hashes their content, so the hit is a provenance check.
+        # Same predicate the shared dump applies: a headerless DWARF hit is no
+        # more entitled to re-read DW_AT_decl_file paths (Codex review, P2).
+        stamp_binary_identity(cached, path)
         if extraction_read_source_inputs(cached):
             cached.live_source_evidence = True
         return cached

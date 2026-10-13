@@ -23,7 +23,7 @@ from pathlib import Path
 import pytest
 
 from abicheck.checker import compare
-from abicheck.reporter_markdown import to_markdown
+from abicheck.report.dispatch_markdown import to_markdown
 from tests.test_golden_output import _fn, _snap
 
 TESTS_DIR = Path(__file__).parent

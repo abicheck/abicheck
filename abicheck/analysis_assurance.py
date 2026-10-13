@@ -679,10 +679,28 @@ def _dwarf_context_status(old: AbiSnapshot, new: AbiSnapshot) -> tuple[str, list
     """
 
     from .model.debug_evidence import debug_info_evidence
+    from .model.dwarf_facts import AdvancedExtractionStatus
 
     old_ev, new_ev = debug_info_evidence(old), debug_info_evidence(new)
     old_basic, new_basic = old_ev.basic, new_ev.basic
     old_advanced, new_advanced = old_ev.advanced, new_ev.advanced
+
+    # A failed advanced extraction is evidence the run tried and could not read
+    # the side. It is reported as incomplete coverage, never as "no debug info".
+    failed_sides = [
+        (side, snap)
+        for side, snap in (("old", old), ("new", new))
+        if (adv := snap.declarations.debug_advanced) is not None
+        and adv.extraction is AdvancedExtractionStatus.FAILED
+    ]
+    if failed_sides:
+        failed_notes = [
+            f"DWARF advanced extraction failed on the {side} side: its facts are "
+            "unknown, so dwarf_advanced findings for that side cannot be "
+            "established"
+            for side, _snap in failed_sides
+        ]
+        return "asymmetric", failed_notes
 
     if not (old_basic or new_basic or old_advanced or new_advanced):
         return "not_evaluated", []
