@@ -147,7 +147,7 @@ class TestReporterShowOnly:
         # as a "functions" match, which was true only of the superseded
         # name-based exact-match list -- that kind reports an anonymous
         # member of a matched *record* and is declared TYPE.
-        from abicheck.reporter import ShowOnlyFilter
+        from abicheck.report.view import ShowOnlyFilter
 
         filt = ShowOnlyFilter.parse("functions")
         assert filt._check_element(None, "func_removed") is True
@@ -157,7 +157,7 @@ class TestReporterShowOnly:
 
     def test_parse_skips_empty_tokens(self) -> None:
         # Line 105: empty token after split is skipped.
-        from abicheck.reporter import ShowOnlyFilter
+        from abicheck.report.view import ShowOnlyFilter
 
         filt = ShowOnlyFilter.parse("breaking,, ,functions")
         assert "breaking" in filt.severities

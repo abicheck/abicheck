@@ -40,7 +40,6 @@ Mapping rules:
 
 from __future__ import annotations
 
-import hashlib
 import xml.etree.ElementTree as ET
 from collections.abc import Mapping
 from typing import TYPE_CHECKING
@@ -66,8 +65,13 @@ from .report.junit_properties import (
     testcase_properties,
 )
 from .report.junit_scope import append_env_matrix_suite, append_scope_suite
-from .reporter import _finding_id, _suppress_dangling_correlation_notes, apply_show_only
-from .reporter_markdown import _root_cause_key_and_display
+from .report.view import (
+    display_changes,
+    finding_id,
+    root_cause_id_for_key,
+    root_cause_key_and_display,
+    show_only_matches_severity_label,
+)
 
 if TYPE_CHECKING:
     from datetime import date
@@ -309,7 +313,7 @@ def _root_cause_lookup(
     closure and the JSON/markdown ``_group_changes_by_root_cause`` grouping
     key, so all four formats never disagree about a finding's root cause).
 
-    Keyed by finding id (:func:`~abicheck.reporter._finding_id` for a real
+    Keyed by finding id (:func:`~abicheck.report.view.finding_id` for a real
     ``Change``, the label itself for a missing-contract entry — a label has
     no backing ``Change``/finding id of its own) rather than restructuring
     the per-symbol ``<testcase>`` tree JUnit's schema already commits to:
@@ -321,15 +325,15 @@ def _root_cause_lookup(
     referenced_causes = frozenset(c.caused_by_type for c in changes if c.caused_by_type)
     lookup: dict[str, tuple[str, str]] = {}
     for c in changes:
-        key, root_display = _root_cause_key_and_display(
+        key, root_display = root_cause_key_and_display(
             c.caused_by_type,
             c.symbol,
             c.kind.value,
-            _finding_id(c),
+            finding_id(c),
             referenced_causes=referenced_causes,
         )
-        lookup[_finding_id(c)] = (
-            hashlib.sha256(key.encode("utf-8")).hexdigest()[:16],
+        lookup[finding_id(c)] = (
+            root_cause_id_for_key(key),
             root_display,
         )
     rule_id = (
@@ -342,11 +346,11 @@ def _root_cause_lookup(
         # becomes a *grouping* key when some other finding's caused_by_type
         # names it (the referenced_causes guard above) — mirrors
         # sarif._root_cause_for(None, label, rule_id, label) exactly.
-        key, root_display = _root_cause_key_and_display(
+        key, root_display = root_cause_key_and_display(
             None, label, rule_id, label, referenced_causes=referenced_causes
         )
         lookup[label] = (
-            hashlib.sha256(key.encode("utf-8")).hexdigest()[:16],
+            root_cause_id_for_key(key),
             root_display,
         )
     return lookup
@@ -596,7 +600,7 @@ def _build_testsuite(
     # to explain it (Codex review).
     changes += list(getattr(result, "scoped_only_changes", ()) or ())
     if show_only:
-        changes = apply_show_only(
+        changes = display_changes(
             changes,
             show_only,
             policy=result.policy,
@@ -604,7 +608,6 @@ def _build_testsuite(
             policy_file=result.policy_file,
             today=resolved_today,
         )
-        changes = _suppress_dangling_correlation_notes(changes)
 
     change_by_symbol, extra_changes = _partition_changes(changes)
     all_symbols = _collect_all_symbols(
@@ -666,8 +669,6 @@ def _build_testsuite(
     # fix). Element/action tokens don't cleanly apply to "a symbol is simply
     # absent", so only the severity dimension is checked.
     if show_only and missing_labels:
-        from .reporter_markdown import show_only_matches_severity_label
-
         missing_severity_label = "breaking" if missing_blocks else "compatible"
         if not show_only_matches_severity_label(show_only, missing_severity_label):
             missing_labels = ()
@@ -906,7 +907,7 @@ def _add_failure(
     fail.set("message", message)
     fail.set("type", ftype)
     if root_cause_lookup is not None:
-        entry = root_cause_lookup.get(_finding_id(change))
+        entry = root_cause_lookup.get(finding_id(change))
         if entry is not None:
             fail.set("rootCauseId", entry[0])
             fail.set("rootCause", entry[1])

@@ -491,7 +491,7 @@ def _release_finding_dicts(
     *show_only* (Codex review, PR #1154 follow-up: `compare --view
     show=...` on a directory/package input) filters each display bucket the
     same way a single-pair `compare`'s own report filters `result.changes`
-    (`reporter_markdown.apply_show_only`, resolved against this library's
+    (`report.view.apply_show_only`, resolved against this library's
     own effective kind sets/policy file so it never disagrees with the
     per-finding severity a single-pair report for the same library would
     show) -- applied before the cap, so a filtered-out finding never
@@ -509,8 +509,8 @@ def _release_finding_dicts(
     way the retired ``cli_scan_baseline._baseline_summary`` did, instead of a bare
     ``findings_truncated`` boolean that hides the shape of what was cut.
     """
+    from .report.view import apply_show_only
     from .reporter import release_finding_entry
-    from .reporter_markdown import apply_show_only
 
     cap = None if uncapped else _MAX_RELEASE_FINDINGS_PER_LIBRARY
     findings: list[dict[str, object]] = []
@@ -678,7 +678,7 @@ def _strip_diff_results_and_adjust_verdict(
             if show_only:
                 # The filtered *view*, alongside (never instead of) the full
                 # projection above -- see this function's own docstring.
-                from .reporter_markdown import apply_show_only as _apply_show_only
+                from .report.view import apply_show_only as _apply_show_only
 
                 total_gating_view = sum(
                     len(
@@ -723,7 +723,7 @@ def _strip_diff_results_and_adjust_verdict(
                 if impact_table is not None:
                     entry["impact_table"] = dataclasses.asdict(impact_table)
                 if show_only:
-                    from .reporter_markdown import apply_show_only as _apply_show_only2
+                    from .report.view import apply_show_only as _apply_show_only2
 
                     filtered_changes = [
                         c

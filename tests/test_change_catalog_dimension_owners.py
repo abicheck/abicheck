@@ -32,7 +32,7 @@ Every one of these came from reading the emitting code, not the kind's name
 from __future__ import annotations
 
 from abicheck.change_registry import REGISTRY
-from abicheck.reporter_markdown import ShowOnlyFilter
+from abicheck.report.view import ShowOnlyFilter
 
 
 class TestASymbolTableFactIsNotClaimedAsAFunction:

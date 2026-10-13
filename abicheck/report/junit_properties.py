@@ -91,7 +91,7 @@ def add_scoped_properties(props: ET.Element, result: DiffResult) -> None:
     ``abicheck.gate_verdict``/``abicheck.gate_exit_code``, a supplied
     consumer's own impact, reported *beside* the full-library result.
     """
-    from ..reporter import _finding_id
+    from .view import finding_id
 
     scoped_verdict = getattr(result, "scoped_verdict", None)
     if scoped_verdict is None:
@@ -111,7 +111,7 @@ def add_scoped_properties(props: ET.Element, result: DiffResult) -> None:
     _prop("abicheck.scoped_verdict", scoped_verdict.value)
     relevant_ids = getattr(result, "scoped_relevant_finding_ids", None) or frozenset()
     relevant_in_changes = sum(
-        1 for c in result.changes if _finding_id(c) in relevant_ids
+        1 for c in result.changes if finding_id(c) in relevant_ids
     )
     # Scoped-only changes and missing-contract members are relevant by
     # construction and never in result.changes, so they count toward

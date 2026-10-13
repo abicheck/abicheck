@@ -30,7 +30,7 @@ independent findings a reader has to manually notice share a cause.
 
 This module is deliberately narrower than ``reporter_markdown``'s existing
 ``--report-mode root-cause`` grouping
-(:func:`~abicheck.reporter_markdown._group_changes_by_root_cause`): that
+(:func:`~abicheck.report.view.group_changes_by_root_cause`): that
 grouping buckets *every* finding by ``caused_by_type`` (any redundant-change
 family, not just this one), is report-mode-only, and keeps every group
 including size-1 singletons since its whole point is showing full report

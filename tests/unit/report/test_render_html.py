@@ -725,7 +725,7 @@ def test_html_envelope_show_only_dropping_a_correlated_target_does_not_crash() -
     """CodeRabbit review: an envelope-driven render's ``_lookup_verdict``
     indexed only ``envelope.findings`` (keyed by ``result.changes``'
     identity), but ``--show-only`` can hand the renderer
-    ``_suppress_dangling_correlation_notes``'s own shallow ``Change`` copies
+    ``suppress_dangling_correlation_notes``'s own shallow ``Change`` copies
     (made whenever a change's ``correlated_change_kind`` names a target
     ``--show-only`` just filtered out) -- those copies have no entry in that
     index, so bucketing them raised ``KeyError``. ``_result()``'s own

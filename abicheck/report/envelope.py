@@ -210,7 +210,7 @@ class ReportEnvelope:
         Every change the completed evaluation already resolved is *read* from
         this envelope, never re-decided. The one case that cannot be is a
         change object the display layer itself created:
-        ``report_correlation._suppress_dangling_correlation_notes`` hands a
+        ``report_correlation.suppress_dangling_correlation_notes`` hands a
         renderer shallow *copies* of the changes whose correlation note would
         dangle under ``--show-only``, and a copy is a different object with no
         entry in the index. Those are resolved individually through the same
