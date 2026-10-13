@@ -675,3 +675,9 @@ adrs:
     use_cases: []
     surfaces: []
     missing: Proposed, not yet implemented; the advanced-DWARF extraction status is in memory only and is not persisted.
+
+  - id: ADR-082
+    file: 082-declared-header-order-independent-extraction.md
+    disposition: internal
+    reason: Dump-time proof of declared-header order and the stored header_canonical contract field; users reach it only through dump/compare, and the change is a schema v59 contract field, not a flag, report field or exit code.
+    use_cases: []

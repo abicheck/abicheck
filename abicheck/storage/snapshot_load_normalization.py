@@ -273,6 +273,7 @@ def extraction_contract_from_dict(raw: Any) -> ExtractionContract | None:
     profile_fingerprint = raw.get("profile_fingerprint")
     scope_fingerprint = raw.get("scope_fingerprint")
     compiler_identity_status = raw.get("compiler_identity_status")
+    header_canonical = raw.get("header_canonical")
     return ExtractionContract(
         profile_fingerprint=profile_fingerprint
         if isinstance(profile_fingerprint, str)
@@ -288,6 +289,12 @@ def extraction_contract_from_dict(raw: Any) -> ExtractionContract | None:
         # status; only a genuine matching string round-trips.
         compiler_identity_status=compiler_identity_status
         if isinstance(compiler_identity_status, str)
+        else None,
+        # ADR-082: a proof only counts when it is a list of identity strings;
+        # anything else (absent on a pre-v59 snapshot, or malformed) is unproven.
+        header_canonical=list(header_canonical)
+        if isinstance(header_canonical, list)
+        and all(isinstance(x, str) for x in header_canonical)
         else None,
     )
 
