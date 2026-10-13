@@ -6,7 +6,7 @@ This mismatch caused false STRUCT_FIELD_TYPE_CHANGED reports.
 
 Fixes:
 1. _compute_record_type_info() in dwarf_metadata.py — drops "struct " prefix
-2. _diff_struct_layouts() in checker.py — normalizes type names before comparison
+2. diff_struct_layouts() in checker.py — normalizes type names before comparison
 """
 
 from __future__ import annotations
@@ -82,13 +82,13 @@ class TestNestedStructTagNormalization:
         """'struct Inner' (old) vs 'Inner' (new) must NOT emit STRUCT_FIELD_TYPE_CHANGED."""
         from abicheck.checker import (
             ChangeKind,
-            _diff_struct_layouts,  # type: ignore[attr-defined]
+            diff_struct_layouts,  # type: ignore[attr-defined]
         )
 
         old_meta = self._make_meta("Outer", "child", "struct Inner")
         new_meta = self._make_meta("Outer", "child", "Inner")
 
-        changes = _diff_struct_layouts(old_meta, new_meta)
+        changes = diff_struct_layouts(old_meta, new_meta)
         kinds = {c.kind for c in changes}
         assert ChangeKind.STRUCT_FIELD_TYPE_CHANGED not in kinds, (
             "'struct Inner' vs 'Inner' must not trigger STRUCT_FIELD_TYPE_CHANGED"
@@ -98,13 +98,13 @@ class TestNestedStructTagNormalization:
         """'class Foo' vs 'Foo' must NOT emit STRUCT_FIELD_TYPE_CHANGED."""
         from abicheck.checker import (
             ChangeKind,
-            _diff_struct_layouts,  # type: ignore[attr-defined]
+            diff_struct_layouts,  # type: ignore[attr-defined]
         )
 
         old_meta = self._make_meta("Container", "item", "class Foo")
         new_meta = self._make_meta("Container", "item", "Foo")
 
-        changes = _diff_struct_layouts(old_meta, new_meta)
+        changes = diff_struct_layouts(old_meta, new_meta)
         kinds = {c.kind for c in changes}
         assert ChangeKind.STRUCT_FIELD_TYPE_CHANGED not in kinds
 
@@ -112,13 +112,13 @@ class TestNestedStructTagNormalization:
         """'Inner' vs 'Other' (genuinely different type) must STILL be detected."""
         from abicheck.checker import (
             ChangeKind,
-            _diff_struct_layouts,  # type: ignore[attr-defined]
+            diff_struct_layouts,  # type: ignore[attr-defined]
         )
 
         old_meta = self._make_meta("Outer", "child", "Inner")
         new_meta = self._make_meta("Outer", "child", "Other")
 
-        changes = _diff_struct_layouts(old_meta, new_meta)
+        changes = diff_struct_layouts(old_meta, new_meta)
         kinds = {c.kind for c in changes}
         assert ChangeKind.STRUCT_FIELD_TYPE_CHANGED in kinds, (
             "Real type change Inner→Other must still be detected"
@@ -128,13 +128,13 @@ class TestNestedStructTagNormalization:
         """'union U' vs 'U' must NOT emit STRUCT_FIELD_TYPE_CHANGED."""
         from abicheck.checker import (
             ChangeKind,
-            _diff_struct_layouts,  # type: ignore[attr-defined]
+            diff_struct_layouts,  # type: ignore[attr-defined]
         )
 
         old_meta = self._make_meta("Outer", "u_field", "union U")
         new_meta = self._make_meta("Outer", "u_field", "U")
 
-        changes = _diff_struct_layouts(old_meta, new_meta)
+        changes = diff_struct_layouts(old_meta, new_meta)
         kinds = {c.kind for c in changes}
         assert ChangeKind.STRUCT_FIELD_TYPE_CHANGED not in kinds
 
@@ -146,7 +146,7 @@ class TestNestedStructTagNormalization:
         differs between two MSVC builds.)"""
         from abicheck.checker import (
             ChangeKind,
-            _diff_struct_layouts,  # type: ignore[attr-defined]
+            diff_struct_layouts,  # type: ignore[attr-defined]
         )
 
         old_meta = self._make_meta("_TP_CALLBACK_ENVIRON_V3", "u", "<unnamed-tag>")
@@ -154,7 +154,7 @@ class TestNestedStructTagNormalization:
             "_TP_CALLBACK_ENVIRON_V3", "u", "_TP_CALLBACK_ENVIRON_V3::<unnamed-type-u>"
         )
 
-        changes = _diff_struct_layouts(old_meta, new_meta)
+        changes = diff_struct_layouts(old_meta, new_meta)
         kinds = {c.kind for c in changes}
         assert ChangeKind.STRUCT_FIELD_TYPE_CHANGED not in kinds, (
             "anonymous-member placeholder rename must not be a field type change"
@@ -165,7 +165,7 @@ class TestNestedStructTagNormalization:
         name collapse only suppresses unstable-name noise, not real drift)."""
         from abicheck.checker import (
             ChangeKind,
-            _diff_struct_layouts,  # type: ignore[attr-defined]
+            diff_struct_layouts,  # type: ignore[attr-defined]
         )
 
         old_meta = DwarfMetadata(
@@ -203,7 +203,7 @@ class TestNestedStructTagNormalization:
             has_dwarf=True,
         )
 
-        changes = _diff_struct_layouts(old_meta, new_meta)
+        changes = diff_struct_layouts(old_meta, new_meta)
         kinds = {c.kind for c in changes}
         assert ChangeKind.STRUCT_FIELD_TYPE_CHANGED in kinds, (
             "size drift of an anonymous member must still be reported"
@@ -215,13 +215,13 @@ class TestNestedStructTagNormalization:
         aggregate keyword, so it is not masked."""
         from abicheck.checker import (
             ChangeKind,
-            _diff_struct_layouts,  # type: ignore[attr-defined]
+            diff_struct_layouts,  # type: ignore[attr-defined]
         )
 
         old_meta = self._make_meta("Outer", "u", "<anonymous union>")
         new_meta = self._make_meta("Outer", "u", "<anonymous struct>")
 
-        changes = _diff_struct_layouts(old_meta, new_meta)
+        changes = diff_struct_layouts(old_meta, new_meta)
         kinds = {c.kind for c in changes}
         assert ChangeKind.STRUCT_FIELD_TYPE_CHANGED in kinds, (
             "anonymous union → anonymous struct must still be a field type change"
@@ -233,13 +233,13 @@ class TestNestedStructTagNormalization:
         normalization, must still drive the kind so union → struct is reported."""
         from abicheck.checker import (
             ChangeKind,
-            _diff_struct_layouts,  # type: ignore[attr-defined]
+            diff_struct_layouts,  # type: ignore[attr-defined]
         )
 
         old_meta = self._make_meta("Outer", "u", "union <anonymous>")
         new_meta = self._make_meta("Outer", "u", "struct <anonymous>")
 
-        changes = _diff_struct_layouts(old_meta, new_meta)
+        changes = diff_struct_layouts(old_meta, new_meta)
         kinds = {c.kind for c in changes}
         assert ChangeKind.STRUCT_FIELD_TYPE_CHANGED in kinds, (
             "leading-tag 'union <anonymous>' → 'struct <anonymous>' must be detected"
@@ -252,7 +252,7 @@ class TestNestedStructTagNormalization:
 
 
 class TestReservedFieldTypeMatch:
-    """_diff_struct_layouts must verify type_name match for reserved-field reuse."""
+    """diff_struct_layouts must verify type_name match for reserved-field reuse."""
 
     def _make_dwarf(self, struct_name: str, fields: list[FieldInfo]) -> DwarfMetadata:
         return DwarfMetadata(
@@ -268,7 +268,7 @@ class TestReservedFieldTypeMatch:
 
     def test_same_type_matches_reserved(self):
         """Reserved field with same type at same offset → USED_RESERVED_FIELD."""
-        from abicheck.checker import ChangeKind, _diff_struct_layouts
+        from abicheck.checker import ChangeKind, diff_struct_layouts
 
         old = self._make_dwarf(
             "S",
@@ -288,14 +288,14 @@ class TestReservedFieldTypeMatch:
                 FieldInfo(name="x", type_name="int", byte_offset=4, byte_size=4),
             ],
         )
-        changes = _diff_struct_layouts(old, new)
+        changes = diff_struct_layouts(old, new)
         kinds = [c.kind for c in changes]
         assert ChangeKind.USED_RESERVED_FIELD in kinds
         assert ChangeKind.STRUCT_FIELD_REMOVED not in kinds
 
     def test_different_type_no_reserved_match(self):
         """Reserved field with different type at same offset → STRUCT_FIELD_REMOVED."""
-        from abicheck.checker import ChangeKind, _diff_struct_layouts
+        from abicheck.checker import ChangeKind, diff_struct_layouts
 
         old = self._make_dwarf(
             "S",
@@ -313,7 +313,7 @@ class TestReservedFieldTypeMatch:
                 FieldInfo(name="x", type_name="int", byte_offset=4, byte_size=4),
             ],
         )
-        changes = _diff_struct_layouts(old, new)
+        changes = diff_struct_layouts(old, new)
         kinds = [c.kind for c in changes]
         assert ChangeKind.USED_RESERVED_FIELD not in kinds
         assert ChangeKind.STRUCT_FIELD_REMOVED in kinds

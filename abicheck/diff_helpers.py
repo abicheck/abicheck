@@ -521,7 +521,7 @@ def record_canonical_names(snap: AbiSnapshot | None) -> dict[str, str]:
     ``RecordType.name`` — deliberately bare (see that call site's own
     comment: "Keeping emitted symbols bare preserves the identity every
     other consumer already keys on") — while
-    ``diff_platform._diff_struct_layouts``/``_process_struct`` (L1 DWARF
+    ``compare.type_layout_diff.diff_struct_layouts``/``_process_struct`` (L1 DWARF
     tier) keys off ``dwarf_metadata``'s own dict, whose keys are always
     fully qualified (``_process_struct``: ``f"{scope_prefix}::{name}"``).
     Without this bridge, a namespaced type's ``STRUCT_SIZE_CHANGED``/
