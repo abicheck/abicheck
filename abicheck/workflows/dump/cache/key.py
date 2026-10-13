@@ -146,7 +146,7 @@ def _manifest_roots(dump_manifest: Any) -> str:
 
 def _manifest_cache_paths(dump_manifest: Any) -> tuple[list[Path], list[Path]]:
     """Derive ``(headers, includes)``-shaped path lists from *dump_manifest*
-    for :func:`abicheck._cache_key`'s existing content-hash
+    for :func:`abicheck.workflows.dump.cache.key._cache_key`'s existing content-hash
     walk to reuse as-is, rather than teaching that function a second,
     manifest-specific file-discovery mechanism.
 
@@ -164,7 +164,7 @@ def _manifest_cache_paths(dump_manifest: Any) -> tuple[list[Path], list[Path]]:
     ``public_header_dirs`` entry can still quote-include an unnamed sibling
     support header from that same directory, and that sibling's own content
     must still bust the cache (Codex review, PR #636). This only feeds
-    :func:`abicheck._cache_key`'s *content* hashing (so an
+    :func:`abicheck.workflows.dump.cache.key._cache_key`'s *content* hashing (so an
     edit to any file a manifest-driven dump could actually read busts the
     cache -- including a ``public_header_paths`` entry that names neither a
     root nor any TU's forced-include, e.g. a provenance-only header) — the
@@ -256,7 +256,7 @@ def _dump_cache_extra_key(
     """Build the ``extra`` cache-key material for a cacheable dump — every
     input to ``run_dump`` that affects its output besides the binary content
     / headers / includes / version / lang that
-    :func:`abicheck._cache_key` already hashes directly.
+    :func:`abicheck.workflows.dump.cache.key._cache_key` already hashes directly.
 
     Joined with NUL (``\\x00``) rather than a printable delimiter like
     ``,``/``|``: a path may legally contain a comma or pipe on POSIX, so a

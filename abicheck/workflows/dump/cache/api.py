@@ -92,7 +92,7 @@ def _dump_is_cacheable(req: DumpCacheRequest) -> bool:
 
     A ``dump_manifest`` (ADR-050 D3) is cacheable too, as of G32 Phase E:
     :func:`_manifest_cache_paths` derives headers/includes-shaped path lists
-    from the manifest for :func:`abicheck._cache_key`'s own
+    from the manifest for :func:`abicheck.workflows.dump.cache.key._cache_key`'s own
     content-hash walk to reuse unchanged (an edit to any file a
     manifest-driven dump could actually read still busts the cache), and
     :func:`abicheck.comparability.manifest_tu_scope_field` folds the
