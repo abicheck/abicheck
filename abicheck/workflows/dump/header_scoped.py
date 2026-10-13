@@ -164,7 +164,7 @@ def _try_header_scoped_dump(
         deferred_dirs = tuple(
             deferred_token_dirs(deferred)
         ) + cache_relevant_operand_paths(cc.gcc_option_tokens)
-    def _dump_with_contract(scoped_headers: list[Path]) -> AbiSnapshot:
+    def _dump_with_contract(headers: list[Path]) -> AbiSnapshot:
         """Run the native builder and attach its per-input contract.
 
         PE/Mach-O header-scoped extraction bypasses :func:`dumper.dump`, so
@@ -175,7 +175,7 @@ def _try_header_scoped_dump(
         if fmt == "pe":
             snap = _dumper_pe(
                 path,
-                scoped_headers,
+                headers,
                 eff_includes,
                 version,
                 compiler,
@@ -193,7 +193,7 @@ def _try_header_scoped_dump(
         else:
             snap = _dumper_macho(
                 path,
-                scoped_headers,
+                headers,
                 eff_includes,
                 version,
                 compiler,
@@ -210,7 +210,7 @@ def _try_header_scoped_dump(
             )
         _attach_extraction_contract(
             snap,
-            headers=scoped_headers,
+            headers=headers,
             extra_includes=eff_includes,
             gcc_options=cc.gcc_options,
             gcc_option_tokens=eff_tokens,

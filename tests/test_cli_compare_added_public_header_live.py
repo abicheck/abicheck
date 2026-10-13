@@ -258,5 +258,8 @@ def test_a_reordered_header_surface_compares_through_the_cli(
         argv += ["--header", f"new={new_dir / name}"]
 
     result = CliRunner().invoke(main, argv)
+    # Exit 16 is the native-path regression: the witness was not invoked
+    # because its direct wrapper did not expose the required ``headers`` name.
+    assert result.exit_code != 16, result.output
     assert result.exit_code == 0, result.output
     assert "not comparable" not in result.output
