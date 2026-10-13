@@ -263,7 +263,7 @@ def _unexplained_exports(
     table both listing ``_foo`` and the sole declaration ``foo`` joining only
     through the Mach-O underscore alias, the *ELF* ``_foo`` stays unmatched.
 
-    *filter_runtime* mirrors ``diff_symbols_renames._should_filter_transitive_runtime_symbols``:
+    *filter_runtime* mirrors ``public_surface.should_filter_transitive_runtime_symbols``:
     when the snapshot *is* libstdc++/libc++, its ``_ZNSt...`` exports are the
     inspected library's own ABI, not transitive runtime noise, so dropping
     them would let a partial declaration set look fully accounted for (Codex

@@ -187,7 +187,7 @@ class TestNamespaceMoveBatchEvidenceAggregation:
 class TestRealisticMangledKeyVsDemangledNameMismatch:
     """Codex review, fresh evidence: `find_prefix_rename_pairs` emits
     *demangled* `Function.name` pairs, but `old_map` (from
-    `diff_symbols._public_functions`) is keyed by *mangled* symbol -- every
+    `public_surface.public_functions`) is keyed by *mangled* symbol -- every
     test class above used `_fn(mangled, bound)` with `name=mangled`, which
     made the two identity spaces coincide by construction and silently
     hid the real mismatch. These tests use `_real_fn`, where `name` and

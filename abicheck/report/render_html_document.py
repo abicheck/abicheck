@@ -277,7 +277,7 @@ def _render_native_html_document(d: Mapping[str, Any]) -> str:
             # groups as repeated view options") -- this "no changes match"
             # note has the identical raw-separator problem the "Filtered
             # by" note above does; same fix, same helper.
-            from ..reporter_markdown import render_show_only_cli_hint
+            from .view import render_show_only_cli_hint
 
             cli_hint = render_show_only_cli_hint(empty_state["show_only"])
             section_htmls.append(
@@ -320,7 +320,7 @@ def _render_native_html_document(d: Mapping[str, Any]) -> str:
         # groups as repeated view options") -- render each `;`-joined
         # internal group as its own `--view show=...` token, the same
         # helper the Markdown "Filtered by" notes use.
-        from ..reporter_markdown import render_show_only_cli_hint
+        from .view import render_show_only_cli_hint
 
         cli_hint = render_show_only_cli_hint(show_only)
         filter_note = (

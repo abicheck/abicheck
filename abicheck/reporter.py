@@ -17,7 +17,6 @@
 
 from __future__ import annotations
 
-import hashlib
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, cast
 
@@ -59,6 +58,14 @@ from .report.finding_evolution import add_finding_evolution as _add_finding_evol
 from .report.render_json import render_json
 from .report.scoped_gate import ScopedGateChangeHelpers
 from .report.surface_changes import add_surface_changes as _add_surface_changes
+from .report.view import (
+    display_changes,
+    finding_id,
+    group_changes_by_root_cause,
+    resolve_scoped_gate_findings,
+    root_cause_id_for_key,
+    root_cause_key_and_display,
+)
 from .report_model import VERDICT_TO_SEVERITY_LABEL as _VERDICT_TO_SEVERITY_LABEL
 from .report_summary import build_summary, surface_breakdown
 from .reporter_contract_blocks import add_contract_context as _add_contract_context
@@ -75,25 +82,15 @@ from .reporter_markdown import (
     _VERDICT_EMOJI as _VERDICT_EMOJI,
     _VERDICT_LABEL as _VERDICT_LABEL,
     _VERDICT_MERGE_EFFECT as _VERDICT_MERGE_EFFECT,
-    ShowOnlyFilter as ShowOnlyFilter,
-    _finding_id as _finding_id,
     _fmt_size as _fmt_size,
     _format_change_md as _format_change_md,
-    _group_changes_by_root_cause as _group_changes_by_root_cause,
-    _resolve_scoped_gate_findings as _resolve_scoped_gate_findings,
-    _root_cause_key_and_display as _root_cause_key_and_display,
     _section_severity_label as _section_severity_label,
-    _suppress_dangling_correlation_notes as _suppress_dangling_correlation_notes,
-    apply_show_only as apply_show_only,
     entity_for_change as entity_for_change,
     entity_for_kind as entity_for_kind,
     operation_for_kind as operation_for_kind,
-    parse_show_only_groups as parse_show_only_groups,
     root_cause_evidence_lookup_for_changes as root_cause_evidence_lookup_for_changes,
     root_cause_for_change as root_cause_for_change,
     root_cause_lookup_for_changes as root_cause_lookup_for_changes,
-    show_only_matches as show_only_matches,
-    show_only_matches_severity_label as show_only_matches_severity_label,
     to_stat as to_stat,
 )
 from .root_cause_evidence import (
@@ -351,7 +348,7 @@ def _add_entries_to_root_causes(
     }
     touched: set[str] = set()
     for key, root_display, entry in keyed_entries:
-        root_cause_id = hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
+        root_cause_id = root_cause_id_for_key(key)
         group = by_id.get(root_cause_id)
         if group is None:
             group = {
@@ -426,14 +423,14 @@ def _to_json_root_cause(
     prewarm_change_demangling(result)
     changes = list(result.changes)
     if show_only:
-        changes = apply_show_only(
+        changes = display_changes(
             changes,
             show_only,
             policy=result.policy,
             kind_sets=effective_kind_sets(result),
             policy_file=result.policy_file,
+            today=None,
         )
-        changes = _suppress_dangling_correlation_notes(changes)
     effective_policy = result.policy or "strict_abi"
     eff_sets = effective_kind_sets(result)
 
@@ -461,19 +458,19 @@ def _to_json_root_cause(
             policy=effective_policy,
             kind_sets=eff_sets,
             policy_file=result.policy_file,
-            root_cause=_rc_lookup.get(_finding_id(c)),
-            root_cause_evidence=_rc_evidence.get(_finding_id(c)),
+            root_cause=_rc_lookup.get(finding_id(c)),
+            root_cause_evidence=_rc_evidence.get(finding_id(c)),
             evidence_tiers=result.evidence_tiers,
             severity_config=severity_config,
         )
         for c in changes
     }
     entries = [entry_by_id[id(c)] for c in changes]
-    grouped = _group_changes_by_root_cause(changes, extra_causes=extra_causes)
+    grouped = group_changes_by_root_cause(changes, extra_causes=extra_causes)
 
     root_causes = []
     for key, root_display, group_changes in grouped:
-        root_cause_id = hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
+        root_cause_id = root_cause_id_for_key(key)
         entry: dict[str, object] = {
             "root_cause_id": root_cause_id,
             "root": root_display,
@@ -811,8 +808,8 @@ def _add_suppression(d: dict[str, object], result: DiffResult) -> None:
         "suppressed_changes": [
             _suppressed_change_entry(
                 c,
-                root_cause=_rc_lookup.get(_finding_id(c)),
-                root_cause_evidence=_rc_evidence.get(_finding_id(c)),
+                root_cause=_rc_lookup.get(finding_id(c)),
+                root_cause_evidence=_rc_evidence.get(finding_id(c)),
                 rule=ledger.rule_for(c),
             )
             for c in result.suppressed_changes
@@ -1012,8 +1009,8 @@ def _add_changes_block(
             policy=effective_policy,
             kind_sets=eff_sets,
             policy_file=result.policy_file,
-            root_cause=_rc_lookup.get(_finding_id(c)),
-            root_cause_evidence=_rc_evidence.get(_finding_id(c)),
+            root_cause=_rc_lookup.get(finding_id(c)),
+            root_cause_evidence=_rc_evidence.get(finding_id(c)),
             evidence_tiers=result.evidence_tiers,
             severity_config=severity_config,
             today=today,
@@ -1484,7 +1481,7 @@ def _change_to_dict(
     if isinstance(kind, ChangeKind):
         d["operation"] = operation_for_change(c, kind.value)
         d["entity"] = entity_for_change(c, kind.value)
-        d["finding_id"] = _finding_id(c)
+        d["finding_id"] = finding_id(c)
         # Backend-independent sibling of finding_id (schema 2.36).
         from .compare.finding_identity import report_canonical_finding_id
 
@@ -1653,8 +1650,8 @@ def _build_severity_json(
 _SCOPED_GATE_HELPERS = ScopedGateChangeHelpers(
     change_to_dict=_change_to_dict,
     add_entries_to_root_causes=_add_entries_to_root_causes,
-    finding_id=_finding_id,
-    root_cause_key_and_display=_root_cause_key_and_display,
+    finding_id=finding_id,
+    root_cause_key_and_display=root_cause_key_and_display,
     root_cause_for_change=root_cause_for_change,
-    resolve_scoped_gate_findings=_resolve_scoped_gate_findings,
+    resolve_scoped_gate_findings=resolve_scoped_gate_findings,
 )

@@ -186,7 +186,7 @@ out:
 - ``_diff_symbol_renames`` -- a batch-rename HEURISTIC (2+ independently
   removed/added symbols whose names share a naming pattern), not a
   per-pair join over a resolved match; it re-derives its own
-  removed/added sets from ``_public_functions`` directly rather than
+  removed/added sets from ``public_functions`` directly rather than
   consulting any resolved pairing. Threading ctor/dtor reconciliation
   through a heuristic built for an unrelated problem (namespace-prefix
   refactors across MANY symbols) risks changing its unrelated behavior

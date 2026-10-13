@@ -33,14 +33,8 @@ from abicheck.model import (
     Variable,
     Visibility,
 )
-from abicheck.reporter import (
-    ShowOnlyFilter,
-    apply_show_only,
-    to_json,
-    to_markdown,
-    to_stat,
-    to_stat_json,
-)
+from abicheck.report.view import ShowOnlyFilter, apply_show_only
+from abicheck.reporter import to_json, to_markdown, to_stat, to_stat_json
 
 # ---------------------------------------------------------------------------
 # Helpers

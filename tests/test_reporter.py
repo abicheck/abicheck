@@ -1092,7 +1092,7 @@ class TestImpactAssessmentRootCause:
 
 class TestRootCauseMarkdown:
     """G29 Phase 3 slice 4 (ADR-052): --report-mode root-cause markdown/text
-    rendering, sharing reporter._group_changes_by_root_cause with the JSON
+    rendering, sharing report.view.group_changes_by_root_cause with the JSON
     renderer so the two formats can never disagree about grouping."""
 
     def test_groups_findings_sharing_caused_by_type(self):

@@ -68,7 +68,7 @@ def _breaking_symbols(result) -> set[str]:
 #   Real case: Protobuf 6.33.2 -> 6.33.5 (a *patch*) flagged BREAKING because
 #   `_ZTIZN6google8protobuf2io7Printer8WithDefs...EUlSt17basic_string...E_`
 #   (typeinfo for an internal lambda) "disappeared".  Lambda identity is not
-#   stable ABI.  Fixed in diff_symbols._public_variables: RTTI/vtable symbols of
+#   stable ABI.  Fixed in public_surface.public_variables: RTTI/vtable symbols of
 #   function-local types (Itanium ``_ZTIZ``/``_ZTSZ``/``_ZTVZ``/``_ZTTZ`` local-name
 #   production) are excluded from the public-variable surface.
 # ---------------------------------------------------------------------------

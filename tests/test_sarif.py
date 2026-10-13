@@ -796,13 +796,13 @@ class TestScopedGate:
         assert result["properties"]["relevantToConsumerScope"] is False
 
     def test_relevant_change_keeps_its_level_and_marked(self) -> None:
-        from abicheck.reporter import _finding_id
+        from abicheck.report.view import finding_id
 
         c = _breaking_change()
         r = _make_result([c], verdict=Verdict.BREAKING)
         r.scoped_verdict = Verdict.BREAKING  # type: ignore[attr-defined]
         r.gate_scope = "used_by"  # type: ignore[attr-defined]
-        r.scoped_relevant_finding_ids = frozenset({_finding_id(c)})  # type: ignore[attr-defined]
+        r.scoped_relevant_finding_ids = frozenset({finding_id(c)})  # type: ignore[attr-defined]
         doc = to_sarif(r)
         result = doc["runs"][0]["results"][0]
         assert result["level"] == "error"
@@ -878,7 +878,7 @@ class TestScopedGate:
         # but never added to result.changes -- without rendering it, a
         # --used-by run that fails solely because of one of these would
         # report a nonzero gate exitCode with zero results to explain it.
-        from abicheck.reporter import _finding_id
+        from abicheck.report.view import finding_id
 
         scoped_only = Change(
             kind=ChangeKind.PE_ORDINAL_RETARGETED,
@@ -892,7 +892,7 @@ class TestScopedGate:
         r.scoped_exit_code = 4  # type: ignore[attr-defined]
         r.scoped_exit_code_scheme = "legacy"  # type: ignore[attr-defined]
         r.gate_scope = "used_by"  # type: ignore[attr-defined]
-        r.scoped_relevant_finding_ids = frozenset({_finding_id(scoped_only)})  # type: ignore[attr-defined]
+        r.scoped_relevant_finding_ids = frozenset({finding_id(scoped_only)})  # type: ignore[attr-defined]
         r.scoped_only_changes = (scoped_only,)  # type: ignore[attr-defined]
         doc = to_sarif(r)
         results = doc["runs"][0]["results"]
@@ -910,7 +910,7 @@ class TestScopedGate:
         consumer's own import table/execution, not an artifact-level
         library diff -- its properties.evidenceStatus must be
         consumer_proven, not the BREAKING-category default artifact_proven."""
-        from abicheck.reporter import _finding_id
+        from abicheck.report.view import finding_id
 
         scoped_only = Change(
             kind=ChangeKind.PE_ORDINAL_RETARGETED,
@@ -924,7 +924,7 @@ class TestScopedGate:
         r.scoped_exit_code = 4  # type: ignore[attr-defined]
         r.scoped_exit_code_scheme = "legacy"  # type: ignore[attr-defined]
         r.gate_scope = "used_by"  # type: ignore[attr-defined]
-        r.scoped_relevant_finding_ids = frozenset({_finding_id(scoped_only)})  # type: ignore[attr-defined]
+        r.scoped_relevant_finding_ids = frozenset({finding_id(scoped_only)})  # type: ignore[attr-defined]
         r.scoped_only_changes = (scoped_only,)  # type: ignore[attr-defined]
         doc = to_sarif(r)
         results = doc["runs"][0]["results"]
@@ -937,7 +937,7 @@ class TestScopedGate:
         # filters out a scoped-only breaking change (e.g. an app-relevant
         # PE_ORDINAL_RETARGETED under --show-only compatible) must not still
         # upload it, unlike the normal result.changes path.
-        from abicheck.reporter import _finding_id
+        from abicheck.report.view import finding_id
 
         scoped_only = Change(
             kind=ChangeKind.PE_ORDINAL_RETARGETED,
@@ -951,7 +951,7 @@ class TestScopedGate:
         r.scoped_exit_code = 4  # type: ignore[attr-defined]
         r.scoped_exit_code_scheme = "legacy"  # type: ignore[attr-defined]
         r.gate_scope = "used_by"  # type: ignore[attr-defined]
-        r.scoped_relevant_finding_ids = frozenset({_finding_id(scoped_only)})  # type: ignore[attr-defined]
+        r.scoped_relevant_finding_ids = frozenset({finding_id(scoped_only)})  # type: ignore[attr-defined]
         r.scoped_only_changes = (scoped_only,)  # type: ignore[attr-defined]
         doc = to_sarif(r, show_only="compatible")
         assert doc["runs"][0]["results"] == []

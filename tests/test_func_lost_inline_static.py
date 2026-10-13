@@ -72,7 +72,7 @@ def test_lost_inline_fires_even_for_an_unnamed_namespace_function():
     only the ``static`` keyword, not C++ unnamed-namespace membership —
     which gives a function the identical internal linkage ``static``
     does, without setting ``is_static``. With no ELF export table (a
-    header-only snapshot, as here), ``_public_functions()`` has no other
+    header-only snapshot, as here), ``public_functions()`` has no other
     signal to exclude it either, so this reproduces the same false
     "external linkage" premise the impact text's `static`-only caveat
     didn't cover. Pinned the same way as the ``static`` sibling test: the

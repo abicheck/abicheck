@@ -134,7 +134,7 @@ class TestGenuinelyExportedSymbolStaysBreaking:
 
     def test_symbol_exported_only_under_its_export_alias_is_not_demoted(self) -> None:
         """Codex review, fresh evidence: `change.symbol` can be a guessed
-        mangling from `_public_functions`' own bare-name export fallback --
+        mangling from `public_functions`' own bare-name export fallback --
         the function is retained because its real display name ("process")
         is exported, even though the *dict key*/`change.symbol` itself
         (here, a mangling that matches no real dynsym entry) never is.
