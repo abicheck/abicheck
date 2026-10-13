@@ -28,6 +28,7 @@ from abicheck.extract.headers.castxml.preprocessed_text import (
     PreprocessedText,
     attach_preprocessed_text,
     declaration_windows,
+    file_key,
     parse_preprocessed,
     preprocess_command,
     read_preprocessed_text,
@@ -258,14 +259,14 @@ def _has_cc(text: str) -> bool:
 
 def test_parse_preprocessed_maps_lines_back_to_source() -> None:
     files, defined = parse_preprocessed(_PP)
-    assert files["/inc/api.h"] == {
+    assert files[file_key("/inc/api.h")] == {
         1: "#define CALL __attribute__((ms_abi))",
         3: "__attribute__((ms_abi)) int target(int a,",
         5: "    int b);",
         6: "#undef CALL",
         20: "int other(void);",
     }
-    assert files["/inc/plain.h"] == {1: "int plain(void);"}
+    assert files[file_key("/inc/plain.h")] == {1: "int plain(void);"}
     assert not any(k.startswith("<") for k in files)  # pseudo files dropped
     assert {"__x86_64__", "CALL"} <= defined
     assert target_default_convention(defined) == "sysv_abi"
@@ -290,8 +291,8 @@ def _root(*decls: tuple[str, int]) -> Element:
 def test_only_convention_bearing_files_keep_declaration_windows() -> None:
     files, _ = parse_preprocessed(_PP)
     kept = declaration_windows(_root(("f1", 3), ("f2", 1)), files, _has_cc)
-    assert set(kept) == {"/inc/api.h"}  # plain.h spells no convention
-    assert set(kept["/inc/api.h"]) == {1, 3, 5, 6}  # line 20 is out of window
+    assert set(kept) == {file_key("/inc/api.h")}  # plain.h spells no convention
+    assert set(kept[file_key("/inc/api.h")]) == {1, 3, 5, 6}  # line 20 out of window
     # No convention-bearing file at all: nothing kept.
     assert (
         declaration_windows(_root(("f2", 1)), {"/p.h": {1: "int f();"}}, _has_cc) == {}
@@ -306,11 +307,12 @@ def test_a_convention_only_in_a_directive_does_not_mark_the_file() -> None:
 def test_preprocessed_text_round_trips_through_the_document() -> None:
     root = Element("CastXML")
     assert read_preprocessed_text(root) is None  # no table: not "no lines"
-    table = PreprocessedText({"/inc/api.h": {2: "int f()\x01;"}}, "sysv_abi")
+    table = PreprocessedText({file_key("/inc/api.h"): {2: "int f()\x01;"}}, "sysv_abi")
     attach_preprocessed_text(root, table)
     got = read_preprocessed_text(root)
     assert got is not None and got.default_cc == "sysv_abi"
-    assert got.lines == {"/inc/api.h": {2: "int f() ;"}}  # XML-unsafe char blanked
+    # XML-unsafe char blanked
+    assert got.lines == {file_key("/inc/api.h"): {2: "int f() ;"}}
     assert got.source_lines("/inc/./api.h") == ["", "int f() ;"]
     assert got.source_lines("/inc/other.h") is None
     empty = Element("CastXML")
@@ -353,7 +355,9 @@ def test_preprocessed_lines_are_read_instead_of_the_header(
     hdr = tmp_path / "h.h"
     # The raw header says the opposite: it must not be read.
     hdr.write_text("CALL int target(int a) __attribute__((fastcall));\n" * 3)
-    table = PreprocessedText({str(hdr): dict(enumerate(pp_lines, 1))}, "sysv_abi")
+    table = PreprocessedText(
+        {file_key(str(hdr)): dict(enumerate(pp_lines, 1))}, "sysv_abi"
+    )
     line = next(i for i, ln in enumerate(pp_lines, 1) if "target" in ln)
     assert source_calling_conventions(_ctx(hdr, table), _el(line), "target") == want
 
@@ -364,14 +368,14 @@ def test_a_file_without_preprocessed_lines_spells_no_convention(tmp_path: Path) 
     ctx = _ctx(hdr, PreprocessedText({}, "sysv_abi"))
     assert source_calling_conventions(ctx, _el(1), "target") == set()
     # Past the recorded lines: nothing, not a crash.
-    ctx = _ctx(hdr, PreprocessedText({str(hdr): {1: "int target(int);"}}, ""))
+    ctx = _ctx(hdr, PreprocessedText({file_key(str(hdr)): {1: "int target(int);"}}, ""))
     assert source_calling_conventions(ctx, _el(5), "target") == set()
 
 
 def test_preprocessed_lines_are_cached(tmp_path: Path) -> None:
     hdr = tmp_path / "h.h"
     table = PreprocessedText(
-        {str(hdr): {1: "int target(int) __attribute__((ms_abi));"}}
+        {file_key(str(hdr)): {1: "int target(int) __attribute__((ms_abi));"}}
     )
     ctx = _ctx(hdr, table)
     assert source_calling_conventions(ctx, _el(1), "target") == {"ms_abi"}
@@ -405,7 +409,7 @@ def test_resolve_preprocessed_text_end_to_end_and_failures(tmp_path: Path) -> No
 
     got = resolve_preprocessed_text(_CMD, root, tmp_path, ok, _has_cc)
     assert got is not None and got.default_cc == "sysv_abi"
-    assert set(got.lines) == {"/inc/api.h"}
+    assert set(got.lines) == {file_key("/inc/api.h")}
     # Unusable command shape, failing run, missing output, raising runner.
     assert (
         resolve_preprocessed_text(["castxml", "a.h"], root, tmp_path, ok, _has_cc)

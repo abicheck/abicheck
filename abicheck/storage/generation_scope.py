@@ -109,6 +109,11 @@ RESOLVER_NON_SEMANTIC_FILES: dict[str, str] = {
     "abicheck/workflows/resolved_execution_context.py": (
         "execution-context wiring for a resolved request; no fact semantics"
     ),
+    "abicheck/compare/elf_alias_pairs.py": (
+        "pairs already-extracted ELF symbols by version tag for the symbol diff; "
+        "resolves no artifact, owner or reachability (the extracted binding and "
+        "visibility facts it reads are in the extractor scope)"
+    ),
 }
 
 

@@ -57,10 +57,12 @@ def pinned_inputs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 #: Binary content only: no headers, no includes, no version, default lang.
-GOLDEN_BINARY_ONLY = "d7d11c7809e0aa971e5b31d6de0fdf5aaa4ae234132a7ff611f082ae20e0a3eb"
+#: Re-pinned for ``_SNAPSHOT_CACHE_VERSION`` 35 -> 36 (eae134a0e), a deliberate
+#: bump that changes every key; that commit did not update these goldens.
+GOLDEN_BINARY_ONLY = "60ce8774a9be4ebf1dbd20ed3dc3abfe09dfaf07bd791681b422c1d127968c80"
 
 #: Every named input at once, so a change to any one of them shows here.
-GOLDEN_FULL = "76bce184676182990e36a5750e48750656cfdbc6fd71c17824a3ac9baacc9220"
+GOLDEN_FULL = "e9905659f5f1dd336ceeca82f6ad75ab528b348d218b294edd2e97c831808197"
 
 
 def test_binary_only_key_is_pinned(pinned_inputs: Path) -> None:
