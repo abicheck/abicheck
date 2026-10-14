@@ -346,38 +346,48 @@ def test_the_run_decision_is_path_match_or_label() -> None:
     assert 'if [ "$GITHUB_EVENT_NAME" != "pull_request" ]' in script
 
 
-def test_a_detector_test_change_makes_the_pr_lane_fail_closed() -> None:
-    """A test-only diff has no changed production function to scope to, so
-    --diff-scoped alone reports "gated nothing" and exits 0 — green for a run
-    that checked nothing (Codex review)."""
+def test_a_pr_run_is_diff_only_and_never_widens_to_the_population() -> None:
+    """The PR lane gates only the functions its diff changed. Widening it to
+    the whole population was the cost this lane was cut down to avoid, so the
+    PR step must pass --diff-only and must not pass --require-baseline."""
     steps = _workflow()["jobs"]["mutmut"]["steps"]
     pr_step = next(
         s for s in steps if "--diff-scoped" in str(s.get("run", "")) and "run" in s
     )
-    assert "--require-baseline" in pr_step["run"]
-    assert "require_baseline" in pr_step["env"]["REQUIRE_BASELINE"]
+    assert "$diff_only" in pr_step["run"]
+    assert 'DIFF_ONLY" = "true"' in pr_step["run"]
+    assert pr_step["env"]["DIFF_ONLY"] == "${{ needs.resolve.outputs.diff_only }}"
 
 
-def test_a_label_forced_run_also_fails_closed() -> None:
-    """The `mutation` label is documented as the complete check, so a
-    label-forced run on a test-only diff outside the globs must not go green
-    on "gated nothing" — the one run someone explicitly asked to be thorough
+def test_a_label_forced_run_is_the_complete_check() -> None:
+    """The `mutation` label is the complete check on demand: it alone turns
+    diff-only off and requires the baseline when one is recorded, so it never
+    goes green on "gated nothing" for the run someone asked to be thorough
     (Codex review)."""
     steps = _workflow()["jobs"]["resolve"]["steps"]
     decide = next(s for s in steps if s.get("id") == "decide")
+    lines = decide["run"].splitlines()
     # Anchored on the branch that sets the flag, not on the condition text
-    # alone: the run decision one block up ORs the same three variables, so a
-    # bare substring match passed against a version that dropped the label
-    # from *this* branch (caught by falsifying the fix).
-    guard = next(
-        line
-        for line, nxt in zip(
-            decide["run"].splitlines(), decide["run"].splitlines()[1:], strict=False
-        )
-        if "require_baseline=true" in nxt
+    # alone: a bare substring match would pass against a version that dropped
+    # the label from *this* branch.
+    set_true = next(
+        i for i, line in enumerate(lines) if "require_baseline=true" in line
     )
-    assert '"$LABELLED" = "true"' in guard, guard
-    assert '"$MATCHED_TESTS" = "true"' in guard, guard
+    branch = next(
+        line for line in reversed(lines[:set_true]) if line.lstrip().startswith("if ")
+    )
+    assert '"$LABELLED" = "true"' in branch, branch
+    assert "diff_only=false" in lines[set_true - 1], lines[set_true - 1]
+
+
+def test_a_pr_without_the_label_is_diff_only() -> None:
+    """Every PR run that is not label-forced sets diff_only=true and no
+    drift reference, and the resolve job publishes that signal."""
+    steps = _workflow()["jobs"]["resolve"]["steps"]
+    decide = next(s for s in steps if s.get("id") == "decide")
+    assert "diff_only=true" in decide["run"]
+    outputs = _workflow()["jobs"]["resolve"]["outputs"]
+    assert "diff_only" in outputs
 
 
 def test_the_require_baseline_signal_is_published_by_resolve() -> None:
