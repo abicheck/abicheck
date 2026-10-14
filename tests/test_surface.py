@@ -1197,7 +1197,7 @@ class TestProvenanceReasons:
 # ── hidden-friend surface classification (origin-before-exemption fix) ──────
 #
 # hidden_friend_removed/added used to be unconditionally retained regardless
-# of where the befriending class lived (_NEVER_FILTER_KIND_NAMES). That is
+# of where the befriending class lived (NEVER_FILTER_KIND_NAMES). That is
 # right for the not-exported gate (a hidden friend can never have an ELF
 # export) but wrong for header provenance: a hidden friend whose owner class
 # is a system/private-header declaration is exactly as out-of-surface as any

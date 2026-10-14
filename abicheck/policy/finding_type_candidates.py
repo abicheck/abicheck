@@ -30,7 +30,7 @@ from __future__ import annotations
 from ..model.change import Change
 from ..model.change_catalog.kinds import ChangeKind
 from ..model.type_identifiers import type_identifiers as _type_identifiers
-from ..surface import _MEMBER_LEVEL_TYPE_KIND_NAMES, _TYPE_LEVEL_KIND_NAMES
+from ..surface import MEMBER_LEVEL_TYPE_KIND_NAMES, TYPE_LEVEL_KIND_NAMES
 
 # Which spelling a member-level finding's `symbol` actually carries. Verified
 # producer by producer (Codex review): `diff_types.py`'s field/union families
@@ -75,8 +75,8 @@ assert OWNER_IS_SYMBOL_KINDS.isdisjoint(OWNER_PLUS_MEMBER_KINDS), (
 # owner, so fail loudly at import instead (the same discipline as this
 # module's terminal/weak surface-reason assertion above).
 assert (OWNER_IS_SYMBOL_KINDS | OWNER_PLUS_MEMBER_KINDS) == frozenset(
-    _MEMBER_LEVEL_TYPE_KIND_NAMES
-), "every _MEMBER_LEVEL_TYPE_KIND_NAMES member must declare its symbol shape"
+    MEMBER_LEVEL_TYPE_KIND_NAMES
+), "every MEMBER_LEVEL_TYPE_KIND_NAMES member must declare its symbol shape"
 
 
 def type_candidates(change: Change) -> set[str]:
@@ -85,7 +85,7 @@ def type_candidates(change: Change) -> set[str]:
     ``caused_by_type`` spelling ``"const Foo *"`` would not literal-match a
     bare ``"Foo"`` entry).
 
-    A member-level finding (``_MEMBER_LEVEL_TYPE_KIND_NAMES``) must resolve to
+    A member-level finding (``MEMBER_LEVEL_TYPE_KIND_NAMES``) must resolve to
     its *owner* type -- but the producers in that one kind set disagree on
     whether ``symbol`` already names the member, so **both** readings are
     offered as candidates (Codex review, confirmed against ``diff_types.py``):
@@ -141,7 +141,7 @@ def qualified_type_candidates(change: Change) -> set[str]:
     too (``ns::Mode::X``), so its owner prefix is the candidate -- the same
     per-kind shape :func:`type_candidates` applies to ``symbol``.
     """
-    if change.kind.value not in _TYPE_LEVEL_KIND_NAMES:
+    if change.kind.value not in TYPE_LEVEL_KIND_NAMES:
         return set()
     qualified = change.qualified_name or ""
     if not qualified:

@@ -157,15 +157,15 @@
       "abicheck/bundle_resolution_reachability.py": "7d60ccf82fe98a12c7c81ac02d2c920492c8c20c52f0b13398195c4590615c08",
       "abicheck/compare/export_owner_resolution.py": "e9108cbdf0459cb8171f63ca328138558cfd032bff9124e4b9bd0fd5bf8553c8",
       "abicheck/debug_resolver.py": "cdcc4f72bd8fb5304fe030b3e1365da488ad009397e014ba56931a3f311cf1f3",
-      "abicheck/post_processing_reachability.py": "c98dcbf8e1be25e3cc426853eda26342fa4e729d55e9537dff68435a8c37283d",
+      "abicheck/post_processing_reachability.py": "7d0bbf2a1ae31268de442b303fbcd758ff61b2a48312963cbe21e8f51168d7cc",
       "abicheck/resolver.py": "91f558b58a035da779342a79e39e68b3f8dc452dbe53d27c7ff6e7ed5e093ed4",
       "abicheck/storage/native_identity_aliases.py": "061e634659b371f1688cfcd4845fdcbe6147b9c2cfddaa4285dd34c757ca80ef",
       "abicheck/type_reachability.py": "89d8db3c507a58004fd6b38ad4fee5ea6c9b40a9da97f34d8067ae440aa9e9bb",
       "abicheck/type_reachability_spelling.py": "4262f30db17f2a4c5ba2a4341b8eed9f1408e335825644845e10cb08838995cb",
       "abicheck/type_reachability_stdlib_spellings.py": "0cc608abede4a96a81172caf237e1bb813100a22642d6a828838e4cd60e992ae"
     },
-    "fingerprint": "7c8b9bd4a410ad154334cac365132d874b43a9f981266fc05b96bc2a5306d679",
+    "fingerprint": "eec7d3d2981c32b7f63d44de922041451911a52d8529c8e886f2c553b2e80601",
     "generation": 1,
-    "reason": "comment-only: a docstring cross-reference to reporter._add_reconciled was renamed to json_sections.add_reconciled when the JSON section builders moved to report/; no resolver semantics changed"
+    "reason": "Pure rename of a private kind-set import in post_processing_reachability.py (_IDENTITY_VTABLE_KINDS -> IDENTITY_VTABLE_KINDS). No extraction or resolution semantics change; the set values and all resolver logic are identical. No generation bump."
   }
 }

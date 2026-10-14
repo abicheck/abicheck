@@ -476,19 +476,19 @@ _EXT_INTERNAL_SYMBOL_PREFIXES = (
 
 def _is_off_python_surface(c: Change, init_symbol: str | None) -> bool:
     """True when *c* is a native API-content finding off an extension's contract."""
-    from .surface import _NEVER_FILTER_KIND_NAMES, _TYPE_LEVEL_KIND_NAMES
+    from .surface import NEVER_FILTER_KIND_NAMES, TYPE_LEVEL_KIND_NAMES
 
     v = c.kind.value
     # Authority: Python-level and CPython load-contract findings are the point.
     if v.startswith("python_"):
         return False
     # Leak / constant findings are never scoped out (ADR-024 §D5.2).
-    if v in _NEVER_FILTER_KIND_NAMES:
+    if v in NEVER_FILTER_KIND_NAMES:
         return False
     # The module's own init export is its one real native public symbol.
     if init_symbol and c.symbol and (c.symbol == init_symbol or "PyInit_" in c.symbol):
         return False
-    return v in _TYPE_LEVEL_KIND_NAMES or v.startswith(_EXT_INTERNAL_SYMBOL_PREFIXES)
+    return v in TYPE_LEVEL_KIND_NAMES or v.startswith(_EXT_INTERNAL_SYMBOL_PREFIXES)
 
 
 class DemoteOffPythonSurface:
@@ -1101,8 +1101,8 @@ class DemoteUnreachableInternalChurn:
 
         from .compare.internal_namespaces import DEFAULT_INTERNAL_NAMESPACES
         from .internal_leak import (
-            _LEAK_TRIGGERING_KINDS,
             INTERNAL_NAMESPACE,
+            LEAK_TRIGGERING_KINDS,
             _root_type_name_for_change,
         )
         from .model.change_catalog.kinds import ChangeKind
@@ -1139,7 +1139,7 @@ class DemoteUnreachableInternalChurn:
         for c in changes:
             root = _root_type_name_for_change(c)
             if (
-                c.kind in _LEAK_TRIGGERING_KINDS
+                c.kind in LEAK_TRIGGERING_KINDS
                 and INTERNAL_NAMESPACE.matches(root, internal_namespaces=namespaces)
                 and root not in leaked_types
                 and not _is_frozen(c, root)
