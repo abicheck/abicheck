@@ -4,7 +4,7 @@
 
 from __future__ import annotations
 
-from ..pr_comment_base import CommentModel, _esc
+from .pr_comment_model import CommentModel, escape_cell
 
 #: Cap on how many review groups the PR comment itemizes. Named rather than
 #: inline so the bound is visible next to the disclosure that reports it --
@@ -38,10 +38,10 @@ def review_group_note(model: CommentModel) -> list[str]:
     ]
     shown = model.review_groups[:MAX_COMMENT_REVIEW_GROUPS]
     for group in shown:
-        scope = f"{_esc(group['library'])}: " if group.get("library") else ""
+        scope = f"{escape_cell(group['library'])}: " if group.get("library") else ""
         lines.append(
-            f"- {scope}**{_esc(group.get('display_name', '?'))}** — "
-            f"{_esc(group.get('transition', 'changed'))}"
+            f"- {scope}**{escape_cell(group.get('display_name', '?'))}** — "
+            f"{escape_cell(group.get('transition', 'changed'))}"
         )
     # Measured against that same authoritative total, not against the list
     # this note happens to have been handed. `report/build.py` builds
