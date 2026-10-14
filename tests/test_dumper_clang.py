@@ -4002,7 +4002,7 @@ def test_header_graph_attach_reuses_primary_snapshot_ast(
     to build the graph.
     """
     from abicheck.model import AbiSnapshot
-    from abicheck.service import _attach_header_graph
+    from abicheck.service_header_graph_attach import _attach_header_graph
 
     header = tmp_path / "api.h"
     header.write_text("int f(void);\n")

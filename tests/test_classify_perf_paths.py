@@ -876,8 +876,8 @@ class TestTheHeaderGraphGateSharesTheL2RunnerSafely:
 class TestTheCanonicalOwnerIsClassifiedNotJustTheFacade:
     """A re-export is not the thing that does the work.
 
-    `abicheck/service.py` names `_attach_header_graph`, but only re-exports it
-    from `service_header_graph_attach.py` for import stability. Classifying the
+    `_attach_header_graph` is defined in `service_header_graph_attach.py`; the
+    `abicheck/service.py` facade does not re-export it. Classifying the
     facade alone meant a PR changing the actual attach implementation -- code the
     in-process header-graph benchmark and every full-CLI live dump execute --
     skipped every performance job (Codex review). The family is now swept by
@@ -889,10 +889,10 @@ class TestTheCanonicalOwnerIsClassifiedNotJustTheFacade:
             ["abicheck/service_header_graph_attach.py"]
         )
 
-    def test_the_facade_only_re_exports_the_owner(self) -> None:
+    def test_the_owner_defines_it_and_the_facade_does_not_re_export_it(self) -> None:
         """The premise: if this stops holding, the test above is about the wrong file."""
         facade = (_REPO_ROOT / "abicheck" / "service.py").read_text()
-        assert "from .service_header_graph_attach import _attach_header_graph" in facade
+        assert "_attach_header_graph" not in facade
         owner = (_REPO_ROOT / "abicheck" / "service_header_graph_attach.py").read_text()
         assert "def _attach_header_graph(" in owner
 

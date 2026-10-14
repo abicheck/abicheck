@@ -20,14 +20,9 @@ already moved out of that file (see ``service.py``'s own tail-of-file re-export
 block for the established precedent this follows). No behavior change: same
 function body, same signature.
 
-Re-exported eagerly as ``service._attach_header_graph`` (not a lazy shim) since
-it is patched directly by name in a large number of tests
-(``monkeypatch.setattr("abicheck.service._attach_header_graph", ...)``,
-``unittest.mock.patch("abicheck.service._attach_header_graph", ...)``) and
-imported directly (``from abicheck.service import _attach_header_graph``) --
-both keep working unchanged because Python resolves a module-level name via
-the module's own ``__dict__`` at call time, regardless of where the name was
-originally defined.
+This module is the owner of ``_attach_header_graph``. ``service.py`` no longer
+re-exports it, so tests and scripts import and patch it from here
+(``from abicheck.service_header_graph_attach import _attach_header_graph``).
 
 No import-cycle risk: this module imports from ``.compile_context``,
 ``.dry_run_estimate``, ``.header_utils``, ``.errors``, ``.model`` -- none of which

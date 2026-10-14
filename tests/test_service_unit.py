@@ -11,13 +11,13 @@ import pytest
 from abicheck.checker_types import DiffResult
 from abicheck.comparability import compute_extraction_contract
 from abicheck.errors import ScopeMismatchError, SnapshotError, ValidationError
+from abicheck.frontends.render import _render_deps_section_md
 from abicheck.model import AbiSnapshot, DependencyInfo, Function, Visibility
 from abicheck.serialization import load_snapshot, save_snapshot
 from abicheck.service import (
     CompareRequest,
     CompareResult,
     InputSpec,
-    _render_deps_section_md,
     collect_metadata,
     compare_snapshots,
     dedup_policy_override_warnings,
@@ -505,14 +505,14 @@ class TestResolveInput:
 
     def test_symvers_empty_falls_through(self, tmp_path):
         # A .symvers file with no valid records is not treated as kABI.
-        from abicheck.service import _resolve_symvers
+        from abicheck.workflows.input_resolution import _resolve_symvers
 
         p = tmp_path / "empty.symvers"
         p.write_text("# only a comment\n")
         assert _resolve_symvers(p, "1.0") is None
 
     def test_symvers_unreadable_returns_none(self, tmp_path):
-        from abicheck.service import _resolve_symvers
+        from abicheck.workflows.input_resolution import _resolve_symvers
 
         # A directory named like a manifest cannot be read as text → None.
         d = tmp_path / "Module.symvers"
@@ -1371,7 +1371,7 @@ class TestHeaderScopedInferredRoots:
         return root, umb
 
     def test_pe_no_build_context_adds_root_as_I(self, tmp_path):
-        from abicheck.service import _try_header_scoped_dump
+        from abicheck.workflows.dump.header_scoped import _try_header_scoped_dump
 
         root, umb = self._umbrella(tmp_path)
         captured = {}
@@ -1389,7 +1389,7 @@ class TestHeaderScopedInferredRoots:
     def test_no_headers_skips_inferred_derivation(self, tmp_path):
         # With no -H headers the derivation is skipped: the original includes pass
         # through unchanged and nothing is deferred/hashed.
-        from abicheck.service import _try_header_scoped_dump
+        from abicheck.workflows.dump.header_scoped import _try_header_scoped_dump
 
         captured = {}
 
@@ -1406,7 +1406,7 @@ class TestHeaderScopedInferredRoots:
 
     def test_macho_build_context_defers_and_hashes(self, tmp_path):
         from abicheck.dry_run_estimate import CompileContext
-        from abicheck.service import _try_header_scoped_dump
+        from abicheck.workflows.dump.header_scoped import _try_header_scoped_dump
 
         root, umb = self._umbrella(tmp_path)
         captured = {}
@@ -1434,7 +1434,7 @@ class TestHeaderScopedInferredRoots:
         the _attach_extraction_contract call, contract would silently stay
         None for every real PE header-scoped dump, unlike the ELF service
         path (_dump_elf), which already routes through dumper.dump()."""
-        from abicheck.service import _try_header_scoped_dump
+        from abicheck.workflows.dump.header_scoped import _try_header_scoped_dump
 
         root, umb = self._umbrella(tmp_path)
 
@@ -1469,7 +1469,7 @@ class TestHeaderScopedInferredRoots:
         provenance input must also reach the scope_fingerprint here -- else
         two saved snapshots differing only in declared public-header
         provenance could share a scope_fingerprint."""
-        from abicheck.service import _try_header_scoped_dump
+        from abicheck.workflows.dump.header_scoped import _try_header_scoped_dump
 
         root, umb = self._umbrella(tmp_path)
 
@@ -1520,7 +1520,7 @@ class TestHeaderScopedInferredRoots:
         # run_scan_core's except deadline.DeadlineExceeded -> _BudgetOverflow
         # mapping applies to PE/Mach-O the same way it already does for ELF.
         from abicheck import deadline
-        from abicheck.service import _try_header_scoped_dump
+        from abicheck.workflows.dump.header_scoped import _try_header_scoped_dump
 
         root, umb = self._umbrella(tmp_path)
 
@@ -1553,7 +1553,7 @@ class TestHeaderScopedInferredRoots:
         # DeadlineExceeded test above.
         from abicheck.dry_run_estimate import CompileContext
         from abicheck.errors import AstContextMissingError
-        from abicheck.service import _try_header_scoped_dump
+        from abicheck.workflows.dump.header_scoped import _try_header_scoped_dump
 
         _root, umb = self._umbrella(tmp_path)
 
@@ -4681,7 +4681,7 @@ class TestAttachHeaderGraphDeviceContext:
 
     def test_device_context_skips_include_extractor(self, tmp_path):
         from abicheck.dry_run_estimate import CompileContext
-        from abicheck.service import _attach_header_graph
+        from abicheck.service_header_graph_attach import _attach_header_graph
 
         header = tmp_path / "pub.h"
         header.write_text("int f(void);\n")
@@ -4704,7 +4704,7 @@ class TestAttachHeaderGraphDeviceContext:
 
     def test_host_context_still_uses_include_extractor(self, tmp_path):
         from abicheck.dry_run_estimate import CompileContext
-        from abicheck.service import _attach_header_graph
+        from abicheck.service_header_graph_attach import _attach_header_graph
 
         header = tmp_path / "pub.h"
         header.write_text("int f(void);\n")
@@ -4735,7 +4735,7 @@ class TestAttachHeaderGraphDeviceContext:
         otherwise a pruned dependency function/variable node would degrade
         or drop call-graph edges the graph is built to capture."""
         from abicheck.extract.headers.clang.streaming import streaming_prune_suppressed
-        from abicheck.service import _attach_header_graph
+        from abicheck.service_header_graph_attach import _attach_header_graph
 
         monkeypatch.setenv("ABICHECK_CLANG_PRUNE_DEPENDENCY_DECLS", "1")
         header = tmp_path / "pub.h"
@@ -4772,7 +4772,7 @@ class TestAttachHeaderGraphDeviceContext:
     ):
         """compile=None -- the default CompileContext() -- must behave the
         same as an explicit host request, not be silently skipped."""
-        from abicheck.service import _attach_header_graph
+        from abicheck.service_header_graph_attach import _attach_header_graph
 
         header = tmp_path / "pub.h"
         header.write_text("int f(void);\n")
@@ -4804,7 +4804,7 @@ class TestAttachHeaderGraphCompilerSelection:
     here silently misses the memo on top of picking the wrong driver."""
 
     def test_uppercase_c_selects_cc_compiler(self, tmp_path: Path):
-        from abicheck.service import _attach_header_graph
+        from abicheck.service_header_graph_attach import _attach_header_graph
 
         header = tmp_path / "pub.h"
         header.write_text("int f(void);\n")
@@ -4828,7 +4828,7 @@ class TestAttachHeaderGraphCompilerSelection:
         assert mock_ast.call_args.kwargs["compiler"] == "cc"
 
     def test_lang_none_selects_cpp_compiler(self, tmp_path: Path):
-        from abicheck.service import _attach_header_graph
+        from abicheck.service_header_graph_attach import _attach_header_graph
 
         header = tmp_path / "pub.h"
         header.write_text("void f();\n")
@@ -4860,7 +4860,7 @@ class TestAttachHeaderGraphCompilerSelection:
         three were fixed alongside the compiler selection above but are
         independent code paths, each capable of drifting back to "C++" on
         its own."""
-        from abicheck.service import _attach_header_graph
+        from abicheck.service_header_graph_attach import _attach_header_graph
 
         header = tmp_path / "pub.h"
         header.write_text("int f(void);\n")
@@ -4910,7 +4910,7 @@ class TestAttachHeaderGraphHashesIncludeSearchTokens:
 
     def test_gcc_option_tokens_include_dir_is_hashed(self, tmp_path: Path):
         from abicheck.dry_run_estimate import CompileContext
-        from abicheck.service import _attach_header_graph
+        from abicheck.service_header_graph_attach import _attach_header_graph
 
         header = tmp_path / "pub.h"
         header.write_text("int f(void);\n")
@@ -4936,7 +4936,7 @@ class TestAttachHeaderGraphHashesIncludeSearchTokens:
         assert build_inc in mock_ast.call_args.kwargs["extra_hash_dirs"]
 
     def test_no_include_tokens_hashes_nothing_extra(self, tmp_path: Path):
-        from abicheck.service import _attach_header_graph
+        from abicheck.service_header_graph_attach import _attach_header_graph
 
         header = tmp_path / "pub.h"
         header.write_text("int f(void);\n")
