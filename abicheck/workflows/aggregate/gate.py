@@ -511,7 +511,7 @@ def _scan_severity_gate(data: Mapping[str, Any]) -> GateInfo | None:
 
     Delegates to :meth:`GateInfo.from_report_data` rather than re-validating:
     the retired ``cli_scan_baseline`` built this block with the same
-    ``reporter._build_severity_json`` that writes ``compare``'s, so a second
+    ``json_sections.build_severity_json`` that writes ``compare``'s, so a second
     validator here could only ever disagree with the first. That also means a
     *corrupt* scan gate block fails closed (``_MalformedGate``) exactly as a
     corrupt ``compare`` one does, instead of silently falling through to the

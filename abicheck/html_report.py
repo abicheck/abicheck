@@ -287,7 +287,7 @@ def compute_confidence(
     ``active_reclassify_rules`` here rather than on the render side: whether
     a rule is still in effect is a policy question, and disclosing an expired
     one as though it were would misstate the run (Codex review, mirroring the
-    JSON ``policy_reclassify`` disclosure in ``reporter._add_policy_overrides``
+    JSON ``policy_reclassify`` disclosure in ``json_sections.add_policy_overrides``
     -- the active rule set, not a per-finding "which rule fired" attribution).
     *today* (ADR-061 gap C): an envelope's own ``resolved_today``, so that
     expiry check can't drift from the envelope's own finalized verdicts
@@ -371,7 +371,7 @@ def compute_gate_card(
 
     The gate decision itself is not computed here -- it is projected from
     :func:`abicheck.policy.gate_decision.gate_decision_for_result`, the same
-    single call site ``reporter._build_severity_json`` and
+    single call site ``json_sections.build_severity_json`` and
     ``sarif._severity_gate_properties`` read (ADR-061 D9): this function makes
     no policy decision of its own.
 

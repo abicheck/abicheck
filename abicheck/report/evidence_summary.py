@@ -158,7 +158,7 @@ def _detector_gaps(report: Mapping[str, object]) -> tuple[DetectorGap, ...]:
         not_evaluated = bool(det.get("not_evaluated", False))
         enabled = bool(det.get("enabled", True))
         reason = str(det.get("coverage_gap") or "")
-        # `_add_detectors` emits a detector only when it has findings or a
+        # `add_detectors` emits a detector only when it has findings or a
         # coverage gap, so a plain "ran, found nothing" entry never reaches
         # here at all. Filter anyway rather than relying on that: a detector
         # that ran cleanly is not a limitation, and listing one would be

@@ -558,6 +558,7 @@ COVERAGE: dict[str, str] = {
     "abicheck.compare.finding_identity.symbols:resolve_function_identity": "string probe + snapshot level",
     "abicheck.compare.finding_identity.symbols:resolve_variable_identity": "snapshot level identity keys",
     "abicheck.compare.finding_identity.change:resolve_change_identity": "snapshot level report finding ids (via report_canonical_finding_id); path probe",
+    "abicheck.report.json_sections:add_check_identity": "JSON report check_identity block (tests/test_report_schema.py)",
     "abicheck.model.identity:entity_id_for_function": "negative control + castxml dumps; mutant M4",
     "abicheck.model.identity:entity_id_for_variable": "negative control",
     "abicheck.model.identity:entity_id_for_type": "negative control",
@@ -630,6 +631,9 @@ def test_covered_rows_are_really_registered_in_the_catalogue() -> None:
             "abicheck.model.special_member_identity:special_member_variant_aliases",
             "abicheck.compare.finding_identity.symbols:resolve_variable_identity",
             "abicheck.compare.finding_identity.change:resolve_change_identity",
+            # Exercised by the JSON report check_identity assertions in
+            # tests/test_report_schema.py, not a catalogue transform.
+            "abicheck.report.json_sections:add_check_identity",
             # A capture-state gate, not a catalogue transform: exercised by the
             # G23 ELF legacy-baseline cases in tests/test_g23_elf_facts.py.
             "abicheck.compare.elf_capture_identity:both_captured_elf_identity",

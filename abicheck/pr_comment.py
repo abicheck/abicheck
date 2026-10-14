@@ -528,7 +528,7 @@ def _incomplete_is_blocking(
 def _suppressed_count(report: dict[str, object]) -> int:
     """The number of findings a ``--suppress`` rule removed from ``changes``.
 
-    Reads ``reporter._add_suppression``'s ``suppression`` block
+    Reads ``json_sections.add_suppression``'s ``suppression`` block
     (``suppression.suppressed_count``) -- ``0`` (not an error) for a report
     without it, which is every run that didn't pass ``--suppress``.
     """
@@ -554,9 +554,9 @@ def _disposition_audit(report: dict[str, object]) -> dict[str, object] | None:
 def _reclassified_count(report: dict[str, object]) -> int:
     """The number of ``changes`` whose verdict was moved to a different
     bucket by a ``--policy-file`` reclassification -- either a kind-global
-    ``overrides:`` entry (``reporter._add_policy_overrides``'s
+    ``overrides:`` entry (``json_sections.add_policy_overrides``'s
     ``policy_overrides`` map: ``ChangeKind`` value -> overridden ``Verdict``)
-    or a selector-scoped ``reclassify:`` rule (``reporter._change_to_dict``'s
+    or a selector-scoped ``reclassify:`` rule (``change_json.change_to_dict``'s
     per-change ``reclassified_by`` marker).
 
     Counts each matching change once even if both mechanisms could apply --

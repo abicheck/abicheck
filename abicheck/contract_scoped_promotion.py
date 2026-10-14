@@ -326,7 +326,7 @@ def stamp_missing_contract_entry(
     A missing ``--required-symbol``/``--used-by`` label has no backing
     ``Change`` -- callers synthesize a plain dict and emit it directly in
     their ``changes`` array -- so nothing gives it the per-finding decision
-    fields an ordinary finding gets from ``reporter._change_to_dict``. It
+    fields an ordinary finding gets from ``change_json.change_to_dict``. It
     got the relevance and the evaluation status but neither the decision nor
     the contribution, which is conspicuous precisely because this entry is
     often the *only* blocking finding in the response (Codex review).

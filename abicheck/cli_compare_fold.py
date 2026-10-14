@@ -160,7 +160,7 @@ def _fold_scoped_compat_into_text(
     below need no separate stamping here: the caller
     (``cli_compare_helpers.run_compare``) already stamps them (and any
     matching ``result.changes`` entry) in place before this function runs,
-    so ``_change_to_dict`` picks up the decision for free the same way it
+    so ``change_to_dict`` picks up the decision for free the same way it
     does for any other already-stamped ``Change``.
 
     *demangle*, when True, demangles the ``into_text`` append (missing
@@ -523,7 +523,7 @@ def _fold_use_case_impact_into_text(
         # ("breaking") filters identically in both renders rather than
         # against the default policy here. Scoped-only findings are appended
         # through the shared filter for the same reason the JSON paths' own
-        # `_displayed_with_scoped_only` does: this fold runs alongside
+        # `displayed_with_scoped_only` does: this fold runs alongside
         # `_fold_scoped_compat_into_text`, which puts them in the findings
         # list above, so projecting onto `result.changes` alone would drop
         # every attribution that landed on one.

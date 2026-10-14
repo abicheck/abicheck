@@ -16,7 +16,7 @@
 """The single call site that turns a ``DiffResult`` into a severity
 ``GateDecision`` for report-format document construction (ADR-061 Phase 2).
 
-Before this module existed, ``reporter._build_severity_json``,
+Before this module existed, ``json_sections.build_severity_json``,
 ``sarif._severity_gate_properties``, and ``html_report``'s CI-gate card each
 independently imported :func:`abicheck.policy.severity.compute_gate_decision`
 and hand-assembled the same four arguments

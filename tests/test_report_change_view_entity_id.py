@@ -62,7 +62,9 @@ from abicheck.compare.finding_identity import (
 )
 from abicheck.model.change import Change
 from abicheck.model.identity import EntityId, EntityKind
-from abicheck.reporter import _change_to_dict
+from abicheck.report.change_json import (
+    change_to_dict,
+)
 from abicheck.workflows.aggregate.reconcile import (
     _ReportChangeView,
     resolve_report_change_identity,
@@ -76,15 +78,15 @@ _DESCRIPTION = "Function removed"
 def test_a_live_changes_entity_id_survives_the_report_round_trip() -> None:
     """A real `Change` carrying an `entity_id` must round-trip through a
     report without raising, and `entity_id` (never serialized by
-    `_change_to_dict`) must not change the round-tripped identity relative
+    `change_to_dict`) must not change the round-tripped identity relative
     to an otherwise-identical finding that never had one."""
     eid = EntityId(scope=(), kind=EntityKind.FUNCTION, leaf_name="add")
     with_change = Change(
         kind=_KIND, symbol=_SYMBOL, description=_DESCRIPTION, entity_id=eid
     )
     without_change = Change(kind=_KIND, symbol=_SYMBOL, description=_DESCRIPTION)
-    with_id = resolve_report_change_identity(_change_to_dict(with_change))
-    without_id = resolve_report_change_identity(_change_to_dict(without_change))
+    with_id = resolve_report_change_identity(change_to_dict(with_change))
+    without_id = resolve_report_change_identity(change_to_dict(without_change))
     assert with_id.primary_id == without_id.primary_id
     assert with_id.tier == without_id.tier
 

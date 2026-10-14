@@ -2461,7 +2461,7 @@ class TestUsedByScoping:
         # CONSUMER_REQUIRED_SYMBOL_REMOVED sibling of a real FUNC_REMOVED
         # change is a genuine RootCauseCorrelator two-piece group -- both the
         # pre-existing regular `changes[]` entry (root, via
-        # reporter._add_changes_block) and the newly-appended scoped-only
+        # json_sections.add_changes_block) and the newly-appended scoped-only
         # entry (via cli_compare_fold.py's own fold-in) must carry the same
         # correlator evidence for the same underlying group.
         from abicheck import dumper as dumper_mod
@@ -2517,7 +2517,7 @@ class TestUsedByScoping:
         # "only caused_by_type correlates findings" contract keeps each its
         # own singleton --report-mode root-cause group (one built by
         # _to_json_root_cause before the fold-in, one newly created by
-        # _add_entries_to_root_causes during it). Both singletons must carry
+        # add_entries_to_root_causes during it). Both singletons must carry
         # the same group-level evidence their shared correlator group has.
         from abicheck import dumper as dumper_mod
 

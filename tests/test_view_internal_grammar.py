@@ -817,7 +817,9 @@ class TestMachOSymbolsResolveTheirDemangledName:
             self.symbol = symbol
 
     def test_the_macho_spelling_resolves(self):
-        from abicheck.reporter import resolve_demangled_symbol
+        from abicheck.report.change_json import (
+            resolve_demangled_symbol,
+        )
 
         if not _demangler_available():
             pytest.skip("no demangler available")
@@ -827,7 +829,9 @@ class TestMachOSymbolsResolveTheirDemangledName:
         )
 
     def test_the_elf_spelling_still_resolves(self):
-        from abicheck.reporter import resolve_demangled_symbol
+        from abicheck.report.change_json import (
+            resolve_demangled_symbol,
+        )
 
         if not _demangler_available():
             pytest.skip("no demangler available")
@@ -836,7 +840,9 @@ class TestMachOSymbolsResolveTheirDemangledName:
     def test_an_msvc_decorated_symbol_still_resolves_to_nothing(self):
         """The documented limitation, asserted so the opt-in above cannot
         quietly turn into "demangle anything that looks mangled"."""
-        from abicheck.reporter import resolve_demangled_symbol
+        from abicheck.report.change_json import (
+            resolve_demangled_symbol,
+        )
 
         assert resolve_demangled_symbol(self._Finding("?gone@lib@@YAXH@Z")) is None
 
@@ -1055,7 +1061,7 @@ class TestOneEnvelopeProjectsCorrectlyIntoEveryFormat:
 
 class TestEveryCollectionThatSerializesIsPrewarmed:
     """The demangle prewarm has to cover every collection whose entries reach
-    `_change_to_dict`, not only `result.changes`.
+    `change_to_dict`, not only `result.changes`.
 
     `scoped_only_changes` is the one that was missed: `apply_scoped_gate`
     synthesizes it *after* the document is built, for a `--used-by` /
@@ -1104,7 +1110,9 @@ class TestEveryCollectionThatSerializesIsPrewarmed:
     def test_every_collection_reaches_the_batch(self):
         from unittest import mock
 
-        from abicheck.reporter import prewarm_change_demangling
+        from abicheck.report.change_json import (
+            prewarm_change_demangling,
+        )
 
         result, expected = self._result_with_a_distinct_symbol_per_collection()
         with mock.patch("abicheck.demangle.prewarm_demangle_batch") as batch:

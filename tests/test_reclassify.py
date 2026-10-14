@@ -542,7 +542,7 @@ def test_reclassified_finding_is_identified_via_classify_effective_change(
     """A `reclassify:`-demoted BREAKING finding that lands in `diff.compatible`
     (as QUALITY_ISSUES, since func_removed isn't an ADDITION_KINDS member)
     must still be nameable as a gate-relevant finding -- not just correctly
-    gated (that already worked; `_build_severity_json` passes `policy_file`)
+    gated (that already worked; `build_severity_json` passes `policy_file`)
     but correctly *classified*, via `severity.classify_effective_change` (Codex
     review). This test used to also check `cli_scan_baseline.
     _blocking_compatible_changes` reached the identical conclusion --
@@ -1728,12 +1728,12 @@ def test_reclassified_by_and_policy_reclassify_present_in_root_cause_mode(
 ) -> None:
     """Codex review: a grouping mode builds its own finding dict
     (`_leaf_entry`, for root TYPE_* kinds) rather than routing through
-    `_change_to_dict`, and never called `_add_policy_overrides` at all --
+    `change_to_dict`, and never called `add_policy_overrides` at all --
     both `changes[].reclassified_by` and the run-level `policy_reclassify`
     key were silently absent from leaf-mode output even though the
     identical comparison's full-mode report carried both. `type_size_changed`
     is a root TYPE_* kind (`_ROOT_TYPE_CHANGE_KINDS`), so it's built by
-    `_leaf_entry`, not `_change_to_dict`, exercising the leaf-only path."""
+    `_leaf_entry`, not `change_to_dict`, exercising the leaf-only path."""
     import json
 
     from abicheck.checker_types import DiffResult

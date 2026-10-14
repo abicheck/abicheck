@@ -47,7 +47,7 @@ def add_env_matrix_digest(d: dict[str, Any], result: DiffResult) -> None:
     ``deployment:``) actually governed this comparison (Codex review, P2).
 
     Additive, same convention as ``layer_coverage``/``evidence_metrics``
-    (``reporter._add_evidence_fields``): omitted rather than ``null`` when
+    (``json_sections.add_evidence_fields``): omitted rather than ``null`` when
     no matrix was in effect, so an ordinary comparison with no declared
     deployment contract sees no new key at all.
     ``workflows.no_baseline_compare.run_no_baseline_compare`` stamps the
@@ -58,7 +58,7 @@ def add_env_matrix_digest(d: dict[str, Any], result: DiffResult) -> None:
     field name -- matching this spelling/placement is what lets a JSON
     consumer treat a two-sided ``compare`` report and a ``--no-baseline``
     audit report identically for this field. Called from every JSON path
-    (full/root-cause mode via ``reporter._build_json_base``, leaf mode
+    (full/root-cause mode via ``json_sections.build_json_base``, leaf mode
     directly) rather than only the canonical ``report/build.py`` path, so
     the field's presence does not depend on ``--report-mode``.
     """
@@ -86,7 +86,7 @@ def add_contract_context(
     (``compare(..., contract_evaluation=True)``), serialized via
     :mod:`abicheck.contract_context_io` to match
     :func:`~abicheck.contract_replay.replay_original_decisions`. Called from
-    all three JSON paths, same as ``_add_surface_scope``/``_add_reconciled``.
+    all three JSON paths, same as ``add_surface_scope``/``add_reconciled``.
     *today*, forwarded to the ``exit`` block's resolver and to
     :func:`add_annotations`, keeps both agreeing with an already-frozen
     ``ReportEnvelope`` (Codex review, fresh evidence).
@@ -459,7 +459,7 @@ def render_json_with_side_facts(
     they arrive as data rather than via an ``importlib`` back-reference).
     Every caller of this function is itself inside ``reporter.py``, which
     already holds all six names, so building the bundle costs nothing new
-    there (``reporter._SCOPED_GATE_HELPERS``).
+    there (``json_sections.SCOPED_GATE_HELPERS``).
     """
     doc = build_report_document_with_side_facts(
         d,

@@ -1333,7 +1333,7 @@ def compute_policy_section(
     reclassify_text = None
     if result.policy_file and result.policy_file.reclassify:
         # Codex review: mirrors the JSON `policy_reclassify` disclosure
-        # (reporter.py's `_add_policy_overrides`) -- the active rule set,
+        # (reporter.py's `add_policy_overrides`) -- the active rule set,
         # not a per-finding "which rule fired" attribution (see that
         # function's docstring / schema 2.30 history entry). Filtered
         # through active_reclassify_rules so an expired rule -- which

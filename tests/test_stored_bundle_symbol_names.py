@@ -114,7 +114,7 @@ class TestStoredBundleJsonCarriesBothSymbolNames:
     owes the same "both names" guarantee every other one gives.
 
     It emitted only the mangled `symbol` (Codex review, PR #1284). The
-    oracle is `reporter.resolve_demangled_symbol` -- the same resolver every
+    oracle is `change_json.resolve_demangled_symbol` -- the same resolver every
     other machine projection uses -- not a hand-written expected string, so
     this agrees with them by construction rather than by coincidence.
     """
@@ -159,7 +159,9 @@ class TestStoredBundleJsonCarriesBothSymbolNames:
         return payload["bundle_findings"]
 
     def test_a_mangled_finding_carries_both(self, tmp_path: Path) -> None:
-        from abicheck.reporter import resolve_demangled_symbol
+        from abicheck.report.change_json import (
+            resolve_demangled_symbol,
+        )
 
         symbol = "_ZN3lib4goneEi"
         expected = resolve_demangled_symbol(
@@ -172,7 +174,7 @@ class TestStoredBundleJsonCarriesBothSymbolNames:
         assert finding["demangled_symbol"] == expected
 
     def test_an_unmangled_finding_omits_the_key(self, tmp_path: Path) -> None:
-        """Omitted rather than null, matching `_change_to_dict`."""
+        """Omitted rather than null, matching `change_to_dict`."""
         finding = self._findings("plain_c_function", tmp_path)[0]
         assert finding["symbol"] == "plain_c_function"
         assert "demangled_symbol" not in finding

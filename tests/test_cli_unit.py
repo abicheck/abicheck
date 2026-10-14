@@ -474,7 +474,7 @@ class TestCompareWrite:
         directly by counting real ``assess_change`` calls keyed by
         ``id(change)``, instead of trusting that claim un-measured."""
         import abicheck.impact.engine as engine_mod
-        import abicheck.reporter as reporter_mod
+        import abicheck.report.change_json as change_json_mod
         import abicheck.sarif as sarif_mod
 
         calls: list[int] = []
@@ -486,7 +486,7 @@ class TestCompareWrite:
 
         monkeypatch_targets = [
             (engine_mod, "assess_change"),
-            (reporter_mod, "assess_change"),
+            (change_json_mod, "assess_change"),
             (sarif_mod, "assess_change"),
         ]
         originals = [

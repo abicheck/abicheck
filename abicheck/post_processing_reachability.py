@@ -238,7 +238,7 @@ class MarkReachability:
             ``_run_post_processing`` (this step included) and only ever sets
             ``evidence_category`` on a change it is simultaneously moving out
             of ``kept`` into ``DiffResult.reconciled_changes``.
-            ``reporter._add_reconciled`` renders that list from its own
+            ``json_sections.add_reconciled`` renders that list from its own
             hand-built dict and never reads ``Change.impact_assessment`` for
             it (confirmed by reading ``reporter.py``), so a change that ends
             up reconciled never has its (by-then-stale) cached

@@ -67,7 +67,9 @@ def add_demangled_symbol_property(tc: ET.Element, change: Change) -> None:
     identity consumers key on across runs -- and the readable name travels
     as a property, which is JUnit's own extension point for exactly this.
     """
-    from ..reporter import resolve_demangled_symbol
+    from .change_json import (
+        resolve_demangled_symbol,
+    )
 
     demangled = resolve_demangled_symbol(change)
     if not demangled:

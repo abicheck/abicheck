@@ -1003,7 +1003,7 @@ def to_junit_xml(
 
     reject_unsupported_report_mode(report_mode)
 
-    from .reporter import prewarm_change_demangling  # see to_junit_xml_multi
+    from .report.change_json import prewarm_change_demangling  # see to_junit_xml_multi
 
     prewarm_change_demangling(result)
 
@@ -1105,7 +1105,7 @@ def to_junit_xml_multi(
     # prewarms for itself rather than inheriting that from its single-result
     # sibling (Codex review, PR #1284): an unwarmed demangle cache forks one
     # ``c++filt`` per distinct symbol on a host without in-process ``cxxfilt``.
-    from .reporter import prewarm_change_demangling
+    from .report.change_json import prewarm_change_demangling
 
     for _result, _old_snap in results:
         prewarm_change_demangling(_result)

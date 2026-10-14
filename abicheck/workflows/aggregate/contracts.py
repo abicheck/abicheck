@@ -36,7 +36,7 @@ Three orthogonal axes, kept separate on purpose (ADR-042):
   block (``addition=error``) or a ``BREAKING`` report pass (a demoted preset).
 * **gate** — whether CI should fail. Each report already carries its own gate
   decision (``severity.{exit_code,blocking,blocking_categories}``, computed by
-  ``reporter._build_severity_json`` → ``severity.compute_gate_decision``);
+  ``json_sections.build_severity_json`` → ``severity.compute_gate_decision``);
   ``aggregate`` combines those, it never recomputes a gate from the verdict.
   Reports produced without a severity policy carry no gate block, so
   they fall back to the legacy verdict→exit mapping.

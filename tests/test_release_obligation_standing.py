@@ -183,11 +183,13 @@ def test_member_json_exposes_the_low_confidence() -> None:
     """The scalar report already carries per-finding confidence in
     ``impact_assessment.confidence`` (schema 2.15); pin that the narrowed
     finding reaches it, so the member half of the JSON gap stays closed."""
-    from abicheck.reporter import _change_to_dict
+    from abicheck.report.change_json import (
+        change_to_dict,
+    )
 
     snapshot = _snapshot(
         ("include/pvxs/iochooks.h",), "unresolved", "no_root", "function"
     )
     (finding,) = _check_public_not_exported(snapshot, CrosscheckConfig()).findings
-    payload = _change_to_dict(finding)
+    payload = change_to_dict(finding)
     assert payload["impact_assessment"]["confidence"] == "low"  # type: ignore[index]

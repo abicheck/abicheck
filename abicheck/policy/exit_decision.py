@@ -695,7 +695,7 @@ def resolve_compare_exit_decision(
         # Codex review, fresh evidence: `result.verdict` was frozen at
         # `compare()` time. A render happening later under a captured
         # `today` (an already-frozen `ReportEnvelope`) must agree with the
-        # same today-aware per-finding resolution `_change_to_dict` already
+        # same today-aware per-finding resolution `change_to_dict` already
         # uses for `changes[]`, or a dated `reclassify:` rule's expiry
         # between `compare()` and render could report a finding as breaking
         # there while this exit code stayed the stale, pre-expiry verdict's.

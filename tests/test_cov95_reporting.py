@@ -212,8 +212,10 @@ class TestReporterStat:
 
 class TestReporterChangeToDict:
     def test_change_to_dict_without_kind_sets_uses_policy(self) -> None:
-        # Lines 721-722 + _kind_to_severity 48-57: no kind_sets path.
-        from abicheck.reporter import _change_to_dict
+        # Lines 721-722 + kind_to_severity 48-57: no kind_sets path.
+        from abicheck.report.change_json import (
+            change_to_dict,
+        )
 
         c = _change(
             ChangeKind.FUNC_REMOVED,
@@ -223,7 +225,7 @@ class TestReporterChangeToDict:
         )
         c.source_location = "header.h:42"
         c.affected_symbols = ["a", "b"]
-        d = _change_to_dict(c, policy="strict_abi")
+        d = change_to_dict(c, policy="strict_abi")
         assert d["severity"] == "breaking"
         assert d["caused_by_type"] == "root::Type"
         assert d["caused_count"] == 3
@@ -231,8 +233,10 @@ class TestReporterChangeToDict:
         assert d["affected_symbols"] == ["a", "b"]
 
     def test_change_to_dict_severities_all_branches(self) -> None:
-        # _kind_to_severity api_break / risk / compatible branches (51-57).
-        from abicheck.reporter import _change_to_dict
+        # kind_to_severity api_break / risk / compatible branches (51-57).
+        from abicheck.report.change_json import (
+            change_to_dict,
+        )
 
         sev = {
             ChangeKind.METHOD_ACCESS_CHANGED: "api_break",
@@ -240,38 +244,44 @@ class TestReporterChangeToDict:
             ChangeKind.FUNC_ADDED: "compatible",
         }
         for kind, expected in sev.items():
-            d = _change_to_dict(_change(kind, "s"), policy="strict_abi")
+            d = change_to_dict(_change(kind, "s"), policy="strict_abi")
             assert d["severity"] == expected
 
     def test_change_to_dict_no_kind(self) -> None:
         # Line 724: object without a kind attribute → "unknown".
-        from abicheck.reporter import _change_to_dict
+        from abicheck.report.change_json import (
+            change_to_dict,
+        )
 
         class _Bare:
             symbol = "x"
             description = "y"
 
-        d = _change_to_dict(_Bare())
+        d = change_to_dict(_Bare())
         assert d["severity"] == "unknown"
         assert d["kind"] == ""
 
     def test_change_to_dict_surfaces_correlated_change_kind(self) -> None:
         # ADR-041 P0 roadmap item 2: a structured, machine-readable sibling
         # to the description-prose correlation source_graph_findings emits.
-        from abicheck.reporter import _change_to_dict
+        from abicheck.report.change_json import (
+            change_to_dict,
+        )
 
         c = _change(
             ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED,
             "demo::compute",
             correlated_change_kind=ChangeKind.INLINE_BODY_CHANGED.value,
         )
-        d = _change_to_dict(c, policy="strict_abi")
+        d = change_to_dict(c, policy="strict_abi")
         assert d["correlated_change_kind"] == "inline_body_changed"
 
     def test_change_to_dict_omits_correlated_change_kind_when_unset(self) -> None:
-        from abicheck.reporter import _change_to_dict
+        from abicheck.report.change_json import (
+            change_to_dict,
+        )
 
-        d = _change_to_dict(
+        d = change_to_dict(
             _change(ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED, "demo::compute"),
             policy="strict_abi",
         )
@@ -281,7 +291,9 @@ class TestReporterChangeToDict:
         # ADR-044 P1 item 4: structured reachability evidence, previously
         # description-prose-only (inside the suppression_would_hide_public_break
         # diagnostic).
-        from abicheck.reporter import _change_to_dict
+        from abicheck.report.change_json import (
+            change_to_dict,
+        )
 
         c = _change(
             ChangeKind.FUNC_REMOVED,
@@ -290,7 +302,7 @@ class TestReporterChangeToDict:
             reachability_kind="symbol_availability",
             reachability_proof_path="pubFn --[DECL_CALLS_DECL]--> ns::detail::train_ops_dispatcher",
         )
-        d = _change_to_dict(c, policy="strict_abi")
+        d = change_to_dict(c, policy="strict_abi")
         assert d["public_reachable"] is True
         assert d["reachability_kind"] == "symbol_availability"
         assert d["reachability_proof_path"] == (
@@ -298,9 +310,11 @@ class TestReporterChangeToDict:
         )
 
     def test_change_to_dict_omits_reachability_fields_when_unset(self) -> None:
-        from abicheck.reporter import _change_to_dict
+        from abicheck.report.change_json import (
+            change_to_dict,
+        )
 
-        d = _change_to_dict(
+        d = change_to_dict(
             _change(ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED, "demo::compute"),
             policy="strict_abi",
         )
@@ -334,7 +348,7 @@ class TestReporterJsonLeaf:
         self,
     ) -> None:
         # ADR-044 P1 item 4: a root TYPE_* change routes through the
-        # hand-rolled _leaf_entry, not _change_to_dict — it needs its own
+        # hand-rolled _leaf_entry, not change_to_dict — it needs its own
         # copy of the same structured reachability fields, since this is
         # exactly the category the layout-reachability walk tags most often.
         from abicheck.reporter import to_json

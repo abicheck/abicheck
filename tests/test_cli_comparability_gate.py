@@ -426,7 +426,7 @@ class TestCompareReleaseNotComparable:
 
 class TestJsonReporterContractFields:
     """reporter.to_json's ADR-050 D2 (schema 2.17) contract_coverage/assurance
-    fields -- a unit test of _add_confidence_evidence directly, since neither
+    fields -- a unit test of add_confidence_evidence directly, since neither
     field is reachable through the CLI-level tests above (those exercise the
     hard-fail path, where no DiffResult is ever constructed, not an ordinary
     completed diff carrying one of these two fields)."""
