@@ -101,6 +101,7 @@ from .extract.headers.ast_config import (
     _resolve_compiler_binary as _resolve_compiler_binary,
 )
 from .extract.headers.backend import HeaderAstBackend, HeaderParseRequest
+from .extract.headers.backend_plan import BackendPlan
 from .extract.headers.castxml.backend import CastxmlBackend, CastxmlRunError
 from .extract.headers.castxml.dumper import (
     _CastxmlParser as _CastxmlParser,
@@ -124,10 +125,7 @@ from .extract.headers.sysinc import (
     _resolve_probe_compiler as _resolve_probe_compiler,
 )
 from .extract.headers.toolchain import (
-    _allow_unsupported_castxml_enabled as _allow_unsupported_castxml_enabled,
     _ast_compile_provenance as _ast_compile_provenance,
-    _ast_fallback_enabled as _ast_fallback_enabled,
-    _auto_ast_fallback_eligible as _auto_ast_fallback_eligible,
     _configured_target_triple as _configured_target_triple,
     _cplusplus_macro_for_standard as _cplusplus_macro_for_standard,
     _parser_ast_fallback_reason as _parser_ast_fallback_reason,
@@ -180,6 +178,7 @@ def _castxml_fallback_reason(
     compiler: str,
     gcc_path: str | None,
     gcc_prefix: str | None,
+    plan: BackendPlan,
 ) -> str | None:
     """Decide whether a failed castxml dump may fall back to the clang backend.
 
@@ -219,7 +218,7 @@ def _castxml_fallback_reason(
         except SnapshotError:
             return False
 
-    if not _ast_fallback_enabled() or not _clang_fallback_ready():
+    if not plan.ast_fallback_enabled or not _clang_fallback_ready():
         message = (
             f"{exc}\n\nAutomatic CastXML-to-Clang fallback is disabled because "
             "the two frontends can produce materially different findings. "
@@ -308,7 +307,8 @@ def _header_ast_parser(
     if effective == "clang":
         return _run_clang()
 
-    auto_selected = _auto_ast_fallback_eligible(backend)
+    plan = BackendPlan.from_environment()
+    auto_selected = plan.auto_selected(backend)
     try:
         return cast(
             _CastxmlParser,
@@ -321,6 +321,7 @@ def _header_ast_parser(
             compiler=compiler,
             gcc_path=gcc_path,
             gcc_prefix=gcc_prefix,
+            plan=plan,
         )
         if fallback_reason is None:
             raise exc.original from None

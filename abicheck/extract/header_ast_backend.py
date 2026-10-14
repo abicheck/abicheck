@@ -46,9 +46,8 @@ directly; :mod:`abicheck.dumper` does not re-export it.
 
 from __future__ import annotations
 
-import os
-
 from ..errors import AstContextMissingError, ValidationError
+from .headers.backend_plan import ast_frontend_pin
 
 __all__ = [
     "HEADER_BACKENDS",
@@ -81,7 +80,7 @@ def _resolve_header_backend(backend: str | None) -> str:
         raise ValidationError(
             f"Unknown AST frontend {backend!r}; expected one of {HEADER_BACKENDS}."
         )
-    env = os.environ.get("ABICHECK_AST_FRONTEND", "").strip().lower()
+    env = ast_frontend_pin()
     if env in ("castxml", "clang", "hybrid"):
         return env
     return "castxml"
@@ -137,7 +136,7 @@ def _resolve_single_ast_backend(backend: str, frontend_context: str) -> str:
         )
     # `resolved` alone can't tell explicit/env-pinned/defaulted castxml apart; an env pin counts as explicit (environment.md: "honoured verbatim").
     _env_pinned_castxml = (backend or "auto").lower() == "auto" and (
-        os.environ.get("ABICHECK_AST_FRONTEND", "").strip().lower() == "castxml"
+        ast_frontend_pin() == "castxml"
     )
     if (
         resolved == "castxml"
