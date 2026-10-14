@@ -34,6 +34,7 @@ it.
 
 from __future__ import annotations
 
+import gc
 import itertools
 import time
 
@@ -63,15 +64,23 @@ def test_compare_scaling_exponent(workload: str) -> None:
 
     def measure(n: int) -> float:
         old, new = pairs[n]
-        start = time.perf_counter()
-        result = compare(old, new)
-        elapsed = time.perf_counter() - start
+        # A cyclic-GC pass over the prebuilt pairs lands on whichever sample
+        # it happens to hit and skews the fit (seen as 1.62 on a CI runner for
+        # a shape that measures ~1.1); keep collection out of the timed call.
+        gc.collect()
+        gc.disable()
+        try:
+            start = time.perf_counter()
+            result = compare(old, new)
+            elapsed = time.perf_counter() - start
+        finally:
+            gc.enable()
         assert result.changes, (
             f"{workload}: n={n} produced no findings -- the workload stopped exercising detectors"
         )
         return elapsed
 
-    exponent = measure_scaling_exponent(measure, SIZES)
+    exponent = measure_scaling_exponent(measure, SIZES, repeats=5)
     assert exponent < CEILING, (
         f"{workload}: compare() time scaling exponent {exponent:.2f} >= {CEILING} (regressing toward O(n^2))"
     )
