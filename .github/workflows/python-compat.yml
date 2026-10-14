@@ -1,14 +1,16 @@
 name: Python compatibility
 
 # Tiered Python testing. `ci.yml`'s `unit-tests` job runs the full suite
-# with coverage (80% floor) on canonical 3.13. This workflow adds, on every
+# with coverage (80% floor) on canonical 3.14. This workflow adds, on every
 # PR, with no continue-on-error (required in .github/AGENTS.md terms; no check
 # is mechanically merge-blocking on main):
-#   * full-suite: the same full fast suite on the oldest supported Python
-#     (3.11, the `requires-python` floor) and on 3.15;
+#   * full-suite: the same full fast suite on 3.15 (3.14 is already covered by
+#     ci.yml's canonical lane);
 #   * free-threading: the full fast suite on 3.15t with the GIL disabled;
 #   * smoke: sdist+wheel build, *wheel* install into a clean venv, import of
-#     every module, CLI and a smoke subset on 3.11/3.12/3.14/3.15.
+#     every module, CLI and a smoke subset on 3.11/3.12/3.14/3.15. 3.11 (the
+#     `requires-python` floor) is smoke-only by design: it proves the package
+#     still imports and installs there, not that the full suite passes.
 # A smoke-only, non-blocking 3.15 lane is how a str-Enum serialization
 # break (~1,265 failing tests on 3.15) went unnoticed; don't regress to it.
 
@@ -189,10 +191,10 @@ jobs:
             --shard=${{ matrix.shard }}/3
 
   full-suite:
-    # The full fast suite (same selection as ci.yml's canonical 3.13
-    # `unit-tests`, minus coverage) on the oldest supported Python and on
-    # 3.15, on every PR. A smoke subset on these interpreters let a 3.15
-    # json/str-Enum serialization break (~1,265 failing tests) go unnoticed.
+    # The full fast suite (same selection as ci.yml's canonical 3.14
+    # `unit-tests`, minus coverage) on 3.15, on every PR. A smoke subset on
+    # these interpreters let a 3.15 json/str-Enum serialization break
+    # (~1,265 failing tests) go unnoticed.
     name: full-suite (py${{ matrix.python-version }}, shard ${{ matrix.shard }}/3)
     runs-on: ubuntu-latest
     timeout-minutes: 40
@@ -201,7 +203,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ['3.11', '3.15']
+        python-version: ['3.15']
         shard: [1, 2, 3]
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6
