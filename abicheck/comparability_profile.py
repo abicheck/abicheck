@@ -507,3 +507,49 @@ def check_build_identity_comparable(
     return ComparabilityMismatch(
         "profile", reason, dimensions=BUILD_IDENTITY_DIMENSIONS, fatal=fatal
     )
+
+
+#: Which comparability dimensions a compiler-family switch leaves unverified:
+#: the pair ``_PROFILE_FIELD_DIMENSIONS["compiler_family"]`` names for the
+#: header-parse profile -- struct layout and calling-convention/runtime
+#: behavior are what a different compiler can change without touching a
+#: single exported name.
+BUILD_MODE_DIMENSIONS = _PROFILE_FIELD_DIMENSIONS["compiler_family"]
+
+
+def check_build_mode_comparable(
+    old: AbiSnapshot, new: AbiSnapshot
+) -> ComparabilityMismatch | None:
+    """``check_contracts_comparable``'s build-mode axis: the compiler family
+    each side's own binary records (``AbiSnapshot.build_mode``, captured at
+    dump time from ``DW_AT_producer``/``.comment``).
+
+    Both sides record a known family and they differ: a **non-fatal**
+    mismatch bounding ``layout``/``runtime``, the same treatment an untagged
+    ``dependency_scope`` gets. It does not refuse: checking a toolchain
+    switch is legitimate, and the stdlib/dual-ABI dimensions it can move are
+    already compared as findings (``diff_stdlib_impl``,
+    ``diff_platform._diff_glibcxx_dual_abi``). What it must not do is read
+    as a clean, like-for-like comparison. A family unrecorded or
+    ``unknown`` on either side is unknown, never a mismatch. A header parse
+    under a different compiler is refused earlier, by the profile
+    fingerprint's own ``compiler_family`` field, which wins over this.
+    """
+    from .model.build_mode_facts import CompilerFamily
+
+    old_bm, new_bm = old.build_mode, new.build_mode
+    if old_bm is None or new_bm is None:
+        return None
+    old_family, new_family = old_bm.compiler_family, new_bm.compiler_family
+    if CompilerFamily.UNKNOWN in (old_family, new_family) or old_family == new_family:
+        return None
+    return ComparabilityMismatch(
+        "profile",
+        "build mode: compiler family differs (old: "
+        f"{old_family.value}; new: {new_family.value}) -- the two binaries "
+        "were built by different toolchains, so layout and runtime "
+        "conventions are not verified like-for-like; rebuild the baseline "
+        "with the same compiler to verify them",
+        dimensions=BUILD_MODE_DIMENSIONS,
+        fatal=False,
+    )

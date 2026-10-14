@@ -643,6 +643,7 @@ def dump(
         effective_public_header_dirs,
         include_search_dirs=public_include_search_dirs,
         read_dwarf=not (symbols_only or debug_presence_only),  # shallow: .comment only
+        debug_info_path=debug_info_path,
     )
 
 

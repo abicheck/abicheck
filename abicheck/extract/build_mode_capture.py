@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Capture an ELF snapshot's :class:`~abicheck.model.build_mode_facts.BuildMode`
+"""Capture a snapshot's :class:`~abicheck.model.build_mode_facts.BuildMode`
 at dump time.
 
 :func:`abicheck.build_mode.build_mode_from_signals` takes the compiler's
@@ -22,6 +22,25 @@ at dump time.
 (:func:`read_elf_build_signals`) and records the result on the snapshot
 (:func:`capture_elf_build_mode`), so ``compiler_family``, ``language_std`` and
 the provenance strings are no longer always ``UNKNOWN`` on a fresh dump.
+
+Where the signals come from, per format:
+
+* **ELF** -- the image's own DWARF and ``.comment``; when the image carries no
+  ``DW_AT_producer`` (a stripped release build), the detached debug file the
+  dump resolved (``debug_info_path``: ``--debug-info``, a build-id tree or a
+  path mirror) is read for it instead.
+* **Mach-O** -- a linked image keeps no DWARF of its own, so the producer is
+  read from its dSYM companion (``debug_info_path``, else the adjacent
+  ``<image>.dSYM`` bundle) or from the ``__DWARF`` segment of an object file
+  (:mod:`abicheck.extract.macho_build_signals`). ``LC_BUILD_VERSION`` tool
+  entries are deliberately not used: ``ld`` writes them for the tools *it*
+  knows about, not for the compiler that produced every object, so they do
+  not identify the compiler family.
+* **PE** -- nothing is captured from the image. The Rich header lists the
+  MSVC tools behind every linked object, including the MSVC CRT objects a
+  clang-cl build links too, so it does not identify the compiler that built
+  the library; PDB ``S_COMPILE3`` records are outside this module's reach.
+  ``build_mode`` stays ``None`` (unknown) rather than a guessed family.
 
 Only CU *top* DIEs are read -- never the DIE trees -- so the cost is one DIE
 per compilation unit. A read that fails leaves the snapshot's ``build_mode``
@@ -36,10 +55,16 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ..model import AbiSnapshot
+from .dwarf_producer import best_cu_producer, decode_attr
 
 log = logging.getLogger(__name__)
 
-__all__ = ["ElfBuildSignals", "capture_elf_build_mode", "read_elf_build_signals"]
+__all__ = [
+    "ElfBuildSignals",
+    "capture_build_mode",
+    "capture_elf_build_mode",
+    "read_elf_build_signals",
+]
 
 
 @dataclass(frozen=True)
@@ -51,60 +76,12 @@ class ElfBuildSignals:
     comment: str | None = None
 
 
-def _decode(raw: object) -> str | None:
-    if isinstance(raw, bytes):
-        text = raw.decode("utf-8", errors="replace")
-    elif isinstance(raw, str):
-        text = raw
-    else:
-        return None
-    text = text.strip()
-    return text or None
-
-
-def _cu_rank(producer: str | None, lang: int | None) -> int:
-    """Lower is better: a recognised C++ CU wins over a C or assembler helper
-    CU linked into the same image."""
-    from ..build_mode import detect_compiler_family, detect_cxx_standard
-    from ..model.build_mode_facts import CompilerFamily, CxxStandard
-
-    known = detect_compiler_family(producer, None)[0] is not CompilerFamily.UNKNOWN
-    std = detect_cxx_standard(lang)
-    if std not in (CxxStandard.UNKNOWN, CxxStandard.C):
-        return 0 if known else 2
-    if std is CxxStandard.C:
-        return 1 if known else 3
-    return 4 if known else 5
-
-
 def _read_producer(elf: object) -> tuple[str | None, int | None]:
     from ..dwarf_utils import has_real_dwarf_info
 
     if not has_real_dwarf_info(elf):
         return None, None
-    dwarf = elf.get_dwarf_info()  # type: ignore[attr-defined]
-    best: tuple[int, str | None, int | None] | None = None
-    for cu in dwarf.iter_CUs():
-        try:
-            top = cu.get_top_DIE()
-        except Exception as exc:  # noqa: BLE001 - one bad CU must not hide the rest
-            log.debug("build_mode_capture: skipping CU: %s", exc)
-            continue
-        prod_attr = top.attributes.get("DW_AT_producer")
-        lang_attr = top.attributes.get("DW_AT_language")
-        producer = _decode(prod_attr.value) if prod_attr is not None else None
-        lang = lang_attr.value if lang_attr is not None else None
-        lang = lang if isinstance(lang, int) else None
-        if producer is None and lang is None:
-            continue
-        rank = _cu_rank(producer, lang)
-        if best is None or rank < best[0]:
-            best = (rank, producer, lang)
-            if rank == 0:
-                break
-    if best is None:
-        return None, None
-    return best[1], best[2]
+    return best_cu_producer(elf.get_dwarf_info())  # type: ignore[attr-defined]
 
 
 def _read_comment(elf: object) -> str | None:
@@ -115,19 +92,36 @@ def _read_comment(elf: object) -> str | None:
     parts = dict.fromkeys(
         text
         for chunk in section.data().split(b"\0")
-        if (text := _decode(chunk)) is not None
+        if (text := decode_attr(chunk)) is not None
     )
     return "\n".join(parts) or None
 
 
+def _read_detached_producer(debug_path: Path) -> tuple[str | None, int | None]:
+    """The producer/language of a detached ELF debug file (``None`` pair when
+    it cannot be read or carries no CU attributes)."""
+    from elftools.elf.elffile import ELFFile
+
+    try:
+        with debug_path.open("rb") as fh:
+            return _read_producer(ELFFile(fh))  # type: ignore[no-untyped-call]
+    except Exception as exc:  # noqa: BLE001 - detached debug is optional evidence
+        log.debug("build_mode_capture: cannot read %s: %s", debug_path, exc)
+        return None, None
+
+
 def read_elf_build_signals(
-    path: Path, *, read_dwarf: bool = True
+    path: Path, *, read_dwarf: bool = True, debug_path: Path | None = None
 ) -> ElfBuildSignals | None:
     """Read ``DW_AT_producer``/``DW_AT_language`` (best CU) and ``.comment``.
 
     ``read_dwarf=False`` (shallow ``symbols_only``/``debug_presence_only``
     dumps) skips the DWARF CU read entirely -- ``get_dwarf_info()`` loads
     every debug section -- and records only ``.comment``.
+
+    *debug_path* is the detached debug file resolved for *path*; it is read
+    only when the image itself yields no producer/language and DWARF reading
+    is allowed (``read_dwarf=False`` reads neither file's DWARF).
 
     Returns ``None`` when the file cannot be read as ELF at all.
     """
@@ -148,28 +142,40 @@ def read_elf_build_signals(
     except Exception as exc:  # noqa: BLE001
         log.debug("build_mode_capture: cannot read %s: %s", path, exc)
         return None
+    if read_dwarf and producer is None and lang is None and debug_path is not None:
+        producer, lang = _read_detached_producer(debug_path)
     return ElfBuildSignals(producer=producer, dwarf_language=lang, comment=comment)
 
 
-def capture_elf_build_mode(
-    snapshot: AbiSnapshot, *, read_dwarf: bool = True
+def capture_build_mode(
+    snapshot: AbiSnapshot,
+    *,
+    read_dwarf: bool = True,
+    debug_info_path: Path | None = None,
 ) -> AbiSnapshot:
-    """Populate ``snapshot.build_mode`` from its ELF image's own signals.
+    """Populate ``snapshot.build_mode`` from whatever its format reliably
+    records (see the module docstring); a PE snapshot is left alone."""
+    if snapshot.platform == "elf":
+        return capture_elf_build_mode(
+            snapshot, read_dwarf=read_dwarf, debug_info_path=debug_info_path
+        )
+    if snapshot.platform == "macho":
+        return _capture_macho_build_mode(
+            snapshot, read_dwarf=read_dwarf, debug_info_path=debug_info_path
+        )
+    return snapshot
 
-    Left alone when the snapshot is not ELF, already carries a build mode, has
-    no readable ``source_path``, or the image yields no signal at all.
-    """
-    if snapshot.platform != "elf" or snapshot.build_mode is not None:
-        return snapshot
-    if not snapshot.source_path:
-        return snapshot
-    signals = read_elf_build_signals(Path(snapshot.source_path), read_dwarf=read_dwarf)
-    if signals is None:
-        return snapshot
-    from ..build_mode import build_mode_from_signals
 
+def _mangled_names(snapshot: AbiSnapshot) -> list[str]:
     mangled = [f.mangled for f in snapshot.declarations.functions if f.mangled]
     mangled += [v.mangled for v in snapshot.declarations.variables if v.mangled]
+    return mangled
+
+
+def _record(snapshot: AbiSnapshot, signals: ElfBuildSignals) -> AbiSnapshot:
+    from ..build_mode import build_mode_from_signals
+
+    mangled = _mangled_names(snapshot)
     if (
         signals.producer is None
         and signals.comment is None
@@ -184,3 +190,44 @@ def capture_elf_build_mode(
         mangled_symbols=mangled,
     )
     return snapshot
+
+
+def _capture_macho_build_mode(
+    snapshot: AbiSnapshot, *, read_dwarf: bool, debug_info_path: Path | None
+) -> AbiSnapshot:
+    if snapshot.build_mode is not None or not snapshot.source_path:
+        return snapshot
+    producer: str | None = None
+    lang: int | None = None
+    if read_dwarf:
+        from .macho_build_signals import read_macho_producer
+
+        producer, lang = read_macho_producer(
+            Path(snapshot.source_path), debug_path=debug_info_path
+        )
+    return _record(snapshot, ElfBuildSignals(producer=producer, dwarf_language=lang))
+
+
+def capture_elf_build_mode(
+    snapshot: AbiSnapshot,
+    *,
+    read_dwarf: bool = True,
+    debug_info_path: Path | None = None,
+) -> AbiSnapshot:
+    """Populate ``snapshot.build_mode`` from its ELF image's own signals, or
+    from its detached debug file (*debug_info_path*) when the image carries
+    no ``DW_AT_producer``.
+
+    Left alone when the snapshot is not ELF, already carries a build mode, has
+    no readable ``source_path``, or the image yields no signal at all.
+    """
+    if snapshot.platform != "elf" or snapshot.build_mode is not None:
+        return snapshot
+    if not snapshot.source_path:
+        return snapshot
+    signals = read_elf_build_signals(
+        Path(snapshot.source_path), read_dwarf=read_dwarf, debug_path=debug_info_path
+    )
+    if signals is None:
+        return snapshot
+    return _record(snapshot, signals)

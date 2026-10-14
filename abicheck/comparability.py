@@ -1220,6 +1220,9 @@ def check_contracts_comparable(
         lambda: _importlib.import_module(
             ".comparability_profile", __package__
         ).check_build_identity_comparable(old, new),
+        lambda: _importlib.import_module(
+            ".comparability_profile", __package__
+        ).check_build_mode_comparable(old, new),
     )
     # A non-fatal descriptor (ComparabilityMismatch.fatal=False) is neither
     # raised nor allowed to end the scan: it bounds the comparison instead of

@@ -3,7 +3,7 @@
     "files": {
       "abicheck/btf_metadata.py": "614321e6140b32e7518deb3991dc9b9421107688c952542808ec4da88a17dc73",
       "abicheck/ctf_metadata.py": "42d3f588c6c4567c2a9d43a3ef5b886a753c37dd5357a4199d81d7ffc60d2109",
-      "abicheck/dumper.py": "245750a6e223fa1d9631268fd0e1e0805cdb925f1c198443e22deb837b9cda46",
+      "abicheck/dumper.py": "4abf1baed31c0296f81a8ae230d09bdc7bd6220d7590f543279f4908501def75",
       "abicheck/dwarf_advanced.py": "ac7ed6d945a00dedbfb71d79f98b2be5b9b42d2bbe4810babfe485aad266b5cb",
       "abicheck/dwarf_metadata.py": "d558cc589ad135f68197c686cc21a8755a1949d6a43df8aed5b212ceb69f0c57",
       "abicheck/dwarf_presence.py": "7e73580ec7a02fdf24e3815cb89e42aa6fe00e46e8cda6b7fe9d547f06ac3f06",
@@ -15,7 +15,7 @@
       "abicheck/extract/__init__.py": "011ec37fad96ea2035983eaaedeba0976940a570900f85db8c03bb7369af742a",
       "abicheck/extract/binary_format.py": "4b9f591077fa5c90d2e3a767343d92b098061870403d431694470bc05e5468b3",
       "abicheck/extract/binary_identity.py": "4645eaf3dddd0a2230a5c694882548476406c57514275fa4c8c1bc152607ca88",
-      "abicheck/extract/build_mode_capture.py": "69f5e28509f31f7c6b840ba9623743a9a9284f46e8312429e6627132c59a196c",
+      "abicheck/extract/build_mode_capture.py": "7a46c5babcc5bf770a1a38d5a5d3abb49a2b7d9575bda2b210d2e2861ebfb51f",
       "abicheck/extract/cache_header_scan.py": "4a944a4e6eff6b10de32c6aec2ad939b78e9ffc96e725791247431a0cc870684",
       "abicheck/extract/castxml_compiler_emulation.py": "7391b21ad676ed5fa96a807af46f746ced174d1dc174f33881ff9a6b06858266",
       "abicheck/extract/castxml_header_compat.py": "d0e78b90ad113be1cb89f05465f77fa9d9fc9546608275707cd7d15f18e2f518",
@@ -34,6 +34,7 @@
       "abicheck/extract/dpcpp_jobs.py": "7e30f36f5a4ccaf84aa9abe6ed7958d23ce5c43dbb9f6504b9921502c99fad08",
       "abicheck/extract/dump_manifest_roots.py": "b616e45b7eafdd2dd4c69c1031f9a5c8b54973633aa3e9057edc60525ea0d15a",
       "abicheck/extract/dwarf_layout_backfill.py": "3dcc9efb8907b6b3419b09b1c262f64403a5162148bc3be0a5d51e112ef69a4d",
+      "abicheck/extract/dwarf_producer.py": "86e449f5776fe7aead410ef979dc636837d28c8caae5599d3c22b8c3f442e1c6",
       "abicheck/extract/dwarf_records.py": "280e22c54d117c0cf496b894eb266c89596456b44ecafea821226ec78563de0e",
       "abicheck/extract/dwarf_scope.py": "1800757661a850338d8cb96d715995ffa8f79354047f68b1ce5e248a72819b20",
       "abicheck/extract/dwarf_subtree_index.py": "45ffbba03c1eeb9f8a1d9ed54ab3f3e2492363d4b56e16944f326154c7654aa9",
@@ -107,6 +108,7 @@
       "abicheck/extract/headers/sysinc.py": "437f7d1ebb0bbdccc50e49fdc5e0e028595920ad7accdc2cffa064c79c8c8672",
       "abicheck/extract/headers/toolchain.py": "d931ab887cf450483ccdf3ddaf3e598204969b04d95a4227c683308bf716c830",
       "abicheck/extract/library_export_facts.py": "071b2a58f284753b57fa2e374680a57e9ce6897877b65a84fb92f420e7cf2ab7",
+      "abicheck/extract/macho_build_signals.py": "c277bfdd55f26aae61af66c8fa6c5cdc5fa45acc49a3ae513af5899417db88bb",
       "abicheck/extract/mangled_foreign_template_args.py": "68a87749f13cafca0ce75725b98b22f7695afaf20a71a158759eef220ec72274",
       "abicheck/extract/manifest_semantic_ir.py": "9d8a6ddaa619a7d4b214bbeab5c2c0dfef681a6fd9dffd004760b19a62da3b15",
       "abicheck/extract/metadata_attach.py": "a4d2cba939ecf96036f0c974e723c15e68699d9f5ce847c8e9f8b04f0440fa6d",
@@ -143,9 +145,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "f0a355edba906f36ce5d597fdfc7151ceaa53cf189701d06105abe050888974c",
-    "generation": 2,
-    "reason": "unparseable_header_fallback: probe pools now carry the header-graph cancel token (carry_cancel_token); extraction output is unchanged for every run that is not cancelled, so no generation bump"
+    "fingerprint": "627a68cbc9371de580bbbee258663efdc6482e0c92403f530291ff7a24cd57af",
+    "generation": 3,
+    "reason": "bumped to 3 for a semantic change"
   },
   "resolver": {
     "files": {
