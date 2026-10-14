@@ -1,3 +1,4 @@
 ### Fixed
 
 - Opaque-type suppression: a bare by-value reference in another namespace no longer marks an unrelated opaque type as exposed when the snapshot declares the same-named type that C++ lookup finds first, and an opaque-struct forward declaration is no longer treated as absent when the other side defines it under its other spelling (`name` vs `qualified_name`, as DWARF and header producers differ), which used to suppress that type's layout findings.
+- Opaque-type suppression also pairs a type that is opaque on both sides under different spellings, ignores `::` inside template arguments when deciding a declaration's scope, and keeps a template owner such as `ns::Box<void (*)()>` whole when cutting a function's parameter list; header body coverage counts a function-try-block as a body.

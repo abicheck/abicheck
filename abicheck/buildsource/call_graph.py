@@ -566,9 +566,10 @@ def _node_file(node: dict[str, Any]) -> str:
 
 
 def _has_function_body(node: dict[str, Any]) -> bool:
-    """Whether a function-decl node carries a definition body (a ``CompoundStmt`` child)."""
+    """Whether a function-decl node carries a definition body: a ``CompoundStmt``
+    child, or a ``CXXTryStmt`` child for a function-try-block."""
     return any(
-        isinstance(ch, dict) and ch.get("kind") == "CompoundStmt"
+        isinstance(ch, dict) and ch.get("kind") in ("CompoundStmt", "CXXTryStmt")
         for ch in node.get("inner", []) or []
     )
 

@@ -271,6 +271,31 @@ def test_collect_function_bodies_qualifies_scope_and_skips_prototypes() -> None:
     assert next(iter(found)).startswith("ns::C::m")
 
 
+def test_function_try_block_counts_as_a_body() -> None:
+    """A function-try-block puts ``CXXTryStmt`` (not ``CompoundStmt``) in the
+    body position; it is still a definition whose body was walked."""
+    ast = {
+        "kind": "TranslationUnitDecl",
+        "inner": [
+            {
+                "kind": "FunctionDecl",
+                "name": "guarded",
+                "type": {"qualType": "void ()"},
+                "inner": [{"kind": "CXXTryStmt", "inner": [{"kind": "CompoundStmt"}]}],
+            },
+            {
+                "kind": "FunctionDecl",
+                "name": "proto",
+                "type": {"qualType": "void ()"},
+                "inner": [{"kind": "ParmVarDecl", "name": "x"}],
+            },
+        ],
+    }
+    found = collect_function_bodies(ast)
+    assert len(found) == 1
+    assert next(iter(found)).startswith("guarded")
+
+
 def test_projection_merge_and_cache_keep_bodies() -> None:
     a = project_header_graph_ast(_ast({"f": []}))
     b = project_header_graph_ast(_ast({"g": []}))

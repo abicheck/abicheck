@@ -95,15 +95,16 @@ def find_opaque_struct_types(old: AbiSnapshot, new: AbiSnapshot) -> OpaqueTypeIn
     this index is not the product of a paired ``intersect()``, so it has
     no completeness proof to license ``contains(..., strict=True)``).
     """
-    old_opaque = {t.name for t in old.declarations.types if t.is_opaque}
-    new_opaque = {t.name for t in new.declarations.types if t.is_opaque}
-    old_type_names = {t.name for t in old.declarations.types}
-    new_type_names = {t.name for t in new.declarations.types}
+    # ``declarations`` is read once per snapshot and passed down.
+    old_types = old.declarations.types
+    new_types = new.declarations.types
+    old_type_names = {t.name for t in old_types}
+    new_type_names = {t.name for t in new_types}
     old_all_spellings = old_type_names | {
-        t.qualified_name for t in old.declarations.types if t.qualified_name is not None
+        t.qualified_name for t in old_types if t.qualified_name is not None
     }
     new_all_spellings = new_type_names | {
-        t.qualified_name for t in new.declarations.types if t.qualified_name is not None
+        t.qualified_name for t in new_types if t.qualified_name is not None
     }
 
     # Asymmetric existence: a forward declaration counts as absent from the
@@ -112,10 +113,10 @@ def find_opaque_struct_types(old: AbiSnapshot, new: AbiSnapshot) -> OpaqueTypeIn
     # ``name`` qualified while a header backend keys it bare with the scoped
     # spelling in ``qualified_name``, so a name-only check read the same
     # entity's full definition, spelled the other way, as absent.
-    def _absent_from(snap: AbiSnapshot, other: set[str]) -> set[str]:
+    def _absent_from(types: list[RecordType], other: set[str]) -> set[str]:
         present: set[str] = set()
         candidates: set[str] = set()
-        for t in snap.declarations.types:
+        for t in types:
             if not t.is_opaque:
                 continue
             candidates.add(t.name)
@@ -125,8 +126,34 @@ def find_opaque_struct_types(old: AbiSnapshot, new: AbiSnapshot) -> OpaqueTypeIn
                 present.add(t.name)
         return candidates - present
 
-    opaque_types = (old_opaque & new_opaque) | (
-        _absent_from(old, new_all_spellings) | _absent_from(new, old_all_spellings)
+    # An entity opaque on both sides but spelled differently (``ns::Handle``
+    # vs bare ``Handle`` with ``qualified_name`` ``ns::Handle``) pairs by any
+    # of its spellings before the absence rule runs.
+    def _opaque_spellings(types: list[RecordType]) -> set[str]:
+        return {
+            s
+            for t in types
+            if t.is_opaque
+            for s in (t.name, t.qualified_name)
+            if s is not None
+        }
+
+    def _paired(types: list[RecordType], other_opaque: set[str]) -> set[str]:
+        return {
+            t.name
+            for t in types
+            if t.is_opaque
+            and (t.name in other_opaque or t.qualified_name in other_opaque)
+        }
+
+    old_opaque_spellings = _opaque_spellings(old_types)
+    new_opaque_spellings = _opaque_spellings(new_types)
+    opaque_types = (
+        _paired(old_types, new_opaque_spellings)
+        | _paired(new_types, old_opaque_spellings)
+    ) | (
+        _absent_from(old_types, new_all_spellings)
+        | _absent_from(new_types, old_all_spellings)
     )
     if not opaque_types:
         return OpaqueTypeIndex(stable=frozenset(), local=frozenset())
@@ -161,8 +188,8 @@ def find_opaque_struct_types(old: AbiSnapshot, new: AbiSnapshot) -> OpaqueTypeIn
     # conclusions... never upgrades to a clean compatibility claim" already
     # states the correct default for this exact ambiguity: prefer not
     # suppressing when the two directions cannot be told apart.
-    non_opaque_old = [t for t in old.declarations.types if not t.is_opaque]
-    non_opaque_new = [t for t in new.declarations.types if not t.is_opaque]
+    non_opaque_old = [t for t in old_types if not t.is_opaque]
+    non_opaque_new = [t for t in new_types if not t.is_opaque]
     embedded_types: set[str] = set()
     for records in (non_opaque_old, non_opaque_new):
         for t in records:
@@ -181,8 +208,8 @@ def find_opaque_struct_types(old: AbiSnapshot, new: AbiSnapshot) -> OpaqueTypeIn
     # declarations' own names, so a non-opaque namesake must not join
     # `declarations` even for the always-safe spelling tier.
     declarations: dict[str, list[RecordType]] = {}
-    for snap in (old, new):
-        for t in snap.declarations.types:
+    for types in (old_types, new_types):
+        for t in types:
             if t.name in truly_opaque and t.is_opaque:
                 declarations.setdefault(t.name, []).append(t)
 
@@ -225,12 +252,12 @@ def find_opaque_struct_types(old: AbiSnapshot, new: AbiSnapshot) -> OpaqueTypeIn
     # to compute. Every declaration under an id is now consulted; see
     # below.
     old_by_stable_id: dict[StableEntityId, list[RecordType]] = {}
-    for t in old.declarations.types:
+    for t in old_types:
         resolved = stable_entity_id(t.entity_id)
         if resolved is not None:
             old_by_stable_id.setdefault(resolved, []).append(t)
     new_by_stable_id: dict[StableEntityId, list[RecordType]] = {}
-    for t in new.declarations.types:
+    for t in new_types:
         resolved = stable_entity_id(t.entity_id)
         if resolved is not None:
             new_by_stable_id.setdefault(resolved, []).append(t)
@@ -292,8 +319,8 @@ def find_opaque_struct_types(old: AbiSnapshot, new: AbiSnapshot) -> OpaqueTypeIn
         evidence narrows conclusions... never upgrades to a clean
         compatibility claim" already rules out for the sibling
         asymmetric-absence case below."""
-        for snap in (old, new):
-            for t in snap.declarations.types:
+        for types in (old_types, new_types):
+            for t in types:
                 if t.is_opaque or stable_entity_id(t.entity_id) is not None:
                     continue
                 if t.name in spellings or (
@@ -407,8 +434,8 @@ def find_opaque_struct_types(old: AbiSnapshot, new: AbiSnapshot) -> OpaqueTypeIn
     # stable tier (resolved identities) is left untouched.
     visible_spellings = {
         spelling
-        for side in (old, new)
-        for t in side.declarations.types
+        for types in (old_types, new_types)
+        for t in types
         if not t.is_opaque
         for spelling in (t.name, t.qualified_name)
         if spelling is not None

@@ -37,8 +37,20 @@ __all__ = ["leaf_hidden", "leaf_hiders", "scope_of"]
 
 
 def scope_of(name: str) -> tuple[str, ...]:
-    """Enclosing scopes of a qualified declaration name (parameter list cut)."""
-    return tuple(split_top_level_scopes(name.split("(", 1)[0])[:-1])
+    """Enclosing scopes of a qualified declaration name (parameter list cut).
+
+    Only a ``(`` outside template arguments starts the parameter list, so an
+    owner such as ``ns::Box<void (*)()>`` keeps its full spelling."""
+    depth = 0
+    for i, ch in enumerate(name):
+        if ch == "<":
+            depth += 1
+        elif ch == ">" and depth:
+            depth -= 1
+        elif ch == "(" and not depth:
+            name = name[:i]
+            break
+    return tuple(split_top_level_scopes(name)[:-1])
 
 
 def leaf_hiders(
@@ -46,12 +58,12 @@ def leaf_hiders(
 ) -> dict[str, list[tuple[str, ...]]]:
     """For each qualified candidate, the scopes of *other* declarations in
     *snap* that share its leaf spelling. Only a declaration whose scope is
-    known (a ``::`` in ``qualified_name`` or ``name``) counts."""
+    known (a top-level ``::`` in ``qualified_name`` or ``name``) counts."""
     by_leaf: dict[str, list[tuple[str, ...]]] = {}
     for t in snap.declarations.types:
         spelled = t.qualified_name or t.name
-        if "::" in spelled:
-            segs = split_top_level_scopes(spelled)
+        segs = split_top_level_scopes(spelled)
+        if len(segs) > 1:
             by_leaf.setdefault(segs[-1], []).append(tuple(segs[:-1]))
     hiders: dict[str, list[tuple[str, ...]]] = {}
     for tname in opaque:

@@ -131,6 +131,8 @@ def test_same_text_in_two_scopes_is_scanned_per_scope():
 def test_helpers_edge_cases():
     assert scope_of("a::b::f(int, x::y)") == ("a", "b")
     assert scope_of("f") == ()
+    assert scope_of("ns::Box<void (*)()>::f(int)") == ("ns", "Box<void (*)()>")
+    assert scope_of("ns::Box<int>::f(x::y)") == ("ns", "Box<int>")
     assert not leaf_hidden("ns::Handle", [("other",)], ())
 
 
@@ -189,3 +191,101 @@ def test_forward_declaration_pairs_with_definition_under_any_spelling(
     assert bool(out) is not suppressed
     spellings = {k.spelling for k in find_opaque_struct_types(old, new).local}
     assert (symbol in spellings) is suppressed
+
+
+def _bare_handle_param(fname: str, ptype: str = "Handle") -> Function:
+    return Function(
+        name=fname,
+        mangled="_Z1fv",
+        return_type="void",
+        params=[Param(name="h", type=ptype, pointer_depth=0)],
+    )
+
+
+@pytest.mark.parametrize(
+    ("others", "exposed"),
+    [
+        (["ns::Box<void (*)()>::Handle"], False),
+        ([], True),
+        (["ns::Box<int>::Handle"], True),
+    ],
+)
+def test_nested_type_under_template_owner_with_function_type_argument(others, exposed):
+    """``ns::Box<void (*)()>::f(int)``'s scope is the whole owner, not a cut
+    at the ``(`` inside its template argument; the owner's nested ``Handle``
+    hides ``ns::Handle``."""
+    snap = _snap(
+        types=[_opaque(), *(_decl(n) for n in others)],
+        functions=[_bare_handle_param("ns::Box<void (*)()>::f(int)")],
+    )
+    assert (find_by_value_types(snap, {"ns::Handle"}) == {"ns::Handle"}) is exposed
+
+
+@pytest.mark.parametrize(
+    ("hider", "exposed"),
+    [
+        # ``::`` only inside template arguments: no enclosing scope known.
+        ("Box<dep::Tag>", True),
+        # A real enclosing scope does hide.
+        ("other::Box<dep::Tag>", False),
+    ],
+)
+def test_template_argument_scope_is_not_an_enclosing_scope(hider, exposed):
+    snap = _snap(
+        types=[
+            RecordType(name="ns::Box<dep::Tag>", kind="struct", is_opaque=True),
+            _decl(hider),
+        ],
+        functions=[_bare_handle_param("other::f", "Box<dep::Tag>")],
+    )
+    got = find_by_value_types(snap, {"ns::Box<dep::Tag>"})
+    assert (got == {"ns::Box<dep::Tag>"}) is exposed
+
+
+@pytest.mark.parametrize(
+    ("old_types", "new_types", "symbol", "suppressed"),
+    [
+        # Opaque on both sides, spelled qualified old / bare+qualified new.
+        (
+            [("ns::Handle", True, None)],
+            [("Handle", True, "ns::Handle")],
+            "ns::Handle",
+            True,
+        ),
+        # Mirror direction.
+        (
+            [("Handle", True, "ns::Handle")],
+            [("ns::Handle", True, None)],
+            "Handle",
+            True,
+        ),
+        # Control: different entity opaque on the other side, defined nowhere.
+        (
+            [("ns::Handle", True, None)],
+            [("Handle", True, "other::Handle")],
+            "ns::Handle",
+            True,
+        ),
+        # Control: other side has the full definition under the other spelling.
+        (
+            [("ns::Handle", True, None)],
+            [("Handle", False, "ns::Handle")],
+            "ns::Handle",
+            False,
+        ),
+    ],
+)
+def test_opaque_on_both_sides_pairs_across_spellings(
+    old_types, new_types, symbol, suppressed
+):
+    def build(specs):
+        return _snap(
+            types=[_record(n, is_opaque=o, qualified_name=q) for n, o, q in specs]
+        )
+
+    old, new = build(old_types), build(new_types)
+    out, filtered = _downgrade_opaque_struct_changes(
+        [_struct_size_change(symbol)], old, new
+    )
+    assert bool(filtered) is suppressed
+    assert bool(out) is not suppressed
