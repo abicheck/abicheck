@@ -198,6 +198,7 @@ from .call_graph import (
     _fill_callee_files,
     _index_member_decls,
     _walk_calls,
+    collect_function_bodies,
 )
 from .header_graph_ast_projection import HeaderGraphAstProjection
 from .semantic_fact_folds import SemanticFactStream
@@ -663,9 +664,11 @@ def project_header_graph_ast_file(path: Path) -> HeaderGraphAstProjection:
     id_index: dict[str, str] = {}
     pending_anon_enum: dict[str, Any] | None = None
     call_file = ""
+    bodies: set[str] = set()
     for element in stream_recorded_decls(
         path, extents, location_states=location_states
     ):
+        collect_function_bodies(element, [], bodies)
         pending_anon_enum = _walk_child_sequence(
             (element,), [], "", type_edges, idx, pending_anon_enum
         )
@@ -710,4 +713,5 @@ def project_header_graph_ast_file(path: Path) -> HeaderGraphAstProjection:
         entity_files=dict(idx.decl_file) if needs_entity_files else {},
         special_member_names=frozenset(special),
         semantic_facts=semantic.finish(type_edges),
+        function_bodies=frozenset(bodies),
     )

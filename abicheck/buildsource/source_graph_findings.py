@@ -53,6 +53,7 @@ from ..model.source_graph_coverage import (
     HEADER_PASS_ALIAS,
     PASS_EDGE_KINDS,
     TYPE_GRAPH_PASS,
+    body_scoped_closures,
     graph_records_passes,
     trusted_kinds,
 )
@@ -1402,16 +1403,16 @@ def _internal_dependency_findings(
     # public closure, or no semantic pass at all) cannot make every
     # pre-existing internal dependency look newly added (earlier Codex review).
     common_kinds = _common_dependency_edge_kinds(old, new)
-    # Role-scoped, not kind-scoped (Codex review, fresh evidence, second
-    # round): a producer-version disagreement on one ROLE_COVERAGE_MATRIX
-    # role (e.g. G29 Phase 5 item 5's `enum_underlying`) must not untrust
-    # a *different*, agreed-upon role sharing the same kind (`field`/
-    # `alias`) — see `_untrusted_dependency_roles`'s own docstring. Only the
-    # disputed roles' own edges are excluded from the closure below; every
-    # role both sides confirm stays fully trusted.
+    # Role-scoped, not kind-scoped: only disputed ROLE_COVERAGE_MATRIX
+    # roles' own edges leave the closure (`_untrusted_dependency_roles`).
     untrusted_roles = _untrusted_dependency_roles(old, new)
-    old_closure = _drop_untrusted_role_edges(old, untrusted_roles)
-    new_closure = _drop_untrusted_role_edges(new, untrusted_roles)
+    # A body-dependent kind neither pass trusts project-wide is still judged
+    # per declaration whose body both sides saw in full (ADR-077 D5).
+    old_closure, new_closure, common_kinds = body_scoped_closures(
+        _drop_untrusted_role_edges(old, untrusted_roles),
+        _drop_untrusted_role_edges(new, untrusted_roles),
+        common_kinds,
+    )
     if _has_internal_reach_coverage(
         old_closure, common_kinds
     ) and _has_internal_reach_coverage(new_closure, common_kinds):

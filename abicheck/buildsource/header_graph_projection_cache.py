@@ -187,6 +187,7 @@ def encode_projection(projection: HeaderGraphAstProjection) -> str:
                 for e in projection.call_edges
             ],
             "semantic_facts": _encode_semantic(projection.semantic_facts),
+            "function_bodies": sorted(projection.function_bodies),
         },
         separators=(",", ":"),
     )
@@ -220,6 +221,7 @@ def decode_projection(blob: str) -> HeaderGraphAstProjection | None:
             call_edges=[CallEdge(*row) for row in doc["call_edges"]],
             special_member_names=frozenset(doc["special_member_names"]),
             semantic_facts=_decode_semantic(doc["semantic_facts"]),
+            function_bodies=frozenset(doc["function_bodies"]),
         )
     except (KeyError, TypeError, ValueError, AttributeError):
         return None

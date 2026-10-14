@@ -99,12 +99,17 @@ from ..model.graph_facts import (
     _type_node_id,
 )
 from ..model.source_graph_coverage import (
+    HEADER_BODY_ATTR,
     HEADER_CALL_GRAPH_PASS as _HEADER_CALL_GRAPH_PASS,
     HEADER_DECLARATIONS_PASS,
     HEADER_TYPE_GRAPH_PASS as _HEADER_TYPE_GRAPH_PASS,
 )
 from .ast_special_members import collect_special_member_names
-from .call_graph import augment_graph_with_calls, parse_clang_ast_calls
+from .call_graph import (
+    augment_graph_with_calls,
+    collect_function_bodies,
+    parse_clang_ast_calls,
+)
 from .inline_graph_fold import _mark_role_coverage
 from .semantic_fact_folds import (
     SemanticFacts,
@@ -174,6 +179,10 @@ class HeaderGraphAstProjection:
     #: a hand-built projection -- so the header passes for those families
     #: stay unstamped (unknown), never "ran and found nothing".
     semantic_facts: SemanticFacts | None = None
+    #: Identities of every function whose body the parse saw in full
+    #: (``call_graph.collect_function_bodies``) -- the per-declaration body
+    #: coverage :func:`seed_ast_graph` marks on the graph.
+    function_bodies: frozenset[str] = frozenset()
 
 
 def project_header_graph_ast(ast_root: dict[str, Any]) -> HeaderGraphAstProjection:
@@ -200,6 +209,7 @@ def project_header_graph_ast(ast_root: dict[str, Any]) -> HeaderGraphAstProjecti
         entity_files=entity_files,
         special_member_names=frozenset(special),
         semantic_facts=semantic_facts,
+        function_bodies=frozenset(collect_function_bodies(ast_root)),
     )
 
 
@@ -221,6 +231,7 @@ def merge_header_graph_ast_projections(
     type_edges: dict[TypeEdge, None] = {}
     call_edges: dict[CallEdge, None] = {}
     special: set[str] = set()
+    bodies: set[str] = set()
     for part in parts:
         for name, path in part.type_files.items():
             type_files.setdefault(name, path)
@@ -229,6 +240,7 @@ def merge_header_graph_ast_projections(
         type_edges.update(dict.fromkeys(part.type_edges))
         call_edges.update(dict.fromkeys(part.call_edges))
         special.update(part.special_member_names)
+        bodies.update(part.function_bodies)
     facts = [p.semantic_facts for p in parts]
     return HeaderGraphAstProjection(
         type_files=type_files,
@@ -241,6 +253,7 @@ def merge_header_graph_ast_projections(
             if facts and all(f is not None for f in facts)
             else None
         ),
+        function_bodies=frozenset(bodies),
     )
 
 
@@ -423,6 +436,7 @@ def seed_ast_graph(
         )
     augment_graph_with_types(graph, type_edges)
     augment_graph_with_calls(graph, call_edges)
+    _mark_seen_bodies(graph, projection.function_bodies)
     if projection.semantic_facts is not None:
         # After the call and type edges, which the virtual-dispatch and
         # callback joins read -- the same order the L5 folds run in.
@@ -453,6 +467,26 @@ def seed_ast_graph(
     # through as a false `PUBLIC_API_INTERNAL_DEPENDENCY_ADDED` the same way
     # the build-integrated pass's own pre-D3-consumer gap did.
     _mark_role_coverage(graph.extractor_passes, HEADER_TYPE_GRAPH_PASS)
+
+
+def _mark_seen_bodies(graph: SourceGraphSummary, bodies: frozenset[str]) -> None:
+    """Record per-declaration body coverage (ADR-077 D5) on each already
+    seeded ``decl://`` node whose body this header parse saw in full. A
+    declaration with no node has no public role and no edge, so it can carry
+    no body-dependent finding; it is not minted just to hold the mark."""
+    for identity in sorted(bodies):
+        node_id = _decl_node_id(identity)
+        if graph.has_node(node_id):
+            graph.add_node(
+                GraphNode(
+                    id=node_id,
+                    kind="source_decl",
+                    label=identity,
+                    provenance=_PROVENANCE,
+                    confidence=CONF_HIGH,
+                    attrs={HEADER_BODY_ATTR: True},
+                )
+            )
 
 
 class MemoizedParseFailure(SnapshotError):
