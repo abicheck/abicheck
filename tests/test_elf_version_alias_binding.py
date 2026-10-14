@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -199,8 +200,9 @@ def _build(cc: str, d: Path, name: str, src: str) -> Path:
 
 
 @pytest.mark.skipif(
-    shutil.which("gcc") is None and shutil.which("cc") is None,
-    reason="needs a C compiler to build symbol-versioned fixtures",
+    not sys.platform.startswith("linux")
+    or (shutil.which("gcc") is None and shutil.which("cc") is None),
+    reason="needs a Linux C toolchain (ELF .symver) to build symbol-versioned fixtures",
 )
 def test_real_library_binding_change_on_non_last_alias(tmp_path: Path) -> None:
     from abicheck.dumper import dump
@@ -488,8 +490,9 @@ def test_stored_snapshot_keeps_versions_and_clears_ambiguous_facts(
 
 
 @pytest.mark.skipif(
-    shutil.which("gcc") is None and shutil.which("cc") is None,
-    reason="needs a C compiler to build symbol-versioned fixtures",
+    not sys.platform.startswith("linux")
+    or (shutil.which("gcc") is None and shutil.which("cc") is None),
+    reason="needs a Linux C toolchain (ELF .symver) to build symbol-versioned fixtures",
 )
 def test_real_library_alias_change_survives_a_stored_baseline(tmp_path: Path) -> None:
     from abicheck.dumper import dump

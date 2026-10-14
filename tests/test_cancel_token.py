@@ -98,6 +98,11 @@ def test_a_worker_submitted_without_carrying_the_token_is_not_cancelled() -> Non
         )
         outputs.append(done.stdout.strip())
 
-    with cancel_scope(token), ThreadPoolExecutor(1) as pool:
-        pool.submit(worker).result(timeout=30)
+    with ThreadPoolExecutor(1) as pool:
+        # Start the worker thread before entering the scope: free-threaded
+        # builds default to ``thread_inherit_context``, so a thread spawned
+        # inside the scope would inherit the token and void this control.
+        pool.submit(lambda: None).result(timeout=30)
+        with cancel_scope(token):
+            pool.submit(worker).result(timeout=30)
     assert outputs == ["finished"]
