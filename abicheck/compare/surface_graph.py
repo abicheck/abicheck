@@ -72,6 +72,7 @@ from ..model.graph_evidence_class import (
     EdgeEvidenceClass,
 )
 from ..model.graph_facts import GraphEdge, GraphNode
+from ..model.graph_identity import header_node_id
 from ..model.graph_join import (
     EDGE_KIND_DEBUG_TYPE_OF,
     EDGE_KIND_EXPORTS,
@@ -165,16 +166,12 @@ def _identity_attrs(ident: GraphEntityIdentity) -> dict[str, object]:
     return {} if ident.resolved else {IDENTITY_STATE_ATTR: ident.state.value}
 
 
-def _header_node_id(header: str) -> str:
-    return f"header://{header}"
-
-
 def _add_header_declares(
     graph: SurfaceGraphLike, source_header: str | None, decl_node_id: str
 ) -> None:
     if not source_header:
         return
-    header_id = _header_node_id(source_header)
+    header_id = header_node_id(source_header)
     graph.add_node(
         GraphNode(
             provenance=PUBLIC_SURFACE_FACTS_PRODUCER,

@@ -682,10 +682,6 @@ def _source_node_id(path: str) -> str:
     return f"source://{path}"
 
 
-def _header_node_id(path: str) -> str:
-    return f"header://{path}"
-
-
 def _option_node_id(flag: str) -> str:
     return f"build_option://{flag}"
 

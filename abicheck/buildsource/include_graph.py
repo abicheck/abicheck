@@ -30,7 +30,8 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from ..model.graph_facts import CONF_HIGH, GraphEdge, GraphNode
-from ..model.source_graph import _header_node_id, _source_node_id
+from ..model.graph_identity import header_node_id
+from ..model.source_graph import _source_node_id
 from .include_graph_workers import DepfileProbe, run_probes
 
 if TYPE_CHECKING:
@@ -345,7 +346,7 @@ def augment_graph_with_includes(
             # Prefer linking to a header/source node the rest of the graph
             # already knows about so include-graph drift lines up with the
             # public-header set; otherwise materialize a plain file node.
-            for candidate in (_header_node_id(path), _source_node_id(path)):
+            for candidate in (header_node_id(path), _source_node_id(path)):
                 if graph.has_node(candidate):
                     node_id = candidate
                     break

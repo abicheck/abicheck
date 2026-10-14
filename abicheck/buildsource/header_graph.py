@@ -107,8 +107,9 @@ from ..model.graph_facts import (
     GraphEdge,
     GraphNode,
 )
+from ..model.graph_identity import header_node_id
 from ..model.snapshot_identity_table import identities_for_snapshot
-from ..model.source_graph import SourceGraphSummary, _header_node_id
+from ..model.source_graph import SourceGraphSummary
 from ..model.source_graph_coverage import (
     HEADER_DECLARATIONS_PASS,
     HEADER_INCLUDE_GRAPH_PASS as _HEADER_INCLUDE_GRAPH_PASS,
@@ -486,7 +487,7 @@ def build_header_only_graph(
         node_id = header_ids.get(path)
         if node_id is not None:
             return node_id
-        node_id = _header_node_id(path)
+        node_id = header_node_id(path)
         origin = classify(path)
         attrs = {"visibility": origin.value} if origin != ScopeOrigin.UNKNOWN else {}
         graph.add_node(
@@ -589,7 +590,7 @@ class ClangHeaderIncludeExtractor:
     drives it through a throwaway :class:`~abicheck.buildsource.build_evidence.BuildEvidence`
     with one synthetic :class:`~abicheck.buildsource.build_evidence.CompileUnit`
     per header — its ``id`` set to that header's graph node id
-    (:func:`abicheck.model.source_graph._header_node_id`), so
+    (:func:`abicheck.model.graph_identity.header_node_id`), so
     :func:`abicheck.buildsource.include_graph.augment_graph_with_includes`
     can fold the result straight onto the already-built
     :class:`~abicheck.model.source_graph.SourceGraphSummary` without any
@@ -705,7 +706,7 @@ class ClangHeaderIncludeExtractor:
             toolchain_tokens.append("-nostdinc")
         compile_units = [
             CompileUnit(
-                id=_header_node_id(h),
+                id=header_node_id(h),
                 source=h,
                 argv=[
                     *(f"-I{i}" for i in includes),
@@ -733,7 +734,7 @@ class ClangHeaderIncludeExtractor:
 
         filtered: dict[str, list[str]] = {}
         for h in headers:
-            paths = include_map.get(_header_node_id(h), [])
+            paths = include_map.get(header_node_id(h), [])
             if not paths:
                 continue
             try:
@@ -749,5 +750,5 @@ class ClangHeaderIncludeExtractor:
                     pass
                 kept.append(p)
             if kept:
-                filtered[_header_node_id(h)] = kept
+                filtered[header_node_id(h)] = kept
         return filtered, list(extractor.diagnostics)

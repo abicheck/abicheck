@@ -397,6 +397,18 @@ def _type_node_id(identity: str) -> str:
     return f"type://{_normalize_graph_identity(identity)}"
 
 
+def header_node_id(path: str) -> str:
+    """The ``header://`` node id for a header ``path``.
+
+    The one owner of this scheme: the L5 source graph (``model/source_graph``
+    and ``buildsource/``) and the public-surface graph (``compare/surface_graph``)
+    both key a header node by it, and an edge from one to the other only joins
+    while both mint the identical string. ``path`` is used verbatim (it is
+    already the producer's redacted path), so the id is not normalized here.
+    """
+    return f"header://{path}"
+
+
 #: Matches the ``<marker>:<basename>:<line>:<col>`` shape
 #: :func:`_normalize_graph_identity` already produces (both the
 #: parenthesized and bare closure/anonymous-tag spellings converge on this
