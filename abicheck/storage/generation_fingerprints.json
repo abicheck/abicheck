@@ -131,7 +131,7 @@
       "abicheck/extract/target_platform_probe.py": "060c391c71dca8f863f3452de90731edcf67ac14c1b804fb91606eb8140b1ee7",
       "abicheck/extract/toolchain_identity.py": "a695a96ce37cc859a048d7cde13d2b28ca5b2509c0a800d238cb268248cf1d1f",
       "abicheck/extract/tu_jobs.py": "d320440a203712cb628a1676ca0e919a853357907a32f1e08b60c9cb669c7b1e",
-      "abicheck/extract/unparseable_header_fallback.py": "3d3a2e6dd5ca319f573e680d8ee43c4621a50ce10646ce11bf4ce9b606d494e8",
+      "abicheck/extract/unparseable_header_fallback.py": "f845b80782f38996a5a77175ebe559c1ecf82c2561cefe18f72794116d98be0f",
       "abicheck/extract/wheel_tags.py": "92804dbb642bafd00bd9bc4c9999127c98efa6d748f38ffb4bc68dd34d833cd4",
       "abicheck/macho_metadata.py": "5fb0d218553c8e3f8911429074132849087fbc2f440bba6073fa7a5a43d7d7b1",
       "abicheck/pdb_metadata.py": "79beb794904dd26afaf7d1fa8e9fdf74d4d4dfd21f5c09b9764c45b253a2dc1f",
@@ -143,9 +143,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "a541d69eeca3127d22f1cb61ea16ac17da6f88d3db6f36e06863404d8f39692d",
+    "fingerprint": "f0a355edba906f36ce5d597fdfc7151ceaa53cf189701d06105abe050888974c",
     "generation": 2,
-    "reason": "Compiler-driver resolution and the dpcpp probe move from dumper_clang/buildsource into extract/ (compiler_driver.py, dpcpp_jobs.py) and header_ast_backend is imported from its owner. Pure relocation: no extracted fact or derived graph changes; the generation constant stays put."
+    "reason": "unparseable_header_fallback: probe pools now carry the header-graph cancel token (carry_cancel_token); extraction output is unchanged for every run that is not cancelled, so no generation bump"
   },
   "resolver": {
     "files": {

@@ -50,6 +50,7 @@ import re
 from pathlib import Path
 from typing import TYPE_CHECKING, TypeVar
 
+from ..deadline import carry_cancel_token
 from ..errors import SnapshotError
 from ..model.header_exclusion_record import EXCLUDED_HEADERS_TOOLCHAIN_KEY
 from ..process_resources import BudgetedExecutor
@@ -292,6 +293,7 @@ def _confirm_in_context(
     context = set(active)
     pending = list(suspects)
     restored: list[Path] = []
+    probe = carry_cancel_token(ok)
     with BudgetedExecutor(_probe_jobs()) as pool:
         while pending:
             groups = [
@@ -302,7 +304,7 @@ def _confirm_in_context(
                 + [s]
                 for s in pending
             ]
-            passed = list(pool.map(ok, groups))
+            passed = list(pool.map(probe, groups))
             wave = [s for s, good in zip(pending, passed, strict=True) if good]
             if not wave:
                 break
@@ -356,9 +358,10 @@ def _probe_remaining(
             return exc
         return None
 
+    probe = carry_cancel_token(run)
     with BudgetedExecutor(_probe_jobs()) as pool:
         while groups:
-            outcomes = list(pool.map(run, groups))
+            outcomes = list(pool.map(probe, groups))
             nxt: list[list[Path]] = []
             for group, exc in zip(groups, outcomes, strict=True):
                 if exc is None or not is_header_specific(exc):

@@ -375,7 +375,9 @@ def _extract_and_finish(
             # declaration-provenance classification above, not silently
             # re-widen it.
             include_search_dirs=_public_include_search_dirs,
-            prefetched=_prefetched_graph,
+            prefetched=(
+                _prefetched_graph.future if _prefetched_graph is not None else None
+            ),
         )
         snap = attach_clang_layout(
             snap, _headers, _includes, lang=lang, compile=compile

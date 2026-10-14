@@ -393,6 +393,11 @@ class AstAcquisitionScope:
             left = deadline.remaining()
             try:
                 result = future.result(timeout=left)
+            except deadline.ProcessCancelled:
+                # The producer was cancelled because *its* request's dump
+                # failed, not because this waiter gave up. This waiter still
+                # needs the value, so acquire it again as leader or follower.
+                return self.run(backend, key, producer, group=group)
             except FutureTimeoutError:
                 if future.done():
                     return cast("_T", future.result())
@@ -409,13 +414,17 @@ class AstAcquisitionScope:
         try:
             result = producer()
         except BaseException as exc:
-            future.set_exception(exc.with_traceback(None))
-            # A failed acquisition is retryable within the request.  Removing
-            # only our own entry avoids racing a later successful producer.
+            # Unregister before waking waiters: set_exception wakes them, and
+            # one that retries (the ProcessCancelled branch above) must find no
+            # entry, or it would re-read this same failed future and recurse.
             with self._lock:
                 if self._entries.get(lookup) is future:
                     del self._entries[lookup]
                 self._ungrouped.pop(lookup, None)
+            future.set_exception(exc.with_traceback(None))
+            # A failed acquisition is retryable within the request.  Removing
+            # only our own entry avoids racing a later successful producer.
+            with self._lock:
                 # A settled producer can make its group releasable, so retry
                 # the bound here -- see `set_result` below for why.
                 self._evict_groups_locked()
