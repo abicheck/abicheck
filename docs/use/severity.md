@@ -188,7 +188,7 @@ The one exception is the fixed `informational` category, which never gates.
 The GitHub Action supports severity configuration via inputs:
 
 ```yaml
-- uses: abicheck/abicheck@v0.6.0
+- uses: abicheck/abicheck@v0.7.0
   with:
     old-library: libfoo-v1.json
     new-library: libfoo-v2.json
@@ -207,7 +207,7 @@ severity:
 ```
 
 ```yaml
-- uses: abicheck/abicheck@v0.6.0
+- uses: abicheck/abicheck@v0.7.0
   with:
     old-library: libfoo-v1.json
     new-library: libfoo-v2.json

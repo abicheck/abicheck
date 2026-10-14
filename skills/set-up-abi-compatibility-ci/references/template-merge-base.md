@@ -56,7 +56,7 @@ jobs:
           cmake --build build -j
 
       - name: Compare base vs head
-        uses: abicheck/abicheck@v0.6.0
+        uses: abicheck/abicheck@v0.7.0
         with:
           old-library: old/<lib-path>
           new-library: new/<lib-path>

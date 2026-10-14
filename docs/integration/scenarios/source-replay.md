@@ -18,7 +18,7 @@ where the *build* emits source facts as it compiles instead.
   zero-config (CMake configure-only, a Bazel `aquery`, or a Make dry-run
   transcript) — see
   [Evidence Depth § Obtaining a compile database](../../use/evidence-depth.md#obtaining-a-compile-database-without-a-full-build).
-- `clang` on the runner. With the latest published release (`@v0.6.0`, used
+- `clang` on the runner. With the latest published release (`@v0.7.0`, used
   below), the default `dependency-source: conda-forge` installs castxml but
   does **not** install clang on Linux or macOS. Pin
   `dependency-source: conda-forge-clang20`, choose `system` when clang is
@@ -43,7 +43,7 @@ changed paths, runs the pinned evidence level, and compares in one step
 `old-library` as the baseline):
 
 ```yaml
-- uses: abicheck/abicheck@v0.6.0
+- uses: abicheck/abicheck@v0.7.0
   with:
     old-library: abi-baseline.json
     new-library: build/libfoo.so
@@ -62,7 +62,7 @@ of several a `.abicheck.yml` `targets:`/`profiles:` block declares,
 in `v0.6.0`, so pin that release tag for a reproducible workflow:
 
 ```yaml
-- uses: abicheck/abicheck/actions/check-target@v0.6.0
+- uses: abicheck/abicheck/actions/check-target@v0.7.0
   with:
     name: libfoo
     requested-depth: source
