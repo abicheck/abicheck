@@ -35,7 +35,7 @@ a :class:`~abicheck.workflows.release_compare_reporter.ReleaseCompareReporter`.
 
 **One member is the scalar path.** A one-member release runs that member
 through exactly the request a single-pair ``compare`` of the same operands
-builds (``release_member_request.run_compare_kwargs``), and no sibling pass
+builds (``release_member_request.member_compare_request``), and no sibling pass
 fires at N=1 (both need a sibling). ``tests/test_release_compare_workflow.py``
 pins it through this function; ``tests/test_compare_cardinality_invariance.py``
 through the CLI.

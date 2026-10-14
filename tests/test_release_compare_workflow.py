@@ -231,13 +231,12 @@ def test_mutant_member_dropping_a_setting_is_caught(
     break the invariant, or the oracle above proves nothing."""
     import abicheck.workflows.member_compare as member_compare
 
-    real = member_compare.run_compare
+    real = member_compare.run_compare_request
 
-    def dropping(*args: object, **kwargs: object) -> object:
-        kwargs["suppress"] = None
-        return real(*args, **kwargs)
+    def dropping(request: Any, *args: Any, **kwargs: Any) -> Any:
+        return real(dataclasses.replace(request, suppress=None), *args, **kwargs)
 
-    monkeypatch.setattr(member_compare, "run_compare", dropping)
+    monkeypatch.setattr(member_compare, "run_compare_request", dropping)
     with pytest.raises(AssertionError):
         test_each_member_is_the_scalar_compare_of_its_pair(
             ("removal_and_addition", "addition_only"), "suppress", tmp_path

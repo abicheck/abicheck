@@ -23,6 +23,7 @@ import dataclasses
 import itertools
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 from _family_f2_routes import (
@@ -137,13 +138,12 @@ def test_mutant_member_dropping_a_setting_is_caught(
     must break the invariant."""
     import abicheck.workflows.member_compare as member_compare
 
-    real = member_compare.run_compare
+    real = member_compare.run_compare_request
 
-    def dropping(*args: object, **kwargs: object) -> object:
-        kwargs["suppress"] = None
-        return real(*args, **kwargs)
+    def dropping(request: Any, *args: Any, **kwargs: Any) -> Any:
+        return real(dataclasses.replace(request, suppress=None), *args, **kwargs)
 
-    monkeypatch.setattr(member_compare, "run_compare", dropping)
+    monkeypatch.setattr(member_compare, "run_compare_request", dropping)
     with pytest.raises(AssertionError):
         test_member_result_is_independent_of_cardinality(
             ("removal_and_addition", "addition_only"), "suppress", tmp_path

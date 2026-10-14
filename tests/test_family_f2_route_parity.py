@@ -752,14 +752,13 @@ def test_mutant_release_member_drops_stated_setting(
     drops a field the caller stated. Here: suppress and policy."""
     import abicheck.workflows.member_compare as member_compare
 
-    real = member_compare.run_compare
+    real = member_compare.run_compare_request
 
-    def dropping(*args: Any, **kwargs: Any) -> Any:
-        kwargs["suppress"] = None
-        kwargs["policy"] = "strict_abi"
-        return real(*args, **kwargs)
+    def dropping(request: Any, *args: Any, **kwargs: Any) -> Any:
+        dropped = dataclasses.replace(request, suppress=None, policy="strict_abi")
+        return real(dropped, *args, **kwargs)
 
-    monkeypatch.setattr(member_compare, "run_compare", dropping)
+    monkeypatch.setattr(member_compare, "run_compare_request", dropping)
     caught = []
     for axis in ("suppress", "policy_sdk_vendor"):
         outs = _run_all(

@@ -130,7 +130,7 @@ class TestReleaseFanOutStampsResolvedConfig:
         new.write_bytes(b"")
         with (
             patch(
-                "abicheck.workflows.member_compare.run_compare",
+                "abicheck.workflows.member_compare.run_compare_request",
                 return_value=fake_result,
             ),
             patch(

@@ -17,22 +17,24 @@
 
 Design-hardening Phase 2 (F2, ``docs/contribute/plans/design-hardening-
 from-defect-families.md``). The release fan-out used to rebuild each
-member's ``service.run_compare`` call keyword by keyword from a 34-slot
-positional tuple. Every new request field had to be added to the tuple, to
-two function signatures and to the forwarding call, and a field missed at
-any of those four places was silently dropped for directory/package
-comparisons only (#1391, and the ``lang_explicit``/``exclude_headers``/
-``env_matrix`` follow-ups each closed one such drop).
+member's comparison keyword by keyword from a 34-slot positional tuple, and
+a field missed at any of the forwarding places was silently dropped for
+directory/package comparisons only (#1391, and the ``lang_explicit``/
+``exclude_headers``/``env_matrix`` follow-ups each closed one such drop).
 
 Now the release resolves one :class:`ReleaseMemberCompareRequest` -- the
 parent -- and each member receives it plus a :class:`MemberDelta`: a frozen
 type listing the only fields a member may override (its two operands and
 their per-member debug files). :func:`member_request` applies the delta with
 :func:`dataclasses.replace`, so every other field is inherited by
-construction, and :func:`run_compare_kwargs` forwards every field by
-iterating the dataclass rather than naming them. A new field therefore
-reaches every member without a second edit, and
-``tests/test_release_member_request.py`` proves it with a synthetic field.
+construction.
+
+:func:`member_compare_request` then builds the member's typed
+:class:`~abicheck.workflows.contracts.CompareRequest` directly -- the same
+request the keyword API builds for the same operands -- with no keyword
+round-trip. It consumes every field explicitly, and refuses a field it does
+not map rather than dropping it, so a new request field cannot silently
+disagree with the identical single-pair comparison.
 """
 
 from __future__ import annotations
@@ -42,6 +44,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from .contracts import CompareRequest
+from .request_inputs import InputSpec
+
 if TYPE_CHECKING:
     from ..compile_context import CompileContext
     from ..environment_matrix import EnvironmentMatrix
@@ -49,8 +54,8 @@ if TYPE_CHECKING:
 __all__ = [
     "MemberDelta",
     "ReleaseMemberCompareRequest",
+    "member_compare_request",
     "member_request",
-    "run_compare_kwargs",
 ]
 
 
@@ -59,8 +64,8 @@ class ReleaseMemberCompareRequest:
     """The release's resolved per-pair request -- the parent every member
     inherits from.
 
-    Each field name is a ``service.run_compare`` keyword, which
-    :func:`run_compare_kwargs` relies on (and a test asserts). The four
+    Field names mirror the single-pair comparison's keywords (the public
+    ``service.run_compare`` signature), which a test asserts. The four
     :class:`MemberDelta` slots stay ``None`` on the parent: only a member
     has operands.
     """
@@ -123,6 +128,45 @@ if not set(_DELTA_FIELDS) <= _REQUEST_FIELDS:  # pragma: no cover - import-time 
         "MemberDelta names a field ReleaseMemberCompareRequest does not have"
     )
 
+#: Every request field :func:`member_compare_request` consumes. Checked
+#: against the dataclass on each call, so a field added without a mapping is
+#: refused loudly rather than dropped from the member's comparison.
+_MAPPED_FIELDS = frozenset(
+    {
+        "old_input",
+        "new_input",
+        "old_pdb_path",
+        "new_pdb_path",
+        "old_headers",
+        "new_headers",
+        "old_includes",
+        "new_includes",
+        "old_version",
+        "new_version",
+        "lang",
+        "lang_explicit",
+        "suppress",
+        "policy",
+        "policy_file_path",
+        "scope_to_public_surface",
+        "pattern_verdicts",
+        "include_dependencies",
+        "contract_evaluation",
+        "contract_mode",
+        "pack_policy_overrides",
+        "pack_internal_namespaces",
+        "compile_context",
+        "depth",
+        "public_header_dirs",
+        "collapse_versioned_symbols",
+        "project_policy_overrides",
+        "env_matrix",
+        "exclude_headers",
+        "acknowledgments_path",
+        "acknowledgment_unacknowledged_additions",
+    }
+)
+
 
 def member_request(
     parent: ReleaseMemberCompareRequest, delta: MemberDelta
@@ -133,15 +177,90 @@ def member_request(
     )
 
 
-def run_compare_kwargs(request: ReleaseMemberCompareRequest) -> dict[str, Any]:
-    """Every field of *request*, as ``service.run_compare`` keywords.
+def member_compare_request(request: ReleaseMemberCompareRequest) -> CompareRequest:
+    """*request* as the typed :class:`CompareRequest` for one member's pair.
 
-    Iterates the dataclass (shallowly -- ``dataclasses.asdict`` would deep-copy
-    the compile context and env matrix), so no field can be left out. Raises
-    on a request that is still a parent: a comparison needs both operands.
+    The mapping, field by field (a both-sides keyword fans out to each
+    :class:`InputSpec`; ``None``/empty collections normalise exactly as the
+    keyword API's own shim does, so the two routes build equal requests):
+
+    - ``old_input``/``new_input``, ``*_pdb_path``, ``*_headers``,
+      ``*_includes``, ``*_version`` -> that side's ``InputSpec``
+    - ``include_dependencies``, ``compile_context``, ``public_header_dirs``,
+      ``exclude_headers`` -> both sides' ``InputSpec``
+    - ``pack_policy_overrides``, ``project_policy_overrides`` -> a tuple of
+      pairs, or ``None`` when empty
+    - ``scope_to_public_surface`` -> ``CompareRequest.scope_public``
+    - the remaining fields carry over under their own names
+
+    ``frontend``, ``debug_roots``, ``enable_debuginfod``,
+    ``diagnostic_comparison``, ``severity_preset`` and the other keyword-only
+    defaults are not release fields: both routes leave them at the
+    ``CompareRequest`` default.
     """
     if request.old_input is None or request.new_input is None:
         raise ValueError(
             "a release parent request has no operands; apply a MemberDelta first"
         )
-    return {f.name: getattr(request, f.name) for f in dataclasses.fields(request)}
+    unmapped = {f.name for f in dataclasses.fields(request)} - _MAPPED_FIELDS
+    if unmapped:
+        raise TypeError(
+            f"no CompareRequest mapping for {sorted(unmapped)}; add it to "
+            "member_compare_request rather than dropping it"
+        )
+    # Both sides carry the release's shared settings; each side keeps its own
+    # operands, debug file, headers, includes and version. Written out per
+    # side (as the keyword shim does) so the two routes read the same way.
+    return CompareRequest(
+        old=InputSpec(
+            path=request.old_input,
+            headers=tuple(request.old_headers or ()),
+            includes=tuple(request.old_includes or ()),
+            version=request.old_version,
+            pdb=request.old_pdb_path,
+            debug_roots=(),
+            exclude_headers=tuple(request.exclude_headers or ()),
+            include_dependencies=request.include_dependencies,
+            compile=request.compile_context,
+            public_header_dirs=tuple(request.public_header_dirs or ()),
+        ),
+        new=InputSpec(
+            path=request.new_input,
+            headers=tuple(request.new_headers or ()),
+            includes=tuple(request.new_includes or ()),
+            version=request.new_version,
+            pdb=request.new_pdb_path,
+            debug_roots=(),
+            exclude_headers=tuple(request.exclude_headers or ()),
+            include_dependencies=request.include_dependencies,
+            compile=request.compile_context,
+            public_header_dirs=tuple(request.public_header_dirs or ()),
+        ),
+        lang=request.lang,
+        lang_explicit=request.lang_explicit,
+        policy=request.policy,
+        policy_file_path=request.policy_file_path,
+        suppress=request.suppress,
+        scope_public=request.scope_to_public_surface,
+        pattern_verdicts=request.pattern_verdicts,
+        contract_evaluation=request.contract_evaluation,
+        contract_mode=request.contract_mode,
+        pack_policy_overrides=(
+            tuple(request.pack_policy_overrides.items())
+            if request.pack_policy_overrides
+            else None
+        ),
+        pack_internal_namespaces=request.pack_internal_namespaces,
+        project_policy_overrides=(
+            tuple(request.project_policy_overrides.items())
+            if request.project_policy_overrides
+            else None
+        ),
+        depth=request.depth,
+        collapse_versioned_symbols=request.collapse_versioned_symbols,
+        env_matrix=request.env_matrix,
+        acknowledgments_path=request.acknowledgments_path,
+        acknowledgment_unacknowledged_additions=(
+            request.acknowledgment_unacknowledged_additions
+        ),
+    )
