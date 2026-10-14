@@ -70,6 +70,11 @@ def test_binary_only_key_is_pinned(pinned_inputs: Path) -> None:
     assert key == GOLDEN_BINARY_ONLY, f"binary-only key changed: {key}"
 
 
+@pytest.mark.skipif(
+    os.sep != "/",
+    reason="the key hashes header/include path strings as str(Path), so "
+    "'inc/api.h' hashes as 'inc\\\\api.h' on Windows; the golden is POSIX-only",
+)
 def test_full_input_key_is_pinned(pinned_inputs: Path) -> None:
     key = dump_cache_key._cache_key(
         Path("lib.so"),
