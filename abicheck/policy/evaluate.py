@@ -18,7 +18,7 @@ edit, exactly as the former ``DiffResult.breaking`` properties did.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 from ..model.change_catalog.registry import Verdict
 from ..model.contract_finding_relevance import is_evaluated
@@ -54,6 +54,34 @@ def effective_verdict(
         kind_sets=kind_sets if kind_sets is not None else effective_kind_sets(diff),
         policy_file=diff.policy_file,
     )
+
+
+class _ResolvedFinding(Protocol):
+    """The one field :func:`verdict_for` reads off a pre-resolved finding."""
+
+    @property
+    def verdict(self) -> Verdict: ...
+
+
+def verdict_for(
+    change: Change,
+    diff: DiffResult,
+    *,
+    finding: _ResolvedFinding | None = None,
+    kind_sets: KindSets | None = None,
+) -> Verdict:
+    """The verdict a renderer shows for *change*: *finding*'s if resolved, else
+    the policy resolver's (ADR-061 Phase 2 item 4b).
+
+    Every renderer that displays a per-change verdict routes through here, so
+    a change to that rule lands in exactly one place. *finding* is the
+    already-built ``ReportFinding`` for *change*, or ``None`` when the caller
+    has none and the resolver must answer. The caller does the lookup, so a
+    caller that requires the finding keeps its own strictness.
+    """
+    if finding is not None:
+        return finding.verdict
+    return effective_verdict(diff, change, kind_sets=kind_sets)
 
 
 def evaluated_changes(diff: DiffResult) -> list[Change]:

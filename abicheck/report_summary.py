@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING
 
 from .checker import _BREAKING_KINDS, DiffResult
 from .model.change_catalog.kinds import HasKind
-from .policy.evaluate import effective_kind_sets, effective_verdict, evaluated_changes
+from .policy.evaluate import effective_kind_sets, evaluated_changes, verdict_for
 from .report.change_inventory import ChangeInventorySplit, compute_change_inventory
 
 if TYPE_CHECKING:
@@ -283,9 +283,11 @@ def build_summary(
     )
 
     def verdict_of(c: Change) -> Verdict:
-        if findings is not None:
-            return finding_by_id[id(c)].verdict
-        return effective_verdict(result, c)
+        return verdict_for(
+            c,
+            result,
+            finding=finding_by_id[id(c)] if findings is not None else None,
+        )
 
     breaking = [c for c in evaluated if verdict_of(c) == Verdict.BREAKING]
     source_breaks = [c for c in evaluated if verdict_of(c) == Verdict.API_BREAK]
