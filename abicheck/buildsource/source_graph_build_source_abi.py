@@ -41,12 +41,12 @@ from ..model.graph_facts import (
     _type_node_id,
     register_fact,
 )
+from ..model.graph_identity import header_node_id
 from ..model.source_graph import (
     _FULL_WALK_SOURCE_EDGES_PRODUCER,
     DEPENDENCY_EDGE_KINDS,
     SourceGraphSummary,
     _debug_type_node_id,
-    _header_node_id,
     _macro_node_id,
     _symbol_node_id,
     _type_node_kind,
@@ -193,7 +193,7 @@ def _augment_with_source_abi(
         loc = entity.source_location
         if loc is None or not loc.path:
             return
-        hid = _header_node_id(loc.path)
+        hid = header_node_id(loc.path)
         # add_node keeps the first writer's facts, so a build-evidence header
         # node (HIGH confidence) is not downgraded by this source_abi one.
         graph.add_node(

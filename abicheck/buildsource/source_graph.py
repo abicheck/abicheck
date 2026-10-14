@@ -83,7 +83,6 @@ from ..model.source_graph import (
     SOURCE_GRAPH_VERSION as SOURCE_GRAPH_VERSION,
     SourceGraphSummary as SourceGraphSummary,
     _debug_type_node_id as _debug_type_node_id,
-    _header_node_id as _header_node_id,
     _macro_node_id as _macro_node_id,
     _object_node_id as _object_node_id,
     _option_node_id as _option_node_id,

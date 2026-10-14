@@ -45,9 +45,9 @@ from ..model.graph_facts import (
     GraphEdge,
     GraphNode,
 )
+from ..model.graph_identity import header_node_id
 from ..model.source_graph import (
     SourceGraphSummary,
-    _header_node_id,
     _object_node_id,
     _option_node_id,
     _source_node_id,
@@ -144,7 +144,7 @@ def build_source_graph(
             )
             return node_id
         if header:
-            node_id = _header_node_id(path)
+            node_id = header_node_id(path)
             graph.add_node(
                 GraphNode(
                     id=node_id,
