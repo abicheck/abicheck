@@ -156,15 +156,15 @@
       "abicheck/bundle_resolution_reachability.py": "7d60ccf82fe98a12c7c81ac02d2c920492c8c20c52f0b13398195c4590615c08",
       "abicheck/compare/export_owner_resolution.py": "e9108cbdf0459cb8171f63ca328138558cfd032bff9124e4b9bd0fd5bf8553c8",
       "abicheck/debug_resolver.py": "cdcc4f72bd8fb5304fe030b3e1365da488ad009397e014ba56931a3f311cf1f3",
-      "abicheck/post_processing_reachability.py": "50cb9d2a1c15e64d1fab2c283c47cf84494e3bddeb0f60c0bb70cdb3d6a49b26",
+      "abicheck/post_processing_reachability.py": "c98dcbf8e1be25e3cc426853eda26342fa4e729d55e9537dff68435a8c37283d",
       "abicheck/resolver.py": "91f558b58a035da779342a79e39e68b3f8dc452dbe53d27c7ff6e7ed5e093ed4",
       "abicheck/storage/native_identity_aliases.py": "061e634659b371f1688cfcd4845fdcbe6147b9c2cfddaa4285dd34c757ca80ef",
       "abicheck/type_reachability.py": "89d8db3c507a58004fd6b38ad4fee5ea6c9b40a9da97f34d8067ae440aa9e9bb",
       "abicheck/type_reachability_spelling.py": "4262f30db17f2a4c5ba2a4341b8eed9f1408e335825644845e10cb08838995cb",
       "abicheck/type_reachability_stdlib_spellings.py": "0cc608abede4a96a81172caf237e1bb813100a22642d6a828838e4cd60e992ae"
     },
-    "fingerprint": "ee013a6f8781e398bd9a4bc6f63cd82862c9fe3f1220faa9b9816fd7855e61b4",
+    "fingerprint": "7c8b9bd4a410ad154334cac365132d874b43a9f981266fc05b96bc2a5306d679",
     "generation": 1,
-    "reason": "initial recording at the current generation"
+    "reason": "comment-only: a docstring cross-reference to reporter._add_reconciled was renamed to json_sections.add_reconciled when the JSON section builders moved to report/; no resolver semantics changed"
   }
 }
