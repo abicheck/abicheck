@@ -429,7 +429,7 @@ _ARTIFACT_NAMES = frozenset(
 #: 2.33 — the same optional ``symbol_binding`` key (see 2.32) is now also
 #:       propagated onto ``suppression.suppressed_changes[]`` entries, not
 #:       just the top-level ``changes[]``/``root_causes[]`` array -- a
-#:       separate projector (``reporter._suppressed_change_entry``) that
+#:       separate projector (``change_json.suppressed_change_entry``) that
 #:       the 2.32 fix didn't reach, so a binding-scoped suppression's audit
 #:       trail couldn't show why it matched. Additive optional key (Codex
 #:       review, fresh evidence).

@@ -231,7 +231,7 @@ REPORT_BUG_CLASSES: tuple[BugClass, ...] = (
                     "`Change.suppression_rule`, the `label or reason` "
                     "display collapse, while the same run's JSON already "
                     "publishes the full ADR-067 record via "
-                    "`reporter.py`'s `_suppressed_change_entry` -- the same "
+                    "`reporter.py`'s `suppressed_change_entry` -- the same "
                     "between-formats split the audit's SARIF had. (2) "
                     "`cli_scan_baseline.py`'s baseline `findings[]` entries "
                     "carry the display label only, with no provenance field "

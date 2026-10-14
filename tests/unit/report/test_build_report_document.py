@@ -1309,8 +1309,8 @@ class TestRendererOrderIndependence:
         ``build_report_findings``, but its own ``build_report_document`` call
         (which builds the frozen JSON document *during the same
         construction*) received ``gate`` and nothing else -- ``_add_changes_
-        block``, ``_add_policy_overrides``, and ``_build_severity_json`` (via
-        ``_change_to_dict``/``active_reclassify_rules``/``categorize_changes``)
+        block``, ``add_policy_overrides``, and ``build_severity_json`` (via
+        ``change_to_dict``/``active_reclassify_rules``/``categorize_changes``)
         still resolved a fresh ``date.today()``. If construction straddles
         midnight on a dated ``reclassify`` rule's expiry, the document could
         report a finding as breaking and omit the still-active rule while

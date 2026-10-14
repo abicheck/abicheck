@@ -571,7 +571,7 @@ class DispositionLedger:
         ``Change`` carries no such attribute -- the value is computed on
         demand, like :meth:`resolve_verdict_classes` computes
         ``verdict_class``, so every record started out ``None`` here. Mirrors
-        :func:`abicheck.reporter._reclassified_by_for_change`'s own
+        :func:`abicheck.change_json.reclassified_by_for_change`'s own
         precedence (``rule.label or rule.reason or rule.to_verdict.value``)
         without importing that ``frontends``-adjacent helper (``policy/``
         may not depend on it); both read

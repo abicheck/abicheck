@@ -630,9 +630,11 @@ def stored_release_json_document(report: StoredReleaseReport) -> ReportDocument:
     bundle_facts``) -- a different shape from :func:`release_json_document`;
     see :func:`build_release_report`."""
     from ..reporter import (
+        to_json,
+    )
+    from .change_json import (
         prewarm_change_demangling,
         resolve_demangled_symbol as _resolve_demangled_symbol,
-        to_json,
     )
     from .release_stored_scope import json_scope_fields
     from .release_stored_sections import assurance_sections, public_surface_terms

@@ -76,7 +76,7 @@ def validate_evidence_depth(field_name: str, value: str) -> None:
     for any future caller (G30 P1.3) that sets it from a less-validated
     source, since a bad value would otherwise only be caught by the JSON
     Schema — which production code never runs against (only opt-in tests
-    do). Shared by ``reporter._add_check_identity`` (compare) and
+    do). Shared by ``json_sections.add_check_identity`` (compare) and
     ``ScanOutcome.to_dict`` (scan) so both validate identically.
     """
     if value not in EVIDENCE_DEPTH_VALUES:
@@ -123,7 +123,7 @@ def validate_check_id(value: str) -> None:
     Same rationale as ``validate_evidence_depth``: a future caller (G30 P1.3)
     setting a malformed ``check_id`` would otherwise only be caught by the
     JSON Schema, which production code never runs against. Fail fast here
-    instead, at the point ``reporter._add_check_identity`` sets the field.
+    instead, at the point ``json_sections.add_check_identity`` sets the field.
     """
     if not CHECK_ID_PATTERN.match(value):
         raise ValueError(

@@ -385,7 +385,7 @@ class TestDemanglePrewarmScoping:
 class TestSuppressedRemovalCarriesDemangledSymbol:
     """Codex review, fresh evidence: the report schema declares
     ``suppressed_changes[].demangled_symbol`` (schema 3.14), but
-    ``reporter._suppressed_change_entry`` -- the one function that
+    ``change_json.suppressed_change_entry`` -- the one function that
     projects a suppressed ``Change`` into that shape -- never read the
     field, so a suppressed elf_only removal still serialized with only
     its raw mangled symbol, contradicting its own schema.

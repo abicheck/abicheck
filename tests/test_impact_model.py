@@ -377,7 +377,7 @@ class TestAssessChange:
 
     def test_duck_typed_object_without_change_fields(self) -> None:
         """assess_change must not blow up on an object that doesn't carry
-        every Change field (mirrors _change_to_dict's own `c: object` duck
+        every Change field (mirrors change_to_dict's own `c: object` duck
         typing in reporter.py)."""
 
         class Bare:
@@ -524,7 +524,7 @@ class TestAssessChangeWithCachedImpactAssessment:
 class TestReporterIntegration:
     """Codex review: two production call sites this slice initially missed --
     A grouped document builds its finding dicts independently of
-    _change_to_dict, and _add_suppression()'s suppressed_changes list was
+    change_to_dict, and add_suppression()'s suppressed_changes list was
     never routed through assess_change(suppressed=True) at all, so the
     advertised decision.state == "suppressed" was unreachable in practice."""
 

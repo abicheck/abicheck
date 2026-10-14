@@ -335,7 +335,7 @@ def _display_name(change: Change) -> str:
 def _resolved_finding_dict(change: Change) -> dict[str, object]:
     """JSON-safe projection of one ``FindingEvolution.RESOLVED`` finding.
 
-    Deliberately not the full ``reporter._change_to_dict`` shape (severity,
+    Deliberately not the full ``change_json.change_to_dict`` shape (severity,
     gate contribution, ...) -- a resolved finding is a historical fact about
     the *previous* pair's own comparison, not one this pair's own policy
     classified -- mirrors ``report.finding_evolution.ResolvedFindingEntry``

@@ -506,7 +506,9 @@ def _finalize_compare_result(
     # batched call a host with no in-process `cxxfilt` forks a `c++filt`
     # per distinct symbol in the loops below (Codex review, PR #1284).
     if result.out_of_surface_changes or result.reconciled_changes:
-        from ...reporter import prewarm_change_demangling
+        from ...report.change_json import (
+            prewarm_change_demangling,
+        )
 
         prewarm_change_demangling(result)
     if result.out_of_surface_changes:

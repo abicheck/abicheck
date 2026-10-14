@@ -22,12 +22,10 @@ This is the ``report_mode="full"`` build formerly inlined in
 function in ``reporter.py``) purely to stay clear of that file's ADR-061
 ``no_growth`` architecture-debt baseline (``architecture/debt.yaml``); the
 logic is otherwise unchanged from what ``to_json`` used to run inline. This
-module imports ``reporter.py``'s private ``_add_*``/``_build_*`` helpers
-statically (function-local, to avoid a module-level import-time ordering
-issue, but a real, named import all the same); ``reporter.to_json`` reaches
-back into *this* module through ``importlib`` instead of a static
-``from .report.build import ...``, so the pair never forms a real import
-cycle -- only one direction is a static edge.
+module builds its sections from the ``report`` section owners
+(``report.json_sections`` / ``report.change_json``); it does not import the
+legacy ``reporter.py`` root module, so ``reporter.to_json`` calls it directly
+without an import cycle.
 
 Scope note (gap C closure package 3): every format now projects **one**
 document, not one document per format. :func:`build_report_envelope` is the
@@ -109,39 +107,34 @@ def build_report_document(
     ``reclassify:`` rule's expiry is crossed between construction and render
     (Codex review, fresh evidence).
     """
-    # Static import of `reporter.py`'s own privately-defined helpers --
-    # this is the one direction of the report.build <-> reporter dependency
-    # that stays a real import; `reporter.to_json` reaches back into this
-    # module through `importlib` instead, so the pair never forms an
-    # actual import cycle (see `reporter.to_json`'s own comment).
     from ..policy.gate_decision import gate_decision_for_result
-    from ..reporter import (
-        _SCOPED_GATE_HELPERS,
-        _add_abi_surface_breakdown,
-        _add_changes_block,
-        _add_confidence_evidence,
-        _add_detectors,
-        _add_evidence_fields,
-        _add_policy_overrides,
-        _add_reconciled,
-        _add_show_only_filter,
-        _add_suppression,
-        _add_surface_scope,
-        _add_trailing_fields,
-        _build_json_base,
-        _build_severity_json,
-        _displayed_with_scoped_only,
-        prewarm_change_demangling,
-    )
     from ..reporter_contract_blocks import (
         add_contract_context as _add_contract_context,
         build_report_document_with_side_facts,
     )
+    from .change_json import prewarm_change_demangling
     from .disposition_audit import (
         DispositionAudit,
         add_disposition_audit as _add_disposition_audit,
     )
     from .finding_evolution import add_finding_evolution as _add_finding_evolution
+    from .json_sections import (
+        SCOPED_GATE_HELPERS,
+        add_abi_surface_breakdown,
+        add_changes_block,
+        add_confidence_evidence,
+        add_detectors,
+        add_evidence_fields,
+        add_policy_overrides,
+        add_reconciled,
+        add_show_only_filter,
+        add_suppression,
+        add_surface_scope,
+        add_trailing_fields,
+        build_json_base,
+        build_severity_json,
+        displayed_with_scoped_only,
+    )
     from .pattern_preprocessor_scan import (
         add_pattern_preprocessor_scan as _add_pattern_preprocessor_scan,
     )
@@ -161,22 +154,22 @@ def build_report_document(
             today=None,
         )
 
-    d = _build_json_base(result)
-    _add_abi_surface_breakdown(d, result)
-    _add_evidence_fields(d, result)
+    d = build_json_base(result)
+    add_abi_surface_breakdown(d, result)
+    add_evidence_fields(d, result)
     effective_policy = result.policy or "strict_abi"
     d["policy"] = effective_policy
     eff_sets = effective_kind_sets(result)
 
     if show_only:
-        _add_show_only_filter(d, result, changes, show_only)
+        add_show_only_filter(d, result, changes, show_only)
 
     # Severity-categorized summary when severity config is provided
     if gate is None and severity_config is not None:
         gate = gate_decision_for_result(result, severity_config, today=today)
     if gate is not None:
         assert severity_config is not None  # gate is None otherwise
-        d["severity"] = _build_severity_json(
+        d["severity"] = build_severity_json(
             changes,
             severity_config,
             gate=gate,
@@ -187,12 +180,12 @@ def build_report_document(
         )
 
     # Plan slice 7o (Codex review, PR #1284): one batched demangle before the
-    # per-finding dicts are built -- `_add_changes_block` resolves a
+    # per-finding dicts are built -- `add_changes_block` resolves a
     # `demangled_symbol` per finding, and this builder is the chokepoint every
     # projection reaches, so prewarming anywhere else leaves a path forking a
     # `c++filt` per distinct symbol.
     prewarm_change_demangling(result)
-    _add_changes_block(
+    add_changes_block(
         d,
         result,
         changes,
@@ -202,7 +195,7 @@ def build_report_document(
         severity_config=severity_config,
         today=today,
     )
-    _add_suppression(d, result)
+    add_suppression(d, result)
     _add_disposition_audit(d, result, severity_config, today=today)
     _add_surface_changes(d, result, changes)
     all_findings = findings or build_report_findings(
@@ -239,24 +232,24 @@ def build_report_document(
     ).to_dict()
     _add_finding_evolution(d, result)
     _add_pattern_preprocessor_scan(d, result)
-    _add_surface_scope(d, result)
-    _add_reconciled(d, result)
+    add_surface_scope(d, result)
+    add_reconciled(d, result)
     _add_contract_context(
         d,
         result,
-        _displayed_with_scoped_only(result, changes, show_only),
+        displayed_with_scoped_only(result, changes, show_only),
         require_complete_analysis=require_complete_analysis,
         severity_config=severity_config,
         today=today,
     )
-    _add_detectors(d, result)
-    _add_confidence_evidence(d, result)
-    _add_policy_overrides(d, result, today=today)
-    _add_trailing_fields(d, result, show_impact, show_only)
+    add_detectors(d, result)
+    add_confidence_evidence(d, result)
+    add_policy_overrides(d, result, today=today)
+    add_trailing_fields(d, result, show_impact, show_only)
     return build_report_document_with_side_facts(
         d,
         result,
-        helpers=_SCOPED_GATE_HELPERS,
+        helpers=SCOPED_GATE_HELPERS,
         severity_config=severity_config,
         gate=gate,
         show_only=show_only,
@@ -409,11 +402,7 @@ def _snapshot_diff_result(result: DiffResult) -> DiffResult:
         elif isinstance(value, tuple) and any(isinstance(v, Change) for v in value):
             setattr(snapshot, name, tuple(_snapshot_element(v) for v in value))
         elif isinstance(value, dict):
-            setattr(
-                snapshot,
-                name,
-                {k: _snapshot_element(v) for k, v in value.items()},
-            )
+            setattr(snapshot, name, {k: _snapshot_element(v) for k, v in value.items()})
         elif value is not None and not isinstance(
             value, (str, int, float, bool, bytes, Enum)
         ):

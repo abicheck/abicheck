@@ -47,6 +47,7 @@ from abicheck.policy.classification import (
     policy_for,
 )
 from abicheck.policy.severity import missing_contract_exit_code
+from abicheck.report.change_json import resolve_demangled_symbol
 from abicheck.report.disposition_audit import disposition_audit_dict_reusing_document
 from abicheck.report.envelope import ReportEnvelope, resolved_document, resolved_gate
 from abicheck.report.render_json import render_mapping_as_json
@@ -60,7 +61,6 @@ from abicheck.report.view import (
     show_only_matches_severity_label,
 )
 from abicheck.report_model import VERDICT_TO_SARIF_LEVEL as _VERDICT_TO_SARIF_LEVEL
-from abicheck.reporter import resolve_demangled_symbol
 from abicheck.reporter_markdown import (
     root_cause_evidence_lookup_for_changes,
     root_cause_lookup_for_changes,
@@ -539,7 +539,7 @@ def _severity_gate_properties(
     """Build a compact, auditable ``severityGate`` block for SARIF ``properties``.
 
     Mirrors the categories/exit-code contract of JSON's ``severity`` block
-    (:func:`abicheck.reporter._build_severity_json`) so a SARIF consumer can
+    (:func:`abicheck.report.json_sections.build_severity_json`) so a SARIF consumer can
     tell *why* the invocation's exit code is what it is without
     cross-referencing the JSON report separately. *gate* is the caller's
     already-computed
@@ -770,7 +770,7 @@ def to_sarif(
     # host with no in-process `cxxfilt` forks one `c++filt` per distinct
     # symbol while building `demangledSymbol` properties (Codex review, PR
     # #1284).
-    from .reporter import prewarm_change_demangling
+    from .report.change_json import prewarm_change_demangling
 
     prewarm_change_demangling(result)
 

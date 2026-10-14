@@ -751,7 +751,7 @@ class TestExplicitScopeReachesTheGateBeforeItComputes:
     ) -> None:
         """A missing required symbol with no backing library-diff `Change`
         used to reach the report only as a bespoke synthesized entry that
-        bypassed `_change_to_dict` entirely and got neither decision nor
+        bypassed `change_to_dict` entirely and got neither decision nor
         contribution — on what was, under the pre-D-S1 design, frequently
         the response's only blocking finding (Codex review). Runs under
         both the derived-legacy (no severity setting) and severity
@@ -762,7 +762,7 @@ class TestExplicitScopeReachesTheGateBeforeItComputes:
         `CONSUMER_REQUIRED_SYMBOL_REMOVED` overlay `--used-by` has carried
         since ADR-044 P2, so this label is no longer the bespoke
         `required_symbol_missing` synthetic kind at all -- it is a real
-        `Change` that routes through the ordinary `_change_to_dict` path,
+        `Change` that routes through the ordinary `change_to_dict` path,
         which is a strictly more complete representation (impact_assessment,
         evidence description, reachability) than the bespoke entry this test
         used to assert completeness *despite*.
@@ -823,12 +823,12 @@ class TestExplicitScopeReachesTheGateBeforeItComputes:
             # orthogonal contract-coverage floor).
             assert entry["gate_contribution"] == 4
             # Regression (Codex review, PR #753, fresh evidence): the
-            # pre-C-S2 bespoke synthetic entry bypassed _change_to_dict
+            # pre-C-S2 bespoke synthetic entry bypassed change_to_dict
             # entirely, so it never picked up canonical_finding_id
             # (schema 2.35) the way every other changes[] entry does --
             # exactly the entry most likely to be the response's only
             # blocking finding. The overlay Change never had that gap
-            # (routes through _change_to_dict like any other finding), but
+            # (routes through change_to_dict like any other finding), but
             # the assertion stays as the executable statement of the
             # property this test exists to pin.
             assert entry["canonical_finding_id"]
@@ -1156,7 +1156,7 @@ class TestAnExcludedFindingCannotLaunderItselfBack:
 
 class TestEveryReportModeStatesTheSameGateContribution:
     """`--report-mode leaf` builds its own entry dicts rather than routing
-    through `_change_to_dict`, so it can silently miss a field the other
+    through `change_to_dict`, so it can silently miss a field the other
     modes carry -- which is exactly what happened to `gate_contribution`."""
 
     @staticmethod

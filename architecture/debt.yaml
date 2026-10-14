@@ -970,17 +970,6 @@
       "review_by": "2026-11-30"
     },
     {
-      "path": "abicheck/reporter.py",
-      "baseline_lines": 1657,
-      "target": "report",
-      "rule": "no_growth",
-      "disposition": "migrate",
-      "category": "legacy_report_monolith",
-      "owner": "abicheck maintainers",
-      "rationale": "Lowered 2094 -> 1657 (ADR-067 report view: JUnit/HTML/SARIF/JSON/Markdown now read the --show-only filter, finding id and root-cause key from abicheck/report/view.py instead of each other). Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Landed at the unchanged 2000-line baseline (the 2000-line hard cap leaves no headroom): one emit block for `Change.surface_facts` (report schema 4.4) -- the three split surface facts, emitted whole including every \"unknown\", since an omitted key is exactly what a reader mistakes for a negative. The values are computed in `model/surface_facts.py` and stamped at diff time; this is the serialization line and its pointer. Baseline raised 2000 -> 2086 by the one-time `ruff format` pass that made `fmt-check` a real CI gate (see docs/contribute/known-gaps.md). No responsibility was added or moved: the formatter only rewrapped call sites and expanded magic trailing commas, and the file's parsed statement count is byte-for-byte unchanged (verified by comparing `ast.dump` of this file before and after). This is the one bump that \"move responsibility instead of raising the baseline\" cannot be answered by moving anything; physical line counts are formatter-stable from here, because `fmt-check` now gates them. Raised 2086 -> 2094 (PR #1283, Codex review): two call sites emitting that same per-finding `library` -- one in `_change_to_dict`, one in `_leaf_entry`, which builds its own dict rather than routing through it. Both are guarded so the key is absent for every single-library report, which keeps those byte-identical. There is nothing to move: each is the one place its own JSON shape is built.",
-      "review_by": "2026-11-30"
-    },
-    {
       "path": "abicheck/reporter_markdown.py",
       "baseline_lines": 1381,
       "target": "report",

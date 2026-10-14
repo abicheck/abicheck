@@ -109,7 +109,7 @@ def reclassified_by_label(
     """The ``reclassify:`` rule label that decided *change*, or ``None``.
 
     The single owner of the JSON report's per-change ``reclassified_by``
-    value (``reporter._change_to_dict`` delegates here). Falls back to
+    value (``change_json.change_to_dict`` delegates here). Falls back to
     ``rule.to_verdict.value`` rather than ``rule.to``, since a directly-
     constructed ``ReclassifyRule`` could leave the latter empty.
     """

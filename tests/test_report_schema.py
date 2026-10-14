@@ -575,7 +575,7 @@ class TestReportValidatesAgainstSchema:
         # Regression (Codex review, fresh evidence): the identical
         # out_of_surface_changes Change objects are also serialized a
         # second, independent time as scope.filtered_internal_changes
-        # (reporter._scope_dict) -- that ledger's own entries never read
+        # (change_json.scope_dict) -- that ledger's own entries never read
         # the already-stamped fields, so a consumer of it (rather than
         # surface_scope.out_of_surface_changes) missed the decision.
         scope_entries = payload["scope"]["filtered_internal_changes"]
@@ -643,7 +643,7 @@ class TestReportValidatesAgainstSchema:
         # --reconcile-build-context clears from `kept` (a context-free
         # header-parse phantom the build's active defines prove never
         # happened) stays visible in its own audit ledger
-        # (reporter._add_reconciled, build_context_reconciled.changes) --
+        # (json_sections.add_reconciled, build_context_reconciled.changes) --
         # but reconciliation runs *before* contract classification
         # (checker.compare's own pipeline order), so the cleared finding
         # never reached `kept` and its ledger entry silently lost the
@@ -673,7 +673,7 @@ class TestReportValidatesAgainstSchema:
         # Same fix, exercised through a real --reconcile-build-context
         # false-positive clear (test_diff_reconcile.py's own canonical
         # fixture) rather than a hand-built Change, and through the real
-        # JSON renderer (reporter._add_reconciled) end to end.
+        # JSON renderer (json_sections.add_reconciled) end to end.
         from tests.test_diff_reconcile import _fp_pair
 
         old, new = _fp_pair()
@@ -876,7 +876,7 @@ class TestCheckTargetSyntheticReportsValidateAgainstSchema:
 class TestEvidenceDepthValidator:
     """Direct unit coverage for checker_types.validate_evidence_depth/
     EVIDENCE_DEPTH_VALUES -- the shared depth-spelling guard both
-    reporter._add_check_identity (compare) and ScanOutcome.to_dict (scan)
+    json_sections.add_check_identity (compare) and ScanOutcome.to_dict (scan)
     delegate to."""
 
     def test_accepts_every_public_depth(self):
@@ -1053,8 +1053,8 @@ class TestReportIdentityEnvelope:
 
     def test_leaf_mode_carries_identity_fields_too(self):
         # Regression guard: --report-mode leaf builds its own top-level dict
-        # independently of _build_json_base/to_stat_json (a separate code
-        # path, _to_json_leaf), so it needs its own _add_check_identity call
+        # independently of build_json_base/to_stat_json (a separate code
+        # path, _to_json_leaf), so it needs its own add_check_identity call
         # -- code review on PR #611 caught this gap between the PR's own
         # description ("full/--stat/leaf JSON via a shared helper") and what
         # _to_json_leaf actually did (nothing, until this fix).

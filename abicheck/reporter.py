@@ -17,37 +17,40 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, cast
 
-from .policy.evaluate import effective_kind_sets, effective_verdict
+from .policy.evaluate import effective_kind_sets
+from .report.build import build_report_document
+from .report.change_json import (
+    change_to_dict,
+    prewarm_change_demangling,
+    reclassified_by_for_change,
+    scope_dict,
+)
+from .report.json_sections import (
+    SCOPED_GATE_HELPERS,
+    add_abi_surface_breakdown,
+    add_check_identity,
+    add_confidence_evidence,
+    add_detectors,
+    add_evidence_fields,
+    add_policy_overrides,
+    add_reconciled,
+    add_show_only_filter,
+    add_suppression,
+    add_surface_scope,
+    build_json_base,
+    build_severity_json,
+    displayed_with_scoped_only,
+    scoped_only_extra_causes,
+)
 
 if TYPE_CHECKING:
-    from datetime import date
-
-    from .policy.severity import GateDecision, KindSets, SeverityConfig
+    from .policy.severity import SeverityConfig
 from . import reporter_contract_blocks as _reporter_contract_blocks
-from .checker import Change, DiffResult, Verdict
-from .impact import assess_change
-from .model.change import validate_check_id, validate_evidence_depth
-from .model.change_catalog.kinds import ChangeKind, HasKind
-from .model.evidence_status import EvidenceStatus
-from .policy.classification import (
-    evidence_status_for_result,
-    impact_for,
-    policy_kind_sets as _policy_kind_sets,
-)
-from .policy.disposition_close import ledger_for
-from .policy.disposition_ledger import RuleProvenance
+from .checker import Change, DiffResult
 from .policy.gate_decision import gate_decision_for_result
-from .report.change_annotations import (
-    change_annotation_fields as _change_annotation_fields,
-)
 from .report.change_inventory import render_change_inventory_json
-from .report.change_operation import operation_for_change
-from .report.contract_fields import (
-    add_contract_evaluation_fields as _add_contract_evaluation_fields,
-)
 from .report.dispatch_markdown import (
     _to_markdown_root_cause as _to_markdown_root_cause,
     to_markdown as to_markdown,
@@ -56,18 +59,14 @@ from .report.dispatch_markdown import (
 from .report.disposition_audit import add_disposition_audit as _add_disposition_audit
 from .report.finding_evolution import add_finding_evolution as _add_finding_evolution
 from .report.render_json import render_json
-from .report.scoped_gate import ScopedGateChangeHelpers
 from .report.surface_changes import add_surface_changes as _add_surface_changes
 from .report.view import (
     display_changes,
     finding_id,
     group_changes_by_root_cause,
-    resolve_scoped_gate_findings,
     root_cause_id_for_key,
-    root_cause_key_and_display,
 )
-from .report_model import VERDICT_TO_SEVERITY_LABEL as _VERDICT_TO_SEVERITY_LABEL
-from .report_summary import build_summary, surface_breakdown
+from .report_summary import build_summary
 from .reporter_contract_blocks import add_contract_context as _add_contract_context
 
 # Markdown rendering is a leaf; names stay importable here for compatibility.
@@ -93,29 +92,9 @@ from .reporter_markdown import (
     root_cause_lookup_for_changes as root_cause_lookup_for_changes,
     to_stat as to_stat,
 )
-from .root_cause_evidence import (
-    entry_root_cause_evidence,
-    fold_evidence_summaries,
-    root_cause_group_evidence,
-    scoped_only_changes_filtered,
-    scoped_only_evidence_lookup,
-)
+from .root_cause_evidence import root_cause_group_evidence, scoped_only_evidence_lookup
 from .schemas import REPORT_SCHEMA_VERSION
 from .semver import recommend_release_for_report
-
-
-def _kind_to_severity(kind: ChangeKind, policy: str) -> str:
-    """Map a ChangeKind to its severity label under the given policy (FIX-G)."""
-    breaking, api_break, compatible, risk = _policy_kind_sets(policy)
-    if kind in breaking:
-        return "breaking"
-    if kind in api_break:
-        return "api_break"
-    if kind in risk:
-        return "risk"
-    if kind in compatible:
-        return "compatible"
-    return "unknown"
 
 
 def to_stat_json(
@@ -130,7 +109,7 @@ def to_stat_json(
     """JSON output for --stat mode: summary only, no changes array.
 
     *severity_config*, when given, adds a ``severity`` block (same shape as
-    the full JSON report's — see :func:`_build_severity_json`) so ``--stat
+    the full JSON report's — see :func:`build_severity_json`) so ``--stat
     -o json=...`` reflects the actual severity-aware gate instead of only
     the compatibility verdict. Without it, ``--stat`` output has historically
     bypassed severity handling entirely (it short-circuits in
@@ -165,11 +144,11 @@ def to_stat_json(
     # raw-versus-effective counts.
     _add_disposition_audit(d, result, severity_config)
     _add_finding_evolution(d, result)
-    _add_check_identity(d, result)
+    add_check_identity(d, result)
     gate = gate_decision_for_result(result, severity_config)
     if gate is not None:
         assert severity_config is not None  # gate is None otherwise
-        d["severity"] = _build_severity_json(
+        d["severity"] = build_severity_json(
             result.changes,
             severity_config,
             gate=gate,
@@ -217,180 +196,12 @@ def to_stat_json(
         d,
         result,
         indent=indent,
-        helpers=_SCOPED_GATE_HELPERS,
+        helpers=SCOPED_GATE_HELPERS,
         severity_config=severity_config,
         gate=gate,
         show_only=show_only,
         contract_evaluation=contract_evaluation,
     )
-
-
-def _add_surface_scope(d: dict[str, object], result: DiffResult) -> None:
-    """Attach the ADR-024 §D4/D5 public-surface scope ledger to a JSON dict.
-
-    When header scoping is active, findings that fall outside the public ABI
-    surface are demoted to this audit ledger rather than dropped — disclosed
-    here (not just on stderr) so the "why was this excluded" trail is
-    machine-readable. Shared by the full and leaf JSON paths so both formats
-    carry the ledger consistently.
-    """
-    if not result.scope_to_public_surface:
-        return
-
-    def _out_of_surface_entry(c: Change) -> dict[str, object]:
-        entry: dict[str, object] = {
-            "kind": c.kind.value,
-            "symbol": c.symbol,
-            "description": c.description,
-            "source_location": c.source_location,
-            "reason": getattr(c, "surface_exclusion_reason", None),
-        }
-        # ADR-049 Phase 3 (shadow contract evaluator, opt-in
-        # `compare(..., contract_evaluation=True)`) -- a demoted finding's
-        # shadow decision (typically PROVEN_OUT_OF_CONTRACT, resolved via
-        # its own surface_exclusion_reason above) is exposed here too, not
-        # just on an ordinary `changes` entry (Codex review, fresh evidence).
-        _add_contract_evaluation_fields(entry, c)
-        return entry
-
-    d["surface_scope"] = {
-        "enabled": True,
-        # ADR-024 §D5.3 — structured confidence in the resolution itself.
-        "confidence": result.surface_scope_confidence,
-        "notes": list(result.surface_scope_notes),
-        "out_of_surface_count": result.out_of_surface_count,
-        "out_of_surface_changes": [
-            _out_of_surface_entry(c) for c in result.out_of_surface_changes
-        ],
-    }
-
-
-def _add_reconciled(d: dict[str, object], result: DiffResult) -> None:
-    """Attach the ADR-039 build-context reconciliation ledger to a JSON dict.
-
-    Findings cleared as context-free header-parse artifacts are disclosed here —
-    not just dropped from the verdict — so the "why was this removed" trail is
-    machine-readable. Independent of surface scoping (reconciliation can run
-    without ``--scope-public-headers``); emitted only when something was cleared.
-    """
-    if not result.reconciled_changes:
-        return
-    entries: list[dict[str, object]] = []
-    for c in result.reconciled_changes:
-        entry: dict[str, object] = {
-            "kind": c.kind.value,
-            "symbol": c.symbol,
-            "description": c.description,
-            "source_location": c.source_location,
-            "reason": getattr(c, "surface_exclusion_reason", None),
-        }
-        # ADR-049 Phase 3 (Codex review, fresh evidence): reconciliation runs
-        # before checker._apply_contract_evaluation_shadow (a reconciled
-        # finding never reaches `kept`), so without this call the ledger
-        # entry silently lost the contract decision the finding would
-        # otherwise carry -- a no-op when contract_evaluation was never
-        # requested, mirroring this helper's other callers.
-        _add_contract_evaluation_fields(entry, c)
-        entries.append(entry)
-    d["build_context_reconciled"] = {
-        "count": result.reconciled_count,
-        "changes": entries,
-    }
-
-
-def _displayed_with_scoped_only(
-    result: Any, changes: list[Change], show_only: str | None
-) -> list[Change]:
-    """The findings this report will actually list, scoped-only ones included.
-
-    `--used-by`/`--required-symbol` scoping synthesizes fresh `Change`
-    objects onto `result.scoped_only_changes` (e.g. `PE_ORDINAL_RETARGETED`),
-    and `_fold_scoped_compat_into_text` appends them to the rendered report's
-    own `changes` array afterwards. Any block projected onto "what is
-    displayed" therefore has to count them too, or it silently describes a
-    smaller report than the reader sees -- which is how `use_case_impact`'s
-    `total_changes` came out below the adjacent findings list, attributing
-    and counting neither (Codex review).
-
-    Filtered through the shared `scoped_only_changes_filtered` rather than a
-    local `apply_show_only`, so the two lists can never be filtered
-    differently.
-    """
-    return changes + scoped_only_changes_filtered(result, show_only)
-
-
-def _add_entries_to_root_causes(
-    d: dict[str, object],
-    keyed_entries: list[tuple[str, str, dict[str, object]]],
-) -> None:
-    """Fold additional ``(key, root_display, entry)`` triples into an
-    already-built ``--report-mode root-cause`` payload, for synthetic
-    scoped-gate entries computed after :func:`_to_json_root_cause` already
-    grouped ``result.changes`` (else they'd sit in ``changes[]`` but never in
-    ``root_causes``). No-op if *d* has no ``root_causes`` list.
-
-    Each touched group's ``strongest_evidence_level``/``evidence_levels``
-    (G29 Phase 6, Codex review) is recomputed from *all* its findings --
-    pre-existing and newly folded-in alike -- every time a group is touched,
-    via :func:`~abicheck.root_cause_evidence.fold_evidence_summaries` over each finding's own
-    ``impact_assessment.root_cause_evidence``. Without this, a scoped-only
-    entry folded into an existing (or brand-new) group here never
-    contributed its own evidence to the group summary at all, unlike a
-    group :func:`_to_json_root_cause` builds entirely from ``changes``.
-    """
-    root_causes = d.get("root_causes")
-    if not isinstance(root_causes, list):
-        return
-    by_id = {
-        group["root_cause_id"]: group
-        for group in root_causes
-        if isinstance(group, dict)
-    }
-    touched: set[str] = set()
-    for key, root_display, entry in keyed_entries:
-        root_cause_id = root_cause_id_for_key(key)
-        group = by_id.get(root_cause_id)
-        if group is None:
-            group = {
-                "root_cause_id": root_cause_id,
-                "root": root_display,
-                "finding_count": 0,
-                "findings": [],
-            }
-            root_causes.append(group)
-            by_id[root_cause_id] = group
-        group["findings"].append(entry)
-        group["finding_count"] = len(group["findings"])
-        touched.add(root_cause_id)
-    for root_cause_id in touched:
-        group = by_id[root_cause_id]
-        evidence = fold_evidence_summaries(
-            entry_root_cause_evidence(f)
-            for f in group["findings"]
-            if isinstance(f, dict)
-        )
-        if evidence is not None:
-            group["strongest_evidence_level"] = evidence["strongest_evidence_level"]
-            group["evidence_levels"] = evidence["evidence_levels"]
-    d["root_cause_count"] = len(root_causes)
-
-
-def _scoped_only_extra_causes(
-    result: DiffResult, show_only: str | None
-) -> frozenset[str]:
-    """``caused_by_type`` values from ``result.scoped_only_changes`` (G29
-    Phase 3 follow-up, review finding).
-
-    ``cli_compare_fold.py``'s scoped-gate fold-in appends scoped-only
-    changes *after* a JSON serializer already built its root-cause lookup --
-    folding their ``caused_by_type`` in here too keeps a `changes` entry
-    that only correlates via one of those later-appended findings from
-    being locked into its own singleton group, matching
-    ``sarif.to_sarif``/``junit_report._build_testsuite``'s identical,
-    single-pass fold.
-    """
-    scoped_only = scoped_only_changes_filtered(result, show_only)
-    return frozenset(c.caused_by_type for c in scoped_only if c.caused_by_type)
 
 
 def _to_json_root_cause(
@@ -442,9 +253,9 @@ def _to_json_root_cause(
     # of those later-appended findings would already be locked into its own
     # singleton group by the time the fold-in tries to join it, contradicting
     # SARIF's identical grouping (computed in one pass, so it doesn't have
-    # this two-phase gap). See _scoped_only_extra_causes for the shared
+    # this two-phase gap). See scoped_only_extra_causes for the shared
     # computation every other JSON mode now uses too.
-    extra_causes = _scoped_only_extra_causes(result, show_only)
+    extra_causes = scoped_only_extra_causes(result, show_only)
 
     # Build each finding's dict exactly once; group the same dict objects by
     # key so `changes` (flat, backward-compatible -- every existing report
@@ -453,7 +264,7 @@ def _to_json_root_cause(
     _rc_lookup = root_cause_lookup_for_changes(changes, extra_causes=extra_causes)
     _rc_evidence = scoped_only_evidence_lookup(result, changes, show_only)
     entry_by_id = {
-        id(c): _change_to_dict(
+        id(c): change_to_dict(
             c,
             policy=effective_policy,
             kind_sets=eff_sets,
@@ -485,16 +296,16 @@ def _to_json_root_cause(
             entry["evidence_levels"] = group_evidence["evidence_levels"]
         root_causes.append(entry)
 
-    d = _build_json_base(result)
-    _add_abi_surface_breakdown(d, result)
-    _add_evidence_fields(d, result)
+    d = build_json_base(result)
+    add_abi_surface_breakdown(d, result)
+    add_evidence_fields(d, result)
     d["policy"] = effective_policy
     if show_only:
-        _add_show_only_filter(d, result, changes, show_only)
+        add_show_only_filter(d, result, changes, show_only)
     gate = gate_decision_for_result(result, severity_config)
     if gate is not None:
         assert severity_config is not None  # gate is None otherwise
-        d["severity"] = _build_severity_json(
+        d["severity"] = build_severity_json(
             changes,
             severity_config,
             gate=gate,
@@ -505,7 +316,7 @@ def _to_json_root_cause(
     d["changes"] = entries
     d["root_causes"] = root_causes
     d["root_cause_count"] = len(root_causes)
-    # Codex review: full mode's _add_changes_block (and leaf mode's own copy)
+    # Codex review: full mode's add_changes_block (and leaf mode's own copy)
     # both surface these audit-trail fields whenever they're non-empty --
     # root-cause mode built its own JSON path and skipped them, silently
     # dropping the redundant/modulated-finding trail for a filtered report.
@@ -513,308 +324,39 @@ def _to_json_root_cause(
         d["redundant_count"] = result.redundant_count
     if result.pattern_modulations:
         d["pattern_modulations"] = result.pattern_modulations
-    _add_suppression(d, result)
+    add_suppression(d, result)
     _add_disposition_audit(d, result, severity_config)
     _add_surface_changes(d, result, changes)
     _add_finding_evolution(d, result)
-    _add_surface_scope(d, result)
-    _add_reconciled(d, result)
+    add_surface_scope(d, result)
+    add_reconciled(d, result)
     _add_contract_context(
         d,
         result,
-        _displayed_with_scoped_only(result, changes, show_only),
+        displayed_with_scoped_only(result, changes, show_only),
         require_complete_analysis=require_complete_analysis,
         severity_config=severity_config,
     )
-    _add_detectors(d, result)
-    _add_confidence_evidence(d, result)
-    _add_policy_overrides(d, result)
+    add_detectors(d, result)
+    add_confidence_evidence(d, result)
+    add_policy_overrides(d, result)
     # Codex review: full/leaf JSON both emit the machine-readable
     # `scope` block (resolved/fell_back/manual_review_required) when
     # --scope-public-headers was requested -- root-cause mode dropped it,
     # hiding the fallback/manual-review warning for scoped root-cause runs.
-    scope = _scope_dict(result)
+    scope = scope_dict(result)
     if scope is not None:
         d["scope"] = scope
     return _reporter_contract_blocks.render_json_with_side_facts(
         d,
         result,
         indent=2,
-        helpers=_SCOPED_GATE_HELPERS,
+        helpers=SCOPED_GATE_HELPERS,
         severity_config=severity_config,
         gate=gate,
         show_only=show_only,
         contract_evaluation=contract_evaluation,
     )
-
-
-def _metadata_dict(meta: object | None) -> dict[str, object] | None:
-    if meta is None:
-        return None
-    return {
-        "path": getattr(meta, "path", ""),
-        "sha256": getattr(meta, "sha256", ""),
-        "size_bytes": getattr(meta, "size_bytes", 0),
-    }
-
-
-def _scope_dict(result: DiffResult) -> dict[str, object] | None:
-    """Machine-readable public-surface scoping block (ADR-024, issue #235).
-
-    Only emitted when ``--scope-public-headers`` was requested, so default
-    reports are unchanged. Records whether scoping resolved or fell back to the
-    full export table (``manual_review_required``), the public additions count,
-    and the audit ledger of findings filtered as internal/private.
-    """
-    if not result.scope_to_public_surface:
-        return None
-    summary = build_summary(result)
-    return {
-        "public_headers_applied": True,
-        "resolved": result.scope_resolved,
-        "fell_back": not result.scope_resolved,
-        "manual_review_required": not result.scope_resolved,
-        "public_additions": summary.compatible_additions,
-        "filtered_internal_count": result.out_of_surface_count,
-        "filtered_internal_changes": [
-            _filtered_internal_entry(c) for c in result.out_of_surface_changes
-        ],
-    }
-
-
-def _filtered_internal_entry(c: Change) -> dict[str, object]:
-    entry: dict[str, object] = {
-        "kind": c.kind.value,
-        "symbol": c.symbol,
-        "description": c.description,
-    }
-    # ADR-049 Phase 3 (Codex review, fresh evidence): result.out_of_surface_changes
-    # is the same list _apply_contract_evaluation_shadow already stamps
-    # (folded into all_changes alongside `kept`) -- this second, independent
-    # serialization of the identical Change objects
-    # (scope.filtered_internal_changes, distinct from
-    # surface_scope.out_of_surface_changes above) never read the fields, so a
-    # --contract consumer of this established ledger missed the decision even
-    # though the sibling ledger already carried it.
-    _add_contract_evaluation_fields(entry, c)
-    return entry
-
-
-def _add_check_identity(d: dict[str, object], result: DiffResult) -> None:
-    """Add the ADR-047 §7 report-identity envelope fields (G30 P0.3).
-
-    Each field is omitted entirely when unset — additive, and nothing
-    populates these yet (the GitHub Actions integration-model primitives
-    that will are G30 P1 work), so a report with none of them set looks
-    identical to one from before this schema version.
-    """
-    if result.check_id is not None:
-        validate_check_id(result.check_id)
-        d["check_id"] = result.check_id
-    if result.profile_id is not None:
-        d["profile_id"] = result.profile_id
-    if result.requested_depth is not None:
-        validate_evidence_depth("requested_depth", result.requested_depth)
-        d["requested_depth"] = result.requested_depth
-    if result.effective_depth is not None:
-        validate_evidence_depth("effective_depth", result.effective_depth)
-        d["effective_depth"] = result.effective_depth
-    if result.baseline_channel is not None:
-        d["baseline_channel"] = result.baseline_channel
-
-
-def _build_json_base(result: DiffResult) -> dict[str, object]:
-    """Build the opening header + summary block of the JSON report dict."""
-    summary = build_summary(result)
-    d: dict[str, object] = {
-        "report_schema_version": REPORT_SCHEMA_VERSION,
-        "library": result.library,
-        "old_version": result.old_version,
-        "new_version": result.new_version,
-        "verdict": result.verdict.value,
-    }
-    _add_check_identity(d, result)
-    # Library file metadata (path, SHA-256, size) — always present for schema consistency
-    d["old_file"] = _metadata_dict(getattr(result, "old_metadata", None))
-    d["new_file"] = _metadata_dict(getattr(result, "new_metadata", None))
-    _reporter_contract_blocks.add_env_matrix_digest(d, result)
-    d["summary"] = {
-        "breaking": summary.breaking,
-        "source_breaks": summary.source_breaks,
-        "risk_changes": summary.risk_count,
-        "compatible_additions": summary.compatible_additions,
-        "quality_issues": summary.quality_issues,
-        "informational": summary.informational,
-        "total_changes": summary.total_changes,
-        "binary_compatibility_pct": round(summary.binary_compatibility_pct, 1),
-        "affected_pct": round(summary.affected_pct, 1),
-        "change_inventory": render_change_inventory_json(summary.inventory),
-    }
-    return d
-
-
-def _add_abi_surface_breakdown(d: dict[str, object], result: DiffResult) -> None:
-    """Conditionally add ABI surface breakdown of the breaking set.
-
-    Only present when there are RTTI/internal-namespace changes — additive,
-    machine-facing.
-    """
-    from .policy.evaluate import evaluate
-
-    _bd = surface_breakdown(evaluate(result).breaking)
-    if _bd.rtti or _bd.internal:
-        d["abi_surface_breakdown"] = {
-            "breaking_total": _bd.total,
-            "public": _bd.public,
-            "rtti_churn": _bd.rtti,
-            "internal_churn": _bd.internal,
-        }
-
-
-def _add_evidence_fields(d: dict[str, object], result: DiffResult) -> None:
-    """Add release recommendation, optional evidence coverage/metrics, and policy."""
-    # Release recommendation (semver bump + soname action) — additive, machine-facing.
-    d["release_recommendation"] = recommend_release_for_report(result).to_dict()
-    # Evidence coverage (ADR-028 D7) — L0–L5 rows when a BuildSourcePack was
-    # supplied; lets consumers tell artifact-proven from build-context-only
-    # findings. Additive, present only when evidence was involved.
-    if getattr(result, "layer_coverage", None):
-        d["layer_coverage"] = result.layer_coverage
-    # Evidence-entity-model I4: which relationships' absence is proven vs
-    # unknown, per side (`compare.edge_query.edge_coverage_report`).
-    if getattr(result, "edge_coverage", None):
-        d["edge_coverage"] = result.edge_coverage
-    # Evidence metrics (ADR-033 D6/D9) — collection timing + finding split, when
-    # build-info/source facts were involved. Additive; lets CI tune mode choice.
-    if getattr(result, "evidence_metrics", None):
-        d["evidence_metrics"] = result.evidence_metrics
-
-
-def _add_show_only_filter(
-    d: dict[str, object],
-    result: DiffResult,
-    changes: list[Change],
-    show_only: str,
-) -> None:
-    """Add show_only_filter + filtered_summary when a show_only filter is active.
-
-    The three verdict counters are over the *evaluated* subset, exactly like
-    the main ``summary`` block (ADR-049 D1) -- a NOT_EVALUATED finding was
-    never scored by compatibility policy, so counting one here reported
-    ``verdict: NO_CHANGE`` and ``summary.breaking: 0`` beside
-    ``filtered_summary.breaking: 1`` in a single document (Codex review,
-    reproduced with ``--show-only breaking`` on a proven-out-of-contract
-    finding). ``total_changes`` stays inclusive, matching the main summary's
-    own rule: it counts what the filter *displays*, not what gated.
-    """
-    from .model.contract_finding_relevance import is_evaluated
-
-    d["show_only_filter"] = show_only
-    scored = [c for c in changes if is_evaluated(c)]
-    d["filtered_summary"] = {
-        "breaking": sum(
-            1 for c in scored if effective_verdict(result, c) == Verdict.BREAKING
-        ),
-        "source_breaks": sum(
-            1 for c in scored if effective_verdict(result, c) == Verdict.API_BREAK
-        ),
-        "risk_changes": sum(
-            1
-            for c in scored
-            if effective_verdict(result, c) == Verdict.COMPATIBLE_WITH_RISK
-        ),
-        "total_changes": len(changes),
-    }
-
-
-def _suppressed_change_entry(
-    c: Change,
-    *,
-    root_cause: tuple[str, str] | None = None,
-    root_cause_evidence: dict[str, object] | None = None,
-    rule: RuleProvenance | None = None,
-) -> dict[str, object]:
-    """Minimal audit-trail entry for one suppressed change, plus the
-    impact-assessment decision it was actually suppressed with (G29 Phase 3
-    slice 1, ADR-052 follow-up, Codex review: this is the one call site that
-    passes ``suppressed=True`` -- without it, ``decision.state:
-    "suppressed"`` was advertised but never actually reachable from
-    production reporting).
-
-    ``root_cause``/``root_cause_evidence`` (G29 Phase 3/6 follow-ups): the
-    caller resolves both from a lookup scoped to ``result.suppressed_changes``
-    itself -- a suppressed finding's root cause is computed relative to other
-    *suppressed* findings, not folded together with the kept ``changes[]``
-    list's own grouping.
-
-    ``rule`` (ADR-067 D3) is the provenance of the suppression that actually
-    fired, looked up by object identity from the run's own ledger — not
-    re-evaluated here, since the rule set is matched against fields that may
-    have been enriched after the match, and a second evaluation could
-    therefore name a different rule than the one that hid the finding.
-    """
-    entry: dict[str, object] = {
-        "kind": c.kind.value,
-        "symbol": c.symbol,
-        "description": c.description,
-    }
-    if rule is not None:
-        entry["rule"] = rule.to_dict()
-    assessment = assess_change(
-        c,
-        suppressed=True,
-        root_cause=root_cause,
-        root_cause_evidence=root_cause_evidence,
-    )
-    entry["reachability_state"] = assessment.reachability_state.value
-    if assessment.has_signal():
-        entry["impact_assessment"] = assessment.to_dict()
-    if getattr(c, "symbol_binding", None):
-        entry["symbol_binding"] = c.symbol_binding
-    # Codex review, fresh evidence: an elf_only-visibility removal's
-    # demangled_symbol (schema 3.14) reaches every other machine-format
-    # projection of this same Change -- a suppressed one must not lose it
-    # just because it's rendered through this narrower audit-entry shape
-    # instead of _change_to_dict.
-    demangled_symbol = resolve_demangled_symbol(c)
-    if demangled_symbol:
-        entry["demangled_symbol"] = demangled_symbol
-    # ADR-049 Phase 3 (Codex review, fresh evidence): suppression is a
-    # display/gate decision, not a reason to erase the contract-relevance
-    # decision checker._apply_contract_evaluation_shadow already stamped on
-    # this Change -- a no-op when contract_evaluation was never requested,
-    # mirroring this helper's other callers.
-    _add_contract_evaluation_fields(entry, c)
-    return entry
-
-
-def _add_suppression(d: dict[str, object], result: DiffResult) -> None:
-    """Add suppression block (file flag, count, suppressed change list).
-
-    Each entry carries the rule that hid it (ADR-067 D3) plus the
-    ``--suppress`` document's own path, so "which rule hid this and why"
-    survives into the report instead of being computed and dropped. The
-    per-entry projection itself is
-    ``report.disposition_audit.suppressed_change_entry``; this function stays
-    here because the root-cause lookups it feeds that projection live in
-    ``reporter_markdown``, which this package may not import back.
-    """
-    ledger = ledger_for(result)
-    _rc_lookup = root_cause_lookup_for_changes(result.suppressed_changes)
-    _rc_evidence = root_cause_evidence_lookup_for_changes(result.suppressed_changes)
-    d["suppression"] = {
-        "file_provided": result.suppression_file_provided,
-        "suppressed_count": result.suppressed_count,
-        "suppressed_changes": [
-            _suppressed_change_entry(
-                c,
-                root_cause=_rc_lookup.get(finding_id(c)),
-                root_cause_evidence=_rc_evidence.get(finding_id(c)),
-                rule=ledger.rule_for(c),
-            )
-            for c in result.suppressed_changes
-        ],
-    }
 
 
 def disposition_ledger_blocks(result: DiffResult) -> dict[str, object]:
@@ -837,7 +379,7 @@ def disposition_ledger_blocks(result: DiffResult) -> dict[str, object]:
     rule exists to prevent, and a terminal log is not a report.
 
     Returns only the blocks that actually say something: ``surface_scope``
-    when scoping ran (``_add_surface_scope``'s own condition), ``suppression``
+    when scoping ran (``add_surface_scope``'s own condition), ``suppression``
     when a suppression document was supplied or a finding was suppressed, and
     ``build_context_reconciled`` when reconciliation cleared anything. A
     library with none of them adds no keys, which is what keeps every release
@@ -854,11 +396,11 @@ def disposition_ledger_blocks(result: DiffResult) -> dict[str, object]:
     # the caller renders next.
     prewarm_change_demangling(result)
     blocks: dict[str, object] = {}
-    _add_suppression(blocks, result)
+    add_suppression(blocks, result)
     suppression = cast("dict[str, object]", blocks["suppression"])
     if not (suppression.get("file_provided") or suppression.get("suppressed_count")):
         del blocks["suppression"]
-    _add_surface_scope(blocks, result)
+    add_surface_scope(blocks, result)
     # Build-context reconciliation is a *disposition* too, and the release
     # fan-out omitted it: a release whose every break was cleared as a
     # context-free header-parse artifact passed while its JSON and Markdown
@@ -866,9 +408,9 @@ def disposition_ledger_blocks(result: DiffResult) -> dict[str, object]:
     # Same function the scalar path uses, so the block has one shape; it is
     # independent of both siblings above (reconciliation runs without
     # `--scope-public-headers` and without any suppression document) and
-    # self-gating -- `_add_reconciled` returns early when nothing was
+    # self-gating -- `add_reconciled` returns early when nothing was
     # cleared, so a library that reconciled nothing still adds no key.
-    _add_reconciled(blocks, result)
+    add_reconciled(blocks, result)
     # ADR-027 pattern modulation is a *reclassification*, which ADR-067 names
     # as a disposition alongside suppression and scope exclusion -- so the
     # same rule applies: a release whose every breaking finding a rule demoted
@@ -890,152 +432,6 @@ def disposition_ledger_blocks(result: DiffResult) -> dict[str, object]:
 
     add_suppression_audit(blocks, result)
     return blocks
-
-
-def _add_detectors(d: dict[str, object], result: DiffResult) -> None:
-    """Add detector metadata — only detectors with findings or a coverage gap."""
-    d["detectors"] = [
-        {
-            "name": det.name,
-            "changes_count": det.changes_count,
-            "enabled": det.enabled,
-            "coverage_gap": det.coverage_gap,
-            # ADR-067 D3: "did not run" is a different statement from "ran
-            # and found nothing", and `changes_count: 0` cannot tell them
-            # apart on its own.
-            "not_evaluated": getattr(det, "not_evaluated", False),
-            # ADR-063 T9 (schema 5.11): comparisons the detector ran but
-            # declined to judge, each with its evidence reason.
-            "declined": [
-                {"entity": entity, "reason": reason} for entity, reason in det.declined
-            ],
-        }
-        for det in result.detector_results
-        if det.changes_count > 0 or det.coverage_gap is not None or bool(det.declined)
-    ]
-
-
-def _add_confidence_evidence(d: dict[str, object], result: DiffResult) -> None:
-    """Add confidence level, evidence tier/tiers, and optional coverage warnings."""
-    # Confidence & evidence metadata — helps users assess verdict trust level
-    d["confidence"] = result.confidence.value
-    d["evidence_tier"] = result.evidence_tier.value
-    d["evidence_tiers"] = list(result.evidence_tiers)
-    if result.coverage_warnings:
-        d["coverage_warnings"] = list(result.coverage_warnings)
-    # ADR-050 D2 (schema 2.17) — report-level comparability metadata, never a
-    # Change/ChangeKind finding, so it stays unreachable by severity promotion.
-    # Omitted entirely (not emitted as null) when unset, matching every other
-    # optional field in this builder.
-    if result.contract_coverage is not None:
-        d["contract_coverage"] = result.contract_coverage
-    if result.assurance is not None:
-        d["assurance"] = result.assurance
-    # E-S2 (docs/contribute/plans/cli-cleanup-phase-two.md, Block 5,
-    # report_schema_version 3.1) — the per-dimension breakdown behind the
-    # coarse `assurance` flag above. Same "only under --diagnostic-comparison,
-    # omitted entirely otherwise" convention.
-    if result.comparability_assurance is not None:
-        d["comparability_assurance"] = dict(result.comparability_assurance)
-
-
-def _add_policy_overrides(
-    d: dict[str, object], result: DiffResult, *, today: date | None = None
-) -> None:
-    """Add policy file overrides/reclassify rules (custom re-classifications)
-    when present.
-
-    ``policy_reclassify`` (report_schema_version 2.30) lists the *active
-    rule set* -- the same level of audit detail ``policy_overrides`` already
-    gives for kind-global overrides. The per-finding "which rule fired"
-    attribution 2.30's own history entry originally deferred is a separate
-    field, ``change.reclassified_by`` (report_schema_version 2.31, stamped in
-    ``_change_to_dict`` via ``severity.reclassify_rule_for_change`` -- see
-    ``abicheck/schemas/__init__.py``'s 2.31 history entry). Each rule's dict
-    here comes from ``ReclassifyRule.to_report_dict()`` -- shared with
-    ``sarif.py``'s ``policyReclassify`` so the two can't drift on field
-    set/spelling. *today*, forwarded to :func:`active_reclassify_rules`, keeps
-    the active-rule set consistent with an already-frozen ``ReportEnvelope``
-    (Codex review, fresh evidence).
-    """
-    if result.policy_file and result.policy_file.overrides:
-        d["policy_overrides"] = {
-            kind.value: verdict.value
-            for kind, verdict in result.policy_file.overrides.items()
-        }
-        if result.policy_file.source_path:
-            d["policy_file"] = str(result.policy_file.source_path)
-    if result.policy_file and result.policy_file.reclassify:
-        from .policy.reclassify import active_reclassify_rules
-
-        active = active_reclassify_rules(result.policy_file.reclassify, today)
-        if active:
-            d["policy_reclassify"] = [rule.to_report_dict() for rule in active]
-            if result.policy_file.source_path:
-                d["policy_file"] = str(result.policy_file.source_path)
-
-
-def _add_changes_block(
-    d: dict[str, object],
-    result: DiffResult,
-    changes: list[Change],
-    effective_policy: str,
-    eff_sets: KindSets | None,
-    show_only: str | None = None,
-    severity_config: SeverityConfig | None = None,
-    today: date | None = None,
-) -> None:
-    """Add changes list and optional redundant-count / pattern-modulations fields.
-
-    *show_only* folds ``result.scoped_only_changes``' ``caused_by_type``
-    values into the root-cause grouping the same way ``_to_json_root_cause``
-    does (review finding) -- without it, a finding here correlating only via
-    a scoped-only overlay silently lost its ``impact_assessment.root_cause_id``,
-    disagreeing with root-cause mode, SARIF, and JUnit. ``root_cause_evidence``
-    (G29 Phase 6, Codex review) gets the same treatment via
-    :func:`~abicheck.root_cause_evidence.scoped_only_evidence_lookup`, correlating against the real
-    scoped-only ``Change`` objects rather than just their ``caused_by_type``.
-    *today*, forwarded to :func:`_change_to_dict` for every entry, keeps this
-    agreeing with an already-frozen ``ReportEnvelope`` (Codex review, fresh
-    evidence).
-    """
-    _rc_lookup = root_cause_lookup_for_changes(
-        changes, extra_causes=_scoped_only_extra_causes(result, show_only)
-    )
-    _rc_evidence = scoped_only_evidence_lookup(result, changes, show_only)
-    d["changes"] = [
-        _change_to_dict(
-            c,
-            policy=effective_policy,
-            kind_sets=eff_sets,
-            policy_file=result.policy_file,
-            root_cause=_rc_lookup.get(finding_id(c)),
-            root_cause_evidence=_rc_evidence.get(finding_id(c)),
-            evidence_tiers=result.evidence_tiers,
-            severity_config=severity_config,
-            today=today,
-        )
-        for c in changes
-    ]
-    if result.redundant_count > 0:
-        d["redundant_count"] = result.redundant_count
-    # ADR-027 A4 — pattern-aware modulation ledger (disclosed, reversible).
-    if result.pattern_modulations:
-        d["pattern_modulations"] = result.pattern_modulations
-
-
-def _add_trailing_fields(
-    d: dict[str, object],
-    result: DiffResult,
-    show_impact: bool,
-    show_only: str | None,
-) -> None:
-    """Add show_only_applied flag and public-surface scope block (both optional)."""
-    if show_impact:
-        d["show_only_applied"] = show_only is not None
-    scope = _scope_dict(result)
-    if scope is not None:
-        d["scope"] = scope
 
 
 def to_json(
@@ -1068,13 +464,7 @@ def to_json(
             contract_evaluation=contract_evaluation,
         )
 
-    # report.build statically imports this module's own private `_add_*`
-    # helpers; reaching back via a plain `from .report.build import ...`
-    # would close a real import cycle, so this side goes through
-    # `importlib` -- same pattern `scoped_gate.py` uses for a legacy sibling.
-    import importlib
-
-    doc = importlib.import_module(".report.build", __package__).build_report_document(
+    doc = build_report_document(
         result,
         show_only=show_only,
         show_impact=show_impact,
@@ -1083,171 +473,6 @@ def to_json(
         contract_evaluation=contract_evaluation,
     )
     return render_json(doc)
-
-
-_VERDICT_TO_RECOMMENDED_ACTION: dict[Verdict, str] = {
-    Verdict.BREAKING: "recompile_and_relink_required",
-    Verdict.API_BREAK: "recompile_required",
-    Verdict.COMPATIBLE_WITH_RISK: "verify_deployment_compatibility",
-}
-
-
-def _recommended_action_for_change(
-    c: object,
-    *,
-    policy: str | None,
-    kind_sets: KindSets | None,
-    policy_file: object | None,
-    today: date | None = None,
-) -> str:
-    """Return a structured, machine-readable next step for *c* (schema 2.4).
-
-    Derived from the same effective verdict/category resolution
-    ``severity``/``operation``/``finding_id`` already use, so it can never
-    disagree with them for the same finding:
-
-    - ``BREAKING`` → ``recompile_and_relink_required`` (binary ABI break)
-    - ``API_BREAK`` → ``recompile_required`` (source-level break only)
-    - ``COMPATIBLE_WITH_RISK`` → ``verify_deployment_compatibility``
-    - ``COMPATIBLE`` additions and informational outcomes → ``no_action_required``
-    - ``COMPATIBLE`` quality issues → ``review_recommended``
-    """
-    from .policy.severity import (
-        IssueCategory,
-        classify_effective_change,
-        effective_verdict_for_change,
-    )
-
-    verdict = effective_verdict_for_change(
-        cast(HasKind, c),
-        policy=policy,
-        kind_sets=kind_sets,
-        policy_file=policy_file,
-        today=today,
-    )
-    action = _VERDICT_TO_RECOMMENDED_ACTION.get(verdict)
-    if action is not None:
-        return action
-    # COMPATIBLE: distinguish a genuine addition (nothing to do) from a
-    # quality issue (compatible, but worth a look) via the same category
-    # classification the severity JSON block uses.
-    category = classify_effective_change(
-        cast(HasKind, c),
-        policy=policy,
-        kind_sets=kind_sets,
-        policy_file=policy_file,
-        today=today,
-    )
-    # An informational outcome (ADR-078) records that nothing changed.
-    return (
-        "no_action_required"
-        if category in (IssueCategory.ADDITION, IssueCategory.INFORMATIONAL)
-        else "review_recommended"
-    )
-
-
-#: Per-kind reviewer guidance for a COMPATIBLE addition, keyed by
-#: ``ChangeKind.value``. Falls back to ``_DEFAULT_ADDITION_REVIEWER_ACTION``
-#: for any addition kind not listed here.
-_ADDITION_REVIEWER_ACTION: dict[str, str] = {
-    # Old binaries are unaffected, but exhaustive `switch`/sentinel-value
-    # patterns in *source* consumers can miss the new case silently.
-    "enum_member_added": "review_exhaustive_switches",
-    # A semantic addition with no new symbol: the API existed but was
-    # unstable; graduating it is a documentation/support-contract change,
-    # not a binary one.
-    "experimental_graduated": "document_stable_replacement",
-}
-_DEFAULT_ADDITION_REVIEWER_ACTION = "confirm_public_api_intent"
-
-
-def _reviewer_action_for_change(
-    c: object,
-    *,
-    policy: str | None,
-    kind_sets: KindSets | None,
-    policy_file: object | None,
-    today: date | None = None,
-) -> str | None:
-    """Finer-grained reviewer guidance for a COMPATIBLE addition (additive).
-
-    ``recommended_action`` collapses every addition to one value,
-    ``no_action_required`` — accurate for the *old binary consumer*
-    (nothing to recompile, nothing to relink), but a reviewer approving a
-    new public export almost always has something to check: was it
-    intentional, does it need a release note, do exhaustive switches need
-    the new case. This field carries that reviewer-facing nuance without
-    changing ``recommended_action``'s existing meaning or schema enum.
-    Returns ``None`` for every non-addition finding, since those already
-    have reviewer-actionable guidance via ``recommended_action`` itself.
-    """
-    from .policy.severity import IssueCategory, classify_effective_change
-
-    category = classify_effective_change(
-        cast(HasKind, c),
-        policy=policy,
-        kind_sets=kind_sets,
-        policy_file=policy_file,
-        today=today,
-    )
-    if category != IssueCategory.ADDITION:
-        return None
-    kind = getattr(c, "kind", None)
-    kind_val = kind.value if kind else ""
-    return _ADDITION_REVIEWER_ACTION.get(kind_val, _DEFAULT_ADDITION_REVIEWER_ACTION)
-
-
-def _change_reachability_fields(c: Any) -> dict[str, Any]:
-    """Structured reachability evidence and graph-impact data for one change.
-
-    Machine-readable counterparts to what used to be description prose only --
-    see the per-entry comments for which ADR each came from.
-    """
-    out: dict[str, Any] = {}
-    # ADR-044 P1 item 4 — structured reachability evidence (previously
-    # description-text-only): whether a suppression rule's reachability gate
-    # tagged this change public-reachable, how (layout/call-graph/direct),
-    # and the shortest proof path, so a machine consumer doesn't need to
-    # parse the suppression_would_hide_public_break diagnostic's prose.
-    if getattr(c, "public_reachable", False):
-        out["public_reachable"] = True
-        reach_kind = getattr(c, "reachability_kind", None)
-        if reach_kind:
-            out["reachability_kind"] = reach_kind
-        proof_path = getattr(c, "reachability_proof_path", None)
-        if proof_path:
-            out["reachability_proof_path"] = proof_path
-    # G31 Phase B B3 (ADR-048) — structured graph impact/proof-path data:
-    # the machine-readable counterpart of reachability_proof_path's prose,
-    # as a list of node/edge reference dicts, plus which public root(s) it
-    # traces back to and whether the dependency is direct or transitive.
-    affected_roots = getattr(c, "affected_public_roots", None)
-    if affected_roots:
-        out["affected_public_roots"] = affected_roots
-    impact_path = getattr(c, "impact_proof_path", None)
-    if impact_path:
-        out["impact_proof_path"] = impact_path
-    impact_direct = getattr(c, "impact_is_direct", None)
-    if impact_direct is not None:
-        out["impact_is_direct"] = impact_direct
-    return out
-
-
-def _reclassified_by_for_change(
-    c: object, policy_file: object | None, *, today: date | None = None
-) -> str | None:
-    """``reclassified_by`` audit value for *c*, or ``None`` -- shared by
-    :func:`_change_to_dict` and leaf mode's ``_leaf_entry`` (Codex review)
-    so the two entry builders can't drift on this field. Falls back to
-    ``rule.to_verdict.value`` rather than ``rule.to``, since a directly-
-    constructed ``ReclassifyRule`` could leave the latter empty/mismatched
-    -- see ``severity.reclassify_rule_for_change`` for the full precedence.
-    *today*, forwarded there, keeps this agreeing with an already-frozen
-    ``ReportEnvelope`` (Codex review, fresh evidence).
-    """
-    from .report.finding import reclassified_by_label
-
-    return reclassified_by_label(c, policy_file, today)
 
 
 def release_finding_entry(
@@ -1259,14 +484,14 @@ def release_finding_entry(
     shape ``cli_compare_release_matrix._release_finding_dicts`` has always
     built inline, with one addition: ``reclassified_by`` (schema 2.31) when a
     ``reclassify:`` rule decided this change's effective verdict, resolved
-    through the identical :func:`_reclassified_by_for_change` helper
-    ``_change_to_dict``/``_leaf_entry``/the retired ``cli_scan_baseline.
+    through the identical :func:`reclassified_by_for_change` helper
+    ``change_to_dict``/``_leaf_entry``/the retired ``cli_scan_baseline.
     _baseline_finding_dicts`` use -- so all four entry builders agree
     on which rule (if any) fired for a shared finding, instead of the release
     fan-out's own projection never computing the field at all. Lives here
     (not in ``cli_compare_release_matrix.py``, which sits at its own
     ``no_growth`` line cap with no headroom) since this module already owns
-    ``_reclassified_by_for_change`` and every other entry builder that calls
+    ``reclassified_by_for_change`` and every other entry builder that calls
     it.
     """
     entry: dict[str, object] = {
@@ -1276,7 +501,7 @@ def release_finding_entry(
         "description": c.description,
         "source_location": c.source_location,
     }
-    reclassified_by = _reclassified_by_for_change(c, policy_file)
+    reclassified_by = reclassified_by_for_change(c, policy_file)
     if reclassified_by:
         entry["reclassified_by"] = reclassified_by
     return entry
@@ -1298,360 +523,3 @@ def release_finding_detail_lines(entry: dict[str, object]) -> list[str]:
     if reclassified_by:
         lines.append(f"  - _Reclassified by:_ {reclassified_by}")
     return lines
-
-
-def prewarm_change_demangling(result: Any) -> None:
-    """Batch-demangle every finding's symbol once, ahead of serialization.
-
-    Plan slice 7o makes every finding's dict resolve a ``demangled_symbol``
-    (:func:`resolve_demangled_symbol`), so one batched ``c++filt`` call up
-    front is what keeps a host without the in-process ``cxxfilt`` package
-    from forking a subprocess per distinct symbol -- the same prewarm
-    ``appcompat_html.py`` (removed) already does for its own per-row demangling.
-
-    Called from ``report.build.build_report_document``, not from
-    ``to_json`` (Codex review, PR #1284): the document builder is the one
-    chokepoint *every* projection goes through -- ``to_json``, the
-    ``ReportEnvelope`` path (``service_render.render_output``), and
-    ``report.build``'s own callers -- so prewarming at ``to_json`` alone
-    left the envelope path, which is what the CLI actually renders
-    through, forking per symbol before it was ever reached.
-    """
-    from .demangle import prewarm_demangle_batch
-
-    # Every collection whose entries reach `_change_to_dict`, not only the
-    # headline one. `scoped_only_changes` is the one that is easy to miss:
-    # `apply_scoped_gate` synthesizes it *after* the document is built, for
-    # a `--used-by`/`--required-symbol` run, and serializes it through the
-    # same path -- so leaving it out put every consumer-required C++ symbol
-    # back on the per-symbol subprocess it is the point of this function to
-    # avoid (Codex review, PR #1284).
-    changes = list(getattr(result, "changes", ()) or ())
-    for attr in (
-        "suppressed_changes",
-        "out_of_surface_changes",
-        "scoped_only_changes",
-        "reconciled_changes",
-    ):
-        changes += list(getattr(result, attr, ()) or ())
-    if changes:
-        prewarm_demangle_batch(changes, attrs=("symbol",))
-
-
-def resolve_demangled_symbol(c: Any) -> str | None:
-    """The demangled spelling of *c*'s symbol, for a machine projection.
-
-    Plan slice 7o, deliverable 2: every machine format carries **both**
-    names -- the exact mangled ``symbol`` it always carried, plus the
-    readable one. Before this, ``demangled_symbol`` was emitted only for an
-    ``ELF_ONLY``-visibility finding (``compare.elf_only_demangle``, the one
-    case whose ``symbol``/``description`` were *unreadable* without it), so
-    a JSON/SARIF consumer of an ordinary C++ removal had the mangled name
-    and no way to show a human one. Reading a report and grepping the
-    binary are then the same string, which is what makes the human side's
-    automatic demangling lossless.
-
-    Returns ``None`` when the symbol is not an Itanium-mangled name, or no
-    demangler is available -- never a copy of ``symbol`` itself, so a
-    consumer can treat the field's presence as "this differs from symbol".
-    A finding that already carries one (the ``ELF_ONLY`` path) keeps it
-    verbatim rather than being re-derived.
-    """
-    existing = getattr(c, "demangled_symbol", None)
-    if existing:
-        return str(existing)
-    symbol = getattr(c, "symbol", "") or ""
-    if not symbol:
-        return None
-    from .demangle import demangle
-
-    # ``accept_macho_prefix=True`` (Codex review, PR #1284): clang's own
-    # ``mangledName`` carries the platform global-symbol prefix on macOS, so a
-    # Mach-O finding's symbol can read ``__ZN3lib4goneEi``. The strict default
-    # rejects that spelling *before* consulting the cache, so a Mach-O run
-    # warmed the batch cache (``prewarm_change_demangling`` opts in) and then
-    # emitted no ``demangled_symbol`` at all -- exactly the gap this field
-    # exists to close. This is report-only resolution, which is the case
-    # ``_is_itanium_mangled``'s own docstring names as the one that may opt
-    # in; the correctness-critical symbol-matching callers keep the strict
-    # default.
-    demangled = demangle(symbol, accept_macho_prefix=True)
-    return demangled if demangled and demangled != symbol else None
-
-
-def _change_to_dict(
-    c: object,
-    *,
-    policy: str = "strict_abi",
-    kind_sets: tuple[
-        frozenset[ChangeKind],
-        frozenset[ChangeKind],
-        frozenset[ChangeKind],
-        frozenset[ChangeKind],
-    ]
-    | None = None,
-    policy_file: object | None = None,
-    evidence_status_override: EvidenceStatus | None = None,
-    root_cause: tuple[str, str] | None = None,
-    root_cause_evidence: dict[str, object] | None = None,
-    evidence_tiers: Sequence[str] = (),
-    severity_config: SeverityConfig | None = None,
-    today: date | None = None,
-) -> dict[str, object]:
-    """Convert a Change to a JSON-serializable dict with impact and metadata.
-
-    ``evidence_status_override`` lets a caller assert a stronger epistemic
-    status than the finding's own classification implies — e.g.
-    ``appcompat_to_json`` (removed) marks every finding it already proved a specific
-    consumer depends on as ``EvidenceStatus.CONSUMER_PROVEN``, regardless of
-    the finding's own kind.
-
-    ``root_cause`` (G29 Phase 3 follow-up, ADR-052), when given, is *c*'s
-    ``(root_cause_id, root_display)`` pair — forwarded to
-    :func:`~abicheck.impact.engine.assess_change` so
-    ``impact_assessment.root_cause_id`` is populated. Callers resolve this
-    once per report via
-    :func:`~abicheck.reporter_markdown.root_cause_lookup_for_changes` rather
-    than recomputing it per change. ``root_cause_evidence`` (G29 Phase 6) is
-    the analogous per-change entry from
-    :func:`~abicheck.impact.correlation.correlate_root_causes`, resolved the
-    same way.
-
-    ``evidence_tiers`` is the owning comparison's ``DiffResult.evidence_tiers``
-    (P0 evidence-provider audit) — when a caller has it (most do; the
-    default ``()`` reads as "unknown", not "absent", matching
-    :func:`~.checker_policy.has_binary_evidence`'s own convention), it
-    downgrades an otherwise ``ARTIFACT_PROVEN`` status to ``UNATTRIBUTED``
-    for a comparison positively known to have never examined a real binary.
-
-    ``severity_config`` is the run's resolved gate configuration, when it has
-    one — it decides ADR-049's per-finding ``gate_contribution`` (see the call
-    to :func:`~abicheck.policy.severity.gate_contribution_for_change` below). ``None``
-    means the legacy verdict-based scheme, not "no gate".
-
-    ``today``, forwarded to every date-sensitive resolution below (verdict,
-    reclassify attribution, recommended/reviewer action, gate contribution),
-    keeps this agreeing with an already-frozen ``ReportEnvelope`` (Codex
-    review, fresh evidence).
-    """
-    kind = getattr(c, "kind", None)
-    reclassified_by: str | None = None
-    if isinstance(kind, ChangeKind) and kind_sets:
-        from .policy.severity import effective_verdict_for_change
-
-        verdict = effective_verdict_for_change(
-            cast(HasKind, c),
-            policy=policy,
-            kind_sets=kind_sets,
-            policy_file=policy_file,
-            today=today,
-        )
-        severity = _VERDICT_TO_SEVERITY_LABEL.get(verdict, "unknown")
-        # Per-change reclassify: disclosure (Codex review) -- see
-        # _reclassified_by_for_change's own docstring.
-        reclassified_by = _reclassified_by_for_change(c, policy_file, today=today)
-    elif kind:
-        severity = _kind_to_severity(kind, policy)
-    else:
-        severity = "unknown"
-    evidence_status = evidence_status_override
-    if evidence_status is None and isinstance(kind, ChangeKind):
-        evidence_status = evidence_status_for_result(cast(HasKind, c), evidence_tiers)
-    d: dict[str, object] = {
-        "kind": kind.value if kind else "",
-        "symbol": getattr(c, "symbol", ""),
-        "description": getattr(c, "description", ""),
-        "old_value": getattr(c, "old_value", None),
-        "new_value": getattr(c, "new_value", None),
-        "review_evidence": getattr(c, "review_evidence", None),
-        "severity": severity,
-    }
-    if reclassified_by:
-        d["reclassified_by"] = reclassified_by
-    # Two per-declaration blocks, omitted when absent (see their own field
-    # docs on Change): `demangled_symbol`, a readable name for a finding whose
-    # old-side declaration is export-table-only (`symbol`/`old_value` stay raw
-    # mangled -- the "machine format" branch demangle.demangle_text
-    # describes), and `surface_facts`, the three split surface facts emitted
-    # whole, "unknown" included (report schema 4.4, model/surface_facts.py).
-    if demangled_symbol := resolve_demangled_symbol(c):
-        d["demangled_symbol"] = demangled_symbol
-    if surface_facts := getattr(c, "surface_facts", None):
-        d["surface_facts"] = dict(surface_facts)
-    if isinstance(kind, ChangeKind):
-        d["operation"] = operation_for_change(c, kind.value)
-        d["entity"] = entity_for_change(c, kind.value)
-        d["finding_id"] = finding_id(c)
-        # Backend-independent sibling of finding_id (schema 2.36).
-        from .compare.finding_identity import report_canonical_finding_id
-
-        d["canonical_finding_id"] = report_canonical_finding_id(c)
-        d["recommended_action"] = _recommended_action_for_change(
-            c,
-            policy=policy,
-            kind_sets=kind_sets,
-            policy_file=policy_file,
-            today=today,
-        )
-        reviewer_action = _reviewer_action_for_change(
-            c,
-            policy=policy,
-            kind_sets=kind_sets,
-            policy_file=policy_file,
-            today=today,
-        )
-        if reviewer_action is not None:
-            d["reviewer_action"] = reviewer_action
-    if evidence_status is not None:
-        d["evidence_status"] = evidence_status.value
-    # Impact explanation. Finding C(ii): pass the already-computed
-    # evidence_status so a downgraded (UNATTRIBUTED) finding's impact text
-    # gets its evidence caveat rather than the same unconditional claim an
-    # ARTIFACT_PROVEN finding of the same kind carries.
-    if kind:
-        impact = impact_for(kind, evidence_status)
-        if impact:
-            d["impact"] = impact
-    d.update(_change_annotation_fields(c))
-    d.update(_change_reachability_fields(c))
-    # G29 Phase 3 slice 1 (ADR-052): reachability_state has existed on Change
-    # since PR #607 but was never serialized -- without it, a JSON consumer
-    # cannot tell a PROVEN_UNREACHABLE finding apart from one the graph walk
-    # never examined at all (UNKNOWN), since both leave public_reachable
-    # False. impact_assessment is the unified read view over the scattered
-    # reachability/impact fields above; only emitted when it carries
-    # information beyond the all-defaults case, matching this function's own
-    # convention of not padding every plain finding with an empty object.
-    assessment = assess_change(
-        c, root_cause=root_cause, root_cause_evidence=root_cause_evidence
-    )
-    d["reachability_state"] = assessment.reachability_state.value
-    if assessment.has_signal():
-        d["impact_assessment"] = assessment.to_dict()
-    # ADR-049 D1's `gate_contribution`, computed for a `changes` entry (the
-    # only findings that reach a gate at all) from the same severity/legacy
-    # scheme the run itself exits on -- see
-    # `severity.gate_contribution_for_change`. `severity_config` is None on
-    # the legacy scheme, where the contribution is the finding's own
-    # verdict-to-exit mapping.
-    from .policy.severity import gate_contribution_for_change
-
-    _add_contract_evaluation_fields(
-        d,
-        c,
-        gate_contribution=(
-            gate_contribution_for_change(
-                cast(HasKind, c),
-                severity_config,
-                policy=policy,
-                kind_sets=kind_sets,
-                policy_file=policy_file,
-                today=today,
-            )
-            if isinstance(kind, ChangeKind)
-            else 0
-        ),
-    )
-    return d
-
-
-def _build_severity_json(
-    changes: list[Change],
-    severity_config: SeverityConfig,
-    *,
-    gate: GateDecision,
-    policy: str | None = None,
-    kind_sets: KindSets | None = None,
-    policy_file: object | None = None,
-    today: date | None = None,
-) -> dict[str, object]:
-    """Build severity information for JSON output.
-
-    *changes* are the (possibly filtered) changes for display counts. *gate*
-    is the caller's already-computed :func:`gate_decision_for_result` value
-    (ADR-061 D9: this function projects a decision, it does not recompute
-    one) -- always derived from the *unfiltered* change set, so
-    ``--show-only`` does not affect the exit code it reports. *kind_sets*
-    from ``policy.evaluate.effective_kind_sets(DiffResult)`` includes PolicyFile overrides.
-    *today*, forwarded to :func:`categorize_changes`, keeps this agreeing
-    with an already-frozen ``ReportEnvelope`` (Codex review, fresh evidence).
-    """
-    from .policy.severity import SeverityLevel, categorize_changes
-
-    categorized = categorize_changes(
-        changes,
-        policy=policy,
-        kind_sets=kind_sets,
-        policy_file=policy_file,
-        today=today,
-    )
-
-    config_dict: dict[str, str] = {}
-    for attr in ("abi_breaking", "potential_breaking", "quality_issues", "addition"):
-        level = getattr(severity_config, attr, SeverityLevel.INFO)
-        config_dict[attr] = level.value if hasattr(level, "value") else str(level)
-
-    categories: dict[str, object] = {
-        "abi_breaking": {
-            "severity": config_dict["abi_breaking"],
-            "count": len(categorized.abi_breaking),
-        },
-        "potential_breaking": {
-            "severity": config_dict["potential_breaking"],
-            "count": len(categorized.potential_breaking),
-        },
-        "quality_issues": {
-            "severity": config_dict["quality_issues"],
-            "count": len(categorized.quality_issues),
-        },
-        "addition": {
-            "severity": config_dict["addition"],
-            "count": len(categorized.addition),
-        },
-        # ADR-078: fixed at ``info`` -- not in ``config``, never in
-        # ``blocking_categories``; reported so no finding leaves the block.
-        "informational": {
-            "severity": SeverityLevel.INFO.value,
-            "count": len(categorized.informational),
-        },
-    }
-
-    # ``blocking``/``blocking_categories`` (schema 2.3, additive): a typed,
-    # auditable gate summary mirroring SARIF's ``severityGate`` block
-    # (``sarif._severity_gate_properties``) — without them, a JSON consumer
-    # had to independently recompute "which category is actually failing the
-    # build" from ``config``/``categories`` itself; this makes that answer a
-    # first-class, versioned part of the report.
-    #
-    # ``gate`` was computed once by the caller from the unfiltered change
-    # set, not ``changes`` (the possibly --show-only-filtered *display*
-    # set) — otherwise hiding the one category that's actually failing the
-    # build (e.g. ``--show-only=breaking`` when an addition promoted to
-    # ``error`` is what's blocking) would report ``blocking: true`` alongside
-    # ``blocking_categories: []`` (Codex review on #557).
-    return {
-        "config": config_dict,
-        "categories": categories,
-        "exit_code": gate.exit_code,
-        "blocking": gate.blocking,
-        "blocking_categories": list(gate.blocking_categories),
-    }
-
-
-# ADR-063 T10: the bundle of per-change helpers report.scoped_gate.
-# apply_scoped_gate needs but may not import itself (see that module's own
-# docstring for the cycle a static/importlib back-reference would close).
-# Built once here, since every name is already defined or re-exported in
-# this module by this point, and threaded through render_json_with_side_
-# facts's four call sites above rather than re-resolved per call. Must stay
-# below _change_to_dict's/_add_entries_to_root_causes's own definitions
-# (both defined in this module) -- a module executes top to bottom, so a
-# forward reference here would raise NameError at import time.
-_SCOPED_GATE_HELPERS = ScopedGateChangeHelpers(
-    change_to_dict=_change_to_dict,
-    add_entries_to_root_causes=_add_entries_to_root_causes,
-    finding_id=finding_id,
-    root_cause_key_and_display=root_cause_key_and_display,
-    root_cause_for_change=root_cause_for_change,
-    resolve_scoped_gate_findings=resolve_scoped_gate_findings,
-)

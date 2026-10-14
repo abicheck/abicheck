@@ -31,7 +31,7 @@ dropping these counts is not."* The renderers here therefore differ only in
 how much rule detail they show, never in whether the counts appear.
 
 The JSON suppression ledger itself stays in ``reporter.py``
-(``_add_suppression``/``_suppressed_change_entry``): it needs that module's
+(``add_suppression``/``suppressed_change_entry``): it needs that module's
 root-cause lookups and the ``impact`` engine, neither of which this layer may
 import (``architecture/modules.yaml``). What it gained from ADR-067 is the
 rule that hid each finding — id, source file, reason, expiry — read off the

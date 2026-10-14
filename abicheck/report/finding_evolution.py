@@ -63,7 +63,7 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 class ResolvedFindingEntry:
     """One ``FindingEvolution.RESOLVED`` finding, JSON-safe.
 
-    Deliberately not the full ``reporter._change_to_dict`` shape (severity,
+    Deliberately not the full ``change_json.change_to_dict`` shape (severity,
     gate contribution, impact assessment, ...): a resolved finding is a
     historical fact about a *previous* comparison, not a finding this run's
     policy classified, so re-running that machinery over it would either be

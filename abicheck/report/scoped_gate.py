@@ -97,7 +97,7 @@ class ScopedGateChangeHelpers:
 
     Supplied by the caller (``reporter_contract_blocks.
     render_json_with_side_facts``, via ``reporter.py``'s own
-    :data:`~abicheck.reporter._SCOPED_GATE_HELPERS`) rather than resolved
+    :data:`~abicheck.json_sections.SCOPED_GATE_HELPERS`) rather than resolved
     here via ``importlib`` -- see this module's own docstring for why.
     """
 
