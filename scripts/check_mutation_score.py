@@ -1797,6 +1797,15 @@ def main(argv: list[str] | None = None) -> int:
             shard_units,
             args.baseline_file,
         )
+    elif args.diff_only:
+        # --diff-only measured only this diff's functions. Comparing that
+        # against the whole-population baseline would read every unmeasured
+        # module as improved, so the comparison is skipped; drift is the weekly
+        # full run's question.
+        print(
+            "mutation-score: --diff-only: whole-population baseline comparisons "
+            "skipped (the run measured only this diff's functions)"
+        )
     elif baseline_modules is not None:
         failures, skipped_modules = check_per_module(
             records, baseline_modules, scope_modules
@@ -1833,7 +1842,9 @@ def main(argv: list[str] | None = None) -> int:
             "run with --write-baseline to establish it."
         )
 
-    if total_baseline is None:
+    if args.diff_only:
+        pass  # reported with the per-module check above
+    elif total_baseline is None:
         print(
             "mutation-score: global-total baseline not set — report-only. The "
             "per-module baseline file is the preferred gate."
