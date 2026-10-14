@@ -133,17 +133,24 @@ def test_fatal_axis_still_wins_over_toolchain_bound() -> None:
 # ── 2. detached debuginfo ─────────────────────────────────────────────────
 
 
-def _elf_host() -> Path:
-    lib = Path(sys.executable).resolve()
-    if not sys.platform.startswith("linux") or lib.read_bytes()[:4] != b"\x7fELF":
-        pytest.skip("needs an ELF host binary")
-    return lib
+class _FakeElf:
+    """Stands in for pyelftools' ``ELFFile``: no ``.comment``, no DWARF."""
+
+    def __init__(self, _fh: object) -> None:
+        pass
+
+    def get_section_by_name(self, _name: str) -> None:
+        return None
 
 
 def test_detached_debug_consulted_only_when_image_has_no_producer(
-    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    lib = _elf_host()
+    from elftools.elf import elffile
+
+    monkeypatch.setattr(elffile, "ELFFile", _FakeElf)
+    lib = tmp_path / "libx.so"
+    lib.write_bytes(b"\x7fELF")
     lang = ENUM_DW_LANG["DW_LANG_C_plus_plus_14"]
     seen: list[Path] = []
 
@@ -476,3 +483,132 @@ def test_macho_object_real_clang(tmp_path: Path) -> None:
     producer, lang = read_macho_producer(obj)
     assert producer == banner.strip()
     assert lang is not None
+
+
+# ── pure-Python branch coverage (no host binary, no external tools) ──────
+
+
+class _Attr:
+    def __init__(self, value: object) -> None:
+        self.value = value
+
+
+class _CU:
+    def __init__(self, attrs: dict[str, object] | None) -> None:
+        self._attrs = attrs
+
+    def get_top_DIE(self) -> object:
+        if self._attrs is None:
+            raise ValueError("truncated CU")
+        attrs = {k: _Attr(v) for k, v in self._attrs.items()}
+        return type("_Die", (), {"attributes": attrs})()
+
+
+class _Dwarf:
+    def __init__(self, *cus: dict[str, object] | None) -> None:
+        self._cus = [_CU(a) for a in cus]
+
+    def iter_CUs(self) -> list[_CU]:
+        return self._cus
+
+
+_GCC = "GNU C++17 13.3.0 -g"
+_DW_C99 = ENUM_DW_LANG["DW_LANG_C99"]
+
+
+@pytest.mark.parametrize(
+    ("cus", "expected"),
+    [
+        ((), (None, None)),
+        ((None, {}), (None, None)),  # broken CU, attribute-less CU
+        (({"DW_AT_language": "x"},), (None, None)),  # non-int language
+        (({"DW_AT_producer": b"  "},), (None, None)),  # blank producer
+        (({"DW_AT_producer": 7},), (None, None)),  # non-string producer
+        # rank 5 (unknown, no lang) loses to rank 3 (unknown C) ...
+        (
+            ({"DW_AT_producer": "asm"}, {"DW_AT_language": _DW_C99}),
+            (None, _DW_C99),
+        ),
+        # ... which loses to rank 1 (known C) ...
+        (
+            (
+                {"DW_AT_language": _DW_C99},
+                {"DW_AT_producer": b"GNU C99 13.3.0", "DW_AT_language": _DW_C99},
+            ),
+            ("GNU C99 13.3.0", _DW_C99),
+        ),
+        # ... and rank 2 (unknown C++) loses to rank 0 (known C++), which stops
+        # the walk: the trailing broken CU is never read.
+        (
+            (
+                {"DW_AT_language": _LANG_CXX14},
+                {"DW_AT_producer": _GCC, "DW_AT_language": _LANG_CXX14},
+                None,
+            ),
+            (_GCC, _LANG_CXX14),
+        ),
+        # rank 4 (known, no language) is kept over nothing.
+        (({"DW_AT_producer": _GCC},), (_GCC, None)),
+    ],
+)
+def test_best_cu_producer_ranking(
+    cus: tuple[dict[str, object] | None, ...],
+    expected: tuple[str | None, int | None],
+) -> None:
+    from abicheck.extract.dwarf_producer import best_cu_producer
+
+    assert best_cu_producer(_Dwarf(*cus)) == expected
+
+
+def test_read_producer_needs_real_dwarf(monkeypatch: pytest.MonkeyPatch) -> None:
+    from abicheck import dwarf_utils
+
+    elf = type(
+        "_E", (), {"get_dwarf_info": lambda self: _Dwarf({"DW_AT_producer": _GCC})}
+    )()
+    monkeypatch.setattr(dwarf_utils, "has_real_dwarf_info", lambda _e: False)
+    assert build_mode_capture._read_producer(elf) == (None, None)
+    monkeypatch.setattr(dwarf_utils, "has_real_dwarf_info", lambda _e: True)
+    assert build_mode_capture._read_producer(elf) == (_GCC, None)
+
+
+def test_read_detached_producer_reads_the_debug_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from elftools.elf import elffile
+
+    monkeypatch.setattr(elffile, "ELFFile", _FakeElf)
+    monkeypatch.setattr(
+        build_mode_capture,
+        "_read_producer",
+        lambda e: (_GCC, None) if isinstance(e, _FakeElf) else (None, None),
+    )
+    debug = tmp_path / "libx.debug"
+    debug.write_bytes(b"\x7fELF")
+    assert build_mode_capture._read_detached_producer(debug) == (_GCC, None)
+
+
+def test_capture_elf_without_source_path_is_untouched() -> None:
+    snap = AbiSnapshot(library="libx.so", version="1")
+    snap.platform = "elf"
+    assert capture_elf_build_mode(snap).build_mode is None
+
+
+def test_macho_load_command_walk_edges() -> None:
+    header = struct.pack("<IiiIIIII", 0xFEEDFACF, 0x01000007, 3, 1, 3, 24, 0, 0)
+    # LC_SYMTAB-like non-segment command, then a malformed (cmdsize 0) one.
+    cmds = struct.pack("<II", 0x2, 8) + struct.pack("<II", 0x19, 0) + b"\0" * 8
+    assert macho_dwarf_sections(header + cmds) == {}
+    # A universal header listing no slices.
+    assert macho_dwarf_sections(struct.pack(">II", 0xCAFEBABE, 0) + b"\0" * 24) == {}
+
+
+def test_macho_candidate_without_cu_attributes_is_skipped(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from abicheck.extract import dwarf_producer
+
+    obj = tmp_path / "a.o"
+    obj.write_bytes(_macho(_CLANG, _LANG_CXX14))
+    monkeypatch.setattr(dwarf_producer, "best_cu_producer", lambda _d: (None, None))
+    assert read_macho_producer(obj) == (None, None)
