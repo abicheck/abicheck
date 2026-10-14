@@ -6,8 +6,9 @@ A smoke-only, ``continue-on-error`` 3.15 leg that skipped ordinary PRs let a
 unnoticed. This pins each property whose silent loss would reopen that escape:
 which interpreters run the full suite, that every shard exists, that nothing
 gates the jobs off a PR or swallows their failure, and that the test selection
-matches the canonical 3.13 ``unit-tests`` lane (the oracle is ``ci.yml``, not a
-copy of the expression).
+matches the canonical 3.14 ``unit-tests`` lane (the oracle is ``ci.yml``, not a
+copy of the expression). The oldest supported Python (the ``requires-python``
+floor) is smoke-only: it must stay in the ``smoke`` matrix, not ``full-suite``.
 """
 
 from __future__ import annotations
@@ -56,12 +57,14 @@ def test_no_lane_is_gated_off_a_pr_or_allowed_to_fail(name: str) -> None:
         assert "continue-on-error" not in step, (name, step.get("name"))
 
 
-def test_full_suite_covers_the_floor_and_the_newest_interpreter() -> None:
+def test_full_suite_runs_the_newest_interpreter_and_not_the_floor() -> None:
     matrix = _COMPAT["jobs"]["full-suite"]["strategy"]["matrix"]
     floor = tomllib.loads((_ROOT / "pyproject.toml").read_text())["project"][
         "requires-python"
     ].removeprefix(">=")
-    assert set(matrix["python-version"]) == {floor, "3.15"}
+    assert set(matrix["python-version"]) == {"3.15"}
+    # The floor is still exercised, as a smoke lane (wheel install + imports).
+    assert floor in _COMPAT["jobs"]["smoke"]["strategy"]["matrix"]["python-version"]
 
 
 def test_free_threading_job_runs_a_free_threaded_interpreter_on_path() -> None:

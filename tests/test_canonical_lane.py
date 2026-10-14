@@ -50,11 +50,11 @@ def test_canonical_python_degrades_on_malformed_repo_facts(
     tmp_path: Path, content: str
 ) -> None:
     (tmp_path / "repo_facts.json").write_text(content, encoding="utf-8")
-    assert canonical_python(tmp_path) == (3, 13)
+    assert canonical_python(tmp_path) == (3, 14)
 
 
 def test_canonical_python_degrades_when_the_file_is_absent(tmp_path: Path) -> None:
-    assert canonical_python(tmp_path) == (3, 13)
+    assert canonical_python(tmp_path) == (3, 14)
 
 
 def test_canonical_python_reads_a_well_formed_repo_facts(tmp_path: Path) -> None:
@@ -66,7 +66,7 @@ def test_canonical_python_reads_a_well_formed_repo_facts(tmp_path: Path) -> None
 
 def test_canonical_python_reads_the_real_repo_facts_json() -> None:
     """Sanity: the real committed repo_facts.json's canonical_python value."""
-    assert canonical_python() == (3, 13)
+    assert canonical_python() == (3, 14)
 
 
 def test_is_canonical_lane_agrees_with_canonical_python(tmp_path: Path) -> None:

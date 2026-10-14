@@ -176,7 +176,7 @@ def compute_facts(*, existing: dict[str, Any] | None = None) -> dict[str, Any]:
         "latest_release": existing.get("latest_release", _project_version()),
         "example_cases": _example_cases(),
         "fast_test_cases_collected": _fast_test_cases_collected(),
-        "canonical_python": existing.get("canonical_python", "3.13"),
+        "canonical_python": existing.get("canonical_python", "3.14"),
         "generated_utc": existing.get("generated_utc", "unset"),
         "source_commit": _git_commit(),
     }
