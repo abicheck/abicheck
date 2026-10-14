@@ -37,7 +37,7 @@ from collections.abc import Callable, Mapping
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import TypeVar
 
-from ..pr_comment_base import CommentModel, Finding
+from .pr_comment_model import CommentModel, Finding
 
 #: How many targets one document may have folded. Real fan-outs are a build
 #: matrix -- tens of targets, not thousands -- so this sits far above any

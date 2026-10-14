@@ -35,7 +35,7 @@ whose size it can state exactly.
 
 from __future__ import annotations
 
-from .pr_comment_base import CommentModel, _esc
+from .pr_comment_base import CommentModel, escape_cell
 from .report.evidence_summary import tier_label
 
 # ---------------------------------------------------------------------------
@@ -163,7 +163,7 @@ def _confidence_line(model: CommentModel) -> str | None:
     ev = model.evidence
     if ev is None or not ev.confidence:
         return None
-    return f"Confidence: **{_esc(ev.confidence)}**"
+    return f"Confidence: **{escape_cell(ev.confidence)}**"
 
 
 def _evidence_block(model: CommentModel) -> list[str]:
@@ -190,9 +190,11 @@ def _evidence_block(model: CommentModel) -> list[str]:
     if conf:
         first.append(conf)
     if ev.evidence_tier:
-        first.append(f"Analysis depth: `{_esc(ev.evidence_tier)}`")
+        first.append(f"Analysis depth: `{escape_cell(ev.evidence_tier)}`")
     if ev.evidence_tiers:
-        sources = ", ".join(f"`{_esc(tier_label(t))}`" for t in ev.evidence_tiers)
+        sources = ", ".join(
+            f"`{escape_cell(tier_label(t))}`" for t in ev.evidence_tiers
+        )
         first.append(f"Evidence: {sources}")
     if first:
         out += ["> " + " · ".join(first), ""]
@@ -203,7 +205,7 @@ def _evidence_block(model: CommentModel) -> list[str]:
             f"({len(ev.coverage_warnings)})</summary>"
         )
         out.append("")
-        out += [f"- {_esc(w)}" for w in shown]
+        out += [f"- {escape_cell(w)}" for w in shown]
         hidden = len(ev.coverage_warnings) - len(shown)
         if hidden > 0:
             out.append(f"- _… {hidden} more, see the full report_")
@@ -234,7 +236,8 @@ def _evidence_block(model: CommentModel) -> list[str]:
                 continue
             shown_gaps = gaps[:_EVIDENCE_ITEMS_INLINE]
             listed = ", ".join(
-                f"`{_esc(g.name)}`" + (f" ({_esc(g.reason)})" if g.reason else "")
+                f"`{escape_cell(g.name)}`"
+                + (f" ({escape_cell(g.reason)})" if g.reason else "")
                 for g in shown_gaps
             )
             more = (
@@ -274,12 +277,12 @@ def _change_summary_block(model: CommentModel) -> list[str]:
     ]
     for row in summary.rows:
         out.append(
-            f"| {_esc(row.label)} | {row.removed} | {row.modified} | {row.added} |"
+            f"| {escape_cell(row.label)} | {row.removed} | {row.modified} | {row.added} |"
         )
     out.append("")
     if not summary.exact:
         reason = summary.inexact_reason or "the finding list was truncated upstream"
-        out.append(f"> ⚠️ Not exact totals — {_esc(reason)}.")
+        out.append(f"> ⚠️ Not exact totals — {escape_cell(reason)}.")
         out.append("")
     out += ["</details>", ""]
     return out
@@ -293,13 +296,13 @@ def _change_summary_block(model: CommentModel) -> list[str]:
 def _library_notes(model: CommentModel) -> list[str]:
     out: list[str] = []
     if model.removed_libraries:
-        listed = ", ".join(f"`{_esc(x)}`" for x in model.removed_libraries)
+        listed = ", ".join(f"`{escape_cell(x)}`" for x in model.removed_libraries)
         out += [f"> ⛔ Libraries removed: {listed}", ""]
     if model.added_libraries:
-        listed = ", ".join(f"`{_esc(x)}`" for x in model.added_libraries)
+        listed = ", ".join(f"`{escape_cell(x)}`" for x in model.added_libraries)
         out += [f"> ➕ New libraries: {listed}", ""]
     if model.scope_notice is not None:
-        out += [f"> 🧭 {_esc(model.scope_notice)}", ""]
+        out += [f"> 🧭 {escape_cell(model.scope_notice)}", ""]
     unmatched_old = [x for x in model.unmatched_old if x not in model.removed_libraries]
     unmatched_new = [x for x in model.unmatched_new if x not in model.added_libraries]
     if unmatched_old or unmatched_new:
@@ -308,8 +311,8 @@ def _library_notes(model: CommentModel) -> list[str]:
         # the trailing rule is the one D2 statement true of all of them.
         def _named(x: str) -> str:
             state = model.unmatched_states.get(x)
-            return f"`{_esc(x)}`" + (
-                f" ({_esc(state.replace('_', ' '))})" if state else ""
+            return f"`{escape_cell(x)}`" + (
+                f" ({escape_cell(state.replace('_', ' '))})" if state else ""
             )
 
         parts = []
@@ -391,7 +394,7 @@ def _scoped_notes(model: CommentModel) -> list[str]:
         missing_symbols = app.get("missing_symbols")
         n_missing = len(missing_symbols) if isinstance(missing_symbols, list) else 0
         out.append(
-            f"- `--used-by {_esc(app.get('app'))}`: **{_esc(app.get('verdict'))}** "
+            f"- `--used-by {escape_cell(app.get('app'))}`: **{escape_cell(app.get('verdict'))}** "
             f"(missing {n_missing} symbol(s), "
             f"{app.get('relevant_change_count', 0)} relevant change(s))"
         )
@@ -402,7 +405,7 @@ def _scoped_notes(model: CommentModel) -> list[str]:
             len(missing_entrypoints) if isinstance(missing_entrypoints, list) else 0
         )
         out.append(
-            f"- `--required-symbol` contract: **{_esc(rs.get('verdict'))}** "
+            f"- `--required-symbol` contract: **{escape_cell(rs.get('verdict'))}** "
             f"(missing {n_missing_ep} "
             f"entrypoint(s), {rs.get('relevant_change_count', 0)} relevant change(s))"
         )
