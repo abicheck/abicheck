@@ -80,7 +80,7 @@ def _with_filenames(facts: BundleFacts) -> BundleFacts:
     """`facts`, with `library_filenames` stamped to each library's own bare
     name -- what a real capture run records, and what
     `workflows.release_package._release_match_key` needs to derive the same
-    canonical key a live directory operand's own `_build_match_map` would."""
+    canonical key a live directory operand's own `build_match_map` would."""
     names = tuple(facts.per_library_snapshots)
     return BundleFacts(
         variant_fingerprint=facts.variant_fingerprint,

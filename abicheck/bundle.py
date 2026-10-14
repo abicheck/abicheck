@@ -121,7 +121,7 @@ def build_bundle_snapshot(libraries: dict[str, Path]) -> BundleSnapshot:
 
     Args:
         libraries: A {canonical_name: path} map (the same shape
-            ``_build_match_map`` produces in :mod:`abicheck.cli`).
+            ``binary_utils.build_match_map`` produces).
 
     Returns:
         A :class:`BundleSnapshot` with all libraries' :class:`ElfMetadata`
@@ -1002,7 +1002,7 @@ def discover_artifact_set(paths: list[Path], *, explicit: bool) -> dict[str, Pat
       the same library name (e.g. an explicit ``dir1/libfoo.so,
       dir2/libfoo.so`` naming two unrelated real files) are rejected
       outright — unlike ``compare``'s two-sided old-vs-new matching
-      (``_build_match_map``), a one-sided audit set has no "newest version
+      (``binary_utils.build_match_map``), a one-sided audit set has no "newest version
       wins" tiebreak that would be sound here.
 
     For the explicit-list form, every named path must look like a real ELF

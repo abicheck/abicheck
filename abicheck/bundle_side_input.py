@@ -20,7 +20,7 @@ Phase 13).
 fully implemented and parity-tested, but the plan's own Phase 2 status note
 records that no CLI surface feeds it a real stored OLD side --
 ``cli_compare_release.py`` (the release fan-out's Click entry point) and its
-``cli_compare_helpers.py``/``cli_helpers_compare.py`` siblings are all within
+``cli_compare_helpers.py`` sibling is within
 two lines of the AI-readiness 2000-line hard cap at the time this module was
 written (confirmed by ``wc -l`` immediately before this change; see this
 module's own Phase 13 status note in the G38 plan doc for the exact counts),
@@ -283,15 +283,14 @@ def compare_release_against_bundle_facts(
     else:
         new_files = [new_dir]
     # Version-aware duplicate resolution (the same rule the live release
-    # fan-out uses -- `cli_compare_release.py`'s own `_build_match_map`,
-    # itself now a thin `click.ClickException`-translating wrapper over this
-    # same `binary_utils.build_match_map` primitive), rather than a plain
+    # fan-out uses -- `binary_utils.build_match_map`, the primitive the CLI
+    # boundary also translates for Click), rather than a plain
     # last-write-wins dict build: a directory carrying more than one version
     # of a library (e.g. `libfoo.so.9` and `libfoo.so.10`) must not silently
     # resolve to whichever sorts last lexicographically (Codex review). Calls
     # the pure, Click-free primitive directly (ADR-061: this module is
     # classified `workflows`, which may not import the `frontends`-legacy
-    # `cli_helpers_compare.py`) -- an `AmbiguousLibraryMatchError` here
+    # a CLI helper module) -- an `AmbiguousLibraryMatchError` here
     # propagates as a plain Python exception, appropriate for a module with
     # callers outside any Click command.
     new_map, _match_warnings = build_match_map(new_files)

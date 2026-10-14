@@ -177,17 +177,11 @@ def _fold_compile_db_tokens(
     interleaved as ``(*tokens, *split(ctx.gcc_options), *ctx.gcc_option_
     tokens)``: the legacy tokens first (lowest precedence), then whatever
     *ctx* already carried, in the same relative order it always had.
-    Mirrors ``cli_helpers_compare._merge_gcc_options``'s own ordering intent
-    (that function cannot be imported here: it lives in a ``cli_*`` module,
-    and this file is under ``workflows/artifact/`` -- an engine-layer tree
-    ``scripts/check_ai_readiness.py``'s ``engine-cli-boundary`` check
-    forbids importing a CLI sibling from) -- the combined *effective* token
-    sequence a real ``-p compile_commands.json`` run would produce is
-    identical to what ``_merge_gcc_options``'s own string-join path
-    produces for any token *without* embedded whitespace (every existing
-    precedence test's fixture shape); it is *this* function that is now
-    correct where ``_merge_gcc_options`` still is not, for a token that
-    does carry embedded whitespace.
+    The identical splitter every consumer applies downstream is used here,
+    so a token with embedded whitespace is never re-joined by a string
+    round-trip. (This function cannot import a CLI helper: ``workflows/artifact/``
+    is an engine-layer tree that ``scripts/check_ai_readiness.py``'s
+    ``engine-cli-boundary`` check keeps free of CLI siblings.)
     """
     if not tokens:
         return ctx

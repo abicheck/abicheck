@@ -337,7 +337,7 @@ def has_explicit_std(
     value depends on the caller's language mode, which this function does
     not currently receive) *and* every one of this function's several
     call sites across ``dumper_ast_config.py``/``dumper_toolchain.py``/
-    ``cli_helpers_compare.py``/``service_compare_evidence.py``/
+    ``service_compare_evidence.py``/
     ``dry_run_estimate.py`` re-verified against the new signature -- a genuine,
     cross-cutting change, not a follow-up to one caller.
 

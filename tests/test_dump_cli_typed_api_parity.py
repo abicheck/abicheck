@@ -443,7 +443,7 @@ def test_dump_cli_and_typed_api_agree_on_resolved_compile_context(
 # investigation): two shapes diverged field-by-field against a real g++
 # build + clang L2 parse, and both traced to ONE root cause -- the `dump`
 # CLI ran the legacy `-p`/`--compile-db` auto-match
-# (`cli_helpers_compare._resolve_build_context_flags`, folded into
+# (`workflows.artifact.compile_db_match.match_compile_db`, folded into
 # `effective_gcc_options`) *in addition to* the P0.3 L3->L2 fold, when both
 # are fed by the same `--build-info` compile database, while every other
 # resolver runs the fold alone:

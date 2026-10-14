@@ -29,7 +29,7 @@ already depends on `storage`). `workflows` may import both `storage` and
 coordination needs: `project_snapshot_legacy.materialize_release_variant_
 artifacts` does the storage-layer unpacking (returns `{artifact_id: (Path,
 ArtifactRef)}`), and this module re-keys that by the same canonical
-library-matching key a live directory operand's own `_build_match_map`
+library-matching key a live directory operand's own `build_match_map`
 computes, so a stored-side map matches a live-side one for the same
 library. A `frontends` command (`cli_resolve.py`/`cli_compare_release_
 matrix.py`) reaches this module directly rather than either `storage`-
@@ -188,7 +188,7 @@ def _release_match_key(
 ) -> str:
     """The canonical `cli_compare_release` matching key for *artifact*,
     matching the same `binary_utils._canonical_library_key()` a live
-    directory-of-`.so`-files operand's own `_build_match_map` uses -- the
+    directory-of-`.so`-files operand's own `build_match_map` uses -- the
     property a stored/live A1.7 comparison depends on: a package-sourced
     map and a live-directory-sourced map must agree on the key for the same
     library, or the two can never match via `_match_release_keys`'s plain

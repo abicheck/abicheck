@@ -772,7 +772,7 @@ def compute_gate_decision(
     Only the severity-aware scheme has a decision to compute here: the legacy
     verdict-based scheme has no per-category configuration to single a
     blocker out from, and every caller (``gate_decision.
-    gate_decision_for_result``, ``cli_helpers_compare.
+    gate_decision_for_result``, ``workflows.consumer_scope_gate.
     _scoped_severity_summary``) already handles ``severity_config is None``
     itself before calling in.
 

@@ -1249,8 +1249,8 @@ class TestPackSuppliedSeverityActivatesAuto:
 
 class TestSymbolListParsing:
     def test_the_shared_merge_helper_reads_both_sources(self, tmp_path):
-        # `cli_helpers_compare` re-exports this as `_collect_force_public_symbols`,
-        # so the live CLI and this resolver share one definition of the format.
+        # `collect_force_public_symbols` is the one definition the live CLI and
+        # this resolver share, so the format stays in one place.
         listed = tmp_path / "symbols.txt"
         listed.write_text("# comment\n\nfrom_file\n  spaced  \n")
         assert collect_force_public_symbols(("inline", " ", ""), listed) == {

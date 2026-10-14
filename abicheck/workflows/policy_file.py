@@ -28,7 +28,7 @@ already gets this right for the real load (``load_suppression_and_policy``);
 this module gives the flat CLI helpers (``cli_params.py``,
 ``cli_buildsource_helpers.py``, ``cli_compare_helpers.py``,
 ``cli_compare_receipt.py``, ``cli_compare_release.py``,
-``cli_compare_release_helpers.py``, ``cli_helpers_compare.py``,
+``cli_compare_release_helpers.py``,
 and formerly ``cli_scan_baseline.py``) the same route for the names they type-check or
 call directly.
 

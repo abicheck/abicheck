@@ -749,9 +749,7 @@ def collect_force_public_symbols(
     ignored (à la abi-compliance-checker ``-symbols-list``). Inline trailing
     comments are not stripped — a ``#`` must start the line to be a comment.
 
-    Lives here rather than in ``cli_helpers_compare.py`` (which re-exports it
-    as ``_collect_force_public_symbols`` for its existing callers) so this
-    module can build ``surface.explicit_scope`` from *both* sources without
+    Lives here rather than in the CLI layer, so this module can build ``surface.explicit_scope`` from *both* sources without
     importing a CLI-layer module. Reading only the inline tuple made a
     list-file-only invocation resolve to no explicit scope at all, and a
     mixed one silently drop every symbol the file supplied (Codex review).

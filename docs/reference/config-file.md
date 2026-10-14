@@ -31,7 +31,7 @@ turn overrides the built-in defaults (`CLI > config > default`).
 - Loader (build/source blocks): `load_build_config()` in
   `abicheck/buildsource/inline.py`; parsed into the `BuildConfig` dataclass.
 - Precedence resolver (`compare` project-contract blocks):
-  `resolve_compare_config()` in `abicheck/cli_helpers_compare.py`.
+  `resolve_compare_config()` in `abicheck/workflows/compare_configuration.py`.
 
 ---
 

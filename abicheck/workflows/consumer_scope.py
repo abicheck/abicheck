@@ -426,7 +426,7 @@ def scope_diff_to_consumer_facts(
     # consumer, and under a scoped gate (`scope_decides_exit=True`)
     # `apply_scope` only ever demotes, so closing per consumer would
     # intersect the consumers' relevant sets instead of unioning them.
-    # The scoped gate's orchestrator (`cli_helpers_compare.
+    # The scoped gate's orchestrator (`consumer_scope_gate.
     # _apply_used_by_scoping`, or `check_appcompat` below) makes the single
     # `close_consumer_scope` call.
     return AppCompatResult(

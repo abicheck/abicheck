@@ -19,8 +19,7 @@ pipeline.
 
 See ``docs/contribute/known-gaps.md``'s "ADR-063 Phase 1" entry for the full
 mechanism this closes and what remains open. In short: ``dump_cmd``'s legacy
-``-p``/``--compile-db`` auto-match (``cli_helpers_compare.
-_resolve_build_context_flags``, backed by ``build_context_for_header``/
+``-p``/``--compile-db`` auto-match (``match_compile_db``, backed by ``build_context_for_header``/
 ``build_context_union_fallback``) is a *different* code path from the P0.3
 L3->L2 fold (``buildsource.l2_seed.seed_includes_and_fold_compile_context``,
 backed by ``header_compile_context.resolve_header_compile_context``) the
@@ -38,7 +37,7 @@ no way to see it at all.
 
 ``execute_dump_request``'s new ``compile_db_tokens`` parameter closes
 that gap for any caller willing to compute the legacy match's own flags
-(exactly as ``dump_cmd`` already does, via ``_resolve_build_context_flags``)
+(exactly as ``dump_cmd`` already does, via ``match_compile_db``)
 and pass them through -- proven here end to end against a real compile
 database and a real clang L2 parse, not merely unit-tested against the
 merge helper in isolation. The real ``dump`` CLI's ELF run does **not** pass

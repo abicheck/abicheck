@@ -125,7 +125,7 @@ class TestCanonicalLibraryKeyCaseFolding:
         # own content -- the snapshot's bytes are JSON, so
         # _pe_is_dll_content (which reads the actual file) never recognizes
         # it as a PE image. Without matching the embedded ".dll" segment,
-        # compare-release's _build_match_map reported the same release's
+        # compare-release's build_match_map reported the same release's
         # snapshot published under two case spellings as an unrelated
         # removal+addition (Codex review, fresh evidence).
         assert _canonical_library_key(

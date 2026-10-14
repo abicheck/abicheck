@@ -269,7 +269,7 @@ class TestWhitespaceBearingTokensSurviveTheFold:
     ) -> None:
         """An explicit, caller-supplied `ctx.gcc_options` must still win
         over the legacy match for a conflicting flag -- the exact
-        precedence `_merge_gcc_options`'s string-join ordering already
+        precedence the legacy CLI merge's string-join ordering already
         established. Verified via the *combined* effective token sequence
         (mirroring how `test_legacy_compile_db_typed_threading.py`'s own
         precedence test reads it), since the encoding moved from a single

@@ -490,7 +490,7 @@ class TestCompareReleaseAgainstBundleFactsResolutionUnit:
     ) -> None:
         """Codex review (P2): two versions of one library in *new_dir* must
         resolve via the same version-aware duplicate resolution the live
-        release fan-out uses (`cli_helpers_compare._build_match_map`), not
+        release fan-out uses (`binary_utils.build_match_map`), not
         a plain dict-build that keeps whichever path a directory listing
         happens to enumerate last. `libcore.so.9` sorts after `libcore.so.10`
         lexicographically but must lose to it under real version

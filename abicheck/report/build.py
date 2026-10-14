@@ -322,7 +322,7 @@ def _snapshot_diff_result(result: DiffResult) -> DiffResult:
     after construction, reported as a follow-up finding on this same fix).
 
     ``copy.copy`` (not ``dataclasses.replace``) on purpose: some scoping
-    passes (``cli_helpers_compare.py``'s ``result.scoped_only_changes =
+    passes (``cli_compare_helpers.py``'s ``result.scoped_only_changes =
     ...``) attach attributes that are not declared ``DiffResult`` fields at
     all; ``dataclasses.replace`` reconstructs the object through
     ``__init__`` and would silently drop them, while ``copy.copy`` carries
