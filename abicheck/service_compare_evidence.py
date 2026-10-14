@@ -134,13 +134,12 @@ def source_replay_extractor(compile: CompileContext | None, header_backend: str)
     replays a translation unit's declarations but none of its macros, so an
     L4 replay under it never saw a `#define` change.
     """
-    import os
+    from .extract.headers.backend_plan import PINNABLE_BACKENDS, ast_frontend_pin
 
     if (
         requested_frontend_override(compile, header_backend).lower() == "auto"
         # The only env values L2 honors; any other (`auto`, a typo) is unset.
-        and os.environ.get("ABICHECK_AST_FRONTEND", "").strip().lower()
-        not in ("castxml", "clang", "hybrid")
+        and ast_frontend_pin() not in PINNABLE_BACKENDS
     ):
         return "clang"
     return effective_frontend(compile, header_backend)
