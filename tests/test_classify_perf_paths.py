@@ -892,7 +892,15 @@ class TestTheCanonicalOwnerIsClassifiedNotJustTheFacade:
     def test_the_owner_defines_it_and_the_facade_does_not_re_export_it(self) -> None:
         """The premise: if this stops holding, the test above is about the wrong file."""
         facade = (_REPO_ROOT / "abicheck" / "service.py").read_text()
-        assert "_attach_header_graph" not in facade
+        for name in (
+            "_attach_header_graph",
+            "_try_header_scoped_dump",
+            "_has_matched_public_surface",
+            "_resolve_symvers",
+            "_typeinfo_functions",
+            "_render_deps_section_md",
+        ):
+            assert name not in facade, name
         owner = (_REPO_ROOT / "abicheck" / "service_header_graph_attach.py").read_text()
         assert "def _attach_header_graph(" in owner
 
