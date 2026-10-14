@@ -3,7 +3,7 @@
     "files": {
       "abicheck/btf_metadata.py": "614321e6140b32e7518deb3991dc9b9421107688c952542808ec4da88a17dc73",
       "abicheck/ctf_metadata.py": "42d3f588c6c4567c2a9d43a3ef5b886a753c37dd5357a4199d81d7ffc60d2109",
-      "abicheck/dumper.py": "4abf1baed31c0296f81a8ae230d09bdc7bd6220d7590f543279f4908501def75",
+      "abicheck/dumper.py": "fe4920bdd0c247e016c2e441a9643be2a3b7eba3c1026aa2a85c15070b22e48e",
       "abicheck/dwarf_advanced.py": "ac7ed6d945a00dedbfb71d79f98b2be5b9b42d2bbe4810babfe485aad266b5cb",
       "abicheck/dwarf_metadata.py": "d558cc589ad135f68197c686cc21a8755a1949d6a43df8aed5b212ceb69f0c57",
       "abicheck/dwarf_presence.py": "7e73580ec7a02fdf24e3815cb89e42aa6fe00e46e8cda6b7fe9d547f06ac3f06",
@@ -52,7 +52,7 @@
       "abicheck/extract/export_symbol_identity.py": "2146bd67207411943258124a24271542c8b9767344c1b404aaa9133c0358ff00",
       "abicheck/extract/export_table_read.py": "7783c3baba176ef8b47cb99361f389984bb1797c37ba5d9120866359f60c3601",
       "abicheck/extract/flat_map_dependency_scope.py": "77659ce966d856c4b9008cdc6cf88250a3f50314fdf04140712f4e3797894648",
-      "abicheck/extract/header_ast_backend.py": "b52c062fe85fc8b94c67ad7f6925544a2df62c4eebbf8ebd664a1b275c1656ce",
+      "abicheck/extract/header_ast_backend.py": "e2f52ab0a4a18b87be96c439cdda942531e6b8823b83b38a478eecdebbc66eae",
       "abicheck/extract/header_ast_cache_producers.py": "9fdd20b55d57ae059e2d10136f11ad02149acf1eeffe9439b54c1fa67ea1e035",
       "abicheck/extract/header_ast_fields.py": "436f6feaed4da7566a551fa44d3e102d28964fecc57a22821111d7f63c6f5840",
       "abicheck/extract/header_exclusions.py": "254ca6e4ccf7366b9db516183d6814cb865c279845abe7d05051ac2f72bf0884",
@@ -62,6 +62,7 @@
       "abicheck/extract/headers/ast_config.py": "546501a3d8f2959b97e1d9c0fbb066c65b0a847fb942f7672637fe64b0496aa1",
       "abicheck/extract/headers/ast_config_cpp20_chains.py": "ceeadbcb1d8e2eaac5eb325a3fb7c668614ce605bc04bb03835fcc4957e53c97",
       "abicheck/extract/headers/backend.py": "144cbe76456b6bceaf56f0edd0f3398f171178a222c8b968d53f8a17ee05a21b",
+      "abicheck/extract/headers/backend_plan.py": "1f02babf0ead52a65e4fa08dff8ce5b2a9d60feb1d02d22e7db30ee050cf8717",
       "abicheck/extract/headers/castxml/__init__.py": "cebb319d35840200904dde9fe4ad16489124b02327a50d8351b086844ee19943",
       "abicheck/extract/headers/castxml/backend.py": "8bd413f9bd18ffd621583f95cd0a68790454145ea91042eb69929edd11fb77de",
       "abicheck/extract/headers/castxml/calling_convention.py": "ab4cd4474d11eb0da2216b29393e9daf1dbcf94226204237fd4c0381adacbcbb",
@@ -106,7 +107,7 @@
       "abicheck/extract/headers/manifest.py": "2b32d5f334b3a72ea46723933f0e5ae8cb1bf829f345caf9af0d0c911f70a50f",
       "abicheck/extract/headers/scope_segments.py": "d413edec257eb1334c829263770b66dc2eda3d263c765f699eac9f7e3ace9e65",
       "abicheck/extract/headers/sysinc.py": "437f7d1ebb0bbdccc50e49fdc5e0e028595920ad7accdc2cffa064c79c8c8672",
-      "abicheck/extract/headers/toolchain.py": "d931ab887cf450483ccdf3ddaf3e598204969b04d95a4227c683308bf716c830",
+      "abicheck/extract/headers/toolchain.py": "59c212cd9e7efca69694dfcfb7a363381c8c5e0c762dc3e760197af0f651709c",
       "abicheck/extract/library_export_facts.py": "071b2a58f284753b57fa2e374680a57e9ce6897877b65a84fb92f420e7cf2ab7",
       "abicheck/extract/macho_build_signals.py": "c277bfdd55f26aae61af66c8fa6c5cdc5fa45acc49a3ae513af5899417db88bb",
       "abicheck/extract/mangled_foreign_template_args.py": "68a87749f13cafca0ce75725b98b22f7695afaf20a71a158759eef220ec72274",
@@ -145,9 +146,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "627a68cbc9371de580bbbee258663efdc6482e0c92403f530291ff7a24cd57af",
+    "fingerprint": "3ad2280e2bb95658657123629d58adba279d81e1d2ae96fd62911d59bb8d9a78",
     "generation": 3,
-    "reason": "bumped to 3 for a semantic change"
+    "reason": "Refactor only: header-backend environment decisions (AST fallback, unsupported-castxml opt-in, ABICHECK_AST_FRONTEND pin) now read through extract/headers/backend_plan.py; backend selection, fallback decisions, error messages and extracted facts are unchanged, and the full fast suite passes apart from this fingerprint."
   },
   "resolver": {
     "files": {
