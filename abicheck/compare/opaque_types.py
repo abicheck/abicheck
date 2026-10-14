@@ -58,6 +58,7 @@ from ..model.qualified_name_split import (
     skip_template_arguments,
 )
 from ..model.surface_facts import is_abi_visible
+from .opaque_leaf_lookup import leaf_hidden, leaf_hiders, scope_of
 
 if TYPE_CHECKING:
     from ..model import AbiSnapshot, RecordType
@@ -687,22 +688,9 @@ def _type_is_by_value_referenced(tname: str, text: str) -> bool:
     would treat a real, separately-scoped ``other::Handle`` reference as
     exposing ``ns::Handle`` too.
 
-    **Documented, still-open gap** (Codex review on PR #1041, follow-up
-    round): rejecting a preceding ``::`` closes the *qualified*-collision
-    case, but a *bare* same-leaf reference in a genuinely different scope
-    (e.g. a function declared inside namespace ``other`` whose own
-    unqualified ``Handle`` parameter really means ``other::Handle``) still
-    matches ``ns::Handle``'s leaf candidate -- there is no textual marker
-    left to reject on, since the reference carries no qualifier at all. This
-    is the exposure-detection mirror of the identical, already-accepted
-    bare-name-collision limitation on the *suppression* side (see
-    ``TestKnownGapStaysDocumented`` in ``tests/test_opaque_identity_tiers.py``)
-    -- both are the same underlying limitation of matching by rendered
-    spelling instead of by an entity's actual owning scope, which is
-    exactly what ``EntityId``-based identity resolution exists to close
-    properly, not a heuristic patch here. See
-    ``test_find_by_value_types_leaf_widening_bare_reference_in_another_scope_is_a_documented_gap``
-    in ``tests/test_cov95_diff_filtering.py`` for the pinned reproduction.
+    A *bare* same-leaf reference in a genuinely different scope carries no
+    qualifier to reject on; :func:`find_by_value_types` resolves that case
+    by C++ unqualified lookup instead (:func:`~abicheck.compare.opaque_leaf_lookup.leaf_hidden`).
 
     Each regex scan is gated on a plain substring check first (``tname in
     text`` / ``leaf in text``) -- a token match always contains its own
@@ -746,33 +734,45 @@ def _referenced_by_value(tname: str, leaf: str | None, text: str) -> bool:
 
 
 def find_by_value_types(snap: AbiSnapshot, opaque: set[str]) -> set[str]:
-    """Return the subset of *opaque* types that any public function/variable uses by value."""
+    """Return the subset of *opaque* types that any public function/variable uses by value.
+
+    A bare leaf occurrence counts for a qualified candidate unless the
+    referencing declaration's own scope and a same-leaf declaration in
+    *snap* prove it names that other declaration (:func:`~abicheck.compare.opaque_leaf_lookup.leaf_hidden`).
+    """
     candidates = [(tname, _leaf_candidate(tname)) for tname in opaque]
+    hiders = leaf_hiders(snap, opaque)
     by_value_types: set[str] = set()
     # A scan only ever adds to `by_value_types`, so a spelling already
-    # scanned cannot add anything: most parameters repeat a handful of type
-    # spellings (20k scans of a few hundred texts on a 60-module library).
-    scanned: set[str] = set()
+    # scanned (in the same lookup scope) cannot add anything: most
+    # parameters repeat a handful of type spellings.
+    scanned: set[tuple[str, tuple[str, ...]]] = set()
 
-    def scan(text: str) -> None:
-        if text in scanned:
+    def scan(text: str, owner: str) -> None:
+        scope = scope_of(owner) if hiders else ()
+        if (text, scope) in scanned:
             return
-        scanned.add(text)
+        scanned.add((text, scope))
         for tname, leaf in candidates:
-            if tname not in by_value_types and _referenced_by_value(tname, leaf, text):
+            if tname in by_value_types:
+                continue
+            h = hiders.get(tname)
+            if h and leaf is not None and leaf_hidden(tname, h, scope):
+                leaf = None
+            if _referenced_by_value(tname, leaf, text):
                 by_value_types.add(tname)
 
     for func in snap.declarations.functions:
         if not is_abi_visible(func):
             continue
-        scan(func.return_type.strip())
+        scan(func.return_type.strip(), func.name)
         for param in func.params:
             # Only a by-value parameter can expose a type by value.
             if param.pointer_depth == 0:
-                scan(param.type.strip())
+                scan(param.type.strip(), func.name)
     # Also check variables — a public variable of this type means it's by-value
     for var in snap.declarations.variables:
         if not is_abi_visible(var):
             continue
-        scan(var.type.strip())
+        scan(var.type.strip(), var.name)
     return by_value_types

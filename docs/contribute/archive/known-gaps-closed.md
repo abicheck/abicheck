@@ -16,6 +16,12 @@ re-verification status line (2026-10-09, `456989f`). Do not re-open an
 entry from here without reproducing it on current `main`; record a new
 gap on the main page instead.
 
+### Opaque-type suppression fell back to bare RecordType.name when stable identities were incomplete (closed 2026-10-14)
+
+**Status (2026-10-14): CLOSED.** Both remaining mechanical parts are fixed. `find_by_value_types`'s leaf widening now applies C++ unqualified lookup (`compare/opaque_leaf_lookup.py`): a bare leaf reference written inside a known scope does not expose `ns::Handle` when the snapshot declares a same-leaf type in a scope that lookup reaches first; with no such declaration, or no known scope, the reference stays exposed. `find_opaque_struct_types`' asymmetric-existence rule now pairs a forward declaration with a definition under either spelling (`name` or `qualified_name`), so a DWARF forward declaration keyed `ns::Handle` and a header definition keyed `Handle`/`ns::Handle` (or the reverse) are no longer read as "absent", and a visible declaration's `qualified_name` also blocks the spelling tier. Accepted by design, not a gap: a change with no identity whose spelling is shared only by opaque declarations is suppressed by spelling, since no identity or visible namesake contradicts it. Regression: `tests/test_opaque_leaf_lookup.py`.
+
+[Full write-up](../known-gaps/opaque-type-suppression-still-falls-back-to-bare-recordtypename.md)
+
 ### A snapshot's `build_mode` is captured only for ELF, and only from the main image (closed 2026-10-14)
 
 **Status (2026-10-14): CLOSED.** `comparability_profile.check_build_mode_comparable` bounds a run whose two snapshots record different known compiler families (non-fatal; `layout`/`runtime` unverified plus a `coverage_warnings` reason; unrecorded or `unknown` on either side is not a mismatch). `extract/build_mode_capture.py` reads the producer from the dump's detached debug file when the ELF main image has none, and from a Mach-O `__DWARF` segment (object, dSYM) via `extract/macho_build_signals.py`. PE stays `None` by design: no reliable compiler-family signal.
