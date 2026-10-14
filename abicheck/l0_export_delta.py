@@ -18,7 +18,7 @@ and ``scan --against``'s baseline comparison.
 
 Before this module, the same "re-resolve both sides symbols-only, diff them
 unscoped, and keep only the ``func_removed_elf_only`` fact" logic was
-hand-copied in two places -- ``cli_helpers_compare.fold_l0_hard_removals``
+hand-copied in two places -- ``fold_l0_hard_removals``
 (direct ``compare``) and the since-retired ``cli_scan_baseline._run_baseline_compare`` (``scan
 --against``) -- each docstring explicitly cross-referencing the other as its
 twin. :func:`collect_l0_export_delta` is the single implementation both now
@@ -42,7 +42,7 @@ without manufacturing anything the ELF layer doesn't already assert
 Deliberately narrow: this module owns only the "resolve two paths
 symbols-only and extract the hard fact" core. It does NOT own staleness
 checking against an already-resolved snapshot's own ``source_path`` (that
-stays in ``cli_helpers_compare.fold_l0_hard_removals``, since only the
+stays in ``fold_l0_hard_removals``, since only the
 direct-``compare`` call site re-derives paths from snapshots that could have
 been read from a stale pre-dumped JSON file; ``scan --against`` already holds
 the real, freshly-resolved ``Path`` objects and has nothing to go stale

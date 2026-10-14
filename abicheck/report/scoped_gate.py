@@ -46,8 +46,7 @@ apply it that way. It moved here once ``reporter.to_json``/``to_stat_json``
 themselves gained a real ``contract_evaluation`` parameter, threaded from
 the CLI the same way ``severity_config``/``show_only`` already were -- the
 other inputs the fold needs (``used_by``, ``required_symbols``, and every
-``scoped_*`` ``DiffResult`` attribute ``cli_helpers_compare.py``/
-``cli_compare_helpers.py`` stamp before rendering) were already plain
+``scoped_*`` ``DiffResult`` attribute ``cli_compare_helpers.py`` stamp before rendering) were already plain
 attributes read off *result* via ``getattr``, so nothing about *how* they
 reach this fold changed -- only *when* the fold itself runs.
 ``cli_compare_fold._fold_scoped_compat_into_text``'s JSON branch is now a
@@ -153,7 +152,7 @@ def apply_scoped_gate(
     """Fold ``--used-by``/``--required-symbol(s)`` *enrichment* into *payload*.
 
     No-op unless *result* carries a stamped ``used_by``/``required_symbols``
-    (set by ``cli_helpers_compare.py`` before rendering ever starts) --
+    (set by ``cli_compare_helpers.py`` before rendering ever starts) --
     every other caller of ``to_json``/``to_stat_json`` is unaffected.
 
     Workstream D-S1: ``verdict``/``severity``/``run_outcome``/``summary`` are

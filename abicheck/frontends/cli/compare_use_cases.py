@@ -17,7 +17,7 @@
 actually renders.
 
 Split out of ``cli_compare_helpers.run_compare`` (ADR-068 D4/Phase 5) rather
-than folded into a sibling helper module, since both ``cli_helpers_compare.py``
+than folded into a sibling helper module, since both ``cli_compare_helpers.py``
 and ``cli_compare_options.py`` are already at their own ``architecture/
 debt.yaml`` ``no_growth`` ceilings -- a fresh, single-purpose leaf module is
 the "move responsibility to a properly-owned module" ADR-061 asks for,

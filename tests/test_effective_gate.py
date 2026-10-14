@@ -22,7 +22,7 @@ closure package's task asked for -- both callers now fold onto the *same*
 :class:`~abicheck.policy.effective_gate.GateSeverityState` shape, and both
 ``GateOptions`` (a property) and ``ResolvedCompareConfig`` (via
 ``workflows.gate.effective_gate_for_resolved_compare_config`` -- a free
-function rather than a third property, since ``cli_helpers_compare.py`` sits
+function rather than a third property, since ``cli_compare_helpers.py`` sits
 at its own ``architecture/debt.yaml`` no-growth cap) resolve to the *same*
 :class:`~abicheck.policy.effective_gate.EffectiveGate` shape -- checked
 against inputs beyond any one example, per this repo's own "General

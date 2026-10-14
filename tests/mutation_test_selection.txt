@@ -157,7 +157,6 @@ tests/test_cli_dump_manifest.py
 tests/test_cli_export_grammar.py
 tests/test_cli_frontend_context.py
 tests/test_cli_help.py
-tests/test_cli_helpers_compare_coverage.py
 tests/test_cli_new_features.py
 tests/test_cli_phase1.py
 tests/test_cli_project_history.py
@@ -178,6 +177,7 @@ tests/test_compare_config_public_header_dirs.py
 tests/test_compare_dispatch.py
 tests/test_compare_dry_run_compile_db.py
 tests/test_compare_env_matrix_digest_formats.py
+tests/test_compare_helper_owners.py
 tests/test_compare_inline_embed_config_trust.py
 tests/test_compare_input_modes.py
 tests/test_compare_no_baseline_cli.py

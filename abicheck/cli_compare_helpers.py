@@ -17,7 +17,7 @@
 
 The click-decorated ``compare`` wrapper in :mod:`abicheck.cli` parses options
 and delegates to :func:`run_compare` here, keeping cli.py under the
-AI-readiness file-size cap. Not the leaf helper module ``cli_helpers_compare``
+AI-readiness file-size cap. Not a leaf helper module
 (plain, cli-independent utilities): ``run_compare`` drives the full
 single-pair compare flow and reuses the option-parsing/render/exit helpers
 still in :mod:`abicheck.cli` (imported back below -- the by-design sibling
@@ -50,9 +50,6 @@ from .cli_compare_options import (
     echo_coverage_warnings,
 )
 from .cli_dump_helpers import resolve_dump_debug_format
-from .cli_helpers_compare import (
-    _warn_ignored_flags,
-)
 from .cli_options import (
     resolve_compile_context,
     resolve_contract_domain,
@@ -95,6 +92,7 @@ from .frontends.cli.contract_overlays import (
     note_unapplied_post_manifest,
     post_manifest_allowlist_for,
 )
+from .frontends.cli.ignored_flag_warnings import _warn_ignored_flags
 from .frontends.cli.options.params import _load_suppression_and_policy
 from .frontends.cli.ownership_config import project_ownership_request
 from .frontends.cli.project_config import (

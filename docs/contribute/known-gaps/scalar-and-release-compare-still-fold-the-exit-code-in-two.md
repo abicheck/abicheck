@@ -29,7 +29,7 @@ worst member's. Both paths now share the per-member primitive
 (`workflows/member_compare.compare_member` -> `run_compare_request`), but the
 exit fold is still two implementations: the scalar one in
 `policy/exit_decision.py::resolve_compare_exit_decision` (driven from
-`cli_compare_fold`/`cli_helpers_compare`) and the release one in
+`cli_compare_fold`) and the release one in
 `policy/release_exit_decision.py` -> `exit_decision_precedence.resolve_release_exit_decision`.
 
 Axes only the release fold has, which a single fold must keep and which have

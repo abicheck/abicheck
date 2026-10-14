@@ -538,7 +538,7 @@ use_cases:
       canonical logical SONAME regardless of a hash-suffix rebuild.
     evidence:
       modules: [
-        abicheck/cli_helpers_compare.py,
+        abicheck/binary_utils.py,
         abicheck/bundle.py,
         abicheck/diff_cpp_patterns.py,
       ]

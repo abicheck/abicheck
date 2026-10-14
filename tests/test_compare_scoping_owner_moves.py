@@ -1,4 +1,4 @@
-"""Unit coverage for helpers moved out of ``cli_helpers_compare``.
+"""Unit coverage for helpers moved out of the retired CLI helper module.
 
 These pin the branches the CLI-level tests reach only incidentally: the
 redundant-change merge, and the optional provenance fields of a consumer

@@ -250,9 +250,8 @@ def _canonical_library_key(path: Path) -> str:
     Vendored auditwheel/delocate hash suffixes are stripped first (G9) so the
     same bundled dependency pairs across rebuilds despite its hash changing.
 
-    Lives in this leaf module (not ``cli_helpers_compare.py``, which re-exports
-    it for back-compat) so ``bundle.py``'s ``discover_artifact_set`` (ADR-056)
-    can use it without a ``bundle -> cli_helpers_compare -> service ->
+    Lives in this leaf module (not in a CLI helper) so ``bundle.py``'s ``discover_artifact_set`` (ADR-056)
+    can use it without a ``bundle -> CLI helper -> service ->
     dry_run_estimate -> bundle`` import cycle (`dry_run_estimate.py` imports `bundle`
     for the ``--artifact-set`` audit path).
 
@@ -388,8 +387,8 @@ def _version_sort_key(
     outrank the real SONAME version tokens and :func:`build_match_map` picks a
     stale duplicate over the newer one (Codex review, PR #551).
 
-    Lives here (not ``cli_helpers_compare.py``, which re-exports it for
-    back-compat, mirroring :func:`_canonical_library_key`'s own precedent) so
+    Lives here (not in a CLI helper, mirroring :func:`_canonical_library_key`'s
+    own precedent) so
     ``bundle_side_input.py``'s stored-facts driver (ADR-061: classified
     ``workflows``, which may not import a ``frontends``-legacy module) can
     use it directly.
@@ -459,7 +458,7 @@ def build_match_map(paths: list[Path]) -> tuple[dict[str, Path], list[str]]:
 
     A plain, Click-free primitive (see :class:`~abicheck.errors.
     AmbiguousLibraryMatchError`'s own docstring for why) -- lives here, not
-    ``cli_helpers_compare.py``, so ``bundle_side_input.py`` can call it
+    a CLI helper module, so ``bundle_side_input.py`` can call it
     without a ``frontends``-legacy import (ADR-061: ``workflows`` may not
     import ``frontends``). The CLI boundary translates
     :class:`AmbiguousLibraryMatchError`; there is no Click-raising wrapper.

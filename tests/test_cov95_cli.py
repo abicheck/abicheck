@@ -34,15 +34,13 @@ from click.testing import CliRunner
 from abicheck.checker import Change, DiffResult
 from abicheck.checker_policy import ChangeKind, Verdict
 from abicheck.cli import main
-from abicheck.cli_helpers_compare import (
-    _warn_ignored_flags,
-)
 from abicheck.cli_resolve import (
     _expand_header_inputs,
     _resolve_linker_script,
     _sniff_text_format,
 )
 from abicheck.elf_metadata import ElfMetadata, ElfSymbol
+from abicheck.frontends.cli.ignored_flag_warnings import _warn_ignored_flags
 from abicheck.frontends.cli.options.params import _load_suppression_and_policy
 from abicheck.frontends.cli.release_exit import _exit_compare_release
 from abicheck.frontends.cli.release_report import render_release_summary
@@ -264,7 +262,7 @@ class TestSafeWriteOutput:
         assert "to-stdout" in capsys.readouterr().out
 
 
-# ── _merge_gcc_options (cli.py helpers) ───────────────────────────────────────
+# ── small CLI helpers ───────────────────────────────────────
 
 
 class TestSmallHelpers:
@@ -518,7 +516,7 @@ class TestSmallHelpers:
         assert rejected.exit_code != 0
 
 
-# ── _warn_ignored_flags (cli.py:949-971) ──────────────────────────────────────
+# ── _warn_ignored_flags (frontends/cli/ignored_flag_warnings.py) ──────────────────────────────────────
 
 
 class TestWarnIgnoredFlags:

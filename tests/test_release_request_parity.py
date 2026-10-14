@@ -266,7 +266,7 @@ class TestTheApiRaisesTypedErrorsAndTheCliTranslatesThem:
 
         Release input resolution reaches ``binary_utils.build_match_map`` --
         the pure primitive -- directly now, rather than through
-        ``cli_helpers_compare._build_match_map``'s Click-translating wrapper,
+        a Click-translating wrapper,
         so the typed ``AmbiguousLibraryMatchError`` it raises has to be
         translated at this boundary instead. Without that it escaped
         uncaught: still exit ``1``, but with no message naming the tie it

@@ -217,8 +217,8 @@ def _merge_l3_compile_context(
 ) -> CompileContext | None:
     """Fold *derived* (L3-derived, P0.3) ahead of *explicit* (user-supplied).
 
-    Mirrors ``-p``/``--compile-db``'s existing precedence for ``dump``
-    (``cli_helpers_compare._merge_gcc_options``): the build-derived flags lead
+    Mirrors ``-p``/``--compile-db``'s existing precedence for ``dump``:
+    the build-derived flags lead
     and the caller's own explicit representation is appended after — so an
     explicit, later token still wins any literal redefinition (e.g. a
     caller's own ``-DFOO=2`` after a derived ``-DFOO=1`` — the compiler uses

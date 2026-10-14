@@ -13,24 +13,20 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""CLI-only helpers for the ``compare``/``dump`` paths.
+"""Terminal warning for dump-only flags given alongside two snapshot inputs.
 
-Holds the dump-only flag warning, which writes to the terminal. Everything
-else that used to live here is owned by the workflow layer: the scoped gate
-(:mod:`abicheck.workflows.consumer_scope_gate`), the pair-wide dialect override
-(:mod:`abicheck.workflows.compare_configuration`) and the redundant-change
-merge (:mod:`abicheck.workflows.compare_finalize`).
+``compare`` accepts the header and include options only when an operand is a
+binary or a source tree; when both operands are snapshots they have no effect,
+and this warning says so on stderr. It is the CLI's only terminal-writing
+helper for that path -- the rest of the compare/dump helper logic is owned by
+:mod:`abicheck.workflows`.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import click
-
-if TYPE_CHECKING:
-    pass
 
 
 def _warn_ignored_flags(

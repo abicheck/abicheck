@@ -604,7 +604,7 @@ class TestReportValidatesAgainstSchema:
         # Regression (Codex review, PR #658, fresh evidence): a redundant
         # (display-dedup) finding is only restored into the rendered report
         # when the caller passes --show-redundant/scope.show_redundant --
-        # entirely in the CLI layer, via cli_helpers_compare.
+        # entirely in the CLI layer, via frontends.cli.runtime.
         # _merge_redundant_changes, long after the contract-evaluation stage
         # already ran over `kept` + out_of_surface only. Without stamping the
         # redundant bucket too, a restored finding rendered with none of the

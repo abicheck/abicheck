@@ -112,7 +112,7 @@ def resolve_release_package_side(
     directory -- the caller falls back to its existing live-discovery path
     unchanged. Otherwise, *side_dir* is unpacked via
     `workflows.release_package.resolve_release_package_map` into
-    the same canonical-key -> `Path` shape `_build_match_map` builds from a
+    the same canonical-key -> `Path` shape `binary_utils.build_match_map` builds from a
     live directory of `.so` files (ADR-062 A1.7), so `_match_release_keys`'s
     own ``set(old_map) & set(new_map)`` matches a stored-side library
     against a live-side or another stored-side one by the identical key.
@@ -158,7 +158,7 @@ def resolve_release_package_side(
         # unreadable ref (OSError), an object absent from objects/ entirely
         # (KeyError, DirectoryObjectStore.get's own error on a truncated
         # package; CodeRabbit review), or a corrupt document (SnapshotError)
-        # are all usage errors, translated like `_build_match_map`'s own
+        # are all usage errors, translated like `build_match_map`'s own
         # `AmbiguousLibraryMatchError` (Codex review).
         raise ReleaseOperandUsageError(str(exc)) from exc
 

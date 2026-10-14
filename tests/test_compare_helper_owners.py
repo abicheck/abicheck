@@ -1,6 +1,9 @@
-"""Coverage-focused unit tests for :mod:`abicheck.cli_helpers_compare`.
+"""Unit coverage for helpers that moved out of the retired ``cli_helpers_compare`` module.
 
-Exercises project-config discovery (``discover_project_config``) with real inputs and meaningful assertions.
+Each helper is tested at its owner: project-config discovery
+(:mod:`abicheck.config_paths`), the L0 hard-removal fold
+(:mod:`abicheck.l0_export_delta`), and the pair-wide C++20 dialect override and
+required-symbols loader (:mod:`abicheck.workflows.compare_configuration`).
 """
 
 from __future__ import annotations

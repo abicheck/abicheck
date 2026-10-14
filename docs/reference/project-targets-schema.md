@@ -101,7 +101,7 @@ Common optional fields for `kind: library`:
 | Field | Type | Meaning |
 |-------|------|---------|
 | `consumer_binary_pattern` | string | (`app-consumer` only) Path pattern to the consumer binary under test. |
-| `contract_file` | string | (`plugin-contract` only) A **`.syms` file** — one required linker symbol per line, `#` comments allowed. This is `--required-symbol @FILE`'s actual on-disk format (`abicheck/cli_helpers_compare.py`'s `load_required_symbols`), not YAML. |
+| `contract_file` | string | (`plugin-contract` only) A **`.syms` file** — one required linker symbol per line, `#` comments allowed. This is `--required-symbol @FILE`'s actual on-disk format (`abicheck/workflows/compare_configuration.py`'s `load_required_symbols`), not YAML. |
 | `library` | string | The `kind: library` target this entry resolves its baseline **and** candidate-artifact lookup through . Must name a real, declared `kind: library` target — never another `app-consumer`/`plugin-contract` entry. The check's own reporting identity (`check_id`/`target_id`) stays this entry's own name; only the *lookup* redirects to `library`. |
 
 ### `checks:`

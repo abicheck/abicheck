@@ -36,7 +36,7 @@ so a side's own root must still shadow a shared one carrying the same
 header name; the shared roots stay available underneath as a fallback.
 
 Lives in ``model`` because both a ``frontends``-layer CLI helper
-(``cli_helpers_compare``) and a ``workflows``-layer resolver
+(``cli_compare_helpers``) and a ``workflows``-layer resolver
 (``workflows.release_inputs``) must apply the identical rule, and
 ``model`` is the innermost ring both may import.
 """

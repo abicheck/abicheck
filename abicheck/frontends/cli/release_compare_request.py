@@ -91,7 +91,7 @@ def resolve_release_compare_plan(
     :class:`~abicheck.errors.AmbiguousLibraryMatchError` is translated the
     same way, for the same reason: the resolution reaches
     ``binary_utils.build_match_map`` -- the pure primitive -- directly now,
-    rather than through ``cli_helpers_compare._build_match_map``'s wrapper,
+    rather than through a Click-translating wrapper,
     so this is the boundary that owes its message. Without it a stale
     ``.gz``/``.zst`` sibling next to a plain snapshot exited ``1`` with no
     output instead of naming the tie it refused to break.

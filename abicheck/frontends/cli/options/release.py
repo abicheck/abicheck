@@ -79,7 +79,7 @@ def release_options(func: F) -> F:
     (prerequisite vision A-S4/ADR-065 S4 landed 2026-09-06),
     ``scope.on_incomplete``, and ``release.include_private_dso`` in
     ``.abicheck.yml`` are their only source now, no surviving CLI override,
-    resolved the same way onto :class:`abicheck.cli_helpers_compare.
+    resolved the same way onto :class:`abicheck.workflows.compare_configuration.
     ResolvedCompareConfig`. ``--dso-only`` (the fourth Phase 7d topology
     flag, ``release.dso_only``) lived in ``cli_options.set_input_options``
     instead, not here.

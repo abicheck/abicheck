@@ -601,7 +601,7 @@ def _scoped_result(**dynamic_attrs) -> DiffResult:
     """A ``_result()`` with ADR-043 scoping attributes set the way the real
     CLI sets them (plain attribute assignment onto an already-built
     ``DiffResult`` -- ``gate_scope``/``used_by``/``required_symbols`` are
-    not dataclass fields, see ``cli_helpers_compare.py``'s ``# type:
+    not dataclass fields, see the scoping passes' ``# type:
     ignore[attr-defined]`` assignments)."""
     result = _result()
     for name, value in dynamic_attrs.items():
