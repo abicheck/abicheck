@@ -40,39 +40,13 @@ from ..policy.classification import (
 from ..policy.disposition_ledger import RuleProvenance
 from ..report_model import VERDICT_TO_SEVERITY_LABEL as _VERDICT_TO_SEVERITY_LABEL
 from ..report_summary import build_summary
-
-# Markdown rendering is a leaf; names stay importable here for compatibility.
 from ..reporter_markdown import (
-    _ADDITION_ICON as _ADDITION_ICON,
-    _BREAKING_ICON as _BREAKING_ICON,
-    _BUMP_EMOJI as _BUMP_EMOJI,
-    _QUALITY_ICON as _QUALITY_ICON,
-    _RISK_ICON as _RISK_ICON,
-    _SEVERITY_EMOJI as _SEVERITY_EMOJI,
-    _SOURCE_BREAK_ICON as _SOURCE_BREAK_ICON,
-    _VERDICT_EMOJI as _VERDICT_EMOJI,
-    _VERDICT_LABEL as _VERDICT_LABEL,
-    _VERDICT_MERGE_EFFECT as _VERDICT_MERGE_EFFECT,
-    _fmt_size as _fmt_size,
-    _format_change_md as _format_change_md,
-    _section_severity_label as _section_severity_label,
     entity_for_change as entity_for_change,
-    entity_for_kind as entity_for_kind,
-    operation_for_kind as operation_for_kind,
-    root_cause_evidence_lookup_for_changes as root_cause_evidence_lookup_for_changes,
-    root_cause_for_change as root_cause_for_change,
-    root_cause_lookup_for_changes as root_cause_lookup_for_changes,
-    to_stat as to_stat,
 )
 from .change_annotations import change_annotation_fields as _change_annotation_fields
 from .change_operation import operation_for_change
 from .contract_fields import (
     add_contract_evaluation_fields as _add_contract_evaluation_fields,
-)
-from .dispatch_markdown import (
-    _to_markdown_root_cause as _to_markdown_root_cause,
-    to_markdown as to_markdown,
-    to_review_digest as to_review_digest,
 )
 from .view import finding_id
 

@@ -41,29 +41,10 @@ from ..model.change import validate_check_id, validate_evidence_depth
 from ..policy.disposition_close import ledger_for
 from ..report_summary import build_summary, surface_breakdown
 from ..reporter_contract_blocks import add_env_matrix_digest
-
-# Markdown rendering is a leaf; names stay importable here for compatibility.
 from ..reporter_markdown import (
-    _ADDITION_ICON as _ADDITION_ICON,
-    _BREAKING_ICON as _BREAKING_ICON,
-    _BUMP_EMOJI as _BUMP_EMOJI,
-    _QUALITY_ICON as _QUALITY_ICON,
-    _RISK_ICON as _RISK_ICON,
-    _SEVERITY_EMOJI as _SEVERITY_EMOJI,
-    _SOURCE_BREAK_ICON as _SOURCE_BREAK_ICON,
-    _VERDICT_EMOJI as _VERDICT_EMOJI,
-    _VERDICT_LABEL as _VERDICT_LABEL,
-    _VERDICT_MERGE_EFFECT as _VERDICT_MERGE_EFFECT,
-    _fmt_size as _fmt_size,
-    _format_change_md as _format_change_md,
-    _section_severity_label as _section_severity_label,
-    entity_for_change as entity_for_change,
-    entity_for_kind as entity_for_kind,
-    operation_for_kind as operation_for_kind,
     root_cause_evidence_lookup_for_changes as root_cause_evidence_lookup_for_changes,
     root_cause_for_change as root_cause_for_change,
     root_cause_lookup_for_changes as root_cause_lookup_for_changes,
-    to_stat as to_stat,
 )
 from ..root_cause_evidence import (
     entry_root_cause_evidence,
@@ -76,11 +57,6 @@ from ..semver import recommend_release_for_report
 from .change_inventory import render_change_inventory_json
 from .contract_fields import (
     add_contract_evaluation_fields as _add_contract_evaluation_fields,
-)
-from .dispatch_markdown import (
-    _to_markdown_root_cause as _to_markdown_root_cause,
-    to_markdown as to_markdown,
-    to_review_digest as to_review_digest,
 )
 from .scoped_gate import ScopedGateChangeHelpers
 from .view import (
@@ -334,7 +310,7 @@ def add_suppression(d: dict[str, object], result: DiffResult) -> None:
     ``--suppress`` document's own path, so "which rule hid this and why"
     survives into the report instead of being computed and dropped. The
     per-entry projection itself is
-    ``report.disposition_audit.suppressed_change_entry``; this function stays
+    ``report.change_json.suppressed_change_entry``; this function stays
     here because the root-cause lookups it feeds that projection live in
     ``reporter_markdown``, which this package may not import back.
     """
@@ -640,7 +616,7 @@ def add_check_identity(d: dict[str, object], result: DiffResult) -> None:
 # ADR-063 T10: the bundle of per-change helpers report.scoped_gate.
 # apply_scoped_gate needs but may not import itself (see that module's own
 # docstring for the cycle a static/importlib back-reference would close).
-# Built once here, since every name is already defined or re-exported in
+# Built once here, since every name is already defined or imported in
 # this module by this point, and threaded through render_json_with_side_
 # facts's four call sites above rather than re-resolved per call. Must stay
 # below change_to_dict's/add_entries_to_root_causes's own definitions
