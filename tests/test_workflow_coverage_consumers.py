@@ -348,14 +348,14 @@ class TestMatrixExpansionFollowsGitHub:
         doc = _yaml_fast.safe_load(read_repo_text(WORKFLOW_DIR / "ci.yml"))
         shards = _matrix_combinations(doc["jobs"]["unit-tests"])
         assert [(c["python-version"], c["shard"]) for c in shards] == [
-            ("3.13", 1),
-            ("3.13", 2),
-            ("3.13", 3),
+            ("3.14", 1),
+            ("3.14", 2),
+            ("3.14", 3),
         ]
         other = _matrix_combinations(doc["jobs"]["unit-tests-other-os"])
         assert [(c["os"], c["python-version"]) for c in other] == [
-            ("windows-latest", "3.13"),
-            ("macos-latest", "3.13"),
+            ("windows-latest", "3.14"),
+            ("macos-latest", "3.14"),
         ]
 
 
