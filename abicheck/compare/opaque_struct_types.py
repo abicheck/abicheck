@@ -99,9 +99,34 @@ def find_opaque_struct_types(old: AbiSnapshot, new: AbiSnapshot) -> OpaqueTypeIn
     new_opaque = {t.name for t in new.declarations.types if t.is_opaque}
     old_type_names = {t.name for t in old.declarations.types}
     new_type_names = {t.name for t in new.declarations.types}
+    old_all_spellings = old_type_names | {
+        t.qualified_name for t in old.declarations.types if t.qualified_name is not None
+    }
+    new_all_spellings = new_type_names | {
+        t.qualified_name for t in new.declarations.types if t.qualified_name is not None
+    }
+
+    # Asymmetric existence: a forward declaration counts as absent from the
+    # other side only when *none* of its spellings (``name`` and
+    # ``qualified_name``) names a declaration there. A DWARF producer keys
+    # ``name`` qualified while a header backend keys it bare with the scoped
+    # spelling in ``qualified_name``, so a name-only check read the same
+    # entity's full definition, spelled the other way, as absent.
+    def _absent_from(snap: AbiSnapshot, other: set[str]) -> set[str]:
+        present: set[str] = set()
+        candidates: set[str] = set()
+        for t in snap.declarations.types:
+            if not t.is_opaque:
+                continue
+            candidates.add(t.name)
+            if t.name in other or (
+                t.qualified_name is not None and t.qualified_name in other
+            ):
+                present.add(t.name)
+        return candidates - present
 
     opaque_types = (old_opaque & new_opaque) | (
-        (old_opaque - new_type_names) | (new_opaque - old_type_names)
+        _absent_from(old, new_all_spellings) | _absent_from(new, old_all_spellings)
     )
     if not opaque_types:
         return OpaqueTypeIndex(stable=frozenset(), local=frozenset())
@@ -225,13 +250,6 @@ def find_opaque_struct_types(old: AbiSnapshot, new: AbiSnapshot) -> OpaqueTypeIn
     # absent, letting an old opaque declaration's stable id enter the
     # index and then get borrowed by that same counterpart's own
     # ``qualified_name`` (Codex review, PR #1218, round 10).
-    old_all_spellings = old_type_names | {
-        t.qualified_name for t in old.declarations.types if t.qualified_name is not None
-    }
-    new_all_spellings = new_type_names | {
-        t.qualified_name for t in new.declarations.types if t.qualified_name is not None
-    }
-
     # Check the stable counterpart BY ID first, before ever consulting bare
     # names -- two producers can render the identical entity under two
     # different spellings (this whole module's own premise: "the header
@@ -388,10 +406,12 @@ def find_opaque_struct_types(old: AbiSnapshot, new: AbiSnapshot) -> OpaqueTypeIn
     # would match the opaque one here. Only the spelling tier is narrowed; the
     # stable tier (resolved identities) is left untouched.
     visible_spellings = {
-        t.name
+        spelling
         for side in (old, new)
         for t in side.declarations.types
         if not t.is_opaque
+        for spelling in (t.name, t.qualified_name)
+        if spelling is not None
     }
     return replace(
         index,

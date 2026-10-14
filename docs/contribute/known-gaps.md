@@ -74,11 +74,6 @@ Each entry's status line says what is still open. A PARTIAL entry's write-up als
 **Status (recorded 2026-10-11 at `2a1ccb0c8`): OPEN.** source_graph_coverage gives header passes a single HEADER_INLINE_BODIES unit; no per-declaration body fact exists.  
 `false-clean` — Body-dependent call/reference changes in an inline function visible on both sides are declined, because coverage cannot prove that specific body was seen. [Full write-up](known-gaps/header-body-coverage-is-not-per-body.md)
 
-#### Opaque-type suppression still falls back to bare RecordType.name when stable identities are incomplete
-
-**Status (updated 2026-10-13): PARTIAL, narrowed further.** Visible-namesake suppression by spelling is closed on both opaque paths, and a stable id a visible declaration also carries no longer proves opacity. Still open: spelling-only suppression with no contradicting identity or namesake (by design), the `find_by_value_types` exposure-detection mirror, and DWARF-only forward-declaration pairing in `find_opaque_struct_types`. Earlier status (2026-10-09): compare/opaque_types.py:74-130 uses OpaqueTypeIndex carrying stable EntityIds plus a bare-name 'local' tier. contains(strict=True) narrows the bare-name collision only when intersect() proves the pairing is complete, and otherwise falls back to the old bare RecordType.name matching. diff_filtering.py:854 _root_type_name now prefers Change.qualified_name.  
-`false-clean` — Opaque-type suppression keys on stable `EntityId`s only when the pairing is proven complete; otherwise it falls back to bare `RecordType.name`, so same-named types in different scopes can suppress each other. [Full write-up](known-gaps/opaque-type-suppression-still-falls-back-to-bare-recordtypename.md)
-
 #### Type identity: typedef and tag names keyed by bare spelling
 
 `false-clean` — Two entries on one shape: a typedef's identity is its bare spelling, so a tag-namespace record and a same-spelled typedef collide in the clang parser, and typedef diffing still reads the bare-keyed `AbiSnapshot.typedefs` instead of the qualified twin.
