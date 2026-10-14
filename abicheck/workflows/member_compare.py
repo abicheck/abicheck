@@ -5,21 +5,22 @@
 
 :func:`compare_member` runs one member's already-resolved
 :class:`~abicheck.workflows.release_member_request.ReleaseMemberCompareRequest`
-through the single Tier-2 chokepoint (``run_compare`` ->
-``run_compare_request``, ADR-037 D1) and records the release's resolved
-rich-tier config on the result. A directory/package ``compare`` and the
-typed API therefore score a member exactly as a single-pair comparison of
-the same operands does (ADR-063 "one model, any cardinality"). Operand
-normalization (following GNU ld linker scripts, with its user-facing note)
-stays with the frontend that owns the terminal.
+through the single Tier-2 chokepoint (``run_compare_request``, ADR-037 D1),
+building the member's typed :class:`CompareRequest` directly rather than
+through the keyword API, and records the release's resolved rich-tier config
+on the result. A directory/package ``compare`` and the typed API therefore
+score a member exactly as a single-pair comparison of the same operands does
+(ADR-063 "one model, any cardinality"). Operand normalization (following GNU
+ld linker scripts, with its user-facing note) stays with the frontend that
+owns the terminal.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from ..service_compare_pipeline import run_compare
-from .release_member_request import ReleaseMemberCompareRequest, run_compare_kwargs
+from ..service_compare_pipeline import run_compare_request
+from .release_member_request import ReleaseMemberCompareRequest, member_compare_request
 
 if TYPE_CHECKING:
     from ..checker_types import DiffResult
@@ -43,13 +44,15 @@ def compare_member(
 
     *request* is the release's parent request with this member's
     :class:`~abicheck.workflows.release_member_request.MemberDelta` applied;
-    every one of its fields is forwarded by :func:`run_compare_kwargs`, so no
-    setting the release resolved can be dropped here. That forwarding used to
-    be a hand-written keyword list, and each historical gap in it
-    (``include_dependencies``, the contract flags, ``--pack``, the compile
-    context, ``--depth``, ``scope.public_header_dirs``, ``--exclude-header``,
-    ``lang_explicit``, the deployment matrix) was a release member silently
-    disagreeing with the identical single-pair comparison.
+    :func:`member_compare_request` maps every one of its fields onto the
+    member's :class:`CompareRequest`, so no setting the release resolved can
+    be dropped here. Earlier the member went through the keyword API, which
+    re-translated the request into loose keywords and back; each historical
+    gap in that forwarding (``include_dependencies``, the contract flags,
+    ``--pack``, the compile context, ``--depth``, ``scope.public_header_dirs``,
+    ``--exclude-header``, ``lang_explicit``, the deployment matrix) was a
+    release member silently disagreeing with the identical single-pair
+    comparison.
 
     *pack_application* is the release's resolved ``--pack`` contribution
     (a ``pack_application.PackApplication``, typed loosely because that module
@@ -57,7 +60,7 @@ def compare_member(
     overrides are already on *request*. It is passed separately only for the
     rich-tier config record below.
     """
-    result = run_compare(**run_compare_kwargs(request))
+    result = run_compare_request(member_compare_request(request))
     # The rich-tier config is recorded under exactly the condition the
     # single-pair CLI (`resolve_and_apply`) and the typed API
     # (`install_resolved_gate_receipt`) record one: a contract evaluation, or

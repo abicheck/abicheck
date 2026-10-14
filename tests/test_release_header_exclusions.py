@@ -217,11 +217,12 @@ class TestExclusionRulesAreThreadedToEveryReleaseConsumer:
         class _Stop(Exception):
             pass
 
-        def _fake_run_compare(*_a: Any, **kw: Any) -> Any:
-            seen.update(kw)
+        def _fake_run_compare_request(request: Any, *_a: Any, **_kw: Any) -> Any:
+            seen["old"] = request.old.exclude_headers
+            seen["new"] = request.new.exclude_headers
             raise _Stop()
 
-        monkeypatch.setattr(service, "run_compare", _fake_run_compare)
+        monkeypatch.setattr(service, "run_compare_request", _fake_run_compare_request)
         if True:
             with pytest.raises(_Stop):
                 pairwise.compare_member_pair(
@@ -236,7 +237,7 @@ class TestExclusionRulesAreThreadedToEveryReleaseConsumer:
                         include_dependencies=True,
                     ),
                 )
-        assert seen["exclude_headers"] == ("fftw3.h", "fftw.h")
+        assert seen["old"] == seen["new"] == ("fftw3.h", "fftw.h")
 
     def test_the_service_shim_writes_them_onto_both_sides(self) -> None:
         """Claim 1 at the point the rules become per-side inputs: old and

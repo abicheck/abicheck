@@ -1,9 +1,10 @@
-"""A release member inherits every request field by construction
+"""A release member's request is the parent with its delta applied, and every
+field of that request reaches the member's typed ``CompareRequest``
 (design-hardening plan, Phase 2 / F2, #1391's class).
 
 The oracle is the dataclass itself, not a hand-written field list: a field
-added to the request reaches ``service.run_compare`` for every member
-without any further edit, and only ``MemberDelta``'s fields differ.
+added to the request must be mapped by :func:`member_compare_request`, or the
+member refuses to build rather than silently dropping it.
 """
 
 from __future__ import annotations
@@ -11,17 +12,15 @@ from __future__ import annotations
 import dataclasses
 import inspect
 from pathlib import Path
-from typing import Any
 
 import pytest
 
 from abicheck import service_compare_pipeline
-from abicheck.workflows import release_members as pairwise
 from abicheck.workflows.release_member_request import (
     MemberDelta,
     ReleaseMemberCompareRequest,
+    member_compare_request,
     member_request,
-    run_compare_kwargs,
 )
 
 _DELTA = {f.name for f in dataclasses.fields(MemberDelta)}
@@ -36,6 +35,8 @@ def _delta(i: int = 0) -> MemberDelta:
 
 
 def test_every_request_field_is_a_run_compare_keyword() -> None:
+    # The public keyword API must still accept every release field, so a
+    # release member never carries a setting a single-pair caller cannot pass.
     params = set(inspect.signature(service_compare_pipeline.run_compare).parameters)
     fields = {f.name for f in dataclasses.fields(ReleaseMemberCompareRequest)}
     assert fields <= params, fields - params
@@ -60,11 +61,9 @@ def test_member_differs_from_parent_only_in_delta_fields(member: int) -> None:
     assert {n for n in _DELTA if getattr(child, n) != getattr(parent, n)} <= _DELTA
 
 
-def test_synthetic_new_field_reaches_every_member(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Add a field to the request type; nothing else changes, and each
-    member's ``service.run_compare`` call receives it."""
+def test_a_field_without_a_mapping_is_refused_not_dropped() -> None:
+    """Add a field to the request type with no mapping: building the member's
+    request must fail and name it, rather than compare without it."""
     extended = dataclasses.make_dataclass(
         "ExtendedRequest",
         [("synthetic_setting", str, dataclasses.field(default="unset"))],
@@ -72,24 +71,10 @@ def test_synthetic_new_field_reaches_every_member(
         frozen=True,
     )
     parent = extended(synthetic_setting="stated-by-caller", old_version="1")
-    seen: list[dict[str, Any]] = []
-
-    def fake_run_compare(**kwargs: Any) -> Any:
-        seen.append(kwargs)
-        raise RuntimeError("stop after capture")
-
-    import abicheck.workflows.member_compare as service
-
-    monkeypatch.setattr(service, "run_compare", fake_run_compare)
-    monkeypatch.setattr(pairwise, "normalize_member_operand", lambda p, _notice: p)
-    for i in range(3):
-        with pytest.raises(RuntimeError):
-            pairwise.compare_member_pair(member_request(parent, _delta(i)))
-    assert [k["synthetic_setting"] for k in seen] == ["stated-by-caller"] * 3
-    assert [k["old_input"] for k in seen] == [Path(f"old{i}.so") for i in range(3)]
-    assert all(k["old_version"] == "1" for k in seen)
+    with pytest.raises(TypeError, match="synthetic_setting"):
+        member_compare_request(member_request(parent, _delta(0)))
 
 
-def test_parent_request_cannot_be_run() -> None:
+def test_parent_request_cannot_be_compared() -> None:
     with pytest.raises(ValueError, match="MemberDelta"):
-        run_compare_kwargs(ReleaseMemberCompareRequest())
+        member_compare_request(ReleaseMemberCompareRequest())
