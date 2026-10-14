@@ -70,9 +70,9 @@ class TestBaseClassLayoutFindingsAreTypeEntities:
 
     def test_it_agrees_with_the_type_level_surface_routing(self):
         """The independent oracle: `surface.py`'s own type-level family."""
-        from abicheck.surface import _TYPE_LEVEL_KIND_NAMES
+        from abicheck.surface import TYPE_LEVEL_KIND_NAMES
 
-        for kind in _TYPE_LEVEL_KIND_NAMES:
+        for kind in TYPE_LEVEL_KIND_NAMES:
             if entity_for_kind(kind) is None:
                 continue
             assert entity_for_kind(kind) in {

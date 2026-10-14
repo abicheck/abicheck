@@ -262,7 +262,7 @@ class MarkReachability:
 
         from .compare.internal_namespaces import DEFAULT_INTERNAL_NAMESPACES
         from .internal_leak import (
-            _IDENTITY_VTABLE_KINDS,
+            IDENTITY_VTABLE_KINDS,
             INTERNAL_NAMESPACE,
             _format_path,
             _path_has_indirection,
@@ -572,7 +572,7 @@ class MarkReachability:
                 # suppression_would_hide_public_break diagnostic for churn
                 # that was always going to be demoted as unreachable by
                 # DemoteUnreachableInternalChurn, a false alarm.
-                identity_or_vtable = c.kind in _IDENTITY_VTABLE_KINDS
+                identity_or_vtable = c.kind in IDENTITY_VTABLE_KINDS
                 all_indirect = bool(paths) and all(
                     _path_has_indirection(p) for p in paths
                 )

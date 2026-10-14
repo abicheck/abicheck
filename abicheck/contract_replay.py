@@ -112,11 +112,11 @@ class ReplayDecision:
 
 
 def _type_scoped(change: Change) -> bool:
-    from .surface import _MEMBER_LEVEL_TYPE_KIND_NAMES, _TYPE_LEVEL_KIND_NAMES
+    from .surface import MEMBER_LEVEL_TYPE_KIND_NAMES, TYPE_LEVEL_KIND_NAMES
 
     return (
-        change.kind.value in _TYPE_LEVEL_KIND_NAMES
-        or change.kind.value in _MEMBER_LEVEL_TYPE_KIND_NAMES
+        change.kind.value in TYPE_LEVEL_KIND_NAMES
+        or change.kind.value in MEMBER_LEVEL_TYPE_KIND_NAMES
     )
 
 
@@ -138,9 +138,9 @@ def _symbol_may_name_a_declaration(change: Change) -> bool:
     owning type) is matched by plain membership there, so it is here too.
     """
     from .contract_evaluation import _is_mangled_identity
-    from .surface import _TYPE_LEVEL_KIND_NAMES
+    from .surface import TYPE_LEVEL_KIND_NAMES
 
-    if change.kind.value not in _TYPE_LEVEL_KIND_NAMES:
+    if change.kind.value not in TYPE_LEVEL_KIND_NAMES:
         return True
     return _is_mangled_identity(change.symbol or "")
 

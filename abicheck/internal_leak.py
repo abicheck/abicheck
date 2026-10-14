@@ -88,7 +88,7 @@ _CONFIDENCE_RANK: dict[str, int] = {CONF_HIGH: 2, CONF_REDUCED: 1, CONF_UNKNOWN:
 # Change kinds that represent a meaningful change to a type's binary layout
 # or identity. If a *change of one of these kinds* applies to an internal
 # type that's reachable from public API, we raise a leak finding.
-_LEAK_TRIGGERING_KINDS: frozenset[ChangeKind] = frozenset(
+LEAK_TRIGGERING_KINDS: frozenset[ChangeKind] = frozenset(
     {
         ChangeKind.TYPE_SIZE_CHANGED,
         ChangeKind.TYPE_ALIGNMENT_CHANGED,
@@ -1172,7 +1172,7 @@ def _collect_internal_changes(
     """
     internal_changes: dict[str, list[Change]] = collections.defaultdict(list)
     for c in changes:
-        if c.kind not in _LEAK_TRIGGERING_KINDS:
+        if c.kind not in LEAK_TRIGGERING_KINDS:
             continue
         # ``symbol`` may be e.g. "ns::detail::Impl::field" — peel the field
         # qualifier so we look up the type itself.
@@ -1202,7 +1202,7 @@ def _merge_leak_paths(
 # value-embedding analysis. Every other triggering kind is a pure layout change
 # (size/offset/padding/field add-remove), which does NOT reach the public holder
 # through a pointer and is suppressed for pointer-only leaks (UXL field run P2).
-_IDENTITY_VTABLE_KINDS: frozenset[ChangeKind] = frozenset(
+IDENTITY_VTABLE_KINDS: frozenset[ChangeKind] = frozenset(
     {
         ChangeKind.TYPE_VTABLE_CHANGED,
         ChangeKind.VPTR_INTRODUCED,
@@ -1337,7 +1337,7 @@ def detect_internal_leaks(
         # sample would mis-read the indirection (Codex review). A side with no
         # paths contributes nothing.
         side_paths = [*old_pl, *new_pl]
-        identity_or_vtable = any(c.kind in _IDENTITY_VTABLE_KINDS for c in triggers)
+        identity_or_vtable = any(c.kind in IDENTITY_VTABLE_KINDS for c in triggers)
         # P2 (UXL field run), narrowed by decision 2A of the design-hardening
         # plan: an internal type reached **only** behind a pointer
         # (per-hop ``indirect:`` markers recorded at enqueue) whose change is pure
@@ -1460,7 +1460,7 @@ def detect_call_graph_leaks(
     :func:`detect_internal_leaks`.
 
     Unlike the layout walk, which triggers on a fixed set of layout-affecting
-    kinds (:data:`_LEAK_TRIGGERING_KINDS`) applied to a type *embedding* the
+    kinds (:data:`LEAK_TRIGGERING_KINDS`) applied to a type *embedding* the
     internal root, this triggers directly on any already artifact-proven
     ``BREAKING_KINDS`` change whose own subject *is* the internal decl (e.g.
     ``func_removed`` on an internal template specialization) — the
@@ -1477,7 +1477,7 @@ def detect_call_graph_leaks(
     reads "no exported symbol") have no removed linker symbol at all —
     composing one into this overlay's "can fail to resolve this symbol at
     load time" description would be a false binary-load-time claim for a
-    change that was never one. Mirrors :data:`_LEAK_TRIGGERING_KINDS`'s own
+    change that was never one. Mirrors :data:`LEAK_TRIGGERING_KINDS`'s own
     precedent of a hand-curated, binary-observable-only trigger set, rather
     than the full breaking/API-break union.
 

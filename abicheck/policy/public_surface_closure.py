@@ -348,7 +348,7 @@ def _seed_undeclared_exports(
     (``classify_change_surface``) is the second gate.
 
     ``exported_not_public`` itself is deliberately exempt from the whole
-    classifier (``surface._NEVER_FILTER_KIND_NAMES``): its entire purpose
+    classifier (``surface.NEVER_FILTER_KIND_NAMES``): its entire purpose
     is to report this leak, so the evidence explaining *why* the other
     findings were demoted stays visible in the active report rather than
     being demoted alongside them.

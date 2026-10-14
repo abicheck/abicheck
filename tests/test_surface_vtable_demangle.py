@@ -20,7 +20,7 @@ AI-readiness file-size hard cap.
 ``VTABLE_SLOT_COUNT_CHANGED``/``RTTI_INHERITANCE_CHANGED``/
 ``VTT_SLOT_COUNT_CHANGED`` (``diff_elf_layout.py``) carry a raw mangled
 ``_ZTV``/``_ZTI``/``_ZTT`` + class symbol in ``Change.symbol``, not a plain
-type spelling -- none of those kinds are in ``_TYPE_LEVEL_KIND_NAMES``, so
+type spelling -- none of those kinds are in ``TYPE_LEVEL_KIND_NAMES``, so
 ``_classify_symbol_level`` runs first, finds no matching function/variable
 (a vtable/RTTI symbol is neither), and falls through to the type-level path
 with ``sym`` still mangled. Before demangling that fallback,

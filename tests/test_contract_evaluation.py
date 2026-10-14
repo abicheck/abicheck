@@ -483,7 +483,7 @@ class TestPublicModeIdentityAmbiguous:
         # sole producer emits a batch-shaped finding with symbol="<visibility>"
         # (a synthetic spokesperson, never a real entity) -- finding_identity
         # deliberately resolves this to the REDUCED tier (confirmed
-        # empirically). Since _NEVER_FILTER_KIND_NAMES findings are trusted
+        # empirically). Since NEVER_FILTER_KIND_NAMES findings are trusted
         # unconditionally by construction (the same as python_* findings),
         # they must bypass the identity-ambiguity gate entirely rather than
         # being downgraded to UNKNOWN_UNRESOLVED purely because their
@@ -546,7 +546,7 @@ class TestPublicModeSourceAbiKindsTrustedByConstruction:
         )
 
     def test_inline_function_removed_bypasses_unresolvable_surface_too(self) -> None:
-        # Same bypass ordering as _NEVER_FILTER_KIND_NAMES/python_*: this
+        # Same bypass ordering as NEVER_FILTER_KIND_NAMES/python_*: this
         # must not require a resolvable surface at all.
         c = Change(
             kind=ChangeKind.INLINE_FUNCTION_REMOVED,
@@ -957,7 +957,7 @@ class TestPublicModeConservativeRetentionIsNotConfirmation:
     def test_constant_changed_stays_in_contract_despite_no_universe_evidence(
         self,
     ) -> None:
-        # constant_changed is a _NEVER_FILTER_KIND_NAMES kind -- public by
+        # constant_changed is a NEVER_FILTER_KIND_NAMES kind -- public by
         # construction (the dumper only extracts PUBLIC_HEADER constants),
         # so it must stay trusted even though a constant name never
         # appears in public_symbols/public_types at all.

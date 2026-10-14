@@ -81,7 +81,7 @@ if TYPE_CHECKING:
 
 # Findings whose whole purpose is to surface a *private* entity leaking into
 # the public ABI. Scoping must never filter these (ADR-024 §D5.2).
-_NEVER_FILTER_KIND_NAMES: frozenset[str] = frozenset(
+NEVER_FILTER_KIND_NAMES: frozenset[str] = frozenset(
     {
         "internal_type_leaks_via_public_api",
         "internal_template_leaks_via_public_api",
@@ -93,7 +93,7 @@ _NEVER_FILTER_KIND_NAMES: frozenset[str] = frozenset(
         # name (e.g. "demo::Public" or "demo::configure") -- a type or a
         # function/variable that legitimately IS on the public surface, but
         # the type-vs-symbol split above still runs it through
-        # ``_classify_symbol_level`` (not in ``_TYPE_LEVEL_KIND_NAMES``),
+        # ``_classify_symbol_level`` (not in ``TYPE_LEVEL_KIND_NAMES``),
         # which looks it up in the flat ``all_symbols``/``public_symbols``
         # sets. A type name is never in those sets (only functions/variables
         # are), so every type-rooted instance of this finding was silently
@@ -148,7 +148,7 @@ _NEVER_FILTER_KIND_NAMES: frozenset[str] = frozenset(
 # whose befriending class lives in a system/private header is exactly as
 # out-of-surface as any other declaration from that header. These kinds get
 # their own classification path (``_classify_hidden_friend_surface``) instead
-# of the unconditional keep in ``_NEVER_FILTER_KIND_NAMES`` above.
+# of the unconditional keep in ``NEVER_FILTER_KIND_NAMES`` above.
 _HIDDEN_FRIEND_KIND_NAMES: frozenset[str] = frozenset(
     {
         "hidden_friend_removed",
@@ -180,7 +180,7 @@ def is_hidden_friend_finding(change: Change) -> bool:
 # type reachability before consulting the symbol universe: in C++ especially,
 # a public type name can collide with a hidden constructor/destructor or helper
 # symbol of the same spelling.
-_TYPE_LEVEL_KIND_NAMES: frozenset[str] = frozenset(
+TYPE_LEVEL_KIND_NAMES: frozenset[str] = frozenset(
     {
         "type_size_changed",
         "type_alignment_changed",
@@ -237,7 +237,7 @@ _TYPE_LEVEL_KIND_NAMES: frozenset[str] = frozenset(
     }
 )
 
-_MEMBER_LEVEL_TYPE_KIND_NAMES: frozenset[str] = frozenset(
+MEMBER_LEVEL_TYPE_KIND_NAMES: frozenset[str] = frozenset(
     {
         # Struct/union field findings, encoded as ``Type::field``.
         "type_field_removed",
@@ -263,12 +263,12 @@ _MEMBER_LEVEL_TYPE_KIND_NAMES: frozenset[str] = frozenset(
 
 # Owner-qualified member findings are a strict subset of type-level findings:
 # the owner-type reclassification in classify_change_surface() only runs inside
-# the type-level branch, so any member kind missing from _TYPE_LEVEL_KIND_NAMES
+# the type-level branch, so any member kind missing from TYPE_LEVEL_KIND_NAMES
 # would silently never be reclassified. Guard the invariant at import time so a
 # future kind cannot drift out of sync.
-assert _MEMBER_LEVEL_TYPE_KIND_NAMES <= _TYPE_LEVEL_KIND_NAMES, (
+assert MEMBER_LEVEL_TYPE_KIND_NAMES <= TYPE_LEVEL_KIND_NAMES, (
     "member-level kinds must also be type-level: "
-    f"{_MEMBER_LEVEL_TYPE_KIND_NAMES - _TYPE_LEVEL_KIND_NAMES}"
+    f"{MEMBER_LEVEL_TYPE_KIND_NAMES - TYPE_LEVEL_KIND_NAMES}"
 )
 
 
@@ -287,7 +287,7 @@ def is_symbol_level_finding(change: Change) -> bool:
     a break).
     """
     kv = change.kind.value
-    return kv not in _NEVER_FILTER_KIND_NAMES and kv not in _TYPE_LEVEL_KIND_NAMES
+    return kv not in NEVER_FILTER_KIND_NAMES and kv not in TYPE_LEVEL_KIND_NAMES
 
 
 # ``PublicSurface`` itself now lives in ``policy/public_surface.py`` --
@@ -623,7 +623,7 @@ def classify_change_surface(
     four old∪new set unions on every call — that recomputation is what makes a
     large comparison quadratic in the number of findings.
     """
-    if change.kind.value in _NEVER_FILTER_KIND_NAMES:
+    if change.kind.value in NEVER_FILTER_KIND_NAMES:
         return True, None
     # Python-level API and CPython load-contract findings (G23/G14) live on a
     # distinct evidence axis from the C/C++ export surface: their ``symbol`` is a
@@ -662,7 +662,7 @@ def classify_change_surface(
     # a public type such as ``Foo`` can legitimately collide with a hidden
     # constructor/destructor/helper symbol named ``Foo``. In that case the
     # layout change's ``symbol`` still denotes the type, so reachability decides.
-    type_level_finding = change.kind.value in _TYPE_LEVEL_KIND_NAMES
+    type_level_finding = change.kind.value in TYPE_LEVEL_KIND_NAMES
 
     def _resolve_type_candidates() -> set[str]:
         """Candidate type names implicated by *change*, computed lazily.
@@ -677,7 +677,7 @@ def classify_change_surface(
         # FUNC_REMOVED/VAR_REMOVED that `_classify_symbol_level` resolves
         # and returns from without ever consulting `candidates`. Computed
         # lazily now, only when actually needed for `_classify_type_level`.
-        if change.kind.value in _MEMBER_LEVEL_TYPE_KIND_NAMES and "::" in sym:
+        if change.kind.value in MEMBER_LEVEL_TYPE_KIND_NAMES and "::" in sym:
             # Member-level findings are owner-qualified: ``Type::field``
             # (struct/union field) or ``Enum::member`` (enum member).
             # Classifying the full string as a type keeps a private
