@@ -16,6 +16,12 @@ re-verification status line (2026-10-09, `456989f`). Do not re-open an
 entry from here without reproducing it on current `main`; record a new
 gap on the main page instead.
 
+### A snapshot's `build_mode` is captured only for ELF, and only from the main image (closed 2026-10-14)
+
+**Status (2026-10-14): CLOSED.** `comparability_profile.check_build_mode_comparable` bounds a run whose two snapshots record different known compiler families (non-fatal; `layout`/`runtime` unverified plus a `coverage_warnings` reason; unrecorded or `unknown` on either side is not a mismatch). `extract/build_mode_capture.py` reads the producer from the dump's detached debug file when the ELF main image has none, and from a Mach-O `__DWARF` segment (object, dSYM) via `extract/macho_build_signals.py`. PE stays `None` by design: no reliable compiler-family signal.
+
+[Full write-up](../known-gaps/a-snapshots-build-mode-is-captured-only-for-elf-and-only-from.md)
+
 ### `Function.elf_binding`/`Variable.elf_binding` (and the pre-existing `elf_visibility`) collapsed mixed bindings across symbol-versioned aliases (closed 2026-10-12)
 
 **Status (2026-10-12): CLOSED.** Every ELF reader that compared a binding, visibility, size, COMMON or UNIQUE state, origin, or presence per bare name now pairs symbol-versioned aliases by version tag (`compare/elf_alias_pairs.py`, `ElfMetadata.symbol_aliases`, `ElfMetadata.unambiguous_symbol`). Nothing under `abicheck/` reads `symbol_map` any more, and a repo-scan test keeps it that way. Unpairable leftovers are recorded as declined comparisons, not dropped.

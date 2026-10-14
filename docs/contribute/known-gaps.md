@@ -46,12 +46,7 @@ Each open entry below has its status line, a risk tag and a short summary; the f
 
 Open correctness gaps, in the order of the maintainer ruling of 2026-10-01 (closed items from that ruling are in the archive):
 
-Next, unranked (the `--no-baseline` one-sided-detector gap, the target-platform gap and the untagged `dependency_scope` gap were closed on 2026-10-10, and the informational-outcome strict-gate gap on 2026-10-12; see the archive). Each of these can let a run read as cleaner or more comparable than its evidence supports:
-
-### A snapshot's `build_mode` is captured only for ELF, and only from the main image
-
-**Status (re-verified 2026-10-11 at `46c127111`): PARTIAL.** Unchanged since 2026-10-10: `extract/build_mode_capture.py` is ELF-only and its only caller is `workflows/snapshot_factory.py`. PE/Mach-O get no `build_mode`, detached debuginfo is not read, and nothing compares compiler family across snapshots.  
-`false-clean` — `build_mode` comes only from an ELF main image; PE/Mach-O snapshots and detached debuginfo carry none, and compiler family is never compared across snapshots, so a toolchain switch reads as comparable. [Full write-up](known-gaps/a-snapshots-build-mode-is-captured-only-for-elf-and-only-from.md)
+Next, unranked (the `--no-baseline` one-sided-detector gap, the target-platform gap and the untagged `dependency_scope` gap were closed on 2026-10-10, the informational-outcome strict-gate gap on 2026-10-12, and the ELF-only `build_mode` capture gap on 2026-10-14; see the archive). Each of these can let a run read as cleaner or more comparable than its evidence supports:
 
 ### Scalar and release `compare` still fold the exit code in two places (2026-10-07)
 
