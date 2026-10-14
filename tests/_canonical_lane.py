@@ -34,7 +34,7 @@ def canonical_python(root: Path = ROOT) -> tuple[int, int]:
     """``repo_facts.json``'s ``canonical_python``, the single source of truth
     (AGENTS.md's "Line-coverage floor" section) for which unit-test lane is
     the one that actually matters for a platform/interpreter-independent
-    check — falls back to 3.13 (today's value) if the file is
+    check — falls back to 3.14 (today's value) if the file is
     missing/malformed rather than failing collection over it.
 
     A caller using this in a module-level ``pytestmark`` is evaluated at
@@ -48,11 +48,11 @@ def canonical_python(root: Path = ROOT) -> tuple[int, int]:
     try:
         raw = json.loads((root / "repo_facts.json").read_text(encoding="utf-8"))
         if not isinstance(raw, dict):
-            return 3, 13
+            return 3, 14
         major, minor = (int(p) for p in str(raw["canonical_python"]).split("."))
         return major, minor
     except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError):
-        return 3, 13
+        return 3, 14
 
 
 def is_canonical_lane(root: Path = ROOT) -> bool:

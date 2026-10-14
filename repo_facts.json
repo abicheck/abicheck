@@ -1,5 +1,5 @@
 {
-  "canonical_python": "3.13",
+  "canonical_python": "3.14",
   "example_cases": 216,
   "fast_test_cases_collected": 72846,
   "generated_utc": "2026-10-14T00:06:38+00:00",
