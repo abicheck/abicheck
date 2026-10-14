@@ -41,6 +41,64 @@ gate = _load("check_mutation_score")
 results = _load("mutation_results")
 
 
+@pytest.mark.parametrize(
+    ("plan_shards", "nothing_in_scope", "exit_code"),
+    [
+        (None, True, 0),
+        (None, False, 1),
+        (12, True, 0),
+        (12, False, 0),
+    ],
+)
+def test_diff_only_stop_never_widens_and_plans_one_shard(
+    capsys, plan_shards, nothing_in_scope, exit_code
+) -> None:
+    """--diff-only with no function scope must stop, never fall back to the
+    whole population. Under --plan-shards it plans exactly one shard, so the
+    run job reports the outcome instead of fanning out twelve runners."""
+    assert scope.diff_only_stop(plan_shards, nothing_in_scope) == exit_code
+    out = capsys.readouterr().out.strip().splitlines()
+    if plan_shards:
+        assert out[-1] == "[1]"
+    else:
+        assert out and "[1]" not in out
+        assert ("nothing is measured" in out[0]) is nothing_in_scope
+
+
+def test_diff_only_plans_one_shard_when_no_mutable_function_changed(
+    tmp_path, capsys
+) -> None:
+    """End to end through main(): a test-only diff changes no only_mutate
+    function, so --diff-only must not widen to the whole population (which
+    used to split into twelve shards on every such PR)."""
+    diff = tmp_path / "pr.diff"
+    diff.write_text(
+        "diff --git a/tests/test_something.py b/tests/test_something.py\n"
+        "index 1111111..2222222 100644\n"
+        "--- a/tests/test_something.py\n"
+        "+++ b/tests/test_something.py\n"
+        "@@ -1 +1 @@\n"
+        "-assert x == 1\n"
+        "+assert x == 2\n",
+        encoding="utf-8",
+    )
+    rc = gate.main(
+        [
+            "--run",
+            "--plan-shards",
+            "12",
+            "--diff-scoped",
+            "--scope-run-to-diff",
+            "--scope-run-to-functions",
+            "--diff-only",
+            "--diff-file",
+            str(diff),
+        ]
+    )
+    assert rc == 0
+    assert capsys.readouterr().out.strip().splitlines()[-1] == "[1]"
+
+
 # --------------------------------------------------------------------------
 # Pattern encoding vs mutmut's key decoding
 # --------------------------------------------------------------------------

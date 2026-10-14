@@ -95,9 +95,12 @@ from mutation_results import (  # noqa: E402
 )
 from mutation_scope import (  # noqa: E402
     NOTHING_MATCHES_MARKER,
+    diff_only_stop,
     function_run_scope,
     function_scope_pattern,
     is_splittable,
+    load_baseline,
+    load_function_baseline,
     mutation_units,
     parse_shard,
     planned_shards,
@@ -745,51 +748,6 @@ def render_baseline(records: list[MutantRecord]) -> dict[str, object]:
     }
 
 
-def load_baseline(path: Path) -> dict[str, int] | None:
-    """Read ``{module_path: survivor_count}``, or ``None`` if absent/invalid."""
-    try:
-        with open(path, encoding="utf-8") as fh:
-            doc = json.load(fh)
-    except (OSError, json.JSONDecodeError):
-        return None
-    modules = doc.get("modules") if isinstance(doc, dict) else None
-    if not isinstance(modules, dict):
-        return None
-    out: dict[str, int] = {}
-    for module, entry in modules.items():
-        if isinstance(entry, dict) and isinstance(entry.get("survivors"), int):
-            out[module] = entry["survivors"]
-        elif isinstance(entry, int):
-            out[module] = entry
-    return out
-
-
-def load_function_baseline(path: Path) -> dict[tuple[str, str], int]:
-    """Read per-function survivor counts from a current baseline document.
-
-    Old baselines intentionally yield no entries: treating their module total
-    as a function total would hide a regression in one function paid for by an
-    improvement in another.
-    """
-    try:
-        with open(path, encoding="utf-8") as fh:
-            doc = json.load(fh)
-    except (OSError, json.JSONDecodeError):
-        return {}
-    modules = doc.get("modules") if isinstance(doc, dict) else None
-    if not isinstance(modules, dict):
-        return {}
-    out: dict[tuple[str, str], int] = {}
-    for module, entry in modules.items():
-        funcs = entry.get("functions") if isinstance(entry, dict) else None
-        if not isinstance(funcs, dict):
-            continue
-        for function, survivors in funcs.items():
-            if isinstance(function, str) and isinstance(survivors, int):
-                out[(module, function)] = survivors
-    return out
-
-
 def check_per_module(
     records: list[MutantRecord],
     baseline: dict[str, int],
@@ -1335,6 +1293,15 @@ def main(argv: list[str] | None = None) -> int:
             "this so it cannot silently degrade to report-only."
         ),
     )
+    parser.add_argument(
+        "--diff-only",
+        action="store_true",
+        help=(
+            "With --run --diff-scoped: gate only the functions this diff changed, "
+            "and never widen to the whole population (the PR lane). A diff that "
+            "changes no mutable function runs nothing; drift is the weekly run's."
+        ),
+    )
     parser.add_argument("--json", help="Write a machine-readable receipt here.")
     args = parser.parse_args(argv)
 
@@ -1398,6 +1365,7 @@ def main(argv: list[str] | None = None) -> int:
     scope_modules: set[str] = set()
     scope_mode = "full"
     shard_units: list[tuple[str, str]] = []
+    diff_only_empty = False
     if (
         args.run
         and not args.results_file
@@ -1405,8 +1373,9 @@ def main(argv: list[str] | None = None) -> int:
         and args.scope_run_to_functions
         and not args.require_baseline
         and not args.write_baseline
-        and baseline_modules is None
-        and total_baseline is None
+        # --diff-only scopes by function whatever the baseline: it never runs
+        # the drift gates that need the full population (those are weekly).
+        and (args.diff_only or (baseline_modules is None and total_baseline is None))
         and diff_text is not None
         # The diff readers below must see every entry; the same trust checks
         # module scoping applies (see diff_touches_outside_only_mutate).
@@ -1434,9 +1403,12 @@ def main(argv: list[str] | None = None) -> int:
                     f"mutation-score: scoping this run to {len(patterns)} changed "
                     "function/module pattern(s): " + ", ".join(patterns)
                 )
+            elif args.diff_only:
+                diff_only_empty = True
     if (
         scope_patterns is None
         and args.run
+        and not args.diff_only
         # _gather() checks --results-file *before* --run and returns those
         # saved results unconditionally when both are given (a pre-existing
         # quirk, unchanged here) — so --run alone does not mean mutmut is
@@ -1484,6 +1456,9 @@ def main(argv: list[str] | None = None) -> int:
                 + ", ".join(sorted(scope_modules))
             )
             scope_mode = "diff"
+
+    if args.diff_only and args.run and not args.results_file and scope_patterns is None:
+        return diff_only_stop(args.plan_shards, diff_only_empty)
 
     # A global-total-only baseline cannot be scored per shard.
     global_total_only = total_baseline is not None and baseline_modules is None

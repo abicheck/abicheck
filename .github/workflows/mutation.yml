@@ -6,11 +6,13 @@ name: Mutation testing
 #
 # Three lanes, because one lane cannot serve both purposes:
 #
-#   pull_request (paths-filtered) -> `--diff-scoped`
+#   pull_request (paths-filtered) -> `--diff-scoped --diff-only`
 #     Gates only the functions the branch changed. Absolute: no baseline to be
 #     under. This is what makes mutation testing actionable on a PR, and it
 #     fires automatically on the mutated modules instead of waiting for someone
-#     to remember the `mutation` label.
+#     to remember the `mutation` label. `--diff-only` never widens to the whole
+#     population, so a PR costs minutes, not a sharded full run. The complete
+#     check is the `mutation` label (below) and the weekly schedule.
 #
 #   schedule -> per-module baseline drift
 #     Full run, compared against the committed `mutation-baseline.json`. Per
@@ -90,6 +92,9 @@ jobs:
       # weekly run that has no baseline to drift against (it bootstraps one
       # instead of failing, so the lane can reach a gating state on its own).
       record_baseline: ${{ steps.baseline.outputs.record }}
+      # PR runs without the `mutation` label gate only the functions the diff
+      # changed (--diff-only). The label asks for the complete check instead.
+      diff_only: ${{ steps.decide.outputs.diff_only }}
       shards: ${{ steps.plan.outputs.shards }}
       check_selection: ${{ github.event_name != 'pull_request' || steps.changed.outputs.selection == 'true' || steps.pyproject.outputs.relevant == 'true' }}
     steps:
@@ -233,6 +238,7 @@ jobs:
         run: |
           if [ "$GITHUB_EVENT_NAME" != "pull_request" ]; then
             echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "diff_only=false" >> "$GITHUB_OUTPUT"
             echo "require_baseline=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -241,20 +247,16 @@ jobs:
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
           fi
-          # Which PR runs must have a *drift* reference, not just
-          # --diff-scoped (which only looks at the functions this branch
-          # changed):
-          #   - a detector test changed: the branch may have changed no
-          #     production function at all, so there is nothing to scope to
-          #     and the answer exists only as drift;
-          #   - the `mutation` label: it is documented as the complete check,
-          #     and a label-forced run on a test-only diff outside the globs
-          #     above would otherwise print "gated nothing" and exit 0 —
-          #     green for precisely the run someone asked to be thorough
-          #     (Codex review).
-          if [ "$MATCHED_TESTS" = "true" ] || [ "$LABELLED" = "true" ]; then
+          # A PR gates only the functions its diff changed (--diff-only) and
+          # never needs a drift reference: survivor drift across the whole
+          # population is the weekly run's question. The `mutation` label is
+          # the complete check on demand, so it alone runs the full population
+          # and requires the baseline when one is recorded.
+          if [ "$LABELLED" = "true" ]; then
+            echo "diff_only=false" >> "$GITHUB_OUTPUT"
             echo "require_baseline=true" >> "$GITHUB_OUTPUT"
           else
+            echo "diff_only=true" >> "$GITHUB_OUTPUT"
             echo "require_baseline=false" >> "$GITHUB_OUTPUT"
           fi
       - name: Plan the shard matrix
@@ -268,6 +270,7 @@ jobs:
         if: steps.decide.outputs.run == 'true'
         env:
           REQUIRE_BASELINE: ${{ steps.decide.outputs.require_baseline }}
+          DIFF_ONLY: ${{ steps.decide.outputs.diff_only }}
           HAS_BASELINE: ${{ steps.baseline.outputs.present }}
           RECORD: ${{ steps.baseline.outputs.record }}
           # Through `env`, not expanded into the script (zizmor
@@ -279,6 +282,7 @@ jobs:
             pull_request)
               args+=(--diff-scoped --scope-run-to-diff --scope-run-to-functions
                      --base-ref "origin/$BASE_REF")
+              if [ "$DIFF_ONLY" = "true" ]; then args+=(--diff-only); fi
               if [ "$REQUIRE_BASELINE" = "true" ] && [ "$HAS_BASELINE" = "true" ]; then args+=(--require-baseline); fi ;;
             schedule)
               if [ "$RECORD" = "true" ]; then args+=(--write-baseline); else args+=(--require-baseline); fi ;;
@@ -380,6 +384,7 @@ jobs:
         # drift answer to require, so the step warns instead (see below).
         env:
           REQUIRE_BASELINE: ${{ needs.resolve.outputs.require_baseline }}
+          DIFF_ONLY: ${{ needs.resolve.outputs.diff_only }}
           HAS_BASELINE: ${{ needs.resolve.outputs.baseline_available }}
           # Through `env`, not expanded into the script: a branch name is
           # attacker-chosen on a fork PR, and `${{ }}` inside `run:` is
@@ -409,6 +414,16 @@ jobs:
               echo "$msg" >> "$GITHUB_STEP_SUMMARY"
             fi
           fi
+          # --diff-only: the PR lane gates only the functions this diff changed
+          # and never widens to the whole population (drift is weekly / label).
+          diff_only=""
+          if [ "$DIFF_ONLY" = "true" ]; then
+            diff_only="--diff-only"
+            {
+              echo "### PR lane: changed functions only"
+              echo "Survivors are gated in the functions this PR changed. Drift across the whole population runs weekly and with the \`mutation\` label."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
           # --scope-run-to-functions: with no baseline recorded, only the
           # mutants of the functions this branch changed are executed, which
           # is everything --diff-scoped reads (see mutation_scope.py).
@@ -416,7 +431,7 @@ jobs:
             --scope-run-to-diff --scope-run-to-functions \
             --shard "$SHARD" \
             --base-ref "origin/$BASE_REF" \
-            $require \
+            $require $diff_only \
             --json mutation-receipt.json
       - name: Run mutation testing (baseline drift)
         if: github.event_name == 'schedule' && needs.resolve.outputs.record_baseline != 'true'
