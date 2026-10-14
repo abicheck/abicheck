@@ -50,7 +50,7 @@ from .model.change import Change
 from .model.contract_finding_relevance import is_evaluated
 from .model.symbol_inventory import SymbolInventory
 from .policy.classification import Verdict
-from .policy.evaluate import effective_kind_sets
+from .policy.evaluate import effective_kind_sets, verdict_for
 from .report.envelope import resolved_document as _resolved_document
 from .report.junit_disposition import (
     # ADR-061: moved to report/ (its historical private name is kept here
@@ -135,33 +135,13 @@ _VERDICT_TO_JUNIT_TYPE: dict[Verdict, str] = {
 }
 
 
-def _resolved_verdict(
-    change: Change,
-    result: DiffResult,
-    kind_sets: KindSets,
-    finding: ReportFinding | None,
-) -> Verdict:
-    """*finding*'s verdict if resolved (ADR-061 Phase 2 item 4b), else the
-    direct resolver call every caller used before ``findings_by_id``."""
-    if finding is not None:
-        return finding.verdict
-    from .policy.severity import effective_verdict_for_change
-
-    return effective_verdict_for_change(
-        change,
-        policy=result.policy,
-        kind_sets=kind_sets,
-        policy_file=result.policy_file,
-    )
-
-
 def _resolved_category(
     change: Change,
     result: DiffResult,
     kind_sets: KindSets,
     finding: ReportFinding | None,
 ) -> IssueCategory:
-    """Category counterpart of :func:`_resolved_verdict`."""
+    """Category counterpart of :func:`~abicheck.policy.evaluate.verdict_for`."""
     if finding is not None:
         return finding.category
     from .policy.severity import classify_effective_change
@@ -190,7 +170,7 @@ def _is_failure(
     A4 per-finding ``effective_verdict`` (ADR-027), and frozen-namespace
     escalation guards — so the JUnit file can never disagree with the JSON
     report or the severity-aware exit code. *findings_by_id*, when given,
-    resolves via :func:`_resolved_verdict`/:func:`_resolved_category`.
+    resolves via :func:`~abicheck.policy.evaluate.verdict_for`/:func:`_resolved_category`.
 
     When *severity_config* is given (from ``--severity-preset`` or
     ``severity:`` config overrides), it is the sole source of truth — a finding
@@ -231,7 +211,7 @@ def _is_failure(
 
         cat = _resolved_category(change, result, kind_sets, finding)
         return severity_config.level_for(cat) == SeverityLevel.ERROR
-    verdict = _resolved_verdict(change, result, kind_sets, finding)
+    verdict = verdict_for(change, result, finding=finding, kind_sets=kind_sets)
     if verdict in (Verdict.BREAKING, Verdict.API_BREAK):
         return True
     # COMPATIBLE_WITH_RISK never fails without a severity_config: all
@@ -286,7 +266,7 @@ def _failure_type(
             # change's verdict without changing which kind-set its raw kind
             # belongs to, so kind-set membership alone could contradict the
             # category already resolved above (CodeRabbit review, PR #557).
-            verdict = _resolved_verdict(change, result, kind_sets, finding)
+            verdict = verdict_for(change, result, finding=finding, kind_sets=kind_sets)
             if verdict == Verdict.API_BREAK:
                 return "API_BREAK"
             if verdict == Verdict.COMPATIBLE_WITH_RISK:
@@ -294,7 +274,7 @@ def _failure_type(
             return "POTENTIAL_BREAKING"
         return _CATEGORY_TO_JUNIT_TYPE.get(category.value, "COMPATIBLE")
 
-    verdict = _resolved_verdict(change, result, kind_sets, finding)
+    verdict = verdict_for(change, result, finding=finding, kind_sets=kind_sets)
     return _VERDICT_TO_JUNIT_TYPE.get(verdict, "COMPATIBLE")
 
 
