@@ -56,6 +56,8 @@ import tomllib
 from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path, PurePosixPath
 
+from baseline_loader import BaselineFormatError, read_baseline
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 #: mutmut's separator in a method's mangled name: ``xǁClassǁmethod``.
@@ -309,10 +311,16 @@ def check_shard_drift(
 
 
 def load_baseline(path: Path) -> dict[str, int] | None:
-    """Read ``{module_path: survivor_count}``, or ``None`` if absent/invalid."""
+    """Read ``{module_path: survivor_count}``, or ``None`` if absent/invalid.
+
+    A ``NaN``/``Infinity`` baseline raises :class:`BaselineFormatError` instead
+    of returning ``None``: ``None`` means "no per-module baseline", which would
+    quietly skip the per-module drift check. Raising fails the run.
+    """
     try:
-        with open(path, encoding="utf-8") as fh:
-            doc = json.load(fh)
+        doc = read_baseline(path)
+    except BaselineFormatError:
+        raise
     except (OSError, json.JSONDecodeError):
         return None
     modules = doc.get("modules") if isinstance(doc, dict) else None
@@ -332,11 +340,13 @@ def load_function_baseline(path: Path) -> dict[tuple[str, str], int]:
 
     Old baselines intentionally yield no entries: treating their module total
     as a function total would hide a regression in one function paid for by an
-    improvement in another.
+    improvement in another. A ``NaN``/``Infinity`` baseline raises
+    :class:`BaselineFormatError`, as in :func:`load_baseline`.
     """
     try:
-        with open(path, encoding="utf-8") as fh:
-            doc = json.load(fh)
+        doc = read_baseline(path)
+    except BaselineFormatError:
+        raise
     except (OSError, json.JSONDecodeError):
         return {}
     modules = doc.get("modules") if isinstance(doc, dict) else None
