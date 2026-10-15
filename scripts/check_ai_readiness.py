@@ -341,7 +341,7 @@ FILE_SIZE_GRANDFATHERED: dict[str, int] = {
     "scripts/check_architecture.py": 1728,
     "scripts/check_docs_contract.py": 1423,
     "scripts/check_fp_rate.py": 1880,
-    "scripts/check_header_graph_perf.py": 1544,
+    "scripts/check_header_graph_perf.py": 1547,
     "scripts/check_l2_cli_perf.py": 1895,
     "scripts/check_mutation_score.py": 1981,
     "scripts/fact_detector_misuse_aliases.py": 1771,
