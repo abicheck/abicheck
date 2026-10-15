@@ -30,7 +30,7 @@ from xml.etree.ElementTree import Element, SubElement
 import pytest
 from hypothesis import given, strategies as st
 
-from abicheck.diff_helpers import type_map_key
+from abicheck.compare.type_map_pair import type_map_key
 from abicheck.dumper import _CastxmlParser
 from abicheck.name_classification import strip_anonymous_type_location
 

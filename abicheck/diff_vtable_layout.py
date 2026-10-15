@@ -50,8 +50,9 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
+from .compare.type_map_pair import TypeMap
 from .detector_registry import registry
-from .diff_helpers import TypeMap, build_type_map, lookup_matched_type, make_change
+from .diff_helpers import build_type_map, lookup_matched_type, make_change
 from .diff_types_vtable import _virtual_signatures_by_owner
 from .model import (
     AbiSnapshot,

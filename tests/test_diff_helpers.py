@@ -17,13 +17,13 @@
 from __future__ import annotations
 
 from abicheck.checker_policy import ChangeKind
+from abicheck.compare.type_map_pair import type_map_key
 from abicheck.diff_helpers import (
     bool_transition,
     build_type_map,
     depth_aware_bare_name,
     diff_by_key,
     lookup_matched_type,
-    type_map_key,
 )
 from abicheck.fact_provenance import resolved_fact_producer
 from abicheck.model import AbiSnapshot, RecordType
