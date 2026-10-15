@@ -91,8 +91,9 @@ gh api /repos/abicheck/abicheck/rulesets/<id> > /tmp/existing-ruleset.json
 
 - If it carries anything else in *any* of those three fields, **merge by
   hand instead of running the command above**: start from
-  `/tmp/existing-ruleset.json`, make its `required_status_checks` rule (if
-  any) require exactly `lint-and-types`, keep the `non_fast_forward` rule,
+  `/tmp/existing-ruleset.json`, make its `required_status_checks` rule require
+  exactly `lint-and-types`; if no such rule exists, add it. Keep the
+  `non_fast_forward` rule,
   keep its `conditions` and every other rule/`bypass_actors` entry untouched, save
   the merged result to a file, and `PUT` *that* file (same command as
   above, with `--input` pointed at the merged file) — not
@@ -131,7 +132,8 @@ gh api /repos/abicheck/abicheck/rulesets/<id> > /tmp/existing-ruleset.json
 all; a Ruleset object and a classic protection config are different
 resources with different shapes. If that classic config has
 `required_status_checks` enabled, make it require exactly `lint-and-types`
-there (GitHub's
+there. If it is absent or disabled, enable required status checks and
+configure `lint-and-types` as the sole context (GitHub's
 [branch-protection endpoint](https://docs.github.com/en/rest/branches/branch-protection#update-branch-protection)),
 and separately apply this Ruleset (the `POST` command in "Apply" above) if
 force-push protection or the admin bypass isn't already covered by the

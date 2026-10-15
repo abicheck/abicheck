@@ -161,7 +161,9 @@ class TestBranchRulesetArtifact:
         assert "name" not in job, "check-run name must equal the job id"
         assert "if" not in job and "needs" not in job
         triggers = wf.get("on", wf.get(True)) or {}
+        assert "pull_request" in triggers
         pull_request = triggers.get("pull_request") or {}
+        assert "main" in pull_request.get("branches", [])
         assert "paths" not in pull_request
         assert "paths-ignore" not in pull_request
 
