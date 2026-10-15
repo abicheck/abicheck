@@ -138,9 +138,7 @@ class TestBranchRulesetArtifact:
         """The one thing this suite must keep true: the required set is
         `lint-and-types` and no other check is merge-blocking."""
         (rule,) = self._rules_of_type("required_status_checks")
-        contexts = {
-            c["context"] for c in rule["parameters"]["required_status_checks"]
-        }
+        contexts = {c["context"] for c in rule["parameters"]["required_status_checks"]}
         assert contexts == self.REQUIRED_CONTEXTS
 
     def test_repository_admin_bypass_is_declared(self) -> None:
