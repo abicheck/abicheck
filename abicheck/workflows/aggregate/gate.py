@@ -485,7 +485,7 @@ class GateInfo:
         }
 
 
-def _contract_coverage_declared(data: Mapping[str, Any]) -> bool:
+def contract_coverage_declared(data: Mapping[str, Any]) -> bool:
     """Whether the report actually *stated* a usable coverage contribution.
 
     :func:`_contract_coverage_exit` fails open, so its ``0`` covers three
@@ -500,6 +500,10 @@ def _contract_coverage_declared(data: Mapping[str, Any]) -> bool:
         _is_valid_contribution(block.get("contract_coverage_exit_contribution"))
         for block in contract_coverage_blocks(data)
     )
+
+
+#: Pre-promotion name; ``no_baseline_load.py`` and tests still import it.
+_contract_coverage_declared = contract_coverage_declared
 
 
 def _scan_severity_gate(data: Mapping[str, Any]) -> GateInfo | None:
@@ -567,7 +571,7 @@ def _contract_coverage_exit(data: Mapping[str, Any]) -> int:
     return 0
 
 
-def _analysis_assurance_exit(data: Mapping[str, Any]) -> int:
+def analysis_assurance_exit(data: Mapping[str, Any]) -> int:
     """The report's own P0.4 analysis-assurance contribution (``0``/``1``):
     read, not recomputed (``GateInfo.from_scan_report`` reads only the
     nested compatibility gate -- Codex review); fails open like its sibling
@@ -580,6 +584,10 @@ def _analysis_assurance_exit(data: Mapping[str, Any]) -> int:
         if _is_valid_contribution(raw):
             return raw
     return 0
+
+
+#: Pre-promotion name; ``no_baseline_load.py`` and tests still import it.
+_analysis_assurance_exit = analysis_assurance_exit
 
 
 def scan_severity_gate_paths(data: Mapping[str, Any]) -> list[tuple[str, ...]]:
