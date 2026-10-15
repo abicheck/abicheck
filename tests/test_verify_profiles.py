@@ -522,7 +522,7 @@ def test_ci_actually_runs_every_shared_gate_step() -> None:
 
 
 def test_ci_canonical_unit_lane_matches_verify_pr_profile() -> None:
-    """The Linux/3.13 canonical unit-tests CI step keeps its own pytest
+    """The Linux/3.14 canonical unit-tests CI step keeps its own pytest
     invocation (matrix/coverage-artifact/xdist concerns don't fit the plain
     pass/fail Step model), but its marker expression and coverage floor must
     still agree with `verify.py`'s `unit-pr` step — the actual PR-gate

@@ -150,8 +150,12 @@ python scripts/check_ai_readiness.py   # structural repo gates
 ### Definition of done: `scripts/verify.py`
 
 `scripts/verify.py` is the single verification orchestrator that pixi,
-pre-commit, CI and this file all route through
-(`tests/test_verify_profiles.py` enforces that). **Before opening a PR, run
+pre-commit, CI and this file all route through. `tests/test_verify_profiles.py`
+checks that the `ai-readiness`, `lint-and-types` and `fair-metadata` jobs in
+`ci.yml` invoke `verify.py` with their expected steps, that the canonical unit
+lane uses `unit-pr`'s marker expression, and that every `pr`-profile step is
+named by some CI job's `--only` list (`unit-pr` runs directly in the
+unit-tests matrix); it does not check the rest of CI's commands. **Before opening a PR, run
 `python scripts/verify.py --profile pr`** (same as `pixi run check`) — it adds
 golden tests, the 80% coverage floor and ai-readiness on top of the fast loop.
 
@@ -170,13 +174,15 @@ PR description. To change a check, change it in `verify.py` and let
 `tests/test_verify_profiles.py` say what else must follow.
 
 **Long runs.** The `pr` profile and the full fast suite take 13–25 min, past
-the 10-min foreground tool limit. Start them once with the Bash tool's
-`run_in_background` and let its completion notification wake you; a shell
+the 10-min foreground tool limit. Start them once in the background, with
+an explicit timeout, and wait for their result in the same turn: a
+completion notification is not guaranteed to resume the agent. If the run
+does not finish within its timeout, stop it and name the blocker in the
+final message. Do not end the turn while a run is still in progress. A shell
 wait loop (`until … sleep`, `pgrep -f`, `pkill -f`) matches its own command
 line and hangs or kills itself. Keep the tree still while a run is live —
 `test_code_identity` hashes the source tree, so a commit mid-run fails it —
-and push once the run is green; an "unpushed changes" stop-hook nag is
-answered by the running verify, not by an early push.
+and push once the run is green.
 
 **PR body.** Write every PR description with the `pr` skill
 (`.claude/skills/pr/`), whatever tool opens the PR. Write the description to a file and run

@@ -1,7 +1,20 @@
 # Architecture deepening: from shallow modules to fewer, deeper owners
 
 Status: Phases 1 and 2 landed 2026-10-07 (see each phase's "Landed"
-note); Phases 3-5 proposed. No new ADR: each phase finishes
+note). The PR series that followed landed on `main` as follows:
+
+- #1602: move JSON report section builders out of `reporter.py`.
+- #1603: single owner for the `header://` node id.
+- #1604: one owner for the per-change verdict a renderer shows.
+- #1605: retire `cli_helpers_compare`; move the dump-flag warning to `frontends/cli`.
+- #1606: resolve header-backend env decisions through one `BackendPlan` reader.
+- #1608: promote post-processing's kind-set reach-ins to public owner names.
+- #1609: release members build their typed `CompareRequest` directly.
+- #1610: give the PR-comment model one owner in `report/`.
+- #1613: require a plan link and a bounded rationale for raised debt entries.
+
+Phase 3 and Phase 4 premises are stale (see the notes under each). Phase 5
+is still proposed. No new ADR: each phase finishes
 work [ADR-061](../adr/061-responsibility-package-architecture.md) already
 decided (D8 facades, gap B dependency direction, the `service_*`/`cli_*`/
 `diff_*` target owners). Effort: L overall, delivered as independent
@@ -176,6 +189,13 @@ Still proposed: consolidating the four `service_dump_*` modules under one
 
 ### Phase 3: CLI compare helpers keep only adapter work. Strong (re-scoped)
 
+**Premise stale.** Its named call chain (`_run_compare_pair` →
+`_compare_one_library` → `_compare_release_libraries` →
+`_CompareReleaseCommonArgs`) does not exist on `main`. The real friction is
+the `service_compare_pipeline` `run_compare` keyword shim, which the release
+member fan-out no longer goes through since #1609 (the public
+`service.run_compare` keyword API is unchanged).
+
 **Evidence.** `cli_compare_helpers.py` is 2,198 lines, over the
 2,000-line hard limit and listed in `debt.yaml`.
 `cli_compare_release_helpers.py` is 1,841 lines; its `debt.yaml`
@@ -208,6 +228,10 @@ the next dropped option, a class that has recurred at least five times
 in `debt.yaml`.
 
 ### Phase 4: narrow `service.py`. Worth exploring
+
+**Premise stale.** `service.py` is 249 lines, with 7 `noqa: E402`
+re-export lines (re-measured on `main`; the figures below are the earlier
+ones).
 
 **Evidence.** `service.py` is 289 lines, with 8 `noqa: E402` re-export
 blocks. The ADR-061 facade budget is 120–150 lines. It re-exports
