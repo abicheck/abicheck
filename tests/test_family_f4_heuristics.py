@@ -23,7 +23,7 @@ confirms or vetoes it (#1411, #1231, #1316, #1308, #1344, #1218).
 **Runtime registry** (design-hardening Phase 5): every spelling-based
 classifier registers with ``abicheck.model.name_heuristics`` -- a lowering
 or review-routing effect, or, to raise severity, a named structural fact --
-and ``abicheck.policy.name_heuristic_catalogue`` catalogues the complete set. This
+and ``abicheck.policy.name_heuristics`` catalogues the complete set. This
 harness stays the oracle.
 
 **Inventory** (``_family_f4_inventory``): an AST scan of the decision
@@ -69,7 +69,7 @@ from abicheck.model.name_heuristics import (
     register_name_heuristic,
     register_severity_raising_heuristic,
 )
-from abicheck.policy.name_heuristic_catalogue import (
+from abicheck.policy.name_heuristics import (
     name_heuristic_registry,
     registry_problems,
     severity_raising_heuristics,
@@ -154,7 +154,7 @@ def test_every_site_is_registered_or_exempt() -> None:
     assert len(uncategorized) <= UNCATEGORIZED_CEILING, (
         "unregistered name/spelling heuristic site(s): register each through "
         "abicheck.model.name_heuristics (and list its module in "
-        "policy.name_heuristic_catalogue.HEURISTIC_OWNER_MODULES), or add an exemption "
+        "policy.name_heuristics.HEURISTIC_OWNER_MODULES), or add an exemption "
         f"row to tests/_family_f4_registry.HEURISTICS: {sorted(uncategorized)}"
     )
 

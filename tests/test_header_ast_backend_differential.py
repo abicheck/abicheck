@@ -15,9 +15,9 @@
 
 """castxml vs clang through the header-AST backend protocol (lane B, B2b).
 
-Both :class:`~abicheck.extract.headers.header_backend_protocol.HeaderAstBackend`
+Both :class:`~abicheck.extract.headers.backend_protocol.HeaderAstBackend`
 implementations parse the SAME headers from the SAME
-:class:`~abicheck.extract.headers.header_backend_protocol.HeaderParseRequest`; the facts
+:class:`~abicheck.extract.headers.backend_protocol.HeaderParseRequest`; the facts
 read back through :func:`parse_header_ast_fields` must agree, facet by
 facet. Every disagreement is listed in :data:`KNOWN_GAPS` with the exact
 values each producer yields today, so a gap that closes (or widens) fails
@@ -38,12 +38,12 @@ import pytest
 from _clang_ast_cache_isolation import _isolate_ast_cache, _reset_ast_memo
 
 from abicheck.extract.header_ast_fields import parse_header_ast_fields
-from abicheck.extract.headers.castxml.backend import CastxmlBackend
-from abicheck.extract.headers.clang.backend import ClangBackend
-from abicheck.extract.headers.header_backend_protocol import (
+from abicheck.extract.headers.backend_protocol import (
     HeaderAstBackend,
     HeaderParseRequest,
 )
+from abicheck.extract.headers.castxml.backend import CastxmlBackend
+from abicheck.extract.headers.clang.backend import ClangBackend
 
 pytestmark = pytest.mark.skipif(
     shutil.which("castxml") is None

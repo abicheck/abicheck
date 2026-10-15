@@ -29,7 +29,7 @@ and the registration functions for spelling-based classifiers
 (design-hardening Phase 5). It lives here only because the `compare`-layer
 detectors that register may import nothing but `model`. The matchers stay with
 their detectors, and the catalogue and its validation live in
-`policy/name_heuristic_catalogue.py`.
+`policy/name_heuristics.py`.
 
 **A second deliberate, ADR-063 D7-sanctioned exception: `fact_registry.py`.**
 D7 names `abicheck/model/fact_registry.py` explicitly as the fact/capability
