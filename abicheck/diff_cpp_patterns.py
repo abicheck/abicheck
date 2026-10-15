@@ -64,12 +64,11 @@ from .compare.template_surface import (
     reconciled_abi_visible_functions,
     strip_template_args as _callable_stem,  # noqa: F401
 )
+from .compare.type_map_pair import TypeMap, type_map_key
 from .diff_helpers import (
-    TypeMap,
     build_type_map,
     lookup_matched_type,
     make_change,
-    type_map_key,
 )
 
 # Re-exports — the generic detectors were extracted to dedicated modules

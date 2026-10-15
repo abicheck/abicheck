@@ -101,7 +101,7 @@ def _public_type_embeds_stdlib_by_value(snap: AbiSnapshot) -> bool:
     falsely claim a public layout change exists when the global stdlib filter has
     kept all the matching records out of the surface (Codex review #345).
     """
-    from .diff_helpers import type_map_key
+    from .compare.type_map_pair import type_map_key
     from .model import is_non_abi_surface_type
     from .policy.public_surface_query import PublicSurfaceQuery
 
@@ -147,7 +147,8 @@ def _public_by_value_type_closure(snap: AbiSnapshot) -> set[str]:
     it. There is no pairwise comparison here for
     :func:`~abicheck.compare.fact_comparison.compare_facts` to gate.
     """
-    from .diff_helpers import build_type_map, type_map_key
+    from .compare.type_map_pair import type_map_key
+    from .diff_helpers import build_type_map
     from .model import RecordType, resolved_fact_value
     from .model.type_identifiers import type_identifiers as _type_identifiers
 

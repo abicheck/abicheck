@@ -49,8 +49,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from .compare.type_map_pair import Side, TypeMapPair
 from .detector_registry import registry
-from .diff_helpers import build_type_map, lookup_matched_type, make_change
+from .diff_helpers import build_type_map, make_change
 from .model import FactStatus, fact_confirmed_true, resolved_fact_value
 from .model.change import Change
 from .model.change_catalog.kinds import ChangeKind
@@ -58,7 +59,7 @@ from .model.snapshot_reliability import family_reliable
 from .name_classification import STDLIB_TYPE_NAMESPACE_PREFIXES
 
 if TYPE_CHECKING:
-    from .diff_helpers import TypeMap
+    from .compare.type_map_pair import TypeMap
     from .model import AbiSnapshot, RecordType
 
 
@@ -445,8 +446,9 @@ def _diff_layout_descriptor(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     # (never the bare-name alias — see TypeMap's own docstring), so this
     # loop can't double-process a type the way iterating a raw dict with a
     # bare-name alias mixed in would.
+    pairs = TypeMapPair(old=old_idx, new=new_idx)
     for _key, new_rec in new_idx.items():
-        old_rec = lookup_matched_type(new_idx, old_idx, new_rec)
+        old_rec = pairs.counterpart(Side.NEW, new_rec)
         if old_rec is None:
             continue  # added type — handled by the structural type diff
         # Opaque/forward-declared types carry no real layout; skip them so the

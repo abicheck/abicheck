@@ -34,13 +34,13 @@ from __future__ import annotations
 
 from .compare.fact_comparison import compare_facts
 from .compare.fact_gate import both_facts_present
+from .compare.type_map_pair import type_map_key
 from .detector_registry import registry
 from .diff_helpers import (
     build_type_map as _build_type_map,
     fact_same_producer_qualified,
     lookup_matched_type as _lookup_matched_type,
     make_change,
-    type_map_key,
 )
 from .diff_types_surface import (
     RESERVED_FIELD,

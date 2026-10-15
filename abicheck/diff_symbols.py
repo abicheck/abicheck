@@ -67,6 +67,7 @@ from .compare.public_surface import (
     reconciled_variable_surfaces,
     should_filter_transitive_runtime_symbols,
 )
+from .compare.type_map_pair import TypeMap, type_map_key
 from .detector_registry import registry
 from .diff_cxx_rules import (
     old_virtual_signatures,
@@ -78,12 +79,10 @@ from .diff_default_value_reliability import (
     default_value_fingerprint_comparison_unreliable,
 )
 from .diff_helpers import (
-    TypeMap,
     build_type_map,
     diff_by_key,
     lookup_matched_type,
     make_change,
-    type_map_key,
 )
 from .diff_hidden_friends import diff_inline_hidden_friends
 from .diff_symbols_anon_fields import (
