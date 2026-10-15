@@ -41,65 +41,40 @@ bucket it's in:
 | `bugfix-test-contract.yml` | Yes, on `fix:`/`perf:`/`security:` PRs | Structural half: a fix changing shipped code must change a test. Declared half: the PR body must answer the bug-fix test contract, plus any conditional the diff triggers. Bypass with the `skip-test-contract` label. See `scripts/check_bugfix_test_contract.py` for what each answer is for. |
 | `publish.yml` / `pages.yml` | N/A (release/deploy only) | Not PR gates |
 
-## Required-status-check configuration — deliberately not enforced (2026-09)
+## Required-status-check configuration — `lint-and-types` required (2026-10-15)
 
-**Decision: `main` does not require status checks to pass before a merge,
-and this is intentional, not an oversight or an outstanding admin TODO.**
+**Decision (2026-10-15): exactly one check gates merges into `main`: the
+`lint-and-types` job in `.github/workflows/ci.yml`. No other check is
+required.** This reverses the 2026-09 decision that `main` requires no status
+checks. The maintainer decided that a lint, format, type or strict-docs
+failure should block a merge, and accepts the cost of waiting for that one
+job. It has no path filter, runs on every pull request to `main`, and has a
+10-minute timeout.
 
-CLI cleanup phase two's PR A / PR 0B originally built toward the opposite —
-a real GitHub required-status-checks Ruleset that would block the merge
-button until every check in a derived 14-name list passed on the PR's head
-SHA, plus `verify-merge-checks.yml` as a post-merge audit to catch a merge
-that slipped through before that Ruleset was actually applied. Both pieces
-were built, tested, and the Ruleset was eventually applied by an admin. It
-worked as designed: merges to `main` were blocked until CI finished.
+What is enforced and how:
 
-The maintainer then decided that trade-off isn't wanted going forward —
-waiting for CI to complete before a push/merge can land is a real cost to
-iteration speed, and this repo chooses to accept the risk of an occasional
-red or incomplete merge over paying it on every merge. Concretely:
-
-- The Ruleset's `required_status_checks` rule has been removed.
-  `.github/branch-protection-ruleset.json` now carries only a
-  `non_fast_forward` rule (no force-pushes/history rewrites on `main`) —
-  see `.github/branch-protection-ruleset.md` for the current runbook.
-- `.github/workflows/verify-merge-checks.yml` has been **removed outright**,
-  along with its dedicated tests (`tests/test_verify_merge_checks_race_logic.py`,
-  `tests/verify_merge_checks_harness.mjs`). That workflow's entire purpose
-  was catching a merge whose required checks hadn't actually finished before
-  `merged_at` — the ADR-style problem statement was "a required check that
-  didn't block a merge is a detectable gap, not a policy". Once the policy
-  itself became "don't require checks to block a merge," every merge it
-  used to flag as a finding became expected, normal behavior instead — an
-  audit that fires on every single merge, correctly, is not an audit
-  anymore, it's noise. There is no compensating mechanism to re-add in its
-  place; the absence of merge-blocking is the accepted state, not a gap.
-- The rest of this file's "Required vs. informational workflows" table is
-  kept as-is and still means what it says as *review guidance* — which
-  checks a human or reviewing agent should treat as "fix this before
-  merging" — it just no longer describes anything GitHub itself enforces
-  mechanically on the merge button.
-
-**If this decision is ever reversed**, the mechanical pieces this repo built
-for it are still intact and don't need to be reinvented — see the
-now-historical "PR 0 — restore a green CI baseline first" section of
-`docs/contribute/plans/cli-cleanup-phase-two.md` for the full original
-design (the required-check derivation rule and the
-one-stable-aggregate-check-per-workflow principle). The `docs-pr (required)`/
-`test-action (required)` bridge jobs that design put in `ci.yml` were
-**deleted** (2026-09-30): with nothing required they only polled another
-workflow's check for up to 25/35 minutes each, holding a runner on every PR.
-Re-enabling merge-blocking must bridge a path-filtered workflow with a
-reusable-workflow call and ordinary `needs:` instead (plan
-`docs/contribute/plans/ci-cost-and-assurance.md`, Phase 1) —
-`tests/test_required_checks_governance.py` rejects a sleep-loop poller. Re-deriving the
-required-check list from this file's "Required vs. informational workflows"
-table, adding a `required_status_checks` rule with that list to
-`branch-protection-ruleset.json`, and applying it is enough on its own —
-re-adding a `verify-merge-checks.yml`-style post-merge audit is optional at
-that point (it only earns its keep while the Ruleset's enforcement itself is
-still being rolled out or is unverified, per its original design rationale),
-not a required companion piece.
+- `.github/branch-protection-ruleset.json` carries a `non_fast_forward` rule
+  and a `required_status_checks` rule whose only context is
+  `lint-and-types`. The check-run name equals the job id, because the job
+  sets no `name:`.
+- The Ruleset has a repository-admin bypass (`RepositoryRole`, admin) so an
+  urgent merge is possible. This is a maintainer choice and can be removed.
+- **Applying the JSON is an admin step.** No repository workflow applies it.
+  Until a repository admin applies it, `main` does not enforce the check. The
+  runbook is `.github/branch-protection-ruleset.md`.
+- `tests/test_required_checks_governance.py` pins the required set to exactly
+  `lint-and-types`, and asserts that the job still runs on every pull request.
+  Changing the required set means changing the JSON, that test and this
+  section together.
+- The "Required vs. informational workflows" table below keeps its meaning as
+  review guidance. Only `lint-and-types` is merge-blocking.
+- The `docs-pr (required)` / `test-action (required)` bridge jobs and the
+  `test-action summary` roll-up job stay removed. If another check is ever
+  required, bridge a path-filtered workflow with a reusable-workflow call and
+  ordinary `needs:`, never a sleep loop (plan
+  `docs/contribute/plans/ci-cost-and-assurance.md`, Phase 1).
+- `.github/workflows/verify-merge-checks.yml` stays removed. It is not needed
+  to enforce the required check.
 
 ## Local equivalence (CLAUDE.md "M0-3")
 
