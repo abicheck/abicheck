@@ -43,7 +43,13 @@ from itertools import chain
 from pathlib import Path
 from typing import cast
 
-from .extract.path_aliases import (
+from ..model import AbiSnapshot, Fact, ScopeOrigin
+from ..model.surface_facts import (
+    SurfaceFactBearing,
+    is_export_table_only_record,
+    public_header_contract_fact,
+)
+from .path_aliases import (
     absolutize_header_root,
     dedup_segments,
     include_root_alias_segments,
@@ -51,19 +57,13 @@ from .extract.path_aliases import (
     segments,
     source_header_alias_segments,
 )
-from .extract.path_segments import _contiguous_subsequence, _suffix_match
-from .extract.public_header_identifiers import stamp_public_header_identifiers
-from .extract.public_root_ownership import compile_only_roots, retain_owning_roots
-from .extract.system_header_layout import (  # noqa: F401 -- _TARGET_TRIPLE_RE re-read by tests
+from .path_segments import _contiguous_subsequence, _suffix_match
+from .public_header_identifiers import stamp_public_header_identifiers
+from .public_root_ownership import compile_only_roots, retain_owning_roots
+from .system_header_layout import (  # noqa: F401 -- _TARGET_TRIPLE_RE re-read by tests
     _TARGET_TRIPLE_RE,
     _cross_sysroot_includes,
     _looks_like_multiarch_component,
-)
-from .model import AbiSnapshot, Fact, ScopeOrigin
-from .model.surface_facts import (
-    SurfaceFactBearing,
-    is_export_table_only_record,
-    public_header_contract_fact,
 )
 
 # The private spellings this module has exported since before

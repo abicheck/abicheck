@@ -14,6 +14,7 @@ import struct
 from pathlib import Path
 
 from abicheck.dwarf_metadata import DwarfMetadata, EnumInfo, FieldInfo, StructLayout
+from abicheck.extract.declaration_provenance import apply_provenance
 from abicheck.model import ScopeOrigin
 from abicheck.model.identity import EntityKind, Namespace, Record
 from abicheck.pdb_metadata import parse_pdb_debug_info
@@ -30,7 +31,6 @@ from abicheck.pdb_parser import (
     extract_udt_source_files,
     parse_tpi_stream,
 )
-from abicheck.provenance import apply_provenance
 from tests.test_pdb_parser import (
     _build_minimal_pdb,
     _build_tpi_stream,

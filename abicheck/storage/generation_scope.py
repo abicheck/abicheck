@@ -70,7 +70,7 @@ RESOLVER_NAME_WORDS: tuple[str, ...] = ("resol", "reachab", "alias", "provider")
 
 #: Modules that decide the semantics of a resolver generation.
 RESOLVER_SEMANTIC_FILES: tuple[str, ...] = (
-    "abicheck/resolver.py",
+    "abicheck/workflows/elf_dependency_resolver.py",
     "abicheck/debug_resolver.py",
     "abicheck/bundle_resolution_reachability.py",
     "abicheck/post_processing_reachability.py",

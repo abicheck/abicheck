@@ -31,7 +31,11 @@ from pathlib import Path
 import pytest
 from hypothesis import given, strategies as st
 
-from abicheck.provenance import _is_bare_system_dir, _segments, is_system_header
+from abicheck.extract.declaration_provenance import (
+    _is_bare_system_dir,
+    _segments,
+    is_system_header,
+)
 from abicheck.serialization import load_snapshot
 
 #: Real Debian cross-toolchain triples (``gcc-<ver>-<triple>`` package names).

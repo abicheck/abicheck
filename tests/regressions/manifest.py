@@ -236,7 +236,7 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
                     "snapshots built directly (no castxml/clang, no CLI). "
                     "Phase 3 (bug-class-regression-testing.md) added a "
                     "third seed test targeting the path/segment-based "
-                    "'abicheck.provenance' origin classifier "
+                    "'abicheck.extract.declaration_provenance' origin classifier "
                     "('classify_origin'/'_matches_public') with metamorphic "
                     "(checkout relocation, './..' spelling), independent-"
                     "oracle (real directory containment vs. a sibling-"

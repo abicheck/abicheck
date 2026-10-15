@@ -70,6 +70,7 @@ from functools import partial
 from typing import TYPE_CHECKING, Protocol, TypeVar
 
 from .errors import TuMergeError
+from .extract.declaration_provenance import build_public_set
 from .extract.headers.castxml.dumper import (
     _mangled_name_is_local_linkage as _mangled_name_is_local_linkage,
     entity_is_record_member as entity_is_record_member,
@@ -86,7 +87,6 @@ from .model import (
 from .model.cc_attributes import is_cc_attribute as _is_cc_attribute
 from .model.declaration_headers import HeaderAttributedMap, declaring_header_set
 from .model.evidence_merge import merged_capture_fact
-from .provenance import build_public_set
 from .tu_fragment import MergedTuFragments, TuFragment, entity_key
 from .tu_merge_provenance import (
     _blank_provenance,
@@ -505,7 +505,7 @@ def merge_fragments(
     when they are not (ADR-050 D4).
 
     *public_header_paths*/*public_header_dirs* are the same manifest-wide
-    public-surface inputs :func:`abicheck.provenance.apply_provenance` later
+    public-surface inputs :func:`abicheck.extract.declaration_provenance.apply_provenance` later
     classifies declarations against (opt-in — omitted, every declaration's
     origin stays ``UNKNOWN`` and this has no effect, matching that module's
     own default). When supplied, they let a trivial merge prefer whichever

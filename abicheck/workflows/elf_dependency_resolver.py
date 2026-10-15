@@ -35,7 +35,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .elf_metadata import ElfMetadata, parse_elf_metadata
+from ..elf_metadata import ElfMetadata, parse_elf_metadata
 
 log = logging.getLogger(__name__)
 

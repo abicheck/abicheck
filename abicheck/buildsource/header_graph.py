@@ -30,7 +30,7 @@ straight from an ordinary L2 header scan:
 - :func:`build_header_only_graph` seeds ``source_decl`` nodes for every
   function/variable in the already-parsed :class:`~abicheck.model.AbiSnapshot`
   (visibility from ``Function.origin``/``Variable.origin`` — the same
-  ``ScopeOrigin`` classification :func:`abicheck.provenance.apply_provenance`
+  ``ScopeOrigin`` classification :func:`abicheck.extract.declaration_provenance.apply_provenance`
   already computes when a public-header set is given),
   then folds ``type_graph.parse_clang_ast_types()``/
   ``call_graph.parse_clang_ast_calls()`` over the *same* header-aggregate
@@ -92,6 +92,11 @@ from dataclasses import dataclass
 from functools import partial
 from typing import TYPE_CHECKING, Any
 
+from ..extract.declaration_provenance import (
+    build_public_set,
+    classify_origin,
+    split_include_roots,
+)
 from ..fact_provenance import func_fact_key, var_fact_key
 from ..model import AbiSnapshot, ScopeOrigin, resolved_fact_value
 from ..model.graph_entity_identity import (
@@ -113,11 +118,6 @@ from ..model.source_graph import SourceGraphSummary
 from ..model.source_graph_coverage import (
     HEADER_DECLARATIONS_PASS,
     HEADER_INCLUDE_GRAPH_PASS as _HEADER_INCLUDE_GRAPH_PASS,
-)
-from ..provenance import (
-    build_public_set,
-    classify_origin,
-    split_include_roots,
 )
 from .header_graph_ast_projection import (
     _PROVENANCE,
@@ -174,7 +174,7 @@ def _seed_flat_type_node(
 
     Unlike the AST path above, ``RecordType``/``EnumType`` already carry their
     own ``origin``/``source_header`` (ADR-015 provenance, populated by
-    :func:`abicheck.provenance.apply_provenance` from the same
+    :func:`abicheck.extract.declaration_provenance.apply_provenance` from the same
     public-header inputs) — no
     ``classify_origin`` re-derivation needed here.
     """
@@ -401,7 +401,7 @@ def build_header_only_graph(
 
     *public_header_paths*/*public_dir_paths* are the same public-header
     inputs already threaded through
-    :func:`abicheck.provenance.apply_provenance` — required for anything to
+    :func:`abicheck.extract.declaration_provenance.apply_provenance` — required for anything to
     classify as ``public_header``/``private_header`` rather than ``unknown``
     (provenance stays opt-in, matching the rest of the L2 pipeline).
 

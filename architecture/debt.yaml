@@ -2488,7 +2488,7 @@
       "review_by": "2026-11-30"
     },
     {
-      "path": "abicheck/provenance.py",
+      "path": "abicheck/extract/declaration_provenance.py",
       "baseline_lines": 804,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",

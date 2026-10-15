@@ -35,8 +35,8 @@ from .checker import DiffResult
 from .errors import ProfileMismatchError, ScopeMismatchError, UnsupportedArtifactError
 from .model.change import Change
 from .policy.exit_decision import ExitDecision, resolve_exit_decision
-from .resolver import DependencyGraph, resolve_dependencies
 from .stack_binding_diff import diff_runtime_bindings
+from .workflows.elf_dependency_resolver import DependencyGraph, resolve_dependencies
 
 log = logging.getLogger(__name__)
 

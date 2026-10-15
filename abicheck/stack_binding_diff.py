@@ -37,7 +37,7 @@ from .binder import BindingStatus, SymbolBinding
 from .diff_helpers import make_change
 from .model.change import Change
 from .model.change_catalog.kinds import ChangeKind
-from .resolver import DependencyGraph
+from .workflows.elf_dependency_resolver import DependencyGraph
 
 #: Binding statuses that count as "the symbol resolved to a live provider"
 #: (as opposed to missing, version-mismatched, weak-unresolved, or blocked).

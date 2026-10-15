@@ -33,8 +33,8 @@ from xml.etree.ElementTree import Element
 from ....model import AccessLevel, ScopeOrigin, Visibility
 from ....model.export_index import ExportMatch, match_export
 from ....name_classification import strip_anonymous_type_location
-from ....provenance import classify_origin, header_from_location
 from ...castxml_header_compat import PREAMBLE_FILENAME
+from ...declaration_provenance import classify_origin, header_from_location
 from .context import CastxmlParserContext
 
 

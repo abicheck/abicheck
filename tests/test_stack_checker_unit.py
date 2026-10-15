@@ -13,7 +13,6 @@ from abicheck.checker import DiffResult
 from abicheck.checker_policy import ChangeKind, Verdict
 from abicheck.model.change import Change
 from abicheck.policy.exit_decision import ExitReason
-from abicheck.resolver import DependencyGraph, ResolvedDSO
 from abicheck.stack_checker import (
     StackChange,
     StackCheckResult,
@@ -29,6 +28,7 @@ from abicheck.stack_checker import (
     exit_decision_for_stack_tree,
     under_sysroot,
 )
+from abicheck.workflows.elf_dependency_resolver import DependencyGraph, ResolvedDSO
 
 # ---------------------------------------------------------------------------
 # Helpers

@@ -207,7 +207,7 @@ _MUTANTS = {
     # extraction.linker_summary_flag_read_as_the_fact, reverted (in-process).
     # scoping.system_header_layout_unrecognized, reverted.
     "no_cross_sysroot": (
-        "import abicheck.extract.system_header_layout as l, abicheck.provenance as p\n"
+        "import abicheck.extract.system_header_layout as l, abicheck.extract.declaration_provenance as p\n"
         "l._cross_sysroot_includes = p._cross_sysroot_includes = lambda segs: []\n"
     ),
 }

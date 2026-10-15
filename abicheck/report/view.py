@@ -31,13 +31,13 @@ from typing import TYPE_CHECKING
 from ..compare.finding_identity import missing_contract_kind, report_finding_id
 from ..policy.evaluate import effective_kind_sets
 from ..policy.severity import Verdict
-from ..report_correlation import suppress_dangling_correlation_notes
 from .change_operation import (
     ACTION_TOKEN_OPERATIONS,
     ELEMENT_TOKEN_ENTITIES,
     entity_for_change,
     operation_for_change,
 )
+from .correlation import suppress_dangling_correlation_notes
 
 if TYPE_CHECKING:
     from ..checker import Change, DiffResult
@@ -323,7 +323,7 @@ def display_changes(
     Without *show_only* this is *changes* unchanged. With it, the changes are
     filtered by :func:`apply_show_only`, then each surviving
     ``correlated_change_kind`` that names a hidden change is cleared by
-    :func:`~abicheck.report_correlation.suppress_dangling_correlation_notes`.
+    :func:`~abicheck.report.correlation.suppress_dangling_correlation_notes`.
     Every format used to run those two steps itself, in its own order; a
     format that skipped the second one could render a reference to a finding
     it had just hidden.

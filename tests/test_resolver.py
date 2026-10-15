@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Tests for abicheck.resolver — transitive ELF dependency resolution."""
+"""Tests for abicheck.workflows.elf_dependency_resolver — transitive ELF dependency resolution."""
 
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ from pathlib import Path
 
 import pytest
 
-from abicheck.resolver import (
+from abicheck.workflows.elf_dependency_resolver import (
     _search_library,
     resolve_dependencies,
 )
@@ -180,7 +180,10 @@ class TestRpathRunpathSemantics:
         of the object that declares it, not for transitive deps."""
         # This is a semantic test — we can't easily create real ELF binaries
         # in a test, but we verify the search order construction logic.
-        from abicheck.resolver import ResolvedDSO, _build_search_order
+        from abicheck.workflows.elf_dependency_resolver import (
+            ResolvedDSO,
+            _build_search_order,
+        )
 
         # A node with DT_RUNPATH (no DT_RPATH).
         node = ResolvedDSO(
@@ -209,7 +212,10 @@ class TestRpathRunpathSemantics:
 
     def test_rpath_without_runpath_propagates(self):
         """When a DSO has DT_RPATH but no DT_RUNPATH, RPATH propagates."""
-        from abicheck.resolver import ResolvedDSO, _build_search_order
+        from abicheck.workflows.elf_dependency_resolver import (
+            ResolvedDSO,
+            _build_search_order,
+        )
 
         node = ResolvedDSO(
             path=Path("/app/lib/libfoo.so"),
