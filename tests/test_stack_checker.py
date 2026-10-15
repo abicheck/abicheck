@@ -22,7 +22,6 @@ from pathlib import Path
 import pytest
 
 from abicheck.binder import BindingStatus, SymbolBinding
-from abicheck.resolver import DependencyGraph, ResolvedDSO
 from abicheck.stack_checker import (
     StackChange,
     StackVerdict,
@@ -33,6 +32,7 @@ from abicheck.stack_checker import (
     _file_hash,
     check_single_env,
 )
+from abicheck.workflows.elf_dependency_resolver import DependencyGraph, ResolvedDSO
 
 
 def _require_linux_elf(path: Path) -> Path:

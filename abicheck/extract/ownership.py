@@ -22,7 +22,7 @@ drops, keeps or rewrites a declaration.
 The precedence the plan states as normative, and where each is decided:
 
 1. An explicit root beats the system-path heuristic -- roots are tried
-   first, :func:`~abicheck.provenance.is_system_header` only when none
+   first, :func:`~abicheck.extract.declaration_provenance.is_system_header` only when none
    matches.
 2. The most specific root wins -- the longest matching root, compared on
    resolved path segments.
@@ -55,7 +55,7 @@ from ..model.ownership_rules import (
     OwnershipRules,
     dependency_owner,
 )
-from ..provenance import is_system_header
+from .declaration_provenance import is_system_header
 
 __all__ = [
     "DeclarationSite",

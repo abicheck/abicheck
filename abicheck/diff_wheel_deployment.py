@@ -528,7 +528,7 @@ def _elf_rpath_entries(elf: ElfMetadata) -> list[str]:
 
     Prefers ``DT_RUNPATH`` over ``DT_RPATH`` rather than combining both:
     the dynamic loader consults ``DT_RPATH`` only when the *same* object
-    carries no ``DT_RUNPATH`` at all (see :mod:`abicheck.resolver`'s own
+    carries no ``DT_RUNPATH`` at all (see :mod:`abicheck.workflows.elf_dependency_resolver`'s own
     loader-accurate precedence modeling) — when both are present,
     ``DT_RPATH`` is entirely ignored. Combining them unconditionally could
     either mask a genuine non-portable/closure-violation finding behind a

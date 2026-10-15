@@ -45,9 +45,9 @@ from abicheck.model import (
     Visibility,
 )
 from abicheck.model.change import Change, LibraryMetadata
-from abicheck.resolver import DependencyGraph, ResolvedDSO
 from abicheck.stack_checker import StackChange, StackCheckResult, StackVerdict
 from abicheck.suppression import SuppressionOutcome
+from abicheck.workflows.elf_dependency_resolver import DependencyGraph, ResolvedDSO
 
 # ===========================================================================
 # Shared builders

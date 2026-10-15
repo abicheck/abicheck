@@ -32,8 +32,8 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import Protocol, TypeVar
 
+from .extract.declaration_provenance import classify_origin, header_from_location
 from .model import Fact, ScopeOrigin, replace_with_fact_sync
-from .provenance import classify_origin, header_from_location
 
 __all__ = [
     "_Provenanced",
@@ -171,7 +171,7 @@ def _more_public_of(
 
     A merged declaration carries exactly one ``source_location`` (the model
     has no "seen from N headers" field), and
-    :func:`abicheck.provenance.apply_provenance` classifies a declaration's
+    :func:`abicheck.extract.declaration_provenance.apply_provenance` classifies a declaration's
     public/private ``origin`` from that single field, *after* this merge
     already ran. Defaulting to an arbitrary side (e.g. always the
     tu_name-sorted-first one) is a real correctness gap, not a cosmetic

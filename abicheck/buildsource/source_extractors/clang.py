@@ -530,7 +530,7 @@ class _ClassifyContext:
     """Public-surface classification for clang file paths (ADR-024 / ADR-030)."""
 
     def __init__(self, public_header_roots: list[str]) -> None:
-        from ...provenance import build_public_set
+        from ...extract.declaration_provenance import build_public_set
 
         # A public root may be a *directory* (`--headers include/`). Feeding it to
         # build_public_set as a header file would never match a decl under it
@@ -550,8 +550,11 @@ class _ClassifyContext:
         owns it); a generated *private* header (not in the public set) is demoted
         off the public surface.
         """
+        from ...extract.declaration_provenance import (
+            classify_origin,
+            is_generated_header,
+        )
         from ...model import ScopeOrigin
-        from ...provenance import classify_origin, is_generated_header
 
         if _matches_exact_public_header(file, self.exact_header_segs):
             if is_generated_header(file):

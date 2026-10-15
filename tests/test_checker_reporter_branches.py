@@ -1053,7 +1053,7 @@ class TestFormatChangeMd:
 
 def _make_graph(nodes_dict, edges, unresolved=None, root="/app"):
     """Build a DependencyGraph for testing."""
-    from abicheck.resolver import DependencyGraph, ResolvedDSO
+    from abicheck.workflows.elf_dependency_resolver import DependencyGraph, ResolvedDSO
 
     nodes = {}
     for key, (soname, depth, reason) in nodes_dict.items():
@@ -1238,8 +1238,8 @@ class TestStackReportRenderTree:
 
     def test_empty_graph(self):
         """No root node found -> '_(empty graph)_'."""
-        from abicheck.resolver import DependencyGraph
         from abicheck.stack_report import _render_tree
+        from abicheck.workflows.elf_dependency_resolver import DependencyGraph
 
         graph = DependencyGraph(root="/none", nodes={}, edges=[])
         lines: list[str] = []

@@ -10,8 +10,8 @@ from click.testing import CliRunner
 
 from abicheck.binder import BindingStatus, SymbolBinding
 from abicheck.cli import main
-from abicheck.resolver import DependencyGraph, ResolvedDSO
 from abicheck.stack_checker import StackChange, StackCheckResult, StackVerdict
+from abicheck.workflows.elf_dependency_resolver import DependencyGraph, ResolvedDSO
 
 # ---------------------------------------------------------------------------
 # Helpers — build synthetic data

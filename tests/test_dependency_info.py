@@ -61,7 +61,8 @@ class _FakeGraph:
 
 
 def _stub_resolution(monkeypatch, *, missing_symbol: bool = True):
-    from abicheck import binder, resolver
+    from abicheck import binder
+    from abicheck.workflows import elf_dependency_resolver as resolver
 
     monkeypatch.setattr(resolver, "resolve_dependencies", lambda *a, **k: _FakeGraph())
     bindings = [
@@ -118,7 +119,8 @@ class TestPopulateDependencyInfo:
         assert snap.dependency_info.missing_symbols == []
 
     def test_search_paths_and_ld_library_path_reach_the_resolver(self, monkeypatch):
-        from abicheck import binder, resolver
+        from abicheck import binder
+        from abicheck.workflows import elf_dependency_resolver as resolver
 
         captured: dict[str, object] = {}
 
@@ -147,7 +149,8 @@ class TestPopulateDependencyInfo:
     def test_empty_search_paths_pass_none_not_an_empty_list(self, monkeypatch):
         # resolve_dependencies treats None as "use the default search order";
         # an empty list would be a different, wrong instruction.
-        from abicheck import binder, resolver
+        from abicheck import binder
+        from abicheck.workflows import elf_dependency_resolver as resolver
 
         captured: dict[str, object] = {}
 
