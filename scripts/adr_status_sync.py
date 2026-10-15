@@ -54,6 +54,27 @@ class Findings(Protocol):
         """Record a non-blocking finding under `check`."""
         ...
 
+    def info(self, check: str, msg: str) -> None:
+        """Print an informational note under `check`; it never counts."""
+        ...
+
+
+# ADRs whose Status was already edited past their '**Verified:**' receipt
+# when the check became a failure. Each stays a WARN until someone re-reads
+# its Status against the code and moves the receipt forward (then drop it
+# from here). A new occurrence, on an ADR not listed, is an ERROR.
+STATUS_EDIT_GRANDFATHERED: frozenset[str] = frozenset(
+    {
+        "022-baseline-registry.md",
+        "037-cli-interface-contract.md",
+        "049-contract-relevance-and-compatibility-configuration.md",
+        "050-comparability-contract-and-multi-tu-manifest.md",
+        "052-unified-impact-assessment-model.md",
+        "055-typed-request-result-completeness-and-schema-registry.md",
+        "056-multi-artifact-library-set-scan.md",
+    }
+)
+
 
 def _read(p: Path) -> str:
     """File contents, or `""` when unreadable.
@@ -436,7 +457,12 @@ def _warn_if_status_edited_after_verification(
     if then is None:
         return
     if (_adr_status_text(then) or "") != status:
-        f.warn(
+        # The one failing signal on a receipt: a Status edited past it means
+        # the receipt vouches for prose nobody checked. The ADRs already in
+        # this state are recorded in STATUS_EDIT_GRANDFATHERED and stay a
+        # visible WARN until re-verified; any other ADR fails.
+        report = f.warn if name in STATUS_EDIT_GRANDFATHERED else f.err
+        report(
             "adr-status-sync",
             f"docs/contribute/adr/{name}: the Status was edited after "
             f"{raw_date}, the date its '**Verified:**' receipt records — so "
@@ -455,9 +481,9 @@ def _check_adr_verification_receipt(
     The receipt records the commit at which a maintainer last checked this
     ADR's Status claims against the tree. Every first-party module path the
     Status paragraph *names* is then a tripwire: a commit touching one after
-    that point means the prose describing it may no longer hold. That is a
-    WARN, not an ERROR -- a change to a named module doesn't prove the claim
-    went stale, it proves nobody has re-read it since the code moved.
+    that point means the prose describing it may no longer hold. That is an
+    INFO, never a WARN or ERROR -- a change to a named module doesn't prove the
+    claim went stale, it proves nobody has re-read it since the code moved.
 
     Exactly one receipt is allowed. Two of them -- what a merge resolution or
     a careless edit produces -- leave "which commit was this verified at?"
@@ -510,7 +536,10 @@ def _check_adr_verification_receipt(
     if not log or not log.strip():
         return
     commits = log.split()
-    f.warn(
+    # Info, not a warning: a commit touching a named module is a weak signal
+    # on its own (most touch no claim), so it must neither fail nor add to the
+    # warning count. The gate's real signal is the edited-Status check above.
+    f.info(
         "adr-status-sync",
         f"docs/contribute/adr/{name}: Status was verified at {sha} but "
         f"{len(commits)} commit(s) have touched the module(s) it names since "

@@ -156,9 +156,10 @@ def _iter_first_party_python_files() -> Iterable[Path]:
             yield path
 
 
-# File-size thresholds (lines).  Files over WARN_LINES surface a warning;
-# files over ERROR_LINES are an error unless they appear in LARGE_FILE_ALLOWLIST.
-WARN_LINES = 1500
+# Hard file-size limit (lines): an error unless the file is in
+# LARGE_FILE_ALLOWLIST. The per-kind caps (production / test) are not defined
+# here: they come from architecture/modules.yaml `limits`, read by
+# `check_file_sizes`. There is no separate warning tier.
 ERROR_LINES = 2000
 
 # Hard line limit is enforced for every first-party source file. If you find
@@ -299,32 +300,119 @@ def _read(p: Path) -> str:
 # ---------------------------------------------------------------------------
 
 
+def _read_size_caps(path: Path) -> dict[str, int]:
+    """The `limits` of architecture/modules.yaml, read as JSON.
+
+    The file is JSON-formatted (check_architecture.py reads it the same way),
+    so this stays stdlib-only, as the gate must be: it runs before
+    `pip install`. It is the single source for the caps the architecture gate
+    enforces too.
+    """
+    limits = json.loads(_read(path)).get("limits", {})
+    if not isinstance(limits.get("production"), int) or not isinstance(
+        limits.get("test"), int
+    ):
+        raise RuntimeError(f"{path}: no integer limits.production / limits.test")
+    return {"production": limits["production"], "test": limits["test"]}
+
+
+def _debt_ledger_paths(path: Path) -> frozenset[str]:
+    """Every file with an architecture/debt.yaml entry.
+
+    A file there is grandfathered for size: `check_architecture.py`'s
+    no_growth ratchet, not this gate, decides whether it may grow.
+    """
+    files = json.loads(_read(path)).get("files", [])
+    return frozenset(entry["path"] for entry in files)
+
+
+# The architecture ledgers the size rule reads (read on use, not at import).
+ARCHITECTURE_DIR = ROOT / "architecture"
+
+# First-party files over their cap that have no architecture/debt.yaml entry,
+# each recorded at its length when it was grandfathered. Such a file may not
+# grow past its recorded length; shrinking it, splitting it, or moving it into
+# debt.yaml is always fine. A new over-cap file belongs in debt.yaml with a
+# rationale, not here.
+FILE_SIZE_GRANDFATHERED: dict[str, int] = {
+    "action/report_query.py": 948,
+    "scripts/benchmark_scaling.py": 1953,
+    "scripts/bench_release_memory.py": 881,
+    "scripts/check_architecture.py": 1728,
+    "scripts/check_docs_contract.py": 1423,
+    "scripts/check_fp_rate.py": 1880,
+    "scripts/check_header_graph_perf.py": 1544,
+    "scripts/check_l2_cli_perf.py": 1895,
+    "scripts/check_mutation_score.py": 1981,
+    "scripts/fact_detector_misuse_aliases.py": 1771,
+    "scripts/fact_detector_misuse_scope.py": 1660,
+    "scripts/fact_field_readers.py": 920,
+    "scripts/fact_field_readers_scan.py": 1056,
+    "scripts/fact_field_readers_scope.py": 1012,
+    "scripts/fact_registry_completeness.py": 1128,
+    "scripts/gen_agent_skills.py": 1281,
+    "scripts/gen_harbor_tasks.py": 1116,
+    "scripts/gen_examples_docs.py": 1447,
+    "scripts/l2_real_profiles.py": 1710,
+    "scripts/learning_ladder.py": 856,
+    "scripts/measure_contract_shadow.py": 900,
+    "scripts/perf_receipt.py": 875,
+    "scripts/retired_surfaces.py": 1422,
+    "scripts/usecase_paths.py": 1084,
+    "scripts/backend_capabilities.py": 1575,
+    "scripts/verify.py": 1163,
+    "scripts/check_bugfix_test_contract.py": 1140,
+    "skills-src/evaluation/agents/ci-setup/grader.py": 903,
+    "skills-src/evaluation/agents/skills/graders/dimensions.py": 841,
+    "skills-src/evaluation/agents/skills/graders/evidence.py": 802,
+    "skills-src/evaluation/agents/skills/runners/claude_code.py": 1790,
+    "skills-src/evaluation/validation/scripts/collect_full_example_matrix.py": 821,
+}
+
+
 def check_file_sizes(f: Findings) -> None:
-    """ERROR if a first-party source file exceeds ERROR_LINES (unless
-    allow-listed); WARN at WARN_LINES regardless.
+    """One file-size rule: the caps in architecture/modules.yaml, a hard error
+    above ERROR_LINES, and no warning tier.
+
+    - Over ERROR_LINES: an error unless the file is in LARGE_FILE_ALLOWLIST.
+    - Over its production/test cap: grandfathered when architecture/debt.yaml
+      has an entry for it, or when it is in FILE_SIZE_GRANDFATHERED and has
+      not grown past its recorded length. Anything else is an error.
 
     Covers every FIRST_PARTY_PY_ROOTS tree (CLAUDE.md "M1-2"), not just
     `abicheck/` — `scripts/`, `skills-src/evaluation/field/`, `skills-src/evaluation/validation/`, `action/`, and the
     clang-plugin's `tests/` can grow unbounded just as easily.
     """
+    caps = _read_size_caps(ARCHITECTURE_DIR / "modules.yaml")
+    production_cap, test_cap = caps["production"], caps["test"]
+    debt = _debt_ledger_paths(ARCHITECTURE_DIR / "debt.yaml")
     for path in _iter_first_party_python_files():
         rel = _rel(path)
         with path.open("r", encoding="utf-8") as fh:
             lines = sum(1 for _ in fh)
         if lines > ERROR_LINES:
-            if rel in LARGE_FILE_ALLOWLIST:
-                f.warn(
-                    "file-size",
-                    f"{rel}: {lines} lines (allowlisted; consider splitting per CLAUDE.md)",
-                )
-            else:
+            if rel not in LARGE_FILE_ALLOWLIST:
                 f.err(
                     "file-size",
                     f"{rel}: {lines} lines exceeds hard limit ({ERROR_LINES}). Split via helpers or a _lib/ pattern.",
                 )
-        elif lines > WARN_LINES:
-            f.warn(
-                "file-size", f"{rel}: {lines} lines exceeds soft limit ({WARN_LINES})"
+            continue
+        cap = test_cap if rel.startswith("tests/") else production_cap
+        if lines <= cap or rel in debt:
+            continue
+        recorded = FILE_SIZE_GRANDFATHERED.get(rel)
+        if recorded is None:
+            f.err(
+                "file-size",
+                f"{rel}: {lines} lines exceeds its {cap}-line cap "
+                "(architecture/modules.yaml) and has no grandfather entry; "
+                "split it, or add an architecture/debt.yaml entry with a rationale",
+            )
+        elif lines > recorded:
+            f.err(
+                "file-size",
+                f"{rel}: {lines} lines grew past its grandfathered length "
+                f"{recorded}; split out the new code instead",
             )
 
 
@@ -3274,14 +3362,67 @@ _LICENSE_RE = re.compile(
 )
 
 
+def _git_lines(*args: str) -> list[str]:
+    """Stdout lines of ``git <args>`` in the repo, or ``[]`` if git can't answer."""
+    try:
+        proc = subprocess.run(
+            ["git", *args],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return []
+    return proc.stdout.splitlines() if proc.returncode == 0 else []
+
+
+def _base_revision() -> str | None:
+    """The revision new files are measured against.
+
+    CI sets ``ARCHITECTURE_BASE`` to the PR's base (or the pushed-before sha);
+    an empty value means no base applies. A bare local run falls back to the
+    merge-base with main, as ``check_architecture.py`` does.
+    """
+    if "ARCHITECTURE_BASE" in os.environ:
+        return os.environ["ARCHITECTURE_BASE"] or None
+    for ref in ("origin/main", "main"):
+        out = _git_lines("merge-base", "HEAD", ref)
+        if out and out[0].strip():
+            return out[0].strip()
+    return None
+
+
+def _files_new_since_base() -> frozenset[str]:
+    """Repo-relative paths added since the base revision, plus untracked files.
+
+    An unresolvable git means no path is known to be new, so nothing is
+    reported rather than everything.
+    """
+    added: set[str] = set()
+    base = _base_revision()
+    if base:
+        added.update(_git_lines("diff", "--name-only", "--diff-filter=A", base, "HEAD"))
+    added.update(_git_lines("ls-files", "--others", "--exclude-standard"))
+    return frozenset(added)
+
+
 def check_license_header(f: Findings) -> None:
-    """Every abicheck/**/*.py should carry the Apache-2.0 header.
+    """Every NEW abicheck/**/*.py must carry the Apache-2.0 header.
+
+    "New" means added since the base revision (or still untracked). Existing
+    files without a header are grandfathered and not reported, so the rule
+    stops new code arriving without one without demanding a sweep of the old.
 
     We look at the first 25 lines so the check tolerates an optional
     shebang or encoding cookie on top.
     """
+    new = _files_new_since_base()
     for path in PKG.rglob("*.py"):
         rel = _rel(path)
+        if rel not in new:
+            continue
         # Empty files and package markers (__init__.py / __main__.py without
         # real code) are skipped — the project ships some intentionally
         # trivial files that don't need their own header.
@@ -3291,9 +3432,9 @@ def check_license_header(f: Findings) -> None:
         head = "\n".join(src.splitlines()[:25])
         if _LICENSE_RE.search(head):
             continue
-        f.warn(
+        f.err(
             "license-header",
-            f"{rel}: missing Apache-2.0 license header (add `# SPDX-License-Identifier: Apache-2.0` or full notice)",
+            f"{rel}: new file is missing an Apache-2.0 license header (add `# SPDX-License-Identifier: Apache-2.0` or full notice)",
         )
 
 
