@@ -417,7 +417,7 @@ class _LoadedReport:
     completed_without_compatibility_verdict: bool = False
 
 
-def _malformed_gate_report(
+def malformed_gate_report(
     target_id: str, library: str | None, head_sha: str | None, path: Path, reason: str
 ) -> _LoadedReport:
     """The shared "gate decision is malformed" unavailable shape every
@@ -444,6 +444,12 @@ def _malformed_gate_report(
         reason=reason,
         path=path,
     )
+
+
+#: Pre-promotion name, kept so existing ``_malformed_gate_report`` importers
+#: (``no_baseline_load.py``, the aggregate import-compatibility tests) keep
+#: working. New sibling imports use :func:`malformed_gate_report`.
+_malformed_gate_report = malformed_gate_report
 
 
 @dataclass(frozen=True)
