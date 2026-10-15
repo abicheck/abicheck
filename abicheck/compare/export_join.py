@@ -23,7 +23,7 @@ the producer recorded none (a C symbol, a headerless PE ordinal placeholder).
 It joins an export when the observed table *contains* that spelling. On a
 Mach-O table only, Phase 1's decoration alias applies: one leading underscore
 more or fewer than the trie's already-stripped name (clang keeps the Darwin
-underscore; ``model.name_decoration.macho`` owns the fact), refused
+underscore; ``model.name_decoration.macho_underscore`` owns the fact), refused
 whenever another declaration owns the shifted spelling exactly -- the alias
 exists for one entity spelled two ways, never to hand one declaration's
 export to another. On a PE table, Phase 1's x86 calling-convention alias
@@ -75,7 +75,10 @@ from ..model.graph_join import (
     binary_symbol_node_id,
     resolve_join_records,
 )
-from ..model.name_decoration import itanium_structors, macho as macho_decoration
+from ..model.name_decoration import (
+    itanium_structors,
+    macho_underscore as macho_decoration,
+)
 from ..model.snapshot_identity_table import identities_for_snapshot
 
 if TYPE_CHECKING:

@@ -973,7 +973,7 @@ def test_dynamic_import_module_with_non_literal_target_is_not_resolved(
 ) -> None:
     """A genuinely dynamic target (a variable, not a string literal) is D6's
     own narrow, documented exception -- ``detector_registry.py``'s plugin
-    discovery and ``policy/public_surface.py``'s dict-keyed re-export shim
+    discovery and ``policy/public_surface_index.py``'s dict-keyed re-export shim
     are the real examples. The checker must not guess at it, and must not
     crash trying."""
     root = _tree(tmp_path)

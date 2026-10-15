@@ -35,7 +35,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from ...report.comparison_scope import ComparisonScopeTerms, comparison_scope_terms
-from ...report.release_assurance import ReleaseAssuranceTerms, release_assurance_terms
+from ...report.release_assurance_section import (
+    ReleaseAssuranceTerms,
+    release_assurance_terms,
+)
 from ...report.release_document import ReleaseEvaluation, build_release_report
 from ...report.render_release_report import render_release_text
 from ...workflows.gate import (
@@ -48,7 +51,7 @@ if TYPE_CHECKING:
     from ...bundle_models import BundleDiffResult
     from ...checker_types import DiffResult
     from ...report.junit_inventory import JunitOldOperand
-    from ...report.release_public_surface import ReleasePublicSurfaceTerms
+    from ...report.release_public_surface_section import ReleasePublicSurfaceTerms
     from ...workflows.gate import SeverityConfig
 
 __all__ = ["render_release_summary"]

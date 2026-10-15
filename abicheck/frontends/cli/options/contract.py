@@ -107,7 +107,7 @@ def contract_options(f: F) -> F:
     carried in ``-o json=...``/sarif/junit/html unconditionally, so the
     flag only ever chose whether the markdown/text/review render echoed it
     -- a rendering selector, which is what ``--view suppressions`` is for
-    (:mod:`abicheck.frontends.cli.options.view`).
+    (:mod:`abicheck.frontends.cli.options.compare_view`).
     """
     f = click.option(
         "--contract",

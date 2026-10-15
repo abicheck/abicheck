@@ -15,7 +15,7 @@
 
 """Per-change JSON projection: one ``Change`` -> its report dict.
 
-Extracted from ``reporter.py`` (ADR-061 report/ migration) so ``report.build``
+Extracted from ``reporter.py`` (ADR-061 report/ migration) so ``report.document_builder``
 no longer reaches back into the legacy root module. Behaviour is unchanged.
 """
 
@@ -563,11 +563,11 @@ def prewarm_change_demangling(result: Any) -> None:
     from forking a subprocess per distinct symbol -- the same prewarm
     ``appcompat_html.py`` (removed) already does for its own per-row demangling.
 
-    Called from ``report.build.build_report_document``, not from
+    Called from ``report.document_builder.build_report_document``, not from
     ``to_json`` (Codex review, PR #1284): the document builder is the one
     chokepoint *every* projection goes through -- ``to_json``, the
     ``ReportEnvelope`` path (``service_render.render_output``), and
-    ``report.build``'s own callers -- so prewarming at ``to_json`` alone
+    ``report.document_builder``'s own callers -- so prewarming at ``to_json`` alone
     left the envelope path, which is what the CLI actually renders
     through, forking per symbol before it was ever reached.
     """

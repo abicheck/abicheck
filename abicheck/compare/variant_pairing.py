@@ -23,7 +23,7 @@ triple or compiler family changed is the *same* variant with a boundary
 change, not a removal plus an addition), and two variants that happen to
 share coordinates would become ambiguous.
 
-Pure: operates on :class:`~abicheck.model.variant_pairing.VariantView`
+Pure: operates on :class:`~abicheck.model.variant_pairing_values.VariantView`
 values, however they were read. ``workflows.bundle_variants_capture.
 package_variant_views`` reads them off a stored package.
 """
@@ -32,7 +32,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from ..model.variant_pairing import (
+from ..model.variant_pairing_values import (
     PAIRED,
     UNMATCHED_NEW,
     UNMATCHED_OLD,

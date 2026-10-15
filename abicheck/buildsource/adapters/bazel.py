@@ -56,7 +56,7 @@ from ..build_evidence import (
     TargetScope,
 )
 from ..redaction import DEFAULT_REDACTION, RedactionPolicy
-from .base import (
+from .adapter_shared import (
     compile_unit_id,
     derive_build_options,
     effective_language,

@@ -39,7 +39,7 @@ multi-library product cannot answer per member:
   would mean a second copy of a hundred-line accounting rule for no change
   in conclusion. What *was* wrong is cardinality when several members export
   the same symbol: those identical findings are folded to one, naming every
-  provider, by ``report.release_public_surface.
+  provider, by ``report.release_public_surface_section.
   dedupe_shared_member_findings``. This module adds the release-level
   *accounting* over the same evidence
   (:func:`undocumented_exports_by_member`), so a reader sees one total for
@@ -59,7 +59,7 @@ vanishing.
 **Evolution, not a snapshot judgement.** Both checks are intra-version
 hygiene: each side is reconciled independently and the two results are
 folded into one evolution-stated finding set, exactly as
-``workflows.cross_source_evolution`` does per member -- a contract gap
+``workflows.cross_source_hygiene`` does per member -- a contract gap
 present on both real releases must not read as ``INTRODUCED`` because one
 side's evidence was thinner.
 """
@@ -267,7 +267,7 @@ def reconcile_release(
 ) -> ReleaseReconciliation:
     """Fold both sides' reconciliations into one evolution-stated result.
 
-    The pairing rules are ``workflows.cross_source_evolution``'s, applied to
+    The pairing rules are ``workflows.cross_source_hygiene``'s, applied to
     one obligation symbol as its identity: flagged on both sides ->
     ``PERSISTENT``; only NEW -> ``INTRODUCED``; only OLD -> ``RESOLVED``;
     flagged on a side whose sibling could not be evaluated ->

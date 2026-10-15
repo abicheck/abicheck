@@ -37,13 +37,13 @@ from .change_kinds import (
     _is_batch_shaped_change,
     _is_symbol_level_kind,
 )
-from .mangled import normalize_mangled_name
-from .symbols import (
+from .declaration_identity import (
     IDENTITY_TIER_CANONICAL,
     IDENTITY_TIER_NORMALIZED,
     IDENTITY_TIER_REDUCED,
     FindingIdentity,
 )
+from .mangled import normalize_mangled_name
 
 
 def _split_top_level_commas(value: str) -> list[str]:

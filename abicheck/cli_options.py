@@ -1488,7 +1488,7 @@ def set_input_options(func: F) -> F:
 #: standalone leaf module (see its own docstring for why it isn't declared
 #: inline on ``compare_cmd``). Re-exported here for the same reason as
 #: ``contract_options``/``pack_option`` below.
-from .frontends.cli.options.bundle_facts import (  # noqa: E402
+from .frontends.cli.options.bundle_facts_library_manifest import (  # noqa: E402
     bundle_facts_manifest_options as bundle_facts_manifest_options,
     reject_bundle_facts_manifest_without_old_bundle_facts as reject_bundle_facts_manifest_without_old_bundle_facts,
 )

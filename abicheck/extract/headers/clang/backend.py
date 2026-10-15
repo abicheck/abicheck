@@ -79,7 +79,7 @@ from ...compiler_driver import (
     resolve_dpcpp_acquisition,
 )
 from ...path_aliases import absolutize_include_roots
-from ..backend import HeaderParseRequest
+from ..backend_protocol import HeaderParseRequest
 from .error_header_retry import retry_excluding_error_headers
 from .locations import materialize_locations
 
@@ -424,7 +424,7 @@ def clang_header_dump(
 
 
 class ClangBackend:
-    """The ``clang`` :class:`~abicheck.extract.headers.backend.HeaderAstBackend`.
+    """The ``clang`` :class:`~abicheck.extract.headers.backend_protocol.HeaderAstBackend`.
 
     *runner* runs one clang command and returns the completed process; the
     default is :func:`~abicheck.dumper_clang_errors.run_clang_ast`.

@@ -27,7 +27,7 @@ from typing import TYPE_CHECKING
 
 from ..errors import ValidationError
 from ..model import AbiSnapshot
-from ..report.build import build_report_envelope
+from ..report.document_builder import build_report_envelope
 from ..report.envelope import RenderOptions, ReportEnvelope
 from ..report.report_modes import (
     normalize_report_mode as _normalize_report_mode,
@@ -236,7 +236,7 @@ def render_envelope(fmt: str, envelope: ReportEnvelope) -> str:
 
     ADR-061 gap C's "one result, one document, several projections" is this
     function's contract: every decision *fmt* could need was made by
-    :func:`~abicheck.report.build.build_report_envelope` before this call,
+    :func:`~abicheck.report.document_builder.build_report_envelope` before this call,
     so rendering the same envelope into several formats, in any order, can
     only produce the same semantic content each time -- no projection re-runs
     extraction, policy evaluation, or gate resolution.
@@ -527,15 +527,15 @@ def _render_json_output(
     """
     if report_mode == "full":
         # ADR-061 Phase 2 gap C: the full-mode JSON report is built through
-        # the one shared document choke point (report.build.
+        # the one shared document choke point (report.document_builder.
         # build_report_document) rather than to_json's own independent
-        # dict-building pass -- see report/build.py's module docstring.
+        # dict-building pass -- see report/document_builder.py's module docstring.
         from ..report.render_json import render_json
 
         if envelope is not None:
             doc = envelope.document
         else:
-            from ..report.build import build_report_document
+            from ..report.document_builder import build_report_document
 
             doc = build_report_document(
                 result,

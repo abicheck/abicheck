@@ -73,7 +73,7 @@ if TYPE_CHECKING:
     from ..policy_file import PolicyFile
     from ..suppression import SuppressionList
     from .compare_configuration import CompareConfiguration
-    from .contracts import CompareRequest
+    from .service_requests import CompareRequest
 
 
 def _project_inputs_for_request(

@@ -16,7 +16,7 @@
 """The policy-disposition ledger operations a frontend legitimately performs.
 
 Same rule and same shape as ``workflows/policy_file.py`` and
-``workflows/suppression.py`` (ADR-061 Phase 4 item 2): ``policy`` is not in
+``workflows/suppression_input.py`` (ADR-061 Phase 4 item 2): ``policy`` is not in
 ``frontends.may_import``, so a CLI module that has to close the run's
 disposition ledger reaches it through the workflow layer rather than
 importing ``policy/disposition_ledger.py`` directly.

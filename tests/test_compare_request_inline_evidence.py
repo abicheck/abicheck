@@ -46,9 +46,9 @@ from abicheck.errors import ValidationError
 from abicheck.model import AbiSnapshot
 from abicheck.workflows.artifact.dump_execution_options import DumpExecutionOptions
 from abicheck.workflows.artifact.execute import SideResolution
-from abicheck.workflows.contracts import CompareRequest, DumpRequest
 from abicheck.workflows.plan import AnalysisPlanner
 from abicheck.workflows.request_inputs import InputSpec
+from abicheck.workflows.service_requests import CompareRequest, DumpRequest
 
 # ── operands and evidence inputs ─────────────────────────────────────────
 

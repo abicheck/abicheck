@@ -2,7 +2,7 @@
 # Copyright The abicheck Authors
 """The actual closure-walk half of ADR-063 Phase 3 D5's public-surface
 traversal, plus its real entry point, :func:`resolve_public_surface` --
-split out of ``policy/public_surface.py`` (which keeps the ``PublicSurface``
+split out of ``policy/public_surface_index.py`` (which keeps the ``PublicSurface``
 dataclass and the indexing/bookkeeping half) purely to keep each file under
 this repo's 800-line new-file production cap (mechanical extraction, not a
 redesign; mirrors the ``fact_detector_misuse.py``/``fact_detector_misuse_
@@ -121,7 +121,7 @@ from ..model.vocabulary import ScopeOrigin
 from .captured_type_identities import captured_identity_seeds, field_identities
 from .header_identifier_evidence import present_header_identifiers
 from .header_origin_evidence import collect_header_origin_unknown_types
-from .public_surface import (
+from .public_surface_index import (
     _DEMOTE_ORIGINS,
     PublicSurface,
     _index_surface_types,
@@ -763,7 +763,7 @@ def resolve_public_surface(
 
 # ``type_reachability.directly_referenced_stdlib_types()`` migrating here
 # (D5's own closing note: "itself a relevance decision... becomes a second,
-# narrower query in policy/public_surface.py") is deliberately NOT done in
+# narrower query in policy/public_surface_index.py") is deliberately NOT done in
 # this slice, for a reason specific to this one function rather than this
 # module's general scoping note above: `type_reachability.py` itself
 # imports `diff_cxx_rules.py`/`type_reachability_spelling.py`, both already

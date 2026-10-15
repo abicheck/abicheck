@@ -24,7 +24,7 @@ from pathlib import Path
 
 import pytest
 
-from abicheck.extract.headers.backend import HeaderParseRequest
+from abicheck.extract.headers.backend_protocol import HeaderParseRequest
 from abicheck.extract.headers.castxml.backend import CastxmlBackend
 from abicheck.extract.headers.castxml.calling_convention import (
     source_calling_conventions,

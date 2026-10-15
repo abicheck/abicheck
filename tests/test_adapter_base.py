@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import os
 
-from abicheck.buildsource.adapters.base import (
+from abicheck.buildsource.adapters.adapter_shared import (
     _is_msvc_command,
     msvc_driver_token,
     source_from_argv,
@@ -353,7 +353,7 @@ def test_derived_gcc_path_resolves_driver_behind_env_prefix():
 
 
 def test_sources_from_argv_returns_every_tu():
-    from abicheck.buildsource.adapters.base import sources_from_argv
+    from abicheck.buildsource.adapters.adapter_shared import sources_from_argv
 
     # A multi-source compile yields all TU operands, in order; forced-include
     # operands and the output are not mistaken for sources.
@@ -380,7 +380,7 @@ def test_legacy_xclang_target_feature_survivor_matches_canonical_shape():
     IDENTICAL ``(key, value)`` ``BuildOption`` shape -- otherwise
     ``build_diff`` reads a legacy-collected pack and a freshly-collected
     one as a spurious remove+add for the same effective compiler state."""
-    from abicheck.buildsource.adapters.base import derive_build_options
+    from abicheck.buildsource.adapters.adapter_shared import derive_build_options
     from abicheck.buildsource.build_evidence import CompileUnit
 
     cu_legacy = CompileUnit(
@@ -408,7 +408,7 @@ def test_legacy_xclang_target_feature_last_wins_still_applies():
     """The last-wins per-feature-name semantics (round 27 Finding 3) still
     apply correctly when the sequence mixes legacy-marked and canonical
     survivor spellings for the SAME feature name."""
-    from abicheck.buildsource.adapters.base import derive_build_options
+    from abicheck.buildsource.adapters.adapter_shared import derive_build_options
     from abicheck.buildsource.build_evidence import CompileUnit
 
     cu = CompileUnit(
@@ -431,7 +431,7 @@ def test_legacy_xclang_target_feature_negative_control_unrelated_flag_unaffected
     that is NOT a split-operand-ABI-flag survivor at all is completely
     unaffected by the new strip -- it still falls through to the generic
     option path exactly as before."""
-    from abicheck.buildsource.adapters.base import derive_build_options
+    from abicheck.buildsource.adapters.adapter_shared import derive_build_options
     from abicheck.buildsource.build_evidence import CompileUnit
 
     cu = CompileUnit(

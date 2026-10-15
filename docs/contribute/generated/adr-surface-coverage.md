@@ -65,13 +65,13 @@ Which public surface reaches each ADR, which use cases it serves, and whether a 
 | [ADR-046](../adr/046-source-graph-identity-v2-and-evidence-merge.md) | internal | — | — | Source-graph identity and merge inside extract/; no switch or field of its own. |
 | [ADR-047](../adr/047-github-actions-integration-model.md) | partial | UC-WF-baseline | `action: actions/baseline`<br>`action: actions/check-target`<br>`action: actions/aggregate`<br>`cli: aggregate` | P2 of the lifecycle model is only partially implemented (see the ADR). |
 | [ADR-048](../adr/048-canonical-entity-identity-and-graph-reconciliation.md) | internal | — | — | Canonical entity identity in model/; no user-addressable surface. |
-| [ADR-049](../adr/049-contract-relevance-and-compatibility-configuration.md) | surfaced | UC-WF-compare | `cli: compare --contract`<br>`api: abicheck.workflows.contracts.CompareRequest.pack_paths`<br>`api: abicheck.workflows.contracts.CompareRequest.stated_settings`<br>`report: compare_report.contract_coverage`<br>`report: compare_report.contract_context` | — |
+| [ADR-049](../adr/049-contract-relevance-and-compatibility-configuration.md) | surfaced | UC-WF-compare | `cli: compare --contract`<br>`api: abicheck.workflows.service_requests.CompareRequest.pack_paths`<br>`api: abicheck.workflows.service_requests.CompareRequest.stated_settings`<br>`report: compare_report.contract_coverage`<br>`report: compare_report.contract_context` | — |
 | [ADR-050](../adr/050-comparability-contract-and-multi-tu-manifest.md) | surfaced | — | `cli: compare --dump-manifest`<br>`report: compare_report.comparability_assurance` | — |
 | [ADR-051](../adr/051-documentation-operational-model.md) | internal | — | — | Repository documentation governance; not a product surface. |
 | [ADR-052](../adr/052-unified-impact-assessment-model.md) | surfaced | UC-WF-appcompat | `cli: compare --used-by-manifest`<br>`report: compare_report.consumer_impact_summary` | — |
 | [ADR-053](../adr/053-tu-link-unit-dso-attribution.md) | partial | — | — | Core algorithm and validator only; CLI/Action pipeline wiring is deferred (D5). |
 | [ADR-054](../adr/054-cli-project-integration-surface-consolidation.md) | surfaced | UC-WF-cli-contract | `cli: project plan`<br>`cli: project validate` | — |
-| [ADR-055](../adr/055-typed-request-result-completeness-and-schema-registry.md) | surfaced | UC-WF-compare | `api: abicheck.workflows.contracts.CompareRequest`<br>`api: abicheck.workflows.contracts.DumpRequest`<br>`report: compare_report.report_schema_version` | — |
+| [ADR-055](../adr/055-typed-request-result-completeness-and-schema-registry.md) | surfaced | UC-WF-compare | `api: abicheck.workflows.service_requests.CompareRequest`<br>`api: abicheck.workflows.service_requests.DumpRequest`<br>`report: compare_report.report_schema_version` | — |
 | [ADR-056](../adr/056-multi-artifact-library-set-scan.md) | internal | — | — | Superseded by ADR-068; the `scan` command it extended was deleted. |
 | [ADR-057](../adr/057-consumer-graph-and-impact-join.md) | partial | UC-WF-appcompat | `cli: compare --use-cases --used-by`<br>`report: compare_report.use_case_impact` | Later slices of the consumer graph beyond slice 1 and the slice-2 manifest remain open. |
 | [ADR-058](../adr/058-native-compatibility-agent-skills.md) | partial | — | — | Agent skills ship as repository content, not a CLI/API/Action/report surface; P0.4/P0.5 product-surface items and most of P1 remain. |
@@ -189,8 +189,8 @@ Which public surface reaches each ADR, which use cases it serves, and whether a 
 - ADR-047 action: actions/baseline
 - ADR-047 action: actions/check-target
 - ADR-047 cli: aggregate
-- ADR-049 api: abicheck.workflows.contracts.CompareRequest.pack_paths
-- ADR-049 api: abicheck.workflows.contracts.CompareRequest.stated_settings
+- ADR-049 api: abicheck.workflows.service_requests.CompareRequest.pack_paths
+- ADR-049 api: abicheck.workflows.service_requests.CompareRequest.stated_settings
 - ADR-049 cli: compare --contract
 - ADR-049 report: compare_report.contract_context
 - ADR-049 report: compare_report.contract_coverage
@@ -200,8 +200,8 @@ Which public surface reaches each ADR, which use cases it serves, and whether a 
 - ADR-052 report: compare_report.consumer_impact_summary
 - ADR-054 cli: project plan
 - ADR-054 cli: project validate
-- ADR-055 api: abicheck.workflows.contracts.CompareRequest
-- ADR-055 api: abicheck.workflows.contracts.DumpRequest
+- ADR-055 api: abicheck.workflows.service_requests.CompareRequest
+- ADR-055 api: abicheck.workflows.service_requests.DumpRequest
 - ADR-055 report: compare_report.report_schema_version
 - ADR-057 cli: compare --use-cases --used-by
 - ADR-057 report: compare_report.use_case_impact

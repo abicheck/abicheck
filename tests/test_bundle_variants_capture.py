@@ -39,7 +39,7 @@ from abicheck.compare.variant_pairing import pair_variant_views
 from abicheck.model import AbiSnapshot, Function, Visibility
 from abicheck.model.bundle_variants import parse_bundle_variants
 from abicheck.model.dwarf_facts import AdvancedDwarfMetadata, ToolchainInfo
-from abicheck.model.variant_pairing import (
+from abicheck.model.variant_pairing_values import (
     PAIRED,
     UNMATCHED_NEW,
     UNMATCHED_OLD,
@@ -59,7 +59,7 @@ from abicheck.workflows.bundle_variants_capture import (
     captured_coordinates,
     plan_variant_capture,
 )
-from abicheck.workflows.variant_pairing import package_variant_views
+from abicheck.workflows.stored_variant_pairing import package_variant_views
 from tests._project_manifest_reader import read_project_manifest
 
 

@@ -31,7 +31,7 @@ library, present identically on both sides. Under the default
 library.
 
 **Where the answer already lived.** ADR-068 D3's
-``workflows/cross_source_evolution.py`` re-runs each one-sided hygiene check
+``workflows/cross_source_hygiene.py`` re-runs each one-sided hygiene check
 against the baseline and stamps every finding ``introduced`` / ``resolved``
 / ``persistent`` / ``not_evaluated``; the JSON report has carried the value
 per finding all along. The comment renderer simply never read it. So this is

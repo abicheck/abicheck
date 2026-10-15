@@ -11,7 +11,7 @@ generated: false
 
 Index: [Known gaps](../known-gaps.md)
 
-**Status (re-verified 2026-10-09 at `456989f`): PARTIAL.** Fixed: -fsycl flag vocabulary (buildsource/adapters/base.py:160) and the two-pass JSON crash. Still open, as the entry says: host+device dual-context L4 replay.
+**Status (re-verified 2026-10-09 at `456989f`): PARTIAL.** Fixed: -fsycl flag vocabulary (buildsource/adapters/adapter_contract.py:160) and the two-pass JSON crash. Still open, as the entry says: host+device dual-context L4 replay.
 
 Fixing L4 clang_bin
 resolution to honor `--gcc-path` (an earlier PR) meant L4 could for the

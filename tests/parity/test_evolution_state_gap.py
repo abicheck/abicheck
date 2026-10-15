@@ -33,7 +33,7 @@ ran single-sided (an AST-level pin on ``scan_engine.py``'s single
 ``scan_engine.py``, deleted outright with the ``scan`` command itself
 (ADR-068 Phase 6) -- there is no ``compare``-side equivalent single-sided
 crosscheck limitation to pin (``compare``'s own cross-source-checks wiring
-already runs per side via ``workflows.cross_source_evolution``, see that
+already runs per side via ``workflows.cross_source_hygiene``, see that
 module's own coverage), so the test went with it rather than being ported.
 """
 

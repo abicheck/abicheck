@@ -618,7 +618,7 @@ concepts:
       directly), applied to the one part of _diff_functions that might be
       migrated without inventing new normalizer output -- the old/new
       matching INDEX itself (SymbolIdentityIndex.for_functions). A first
-      draft (abicheck/compare/functions.py's function_identity_index)
+      draft (abicheck/compare/function_cutover.py's function_identity_index)
       built a SemanticIRIndex from the real IR when present and looked up
       each function's entity_id in it -- but discarded the lookup's
       result, since finding_identity.resolve_function_identity still
@@ -640,7 +640,7 @@ concepts:
       abicheck/model/semantic_ir_legacy_adapter.py's legacy_function_ir (a
       real, tested SemanticIR projection of the flat function map, shaped
       like legacy_typedef_ir/legacy_constant_ir but unconsumed by any
-      caller today) and the compare/functions.py module boundary itself --
+      caller today) and the compare/function_cutover.py module boundary itself --
       landed with no live caller yet, the precedent SemanticIRIndex itself
       was accepted under. Registering `functions` in MIGRATED_COHORTS is
       deferred until a genuine consumer exists: CanonicalEntity growing
@@ -650,7 +650,7 @@ concepts:
       string, and extract/semantic_normalizer.py's own normalizer does not
       carry ref_qualifier/variadic status at all) would let a genuine
       signature-level comparison read through the IR, at which point the
-      cohort can close for real. See abicheck/compare/functions.py's own
+      cohort can close for real. See abicheck/compare/function_cutover.py's own
       module docstring for the full account.
 
       **2026-09-05 re-assessment correction:** both landed cohorts were

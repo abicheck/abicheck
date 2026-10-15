@@ -280,8 +280,8 @@ def captured_coordinates(snapshots: Sequence[AbiSnapshot]) -> dict[str, str]:
 
 
 def _default_dump(path: Path, item: VariantCaptureInput) -> AbiSnapshot:
-    from ..workflows.dump.pipeline import run_dump_request
-    from .contracts import DumpRequest, InputSpec
+    from ..workflows.dump.request import run_dump_request
+    from .service_requests import DumpRequest, InputSpec
 
     return run_dump_request(
         DumpRequest(

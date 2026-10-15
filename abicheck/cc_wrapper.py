@@ -55,7 +55,7 @@ from pathlib import Path
 
 import click
 
-from .buildsource.adapters.base import (
+from .buildsource.adapters.adapter_shared import (
     compile_unit_id,
     effective_language,
     extract_abi_relevant_flags,

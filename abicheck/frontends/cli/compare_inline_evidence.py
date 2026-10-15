@@ -57,8 +57,8 @@ import click
 
 if TYPE_CHECKING:
     from ...dry_run_estimate import CompileContext
-    from ...workflows.contracts import CompareRequest
     from ...workflows.request_inputs import InputSpec
+    from ...workflows.service_requests import CompareRequest
     from .dump_debug_config import DumpDebugConfig
 
 __all__ = ["InlineEvidence", "InlineEvidenceRun", "OutOfBandPacks"]

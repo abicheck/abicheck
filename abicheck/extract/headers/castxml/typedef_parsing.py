@@ -23,7 +23,7 @@ is exactly the "legacy sibling" ``abicheck/extract/AGENTS.md`` says a new
 ``extract`` module must not reach into the private helpers of. Both are
 re-exported here under their old private names so every existing caller
 (including ``dumper_castxml.py``'s own re-export of them, and the direct
-``from abicheck.extract.headers.castxml.typedefs import ...`` test imports) is
+``from abicheck.extract.headers.castxml.typedef_parsing import ...`` test imports) is
 unaffected.
 
 Pure functions taking the parser's own bound helper methods (or an

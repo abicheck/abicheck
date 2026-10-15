@@ -99,7 +99,7 @@ def crosscheck_finding_set(snapshot: Any, config: Any = None) -> FindingSet:
 
     Calls :func:`abicheck.buildsource.cross_source_checks.run_crosschecks`
     directly -- the primitive ``compare()``'s automatic cross-source stage
-    (``workflows/cross_source_evolution.py``) runs.
+    (``workflows/cross_source_hygiene.py``) runs.
     """
     from abicheck.buildsource.cross_source_checks import run_crosschecks
     from abicheck.compare.finding_identity import report_finding_id

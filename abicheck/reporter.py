@@ -20,13 +20,13 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, cast
 
 from .policy.evaluate import effective_kind_sets
-from .report.build import build_report_document
 from .report.change_json import (
     change_to_dict,
     prewarm_change_demangling,
     reclassified_by_for_change,
     scope_dict,
 )
+from .report.document_builder import build_report_document
 from .report.json_sections import (
     SCOPED_GATE_HELPERS,
     add_abi_surface_breakdown,
@@ -57,7 +57,9 @@ from .report.dispatch_markdown import (
     to_review_digest as to_review_digest,
 )
 from .report.disposition_audit import add_disposition_audit as _add_disposition_audit
-from .report.finding_evolution import add_finding_evolution as _add_finding_evolution
+from .report.finding_evolution_section import (
+    add_finding_evolution as _add_finding_evolution,
+)
 from .report.render_json import render_json
 from .report.surface_changes import add_surface_changes as _add_surface_changes
 from .report.view import (
@@ -227,7 +229,7 @@ def _to_json_root_cause(
     :func:`~abicheck.root_cause_evidence.root_cause_group_evidence`) without adopting its id scheme.
     """
     # Plan slice 7o (Codex review, PR #1284): this mode builds its finding
-    # dicts directly rather than through `report.build.build_report_document`,
+    # dicts directly rather than through `report.document_builder.build_report_document`,
     # so it needs its own batched demangle -- see
     # `prewarm_change_demangling`'s own docstring for why one per-projection
     # call is not enough.

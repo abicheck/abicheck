@@ -17,7 +17,7 @@
 release comparison.
 
 Reads each stored package's ``VariantRef`` set into
-:class:`~abicheck.model.variant_pairing.VariantView` values and pairs them
+:class:`~abicheck.model.variant_pairing_values.VariantView` values and pairs them
 (``compare.variant_pairing``). Called once per release plan
 (``workflows.release_request``) when **both** operands are stored packages;
 the result rides on the scope plan into the ADR-065 acquisition record and
@@ -33,7 +33,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from ..compare.variant_pairing import pair_variant_views
-from ..model.variant_pairing import VariantPairing, VariantView
+from ..model.variant_pairing_values import VariantPairing, VariantView
 from .bundle_variants_capture import BUNDLE_VARIANT_SPEC_SECTION_KIND
 
 __all__ = ["package_variant_views", "release_variant_pairing"]

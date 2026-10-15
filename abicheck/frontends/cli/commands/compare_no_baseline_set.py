@@ -35,7 +35,7 @@ from typing import TYPE_CHECKING, Any
 
 import click
 
-from ....report.no_baseline_set import (
+from ....report.audit_set import (
     NO_BASELINE_SET_SUPPORTED_FORMATS,
     NO_BASELINE_SET_UNSUPPORTED_FORMATS,
     render_no_baseline_set,
@@ -153,7 +153,7 @@ def run_no_baseline_set_cmd(
 ) -> None:
     """Validate, resolve, audit every member of *candidate*, and report.
 
-    Exits with the folded exit code (``report.no_baseline_set``): the max of
+    Exits with the folded exit code (``report.audit_set``): the max of
     every member's own axes, the operational-error axis for a failed member,
     and ADR-065's scope axes -- so zero audited members exits ``1``.
     """

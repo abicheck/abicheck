@@ -452,8 +452,8 @@ def resolve_release_side(
     OLD-vs-NEW Debian diff, warning order).
     """
     from ..package import package_component_inventory
-    from .contract_conflicts import debian_symbols_binary_conflict_lines
     from .extraction import build_match_map
+    from .package_claim_conflicts import debian_symbols_binary_conflict_lines
 
     pkg_map = (
         resolve_release_package_side(side_dir, variant, make_temp_dir, side=side)

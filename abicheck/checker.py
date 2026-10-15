@@ -900,7 +900,7 @@ def compare(
             public-surface ``EntityId`` set; *new_public_entity_ids* is
             *new*'s (never swap). ``None`` (default) preserves prior behavior.
         cross_source_checks: ADR-068 D3/D4/D5. Runs the migrated
-            cross-source check(s) (``workflows.cross_source_evolution``) on
+            cross-source check(s) (``workflows.cross_source_hygiene``) on
             *old*/*new*, merging the evolution-stated result into
             ``changes``. **On by default**, evidence-gated per check/side;
             never changes a finding's default verdict.
@@ -998,7 +998,7 @@ def compare(
 
     # ADR-068 D3 / plan P2 -- first cross-source check migrated onto compare().
     if cross_source_checks:
-        from .workflows.cross_source_evolution import cross_source_findings
+        from .workflows.cross_source_hygiene import cross_source_findings
 
         changes.extend(cross_source_findings(old, new, changes))
 

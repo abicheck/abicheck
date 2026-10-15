@@ -30,7 +30,7 @@ from pathlib import Path
 import pytest
 
 from abicheck import dumper
-from abicheck.extract.headers.backend import HeaderParseRequest
+from abicheck.extract.headers.backend_protocol import HeaderParseRequest
 from abicheck.extract.headers.toolchain import _parser_ast_toolchain
 
 _HAVE_TOOL = {

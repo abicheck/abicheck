@@ -57,7 +57,7 @@ from abicheck.policy.release_contract_reconciliation import (
     release_owned_checks,
     undocumented_exports_by_member,
 )
-from abicheck.report.release_public_surface import (
+from abicheck.report.release_public_surface_section import (
     compute_release_public_surface,
     dedupe_shared_member_findings,
     render_release_public_surface_markdown,

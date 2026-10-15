@@ -99,7 +99,7 @@ def _markdown_body(report: ReleaseReport) -> str:
         render_disposition_audit_section,
     )
     from .release_display_limits import MAX_RELEASE_FINDINGS_PER_LIBRARY
-    from .release_public_surface import render_release_public_surface_markdown
+    from .release_public_surface_section import render_release_public_surface_markdown
     from .render_release_markdown import (
         _release_md_bundle_findings,
         _release_md_changed_libraries,

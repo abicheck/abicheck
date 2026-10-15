@@ -421,7 +421,7 @@ class TestReleaseAssuranceThroughTheCli:
 
         Codex security review (P1) found the floor reaching only `exit.
         analysis_assurance_contribution` and `analysis_assurance.
-        exit_contribution`, while `workflows.aggregate.gate._analysis_assurance_
+        exit_contribution`, while `workflows.aggregate.report_gate._analysis_assurance_
         exit` and the composite Action's `gate_mode: deferred` path read the
         canonical **top-level** `analysis_assurance_exit_contribution` (report
         schema 2.40, the exact sibling of the coverage axis's own key) -- so
@@ -433,7 +433,7 @@ class TestReleaseAssuranceThroughTheCli:
         and through the reader those consumers actually use rather than a key
         presence check: a future writer added without the axis fails here.
         """
-        from abicheck.workflows.aggregate.gate import _analysis_assurance_exit
+        from abicheck.workflows.aggregate.report_gate import _analysis_assurance_exit
 
         out = tmp_path / "every"
         run = _compare(
@@ -463,7 +463,7 @@ class TestReleaseAssuranceThroughTheCli:
         """Negative control for the invariant above: with every member's
         analysis complete, the same reader must see `0` in every document --
         so the test above is not satisfied by a writer that hard-codes `1`."""
-        from abicheck.workflows.aggregate.gate import _analysis_assurance_exit
+        from abicheck.workflows.aggregate.report_gate import _analysis_assurance_exit
 
         out = tmp_path / "clean"
         run = _compare(
@@ -544,7 +544,7 @@ class TestReleaseAssuranceThroughTheCli:
         on this driver because sharing the fold function does not mean sharing
         the publishing path.
         """
-        from abicheck.workflows.aggregate.gate import _analysis_assurance_exit
+        from abicheck.workflows.aggregate.report_gate import _analysis_assurance_exit
 
         facts = tmp_path / "old.bundlefacts.json"
         captured = _compare(
@@ -581,7 +581,7 @@ class TestReleaseAssuranceThroughTheCli:
         """Negative control for the stored driver: comparing a stored capture
         against the very tree it was captured from leaves nothing short, so the
         same reader must see `0` everywhere."""
-        from abicheck.workflows.aggregate.gate import _analysis_assurance_exit
+        from abicheck.workflows.aggregate.report_gate import _analysis_assurance_exit
 
         facts = tmp_path / "same.bundlefacts.json"
         _compare(

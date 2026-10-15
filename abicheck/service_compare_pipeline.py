@@ -75,8 +75,8 @@ from .workflows.artifact.compile_db_match import match_side_compile_db
 from .workflows.artifact.dump_execution_options import DumpExecutionOptions
 from .workflows.artifact.execute import _resolve_side_snapshot_impl
 from .workflows.compare_classify import ResolvedComparePair
-from .workflows.contracts import CompareRequest, CompareResult
 from .workflows.request_inputs import InputSpec, required_path
+from .workflows.service_requests import CompareRequest, CompareResult
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -575,7 +575,7 @@ def run_compare_request(request: CompareRequest) -> CompareResult:
     under) calls the two phases directly rather than keeping a second
     resolution implementation.
 
-    Returns a :class:`~abicheck.workflows.contracts.CompareResult` (ADR-055 D2), not the
+    Returns a :class:`~abicheck.workflows.service_requests.CompareResult` (ADR-055 D2), not the
     bare ``(DiffResult, old, new)`` tuple it returned before 0.6: a struct can
     gain a field without breaking positional callers, which a tuple cannot.
     ``CompareResult.as_tuple()`` reproduces the old shape for a caller that
@@ -763,7 +763,7 @@ def run_compare(
     every pre-existing caller.
 
     Returns:
-        A :class:`~abicheck.workflows.contracts.CompareResult`. This returned the bare
+        A :class:`~abicheck.workflows.service_requests.CompareResult`. This returned the bare
         ``(DiffResult, old, new)`` tuple before 0.6; ``.as_tuple()`` gives that
         shape back for a caller that unpacks positionally.
     Raises:

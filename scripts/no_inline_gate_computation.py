@@ -13,7 +13,7 @@ PolicyGateDecision`/:class:`~abicheck.policy.outcome.OperationalStatus`) --
 converting either to a real process exit code or comparing it against a raw
 integer is confined to the small set of boundary encoders ADR-063 D6 names:
 ``policy/outcome.py`` itself (the one place a ``RunOutcome`` axis may be
-*decoded* from raw report fields at all), ``workflows/aggregate/gate.py``
+*decoded* from raw report fields at all), ``workflows/aggregate/report_gate.py``
 (the read-time boundary for a persisted report), and ``cli.py``/
 ``service.py``/``aggregate.py`` (the write-time boundaries that convert an
 already-decoded value to the final exit code/JSON integer).
@@ -65,7 +65,7 @@ class Findings(Protocol):
 ALLOWED_RELATIVE_PATHS = frozenset(
     {
         "policy/outcome.py",
-        "workflows/aggregate/gate.py",
+        "workflows/aggregate/report_gate.py",
         "service.py",
         "cli.py",
     }
@@ -148,5 +148,5 @@ def check_no_inline_gate_computation(f: Findings) -> None:
                 "no-inline-gate-computation",
                 f"abicheck/{rel}:{lineno}: {reason} -- confine this to "
                 "policy/outcome.py and the per-front-end encoders "
-                "(workflows/aggregate/gate.py, service.py, cli.py, aggregate.py)",
+                "(workflows/aggregate/report_gate.py, service.py, cli.py, aggregate.py)",
             )

@@ -40,7 +40,7 @@ incompleteness outcome instead -- never demoted to out-of-scope, never
 promoted to a removal.
 
 A leaf ``model`` module: no imports beyond the standard library and the
-sibling leaf ``model.variant_pairing``, so
+sibling leaf ``model.variant_pairing_values``, so
 ``policy`` (the completeness axis), ``workflows`` (the release builder), and
 ``report`` (the rendered section) can all depend on it without a cycle.
 """
@@ -52,7 +52,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
-from .variant_pairing import VariantPairing
+from .variant_pairing_values import VariantPairing
 
 __all__ = [
     "SCOPE_ACQUISITION_SCHEMA_VERSION",

@@ -76,11 +76,11 @@ does, so nothing about the rendering or synthetic-identity story differs
 between the two families.
 
 **Cohort 3 (functions) does not reuse this module the same way.** ADR-063
-Phase 6B's third detector cohort (``compare/functions.py``) migrates only
+Phase 6B's third detector cohort (``compare/function_cutover.py``) migrates only
 the old/new *matching* index, not a payload fact the way typedefs/constants
 did -- see :func:`legacy_function_ir`'s own docstring for why a function has
 no legacy-vs-IR identity duality to adjudicate the way typedefs/constants
-do, and ``compare/functions.py``'s module docstring for the full scoping
+do, and ``compare/function_cutover.py``'s module docstring for the full scoping
 account.
 
 **Synthetic identity is marked, not hidden.** A legacy declaration whose
@@ -493,7 +493,7 @@ def legacy_function_signature_entity(
 def legacy_function_ir(functions: Mapping[str, Function]) -> SemanticIR:
     """Project one comparison's (already ELF/API-surface-selected) function
     collection into a real ``SemanticIR`` -- the fallback half of
-    ``compare/functions.py``'s cohort-3 index (ADR-063 Phase 6B).
+    ``compare/function_cutover.py``'s cohort-3 index (ADR-063 Phase 6B).
 
     **Deliberately shaped differently from :func:`legacy_typedef_ir`/
     :func:`legacy_constant_ir`.** Those two project a *snapshot-level* flat
@@ -509,7 +509,7 @@ def legacy_function_ir(functions: Mapping[str, Function]) -> SemanticIR:
     ``extract/semantic_normalizer.py``'s own third slice reads verbatim (not
     recomputes) when it builds a real ``SemanticIR`` occurrence for a
     header-AST-derived function. There is therefore no legacy-vs-IR
-    *identity* duality here to adjudicate -- see ``compare/functions.py``'s
+    *identity* duality here to adjudicate -- see ``compare/function_cutover.py``'s
     own module docstring for the full account of why this cohort's scope is
     narrower than typedefs'/constants'.
 
@@ -525,7 +525,7 @@ def legacy_function_ir(functions: Mapping[str, Function]) -> SemanticIR:
     ``canonical_spelling`` is deliberately left ``Fact.not_collected()`` --
     unlike typedefs'/constants' single payload fact, no consumer of this
     projection reads a function's signature spelling through it yet (see
-    ``compare/functions.py``'s own "what this slice does not migrate"
+    ``compare/function_cutover.py``'s own "what this slice does not migrate"
     section); inventing a value here nothing reads would only be a
     maintenance liability with no corresponding test coverage to catch it
     drifting from the real normalizer's own formula.

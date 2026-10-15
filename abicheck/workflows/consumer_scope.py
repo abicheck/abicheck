@@ -19,7 +19,7 @@ Answers "will my application (or plugin host) still work with the new
 library version?" by intersecting a consumer's requirements with an
 already-computed library diff. This module is the workflow glue:
 ``extract.consumer_imports``/``extract.library_export_facts`` read the facts,
-``policy.consumer_requirements`` evaluates them, and this module adds the
+``policy.consumer_requirement_evaluation`` evaluates them, and this module adds the
 suppressible consumer-overlay findings, the disposition-ledger bookkeeping
 and the result types. It is the documented public import path
 (``docs/use/python-api.md``).
@@ -61,7 +61,7 @@ from ..model.consumer_spec import (
 )
 from ..model.evidence_status import ReachabilityState
 from ..policy.classification import Verdict
-from ..policy.consumer_requirements import (
+from ..policy.consumer_requirement_evaluation import (
     appcompat_verdict,
     evaluate_consumer_requirements,
     missing_app_versions,

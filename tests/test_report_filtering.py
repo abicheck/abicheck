@@ -659,7 +659,7 @@ class TestLeafModeRetired:
         assert symbols == {"Config", "old_api"}
 
     def test_leaf_is_not_a_report_mode_any_more(self):
-        from abicheck.frontends.cli.options.view import REPORT_MODES
+        from abicheck.frontends.cli.options.compare_view import REPORT_MODES
 
         assert "leaf" not in REPORT_MODES
 

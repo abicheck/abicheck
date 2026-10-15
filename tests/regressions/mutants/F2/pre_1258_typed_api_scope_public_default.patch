@@ -1,5 +1,5 @@
---- a/abicheck/workflows/contracts.py
-+++ b/abicheck/workflows/contracts.py
+--- a/abicheck/workflows/service_requests.py
++++ b/abicheck/workflows/service_requests.py
 @@ -125,7 +125,7 @@
      policy: str = "strict_abi"
      policy_file_path: Path | None = None

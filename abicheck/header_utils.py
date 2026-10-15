@@ -844,7 +844,7 @@ def is_msvc_driver_stem(stem: str) -> bool:
     The single vocabulary behind both dialect decisions this codebase makes,
     which had drifted apart: ``source_extractors._argv.is_msvc_mode`` (the L4
     replay path) recognized ``dpcpp-cl`` and version-suffixed drivers, while
-    ``buildsource.adapters.base._is_msvc_command`` (which decides the dialect
+    ``buildsource.adapters.adapter_contract._is_msvc_command`` (which decides the dialect
     for source detection, forced-language detection, structured-field masking
     and — since PR D — the L2 forced-include render) listed only ``cl`` and
     unversioned ``clang-cl``. A ``dpcpp-cl``/``clang-cl-20`` command spelled

@@ -1066,8 +1066,8 @@ class TestNoteIfSameBinaryCompared:
         from abicheck.model import AbiSnapshot
         from abicheck.service_compare_pipeline import ResolvedComparePair
         from abicheck.workflows import compare_classify
-        from abicheck.workflows.contracts import CompareRequest
         from abicheck.workflows.request_inputs import InputSpec
+        from abicheck.workflows.service_requests import CompareRequest
 
         embedded_snapshot = tmp_path / "old.abi.json"
         embedded_snapshot.write_text(json.dumps({"library": "libfoo.so"}))

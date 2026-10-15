@@ -129,7 +129,7 @@ def validate_provenance(
     ctx: click.Context, param: click.Parameter, value: tuple[str, ...]
 ) -> tuple[str, ...]:
     """Eagerly validate ``--provenance`` tokens -- the exact shape
-    ``frontends.cli.options.view.validate_view`` uses for ``compare --view``, so
+    ``frontends.cli.options.compare_view.validate_view`` uses for ``compare --view``, so
     a malformed ``KEY=VALUE``, an unknown key, or a bad ``git=`` value
     surfaces as a usage error before any extraction work runs. Returns the
     raw tuple (Click needs a value on the dest); ``dump_cmd`` calls

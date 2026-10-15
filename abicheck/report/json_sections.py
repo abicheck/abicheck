@@ -13,9 +13,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""JSON report section builders used by ``report.build.build_report_document``.
+"""JSON report section builders used by ``report.document_builder.build_report_document``.
 
-Extracted from ``reporter.py`` (ADR-061 report/ migration) so ``report.build``
+Extracted from ``reporter.py`` (ADR-061 report/ migration) so ``report.document_builder``
 no longer reaches back into the legacy root module through private helpers and
 an ``importlib`` hop. Behaviour is unchanged.
 """

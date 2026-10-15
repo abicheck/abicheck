@@ -284,7 +284,7 @@ def _introduced_changes(changes: object) -> list[dict[str, object]]:
 
 #: ``Change.cross_source_evolution`` states that mean *this comparison did
 #: not introduce the finding* (ADR-068 D3, stamped by
-#: ``workflows/cross_source_evolution.py``). A one-sided hygiene check is
+#: ``workflows/cross_source_hygiene.py``). A one-sided hygiene check is
 #: re-run against the baseline and its findings paired, so the comparison
 #: layer already knows which of them are new; this renderer reads that
 #: answer and never re-derives it (ADR-072 D1).

@@ -80,8 +80,8 @@ if TYPE_CHECKING:
     from ...compile_context import CompileContext
     from ...model import AbiSnapshot
     from ...service_compare_evidence import SideEvidence
-    from ...workflows.contracts import DumpRequest
     from ...workflows.resolved_execution_context import ResolvedExecutionContext
+    from ...workflows.service_requests import DumpRequest
 
 __all__ = [
     "DumpExecutionOptions",
@@ -214,7 +214,7 @@ def run_dump_request(
     ``abi_dump`` tool. Runs, in order:
 
     1. :meth:`DumpRequest.validate` — the same value/cross-flag rules
-       :class:`~abicheck.workflows.contracts.CompareRequest` applies;
+       :class:`~abicheck.workflows.service_requests.CompareRequest` applies;
     2. the input's evidence resolution (``depth`` → collect mode, headers,
        ``dump_manifest``, merged :class:`CompileContext`);
     3. :func:`abicheck.service.resolve_input`, plus inline build/source

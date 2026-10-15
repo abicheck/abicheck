@@ -222,7 +222,7 @@ topics:
       - abicheck/workflows/bundle_facts_library_overrides.py
       - abicheck/workflows/bundle_stored_pair_compare.py
       - abicheck/frontends/cli/commands/compare_bundle_facts.py
-      - abicheck/frontends/cli/options/bundle_facts.py
+      - abicheck/frontends/cli/options/bundle_facts_library_manifest.py
       - abicheck/buildsource/build_config.py
       - abicheck/buildsource/build_config_schema.py
     reference_page: reference/cli-reference.md
@@ -289,11 +289,11 @@ topics:
     canonical_page: use/python-api.md
     fact_sources:
       - abicheck/service.py
-      - abicheck/workflows/contracts.py
-      - abicheck/workflows/contracts.py
+      - abicheck/workflows/service_requests.py
+      - abicheck/workflows/service_requests.py
       - abicheck/workflows/request_inputs.py
       - abicheck/model/header_ast_frontends.py
-      - abicheck/workflows/dump/pipeline.py
+      - abicheck/workflows/dump/request.py
       - abicheck/service_compare_pipeline.py
       - abicheck/dry_run_estimate.py
       # ADR-068 §3 #19: CompareRequest.budget_s, same absorbed surface as
@@ -320,7 +320,7 @@ topics:
   impact-analysis:
     canonical_page: learn/impact-analysis.md
     fact_sources:
-      - abicheck/impact/model.py
+      - abicheck/impact/assessment.py
       - abicheck/impact/engine.py
       - abicheck/impact/use_cases.py
       - abicheck/cli_project.py
@@ -444,7 +444,7 @@ topics:
     canonical_page: use/aggregate-reports.md
     fact_sources:
       - abicheck/workflows/aggregate/__init__.py
-      - abicheck/workflows/aggregate/resolve.py
+      - abicheck/workflows/aggregate/expected_targets.py
       - abicheck/workflows/aggregate/reconcile.py
       - abicheck/cli_aggregate.py
       - abicheck/buildsource/run_plan.py
@@ -560,7 +560,7 @@ topics:
       - abicheck/policy/versioning_policy.py
       - abicheck/report/not_comparable.py
       - abicheck/buildsource/check_report_run_outcome.py
-      - abicheck/workflows/aggregate/gate.py
+      - abicheck/workflows/aggregate/report_gate.py
       - abicheck/cli_compare_release_helpers.py
       - abicheck/cli_compare_release_matrix.py
       - abicheck/schemas/compare_report.schema.json
@@ -882,10 +882,10 @@ topics:
   project-snapshot-storage:
     canonical_page: reference/project-snapshot-format.md
     fact_sources:
-      - abicheck/storage/availability.py
+      - abicheck/storage/availability_ledger.py
       - abicheck/storage/fact_availability.py
       - abicheck/storage/availability_status.py
-      - abicheck/storage/identity.py
+      - abicheck/storage/occurrence_identity.py
       - abicheck/storage/entity_ids.py
       - abicheck/storage/canonical.py
       - abicheck/storage/versioning.py

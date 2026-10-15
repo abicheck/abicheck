@@ -338,7 +338,7 @@ def _resolved_finding_dict(change: Change) -> dict[str, object]:
     Deliberately not the full ``change_json.change_to_dict`` shape (severity,
     gate contribution, ...) -- a resolved finding is a historical fact about
     the *previous* pair's own comparison, not one this pair's own policy
-    classified -- mirrors ``report.finding_evolution.ResolvedFindingEntry``
+    classified -- mirrors ``report.finding_evolution_section.ResolvedFindingEntry``
     field-for-field without importing it: ``workflows/`` may not import
     ``report/`` (ADR-061's dependency direction is the other way around), so
     this stays a small, self-contained projection rather than a new
@@ -358,7 +358,7 @@ def _resolved_finding_dict(change: Change) -> dict[str, object]:
 def _evolution_counts(result: DiffResult) -> tuple[tuple[str, int], ...]:
     """Per-``FindingEvolution``-state counts over *result*'s own findings,
     after :func:`~abicheck.policy.finding_evolution.apply_finding_evolution`
-    has stamped it. Mirrors ``report.finding_evolution.
+    has stamped it. Mirrors ``report.finding_evolution_section.
     compute_finding_evolution_summary``'s counting rule field-for-field
     (zero-inclusive, ``RESOLVED`` counted from ``resolved_findings`` rather
     than ``changes`` -- see that function's own comment for why) without

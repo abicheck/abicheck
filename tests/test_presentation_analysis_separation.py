@@ -599,7 +599,7 @@ class TestShowOnlyCliHintIsReRunnable:
     ) -> None:
         import re
 
-        from abicheck.frontends.cli.options.view import parse_view_tokens
+        from abicheck.frontends.cli.options.compare_view import parse_view_tokens
 
         old_p, new_p = _write_pair(tmp_path)
         result = CliRunner().invoke(
@@ -879,7 +879,7 @@ def _engine_oracle(old_p: Path, new_p: Path, suppress: Path) -> dict[str, Any]:
     """
     from abicheck.serialization import load_snapshot
     from abicheck.workflows.compare_policy import compare_snapshots
-    from abicheck.workflows.suppression import SuppressionList
+    from abicheck.workflows.suppression_input import SuppressionList
 
     result = compare_snapshots(
         load_snapshot(str(old_p)),

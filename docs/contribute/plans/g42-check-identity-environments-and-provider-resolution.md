@@ -625,7 +625,7 @@ merely a safer mutator once inside one job:
 3. **Each environment's report needs its own `target_id`, not merely its
    own artifact filename — confirmed by reading the aggregate's actual
    loader, not assumed, correcting a wrong claim in an earlier draft of
-   this plan.** `abicheck/workflows/aggregate/execute.py`'s
+   this plan.** `abicheck/workflows/aggregate/fan_in_execution.py`'s
    `collect_reports()` indexes every loaded report by its **in-report**
    `target_id` field (the `check_id`-shaped string) and raises
    `AggregateError` on a duplicate — keyed by that field, not by the

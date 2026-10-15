@@ -30,7 +30,7 @@ claims about it:
   exactly once. A front end that wanted a second opinion would have to call
   this again, not fork the logic.
 * **Resource lifetimes cover execution.** The L2 seed's cleanup thunks are
-  drained through :class:`~abicheck.workflows.artifact.contracts.ResolvedArtifactPlan`
+  drained through :class:`~abicheck.workflows.artifact.resolved_plan.ResolvedArtifactPlan`
   *after* the header parse consumes the seeded directories and *before* the
   L3-L5 embed step runs its own collection -- an ordering fixed after an
   inferred build query's own ``flock`` was found able to self-contend with the
@@ -59,12 +59,12 @@ from typing import TYPE_CHECKING
 from ...errors import ValidationError
 from ...header_conditionals import attach_build_context_for_parsed_headers
 from ...header_utils import include_operand_dirs
-from .contracts import ResolvedArtifactPlan
 from .embed_side import embed_side_build_source
 from .resolve import (
     _gated_build_query_inputs,
     _seeded_includes_and_compile_context,
 )
+from .resolved_plan import ResolvedArtifactPlan
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -139,8 +139,8 @@ def resolve_side_snapshot(
 
     ``lang_explicit`` (G31 Phase C follow-up): whether *lang* reflects a
     genuinely explicit request rather than a request-level default — see
-    :attr:`abicheck.workflows.contracts.CompareRequest.lang_explicit` /
-    :attr:`abicheck.workflows.contracts.DumpRequest.lang_explicit`. Forwarded to
+    :attr:`abicheck.workflows.service_requests.CompareRequest.lang_explicit` /
+    :attr:`abicheck.workflows.service_requests.DumpRequest.lang_explicit`. Forwarded to
     :func:`abicheck.service.resolve_input` unchanged.
 
     A thin wrapper over :func:`_resolve_side_snapshot_impl` for a caller that

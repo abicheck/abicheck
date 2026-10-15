@@ -15,12 +15,12 @@
 """``InputSpec`` -- the per-side typed operand of a comparison/dump request
 (ADR-037 D2; ADR-061 gap B).
 
-The real owner behind the flat ``abicheck.workflows.contracts`` compatibility
+The real owner behind the flat ``abicheck.workflows.service_requests`` compatibility
 facade's input-side half: the supported-choice constants
 (``SUPPORTED_LANGS``/``SUPPORTED_FRONTENDS``/``SUPPORTED_DEBUG_FORMATS``),
 ``InputSpec`` itself, and its validation helpers. ``CompareRequest``/
 ``DumpRequest``/``CompareResult`` -- the pair/result half that builds on
-this one -- live in the sibling module :mod:`abicheck.workflows.contracts`,
+this one -- live in the sibling module :mod:`abicheck.workflows.service_requests`,
 split out purely to keep each module under the 800-line new-file ceiling.
 
 :data:`~abicheck.model.header_ast_frontends.HEADER_AST_FRONTENDS` (the
@@ -28,7 +28,7 @@ subset of :data:`SUPPORTED_FRONTENDS` valid for header-AST parsing) moved to
 `model` instead of staying here -- see that module's own docstring for the
 second, independent `extract`-layer need that motivated the move; it is
 re-exported here unchanged for every existing
-``from abicheck.workflows.contracts import HEADER_AST_FRONTENDS`` caller.
+``from abicheck.workflows.service_requests import HEADER_AST_FRONTENDS`` caller.
 """
 
 from __future__ import annotations

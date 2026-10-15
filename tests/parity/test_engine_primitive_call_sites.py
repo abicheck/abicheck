@@ -11,7 +11,7 @@ gave each a ``compare``-side caller, and Phase 6 deleted ``scan_engine.py``.
 
 What this module pins now is the resulting caller set, by a real AST scan
 over every ``abicheck/**/*.py`` module (not a grep a comment could fool):
-``run_crosschecks`` is called only from ``workflows/cross_source_evolution.py``
+``run_crosschecks`` is called only from ``workflows/cross_source_hygiene.py``
 and the two lexical/preprocessor primitives only from
 ``workflows/pattern_preprocessor_scan.py``. Losing that caller would make
 ``compare`` silently stop running the check, and a surprise second caller is
@@ -33,7 +33,7 @@ _ABICHECK_ROOT = Path(__file__).resolve().parent.parent.parent / "abicheck"
 _ENGINE_PRIMITIVES: dict[str, tuple[str, tuple[str, ...]]] = {
     "run_crosschecks": (
         "buildsource/cross_source_checks.py",
-        ("workflows/cross_source_evolution.py",),
+        ("workflows/cross_source_hygiene.py",),
     ),
     "find_pattern_facts": (
         "buildsource/pattern_facts.py",

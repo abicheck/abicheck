@@ -27,7 +27,7 @@ divergence found by the F2 route-parity harness was patched on both copies.
 
 What the module takes is everything a front end may legitimately decide:
 
-* the :class:`~abicheck.workflows.contracts.CompareRequest` (the classification
+* the :class:`~abicheck.workflows.service_requests.CompareRequest` (the classification
   settings: policy, scope, depth, probe matrices, ``abi3_floor``, ...);
 * the :class:`ResolvedComparePair` from
   ``resolve_compare_request``;
@@ -59,8 +59,8 @@ if TYPE_CHECKING:
     from ..model import AbiSnapshot
     from ..service_compare_evidence import SideEvidence
     from .compare_request_policy import RequestPolicyInputs
-    from .contracts import CompareRequest
     from .resolved_execution_context import ResolvedExecutionContext
+    from .service_requests import CompareRequest
 
 __all__ = [
     "ClassifiedPair",

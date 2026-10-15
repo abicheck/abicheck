@@ -28,8 +28,8 @@ from abicheck.model import (
 )
 from abicheck.model.identity import entity_id_for_function, entity_id_for_variable
 from abicheck.model.source_graph import SourceGraphSummary
-from abicheck.policy.public_surface import PublicSurface
 from abicheck.policy.public_surface_closure import resolve_public_surface
+from abicheck.policy.public_surface_index import PublicSurface
 from abicheck.policy.public_surface_query import PublicSurfaceQuery
 
 
@@ -322,13 +322,13 @@ class TestPublicSurfaceQueryResolveExportDomain:
 
 class TestPublicSurfaceBackCompatReexports:
     """``resolve_public_surface``/``PublicSurfaceQuery`` historically lived
-    directly in ``policy.public_surface`` before this migration split them
+    directly in ``policy.public_surface_index`` before this migration split them
     into sibling modules -- the lazy ``__getattr__`` shim at the bottom of
     that module must keep the historical import path resolving (Codex
     review, PR #979)."""
 
     def test_resolve_public_surface_resolves_via_the_old_import_path(self) -> None:
-        import abicheck.policy.public_surface as old_path
+        import abicheck.policy.public_surface_index as old_path
         from abicheck.policy.public_surface_closure import (
             resolve_public_surface as moved,
         )
@@ -336,7 +336,7 @@ class TestPublicSurfaceBackCompatReexports:
         assert old_path.resolve_public_surface is moved
 
     def test_public_surface_query_resolves_via_the_old_import_path(self) -> None:
-        import abicheck.policy.public_surface as old_path
+        import abicheck.policy.public_surface_index as old_path
         from abicheck.policy.public_surface_query import (
             PublicSurfaceQuery as moved,
         )
@@ -344,13 +344,13 @@ class TestPublicSurfaceBackCompatReexports:
         assert old_path.PublicSurfaceQuery is moved
 
     def test_public_surface_resolution_is_the_public_surface_alias(self) -> None:
-        import abicheck.policy.public_surface as old_path
+        import abicheck.policy.public_surface_index as old_path
 
         assert old_path.PublicSurfaceResolution is old_path.PublicSurface
 
     def test_star_import_carries_all_four_historical_names(self) -> None:
         ns: dict[str, object] = {}
-        exec("from abicheck.policy.public_surface import *", ns)  # noqa: S102
+        exec("from abicheck.policy.public_surface_index import *", ns)  # noqa: S102
         for name in (
             "PublicSurface",
             "PublicSurfaceQuery",
@@ -360,7 +360,7 @@ class TestPublicSurfaceBackCompatReexports:
             assert name in ns, name
 
     def test_unknown_attribute_still_raises_attribute_error(self) -> None:
-        import abicheck.policy.public_surface as old_path
+        import abicheck.policy.public_surface_index as old_path
 
         try:
             old_path.definitely_not_a_real_attribute

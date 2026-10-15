@@ -30,7 +30,7 @@ their per-member debug files). :func:`member_request` applies the delta with
 construction.
 
 :func:`member_compare_request` then builds the member's typed
-:class:`~abicheck.workflows.contracts.CompareRequest` directly -- the same
+:class:`~abicheck.workflows.service_requests.CompareRequest` directly -- the same
 request the keyword API builds for the same operands -- with no keyword
 round-trip. It consumes every field explicitly, and refuses a field it does
 not map rather than dropping it, so a new request field cannot silently
@@ -44,8 +44,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from .contracts import CompareRequest
 from .request_inputs import InputSpec
+from .service_requests import CompareRequest
 
 if TYPE_CHECKING:
     from ..compile_context import CompileContext

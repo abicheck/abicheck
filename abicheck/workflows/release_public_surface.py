@@ -30,7 +30,7 @@ them from what a release front end has already resolved.
 ``_diff_result``/bundle-evidence keys are stripped from the release's
 library entries, because the export index is built from them. The report
 section is assembled afterwards, from the returned stage, by
-``report.release_public_surface.assemble_release_public_surface``.
+``report.release_public_surface_section.assemble_release_public_surface``.
 """
 
 from __future__ import annotations

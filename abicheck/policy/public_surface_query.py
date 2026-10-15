@@ -4,16 +4,16 @@
 answers "is this declaration on the public surface / exports surface"
 across both relevance domains.
 
-**Split out of ``policy/public_surface.py`` itself, not merely alongside
+**Split out of ``policy/public_surface_index.py`` itself, not merely alongside
 it, for a real dependency-direction reason, not organizational taste.**
-``policy/public_surface.py`` is the leaf module housing the actual graph
-traversal (:func:`~abicheck.policy.public_surface.resolve_public_surface`)
+``policy/public_surface_index.py`` is the leaf module housing the actual graph
+traversal (:func:`~abicheck.policy.public_surface_index.resolve_public_surface`)
 that ``export_surface.py`` itself now imports from (its own type-closure
 step shares that module's ``_walk_type_closure`` verbatim -- see that
 module's own docstring). If this class's :meth:`PublicSurfaceQuery.
 resolve_export_domain` lived in that same leaf module, its own need to call
 ``export_surface.compute_export_surface()`` would close a real, two-node
-import cycle (``policy.public_surface -> export_surface -> policy.
+import cycle (``policy.public_surface_index -> export_surface -> policy.
 public_surface``) -- one the AI-readiness `import-cycle-growth` gate
 catches by *static* analysis of every ``import``/``from ... import``
 statement, including one written inside a function body specifically to
@@ -31,8 +31,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from ..export_surface import ExportSurface, compute_export_surface
-from .public_surface import PublicSurface
 from .public_surface_closure import resolve_public_surface
+from .public_surface_index import PublicSurface
 
 if TYPE_CHECKING:
     from ..model.identity import EntityId
@@ -47,7 +47,7 @@ def _linker_key_is_public(mangled: str, name: str, public_symbols: set[str]) -> 
     over its bare demangled name whenever the two genuinely differ.
 
     When two C++ overloads share one demangled name and only one is
-    public, ``policy.public_surface._seed_public_roots`` unions *both* the
+    public, ``policy.public_surface_index._seed_public_roots`` unions *both* the
     mangled name and the bare name into ``public_symbols`` for the public
     overload alone -- but a plain ``mangled in ... or name in ...`` check
     still matches the *other*, non-public overload via that shared bare
@@ -85,7 +85,7 @@ class PublicSurfaceQuery:
         snapshot cannot support a real ``EntityId``-based answer: either
         ``resolve_public_surface()`` itself is unresolvable (``surf.
         resolvable`` is ``False`` — no header-derived visibility exists at
-        all, per :class:`~abicheck.policy.public_surface.PublicSurface`'s
+        all, per :class:`~abicheck.policy.public_surface_index.PublicSurface`'s
         own docstring, "scoping is skipped entirely"), or the *public*
         portion of the surface carries no ``entity_id``-bearing declaration
         at all (a pre-ADR-063-Phase-2 snapshot, schema < 28, or a
@@ -147,7 +147,7 @@ class PublicSurfaceQuery:
         result — ``resolvable``/``has_typed_roots``/``has_provenance``/
         ``ambiguous_type_names``/``exact_type_identities``/both origin
         indices, none of which a bare id set can express. Today this *is*
-        :func:`~abicheck.policy.public_surface.resolve_public_surface`'s own
+        :func:`~abicheck.policy.public_surface_index.resolve_public_surface`'s own
         return value."""
         return resolve_public_surface(snapshot)
 
@@ -171,11 +171,11 @@ class PublicSurfaceQuery:
         ``export_surface.py``'s own export-table-matching root-seeding
         stays its own, independently proven implementation unchanged; its
         final type-closure step shares
-        ``policy.public_surface._walk_type_closure`` with this class's own
+        ``policy.public_surface_index._walk_type_closure`` with this class's own
         public-domain query and is therefore graph-native too. This is a
         real, top-level import (not deferred): this module is the one
         place that may depend on both ``export_surface.py`` and
-        ``policy/public_surface.py`` at once -- see this module's own
+        ``policy/public_surface_index.py`` at once -- see this module's own
         docstring for why neither of *those* two may import this one back.
         """
         return compute_export_surface(snapshot)

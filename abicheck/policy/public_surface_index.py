@@ -309,7 +309,7 @@ def _index_surface_types(
 # import cycle -- both sibling modules import from *this* one. This
 # module-level `__getattr__` (PEP 562) resolves the two names lazily via
 # `importlib.import_module` instead (a runtime call, not a static import
-# edge), preserving the historical path `from abicheck.policy.public_surface
+# edge), preserving the historical path `from abicheck.policy.public_surface_index
 # import resolve_public_surface, PublicSurfaceQuery` (Codex review, PR #979)
 # without coupling the three modules. New code should import from
 # `public_surface_closure`/`public_surface_query` directly.

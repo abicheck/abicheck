@@ -298,7 +298,7 @@ class TestCompareReleaseAgainstBundleFactsResolutionUnit:
         import abicheck.package as package_mod
         import abicheck.workflows.compare_policy as compare_policy_mod
         import abicheck.workflows.input_resolution as input_resolution_mod
-        from abicheck.workflows.suppression import SuppressionList
+        from abicheck.workflows.suppression_input import SuppressionList
 
         facts_path = self._old_facts(tmp_path)
         new_dir = tmp_path / "new"

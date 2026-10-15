@@ -35,8 +35,8 @@ from abicheck.cli import main
 from abicheck.errors import ValidationError
 from abicheck.model import AbiSnapshot, Function, Visibility
 from abicheck.serialization import snapshot_to_json
-from abicheck.workflows.contracts import CompareRequest
 from abicheck.workflows.request_inputs import InputSpec
+from abicheck.workflows.service_requests import CompareRequest
 
 
 def _fn(name: str, mangled: str | None = None) -> Function:

@@ -99,7 +99,7 @@ class TestReleaseJsonRunOutcome:
 
         from abicheck.frontends.cli.release_report import render_release_summary
         from abicheck.policy.severity import resolve_severity_config
-        from abicheck.workflows.aggregate.gate import GateInfo
+        from abicheck.workflows.aggregate.report_gate import GateInfo
 
         cfg = resolve_severity_config("default")
         out = render_release_summary(

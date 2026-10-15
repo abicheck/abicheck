@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Build an :class:`~abicheck.impact.model.ImpactAssessment` from an existing
+"""Build an :class:`~abicheck.impact.assessment.ImpactAssessment` from an existing
 ``Change`` (G29 Phase 3 slice 1, ADR-052).
 
 ``assess_change`` is a pure read view: it does not mutate *change*, run any
@@ -27,7 +27,7 @@ from __future__ import annotations
 from typing import Any
 
 from ..model.evidence_status import Confidence, ReachabilityState
-from .model import FindingDecision, GraphProofPath, ImpactAssessment, ProofStep
+from .assessment import FindingDecision, GraphProofPath, ImpactAssessment, ProofStep
 
 
 def _proof_path_target(change: Any, steps: tuple[ProofStep, ...]) -> str:
@@ -136,7 +136,7 @@ def assess_change(
     the caller the same way *root_cause* is (whole-``DiffResult`` context
     this function doesn't have), via
     :func:`~abicheck.reporter_markdown.root_cause_evidence_lookup_for_changes`.
-    ``None`` leaves :attr:`~abicheck.impact.model.ImpactAssessment.
+    ``None`` leaves :attr:`~abicheck.impact.assessment.ImpactAssessment.
     root_cause_evidence` unset, same as any caller with no correlator
     context to offer.
 

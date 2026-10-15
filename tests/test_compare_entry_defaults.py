@@ -25,9 +25,9 @@ from _family_f2_routes import CORPUS
 from abicheck import checker, service_compare_pipeline
 from abicheck.service_compare_pipeline import run_compare
 from abicheck.workflows.compare_policy import compare_snapshots
-from abicheck.workflows.contracts import CompareRequest
 from abicheck.workflows.history import HistoryEntry, build_longitudinal_history
 from abicheck.workflows.request_inputs import InputSpec
+from abicheck.workflows.service_requests import CompareRequest
 
 #: ``scope_mismatch`` is a refused comparison (comparability gate), not a verdict.
 _COMPARABLE = sorted(c for c in CORPUS if c != "scope_mismatch")

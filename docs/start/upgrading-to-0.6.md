@@ -361,7 +361,7 @@ abicheck compare libfoo.so.1 libfoo.so.2 \
 ## D. Python API
 
 The supported import surface is `abicheck.service`. The request/result types
-are defined in `abicheck.workflows.contracts` and
+are defined in `abicheck.workflows.service_requests` and
 `abicheck.workflows.request_inputs`, but **import them from
 `abicheck.service`** — that is the stable re-export point:
 

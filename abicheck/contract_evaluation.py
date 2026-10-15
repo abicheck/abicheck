@@ -1271,7 +1271,7 @@ def _mode_dispatch_decision(
     if change.kind.value in _NOT_APPLICABLE_KIND_SLUGS:
         return _not_applicable_decision()
     # A cross-source hygiene finding (`exported_not_public`,
-    # `private_header_leak`, ...; `workflows.cross_source_evolution`) states
+    # `private_header_leak`, ...; `workflows.cross_source_hygiene`) states
     # how one build's evidence sources agree, not that a contract entity
     # changed between OLD and NEW -- its evolution stamp is what says so.
     # Relevance is therefore not the question for it: `NOT_APPLICABLE` keeps

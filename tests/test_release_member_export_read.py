@@ -126,7 +126,7 @@ def test_rendered_release_section_says_unresolved_not_missing(state: str) -> Non
     """Through the report's own compute/render pair: an unread member
     produces no missing-export finding and names the coverage gap."""
     from abicheck.policy.release_contract_reconciliation import reconcile_release
-    from abicheck.report.release_public_surface import (
+    from abicheck.report.release_public_surface_section import (
         compute_release_public_surface,
         render_release_public_surface_markdown,
     )

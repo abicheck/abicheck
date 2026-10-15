@@ -29,13 +29,13 @@ from .contracts import (
     TargetReport,
     _LoadedReport,
 )
-from .fold import AggregateResult
-from .load import _load_report_file
-from .resolve import (
+from .expected_targets import (
     ExpectedTargets,
     OnUnexpectedTarget,
     resolve_gate_policy,
 )
+from .fold import AggregateResult
+from .load import _load_report_file
 
 
 def aggregate(

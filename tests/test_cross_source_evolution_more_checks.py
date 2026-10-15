@@ -15,7 +15,7 @@ the sibling module, plus a ``TestFiveMoreChecksNotEvaluatedCrux`` class
 generalizing the crux (plan §7 F-8/F-9) across all five, and an identity
 test for each of the three checks (``odr_type_variant``, ``identity_
 collision_detected``, ``compile_context_conflict``) that needed the same
-per-check identity generalization ``workflows.cross_source_evolution``
+per-check identity generalization ``workflows.cross_source_hygiene``
 already applies to ``private_header_leak``/``rtti_for_internal_type``/
 ``public_to_internal_dependency`` -- see that module's own docstring.
 """
@@ -31,7 +31,7 @@ from abicheck.checker import compare
 from abicheck.checker_policy import ChangeKind, CrossSourceEvolution
 from abicheck.elf_metadata import ElfMetadata, ElfSymbol
 from abicheck.model import AbiSnapshot
-from abicheck.workflows.cross_source_evolution import compute_cross_source_evolution
+from abicheck.workflows.cross_source_hygiene import compute_cross_source_evolution
 
 # --------------------------------------------------------------------------- #
 # The five checks this PR migrates onto compute_cross_source_evolution:

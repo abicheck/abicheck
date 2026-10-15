@@ -47,7 +47,9 @@ from .contracts import (
     malformed_gate_report,
 )
 from .disposition_axis import disposition_audit_block
-from .gate import (
+from .no_baseline_load import load_no_baseline_report
+from .reconcile import ReportFindings, parse_report_findings
+from .report_gate import (
     _VALID_GATE_EXIT,
     COVERAGE_INCOMPLETE_EXIT,
     _contract_coverage_exit,
@@ -63,8 +65,6 @@ from .gate import (
     contract_coverage_blocks,
     contract_coverage_declared,
 )
-from .no_baseline_load import load_no_baseline_report
-from .reconcile import ReportFindings, parse_report_findings
 from .scope_axis import (
     declares_null_compatibility,
     scope_completeness_exit,

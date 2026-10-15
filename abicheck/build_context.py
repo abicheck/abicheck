@@ -741,7 +741,7 @@ def source_matches_filter(
     layer that narrows a compile database by it — this module's own
     :class:`CompileEntry` scan, ``header_conditionals``' raw-dict scan for the
     ADR-039 collector, and ``buildsource.header_compile_context``'s
-    :class:`~abicheck.buildsource.adapters.base.CompileUnit` scan for the P0.3
+    :class:`~abicheck.buildsource.adapters.adapter_shared.CompileUnit` scan for the P0.3
     L3→L2 fold. Three layers had (or would have had) their own copy of this
     predicate; the same shape has already drifted silently once in this
     codebase (the MSVC-driver vocabulary, third finding on the root
@@ -965,7 +965,7 @@ def load_compile_db(path: Path) -> list[CompileEntry]:
 #: ABI-relevant flags forwarded verbatim from a matched compile-DB entry into
 #: the real castxml/clang header-parse command (via ``to_castxml_flags``'s
 #: ``extra_flags``). Kept in sync with the broader
-#: ``buildsource.adapters.base.ABI_RELEVANT_FLAG_PREFIXES`` list (that one
+#: ``buildsource.adapters.adapter_contract.ABI_RELEVANT_FLAG_PREFIXES`` list (that one
 #: feeds the separate L3 build-evidence-drift diff, not the L2 header parse
 #: itself) — data-model/calling-convention/target flags a real build used are
 #: exactly the kind of thing that must reach the actual header parse, not

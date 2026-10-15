@@ -32,7 +32,7 @@ from abicheck.policy.outcome import (
     run_outcome_scope_required,
 )
 from abicheck.schemas import load_compare_report_schema
-from abicheck.workflows.aggregate.gate import _is_schema_valid_run_outcome
+from abicheck.workflows.aggregate.report_gate import _is_schema_valid_run_outcome
 
 
 def _block(version: str, scope: object = "<absent>") -> dict[str, Any]:

@@ -92,8 +92,8 @@ dated audit note to the real owning document, or (§3) implements against it.
     G45's *target-kind* slice (a native `kind: header-only` in
     `project_targets.py`, distinct from `kind: library` requiring
     `binary_pattern`) is **not** landed — see §8.
-  - **Recent contract-conflict reporting** — landed (`policy/contract_conflicts.py`,
-    `workflows/contract_conflicts.py`, wired into `DiffResult.contract_conflicts`
+  - **Recent contract-conflict reporting** — landed (`policy/contract_conflict_detectors.py`,
+    `workflows/package_claim_conflicts.py`, wired into `DiffResult.contract_conflicts`
     per `architecture/debt.yaml`'s own dated rationale entries).
 
 ## 2. Non-negotiable semantics — audit finding

@@ -38,7 +38,10 @@ from abicheck import deadline, dumper
 from abicheck.dumper_clang_errors import run_clang_ast, run_clang_to_ast_file
 from abicheck.errors import SnapshotError
 from abicheck.extract.header_ast_fields import parse_header_ast_fields
-from abicheck.extract.headers.backend import HeaderAstBackend, HeaderParseRequest
+from abicheck.extract.headers.backend_protocol import (
+    HeaderAstBackend,
+    HeaderParseRequest,
+)
 from abicheck.extract.headers.castxml.backend import CastxmlBackend, CastxmlRunError
 from abicheck.extract.headers.castxml.probe import check_scan_deadline, run_castxml
 from abicheck.extract.headers.clang.backend import ClangBackend

@@ -77,7 +77,7 @@ from ....storage.header_ast_cache import (
 )
 from ...castxml_header_compat import write_castxml_aggregate
 from ...path_aliases import absolutize_include_roots
-from ..backend import HeaderParseRequest
+from ..backend_protocol import HeaderParseRequest
 from .calling_convention import calling_conventions_in
 from .preprocessed_text import attach_preprocessed_text, resolve_preprocessed_text
 
@@ -467,7 +467,7 @@ def _record_calling_convention_macros(
 
 
 class CastxmlBackend:
-    """The ``castxml`` :class:`~abicheck.extract.headers.backend.HeaderAstBackend`.
+    """The ``castxml`` :class:`~abicheck.extract.headers.backend_protocol.HeaderAstBackend`.
 
     *runner* runs one castxml command; *check_deadline* is the scan-deadline
     check between attempts. Defaults: ``dumper_castxml_probe.run_castxml``

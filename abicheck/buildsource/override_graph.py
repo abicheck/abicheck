@@ -129,7 +129,7 @@ from ..model.graph_facts import (
     GraphNode,
     _decl_node_id,
 )
-from ..model.name_decoration import macho as macho_decoration
+from ..model.name_decoration import macho_underscore as macho_decoration
 from ..model.source_graph import function_decl_identity
 from .type_graph import EDGE_TYPE_INHERITS, parse_clang_ast_types
 

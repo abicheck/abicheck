@@ -416,7 +416,7 @@ for the exhaustive schema this phase produced.
   `source_graph_findings.py`'s `PUBLIC_API_INTERNAL_DEPENDENCY_ADDED`
   producer in place of its own `min(..., key=len)`. The
   `primary_path`/`alternative_paths`/`discarded_path_count` finding shape is
-  on `impact.model.GraphProofPath`, populated by
+  on `impact.assessment.GraphProofPath`, populated by
   `graph_impact.attach_impact_metadata`. Still open: only a genuinely finer
   reduced-confidence-name-resolution axis beyond the residual case
   (investigated, needs an ADR amendment to insert a new tier — see
@@ -430,7 +430,7 @@ scoped subset); this paragraph originally described the pre-implementation
 ### Phase 3 — Reporting & root causes — **slices 1-10 implemented (ADR-052)**
 
 [ADR-052](../adr/052-unified-impact-assessment-model.md) records the slice 1
-decisions: `abicheck/impact/model.py`'s `ImpactAssessment`/`GraphProofPath`/
+decisions: `abicheck/impact/assessment.py`'s `ImpactAssessment`/`GraphProofPath`/
 `FindingDecision` dataclasses (a narrower field set than originally planned
 below — `changed_entities`/`affected_consumers`/`affected_use_cases`/
 `coverage` have no data source yet and are deliberately absent rather than
@@ -556,7 +556,7 @@ surface to be worth writing, closing what ADR-052 originally called
 premature) — the rest of this list is the original Phase 3 scope this
 section describes, most of it still open:
 
-- `abicheck/impact/model.py`: `ImpactAssessment` (`reachability_state`,
+- `abicheck/impact/assessment.py`: `ImpactAssessment` (`reachability_state`,
   `contract_effect`, `changed_entities`, `public_entries`, `proof_paths`,
   `affected_consumers`, `affected_use_cases`, `coverage`, `confidence`,
   `root_cause_id`, `decision`), `GraphProofPath` (root/target/effect/confidence/

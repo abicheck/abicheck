@@ -27,7 +27,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     pass
 
-from .change import resolve_change_identity
+from .change_identity import resolve_change_identity
 
 
 def report_finding_id(c: object) -> str:

@@ -266,7 +266,7 @@ def _change_row(
         # ADR-068 finding A: this row type feeds the default full-mode
         # Markdown report (`to_markdown`'s primary view) -- until this fix
         # it never carried the OLD->NEW evolution state
-        # `workflows.cross_source_evolution` stamps on every hygiene
+        # `workflows.cross_source_hygiene` stamps on every hygiene
         # finding, so a `persistent` (pre-existing) finding rendered
         # indistinguishably from newly `introduced` drift.
         "cross_source_evolution": getattr(cse, "value", None),

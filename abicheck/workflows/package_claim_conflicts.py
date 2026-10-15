@@ -17,7 +17,7 @@
 
 Depends on :mod:`abicheck.debian_symbols`, a ``workflows``-classified
 module, so this detector lives here rather than beside its siblings in
-:mod:`abicheck.policy.contract_conflicts`. Also owns the CLI-facing helper
+:mod:`abicheck.policy.contract_conflict_detectors`. Also owns the CLI-facing helper
 (:func:`debian_symbols_binary_conflict_lines`) the directory/package release
 fan-out calls -- it needs :mod:`abicheck.elf_metadata` (an ``extract``
 module `workflows` may import but `frontends` may not), so the matching
@@ -51,7 +51,7 @@ def detect_package_binary_mismatch(
     sides' claims kept. ``new_symbols`` (exported by the binary but
     undeclared in the package's symbols file) is deliberately not folded in
     here: that is exactly
-    :func:`abicheck.policy.contract_conflicts.detect_exported_but_undeclared`'s
+    :func:`abicheck.policy.contract_conflict_detectors.detect_exported_but_undeclared`'s
     own question, asked between a *different* pair of sources (export table
     vs. public headers, not export table vs. package metadata) --
     conflating the two would double-report the same kind of asymmetry under

@@ -16,7 +16,7 @@ depends_on:
   - abicheck/compare/bundle_export_index.py
   - abicheck/policy/release_contract_reconciliation.py
   - abicheck/workflows/release_public_surface.py
-  - abicheck/report/release_public_surface.py
+  - abicheck/report/release_public_surface_section.py
   - abicheck/cli_aggregate.py
 lifecycle: active
 generated: false

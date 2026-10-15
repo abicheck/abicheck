@@ -503,7 +503,7 @@ class TestNamespaceComponentCannotMasqueradeAsOwner:
         bare-owner-tail fix above. CastXML/Clang records are indexed in
         ``PublicSurface.all_types`` only by their *bare* leaf name, while
         the real ``ns::Foo`` identity is retained separately in
-        ``origin_by_qualified_key`` (``policy/public_surface.py``). The
+        ``origin_by_qualified_key`` (``policy/public_surface_index.py``). The
         round-10 fix tested a candidate's qualified form only against
         ``all_types``, so a real, modeled-but-private owner indexed under
         ``origin_by_qualified_key`` was wrongly treated as *unresolvable*

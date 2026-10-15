@@ -100,8 +100,8 @@ from .extract.headers.ast_config import (
     _detect_cpp_headers as _detect_cpp_headers,
     _resolve_compiler_binary as _resolve_compiler_binary,
 )
-from .extract.headers.backend import HeaderAstBackend, HeaderParseRequest
 from .extract.headers.backend_plan import BackendPlan
+from .extract.headers.backend_protocol import HeaderAstBackend, HeaderParseRequest
 from .extract.headers.castxml.backend import CastxmlBackend, CastxmlRunError
 from .extract.headers.castxml.dumper import (
     _CastxmlParser as _CastxmlParser,

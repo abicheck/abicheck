@@ -126,7 +126,9 @@ class TestPublicNotExported:
 class TestExportedButUndeclared:
     def _conflicts(self, snap):
         from abicheck.export_surface import compute_export_surface
-        from abicheck.policy.contract_conflicts import detect_exported_but_undeclared
+        from abicheck.policy.contract_conflict_detectors import (
+            detect_exported_but_undeclared,
+        )
 
         return detect_exported_but_undeclared(
             compute_export_surface(snap), side="new", snapshot=snap
@@ -148,8 +150,8 @@ class TestExportedButUndeclared:
 class TestUndeclaredExportSeeding:
     def _undeclared(self, snap):
         from abicheck.model.graph_entity_identity import snapshot_identities
-        from abicheck.policy.public_surface import PublicSurface
         from abicheck.policy.public_surface_closure import _seed_undeclared_exports
+        from abicheck.policy.public_surface_index import PublicSurface
 
         surface = PublicSurface()
         surface.has_provenance = True

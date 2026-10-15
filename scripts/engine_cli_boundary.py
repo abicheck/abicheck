@@ -69,7 +69,7 @@ _ENGINE_MODULE_BASENAMES: frozenset[str] = frozenset({"dry_run_estimate.py"})
 #: Package-rooted engine-layer trees, matched as a ``tail.startswith(...)``
 #: prefix. ``workflows/artifact/`` is ADR-061 Phase 3's migrated home for
 #: what was the flat ``artifact_*.py`` family (``abicheck/artifact_plan.py``
-#: moved to ``abicheck/workflows/artifact/contracts.py``) -- without this
+#: moved to ``abicheck/workflows/artifact/resolved_plan.py``) -- without this
 #: entry, the migrated module's own docstring claim that "the
 #: engine-cli-boundary gate would reject" a ``click``/``cli_*`` import there
 #: would be false, since the basename-only check below never matches a

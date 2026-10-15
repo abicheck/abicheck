@@ -24,7 +24,7 @@
       "review_by": "2026-11-30"
     },
     {
-      "path": "abicheck/buildsource/adapters/base.py",
+      "path": "abicheck/buildsource/adapters/adapter_shared.py",
       "baseline_lines": 1234,
       "target": "extract/build-or-source",
       "rule": "no_growth",
@@ -944,7 +944,7 @@
       "disposition": "migrate",
       "category": "legacy_oversized_module",
       "owner": "abicheck maintainers",
-      "rationale": "Classification is done: `abicheck/suppression.py` is `policy` in architecture/modules.yaml, and the real `frontends -> policy` edge this entry originally recorded (cli_params.py:27,383 and cli_scan_baseline.py:52 importing SuppressionList directly) is closed -- both now route through `abicheck.workflows.suppression`, the same pattern `abicheck.workflows.storage` already established for `snapshot_io.py` (verified: `python scripts/check_architecture.py` reports 0 findings). What remains is only this file's own size: at 1993 lines it is far over the 800-line production cap, so it stays `no_growth`-tracked under `legacy_oversized_module` until it is itself split -- a separate, larger slice than the classification work this entry originally blocked on (CodeRabbit review caught this entry's target/rationale going stale after the classification landed).",
+      "rationale": "Classification is done: `abicheck/suppression.py` is `policy` in architecture/modules.yaml, and the real `frontends -> policy` edge this entry originally recorded (cli_params.py:27,383 and cli_scan_baseline.py:52 importing SuppressionList directly) is closed -- both now route through `abicheck.workflows.suppression_input`, the same pattern `abicheck.workflows.storage` already established for `snapshot_io.py` (verified: `python scripts/check_architecture.py` reports 0 findings). What remains is only this file's own size: at 1993 lines it is far over the 800-line production cap, so it stays `no_growth`-tracked under `legacy_oversized_module` until it is itself split -- a separate, larger slice than the classification work this entry originally blocked on (CodeRabbit review caught this entry's target/rationale going stale after the classification landed).",
       "review_by": "2026-11-30"
     },
     {

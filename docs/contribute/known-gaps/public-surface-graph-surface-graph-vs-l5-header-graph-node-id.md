@@ -13,7 +13,7 @@ Index: [Known gaps](../known-gaps.md)
 
 **Status (re-verified 2026-10-09 at `456989f`): PARTIAL.** The traversal half is superseded: the closure walk moved to policy/public_surface_closure.py. Still true: abicheck/type_reachability.py is unmigrated, and the compare/surface_graph.py and header_graph node-id namespaces are not unified.
 
-`policy/public_surface.py`'s
+`policy/public_surface_index.py`'s
 `PublicSurfaceQuery` delegates to `surface.compute_public_surface()`/
 `export_surface.compute_export_surface()` unchanged rather than
 reimplementing either as a literal graph traversal: both are exactly the
@@ -28,7 +28,7 @@ Consequences: `compute_public_surface()`'s signature was never changed
 to accept a structured `resolution` parameter, so there is no lazy,
 graph-reading legacy-snapshot backfill path; `type_reachability.
 directly_referenced_stdlib_types()` was not migrated into
-`policy/public_surface.py` (doing so would reclassify `type_reachability.py`
+`policy/public_surface_index.py` (doing so would reclassify `type_reachability.py`
 into the `policy` layer, which would introduce a genuine new
 `policy -> extract` architecture violation — that module imports two
 already-`extract`-classified siblings); and `compare/surface_graph.py`'s
@@ -44,7 +44,7 @@ implementation plan's Phase 3 "Landed"/D5 "Amendment" notes
 (`docs/contribute/plans/one-semantic-pipeline.md`; ADR-063 itself no
 longer carries a duplicated per-phase status block, removed by PR 0,
 2026-09-02) and
-`compare/surface_graph.py`'s/`policy/public_surface.py`'s own module
+`compare/surface_graph.py`'s/`policy/public_surface_index.py`'s own module
 docstrings for the exact reasoning each carries.
 
 **Correction (2026-09-01): the traversal-migration half of this entry's
@@ -54,7 +54,7 @@ in this phase's first landing.** A later round did reimplement
 in place: `_index_surface_types`/`_seed_public_roots`/
 `_walk_type_closure`/`_walk_exact_type_closure`/`_record_exact_identities`/
 `_record_nested_in_known_record`/`_record_is_confirmed_public_seed` and
-the `PublicSurface` type moved to `policy/public_surface.py` (dataclass +
+the `PublicSurface` type moved to `policy/public_surface_index.py` (dataclass +
 indexing) and `policy/public_surface_closure.py` (the walk itself, plus
 `resolve_public_surface()`), and `surface.py`'s own copies were
 **deleted**, not kept alongside — `surface.compute_public_surface()` is

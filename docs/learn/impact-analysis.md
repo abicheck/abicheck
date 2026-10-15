@@ -8,7 +8,7 @@ canonical_for:
   - impact-analysis
 depends_on:
   - abicheck/impact/consumer_graph.py
-  - abicheck/impact/model.py
+  - abicheck/impact/assessment.py
   - abicheck/impact/engine.py
   - abicheck/buildsource/graph_impact.py
   - abicheck/junit_report.py

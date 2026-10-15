@@ -40,7 +40,9 @@ from abicheck.model.ownership_rules import OwnershipRules
 from abicheck.model.release_surface import ReleasePublicSurface
 from abicheck.model.vocabulary import AccessLevel, ScopeOrigin
 from abicheck.policy.release_contract_reconciliation import reconcile_release
-from abicheck.report.release_public_surface import compute_release_public_surface
+from abicheck.report.release_public_surface_section import (
+    compute_release_public_surface,
+)
 from abicheck.workflows.release_surface_acquisition import surface_from_snapshot
 
 _ROOTS = [(), ("include/pvxs/iochooks.h",)]

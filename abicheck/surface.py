@@ -72,7 +72,7 @@ from .model.owner_recovery import (
     itanium_special_name_owner_scope_components,
 )
 from .model.type_identifiers import type_identifiers as _type_identifiers
-from .policy.public_surface import PublicSurface as PublicSurface
+from .policy.public_surface_index import PublicSurface as PublicSurface
 from .policy.public_surface_query import PublicSurfaceQuery
 
 if TYPE_CHECKING:
@@ -290,7 +290,7 @@ def is_symbol_level_finding(change: Change) -> bool:
     return kv not in NEVER_FILTER_KIND_NAMES and kv not in TYPE_LEVEL_KIND_NAMES
 
 
-# ``PublicSurface`` itself now lives in ``policy/public_surface.py`` --
+# ``PublicSurface`` itself now lives in ``policy/public_surface_index.py`` --
 # see the re-export import at the top of this file for why.
 
 
@@ -468,7 +468,7 @@ class SurfaceUnions:
     tracks_qualified_names: bool
     #: Round 11 (Codex review): the union of both surfaces'
     #: ``origin_by_qualified_key`` -- castxml/clang records index `all_types`
-    #: only by their *bare* leaf name (`policy/public_surface.py`), with the
+    #: only by their *bare* leaf name (`policy/public_surface_index.py`), with the
     #: real `ns::Foo` identity recorded here instead. `_classify_type_level`
     #: must confirm a specific qualified candidate against this index, not
     #: merely against `all_types`, or an unrelated qualified name elsewhere
@@ -1042,7 +1042,7 @@ def _classify_type_level(
     # specific qualified candidate against `qualified_key_union` as well as
     # `all_types` -- castxml/clang records index `all_types` only by their
     # bare leaf name, with the real `ns::Foo` identity in
-    # `origin_by_qualified_key` instead (`policy/public_surface.py`), so an
+    # `origin_by_qualified_key` instead (`policy/public_surface_index.py`), so an
     # `all_types`-only test would treat every such candidate as unmatched
     # regardless of whether the real owner is actually modeled, wrongly
     # demoting a valid bare-tail match merely because an *unrelated*

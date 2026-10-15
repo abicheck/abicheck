@@ -12,7 +12,7 @@ depends_on:
   - abicheck/workflows/release_scope.py
   - abicheck/report/comparison_scope.py
   - abicheck/policy/release_assurance.py
-  - abicheck/report/release_assurance.py
+  - abicheck/report/release_assurance_section.py
   - abicheck/workflows/release_assurance_members.py
   - abicheck/frontends/cli/options/release.py
   - abicheck/bundle.py

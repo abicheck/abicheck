@@ -523,7 +523,7 @@ _IDENTITY_NAME_RE = re.compile(
 _EXTRA_REGISTERED = {
     "abicheck.extract.export_symbol_identity:msvc_export_function",
     "abicheck.model.special_member_identity:special_member_variant_aliases",
-    "abicheck.model.name_decoration.macho:decode_itanium",
+    "abicheck.model.name_decoration.macho_underscore:decode_itanium",
     "abicheck.model.name_decoration.pe_x86:decode_c_name",
     "abicheck.model.name_decoration.elf_version:unversioned_name",
     "abicheck.model.symbol_leaf:symbol_leaf_identifier",
@@ -551,13 +551,13 @@ COVERAGE: dict[str, str] = {
     "abicheck.model.symbol_leaf:symbol_leaf_identifier": "ELF version codec",
     "abicheck.compare.elf_capture_identity:both_captured_elf_identity": "G23 ELF capture gate (tests/test_g23_elf_facts.py legacy-baseline cases)",
     "abicheck.model.source_graph:function_decl_identity": "string probe x path transforms",
-    "abicheck.model.name_decoration.macho:decode_itanium": "Mach-O codec; mutant M2",
+    "abicheck.model.name_decoration.macho_underscore:decode_itanium": "Mach-O codec; mutant M2",
     "abicheck.extract.headers.clang.context:strip_darwin_itanium_decoration": "Mach-O codec",
     "abicheck.extract.export_symbol_identity:msvc_export_function": "x86 PE codec",
     "abicheck.model.special_member_identity:special_member_variant_aliases": "ctor/dtor codec; mutant M6",
-    "abicheck.compare.finding_identity.symbols:resolve_function_identity": "string probe + snapshot level",
-    "abicheck.compare.finding_identity.symbols:resolve_variable_identity": "snapshot level identity keys",
-    "abicheck.compare.finding_identity.change:resolve_change_identity": "snapshot level report finding ids (via report_canonical_finding_id); path probe",
+    "abicheck.compare.finding_identity.declaration_identity:resolve_function_identity": "string probe + snapshot level",
+    "abicheck.compare.finding_identity.declaration_identity:resolve_variable_identity": "snapshot level identity keys",
+    "abicheck.compare.finding_identity.change_identity:resolve_change_identity": "snapshot level report finding ids (via report_canonical_finding_id); path probe",
     "abicheck.report.json_sections:add_check_identity": "JSON report check_identity block (tests/test_report_schema.py)",
     "abicheck.model.identity:entity_id_for_function": "negative control + castxml dumps; mutant M4",
     "abicheck.model.identity:entity_id_for_variable": "negative control",
@@ -568,7 +568,7 @@ COVERAGE: dict[str, str] = {
     # -- path probes (Phase 3: identity takes a RootRelativePath) ---------
     "abicheck.model.entity_identity:source_relative_identity": "path probe x path transforms",
     "abicheck.model.entity_identity:resolve_canonical_identity": "path probe (graph def_file) x path transforms",
-    "abicheck.compare.finding_identity.symbols:resolve_symbol_identity": "path probe x path transforms",
+    "abicheck.compare.finding_identity.declaration_identity:resolve_symbol_identity": "path probe x path transforms",
     "abicheck.workflows.aggregate.reconcile:resolve_report_change_identity": "path probe (report entry) x path transforms",
     # -- environment cells (tests/test_family_f3_identity_cells.py) -------
     "abicheck.model.identity_tiers:snapshot_local_identity": "cell: decoded spelling joins",
@@ -629,8 +629,8 @@ def test_covered_rows_are_really_registered_in_the_catalogue() -> None:
             # tests/test_snapshot_hit_binary_identity.py, not a catalogue transform.
             "abicheck.extract.binary_identity:stamp_binary_identity",
             "abicheck.model.special_member_identity:special_member_variant_aliases",
-            "abicheck.compare.finding_identity.symbols:resolve_variable_identity",
-            "abicheck.compare.finding_identity.change:resolve_change_identity",
+            "abicheck.compare.finding_identity.declaration_identity:resolve_variable_identity",
+            "abicheck.compare.finding_identity.change_identity:resolve_change_identity",
             # Exercised by the JSON report check_identity assertions in
             # tests/test_report_schema.py, not a catalogue transform.
             "abicheck.report.json_sections:add_check_identity",

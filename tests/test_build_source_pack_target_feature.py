@@ -24,7 +24,7 @@ own ``-target-feature=`` branch for the full reasoning.
 from __future__ import annotations
 
 from abicheck.buildsource.adapters import extract_abi_relevant_flags
-from abicheck.buildsource.adapters.base import derive_build_options
+from abicheck.buildsource.adapters.adapter_shared import derive_build_options
 from abicheck.buildsource.build_evidence import CompileUnit
 
 # -- Round 27 Finding 3 (Codex): repeated -target-feature occurrences must --

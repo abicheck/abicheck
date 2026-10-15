@@ -49,7 +49,7 @@ import textwrap
 import pytest
 
 from abicheck.change_registry import REGISTRY
-from abicheck.frontends.cli.options.view import (
+from abicheck.frontends.cli.options.compare_view import (
     REPORT_MODES,
     RETIRED_TOKENS,
     parse_view_tokens,
@@ -983,7 +983,7 @@ class TestOneEnvelopeProjectsCorrectlyIntoEveryFormat:
         from abicheck.model import AbiSnapshot
         from abicheck.model.change import Change
         from abicheck.model.change_catalog.kinds import ChangeKind
-        from abicheck.report.build import build_report_envelope
+        from abicheck.report.document_builder import build_report_envelope
         from abicheck.report.envelope import RenderOptions
 
         result = DiffResult(
@@ -1029,7 +1029,7 @@ class TestOneEnvelopeProjectsCorrectlyIntoEveryFormat:
     def test_the_two_public_entry_points_agree(self):
         """The drift itself: same evaluation, same format, same bytes."""
         from abicheck.frontends.render import render_envelope, render_output
-        from abicheck.report.build import build_report_envelope
+        from abicheck.report.document_builder import build_report_envelope
         from abicheck.report.envelope import RenderOptions
 
         envelope = self._envelope()
@@ -1044,7 +1044,7 @@ class TestOneEnvelopeProjectsCorrectlyIntoEveryFormat:
         from abicheck.demangle import demangle
         from abicheck.frontends.render import render_envelope
         from abicheck.model import AbiSnapshot
-        from abicheck.report.build import build_report_envelope
+        from abicheck.report.document_builder import build_report_envelope
         from abicheck.report.envelope import RenderOptions
 
         if demangle("_ZN3lib4goneEi") is None:

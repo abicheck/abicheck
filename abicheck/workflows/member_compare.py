@@ -26,7 +26,7 @@ if TYPE_CHECKING:
     from ..checker_types import DiffResult
     from ..policy.exit_decision import ExitDecision
     from ..policy.severity import SeverityConfig
-    from .contracts import CompareResult
+    from .service_requests import CompareResult
 
 __all__ = [
     "compare_member",

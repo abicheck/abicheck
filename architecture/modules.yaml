@@ -27,7 +27,7 @@
         "abicheck/environment_matrix.py",
         "abicheck/evidence_depth.py",
         "abicheck/fact_provenance.py",
-        "abicheck/impact/model.py",
+        "abicheck/impact/assessment.py",
         "abicheck/name_classification.py",
         "abicheck/report_side_facts.py",
         "abicheck/stable_abi.py",
@@ -532,7 +532,7 @@
   ],
   "legacy_generic_modules": [
     "abicheck/binary_utils.py",
-    "abicheck/buildsource/adapters/base.py",
+    "abicheck/buildsource/adapters/adapter_shared.py",
     "abicheck/buildsource/source_extractors/base.py",
     "abicheck/cli_buildsource_helpers.py",
     "abicheck/cli_compare_helpers.py",

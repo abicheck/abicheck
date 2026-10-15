@@ -45,7 +45,7 @@ from ..model.symbol_leaf import symbol_leaf_identifier
 
 if TYPE_CHECKING:
     from ..model.change import Change
-    from .public_surface import PublicSurface
+    from .public_surface_index import PublicSurface
 
 
 def header_domain_closes_without_commitment(

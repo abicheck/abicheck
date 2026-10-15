@@ -3,7 +3,7 @@
 """Candidate type-name tokens referenced by a C/C++ type spelling.
 
 The one owner of the small, pure regex scan that ``compare/surface_graph.py``
-and ``policy/public_surface.py`` (and, through them, ``surface.py`` and
+and ``policy/public_surface_index.py`` (and, through them, ``surface.py`` and
 ``export_surface.py``) all need. It previously lived as two leaf-local
 copies, because ``compare/`` may not import a ``policy``-layer module; both
 layers may import ``model``, so the shared scan lives here instead.

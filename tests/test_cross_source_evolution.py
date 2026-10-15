@@ -23,7 +23,7 @@ matrix test), not a single fixed fixture — see root ``AGENTS.md``'s bug-class
 regression-testing guidance. The ``private_header_leak``,
 ``rtti_for_internal_type``, and ``public_to_internal_dependency`` tests
 additionally exercise the per-check identity generalization
-``workflows.cross_source_evolution`` needed to support a check whose own
+``workflows.cross_source_hygiene`` needed to support a check whose own
 findings are not uniquely keyed by ``symbol`` alone -- see that module's own
 docstring.
 """
@@ -42,7 +42,7 @@ from abicheck.checker_policy import ChangeKind, CrossSourceEvolution
 from abicheck.model import AbiSnapshot, Function, RecordType, ScopeOrigin
 from abicheck.model.change import Change
 from abicheck.model.elf_facts import ElfMetadata, ElfSymbol, ElfVersionBinding
-from abicheck.workflows.cross_source_evolution import compute_cross_source_evolution
+from abicheck.workflows.cross_source_hygiene import compute_cross_source_evolution
 
 
 def _snap(elf: ElfMetadata | None, *, version: str = "1.0") -> AbiSnapshot:
@@ -955,7 +955,7 @@ def test_rtti_for_internal_type_identity_distinguishes_two_types_same_symbol() -
     # this fixture's simplified model) -- the identity function itself is
     # exercised directly instead, mirroring private_header_leak's own test.
     from abicheck.buildsource.cross_source_checks import CHECK_RTTI_FOR_INTERNAL_TYPE
-    from abicheck.workflows.cross_source_evolution import _IDENTITY_FUNCS
+    from abicheck.workflows.cross_source_hygiene import _IDENTITY_FUNCS
 
     identity = _IDENTITY_FUNCS[CHECK_RTTI_FOR_INTERNAL_TYPE]
     old_changes = compute_cross_source_evolution(old, new)

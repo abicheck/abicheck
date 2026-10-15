@@ -33,7 +33,7 @@ from abicheck.policy.release_contract_reconciliation import (
     reconcile_release,
     reconcile_side,
 )
-from abicheck.report.release_public_surface import (
+from abicheck.report.release_public_surface_section import (
     ReleasePublicSurfaceTerms,
     SharedFinding,
     render_release_public_surface_markdown,

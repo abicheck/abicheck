@@ -531,7 +531,7 @@ Core pipeline (in order of data flow):
    `policy/release_contract_reconciliation.py` reconciles the contract
    against the union of those exports and folds OLD/NEW into one
    evolution-stated finding set. `workflows/release_public_surface.py`
-   orchestrates the stage; `report/release_public_surface.py` owns the
+   orchestrates the stage; `report/release_public_surface_section.py` owns the
    report section and the shared-finding fold.
    **Three drivers, one model.** `workflows/release_public_surface.py`'s
    `reconcile_member_sets` is the driver-agnostic core and

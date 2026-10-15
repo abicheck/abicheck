@@ -36,7 +36,7 @@ one permitted difference (*which* front end stated a value: ``explicit_cli``
 vs. ``api_request``, and the option spelling that goes with it), and
 ``tests/test_compatibility_evaluation_frontend.py`` runs the CLI's own
 ``compare`` kwargs against the equivalent
-:class:`~abicheck.workflows.contracts.CompareRequest` through it:
+:class:`~abicheck.workflows.service_requests.CompareRequest` through it:
 
 - :func:`compare_cli_inputs` -- the ``compare`` command's real kwargs
   (``cli.py``'s option destinations: ``--contract``, ``--scope-public-headers``,
@@ -46,7 +46,7 @@ vs. ``api_request``, and the option spelling that goes with it), and
   caller would pass), since several of those options carry a non-``None``
   click default that must not be mistaken for a stated value.
 - :func:`compare_request_inputs` -- the same semantic fields off a typed
-  :class:`~abicheck.workflows.contracts.CompareRequest`.
+  :class:`~abicheck.workflows.service_requests.CompareRequest`.
 - :meth:`ProjectCompatibilityInputs.from_build_config` -- the project's own
   ``.abicheck.yml`` (``buildsource.build_config.BuildConfig``), contributing
   at ``project_config`` tier.
@@ -133,7 +133,7 @@ from .workflows.ownership_contract_inputs import (
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from .buildsource.build_config import BuildConfig
     from .policy_file import PolicyFile
-    from .workflows.contracts import CompareRequest
+    from .workflows.service_requests import CompareRequest
 
 # Field names double as provenance-receipt keys. Declared once so the receipt
 # a consumer reads and the pack-route table in
@@ -1035,7 +1035,7 @@ def resolve_compatibility_evaluation_config(
         ``None`` for an input only the CLI can state, where the CLI spelling
         is the only truthful one.
 
-        *api_field* is the :class:`~abicheck.workflows.contracts.CompareRequest`
+        *api_field* is the :class:`~abicheck.workflows.service_requests.CompareRequest`
         spelling, because that is the typed surface this resolver was built
         against -- but "the API" is not one namespace. ``ScanRequest`` names
         the same three inputs ``scope_to_public_surface``/``policy_file``/
@@ -1794,7 +1794,7 @@ def compare_request_inputs(
     policy_file: PolicyFile | None = None,
     suppression: SuppressionSource | None = None,
 ) -> ExplicitCompatibilityInputs:
-    """Normalize a typed :class:`~abicheck.workflows.contracts.CompareRequest`.
+    """Normalize a typed :class:`~abicheck.workflows.service_requests.CompareRequest`.
 
     Every field is read as *stated* unless ``request.stated_settings`` names
     the stated ones (then an unnamed ``policy`` is the built-in default, as

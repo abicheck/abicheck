@@ -97,8 +97,11 @@ RESOLVER_NON_SEMANTIC_FILES: dict[str, str] = {
     "abicheck/frontends/action/tag_resolution.py": (
         "Action tag selection for releases; not fact or graph semantics"
     ),
-    "abicheck/workflows/aggregate/resolve.py": (
+    "abicheck/workflows/aggregate/expected_targets.py": (
         "chooses which aggregate inputs to read; does not interpret their contents"
+    ),
+    "abicheck/workflows/artifact/resolved_plan.py": (
+        "the ResolvedArtifactPlan value type: the shape of a resolved plan, no resolution logic (resolve.py decides it)"
     ),
     "abicheck/workflows/artifact/resolve.py": (
         "chooses which artifact inputs to read; does not interpret their contents"

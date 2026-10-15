@@ -37,7 +37,7 @@ Check                             Inputs                                  Tier
 All eleven checks (this table's eight plus the three in
 :mod:`cross_source_checks_coherence`) now run automatically inside every
 :func:`abicheck.checker.compare` call (``cross_source_checks=True`` by
-default, ADR-068 D3/D4/D5, via :mod:`abicheck.workflows.cross_source_evolution`),
+default, ADR-068 D3/D4/D5, via :mod:`abicheck.workflows.cross_source_hygiene`),
 as well as from ``scan --audit``'s ADR-035 D8 single-release hygiene case.
 
 Per ADR-035 D1/D4 the findings are **never** ``BREAKING`` on their own (an

@@ -18,7 +18,7 @@ additions-review gate policy.
 
 ``policy`` is not in ``frontends.may_import``, so a CLI module reaches the
 records loader and the D7 policy resolution through this workflow module
-(the same rule ``workflows/suppression.py`` and ``workflows/disposition.py``
+(the same rule ``workflows/suppression_input.py`` and ``workflows/disposition.py``
 follow). What decides *whether* a project-config value applies at all -- the
 trust boundary on an auto-discovered ``.abicheck.yml`` -- is the frontend's
 business, not this module's.

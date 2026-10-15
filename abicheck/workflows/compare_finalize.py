@@ -18,7 +18,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from . import gate as gate_workflow
-from .contracts import CompareRequest, CompareResult
+from .service_requests import CompareRequest, CompareResult
 
 if TYPE_CHECKING:
     from ..checker_types import DiffResult

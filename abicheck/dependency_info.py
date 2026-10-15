@@ -33,8 +33,8 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from .model import AbiSnapshot
-    from .workflows.contracts import CompareRequest
     from .workflows.request_inputs import InputSpec
+    from .workflows.service_requests import CompareRequest
 
 
 def populate_dependency_info(

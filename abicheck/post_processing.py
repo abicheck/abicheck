@@ -34,7 +34,7 @@ from .policy.finding_disposition.pipeline import (
 if TYPE_CHECKING:
     from .model import AbiSnapshot
     from .model.change import Change
-    from .policy.finding_disposition.context import PipelineContext
+    from .policy.finding_disposition.run_state import PipelineContext
 
 
 # ---------------------------------------------------------------------------
