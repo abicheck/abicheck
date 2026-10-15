@@ -299,4 +299,33 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
             ),
         ),
     ),
+    BugClass(
+        id="package.ar_magic_is_not_deb",
+        invariant=(
+            "A file is a Debian package iff its first ar member is "
+            "`debian-binary`; a plain ar archive (static .a / Rust .rlib) "
+            "is never routed to the Debian extractor, whatever its member "
+            "names or file suffix, in either the Python detector or the "
+            "Action's shell operand predicate."
+        ),
+        # Filled with the PR that introduced this entry (see the PR body).
+        fixed_by=(1623,),
+        seed_tests=(
+            "tests/test_deb_extractor_detection.py",
+            "tests/test_cli_compare_bundle_facts_rejections_more.py",
+        ),
+        axes={"sniffer": ("python-detector", "action-shell-predicate")},
+    ),
+    BugClass(
+        id="templates.fn_type_arguments_counted_as_template_arguments",
+        invariant=(
+            "Template arity counts only top-level template arguments: a "
+            "function type's parameter list (commas inside parentheses or "
+            "brackets) and the `>` of a `->` arrow never change how many "
+            "arguments a template takes, so a callback's signature change "
+            "is not reported as a template gaining a mandatory parameter."
+        ),
+        fixed_by=(1623,),
+        seed_tests=("tests/test_diff_templates_fn_type_arity.py",),
+    ),
 )
