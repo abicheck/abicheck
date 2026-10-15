@@ -6,18 +6,19 @@ project-wide contract — this file only covers what's specific to this tree.
 
 ## Required vs. informational workflows
 
-Not every workflow here blocks a merge — and, per the decision below, as of
-2026-09 **none of them mechanically can**: `main` carries no
-`required_status_checks` Ruleset rule, so GitHub's merge button is never
-disabled by CI state. The table's "Required?" column is retained as
-*guidance* — which checks a human (or reviewing agent) should treat as
-"fix this before merging" — not as a description of an enforced gate.
-Before assuming a red check means "fix this before merging," check which
-bucket it's in:
+Not every workflow here blocks a merge. Since 2026-10-15 (PR #1612), exactly
+one check is the required merge gate on `main`: `lint-and-types` (see the
+"Required-status-check configuration" section below). That is the decision.
+The Ruleset that enforces it is applied by a repository admin; until that is
+done, GitHub's merge button is not gated by CI state. The table's "Required?"
+column is retained as *guidance* — which checks a human (or reviewing agent)
+should treat as "fix this before merging" — and apart from `lint-and-types`
+it is not a description of an enforced gate. Before assuming a red check
+means "fix this before merging," check which bucket it's in:
 
 | Workflow | Required on every PR? | Notes |
 |----------|------------------------|-------|
-| `ci.yml` | **Yes** — `ai-readiness`, `fair-metadata`, `lint-and-types`, `unit-tests` (canonical Linux/3.13 lane, three `--shard=K/3` jobs) + `unit-tests-coverage` (combines their coverage data and enforces the 80% floor once), `unit-tests-other-os` (macOS/Windows, no coverage; runs on `main` pushes, dispatch, and PRs labelled `ci:full` — add the label to a platform-sensitive PR), `slow-tests`, `packaging` (Windows; the Linux build is `fair-metadata`'s `distribution-build`) jobs | The core gate. Tests marked `repo_scan` (whole-tree structural scans, OS- and coverage-independent) are excluded from every unit leg and run once, as a step of `ai-readiness` (`python scripts/verify.py --profile pr --only repo-scan-tests`) — it was its own `repo-scan-tests` job until 2026-10, folded in because both jobs had the identical Python 3.13 + `[dev]` setup and neither is on the critical path. `lint-and-types` is the one PR-time docs build owner (`docs-build` + `examples-docs`, installing the `[docs]` extra). The real-toolchain lanes (integration, native PE/Mach-O compare, MSVC+PDB, libabigail/ABICC parity) live in `integration.yml`, below. `ai-readiness` also runs the ADR-061 bounded-module architecture gate as its own step (`scripts/verify.py --profile pr --only architecture`, i.e. `scripts/check_architecture.py`) — there is no separate `module-architecture.yml` workflow or check. `slow-tests` is the `slow` marker lane, split out of `unit-tests`' canonical leg (where it ran as a step behind the ~23-minute main suite) so it runs concurrently instead — still required on every PR, still every `slow`-marked test. The job itself runs `python scripts/verify.py --profile full --only slow,slow-perf --junit-dir .` (no inline pytest copy; `tests/test_verify_profiles.py` enforces it), so the local command is the CI command. |
+| `ci.yml` | **Yes** — `ai-readiness`, `fair-metadata`, `lint-and-types`, `unit-tests` (canonical Linux/3.14 lane, three `--shard=K/3` jobs) + `unit-tests-coverage` (combines their coverage data and enforces the 80% floor once), `unit-tests-other-os` (macOS/Windows, no coverage; runs on `main` pushes, dispatch, and PRs labelled `ci:full` — add the label to a platform-sensitive PR), `slow-tests`, `packaging` (Windows; the Linux build is `fair-metadata`'s `distribution-build`) jobs | The core gate. Tests marked `repo_scan` (whole-tree structural scans, OS- and coverage-independent) are excluded from every unit leg and run once, as a step of `ai-readiness` (`python scripts/verify.py --profile pr --only repo-scan-tests`) — it was its own `repo-scan-tests` job until 2026-10, folded in because both jobs had the identical Python 3.13 + `[dev]` setup and neither is on the critical path. `lint-and-types` is the one PR-time docs build owner (`docs-build` + `examples-docs`, installing the `[docs]` extra). The real-toolchain lanes (integration, native PE/Mach-O compare, MSVC+PDB, libabigail/ABICC parity) live in `integration.yml`, below. `ai-readiness` also runs the ADR-061 bounded-module architecture gate as its own step (`scripts/verify.py --profile pr --only architecture`, i.e. `scripts/check_architecture.py`) — there is no separate `module-architecture.yml` workflow or check. `slow-tests` is the `slow` marker lane, split out of `unit-tests`' canonical leg (where it ran as a step behind the ~23-minute main suite) so it runs concurrently instead — still required on every PR, still every `slow`-marked test. The job itself runs `python scripts/verify.py --profile full --only slow,slow-perf --junit-dir .` (no inline pytest copy; `tests/test_verify_profiles.py` enforces it), so the local command is the CI command. |
 | `changelog-check.yml` | Yes, only when the diff touches `abicheck/**/*.py` | Bypass with the `skip-changelog` label |
 | `cli-interface-check.yml` | Yes, when the CLI surface changes | Diffs `dump_cli_surface.py` output old vs. new |
 | `dependency-review.yml` | Yes | GitHub's built-in dependency-review action. PR-only, path-filtered to dependency manifests (`pyproject.toml`, `requirements*.txt`, `pixi.lock`, `action.yml`, workflows) — it diffs those only. Complements, does not duplicate, `security.yml`'s pip-audit (whole resolved tree, every advisory). |
@@ -43,7 +44,7 @@ bucket it's in:
 
 ## Required-status-check configuration — `lint-and-types` required (2026-10-15)
 
-**Decision (2026-10-15): exactly one check gates merges into `main`: the
+**Decision (2026-10-15, merged as PR #1612): exactly one check gates merges into `main`: the
 `lint-and-types` job in `.github/workflows/ci.yml`. No other check is
 required.** This reverses the 2026-09 decision that `main` requires no status
 checks. The maintainer decided that a lint, format, type or strict-docs
@@ -80,7 +81,7 @@ What is enforced and how:
 
 `ci.yml`'s always-required jobs (`ai-readiness` — which includes the
 ADR-061 architecture step — `fair-metadata`, `lint-and-types`, the
-canonical `unit-tests` Linux/3.13 lane, and `packaging`, reproduced by the
+canonical `unit-tests` Linux/3.14 lane, and `packaging`, reproduced by the
 `pr` profile's own `distribution-build` step) are reproducible through
 `python scripts/verify.py --profile pr` — `tests/test_verify_profiles.py`
 asserts the core `ci.yml` catalog stays in sync. **Don't add a new required
