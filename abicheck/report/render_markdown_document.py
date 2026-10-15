@@ -114,6 +114,7 @@ from .edge_coverage_section import (
 from .envelope import ReportEnvelope, resolved_document
 from .finding import build_report_findings
 from .kind_rollup import KindRollup, render_kind_rollups
+from .not_evaluated_section import compute_not_evaluated
 from .pattern_modulations_markdown import render_pattern_modulations_from_mapping
 from .render_edge_coverage import render_edge_coverage_markdown
 from .render_markdown import (
@@ -481,7 +482,7 @@ def build_markdown_document(
     severity_data = rm.compute_severity_sections(
         breaking, source_breaks, risk, compatible, severity_config=severity_config
     )
-    not_evaluated = rm.compute_not_evaluated(model.not_evaluated)
+    not_evaluated = compute_not_evaluated(model.not_evaluated)
 
     # The headline's own totals are deliberately over the *full*, unfiltered
     # `result.changes` (a different population than the severity groups

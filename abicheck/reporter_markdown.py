@@ -35,6 +35,9 @@ from .report.change_operation import (
     operation_for_kind as operation_for_kind,
 )
 from .report.kind_rollup import roll_up_large_kinds
+from .report.not_evaluated_section import (
+    compute_not_evaluated as compute_not_evaluated,
+)
 from .report.view import (
     apply_show_only,
     finding_id,
@@ -964,36 +967,6 @@ def compute_severity_sections(
             )
 
     return _rmd.SeveritySectionsData(groups=tuple(groups))
-
-
-def compute_not_evaluated(
-    not_evaluated: list[Change],
-) -> _rmd.NotEvaluatedSection | None:
-    """The structured intermediate for :func:`~abicheck.report.render_markdown.render_not_evaluated_section`.
-
-    Disclose the findings compatibility policy did not score (ADR-049 D1).
-
-    These are real detector facts that carry no verdict: contract evaluation
-    either proved the entity outside the declared contract, or could not
-    resolve it from the evidence the run had. They are deliberately absent
-    from the four verdict sections above -- filing an unscored finding under
-    "Breaking Changes" would contradict the verdict printed at the top of the
-    same report -- so this section is what keeps them visible, with the
-    relevance and reason code that explain *why* they did not gate.
-
-    ``None`` (and so entirely absent) unless the run opted into
-    ``--contract``.
-    """
-    if not not_evaluated:
-        return None
-    entries = []
-    for c in not_evaluated:
-        relevance = getattr(c, "contract_relevance", None)
-        reason = getattr(c, "contract_reason_code", None)
-        label = getattr(relevance, "value", None) or "UNKNOWN"
-        suffix = f" ({reason})" if reason else ""
-        entries.append(_rmd.NotEvaluatedEntry(change=c, label=label, suffix=suffix))
-    return _rmd.NotEvaluatedSection(entries=tuple(entries))
 
 
 def compute_environment_drift(
