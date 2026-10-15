@@ -146,6 +146,21 @@ Each entry's status line says what is still open. A PARTIAL entry's write-up als
 **Status (2026-10-12): PARTIAL.** Fixed: FAILED import reads; tests/unit/workflows/test_failed_consumer_read.py exists. Open: a stored snapshot cannot record a partial export-table read. [ADR-081](adr/079-partial-export-table-read-in-the-stored-snapshot.md) is drafted and Proposed; the schema field waits on its decision, so the schema stays at v58.  
 `false-clean` — FAILED import reads are fixed. A stored snapshot still cannot record that its export-table read was partial; ADR-081 is drafted (Proposed) and needs a schema decision. [Full write-up](known-gaps/a-stored-snapshot-keeps-no-record-of-a-partial-export-table-read.md)
 
+#### `debug = 1` DWARF has no function types, so a return-type break reads `NO_CHANGE` with `assurance: complete` (2026-10-15)
+
+**Status (2026-10-15): OPEN.** The DWARF section is present, but exported subprograms carry no `DW_AT_type` or parameters, and assurance still reads `complete`.
+`false-clean` — A Rust cdylib built with `debug = 1` misses a return-type change and exits 0 with a complete-assurance label. [Full write-up](known-gaps/debug-1-dwarf-drops-function-types-with-complete-assurance.md)
+
+#### A function-pointer parameter's signature is not compared, so a callback arity change reads `NO_CHANGE` on the header path (2026-10-15)
+
+**Status (2026-10-15): OPEN.** Reproduced in plain C. The parameter record keeps only the pointer's type name, and the pointee's signature is not compared on either path.
+`false-clean` — A callback that gains a parameter is reported as no change with headers, and on DWARF unless the type name happens to carry the signature. [Full write-up](known-gaps/function-pointer-signatures-are-not-compared-in-header-mode.md)
+
+#### A default release-profile Rust run without headers reports `NO_CHANGE ... ACCEPTED` while its own warnings say the result is unconfirmed (2026-10-15)
+
+**Status (2026-10-15): OPEN.** The headline label, the gate and the `analysis_assurance: partial` field disagree with each other, and the label is the clean one.
+`false-clean` — A real return-type change in a header-less, no-debug run is labelled `NO_CHANGE` and accepted at exit 0. [Full write-up](known-gaps/header-less-rust-runs-report-no-change-and-alignment-noise.md)
+
 ### False-positive risk
 
 #### `--lang c++` explicitness not threaded to remaining fan-out callers (l0_export_delta/appcompat); dump/compare fixed
@@ -207,6 +222,16 @@ Each entry's status line says what is still open. A PARTIAL entry's write-up als
 
 **Status (re-verified 2026-10-09 at `456989f`): OPEN.** unverified: castxml mangling was not run. The entry records the defect as an unresolved castxml limitation: _Float128 functions read as not exported.  
 `false-positive` — Unverified: castxml gives a library's own `_Float128` functions no correct mangled name, so they read as not exported. [Full write-up](known-gaps/a-librarys-own-float128-api-has-no-correct-mangled-name-from.md)
+
+#### Renaming a Rust crate changes every crate-qualified type name, so an unchanged C surface reads `API_BREAK` on the DWARF path (2026-10-15)
+
+**Status (2026-10-15): OPEN.** Header mode is clean; DWARF mode reports each type as removed and re-added under the new crate name.
+`false-positive` — A crate rename with the same C ABI gives `API_BREAK` on DWARF-only compares, because DWARF type names are crate-qualified. [Full write-up](known-gaps/crate-rename-changes-rust-type-identity.md)
+
+#### Header-less runs flag `exported_object_alignment_reduced` on an unrelated exported static after an additive change (2026-10-15)
+
+**Status (2026-10-15): OPEN.** The alignment is derived from link-time address, so a neighbour's addition can move it; headers suppress the finding.
+`false-positive` — An added exported function gives `COMPATIBLE_WITH_RISK` through an alignment finding on a static it does not touch, when no headers are passed. [Full write-up](known-gaps/header-less-rust-runs-report-no-change-and-alignment-noise.md)
 
 ### Performance
 

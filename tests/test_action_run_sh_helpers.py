@@ -424,7 +424,7 @@ def _real_package(tmp_path: Path, suffix: str) -> Path:
     if suffix == ".rpm":
         target.write_bytes(b"\xed\xab\xee\xdb" + b"\x00" * 64)
     elif suffix == ".deb":
-        target.write_bytes(b"!<arch>\n" + b"\x00" * 64)
+        target.write_bytes(b"!<arch>\n" + b"debian-binary".ljust(60) + b"\x00" * 64)
     elif suffix == ".conda":
         _make_conda_v2(target, {})
     elif suffix == ".whl":
@@ -535,7 +535,7 @@ class TestIsReleaseStyleOperand:
         # Deb packages are ar archives ("!<arch>\n" magic) — also detected
         # without a .deb extension by package.py's is_package().
         f = tmp_path / "libfoo-release"
-        f.write_bytes(b"!<arch>\n" + b"\x00" * 90)
+        f.write_bytes(b"!<arch>\n" + b"debian-binary".ljust(60) + b"\x00" * 30)
         assert _run_predicate(f'_is_release_style_operand "{f}"')
 
     def test_extensionless_plain_binary_not_release_style(self, tmp_path) -> None:

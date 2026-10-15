@@ -932,29 +932,29 @@ def detect_overload_set_rerouted(
 
 
 def _count_top_level_template_args(name: str) -> int | None:
-    """Count the comma-separated top-level template arguments in
-    ``name<...>``. Returns ``None`` if there is no top-level ``<``.
+    """Count the top-level template arguments in ``name<...>``; ``None`` with no
+    ``<``. Commas inside ``(...)``/``[...]`` (a function type's parameters) and
+    the ``>`` of a ``->`` arrow are not argument separators.
 
-    ``Foo<int, std::pair<int, char>>`` → 2.
+    ``Foo<int, std::pair<int, char>>`` → 2, ``std::function<void(int, int)>`` → 1.
     """
     if "<" not in name:
         return None
-    depth = 0
-    args = 0
-    saw_any = False
-    for ch in name:
-        if ch == "<":
+    depth = group = args = 0
+    for i, ch in enumerate(name):
+        if ch == ">" and name[i - 1 : i] == "-":
+            continue
+        if ch in "([":
+            group += 1
+        elif ch in ")]":
+            group -= 1
+        elif ch == "<":
             depth += 1
-            if depth == 1:
-                saw_any = True
-            continue
-        if ch == ">":
-            if depth > 0:
-                depth -= 1
-            continue
-        if depth == 1 and ch == ",":
+        elif ch == ">":
+            depth = max(depth - 1, 0)
+        elif ch == "," and depth == 1 and group == 0:
             args += 1
-    return args + 1 if saw_any else None
+    return args + 1
 
 
 def detect_mandatory_template_param_added(

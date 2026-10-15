@@ -344,7 +344,7 @@ class TestIsPackage:
 
     def test_deb_extension(self, tmp_path: Path) -> None:
         f = tmp_path / "libfoo.deb"
-        f.write_bytes(b"!<arch>\n" + b"\x00" * 100)
+        f.write_bytes(b"!<arch>\n" + b"debian-binary".ljust(60))
         assert is_package(f) is True
 
     def test_tar_gz_extension(self, tmp_path: Path) -> None:
@@ -377,7 +377,7 @@ class TestIsPackage:
 
     def test_deb_by_magic(self, tmp_path: Path) -> None:
         f = tmp_path / "unknown_file"
-        f.write_bytes(b"!<arch>\n" + b"\x00" * 100)
+        f.write_bytes(b"!<arch>\n" + b"debian-binary".ljust(60))
         assert is_package(f) is True
 
     def test_conda_extension(self, tmp_path: Path) -> None:
@@ -416,7 +416,7 @@ class TestDetectExtractor:
 
     def test_deb(self, tmp_path: Path) -> None:
         f = tmp_path / "test.deb"
-        f.write_bytes(b"!<arch>\n" + b"\x00" * 100)
+        f.write_bytes(b"!<arch>\n" + b"debian-binary".ljust(60))
         ext = detect_extractor(f)
         assert isinstance(ext, DebExtractor)
 
@@ -563,12 +563,12 @@ class TestRpmExtractor:
 class TestDebExtractor:
     def test_detect_deb_extension(self, tmp_path: Path) -> None:
         f = tmp_path / "test.deb"
-        f.write_bytes(b"!<arch>\n" + b"\x00" * 100)
+        f.write_bytes(b"!<arch>\n" + b"debian-binary".ljust(60))
         assert DebExtractor().detect(f)
 
     def test_detect_deb_magic(self, tmp_path: Path) -> None:
         f = tmp_path / "noext"
-        f.write_bytes(b"!<arch>\n" + b"\x00" * 100)
+        f.write_bytes(b"!<arch>\n" + b"debian-binary".ljust(60))
         assert DebExtractor().detect(f)
 
     def test_detect_non_deb(self, tmp_path: Path) -> None:
