@@ -41,7 +41,6 @@ Pure stdlib plus the shared `perf_measurement` primitives.
 from __future__ import annotations
 
 import importlib.util
-import json
 import sys
 from pathlib import Path
 from typing import Any
@@ -55,6 +54,7 @@ if importlib.util.find_spec("perf_measurement") is None:  # pragma: no cover
 if str(_SCRIPTS_DIR) not in sys.path:  # pragma: no cover
     sys.path.insert(0, str(_SCRIPTS_DIR))
 
+from baseline_loader import read_baseline  # noqa: E402
 from perf_measurement import GateThreshold, is_gateable  # noqa: E402
 
 
@@ -108,7 +108,7 @@ def load_baseline(path: Path) -> tuple[dict[tuple[str, str], float], list[str]]:
     so is the difference between "nothing to gate" and "gated against a broken
     base".
     """
-    data = json.loads(path.read_text(encoding="utf-8"))
+    data = read_baseline(path)
     scenarios = data.get("scenarios", [])
     return gated_points(scenarios), rejected_baseline_scenarios(scenarios)
 

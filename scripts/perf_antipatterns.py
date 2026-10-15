@@ -107,6 +107,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
+from baseline_loader import read_baseline
+
 ROOT = Path(__file__).resolve().parent.parent
 PACKAGE = ROOT / "abicheck"
 BASELINE_FILE = ROOT / "scripts" / "perf_antipatterns_baseline.json"
@@ -695,7 +697,7 @@ def site_counts(sites: list[Site]) -> dict[str, int]:
 def load_baseline() -> dict[str, int]:
     if not BASELINE_FILE.exists():
         return {}
-    return json.loads(BASELINE_FILE.read_text(encoding="utf-8"))["sites"]
+    return read_baseline(BASELINE_FILE)["sites"]
 
 
 def compare_to_baseline(

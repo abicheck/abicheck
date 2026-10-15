@@ -445,16 +445,21 @@ class TestLoadBaseline:
         assert hg_gate._load_baseline(report)[(10, "clang")]["dump_ms"] == 7.0
 
     @pytest.mark.parametrize("literal", ["NaN", "Infinity", "-Infinity"])
-    def test_non_finite_json_literals_are_dropped(self, tmp_path, literal):
+    def test_non_finite_json_literals_refuse_the_whole_baseline(
+        self, tmp_path, literal
+    ):
+        # The shared loader refuses the file (scripts/baseline_loader.py) rather
+        # than dropping the one point, so the gate cannot pass on a partial base.
+        from baseline_loader import BaselineFormatError
+
         report = tmp_path / "report.json"
         report.write_text(
             '{"points": [{"size": 10, "backend": "clang", "dump_ms": '
             + literal
             + ', "attach_ms": 20.0, "total_ms": 121.0}]}'
         )
-        loaded = hg_gate._load_baseline(report)
-        assert "dump_ms" not in loaded[(10, "clang")]
-        assert loaded[(10, "clang")]["attach_ms"] == 20.0
+        with pytest.raises(BaselineFormatError):
+            hg_gate._load_baseline(report)
 
 
 class TestMatchedPoints:

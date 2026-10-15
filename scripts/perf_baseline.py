@@ -33,6 +33,8 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, Protocol
 
+from baseline_loader import read_baseline
+
 # No sys.path mutation here (CodeRabbit review): this is an imported helper
 # module, not a script entry point, so it must not have global side effects
 # merely from being imported (scripts/CLAUDE.md's own "No global side effects
@@ -167,12 +169,10 @@ def load_baseline(
     ``--regress-tolerance 0`` printed the 50% default while the gate itself used
     the stated 0.0.
     """
-    import json
-
     regress_tolerance = stated_or_default(regress_tolerance, DEFAULT_REGRESS_TOLERANCE)
 
     try:
-        points = baseline_points_from_report(json.loads(baseline_path.read_text()))
+        points = baseline_points_from_report(read_baseline(baseline_path))
         print(
             f"Comparing against baseline {baseline_path} "
             f"({len(points)} points, tolerance "
@@ -438,8 +438,6 @@ def load_memory_baseline(
     passing silently here. Returns an empty mapping (an inactive gate, with
     the reason printed) in every such case.
     """
-    import json
-
     if not track_memory:
         print(
             "\nNOTE: --no-memory was given, so the baseline memory-regression "
@@ -448,7 +446,7 @@ def load_memory_baseline(
         return {}
     try:
         points = baseline_points_from_report(
-            json.loads(baseline_path.read_text()), field="peak_mb"
+            read_baseline(baseline_path), field="peak_mb"
         )
     except (OSError, ValueError) as e:
         print(f"WARNING: could not load memory baseline {baseline_path}: {e}")

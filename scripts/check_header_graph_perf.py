@@ -178,6 +178,7 @@ _SCRIPTS_DIR = Path(__file__).resolve().parent
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 
+from baseline_loader import read_baseline  # noqa: E402
 from perf_measurement import (  # noqa: E402
     GateThreshold,
     finite_nonnegative_float_arg,
@@ -920,18 +921,20 @@ def _load_baseline(path: Path) -> dict[tuple[int, str], dict[str, float]]:
     original single-``attach_ms`` gate impossible to extend without silently
     dropping the other two.
 
-    Only :func:`is_gateable` values are retained. A ``NaN``/``Infinity``
-    baseline (both of which ``json.load`` accepts and happily round-trips) is
-    dropped rather than kept, because ``current > base + allowed`` is ``False``
-    for either -- a single poisoned number would otherwise turn this gate into
-    an unconditional pass that still prints ``OK``. Dropping it makes the point
-    read as *ungated*, which :func:`main` then surfaces (and, when nothing at
-    all survives, fails on) instead.
+    The file is parsed by :func:`baseline_loader.read_baseline`, which refuses a
+    ``NaN``/``Infinity`` anywhere in it: ``current > base + allowed`` is ``False``
+    for either, so a poisoned baseline would turn this gate into an
+    unconditional pass that still prints ``OK``. The refusal fails the whole
+    file (reported by the caller as an unreadable ``--baseline``).
+
+    Only :func:`is_gateable` values are retained (a zero or negative metric is
+    not a measurement either). A point that retains no metric reads as *ungated*,
+    which :func:`main` surfaces.
 
     ``baseline_ms`` is accepted as an alias for ``dump_ms`` -- see
     :data:`LEGACY_METRIC_ALIASES`.
     """
-    data = json.loads(path.read_text())
+    data = read_baseline(path)
     points = data if isinstance(data, list) else data.get("points", [])
     out: dict[tuple[int, str], dict[str, float]] = {}
     for p in points:
