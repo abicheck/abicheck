@@ -840,14 +840,14 @@ jobs:
             #     installed (from head's install script) for both sides;
             # (2) base's installed abicheck package predates the header-graph
             #     feature this gate measures entirely -- head's harness
-            #     imports service._attach_header_graph unconditionally, so a
-            #     base commit from before that existed (G31 Phase A) surfaces
-            #     as an ImportError rather than the old "script file not
+            #     imports abicheck.service_header_graph_attach unconditionally,
+            #     so a base commit from before that existed (G31 Phase A)
+            #     surfaces as an ImportError rather than the old "script file not
             #     present on base" signal (which no longer applies now that
             #     head's copy always exists).
             if grep -q "^FAIL: castxml version rejected by this build's policy:" base_measure.log; then
               echo "Base branch's castxml policy rejects the installed pinned castxml (cross-checkout version-policy mismatch) -- report-only." >&2
-            elif grep -qE "(ImportError|ModuleNotFoundError):.*_attach_header_graph" base_measure.log; then
+            elif grep -qE "(ImportError|ModuleNotFoundError):.*(_attach_header_graph|service_header_graph_attach)" base_measure.log; then
               echo "Base branch's installed abicheck predates the header-graph feature this gate measures -- report-only." >&2
             else
               exit "$status"

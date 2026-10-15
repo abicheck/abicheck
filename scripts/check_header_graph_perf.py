@@ -605,7 +605,7 @@ def _measure_one(n: int, backend: str, repeat: int) -> dict[str, Any]:
     """
     from abicheck.compile_context import CompileContext
     from abicheck.dumper import dump
-    from abicheck.service import _attach_header_graph
+    from abicheck.service_header_graph_attach import _attach_header_graph
 
     dumper_cache = _header_ast_cache_module()
 
@@ -755,7 +755,7 @@ def _memory_probe(n: int, backend: str) -> dict[str, float]:
     """
     from abicheck.compile_context import CompileContext
     from abicheck.dumper import dump
-    from abicheck.service import _attach_header_graph
+    from abicheck.service_header_graph_attach import _attach_header_graph
 
     dumper_cache = _header_ast_cache_module()
 
