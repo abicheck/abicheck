@@ -214,7 +214,7 @@ Follow the pointer whose trigger matches your task:
 | `abicheck/<layer>/AGENTS.md` | editing code inside that layer (`model`, `extract`, `compare`, `policy`, `workflows`, `storage`, `report`, `frontends`) |
 | [`docs/contribute/agent-guide/quality-gates.md`](docs/contribute/agent-guide/quality-gates.md) | an `ai-readiness`/coverage/mutation/FP-rate gate failed, or you are writing tests for a bug fix, a matrix, a differential comparison or a reusable primitive |
 | [`docs/contribute/agent-guide/performance.md`](docs/contribute/agent-guide/performance.md) | touching a hot path, a call-count/cost-budget/`perf-antipatterns` gate failed, or a user reports "slow" |
-| [`docs/contribute/agent-guide/cli-and-exit-codes.md`](docs/contribute/agent-guide/cli-and-exit-codes.md) | adding a CLI command or flag, changing an exit code, or editing a file over 1500 lines |
+| [`docs/contribute/agent-guide/cli-and-exit-codes.md`](docs/contribute/agent-guide/cli-and-exit-codes.md) | adding a CLI command or flag, changing an exit code, or editing a file over its size cap (`architecture/modules.yaml`) |
 | [`docs/contribute/agent-guide/decision-principles.md`](docs/contribute/agent-guide/decision-principles.md) | filling the PR template's "Bug class / General invariant" rows |
 | [`docs/contribute/known-gaps.md`](docs/contribute/known-gaps.md) | about to fix something in an area with a known gap or a reverted fix — read it **before** re-attempting |
 | [`tests/regressions/manifest.py`](tests/regressions/manifest.py) | writing a regression test — reuse a matching `BugClass` first |
@@ -270,10 +270,18 @@ Follow the pointer whose trigger matches your task:
 - **mypy**: keep `mypy abicheck/` at 0 errors. A needed third-party
   suppression goes into that module's `disable_error_code` override in
   `pyproject.toml`, not a scattered `# type: ignore`.
-- **Large files**: check `python scripts/check_ai_readiness.py 2>&1 | grep
-  "exceeds soft limit"` (WARN > 1500 lines, ERROR > 2000) and
-  `architecture/debt.yaml`'s `no_growth` baselines before growing a big file;
-  shrink by moving a responsibility to a properly-owned module.
+- **Large files**: one rule. The caps are `architecture/modules.yaml`
+  `limits` (800 lines for production code, 1200 for tests), and both
+  `check_architecture.py` and `check_ai_readiness.py` read them from there.
+  A file over its cap needs a grandfather record: an `architecture/debt.yaml`
+  entry (its `no_growth` baseline, which may not be raised), or, for a
+  `scripts/`, `skills-src/` or `action/` file with none, an entry in
+  `FILE_SIZE_GRANDFATHERED` in `scripts/check_ai_readiness.py` recording its
+  current length. Growing past that record fails. Any file over 2000 lines
+  fails outright unless it is in `LARGE_FILE_ALLOWLIST`. Nothing warns. Check
+  with `python scripts/check_architecture.py` and
+  `python scripts/check_ai_readiness.py`; shrink by moving a responsibility to
+  a properly-owned module.
 
 ## Decision-making principles
 

@@ -44,6 +44,8 @@ class Findings:
     def __init__(self) -> None:
         self.errors: list[tuple[str, str]] = []
         self.warnings: list[tuple[str, str]] = []
+        #: Informational notes: printed, never counted, never failing.
+        self.infos: list[tuple[str, str]] = []
 
     def err(self, check: str, msg: str) -> None:
         self.errors.append((check, msg))
@@ -51,15 +53,20 @@ class Findings:
     def warn(self, check: str, msg: str) -> None:
         self.warnings.append((check, msg))
 
+    def info(self, check: str, msg: str) -> None:
+        self.infos.append((check, msg))
+
     def report(self) -> int:
         """Print every finding grouped by check; return the process exit code."""
         by_check: dict[str, dict[str, list[str]]] = defaultdict(
-            lambda: {"errors": [], "warnings": []}
+            lambda: {"errors": [], "warnings": [], "infos": []}
         )
         for check, msg in self.errors:
             by_check[check]["errors"].append(msg)
         for check, msg in self.warnings:
             by_check[check]["warnings"].append(msg)
+        for check, msg in self.infos:
+            by_check[check]["infos"].append(msg)
 
         for check, buckets in sorted(by_check.items()):
             print(f"\n=== {check} ===")
@@ -67,6 +74,8 @@ class Findings:
                 print(f"  ERROR: {m}")
             for m in buckets["warnings"]:
                 print(f"  WARN:  {m}")
+            for m in buckets["infos"]:
+                print(f"  INFO:  {m}")
 
         n_err, n_warn = len(self.errors), len(self.warnings)
         print(f"\n{self.SUMMARY_LABEL}: {n_err} error(s), {n_warn} warning(s)")
