@@ -14,7 +14,7 @@
     },
     {
       "path": "abicheck/build_context.py",
-      "baseline_lines": 1449,
+      "baseline_lines": 1443,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -36,7 +36,7 @@
     },
     {
       "path": "abicheck/buildsource/archive_graph.py",
-      "baseline_lines": 1373,
+      "baseline_lines": 1350,
       "target": "extract/build-or-source",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -58,7 +58,7 @@
     },
     {
       "path": "abicheck/buildsource/build_config.py",
-      "baseline_lines": 939,
+      "baseline_lines": 938,
       "target": "buildsource (already home; split into a sibling module if it grows further past this baseline)",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -80,7 +80,7 @@
     },
     {
       "path": "abicheck/buildsource/call_graph.py",
-      "baseline_lines": 1324,
+      "baseline_lines": 1144,
       "target": "extract/build-or-source",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -91,7 +91,7 @@
     },
     {
       "path": "abicheck/buildsource/callback_graph.py",
-      "baseline_lines": 1067,
+      "baseline_lines": 988,
       "target": "extract/build-or-source",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -102,7 +102,7 @@
     },
     {
       "path": "abicheck/buildsource/check_report.py",
-      "baseline_lines": 882,
+      "baseline_lines": 878,
       "target": "workflows",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -113,7 +113,7 @@
     },
     {
       "path": "abicheck/buildsource/cross_source_checks.py",
-      "baseline_lines": 1783,
+      "baseline_lines": 1698,
       "target": "extract/build-or-source",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -135,7 +135,7 @@
     },
     {
       "path": "abicheck/buildsource/graph_reconcile.py",
-      "baseline_lines": 911,
+      "baseline_lines": 910,
       "target": "extract/build-or-source",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -146,7 +146,7 @@
     },
     {
       "path": "abicheck/buildsource/header_compile_context.py",
-      "baseline_lines": 1765,
+      "baseline_lines": 1760,
       "target": "extract/build-or-source",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -157,7 +157,7 @@
     },
     {
       "path": "abicheck/buildsource/inline.py",
-      "baseline_lines": 1984,
+      "baseline_lines": 1490,
       "target": "extract/build-or-source",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -168,51 +168,18 @@
     },
     {
       "path": "abicheck/buildsource/inline_graph_fold.py",
-      "baseline_lines": 1083,
+      "baseline_lines": 890,
       "target": "extract/build-or-source",
       "rule": "no_growth",
       "disposition": "migrate",
       "category": "legacy_extraction_monolith",
       "owner": "abicheck maintainers",
       "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
-      "review_by": "2026-11-30"
-    },
-    {
-      "path": "abicheck/buildsource/l2_seed.py",
-      "baseline_lines": 856,
-      "target": "extract/build-or-source",
-      "rule": "no_growth",
-      "disposition": "migrate",
-      "category": "legacy_extraction_monolith",
-      "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Baseline raised by 7 lines (ADR-063 Phase 4, Codex review): derive_l2_include_dirs/derive_l2_compile_context/seed_includes_and_fold_compile_context each wrap their own collect_inline_pack call in a broad best-effort except Exception, which silently swallowed the new Bazel target-scoping ValidationError (e.g. at --depth headers, where embed_build_source's own real check never even runs, making this L2-seed call the only place the error could fire at all) -- a real, silent-failure regression the ADR-063 Phase 4 slice itself introduced. Fixed by carving ValidationError out of the catch-all, mirroring the file's pre-existing HeaderCompileContextAmbiguousError carve-out for the identical reason (a deliberate usage error, not a best-effort collection failure). Comments already minimized to two lines each; no smaller diff was found that still states both the exception and why it must propagate. Lowered 1037 -> 856: config/pack-argument resolution for the seed moved to buildsource/l2_seed_args.py, its own owner.",
       "review_by": "2026-11-30"
     },
     {
       "path": "abicheck/buildsource/macro_graph.py",
-      "baseline_lines": 1140,
-      "target": "extract/build-or-source",
-      "rule": "no_growth",
-      "disposition": "migrate",
-      "category": "legacy_extraction_monolith",
-      "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
-      "review_by": "2026-11-30"
-    },
-    {
-      "path": "abicheck/buildsource/override_graph.py",
-      "baseline_lines": 822,
-      "target": "extract/build-or-source",
-      "rule": "no_growth",
-      "disposition": "migrate",
-      "category": "legacy_extraction_monolith",
-      "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
-      "review_by": "2026-11-30"
-    },
-    {
-      "path": "abicheck/buildsource/pattern_facts.py",
-      "baseline_lines": 941,
+      "baseline_lines": 1019,
       "target": "extract/build-or-source",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -223,7 +190,7 @@
     },
     {
       "path": "abicheck/buildsource/preprocessor_facts.py",
-      "baseline_lines": 900,
+      "baseline_lines": 891,
       "target": "extract/build-or-source",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -234,7 +201,7 @@
     },
     {
       "path": "abicheck/buildsource/project_targets.py",
-      "baseline_lines": 1840,
+      "baseline_lines": 1806,
       "target": "extract/build-or-source",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -245,7 +212,7 @@
     },
     {
       "path": "abicheck/buildsource/run_plan.py",
-      "baseline_lines": 1130,
+      "baseline_lines": 1125,
       "target": "extract/build-or-source",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -278,7 +245,7 @@
     },
     {
       "path": "abicheck/buildsource/source_extractors/clang.py",
-      "baseline_lines": 1879,
+      "baseline_lines": 1872,
       "target": "extract/build-or-source",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -300,7 +267,7 @@
     },
     {
       "path": "abicheck/buildsource/source_link.py",
-      "baseline_lines": 1677,
+      "baseline_lines": 1669,
       "target": "extract/build-or-source",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -311,7 +278,7 @@
     },
     {
       "path": "abicheck/buildsource/source_replay.py",
-      "baseline_lines": 1318,
+      "baseline_lines": 1236,
       "target": "extract/build-or-source",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -322,7 +289,7 @@
     },
     {
       "path": "abicheck/buildsource/template_graph.py",
-      "baseline_lines": 2000,
+      "baseline_lines": 1789,
       "target": "extract/build-or-source",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -344,7 +311,7 @@
     },
     {
       "path": "abicheck/buildsource/type_graph.py",
-      "baseline_lines": 2000,
+      "baseline_lines": 1947,
       "target": "extract/build-or-source",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -355,7 +322,7 @@
     },
     {
       "path": "abicheck/bundle.py",
-      "baseline_lines": 2000,
+      "baseline_lines": 1378,
       "target": "compare",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -365,36 +332,14 @@
       "review_by": "2026-11-30"
     },
     {
-      "path": "abicheck/bundle_detectors.py",
-      "baseline_lines": 801,
-      "target": "workflows",
-      "rule": "no_growth",
-      "disposition": "accept",
-      "category": "adr061_gap_b_internal_caller_redirect",
-      "owner": "abicheck maintainers",
-      "rationale": "New entry, first crossing the 800-line production cap (P1, Codex review, ADR-061 gap B follow-up): the module-level `from .checker_policy import ChangeKind, Verdict, policy_kind_sets` facade import was pointed at its two real owners (`model.change_catalog.kinds` for `ChangeKind`, `policy.classification` for `Verdict`/`policy_kind_sets`) so this canonical internal caller no longer routes through the compatibility facade. Unavoidably two `from` lines where one stood before -- `ChangeKind` and the two policy-owned names genuinely live in different-layer owner modules, and both names are used at 23+ call sites throughout this file, so a qualified-module-import alternative would mean rewriting every call site (real risk of a silent miscompile across that many sites) instead of the one-line import-block cost. No smaller diff.",
-      "review_by": "2026-11-30"
-    },
-    {
       "path": "abicheck/checker.py",
-      "baseline_lines": 1409,
+      "baseline_lines": 1407,
       "target": "compare",
       "rule": "no_growth",
       "disposition": "migrate",
       "category": "legacy_compare_monolith",
       "owner": "abicheck maintainers",
       "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Raised 1384 -> 1406 (`docs/contribute/plans/one-comparison-product.md` Phase 2b, ADR-068 D3/D4/D5): `compare()` gained the `pattern_preprocessor_scan` opt-out-only parameter (default `True`, no CLI/API/Action opt-in flag) and its call into `workflows.pattern_preprocessor_scan.compute_pattern_preprocessor_scan`, attaching the folded result onto the returned `DiffResult` after construction -- the same 'irreducible call-site cost, logic lives in a sibling workflow module' shape `cross_source_checks` already established for this file. Baseline raised 1286 -> 1339 (ADR-067 C-S1, scalar disposition audit): `compare()` builds one conserved `DispositionLedger` before the first disposition can apply and threads it into every suppression application point (`_filter_suppressed_changes`, `_filter_pattern_synthetic`, `_apply_surface_metrics`, `_apply_soname_policy`, `_apply_pattern_verdicts_step`, `_env_matrix_contract_changes`, the post-processing pipeline), closing it over the result at the end. Almost all of the growth is one added parameter per already-existing helper signature plus the two `record_suppressed_change` calls -- the ledger type, the recording primitive and the finalization logic all live in `abicheck/policy/disposition_ledger.py`, which is where the responsibility actually moved to. Raised 1339 -> 1345 (E-S2, cli-cleanup-phase-two.md Block 5): `compare()` gained the `comparability_assurance` local -- computed via the new `comparability.dimension_assurance()` helper and threaded into `DiffResult` -- plus a two-line docstring note on the `diagnostic_comparison` parameter pointing at it. A real new reviewed field, not incidental growth. Raised 1345 -> 1352 (Workstream E slice S3, vision-api-abi-evolution.md section E): compare() now serializes ContractEvaluationStage.conflicts into DiffResult.contract_conflicts alongside the existing contract_context assembly -- the minimum call-site wiring; the detection logic itself lives in policy/contract_conflicts.py and workflows/contract_conflicts.py, not here. Baseline raised 1352 -> 1357 independently on this branch (ADR-068 D3/plan P2): compare() gained the `cross_source_checks` opt-in parameter and its call into `workflows.cross_source_evolution.compute_cross_source_evolution`, threading the result onto the returned changes. Both branches' additions merged together (a Workstream E S3/ADR-068 D3 merge conflict): baseline raised 1352/1357 -> 1364 to cover both. Raised 1364 -> 1368 (ADR-067 D5/D6, workstream C-S3): `compare()` gained the `acknowledgments` opt-in parameter (one `TYPE_CHECKING` import, one parameter, one docstring line, one `DiffResult` constructor kwarg) -- the same 'irreducible dataclass-field/call-site cost lands here, the actual logic moves to a sibling module' shape policy_file.py's own ADR-066 D4/S2 entry already used. All of `resolve_acknowledgments`'s matching/recording logic and the additions-review gate evaluation live in `abicheck/policy/acknowledgment.py`/`acknowledgment_gate.py`/`policy/disposition_close.py`, not here. Raised 1368 -> 1381 (same slice, Codex review, fresh evidence): the additions-review gate's own evaluation call moved back into `compare()` from `disposition_close.finalize_ledger()`, where it had briefly landed -- `ledger_for()`'s fallback path also calls `finalize_ledger()` and is documented to 'never mutate *result*', so writing `result.unacknowledged_additions_review` there broke that contract for a hand-built `DiffResult`. `compare()` is the only caller that legitimately owns `result` at that point, so the assignment (one `if`/import/call, four lines) has to live here; the review-computation logic itself is still entirely in `acknowledgment_gate.py`. Raised 1381 -> 1384 (same slice, CodeRabbit review): `finalize_ledger()`'s own call site here now passes the new `strict_acknowledgments=True` keyword (D5's hard-error requirement for the run that owns the comparison, as opposed to `ledger_for()`'s tolerant report-projection fallback) -- three formatted lines for one added keyword argument; the strictness logic itself lives in `policy/disposition_close.py`'s `_resolve_acknowledgments`/`finalize_ledger`. Raised 1406 -> 1411 (Codex review, PR #1172, round 12, ADR-068 plan F-9): a RESOLVED cross-source finding used to reach `all_unsuppressed` -- and therefore the verdict -- exactly like PERSISTENT/INTRODUCED, contradicting F-9's own acceptance criterion (\"resolved, and visible on a passing run\"). `all_unsuppressed` now excludes it via the new shared `checker_policy.is_cross_source_resolved` predicate (also wired into `policy/severity.py`'s `gate_eligible_changes`/`gate_contribution_for_change` for the severity-preset exit-code axis) while `kept` itself, and therefore the report, is untouched. Five lines: the predicate import plus splitting the list comprehension from the `+=` onto its own line for legibility -- the predicate itself lives in `checker_policy.py`, not here. Raised 1411 -> 1446 (same PR, round 13, Codex review): the round-12 fix only covered the *first* `all_unsuppressed` computation -- `_apply_surface_metrics`'s and `_apply_pattern_verdicts_step`'s own verdict recomputations (`--surface-metrics`/`--pattern-verdicts` opt-in steps) independently rebuilt `kept + verdict_redundant` from scratch and silently let a RESOLVED finding back into the verdict, so fixing a pre-existing cross-source issue while either opt-in step also fired could still report a non-zero exit code. Added one shared `_verdict_scored_population()` helper applying the same `is_cross_source_resolved` exclusion, called from all three sites instead of three independent inline filters -- consolidation, not duplication, and the fix generalizes to any future verdict-recomputation call site the same way. Most of the growth is the new function's own docstring (it explains why a *shared* helper replaces the round-12 inline filter, cross-referencing `cli_scan_baseline.py`'s sibling `verdict_scored_changes()` for the same plan-F-9 obligation at a different chokepoint) plus a short comment at each of the two new call sites. Raised 1446 -> 1455 (Codex review, PR #1221, no-baseline env-matrix audit findings 1/2): three of `_env_matrix_contract_changes`'s six standalone declared-runtime-floor/wheel-packaging checks (`PLATFORM_BASELINE_FLOOR_RAISED`/`MACOS_DEPLOYMENT_TARGET_RAISED`/`WHEEL_RPATH_NOT_PORTABLE`) default to a RISK verdict in the catalog even though each only ever fires on an actual floor violation, so neither this two-sided path nor the no-baseline audit path ever promoted them to BREAKING. Added one import and one call to the new shared `diff_versioning.promote_baseline_violation_findings(produced)` right before this function returns -- the promotion logic itself lives in `diff_versioning.py`, not here; this file's own growth is the irreducible import-plus-call-site cost, the same shape every other entry in this rationale already establishes. Raised 1455 -> 1473 (Codex review, PR #1221, follow-up findings 1/3): finding 1 removed `WHEEL_RPATH_NOT_PORTABLE` from the promoted-kinds set (a heuristic finding, not proof of a break -- see `diff_versioning.py`'s own updated rationale) and correspondingly widened this function's docstring paragraph explaining which two kinds are actually promoted and why the third is deliberately excluded. Finding 3 moved the `promote_baseline_violation_findings(check_changes)` call from once, after the loop, over the whole already-suppression-filtered `produced` list, to once per check inside the loop, over each check's raw `check_changes` list *before* `_filter_suppressed_changes` disposes of a match into `suppressed` -- otherwise a suppression rule matching a genuine floor violation recorded it at the unpromoted RISK default rather than the correctly-promoted BREAKING verdict the identical unsuppressed occurrence gets (AGENTS.md's \"Record before disposing\"). Both fixes are docstring/comment-heavy (explaining a subtle ordering invariant future readers must not silently reverse) rather than logic growth -- the promotion call itself only moved position, it did not gain new callers or new logic; the promotion function itself lives in `diff_versioning.py`, not here. Raised 1473 -> 1482 (Codex review, PR #1221, round-6 follow-up findings 2/3): the inline `env_matrix_source_sha256` digest computation was extracted into a new shared top-level function, `env_matrix_content_digest()`, so a release fan-out with zero matched/completed library pairs (finding 3) and `workflows.no_baseline_compare` (finding 2's follow-on) can compute the identical digest without either re-deriving the formula or reading it off a `DiffResult` that may not exist at release scope. `compare()`'s own call site shrank to one line; the growth is the new function's own definition plus its docstring. Raised 1482 -> 1540 (one-comparison-product.md: baseline presence becomes an input to the one comparison pipeline). `compare()` takes `old: AbiSnapshot | None`: the evolution stages (detector registry, comparability, SONAME policy, build-context reconciliation, NumPy C-API delta, surface-metric and pattern-verdict modulations) are gated on a real baseline, and the one-sided stages route to their candidate-only counterparts, which live in `workflows.cross_source_evolution`/`workflows.pattern_preprocessor_scan` rather than here. The growth is that gating plus the docstring stating the contract -- both intrinsic to this function, which is the pipeline. The alternative was a second, parallel single-build pipeline, which is exactly the duplication ADR-061 and this file's own \"Finish the workflow\" rule forbid. Raised 1540 -> 1542 when main merged into the plan-slice-7o branch (PR #1284): two lines, and merge arithmetic rather than new growth -- both branches touched this file within their own baselines and the merged file carries both edits. Lowered 1542 -> 1409 (finding-disposition refactor): the five-site suppression loop collapsed into `policy.finding_disposition.dispose_by_suppression`, the post-processing glue into `dispose_findings` + `DispositionRules.from_policy_file`, and the private `diff_filtering` re-exports were deleted.",
-      "review_by": "2026-11-30"
-    },
-    {
-      "path": "abicheck/cli_buildsource_helpers.py",
-      "baseline_lines": 1066,
-      "target": "workflows-or-frontends",
-      "rule": "no_growth",
-      "disposition": "migrate",
-      "category": "legacy_workflow_or_frontend_monolith",
-      "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Baseline raised 1043 -> 1066 by the one-time `ruff format` pass that made `fmt-check` a real CI gate (see docs/contribute/known-gaps.md). No responsibility was added or moved: the formatter only rewrapped call sites and expanded magic trailing commas, and the file's parsed statement count is byte-for-byte unchanged (verified by comparing `ast.dump` of this file before and after). This is the one bump that \"move responsibility instead of raising the baseline\" cannot be answered by moving anything; physical line counts are formatter-stable from here, because `fmt-check` now gates them. Raised 876 -> 884 (PR #1283, Codex review round 7): `extend_records`, the one API a merge of several comparisons' ledgers needs. A multi-library `compat check` dropped every per-library ledger, so a release whose policy demonstrably acted reported an empty policy trail -- ADR-067's \"every disposition keeps its rule and reason\" lost at the aggregation step. `record()` cannot serve the merge: it is keyed on the live `Change` object a disposition was applied to, and a merge holds the records rather than the objects behind them. The merge itself, and all of its reasoning, lives in the new `policy/disposition_merge.py`; what is here is the seven-line accessor into this class's own private list, which cannot live anywhere else without a cross-module private access. The alternative considered and rejected was a parallel merged-ledger type in the new module, which would have had to duplicate this class's whole query surface (`records`/`__len__`/`__iter__`/`detected_total`/`scope_reasons`/`suppressed_gating_records`) to be usable by the same reporters -- strictly more duplication than eight lines.",
       "review_by": "2026-11-30"
     },
     {
@@ -410,7 +355,7 @@
     },
     {
       "path": "abicheck/cli_compare_helpers.py",
-      "baseline_lines": 1757,
+      "baseline_lines": 1755,
       "target": "workflows-or-frontends",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -421,7 +366,7 @@
     },
     {
       "path": "abicheck/cli_dump_dry_run_build_query.py",
-      "baseline_lines": 1376,
+      "baseline_lines": 1290,
       "target": "workflows-or-frontends",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -432,7 +377,7 @@
     },
     {
       "path": "abicheck/cli_dump_helpers.py",
-      "baseline_lines": 917,
+      "baseline_lines": 832,
       "target": "workflows-or-frontends",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -443,7 +388,7 @@
     },
     {
       "path": "abicheck/cli_options.py",
-      "baseline_lines": 1977,
+      "baseline_lines": 1528,
       "target": "workflows-or-frontends",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -453,19 +398,8 @@
       "review_by": "2026-11-30"
     },
     {
-      "path": "abicheck/cli_resolve.py",
-      "baseline_lines": 840,
-      "target": "workflows-or-frontends",
-      "rule": "no_growth",
-      "disposition": "migrate",
-      "category": "legacy_workflow_or_frontend_monolith",
-      "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Raised 806 -> 808 (one-comparison-product.md Phase 2c, ADR-068): `_resolve_compare_snapshots` gains a `changed_paths` parameter and forwards it onto the `CompareRequest` it already builds, so the native `compare` CLI's `--since`/`--changed-path` seed reaches the same shared per-side resolution the typed API uses (`_resolve_side_snapshot_impl(changed_paths=...)`) instead of a second scoping path. Two lines: the parameter and the request field -- this function's whole job is translating the CLI's loose arguments into that one request object. Raised again 808 -> 813 in the same PR (review of its own first round): `_reject_evidence_flags_for_set_inputs` -- this file's one set-input rejection chokepoint -- now also calls `_reject_single_pair_flags_for_set_inputs`, so `--since`/`--changed-path`/`--abi3` on a directory/package operand is a loud usage error instead of a silently-ignored flag (the release fan-out implements none of the three). The rejection *logic* and its message live in `cli_compare_options.py`, following the precedent `_reject_depth_for_set_inputs` set for exactly this budget reason; only the import and the one call site are here, because this is the function every set-input operand already routes through. Raised 813 -> 833 (ADR-068 plan §5 P4, four-check cross-source migration PR): `_resolve_compare_snapshots` gains a `config_public_header_dirs` parameter, folded into both sides' `InputSpec.public_header_dirs` (skipped for a `dump_manifest` side, which rejects that field outright) -- this function is the one place both sides' `InputSpec` objects are assembled from the CLI's loose arguments, so the fold has no smaller home; the projection from a loaded config to a directory list itself lives in the new `workflows.public_header_boundary` module, not here. Raised 833 -> 837 (Codex review, PR #1154 follow-up, security fix): `resolve_directory_compile_context` gains a `config_explicit` parameter, threaded straight through to `resolve_compile_context` -- closes a real trust-boundary bug where the directory/package release fan-out's own already-auto-discovered `.abicheck.yml` path was passed through as if it were an explicit `--config`, letting an untrusted `compile.compiler` select the header-extraction executable; four lines (parameter, one docstring line, one keyword forward), no smaller home since this is the one wrapper the release fan-out calls. Raised 837 -> 840 (PR #1283, the Intel MKL evaluation fixes). Three lines: the same `--exclude-header` operand reaching `resolve_input`. Keyword-only and appended, never inserted mid-signature (this repository's own registered `api.positional_slot_rebinding` bug class). Nothing to move; the filtering itself is `extract/header_exclusions.py`'s.",
-      "review_by": "2026-11-30"
-    },
-    {
       "path": "abicheck/comparability.py",
-      "baseline_lines": 1524,
+      "baseline_lines": 1305,
       "target": "compare",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -487,7 +421,7 @@
     },
     {
       "path": "abicheck/compatibility_evaluation_frontend.py",
-      "baseline_lines": 2006,
+      "baseline_lines": 1859,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -498,7 +432,7 @@
     },
     {
       "path": "abicheck/compatibility_evaluation_wiring.py",
-      "baseline_lines": 929,
+      "baseline_lines": 866,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -509,7 +443,7 @@
     },
     {
       "path": "abicheck/contract_context.py",
-      "baseline_lines": 858,
+      "baseline_lines": 857,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -531,7 +465,7 @@
     },
     {
       "path": "abicheck/contract_evaluation.py",
-      "baseline_lines": 1734,
+      "baseline_lines": 1715,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -542,7 +476,7 @@
     },
     {
       "path": "abicheck/contract_evidence_collect.py",
-      "baseline_lines": 1193,
+      "baseline_lines": 1111,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -564,7 +498,7 @@
     },
     {
       "path": "abicheck/diff_cpp_patterns.py",
-      "baseline_lines": 1383,
+      "baseline_lines": 1205,
       "target": "compare",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -575,7 +509,7 @@
     },
     {
       "path": "abicheck/diff_cxx_rules.py",
-      "baseline_lines": 1492,
+      "baseline_lines": 1244,
       "target": "compare",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -586,7 +520,7 @@
     },
     {
       "path": "abicheck/diff_filtering.py",
-      "baseline_lines": 994,
+      "baseline_lines": 981,
       "target": "compare",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -597,7 +531,7 @@
     },
     {
       "path": "abicheck/diff_namespaces.py",
-      "baseline_lines": 1296,
+      "baseline_lines": 1252,
       "target": "compare",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -608,7 +542,7 @@
     },
     {
       "path": "abicheck/diff_platform.py",
-      "baseline_lines": 1640,
+      "baseline_lines": 1635,
       "target": "compare",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -619,7 +553,7 @@
     },
     {
       "path": "abicheck/diff_platform_elf_dynamic.py",
-      "baseline_lines": 1018,
+      "baseline_lines": 1016,
       "target": "compare",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -641,7 +575,7 @@
     },
     {
       "path": "abicheck/diff_symbols.py",
-      "baseline_lines": 1430,
+      "baseline_lines": 1429,
       "target": "compare",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -652,7 +586,7 @@
     },
     {
       "path": "abicheck/diff_templates.py",
-      "baseline_lines": 1466,
+      "baseline_lines": 1463,
       "target": "compare",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -663,7 +597,7 @@
     },
     {
       "path": "abicheck/diff_types.py",
-      "baseline_lines": 1999,
+      "baseline_lines": 1500,
       "target": "compare",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -674,7 +608,7 @@
     },
     {
       "path": "abicheck/diff_versioning.py",
-      "baseline_lines": 905,
+      "baseline_lines": 891,
       "target": "compare",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -696,18 +630,7 @@
     },
     {
       "path": "abicheck/dumper_ast_config_cpp20.py",
-      "baseline_lines": 1299,
-      "target": "see ADR-061 ownership map",
-      "rule": "no_growth",
-      "disposition": "migrate",
-      "category": "legacy_oversized_module",
-      "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
-      "review_by": "2026-11-30"
-    },
-    {
-      "path": "abicheck/extract/headers/castxml/dumper.py",
-      "baseline_lines": 2000,
+      "baseline_lines": 1264,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -740,7 +663,7 @@
     },
     {
       "path": "abicheck/dwarf_advanced.py",
-      "baseline_lines": 1378,
+      "baseline_lines": 1172,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -762,7 +685,7 @@
     },
     {
       "path": "abicheck/elf_metadata.py",
-      "baseline_lines": 1168,
+      "baseline_lines": 1081,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -773,7 +696,7 @@
     },
     {
       "path": "abicheck/export_surface.py",
-      "baseline_lines": 1325,
+      "baseline_lines": 1246,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -794,19 +717,8 @@
       "review_by": "2026-11-30"
     },
     {
-      "path": "abicheck/frontends/cli/commands/compare_bundle_facts_rejections.py",
-      "baseline_lines": 857,
-      "target": "frontends (already home; split further if it grows again)",
-      "rule": "no_growth",
-      "disposition": "migrate",
-      "category": "adr062_new_capability_growth",
-      "owner": "abicheck maintainers",
-      "rationale": "New entry, merging origin/main: this file was 786 lines (under the 800-line production cap) on origin/main, and this PR's own independent --view consolidation work (Codex review, PR #1154 follow-up: \"Honor pattern views for stored-bundle comparisons\" and its siblings) crossed the cap once combined -- reject_unsupported_options() gained a suppress= forward alongside audit_suppressions (a --audit-suppressions with no --suppress is a harmless no-op, matching every other compare path, so only the real conflict is rejected), dropped its now-unneeded --surface-metrics rejection (surface_metrics is unconditional on this path too now, matching the Tier-2 chokepoint every other path already reaches), reworded its --show-only/--report-mode/--demangle rejection messages to name their --view equivalents (`--view show=...`/`--view <mode>`/`--view demangle`) alongside the retired flag spelling, and added a new --view patterns rejection (this dispatcher's own _render has no per-library stderr echo channel for pattern_modulations, the same 'no channel here' gap --demangle already covers, so the flag is rejected rather than silently accepted and doing nothing -- the pattern-modulation ledger itself is unaffected, still appearing in this comparison's own JSON output unconditionally). Auto-merged cleanly against origin/main's own parallel PR #1159 growth (786 lines, no conflict markers); this file simply had no adoption debt entry yet at either baseline. Raised 816 -> 830 merging origin/main into PR #1174: that PR's own independent Codex-review fix (`resolve_max_json_object_nodes_cfg()`, extracted here alongside this file's other pure option-resolution helpers -- see this file's own docstring) auto-merged cleanly against this entry's 816-line history above. Actual, directly-measured post-merge count. Raised 830 -> 840 (same PR, Codex review, fresh evidence): a new `support_promise` parameter plus its own rejection block, mirroring `fail_on_removed`'s existing shape exactly -- this driver builds no proven-inventory acquisition record to derive a support-promise finding from, so a declared policy here would silently produce none. Raised 840 -> 843 (rulings.py deferred-option followup): a new `require_complete_analysis` parameter, mirroring `support_promise`'s own shape immediately above -- the former `compare --require-complete-analysis` (`assurance.require_complete`) gets the identical resolved-off-config treatment, threaded into `_reject_set_input_flags()` alongside the existing check. Raised 843 -> 846 (ADR-071 D8): comment and docstring only. `require_complete_analysis` is no longer forwarded into `_reject_set_input_flags` (it has a real channel on this driver now), and both the dropped forward and the now-deliberately-unused parameter are recorded in place -- this module's entire purpose is explaining why each flag is or is not rejected, so a silently removed forward would be the one change here that must not go unexplained.",
-      "review_by": "2026-11-30"
-    },
-    {
       "path": "abicheck/frontends/cli/commands/dump.py",
-      "baseline_lines": 905,
+      "baseline_lines": 901,
       "target": "frontends (already home; the header-only branch's own body already delegates to frontends/cli/dump_execute.py -- only the dispatch/is_header_only_evidence check stays here)",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -817,7 +729,7 @@
     },
     {
       "path": "abicheck/header_conditionals.py",
-      "baseline_lines": 1375,
+      "baseline_lines": 1370,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -828,7 +740,7 @@
     },
     {
       "path": "abicheck/header_utils.py",
-      "baseline_lines": 1085,
+      "baseline_lines": 1075,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -849,19 +761,8 @@
       "review_by": "2026-11-30"
     },
     {
-      "path": "abicheck/impact/use_cases.py",
-      "baseline_lines": 886,
-      "target": "see ADR-061 ownership map",
-      "rule": "no_growth",
-      "disposition": "migrate",
-      "category": "legacy_oversized_module",
-      "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
-      "review_by": "2026-11-30"
-    },
-    {
       "path": "abicheck/internal_leak.py",
-      "baseline_lines": 1654,
+      "baseline_lines": 1583,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -883,7 +784,7 @@
     },
     {
       "path": "abicheck/name_classification.py",
-      "baseline_lines": 1258,
+      "baseline_lines": 1255,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -894,7 +795,7 @@
     },
     {
       "path": "abicheck/package.py",
-      "baseline_lines": 1993,
+      "baseline_lines": 1734,
       "target": "storage",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -905,7 +806,7 @@
     },
     {
       "path": "abicheck/pdb_parser.py",
-      "baseline_lines": 1453,
+      "baseline_lines": 1452,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -916,7 +817,7 @@
     },
     {
       "path": "abicheck/policy/disposition_ledger.py",
-      "baseline_lines": 884,
+      "baseline_lines": 880,
       "target": "policy",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -949,7 +850,7 @@
     },
     {
       "path": "abicheck/pr_comment.py",
-      "baseline_lines": 1545,
+      "baseline_lines": 1517,
       "target": "report",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -960,7 +861,7 @@
     },
     {
       "path": "abicheck/project_snapshot_store.py",
-      "baseline_lines": 834,
+      "baseline_lines": 812,
       "target": "storage (already home; ADR-061 D1 layering keeps this filesystem-facing writer outside storage/ itself)",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -993,7 +894,7 @@
     },
     {
       "path": "abicheck/schemas/__init__.py",
-      "baseline_lines": 1294,
+      "baseline_lines": 1171,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -1004,7 +905,7 @@
     },
     {
       "path": "abicheck/service_compare_pipeline.py",
-      "baseline_lines": 910,
+      "baseline_lines": 837,
       "target": "workflows-or-frontends (already home for the compare-pipeline shim; the new parameter is one keyword forwarded onto two pre-existing InputSpec constructions, not extractable further)",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -1015,7 +916,7 @@
     },
     {
       "path": "abicheck/snapshot_io.py",
-      "baseline_lines": 1052,
+      "baseline_lines": 1047,
       "target": "storage (blocked)",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -1036,19 +937,8 @@
       "review_by": "2026-11-30"
     },
     {
-      "path": "abicheck/storage/package.py",
-      "baseline_lines": 833,
-      "target": "storage (already home)",
-      "rule": "no_growth",
-      "disposition": "migrate",
-      "category": "adr062_new_capability_growth",
-      "owner": "abicheck maintainers",
-      "rationale": "Not legacy debt: ADR-062 A1.4/A1.5 added PackageManifest.project_sections (cross-artifact evidence stored once and referenced by every ArtifactRef that shares it), the schema addition abicheck/bundle_facts_store.py's first real multi-artifact package writer needed. A shared _object_ref_mapping helper (also used by ArtifactRef.sections) kept the net growth to a small, reviewed amount past the 800-line adoption baseline rather than splitting one cohesive object-model file.",
-      "review_by": "2026-11-30"
-    },
-    {
       "path": "abicheck/suppression.py",
-      "baseline_lines": 1993,
+      "baseline_lines": 1018,
       "target": "policy (done; classified, remaining debt is line count only)",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -1059,7 +949,7 @@
     },
     {
       "path": "abicheck/surface.py",
-      "baseline_lines": 1507,
+      "baseline_lines": 1129,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -1070,7 +960,7 @@
     },
     {
       "path": "abicheck/tu_merge.py",
-      "baseline_lines": 1622,
+      "baseline_lines": 1610,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -1081,18 +971,7 @@
     },
     {
       "path": "abicheck/type_reachability.py",
-      "baseline_lines": 1504,
-      "target": "see ADR-061 ownership map",
-      "rule": "no_growth",
-      "disposition": "migrate",
-      "category": "legacy_oversized_module",
-      "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
-      "review_by": "2026-11-30"
-    },
-    {
-      "path": "abicheck/type_reachability_spelling.py",
-      "baseline_lines": 826,
+      "baseline_lines": 1225,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -1113,30 +992,8 @@
       "review_by": "2026-11-30"
     },
     {
-      "path": "abicheck/workflows/aggregate/load.py",
-      "baseline_lines": 809,
-      "target": "workflows",
-      "rule": "no_growth",
-      "disposition": "migrate",
-      "category": "legacy_workflow_or_frontend_monolith",
-      "owner": "abicheck maintainers",
-      "rationale": "Newly crossed the 800-line production cap (ADR-067 C-S2): `_LoadedReport` gained one `disposition_audit` field, read verbatim off each of its five real (non-early-failure) construction sites via the new sibling leaf `disposition_axis.disposition_audit_block` -- the same ADR-065 S2 `scope_axis.py` pattern this module already follows for `scope_completeness_exit`. The read logic itself lives in that new leaf, not here; what is added here is the field declaration, one import, and one line per construction site.",
-      "review_by": "2026-11-30"
-    },
-    {
-      "path": "abicheck/workflows/history.py",
-      "baseline_lines": 860,
-      "target": "workflows",
-      "rule": "no_growth",
-      "disposition": "migrate",
-      "category": "legacy_workflow_or_frontend_monolith",
-      "owner": "abicheck maintainers",
-      "rationale": "Newly crossed the 800-line production cap (Codex review, fresh evidence: 'apply_finding_evolution has no caller outside tests/'). `policy.finding_evolution.apply_finding_evolution` -- ADR-068 Phase 1 item 2's own module docstring names `workflows/history.py` as the dedicated N>1-comparison caller it was built for and left unwired pending -- is now called once per adjacent pair in `build_longitudinal_history`'s existing loop, against the prior pair's own `compare()` result in the same chain (`None` for the first pair, so its findings correctly read `not_evaluated` rather than a guessed `introduced`). `PairwiseSummary` gains `evolution_counts`/`resolved` (the pair's own evolution-classified findings), with two small local projection helpers (`_evolution_counts`/`_resolved_finding_dict`) mirroring `report.finding_evolution`'s identical compute logic field-for-field rather than importing it -- `workflows/` may not import `report/` (ADR-061's dependency direction runs the other way), so this stays a self-contained projection, not a new cross-layer edge. All of the added lines are this one wiring: the two dataclass fields, the two small helper functions, and the three-line change to the existing pairwise loop. Raised 854 -> 858 (PR #1283, Codex review): one `_ADDED_KINDS` entry for `FUNC_ADDED_ELF_ONLY`, mirroring the `FUNC_REMOVED_ELF_ONLY` its `_REMOVED_KINDS` already carried, plus the comment saying why an entity's lifecycle event does not depend on which evidence tier saw it. A registry entry's only possible owner is its registry. Raised 858 -> 859 (PR #1283, Codex review): one more `_ADDED_KINDS` entry, for `var_added_elf_only`, beside the `func_added_elf_only` the previous round added. A registry entry's only owner is its registry. Raised 859 -> 860 (SVS PR-387 findings audit, workstream 1): one `_REMOVED_KINDS`-side entity-kind entry for `var_removed_elf_only`, beside the `VAR_REMOVED` above it -- an entity's lifecycle event does not depend on which evidence tier observed it. Same one-line registry shape as the two raises before it.",
-      "review_by": "2026-11-30"
-    },
-    {
       "path": "tests/regressions/manifest.py",
-      "baseline_lines": 1495,
+      "baseline_lines": 1491,
       "target": "tests/regressions (already home; a BugClass entry's prose is not further extractable)",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -1146,19 +1003,8 @@
       "review_by": "2026-11-30"
     },
     {
-      "path": "abicheck/report/render_markdown.py",
-      "baseline_lines": 838,
-      "target": "keep with render_markdown_document.py's own compute/render split; no split warranted at this size",
-      "rule": "no_growth",
-      "disposition": "migrate",
-      "category": "adr062_new_capability_growth",
-      "owner": "abicheck maintainers",
-      "rationale": "First crossing the 800-line production cap: abicheck code-review report round's Codex-review follow-up threaded evidence_tiers through _format_change_md (the --report-mode root-cause path) so an UNATTRIBUTED finding's impact caveat reaches root-cause Markdown the same way it already reaches JSON/full/leaf Markdown. Needs the Sequence type (an already-imported type elsewhere in the module tree, but not previously imported here) to match the parameter's existing Sequence[str] contract at its one real caller (reporter_markdown.py's compute_root_cause_section) -- narrowing to list[str] to avoid the import would create a real type mismatch at that call site, which passes a Sequence[str]. One import line, plus a second (`cast`/`HasKind`) mypy needed for the pre-existing duck-typed `c: object` parameter now flowing into `evidence_status_for_result`'s `HasKind` contract -- no smaller diff keeps both files' types consistent and the module mypy-clean. Raised 803 -> 806 (round-7 Codex review, Finding 4): `ReviewDigest` gained one new optional field (`env_matrix_source_sha256`) and `render_review_digest` one new conditional bullet, the identical shape every sibling optional field on this exact class (`disposition_audit`/`surface_changes`/`quality_issues_count`) already pays here -- there is no other module this field's own render belongs to; `render_markdown_document.py` (this entry's own stated overflow target) owns assembling the `ReportDocument` mapping, not formatting `ReviewDigest`'s Markdown text, so moving the conditional there would split one field's render across two files for no reason. Trimmed to the minimum shape first (no per-field docstring, no separator blank line beyond what the rendered Markdown itself requires) before accepting the remaining 3-line irreducible cost. Raised 806 -> 819 (public-contract-vs-name-shape fix): `render_rtti_note` used to conclude that RTTI/internal-namespace breaking findings were 'typically ... not public-API breaks' and label the remainder the 'genuine public-surface' count. Name shape cannot establish that -- a vtable is a representation, not a visibility, so a layout change on a public, user-derivable class is a genuine public ABI break, and the note was telling users to disregard one. The replacement reports the same counts and then says what they do and do not establish, pointing at `--contract` for real contract classification; a bare count with no such caveat would simply re-invite the reading that was wrong. There is no other module this render belongs to (this entry's own stated overflow target, render_markdown_document.py, owns assembling the ReportDocument mapping, not formatting this note), and the note text was compacted twice before accepting the remainder. Bug class `classification.name_shape_as_contract_membership`. Baseline raised 819 -> 823 by the one-time `ruff format` pass that made `fmt-check` a real CI gate (see docs/contribute/known-gaps.md). No responsibility was added or moved: the formatter only rewrapped call sites and expanded magic trailing commas, and the file's parsed statement count is byte-for-byte unchanged (verified by comparing `ast.dump` of this file before and after). This is the one bump that \"move responsibility instead of raising the baseline\" cannot be answered by moving anything; physical line counts are formatter-stable from here, because `fmt-check` now gates them. Raised 823 -> 828 (PR #1283, the Intel MKL evaluation fixes). Five lines: the `ChangeGroup.rollups` field and the one `render_kind_rollups(...)` call in the section renderer. The renderer itself lives in `report/kind_rollup.py`; a dataclass field cannot live outside its dataclass, and the call belongs at the one place a section is rendered. Raised 828 -> 838 (PR #1283, Codex review): one render branch appending the finding's library to the Markdown line, and the comment recording that it is absent for a single-library report so those render exactly as before. The renderer is where a line is rendered; there is no elsewhere.",
-      "review_by": "2026-11-30"
-    },
-    {
       "path": "abicheck/report/render_markdown_document.py",
-      "baseline_lines": 834,
+      "baseline_lines": 815,
       "target": "report",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -1168,19 +1014,8 @@
       "review_by": "2026-11-30"
     },
     {
-      "path": "tests/test_confidence_evidence.py",
-      "baseline_lines": 1226,
-      "target": "keep with confidence.py's own tests; no split warranted at this size",
-      "rule": "no_growth",
-      "disposition": "migrate",
-      "category": "adr062_new_capability_growth",
-      "owner": "abicheck maintainers",
-      "rationale": "First crossing the 1200-line test-size cap: abicheck code-review report round's Item 4 fix (note_if_same_binary_compared's snapshot-content-digest fallback) needed regression coverage for two independently-broken paths a Codex review found across two rounds -- the typed-API path (service_compare_pipeline.classify_compare_pair) and, separately, the native compare CLI path (frontends.cli.runtime._finalize_compare_result, found still missing the fallback entirely), plus the mixed live-binary-vs-stored-snapshot false-positive fix and the digest-priority/negative-control cases. Each test is already trimmed to its minimal docstring; no smaller diff documents this many independently-necessary regression cases for one fix landing across two files. Raised 1211 -> 1226 (same code-review round, third Codex pass): one more regression test pinning the snapshot-fallback warning's own wording (no binaries claim, canonical-serialization language) after a wording bug the golden-output suite caught was fixed.",
-      "review_by": "2026-11-30"
-    },
-    {
       "path": "tests/unit/report/test_build_report_document.py",
-      "baseline_lines": 1619,
+      "baseline_lines": 1618,
       "target": "report",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -1190,19 +1025,8 @@
       "review_by": "2026-11-30"
     },
     {
-      "path": "tests/test_action_check_target.py",
-      "baseline_lines": 1225,
-      "target": "tests/unit-or-contract ownership matching production migration",
-      "rule": "no_growth",
-      "disposition": "migrate",
-      "category": "legacy_oversized_test_module",
-      "owner": "abicheck maintainers",
-      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
-      "review_by": "2026-11-30"
-    },
-    {
       "path": "tests/test_action_collect_facts.py",
-      "baseline_lines": 1905,
+      "baseline_lines": 1890,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -1213,7 +1037,7 @@
     },
     {
       "path": "tests/test_action_compile_context_parity.py",
-      "baseline_lines": 1739,
+      "baseline_lines": 1627,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -1224,7 +1048,7 @@
     },
     {
       "path": "tests/test_action_coverage_verdict.py",
-      "baseline_lines": 1613,
+      "baseline_lines": 1560,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -1235,7 +1059,7 @@
     },
     {
       "path": "tests/test_action_resolve_baseline.py",
-      "baseline_lines": 1218,
+      "baseline_lines": 1204,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -1246,7 +1070,7 @@
     },
     {
       "path": "tests/test_action_validate_inputs.py",
-      "baseline_lines": 1368,
+      "baseline_lines": 1330,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -1257,7 +1081,7 @@
     },
     {
       "path": "tests/test_aggregate.py",
-      "baseline_lines": 1983,
+      "baseline_lines": 1906,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -1268,7 +1092,7 @@
     },
     {
       "path": "tests/test_aggregate_findings.py",
-      "baseline_lines": 1544,
+      "baseline_lines": 1542,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -1279,7 +1103,7 @@
     },
     {
       "path": "tests/test_ai_readiness.py",
-      "baseline_lines": 1931,
+      "baseline_lines": 1913,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -1290,7 +1114,7 @@
     },
     {
       "path": "tests/test_analysis_assurance.py",
-      "baseline_lines": 1993,
+      "baseline_lines": 1954,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -1323,35 +1147,13 @@
     },
     {
       "path": "tests/test_baseline_set.py",
-      "baseline_lines": 1935,
+      "baseline_lines": 1927,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",
       "category": "legacy_oversized_test_module",
       "owner": "abicheck maintainers",
       "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
-      "review_by": "2026-11-30"
-    },
-    {
-      "path": "tests/test_binary_fingerprint.py",
-      "baseline_lines": 1472,
-      "target": "tests/unit-or-contract ownership matching production migration",
-      "rule": "no_growth",
-      "disposition": "migrate",
-      "category": "legacy_oversized_test_module",
-      "owner": "abicheck maintainers",
-      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration. Baseline raised 1470 -> 1472 by the one-time `ruff format` pass that made `fmt-check` a real CI gate (see docs/contribute/known-gaps.md). No responsibility was added or moved: the formatter only rewrapped call sites and expanded magic trailing commas, and the file's parsed statement count is byte-for-byte unchanged (verified by comparing `ast.dump` of this file before and after). This is the one bump that \"move responsibility instead of raising the baseline\" cannot be answered by moving anything; physical line counts are formatter-stable from here, because `fmt-check` now gates them. Raised 876 -> 884 (PR #1283, Codex review round 7): `extend_records`, the one API a merge of several comparisons' ledgers needs. A multi-library `compat check` dropped every per-library ledger, so a release whose policy demonstrably acted reported an empty policy trail -- ADR-067's \"every disposition keeps its rule and reason\" lost at the aggregation step. `record()` cannot serve the merge: it is keyed on the live `Change` object a disposition was applied to, and a merge holds the records rather than the objects behind them. The merge itself, and all of its reasoning, lives in the new `policy/disposition_merge.py`; what is here is the seven-line accessor into this class's own private list, which cannot live anywhere else without a cross-module private access. The alternative considered and rejected was a parallel merged-ledger type in the new module, which would have had to duplicate this class's whole query surface (`records`/`__len__`/`__iter__`/`detected_total`/`scope_reasons`/`suppressed_gating_records`) to be usable by the same reporters -- strictly more duplication than eight lines.",
-      "review_by": "2026-11-30"
-    },
-    {
-      "path": "tests/test_bugfix_test_contract.py",
-      "baseline_lines": 1209,
-      "target": "tests/unit-or-contract ownership matching production migration",
-      "rule": "no_growth",
-      "disposition": "migrate",
-      "category": "legacy_oversized_test_module",
-      "owner": "abicheck maintainers",
-      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration. Raised 1206 -> 1208 (ADR-061 gap B follow-up, Codex review, fresh evidence): TestConditionalRequirements::test_touching_the_surface_asks_its_question gained two parametrize cases (abicheck/policy/classification.py, abicheck/policy/contract_finding_relevance.py) proving the verdict-gate-exit trigger fires on checker_policy.py's/contract_gating.py's real owners, not only their now-logic-free re-export facades -- the same gap check_bugfix_test_contract.py's own trigger tuple just closed. Two lines, one parametrize case each; no smaller diff proves the new trigger strings actually fire. Raised 1208 -> 1209 (same follow-up sweep, Codex review, fresh evidence): one more parametrize case (abicheck/policy/evidence_status.py) proving checker_policy.py's *second* gap-B owner (has_binary_evidence/is_cross_source_resolved, which feed policy.classification's/severity.py's gate decisions) also triggers verdict-gate-exit -- the trigger tuple addition it proves was itself a one-line fix, and this is the one line proving it fires.",
       "review_by": "2026-11-30"
     },
     {
@@ -1389,7 +1191,7 @@
     },
     {
       "path": "tests/test_build_source_cli.py",
-      "baseline_lines": 4181,
+      "baseline_lines": 3786,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -1411,7 +1213,7 @@
     },
     {
       "path": "tests/test_bundle.py",
-      "baseline_lines": 4248,
+      "baseline_lines": 3701,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -1422,7 +1224,7 @@
     },
     {
       "path": "tests/test_bundle_facts.py",
-      "baseline_lines": 1545,
+      "baseline_lines": 1544,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -1444,18 +1246,7 @@
     },
     {
       "path": "tests/test_call_graph.py",
-      "baseline_lines": 1949,
-      "target": "tests/unit-or-contract ownership matching production migration",
-      "rule": "no_growth",
-      "disposition": "migrate",
-      "category": "legacy_oversized_test_module",
-      "owner": "abicheck maintainers",
-      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
-      "review_by": "2026-11-30"
-    },
-    {
-      "path": "tests/test_callback_graph.py",
-      "baseline_lines": 1211,
+      "baseline_lines": 1908,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -1466,7 +1257,7 @@
     },
     {
       "path": "tests/test_check_report.py",
-      "baseline_lines": 1229,
+      "baseline_lines": 1226,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -1477,24 +1268,13 @@
     },
     {
       "path": "tests/test_checker_reporter_branches.py",
-      "baseline_lines": 1791,
+      "baseline_lines": 1713,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",
       "category": "legacy_oversized_test_module",
       "owner": "abicheck maintainers",
       "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration. Baseline raised 1519 -> 1791 by the one-time `ruff format` pass that made `fmt-check` a real CI gate (see docs/contribute/known-gaps.md). No responsibility was added or moved: the formatter only rewrapped call sites and expanded magic trailing commas, and the file's parsed statement count is byte-for-byte unchanged (verified by comparing `ast.dump` of this file before and after). This is the one bump that \"move responsibility instead of raising the baseline\" cannot be answered by moving anything; physical line counts are formatter-stable from here, because `fmt-check` now gates them. Raised 876 -> 884 (PR #1283, Codex review round 7): `extend_records`, the one API a merge of several comparisons' ledgers needs. A multi-library `compat check` dropped every per-library ledger, so a release whose policy demonstrably acted reported an empty policy trail -- ADR-067's \"every disposition keeps its rule and reason\" lost at the aggregation step. `record()` cannot serve the merge: it is keyed on the live `Change` object a disposition was applied to, and a merge holds the records rather than the objects behind them. The merge itself, and all of its reasoning, lives in the new `policy/disposition_merge.py`; what is here is the seven-line accessor into this class's own private list, which cannot live anywhere else without a cross-module private access. The alternative considered and rejected was a parallel merged-ledger type in the new module, which would have had to duplicate this class's whole query surface (`records`/`__len__`/`__iter__`/`detected_total`/`scope_reasons`/`suppressed_gating_records`) to be usable by the same reporters -- strictly more duplication than eight lines.",
-      "review_by": "2026-11-30"
-    },
-    {
-      "path": "tests/test_cli_compare_bundle_facts_rejections.py",
-      "baseline_lines": 1223,
-      "target": "tests/unit-or-contract ownership matching production migration",
-      "rule": "no_growth",
-      "disposition": "migrate",
-      "category": "adr062_new_capability_growth",
-      "owner": "abicheck maintainers",
-      "rationale": "New entry: was 1191 lines (under the 1200-line test cap) on origin/main, with only 9 lines of slack. rulings.py deferred-option followup replaced test_require_complete_analysis_is_rejected (one test, CLI-flag-based) with two tests -- test_assurance_require_complete_config_is_rejected (the config-driven replacement's own rejection) and test_require_complete_analysis_flag_no_longer_exists (the old spelling now a plain Click usage error) -- since the CLI flag and its config-key replacement are two different, independently-worth-pinning behaviors, not a one-for-one rename. No smaller diff: both tests are already comment-trimmed to their irreducible setup/invoke/assert lines, matching this file's own existing per-test shape. Raised 1206 -> 1216 (ADR-071 D8): `test_assurance_require_complete_config_is_rejected` became `..._is_accepted` -- the driver honors `assurance.require_complete` now (it folds every member's own `AnalysisAssurance` off `result.per_library`), so the test was inverted rather than deleted, since a silent regression back to exit 64 for a supported setting is exactly what it is still here to catch. The growth is its explanatory comment, which also records why the run still fails for its own unrelated reason (the stub facts document names no library under the empty NEW directory) and that only the old rejection's absence is being asserted. Baseline raised 1216 -> 1223 by the one-time `ruff format` pass that made `fmt-check` a real CI gate (see docs/contribute/known-gaps.md). No responsibility was added or moved: the formatter only rewrapped call sites and expanded magic trailing commas, and the file's parsed statement count is byte-for-byte unchanged (verified by comparing `ast.dump` of this file before and after). This is the one bump that \"move responsibility instead of raising the baseline\" cannot be answered by moving anything; physical line counts are formatter-stable from here, because `fmt-check` now gates them. Raised 876 -> 884 (PR #1283, Codex review round 7): `extend_records`, the one API a merge of several comparisons' ledgers needs. A multi-library `compat check` dropped every per-library ledger, so a release whose policy demonstrably acted reported an empty policy trail -- ADR-067's \"every disposition keeps its rule and reason\" lost at the aggregation step. `record()` cannot serve the merge: it is keyed on the live `Change` object a disposition was applied to, and a merge holds the records rather than the objects behind them. The merge itself, and all of its reasoning, lives in the new `policy/disposition_merge.py`; what is here is the seven-line accessor into this class's own private list, which cannot live anywhere else without a cross-module private access. The alternative considered and rejected was a parallel merged-ledger type in the new module, which would have had to duplicate this class's whole query surface (`records`/`__len__`/`__iter__`/`detected_total`/`scope_reasons`/`suppressed_gating_records`) to be usable by the same reporters -- strictly more duplication than eight lines.",
       "review_by": "2026-11-30"
     },
     {
@@ -1510,7 +1290,7 @@
     },
     {
       "path": "tests/test_cli_contract.py",
-      "baseline_lines": 1540,
+      "baseline_lines": 1405,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -1532,7 +1312,7 @@
     },
     {
       "path": "tests/test_comparability_gate.py",
-      "baseline_lines": 1988,
+      "baseline_lines": 1939,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -1553,19 +1333,8 @@
       "review_by": "2026-11-30"
     },
     {
-      "path": "tests/test_compare_dispatch.py",
-      "baseline_lines": 1923,
-      "target": "tests/unit-or-contract ownership matching production migration",
-      "rule": "no_growth",
-      "disposition": "migrate",
-      "category": "legacy_oversized_test_module",
-      "owner": "abicheck maintainers",
-      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration. Raised 1507 -> 1530 (CodeRabbit review, \"Reject this option on the single-pair path\"): new `test_max_findings_per_library_warns_on_single_file`, alongside its existing sibling `test_set_only_flags_warn_on_single_file`, proving --max-findings-per-library now warns (rather than silently dropping) on a single-pair compare. This is the one test module that already owns this exact set-only-flags-on-single-file contract for every sibling flag. Raised 1530 -> 1532 (merge with main): main's own concurrent depth-shortfall/release-evidence-contract PR touched this same test module (adding its own coverage) independently of this PR's `test_max_findings_per_library_warns_on_single_file` addition; both sides' additions are irreducible lines from two unrelated features landing on the same file. Baseline raised 1532 -> 1928 by the one-time `ruff format` pass that made `fmt-check` a real CI gate (see docs/contribute/known-gaps.md). No responsibility was added or moved: the formatter only rewrapped call sites and expanded magic trailing commas, and the file's parsed statement count is byte-for-byte unchanged (verified by comparing `ast.dump` of this file before and after). This is the one bump that \"move responsibility instead of raising the baseline\" cannot be answered by moving anything; physical line counts are formatter-stable from here, because `fmt-check` now gates them. Raised 876 -> 884 (PR #1283, Codex review round 7): `extend_records`, the one API a merge of several comparisons' ledgers needs. A multi-library `compat check` dropped every per-library ledger, so a release whose policy demonstrably acted reported an empty policy trail -- ADR-067's \"every disposition keeps its rule and reason\" lost at the aggregation step. `record()` cannot serve the merge: it is keyed on the live `Change` object a disposition was applied to, and a merge holds the records rather than the objects behind them. The merge itself, and all of its reasoning, lives in the new `policy/disposition_merge.py`; what is here is the seven-line accessor into this class's own private list, which cannot live anywhere else without a cross-module private access. The alternative considered and rejected was a parallel merged-ledger type in the new module, which would have had to duplicate this class's whole query surface (`records`/`__len__`/`__iter__`/`detected_total`/`scope_reasons`/`suppressed_gating_records`) to be usable by the same reporters -- strictly more duplication than eight lines.",
-      "review_by": "2026-11-30"
-    },
-    {
       "path": "tests/test_compare_release.py",
-      "baseline_lines": 1955,
+      "baseline_lines": 1749,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -1576,7 +1345,7 @@
     },
     {
       "path": "tests/test_compatibility_evaluation_frontend.py",
-      "baseline_lines": 1475,
+      "baseline_lines": 1437,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -1587,7 +1356,7 @@
     },
     {
       "path": "tests/test_compile_context_parity.py",
-      "baseline_lines": 1779,
+      "baseline_lines": 1614,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -1609,7 +1378,7 @@
     },
     {
       "path": "tests/test_contract_authoritative_pipeline.py",
-      "baseline_lines": 1582,
+      "baseline_lines": 1574,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -1620,7 +1389,7 @@
     },
     {
       "path": "tests/test_contract_evaluation.py",
-      "baseline_lines": 1625,
+      "baseline_lines": 1599,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -1642,7 +1411,7 @@
     },
     {
       "path": "tests/test_cov95_cli.py",
-      "baseline_lines": 3427,
+      "baseline_lines": 3398,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -1664,7 +1433,7 @@
     },
     {
       "path": "tests/test_cross_source_checks.py",
-      "baseline_lines": 2701,
+      "baseline_lines": 2611,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -1675,7 +1444,7 @@
     },
     {
       "path": "tests/test_ctf_metadata.py",
-      "baseline_lines": 1364,
+      "baseline_lines": 1358,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -1697,7 +1466,7 @@
     },
     {
       "path": "tests/test_diff_symbols_deep.py",
-      "baseline_lines": 1652,
+      "baseline_lines": 1650,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -1708,7 +1477,7 @@
     },
     {
       "path": "tests/test_diff_types_deep.py",
-      "baseline_lines": 1976,
+      "baseline_lines": 1942,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -1719,7 +1488,7 @@
     },
     {
       "path": "tests/test_docs_contract.py",
-      "baseline_lines": 1809,
+      "baseline_lines": 1807,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -1763,7 +1532,7 @@
     },
     {
       "path": "tests/test_dumper_clang.py",
-      "baseline_lines": 5553,
+      "baseline_lines": 5549,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -1785,7 +1554,7 @@
     },
     {
       "path": "tests/test_dumper_coverage.py",
-      "baseline_lines": 1587,
+      "baseline_lines": 1393,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -1796,7 +1565,7 @@
     },
     {
       "path": "tests/test_dumper_hybrid.py",
-      "baseline_lines": 1793,
+      "baseline_lines": 1778,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -1829,7 +1598,7 @@
     },
     {
       "path": "tests/test_dumper_unit.py",
-      "baseline_lines": 2019,
+      "baseline_lines": 1985,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -1840,7 +1609,7 @@
     },
     {
       "path": "tests/test_dwarf_coverage_gaps.py",
-      "baseline_lines": 2418,
+      "baseline_lines": 2200,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -1851,7 +1620,7 @@
     },
     {
       "path": "tests/test_dwarf_snapshot.py",
-      "baseline_lines": 1989,
+      "baseline_lines": 1824,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -1862,7 +1631,7 @@
     },
     {
       "path": "tests/test_effective_config_digest.py",
-      "baseline_lines": 1698,
+      "baseline_lines": 1473,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -1873,7 +1642,7 @@
     },
     {
       "path": "tests/test_environment_drift.py",
-      "baseline_lines": 1852,
+      "baseline_lines": 1848,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -1883,19 +1652,8 @@
       "review_by": "2026-11-30"
     },
     {
-      "path": "tests/test_exit_decision.py",
-      "baseline_lines": 1260,
-      "target": "tests/unit-or-contract ownership matching production migration",
-      "rule": "no_growth",
-      "disposition": "migrate",
-      "category": "legacy_oversized_test_module",
-      "owner": "abicheck maintainers",
-      "rationale": "New entry (`docs/contribute/plans/one-comparison-product.md` P3): the module was comfortably under the 1200-line test-file cap (1095 lines) until this change added `TestResolveCompareExitDecisionAdr064Axes` (the pure-function coverage for `resolve_compare_exit_decision_with_abort_axes`) and `TestCompareEvidenceContractAndBudgetAxes` (the real end-to-end CLI coverage forcing `DiffResult.evidence_contract_error`/`.budget_overflow` through the actual production pipeline) -- both genuinely new test classes for genuinely new production behavior, not incidental growth. Splitting either out into a sibling file was judged to cost more than it buys given how tightly both classes share this file's own `_compare`/`_compatible_pair`/`_breaking_pair`/`_write` fixtures with the pre-existing `TestCompareExitDecisionIntegration` class; a future split can still separate the ADR-064 axis-specific classes from the base PR-G1 coverage if this file grows further.",
-      "review_by": "2026-11-30"
-    },
-    {
       "path": "tests/test_export_surface.py",
-      "baseline_lines": 1463,
+      "baseline_lines": 1439,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -1906,7 +1664,7 @@
     },
     {
       "path": "tests/test_fact_set.py",
-      "baseline_lines": 1329,
+      "baseline_lines": 1327,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -1928,7 +1686,7 @@
     },
     {
       "path": "tests/test_header_compile_context.py",
-      "baseline_lines": 1995,
+      "baseline_lines": 1738,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -1949,28 +1707,6 @@
       "review_by": "2026-11-30"
     },
     {
-      "path": "tests/test_inline_changed_paths.py",
-      "baseline_lines": 1291,
-      "target": "tests/unit-or-contract ownership matching production migration",
-      "rule": "no_growth",
-      "disposition": "migrate",
-      "category": "legacy_oversized_test_module",
-      "owner": "abicheck maintainers",
-      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
-      "review_by": "2026-11-30"
-    },
-    {
-      "path": "tests/test_inputs_emit.py",
-      "baseline_lines": 1855,
-      "target": "tests/unit-or-contract ownership matching production migration",
-      "rule": "no_growth",
-      "disposition": "migrate",
-      "category": "legacy_oversized_test_module",
-      "owner": "abicheck maintainers",
-      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration. Baseline raised 1849 -> 1855 by the one-time `ruff format` pass that made `fmt-check` a real CI gate (see docs/contribute/known-gaps.md). No responsibility was added or moved: the formatter only rewrapped call sites and expanded magic trailing commas, and the file's parsed statement count is byte-for-byte unchanged (verified by comparing `ast.dump` of this file before and after). This is the one bump that \"move responsibility instead of raising the baseline\" cannot be answered by moving anything; physical line counts are formatter-stable from here, because `fmt-check` now gates them. Raised 876 -> 884 (PR #1283, Codex review round 7): `extend_records`, the one API a merge of several comparisons' ledgers needs. A multi-library `compat check` dropped every per-library ledger, so a release whose policy demonstrably acted reported an empty policy trail -- ADR-067's \"every disposition keeps its rule and reason\" lost at the aggregation step. `record()` cannot serve the merge: it is keyed on the live `Change` object a disposition was applied to, and a merge holds the records rather than the objects behind them. The merge itself, and all of its reasoning, lives in the new `policy/disposition_merge.py`; what is here is the seven-line accessor into this class's own private list, which cannot live anywhere else without a cross-module private access. The alternative considered and rejected was a parallel merged-ledger type in the new module, which would have had to duplicate this class's whole query surface (`records`/`__len__`/`__iter__`/`detected_total`/`scope_reasons`/`suppressed_gating_records`) to be usable by the same reporters -- strictly more duplication than eight lines.",
-      "review_by": "2026-11-30"
-    },
-    {
       "path": "tests/test_internal_leak.py",
       "baseline_lines": 1982,
       "target": "tests/unit-or-contract ownership matching production migration",
@@ -1983,7 +1719,7 @@
     },
     {
       "path": "tests/test_junit_report.py",
-      "baseline_lines": 1987,
+      "baseline_lines": 1951,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -1994,7 +1730,7 @@
     },
     {
       "path": "tests/test_l3l4l5_new_kinds.py",
-      "baseline_lines": 2367,
+      "baseline_lines": 2363,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -2016,7 +1752,7 @@
     },
     {
       "path": "tests/test_pack_application.py",
-      "baseline_lines": 1604,
+      "baseline_lines": 1336,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -2049,7 +1785,7 @@
     },
     {
       "path": "tests/test_platform_coverage_gaps.py",
-      "baseline_lines": 1382,
+      "baseline_lines": 1363,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -2071,7 +1807,7 @@
     },
     {
       "path": "tests/test_project_targets.py",
-      "baseline_lines": 1963,
+      "baseline_lines": 1947,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -2137,7 +1873,7 @@
     },
     {
       "path": "tests/test_reporter.py",
-      "baseline_lines": 1839,
+      "baseline_lines": 1778,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -2148,7 +1884,7 @@
     },
     {
       "path": "tests/test_reusable_workflows.py",
-      "baseline_lines": 1947,
+      "baseline_lines": 1946,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -2159,7 +1895,7 @@
     },
     {
       "path": "tests/test_run_plan.py",
-      "baseline_lines": 1936,
+      "baseline_lines": 1911,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -2170,7 +1906,7 @@
     },
     {
       "path": "tests/test_sarif.py",
-      "baseline_lines": 1431,
+      "baseline_lines": 1427,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -2181,7 +1917,7 @@
     },
     {
       "path": "tests/test_service_unit.py",
-      "baseline_lines": 5700,
+      "baseline_lines": 5634,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -2192,7 +1928,7 @@
     },
     {
       "path": "tests/test_skill_eval_graders.py",
-      "baseline_lines": 1522,
+      "baseline_lines": 1509,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -2203,7 +1939,7 @@
     },
     {
       "path": "tests/test_snapshot_compression.py",
-      "baseline_lines": 1499,
+      "baseline_lines": 1434,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -2214,7 +1950,7 @@
     },
     {
       "path": "tests/test_source_abi.py",
-      "baseline_lines": 2168,
+      "baseline_lines": 2157,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -2258,7 +1994,7 @@
     },
     {
       "path": "tests/test_source_replay.py",
-      "baseline_lines": 1271,
+      "baseline_lines": 1240,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -2269,7 +2005,7 @@
     },
     {
       "path": "tests/test_surface.py",
-      "baseline_lines": 1992,
+      "baseline_lines": 1982,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -2280,7 +2016,7 @@
     },
     {
       "path": "tests/test_template_graph.py",
-      "baseline_lines": 1998,
+      "baseline_lines": 1957,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -2313,7 +2049,7 @@
     },
     {
       "path": "tests/test_type_graph.py",
-      "baseline_lines": 2136,
+      "baseline_lines": 1867,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -2335,7 +2071,7 @@
     },
     {
       "path": "tests/test_type_reachability.py",
-      "baseline_lines": 1998,
+      "baseline_lines": 1966,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -2357,7 +2093,7 @@
     },
     {
       "path": "tests/test_typed_dump_request.py",
-      "baseline_lines": 1976,
+      "baseline_lines": 1960,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -2379,7 +2115,7 @@
     },
     {
       "path": "tests/validate_examples.py",
-      "baseline_lines": 1877,
+      "baseline_lines": 1872,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -2389,19 +2125,8 @@
       "review_by": "2026-11-30"
     },
     {
-      "path": "abicheck/environment_matrix.py",
-      "baseline_lines": 814,
-      "target": "model (already home; no smaller extraction available for one added type-validation branch on an existing loop)",
-      "rule": "no_growth",
-      "disposition": "migrate",
-      "category": "adr062_new_capability_growth",
-      "owner": "abicheck maintainers",
-      "rationale": "Codex P2 finding on PR #1221: `_parse_runtime_floors()` coerced every `runtime_floors` key with `str(key).upper()` unconditionally, before checking whether it was already a string -- a malformed `runtime_floors: {123: \"2.28\"}` (an unquoted YAML int key, or a PyYAML-parsed bool key like `{true: \"2.28\"}`) loaded successfully into a spelling (\"123\"/\"TRUE\") no named-prefix detector (GLIBC/MUSLLINUX/WHEEL_ARCH/...) ever recognizes, so the declared floor was silently inert -- the same failure mode already guarded for non-string *values* on the very next lines and for WHEEL_ARCH's value vocabulary further down. The fix adds one `isinstance(key, str)` guard raising the same strict-config `ValueError` this function already raises for every other malformed `runtime_floors` shape, pushing this file from exactly 800 lines (the production cap, with zero prior slack) to 814. No smaller diff: the guard belongs beside the sibling value-type checks it mirrors, in the one function that owns this key's entire parse/validate contract, not in a new leaf module for one seven-line branch.",
-      "review_by": "2026-11-30"
-    },
-    {
       "path": "abicheck/ctf_metadata.py",
-      "baseline_lines": 824,
+      "baseline_lines": 807,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -2411,63 +2136,8 @@
       "review_by": "2026-11-30"
     },
     {
-      "path": "abicheck/extract/headers/clang/templates.py",
-      "baseline_lines": 802,
-      "target": "see ADR-061 ownership map",
-      "rule": "no_growth",
-      "disposition": "migrate",
-      "category": "legacy_oversized_module",
-      "owner": "abicheck maintainers",
-      "rationale": "New entry, 795 -> 802, created by the one-time `ruff format` pass that made `fmt-check` a real CI gate (see docs/contribute/known-gaps.md). This file sat under the 800-line maximum only because it was unformatted; rewrapping its call sites and expanding magic trailing commas crossed the cap without adding a statement (its parsed statement count is unchanged, verified via `ast.dump`). Recorded as debt rather than exempted so it stays in the no-growth ledger and is split like any other oversized file; the formatting bump is not itself a reason to split, so the target below is the pre-existing ADR-061 ownership question, not this change.",
-      "review_by": "2026-11-30"
-    },
-    {
-      "path": "abicheck/model/change_catalog/platform.py",
-      "baseline_lines": 1437,
-      "target": "see ADR-061 ownership map",
-      "rule": "no_growth",
-      "disposition": "migrate",
-      "category": "legacy_oversized_module",
-      "owner": "abicheck maintainers",
-      "rationale": "New entry, 800 -> 1181, created by the one-time `ruff format` pass that made `fmt-check` a real CI gate (see docs/contribute/known-gaps.md). This file sat under the 800-line maximum only because it was unformatted; rewrapping its call sites and expanding magic trailing commas crossed the cap without adding a statement (its parsed statement count is unchanged, verified via `ast.dump`). Recorded as debt rather than exempted so it stays in the no-growth ledger and is split like any other oversized file; the formatting bump is not itself a reason to split, so the target below is the pre-existing ADR-061 ownership question, not this change. Raised 1181 -> 1435 (one-comparison-product.md plan slice 7o): every `ChangeKindMeta` entry in this taxonomy now declares the two canonical display dimensions, `entity` (ChangeEntity) and `operation` (ChangeOperation), on the same single registration that already declares its verdict and impact -- two lines per entry, which is the whole of the growth. This is the one shape \"move responsibility instead of raising the baseline\" cannot answer, because the responsibility is being moved *in*: the superseded implementation derived both dimensions from the kind's *name* in `reporter_markdown.py` (a prefix table plus an exact-match escape list for the element dimension, a suffix rule plus a 30-entry override table for the operation one), maintained beside the catalog rather than in it -- and it silently matched no element at all for 238 of the 407 kinds, so `--view show=` with every element token the vocabulary had hid 58% of the catalog. All of that name-parsing code is deleted; these lines are what replaces it, and they are declarative data in the module that owns the kind. Nothing smaller exists: the fields are mandatory (`_validate_entry` rejects an entry without them, which is what makes \"a kind added tomorrow lands in the right dimension with no second registration\" true), the formatter puts each keyword argument of an already-multi-line call on its own line, and any scheme that stored them elsewhere -- a side table keyed by kind -- would restore exactly the second registration this slice exists to remove. The two enums themselves were extracted to a new `dimensions.py` leaf rather than added to `registry.py`, which is where responsibility genuinely could move and did. Raised 1302 -> 1304 in the same slice (Codex review round 3): `experimental_graduated` and `experimental_removed_without_replacement` are *polymorphic* -- `diff_namespaces` emits both for functions and for types -- so a single declared `entity` was wrong for half of each kind's findings, excluding a graduated function from `--view show=functions` and serializing the wrong `entity`. One line per entry (`entity_from_field`) names the finding attribute that states the concrete entity; the rationale lives once in that field's own docstring rather than being repeated beside each entry, which is where the four comment lines the first attempt added went. The alternative -- splitting the two kinds into function/type variants -- would add two `ChangeKind` values, two catalog entries and a detector branch to express what one declarative field already does. Raised 1435 -> 1437 (P2, Codex review, PR #1284): two lines, one `entity_from_field` declaration each on `bit_int_width_changed` and `char8t_migration`. Both are emitted from `iter_type_slot_changes`, which yields function-owned slots (a parameter or return type) and record-owned slots (a field) through one detector, so a single fixed entity is wrong for one of the two owners by construction. The declaration must sit beside the entry it qualifies -- that is what a single registration means -- so there is nowhere to move it; the discriminator it reads is stated by the producing branch (`TypeSlotChange.owner`), not re-derived from the slot text.",
-      "review_by": "2026-11-30"
-    },
-    {
-      "path": "abicheck/model/change_catalog/symbols.py",
-      "baseline_lines": 1218,
-      "target": "see ADR-061 ownership map",
-      "rule": "no_growth",
-      "disposition": "migrate",
-      "category": "legacy_oversized_module",
-      "owner": "abicheck maintainers",
-      "rationale": "New entry, 732 -> 996, created by the one-time `ruff format` pass that made `fmt-check` a real CI gate (see docs/contribute/known-gaps.md). This file sat under the 800-line maximum only because it was unformatted; rewrapping its call sites and expanding magic trailing commas crossed the cap without adding a statement (its parsed statement count is unchanged, verified via `ast.dump`). Recorded as debt rather than exempted so it stays in the no-growth ledger and is split like any other oversized file; the formatting bump is not itself a reason to split, so the target below is the pre-existing ADR-061 ownership question, not this change. Raised 996 -> 1014 (PR #1283, the Intel MKL evaluation fixes). One `ChangeKindMeta` entry for `func_added_elf_only` (kind, default verdict, impact, description template) plus its comment. AGENTS.md's own 'Adding a new ChangeKind' procedure routes a function-fact kind to this taxonomy module and nowhere else -- `change_registry.py` is a pure assembly point and rejects entries. There is nothing to move: a catalog entry's only possible owner is its catalog. Raised 1014 -> 1029 (PR #1283, Codex review): one more `ChangeKindMeta` entry, for `var_added_elf_only` -- the data counterpart of `func_added_elf_only`, added because an undeclared STT_OBJECT/STT_TLS/STT_COMMON export is absent from the header-derived `variable_map` exactly as an undeclared function is from `function_map`, so `_diff_variables` could not report VAR_ADDED for it either and the addition disappeared entirely. A function-only fix leaves the data half looking fixed, which is worse than fixing neither. AGENTS.md's own procedure routes a symbol-fact kind to this taxonomy and nowhere else; a catalog entry's only possible owner is its catalog. 168 (one-comparison-product.md plan slice 7o): every `ChangeKindMeta` entry in this taxonomy now declares the two canonical display dimensions, `entity` (ChangeEntity) and `operation` (ChangeOperation), on the same single registration that already declares its verdict and impact -- two lines per entry, which is the whole of the growth. This is the one shape \"move responsibility instead of raising the baseline\" cannot answer, because the responsibility is being moved *in*: the superseded implementation derived both dimensions from the kind's *name* in `reporter_markdown.py` (a prefix table plus an exact-match escape list for the element dimension, a suffix rule plus a 30-entry override table for the operation one), maintained beside the catalog rather than in it -- and it silently matched no element at all for 238 of the 407 kinds, so `--view show=` with every element token the vocabulary had hid 58% of the catalog. All of that name-parsing code is deleted; these lines are what replaces it, and they are declarative data in the module that owns the kind. Nothing smaller exists: the fields are mandatory (`_validate_entry` rejects an entry without them, which is what makes \"a kind added tomorrow lands in the right dimension with no second registration\" true), the formatter puts each keyword argument of an already-multi-line call on its own line, and any scheme that stored them elsewhere -- a side table keyed by kind -- would restore exactly the second registration this slice exists to remove. The two enums themselves were extracted to a new `dimensions.py` leaf rather than added to `registry.py`, which is where responsibility genuinely could move and did. Raised 1168 -> 1169 (P2, Codex review, PR #1284): one line, `entity_from_field=\"entity_discriminator\"` on `internal_symbol_required_by_public_api`. `detect_call_graph_leaks` triggers on any BREAKING_KINDS change whose subject is the internal decl, `var_removed` included, so that overlay is emitted for variables as well as functions and a fixed entity hid the variable case from `--view show=variables`. The declaration has to live beside the entry it qualifies -- that is what a single registration means -- so there is nowhere to move it to; the derivation it enables was placed in `change_registry.unanimous_entity_for` rather than here. Raised 1169 -> 1174 (P2, Codex review round 14, PR #1284): one `entity_from_field` declaration plus a four-line pointer comment on `serialization_tag_changed`. `detect_serialization_tag_changes` pools its tags from three sources before emitting one kind -- `AbiSnapshot.constants`, global `variables`, and `enums` members -- so the fixed `type` it declared was wrong for *all three* at once, hiding real findings from both `--view show=variables` and `show=enums` and spelling every one of them a type in machine reports. Nothing here can move: a catalog entry lives in its taxonomy module by ADR-061 D9, and the declaration must sit beside the entry it qualifies. What did move is the explanation -- the full reasoning lives once in `TestSerializationTagFindingsKeepTheirContributingSource`, the test that actually enforces it, and the comment here is a four-line pointer to it rather than a second copy. Trimming the remaining lines to fit the old baseline was rejected deliberately: this file's own AGENTS.md rule says to move responsibility rather than shrink a file to satisfy the gate, and there is no responsibility left to move. Raised 1174 -> 1218 when main merged into the plan-slice-7o branch (PR #1284). Merge arithmetic plus six lines. main added two catalog entries this branch never saw (`func_added_elf_only`, `var_added_elf_only`); 7o makes `entity`/`operation` mandatory on every entry, so the merge had to declare them -- two lines each, plus a two-line comment per entry recording that FUNCTION/ADDED and VARIABLE/ADDED match the kinds' own siblings and are corroborated by `workflows/history.py`'s existing ENTITY_KIND_* mapping. That is exactly the gate working as designed: a kind added while 7o was in flight cannot land without a display dimension. Nothing to move -- a catalog entry lives in its taxonomy module by ADR-061 D9.",
-      "review_by": "2026-11-30"
-    },
-    {
-      "path": "abicheck/model/change_catalog/types.py",
-      "baseline_lines": 1308,
-      "target": "see ADR-061 ownership map",
-      "rule": "no_growth",
-      "disposition": "migrate",
-      "category": "legacy_oversized_module",
-      "owner": "abicheck maintainers",
-      "rationale": "New entry, 775 -> 1092, created by the one-time `ruff format` pass that made `fmt-check` a real CI gate (see docs/contribute/known-gaps.md). This file sat under the 800-line maximum only because it was unformatted; rewrapping its call sites and expanding magic trailing commas crossed the cap without adding a statement (its parsed statement count is unchanged, verified via `ast.dump`). Recorded as debt rather than exempted so it stays in the no-growth ledger and is split like any other oversized file; the formatting bump is not itself a reason to split, so the target below is the pre-existing ADR-061 ownership question, not this change. Raised 1092 -> 1302 (one-comparison-product.md plan slice 7o): every `ChangeKindMeta` entry in this taxonomy now declares the two canonical display dimensions, `entity` (ChangeEntity) and `operation` (ChangeOperation), on the same single registration that already declares its verdict and impact -- two lines per entry, which is the whole of the growth. This is the one shape \"move responsibility instead of raising the baseline\" cannot answer, because the responsibility is being moved *in*: the superseded implementation derived both dimensions from the kind's *name* in `reporter_markdown.py` (a prefix table plus an exact-match escape list for the element dimension, a suffix rule plus a 30-entry override table for the operation one), maintained beside the catalog rather than in it -- and it silently matched no element at all for 238 of the 407 kinds, so `--view show=` with every element token the vocabulary had hid 58% of the catalog. All of that name-parsing code is deleted; these lines are what replaces it, and they are declarative data in the module that owns the kind. Nothing smaller exists: the fields are mandatory (`_validate_entry` rejects an entry without them, which is what makes \"a kind added tomorrow lands in the right dimension with no second registration\" true), the formatter puts each keyword argument of an already-multi-line call on its own line, and any scheme that stored them elsewhere -- a side table keyed by kind -- would restore exactly the second registration this slice exists to remove. The two enums themselves were extracted to a new `dimensions.py` leaf rather than added to `registry.py`, which is where responsibility genuinely could move and did. Raised 1304 -> 1305 (review round 4): one `entity_from_field` line making `mandatory_template_param_added` polymorphic, the third kind to need it. Raised 1305 -> 1306 (review round 5): one `entity_from_field` line for `cpo_kind_changed`. Raised 1306 -> 1307 (review round 6): one `entity_from_field` line for `inline_namespace_version_bumped`. Raised 1307 -> 1308 (P2, Codex review, PR #1284): one line, the `entity_from_field` declaration on `atomic_qualifier_changed` -- the third kind emitted from `iter_type_slot_changes` for both function-owned and record-owned slots. Same reasoning as the `platform.py` entry above.",
-      "review_by": "2026-11-30"
-    },
-    {
-      "path": "abicheck/policy/disposition_close.py",
-      "baseline_lines": 807,
-      "target": "see ADR-061 ownership map",
-      "rule": "no_growth",
-      "disposition": "migrate",
-      "category": "legacy_oversized_module",
-      "owner": "abicheck maintainers",
-      "rationale": "New entry, 800 -> 807, created by the one-time `ruff format` pass that made `fmt-check` a real CI gate (see docs/contribute/known-gaps.md). This file sat under the 800-line maximum only because it was unformatted; rewrapping its call sites and expanding magic trailing commas crossed the cap without adding a statement (its parsed statement count is unchanged, verified via `ast.dump`). Recorded as debt rather than exempted so it stays in the no-growth ledger and is split like any other oversized file; the formatting bump is not itself a reason to split, so the target below is the pre-existing ADR-061 ownership question, not this change.",
-      "review_by": "2026-11-30"
-    },
-    {
       "path": "abicheck/policy/severity.py",
-      "baseline_lines": 827,
+      "baseline_lines": 824,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -2477,30 +2147,8 @@
       "review_by": "2026-11-30"
     },
     {
-      "path": "abicheck/post_manifest.py",
-      "baseline_lines": 808,
-      "target": "see ADR-061 ownership map",
-      "rule": "no_growth",
-      "disposition": "migrate",
-      "category": "legacy_oversized_module",
-      "owner": "abicheck maintainers",
-      "rationale": "New entry, 770 -> 808, created by the one-time `ruff format` pass that made `fmt-check` a real CI gate (see docs/contribute/known-gaps.md). This file sat under the 800-line maximum only because it was unformatted; rewrapping its call sites and expanding magic trailing commas crossed the cap without adding a statement (its parsed statement count is unchanged, verified via `ast.dump`). Recorded as debt rather than exempted so it stays in the no-growth ledger and is split like any other oversized file; the formatting bump is not itself a reason to split, so the target below is the pre-existing ADR-061 ownership question, not this change.",
-      "review_by": "2026-11-30"
-    },
-    {
-      "path": "abicheck/extract/declaration_provenance.py",
-      "baseline_lines": 804,
-      "target": "see ADR-061 ownership map",
-      "rule": "no_growth",
-      "disposition": "migrate",
-      "category": "legacy_oversized_module",
-      "owner": "abicheck maintainers",
-      "rationale": "New entry, 799 -> 804, created by the one-time `ruff format` pass that made `fmt-check` a real CI gate (see docs/contribute/known-gaps.md). This file sat under the 800-line maximum only because it was unformatted; rewrapping its call sites and expanding magic trailing commas crossed the cap without adding a statement (its parsed statement count is unchanged, verified via `ast.dump`). Recorded as debt rather than exempted so it stays in the no-growth ledger and is split like any other oversized file; the formatting bump is not itself a reason to split, so the target below is the pre-existing ADR-061 ownership question, not this change.",
-      "review_by": "2026-11-30"
-    },
-    {
       "path": "abicheck/storage/bundle_archive.py",
-      "baseline_lines": 819,
+      "baseline_lines": 804,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -2522,7 +2170,7 @@
     },
     {
       "path": "tests/test_architecture_refactor.py",
-      "baseline_lines": 1267,
+      "baseline_lines": 1266,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -2554,39 +2202,6 @@
       "review_by": "2026-11-30"
     },
     {
-      "path": "tests/test_bundle_side_input.py",
-      "baseline_lines": 1219,
-      "target": "see ADR-061 ownership map",
-      "rule": "no_growth",
-      "disposition": "migrate",
-      "category": "legacy_oversized_test_module",
-      "owner": "abicheck maintainers",
-      "rationale": "New entry, 1200 -> 1218, created by the one-time `ruff format` pass that made `fmt-check` a real CI gate (see docs/contribute/known-gaps.md). This file sat under the 1200-line maximum only because it was unformatted; rewrapping its call sites and expanding magic trailing commas crossed the cap without adding a statement (its parsed statement count is unchanged, verified via `ast.dump`). Recorded as debt rather than exempted so it stays in the no-growth ledger and is split like any other oversized file; the formatting bump is not itself a reason to split, so the target below is the pre-existing ADR-061 ownership question, not this change. +1 lines (this subtractive-cleanup batch): the delegation-only facades `abicheck.api_types`/`abicheck.bundle_facts` were deleted, so each of this file's imports through them was migrated to the real owner -- and a single facade import whose names live in two owner modules necessarily becomes two import statements. Import-statement growth only; no test body, assertion or statement was added. The same migration deleted 659 lines of facade modules outright, which this baseline's per-file rule cannot offset against.",
-      "review_by": "2026-11-30"
-    },
-    {
-      "path": "tests/test_cli_compare_release_view.py",
-      "baseline_lines": 1324,
-      "target": "see ADR-061 ownership map",
-      "rule": "no_growth",
-      "disposition": "migrate",
-      "category": "legacy_oversized_test_module",
-      "owner": "abicheck maintainers",
-      "rationale": "New entry, 1150 -> 1324, created by the one-time `ruff format` pass that made `fmt-check` a real CI gate (see docs/contribute/known-gaps.md). This file sat under the 1200-line maximum only because it was unformatted; rewrapping its call sites and expanding magic trailing commas crossed the cap without adding a statement (its parsed statement count is unchanged, verified via `ast.dump`). Recorded as debt rather than exempted so it stays in the no-growth ledger and is split like any other oversized file; the formatting bump is not itself a reason to split, so the target below is the pre-existing ADR-061 ownership question, not this change.",
-      "review_by": "2026-11-30"
-    },
-    {
-      "path": "tests/test_diff_platform_deep.py",
-      "baseline_lines": 1208,
-      "target": "see ADR-061 ownership map",
-      "rule": "no_growth",
-      "disposition": "migrate",
-      "category": "legacy_oversized_test_module",
-      "owner": "abicheck maintainers",
-      "rationale": "New entry, 940 -> 1208, created by the one-time `ruff format` pass that made `fmt-check` a real CI gate (see docs/contribute/known-gaps.md). This file sat under the 1200-line maximum only because it was unformatted; rewrapping its call sites and expanding magic trailing commas crossed the cap without adding a statement (its parsed statement count is unchanged, verified via `ast.dump`). Recorded as debt rather than exempted so it stays in the no-growth ledger and is split like any other oversized file; the formatting bump is not itself a reason to split, so the target below is the pre-existing ADR-061 ownership question, not this change.",
-      "review_by": "2026-11-30"
-    },
-    {
       "path": "tests/test_new_detectors.py",
       "baseline_lines": 1201,
       "target": "see ADR-061 ownership map",
@@ -2599,7 +2214,7 @@
     },
     {
       "path": "tests/test_real_world_false_positives.py",
-      "baseline_lines": 1367,
+      "baseline_lines": 1366,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "disposition": "migrate",

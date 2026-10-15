@@ -24,6 +24,10 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+if str(Path(__file__).resolve().parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+from architecture_graph import find_cycle  # noqa: E402 -- sibling leaf, see that module
+
 SCHEMA_VERSION = 1
 GENERIC_NAMES = frozenset(
     {"helpers.py", "utils.py", "common.py", "misc.py", "base.py", "extra.py", "more.py"}
@@ -141,32 +145,6 @@ def _safe_relative_path(
     return value
 
 
-def _find_cycle(graph: Mapping[str, set[str]]) -> list[str] | None:
-    active: list[str] = []
-    done: set[str] = set()
-
-    def visit(node: str) -> list[str] | None:
-        if node in active:
-            start = active.index(node)
-            return [*active[start:], node]
-        if node in done:
-            return None
-        active.append(node)
-        for target in sorted(graph.get(node, ())):
-            cycle = visit(target)
-            if cycle:
-                return cycle
-        active.pop()
-        done.add(node)
-        return None
-
-    for node in sorted(graph):
-        cycle = visit(node)
-        if cycle:
-            return cycle
-    return None
-
-
 def _validate_modules(
     config: dict[str, Any], findings: list[Finding]
 ) -> dict[str, dict[str, Any]]:
@@ -246,7 +224,7 @@ def _validate_modules(
                         f"legacy path {legacy_path!r} is classified by both {previous!r} and {name!r}",
                     )
                 )
-    cycle = _find_cycle(
+    cycle = find_cycle(
         {name: imports & graph.keys() for name, imports in graph.items()}
     )
     if cycle:
@@ -1084,6 +1062,17 @@ def _check_debt_entry(
         )
         return
     lines = _line_count(path)
+    if lines < baseline:
+        # Slack: a baseline above the real size lets the file grow back up to
+        # it unseen, so the ratchet must follow every shrink down.
+        findings.append(
+            Finding(
+                "debt-slack",
+                f"{relative}: baseline_lines {baseline} is {baseline - lines} above "
+                f"the actual {lines} lines; lower it with "
+                "`python scripts/tighten_debt_baselines.py`",
+            )
+        )
     base_lines = _debt_base_lines(
         root,
         relative,
@@ -1564,7 +1553,7 @@ def _check_dependency_graph(
             graph,
             findings,
         )
-    cycle = _find_cycle(graph)
+    cycle = find_cycle(graph)
     if cycle:
         findings.append(
             Finding(
