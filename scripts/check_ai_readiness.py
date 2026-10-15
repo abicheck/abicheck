@@ -309,10 +309,15 @@ def _read_size_caps(path: Path) -> dict[str, int]:
     enforces too.
     """
     limits = json.loads(_read(path)).get("limits", {})
-    if not isinstance(limits.get("production"), int) or not isinstance(
-        limits.get("test"), int
+    # `type(...) is int`, not isinstance: bool is an int subclass, and a
+    # `true` cap would silently become a 1-line limit.
+    if not all(
+        type(limits.get(key)) is int and limits[key] > 0
+        for key in ("production", "test")
     ):
-        raise RuntimeError(f"{path}: no integer limits.production / limits.test")
+        raise RuntimeError(
+            f"{path}: limits.production / limits.test must be positive integers"
+        )
     return {"production": limits["production"], "test": limits["test"]}
 
 
@@ -3483,11 +3488,17 @@ CHECKS: dict[str, Callable[[Findings], None]] = {
 }
 
 
-def _run_one_check(name: str) -> tuple[list[tuple[str, str]], list[tuple[str, str]]]:
-    """Run one check in a worker process; return its findings for the parent."""
+def _run_one_check(
+    name: str,
+) -> tuple[list[tuple[str, str]], list[tuple[str, str]], list[tuple[str, str]]]:
+    """Run one check in a worker process; return its findings for the parent.
+
+    Infos come back too: dropping them here would make the report depend on
+    --jobs, since the serial path prints them.
+    """
     findings = Findings()
     CHECKS[name](findings)
-    return findings.errors, findings.warnings
+    return findings.errors, findings.warnings, findings.infos
 
 
 def _workers_can_import_this_module() -> bool:
@@ -3561,9 +3572,10 @@ def main(argv: list[str] | None = None) -> int:
         from concurrent.futures import ProcessPoolExecutor
 
         with ProcessPoolExecutor(max_workers=min(jobs, len(selected))) as pool:
-            for errors, warnings in pool.map(_run_one_check, selected):
+            for errors, warnings, infos in pool.map(_run_one_check, selected):
                 findings.errors.extend(errors)
                 findings.warnings.extend(warnings)
+                findings.infos.extend(infos)
     else:
         for name in selected:
             CHECKS[name](findings)

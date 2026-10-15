@@ -250,3 +250,30 @@ def test_findings_info_is_printed_but_never_counted(car, capsys):
     assert car.Findings().report() == 0
     assert f.report() == 0
     assert "INFO:  commit heuristic" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("bad", [True, False, 0, -5, "800", 800.0])
+def test_size_caps_reject_non_positive_or_non_int_values(car, tmp_path, bad):
+    """bool is an int subclass, so `true` must not pass as a 1-line cap."""
+    modules = tmp_path / "modules.json"
+    modules.write_text(
+        json.dumps({"limits": {"production": bad, "test": 1200}}), encoding="utf-8"
+    )
+    with pytest.raises(RuntimeError, match="positive integers"):
+        car._read_size_caps(modules)
+
+
+def test_run_one_check_returns_infos_for_the_parallel_path(car, monkeypatch):
+    """The process-pool worker must hand back INFO notes, or --jobs changes
+    what the report prints."""
+
+    def fake(f):
+        f.err("x", "an error")
+        f.warn("x", "a warning")
+        f.info("x", "an info note")
+
+    monkeypatch.setitem(car.CHECKS, "fake-check", fake)
+    errors, warnings, infos = car._run_one_check("fake-check")
+    assert errors == [("x", "an error")]
+    assert warnings == [("x", "a warning")]
+    assert infos == [("x", "an info note")]
