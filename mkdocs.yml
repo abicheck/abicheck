@@ -93,6 +93,8 @@ nav:
       - Python Extensions:
         - Python Extensions (abi3): use/python-extensions.md
         - POST Python Manifests: use/post-python.md
+      - Other Languages:
+        - Rust Libraries: use/rust-libraries.md
       - Kernel & eBPF:
         - Kernel & eBPF (BTF): use/kernel-btf.md
       - Build & Toolchain Contracts:

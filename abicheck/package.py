@@ -883,18 +883,26 @@ class RpmExtractor:
 # ── Deb extractor ────────────────────────────────────────────────────────────
 
 _DEB_MAGIC = b"!<arch>\n"
+# A .deb is an ar archive whose first member is always ``debian-binary``
+# (deb-format(5)). The bare ``!<arch>`` magic is shared with every static
+# archive (``.a``, Rust ``.rlib``, ...), so matching the magic alone routed
+# those to this extractor and failed with "No data.tar.* found in Deb package".
+_DEB_FIRST_MEMBERS = (b"debian-binary", b"debian-binary/")
 
 
 class DebExtractor:
     """Extract Debian packages using ar + tar."""
 
     def detect(self, pkg_path: Path) -> bool:
-        # Magic only, same reason as `RpmExtractor.detect` above.
+        # Magic plus the first ar member name (16-byte field after the magic),
+        # which is what separates a .deb from a plain static archive.
         try:
             with open(pkg_path, "rb") as f:
-                return f.read(8) == _DEB_MAGIC
+                header = f.read(8 + 16)
         except OSError:
             return False
+        name = header[8:24].rstrip(b" ")
+        return header[:8] == _DEB_MAGIC and name in _DEB_FIRST_MEMBERS
 
     def extract(self, pkg_path: Path, target_dir: Path) -> ExtractResult:
         _log.info("Extracting Deb: %s", pkg_path)

@@ -80,7 +80,7 @@ from abicheck.workflows.evidence_transport import (
 # ── shape builders: content only, the caller picks the name ──────────────────
 
 _RPM_MAGIC = b"\xed\xab\xee\xdb"
-_DEB_MAGIC = b"!<arch>\n"
+_DEB_MAGIC = b"!<arch>\n" + b"debian-binary".ljust(60)
 
 
 def _tar_bytes(members: dict[str, bytes], *, mode: str = "w:gz") -> bytes:

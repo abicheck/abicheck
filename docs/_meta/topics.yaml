@@ -155,6 +155,17 @@ topics:
     allowed_summaries:
       - skills-src/shared/remediation-catalog.md
 
+  # Rust is supported only as a C-ABI cdylib (the stable surface is the C ABI);
+  # the page declares that boundary and what was verified against it.
+  rust-libraries:
+    canonical_page: use/rust-libraries.md
+    fact_sources:
+      - abicheck/policies/rust_c_ffi.yaml
+      - abicheck/package.py
+      - abicheck/diff_templates.py
+    allowed_summaries:
+      - use/policies.md
+
   platform-support-matrix:
     canonical_page: learn/limitations.md
     allowed_summaries:

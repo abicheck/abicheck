@@ -278,10 +278,11 @@ class TestCompareOldBundleFactsEarlyRejections:
         facts_path.write_text(_STUB_BUNDLE_FACTS_JSON)
         staging = tmp_path / "staging"
         staging.mkdir()
+        (staging / "debian-binary").write_text("2.0\n")
         (staging / "dummy.txt").write_text("dummy\n")
         fake_deb = tmp_path / "fake.deb"
         subprocess.run(
-            [ar, "rcs", str(fake_deb), "dummy.txt"],
+            [ar, "rcs", str(fake_deb), "debian-binary", "dummy.txt"],
             cwd=staging,
             check=True,
             capture_output=True,
