@@ -50,10 +50,14 @@ jobs:
           allow-prereleases: true
           cache: 'pip'
       - name: Build sdist and wheel
+        # verify.py's `distribution-build` step: the isolated `build` run, the
+        # `twine check` and the metadata validation that ci.yml's
+        # fair-metadata job runs on every PR. Replaces the inline
+        # `python -m build` + `twine check dist/*` pair. --require-complete
+        # makes a missing build/twine fail instead of skipping.
         run: |
           python -m pip install --upgrade pip build twine
-          python -m build
-          twine check dist/*
+          python scripts/verify.py --profile pr --only distribution-build --require-complete
       - name: Install the built wheel into a clean venv
         run: |
           python -m venv "$RUNNER_TEMP/venv"
