@@ -89,7 +89,35 @@ jobs:
         uses: ./.github/actions/setup-castxml
       - name: Install system deps (macOS)
         if: runner.os == 'macOS'
-        run: brew install castxml cmake
+        run: brew install cmake
+      - name: Set up pinned CastXML (macOS)
+        # Homebrew's castxml is unpinnable here: its stable formula moved to
+        # 0.8.0, which castxml/policy.py rejects (MAX_CASTXML is an exclusive
+        # 0.8.0 bound), and Homebrew keeps no versioned castxml formula. Install
+        # the exact conda-forge osx-arm64 build that pixi.lock already commits
+        # to (castxml 0.7.0, build hfc9ce51_0) instead, via a micromamba
+        # bootstrap whose sha256 is verified (same pin as the osx-arm64 asset
+        # of the micromamba release used elsewhere in this repo).
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          MICROMAMBA_VERSION: '2.9.0-0'
+          MICROMAMBA_OSX_ARM64_SHA256: 'ec2a072f028e1a7cf20f3e2e74d5a8127cf5a5f27636375b5359811565f4e5be'
+        run: |
+          set -euo pipefail
+          [ "$(uname -m)" = "arm64" ] || { echo "::error::expected an arm64 macOS runner"; exit 1; }
+          work="$(mktemp -d)"
+          curl --fail --location --silent --show-error --retry 3 --retry-all-errors \
+            --output "$work/micromamba" \
+            "https://github.com/mamba-org/micromamba-releases/releases/download/${MICROMAMBA_VERSION}/micromamba-osx-arm64"
+          echo "${MICROMAMBA_OSX_ARM64_SHA256}  $work/micromamba" | shasum -a 256 -c -
+          chmod +x "$work/micromamba"
+          env_prefix="$RUNNER_TEMP/castxml-env"
+          MAMBA_ROOT_PREFIX="$RUNNER_TEMP/mamba-root" "$work/micromamba" create -y \
+            -p "$env_prefix" -c conda-forge "castxml=0.7.0=hfc9ce51_0"
+          echo "$env_prefix/bin" >> "$GITHUB_PATH"
+          export PATH="$env_prefix/bin:$PATH"
+          castxml --version | grep -q '^castxml version 0\.7\.0' || { echo "::error::unexpected castxml version"; castxml --version; exit 1; }
       - name: Install system deps (Windows)
         if: runner.os == 'Windows'
         # The PyPI `castxml` wheel is a stale 0.4.5 legacy build that the
