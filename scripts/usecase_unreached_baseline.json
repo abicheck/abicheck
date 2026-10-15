@@ -3688,7 +3688,7 @@
   "abicheck/extract/headers/clang/vtable.py::_top_level_param_list_close",
   "abicheck/extract/headers/clang/vtable.py::build_vtable",
   "abicheck/extract/headers/clang/vtable.py::is_record_definition",
-  "abicheck/extract/headers/header_ast_backend.py::HeaderAstBackend.parse",
+  "abicheck/extract/headers/header_backend_protocol.py::HeaderAstBackend.parse",
   "abicheck/extract/headers/manifest.py::_run_tu_fragments",
   "abicheck/extract/headers/manifest.py::_run_tu_fragments.<locals>._handle_failure",
   "abicheck/extract/headers/manifest.py::_run_tu_fragments.<locals>._run_one",

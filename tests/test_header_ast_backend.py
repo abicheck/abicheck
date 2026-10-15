@@ -41,7 +41,7 @@ from abicheck.extract.header_ast_fields import parse_header_ast_fields
 from abicheck.extract.headers.castxml.backend import CastxmlBackend, CastxmlRunError
 from abicheck.extract.headers.castxml.probe import check_scan_deadline, run_castxml
 from abicheck.extract.headers.clang.backend import ClangBackend
-from abicheck.extract.headers.header_ast_backend import (
+from abicheck.extract.headers.header_backend_protocol import (
     HeaderAstBackend,
     HeaderParseRequest,
 )

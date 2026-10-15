@@ -28,7 +28,7 @@ from abicheck.extract.headers.castxml.backend import CastxmlBackend
 from abicheck.extract.headers.castxml.calling_convention import (
     source_calling_conventions,
 )
-from abicheck.extract.headers.header_ast_backend import HeaderParseRequest
+from abicheck.extract.headers.header_backend_protocol import HeaderParseRequest
 
 pytestmark = [
     pytest.mark.integration,
