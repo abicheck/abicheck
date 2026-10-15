@@ -117,7 +117,13 @@ jobs:
             -p "$env_prefix" -c conda-forge "castxml=0.7.0=hfc9ce51_0"
           echo "$env_prefix/bin" >> "$GITHUB_PATH"
           export PATH="$env_prefix/bin:$PATH"
-          castxml --version | grep -q '^castxml version 0\.7\.0' || { echo "::error::unexpected castxml version"; castxml --version; exit 1; }
+          # castxml prints its version banner on stderr, so capture both streams
+          # (a stdout-only pipe into grep sees nothing and fails).
+          version_output="$(castxml --version 2>&1)"
+          case "$version_output" in
+            "castxml version 0.7.0"*) ;;
+            *) echo "::error::unexpected castxml version"; echo "$version_output"; exit 1 ;;
+          esac
       - name: Install system deps (Windows)
         if: runner.os == 'Windows'
         # The PyPI `castxml` wheel is a stale 0.4.5 legacy build that the
