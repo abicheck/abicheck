@@ -23,13 +23,13 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from .gate import contract_coverage_blocks
+from .report_gate import contract_coverage_blocks
 
 
 def disposition_audit_block(data: Mapping[str, Any]) -> Mapping[str, Any] | None:
     """The report's own ``disposition_audit`` mapping, or ``None``.
 
-    Reuses :func:`~abicheck.workflows.aggregate.gate.contract_coverage_blocks`'s
+    Reuses :func:`~abicheck.workflows.aggregate.report_gate.contract_coverage_blocks`'s
     shape-aware traversal (root for ``compare``/release, ``diff``/
     ``report.diff`` for a scan-shaped report) purely so a nested scan report
     is handled the same way every other per-report reader here handles it --

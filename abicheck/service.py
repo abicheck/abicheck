@@ -24,13 +24,6 @@ Provides framework-agnostic functions for the core abicheck operations:
 
 from __future__ import annotations
 
-from .workflows.contracts import (
-    CompareRequest,
-    CompareResult,
-    DumpRequest,
-    OutputSpec,
-)
-
 # ── Input resolution (ADR-061 Phase 4): moved to ``workflows.input_resolution``.
 # Re-exported under their public names so ``from abicheck.service import
 # resolve_input`` keeps working. Private helpers are imported from their owner.
@@ -42,6 +35,12 @@ from .workflows.input_resolution import (
     sniff_text_format,
 )
 from .workflows.request_inputs import InputSpec
+from .workflows.service_requests import (
+    CompareRequest,
+    CompareResult,
+    DumpRequest,
+    OutputSpec,
+)
 
 # ── Binary dumping: ``run_dump`` lives in ``workflows.dump.native``; each
 # format's primary extraction is a ``workflows.dump.formats`` adapter. To
@@ -123,7 +122,7 @@ from .workflows.dump.native import run_dump
 # leaf module ``service_dump_pipeline``. Re-exported for the same reason:
 # ``from abicheck.service import run_dump_request`` is the typed entry point
 # every front end (CLI, typed Python) builds a request for. ──────────────────
-from .workflows.dump.pipeline import run_dump_request
+from .workflows.dump.request_to_snapshot import run_dump_request
 
 # ADR-061 gap D, closed: the directory/package release fan-out's
 # pre-execution resolution is one typed request/plan pair, reachable from

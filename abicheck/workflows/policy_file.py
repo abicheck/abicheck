@@ -22,7 +22,7 @@ apply it to ``extract``/``storage``: once ``policy_file.py`` is classified
 list ``policy``, so a CLI module that needs ``PolicyFile`` to type a loaded
 policy document, or that calls one of its module-level loader/dedup helpers,
 reaches them through this facade instead of importing ``policy_file.py``
-directly -- the identical route ``workflows/suppression.py`` already gives
+directly -- the identical route ``workflows/suppression_input.py`` already gives
 ``SuppressionList``. ``service.py`` (itself ``workflows``-classified)
 already gets this right for the real load (``load_suppression_and_policy``);
 this module gives the flat CLI helpers (``cli_params.py``,
@@ -38,7 +38,7 @@ new implementation appears here. ``policy_file.py`` remains the one module
 to read and to change.
 
 ``from ..x import y`` **binds** ``y`` here at import time, the same
-consequence ``workflows/suppression.py``'s own docstring records -- a test
+consequence ``workflows/suppression_input.py``'s own docstring records -- a test
 that needs to substitute this must patch it *here*, where the call actually
 resolves.
 """

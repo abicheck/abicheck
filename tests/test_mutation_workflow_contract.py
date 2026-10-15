@@ -120,7 +120,7 @@ def _test_globs() -> set[str]:
 
     A module inside a sub-package below a layer
     (``abicheck/<layer>/<package>/<module>.py``) is keyed by its *package*:
-    ``compare/finding_identity/change.py``'s tests are
+    ``compare/finding_identity/change_identity.py``'s tests are
     ``tests/test_finding_identity*.py``, and a per-file stem (``change``,
     ``symbols``) would both miss them and match unrelated test files.
     """
@@ -655,11 +655,11 @@ _ACCEPTED_KILL_LOSS = {
             "abicheck.diff_symbols",
             "abicheck.diff_types",
             "abicheck.diff_vtable_layout",
-            "abicheck.compare.finding_identity.change",
+            "abicheck.compare.finding_identity.change_identity",
             "abicheck.compare.finding_identity.change_kinds",
             "abicheck.compare.finding_identity.mangled",
             "abicheck.compare.finding_identity.report_ids",
-            "abicheck.compare.finding_identity.symbols",
+            "abicheck.compare.finding_identity.declaration_identity",
             "abicheck.idioms",
             "abicheck.model.evidence_status",
             "abicheck.name_classification",
@@ -701,11 +701,11 @@ _ACCEPTED_KILL_LOSS = {
             "abicheck.diff_symbols",
             "abicheck.diff_types",
             "abicheck.diff_vtable_layout",
-            "abicheck.compare.finding_identity.change",
+            "abicheck.compare.finding_identity.change_identity",
             "abicheck.compare.finding_identity.change_kinds",
             "abicheck.compare.finding_identity.mangled",
             "abicheck.compare.finding_identity.report_ids",
-            "abicheck.compare.finding_identity.symbols",
+            "abicheck.compare.finding_identity.declaration_identity",
             "abicheck.idioms",
             "abicheck.name_classification",
             "abicheck.pattern_verdicts",
@@ -743,11 +743,11 @@ _ACCEPTED_KILL_LOSS = {
         {
             "abicheck.policy.classification",
             "abicheck.model.evidence_status",
-            "abicheck.compare.finding_identity.change",
+            "abicheck.compare.finding_identity.change_identity",
             "abicheck.compare.finding_identity.change_kinds",
             "abicheck.compare.finding_identity.mangled",
             "abicheck.compare.finding_identity.report_ids",
-            "abicheck.compare.finding_identity.symbols",
+            "abicheck.compare.finding_identity.declaration_identity",
             "abicheck.name_classification",
             "abicheck.policy.selectors",
             "abicheck.policy.selectors_namespace_glob",
@@ -821,11 +821,11 @@ _ACCEPTED_KILL_LOSS = {
         {
             "abicheck.policy.classification",
             "abicheck.model.evidence_status",
-            "abicheck.compare.finding_identity.change",
+            "abicheck.compare.finding_identity.change_identity",
             "abicheck.compare.finding_identity.change_kinds",
             "abicheck.compare.finding_identity.mangled",
             "abicheck.compare.finding_identity.report_ids",
-            "abicheck.compare.finding_identity.symbols",
+            "abicheck.compare.finding_identity.declaration_identity",
             "abicheck.name_classification",
             "abicheck.policy.selectors",
             "abicheck.policy.selectors_namespace_glob",

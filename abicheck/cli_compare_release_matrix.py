@@ -61,8 +61,8 @@ from .frontends.cli.release_summary import (  # moved (ADR-065 S2), re-exported
 from .frontends.cli.runtime import _safe_write_output, _write_or_echo  # noqa: F401
 from .model.symbol_inventory import SymbolInventory
 from .report.comparison_scope import ComparisonScopeTerms
-from .report.release_assurance import ReleaseAssuranceTerms
-from .report.release_public_surface import ReleasePublicSurfaceTerms
+from .report.release_assurance_section import ReleaseAssuranceTerms
+from .report.release_public_surface_section import ReleasePublicSurfaceTerms
 from .workflows.extraction import package_component_inventory  # noqa: F401
 from .workflows.gate import (
     apply_removed_member_floor,

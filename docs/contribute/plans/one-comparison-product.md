@@ -55,7 +55,7 @@ Stale facts corrected while compacting, each verified against the tree:
 - **`FindingEvolution` is wired.** Phase 1 item 2's primitive is consumed by
   `project history` (`abicheck/cli_project.py` → `workflows/history.py`'s
   `apply_finding_evolution` per adjacent pair) and by `compare`'s own report
-  (`reporter.py`/`report/build.py` → `report/finding_evolution.py`'s
+  (`reporter.py`/`report/document_builder.py` → `report/finding_evolution_section.py`'s
   `finding_evolution` block). The earlier "not yet wired into any CLI
   command" claim was stale.
 - **`skills-src/evaluation/validation/scripts/run_oneapi_scan.py` and `skills-src/evaluation/field/scan_level_scaling.py`
@@ -194,7 +194,7 @@ The "Current owner" column is the owner **at the 2026-09-06 audit**; every
 |---|---|---|---|---|---|
 | 1 | Baseline comparison (`--against`) | `cli_scan_baseline.py`, `scan_engine.run_scan_core` | `compare OLD NEW` | DELETE (it *is* `compare`) | **Done** (Phase 6). Parity gate (Phase 3) passed first |
 | 2 | Audit-only mode (no `--against`) | `scan_engine._audit_exit_code` | `compare --no-baseline` | COMPARE-STAGE | **Done.** Rides ADR-065's `declared_absent` state; `policy/no_baseline_findings.py` partitions the self-diff; audit gating via `policy/audit_gate_exit.py` (exit `3`, opt-in through `--severity-preset`) |
-| 3 | Cross-source checks (11) | `buildsource/cross_source_checks.py`, run only from `scan_engine` | `compare` pipeline, per side | COMPARE-STAGE | **Done, 11 of 11.** Run automatically in every `compare()` (`cross_source_checks` default `True`, no flag — D4/D5), evolution-stated via `workflows/cross_source_evolution.py`. D3's authority rule holds: findings stay `RISK`/`API_BREAK`, never advisory-only (the 2026-09-09 amendment deleted `scan`'s stripping of them as the bug it was) |
+| 3 | Cross-source checks (11) | `buildsource/cross_source_checks.py`, run only from `scan_engine` | `compare` pipeline, per side | COMPARE-STAGE | **Done, 11 of 11.** Run automatically in every `compare()` (`cross_source_checks` default `True`, no flag — D4/D5), evolution-stated via `workflows/cross_source_hygiene.py`. D3's authority rule holds: findings stay `RISK`/`API_BREAK`, never advisory-only (the 2026-09-09 amendment deleted `scan`'s stripping of them as the bug it was) |
 | 4 | Private-header leakage | `crosscheck.private_header_leak` | as #3 | COMPARE-STAGE | **Done.** Boundary from `-H` directory provenance + `.abicheck.yml` `scope.public_header_dirs` (#22) |
 | 5 | public-vs-exported (`public_not_exported`, `exported_not_public`) | `crosscheck` | as #3 | COMPARE-STAGE | **Done.** As #4 |
 | 6 | Pattern checks (lexical pre-scan) | `buildsource/pattern_facts.py` | `compare` pipeline, per side | COMPARE-STAGE | **Done** (Phase 2b). `checker.compare`'s `pattern_preprocessor_scan` (default `True`, no flag) via `workflows/pattern_preprocessor_scan.py`; advisory `pattern_preprocessor_scan` report block, no `ChangeKind` |
@@ -207,7 +207,7 @@ The "Current owner" column is the owner **at the 2026-09-06 audit**; every
 | 13 | Risk-driven evidence selection (`--depth auto`) | `risk.py`, `model/evidence_depth_levels.py` | — | **DELETE** | **Done** (2026-09-09, ruled (b) by ADR-068's second amendment). Unpinned `--depth` resolves to `headers` (`evidence_depth_levels.resolve_unpinned_level`). Documented breaking change: a job relying on escalation must pin its rung |
 | 14 | Risk rule overrides (`--risk-rules`) | `cli_scan_baseline._load_risk_rules` | — | **DELETE** | **Done** (ruled (b)): nothing left to tune once #13 selects nothing; no `risk:` config key |
 | 15 | CPython/`abi3` audit (`--abi3`) | `scan_abi3_resolve.py`, `scan_engine._run_abi3_audit` | `compare` candidate-side enrichment stage | COMPARE-STAGE; floor value is CONFIG (`python.abi3_floor`) | **Done** (Phase 2d). Precondition failure uses the exit-`7` axis. A declared `python.abi3_floor` arms it with no flag (re-verified 2026-10-03) |
-| 16 | Artifact-set / multi-library audit (`--artifact-set`) | `service_scan.run_scan_set`, `bundle.py` | `compare --no-baseline DIR` over ADR-065 members | DELETE (mode); capability preserved | **Done** (2026-10-03, acceptance F-23). Mode deleted; `compare --no-baseline DIR` audits each member of a directory, package archive, or multi-artifact stored package through the same per-candidate sequence as a scalar audit (`workflows/no_baseline_set.py`), with members resolved by the one-sided release resolver both shapes now share (`release_inputs.resolve_release_side`) and ADR-065's acquisition record (`--select`/`--select-required`, `scope.on_incomplete`, D2 inventory proof). One `audit_set` document (`report/no_baseline_set.py`, `audit_set_report.schema.json`). No typed request yet (`known-gaps.md`) |
+| 16 | Artifact-set / multi-library audit (`--artifact-set`) | `service_scan.run_scan_set`, `bundle.py` | `compare --no-baseline DIR` over ADR-065 members | DELETE (mode); capability preserved | **Done** (2026-10-03, acceptance F-23). Mode deleted; `compare --no-baseline DIR` audits each member of a directory, package archive, or multi-artifact stored package through the same per-candidate sequence as a scalar audit (`workflows/no_baseline_set.py`), with members resolved by the one-sided release resolver both shapes now share (`release_inputs.resolve_release_side`) and ADR-065's acquisition record (`--select`/`--select-required`, `scope.on_incomplete`, D2 inventory proof). One `audit_set` document (`report/audit_set.py`, `audit_set_report.schema.json`). No typed request yet (`known-gaps.md`) |
 | 17 | Set member-identity/provider manifest (`scan --manifest`) | `cli_scan_helpers.load_artifact_set_manifest`; ADR-056; cli-cleanup PR H | `.abicheck.yml` bundle/provider contract, read by the same path | CONFIG | `scan` side deleted; PR H cancelled. Provider resolution is G42's. Member *selection* over a set audit is `--select`/`--select-required` on `compare --no-baseline DIR` (row 16) |
 | 18 | Analysis completeness/assurance | `analysis_assurance`, `--require-complete-analysis` (both commands) | `compare` (already present) | MERGE | **Done.** Flag demoted to `assurance.require_complete` after Phase 6 |
 | 19 | Budget guard (`--budget`) | `scan_engine._check_scan_budget`, `_BudgetOverflow`, exit `5` | `compare --budget`, `ExitDecision` operational axis | ADVANCED KEEP; default in CONFIG | **Done** (Phase 4 commit 2). `deadline.deadline_scope` across resolve + classify; `DiffResult.budget_overflow`; typed API `CompareRequest.budget_s` |
@@ -459,9 +459,9 @@ Six cross-cutting blockers. Each gated a whole phase, not one row.
 | # | Prerequisite | Gates | State |
 |---|---|---|---|
 | P1 | An acquisition state for "OLD declared absent" in ADR-065's vocabulary, with its completeness/outcome consequences | `--no-baseline` (§3 #2) | **Landed** (2026-09-09): `declared_absent` is a real `AcquisitionState`, stated as `old_acquisition_state` in every audit report |
-| P2 | An evolution state on the canonical finding model, `not_evaluated` included, carried by `report/`'s compute/render pair | Every one-sided check migration (§3 #3-#8, #15) | **Landed** as a deliberately distinct enum from Phase 1's cross-comparison `FindingEvolution`: `checker_policy.CrossSourceEvolution` + `Change.cross_source_evolution`, produced by `workflows.cross_source_evolution.compute_cross_source_evolution`, projected by `report.cross_source_evolution`. Per-finding identity is a per-check function (a bare `symbol` key collapsed distinct findings for several checks). The correctness crux — a pre-existing problem never reads as newly introduced when one side's evidence is insufficient — is a property test for all eleven checks |
+| P2 | An evolution state on the canonical finding model, `not_evaluated` included, carried by `report/`'s compute/render pair | Every one-sided check migration (§3 #3-#8, #15) | **Landed** as a deliberately distinct enum from Phase 1's cross-comparison `FindingEvolution`: `checker_policy.CrossSourceEvolution` + `Change.cross_source_evolution`, produced by `workflows.cross_source_hygiene.compute_cross_source_evolution`, projected by `report.cross_source_evolution`. Per-finding identity is a per-check function (a bare `symbol` key collapsed distinct findings for several checks). The correctness crux — a pre-existing problem never reads as newly introduced when one side's evidence is insufficient — is a property test for all eleven checks |
 | P3 | `compare` emitting the budget-overflow (`5`) and evidence-contract (`7`) exit axes | `scan`'s deletion | **Landed** (Phase 4 commit 2); §3 #19/#28 |
-| P4 | A public/internal boundary derivable from `-H` directory provenance plus `.abicheck.yml` `scope.public_header_dirs` | §3 #4, #5, #22 | **Solved** for both sources, threaded into `InputSpec.public_header_dirs`/`provenance.apply_provenance`. No new CLI flag. The file-vs-directory asymmetry is preserved verbatim (see `workflows/cross_source_evolution.py`'s module docstring) |
+| P4 | A public/internal boundary derivable from `-H` directory provenance plus `.abicheck.yml` `scope.public_header_dirs` | §3 #4, #5, #22 | **Solved** for both sources, threaded into `InputSpec.public_header_dirs`/`provenance.apply_provenance`. No new CLI flag. The file-vs-directory asymmetry is preserved verbatim (see `workflows/cross_source_hygiene.py`'s module docstring) |
 | P5 | ADR-065 S3's package component inventories | `compare --no-baseline DIR` (§3 #16, #17); `--select-required` merge | **Landed** (ADR-065 S3, 2026-09-06): `model/package_inventory.py`, `package.package_component_inventory`. This row read "Open" until 2026-10-03 |
 | P6 | `EntityId`-based public closure (ADR-063 Phase 2) and `public-contract-default.md` Phase 6's two relevance defects plus two uncovered measurement lanes | Phase 9 only | **Defects closed (2026-10-01).** The seed mismatch was closed earlier; the identity gap is closed by schema v54 slot identities captured at extraction, not by a string heuristic. The `package`/`real_binaries` coverage bound was **accepted** (2026-10-02, integration-tested rather than in the always-on measurement) |
 
@@ -535,8 +535,8 @@ The `gaps.py` registry and its contract test are deleted.
    via `checker_policy`), `Change.evolution`/`DiffResult.resolved_findings`,
    the correspondence primitive `policy/finding_evolution.py`
    (`compute_finding_evolution`/`compute_resolved_findings`/
-   `apply_finding_evolution`) and the projection `report/finding_evolution.py`.
-   **Consumed** by `compare`'s JSON report (`reporter.py`/`report/build.py`)
+   `apply_finding_evolution`) and the projection `report/finding_evolution_section.py`.
+   **Consumed** by `compare`'s JSON report (`reporter.py`/`report/document_builder.py`)
    and by `project history` (`cli_project.py` → `workflows/history.py`, one
    `apply_finding_evolution` per adjacent pair; `PairwiseSummary` carries
    `evolution_counts`/`resolved`). Markdown/HTML rendering of the evolution
@@ -553,7 +553,7 @@ automatically, with no enable flag** on any front end (ADR-068 D4/D5 reject
 "a flag that merely enables useful analysis").
 
 - **2a** cross-source checks (§3 #3–#5) — all eleven, via
-  `workflows/cross_source_evolution.py`, on the `CrossSourceEvolution` axis
+  `workflows/cross_source_hygiene.py`, on the `CrossSourceEvolution` axis
   (P2; distinct from Phase 1's cross-comparison `FindingEvolution` because it
   states OLD-vs-NEW behavior *within one* `compare()` call). Checks whose
   findings are not uniquely keyed by symbol register their own identity
@@ -693,7 +693,7 @@ condensed version in [known gaps](../known-gaps.md).
   `may_import: [model]`), and `buildsource/scan_levels.py` →
   `model/evidence_depth_levels.py`.
 - **Kept, not `scan`'s (list E):** `workflows/pattern_preprocessor_scan.py`,
-  `report/pattern_preprocessor_scan.py`, `docs/use/evidence-depth.md`,
+  `report/pattern_preprocessor_section.py`, `docs/use/evidence-depth.md`,
   `changelog.d/*scan*.md` (history). Naming-sweep false positives kept:
   `tests/test_scan_accuracy.py`, `tests/test_realworld_scan.py`,
   `tests/test_header_scan_deadline_integration.py`,
@@ -749,7 +749,7 @@ introspection, 2026-09-29).
 **7f — `dump` provenance merge. Done.** `--git-tag`/`--build-id`/`--no-git`
 → one repeatable `--provenance KEY=VALUE` (`git-tag=`, `build-id=`,
 `git=auto|off`; last-one-wins per key). Grammar in
-`frontends/cli/options/provenance.py`, validated eagerly by a Click callback
+`frontends/cli/options/dump_provenance.py`, validated eagerly by a Click callback
 so every malformed token is exit `64` before extraction.
 
 **7g — resource limits. Done.** `--max-json-object-nodes` →

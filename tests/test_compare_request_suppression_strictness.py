@@ -125,7 +125,7 @@ def test_expired_message_names_each_selector_kind(
 ) -> None:
     """Every selector kind a rule can carry is named in the error, never "?"."""
     from abicheck.workflows.compare_policy import expired_suppressions_message
-    from abicheck.workflows.suppression import SuppressionList
+    from abicheck.workflows.suppression_input import SuppressionList
 
     sup = tmp_path / "sup.yaml"
     sup.write_text(

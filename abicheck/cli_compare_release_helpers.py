@@ -48,17 +48,17 @@ from typing import TYPE_CHECKING
 import click
 
 from .frontends.cli.release_exit import _exit_compare_release as _exit_compare_release
-from .workflows.contract_conflicts import (
-    # E-S3 case 3: does a package's declared contract match its own
-    # contained binary. Needs `elf_metadata` (`extract`, forbidden directly
-    # from `frontends`), so the real logic lives in `workflows`.
-    debian_symbols_release_conflict_lines as debian_symbols_release_conflict_lines,  # re-exported, E-S3
-)
 from .workflows.gate import (
     GateOptions as GateOptions,  # re-exported, ADR-064
     _resolve_release_severity_config as _resolve_release_severity_config,  # re-exported, ADR-064
     apply_release_gate_pack as apply_release_gate_pack,  # re-exported, ADR-064
     resolve_release_gate_options as resolve_release_gate_options,  # re-exported, ADR-064
+)
+from .workflows.package_claim_conflicts import (
+    # E-S3 case 3: does a package's declared contract match its own
+    # contained binary. Needs `elf_metadata` (`extract`, forbidden directly
+    # from `frontends`), so the real logic lives in `workflows`.
+    debian_symbols_release_conflict_lines as debian_symbols_release_conflict_lines,  # re-exported, E-S3
 )
 
 if TYPE_CHECKING:

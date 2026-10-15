@@ -125,7 +125,7 @@ _STARRED_CALL_ALLOWLIST: dict[tuple[str, str], str] = {
         "This *is* the fact-syncing wrapper — it derives each bridged "
         "field's sibling into the same call."
     ),
-    ("abicheck/workflows/contracts.py", "replace"): (
+    ("abicheck/workflows/service_requests.py", "replace"): (
         "CompareRequest/DumpRequest.replace(): typed request objects, no "
         "Fact[T]-bridged field on either (ADR-061 gap B: moved here from "
         "the flat abicheck/api_types.py facade)."

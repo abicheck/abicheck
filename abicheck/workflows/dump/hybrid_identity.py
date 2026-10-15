@@ -41,7 +41,7 @@ from ...model.mangled_name import itanium_scope_components
 from ...model.mangled_name_template_args import (
     skip_template_args as _skip_template_args,
 )
-from ...model.name_decoration import macho as macho_decoration
+from ...model.name_decoration import macho_underscore as macho_decoration
 from ...model.occurrence import OccurrenceId
 from ...model.semantic_ir import CanonicalEntity, SemanticIR, semantic_ir_conflict_key
 from ...model.synthetic_key import (
@@ -107,7 +107,7 @@ def _macho_normalize_mangled(mangled: str) -> str:
     ``_foo``; Itanium ``_Z...`` -> ``__Z...``). The header-AST backends now
     normalize this at the point of origin too, so *mangled* reaching here
     is ordinarily **already** undecorated -- the Itanium half delegates to
-    the Mach-O codec (``model.name_decoration.macho``): the ``"__Z..."``
+    the Mach-O codec (``model.name_decoration.macho_underscore``): the ``"__Z..."``
     Itanium shape first, then the C-linkage ``"_foo"`` -> ``"foo"`` shape.
     """
     stripped = macho_decoration.decode_itanium(mangled)

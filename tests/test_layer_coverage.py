@@ -24,7 +24,7 @@ from click.testing import CliRunner
 
 from abicheck.buildsource import pack_io
 from abicheck.buildsource.adapters import CMakeFileApiAdapter, NinjaAdapter
-from abicheck.buildsource.adapters.base import derive_build_options
+from abicheck.buildsource.adapters.adapter_contract import derive_build_options
 from abicheck.buildsource.build_diff import diff_build_evidence
 from abicheck.buildsource.build_evidence import (
     BuildEvidence,

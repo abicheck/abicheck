@@ -27,13 +27,15 @@ from .contracts import (
     TargetReport,
     parse_check_id,
 )
-from .execute import aggregate, aggregate_reports_dir, collect_reports
-from .fold import AggregateResult
-from .gate import (
-    contract_coverage_block_paths,
-    contract_coverage_blocks,
-    scan_severity_gate_paths,
+from .expected_targets import (
+    AggregateError,
+    ExpectedTargets,
+    OnMissingRequired,
+    OnUnexpectedTarget,
+    resolve_gate_policy,
 )
+from .fan_in_execution import aggregate, aggregate_reports_dir, collect_reports
+from .fold import AggregateResult
 from .load import parse_report_verdict, target_id_from_path
 from .matrix import (
     FindingMatrixEntry,
@@ -55,12 +57,10 @@ from .reconcile import (
     resolve_cross_abi_identity,
     resolve_report_change_identity,
 )
-from .resolve import (
-    AggregateError,
-    ExpectedTargets,
-    OnMissingRequired,
-    OnUnexpectedTarget,
-    resolve_gate_policy,
+from .report_gate import (
+    contract_coverage_block_paths,
+    contract_coverage_blocks,
+    scan_severity_gate_paths,
 )
 
 __all__ = [

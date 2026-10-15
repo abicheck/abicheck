@@ -88,7 +88,7 @@ entry proposes below:
 
 - **Step 1 ("de-duplicate first") is done.** A finding several members report
   identically is rendered once, release-scoped, naming every affected library
-  (`report.release_public_surface.dedupe_shared_member_findings`), and each
+  (`report.release_public_surface_section.dedupe_shared_member_findings`), and each
   member entry records how many of its findings were folded there
   (`product_level_findings`). Counts, verdicts and exit codes are untouched by
   the fold, so nothing is hidden or downgraded — only the duplicated evidence
@@ -5117,7 +5117,7 @@ ADR amendment for the full reasoning each):
   `scope.on_incomplete`, a directory `unproven`, a fully extracted archive or
   an asserting stored package `proven`), each member is audited by the same
   sequence a scalar audit runs, and the result is one `audit_set` document
-  (`report/no_baseline_set.py`, `audit_set_report.schema.json`). Still open:
+  (`report/audit_set.py`, `audit_set_report.schema.json`). Still open:
   the Action's `new-library-set` input keeps its usage error -- wiring it to
   this command is an Action-side slice, not done here.
 

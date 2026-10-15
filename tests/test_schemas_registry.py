@@ -21,8 +21,8 @@ import pytest
 from abicheck import schemas
 from abicheck.buildsource.build_output import BUILD_OUTPUT_SCHEMA
 from abicheck.buildsource.run_plan import RUN_PLAN_SCHEMA_SKIPPED
+from abicheck.report.audit_set import AUDIT_SET_REPORT_SCHEMA_VERSION
 from abicheck.report.no_baseline_document import AUDIT_REPORT_SCHEMA_VERSION
-from abicheck.report.no_baseline_set import AUDIT_SET_REPORT_SCHEMA_VERSION
 from abicheck.serialization import SCHEMA_VERSION
 from abicheck.workflows.aggregate import AGGREGATE_SCHEMA_VERSION
 

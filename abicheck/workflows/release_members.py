@@ -57,9 +57,9 @@ from .release_snapshot_retention import release_junit_pairs
 
 if TYPE_CHECKING:
     from ..pack_application import PackApplication
-    from .contracts import CompareResult
     from .gate import SeverityConfig
     from .release_admission import MemoryAdmission
+    from .service_requests import CompareResult
 
 __all__ = [
     "ReleaseMemberContext",

@@ -27,7 +27,6 @@ render the same resolved plan a real run consumes, instead of re-deriving a
 preview that looks authoritative while being connected to nothing.
 """
 
-from .contracts import ResolvedArtifactPlan
 from .execute import (
     SideResolution,
     embed_side_build_source,
@@ -38,6 +37,7 @@ from .resolve import (
     is_raw_source_tree,
     reject_hybrid_source_frontend,
 )
+from .resolved_plan import ResolvedArtifactPlan
 
 __all__ = [
     "ResolvedArtifactPlan",

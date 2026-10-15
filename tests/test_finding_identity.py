@@ -31,7 +31,7 @@ from abicheck.compare.finding_identity import (
     resolve_symbol_identity,
     resolve_variable_identity,
 )
-from abicheck.compare.finding_identity.change import _stringify_change_value
+from abicheck.compare.finding_identity.change_identity import _stringify_change_value
 from abicheck.compare.finding_identity.mangled import (
     _looks_like_itanium_encoding,
     _source_name_end,

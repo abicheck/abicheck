@@ -59,7 +59,7 @@ def add_env_matrix_digest(d: dict[str, Any], result: DiffResult) -> None:
     consumer treat a two-sided ``compare`` report and a ``--no-baseline``
     audit report identically for this field. Called from every JSON path
     (full/root-cause mode via ``json_sections.build_json_base``, leaf mode
-    directly) rather than only the canonical ``report/build.py`` path, so
+    directly) rather than only the canonical ``report/document_builder.py`` path, so
     the field's presence does not depend on ``--report-mode``.
     """
     digest = getattr(result, "env_matrix_source_sha256", None)

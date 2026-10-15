@@ -1485,7 +1485,7 @@ class TestMarkdownReporter:
         stale reference, so the filtered JSON's nested impact_assessment
         block kept publishing it even though the top-level field was
         correctly cleared (Codex review, fresh evidence)."""
-        from abicheck.impact.model import ImpactAssessment
+        from abicheck.impact.assessment import ImpactAssessment
 
         layout_change = Change(
             ChangeKind.LAYOUT_UNVERIFIABLE,

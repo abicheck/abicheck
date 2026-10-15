@@ -124,11 +124,11 @@ revision's changed paths — "this call reaches a file that changed this
 revision" is a stronger signal than "this call reaches *something*
 internal". The retired `scan --since` wired a changed-path set through to
 this automatically; `compare`'s own migrated cross-source-evolution path
-(`workflows.cross_source_evolution.compute_cross_source_evolution`, the
+(`workflows.cross_source_hygiene.compute_cross_source_evolution`, the
 `checker.compare()` call site this check now runs through) does not
 currently pass `--since`/`--changed-path` through to
 `CrosscheckConfig.changed_paths` at all — verified live in
-`workflows/cross_source_evolution.py`'s own `_run_one_side`, whose
+`workflows/cross_source_hygiene.py`'s own `_run_one_side`, whose
 `CrosscheckConfig(...)` construction never sets `changed_paths` — so this
 case is always reported at the lower "reaches something internal"
 confidence today, regardless of `--since`. This also means the

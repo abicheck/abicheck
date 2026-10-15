@@ -67,7 +67,7 @@ if TYPE_CHECKING:
     from ..bundle_manifest import InstantiationManifest
     from ..model.bundle_facts import BundleFacts
     from ..model.package_inventory import PackageInventory
-    from ..model.variant_pairing import VariantPairing
+    from ..model.variant_pairing_values import VariantPairing
 
 from ..model.scope_acquisition import (
     AcquisitionState,

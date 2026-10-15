@@ -23,7 +23,7 @@ direct Python callers, so a default can no longer silently diverge between
 front-ends (the ``scope_public`` True-vs-False drift ADR-037 §Context #1
 documents).
 
-The real owner behind the flat ``abicheck.workflows.contracts`` compatibility
+The real owner behind the flat ``abicheck.workflows.service_requests`` compatibility
 facade's pair/result half: :class:`OutputSpec`, :class:`CompareRequest`
 (with :meth:`CompareRequest.validate`), :class:`DumpRequest`, and
 :class:`CompareResult`. :class:`~abicheck.workflows.request_inputs.

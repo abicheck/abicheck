@@ -4,7 +4,7 @@
 """JSON projection of ``DiffResult.pattern_preprocessor_scan`` (ADR-068 D3/D4/D5;
 plan §3 #6/#8, Phase 2b).
 
-Mirrors ``report/finding_evolution.py``'s own shape: the *decision* (what
+Mirrors ``report/finding_evolution_section.py``'s own shape: the *decision* (what
 each primitive found, and how it folds OLD vs NEW) is made once, by
 ``workflows.pattern_preprocessor_scan.compute_pattern_preprocessor_scan``,
 at ``checker.compare()`` time; this module only projects whatever

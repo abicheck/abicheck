@@ -7,7 +7,7 @@ internal header boundary.
 ``compare``'s live-binary dumping already tags declaration provenance
 (``ScopeOrigin.PUBLIC_HEADER``/``PRIVATE_HEADER``/... via
 ``provenance.apply_provenance``) from a ``-H``/``--header`` *directory*
-argument -- see ``workflows.cross_source_evolution``'s own module docstring
+argument -- see ``workflows.cross_source_hygiene``'s own module docstring
 for the full account of why that boundary is what lets
 ``exported_not_public``/``public_not_exported``/``rtti_for_internal_type``/
 ``public_to_internal_dependency`` evidence-gate correctly rather than

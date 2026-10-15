@@ -27,7 +27,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from .release_public_surface import ReleasePublicSurfaceTerms
+    from .release_public_surface_section import ReleasePublicSurfaceTerms
 
 
 def assurance_sections(assurance_decision: Any) -> dict[str, object]:
@@ -41,7 +41,7 @@ def assurance_sections(assurance_decision: Any) -> dict[str, object]:
     """
     if assurance_decision is None or not assurance_decision.require_complete:
         return {}
-    from .release_assurance import release_assurance_terms
+    from .release_assurance_section import release_assurance_terms
 
     return {
         "analysis_assurance_exit_contribution": assurance_decision.exit_contribution,
@@ -65,7 +65,7 @@ def public_surface_terms(result: Any) -> ReleasePublicSurfaceTerms | None:
     per-library fold applies, since these documents already report one
     product-level finding rather than repeating it per member.
     """
-    from .release_public_surface import compute_release_public_surface
+    from .release_public_surface_section import compute_release_public_surface
 
     reconciliation = getattr(result, "public_surface_reconciliation", None)
     if reconciliation is None:
@@ -77,7 +77,7 @@ def public_surface_terms(result: Any) -> ReleasePublicSurfaceTerms | None:
 
 def public_surface_markdown_lines(result: Any) -> list[str]:
     """*result*'s public-surface section as Markdown lines (``[]`` if none)."""
-    from .release_public_surface import (
+    from .release_public_surface_section import (
         render_release_public_surface_markdown,
     )
 

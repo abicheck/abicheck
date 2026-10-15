@@ -831,7 +831,7 @@ _ARTIFACT_NAMES = frozenset(
 #:       default verdict. A companion PR (same schema version -- no shape
 #:       change) added a second check onto this exact mechanism,
 #:       ``private_header_leak`` (plan §5 P2 / §3 #3-#4), generalizing
-#:       ``workflows.cross_source_evolution``'s per-finding identity (a
+#:       ``workflows.cross_source_hygiene``'s per-finding identity (a
 #:       check whose findings are not uniquely keyed by ``symbol`` alone --
 #:       e.g. one function leaking two distinct private types -- registers
 #:       its own identity function) in the process. The wire shape this

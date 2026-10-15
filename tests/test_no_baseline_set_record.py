@@ -340,7 +340,7 @@ def test_the_document_validates_against_its_published_schema(
     pytest.importorskip("jsonschema")
     from schema_validation import validate_instance
 
-    from abicheck.report.no_baseline_set import AUDIT_SET_REPORT_SCHEMA_VERSION
+    from abicheck.report.audit_set import AUDIT_SET_REPORT_SCHEMA_VERSION
     from abicheck.schemas import (
         AUDIT_SET_REPORT_SCHEMA_PATH,
         load_audit_set_report_schema,

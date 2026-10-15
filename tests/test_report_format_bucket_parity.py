@@ -39,7 +39,7 @@ from abicheck.model import AbiSnapshot
 from abicheck.policy.reclassify import ReclassifyRule
 from abicheck.policy_file import PolicyFile
 from abicheck.pr_comment import build_model
-from abicheck.report.build import build_report_envelope
+from abicheck.report.document_builder import build_report_envelope
 from abicheck.report.envelope import RenderOptions, ReportEnvelope
 
 _RULE_LABEL = "accepted-removal"

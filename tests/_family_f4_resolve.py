@@ -36,7 +36,7 @@ from typing import Any
 from _family_f4_inventory import _short
 
 from abicheck.model.name_heuristics import heuristic_callables
-from abicheck.policy.name_heuristics import name_heuristic_registry
+from abicheck.policy.name_heuristic_catalogue import name_heuristic_registry
 
 
 def _qual(fn: Callable[..., object]) -> tuple[str, str]:

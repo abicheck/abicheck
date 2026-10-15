@@ -83,13 +83,13 @@ from .name_classification import (
     STDLIB_TYPE_NAMESPACE_PREFIXES,
     is_cxx_runtime_library,
 )
-from .policy.public_surface import (
+from .policy.public_surface_closure import _walk_type_closure
+from .policy.public_surface_index import (
     PublicSurface,
     _index_surface_types,
     _is_real_type,
     _symbol_keys,
 )
-from .policy.public_surface_closure import _walk_type_closure
 from .type_reachability import (
     _namespace_suffix_spellings,
     _stripped_signature_spelling,
@@ -104,11 +104,11 @@ class ExportSurface:
     snapshot's full universe, used by a caller to tell "this entity exists and
     is provably not reachable from an export" apart from "this entity is not
     something this snapshot knows about at all" -- the same distinction
-    :class:`~abicheck.policy.public_surface.PublicSurface` draws with its own ``all_*``
+    :class:`~abicheck.policy.public_surface_index.PublicSurface` draws with its own ``all_*``
     sets.
     """
 
-    #: Every symbol key (:func:`~abicheck.policy.public_surface._symbol_keys`: demangled
+    #: Every symbol key (:func:`~abicheck.policy.public_surface_index._symbol_keys`: demangled
     #: name, mangled name, and the trailing ``::`` segment) of a declaration
     #: whose linker symbol appears in the observed export table.
     export_symbols: set[str] = field(default_factory=set)
@@ -285,7 +285,7 @@ def _linker_identity(name: str, mangled: str) -> str:
     The mangled name, or the plain name when the producer recorded no mangled
     one (a C symbol, or a backend that leaves the field empty; there is no
     other identity to match on). Deliberately **not**
-    :func:`~abicheck.policy.public_surface._symbol_keys`, whose demangled-name and bare-tail
+    :func:`~abicheck.policy.public_surface_index._symbol_keys`, whose demangled-name and bare-tail
     aliases exist so a *finding* naming any encoding can be looked up: a
     binary exporting the C symbol ``foo`` while the headers also declare an
     unexported ``ns::foo`` would otherwise match on the bare tail ``"foo"``
@@ -346,7 +346,7 @@ def _seed_export_roots(
     :data:`~abicheck.model.Visibility.PUBLIC`.
 
     A root's *lookup* keys are still the full
-    :func:`~abicheck.policy.public_surface._symbol_keys` set, so a finding naming any
+    :func:`~abicheck.policy.public_surface_index._symbol_keys` set, so a finding naming any
     encoding of a genuine root resolves; only the rootness *decision* is
     narrowed to linker identity.
 
@@ -793,7 +793,7 @@ def _edge_is_unresolved(
     Each ``_IDENT_RE`` token is judged on its own -- a template spelling
     like ``Wrapper<Payload>`` carries two independent edges, and either can
     be the missing one. This does not reuse
-    :func:`~abicheck.policy.public_surface._type_identifiers`, which flattens a token and
+    :func:`~abicheck.policy.public_surface_index._type_identifiers`, which flattens a token and
     its bare tail into one set: a qualified token whose bare tail happens to
     be unknown would then look like a second, missing edge.
 
@@ -900,7 +900,7 @@ def _followed_typedef_aliases(
     """Typedef keys named by *type_str* whose target is worth scanning too.
 
     A token is resolved to the alias key the closure *actually traversed*,
-    via :func:`~abicheck.policy.public_surface._type_identifiers` -- the same function the
+    via :func:`~abicheck.policy.public_surface_index._type_identifiers` -- the same function the
     walk queues from -- rather than matched against ``snap.typedefs``
     literally (Codex review, confirmed empirically). The direct-clang
     backend stores a typedef under its bare ``node["name"]`` (the
@@ -1105,7 +1105,7 @@ def compute_export_surface(snap: AbiSnapshot) -> ExportSurface:
 
     # A `PublicSurface` is used purely as the scratch structure
     # `_index_surface_types`/`_walk_type_closure` already know how to fill --
-    # reusing policy/public_surface.py's own indexing and
+    # reusing policy/public_surface_index.py's own indexing and
     # policy/public_surface_closure.py's closure walk verbatim, rather
     # than a second implementation of the same graph traversal that could
     # drift. Only its type-universe/closure outputs are read back; its
@@ -1126,7 +1126,7 @@ def compute_export_surface(snap: AbiSnapshot) -> ExportSurface:
     # minimal snapshot: `export_types` came back empty while
     # `exclusion_is_provable` was true). Adding each record's
     # `qualified_name` to this *local* index gives every such record an exact
-    # handle. Deliberately not done in `policy/public_surface.py`'s shared
+    # handle. Deliberately not done in `policy/public_surface_index.py`'s shared
     # indexing: that index is relied on by every other consumer of the
     # closure walk, and
     # AGENTS.md already records its bare-tail lookup as needing its own

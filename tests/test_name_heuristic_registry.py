@@ -34,7 +34,7 @@ from abicheck.model.name_heuristics import (
     SeverityRaisingNameHeuristic,
     StructuralFact,
 )
-from abicheck.policy.name_heuristics import (
+from abicheck.policy.name_heuristic_catalogue import (
     HEURISTIC_OWNER_MODULES,
     name_heuristic_registry,
     registry_problems,

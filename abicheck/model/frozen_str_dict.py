@@ -50,7 +50,7 @@ that bypasses them entirely: ``dict.__setitem__(instance, "GLIBC", "2.34")``
 of which subclass overrides that name. No amount of instance-method
 overriding can close this: it is not a gap in which methods were
 overridden, it is that *being* a ``dict`` at the C level always exposes
-this back door. If an :class:`~abicheck.workflows.contracts.CompareRequest`
+this back door. If an :class:`~abicheck.workflows.service_requests.CompareRequest`
 carrying this mapping is already a set/dict member, that mutation silently
 changes its hash out from under the container -- exactly the hash-invariant
 violation every previous round of this fix was trying to close, just

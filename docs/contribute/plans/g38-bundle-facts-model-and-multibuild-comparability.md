@@ -2561,7 +2561,7 @@ follow-up, but nothing on the CLI path forwarded them. Closed via:
   module's own docstring already gives: `BuildConfig` has a fixed, declared
   schema and adding a new top-level block there needs real schema/precedence
   work a CLI-only manifest flag avoids entirely).
-- `abicheck/frontends/cli/options/bundle_facts.py` —
+- `abicheck/frontends/cli/options/bundle_facts_library_manifest.py` —
   `@bundle_facts_manifest_options`, declaring `--bundle-facts-library-manifest
   PATH` as a small, reusable decorator (not an inline `@click.option` on
   `compare_cmd`, which was already at the 800-line production cap with no

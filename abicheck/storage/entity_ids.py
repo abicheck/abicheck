@@ -15,11 +15,11 @@
 
 """Entity and occurrence identifiers — the leaf half of ADR-062 D4.
 
-Split out of :mod:`abicheck.storage.identity` when that module crossed the
+Split out of :mod:`abicheck.storage.occurrence_identity` when that module crossed the
 800-line production cap. The split follows the dependency direction rather
 than a line count: the identifiers know nothing about the collection that
 indexes them, while the collection cannot be expressed without them. Putting
-the leaf here and re-exporting from :mod:`~abicheck.storage.identity` keeps
+the leaf here and re-exporting from :mod:`~abicheck.storage.occurrence_identity` keeps
 one import for a caller and keeps the edge pointing one way — the reverse
 arrangement would have made the two modules a cycle.
 

@@ -322,7 +322,7 @@ and `SuppressionList.is_suppressed` (the unsuppressibility proof), all under
 `scope_segments.flat_names`, `legacy_function_ir` (one-semantic-pipeline);
 `evidence_merge.presence_in`, `execution_cache.cache_stats`,
 `model.name_heuristics.heuristic_callables`,
-`policy.name_heuristics.name_heuristic_registry`/`registry_problems`
+`policy.name_heuristic_catalogue.name_heuristic_registry`/`registry_problems`
 (design-hardening); `DetectorRegistry.detector_names` (G31);
 `probe_harness._snapshot_object_file` (duplication-and-convergence, recorded
 exception).

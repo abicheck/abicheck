@@ -58,11 +58,11 @@ def test_cell_snapshot_local_identity() -> None:
     spelling -- so a Mach-O-decorated and a plain spelling of one name are
     one identity, and two distinct names never are."""
     from abicheck.model.identity_tiers import snapshot_local_identity
-    from abicheck.model.name_decoration import macho
+    from abicheck.model.name_decoration import macho_underscore
 
     for name in cat.ITANIUM_NAMES:
-        decorated = macho.encode(name)
-        assert snapshot_local_identity(macho.decode_itanium(decorated)) == (
+        decorated = macho_underscore.encode(name)
+        assert snapshot_local_identity(macho_underscore.decode_itanium(decorated)) == (
             snapshot_local_identity(name)
         )
     keys = {snapshot_local_identity(n) for n in cat.ITANIUM_NAMES}

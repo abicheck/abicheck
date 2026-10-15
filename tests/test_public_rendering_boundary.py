@@ -100,7 +100,7 @@ class TestEveryPublicRendererRejectsARetiredMode:
         from abicheck.errors import ValidationError
         from abicheck.frontends.render import render_envelope
         from abicheck.model import AbiSnapshot
-        from abicheck.report.build import build_report_envelope
+        from abicheck.report.document_builder import build_report_envelope
         from abicheck.report.envelope import RenderOptions
 
         result = self._result()
@@ -119,7 +119,7 @@ class TestEveryPublicRendererRejectsARetiredMode:
     def test_render_envelope_still_renders_every_supported_mode(self):
         from abicheck.frontends.render import render_envelope
         from abicheck.model import AbiSnapshot
-        from abicheck.report.build import build_report_envelope
+        from abicheck.report.document_builder import build_report_envelope
         from abicheck.report.envelope import RenderOptions
 
         result = self._result()
@@ -785,7 +785,7 @@ def _result_with_a_finding():
 
 def _render_envelope(fmt: str, result, **options):
     from abicheck.frontends.render import render_envelope
-    from abicheck.report.build import build_report_envelope
+    from abicheck.report.document_builder import build_report_envelope
     from abicheck.report.envelope import RenderOptions
 
     envelope = build_report_envelope(
@@ -934,7 +934,7 @@ class TestRenderOptionsNeverStoresTheSugarSpelling:
 
     def test_the_envelope_document_is_built_from_the_folded_options(self):
         """The reason the fold has to happen here and not at render time."""
-        from abicheck.report.build import build_report_envelope
+        from abicheck.report.document_builder import build_report_envelope
 
         envelope = build_report_envelope(
             _result_with_a_finding(),

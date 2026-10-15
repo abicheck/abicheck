@@ -71,8 +71,8 @@ from abicheck.policy.gate_decision import gate_decision_for_result
 from abicheck.policy.reclassify import ReclassifyRule
 from abicheck.policy.severity import SeverityConfig, SeverityLevel
 from abicheck.policy_file import PolicyFile
-from abicheck.report.build import build_report_envelope
 from abicheck.report.document import ReportDocument
+from abicheck.report.document_builder import build_report_envelope
 from abicheck.report.envelope import RenderOptions
 from abicheck.report.render_html_document import render_html_document
 

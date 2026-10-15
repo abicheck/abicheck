@@ -69,16 +69,8 @@ NEVER invents a fact a producer did not supply: a tier is only claimed
 when the corresponding input field is actually present.
 """
 
-from .change import resolve_change_identity
-from .mangled import is_real_mangled_name, normalize_mangled_name
-from .report_ids import (
-    MissingContractFinding,
-    missing_contract_finding,
-    missing_contract_kind,
-    report_canonical_finding_id,
-    report_finding_id,
-)
-from .symbols import (
+from .change_identity import resolve_change_identity
+from .declaration_identity import (
     IDENTITY_TIER_CANONICAL,
     IDENTITY_TIER_NORMALIZED,
     IDENTITY_TIER_REDUCED,
@@ -89,6 +81,14 @@ from .symbols import (
     resolve_function_identity,
     resolve_symbol_identity,
     resolve_variable_identity,
+)
+from .mangled import is_real_mangled_name, normalize_mangled_name
+from .report_ids import (
+    MissingContractFinding,
+    missing_contract_finding,
+    missing_contract_kind,
+    report_canonical_finding_id,
+    report_finding_id,
 )
 
 __all__ = [

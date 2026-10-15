@@ -44,7 +44,7 @@ def review_group_note(model: CommentModel) -> list[str]:
             f"{escape_cell(group.get('transition', 'changed'))}"
         )
     # Measured against that same authoritative total, not against the list
-    # this note happens to have been handed. `report/build.py` builds
+    # this note happens to have been handed. `report/document_builder.py` builds
     # `review_groups` from the *displayed* findings under `--view show=`,
     # while `result_counts` is computed over every retained finding -- so a
     # filtered list can be shorter than the headline with the display cap

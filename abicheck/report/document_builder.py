@@ -117,7 +117,9 @@ def build_report_document(
         DispositionAudit,
         add_disposition_audit as _add_disposition_audit,
     )
-    from .finding_evolution import add_finding_evolution as _add_finding_evolution
+    from .finding_evolution_section import (
+        add_finding_evolution as _add_finding_evolution,
+    )
     from .json_sections import (
         SCOPED_GATE_HELPERS,
         add_abi_surface_breakdown,
@@ -135,7 +137,7 @@ def build_report_document(
         build_severity_json,
         displayed_with_scoped_only,
     )
-    from .pattern_preprocessor_scan import (
+    from .pattern_preprocessor_section import (
         add_pattern_preprocessor_scan as _add_pattern_preprocessor_scan,
     )
     from .result_counts import compute_result_counts

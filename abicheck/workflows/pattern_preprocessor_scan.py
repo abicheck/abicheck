@@ -9,7 +9,7 @@ Before this module existed, ``buildsource.pattern_facts.find_pattern_facts`` and
 ``buildsource.preprocessor_facts.collect_preprocessor_facts`` had exactly one
 production caller anywhere under ``abicheck/``: ``scan_engine.py`` (ADR-068
 §1; since deleted by ADR-068 Phase 6). This module gives them a second, ``compare()``-reachable caller,
-mirroring ``workflows/cross_source_evolution.py``'s own shape for the
+mirroring ``workflows/cross_source_hygiene.py``'s own shape for the
 cross-source checks: run the primitive independently on OLD and NEW, then
 fold the two one-sided results into a single, evolution-stated summary
 (:class:`~abicheck.checker_policy.CrossSourceEvolution` -- the same enum,
@@ -565,7 +565,7 @@ def compute_candidate_pattern_preprocessor_scan(
     pattern, a diverging macro, or a leaked header could have been present
     or absent in. Stating ``persistent`` there (which a self-compare does)
     would report history nobody observed; see
-    :func:`~abicheck.workflows.cross_source_evolution.
+    :func:`~abicheck.workflows.cross_source_hygiene.
     compute_candidate_cross_source_findings` for the same rule on the
     findings side.
 

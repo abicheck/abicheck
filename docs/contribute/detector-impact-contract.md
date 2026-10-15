@@ -5,7 +5,7 @@ audience:
 summarizes:
   - impact-analysis
 depends_on:
-  - abicheck/impact/model.py
+  - abicheck/impact/assessment.py
   - abicheck/impact/engine.py
   - abicheck/buildsource/graph_impact.py
   - abicheck/internal_leak.py

@@ -156,7 +156,7 @@ def worse_confidence(left: Confidence, right: Confidence) -> Confidence:
 
     Deliberately *not* the whole rule for merging confidence: a record whose
     status carries no usable evidence has no confidence worth propagating,
-    so :func:`abicheck.storage.availability._merged_confidence` decides which
+    so :func:`abicheck.storage.availability_ledger._merged_confidence` decides which
     records vote before reaching for this. Applied unconditionally, it let a
     ``NOT_APPLICABLE``/``UNKNOWN`` family degrade a real ``PRESENT``/``HIGH``
     override to ``UNKNOWN``.

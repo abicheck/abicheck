@@ -34,6 +34,10 @@ from .contracts import (
     ProfileMatrixEntry,
     TargetReport,
 )
+from .expected_targets import (
+    OnMissingRequired,
+    OnUnexpectedTarget,
+)
 from .matrix import (
     FindingMatrixEntry,
     build_finding_matrix,
@@ -41,10 +45,6 @@ from .matrix import (
 )
 from .profile_matrix_render import render_profile_entry_line
 from .reconcile import ReportFindings
-from .resolve import (
-    OnMissingRequired,
-    OnUnexpectedTarget,
-)
 
 
 @dataclass(frozen=True)

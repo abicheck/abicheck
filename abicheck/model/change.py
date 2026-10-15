@@ -46,7 +46,7 @@ from .identity import EntityId
 from .snapshot import AbiSnapshot
 
 if TYPE_CHECKING:
-    from ..impact.model import ImpactAssessment
+    from ..impact.assessment import ImpactAssessment
 
 # Marker appended to a ``SYMBOL_VERSION_ALIAS_CHANGED`` description when the old
 # default symbol version is NOT retained as a non-default alias (so consumers of
@@ -267,7 +267,7 @@ class Change:
     # the matching ``Suppression`` rule's ``label`` (falling back to
     # ``reason`` when the rule has no label — both are free-form and either
     # may be unset, so this can still be ``None``). Feeds
-    # ``impact.model.FindingDecision.suppression_rule`` — the piece ADR-052
+    # ``impact.assessment.FindingDecision.suppression_rule`` — the piece ADR-052
     # slice 1 deliberately left unwired. Never set for a change that stays
     # visible, nor for the appcompat.py/cli_compare_helpers.py consumer/
     # runtime overlays a suppression rule discards outright (those never

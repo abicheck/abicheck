@@ -849,7 +849,7 @@ def compute_severity_sections(
         # ADR-068 finding A: RISK_KINDS mixes two different stories --
         # ordinary deployment-compatibility risk (a new GLIBC version
         # requirement, etc.) and the cross-source hygiene checks
-        # (workflows.cross_source_evolution) `compare()` runs automatically
+        # (workflows.cross_source_hygiene) `compare()` runs automatically
         # on every invocation. The latter are stamped with an OLD->NEW
         # evolution state (introduced/resolved/persistent/not_evaluated) --
         # a `persistent` finding is pre-existing hygiene debt, not new

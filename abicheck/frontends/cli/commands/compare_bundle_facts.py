@@ -69,7 +69,7 @@ from ....report.comparison_scope import ComparisonScopeTerms
 
 # Via `report`, which re-exports it: `frontends -> policy` is forbidden
 # (`architecture/modules.yaml`), even for a signature's own annotation.
-from ....report.release_assurance import ReleaseAssuranceDecision
+from ....report.release_assurance_section import ReleaseAssuranceDecision
 from ....report.release_document import (
     StoredReleaseEvaluation,
     build_release_report,

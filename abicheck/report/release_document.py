@@ -57,7 +57,7 @@ from ..workflows.gate import (
 from . import release_change_inventory as _inventory
 from .comparison_scope import ComparisonScopeTerms
 from .document import ReportDocument
-from .release_assurance import ReleaseAssuranceTerms
+from .release_assurance_section import ReleaseAssuranceTerms
 
 if TYPE_CHECKING:
     from ..bundle_models import BundleDiffResult, BundleFinding
@@ -65,8 +65,8 @@ if TYPE_CHECKING:
     from ..model.change import Change
     from ..workflows.gate import SeverityConfig
     from .junit_inventory import JunitOldOperand
-    from .release_assurance import ReleaseAssuranceDecision
-    from .release_public_surface import ReleasePublicSurfaceTerms
+    from .release_assurance_section import ReleaseAssuranceDecision
+    from .release_public_surface_section import ReleasePublicSurfaceTerms
 
 __all__ = [
     "ReleaseEvaluation",

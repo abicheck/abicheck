@@ -34,11 +34,11 @@ import click
 from ...bundle import BundleDiffResult
 from ...checker import DiffResult
 from ...report.comparison_scope import ComparisonScopeTerms, comparison_scope_terms
-from ...report.release_assurance import ReleaseAssuranceTerms
+from ...report.release_assurance_section import ReleaseAssuranceTerms
 from .options.params import DEFAULT_POLICY_PROFILE
 
 if TYPE_CHECKING:
-    from ...report.release_public_surface import ReleasePublicSurfaceTerms
+    from ...report.release_public_surface_section import ReleasePublicSurfaceTerms
     from ...workflows.gate import SeverityConfig
 
 __all__ = ["_write_release_summary_file"]

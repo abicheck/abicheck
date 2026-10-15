@@ -62,8 +62,8 @@ from .frontends.cli.release_report import render_release_summary
 from .frontends.cli.runtime import _setup_verbosity, _write_or_echo
 from .model.release_selection import ReleaseSelection
 from .report.comparison_scope import comparison_scope_terms
-from .report.release_assurance import release_assurance_terms
-from .report.release_public_surface import assemble_release_public_surface
+from .report.release_assurance_section import release_assurance_terms
+from .report.release_public_surface_section import assemble_release_public_surface
 from .workflows.release_compare import (
     ReleaseCompareOptions,
     ReleaseCompareOutcome,

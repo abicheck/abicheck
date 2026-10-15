@@ -22,7 +22,11 @@ from abicheck.cli import main
 from abicheck.model import AbiSnapshot, Function, Param
 from abicheck.serialization import save_snapshot
 from abicheck.service_compare_pipeline import run_compare_request
-from abicheck.workflows.contracts import CompareRequest, InputSpec, ValidationError
+from abicheck.workflows.service_requests import (
+    CompareRequest,
+    InputSpec,
+    ValidationError,
+)
 
 
 def _pair(break_it: bool) -> tuple[AbiSnapshot, AbiSnapshot]:

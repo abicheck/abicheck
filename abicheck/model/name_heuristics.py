@@ -37,7 +37,7 @@ confidence or route a finding to review.**
 The API lives in ``model`` because the detectors that register are in the
 ``compare`` layer, which may import only ``model`` (ADR-061). The catalogue
 of registered heuristics, its validation and the repo gate are owned by
-``policy/name_heuristics.py``.
+``policy/name_heuristic_catalogue.py``.
 """
 
 from __future__ import annotations
@@ -358,6 +358,6 @@ def registered_name_heuristics() -> Mapping[
     str, NameHeuristic | SeverityRaisingNameHeuristic
 ]:
     """Every heuristic registered so far (import-order dependent; use
-    ``policy.name_heuristics.name_heuristic_registry`` for the complete set).
+    ``policy.name_heuristic_catalogue.name_heuristic_registry`` for the complete set).
     """
     return dict(_REGISTRY)

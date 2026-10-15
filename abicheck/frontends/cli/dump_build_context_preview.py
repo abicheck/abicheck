@@ -43,7 +43,10 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from ...dry_run import DryRunResult
-    from ...workflows.dump.pipeline import DumpExecutionOptions, ResolvedDumpRequest
+    from ...workflows.dump.request_to_snapshot import (
+        DumpExecutionOptions,
+        ResolvedDumpRequest,
+    )
 
 __all__ = [
     "add_execution_options_dry_run_section",

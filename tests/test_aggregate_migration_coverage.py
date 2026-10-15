@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from abicheck.workflows.aggregate.gate import scan_severity_gate_paths
 from abicheck.workflows.aggregate.load import _load_report_file
+from abicheck.workflows.aggregate.report_gate import scan_severity_gate_paths
 
 
 def test_scan_severity_paths_reject_non_scan_envelope() -> None:

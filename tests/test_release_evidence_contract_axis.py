@@ -148,7 +148,7 @@ class TestEveryExitAxisIsDecodedOntoRunOutcome:
     `run_outcome` -- failed the same way: a renderer or decoder enumerates
     the axes it knows by hand, so an axis added later is silently absent
     rather than loudly unhandled. `run_outcome` is the worst of the four,
-    because `workflows.aggregate.gate.GateInfo.from_report_data` treats
+    because `workflows.aggregate.report_gate.GateInfo.from_report_data` treats
     that block as authoritative: a saved release report said the run was
     operationally fine (`operational: "none"`) beside its own
     `exit.code: 7`, so a report-driven consumer read a failed run as
@@ -243,7 +243,7 @@ class TestASavedReleaseReportIsNotReadAsClean:
         self, kwargs: dict[str, object], expected_blocking: bool
     ) -> None:
         from abicheck.policy.outcome_release import run_outcome_dict_for_release
-        from abicheck.workflows.aggregate.gate import GateInfo
+        from abicheck.workflows.aggregate.report_gate import GateInfo
 
         decision = _release_decision(**kwargs)
         report = {

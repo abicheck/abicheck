@@ -21,7 +21,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from .gate import _is_valid_contribution, contract_coverage_blocks
+from .report_gate import _is_valid_contribution, contract_coverage_blocks
 
 #: The ``exit``-block keys this axis folds, in the order they are stated.
 SCOPE_EXIT_KEYS: tuple[str, ...] = (
@@ -100,7 +100,7 @@ def declares_null_compatibility(data: Mapping[str, Any]) -> bool:
     null`` -- a release that completed no comparison (ADR-065 D7) keeps a
     legacy root ``verdict: "NO_CHANGE"`` for older readers, and the aggregate
     must not manufacture a clean verdict from it (Codex review)."""
-    from .gate import _has_valid_run_outcome_block
+    from .report_gate import _has_valid_run_outcome_block
 
     return (
         _has_valid_run_outcome_block(data)

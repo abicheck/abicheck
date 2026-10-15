@@ -29,7 +29,7 @@ required}`` (the identical key space ``_canonical_library_key`` already
 produces and ``ScopeAcquisitionRecord.members`` already keys by -- never a
 raw filename stem, so a SONAME bump or a relocated library still resolves to
 the same declared identity). Mirrors
-:class:`abicheck.workflows.aggregate.resolve.ExpectedTargets`'s own
+:class:`abicheck.workflows.aggregate.expected_targets.ExpectedTargets`'s own
 ``{target_id: required}`` shape deliberately -- that is this codebase's
 existing, reviewed answer to "a caller declares an expected set with a
 required/optional split", and a release's expected-library set is the same
@@ -90,7 +90,7 @@ class ReleaseSelection:
     to whether that member is *required*. Never empty -- an empty selection
     is not a selection at all, and every constructor below rejects it, the
     same "no expected targets given" discipline
-    :meth:`~abicheck.workflows.aggregate.resolve.ExpectedTargets.from_lists`
+    :meth:`~abicheck.workflows.aggregate.expected_targets.ExpectedTargets.from_lists`
     already applies for the aggregate manifest's own declared-set input.
     """
 

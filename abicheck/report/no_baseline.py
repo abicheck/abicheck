@@ -273,7 +273,7 @@ def compute_no_baseline_document(
     """Resolve *result* into the one document every format below projects."""
     from ..policy.contract_coverage_exit import coverage_exit_floor
     from .disposition_audit import compute_disposition_audit
-    from .pattern_preprocessor_scan import compute_pattern_preprocessor_scan_json
+    from .pattern_preprocessor_section import compute_pattern_preprocessor_scan_json
 
     diff = result.diff
     resolve = _finding_resolver(diff)

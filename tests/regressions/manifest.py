@@ -370,7 +370,7 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
             "tests/test_finding_identity_properties.py",
             "tests/unit/compare/test_dedup_key.py",
             "tests/test_diff_namespaces.py",
-            # workflows/cross_source_evolution.py's own per-side OLD/NEW
+            # workflows/cross_source_hygiene.py's own per-side OLD/NEW
             # lookup was keyed by a bare `Change.symbol` -- non-injective
             # for `private_header_leak`, whose findings are keyed by
             # `(mangled_or_name, leaked_type)` in cross_source_checks.py, so one

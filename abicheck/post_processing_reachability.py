@@ -23,7 +23,7 @@ three module-level names from its parent, which made it the natural seam once
 
 The two kind sets this pass reads are defined here, beside their one real
 consumer; the pipeline's shared state is
-:mod:`abicheck.policy.finding_disposition.context`.
+:mod:`abicheck.policy.finding_disposition.run_state`.
 """
 
 from __future__ import annotations
@@ -36,7 +36,7 @@ from .model.evidence_status import ReachabilityState
 if TYPE_CHECKING:
     from .model import AbiSnapshot
     from .model.change import Change
-    from .policy.finding_disposition.context import PipelineContext
+    from .policy.finding_disposition.run_state import PipelineContext
 
 # diff_types.py builds ENUM_MEMBER_*/ENUM_LAST_MEMBER_VALUE_CHANGED's symbol
 # as "EnumName::member" (unlike TYPE_FIELD_* kinds, which carry the
@@ -164,7 +164,7 @@ class MarkReachability:
 
     ADR-052 D2 follow-up (G29 Phase 3 slice 10): once this step actually
     tags a change (the branch above did *not* early-return), it also caches
-    that change's :class:`~abicheck.impact.model.ImpactAssessment` via
+    that change's :class:`~abicheck.impact.assessment.ImpactAssessment` via
     :func:`impact.engine.assess_change` right at the point its own
     reachability/evidence fields become final -- see the ``_cache_assessment``
     closure below for the specific per-field safety audit. This is the
@@ -207,7 +207,7 @@ class MarkReachability:
 
         def _cache_assessment(c: Change) -> None:
             """ADR-052 D2 follow-up (G29 Phase 3 slice 10): cache *c*'s
-            :class:`~abicheck.impact.model.ImpactAssessment` right after this
+            :class:`~abicheck.impact.assessment.ImpactAssessment` right after this
             step finalizes its reachability/evidence fields.
 
             Verified safe, not assumed, per the same discipline Slice 8/9 used

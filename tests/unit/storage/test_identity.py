@@ -18,7 +18,7 @@ import pytest
 from adr062_scope import adr062_module_paths
 from hypothesis import given, strategies as st
 
-from abicheck.storage.identity import (
+from abicheck.storage.occurrence_identity import (
     EntityId,
     EntityKind,
     ObservationKind,

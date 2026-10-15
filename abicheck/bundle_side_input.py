@@ -73,7 +73,7 @@ if TYPE_CHECKING:
     from .compile_context import CompileContext
     from .environment_matrix import EnvironmentMatrix
     from .policy_file import PolicyFile
-    from .workflows.suppression import SuppressionList
+    from .workflows.suppression_input import SuppressionList
 
 
 def compare_release_against_bundle_facts(

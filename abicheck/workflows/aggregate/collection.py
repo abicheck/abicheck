@@ -15,7 +15,7 @@
 
 """Assemble ``aggregate``'s two inputs from **one** declaration of the run.
 
-:func:`abicheck.workflows.aggregate.execute` needs two things that must agree:
+:func:`abicheck.workflows.aggregate.fan_in_execution` needs two things that must agree:
 a directory holding this run's per-check reports, and an expected-target
 manifest saying which checks the run was *supposed* to produce. Building them
 separately is how a matrix job ends up reporting "no changes found" for a check

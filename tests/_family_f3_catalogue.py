@@ -56,7 +56,7 @@ import abicheck.model.graph_entity_identity as gei_mod
 import abicheck.model.graph_identity as gid_mod
 import abicheck.model.identity as ident_mod
 import abicheck.model.name_decoration.elf_version as elf_codec
-import abicheck.model.name_decoration.macho as macho_codec
+import abicheck.model.name_decoration.macho_underscore as macho_codec
 import abicheck.model.name_decoration.pe_x86 as pe_codec
 import abicheck.model.source_graph as sg_mod
 import abicheck.model.special_member_identity as smi_mod
@@ -237,7 +237,7 @@ STRING_PROBES: tuple[Probe, ...] = (
     Probe(
         # resolve_function_identity folds each parameter spelling through
         # canonicalize_type_name, which drops :line:col by design.
-        "abicheck.compare.finding_identity.symbols:resolve_function_identity",
+        "abicheck.compare.finding_identity.declaration_identity:resolve_function_identity",
         _fn_identity,
         distinguishes_same_header_lambdas=False,
     ),
@@ -322,14 +322,14 @@ def _path_probes() -> dict[str, Callable[[str], str]]:
                 ).primary_id
             )
         ),
-        "abicheck.compare.finding_identity.symbols:resolve_symbol_identity": (
+        "abicheck.compare.finding_identity.declaration_identity:resolve_symbol_identity": (
             lambda p: (
                 finding_mod.resolve_symbol_identity(
                     kind="function", source_location=rel(f"{p}:3")
                 ).primary_id
             )
         ),
-        "abicheck.compare.finding_identity.change:resolve_change_identity": (
+        "abicheck.compare.finding_identity.change_identity:resolve_change_identity": (
             lambda p: (
                 finding_mod.resolve_change_identity(
                     Change(
@@ -404,7 +404,7 @@ def macho_encode(name: str) -> str:
 def macho_decoders() -> dict[str, Callable[[str, str, bool], str]]:
     """decoder(linker_spelling, plain_name, is_extern_c) -> identity key."""
     return {
-        "abicheck.model.name_decoration.macho:decode_itanium": (
+        "abicheck.model.name_decoration.macho_underscore:decode_itanium": (
             lambda s, _plain, c: s if c else macho_codec.decode_itanium(s)
         ),
         "abicheck.model.graph_entity_identity:declaration_identity": (

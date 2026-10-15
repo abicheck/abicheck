@@ -27,7 +27,7 @@ from pathlib import Path
 
 import pytest
 
-from abicheck.buildsource.adapters.base import extract_abi_relevant_flags
+from abicheck.buildsource.adapters.adapter_contract import extract_abi_relevant_flags
 from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
 from abicheck.buildsource.header_compile_context import (
     _split_operand_survivor,
@@ -360,7 +360,7 @@ def test_resolve_bare_and_xclang_wrapped_captures_of_same_value_stay_unambiguous
     tmp_path: Path,
 ) -> None:
     """Regression test for the P2 review finding "Canonicalize equivalent
-    cc1 survivor spellings" (``abicheck/buildsource/adapters/base.py:772``):
+    cc1 survivor spellings" (``abicheck/buildsource/adapters/adapter_contract.py:772``):
     two compile units capturing the IDENTICAL ``-target-abi aapcs`` value
     through two different real argv shapes -- one a direct ``-cc1``
     invocation (bare two-token capture), the other an ordinary driver

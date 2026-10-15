@@ -87,7 +87,7 @@ __all__ = ["RELEASE_SCHEMA_VERSION"]
 #:       ``contract_coverage_exit_contribution``, and the key report schema
 #:       2.40 defined for this axis) -- emitted on the release document and on
 #:       ``--output-dir``'s ``summary.json`` alike, because that top-level key
-#:       is what ``workflows.aggregate.gate._analysis_assurance_exit`` and the
+#:       is what ``workflows.aggregate.report_gate._analysis_assurance_exit`` and the
 #:       composite Action's ``gate_mode: deferred`` path read. Emitting the
 #:       floor only inside ``exit``/``analysis_assurance`` left both reading
 #:       ``0`` for a run whose real exit was ``1`` (Codex security review,
@@ -167,7 +167,7 @@ __all__ = ["RELEASE_SCHEMA_VERSION"]
 #:       carries a block, rather than an all-zero aggregate.
 #: - ``1.8`` adds the top-level ``public_surface_reconciliation`` object: the
 #:       release's one public contract reconciled against the union of its
-#:       members' exports (``report.release_public_surface``). It states, per
+#:       members' exports (``report.release_public_surface_section``). It states, per
 #:       side, how many public declarations carry an export obligation, how
 #:       many the bundle satisfies, which are missing, which are *unresolved*
 #:       because a member was unread, the export totals and the

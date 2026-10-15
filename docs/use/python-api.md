@@ -7,10 +7,10 @@ canonical_for:
   - python-api
 depends_on:
   - abicheck/service.py
-  - abicheck/workflows/contracts.py
+  - abicheck/workflows/service_requests.py
   - abicheck/workflows/request_inputs.py
   - abicheck/model/header_ast_frontends.py
-  - abicheck/workflows/dump/pipeline.py
+  - abicheck/workflows/dump/request_to_snapshot.py
   - abicheck/service_compare_pipeline.py
   - abicheck/dry_run_estimate.py
   - abicheck/deadline.py

@@ -282,7 +282,7 @@ def test_a_bad_database_is_an_operational_failure_not_a_usage_error(tmp_path, co
     from unittest import mock
 
     from abicheck.errors import SnapshotError, ValidationError
-    from abicheck.workflows.dump.pipeline import (
+    from abicheck.workflows.dump.request_to_snapshot import (
         DumpExecutionOptions,
         execute_dump_request,
     )

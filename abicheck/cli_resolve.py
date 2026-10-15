@@ -46,8 +46,8 @@ if TYPE_CHECKING:
     from .model import AbiSnapshot
     from .model.ownership_rules import OwnershipRequest
     from .workflows.compare_classify import ResolvedComparePair
-    from .workflows.contracts import CompareRequest
     from .workflows.extraction import DumpManifest
+    from .workflows.service_requests import CompareRequest
 
 
 def _click_notify(message: str) -> None:
@@ -444,7 +444,7 @@ def _resolve_compare_pair(
     genuinely explicit ``--lang`` on the command line rather than Click's
     own default (which is the identical, indistinguishable string) — see
     ``cli.compare_cmd``'s own detection and
-    :attr:`abicheck.workflows.contracts.CompareRequest.lang_explicit`. ``False`` (the
+    :attr:`abicheck.workflows.service_requests.CompareRequest.lang_explicit`. ``False`` (the
     default) preserves this function's pre-existing behavior for both sides.
 
     ``header_backend`` is the both-sides default; ``old_header_backend`` /
@@ -479,7 +479,7 @@ def _resolve_compare_pair(
     reachable from plain ``compare``.
 
     **ADR-055 D1: this no longer resolves anything itself.** It assembles a
-    :class:`~abicheck.workflows.contracts.CompareRequest` from ``compare``'s loose
+    :class:`~abicheck.workflows.service_requests.CompareRequest` from ``compare``'s loose
     arguments and hands it to the shared
     :func:`abicheck.service.resolve_compare_request`, which is the same
     resolution the typed Python API and the MCP ``abi_compare`` tool run. It
@@ -506,7 +506,10 @@ def _resolve_compare_pair(
     the time it reaches ``old_h``/``new_h``). ``None``/empty is a no-op.
     """
     from .errors import PlanningError, SnapshotError, ValidationError
-    from .workflows import contracts as _contracts, request_inputs as _request_inputs
+    from .workflows import (
+        request_inputs as _request_inputs,
+        service_requests as _contracts,
+    )
 
     def _side_compile(backend_override: str | None) -> CompileContext | None:
         # The per-side --ast-frontend old=/new= rides on that side's own

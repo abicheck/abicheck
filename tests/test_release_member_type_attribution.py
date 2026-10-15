@@ -40,7 +40,7 @@ from abicheck.policy.member_type_attribution import (
     UNESTABLISHED,
     attribute_type,
 )
-from abicheck.report.release_public_surface import (
+from abicheck.report.release_public_surface_section import (
     compute_release_public_surface,
     dedupe_shared_member_findings,
     render_release_public_surface_markdown,

@@ -36,6 +36,7 @@ from .compare.finding_identity.ctor_dtor import (
     reconcile_ctor_dtor_key_drift,
     synthetic_ctor_scope as _synthetic_ctor_scope,
 )
+from .compare.function_cutover import function_identity_index
 from .compare.function_lifecycle import (
     converting_ctor_signature,
     deletion_kind,
@@ -47,7 +48,6 @@ from .compare.function_signature import (
     function_signature_changes,
     function_signature_index,
 )
-from .compare.functions import function_identity_index
 from .compare.naming_conventions import PREFIX_RENAME
 from .compare.parameter_facts import (
     ParameterView,
@@ -543,7 +543,7 @@ def _diff_functions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     # ambiguity-checked alias tier ``_match_old_function``'s extern-C fallback
     # joins on. One shared primitive instead of a second hand-rolled multimap,
     # the same way ``build_type_map`` already backs flat *type* matching.
-    # Since ADR-063 Phase 6B's function cohort (``compare/functions.py``),
+    # Since ADR-063 Phase 6B's function cohort (``compare/function_cutover.py``),
     # built through ``SemanticIRIndex``/the legacy adapter rather than a
     # direct ``AbiSnapshot.function_map`` read -- see that module's own
     # docstring for why the *resolved* identity itself is unchanged.

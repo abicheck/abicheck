@@ -29,7 +29,7 @@ from abicheck.checker_types import DiffResult
 from abicheck.model.change import Change
 from abicheck.report import release_document as rd
 from abicheck.report.comparison_scope import comparison_scope_terms
-from abicheck.report.release_assurance import release_assurance_terms
+from abicheck.report.release_assurance_section import release_assurance_terms
 from abicheck.report.release_stored_scope import scope_terms_for
 from abicheck.report.render_release_report import (
     render_release_text,

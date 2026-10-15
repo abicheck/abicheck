@@ -62,7 +62,14 @@ from typing import Any
 
 from abicheck.change_registry_types import Verdict
 
-from .gate import GateInfo as GateInfo
+from .expected_targets import (
+    AGGREGATE_MANIFEST_VERSION as AGGREGATE_MANIFEST_VERSION,
+    AggregateError as AggregateError,
+    ExpectedTargets as ExpectedTargets,
+    OnMissingRequired as OnMissingRequired,
+    OnUnexpectedTarget as OnUnexpectedTarget,
+    resolve_gate_policy as resolve_gate_policy,
+)
 from .matrix import (
     FindingMatrixEntry as FindingMatrixEntry,
     ProfileContractState as ProfileContractState,
@@ -75,14 +82,7 @@ from .reconcile import (
     ReportFinding as ReportFinding,
     ReportFindings as ReportFindings,
 )
-from .resolve import (
-    AGGREGATE_MANIFEST_VERSION as AGGREGATE_MANIFEST_VERSION,
-    AggregateError as AggregateError,
-    ExpectedTargets as ExpectedTargets,
-    OnMissingRequired as OnMissingRequired,
-    OnUnexpectedTarget as OnUnexpectedTarget,
-    resolve_gate_policy as resolve_gate_policy,
-)
+from .report_gate import GateInfo as GateInfo
 
 #: Machine-readable schema version of the ``to_dict()`` / ``-o json=...``
 #: output. Bump on any incompatible change to that structure.
@@ -389,7 +389,7 @@ class _LoadedReport:
     #: when ``contract.unresolved=warn`` zeroed the contribution above.
     contract_coverage_incomplete: bool = False
     #: Whether the report stated a usable contribution at all -- see
-    #: :func:`~abicheck.workflows.aggregate.gate._contract_coverage_declared`.
+    #: :func:`~abicheck.workflows.aggregate.report_gate._contract_coverage_declared`.
     contract_coverage_declared: bool = False
     #: ``None`` on every failure branch below (none establishes what the
     #: comparison found); otherwise ``parse_report_findings``'s result.

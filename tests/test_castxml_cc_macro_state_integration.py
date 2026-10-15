@@ -24,11 +24,11 @@ from pathlib import Path
 
 import pytest
 
-from abicheck.extract.headers.backend import HeaderParseRequest
 from abicheck.extract.headers.castxml.backend import CastxmlBackend
 from abicheck.extract.headers.castxml.calling_convention import (
     source_calling_conventions,
 )
+from abicheck.extract.headers.header_ast_backend import HeaderParseRequest
 
 pytestmark = [
     pytest.mark.integration,

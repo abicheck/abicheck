@@ -20,7 +20,7 @@ this module (three call sites: :func:`consumer_impact_explanations`,
 :func:`attach_consumer_impact`, :func:`enrich_covered_changes`) -- the rest of
 this file's functions are private helpers those three build on. It never
 touches the app-requirements parsing (``extract.consumer_imports``), the
-requirement evaluation (``policy.consumer_requirements``) or the disposition
+requirement evaluation (``policy.consumer_requirement_evaluation``) or the disposition
 ledger; it depends only on a `Change`/`AppRequirements` pair and the L5
 source graph.
 """
@@ -31,7 +31,7 @@ from typing import TYPE_CHECKING
 
 from ..impact.engine import assess_change
 from ..model.evidence_status import ReachabilityState
-from ..policy.consumer_requirements import change_covers_symbol
+from ..policy.consumer_requirement_evaluation import change_covers_symbol
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -207,7 +207,7 @@ def enrich_covered_changes(
 
     Without this the join reached only *uncovered* symbols: an ordinary
     removed export produces its own ``FUNC_REMOVED``, which
-    ``policy.consumer_requirements.uncovered_missing_symbols`` then excludes from the overlay —
+    ``policy.consumer_requirement_evaluation.uncovered_missing_symbols`` then excludes from the overlay —
     so the common case, including the internal-dispatcher one this join was
     built for, got no proof path at all.
 
@@ -240,7 +240,7 @@ def enrich_covered_changes(
     (:func:`_merge_consumer_impact_paths`) — a single shared ``Change`` can
     cover more than one missing export at once via ``affected_symbols``
     (e.g. one type-size change breaking several removed functions), and
-    :func:`~abicheck.policy.consumer_requirements.change_covers_symbol` treats all of them as covered. Keeping
+    :func:`~abicheck.policy.consumer_requirement_evaluation.change_covers_symbol` treats all of them as covered. Keeping
     only the first match's ``next(...)`` pick (Codex review, fresh
     evidence) silently discarded every other symbol's own public root and
     proof path, reporting a narrower explanation than the same logic

@@ -14,14 +14,14 @@
 
 """Unified impact-assessment model (G29 Phase 3 slice 1, ADR-052).
 
-See :mod:`abicheck.impact.model` for the dataclasses and
+See :mod:`abicheck.impact.assessment` for the dataclasses and
 :mod:`abicheck.impact.engine` for :func:`assess_change`, the builder.
 """
 
 from __future__ import annotations
 
+from .assessment import FindingDecision, GraphProofPath, ImpactAssessment, ProofStep
 from .engine import assess_change
-from .model import FindingDecision, GraphProofPath, ImpactAssessment, ProofStep
 
 __all__ = [
     "FindingDecision",
@@ -33,7 +33,7 @@ __all__ = [
 
 # `correlate_root_causes`/`RootCauseGroup` (impact.correlation) are
 # deliberately NOT imported here at module scope: `checker_types.py` imports
-# `abicheck.impact.model.ImpactAssessment` while it is still being defined,
+# `abicheck.impact.assessment.ImpactAssessment` while it is still being defined,
 # and `impact.correlation` imports `checker_types.Change` at its own module
 # scope -- eagerly importing `.correlation` from this package's `__init__`
 # would close that cycle (`checker_types -> impact -> impact.correlation ->

@@ -17,7 +17,7 @@
 
 Since design-hardening Phase 5 the *runtime* registry
 (``abicheck.model.name_heuristics``, catalogued by
-``abicheck.policy.name_heuristics``) is the registration point. Every key
+``abicheck.policy.name_heuristic_catalogue``) is the registration point. Every key
 produced by :func:`_family_f4_inventory.heuristic_site_inventory` is either
 
 * resolved by :func:`_family_f4_resolve.resolve_site` to a registered

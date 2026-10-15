@@ -226,7 +226,7 @@ def side_is_live(path: Path, *, had_raw_evidence: bool = False) -> bool:
 
 
 def input_spec_is_live(spec: Any) -> bool:
-    """:func:`side_is_live` for a typed :class:`~abicheck.workflows.contracts.InputSpec`.
+    """:func:`side_is_live` for a typed :class:`~abicheck.workflows.service_requests.InputSpec`.
 
     Both front ends reach it through the shared resolution, so they cannot
     answer "did this run extract it?" differently. A stored-snapshot operand
@@ -506,7 +506,7 @@ def _resolve_input_impl(
             logger. The CLI passes a ``click.echo(..., err=True)`` wrapper.
         lang_explicit: Whether *lang* is a genuinely explicit request rather
             than the request-level default (G31 Phase C follow-up — see
-            :attr:`abicheck.workflows.contracts.DumpRequest.lang_explicit`). ``False``
+            :attr:`abicheck.workflows.service_requests.DumpRequest.lang_explicit`). ``False``
             (the default) preserves this function's pre-existing behavior:
             *lang* is honored only when it equals ``"c"``, otherwise the
             header-AST pass auto-detects. ``True`` forces *lang* on the

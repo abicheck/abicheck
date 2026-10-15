@@ -53,7 +53,7 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
     from ...model.change import Change
     from ...suppression import Suppression, SuppressionList
     from ..disposition_ledger import DispositionLedger
-    from .context import PipelineContext
+    from .run_state import PipelineContext
 
 
 @dataclass(frozen=True)

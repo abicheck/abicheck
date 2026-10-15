@@ -17,7 +17,7 @@
 
 :class:`DispositionPipeline` runs :class:`PipelineStep` objects in order over
 a change list and one shared
-:class:`~abicheck.policy.finding_disposition.context.PipelineContext`. It owns
+:class:`~abicheck.policy.finding_disposition.run_state.PipelineContext`. It owns
 the ADR-067 D1 conservation invariant -- **every input finding ends the run
 kept, in a context bucket, or recorded in the disposition ledger** -- rather
 than leaving it to each step: a finding a step drops outright is recorded
@@ -37,7 +37,7 @@ from collections.abc import Iterable, Sequence
 from typing import TYPE_CHECKING, Protocol
 
 from ..disposition_ledger import Disposition, DispositionLedger
-from .context import DispositionRules, PipelineContext
+from .run_state import DispositionRules, PipelineContext
 from .suppression import dispose_by_suppression
 
 if TYPE_CHECKING:  # pragma: no cover - typing only

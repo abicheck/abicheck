@@ -46,7 +46,7 @@ from abicheck.elf_metadata import ElfMetadata
 from abicheck.environment_matrix import EnvironmentMatrix
 from abicheck.junit_report import to_junit_xml
 from abicheck.model import AbiSnapshot
-from abicheck.report.build import build_report_envelope
+from abicheck.report.document_builder import build_report_envelope
 from abicheck.sarif import to_sarif_str
 
 

@@ -11,7 +11,7 @@ generated: false
 
 Index: [Known gaps](../known-gaps.md)
 
-**Status (re-verified 2026-10-09 at `456989f`): OPEN.** workflows/cross_source_evolution.py:360 is still `def compute_cross_source_evolution(old, new)` with no changed_paths parameter, and checker.py has no changed_paths.
+**Status (re-verified 2026-10-09 at `456989f`): OPEN.** workflows/cross_source_hygiene.py:360 is still `def compute_cross_source_evolution(old, new)` with no changed_paths parameter, and checker.py has no changed_paths.
 
 
 Found during the ADR-068 Phase 6 doc follow-up (a stale mention of the
@@ -27,7 +27,7 @@ internal". The retired `scan --since` wired its changed-path set through to
 this automatically.
 
 `compare()`'s own migrated cross-source-evolution path
-(`checker.compare()` → `workflows.cross_source_evolution.
+(`checker.compare()` → `workflows.cross_source_hygiene.
 compute_cross_source_evolution(old, new)`) does **not** currently accept or
 forward a changed-path set at all — the function's signature is
 `(old: AbiSnapshot, new: AbiSnapshot)`, with no `changed_paths` parameter,

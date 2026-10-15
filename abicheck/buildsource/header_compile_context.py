@@ -79,7 +79,7 @@ from ..compile_context import CompileContext
 from ..errors import HeaderCompileContextAmbiguousError
 from ..header_utils import forced_include_operands, iter_directory_headers
 from ..model.execution_cache import memoized
-from .adapters.base import (
+from .adapters.adapter_contract import (
     _is_msvc_command,
     msvc_driver_token,
     split_operand_survivor,
@@ -364,7 +364,7 @@ class _ExplicitPin:
 #: Raw ``abi_relevant_flags`` prefixes that are just alternate spellings of a
 #: field this signature already compares *structurally* (``target_triple``/
 #: ``sysroot``/``standard``). ``CompileUnit.abi_relevant_flags`` is captured
-#: from raw argv by ``buildsource.adapters.base.extract_abi_relevant_flags``
+#: from raw argv by ``buildsource.adapters.adapter_contract.extract_abi_relevant_flags``
 #: (a prefix match over ``ABI_RELEVANT_FLAG_PREFIXES``) independently of the
 #: adapter's own structured-field derivation, so two compile units resolving
 #: to the *identical* structured value (e.g. ``target_triple ==
@@ -402,7 +402,7 @@ class _ExplicitPin:
 #: finding) -- it is masked only when ``CompileUnit.standard`` genuinely
 #: agrees with that specific ``/std:`` token's own value.** Nothing in this
 #: codebase parses ``/std:`` into ``CompileUnit.standard`` at all:
-#: ``abicheck/buildsource/adapters/base.py``'s ``_add_generic_flag_option``
+#: ``abicheck/buildsource/adapters/adapter_contract.py``'s ``_add_generic_flag_option``
 #: says so explicitly ("MSVC ``/std:`` is not parsed into cu.standard") and
 #: only normalizes it into a *separate* ``BuildOption``, itself gated on
 #: ``if not cu.standard``. So for a typical MSVC compile unit ``cu.standard``
@@ -524,7 +524,7 @@ def _msvc_std_flag_matches_captured_standard(
     *not* detected as MSVC/clang-cl-style (see that function's own ``msvc``
     parameter) -- kept as a conservative fallback for the unusual case of a
     ``/std:``-shaped token surviving ``extract_abi_relevant_flags`` on an
-    argv :func:`~abicheck.buildsource.adapters.base._is_msvc_command`
+    argv :func:`~abicheck.buildsource.adapters.adapter_contract._is_msvc_command`
     didn't recognize as MSVC-dialect, rather than deleted outright, since a
     real MSVC/clang-cl unit never reaches this value-comparison path
     anymore.
@@ -555,7 +555,7 @@ def _is_structured_field_flag(flag: str, *, cu_standard: str, msvc: bool) -> boo
 
     ``msvc`` (P2 review, ``discussion_r3787672845``, fresh evidence): ``True``
     when the compile unit *flag* came from was detected as an MSVC/clang-cl
-    dialect command (:func:`~abicheck.buildsource.adapters.base.
+    dialect command (:func:`~abicheck.buildsource.adapters.adapter_contract.
     _is_msvc_command` on ``cu.argv``). For such a unit, ``/std:`` is
     **never** masked, regardless of whether its own value agrees with
     ``cu_standard`` -- see :func:`_msvc_std_flag_matches_captured_standard`'s
@@ -748,7 +748,7 @@ def _pinned_define_macro(flag: str) -> str | None:
 
     ``None`` for every other flag shape -- including a bare ``-D``/``/D``
     with no macro name (``len(flag) <= 2``), which is not a real token
-    :func:`~abicheck.buildsource.adapters.base.extract_abi_relevant_flags`
+    :func:`~abicheck.buildsource.adapters.adapter_contract.extract_abi_relevant_flags`
     ever emits on its own. Mirrors the identical ``-D``/``/D`` recognition
     :meth:`_ExplicitPin.of` already uses when scanning *explicit*'s own
     tokens for a pinned macro name, so a flag this function names is
@@ -1175,7 +1175,7 @@ def _context_flags(
     _clang_context_args``: ``if msvc: cmd.append("--driver-mode=cl")``) --
     unconditional whenever the
     compile unit is MSVC/clang-cl-dialect
-    (:func:`~abicheck.buildsource.adapters.base._is_msvc_command`),
+    (:func:`~abicheck.buildsource.adapters.adapter_contract._is_msvc_command`),
     regardless of whether the resolved driver token's own basename already
     implies CL mode. Harmless when it does (a real ``clang-cl`` invocation
     already defaults to CL mode from its own basename; explicitly
@@ -1472,7 +1472,7 @@ def _derived_gcc_path(cu: CompileUnit) -> str | None:
 
     Returns the driver token this compile unit was itself invoked with --
     only when *cu* is genuinely MSVC/clang-cl-dialect
-    (:func:`~abicheck.buildsource.adapters.base._is_msvc_command`). ``None``
+    (:func:`~abicheck.buildsource.adapters.adapter_contract._is_msvc_command`). ``None``
     otherwise -- a complete no-op for every non-MSVC unit, unchanged from
     this module's pre-Finding-3 behavior.
 
@@ -1484,7 +1484,7 @@ def _derived_gcc_path(cu: CompileUnit) -> str | None:
     clang-family binary, so ``abicheck.extract.compiler_driver.resolve_clang_bin`` rejects it
     and falls back to plain ``clang++``, which cannot parse the retained
     ``/std:`` survivor at all (the exact failure this whole function exists
-    to prevent). Uses :func:`~abicheck.buildsource.adapters.base.
+    to prevent). Uses :func:`~abicheck.buildsource.adapters.adapter_contract.
     msvc_driver_token` -- the same scan ``_is_msvc_command`` runs, refactored
     to also report which token it matched -- to locate the actual
     ``cl``/``clang-cl``-basename token wherever it sits in argv, falling back

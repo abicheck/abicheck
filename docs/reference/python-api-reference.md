@@ -199,7 +199,7 @@ Where/how a result is rendered — the invocation-level output choice.
 
 ## `ReleaseCompareRequest`
 
-A fully-specified directory/package release-comparison *resolution* request -- the release fan-out's counterpart to :class:`abicheck.workflows.contracts.CompareRequest`, scoped to the pre-execution half (:func:`resolve_release_compare_plan` resolves it; it does not itself run any per-library dump/compare).
+A fully-specified directory/package release-comparison *resolution* request -- the release fan-out's counterpart to :class:`abicheck.workflows.service_requests.CompareRequest`, scoped to the pre-execution half (:func:`resolve_release_compare_plan` resolves it; it does not itself run any per-library dump/compare).
 
 *Dataclass.*
 

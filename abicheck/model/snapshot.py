@@ -387,7 +387,7 @@ class AbiSnapshot:
     # every freshly extracted snapshot whose headers were parsed gets one.
     # `None` only for a snapshot predating this field, or one whose headers
     # were never parsed at all (a pure binary-only L0/L1 dump); a query over
-    # such a snapshot goes through `policy.public_surface.
+    # such a snapshot goes through `policy.public_surface_index.
     # resolve_public_surface()`'s lazy, in-memory approximate backfill
     # instead — never through `PublicSurfaceQuery.resolve()` directly, and
     # never persisted back onto the loaded object. `build_source.source_graph`

@@ -14,8 +14,8 @@ from typing import Any
 
 from abicheck.service_compare_evidence import SideEvidence
 from abicheck.service_compare_pipeline import ResolvedComparePair
-from abicheck.workflows.contracts import CompareRequest
 from abicheck.workflows.request_inputs import InputSpec
+from abicheck.workflows.service_requests import CompareRequest
 
 
 def fake_resolved_pair(

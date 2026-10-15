@@ -214,7 +214,7 @@ class BuildConfig:
     #: ``scope.public_header_dirs`` (ADR-068 plan §5 P4): directories
     #: (project-root-relative or absolute) whose headers are this project's
     #: public/internal boundary for the boundary-dependent cross-source checks
-    #: (``workflows/cross_source_evolution.py``). Unrelated to the
+    #: (``workflows/cross_source_hygiene.py``). Unrelated to the
     #: ``scope.public`` boolean above (header-origin scoping, the config home
     #: of the retired ``--scope-public-headers``). Folded in beside any ``-H``
     #: *directory* through ``InputSpec.public_header_dirs``; empty by default,

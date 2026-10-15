@@ -44,14 +44,14 @@ from typing import Any
 
 import pytest
 
-from abicheck.storage.availability import (
+from abicheck.storage.availability_ledger import (
     AvailabilityLedger,
     Confidence,
     FactAvailability,
     FactStatus,
 )
 from abicheck.storage.canonical import canonical_json, semantic_digest
-from abicheck.storage.identity import (
+from abicheck.storage.occurrence_identity import (
     EntityId,
     EntityKind,
     IdentityConflict,

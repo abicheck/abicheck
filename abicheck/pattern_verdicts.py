@@ -224,7 +224,7 @@ def apply_pattern_verdicts(
     review). Raises and annotations still apply — they never hide a finding.
 
     *old_public_entity_ids*/*new_public_entity_ids* (ADR-063 Phase 3 D5):
-    each side's own already-resolved ``policy.public_surface.
+    each side's own already-resolved ``policy.public_surface_index.
     PublicSurfaceQuery`` answer, threaded to its *matching*
     ``build_surface_graph()`` call below — never the other side's set,
     since old and new can genuinely have different public reachability (a

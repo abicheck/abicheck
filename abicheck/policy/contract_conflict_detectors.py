@@ -23,7 +23,7 @@ pass and turn a genuine disagreement into a
 :class:`~abicheck.model.contract_conflicts.ContractSourceConflict` naming
 both sides' claims (never resolved to one side, ADR-067). Case 3
 (package-claim vs. contained binary) lives in
-:mod:`abicheck.workflows.contract_conflicts` instead -- it depends on
+:mod:`abicheck.workflows.package_claim_conflicts` instead -- it depends on
 :mod:`abicheck.debian_symbols`, a layer above this one.
 """
 

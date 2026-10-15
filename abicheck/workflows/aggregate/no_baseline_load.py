@@ -33,7 +33,8 @@ from typing import Any
 
 from .contracts import _LoadedReport, _malformed_gate_report
 from .disposition_axis import disposition_audit_block
-from .gate import (
+from .reconcile import parse_report_findings
+from .report_gate import (
     COVERAGE_INCOMPLETE_EXIT,
     GateInfo,
     _analysis_assurance_exit,
@@ -42,7 +43,6 @@ from .gate import (
     _contract_coverage_incomplete,
     _is_schema_valid_run_outcome,
 )
-from .reconcile import parse_report_findings
 from .scope_axis import scope_completeness_exit, scope_completeness_incomplete
 
 

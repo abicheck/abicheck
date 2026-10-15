@@ -55,10 +55,10 @@ from collections.abc import Iterator
 
 from abicheck.checker_policy import ChangeKind
 from abicheck.compare.finding_identity import (
-    change as identity_change,
+    change_identity as identity_change,
     change_kinds,
+    declaration_identity,
     mangled,
-    symbols,
 )
 from abicheck.model.change import Change
 from abicheck.model.identity import EntityId, EntityKind
@@ -606,7 +606,7 @@ def test_report_change_view_covers_every_attribute_resolve_change_identity_reads
     tree = ast.parse(
         "\n".join(
             inspect.getsource(m)
-            for m in (identity_change, change_kinds, mangled, symbols)
+            for m in (identity_change, change_kinds, mangled, declaration_identity)
         )
     )
     funcs_by_name = _group_funcs_by_name(tree)

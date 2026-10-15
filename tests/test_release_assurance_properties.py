@@ -366,7 +366,7 @@ class TestReportProjectionFollowsTheDecision:
     def test_section_mirrors_the_decision_or_is_absent(
         self, statuses: list[str], require_complete: bool
     ) -> None:
-        from abicheck.report.release_assurance import release_assurance_terms
+        from abicheck.report.release_assurance_section import release_assurance_terms
 
         decision = resolve_release_assurance_decision(
             _members(statuses), require_complete=require_complete
@@ -613,7 +613,9 @@ class TestReleaseExitFoldCarriesTheAxis:
         had no notes of its own), and every line names its member (so a release
         reader can act on it at all).
         """
-        from abicheck.report.release_assurance import build_release_assurance_section
+        from abicheck.report.release_assurance_section import (
+            build_release_assurance_section,
+        )
 
         members = _members(statuses)
         decision = resolve_release_assurance_decision(members, require_complete=True)

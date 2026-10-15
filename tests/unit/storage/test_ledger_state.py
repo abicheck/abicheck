@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from hypothesis import given, strategies as st
 
-from abicheck.storage.availability import AvailabilityLedger, FactAvailability
+from abicheck.storage.availability_ledger import AvailabilityLedger, FactAvailability
 from abicheck.storage.availability_status import FactStatus
 
 
@@ -106,7 +106,7 @@ class TestLedgerStateIsCanonicalNotJustItsViews:
             ObservationKind,
             OccurrenceId,
         )
-        from abicheck.storage.identity import IdentityConflict, OccurrenceSet
+        from abicheck.storage.occurrence_identity import IdentityConflict, OccurrenceSet
         from abicheck.storage.versioning import StorageVersions
 
         first = EntityId(kind=EntityKind.FUNCTION, qualified_name="a")

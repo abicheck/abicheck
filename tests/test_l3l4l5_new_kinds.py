@@ -26,7 +26,7 @@ from __future__ import annotations
 import pytest
 from l5_graph_support import producers_ran_unless_flagged
 
-from abicheck.buildsource.adapters.base import derive_build_options
+from abicheck.buildsource.adapters.adapter_contract import derive_build_options
 from abicheck.buildsource.build_diff import diff_build_evidence
 from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
 from abicheck.buildsource.inline_graph_fold import _role_coverage_key
@@ -132,7 +132,9 @@ def test_l3_identical_flags_emit_nothing() -> None:
 
 
 def _evf(argv: list[str]) -> BuildEvidence:
-    from abicheck.buildsource.adapters.base import extract_abi_relevant_flags
+    from abicheck.buildsource.adapters.adapter_contract import (
+        extract_abi_relevant_flags,
+    )
 
     cu = CompileUnit(
         id="t",
@@ -194,7 +196,9 @@ def test_l3_lto_tuning_flags_are_not_abi_relevant(tuning_flag) -> None:
     # A standalone LTO backend-tuning flag (no -flto) does not enable LTO and is
     # not ABI-relevant, so it must emit nothing — neither lto_mode_changed nor
     # the generic abi_relevant_build_flag_changed.
-    from abicheck.buildsource.adapters.base import extract_abi_relevant_flags
+    from abicheck.buildsource.adapters.adapter_contract import (
+        extract_abi_relevant_flags,
+    )
     from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
 
     def evf(argv):

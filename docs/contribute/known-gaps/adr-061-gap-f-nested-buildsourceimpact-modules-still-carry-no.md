@@ -215,7 +215,7 @@ violations, blocked" pattern this ADR's other gaps already use for
   docs-only pass. Recorded here as a retained, deliberately-unclassified
   exception instead, with the concrete blocking findings named rather
   than asserted.
-- `abicheck/impact/model.py` — the identical shape gap B already
+- `abicheck/impact/assessment.py` — the identical shape gap B already
   established for `checker_policy.py`/`contract_gating.py`/`reclassify.py`:
   `abicheck/checker_types.py` (`model`, whose `may_import` is empty)
   imports `ImpactAssessment` from this module directly and statically
@@ -244,9 +244,9 @@ needs an internal split before either half gets a target. The two
 *retained* entries are not
 migration targets at all, but for two different reasons, not one:
 `source_graph.py` is a pure facade with no offending caller in the first
-place (it exists purely for external/legacy call sites); `impact/model.py`
+place (it exists purely for external/legacy call sites); `impact/assessment.py`
 is the opposite — it has a real, named offending edge
-(`checker_types.py -> impact.model -> policy.evidence_status`), the same
+(`checker_types.py -> impact.assessment -> policy.evidence_status`), the same
 "no single ADR-061 layer admits both directions" conflict gap B's own
 worked example describes, and is forced *toward* (never actually
 classified as) `model` because that conflict has no caller-side or

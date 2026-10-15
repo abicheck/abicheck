@@ -591,7 +591,7 @@ class TestTheOutputDirectorySummaryCarriesTheContract:
     """
 
     def _terms(self, *, missing: bool):
-        from abicheck.report.release_public_surface import (
+        from abicheck.report.release_public_surface_section import (
             compute_release_public_surface,
         )
 
@@ -807,7 +807,7 @@ class TestAnUnresolvedContractIsStatedNotOmitted:
     """
 
     def _unresolved_terms(self):
-        from abicheck.report.release_public_surface import (
+        from abicheck.report.release_public_surface_section import (
             compute_release_public_surface,
         )
 

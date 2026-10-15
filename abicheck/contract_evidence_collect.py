@@ -114,7 +114,7 @@ from .policy.contract_graph_encoding import (
     alias_node as _alias_node,
     name_node as _name_node,
 )
-from .policy.public_surface import (
+from .policy.public_surface_index import (
     PublicSurface,
     _index_surface_types,
     _symbol_keys,

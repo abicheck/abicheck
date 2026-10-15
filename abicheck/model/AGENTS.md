@@ -29,7 +29,7 @@ and the registration functions for spelling-based classifiers
 (design-hardening Phase 5). It lives here only because the `compare`-layer
 detectors that register may import nothing but `model`. The matchers stay with
 their detectors, and the catalogue and its validation live in
-`policy/name_heuristics.py`.
+`policy/name_heuristic_catalogue.py`.
 
 **A second deliberate, ADR-063 D7-sanctioned exception: `fact_registry.py`.**
 D7 names `abicheck/model/fact_registry.py` explicitly as the fact/capability
@@ -57,7 +57,7 @@ question one layer up.
 ## Permitted imports
 
 Per ADR-061 D1, `model/` may import **nothing** first-party except the public
-root surfaces (`abicheck.workflows.contracts`, `abicheck.errors`) and, transitionally,
+root surfaces (`abicheck.workflows.service_requests`, `abicheck.errors`) and, transitionally,
 the flat leaf modules classified `model` in `architecture/modules.yaml`.
 Importing `extract`, `compare`, `policy`, `workflows`, `report` or
 `frontends` is a defect, not a case for an exception list —

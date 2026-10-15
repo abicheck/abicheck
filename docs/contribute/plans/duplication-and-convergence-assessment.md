@@ -1773,7 +1773,7 @@ re-deriving the other.
 
 **Progress update (2026-09-07, later same day): JSON's `report_mode="full"`
 build is now the first format routed through one shared choke point.**
-`report/build.py`'s `build_report_document(result, ...)` performs the
+`report/document_builder.py`'s `build_report_document(result, ...)` performs the
 `report_mode="full"` JSON build exactly once (previously inlined in
 `reporter.to_json`) and `service_render._render_json_output` calls it
 directly, bypassing `to_json`'s own independent pipeline for that mode.

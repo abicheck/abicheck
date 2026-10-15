@@ -100,7 +100,6 @@ from .extract.headers.ast_config import (
     _detect_cpp_headers as _detect_cpp_headers,
     _resolve_compiler_binary as _resolve_compiler_binary,
 )
-from .extract.headers.backend import HeaderAstBackend, HeaderParseRequest
 from .extract.headers.backend_plan import BackendPlan
 from .extract.headers.castxml.backend import CastxmlBackend, CastxmlRunError
 from .extract.headers.castxml.dumper import (
@@ -117,6 +116,7 @@ from .extract.headers.castxml.probe import (
     _validate_castxml_output as _validate_castxml_output,
 )
 from .extract.headers.clang.backend import ClangBackend
+from .extract.headers.header_ast_backend import HeaderAstBackend, HeaderParseRequest
 from .extract.headers.sysinc import (
     _auto_system_includes_enabled as _auto_system_includes_enabled,
     _parse_gnu_include_search_dirs as _parse_gnu_include_search_dirs,

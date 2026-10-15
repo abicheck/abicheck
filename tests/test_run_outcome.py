@@ -45,7 +45,7 @@ from abicheck.policy.outcome import (
     policy_gate_decision_for_exit_code,
     run_outcome_for_scan_fields,
 )
-from abicheck.workflows.aggregate.gate import GateInfo
+from abicheck.workflows.aggregate.report_gate import GateInfo
 from tests.schema_validation import validate_instance
 
 # ---------------------------------------------------------------------------
@@ -375,7 +375,7 @@ class TestRunOutcomeForScanFields:
 
 
 # ---------------------------------------------------------------------------
-# GateInfo structured-first reading (workflows/aggregate/gate.py)
+# GateInfo structured-first reading (workflows/aggregate/report_gate.py)
 # ---------------------------------------------------------------------------
 
 
@@ -433,7 +433,7 @@ class TestGateInfoFromReportDataStructuredFirst:
         greener) legacy verdict path instead of failing the target
         unavailable, exactly the defect the severity block's own
         _MalformedGate handling already guards against."""
-        from abicheck.workflows.aggregate.gate import _MalformedGate
+        from abicheck.workflows.aggregate.report_gate import _MalformedGate
 
         data = {"run_outcome": {"gate": "not_a_real_value", "operational": "none"}}
         with pytest.raises(_MalformedGate):
@@ -447,7 +447,7 @@ class TestGateInfoFromReportDataStructuredFirst:
         as authoritative -- most dangerously here, since with no severity
         block at all there is no OTHER cross-check to catch it, and a
         BREAKING report could read as gate: none."""
-        from abicheck.workflows.aggregate.gate import _MalformedGate
+        from abicheck.workflows.aggregate.report_gate import _MalformedGate
 
         data = {"run_outcome": {"gate": "none", "operational": "none"}}
         with pytest.raises(_MalformedGate):
@@ -458,7 +458,7 @@ class TestGateInfoFromReportDataStructuredFirst:
         on the compatibility axis itself (severity says clean, run_outcome
         says abi_breaking) -- must fail closed rather than silently trust
         the greener severity block."""
-        from abicheck.workflows.aggregate.gate import _MalformedGate
+        from abicheck.workflows.aggregate.report_gate import _MalformedGate
 
         data = {
             "severity": {"exit_code": 0, "blocking": False, "blocking_categories": []},
@@ -480,7 +480,7 @@ class TestGateInfoFromReportDataStructuredFirst:
         a report is corruption exactly like any other, `used_by`'s presence
         notwithstanding. `_fold_top_level_run_outcome` no longer accepts a
         `scoped_exempt` parameter at all."""
-        from abicheck.workflows.aggregate.gate import _MalformedGate
+        from abicheck.workflows.aggregate.report_gate import _MalformedGate
 
         data = {
             "severity": {
@@ -621,7 +621,7 @@ class TestGateInfoFromScanReportStructuredFirst:
         path would reject with `_MalformedGate`), yet the structured
         `run_outcome` alone is enough for from_scan_report to resolve
         cleanly."""
-        from abicheck.workflows.aggregate.gate import _MalformedGate
+        from abicheck.workflows.aggregate.report_gate import _MalformedGate
 
         run_outcome = RunOutcome(
             compatibility=None,
@@ -645,7 +645,7 @@ class TestGateInfoFromScanReportStructuredFirst:
     def test_present_but_malformed_run_outcome_fails_closed(self):
         """Codex review (P2), scan-report counterpart to the identical
         compare-report test above."""
-        from abicheck.workflows.aggregate.gate import _MalformedGate
+        from abicheck.workflows.aggregate.report_gate import _MalformedGate
 
         report = self._scan_report(
             "COMPATIBLE",
@@ -666,7 +666,7 @@ class TestGateInfoFromScanReportStructuredFirst:
         (or even an outright invalid gate value) was silently accepted as
         nonblocking, unlike the equivalent compare report."""
         from abicheck.change_registry_types import Verdict
-        from abicheck.workflows.aggregate.gate import _MalformedGate
+        from abicheck.workflows.aggregate.report_gate import _MalformedGate
 
         contradicting = {
             "scan_schema_version": "1.24",

@@ -61,7 +61,7 @@ if TYPE_CHECKING:
 
 
 from ....cli import main
-from ..options.view import validate_view
+from ..options.compare_view import validate_view
 
 #: `oneline` and `html` render the aggregate release document alone
 #: (`report/release_oneline.py`, `report/render_release_html.py`); the two still
@@ -450,9 +450,9 @@ def compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
     )
 
     # ADR-068 D4/Phase 5, rewritten by plan slice 7o: resolve --view
-    # (frontends.cli.options.view) into the two dest names it still carries,
+    # (frontends.cli.options.compare_view) into the two dest names it still carries,
     # report_mode/show_only. No profile injects those dests.
-    from ..options.view import parse_view_tokens
+    from ..options.compare_view import parse_view_tokens
 
     kwargs.update(parse_view_tokens(kwargs.pop("view", ())))
 

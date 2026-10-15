@@ -425,8 +425,8 @@ adrs:
     use_cases: [UC-WF-compare]
     surfaces:
       - cli: compare --contract
-      - api: abicheck.workflows.contracts.CompareRequest.pack_paths
-      - api: abicheck.workflows.contracts.CompareRequest.stated_settings
+      - api: abicheck.workflows.service_requests.CompareRequest.pack_paths
+      - api: abicheck.workflows.service_requests.CompareRequest.stated_settings
       - report: compare_report.contract_coverage
       - report: compare_report.contract_context
 
@@ -472,8 +472,8 @@ adrs:
     disposition: surfaced
     use_cases: [UC-WF-compare]
     surfaces:
-      - api: abicheck.workflows.contracts.CompareRequest
-      - api: abicheck.workflows.contracts.DumpRequest
+      - api: abicheck.workflows.service_requests.CompareRequest
+      - api: abicheck.workflows.service_requests.DumpRequest
       - report: compare_report.report_schema_version
 
   - id: ADR-056

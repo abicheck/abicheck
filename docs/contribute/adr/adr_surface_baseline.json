@@ -449,8 +449,8 @@
     "ADR-049": {
       "disposition": "surfaced",
       "surfaces": [
-        "api: abicheck.workflows.contracts.CompareRequest.pack_paths",
-        "api: abicheck.workflows.contracts.CompareRequest.stated_settings",
+        "api: abicheck.workflows.service_requests.CompareRequest.pack_paths",
+        "api: abicheck.workflows.service_requests.CompareRequest.stated_settings",
         "cli: compare --contract",
         "report: compare_report.contract_context",
         "report: compare_report.contract_coverage"
@@ -500,8 +500,8 @@
     "ADR-055": {
       "disposition": "surfaced",
       "surfaces": [
-        "api: abicheck.workflows.contracts.CompareRequest",
-        "api: abicheck.workflows.contracts.DumpRequest",
+        "api: abicheck.workflows.service_requests.CompareRequest",
+        "api: abicheck.workflows.service_requests.DumpRequest",
         "report: compare_report.report_schema_version"
       ],
       "use_cases": [
@@ -691,6 +691,31 @@
       "use_cases": [
         "UC-WF-compare"
       ]
+    },
+    "ADR-079": {
+      "disposition": "gap",
+      "surfaces": [],
+      "use_cases": []
+    },
+    "ADR-080": {
+      "disposition": "gap",
+      "surfaces": [],
+      "use_cases": []
+    },
+    "ADR-081": {
+      "disposition": "partial",
+      "surfaces": [],
+      "use_cases": []
+    },
+    "ADR-082": {
+      "disposition": "internal",
+      "surfaces": [],
+      "use_cases": []
+    },
+    "ADR-083": {
+      "disposition": "gap",
+      "surfaces": [],
+      "use_cases": []
     }
   },
   "multichannel_without_family": [
@@ -778,8 +803,8 @@
     "ADR-047 action: actions/baseline",
     "ADR-047 action: actions/check-target",
     "ADR-047 cli: aggregate",
-    "ADR-049 api: abicheck.workflows.contracts.CompareRequest.pack_paths",
-    "ADR-049 api: abicheck.workflows.contracts.CompareRequest.stated_settings",
+    "ADR-049 api: abicheck.workflows.service_requests.CompareRequest.pack_paths",
+    "ADR-049 api: abicheck.workflows.service_requests.CompareRequest.stated_settings",
     "ADR-049 cli: compare --contract",
     "ADR-049 report: compare_report.contract_context",
     "ADR-049 report: compare_report.contract_coverage",
@@ -789,8 +814,8 @@
     "ADR-052 report: compare_report.consumer_impact_summary",
     "ADR-054 cli: project plan",
     "ADR-054 cli: project validate",
-    "ADR-055 api: abicheck.workflows.contracts.CompareRequest",
-    "ADR-055 api: abicheck.workflows.contracts.DumpRequest",
+    "ADR-055 api: abicheck.workflows.service_requests.CompareRequest",
+    "ADR-055 api: abicheck.workflows.service_requests.DumpRequest",
     "ADR-055 report: compare_report.report_schema_version",
     "ADR-057 cli: compare --use-cases --used-by",
     "ADR-057 report: compare_report.use_case_impact",

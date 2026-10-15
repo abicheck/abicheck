@@ -34,7 +34,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from .context import DispositionRules, PipelineContext
+from .run_state import DispositionRules, PipelineContext
 from .suppression import (
     SuppressionDisposition,
     dispose_by_suppression,

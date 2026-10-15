@@ -42,7 +42,7 @@ if TYPE_CHECKING:
     from ..pack_application import PackApplication
     from ..policy_file import PolicyFile
     from ..suppression import SuppressionList
-    from .contracts import CompareRequest
+    from .service_requests import CompareRequest
 
 __all__ = ["RequestPolicyInputs", "resolve_request_policy_inputs"]
 

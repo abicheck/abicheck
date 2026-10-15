@@ -79,7 +79,7 @@ the reverse, so a new resolved-fact field added here must stay plain data
 
 ADR-061 Phase 3: this contract has zero first-party dependencies, so it
 moved into ``abicheck.workflows.artifact`` (D2's target
-``workflows/artifact/contracts.py``) as-is — the flat module's own leaf
+``workflows/artifact/resolved_plan.py``) as-is — the flat module's own leaf
 status above is exactly what made the physical move risk-free. Its four
 call sites at the time (``service_dump_pipeline.py``,
 ``service_input_resolution.py``, ``cli_dump_helpers.py``,

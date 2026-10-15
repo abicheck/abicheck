@@ -73,7 +73,7 @@ if TYPE_CHECKING:
 # side-effect pattern every sibling `cli_*` command module already uses.
 from ....cli import main
 from ....workflows.provenance import stamp_provenance
-from ..options.provenance import dump_provenance_option, parse_provenance_tokens
+from ..options.dump_provenance import dump_provenance_option, parse_provenance_tokens
 from ..runtime import _setup_verbosity
 
 
@@ -608,7 +608,7 @@ def dump_cmd(
     # `try_match_compile_db`'s own docstring for the one accepted
     # imprecision vs. the real run's `match_compile_db`.
     from ....workflows.artifact.compile_db_match import try_match_compile_db
-    from ....workflows.dump.pipeline import DumpExecutionOptions
+    from ....workflows.dump.request_to_snapshot import DumpExecutionOptions
     from ..dump_build_context_preview import (
         add_execution_options_dry_run_section,
         add_ownership_dry_run_section,

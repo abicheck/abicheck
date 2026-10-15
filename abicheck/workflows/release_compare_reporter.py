@@ -41,7 +41,7 @@ from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
     from ..checker_types import DiffResult
-    from .contracts import CompareResult
+    from .service_requests import CompareResult
 
 __all__ = [
     "ComparedMember",

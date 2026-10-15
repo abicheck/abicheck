@@ -213,7 +213,9 @@ class TestReplayStillEmitsForcedIncludesExactlyOnce:
         assert replay_extra_flags(cu, [], "gnu").count("-include") == 1
 
     def test_forced_includes_are_absent_from_abi_relevant_flags(self) -> None:
-        from abicheck.buildsource.adapters.base import extract_abi_relevant_flags
+        from abicheck.buildsource.adapters.adapter_contract import (
+            extract_abi_relevant_flags,
+        )
 
         argv = ["c++", "-include", "cfg.h", "-imacros", "defs.h", "/FIw.h", "-fPIC"]
         assert extract_abi_relevant_flags(argv) == ["-fPIC"]

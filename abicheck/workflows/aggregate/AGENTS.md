@@ -12,7 +12,7 @@ across profiles, folds compatibility/coverage/gate axes, and returns one
 Imports may follow the workflow layer contract: model, compare, policy,
 storage, and extraction owners. Existing flat compare/model modules are
 migration dependencies only. Never import `abicheck.workflows.aggregate`,
-`abicheck.workflows.aggregate.reconcile`, or `abicheck.workflows.aggregate.resolve`; those are
+`abicheck.workflows.aggregate.reconcile`, or `abicheck.workflows.aggregate.expected_targets`; those are
 external compatibility facades.
 
 ## Canonical entry points

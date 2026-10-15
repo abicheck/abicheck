@@ -42,7 +42,7 @@ from elftools.common.exceptions import ELFError
 from elftools.elf.elffile import ELFFile
 
 from ..build_context import _extract_flags
-from .adapters.base import (
+from .adapters.adapter_contract import (
     compile_unit_id,
     derive_build_options,
     effective_language,

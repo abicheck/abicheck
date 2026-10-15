@@ -58,7 +58,7 @@ from ..model.graph_vocabulary import (
     RESOLUTION_OVERAPPROX,
     RESOLUTION_UNKNOWN,
 )
-from ..model.name_decoration import macho as macho_decoration
+from ..model.name_decoration import macho_underscore as macho_decoration
 from ..model.source_graph import function_decl_identity
 from .call_decl_record import (
     _OVERRIDE_MARKER_KINDS,

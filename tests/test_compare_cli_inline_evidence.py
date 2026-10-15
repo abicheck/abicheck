@@ -51,8 +51,8 @@ from abicheck.frontends.cli.dump_debug_config import DumpDebugConfig
 from abicheck.model import AbiSnapshot, Function, Visibility
 from abicheck.serialization import snapshot_to_json
 from abicheck.service_compare_evidence import without_unusable_raw_evidence
-from abicheck.workflows.contracts import CompareRequest
 from abicheck.workflows.request_inputs import InputSpec
+from abicheck.workflows.service_requests import CompareRequest
 
 _OPERANDS = ("elf", "snapshot")
 _EVIDENCE = ("none", "raw", "pack")

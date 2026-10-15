@@ -45,7 +45,7 @@ Deliberately inert value types (``model`` may import nothing): acquisition
 lives in ``workflows.release_surface_acquisition``, the export index in
 ``compare.bundle_export_index``, the reconciliation in
 ``policy.release_contract_reconciliation``, and the report section in
-``report.release_public_surface``.
+``report.release_public_surface_section``.
 """
 
 from __future__ import annotations

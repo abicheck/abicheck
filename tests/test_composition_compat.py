@@ -41,7 +41,7 @@ from abicheck.model.consumer_requirements import (
     LibraryExportFacts,
 )
 from abicheck.pe_metadata import PeExport, PeMetadata
-from abicheck.policy.consumer_requirements import resolve_pe_ordinal_imports
+from abicheck.policy.consumer_requirement_evaluation import resolve_pe_ordinal_imports
 from abicheck.resolver import DependencyGraph, ResolvedDSO
 from abicheck.stack_binding_diff import diff_runtime_bindings
 from abicheck.stack_checker import StackVerdict, _compute_abi_risk

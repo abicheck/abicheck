@@ -52,7 +52,7 @@ short:
 GateDecision`` is confined to the small set of encoders ADR-063 D6 names:
 ``policy/outcome.py`` itself (this module -- the one place a
 ``RunOutcome`` axis is decoded from raw report fields), plus
-``workflows/aggregate/gate.py``, ``cli.py``, ``service.py``, and
+``workflows/aggregate/report_gate.py``, ``cli.py``, ``service.py``, and
 ``workflows/aggregate/fold.py``/``aggregate``'s own ``exit_code()``. No
 other module should compare a ``PolicyGateDecision``/``OperationalStatus``
 against a raw integer or literal -- see
@@ -134,7 +134,7 @@ class PolicyGateDecision(StrEnum):
 
 #: The one place ``PolicyGateDecision`` is given exit-code meaning -- the
 #: same 0/1/2/4 severity-aware scheme ``policy.severity._CATEGORY_EXIT_
-#: CODES``/``workflows.aggregate.gate._VALID_GATE_EXIT`` already share, so a
+#: CODES``/``workflows.aggregate.report_gate._VALID_GATE_EXIT`` already share, so a
 #: ``PolicyGateDecision`` and a legacy-scheme ``GateDecision.exit_code`` map
 #: onto exactly the same four values.
 _GATE_EXIT_CODE: dict[PolicyGateDecision, int] = {
@@ -158,7 +158,7 @@ def policy_gate_decision_for_exit_code(code: int) -> PolicyGateDecision:
     represents.
 
     *code* must be one of ``0``/``1``/``2``/``4`` -- the same scheme
-    ``workflows.aggregate.gate._VALID_GATE_EXIT`` already validates against.
+    ``workflows.aggregate.report_gate._VALID_GATE_EXIT`` already validates against.
     An unrecognized code fails safe to :attr:`PolicyGateDecision.ABI_
     BREAKING`, matching ``severity.classify_change``'s own "unclassified is
     treated as breaking" fail-safe convention, rather than silently
@@ -204,7 +204,7 @@ def operational_status_exit_code(operational: OperationalStatus) -> int:
     """*operational*'s own contribution to the shared 0/1/2/4 scheme.
 
     ``NONE`` contributes ``0``; every other member contributes ``1`` --
-    mirroring ``workflows.aggregate.gate.COVERAGE_INCOMPLETE_EXIT`` and the
+    mirroring ``workflows.aggregate.report_gate.COVERAGE_INCOMPLETE_EXIT`` and the
     identical orthogonal-axis fold ADR-049 Phase 7's contract-coverage
     contribution already uses (a real, independent failure that must never
     be masked by, nor mask, the compatibility gate's own contribution).
@@ -219,7 +219,7 @@ def fold_gate_and_operational(
     the shared 0/1/2/4 scheme -- neither axis is allowed to mask the other.
 
     This is the one fold ADR-063 D6 assigns to ``gate.py``'s own readers
-    (:mod:`abicheck.workflows.aggregate.gate`): two independent axes folded
+    (:mod:`abicheck.workflows.aggregate.report_gate`): two independent axes folded
     once per target, rather than two separate values every later consumer
     has to remember to fold itself.
     """
@@ -392,7 +392,7 @@ _SCAN_ABORT_VERDICT_OPERATIONAL: dict[str, OperationalStatus] = {
 #: ``scan``'s own legacy top-level exit codes that mean "the compatibility
 #: axis contributed nothing; this is an operational condition" -- 5 (budget
 #: overflow) and 6 (not-comparable), the two codes
-#: ``workflows.aggregate.gate.GateInfo.from_scan_report`` already treats as
+#: ``workflows.aggregate.report_gate.GateInfo.from_scan_report`` already treats as
 #: real, independent blocking conditions outside its own 0/2/4 native scheme.
 _SCAN_EXIT_CODE_OPERATIONAL: dict[int, OperationalStatus] = {
     5: OperationalStatus.BUDGET_OVERFLOW,
@@ -403,7 +403,7 @@ _SCAN_EXIT_CODE_OPERATIONAL: dict[int, OperationalStatus] = {
 def _is_valid_coverage_contribution(raw: object) -> bool:
     """Whether *raw* is a usable ``0``/``1`` contract-coverage contribution.
 
-    Mirrors ``workflows.aggregate.gate._is_valid_contribution``'s own
+    Mirrors ``workflows.aggregate.report_gate._is_valid_contribution``'s own
     bool-before-int check exactly (``True == 1`` in Python) -- duplicated
     here since that module may depend on this leaf, never the reverse.
     """
@@ -438,7 +438,7 @@ def run_outcome_for_scan_fields(
     block -- preferred over deriving the compatibility axis from the
     top-level *exit_code*, which under the severity scheme already folds in
     the orthogonal contract-coverage/analysis-assurance contributions
-    (mirrors ``workflows.aggregate.gate._scan_severity_gate``'s own
+    (mirrors ``workflows.aggregate.report_gate._scan_severity_gate``'s own
     preference for the identical nested block).
 
     *contract_coverage_contribution*, when given, is the report's own
@@ -455,7 +455,7 @@ def run_outcome_for_scan_fields(
     blocker). Confirmed via the report's own declared contribution, never
     guessed: an unconfirmed ``1`` stays a compatibility-gate contribution,
     fail-closed, like the reader this mirrors
-    (``workflows.aggregate.gate._contract_coverage_exit``).
+    (``workflows.aggregate.report_gate._contract_coverage_exit``).
 
     *analysis_assurance_contribution*, when given, is the report's own P0.4
     ``analysis_assurance_exit_contribution`` (``0``/``1``) -- the sibling
