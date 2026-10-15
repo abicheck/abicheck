@@ -43,7 +43,7 @@ from __future__ import annotations
 
 from xml.etree.ElementTree import Element
 
-from ....provenance import build_public_set
+from ...declaration_provenance import build_public_set
 from .preprocessed_text import PreprocessedText, read_preprocessed_text
 
 # castxml tags that represent a callable (free function, method, special

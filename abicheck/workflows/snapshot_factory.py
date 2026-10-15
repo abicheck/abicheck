@@ -43,7 +43,7 @@ Now:
   making one.
 
 Implementation of each pass stays with its owner
-(:func:`abicheck.provenance.apply_provenance`,
+(:func:`abicheck.extract.declaration_provenance.apply_provenance`,
 :func:`abicheck.dumper_scoping.resolve_dependency_scope`,
 :func:`abicheck.workflows.ownership_request.classify_extracted`); this
 module only decides that they run, and in what order. Their imports are
@@ -123,7 +123,7 @@ def finish_snapshot(snapshot: AbiSnapshot, finish: SnapshotFinish) -> AbiSnapsho
     return value.
     """
     if finish.provenance is not None:
-        from ..provenance import apply_provenance
+        from ..extract.declaration_provenance import apply_provenance
 
         p = finish.provenance
         apply_provenance(

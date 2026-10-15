@@ -1,4 +1,4 @@
-"""Unit tests for abicheck.resolver module — targeting uncovered lines."""
+"""Unit tests for abicheck.workflows.elf_dependency_resolver module — targeting uncovered lines."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from unittest.mock import patch
 import pytest
 
 from abicheck.elf_metadata import ElfMetadata
-from abicheck.resolver import (
+from abicheck.workflows.elf_dependency_resolver import (
     DependencyGraph,
     ResolvedDSO,
     _build_search_order,
@@ -333,7 +333,10 @@ class TestResolveDependencies:
 
         root_meta = ElfMetadata(soname="app", needed=[], rpath="", runpath="")
 
-        with patch("abicheck.resolver.parse_elf_metadata", return_value=root_meta):
+        with patch(
+            "abicheck.workflows.elf_dependency_resolver.parse_elf_metadata",
+            return_value=root_meta,
+        ):
             result = resolve_dependencies(binary)
 
         assert result.node_count == 1
@@ -371,7 +374,10 @@ class TestResolveDependencies:
                 return root_meta
             return foo_meta
 
-        with patch("abicheck.resolver.parse_elf_metadata", side_effect=fake_parse):
+        with patch(
+            "abicheck.workflows.elf_dependency_resolver.parse_elf_metadata",
+            side_effect=fake_parse,
+        ):
             result = resolve_dependencies(
                 binary,
                 search_paths=[lib_dir],
@@ -392,7 +398,10 @@ class TestResolveDependencies:
             runpath="",
         )
 
-        with patch("abicheck.resolver.parse_elf_metadata", return_value=root_meta):
+        with patch(
+            "abicheck.workflows.elf_dependency_resolver.parse_elf_metadata",
+            return_value=root_meta,
+        ):
             result = resolve_dependencies(binary)
 
         assert result.node_count == 1
@@ -444,7 +453,10 @@ class TestResolveDependencies:
                 return foo_meta
             return bar_meta
 
-        with patch("abicheck.resolver.parse_elf_metadata", side_effect=fake_parse):
+        with patch(
+            "abicheck.workflows.elf_dependency_resolver.parse_elf_metadata",
+            side_effect=fake_parse,
+        ):
             result = resolve_dependencies(binary)
 
         # Root + libfoo + libbar all resolved via propagated RPATH
@@ -491,7 +503,10 @@ class TestResolveDependencies:
                 return metas["libb"]
             return metas["libc"]
 
-        with patch("abicheck.resolver.parse_elf_metadata", side_effect=fake_parse):
+        with patch(
+            "abicheck.workflows.elf_dependency_resolver.parse_elf_metadata",
+            side_effect=fake_parse,
+        ):
             result = resolve_dependencies(binary, search_paths=[search_dir])
 
         assert result.node_count == 4

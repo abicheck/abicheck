@@ -27,7 +27,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from .model.elf_facts import SymbolBinding as ElfSymbolBinding
-from .resolver import DependencyGraph
+from .workflows.elf_dependency_resolver import DependencyGraph
 
 log = logging.getLogger(__name__)
 

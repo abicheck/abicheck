@@ -528,9 +528,13 @@ class CastxmlSourceExtractor:
         """
         # Imported lazily: the castxml parser pulls in the heavy dumper model
         # graph, which the lightweight evidence layer should not load eagerly.
+        from ...extract.declaration_provenance import (
+            build_public_set,
+            is_generated_header,
+            tag_provenance,
+        )
         from ...extract.headers.castxml.dumper import _CastxmlParser
         from ...model import EnumType, Function, RecordType, ScopeOrigin, Variable
-        from ...provenance import build_public_set, is_generated_header, tag_provenance
 
         # A public root may be a directory (`--headers include/`); split it from
         # file roots so a decl under the directory is classified public, not

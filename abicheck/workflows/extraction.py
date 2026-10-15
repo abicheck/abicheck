@@ -123,6 +123,7 @@ from ..elf_metadata import parse_elf_metadata
 from ..extract.compiler_driver import (
     resolve_source_frontend_clang_bin as _resolve_source_frontend_clang_bin,
 )
+from ..extract.declaration_provenance import apply_provenance
 from ..extract.dependency_exclusion import dependency_exclusion_scope
 from ..extract.dump_manifest_roots import dump_manifest_header_roots
 from ..extract.headers.clang.layout_tool import attach_clang_layout
@@ -150,7 +151,6 @@ from ..package import (
     package_component_inventory,
     resolve_debug_info as resolve_package_debug_info,
 )
-from ..provenance import apply_provenance
 from ..python_api import detect_python_api
 from ..python_ext import detect_python_extension
 from ..storage.header_ast_cache import ast_acquisition_scope, ast_memoize_scope

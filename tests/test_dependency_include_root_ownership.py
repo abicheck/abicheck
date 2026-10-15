@@ -56,13 +56,13 @@ from pathlib import Path
 
 import pytest
 
+from abicheck.extract.declaration_provenance import _segments, split_include_roots
 from abicheck.extract.public_root_ownership import (
     compile_only_roots,
     retain_owning_roots,
     roots_a_declared_public_surface,
 )
 from abicheck.model import ScopeOrigin
-from abicheck.provenance import _segments, split_include_roots
 
 pytestmark = pytest.mark.skipif(
     not sys.platform.startswith("linux"),
@@ -393,8 +393,8 @@ class TestEveryOwnershipSourceAndEntryPointAgrees:
         which a per-format behavioural test could not see."""
         import abicheck.dumper as dumper
         import abicheck.workflows.consumer_scope_standalone as appcompat
-        from abicheck import provenance
         from abicheck.buildsource import header_graph
+        from abicheck.extract import declaration_provenance as provenance
         from abicheck.workflows import snapshot_factory
 
         dumper_src = pathlib.Path(dumper.__file__).read_text(encoding="utf-8")
@@ -653,7 +653,7 @@ class TestTheHeaderGraphAgreesWithDeclarationProvenance:
         value -- the companion assertion above pins which values are
         admissible.
         """
-        from abicheck.provenance import (
+        from abicheck.extract.declaration_provenance import (
             build_public_set,
             classify_origin,
             split_include_roots,

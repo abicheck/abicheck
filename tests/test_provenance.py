@@ -20,6 +20,16 @@ from pathlib import Path
 
 import pytest
 
+from abicheck.extract.declaration_provenance import (
+    _absolutize_header_root,
+    _is_toolchain_compiler_include_dir,
+    _segments,
+    apply_provenance,
+    build_public_set,
+    classify_origin,
+    header_from_location,
+    tag_provenance,
+)
 from abicheck.extract.dependency_header_roots import is_dependency_header
 from abicheck.model import (
     AbiSnapshot,
@@ -31,16 +41,6 @@ from abicheck.model import (
     ScopeOrigin,
     Variable,
     Visibility,
-)
-from abicheck.provenance import (
-    _absolutize_header_root,
-    _is_toolchain_compiler_include_dir,
-    _segments,
-    apply_provenance,
-    build_public_set,
-    classify_origin,
-    header_from_location,
-    tag_provenance,
 )
 from abicheck.serialization import SCHEMA_VERSION, snapshot_from_dict, snapshot_to_dict
 
@@ -251,7 +251,7 @@ def test_toolchain_include_dir_path_normalizes_dot_dot_segment():
     # already-collapsed `foo/baz` form -- not just for the toolchain-dir
     # patterns above, but for _segments() generally (basic path-segment
     # equivalence, unrelated to any specific prefix list).
-    from abicheck.provenance import _segments
+    from abicheck.extract.declaration_provenance import _segments
 
     assert _segments("/a/b/../c") == _segments("/a/c")
     assert _segments("bin/../lib/x") == ("lib", "x")
@@ -590,7 +590,7 @@ def test_origin_cache_hit_reuses_prior_classification(monkeypatch):
         calls.append((args, tuple(sorted(kwargs.items()))))
         return real_classify_origin(*args, **kwargs)
 
-    monkeypatch.setattr("abicheck.provenance.classify_origin", _spy)
+    monkeypatch.setattr("abicheck.extract.declaration_provenance.classify_origin", _spy)
 
     header_segs, dir_segs, have_set = build_public_set(["include/api.h"], None)
     origin_cache: dict = {}
@@ -623,7 +623,7 @@ def test_origin_cache_distinguishes_different_headers(monkeypatch):
         calls.append(1)
         return real_classify_origin(*args, **kwargs)
 
-    monkeypatch.setattr("abicheck.provenance.classify_origin", _spy)
+    monkeypatch.setattr("abicheck.extract.declaration_provenance.classify_origin", _spy)
 
     header_segs, dir_segs, have_set = build_public_set(["include/api.h"], None)
     origin_cache: dict = {}
@@ -724,7 +724,7 @@ def test_apply_provenance_shares_one_cache_across_all_declaration_kinds(monkeypa
         calls.append(1)
         return real_classify_origin(*args, **kwargs)
 
-    monkeypatch.setattr("abicheck.provenance.classify_origin", _spy)
+    monkeypatch.setattr("abicheck.extract.declaration_provenance.classify_origin", _spy)
 
     # _snapshot()'s pub/variable/type/enum all declare source_location
     # "/build/include/api.h:<n>" (public, non-export-only) — one shared key.
@@ -980,7 +980,10 @@ class TestIsBareSystemDirToolchainIncludeRoots:
     directory when widened from a flat `-H <file>` root (Codex review, D5)."""
 
     def test_bare_gcc_private_include_dir(self):
-        from abicheck.provenance import _is_bare_system_dir, _segments
+        from abicheck.extract.declaration_provenance import (
+            _is_bare_system_dir,
+            _segments,
+        )
 
         segs = _segments(
             "/home/runner/.pixi/envs/scanner/lib/gcc/"
@@ -989,7 +992,10 @@ class TestIsBareSystemDirToolchainIncludeRoots:
         assert _is_bare_system_dir(segs) is True
 
     def test_bare_gcc_include_fixed_dir(self):
-        from abicheck.provenance import _is_bare_system_dir, _segments
+        from abicheck.extract.declaration_provenance import (
+            _is_bare_system_dir,
+            _segments,
+        )
 
         segs = _segments(
             "/home/runner/.pixi/envs/scanner/lib/gcc/"
@@ -998,7 +1004,10 @@ class TestIsBareSystemDirToolchainIncludeRoots:
         assert _is_bare_system_dir(segs) is True
 
     def test_bare_libstdcxx_version_dir(self):
-        from abicheck.provenance import _is_bare_system_dir, _segments
+        from abicheck.extract.declaration_provenance import (
+            _is_bare_system_dir,
+            _segments,
+        )
 
         segs = _segments(
             "/home/runner/.pixi/envs/scanner/lib/gcc/"
@@ -1017,7 +1026,10 @@ class TestIsBareSystemDirToolchainIncludeRoots:
         # letting the whole libstdc++ tree underneath be promoted to
         # PUBLIC_HEADER via an explicit -I, since classify_origin checks
         # the public match before the system-header one.
-        from abicheck.provenance import _is_bare_system_dir, _segments
+        from abicheck.extract.declaration_provenance import (
+            _is_bare_system_dir,
+            _segments,
+        )
 
         segs = _segments("/usr/include/c++/12")
         assert _is_bare_system_dir(segs) is True
@@ -1028,13 +1040,19 @@ class TestIsBareSystemDirToolchainIncludeRoots:
         # test_bare_include_cxx_with_no_toolchain_prefix_is_not_system_header:
         # a project's own "include/c++" directory with no system prefix at
         # all is not swept up.
-        from abicheck.provenance import _is_bare_system_dir, _segments
+        from abicheck.extract.declaration_provenance import (
+            _is_bare_system_dir,
+            _segments,
+        )
 
         segs = _segments("/project/include/c++")
         assert _is_bare_system_dir(segs) is False
 
     def test_bare_clang_builtin_include_dir(self):
-        from abicheck.provenance import _is_bare_system_dir, _segments
+        from abicheck.extract.declaration_provenance import (
+            _is_bare_system_dir,
+            _segments,
+        )
 
         segs = _segments("/opt/pixi/envs/scanner/lib/clang/18/include")
         assert _is_bare_system_dir(segs) is True
@@ -1052,7 +1070,10 @@ class TestIsBareSystemDirToolchainIncludeRoots:
         # earlier revision of this fix only excluded the exact bare
         # boundary, leaving a subdirectory reachable and therefore
         # promotable to PUBLIC_HEADER).
-        from abicheck.provenance import _is_bare_system_dir, _segments
+        from abicheck.extract.declaration_provenance import (
+            _is_bare_system_dir,
+            _segments,
+        )
 
         segs = _segments(
             "/home/runner/.pixi/envs/scanner/lib/gcc/"
@@ -1061,7 +1082,10 @@ class TestIsBareSystemDirToolchainIncludeRoots:
         assert _is_bare_system_dir(segs) is True
 
     def test_unrelated_project_dir_is_not_bare(self):
-        from abicheck.provenance import _is_bare_system_dir, _segments
+        from abicheck.extract.declaration_provenance import (
+            _is_bare_system_dir,
+            _segments,
+        )
 
         segs = _segments("/home/runner/.pixi/envs/scanner/include/myproject")
         assert _is_bare_system_dir(segs) is False

@@ -28,7 +28,7 @@ import copy
 import dataclasses
 from collections.abc import Sequence
 
-from .checker import Change
+from ..model.change import Change
 
 
 def suppress_dangling_correlation_notes(changes: Sequence[Change]) -> list[Change]:

@@ -173,7 +173,7 @@ PERF_SENSITIVE_PATTERNS: tuple[str, ...] = (
     # all). Also reached by check_header_graph_perf.py (buildsource.
     # header_graph, via service._attach_header_graph) -- not core-only.
     "abicheck/buildsource/**",
-    "abicheck/provenance.py",
+    "abicheck/extract/declaration_provenance.py",
     "abicheck/storage/header_ast_cache.py",
     "abicheck/extract/headers/ast_config.py",
     "abicheck/extract/headers/sysinc.py",
