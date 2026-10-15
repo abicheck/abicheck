@@ -95,3 +95,25 @@ def test_lookup_matched_type_delegates_to_the_same_answer() -> None:
     old_map, new_map = TypeMap([old_legacy]), TypeMap([new_foo])
     assert lookup_matched_type(new_map, old_map, new_foo) is old_legacy
     assert lookup_matched_type(old_map, new_map, old_legacy) is new_foo
+
+
+def test_type_map_mapping_surface_lists_each_qualified_type_once() -> None:
+    # items/values/iteration expose one entry per qualified identity; the
+    # bare-name alias never appears there (see TypeMap's docstring).
+    a = _rec("A", "ns::A")
+    b = _rec("B", "ns::B")
+    m = TypeMap([a, b])
+    assert len(m) == 2
+    assert set(m) == {"ns::A", "ns::B"}
+    assert dict(m.items()) == {"ns::A": a, "ns::B": b}
+    assert {id(v) for v in m.values()} == {id(a), id(b)}
+
+
+def test_repeated_same_identity_keeps_bare_name_unambiguous() -> None:
+    # Two records with one identity are one type, not a bare-name collision.
+    first = _rec("Foo", "ns::Foo")
+    second = _rec("Foo", "ns::Foo")
+    m = TypeMap([first, second])
+    assert len(m) == 1
+    assert m["ns::Foo"] is second
+    assert m.bare_name_is_unambiguous("Foo")
