@@ -371,6 +371,8 @@ OTHER_REASONS: dict[str, str] = {
     "serialization.str_enum_downcast_via_generic_rewrite": "serialization codec",
     "policy.disposition_conservation": "policy disposition audit (ADR-067)",
     "compare.order_independent_reorder_refused": "comparability gate header-order proof (ADR-082)",
+    "package.ar_magic_is_not_deb": "package format sniffing (ar archives)",
+    "templates.fn_type_arguments_counted_as_template_arguments": "template argument counting",
 }
 
 FAMILY_OF: dict[str, str] = {}
