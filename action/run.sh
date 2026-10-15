@@ -1852,15 +1852,15 @@ raise SystemExit(0 if is_package(Path(sys.argv[1])) else 3)
   esac
   [[ -f "$path" ]] || return 1
   # Extensionless RPM (0xedabeedb lead magic) / Deb packages — read the first
-  # 21 bytes as hex (binary-safe; a bash string would truncate at an embedded
-  # NUL) and compare. A Deb is an ar archive whose first member is
-  # "debian-binary"; the bare "!<arch>\n" magic also matches static archives,
+  # 24 bytes as hex (binary-safe; a bash string would truncate at an embedded
+  # NUL) and compare. A Deb is an ar archive whose first member name field is
+  # exactly "debian-binary" (padded, or "debian-binary/"); the bare "!<arch>\n" magic also matches static archives,
   # which are not packages (package.py's DebExtractor.detect says the same).
   local magic
-  magic=$(od -An -tx1 -N 21 "$path" 2>/dev/null | tr -d ' \n')
+  magic=$(od -An -tx1 -N 24 "$path" 2>/dev/null | tr -d ' \n')
   case "$magic" in
     edabeedb*) return 0 ;;          # RPM lead magic (first 4 bytes)
-    213c617263683e0a64656269616e2d62696e617279) return 0 ;;   # "!<arch>\n" + "debian-binary" (Deb, first ar member)
+    213c617263683e0a64656269616e2d62696e617279202020|213c617263683e0a64656269616e2d62696e6172792f2020) return 0 ;;   # "!<arch>\n" + name field "debian-binary" (Deb, first ar member)
   esac
   return 1
 }

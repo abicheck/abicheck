@@ -538,6 +538,15 @@ class TestIsReleaseStyleOperand:
         f.write_bytes(b"!<arch>\n" + b"debian-binary".ljust(60) + b"\x00" * 30)
         assert _run_predicate(f'_is_release_style_operand "{f}"')
 
+    def test_extensionless_static_archive_with_prefixed_member_not_release_style(
+        self, tmp_path
+    ) -> None:
+        # A static archive whose first member name merely starts with
+        # "debian-binary" is not a Deb: the predicate compares the exact name field.
+        f = tmp_path / "libfoo-static"
+        f.write_bytes(b"!<arch>\n" + b"debian-binary.o/".ljust(60) + b"\x00" * 30)
+        assert not _run_predicate(f'_is_release_style_operand "{f}"')
+
     def test_extensionless_plain_binary_not_release_style(self, tmp_path) -> None:
         # A real shared library's ELF magic (0x7f 'ELF') must not be
         # mistaken for RPM/Deb.

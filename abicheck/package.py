@@ -887,7 +887,7 @@ _DEB_MAGIC = b"!<arch>\n"
 # (deb-format(5)). The bare ``!<arch>`` magic is shared with every static
 # archive (``.a``, Rust ``.rlib``, ...), so matching the magic alone routed
 # those to this extractor and failed with "No data.tar.* found in Deb package".
-_DEB_FIRST_MEMBER = b"debian-binary"
+_DEB_FIRST_MEMBERS = (b"debian-binary", b"debian-binary/")
 
 
 class DebExtractor:
@@ -901,7 +901,8 @@ class DebExtractor:
                 header = f.read(8 + 16)
         except OSError:
             return False
-        return header[:8] == _DEB_MAGIC and header[8:].startswith(_DEB_FIRST_MEMBER)
+        name = header[8:24].rstrip(b" ")
+        return header[:8] == _DEB_MAGIC and name in _DEB_FIRST_MEMBERS
 
     def extract(self, pkg_path: Path, target_dir: Path) -> ExtractResult:
         _log.info("Extracting Deb: %s", pkg_path)

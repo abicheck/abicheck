@@ -313,6 +313,7 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
         seed_tests=(
             "tests/test_deb_extractor_detection.py",
             "tests/test_cli_compare_bundle_facts_rejections_more.py",
+            "tests/test_action_run_sh_helpers.py",
         ),
         axes={"sniffer": ("python-detector", "action-shell-predicate")},
     ),

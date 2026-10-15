@@ -22,11 +22,18 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
-pytestmark = pytest.mark.integration
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.skipif(
+        sys.platform != "linux",
+        reason="the cdylib checked here is an ELF .so; Mach-O and PE hosts build .dylib/.dll",
+    ),
+]
 
 _CARGO = shutil.which("cargo")
 requires_cargo = pytest.mark.skipif(_CARGO is None, reason="cargo not installed")

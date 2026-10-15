@@ -20,7 +20,7 @@ abicheck compares a Rust library the same way it compares a C library: as a
 native shared object, with its C-visible surface read from the binary and,
 optionally, from headers. **Rust does not have a stable ABI.** The only part of
 a Rust library that is a binary contract is the part you deliberately expose as
-a C ABI: `#[no_mangle] pub extern "C" fn`, `#[repr(C)]` types, and exported
+a C ABI: `#[unsafe(no_mangle)] pub extern "C" fn` (`#[no_mangle]` in edition 2021), `#[repr(C)]` types, and exported
 statics. That is the surface abicheck checks for Rust.
 
 This page declares what is supported today, what is verified, and what still

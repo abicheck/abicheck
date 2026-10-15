@@ -49,10 +49,10 @@ _is_release_style_operand() {
   esac
   [[ -f "$path" ]] || return 1
   local magic
-  magic=$(od -An -tx1 -N 21 "$path" 2>/dev/null | tr -d ' \n')
+  magic=$(od -An -tx1 -N 24 "$path" 2>/dev/null | tr -d ' \n')
   case "$magic" in
     edabeedb*) return 0 ;;          # RPM lead magic
-    213c617263683e0a64656269616e2d62696e617279) return 0 ;;   # "!<arch>\n" + "debian-binary" (Deb, first ar member)
+    213c617263683e0a64656269616e2d62696e617279202020|213c617263683e0a64656269616e2d62696e6172792f2020) return 0 ;;   # "!<arch>\n" + name field "debian-binary" (Deb, first ar member)
   esac
   return 1
 }

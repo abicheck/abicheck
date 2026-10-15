@@ -31,7 +31,9 @@ def test_deb_detected_by_first_member(tmp_path: Path, suffix: str) -> None:
     assert DebExtractor().detect(f)
 
 
-@pytest.mark.parametrize("name", [b"lib.o/", b"__.SYMDEF", b"foo.o"])
+@pytest.mark.parametrize(
+    "name", [b"lib.o/", b"__.SYMDEF", b"foo.o", b"debian-binary.o/", b"debian-binary-x"]
+)
 def test_static_archive_is_not_a_deb(tmp_path: Path, name: bytes) -> None:
     f = tmp_path / "libfoo.a"
     f.write_bytes(_ar(name) + b"\x00" * 64)
