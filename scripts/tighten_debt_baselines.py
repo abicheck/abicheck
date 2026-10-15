@@ -83,27 +83,36 @@ def find_slack(root: Path) -> list[Slack]:
 def tighten_text(text: str, slack: list[Slack]) -> str:
     """Return ``text`` with every lowerable slack baseline rewritten.
 
-    Each substitution must match exactly one ``"path"``/``"baseline_lines"``
-    pair. The result is re-parsed and must differ from the input only in the
-    intended baseline values, so a formatting surprise fails loudly instead of
-    corrupting the ledger.
+    Each substitution locates the one flat JSON object that carries the entry's
+    ``"path"``, in either key order, then rewrites the ``"baseline_lines"`` value
+    inside that object only. The result is re-parsed and must differ from the
+    input only in the intended baseline values, so a formatting surprise fails
+    loudly instead of corrupting the ledger.
     """
     before = json.loads(text)
     rewritten = text
     for item in slack:
         if not item.lowerable:
             continue
-        pattern = re.compile(
-            r'("path": "' + re.escape(item.path) + r'",\s*"baseline_lines": )(\d+)'
+        record_pattern = re.compile(
+            r'\{[^{}]*"path": "' + re.escape(item.path) + r'"[^{}]*\}'
         )
-        matches = pattern.findall(rewritten)
-        if len(matches) != 1:
+        records = list(record_pattern.finditer(rewritten))
+        if len(records) != 1:
             raise ValueError(
-                f"{item.path}: expected one path/baseline_lines pair, found {len(matches)}"
+                f"{item.path}: expected one record naming it, found {len(records)}"
             )
-        rewritten = pattern.sub(
-            lambda m, n=item.actual: m.group(1) + str(n), rewritten, count=1
+        record = records[0].group(0)
+        if len(re.findall(r'"baseline_lines": \d+', record)) != 1:
+            raise ValueError(f"{item.path}: expected one baseline_lines in its record")
+        new_record = re.sub(
+            r'("baseline_lines": )\d+',
+            lambda m, n=item.actual: m.group(1) + str(n),
+            record,
+            count=1,
         )
+        start, end = records[0].span()
+        rewritten = rewritten[:start] + new_record + rewritten[end:]
     after = json.loads(rewritten)
     lowered = {item.path: item.actual for item in slack if item.lowerable}
     for old, new in zip(before["files"], after["files"], strict=True):

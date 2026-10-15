@@ -158,3 +158,26 @@ def test_entry_under_its_cap_is_reported_not_lowered(tmp_path: Path, capsys) -> 
 
 def test_repository_debt_ledger_has_no_slack() -> None:
     assert tighten.find_slack(ROOT) == []
+
+
+def test_tighten_accepts_baseline_before_path_in_either_key_order(
+    tmp_path: Path,
+) -> None:
+    # The gate reads records by key, not position, so a reordered record is valid
+    # ledger input and must be tightenable too.
+    root = _tree(tmp_path)
+    _write(root / PATH, _lines(9))
+    reordered = {"baseline_lines": 12, **{k: v for k, v in _record(PATH, 12).items()}}
+    ledger = root / "architecture/debt.yaml"
+    _write(
+        ledger,
+        json.dumps({"schema_version": 1, "files": [reordered]}, indent=2) + "\n",
+    )
+
+    assert tighten.main(["--root", str(root)]) == 0
+
+    assert (
+        json.loads(ledger.read_text(encoding="utf-8"))["files"][0]["baseline_lines"]
+        == 9
+    )
+    assert "debt-slack" not in _rules(root)
