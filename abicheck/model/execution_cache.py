@@ -100,8 +100,9 @@ _TRUE = frozenset({"1", "true", "yes", "on"})
 # API on an interpreter whose ``os.environ`` lacks those attributes.
 _ENV_DATA: Any = getattr(os.environ, "_data", None)
 try:
-    _ENV_KEY: Any = os.environ.encodekey(REFERENCE_MODE_ENV_VAR)  # type: ignore[attr-defined]
-    _ENV_DECODE: Callable[[Any], str] = os.environ.decodevalue  # type: ignore[attr-defined]
+    # typeshed omits these CPython ``_Environ`` helpers, so they are read by name.
+    _ENV_KEY: Any = getattr(os.environ, "encodekey")(REFERENCE_MODE_ENV_VAR)
+    _ENV_DECODE: Callable[[Any], str] = getattr(os.environ, "decodevalue")
 except AttributeError:  # pragma: no cover - non-CPython os.environ
     _ENV_DATA = None
 
