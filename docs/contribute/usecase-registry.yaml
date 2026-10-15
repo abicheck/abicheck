@@ -423,7 +423,7 @@ use_cases:
     user_task: [release, audit]
     adrs: [ADR-008]
     evidence:
-      modules: [abicheck/cli_stack.py, abicheck/resolver.py]
+      modules: [abicheck/cli_stack.py, abicheck/workflows/elf_dependency_resolver.py]
       tests: [tests/test_stack_checker.py]
 
   - id: UC-WF-mcp

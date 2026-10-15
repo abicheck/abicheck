@@ -370,7 +370,7 @@ class TestPublicInlineWithoutExport:
     def test_it_stays_in_the_public_surface_when_a_header_set_declared_it(
         self, tmp_path: object
     ) -> None:
-        from abicheck.provenance import apply_provenance
+        from abicheck.extract.declaration_provenance import apply_provenance
 
         header = "include/widget.h"
         fn = _fn(

@@ -76,8 +76,8 @@ class TestTheVerdictVocabularyTracksTheRealEmitters:
         from itertools import product
 
         from abicheck.report.stack import compute_stack_report_mapping
-        from abicheck.resolver import DependencyGraph
         from abicheck.stack_checker import StackCheckResult, StackVerdict
+        from abicheck.workflows.elf_dependency_resolver import DependencyGraph
 
         for load, risk in product(StackVerdict, StackVerdict):
             result = StackCheckResult(

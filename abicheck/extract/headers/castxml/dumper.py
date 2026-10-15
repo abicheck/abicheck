@@ -115,7 +115,7 @@ from ....model.identity import (
     entity_id_for_typedef,
     entity_id_for_variable,
 )
-from ....provenance import header_from_location
+from ...declaration_provenance import header_from_location
 
 
 class _CastxmlParser:

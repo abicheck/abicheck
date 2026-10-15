@@ -94,10 +94,17 @@ def tighten_text(text: str, slack: list[Slack]) -> str:
     for item in slack:
         if not item.lowerable:
             continue
+        # A record is the block from its own ``    {`` line to its ``    }`` line.
+        # Matching by line, not by brace, keeps a brace inside a rationale from
+        # cutting the record short.
         record_pattern = re.compile(
-            r'\{[^{}]*"path": "' + re.escape(item.path) + r'"[^{}]*\}'
+            r"^    \{\n(?:      [^\n]*\n)*?    \}", re.MULTILINE
         )
-        records = list(record_pattern.finditer(rewritten))
+        records = [
+            match
+            for match in record_pattern.finditer(rewritten)
+            if f'"path": "{item.path}"' in match.group(0)
+        ]
         if len(records) != 1:
             raise ValueError(
                 f"{item.path}: expected one record naming it, found {len(records)}"

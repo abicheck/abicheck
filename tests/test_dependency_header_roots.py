@@ -15,7 +15,7 @@
 
 """``prepare_dependency_header_roots`` hoists filesystem work, not behaviour.
 
-:func:`abicheck.provenance.is_dependency_header` re-resolved and re-``stat``ed
+:func:`abicheck.extract.declaration_provenance.is_dependency_header` re-resolved and re-``stat``ed
 its entire root set on *every* call, and
 ``dumper_scoping.scope_snapshot_excluding_dependencies`` asks it once per
 declaration -- twice over, since it re-scans the same lists to collect
@@ -51,12 +51,12 @@ from typing import Any
 
 import pytest
 
+from abicheck.extract.declaration_provenance import is_system_header
 from abicheck.extract.dependency_header_roots import (
     dependency_header_predicate,
     is_dependency_header,
     prepare_dependency_header_roots,
 )
-from abicheck.provenance import is_system_header
 
 
 @pytest.fixture

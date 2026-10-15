@@ -48,6 +48,7 @@ from pathlib import Path
 
 import pytest
 
+from abicheck.extract.declaration_provenance import build_public_set, classify_origin
 from abicheck.extract.dependency_header_roots import is_dependency_header
 from abicheck.extract.path_aliases import (
     _is_native_absolute_spelling,
@@ -60,7 +61,6 @@ from abicheck.extract.path_aliases import (
     source_header_alias_segments,
 )
 from abicheck.model import ScopeOrigin
-from abicheck.provenance import build_public_set, classify_origin
 
 # A symlink is the mechanism under test; Windows only permits creating one
 # with SeCreateSymbolicLinkPrivilege (or developer mode). Only the real-
@@ -561,8 +561,8 @@ def test_dump_scoping_keeps_declarations_under_a_symlinked_root(
     pruned away. Asserted against the real scoping entry point, not against
     ``is_dependency_header`` alone, so the wiring is covered too.
     """
+    from abicheck.extract.declaration_provenance import apply_provenance
     from abicheck.model import AbiSnapshot, Function
-    from abicheck.provenance import apply_provenance
     from abicheck.workflows.dump.dependency_scope import (
         scope_snapshot_excluding_dependencies,
     )

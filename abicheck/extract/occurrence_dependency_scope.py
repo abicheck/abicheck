@@ -62,7 +62,7 @@ from pathlib import Path
 from ..model.identity import EntityId, EntityKind
 from ..model.occurrence import OccurrenceId
 from ..model.semantic_ir import CanonicalEntity
-from ..provenance import header_from_location
+from .declaration_provenance import header_from_location
 from .dependency_header_roots import is_dependency_header
 
 _SCOPED_ENTITY_KINDS = (
@@ -96,7 +96,7 @@ def is_dependency_occurrence(
     case -- a Windows drive-letter colon, or an arbitrary TU name
     containing one, both make "split on the first colon" unreliable).
     Splitting is unnecessary: every classification
-    :func:`~abicheck.provenance.is_dependency_header` performs is a
+    :func:`~abicheck.extract.declaration_provenance.is_dependency_header` performs is a
     SUFFIX or CONTIGUOUS-SUBSEQUENCE match over path segments, never
     anchored to the first segment, so an extra leading ``"<tu_name>:"``
     segment cannot itself create or hide a match. Verified directly

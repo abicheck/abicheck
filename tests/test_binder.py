@@ -31,7 +31,7 @@ from abicheck.elf_metadata import (
     ElfSymbol,
     SymbolBinding as ElfSymbolBinding,
 )
-from abicheck.resolver import DependencyGraph, ResolvedDSO
+from abicheck.workflows.elf_dependency_resolver import DependencyGraph, ResolvedDSO
 
 
 def _make_graph(
@@ -322,7 +322,7 @@ class TestRealBinary:
     @staticmethod
     @pytest.fixture(scope="class")
     def bindings():
-        from abicheck.resolver import resolve_dependencies
+        from abicheck.workflows.elf_dependency_resolver import resolve_dependencies
 
         candidates = [Path("/usr/bin/python3"), Path("/usr/bin/ls"), Path("/bin/ls")]
         for p in candidates:

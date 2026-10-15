@@ -475,7 +475,7 @@ CLASSIFICATION_BUG_CLASSES: tuple[BugClass, ...] = (
                     "either, so they still require the declared and "
                     "reported spellings to agree lexically."
                 ),
-                reference="abicheck/provenance.py",
+                reference="abicheck/extract/declaration_provenance.py",
             ),
         ),
     ),

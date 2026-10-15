@@ -87,6 +87,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from .extract.declaration_provenance import build_public_set
 from .extract.dependency_exclusion import active_dependency_predicate
 from .extract.headers.clang import (
     context as _clang_context,
@@ -156,7 +157,6 @@ from .model.identity import (
     entity_id_for_typedef,
     entity_id_for_variable,
 )
-from .provenance import build_public_set
 from .storage import header_ast_cache as dumper_cache
 
 #: Clang AST node kinds for the function-like declarations we emit. Includes the

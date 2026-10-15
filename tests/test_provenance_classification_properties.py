@@ -15,7 +15,7 @@
 
 """Phase 3 of ``docs/contribute/plans/bug-class-regression-testing.md``:
 the ``policy.public_surface_reachability`` bug class, generalized to
-``abicheck.provenance``'s path/segment-based declaration-origin
+``abicheck.extract.declaration_provenance``'s path/segment-based declaration-origin
 classification (``classify_origin``/``_matches_public``/
 ``is_dependency_header``) -- the layer that decides PUBLIC_HEADER vs.
 PRIVATE_HEADER vs. SYSTEM_HEADER vs. GENERATED for one declaration, which
@@ -60,8 +60,12 @@ import uuid
 import pytest
 from hypothesis import assume, given, settings, strategies as st
 
+from abicheck.extract.declaration_provenance import (
+    _GENERATED_BASENAME,
+    build_public_set,
+    classify_origin,
+)
 from abicheck.model import ScopeOrigin
-from abicheck.provenance import _GENERATED_BASENAME, build_public_set, classify_origin
 
 pytestmark = pytest.mark.slow
 

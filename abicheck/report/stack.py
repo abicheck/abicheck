@@ -27,8 +27,8 @@ from __future__ import annotations
 from ..binder import SymbolBinding
 from ..checker_types import DiffResult
 from ..policy.evaluate import evaluate
-from ..resolver import DependencyGraph
 from ..stack_checker import StackCheckResult
+from ..workflows.elf_dependency_resolver import DependencyGraph
 from .document import ReportDocument
 
 #: Cap on embedded per-library findings in stack JSON -- mirrors

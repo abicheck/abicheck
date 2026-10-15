@@ -47,7 +47,7 @@ from __future__ import annotations
 import pytest
 from hypothesis import given, settings, strategies as st
 
-from abicheck.provenance import (
+from abicheck.extract.declaration_provenance import (
     _TARGET_TRIPLE_RE,
     _TOOLCHAIN_VERSION_RE,
     _is_bare_system_dir,

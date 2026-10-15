@@ -553,7 +553,7 @@ def test_merge_fragments_prefers_public_header_provenance():
     # same-basename coincidence. The merged entity must carry the public
     # location, not arbitrarily whichever TU happened to sort first --
     # otherwise a genuinely public declaration would misclassify as private
-    # once abicheck.provenance.apply_provenance runs on the merged snapshot.
+    # once abicheck.extract.declaration_provenance.apply_provenance runs on the merged snapshot.
     a = TuFragment(
         tu_name="a",
         functions=(_fn("f", "_Z1fv", source_location="internal/detail.h:1"),),
@@ -765,7 +765,7 @@ def test_merge_fragments_function_unions_default_when_public_status_is_unknown()
 
 def test_merge_fragments_without_public_set_keeps_deterministic_default():
     # No public_header_paths/public_header_dirs supplied -- origin
-    # classification stays opt-in (matches abicheck.provenance's own
+    # classification stays opt-in (matches abicheck.extract.declaration_provenance's own
     # default), so the tu_name-sorted-first side's location wins, unchanged
     # from before this fix.
     a = TuFragment(tu_name="a", functions=(_fn("f", "_Z1fv", source_location="a.h:1"),))

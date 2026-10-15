@@ -181,3 +181,19 @@ def test_tighten_accepts_baseline_before_path_in_either_key_order(
         == 9
     )
     assert "debt-slack" not in _rules(root)
+
+
+def test_tighten_survives_braces_inside_a_rationale(tmp_path: Path) -> None:
+    # A rationale may quote code with braces; the record must still be found.
+    root = _tree(tmp_path)
+    _write(root / PATH, _lines(9))
+    record = _record(PATH, 12)
+    record["rationale"] = "Move it along `{a: 1}` and `}` tokens as a vertical slice."
+    ledger = _ledger(root, record)
+
+    assert tighten.main(["--root", str(root)]) == 0
+
+    assert (
+        json.loads(ledger.read_text(encoding="utf-8"))["files"][0]["baseline_lines"]
+        == 9
+    )

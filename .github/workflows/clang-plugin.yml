@@ -35,7 +35,7 @@ on:
       - "abicheck/buildsource/inputs_pack.py"
       - "abicheck/buildsource/inputs_emit.py"
       - "abicheck/buildsource/source_abi.py"
-      - "abicheck/provenance.py"
+      - "abicheck/extract/declaration_provenance.py"
   pull_request:
     paths:
       - "contrib/abicheck-clang-plugin/**"
@@ -58,7 +58,7 @@ on:
       - "abicheck/buildsource/inputs_pack.py"
       - "abicheck/buildsource/inputs_emit.py"
       - "abicheck/buildsource/source_abi.py"
-      - "abicheck/provenance.py"
+      - "abicheck/extract/declaration_provenance.py"
   workflow_dispatch:
 
 permissions:

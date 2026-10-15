@@ -23,7 +23,7 @@ signature drift across the DSO boundary, cross-DSO type drift, provider
 migration, instantiation-manifest drift) is invisible to per-library diff.
 
 This module computes a *bundle finding* layer on top of per-library diff
-results. It reuses :mod:`abicheck.resolver` for the dependency graph and
+results. It reuses :mod:`abicheck.workflows.elf_dependency_resolver` for the dependency graph and
 :mod:`abicheck.elf_metadata` for ELF parsing. The actual per-library diff
 input is what ``compare-release`` already produces.
 

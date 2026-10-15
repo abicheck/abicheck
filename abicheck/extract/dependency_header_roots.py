@@ -16,7 +16,7 @@
 """A ``-H``/``--header`` root set prepared once, and the memoized predicate
 over it that every batch classifier wants.
 
-:func:`abicheck.provenance.is_dependency_header` answers "is this header a
+:func:`abicheck.extract.declaration_provenance.is_dependency_header` answers "is this header a
 toolchain/dependency header, given the roots this dump was invoked with" --
 a pure path classification *given* a resolved root set, but deriving that
 set is not free. It calls :func:`.path_aliases.absolutize_header_root`
@@ -41,7 +41,7 @@ per-distinct-path memo those callers were writing by hand. On a real
 one scoping pass goes from 0.375 s to 0.0006 s.
 
 **This module changes no classification.**
-:func:`abicheck.provenance.is_dependency_header` is now a thin wrapper that
+:func:`abicheck.extract.declaration_provenance.is_dependency_header` is now a thin wrapper that
 prepares and immediately asks, so every caller that keeps passing raw roots
 observes byte-identical behaviour -- including the no-roots fallback to
 ``is_system_header`` and the relative-root working-directory,
@@ -74,7 +74,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from ..model import ScopeOrigin
-from ..provenance import (
+from .declaration_provenance import (
     _is_bare_system_dir,
     _matches_any_dir,
     build_public_set,
@@ -120,7 +120,7 @@ class DependencyHeaderRoots:
     system_header_fallback: bool = False
 
     def is_dependency(self, source_header: str | None) -> bool:
-        """:func:`abicheck.provenance.is_dependency_header`'s answer for
+        """:func:`abicheck.extract.declaration_provenance.is_dependency_header`'s answer for
         *source_header*, against this already-resolved root set."""
         if not source_header:
             return False

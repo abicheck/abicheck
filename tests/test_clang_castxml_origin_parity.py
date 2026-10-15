@@ -15,7 +15,7 @@
 
 """Phase 3 of ``docs/contribute/plans/bug-class-regression-testing.md``:
 cross-backend (castxml vs. direct-clang) agreement on
-``abicheck.provenance.classify_origin``'s PUBLIC_HEADER/PRIVATE_HEADER split.
+``abicheck.extract.declaration_provenance.classify_origin``'s PUBLIC_HEADER/PRIVATE_HEADER split.
 
 Split out as its own module rather than folded into the pre-existing
 ``test_clang_header_backend_integration.py`` (which already carries the
