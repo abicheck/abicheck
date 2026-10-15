@@ -309,11 +309,14 @@ tests/test_dump_request_from_cli.py
 tests/test_dump_resolved_execution_context.py
 tests/test_dump_source_only_execution.py
 tests/test_dumper_clang.py
+tests/test_dumper_clang_extern_c_identity.py
 tests/test_dumper_clang_vtable.py
+tests/test_dumper_clang_vtable_redecl.py
 tests/test_dumper_contract_wiring.py
 tests/test_dumper_coverage.py
 tests/test_dumper_hybrid.py
 tests/test_dumper_manifest.py
+tests/test_dumper_manifest_semantic_ir.py
 tests/test_dumper_members.py
 tests/test_dumper_presence_semantic_ir.py
 tests/test_dumper_scoping.py
