@@ -19,12 +19,9 @@ first (the same "relocate a self-contained chunk first" playbook
 ``dumper_contract.py`` already used for ``dumper.py``, CLAUDE.md). Mostly a
 relocation -- both functions keep their prior behavior for every existing
 caller -- plus ADR-050 D1's own ``include_labels`` parameter/threading added
-in the same commit, re-exported from ``service.py`` so
-``service._try_header_scoped_dump`` / ``service._has_matched_public_surface``
-(the PE/Mach-O extractors in ``workflows.dump.pe``/``.macho`` call it through
-``workflows.dump.scoped``; tests monkeypatch it via
-``monkeypatch.setattr(service, "_try_header_scoped_dump", ...)``) keep
-working unchanged.
+in the same commit. The PE/Mach-O extractors reach it through
+``workflows.dump.scoped``; tests patch or import it from this module
+(``abicheck.workflows.dump.header_scoped``), not from ``service.py``.
 
 ``CompileContext``/``expand_header_inputs`` are imported locally inside
 :func:`_try_header_scoped_dump` rather than at module level, mirroring that

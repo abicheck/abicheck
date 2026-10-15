@@ -994,7 +994,7 @@ def test_try_header_scoped_dump_threads_compile_to_dumper(
     # PE/Mach-O native header scoping forwards the compile context to the dumper
     # (Codex review: gcc_options/sysroot must reach PE/Mach-O header parsing).
     import abicheck.dumper as dumper_mod
-    from abicheck import service
+    from abicheck.workflows.dump import header_scoped
 
     header = tmp_path / "h.h"
     header.write_text("int foo(void);\n")
@@ -1031,7 +1031,7 @@ def test_try_header_scoped_dump_threads_compile_to_dumper(
         sysroot=tmp_path,
         nostdinc=True,
     )
-    snap, reason = service._try_header_scoped_dump(
+    snap, reason = header_scoped._try_header_scoped_dump(
         "pe", tmp_path / "x.dll", [header], [], "1.0", "c++", compile=cc
     )
     assert reason is None  # matched
