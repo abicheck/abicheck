@@ -741,7 +741,7 @@ def source_matches_filter(
     layer that narrows a compile database by it — this module's own
     :class:`CompileEntry` scan, ``header_conditionals``' raw-dict scan for the
     ADR-039 collector, and ``buildsource.header_compile_context``'s
-    :class:`~abicheck.buildsource.adapters.adapter_contract.CompileUnit` scan for the P0.3
+    :class:`~abicheck.buildsource.adapters.adapter_shared.CompileUnit` scan for the P0.3
     L3→L2 fold. Three layers had (or would have had) their own copy of this
     predicate; the same shape has already drifted silently once in this
     codebase (the MSVC-driver vocabulary, third finding on the root

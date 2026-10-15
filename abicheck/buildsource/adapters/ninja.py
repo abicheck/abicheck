@@ -38,7 +38,7 @@ from ...build_context import _extract_flags
 from ...deadline import run_bounded
 from ..build_evidence import BuildEvidence, CompileUnit, Generator
 from ..redaction import DEFAULT_REDACTION, RedactionPolicy
-from .adapter_contract import (
+from .adapter_shared import (
     compile_unit_id,
     derive_build_options,
     detect_language,

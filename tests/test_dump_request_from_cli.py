@@ -92,7 +92,7 @@ class TestDumpCmdBuildsARequest:
         asserts the *pipeline* ran, not merely that a helper with the right
         name was called.
         """
-        from abicheck.workflows.dump import request_to_snapshot as service_dump_pipeline
+        from abicheck.workflows.dump import request as service_dump_pipeline
 
         header, sources, compile_db = _project(tmp_path)
         seen: list[Any] = []
@@ -136,7 +136,7 @@ class TestDumpCmdBuildsARequest:
         `dump_cmd` dispatches on `so_path is None`, so it could not have built
         one request covering both branches while the field was required.
         """
-        from abicheck.workflows.dump import request_to_snapshot as service_dump_pipeline
+        from abicheck.workflows.dump import request as service_dump_pipeline
 
         _header, sources, _db = _project(tmp_path)
         seen: list[Any] = []
@@ -342,7 +342,7 @@ class TestExecutionConsumesTheResolvedPlan:
         # each `dump_cmd` invocation), not `perform_elf_dump` -- patch the
         # module attribute the same way, so the local import inside
         # `dump_cmd` picks up the fake.
-        from abicheck.workflows.dump import request_to_snapshot as service_dump_pipeline
+        from abicheck.workflows.dump import request as service_dump_pipeline
 
         seen: dict[str, object] = {}
 
@@ -371,7 +371,7 @@ class TestExecutionConsumesTheResolvedPlan:
                     options.source_frontend_from_folded_context
                 )
             from abicheck.model import AbiSnapshot
-            from abicheck.workflows.dump.request_to_snapshot import DumpResult
+            from abicheck.workflows.dump.request import DumpResult
 
             side = resolved.request.input
             snap = AbiSnapshot(
@@ -553,7 +553,7 @@ class TestValidationErrorExitsAsUsageError:
 
     def _fake_execute_dump_request_raises(self, monkeypatch) -> None:
         from abicheck.errors import ValidationError
-        from abicheck.workflows.dump import request_to_snapshot as service_dump_pipeline
+        from abicheck.workflows.dump import request as service_dump_pipeline
 
         def _raise(*_args: object, **_kwargs: object):
             raise ValidationError("no exported symbols matched the given headers")

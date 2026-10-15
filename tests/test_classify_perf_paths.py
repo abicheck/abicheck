@@ -917,7 +917,7 @@ class TestTheCanonicalOwnerIsClassifiedNotJustTheFacade:
     @pytest.mark.parametrize(
         "path",
         [
-            "abicheck/workflows/dump/request_to_snapshot.py",
+            "abicheck/workflows/dump/request.py",
             "abicheck/workflows/dump/header_scoped.py",
             "abicheck/workflows/dump/elf_fallback.py",
             "abicheck/storage/header_ast_cache.py",

@@ -893,7 +893,7 @@ def _opt(key: str, value: str) -> BuildOption:
 
 
 def test_runtime_mode_flags_normalize_to_canonical_keys():
-    from abicheck.buildsource.adapters.adapter_contract import derive_build_options
+    from abicheck.buildsource.adapters.adapter_shared import derive_build_options
     from abicheck.buildsource.build_evidence import CompileUnit
 
     cu = CompileUnit(
@@ -953,7 +953,7 @@ def test_split_target_abi_flag_survivor_produces_build_option():
     # by any structured CompileUnit field, so dropping one silently
     # discarded real, independent ABI-relevant information and no
     # build-evidence drift finding was ever produced for it.
-    from abicheck.buildsource.adapters.adapter_contract import derive_build_options
+    from abicheck.buildsource.adapters.adapter_shared import derive_build_options
     from abicheck.buildsource.build_evidence import CompileUnit
 
     abi_relevant_flags = extract_abi_relevant_flags(
@@ -974,7 +974,7 @@ def test_split_target_abi_flag_xclang_wrapped_survivor_produces_build_option():
     # with no `-Xclang` marker, so `derive_build_options`'s raw-string key
     # derivation (`flag.split("=", 1)[0]`) produces the same `-target-abi`
     # key for either capture form instead of visibly disagreeing.
-    from abicheck.buildsource.adapters.adapter_contract import derive_build_options
+    from abicheck.buildsource.adapters.adapter_shared import derive_build_options
     from abicheck.buildsource.build_evidence import CompileUnit
 
     abi_relevant_flags = extract_abi_relevant_flags(
@@ -988,13 +988,13 @@ def test_split_target_abi_flag_xclang_wrapped_survivor_produces_build_option():
 
 def test_split_target_abi_flag_bare_and_xclang_wrapped_captures_produce_one_option():
     # Regression test for the P2 review finding "Canonicalize equivalent cc1
-    # survivor spellings" (abicheck/buildsource/adapters/adapter_contract.py:772): two
+    # survivor spellings" (abicheck/buildsource/adapters/adapter_shared.py:772): two
     # compile units capturing the SAME -target-abi value through different
     # real argv shapes (bare -cc1 invocation vs. an ordinary driver's
     # -Xclang-wrapped forwarding) must project to the SAME BuildOption --
     # not two different (key, value) pairs for what is semantically one
     # unchanged option, which used to read as spurious build-option drift.
-    from abicheck.buildsource.adapters.adapter_contract import derive_build_options
+    from abicheck.buildsource.adapters.adapter_shared import derive_build_options
     from abicheck.buildsource.build_evidence import CompileUnit
 
     cu_bare = CompileUnit(
@@ -1027,7 +1027,7 @@ def test_split_target_abi_flag_disagreement_across_capture_forms_still_diffable(
     # captured it through different argv shapes -- canonicalizing the
     # capture-form encoding must not also canonicalize away a real value
     # difference.
-    from abicheck.buildsource.adapters.adapter_contract import derive_build_options
+    from abicheck.buildsource.adapters.adapter_shared import derive_build_options
     from abicheck.buildsource.build_evidence import CompileUnit
 
     cu_bare = CompileUnit(
@@ -1053,7 +1053,7 @@ def test_split_target_abi_flag_disagreement_across_capture_forms_still_diffable(
 
 
 def test_split_target_abi_flag_legacy_xclang_marker_survivor_produces_same_option():
-    # Round 20 CodeRabbit finding 1 (abicheck/buildsource/adapters/adapter_contract.py:
+    # Round 20 CodeRabbit finding 1 (abicheck/buildsource/adapters/adapter_shared.py:
     # 964-987): a legacy evidence pack persisted before the round-17
     # canonicalization fix may still carry the OLD internal encoding -- a
     # leading `-Xclang ` marker prepended directly to the `<flag>=<value>`
@@ -1066,7 +1066,7 @@ def test_split_target_abi_flag_legacy_xclang_marker_survivor_produces_same_optio
     # unmarked survivor's key (`-target-abi`) -- so a legacy pack on one
     # side of a comparison and a freshly-captured pack on the other read as
     # a false removal + addition of the identical option.
-    from abicheck.buildsource.adapters.adapter_contract import derive_build_options
+    from abicheck.buildsource.adapters.adapter_shared import derive_build_options
     from abicheck.buildsource.build_evidence import CompileUnit
 
     legacy_marked_flag = "-Xclang -target-abi=aapcs"
@@ -1107,7 +1107,7 @@ def test_split_target_abi_flag_disagreement_still_diffable_across_units():
     # produce two distinct BuildOption values, not silently collapse to
     # nothing (which used to make the disagreement invisible to
     # build_diff._diff_options / ABI_RELEVANT_BUILD_FLAG_CHANGED).
-    from abicheck.buildsource.adapters.adapter_contract import derive_build_options
+    from abicheck.buildsource.adapters.adapter_shared import derive_build_options
     from abicheck.buildsource.build_evidence import CompileUnit
 
     cu_a = CompileUnit(
@@ -1250,7 +1250,7 @@ def test_march_added_surfaces_as_abi_build_flag_drift(tmp_path):
     ],
 )
 def test_effective_language_honors_forced_language(argv, source, expected):
-    from abicheck.buildsource.adapters.adapter_contract import effective_language
+    from abicheck.buildsource.adapters.adapter_shared import effective_language
 
     assert effective_language(argv, source) == expected
 
@@ -1270,13 +1270,13 @@ def test_effective_language_honors_forced_language(argv, source, expected):
     ],
 )
 def test_effective_language_ignores_option_operands(argv, source, expected):
-    from abicheck.buildsource.adapters.adapter_contract import effective_language
+    from abicheck.buildsource.adapters.adapter_shared import effective_language
 
     assert effective_language(argv, source) == expected
 
 
 def test_driver_mode_operand_does_not_make_unix_paths_msvc() -> None:
-    from abicheck.buildsource.adapters.adapter_contract import source_from_argv
+    from abicheck.buildsource.adapters.adapter_shared import source_from_argv
 
     assert (
         source_from_argv(
@@ -1294,7 +1294,7 @@ def test_driver_mode_operand_does_not_make_unix_paths_msvc() -> None:
 
 
 def test_clang_driver_mode_keeps_absolute_posix_source() -> None:
-    from abicheck.buildsource.adapters.adapter_contract import source_from_argv
+    from abicheck.buildsource.adapters.adapter_shared import source_from_argv
 
     for source in ("/work/src/foo.cc", "/data/foo.cc", "/include/foo.cc"):
         assert (
@@ -1312,7 +1312,7 @@ def test_clang_driver_mode_keeps_absolute_posix_source() -> None:
 
 
 def test_clang_driver_mode_skips_combined_msvc_source_like_options() -> None:
-    from abicheck.buildsource.adapters.adapter_contract import source_from_argv
+    from abicheck.buildsource.adapters.adapter_shared import source_from_argv
 
     assert (
         source_from_argv(
@@ -1434,7 +1434,7 @@ def test_runtime_mode_flags_last_one_wins_per_tu():
     # Codex P2: conflicting flags within one compile command resolve to the
     # last one (GCC semantics), so -fno-exceptions -fexceptions records only
     # the effective "on", not both values.
-    from abicheck.buildsource.adapters.adapter_contract import derive_build_options
+    from abicheck.buildsource.adapters.adapter_shared import derive_build_options
     from abicheck.buildsource.build_evidence import CompileUnit
 
     cu = CompileUnit(
@@ -1460,7 +1460,7 @@ def test_exceptions_default_is_language_aware():
     # Codex P2: -fexceptions default is on for C++, off for C. An omitted flag
     # must use the language-correct default so a C TU is neither a false flip
     # nor a missed one.
-    from abicheck.buildsource.adapters.adapter_contract import derive_build_options
+    from abicheck.buildsource.adapters.adapter_shared import derive_build_options
     from abicheck.buildsource.build_evidence import CompileUnit
 
     def ev(lang, *flags, src="s.cpp"):

@@ -10,7 +10,7 @@ depends_on:
   - abicheck/workflows/service_requests.py
   - abicheck/workflows/request_inputs.py
   - abicheck/model/header_ast_frontends.py
-  - abicheck/workflows/dump/request_to_snapshot.py
+  - abicheck/workflows/dump/request.py
   - abicheck/service_compare_pipeline.py
   - abicheck/dry_run_estimate.py
   - abicheck/deadline.py

@@ -743,7 +743,7 @@ def _resolve_stranded_library(
     a notice -- never an abort and never a silently impoverished OLD side.
     """
     from . import extraction
-    from .dump.request_to_snapshot import execute_dump_request, resolve_dump_request
+    from .dump.request import execute_dump_request, resolve_dump_request
     from .request_inputs import InputSpec
     from .service_requests import DumpRequest
     from .snapshot_factory import new_snapshot

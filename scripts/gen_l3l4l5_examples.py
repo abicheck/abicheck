@@ -52,7 +52,7 @@ if str(Path(__file__).resolve().parent) not in sys.path:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
 import example_catalog  # noqa: E402
 
-from abicheck.buildsource.adapters.adapter_contract import (
+from abicheck.buildsource.adapters.adapter_shared import (
     derive_build_options,  # noqa: E402
 )
 from abicheck.buildsource.build_evidence import (  # noqa: E402

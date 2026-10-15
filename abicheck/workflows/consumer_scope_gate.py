@@ -23,6 +23,7 @@ renders the result, it does not compute it.
 from __future__ import annotations
 
 from collections.abc import Iterable
+from dataclasses import dataclass, fields
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -31,7 +32,9 @@ from .gate import consumer_verdict_rank, effective_kind_sets
 from .input_resolution import detect_binary_format
 
 if TYPE_CHECKING:
+    from ..model.change_catalog.registry import Verdict
     from ..model.consumer_spec import ConsumerAppInput
+    from .consumer_scope import AppCompatResult, PluginHostContractResult
     from .policy_file import PolicyFile
 
 
@@ -51,7 +54,59 @@ def resolve_scoping_libs(
     return old_lib, new_lib
 
 
-def _app_compat_summary(result: object) -> dict[str, Any]:
+#: Fields a scope produces only sometimes. A ``None`` here means "this scope
+#: did not produce it" and the attribute is not written at all. Every other
+#: field is always written, even when its value is ``None`` (``scoped_verdict``
+#: is ``None`` when no consumer was supplied to ``--used-by``).
+_CONDITIONAL_SCOPED_FIELDS = frozenset(
+    {
+        "used_by",
+        "consumer_impact_summary",
+        "required_symbols",
+        "scoped_blocking_categories",
+        "scoped_severity_counts",
+    }
+)
+
+
+@dataclass(frozen=True)
+class ScopedGateFields:
+    """The scoped-gate attributes a worst-wins pass stamps onto a compare result.
+
+    ADR-043's ``--used-by`` / ``--required-symbol(s)`` passes write these onto
+    the ``DiffResult`` they scope. Readers -- ``policy.effective_gate``, the
+    renderers and the SARIF/JUnit writers -- still look them up by attribute
+    name, so :meth:`stamp` is the only place the set is written and the
+    attribute names live here, once, rather than at every assignment.
+    """
+
+    gate_scope: str
+    scoped_verdict: Verdict | None
+    scoped_exit_code: int
+    scoped_exit_code_scheme: str
+    scoped_relevant_finding_ids: frozenset[str]
+    scoped_missing_labels: tuple[str, ...]
+    scoped_only_changes: tuple[Any, ...]
+    #: ``--used-by`` only: one JSON-safe summary per consumer.
+    used_by: list[dict[str, Any]] | None = None
+    #: ``--used-by`` only: "N of M consumers affected".
+    consumer_impact_summary: dict[str, Any] | None = None
+    #: ``--required-symbol(s)`` only: the plugin-host contract summary.
+    required_symbols: dict[str, Any] | None = None
+    #: Severity-scheme runs only.
+    scoped_blocking_categories: tuple[str, ...] | None = None
+    scoped_severity_counts: dict[str, int] | None = None
+
+    def stamp(self, result: object) -> None:
+        """Write this scope's attributes onto *result* (see the class docstring)."""
+        for field_info in fields(self):
+            value = getattr(self, field_info.name)
+            if value is None and field_info.name in _CONDITIONAL_SCOPED_FIELDS:
+                continue
+            setattr(result, field_info.name, value)
+
+
+def _app_compat_summary(result: AppCompatResult) -> dict[str, Any]:
     """Project an :class:`appcompat.AppCompatResult` into a small JSON-safe dict.
 
     Workstream D-S1: ``platform``/``profile``/``provider_baseline``/
@@ -62,13 +117,13 @@ def _app_compat_summary(result: object) -> dict[str, Any]:
     is byte-for-byte the same shape it has always been.
     """
     summary: dict[str, Any] = {
-        "app": result.app_path,  # type: ignore[attr-defined]
-        "verdict": result.verdict.value,  # type: ignore[attr-defined]
-        "required_symbol_count": result.required_symbol_count,  # type: ignore[attr-defined]
-        "missing_symbols": result.missing_symbols,  # type: ignore[attr-defined]
-        "missing_versions": result.missing_versions,  # type: ignore[attr-defined]
-        "relevant_change_count": len(result.breaking_for_app),  # type: ignore[attr-defined]
-        "symbol_coverage": round(result.symbol_coverage, 1),  # type: ignore[attr-defined]
+        "app": result.app_path,
+        "verdict": result.verdict.value,
+        "required_symbol_count": result.required_symbol_count,
+        "missing_symbols": result.missing_symbols,
+        "missing_versions": result.missing_versions,
+        "relevant_change_count": len(result.breaking_for_app),
+        "symbol_coverage": round(result.symbol_coverage, 1),
     }
     for field in ("platform", "profile", "provider_baseline", "digest"):
         value = getattr(result, field, None)
@@ -111,14 +166,14 @@ def _consumer_impact_summary(summaries: list[dict[str, Any]]) -> dict[str, Any]:
     ).to_json()
 
 
-def _plugin_contract_summary(result: object) -> dict[str, Any]:
+def _plugin_contract_summary(result: PluginHostContractResult) -> dict[str, Any]:
     """Project a :class:`appcompat.PluginHostContractResult` into a small dict."""
     return {
-        "verdict": result.verdict.value,  # type: ignore[attr-defined]
-        "required_entrypoints": sorted(result.required_entrypoints),  # type: ignore[attr-defined]
-        "missing_entrypoints": result.missing_entrypoints,  # type: ignore[attr-defined]
-        "relevant_change_count": len(result.breaking_for_host),  # type: ignore[attr-defined]
-        "coverage": round(result.coverage, 1),  # type: ignore[attr-defined]
+        "verdict": result.verdict.value,
+        "required_entrypoints": sorted(result.required_entrypoints),
+        "missing_entrypoints": result.missing_entrypoints,
+        "relevant_change_count": len(result.breaking_for_host),
+        "coverage": round(result.coverage, 1),
     }
 
 
@@ -275,7 +330,7 @@ def _apply_used_by_scoping(
 
     summaries = []
     worst_exit = 0
-    worst_verdict = None
+    worst_verdict: Verdict | None = None
     worst_verdict_rank = -1
     # Keyed by the change's semantic identity (kind/symbol/old/new/location/
     # description, via `_finding_id`) -- not id(change) -- so a Change or
@@ -374,22 +429,15 @@ def _apply_used_by_scoping(
         if worst_verdict is None or rank >= worst_verdict_rank:
             worst_verdict_rank = rank
             worst_verdict = scoped.verdict
-    result.used_by = summaries  # type: ignore[attr-defined]
+    from .gate import gate_exit_code_scheme
+
     # Workstream D-S1: "N of M consumers affected" -- computed over every
     # supplied consumer's own summary, unreadable-advisory ones included (as
     # non-evaluated), so it stays in step with `summaries` regardless of
     # which apps ended up worst-wins.
-    result.consumer_impact_summary = _consumer_impact_summary(summaries)  # type: ignore[attr-defined]
-    result.scoped_verdict = worst_verdict  # type: ignore[attr-defined]
-    result.scoped_exit_code = worst_exit  # type: ignore[attr-defined]
-    from .gate import gate_exit_code_scheme
-
-    result.scoped_exit_code_scheme = gate_exit_code_scheme(severity is not None)  # type: ignore[attr-defined]
-    result.gate_scope = "used_by"  # type: ignore[attr-defined]
-    result.scoped_relevant_finding_ids = frozenset(relevant_finding_ids)  # type: ignore[attr-defined]
-    result.scoped_missing_labels = tuple(sorted(missing_labels))  # type: ignore[attr-defined]
+    consumer_impact_summary = _consumer_impact_summary(summaries)
     _existing_ids = {report_finding_id(c) for c in result.changes}
-    result.scoped_only_changes = tuple(  # type: ignore[attr-defined]
+    scoped_only_changes = tuple(
         c for fid, c in relevant_changes_by_id.items() if fid not in _existing_ids
     )
     # ADR-067: close the disposition ledger once, here, over the *union* of
@@ -404,13 +452,15 @@ def _apply_used_by_scoping(
         ledger_for(result),
         result,
         gating=list(relevant_changes_by_id.values()),
-        also_detected=result.scoped_only_changes,
+        also_detected=scoped_only_changes,
         # D-S1: the exit is the full-library decision, not the scoped one.
         scope_decides_exit=False,
     )
 
+    blocking_categories: tuple[str, ...] | None = None
+    severity_counts: dict[str, int] | None = None
     if severity is not None:
-        categories, counts = _scoped_severity_summary(
+        blocking_categories, severity_counts = _scoped_severity_summary(
             list(worst_changes.values()),
             worst_missing,
             result,
@@ -418,8 +468,19 @@ def _apply_used_by_scoping(
             policy,
             policy_file,
         )
-        result.scoped_blocking_categories = categories  # type: ignore[attr-defined]
-        result.scoped_severity_counts = counts  # type: ignore[attr-defined]
+    ScopedGateFields(
+        gate_scope="used_by",
+        scoped_verdict=worst_verdict,
+        scoped_exit_code=worst_exit,
+        scoped_exit_code_scheme=gate_exit_code_scheme(severity is not None),
+        scoped_relevant_finding_ids=frozenset(relevant_finding_ids),
+        scoped_missing_labels=tuple(sorted(missing_labels)),
+        scoped_only_changes=scoped_only_changes,
+        used_by=summaries,
+        consumer_impact_summary=consumer_impact_summary,
+        scoped_blocking_categories=blocking_categories,
+        scoped_severity_counts=severity_counts,
+    ).stamp(result)
     return worst_exit
 
 
@@ -457,17 +518,12 @@ def _apply_required_symbol_scoping(
         policy_file=policy_file,
         suppression=suppression,
     )
-    result.required_symbols = _plugin_contract_summary(scoped)  # type: ignore[attr-defined]
-    result.scoped_verdict = scoped.verdict  # type: ignore[attr-defined]
-    result.gate_scope = "required_symbol"  # type: ignore[attr-defined]
-    result.scoped_relevant_finding_ids = frozenset(  # type: ignore[attr-defined]
-        report_finding_id(c) for c in scoped.breaking_for_host
-    )
+    contract_summary = _plugin_contract_summary(scoped)
     # An entrypoint already covered by a relevant Change must not also
     # become a synthetic missing-contract finding (Codex review, mirrors
     # _apply_used_by_scoping's identical dedup).
-    result.scoped_missing_labels = tuple(
-        sorted(  # type: ignore[attr-defined]
+    scoped_missing_labels = tuple(
+        sorted(
             uncovered_missing_symbols(
                 scoped.missing_entrypoints, scoped.breaking_for_host
             )
@@ -476,7 +532,7 @@ def _apply_required_symbol_scoping(
     # Scoped-only changes: relevant to the host contract but never added to
     # result.changes (mirrors _apply_used_by_scoping's identical handling).
     _existing_ids = {report_finding_id(c) for c in result.changes}
-    result.scoped_only_changes = tuple(  # type: ignore[attr-defined]
+    scoped_only_changes = tuple(
         c for c in scoped.breaking_for_host if report_finding_id(c) not in _existing_ids
     )
     # ADR-067: same single close as the `--used-by` orchestrator above --
@@ -486,7 +542,7 @@ def _apply_required_symbol_scoping(
         ledger_for(result),
         result,
         gating=scoped.breaking_for_host,
-        also_detected=result.scoped_only_changes,
+        also_detected=scoped_only_changes,
         # D-S1: the exit is the full-library decision, not the scoped one.
         scope_decides_exit=False,
     )
@@ -500,12 +556,12 @@ def _apply_required_symbol_scoping(
         policy_file,
         has_missing_contract=bool(scoped.missing_entrypoints),
     )
-    result.scoped_exit_code = exit_code  # type: ignore[attr-defined]
     from .gate import gate_exit_code_scheme
 
-    result.scoped_exit_code_scheme = gate_exit_code_scheme(severity is not None)  # type: ignore[attr-defined]
+    blocking_categories: tuple[str, ...] | None = None
+    severity_counts: dict[str, int] | None = None
     if severity is not None:
-        categories, counts = _scoped_severity_summary(
+        blocking_categories, severity_counts = _scoped_severity_summary(
             scoped.breaking_for_host,
             scoped.missing_entrypoints,
             result,
@@ -513,6 +569,18 @@ def _apply_required_symbol_scoping(
             policy,
             policy_file,
         )
-        result.scoped_blocking_categories = categories  # type: ignore[attr-defined]
-        result.scoped_severity_counts = counts  # type: ignore[attr-defined]
+    ScopedGateFields(
+        gate_scope="required_symbol",
+        scoped_verdict=scoped.verdict,
+        scoped_exit_code=exit_code,
+        scoped_exit_code_scheme=gate_exit_code_scheme(severity is not None),
+        scoped_relevant_finding_ids=frozenset(
+            report_finding_id(c) for c in scoped.breaking_for_host
+        ),
+        scoped_missing_labels=scoped_missing_labels,
+        scoped_only_changes=scoped_only_changes,
+        required_symbols=contract_summary,
+        scoped_blocking_categories=blocking_categories,
+        scoped_severity_counts=severity_counts,
+    ).stamp(result)
     return exit_code

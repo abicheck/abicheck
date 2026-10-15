@@ -87,7 +87,7 @@ format up in `workflows.dump.native.FORMAT_ADAPTERS` and passes the
 in a test, swap the registry entry (helper: `tests/_dump_format_fakes.py`);
 the extractor names themselves are owned, not patch points.
 
-`abicheck/workflows/dump/request_to_snapshot.py` owns `DumpRequest ->
+`abicheck/workflows/dump/request.py` owns `DumpRequest ->
 ResolvedDumpRequest -> DumpResult` and is free of CLI imports. It lives in
 this package, so `check_architecture.py` classifies it as `workflows` by
 path and rejects a forbidden *direction* (a `workflows -> report` import

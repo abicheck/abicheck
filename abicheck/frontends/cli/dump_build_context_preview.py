@@ -43,7 +43,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from ...dry_run import DryRunResult
-    from ...workflows.dump.request_to_snapshot import (
+    from ...workflows.dump.request import (
         DumpExecutionOptions,
         ResolvedDumpRequest,
     )

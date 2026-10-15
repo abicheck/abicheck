@@ -319,7 +319,7 @@ class TestStrandedLibraryInlineInputSpecReachesConfigDirs:
         monkeypatch.chdir(tmp_path)
 
         captured: dict[str, object] = {}
-        from abicheck.workflows.dump.request_to_snapshot import (
+        from abicheck.workflows.dump.request import (
             resolve_dump_request as _real_resolve_dump_request,
         )
 
@@ -331,7 +331,7 @@ class TestStrandedLibraryInlineInputSpecReachesConfigDirs:
             return _real_resolve_dump_request(request)  # type: ignore[arg-type]
 
         monkeypatch.setattr(
-            "abicheck.workflows.dump.request_to_snapshot.resolve_dump_request",
+            "abicheck.workflows.dump.request.resolve_dump_request",
             _fake_resolve_dump_request,
         )
 

@@ -21,7 +21,7 @@ Each adapter ingests one build-system surface and emits the shared, neutral
 
 from __future__ import annotations
 
-from .adapter_contract import (
+from .adapter_shared import (
     ABI_RELEVANT_FLAG_PREFIXES,
     BuildAdapter,
     compile_unit_id,

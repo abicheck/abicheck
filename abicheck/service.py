@@ -122,7 +122,7 @@ from .workflows.dump.native import run_dump
 # leaf module ``service_dump_pipeline``. Re-exported for the same reason:
 # ``from abicheck.service import run_dump_request`` is the typed entry point
 # every front end (CLI, typed Python) builds a request for. ──────────────────
-from .workflows.dump.request_to_snapshot import run_dump_request
+from .workflows.dump.request import run_dump_request
 
 # ADR-061 gap D, closed: the directory/package release fan-out's
 # pre-execution resolution is one typed request/plan pair, reachable from

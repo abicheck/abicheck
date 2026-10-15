@@ -16,8 +16,8 @@
 """One Semantic Pipeline plan, sub-phase 4B, ``dump``'s own slice.
 
 Mirrors ``test_service_compare_pipeline.py::TestResolvedExecutionContextWiring``
-for :func:`abicheck.workflows.dump.request_to_snapshot.resolve_dump_request` /
-:func:`abicheck.workflows.dump.request_to_snapshot.execute_dump_request`: both closed the
+for :func:`abicheck.workflows.dump.request.resolve_dump_request` /
+:func:`abicheck.workflows.dump.request.execute_dump_request`: both closed the
 identical "no real caller" gap ``ResolvedComparePair.resolved_execution_context``
 closed for ``compare`` (``resolve_dump_request`` wires the pre-execution view;
 ``execute_dump_request`` is the real post-execution ``with_assurance()``
@@ -33,7 +33,7 @@ import pytest
 from abicheck.model import AbiSnapshot, Function
 from abicheck.serialization import snapshot_to_json
 from abicheck.service import DumpRequest, InputSpec
-from abicheck.workflows.dump.request_to_snapshot import (
+from abicheck.workflows.dump.request import (
     ResolvedDumpRequest,
     execute_dump_request,
     resolve_dump_request,
@@ -210,7 +210,7 @@ class TestExecuteDumpRequestWithAssurance:
             )
 
         monkeypatch.setattr(
-            "abicheck.workflows.dump.request_to_snapshot._resolve_side_snapshot_impl",
+            "abicheck.workflows.dump.request._resolve_side_snapshot_impl",
             _fake_resolve,
         )
 
@@ -250,7 +250,7 @@ class TestExecuteDumpRequestWithAssurance:
             )
 
         monkeypatch.setattr(
-            "abicheck.workflows.dump.request_to_snapshot._resolve_side_snapshot_impl",
+            "abicheck.workflows.dump.request._resolve_side_snapshot_impl",
             _fake_resolve,
         )
 
@@ -288,7 +288,7 @@ class TestExecuteDumpRequestWithAssurance:
             )
 
         monkeypatch.setattr(
-            "abicheck.workflows.dump.request_to_snapshot._resolve_side_snapshot_impl",
+            "abicheck.workflows.dump.request._resolve_side_snapshot_impl",
             _fake_resolve,
         )
 
@@ -327,7 +327,7 @@ class TestExecuteDumpRequestWithAssurance:
             )
 
         monkeypatch.setattr(
-            "abicheck.workflows.dump.request_to_snapshot._resolve_side_snapshot_impl",
+            "abicheck.workflows.dump.request._resolve_side_snapshot_impl",
             _fake_resolve,
         )
 
@@ -369,7 +369,7 @@ class TestExecuteDumpRequestWithAssurance:
             )
 
         monkeypatch.setattr(
-            "abicheck.workflows.dump.request_to_snapshot._resolve_side_snapshot_impl",
+            "abicheck.workflows.dump.request._resolve_side_snapshot_impl",
             _fake_resolve,
         )
 
@@ -418,7 +418,7 @@ class TestExecuteDumpRequestWithAssurance:
             )
 
         monkeypatch.setattr(
-            "abicheck.workflows.dump.request_to_snapshot._resolve_side_snapshot_impl",
+            "abicheck.workflows.dump.request._resolve_side_snapshot_impl",
             _fake_resolve,
         )
 
@@ -452,7 +452,7 @@ class TestExecuteDumpRequestWithAssurance:
             )
 
         monkeypatch.setattr(
-            "abicheck.workflows.dump.request_to_snapshot._resolve_side_snapshot_impl",
+            "abicheck.workflows.dump.request._resolve_side_snapshot_impl",
             _fake_resolve,
         )
 
@@ -486,7 +486,7 @@ class TestExecuteDumpRequestWithAssurance:
             )
 
         monkeypatch.setattr(
-            "abicheck.workflows.dump.request_to_snapshot._resolve_side_snapshot_impl",
+            "abicheck.workflows.dump.request._resolve_side_snapshot_impl",
             _fake_resolve,
         )
 

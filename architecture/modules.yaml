@@ -532,7 +532,7 @@
   ],
   "legacy_generic_modules": [
     "abicheck/binary_utils.py",
-    "abicheck/buildsource/adapters/adapter_contract.py",
+    "abicheck/buildsource/adapters/adapter_shared.py",
     "abicheck/buildsource/source_extractors/base.py",
     "abicheck/cli_buildsource_helpers.py",
     "abicheck/cli_compare_helpers.py",

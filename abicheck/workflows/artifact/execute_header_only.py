@@ -92,7 +92,7 @@ def is_header_only_evidence(resolved: ResolvedDumpRequest) -> bool:
     module executes.
 
     Only meaningful for a request whose ``InputSpec.path is None`` (the
-    caller -- :func:`~abicheck.workflows.dump.request_to_snapshot.execute_dump_request`
+    caller -- :func:`~abicheck.workflows.dump.request.execute_dump_request`
     -- already branches on that); this function answers the *second*
     question, which of the two binary-less shapes it is. ``True`` when the
     resolved header set or a ``--dump-manifest`` names real evidence to
@@ -110,9 +110,9 @@ def is_header_only_evidence(resolved: ResolvedDumpRequest) -> bool:
 
 @dataclass(frozen=True)
 class HeaderOnlyDumpOutcome:
-    """The three facts :func:`~abicheck.workflows.dump.request_to_snapshot.
+    """The three facts :func:`~abicheck.workflows.dump.request.
     execute_dump_request` needs to build its own
-    :class:`~abicheck.workflows.dump.request_to_snapshot.DumpResult` from -- mirrors
+    :class:`~abicheck.workflows.dump.request.DumpResult` from -- mirrors
     :class:`~abicheck.workflows.artifact.execute_source_only.
     SourceOnlyDumpOutcome`'s identical shape and identical reason (avoiding
     a real import cycle back into ``service_dump_pipeline``)."""
