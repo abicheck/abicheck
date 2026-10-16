@@ -370,6 +370,7 @@ OTHER_REASONS: dict[str, str] = {
     "storage.third_party_contract_at_scale": "third-party codec contracts",
     "serialization.str_enum_downcast_via_generic_rewrite": "serialization codec",
     "policy.disposition_conservation": "policy disposition audit (ADR-067)",
+    "detector.selector_axis_unstamped": "policy selector axis over a detector-stamped field (no shared harness yet)",
     "compare.order_independent_reorder_refused": "comparability gate header-order proof (ADR-082)",
     "package.ar_magic_is_not_deb": "package format sniffing (ar archives)",
     "templates.fn_type_arguments_counted_as_template_arguments": "template argument counting",
