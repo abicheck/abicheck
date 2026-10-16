@@ -165,3 +165,27 @@ class TestBaselineSourceInTheWholeAction:
         assert outputs["_exit"] == 0, outputs["_stdout"]
         assert "extra" not in outputs
         assert outputs["baseline-project-ref"] == "v1 extra=injected"
+
+
+class TestHostileManifestValuesHaveNoSideEffects:
+    """Executing proof, not text: a publisher-controlled manifest value that
+    carries command substitutions must never run them. The value reaches the
+    shell only as data (a quoted argument, an echoed string), so a sentinel
+    file the payload would create must not exist afterwards."""
+
+    def test_command_substitution_in_project_ref_is_inert(self, tmp_path: Path) -> None:
+        sentinel = tmp_path / "pwned"
+        payload = f"v1$(touch {sentinel})`touch {sentinel}`;touch {sentinel}"
+        archive_dir = tmp_path / "hostile-archive"
+        archive_dir.mkdir()
+        archive = _build_baseline_set_archive(archive_dir, project_ref=payload)
+        bindir = _stub_abicheck(tmp_path, exit_code=0, payload=_valid_report())
+        _gh_on_path(bindir)
+        _write_new_library(tmp_path)
+        env = _selected_env(tmp_path, legacy=False, project_ref=payload, tag=payload)
+        env["INPUT_BASELINE_PROJECT_REF"] = ""
+        env["FIXTURE_ARCHIVE"] = str(archive)
+        outputs = _run_action(tmp_path, env, bindir)
+        assert not sentinel.exists(), "a manifest value was executed as shell"
+        assert outputs["_exit"] == 0, outputs["_stdout"]
+        assert outputs["baseline-project-ref"] == payload

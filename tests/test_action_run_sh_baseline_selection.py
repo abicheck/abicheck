@@ -579,3 +579,19 @@ class TestBaselineSourceOutputsAndSummary:
         ]
         assert "extra=injected" not in lines
         assert lines[2] == "baseline-project-ref=v1 ::add-mask::secret extra=injected"
+
+
+class TestHostileSummaryValuesAreInert:
+    def test_command_substitution_in_summary_is_inert(self, tmp_path: Path) -> None:
+        sentinel = tmp_path / "pwned"
+        script = _region_script(
+            "BASELINE_SOURCE=baseline-set\n"
+            'BASELINE_SOURCE_ASSET="a"\n'
+            f"BASELINE_SET_PROJECT_REF='$(touch {sentinel})'\n"
+            'BASELINE_SET_PROFILE="p"\n'
+            "_write_baseline_source_summary\n"
+        )
+        result = _run_bash_script(script, dict(os.environ))
+        assert result.returncode == 0, result.stderr
+        assert not sentinel.exists()
+        assert f"$(touch {sentinel})" in result.stdout
