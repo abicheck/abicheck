@@ -48,6 +48,7 @@ from .public_surface import should_filter_transitive_runtime_symbols
 if TYPE_CHECKING:
     from ..model import AbiSnapshot
     from ..model.change import Change
+    from ..model.elf_facts import ElfMetadata
 
 
 @registry.detector("undeclared_exports")
@@ -237,6 +238,9 @@ def _diff_undeclared_exports(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]
                 if mangled in already_reported:
                     continue
                 declaration = new_map.get(mangled)
+                # NEW's binding, the side an addition is about (export_transition
+                # stamps additions the same way). None when NEW's aliases disagree.
+                new_sym = new_elf.unambiguous_symbol(mangled)
                 changes.append(
                     make_change(
                         kind,
@@ -251,6 +255,7 @@ def _diff_undeclared_exports(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]
                         # renderers read.
                         name=mangled,
                         new=mangled,
+                        symbol_binding=new_sym.binding.value if new_sym else None,
                         entity_id=(
                             declaration.entity_id if declaration is not None else None
                         ),
@@ -286,8 +291,8 @@ def _instantiation_wording(
 def _export_only_removals(
     old: AbiSnapshot,
     new: AbiSnapshot,
-    old_elf: object,
-    new_elf: object,
+    old_elf: ElfMetadata,
+    new_elf: ElfMetadata,
     filter_transitive: bool,
     already: list[Change],
     public_scopes: PublicTemplateScopes | None = None,
@@ -376,6 +381,10 @@ def _export_only_removals(
                 continue
             already_reported.add(mangled)
             declaration = old_map.get(mangled)
+            # OLD's binding, the side a removal is about (Change.symbol_binding).
+            # Looked up by name because the export table carries no declaration
+            # to read linkage from; None when OLD's versioned aliases disagree.
+            old_sym = old_elf.unambiguous_symbol(mangled)
             removals.append(
                 make_change(
                     kind,
@@ -401,6 +410,7 @@ def _export_only_removals(
                     # renderers read, mirroring the addition half's `new`.
                     name=mangled,
                     old=mangled,
+                    symbol_binding=old_sym.binding.value if old_sym else None,
                     entity_id=(
                         declaration.entity_id if declaration is not None else None
                     ),

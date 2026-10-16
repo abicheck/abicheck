@@ -285,12 +285,12 @@ def _matches_member_name(compiled: re.Pattern[str], change: SelectorMatchable) -
 def _matches_binding(binding: str, change: SelectorMatchable) -> bool:
     """Return True if *change*'s ELF symbol linkage equals *binding*.
 
-    ``change.symbol_binding`` is ``None`` for every change kind other than
-    ``FUNC_REMOVED``/``FUNC_REMOVED_ELF_ONLY``/``VAR_REMOVED``/
-    ``FUNC_DELETED_ELF_FALLBACK``/``FUNC_VISIBILITY_CHANGED`` (the only
-    kinds any detector stamps it on), and also ``None`` on one of those whose binding
-    was never captured (non-ELF platform, older snapshot, no matching
-    ``.dynsym`` entry). A rule with an explicit ``binding:`` selector never
+    ``change.symbol_binding`` is ``None`` for every change kind no detector
+    stamps it on (the removal kinds and the added-export kinds listed in
+    ``Change.symbol_binding``'s docstring), and also ``None`` on one of those
+    whose binding was never captured (non-ELF platform, older snapshot, no
+    matching ``.dynsym`` entry, or an undeclared export whose versioned
+    aliases disagree). A rule with an explicit ``binding:`` selector never
     matches either case — an unknown binding is not the same fact as a
     confirmed one, and silently treating it as a match would suppress a
     finding this rule was never actually audited against (the same
