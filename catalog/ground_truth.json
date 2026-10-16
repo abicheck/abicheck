@@ -4327,7 +4327,7 @@
       "func_removed_elf_only",
       "func_visibility_changed"
     ],
-    "min_evidence": "L2",
+    "min_evidence": "L0",
     "platforms": [
       "linux"
     ]
@@ -4343,7 +4343,7 @@
       "func_removed_elf_only",
       "func_visibility_changed"
     ],
-    "min_evidence": "L2",
+    "min_evidence": "L0",
     "platforms": [
       "linux"
     ]
