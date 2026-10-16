@@ -104,7 +104,7 @@ def _suppression_source(suppression: Any, path: Any) -> Any:
     suppression_config_for`` follows."""
     if suppression is None:
         return None
-    from .compatibility_evaluation_frontend import SuppressionSource
+    from .workflows.compare_input_sources import SuppressionSource
 
     return SuppressionSource(
         path=str(path) if path is not None else None,
@@ -145,10 +145,8 @@ def cli_configuration_inputs(
     ``contract.overlays`` (a single-pair compare under an explicit
     ``--config``), so the receipt states them at ``project_config`` tier.
     """
-    from .compatibility_evaluation_frontend import (
-        ProjectCompatibilityInputs,
-        compare_cli_inputs,
-    )
+    from .compatibility_evaluation_frontend import ProjectCompatibilityInputs
+    from .workflows.compare_input_adapters import compare_cli_inputs
 
     # The declared contract, enforced rather than only documented: every one
     # of these keys is read below, and a caller that renamed or dropped one
@@ -545,8 +543,8 @@ def record_resolved_config(
     ctx = getattr(result, "contract_context", None)
     if not isinstance(ctx, PersistedContractContext):
         return
-    from .compatibility_evaluation_frontend import SEVERITY_CATEGORY_FIELDS
     from .contract_context import with_resolved_config, with_resolved_gate
+    from .workflows.evaluation_identities import SEVERITY_CATEGORY_FIELDS
 
     ctx = with_resolved_config(ctx, config)
     # The values the run was scored with, with the canonical resolver's

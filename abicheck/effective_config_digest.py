@@ -217,7 +217,7 @@ def _builtin_policy_base_str(name: Any) -> str:
     if not name_str:
         return ""
     try:
-        from .compatibility_evaluation_frontend import builtin_policy_identity
+        from .workflows.evaluation_identities import builtin_policy_identity
 
         return _identity_str(builtin_policy_identity(name_str))
     except ValueError:

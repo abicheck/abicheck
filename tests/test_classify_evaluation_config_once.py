@@ -85,7 +85,7 @@ def _kwargs(spec: dict) -> dict:
 
 @pytest.mark.parametrize("name", sorted(VARIANTS))
 def test_one_resolution_read_by_every_consumer(tmp_path, monkeypatch, name):
-    import abicheck.compatibility_evaluation_frontend as frontend
+    import abicheck.workflows.compare_input_adapters as adapters
     from abicheck.service_compare_pipeline import (
         classify_compare_pair,
         resolve_compare_request,
@@ -99,7 +99,7 @@ def test_one_resolution_read_by_every_consumer(tmp_path, monkeypatch, name):
     pair = resolve_compare_request(request)
     assert pair.resolved_execution_context.evaluation_config is None
 
-    real = frontend.compatibility_config_from_compare_request
+    real = adapters.compatibility_config_from_compare_request
     calls: list[object] = []
 
     def _counting(*args, **kwargs):
@@ -107,10 +107,10 @@ def test_one_resolution_read_by_every_consumer(tmp_path, monkeypatch, name):
         return real(*args, **kwargs)
 
     monkeypatch.setattr(
-        frontend, "compatibility_config_from_compare_request", _counting
+        adapters, "compatibility_config_from_compare_request", _counting
     )
     result = classify_compare_pair(request, pair)
-    monkeypatch.setattr(frontend, "compatibility_config_from_compare_request", real)
+    monkeypatch.setattr(adapters, "compatibility_config_from_compare_request", real)
 
     assert len(calls) == 1, f"{name}: resolved {len(calls)} times"
     context_config = result.resolved_execution_context.evaluation_config
