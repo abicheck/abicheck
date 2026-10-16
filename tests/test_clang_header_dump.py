@@ -36,7 +36,7 @@ from abicheck import deadline, dumper
 from abicheck.dumper_clang import _ClangAstParser
 from abicheck.errors import SnapshotError
 from abicheck.extract import compiler_driver
-from abicheck.extract.headers import ast_config as dumper_ast_config
+from abicheck.extract.headers import ast_config as dumper_ast_config, toolchain
 from abicheck.extract.headers.clang import backend as clang_backend
 from abicheck.extract.headers.clang.backend import clang_header_dump
 from abicheck.storage import header_ast_cache as dumper_cache
@@ -501,7 +501,7 @@ def test_clang_header_dump_retries_cpp_on_missing_cpp_stdlib_header(
     monkeypatch.setattr(
         clang_backend, "_cache_path", lambda *a, **k: tmp_path / "c.json"
     )
-    monkeypatch.setattr(dumper, "_detect_cpp_headers", lambda *a, **k: False)
+    monkeypatch.setattr(toolchain, "_detect_cpp_headers", lambda *a, **k: False)
     monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "0")
     ast_json = '{"kind": "TranslationUnitDecl", "inner": []}'
     cmds: list[list[str]] = []
@@ -540,7 +540,7 @@ def test_clang_header_dump_no_retry_on_other_error(
     monkeypatch.setattr(
         clang_backend, "_cache_path", lambda *a, **k: tmp_path / "c.json"
     )
-    monkeypatch.setattr(dumper, "_detect_cpp_headers", lambda *a, **k: False)
+    monkeypatch.setattr(toolchain, "_detect_cpp_headers", lambda *a, **k: False)
     monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "0")
     calls = {"n": 0}
 

@@ -408,7 +408,7 @@ def test_build_castxml_command_gcc_option_tokens_verbatim(tmp_path):
     the string-quoting approach could not provide on Windows."""
     from pathlib import Path
 
-    from abicheck.dumper import _build_castxml_command
+    from abicheck.extract.headers.ast_config import _build_castxml_command
 
     cmd = _build_castxml_command(
         "gcc",
@@ -563,7 +563,7 @@ def test_castxml_command_user_std_token_not_overridden(tmp_path):
     user's dialect is the last (winning) standard flag (Codex review)."""
     from pathlib import Path
 
-    from abicheck.dumper import _build_castxml_command
+    from abicheck.extract.headers.ast_config import _build_castxml_command
 
     cmd = _build_castxml_command(
         "g++",
@@ -604,7 +604,7 @@ def test_castxml_c_mode_user_std_token_not_overridden():
     C dialect chosen via --compiler-option actually takes effect (Codex review)."""
     from pathlib import Path
 
-    from abicheck.dumper import _build_castxml_command
+    from abicheck.extract.headers.ast_config import _build_castxml_command
 
     cmd = _build_castxml_command(
         "gcc",
@@ -635,7 +635,7 @@ def test_castxml_c_mode_forces_explicit_cpp_driver_probe_to_c():
     """Keep an explicit g++ executable while probing its builtins as C."""
     from pathlib import Path
 
-    from abicheck.dumper import _build_castxml_command
+    from abicheck.extract.headers.ast_config import _build_castxml_command
 
     cmd = _build_castxml_command(
         "/opt/cross/bin/g++",
@@ -660,7 +660,7 @@ def test_castxml_cpp_mode_keeps_gnu_emulation_id():
     """The ``gnu-c`` workaround must be scoped to C parsing only."""
     from pathlib import Path
 
-    from abicheck.dumper import _build_castxml_command
+    from abicheck.extract.headers.ast_config import _build_castxml_command
 
     cmd = _build_castxml_command(
         "g++", "gnu", [], Path("o.xml"), Path("a.hpp"), force_cpp=True
