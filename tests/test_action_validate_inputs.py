@@ -67,6 +67,7 @@ _VALIDATOR_INPUT_VARS = (
     "INPUT_BASELINE_PROFILE",
     "INPUT_BASELINE_TARGET",
     "INPUT_BASELINE_ASSET_NAME_TEMPLATE",
+    "INPUT_BASELINE_PROJECT_REF",
     "INPUT_AGAINST",
     "INPUT_ESTIMATE",
     "INPUT_AUDIT",
@@ -1328,3 +1329,51 @@ class TestBaselineProfileRequiresAbiBaseline:
         )
         assert result.returncode == 1
         assert "baseline-profile is not" in (result.stdout + result.stderr)
+
+
+class TestBaselineProjectRefValues:
+    """baseline-project-ref accepts a closed set; anything else fails preflight.
+
+    action.yml defaults the input to 'tag', so the unset case (no env var, as
+    a direct invocation sees it) and the explicit '' case (check off) must
+    both pass validation, and only a typo or an unsupported spelling fails.
+    """
+
+    @pytest.mark.parametrize(
+        "value",
+        ["tag", "commit", "", "a" * 40, "b" * 64],
+        ids=["tag", "commit", "empty-disables", "sha1", "sha256"],
+    )
+    def test_accepted_values_pass(self, value: str) -> None:
+        result = _run_validate(
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_OLD_LIBRARY": "old.so",
+                "INPUT_NEW_LIBRARY": "new.so",
+                "INPUT_BASELINE_PROJECT_REF": value,
+            }
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+
+    def test_unset_passes_as_the_tag_default(self) -> None:
+        result = _run_validate(
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_OLD_LIBRARY": "old.so",
+                "INPUT_NEW_LIBRARY": "new.so",
+            }
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+
+    @pytest.mark.parametrize("value", ["v2.3.0", "Tag", "abc", "g" * 40])
+    def test_unrecognised_value_fails_preflight(self, value: str) -> None:
+        result = _run_validate(
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_OLD_LIBRARY": "old.so",
+                "INPUT_NEW_LIBRARY": "new.so",
+                "INPUT_BASELINE_PROJECT_REF": value,
+            }
+        )
+        assert result.returncode == 1
+        assert "baseline-project-ref" in (result.stdout + result.stderr)
