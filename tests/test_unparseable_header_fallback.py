@@ -104,7 +104,11 @@ def test_drops_exactly_the_failing_headers(seed):
     # Oracle: the bad set, in input order; survivors keep input order.
     assert excluded == [h for h in headers if h in bad]
     assert calls[-1] == [h for h in headers if h not in bad]
-    # Deterministic: a second run makes the identical sequence of attempts.
+    # Deterministic: a second run makes the same attempts and excludes the
+    # same headers. Compared as a multiset: probe groups run concurrently
+    # (BudgetedExecutor), so the recorded order within a probe wave depends
+    # on which worker finishes first, notably on free-threaded builds. The
+    # result and the excluded set are order-independent and checked exactly.
     calls2: list[list[Path]] = []
     assert (
         parse_excluding_unparseable_headers(headers, _fake_castxml(bad, style, calls2))[
@@ -112,7 +116,7 @@ def test_drops_exactly_the_failing_headers(seed):
         ]
         == excluded
     )
-    assert calls2 == calls
+    assert sorted(calls2) == sorted(calls)
 
 
 @pytest.mark.parametrize("seed", range(30))
