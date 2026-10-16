@@ -773,7 +773,7 @@
     },
     {
       "path": "abicheck/junit_report.py",
-      "baseline_lines": 1184,
+      "baseline_lines": 1183,
       "target": "report",
       "rule": "no_growth",
       "disposition": "migrate",

@@ -51,6 +51,7 @@ from .model.contract_finding_relevance import is_evaluated
 from .model.symbol_inventory import SymbolInventory
 from .policy.classification import Verdict
 from .policy.evaluate import effective_kind_sets, verdict_for
+from .report.change_operation import entity_for_change
 from .report.envelope import resolved_document as _resolved_document
 from .report.junit_disposition import (
     # ADR-061: moved to report/ (its historical private name is kept here
@@ -117,8 +118,6 @@ def _classname_for(change: Change) -> str:
     the one resolver every other projection uses, so a kind added tomorrow
     lands in the right group from its single catalog registration.
     """
-    from .report.change_operation import entity_for_change
-
     entity = entity_for_change(change, change.kind.value)
     return _ENTITY_TO_CLASSNAME.get(entity or "", "metadata")
 
