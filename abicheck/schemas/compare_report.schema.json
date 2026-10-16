@@ -3331,6 +3331,30 @@
             "other"
           ]
         },
+        "removed_instantiations": {
+          "type": "array",
+          "description": "Schema 5.14: present only on internal_template_leaks_via_public_api findings. The complete, uncapped list of removed template instantiations behind the finding -- one entry per old-side declaration whose instantiation is absent from the new library. `symbol` stays the template stem; this list is where each removed instantiation's mangled name and linkage are read. `binding` is the old-side ELF linkage (null when never captured). An empty array means the comparison ran and removed none.",
+          "items": {
+            "type": "object",
+            "required": ["mangled", "demangled", "binding"],
+            "additionalProperties": false,
+            "properties": {
+              "mangled": {
+                "type": "string",
+                "description": "The old-side linker (mangled) name of the removed instantiation."
+              },
+              "demangled": {
+                "type": "string",
+                "description": "The identity name the detector matched on: the demangled name when a demangler resolved it, otherwise the declared qualified name."
+              },
+              "binding": {
+                "type": ["string", "null"],
+                "description": "The old-side ELF linkage, or null when it was not captured.",
+                "enum": ["global", "weak", "local", "unique", "other", null]
+              }
+            }
+          }
+        },
         "demangled_symbol": {
           "type": "string",
           "description": "Schema 5.0: a human-readable demangling of this finding's `symbol`, present on every finding whose symbol is an Itanium-mangled C++ name and whose demangling differs from it -- so a machine consumer always carries both names. `symbol`/`old_value` themselves are never rewritten and stay the exact mangled spelling, which is what makes this field's presence mean \"this differs from symbol\". Omitted when the symbol is not Itanium-mangled (an MSVC-decorated PE export is never demangled -- see `abicheck/demangle.py`), when no demangler is available on the host, or when demangling produces nothing new. Before 5.0 (schema 3.14) this was emitted only for a func_removed_elf_only finding, or a var_removed finding whose old-side variable is elf_only-visibility -- the one case whose `symbol`/`old_value` carried no readable name at all."
