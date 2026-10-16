@@ -40,11 +40,8 @@ from ..policy.classification import (
 from ..policy.disposition_ledger import RuleProvenance
 from ..report_model import VERDICT_TO_SEVERITY_LABEL as _VERDICT_TO_SEVERITY_LABEL
 from ..report_summary import build_summary
-from ..reporter_markdown import (
-    entity_for_change as entity_for_change,
-)
 from .change_annotations import change_annotation_fields as _change_annotation_fields
-from .change_operation import operation_for_change
+from .change_operation import entity_for_change, operation_for_change
 from .contract_fields import (
     add_contract_evaluation_fields as _add_contract_evaluation_fields,
 )

@@ -482,7 +482,7 @@ class TestSerializationTagFindingsKeepTheirContributingSource:
 
     def test_each_finding_states_the_entity_of_its_own_source(self):
         """Batched, so a failure names every disagreeing source at once."""
-        from abicheck.reporter_markdown import entity_for_change
+        from abicheck.report.change_operation import entity_for_change
 
         # Constants share the `variable` entity with real variables, the way
         # `constant_changed` already declares it; the enum member is the one
@@ -500,7 +500,7 @@ class TestSerializationTagFindingsKeepTheirContributingSource:
 
     def test_no_finding_is_reported_as_a_type(self):
         """The specific regression: `type` was wrong for every source."""
-        from abicheck.reporter_markdown import entity_for_change
+        from abicheck.report.change_operation import entity_for_change
 
         wrong = [
             c.symbol

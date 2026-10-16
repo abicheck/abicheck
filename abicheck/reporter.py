@@ -26,6 +26,10 @@ from .report.change_json import (
     reclassified_by_for_change,
     scope_dict,
 )
+from .report.change_operation import (
+    entity_for_change as entity_for_change,
+    operation_for_kind as operation_for_kind,
+)
 from .report.document_builder import build_report_document
 from .report.json_sections import (
     SCOPED_GATE_HELPERS,
@@ -86,9 +90,7 @@ from .reporter_markdown import (
     _fmt_size as _fmt_size,
     _format_change_md as _format_change_md,
     _section_severity_label as _section_severity_label,
-    entity_for_change as entity_for_change,
     entity_for_kind as entity_for_kind,
-    operation_for_kind as operation_for_kind,
     root_cause_evidence_lookup_for_changes as root_cause_evidence_lookup_for_changes,
     root_cause_for_change as root_cause_for_change,
     root_cause_lookup_for_changes as root_cause_lookup_for_changes,

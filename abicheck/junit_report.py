@@ -113,11 +113,11 @@ def _classname_for(change: Change) -> str:
     therefore disagreed with JSON and with ``--view show=`` about the same
     finding (Codex review, PR #1284).
 
-    Resolved through :func:`~abicheck.reporter_markdown.entity_for_change`,
+    Resolved through :func:`~abicheck.report.change_operation.entity_for_change`,
     the one resolver every other projection uses, so a kind added tomorrow
     lands in the right group from its single catalog registration.
     """
-    from .reporter_markdown import entity_for_change
+    from .report.change_operation import entity_for_change
 
     entity = entity_for_change(change, change.kind.value)
     return _ENTITY_TO_CLASSNAME.get(entity or "", "metadata")

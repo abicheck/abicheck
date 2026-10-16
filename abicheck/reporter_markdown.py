@@ -29,10 +29,8 @@ from .policy.evaluate import effective_kind_sets
 from .report.change_operation import (
     ACTION_TOKEN_OPERATIONS as ACTION_TOKEN_OPERATIONS,
     ELEMENT_TOKEN_ENTITIES as ELEMENT_TOKEN_ENTITIES,
-    entity_for_change as entity_for_change,
     entity_for_kind as entity_for_kind,
     operation_for_change as operation_for_change,
-    operation_for_kind as operation_for_kind,
 )
 from .report.kind_rollup import roll_up_large_kinds
 from .report.not_evaluated_section import (
