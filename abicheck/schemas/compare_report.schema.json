@@ -3322,7 +3322,7 @@
         },
         "symbol_binding": {
           "type": "string",
-          "description": "The removed symbol's ELF linkage (schema 2.32), present only on func_removed/func_removed_elf_only/var_removed/func_deleted_elf_fallback findings whose binding was captured (non-ELF platforms, older snapshots, and an unmatched .dynsym entry all omit this key). A WEAK/COMDAT symbol usually \u2014 but not always \u2014 means every consumer already carries its own copy (see the binding: suppression selector's documentation for the extern-template counterexample); this is provider-side evidence about the library's own build, not proof a removal is safe.",
+          "description": "The symbol's ELF linkage (schema 2.32; schema 6.1 extended it to the added-export kinds). A removal carries the OLD side's binding (func_removed/func_removed_elf_only/var_removed/var_removed_elf_only/func_visibility_changed/func_deleted_elf_fallback); an added export carries the NEW side's (func_export_added/var_export_added/func_added_elf_only/var_added_elf_only). Present only when the binding was captured (non-ELF platforms, older snapshots, and an unmatched .dynsym entry all omit this key, and an undeclared export whose versioned aliases disagree omits it too). A WEAK/COMDAT symbol usually \u2014 but not always \u2014 means every consumer already carries its own copy (see the binding: suppression selector's documentation for the extern-template counterexample); this is provider-side evidence about the library's own build, not proof a removal is safe.",
           "enum": [
             "global",
             "weak",
@@ -3333,7 +3333,7 @@
         },
         "removed_instantiations": {
           "type": "array",
-          "description": "Schema 6.1: present only on internal_template_leaks_via_public_api findings. The complete, uncapped list of removed template instantiations behind the finding -- one entry per old-side declaration whose instantiation is absent from the new library. `symbol` stays the template stem; this list is where each removed instantiation's mangled name and linkage are read. `binding` is the old-side ELF linkage (null when never captured). An empty array means the comparison ran and removed none.",
+          "description": "Schema 6.2: present only on internal_template_leaks_via_public_api findings. The complete, uncapped list of removed template instantiations behind the finding -- one entry per old-side declaration whose instantiation is absent from the new library. `symbol` stays the template stem; this list is where each removed instantiation's mangled name and linkage are read. `binding` is the old-side ELF linkage (null when never captured). An empty array means the comparison ran and removed none.",
           "items": {
             "type": "object",
             "required": ["mangled", "demangled", "binding"],

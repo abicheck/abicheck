@@ -47,7 +47,7 @@ from abicheck.extract.public_header_identifiers import (
 )
 from abicheck.model import AbiSnapshot, Function
 from abicheck.model.change import Change
-from abicheck.model.elf_facts import ElfSymbol, SymbolType
+from abicheck.model.elf_facts import ElfSymbol, SymbolBinding, SymbolType
 from abicheck.model.fact import Fact, FactStatus
 from abicheck.model.symbol_leaf import symbol_leaf_identifier
 from abicheck.model.vocabulary import ScopeOrigin
@@ -213,7 +213,7 @@ def _snap(
             symbols=[
                 ElfSymbol(
                     name=n,
-                    binding="GLOBAL",
+                    binding=SymbolBinding.GLOBAL,
                     sym_type=SymbolType.FUNC,
                     size=8,
                     is_default=True,

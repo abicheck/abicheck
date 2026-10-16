@@ -1075,9 +1075,9 @@ _ARTIFACT_NAMES = frozenset(
 #:        counterpart of ``not_evaluated``. A detector is now listed when it
 #:        declined anything, even with no findings and no coverage gap.
 #: 5.13 -- additive ``exit.additions_review_contribution`` (ADR-067 D6): the
-#:        additions-review floor is folded inside ``ExitDecision`` rather than
-#:        after it, so ``exit.code`` equals the process exit when the axis
-#:        fires. ``0`` for every run without acknowledgment records.
+#:        additions-review floor is folded inside ``ExitDecision`` rather
+#:        than after it, so ``exit.code`` equals the process exit when the
+#:        axis fires. ``0`` for every run without acknowledgment records.
 #: 6.0 -- BREAKING (ADR-078): ``summary.quality_issues`` narrows -- a required
 #:        field's own meaning changing is breaking under this policy (the 4.0
 #:        precedent). Findings recording that nothing a consumer can act on
@@ -1091,8 +1091,8 @@ _ARTIFACT_NAMES = frozenset(
 #:        ``category`` reads ``informational``. Exit codes move only under a
 #:        severity setting that made ``quality_issues`` an error: such a finding
 #:        no longer gates.
-#: 6.1 -- additive ``removed_instantiations`` (uncapped removed set) on internal-template leak findings; ``symbol_binding`` on missing-instantiation and leak findings (aggregate, ``weak`` only if all WEAK).
-REPORT_SCHEMA_VERSION = "6.1"
+#: 6.2 -- additive ``removed_instantiations`` (uncapped removed set) on internal-template leak findings; ``symbol_binding`` on missing-instantiation and leak findings (aggregate, ``weak`` only if all WEAK).
+REPORT_SCHEMA_VERSION = "6.2"
 
 # The directory/package release envelope's own version and version history
 # live in `release_schema.py` (see that module's docstring for why); the

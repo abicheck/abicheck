@@ -43,6 +43,7 @@ from abicheck.buildsource.export_declaration_evidence import (
 from abicheck.checker_policy import ChangeKind, Confidence
 from abicheck.elf_metadata import ElfMetadata, ElfSymbol
 from abicheck.model import AbiSnapshot, Function, RecordType, ScopeOrigin
+from abicheck.model.elf_facts import SymbolBinding
 from abicheck.model.evidence_status import CrossSourceEvolution
 from abicheck.model.export_entity_name import (
     PublicTemplateScopes,
@@ -399,7 +400,7 @@ def _elf_side(exports: tuple[str, ...], types: list[RecordType]) -> AbiSnapshot:
     snap.elf = ElfMetadata(
         machine="EM_X86_64",
         symbols=[
-            ElfSymbol(name=n, binding="GLOBAL", sym_type=SymbolType.FUNC)
+            ElfSymbol(name=n, binding=SymbolBinding.GLOBAL, sym_type=SymbolType.FUNC)
             for n in exports
         ],
     )

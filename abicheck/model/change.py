@@ -380,14 +380,18 @@ class Change:
     # Mirrors ``AbiSnapshot``'s identical fix in PR #582.
     vtable_covers_unverifiable_layout_gap: bool = field(default=False, kw_only=True)
     # ELF symbol linkage (Function.elf_binding / Variable.elf_binding's value
-    # string — "global"/"weak"/"local"/"unique"/"other") of the removed (or
-    # visibility-hidden) symbol, stamped by
-    # diff_symbols._check_removed_function/_var_removed on
-    # FUNC_REMOVED/FUNC_REMOVED_ELF_ONLY/VAR_REMOVED/FUNC_VISIBILITY_CHANGED
-    # findings (the old side's binding), and by
-    # diff_platform._diff_elf_deleted_fallback on FUNC_DELETED_ELF_FALLBACK.
-    # None for every other kind, and None here too when the symbol's binding
-    # was never captured. Exists so a suppression rule's ``binding:``
+    # string — "global"/"weak"/"local"/"unique"/"other") of the symbol the
+    # finding is about. Removal kinds carry the OLD side's binding:
+    # diff_symbols._check_removed_function/_var_removed (FUNC_REMOVED,
+    # FUNC_REMOVED_ELF_ONLY, VAR_REMOVED, FUNC_VISIBILITY_CHANGED),
+    # compare/undeclared_exports' export-only removals (FUNC/VAR_REMOVED_
+    # ELF_ONLY), and diff_platform._diff_elf_deleted_fallback
+    # (FUNC_DELETED_ELF_FALLBACK). Added exports carry the NEW side's binding:
+    # export_transition (FUNC/VAR_EXPORT_ADDED) and compare/undeclared_exports'
+    # additions (FUNC/VAR_ADDED_ELF_ONLY). None for every other kind, and None
+    # here too when the symbol's binding was never captured, or when an
+    # undeclared export's versioned aliases disagree (see
+    # ElfMetadata.unambiguous_symbol). Exists so a suppression rule's ``binding:``
     # selector (suppression.py) can narrow a removal rule to the common
     # WEAK-COMDAT-inline case. Provider-side evidence only, NOT proof of
     # safety — see AGENTS.md's "Linkage-blind removal" entry. Deliberately a

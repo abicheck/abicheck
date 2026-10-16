@@ -606,18 +606,22 @@ inputs:
       baseline-profile and baseline-target to instead fetch a
       release-contract baseline-set archive
       (`abicheck-baseline-<profile>.tar.zst`, published by
-      publish-baseline.yml -- see docs/reference/publish-baseline.md); the
-      single-snapshot search always takes priority when both exist.
+      publish-baseline.yml -- see docs/reference/publish-baseline.md). When
+      baseline-profile and baseline-target are both set, that archive is the
+      only source consulted: a single-snapshot asset on the release is
+      ignored, not compared against. Without them, the single-snapshot asset
+      is used as before.
     required: false
   baseline-profile:
     description: >
       Selects which contract profile's baseline-set to fetch when
-      abi-baseline resolves to a release-contract baseline-set archive
-      (docs/reference/publish-baseline.md) rather than a single
-      *.abicheck.json asset. Requires baseline-target to also be set. Omit
-      when the release publishes a single-snapshot asset (abi-baseline's
-      original, unchanged contract) -- this input is only consulted as a
-      fallback when that search finds nothing.
+      abi-baseline resolves a release-contract baseline-set archive
+      (docs/reference/publish-baseline.md). Requires baseline-target to also
+      be set. When set together with baseline-target, the archive is the
+      only baseline source (a missing archive fails the run rather than
+      falling back to a single-snapshot asset). Omit when the release
+      publishes a single-snapshot asset (abi-baseline's original, unchanged
+      contract).
     required: false
   baseline-target:
     description: >
@@ -648,6 +652,20 @@ inputs:
       all -- the default template never does, so this input is a no-op
       unless you opt in by including the placeholder.
     required: false
+  baseline-project-ref:
+    description: >
+      What the selected baseline-set's manifest project_ref must equal.
+      Checked only when baseline-profile and baseline-target select a
+      release-contract baseline-set; a mismatch fails the run with outcome
+      wrong_project_ref. 'tag' (the default) expects the resolved release
+      tag -- what publish-baseline.yml records for a set it captured itself.
+      'commit' expects the commit that tag names, with an annotated tag
+      peeled to its commit -- what a set captured elsewhere (a pre-captured
+      set) records. A full 40/64-character commit SHA is compared literally.
+      Set this to an empty string to turn the check off; it is applied only
+      when the input is omitted, so an explicit '' is a real opt-out.
+    required: false
+    default: 'tag'
 
   # ── Output & policy ─────────────────────────────────────────────────────────
   format:
@@ -1144,6 +1162,35 @@ outputs:
       value the upload-sarif step below gates on, so withholding it skips
       that upload rather than feeding mismatched content to CodeQL.
     value: ${{ steps.run-abicheck.outputs.report-path }}
+  baseline-source:
+    description: >
+      Which release baseline this run compared against: legacy-asset (a
+      single *.abicheck.json[.gz|.zst] release asset), baseline-set (a
+      release-contract baseline-set archive selected by baseline-profile
+      and baseline-target), or direct-path (abi-baseline given as a file
+      path). Empty when no release baseline was resolved.
+    value: ${{ steps.run-abicheck.outputs.baseline-source }}
+  baseline-asset-name:
+    description: >
+      Name of the release asset the baseline came from (the archive name
+      for baseline-set, the *.abicheck.json file name for legacy-asset).
+      Empty when no release baseline was resolved.
+    value: ${{ steps.run-abicheck.outputs.baseline-asset-name }}
+  baseline-project-ref:
+    description: >
+      The manifest project_ref of a baseline-set baseline. Empty for any
+      other baseline source.
+    value: ${{ steps.run-abicheck.outputs.baseline-project-ref }}
+  baseline-generation:
+    description: >
+      The manifest baseline_generation of a baseline-set baseline, or empty
+      when the set records none (or for any other baseline source).
+    value: ${{ steps.run-abicheck.outputs.baseline-generation }}
+  baseline-profile:
+    description: >
+      The manifest profile of a baseline-set baseline. Empty for any other
+      baseline source.
+    value: ${{ steps.run-abicheck.outputs.baseline-profile }}
 
 runs:
   using: 'composite'
@@ -1194,6 +1241,7 @@ runs:
         INPUT_BASELINE_TARGET: ${{ inputs.baseline-target }}
         INPUT_BASELINE_ASSET_NAME_TEMPLATE: ${{ inputs.baseline-asset-name-template }}
         INPUT_BASELINE_GENERATION: ${{ inputs.baseline-generation }}
+        INPUT_BASELINE_PROJECT_REF: ${{ inputs.baseline-project-ref }}
         INPUT_ESTIMATE: ${{ inputs.estimate }}
         INPUT_AUDIT: ${{ inputs.audit }}
         # No-baseline capability-gap guard: compare's audit-only shape
@@ -1405,6 +1453,7 @@ runs:
         INPUT_BASELINE_TARGET: ${{ inputs.baseline-target }}
         INPUT_BASELINE_ASSET_NAME_TEMPLATE: ${{ inputs.baseline-asset-name-template }}
         INPUT_BASELINE_GENERATION: ${{ inputs.baseline-generation }}
+        INPUT_BASELINE_PROJECT_REF: ${{ inputs.baseline-project-ref }}
         INPUT_ADD_JOB_SUMMARY: ${{ inputs.add-job-summary }}
         INPUT_DEBUG_INFO1: ${{ inputs.debug-info1 }}
         INPUT_DEBUG_INFO2: ${{ inputs.debug-info2 }}

@@ -54,7 +54,7 @@ from abicheck.elf_metadata import ElfMetadata
 from abicheck.macho_metadata import MachoMetadata
 from abicheck.model import AbiSnapshot, Function
 from abicheck.model.change import Change
-from abicheck.model.elf_facts import ElfSymbol, SymbolType
+from abicheck.model.elf_facts import ElfSymbol, SymbolBinding, SymbolType
 from abicheck.model.macho_facts import MachoExport
 from abicheck.model.vocabulary import ScopeOrigin
 from abicheck.pe_metadata import PeMetadata
@@ -94,7 +94,7 @@ def _elf_snapshot(
     symbols = [
         ElfSymbol(
             name=name,
-            binding="GLOBAL",
+            binding=SymbolBinding.GLOBAL,
             sym_type=SymbolType.OBJECT,
             size=8,
             version=versioned.get(name),
@@ -326,14 +326,14 @@ class TestExportSpellingsAcrossPlatforms:
                 symbols=[
                     ElfSymbol(
                         name="api",
-                        binding="GLOBAL",
+                        binding=SymbolBinding.GLOBAL,
                         sym_type=SymbolType.FUNC,
                         size=0,
                         is_default=True,
                     ),
                     ElfSymbol(
                         name="old_impl",
-                        binding="GLOBAL",
+                        binding=SymbolBinding.GLOBAL,
                         sym_type=SymbolType.FUNC,
                         size=0,
                         version="V1",
