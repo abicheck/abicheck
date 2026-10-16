@@ -45,6 +45,7 @@ from __future__ import annotations
 
 import re
 from collections import defaultdict
+from collections.abc import Callable
 from functools import partial
 from typing import TYPE_CHECKING
 
@@ -53,12 +54,17 @@ from .compare.naming_conventions import (
     INTERNAL_TEMPLATE_LEAK,
 )
 from .compare.template_surface import (
+    InstantiationSig,
+    aggregate_removed_binding,
     cpo_identity as _cpo_id,
+    instantiation_set,
     mask_operator_symbols,
     qualified_declaration_name as _qualified_function_name,  # noqa: F401  (re-exported)
     qualified_name_lookup,
     reconciled_cpo_surfaces,
     reconciled_public_functions,
+    removed_instantiation_records,
+    removed_instantiations,
     strip_template_args as _strip_template_args,
     template_angle_depth,
 )
@@ -588,44 +594,27 @@ def _functions_by_stem(
     return out
 
 
-def _function_signature(f: Function) -> tuple[str, int, str]:
-    """Return a comparable signature tuple for *f*."""
-    norm = _normalize_graph_identity
-    return (
-        norm(f.return_type),
-        len(f.params),
-        "|".join(norm(p.type) for p in f.params),
-    )
-
-
-def _instantiation_set(
-    funcs: list[Function],
-    demangled: dict[str, str],
-) -> set[tuple[str, tuple[str, int, str]]]:
-    return {
-        (_canonical_identity_name(f.name, f.mangled, demangled), _function_signature(f))
-        for f in funcs
-    }
+def _instantiation_identity(f: Function, demangled: dict[str, str]) -> str:
+    return _canonical_identity_name(f.name, f.mangled, demangled)
 
 
 def _sig_pair(
     stem: str,
     old_by_stem: dict[str, list[Function]],
     new_by_stem: dict[str, list[Function]],
-    demangled: dict[str, str],
-) -> tuple[
-    set[tuple[str, tuple[str, int, str]]], set[tuple[str, tuple[str, int, str]]]
-]:
+    identity_of: Callable[[Function], str],
+) -> tuple[set[InstantiationSig], set[InstantiationSig]]:
     return (
-        _instantiation_set(old_by_stem.get(stem, []), demangled),
-        _instantiation_set(new_by_stem.get(stem, []), demangled),
+        instantiation_set(old_by_stem.get(stem, []), identity_of),
+        instantiation_set(new_by_stem.get(stem, []), identity_of),
     )
 
 
 def _leak_change(
     stem: str,
-    old_sigs: set[tuple[str, tuple[str, int, str]]],
-    new_sigs: set[tuple[str, tuple[str, int, str]]],
+    old_sigs: set[InstantiationSig],
+    new_sigs: set[InstantiationSig],
+    removed: list[tuple[Function, str]],
 ) -> Change:
     """Build an INTERNAL_TEMPLATE_LEAKS_VIA_PUBLIC_API finding for *stem*."""
     removed_names = sorted({n for n, _ in old_sigs - new_sigs})[:3]
@@ -647,6 +636,9 @@ def _leak_change(
         public_reachable=True,
         reachability_state=ReachabilityState.PROVEN_REACHABLE,
         reachability_kind="value_embedding",
+        # Aggregated over every removed instantiation (see aggregate_removed_binding).
+        symbol_binding=aggregate_removed_binding(removed),
+        removed_instantiations=removed_instantiation_records(removed),
     )
 
 
@@ -682,18 +674,21 @@ def detect_internal_template_leaks(
     demangled = _batch_demangle_for_identity(old_funcs + new_funcs)
     old_by_stem = _functions_by_stem(old_funcs, demangled)
     new_by_stem = _functions_by_stem(new_funcs, demangled)
+    identity_of = partial(_instantiation_identity, demangled=demangled)
 
     changes: list[Change] = []
     for stem in sorted(
         _template_stems(old_funcs, demangled) | _template_stems(new_funcs, demangled)
     ):
         sigs = LazyFactInput(
-            partial(_sig_pair, stem, old_by_stem, new_by_stem, demangled)
+            partial(_sig_pair, stem, old_by_stem, new_by_stem, identity_of)
         )
         if INTERNAL_TEMPLATE_LEAK.confirmed(
             stem, sigs, internal_namespaces=internal_namespaces
         ):
-            changes.append(_leak_change(stem, *sigs.value()))
+            old_sigs, new_sigs = sigs.value()
+            removed = removed_instantiations(old_by_stem, stem, new_sigs, identity_of)
+            changes.append(_leak_change(stem, old_sigs, new_sigs, removed))
     return changes
 
 
@@ -1239,6 +1234,8 @@ def detect_missing_instantiations(
                 detail=stem,
                 old_value=fn.mangled,
                 new_value=None,
+                # Old-side linkage, for `binding:` selectors (WEAK vs GLOBAL).
+                symbol_binding=fn.elf_binding.value if fn.elf_binding else None,
                 # ADR-044 D1: both loops above filter to Visibility.PUBLIC, so
                 # this finding's mere existence already proves its subject is
                 # public — same reliable-signal tagging as the detectors in

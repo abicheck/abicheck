@@ -132,6 +132,22 @@ def validate_check_id(value: str) -> None:
         )
 
 
+@dataclass(frozen=True)
+class RemovedInstantiation:
+    """One removed template instantiation, as listed on
+    :attr:`Change.removed_instantiations`.
+
+    ``mangled`` is the old-side linker name, ``demangled`` the identity name
+    the detector matched on (demangled whenever a demangler resolved it), and
+    ``binding`` the old-side ELF linkage value (``SymbolBinding.value``) or
+    ``None`` when it was never captured.
+    """
+
+    mangled: str
+    demangled: str
+    binding: str | None = None
+
+
 @dataclass
 class Change:
     kind: ChangeKind
@@ -476,6 +492,17 @@ class Change:
     #: every finding not produced by a cross-source check. Appended last,
     #: keyword-only, not part of equality, like `review_evidence`.
     cross_source_providers: tuple[str, ...] | None = field(
+        default=None, kw_only=True, compare=False
+    )
+    # The complete, uncapped set of removed template instantiations behind an
+    # INTERNAL_TEMPLATE_LEAKS_VIA_PUBLIC_API finding -- one record per old-side
+    # declaration whose instantiation is gone from NEW. ``Change.symbol`` stays
+    # the template stem (finding identity depends on it), and ``detail`` only
+    # ever names the first few, so this is where a reader or a policy tool
+    # finds every removed instantiation with its mangled name and linkage.
+    # ``None`` for every other kind. Same field(kw_only=True)-appended-last
+    # convention as `cross_source_providers` above.
+    removed_instantiations: tuple[RemovedInstantiation, ...] | None = field(
         default=None, kw_only=True, compare=False
     )
 

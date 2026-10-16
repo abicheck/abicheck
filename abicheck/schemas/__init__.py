@@ -1078,7 +1078,16 @@ _ARTIFACT_NAMES = frozenset(
 #:        additions-review floor is folded inside ``ExitDecision`` rather
 #:        than after it, so ``exit.code`` equals the process exit when the
 #:        axis fires. ``0`` for every run without acknowledgment records.
-REPORT_SCHEMA_VERSION = "5.13"
+#: 5.14 -- additive ``removed_instantiations`` on each ``changes`` entry of an
+#:        internal_template_leaks_via_public_api finding: the uncapped list of
+#:        every removed template instantiation behind it (``mangled``,
+#:        ``demangled``, ``binding``), where ``detail`` names only three. Also
+#:        additive ``symbol_binding`` on instantiation_missing_from_binary and
+#:        internal_template_leaks_via_public_api findings, which previously
+#:        omitted it: the old-side linkage, or for the leak finding the
+#:        aggregate over its removed set (``"weak"`` only when every member is
+#:        WEAK). ``symbol`` on the leak finding is unchanged.
+REPORT_SCHEMA_VERSION = "5.14"
 
 # The directory/package release envelope's own version and version history
 # live in `release_schema.py` (see that module's docstring for why); the

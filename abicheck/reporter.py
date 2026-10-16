@@ -43,6 +43,7 @@ from .policy.disposition_ledger import RuleProvenance
 from .policy.gate_decision import gate_decision_for_result
 from .report.change_annotations import (
     change_annotation_fields as _change_annotation_fields,
+    removed_instantiations_field,
 )
 from .report.change_inventory import render_change_inventory_json
 from .report.change_operation import operation_for_change
@@ -772,6 +773,9 @@ def _suppressed_change_entry(
         entry["impact_assessment"] = assessment.to_dict()
     if getattr(c, "symbol_binding", None):
         entry["symbol_binding"] = c.symbol_binding
+    removed_insts = removed_instantiations_field(c)
+    if removed_insts is not None:
+        entry["removed_instantiations"] = removed_insts
     # Codex review, fresh evidence: an elf_only-visibility removal's
     # demangled_symbol (schema 3.14) reaches every other machine-format
     # projection of this same Change -- a suppressed one must not lose it
