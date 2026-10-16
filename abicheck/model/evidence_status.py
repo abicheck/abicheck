@@ -94,7 +94,7 @@ class ReachabilityState(StrEnum):
     reachability walk ran and positively proved this change is not part of
     the effective public ABI" versus "no walk — or an incomplete one — ever
     reached a verdict on this change at all". A broad suppression rule's
-    default ``unreachable-only`` gate (:mod:`abicheck.suppression`) has
+    default ``unreachable-only`` gate (:mod:`abicheck.policy.suppression.rules`) has
     always treated both as equivalent, which is safe for the common
     no-graph-evidence case (the layout/type-graph walk is a complete closure
     over the snapshot's own declarations) but is a real gap for the optional

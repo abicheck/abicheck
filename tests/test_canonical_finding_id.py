@@ -38,8 +38,8 @@ from abicheck.compare.finding_identity import (
 )
 from abicheck.diff_helpers import make_change
 from abicheck.model.change import Change
+from abicheck.policy.suppression.rules import Suppression, SuppressionList
 from abicheck.reporter import to_json
-from abicheck.suppression import Suppression, SuppressionList
 
 
 def _func_removed(

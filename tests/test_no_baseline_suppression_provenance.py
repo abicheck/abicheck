@@ -25,6 +25,7 @@ from pathlib import Path
 
 import pytest
 
+from abicheck.policy.suppression.rules import Suppression, SuppressionList
 from abicheck.report.no_baseline import (
     NO_BASELINE_SUPPORTED_FORMATS,
     compute_no_baseline_document,
@@ -38,7 +39,6 @@ from abicheck.report.no_baseline_render import (
     render_no_baseline_junit,
     render_no_baseline_sarif,
 )
-from abicheck.suppression import Suppression, SuppressionList
 from abicheck.workflows.no_baseline_compare import (
     resolve_no_baseline_candidate,
     run_no_baseline_compare,

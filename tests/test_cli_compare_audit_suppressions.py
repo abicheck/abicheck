@@ -16,7 +16,7 @@
 """ADR-049 Phase 5 -- ``compare``'s suppression audit (``--view suppressions``).
 
 Wires the existing, previously-orphaned ``SuppressionList.audit()``/
-``SuppressionAudit`` (``suppression.py``) into the ``compare`` CLI: an
+``SuppressionAudit`` (``policy/suppression/rules.py``) into the ``compare`` CLI: an
 additional hygiene check over the ``--suppress`` rule file (stale/high-risk/
 expired/near-expiry rules) against this run's own findings, folded into the
 rendered report the same way ``--contract`` is (see

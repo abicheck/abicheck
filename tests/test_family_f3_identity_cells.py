@@ -174,7 +174,7 @@ def test_cell_rule_identity() -> None:
     """Prose never reaches the identity; a selector or gate does; a
     separator inside a selector cannot forge a second field."""
     from abicheck.policy.rule_identity import rule_identity
-    from abicheck.suppression import Suppression
+    from abicheck.policy.suppression.rules import Suppression
 
     base = Suppression(symbol_pattern="foo.*", reason="first wording")
     assert rule_identity(Suppression(symbol_pattern="foo.*", reason="reworded")) == (

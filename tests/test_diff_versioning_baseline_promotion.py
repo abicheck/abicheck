@@ -265,7 +265,7 @@ class TestPromotionRunsBeforeSuppressionRecording:
     manifested as a silently different severity."""
 
     def test_suppressed_floor_violation_still_records_breaking(self) -> None:
-        from abicheck.suppression import Suppression, SuppressionList
+        from abicheck.policy.suppression.rules import Suppression, SuppressionList
 
         elf = _elf(
             needed=["libc.so.6"],

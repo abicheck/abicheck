@@ -66,21 +66,21 @@ from ...service_header_graph_attach import (
     _attach_header_graph,
 )
 from ...storage import closure_identity
-from ...workflows.dump.formats import (
+from ..run_dump_scope import (
+    run_dump_header_roots,
+    wrap_run_dump_with_dependency_scope,
+)
+from .formats import (
     DEFAULT_ADAPTERS,
     BinaryFormatAdapter,
     NativeExtractRequest,
     emit_notice,
 )
-from ...workflows.dump.header_graph_prefetch import (
+from .header_graph_prefetch import (
     prefetch_graph_if_useful,
     prefetch_settled_on_failure,
 )
-from ...workflows.dump.hybrid import compose_hybrid
-from ...workflows.run_dump_scope import (
-    run_dump_header_roots,
-    wrap_run_dump_with_dependency_scope,
-)
+from .hybrid import compose_hybrid
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -511,7 +511,7 @@ def _apply_native_provenance(
     surface — the exact false-clean result the ELF fix closed, left open on
     these two formats (Codex review, fresh evidence).
     """
-    from ...workflows.snapshot_factory import finish_provenance
+    from ..snapshot_factory import finish_provenance
 
     return finish_provenance(
         snap,

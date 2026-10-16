@@ -40,7 +40,7 @@ from abicheck.model import (
 from abicheck.model.change import Change
 from abicheck.pattern_verdicts import apply_pattern_verdicts
 from abicheck.policy.evaluate import evaluate
-from abicheck.suppression import Suppression, SuppressionList
+from abicheck.policy.suppression.rules import Suppression, SuppressionList
 
 # ---------------------------------------------------------------------------
 # Snapshot builders
@@ -694,7 +694,7 @@ def test_suppressed_synthetic_finding_pruned_from_ledger() -> None:
     # Codex P2: when a synthetic pattern finding is suppressed, its
     # pattern_modulations ledger row must be pruned too — otherwise the JSON /
     # --explain-patterns ledger reports a raise that is absent from changes.
-    from abicheck.suppression import Suppression, SuppressionList
+    from abicheck.policy.suppression.rules import Suppression, SuppressionList
 
     old = _handle_snapshot("struct Foo *")
     new = _handle_snapshot("struct Bar *")

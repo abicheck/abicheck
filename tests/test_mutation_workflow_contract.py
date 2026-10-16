@@ -669,7 +669,7 @@ _ACCEPTED_KILL_LOSS = {
             "abicheck.policy.selectors_namespace_glob",
             "abicheck.storage.snapshot_encode",
             "abicheck.storage.snapshot_schema_versions",
-            "abicheck.suppression",
+            "abicheck.policy.suppression.rules",
             "abicheck.surface_graph",
         }
     ),
@@ -720,7 +720,7 @@ _ACCEPTED_KILL_LOSS = {
             "abicheck.storage.snapshot_encode",
             "abicheck.storage.snapshot_reliability_flags",
             "abicheck.storage.snapshot_schema_versions",
-            "abicheck.suppression",
+            "abicheck.policy.suppression.rules",
             "abicheck.surface_graph",
         }
     ),

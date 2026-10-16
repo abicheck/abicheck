@@ -23,12 +23,12 @@ acknowledged one keeps its verdict class, stays in the report, and still
 contributes to the gate according to policy (D5) — acknowledging a break
 never pretends it is compatible.
 
-**Same grammar, never a second one.** Like :class:`~abicheck.suppression.
+**Same grammar, never a second one.** Like :class:`~abicheck.policy.suppression.rules.
 Suppression`, an :class:`Acknowledgment` constructs and matches through
 :class:`~abicheck.policy.selectors.SelectorSet` (ADR-063 D10) rather than a
 parallel matching engine, and :class:`AcknowledgmentList` loads from the
 identical YAML shape (``version: 1`` plus a top-level list key) that
-:class:`~abicheck.suppression.SuppressionList` already uses.
+:class:`~abicheck.policy.suppression.rules.SuppressionList` already uses.
 
 **Deliberately bounded — the one place this record type diverges from
 suppression's grammar.** ``vision.md``'s "Change governance and evolution"
@@ -143,7 +143,7 @@ class Acknowledgment:
     :attr:`change_kind`) -- never a pattern (see the module docstring). At
     least one of :attr:`finding_id`/:attr:`symbol` is required, and
     :attr:`reason` is required and non-empty: D5's "a reason" is not optional
-    the way :class:`~abicheck.suppression.Suppression`'s own ``reason`` is,
+    the way :class:`~abicheck.policy.suppression.rules.Suppression`'s own ``reason`` is,
     because an acknowledgment with no stated reason is exactly the kind of
     accidental-broad-acceptance vision.md's invariant warns against.
     """
@@ -152,7 +152,7 @@ class Acknowledgment:
     """Preferred selector: the change's canonical finding identity
     (``report_canonical_finding_id``), stable across an ``--ast-frontend``
     switch and any anonymous-type renaming — see
-    :attr:`abicheck.suppression.Suppression.finding_id` for the identical
+    :attr:`abicheck.policy.suppression.rules.Suppression.finding_id` for the identical
     contract."""
     symbol: str | None = None
     """Exact-match fallback selector when no ``finding_id`` is recorded yet.
@@ -183,7 +183,7 @@ class Acknowledgment:
     """Optional external reference (an issue/PR URL, a design doc)."""
     expires: date | None = None
     """Optional expiry — an expired acknowledgment never matches (mirrors
-    :attr:`abicheck.suppression.Suppression.expires`)."""
+    :attr:`abicheck.policy.suppression.rules.Suppression.expires`)."""
     _selector: SelectorSet = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
@@ -296,7 +296,7 @@ class Acknowledgment:
 
 class AcknowledgmentList:
     """A loaded set of :class:`Acknowledgment` records — the D5 counterpart
-    of :class:`~abicheck.suppression.SuppressionList`."""
+    of :class:`~abicheck.policy.suppression.rules.SuppressionList`."""
 
     def __init__(
         self,
@@ -319,7 +319,7 @@ class AcknowledgmentList:
     def load(cls, path: Path) -> AcknowledgmentList:
         """Load acknowledgment records from a YAML file.
 
-        Same envelope as :meth:`abicheck.suppression.SuppressionList.load`
+        Same envelope as :meth:`abicheck.policy.suppression.rules.SuppressionList.load`
         (``version: 1``, raw-byte digest before decoding) — see that
         method's docstring for why the digest is computed over undecoded
         bytes.

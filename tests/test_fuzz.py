@@ -157,7 +157,7 @@ def test_changekind_classification_completeness() -> None:
 # ---------------------------------------------------------------------------
 # 4. Suppression pattern fuzzing
 # ---------------------------------------------------------------------------
-from abicheck.suppression import Suppression  # noqa: E402
+from abicheck.policy.suppression.rules import Suppression  # noqa: E402
 
 
 @settings(max_examples=50)

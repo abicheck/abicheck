@@ -809,7 +809,7 @@ def test_selector_leaf_purity_rejects_deliberately_reintroduced_cycle(
     _add_package(root, "policy", "")
     _write(
         root / "abicheck/policy/selectors.py",
-        "from abicheck.suppression import Suppression\n",
+        "from abicheck.policy.suppression.rules import Suppression\n",
     )
 
     findings = check_repository(root)
@@ -817,14 +817,16 @@ def test_selector_leaf_purity_rejects_deliberately_reintroduced_cycle(
 
     assert "selector-leaf-purity" in rules
     selector_findings = [f for f in findings if f.rule == "selector-leaf-purity"]
-    assert any("abicheck.suppression" in f.message for f in selector_findings)
+    assert any(
+        "abicheck.policy.suppression.rules" in f.message for f in selector_findings
+    )
 
 
 def test_selector_leaf_purity_rejects_each_denylisted_module(tmp_path: Path) -> None:
     for denied in (
         "abicheck.policy_file",
         "abicheck.checker_types",
-        "abicheck.suppression",
+        "abicheck.policy.suppression.rules",
         "abicheck.policy.reclassify",
         "abicheck.compare.finding_identity",
     ):

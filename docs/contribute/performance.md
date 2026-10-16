@@ -121,7 +121,7 @@ The original sweep (PR #331) only covered `compare()` post-processing. A
 follow-up gap analysis extended it to the two other stages that build the
 largest data structures from the finding set:
 
-- **Suppression audit** (`suppression.py`, `SuppressionList.audit`) tests every
+- **Suppression audit** (`policy/suppression/rules.py`, `SuppressionList.audit`) tests every
   rule against every change — O(rules × findings). The `suppression_audit`
   scenario holds the rule count fixed (a project's ruleset is roughly fixed
   while its library grows) and scales findings, so it stays **linear in

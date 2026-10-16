@@ -26,9 +26,9 @@ from abicheck.package import (
     _is_elf_shared_object,
     _safe_zip_extract,
 )
+from abicheck.policy.suppression.rules import Suppression
 from abicheck.policy_file import PolicyFile
 from abicheck.serialization import snapshot_from_dict, snapshot_to_json
-from abicheck.suppression import Suppression
 
 # ---------------------------------------------------------------------------
 # 1. Corrupt ELF magic — _is_elf_shared_object

@@ -27,7 +27,7 @@ from abicheck.model import (
     TypeField,
     Visibility,
 )
-from abicheck.suppression import SuppressionList
+from abicheck.policy.suppression.rules import SuppressionList
 
 # ---------------------------------------------------------------------------
 # Test fixtures / helpers
@@ -599,7 +599,7 @@ class TestAdvancedSuppressionScaffold:
     def test_file_scoped_suppression(self, tmp_path: Path) -> None:
         """source_location glob suppresses changes from matching headers."""
         from abicheck.checker import Change, ChangeKind
-        from abicheck.suppression import Suppression, SuppressionList
+        from abicheck.policy.suppression.rules import Suppression, SuppressionList
 
         change_in_scope = Change(
             kind=ChangeKind.FUNC_REMOVED,
@@ -631,7 +631,7 @@ class TestAdvancedSuppressionScaffold:
     def test_file_scoped_suppression_no_source_location(self, tmp_path: Path) -> None:
         """source_location rule does not suppress changes with no source_location set."""
         from abicheck.checker import Change, ChangeKind
-        from abicheck.suppression import Suppression, SuppressionList
+        from abicheck.policy.suppression.rules import Suppression, SuppressionList
 
         change_no_src = Change(
             kind=ChangeKind.FUNC_REMOVED,
@@ -665,7 +665,7 @@ class TestAdvancedSuppressionScaffold:
     def test_suppression_expired_does_not_suppress(self, tmp_path: Path) -> None:
         """Suppression past its expiry date does not suppress changes."""
         from abicheck.checker import Change, ChangeKind
-        from abicheck.suppression import Suppression, SuppressionList
+        from abicheck.policy.suppression.rules import Suppression, SuppressionList
 
         past = date(2020, 1, 1)
         sup = Suppression(symbol="_Z6helperi", expires=past)
@@ -680,7 +680,7 @@ class TestAdvancedSuppressionScaffold:
 
     def test_suppression_expired_is_reported(self, tmp_path: Path) -> None:
         """expired_rules() returns rules past their expiry date."""
-        from abicheck.suppression import Suppression, SuppressionList
+        from abicheck.policy.suppression.rules import Suppression, SuppressionList
 
         past = date(2020, 1, 1)
         future = date(2099, 1, 1)
@@ -715,7 +715,7 @@ class TestAdvancedSuppressionScaffold:
     ) -> None:
         """source_location must be conjunctive with symbol/symbol_pattern selectors."""
         from abicheck.checker import Change, ChangeKind
-        from abicheck.suppression import Suppression, SuppressionList
+        from abicheck.policy.suppression.rules import Suppression, SuppressionList
 
         sl = SuppressionList(
             suppressions=[
@@ -775,7 +775,7 @@ class TestAdvancedSuppressionScaffold:
     ) -> None:
         """source_location glob should match file path even when change carries :line suffix."""
         from abicheck.checker import Change, ChangeKind
-        from abicheck.suppression import Suppression, SuppressionList
+        from abicheck.policy.suppression.rules import Suppression, SuppressionList
 
         c = Change(
             kind=ChangeKind.FUNC_REMOVED,

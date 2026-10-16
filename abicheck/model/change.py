@@ -376,7 +376,7 @@ class Change:
     # here too when the symbol's binding was never captured, or when an
     # undeclared export's versioned aliases disagree (see
     # ElfMetadata.unambiguous_symbol). Exists so a suppression rule's ``binding:``
-    # selector (suppression.py) can narrow a removal rule to the common
+    # selector (policy/suppression/rules.py) can narrow a removal rule to the common
     # WEAK-COMDAT-inline case. Provider-side evidence only, NOT proof of
     # safety — see AGENTS.md's "Linkage-blind removal" entry. Deliberately a
     # plain string, not the ``SymbolBinding`` enum itself, mirroring

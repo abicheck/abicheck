@@ -95,8 +95,8 @@ __all__ = [
 
 if TYPE_CHECKING:
     from ..policy.disposition_ledger import DispositionLedger
+    from ..policy.suppression.rules import SuppressionList
     from ..policy_file import PolicyFile
-    from ..suppression import SuppressionList
 
 
 @dataclass

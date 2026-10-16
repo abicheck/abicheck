@@ -498,7 +498,7 @@ checks that each path exists. The review-trigger script
   compatibility-governance:             # B4, cross-cutting (case 3)
     canonical_page: learn/rollout-and-governance.md
     fact_sources:
-      - abicheck/suppression.py
+      - abicheck/policy/suppression/rules.py
       - abicheck/policy_file.py
     allowed_summaries:
       - learn/abi-api-handling.md

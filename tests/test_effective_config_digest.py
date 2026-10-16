@@ -392,7 +392,7 @@ class TestSuppressionsWithNoSourceDigest:
     a content digest of its rules rather than recording nothing."""
 
     def test_digest_less_but_active_suppression_list_is_still_hashed(self):
-        from abicheck.suppression import Suppression, SuppressionList
+        from abicheck.policy.suppression.rules import Suppression, SuppressionList
 
         empty = _result(suppression_source_sha256=None)
         rules = SuppressionList([Suppression(symbol="foo")])
@@ -411,7 +411,7 @@ class TestSuppressionsWithNoSourceDigest:
 
     def test_two_distinct_digest_less_rule_sets_hash_differently(self):
         from abicheck.contract_context import suppression_config_for
-        from abicheck.suppression import Suppression, SuppressionList
+        from abicheck.policy.suppression.rules import Suppression, SuppressionList
 
         rules_a = SuppressionList([Suppression(symbol="foo")])
         rules_b = SuppressionList([Suppression(symbol="bar")])

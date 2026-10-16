@@ -276,7 +276,7 @@ def test_the_first_consumers_rule_provenance_is_the_one_kept() -> None:
     """Deduping must not silently re-record: the disposition and rule the
     *first* producer resolved are the ones that applied to the run."""
     from abicheck.policy.disposition_close import record_consumer_overlay
-    from abicheck.suppression import Suppression, SuppressionList
+    from abicheck.policy.suppression.rules import Suppression, SuppressionList
 
     result = _sweep_result()
     ledger = DispositionLedger()
@@ -614,7 +614,7 @@ class TestEveryHtmlPathCarriesTheAudit:
         """A comparison whose every finding is withheld by one rule."""
         from abicheck.checker import compare
         from abicheck.model import AbiSnapshot, Function, Visibility
-        from abicheck.suppression import Suppression, SuppressionList
+        from abicheck.policy.suppression.rules import Suppression, SuppressionList
 
         old = AbiSnapshot(library="libfoo", version="1.0")
         new = AbiSnapshot(library="libfoo", version="2.0")

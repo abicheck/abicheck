@@ -912,7 +912,7 @@ class TestConditionalRequirements:
         "path, key",
         [
             ("abicheck/snapshot_io.py", "real-dependency-test"),
-            ("abicheck/suppression.py", "fp-fn-pair"),
+            ("abicheck/policy/suppression/rules.py", "fp-fn-pair"),
             (".github/workflows/publish.yml", "malicious-fixture"),
         ],
     )

@@ -59,7 +59,7 @@ later reader doesn't re-litigate them as if this module were meant to:
 2. ``reclassify.py`` itself is not reclassified and does not need to be —
    it remains **deliberately unclassified** (``check_architecture.py``
    never checks an unclassified module's own imports), so nothing here
-   requires ``ReclassifyRule``'s constructor-time ``suppression.py``
+   requires ``ReclassifyRule``'s constructor-time ``policy/suppression/rules.py``
    dependency, or its own ``checker_policy`` imports, to be resolved first.
    ``checker_policy.py`` carries the identical treatment, for the identical
    reason: both are ``public_root_surfaces`` leaves any layer may reach

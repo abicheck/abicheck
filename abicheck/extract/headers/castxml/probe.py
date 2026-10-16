@@ -48,8 +48,8 @@ from ....errors import (
     SnapshotError,
     UnsupportedCastxmlVersionError,
 )
-from ....extract.headers.ast_config import _CPP_ONLY_PATTERNS, _detect_cpp_headers
 from ....storage.castxml_xml import parse_castxml_xml
+from ..ast_config import _CPP_ONLY_PATTERNS, _detect_cpp_headers
 from .policy import (
     parse_castxml_version_output as _parse_castxml_version,
 )
@@ -271,7 +271,7 @@ def castxml_dump_excluding_unparseable(
     is not about any one header and is never reduced. Returns the XML root
     and the excluded headers, in input order of exclusion rounds.
     """
-    from ....extract.unparseable_header_fallback import (
+    from ...unparseable_header_fallback import (
         parse_excluding_unparseable_headers,
     )
 

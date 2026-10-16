@@ -65,7 +65,7 @@ _DEBT_PLAN_OR_ADR_REFERENCE = re.compile(
 DEBT_DISPOSITIONS = frozenset({"migrate", "accept"})
 
 # ADR-063 D10 (implementation plan Phase 9): abicheck/policy/selectors.py is
-# the shared selector-matching leaf `suppression.py`'s `Suppression` and
+# the shared selector-matching leaf `policy/suppression/rules.py`'s `Suppression` and
 # `reclassify.py`'s `ReclassifyRule` both build on. Its whole reason to
 # exist is letting `reclassify.py` import it *statically* without recreating
 # the import cycle `policy_file -> reclassify -> suppression -> checker_types
@@ -90,7 +90,7 @@ _SELECTOR_LEAF_PATHS: tuple[str, ...] = (
 _SELECTOR_LEAF_DENYLIST: tuple[str, ...] = (
     "abicheck.policy_file",
     "abicheck.checker_types",
-    "abicheck.suppression",
+    "abicheck.policy.suppression.rules",
     "abicheck.policy.reclassify",
     "abicheck.compare.finding_identity",
 )

@@ -15,7 +15,7 @@
 """The shared selector-matching primitive behind suppression and
 reclassification (ADR-063 D10, implementation plan Phase 9).
 
-``suppression.py``'s ``Suppression`` and ``reclassify.py``'s
+``policy/suppression/rules.py``'s ``Suppression`` and ``reclassify.py``'s
 ``ReclassifyRule`` each need to answer the identical question — "does this
 selector combination (``symbol``/``symbol_pattern``/``type_pattern``/
 ``member_name``/``namespace``/``entity_namespace``/``cause_namespace``/
@@ -32,10 +32,10 @@ build on: it is what ``Suppression.__post_init__``/``ReclassifyRule.
 __post_init__`` each construct internally to validate and match selectors,
 and it is what let ``reclassify.py`` drop the ``importlib`` workaround for a
 **static** import of this module — the cycle it worked around no longer
-exists, because neither ``suppression.py`` nor ``reclassify.py`` needs to
+exists, because neither ``policy/suppression/rules.py`` nor ``reclassify.py`` needs to
 import the *other* module any more; both import this leaf instead.
 
-**Leaf module — zero dependency on ``checker_types.py``, ``suppression.py``,
+**Leaf module — zero dependency on ``checker_types.py``, ``policy/suppression/rules.py``,
 ``reclassify.py``, ``policy_file.py``, or ``finding_identity.py``.** This is
 not a style preference: it is the only way a *static* import from
 ``reclassify.py`` can exist without recreating the cycle above.
@@ -97,7 +97,7 @@ from .selectors_namespace_glob import (
 # `Change.symbol_binding` is stamped with (`SymbolBinding.value`). Imported
 # from `model.elf_facts` rather than duplicated: that module is itself a
 # leaf (`may_import: []` under the `model` layer), so it carries no cycle
-# risk (mirrors `suppression.py`'s own pre-existing identical reasoning for
+# risk (mirrors `policy/suppression/rules.py`'s own pre-existing identical reasoning for
 # this same import, before this phase moved it here).
 _VALID_BINDING: frozenset[str] = frozenset(b.value for b in SymbolBinding)
 
@@ -303,7 +303,7 @@ def _matches_binding(binding: str, change: SelectorMatchable) -> bool:
 
 def _matches_finding_id(finding_id: str, canonical_finding_id: str | None) -> bool:
     """Return True if *canonical_finding_id* equals *finding_id* — see
-    :attr:`~abicheck.suppression.Suppression.finding_id`.
+    :attr:`~abicheck.policy.suppression.rules.Suppression.finding_id`.
 
     A plain string comparison, deliberately: this leaf module has zero
     dependency on :mod:`abicheck.finding_identity` (ADR-063 D10 — see this
@@ -442,7 +442,7 @@ def _current_date() -> date:
 
 @dataclass
 class SelectorSet:
-    """The shared selector grammar :class:`~abicheck.suppression.Suppression`
+    """The shared selector grammar :class:`~abicheck.policy.suppression.rules.Suppression`
     and :class:`~abicheck.policy.reclassify.ReclassifyRule` each validate and match
     through — see the module docstring for why this exists and what it
     deliberately excludes (``reachability``/``allow_public_break``/

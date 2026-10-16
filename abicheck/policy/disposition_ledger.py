@@ -33,7 +33,7 @@ ordinary suppressions and break the raw-versus-effective reconciliation D3
 makes an executable invariant. That primitive is
 :meth:`DispositionLedger.record_suppression` — the first four call it with a
 :class:`~abicheck.checker_types.Change` plus the ``Suppression`` rule
-:meth:`abicheck.suppression.SuppressionList.evaluate` returned, and the fifth
+:meth:`abicheck.policy.suppression.rules.SuppressionList.evaluate` returned, and the fifth
 calls the identical method with its synthesized
 ``CONSUMER_REQUIRED_SYMBOL_REMOVED`` overlay change (its *shape* differs — it
 is built from a raw ``missing_symbols`` string rather than detected by a
@@ -82,7 +82,7 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 
     from ..checker_types import DiffResult
     from ..model.change import Change
-    from ..suppression import Suppression
+    from .suppression.rules import Suppression
 
 
 #: The four D2 dispositions no gate can move: policy already disposed of the

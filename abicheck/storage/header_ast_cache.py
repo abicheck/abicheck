@@ -20,13 +20,13 @@ if TYPE_CHECKING:
 import abicheck.deadline as deadline
 
 from ..model.execution_cache import reference_mode, register_cache
-from ..storage import ast_parse_exclusions, cache_integrity
-from ..storage.acyclic_json import gc_paused
-from ..storage.ast_cache_location import AST_DISK_CACHE, ast_cache_entry_path
-from ..storage.ast_size_observer import mark_ast_intake, report_ast_size
-from ..storage.castxml_xml import parse_castxml_xml
-from ..storage.derived_ast import offer_derived_ast_source
-from ..storage.json_compact import open_cached_entry
+from . import ast_parse_exclusions, cache_integrity
+from .acyclic_json import gc_paused
+from .ast_cache_location import AST_DISK_CACHE, ast_cache_entry_path
+from .ast_size_observer import mark_ast_intake, report_ast_size
+from .castxml_xml import parse_castxml_xml
+from .derived_ast import offer_derived_ast_source
+from .json_compact import open_cached_entry
 
 log = logging.getLogger(__name__)
 

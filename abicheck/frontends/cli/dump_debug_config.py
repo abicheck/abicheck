@@ -311,7 +311,7 @@ def reject_debug_package_operands(debug_roots: tuple[Path, ...]) -> None:
     either command -- see
     ``options/evidence_roles.unsupported_detached_debug``.
     """
-    from ...frontends.cli.options.evidence_roles import (
+    from .options.evidence_roles import (
         reject_unsupported_detached_debug,
         unsided_debug_packages,
     )

@@ -12,7 +12,7 @@ summarizes:
   - project-integration
   - change-acknowledgment
 depends_on:
-  - abicheck/suppression.py
+  - abicheck/policy/suppression/rules.py
   - abicheck/policy_file.py
   - abicheck/policy_file_acknowledgment.py
   - action.yml

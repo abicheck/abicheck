@@ -14717,7 +14717,7 @@ no matching suppression-selector path, or a flagged-reportable fact whose
 field is absent from the JSON schema, fails the check) — they are not
 *generated* from, for the identical reason the registry does not generate
 the model field, the serialization pair, or (post-Phase-8) the DTO
-mapping: `suppression.py`'s selector grammar and `reporter.py`'s
+mapping: `policy/suppression/rules.py`'s selector grammar and `reporter.py`'s
 schema/JSON emission are each their own real implementation, not a
 derivable function of a boolean flag. Concretely, for a fact shaped like
 AGENTS.md's own `elf_binding` entry (suppressible via a `binding: weak`
@@ -14725,7 +14725,7 @@ rule, reportable in the JSON `changes` list) the real touch list is eight
 items, not six: model field + registry entry + serialization encode/
 decode + parser + **suppression selector/matcher entry** + **report/
 schema field** + detector + test — the two added items exist today
-(`suppression.py`'s existing per-`ChangeKind` matchers, `reporter.py`'s
+(`policy/suppression/rules.py`'s existing per-`ChangeKind` matchers, `reporter.py`'s
 existing per-field JSON emission) and are unaffected by this phase; they
 are simply not shrunk by it, and this plan states that explicitly rather
 than letting a reader assume "suppressible"/"reportable" flags alone wire
@@ -17213,7 +17213,7 @@ moved into a sibling leaf, `abicheck/policy/selectors_namespace_glob.py`,
 purely to keep both files under the architecture gate's 800-line ceiling —
 not part of the original design, a mechanical split forced by the moved
 code's own size (the same reason `diff_types_vtable.py` exists). Every
-pre-existing `suppression.py`/`reclassify.py` selector test is unmodified
+pre-existing `policy/suppression/rules.py`/`reclassify.py` selector test is unmodified
 and green; a new `tests/test_policy_selectors.py` exercises the shared leaf
 directly. `reclassify.py`'s `importlib.import_module` workaround and its
 `_suppression_cls()` helper are both deleted, replaced by a static
@@ -17229,13 +17229,13 @@ itself no longer restates per-phase detail (its duplicated status block was
 removed by PR 0, 2026-09-02); see this plan's own pointer paragraph at the
 top of the document for the current set of status sources.
 
-**Goal.** `suppression.py` and `reclassify.py` share one selector-matching
+**Goal.** `policy/suppression/rules.py` and `reclassify.py` share one selector-matching
 primitive instead of two independent grammars kept in sync by hand, and
 `reclassify.py`'s `importlib.import_module` workaround for an import cycle
 is removed because the cycle it works around no longer exists.
 
 **Design.** `abicheck/policy/selectors.py` (new, leaf — zero dependency on
-`checker_types`, `suppression.py`, `reclassify.py`, or `reporter`, per
+`checker_types`, `policy/suppression/rules.py`, `reclassify.py`, or `reporter`, per
 ADR-063 D10): the selector grammar (`symbol`/`symbol_pattern`/
 `type_pattern`/`member_name`/`namespace`/`entity_namespace`/
 `cause_namespace`/`source_location`/`change_kind`/`binding`/`finding_id`/
@@ -17249,7 +17249,7 @@ tests cover weak/global binding rules. `finding_id` is narrower —
 report_canonical_finding_id(change)` — but it is a standalone-sufficient
 selector (an exact match on the producer-agnostic canonical finding
 identity needs no other field to narrow it), so it is still part of the
-shared grammar `suppression.py`'s matcher must keep evaluating even though
+shared grammar `policy/suppression/rules.py`'s matcher must keep evaluating even though
 `reclassify.py` never uses it; the shared module's leaf-matcher contract
 covers the union of both classes' fields, not their intersection, and a
 consumer that doesn't use a given field simply never sets it.
@@ -17262,14 +17262,14 @@ upward-dependency mistake Phase 2 caught and corrected for
 comparison-layer logic that imports `checker_types`/model entities to
 compute its answer, so `policy/selectors.py` calling into it would depend
 upward on `compare/`-level code — precisely the edge this leaf module's
-own "zero dependency on `checker_types`/`suppression.py`/`reclassify.py`/
+own "zero dependency on `checker_types`/`policy/suppression/rules.py`/`reclassify.py`/
 `reporter`" contract exists to forbid, and the existing architecture-gate
 check this phase adds (see Files below) would not even catch it, since
 that check's denylist names those four modules specifically, not
 `finding_identity.py`. The fix follows the same shape Phase 2 already
 established for exactly this situation: the leaf matcher never computes
 the canonical finding id itself — it only compares a string. **The
-caller** (`Suppression.selector_matches()`/`suppression.py`, which already
+caller** (`Suppression.selector_matches()`/`policy/suppression/rules.py`, which already
 imports `finding_identity.py` today and is comparison-layer code, not a
 leaf) computes `report_canonical_finding_id(change)` once and passes the
 resulting string into the shared matcher alongside the `Change`, so
@@ -17289,7 +17289,7 @@ or `policy_file`, `reclassify.py` can import it **statically** — the cycle
 `policy_file -> reclassify -> suppression -> checker_types -> policy_file`
 that `reclassify.py`'s own docstring names as the reason for the
 `importlib.import_module` workaround no longer exists, because neither
-`reclassify.py` nor `suppression.py` needs to import the *other* anymore —
+`reclassify.py` nor `policy/suppression/rules.py` needs to import the *other* anymore —
 both import the shared leaf instead. `Suppression`/`ReclassifyRule` keep
 their own, distinct *outcomes* (delete the finding vs. reclassify its
 verdict) — D10 consolidates the matching grammar, not the two rule types'
@@ -17300,7 +17300,7 @@ otherwise targets.
 **Files.** `abicheck/policy/selectors.py` (new — includes the
 `finding_id` matcher as a plain string-equality comparison against an
 already-computed canonical id, per the Design section above; the leaf
-itself never imports `finding_identity.py`); `suppression.py`
+itself never imports `finding_identity.py`); `policy/suppression/rules.py`
 (`Suppression.selector_matches()` becomes a thin wrapper calling the
 shared matcher — computing `finding_identity.report_canonical_finding_id`
 itself, as it already does today via `_matches_finding_id()`, and passing
@@ -17312,7 +17312,7 @@ validation, intact for existing callers);
 own docstring's cycle justification, replaced by a static import of
 `policy/selectors.py`); `scripts/check_architecture.py`'s import-direction
 gate (ADR-061) gains a check that `policy/selectors.py` itself imports
-nothing from `policy_file.py`/`checker_types.py`/`suppression.py`/
+nothing from `policy_file.py`/`checker_types.py`/`policy/suppression/rules.py`/
 `reclassify.py`/`finding_identity.py` — `finding_identity.py` is added to
 the denylist explicitly, not assumed covered by the other four, since it
 is exactly the module a first draft of this phase tried to import from
@@ -17320,7 +17320,7 @@ the leaf and the module name alone gives no hint it belongs on this list
 unless named — so a future change cannot silently reintroduce the same
 cycle through the new leaf module.
 
-**Tests.** Every existing `suppression.py`/`reclassify.py` selector test is
+**Tests.** Every existing `policy/suppression/rules.py`/`reclassify.py` selector test is
 kept and re-targeted at the shared matcher — this phase's acceptance bar
 is that no selector-matching *behavior* changes, only where the grammar
 lives. A new test asserts `reclassify.py` contains no
@@ -17333,7 +17333,7 @@ module to confirm it actually fails closed.
 **Acceptance criteria.** `reclassify.py`'s `importlib.import_module`
 workaround is deleted, not kept "for safety" alongside the static import —
 per the Governing Invariant, a workaround for a cycle that no longer
-exists is itself a stale second path. `suppression.py`'s selector grammar
+exists is itself a stale second path. `policy/suppression/rules.py`'s selector grammar
 is the shared leaf module's, not a second copy. FP-rate/mutation-score
 gates show no regression (this phase moves matching logic, it does not
 change what matches).

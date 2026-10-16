@@ -40,6 +40,8 @@ from xml.etree.ElementTree import (
     Element,  # type annotation only; parsing uses defusedxml
 )
 
+from ....model.declaration_headers import attributed
+
 # Moved to abicheck.extract.headers.castxml.location (ADR-061 D9's "extract
 # owns castxml/clang header-AST entity parsing", Codex review on PR #939):
 # this module is a still-flat, unmigrated `dumper_castxml.py` sibling, and
@@ -49,12 +51,11 @@ from xml.etree.ElementTree import (
 # warns against. Re-exported under its old private name so every existing
 # caller here (and `dumper_castxml.py`'s own `as`-aliased re-export of it)
 # is unaffected.
-from ....extract.headers.castxml.location import (
+from .location import (
     _CONTRACT_ATTRIBUTE_BASES as _CONTRACT_ATTRIBUTE_BASES,
     contract_attributes,
     deprecation_marker,
 )
-from ....model.declaration_headers import attributed
 
 
 def _extract_contract_attributes(attributes: str) -> list[str]:

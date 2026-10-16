@@ -17,7 +17,7 @@
 
 Two consumers need to say "*which* rule was this" and must not disagree:
 
-* :meth:`abicheck.suppression.SuppressionList.rule_identities` — ADR-049 D7's
+* :meth:`abicheck.policy.suppression.rules.SuppressionList.rule_identities` — ADR-049 D7's
   effective-configuration receipt, one identity per loaded rule;
 * :func:`abicheck.policy.disposition_ledger.rule_provenance` — ADR-067 D3's
   audit, which groups the ledger's records by the rule that disposed of them.
@@ -33,10 +33,10 @@ grammar" rule failing in the small: a second hand-maintained field list is a
 second grammar whether or not it is spelled as one.
 
 So the derivation lives here, once, and is generic over the rule's own
-dataclass fields — a field added to :class:`~abicheck.suppression.Suppression`
+dataclass fields — a field added to :class:`~abicheck.policy.suppression.rules.Suppression`
 later is covered by both consumers without touching either.
 
-A leaf inside ``policy`` rather than in ``suppression.py``: ``suppression``
+A leaf inside ``policy`` rather than in ``policy/suppression/rules.py``: ``suppression``
 already imports ``policy.selectors``, so the ledger cannot import
 ``suppression`` back without a cycle, and the derivation itself needs nothing
 from either module.

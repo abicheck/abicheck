@@ -39,14 +39,14 @@ from pathlib import Path
 
 import yaml
 
-from .change_registry import API_BREAK_KINDS, BREAKING_KINDS
-from .model.change import Change
-from .model.change_catalog.kinds import ChangeKind
-from .model.evidence_status import ReachabilityState
-from .policy.classification import Verdict
-from .policy.rule_identity import rule_identity
-from .policy.selectors import SelectorSet
-from .suppression_yaml import parse_finding_id, raw_finding_ids_by_index
+from ...change_registry import API_BREAK_KINDS, BREAKING_KINDS
+from ...model.change import Change
+from ...model.change_catalog.kinds import ChangeKind
+from ...model.evidence_status import ReachabilityState
+from ..classification import Verdict
+from ..rule_identity import rule_identity
+from ..selectors import SelectorSet
+from .yaml_scalars import parse_finding_id, raw_finding_ids_by_index
 
 # Keys allowed in a suppression entry — unknown keys are rejected
 _KNOWN_ENTRY_KEYS: frozenset[str] = frozenset(
@@ -376,7 +376,7 @@ class Suppression:
         """
         if self.finding_id is None:
             return self._selector.matches_selectors(change, today=today)
-        from .compare.finding_identity import report_canonical_finding_id
+        from ...compare.finding_identity import report_canonical_finding_id
 
         return self._selector.matches_selectors(
             change,
@@ -898,7 +898,7 @@ class SuppressionList:
                 # classify_effective_change means this audit's "high risk"
                 # classification can never disagree with the verdict the
                 # comparison itself actually produced.
-                from .policy.severity import effective_verdict_for_change
+                from ..severity import effective_verdict_for_change
 
                 is_breaking = (
                     effective_verdict_for_change(

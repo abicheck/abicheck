@@ -272,8 +272,6 @@
         "abicheck/post_processing.py",
         "abicheck/post_processing_reachability.py",
         "abicheck/semver.py",
-        "abicheck/suppression.py",
-        "abicheck/suppression_yaml.py",
         "abicheck/surface.py",
         "abicheck/compatibility_evaluation_resolver.py"
       ]
@@ -753,8 +751,6 @@
     "stack_checker.py",
     "stack_html.py",
     "stack_report.py",
-    "suppression.py",
-    "suppression_yaml.py",
     "surface.py",
     "surface_graph.py",
     "sycl_context.py",

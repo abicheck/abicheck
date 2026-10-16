@@ -981,7 +981,7 @@ def test_audit_flags_a_reclassify_promoted_finding_as_high_risk(
     kind-wide set) -- SuppressionList.audit() must classify a matching
     change by the rule's own resolution instead of falling back to (silently
     absent) kind-set membership."""
-    from abicheck.suppression import Suppression, SuppressionList
+    from abicheck.policy.suppression.rules import Suppression, SuppressionList
 
     p = tmp_path / "policy.yaml"
     p.write_text(
@@ -1014,7 +1014,7 @@ def test_audit_reclassify_demotion_is_not_high_risk(tmp_path: Path) -> None:
     """The inverse: a `reclassify:` rule demoting a normally-breaking kind
     to `ignore` for one symbol must NOT be reported as high-risk for that
     symbol, even though the kind is still in breaking_kinds."""
-    from abicheck.suppression import Suppression, SuppressionList
+    from abicheck.policy.suppression.rules import Suppression, SuppressionList
 
     p = tmp_path / "policy.yaml"
     p.write_text(
@@ -1040,7 +1040,7 @@ reclassify:
 def test_audit_without_policy_file_is_unchanged() -> None:
     """No policy_file passed at all => identical to the pre-existing
     behavior (kind-set membership only)."""
-    from abicheck.suppression import Suppression, SuppressionList
+    from abicheck.policy.suppression.rules import Suppression, SuppressionList
 
     sup = Suppression(symbol="foo")
     supl = SuppressionList([sup])
@@ -1057,7 +1057,7 @@ def test_audit_reclassify_respects_frozen_namespace_floor(tmp_path: Path) -> Non
     still flag the suppression as high-risk, via the same shared resolver
     (severity.effective_verdict_for_change) the comparison's own verdict
     already went through."""
-    from abicheck.suppression import Suppression, SuppressionList
+    from abicheck.policy.suppression.rules import Suppression, SuppressionList
 
     p = tmp_path / "policy.yaml"
     p.write_text(
@@ -1088,7 +1088,7 @@ def test_audit_reclassify_yields_to_effective_verdict_precedence(
     audit too, exactly like it already does in
     `severity.effective_verdict_for_change` itself -- not get silently
     bypassed by a reclassify-only shortcut."""
-    from abicheck.suppression import Suppression, SuppressionList
+    from abicheck.policy.suppression.rules import Suppression, SuppressionList
 
     p = tmp_path / "policy.yaml"
     p.write_text(
@@ -1285,7 +1285,7 @@ def test_audit_honors_custom_base_policy_for_a_non_matching_finding(
 ) -> None:
     """Same bug, exercised through the actual --audit-suppressions call
     path this PR added (SuppressionList.audit(..., policy_file=pf))."""
-    from abicheck.suppression import Suppression, SuppressionList
+    from abicheck.policy.suppression.rules import Suppression, SuppressionList
 
     p = tmp_path / "policy.yaml"
     p.write_text("base_policy: plugin_abi\n", encoding="utf-8")

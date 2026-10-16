@@ -103,7 +103,7 @@ def report_finding_id(c: object) -> str:
 
 def report_canonical_finding_id(c: object) -> str:
     """Backend-independent finding identity for cross-producer suppression
-    (schema 2.36, additive; ``suppression.py``'s ``finding_id:`` selector).
+    (schema 2.36, additive; ``policy/suppression/rules.py``'s ``finding_id:`` selector).
 
     Unlike :func:`report_finding_id` -- which folds in ``source_location``
     and ``description`` specifically to disambiguate two same-kind,

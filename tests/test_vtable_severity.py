@@ -1357,7 +1357,7 @@ class TestLayoutUnverifiableCorrelatedWithVtableChanged:
         The annotation step must therefore run *before* MarkReachability, or
         JSON/SARIF's unified impact_assessment block would silently omit the
         correlation the flat top-level field still carries correctly."""
-        from abicheck.suppression import Suppression, SuppressionList
+        from abicheck.policy.suppression.rules import Suppression, SuppressionList
 
         old = _snap(
             types=[
@@ -1416,7 +1416,7 @@ class TestLayoutUnverifiableCorrelatedWithVtableChanged:
         finding the report no longer shows at all. Also confirms a
         previously-cached impact_assessment is kept in sync, not left
         pointing at the now-stale value."""
-        from abicheck.suppression import Suppression, SuppressionList
+        from abicheck.policy.suppression.rules import Suppression, SuppressionList
 
         old = _snap(
             types=[

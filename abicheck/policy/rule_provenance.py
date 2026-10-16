@@ -30,14 +30,14 @@ from typing import TYPE_CHECKING
 from .rule_identity import rule_identity as rule_identity_of
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
-    from ..suppression import Suppression
+    from .suppression.rules import Suppression
 
 
 @dataclass(frozen=True, slots=True)
 class RuleProvenance:
     """ADR-067 D3's "rule id, source file, reason, expiry" for one match.
 
-    Built from a :class:`~abicheck.suppression.Suppression`'s already-existing
+    Built from a :class:`~abicheck.policy.suppression.rules.Suppression`'s already-existing
     fields — this adds no field to the suppression grammar. ``intent`` is
     always ``"unspecified"`` today: ADR-067 D5's explicit ``intent:`` key is
     S3 work, and its own migration default for every rule that predates it is

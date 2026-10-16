@@ -51,11 +51,11 @@ from ....cli_resolve import (
     _expand_header_inputs,
     _normalize_binary_input,
 )
-from ....frontends.cli import help as cli_help
 from ....service_compare_evidence import (
     dump_cli_compile_db_filter_scope_error,
     dump_cli_compile_db_path,
 )
+from .. import help as cli_help
 from ..dump_debug_config import (
     resolve_dump_compile_context,
     resolve_dump_project_config,

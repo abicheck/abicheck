@@ -61,21 +61,15 @@ import re
 from collections.abc import Callable
 from typing import Any
 
-from ....extract.headers.clang.attributes import (
-    clang_contract_attributes as _clang_contract_attributes,
-)
-from ....extract.headers.clang.qualifiers import (
-    OVERRIDE_ELIGIBLE_KINDS as _OVERRIDE_ELIGIBLE_KINDS,
-    clang_method_is_override as _clang_method_is_override,
-    clang_param_is_restrict as _clang_param_is_restrict,
-    clang_param_is_va_list as _clang_param_is_va_list,
-)
 from ....model import Fact, Function, Param
 from ....model.identity import (
     canonicalize_type_param_references,
     entity_id_for_function,
 )
 from ..scope_segments import strip_record_scopes
+from .attributes import (
+    clang_contract_attributes as _clang_contract_attributes,
+)
 from .context import (
     _Decl,
     access_level as _access_level,
@@ -93,6 +87,12 @@ from .context import (
 from .inline_semantics import fold_inline_across_redeclarations, is_effectively_inline
 from .macro_qualifier import node_qualtype_without_macro_qualifiers
 from .param_kind import param_kind as _param_kind
+from .qualifiers import (
+    OVERRIDE_ELIGIBLE_KINDS as _OVERRIDE_ELIGIBLE_KINDS,
+    clang_method_is_override as _clang_method_is_override,
+    clang_param_is_restrict as _clang_param_is_restrict,
+    clang_param_is_va_list as _clang_param_is_va_list,
+)
 from .restrict_spelling import without_top_level_restrict
 from .return_type import return_type as _return_type
 

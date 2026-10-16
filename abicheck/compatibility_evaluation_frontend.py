@@ -335,7 +335,7 @@ class SuppressionSource:
         **The digest falls back to the rules' own content** when the list
         carries no ``source_sha256``. That is not a rare case: a
         programmatically constructed or merged
-        :class:`~abicheck.suppression.SuppressionList` has none, and every
+        :class:`~abicheck.policy.suppression.rules.SuppressionList` has none, and every
         front end that accepts one could hand it over. Taking ``""`` there --
         which each of them previously did, by spelling this
         ``getattr(...) or ""`` inline -- made :class:`SuppressionConfig`
@@ -366,13 +366,13 @@ class SuppressionSource:
 
         ``sha256`` is the digest ``SuppressionList.load`` captured over the
         raw bytes it parsed (exact replay, ADR-049 D6); ``rules`` is
-        :meth:`~abicheck.suppression.SuppressionList.rule_identities`. One
+        :meth:`~abicheck.policy.suppression.rules.SuppressionList.rule_identities`. One
         read produces both, so they always describe the same content.
         *require_justification* is forwarded to the loader so a front end
         running with ``--require-justification`` gets the same hard error
         here that it gets from its own load.
         """
-        from .suppression import SuppressionList
+        from .policy.suppression.rules import SuppressionList
 
         file_path = Path(path)
         loaded = SuppressionList.load(

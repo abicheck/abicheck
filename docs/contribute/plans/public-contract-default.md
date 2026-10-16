@@ -158,13 +158,13 @@ Add a leaf-layer immutable object (exact module name may vary):
 ```python
 @dataclass(frozen=True)
 class CompatibilityEvaluationConfig:
-    contract: ContractConfig          # mode, unresolved behavior, overlays
-    evidence: EvidenceConfig          # providers, requirements, variants
-    surface: SurfaceConfig            # explicit scope and surface hints
-    assurance: AssuranceConfig        # evidence/coverage requirements
-    policy: CompatibilityPolicyConfig # immutable base/packs/overrides
-    gate: GateConfig                  # exit scheme, preset/packs/severity overrides
-    suppressions: SuppressionConfig   # immutable rules and digest
+    contract: ContractConfig  # mode, unresolved behavior, overlays
+    evidence: EvidenceConfig  # providers, requirements, variants
+    surface: SurfaceConfig  # explicit scope and surface hints
+    assurance: AssuranceConfig  # evidence/coverage requirements
+    policy: CompatibilityPolicyConfig  # immutable base/packs/overrides
+    gate: GateConfig  # exit scheme, preset/packs/severity overrides
+    suppressions: SuppressionConfig  # immutable rules and digest
     provenance: Mapping[str, ValueProvenance]
 ```
 
@@ -3210,7 +3210,7 @@ the file being the sole stale one rendered as `rule#0`, and two different
 rules could each render as "rule#0" across two different buckets.
 `SuppressionAudit` has no field carrying a rule's original index (`match_
 counts` does, but its own list-typed buckets don't), and threading one
-through would touch `suppression.py`'s public dataclass shape for a
+through would touch `policy/suppression/rules.py`'s public dataclass shape for a
 display-only concern. Fixed instead by falling back through each of the
 rule's own matching selectors (`symbol`/`symbol_pattern`/`type_pattern`/
 `member_name`/`source_location`/`namespace`/`entity_namespace`/

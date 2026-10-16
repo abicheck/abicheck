@@ -67,14 +67,14 @@ construction.
 ```python
 @dataclass
 class SuppressionRule:
-    symbol: str | None           # Exact symbol match
-    symbol_pattern: str | None   # Regex (fullmatch semantics)
-    type_pattern: str | None     # Regex for type-level changes only
-    change_kind: str | None      # Filter by ChangeKind value
-    reason: str | None           # Documentation
-    label: str | None            # Grouping tag (e.g., "workaround")
+    symbol: str | None  # Exact symbol match
+    symbol_pattern: str | None  # Regex (fullmatch semantics)
+    type_pattern: str | None  # Regex for type-level changes only
+    change_kind: str | None  # Filter by ChangeKind value
+    reason: str | None  # Documentation
+    label: str | None  # Grouping tag (e.g., "workaround")
     source_location: str | None  # fnmatch glob against source path
-    expires: date | None         # ISO 8601 date — inactive after expiry
+    expires: date | None  # ISO 8601 date — inactive after expiry
 ```
 
 ### Matching semantics
@@ -109,7 +109,7 @@ immediate errors. Matching uses `fullmatch()` which applies the pattern to the
 complete string.
 
 The implementation uses Python's standard backtracking `re` library — not an
-RE2-style engine with a guaranteed linear-time bound. `abicheck/suppression.py`
+RE2-style engine with a guaranteed linear-time bound. `abicheck/policy/suppression/rules.py`
 has no complexity check or evaluation timeout on compiled patterns as of this
 writing; the "resist ReDoS" requirement above is a partial mitigation (eager
 `re.compile()` at load time surfaces malformed patterns immediately, and
@@ -231,7 +231,7 @@ Example error for malformed rules:
 
 ## References
 
-- `abicheck/suppression.py` — `SuppressionRule`, `SuppressionList`, matching
+- `abicheck/policy/suppression/rules.py` — `SuppressionRule`, `SuppressionList`, matching
   logic
 - `abicheck/compat/cli.py` — ABICC skip list conversion
 - `abicheck/checker.py` — Pipeline ordering (suppression before redundancy)

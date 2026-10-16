@@ -350,7 +350,7 @@ def add_suppression_audit(d: dict[str, Any], result: DiffResult) -> None:
     ``--audit-suppressions``) omits the key entirely, matching the
     pre-existing behavior exactly.
     """
-    from .suppression import SuppressionAudit
+    from .policy.suppression.rules import SuppressionAudit
 
     audit = result.suppression_audit
     if not isinstance(audit, SuppressionAudit):

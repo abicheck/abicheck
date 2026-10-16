@@ -192,12 +192,12 @@ from abicheck.model import (  # noqa: E402
 )
 from abicheck.pe_metadata import PeExport, PeMetadata  # noqa: E402
 from abicheck.policy.severity import categorize_changes  # noqa: E402
+from abicheck.policy.suppression.rules import Suppression, SuppressionList  # noqa: E402
 from abicheck.sarif import to_sarif_str  # noqa: E402
 from abicheck.serialization import (  # noqa: E402
     snapshot_from_dict,
     snapshot_to_json,
 )
-from abicheck.suppression import Suppression, SuppressionList  # noqa: E402
 
 DEFAULT_SIZES = (500, 1000, 2000, 4000)
 #: The default ladder shifted one step up, for gated scenarios that are cheap
@@ -685,7 +685,7 @@ def _build_suppression_audit(n_findings: int) -> tuple[list[Change], Suppression
     """A large finding set audited against a fixed-size suppression ruleset.
 
     ``SuppressionList.audit`` is O(rules x findings): every rule is tested
-    against every change (``suppression.py``). A real project keeps a roughly
+    against every change (``policy/suppression/rules.py``). A real project keeps a roughly
     fixed ruleset while its library (and so its finding count) grows, so we hold
     the rule count fixed and scale only the findings — the cost should stay
     linear in findings. A regression that makes *per-finding* rule matching

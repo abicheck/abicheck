@@ -153,7 +153,7 @@ if TYPE_CHECKING:
     from .model.identity import EntityId  # noqa: F401
     from .policy.acknowledgment import AcknowledgmentList
     from .policy.finding_disposition import PipelineContext
-    from .suppression import SuppressionList
+    from .policy.suppression.rules import SuppressionList
 
 __all__ = [
     "ChangeKind",

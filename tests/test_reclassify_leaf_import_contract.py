@@ -38,7 +38,7 @@ class TestNoImportlibWorkaround:
     policy_file`` that motivated ``_suppression_cls()``'s runtime
     ``importlib.import_module`` resolution no longer exists — ``reclassify.py``
     imports ``abicheck.policy.selectors`` (a leaf module with zero dependency
-    on ``suppression.py``/``checker_types.py``/``policy_file.py``/
+    on ``policy/suppression/rules.py``/``checker_types.py``/``policy_file.py``/
     ``finding_identity.py``) statically instead. Confirmed to fail against
     the pre-Phase-9 code, which had exactly one such call
     (``_suppression_cls()``, per that module's own docstring)."""

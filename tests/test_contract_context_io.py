@@ -686,7 +686,7 @@ class TestResolvedContextContent:
         at all, which an audit consumer would read as "nothing was
         suppressed" (Codex review, fresh evidence).
         """
-        from abicheck.suppression import SuppressionList
+        from abicheck.policy.suppression.rules import SuppressionList
 
         rules = tmp_path / "suppress.yaml"
         rules.write_text(
@@ -720,7 +720,7 @@ class TestResolvedContextContent:
         The digest falls back to a content digest of the rule identities the
         same block persists, which is what the run actually applied.
         """
-        from abicheck.suppression import Suppression, SuppressionList
+        from abicheck.policy.suppression.rules import Suppression, SuppressionList
 
         suppression = SuppressionList([Suppression(symbol="gone")])
         assert suppression.source_sha256 is None

@@ -60,7 +60,7 @@ from ..model.change_catalog.registry import VALID_BASE_POLICIES
 from ..model.performance import PerformanceProfile, parse_performance_profile
 from ..policy.exit_decision import ExitDecision
 from ..policy.severity import SeverityConfig
-from ..suppression import SuppressionList
+from ..policy.suppression.rules import SuppressionList
 from .request_inputs import (
     _ANDROID_NEEDS_SOURCES,
     FRONTEND_CONTEXTS as FRONTEND_CONTEXTS,
