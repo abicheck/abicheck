@@ -48,9 +48,10 @@ abicheck compare v1.json v2.json --policy policy.yaml
 
 ## Minimum evidence
 
-`min_evidence: L0`: every expected kind (`func_removed_elf_only`,
-`func_visibility_changed`) is detectable from the exported symbol table
-alone, and the gate derives the floor from those kinds.
+`min_evidence: L0`: the expected kind (`func_removed_elf_only`) is detectable
+from the exported symbol table alone, and the gate derives the floor from it.
+`func_visibility_changed` on `hdr_inline` appears only when headers are
+supplied; the binary-only run reports the same symbol as `func_removed_elf_only`.
 
 The walkthrough above still passes `-H`, because the **verdict** needs
 headers. Without `-H` the run also reports `visibility_leak` and

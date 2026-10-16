@@ -7,5 +7,5 @@ _Canonical rule slug:_ `export-loss-weak-binding-demoted`. [← back to all rule
 
 ## Canonical demonstration
 
-- [case217_export_loss_weak_binding_demoted](../case217_export_loss_weak_binding_demoted.md) — WEAK export loss demoted to a risk by a `binding: weak` rule (🟡 COMPATIBLE_WITH_RISK)
+- [case217_export_loss_weak_binding_demoted](../case217_export_loss_weak_binding_demoted.md) — WEAK export loss demoted to a risk by a `binding: weak` rule (🔴 BREAKING)
 

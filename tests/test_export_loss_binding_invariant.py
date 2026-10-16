@@ -224,15 +224,16 @@ _CATALOG_CASES = [
 
 
 @pytest.mark.parametrize("case", _CATALOG_CASES)
-def test_catalog_case_pair_verdict_matches_ground_truth(
+def test_catalog_case_pair_verdicts_match_ground_truth(
     tmp_path: Path, case: str
 ) -> None:
-    """The committed case pair, run as its README says, gives the verdict its
-    ground-truth entry records (with the policy the case ships)."""
+    """The committed case pair gives the verdicts its ground-truth entry records:
+    ``expected`` without a policy (the default-policy verdict), and
+    ``policy_expected`` with the case's own policy.yaml."""
     case_dir = example_catalog.CASES_DIR / case
-    ground_truth = json.loads(
-        example_catalog.GROUND_TRUTH_PATH.read_text(encoding="utf-8")
-    )["verdicts"][case]
+    entry = json.loads(example_catalog.GROUND_TRUTH_PATH.read_text(encoding="utf-8"))[
+        "verdicts"
+    ][case]
     for name in ("v1", "v2"):
         shutil.copy(case_dir / f"{name}.h", tmp_path / f"{name}.h")
     old_so = _build(tmp_path, "v1", (case_dir / "v1.cpp").read_text(encoding="utf-8"))
@@ -244,21 +245,15 @@ def test_catalog_case_pair_verdict_matches_ground_truth(
             main, ["dump", str(so), "-H", str(tmp_path / header), "-o", str(out)]
         )
         assert dumped.exit_code == 0, dumped.output
-    out_json = tmp_path / "out.json"
-    result = CliRunner().invoke(
-        main,
-        [
-            "compare",
-            str(old_json),
-            str(new_json),
-            "--policy",
-            str(case_dir / "policy.yaml"),
-            "-o",
-            f"json={out_json}",
-        ],
-    )
-    report = json.loads(out_json.read_text(encoding="utf-8"))
-    assert report["verdict"] == ground_truth["expected"], result.output
-    assert result.exit_code == (
-        0 if ground_truth["expected"] == "COMPATIBLE_WITH_RISK" else 4
-    )
+    runs = [("expected", [])]
+    if "policy_expected" in entry:
+        runs.append(("policy_expected", ["--policy", str(case_dir / "policy.yaml")]))
+    for key, extra in runs:
+        out_json = tmp_path / f"out-{key}.json"
+        result = CliRunner().invoke(
+            main,
+            ["compare", str(old_json), str(new_json), "-o", f"json={out_json}", *extra],
+        )
+        report = json.loads(out_json.read_text(encoding="utf-8"))
+        assert report["verdict"] == entry[key], (key, result.output)
+        assert result.exit_code == (0 if entry[key] == "COMPATIBLE_WITH_RISK" else 4)

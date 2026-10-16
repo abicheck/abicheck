@@ -3,12 +3,12 @@
 
 | Field | Value |
 |-------|-------|
-| **Verdict** | 🟡 **COMPATIBLE_WITH_RISK** |
-| **Category** | Risk |
+| **Verdict** | 🔴 **BREAKING** |
+| **Category** | Breaking |
 | **Classification** | Rule |
 | **Platforms** | Linux |
-| **Flags** | — |
-| **Detected `ChangeKind`s** | `func_removed_elf_only`, `func_visibility_changed` |
+| **Flags** | ABI break |
+| **Detected `ChangeKind`s** | `func_removed_elf_only` |
 | **Source files** | `catalog/cases/case217_export_loss_weak_binding_demoted/` |
 | **Rule family** | [`export-loss-weak-binding-demoted`](by-rule/export-loss-weak-binding-demoted.md) |
 | **Subject** | [ELF export and linker metadata](by-subject/elf-export-and-linker-metadata.md) |
@@ -61,9 +61,10 @@ abicheck compare v1.json v2.json --policy policy.yaml
 
 ## Minimum evidence
 
-`min_evidence: L0`: every expected kind (`func_removed_elf_only`,
-`func_visibility_changed`) is detectable from the exported symbol table
-alone, and the gate derives the floor from those kinds.
+`min_evidence: L0`: the expected kind (`func_removed_elf_only`) is detectable
+from the exported symbol table alone, and the gate derives the floor from it.
+`func_visibility_changed` on `hdr_inline` appears only when headers are
+supplied; the binary-only run reports the same symbol as `func_removed_elf_only`.
 
 The walkthrough above still passes `-H`, because the **verdict** needs
 headers. Without `-H` the run also reports `visibility_leak` and
@@ -96,4 +97,4 @@ and the same WEAK losses, plus the removal of a GLOBAL export. Its verdict stays
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: WEAK export loss demoted by a binding rule](by-rule/export-loss-weak-binding-demoted.md) · [Subject: ELF export and linker metadata](by-subject/elf-export-and-linker-metadata.md)._
+_See also: [Compatibility Catalog](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md) · [Rule: WEAK export loss demoted by a binding rule](by-rule/export-loss-weak-binding-demoted.md) · [Subject: ELF export and linker metadata](by-subject/elf-export-and-linker-metadata.md)._

@@ -8,7 +8,7 @@
 | **Classification** | Rule |
 | **Platforms** | Linux |
 | **Flags** | ABI break |
-| **Detected `ChangeKind`s** | `func_removed_elf_only`, `func_visibility_changed` |
+| **Detected `ChangeKind`s** | `func_removed_elf_only` |
 | **Source files** | `catalog/cases/case218_export_loss_strong_binding_stays_breaking/` |
 | **Rule family** | [`export-loss-strong-binding-stays-breaking`](by-rule/export-loss-strong-binding-stays-breaking.md) |
 | **Subject** | [ELF export and linker metadata](by-subject/elf-export-and-linker-metadata.md) |
