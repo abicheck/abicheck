@@ -43,7 +43,11 @@ from click.testing import CliRunner
 
 from abicheck.cli import main
 from abicheck.elf_metadata import ElfMetadata, parse_elf_metadata
-from tests._export_loss_binding import assert_binding_matches_old_elf, is_export_loss
+from tests._export_loss_binding import (
+    assert_binding_matches_old_elf,
+    is_export_loss,
+    names_for_finding,
+)
 
 # scripts/ is not a package; the catalog resolver lives there (as in test_abi_examples.py).
 REPO_DIR = Path(__file__).resolve().parent.parent
@@ -137,30 +141,32 @@ def _run_two_versions(
     return json.loads(out_json.read_text(encoding="utf-8")), old_elf
 
 
-def _elf_names_for(change: dict) -> list[str]:
-    """The old-side mangled names a finding is about: its own symbol plus each
-    removed instantiation it lists."""
-    names = [change["symbol"]]
-    names += [r["mangled"] for r in change.get("removed_instantiations") or []]
-    return names
+def check_export_loss_bindings(
+    changes: list[dict], old_elf: ElfMetadata
+) -> tuple[int, int, int]:
+    """Check the contract over every export-loss finding in *changes*.
 
-
-def check_export_loss_bindings(changes: list[dict], old_elf: ElfMetadata) -> int:
-    """Check the contract over every export-loss finding in *changes*. Returns
-    how many there were, so callers can assert the check was not vacuous."""
-    checked = 0
+    Returns ``(checked, applied, leak_applied)``: findings in ``EXPORT_LOSS_KINDS``,
+    how many had every name determinable (so the contract applied), and how many
+    of the leak findings did. The caller asserts the check was not vacuous.
+    """
+    checked = applied = leak_applied = 0
     for change in changes:
         if not is_export_loss(change["kind"]):
             continue
         checked += 1
-        assert_binding_matches_old_elf(
+        removed = [r["mangled"] for r in change.get("removed_instantiations") or []]
+        ok = assert_binding_matches_old_elf(
             change["kind"],
             change["symbol"],
             change.get("symbol_binding"),
-            _elf_names_for(change),
+            names_for_finding(change["symbol"], removed),
             old_elf,
         )
-    return checked
+        applied += ok
+        if removed:
+            leak_applied += ok
+    return checked, applied, leak_applied
 
 
 # Kinds the fixture must produce at each depth. Headers (L2) distinguish the
@@ -184,7 +190,16 @@ def test_every_export_loss_finding_carries_old_binding(
     kinds = {c["kind"] for c in changes}
     # Non-vacuity: the fixture must exercise the paths it claims to cover.
     assert expected_kinds <= kinds, sorted(kinds)
-    assert check_export_loss_bindings(changes, old_elf) >= len(expected_kinds)
+    checked, applied, leak_applied = check_export_loss_bindings(changes, old_elf)
+    assert checked >= len(expected_kinds)
+    # The contract must actually be checked, not skipped, for these findings.
+    assert applied >= len(expected_kinds), (applied, checked)
+    if not with_headers:
+        # Binary-only run: the internal-namespace leak must be checked against
+        # its removed instantiations, not skipped for lacking a stem entry.
+        assert leak_applied >= 1, (
+            "leak finding was not checked against its instantiations"
+        )
 
 
 # Every export OLD loses in this fixture is WEAK, so every export-loss finding

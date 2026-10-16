@@ -37,7 +37,11 @@ from abicheck.model.change import Change
 from abicheck.model.declarations import Function, Visibility
 from abicheck.model.elf_facts import SymbolBinding, SymbolType
 from abicheck.policy.selectors import EXPORT_LOSS_KINDS
-from tests._export_loss_binding import assert_binding_matches_old_elf, is_export_loss
+from tests._export_loss_binding import (
+    assert_binding_matches_old_elf,
+    is_export_loss,
+    names_for_finding,
+)
 
 BINDINGS = [SymbolBinding.WEAK, SymbolBinding.GLOBAL, SymbolBinding.UNIQUE]
 
@@ -93,14 +97,13 @@ def _fn(name: str, binding: SymbolBinding | None) -> Function:
 
 def _check(change: Change, old_elf: ElfMetadata) -> None:
     assert is_export_loss(change.kind.value), change.kind
-    names = [change.symbol] + [r.mangled for r in (change.removed_instantiations or [])]
-    assert_binding_matches_old_elf(
-        change.kind.value,
-        change.symbol,
-        change.symbol_binding,
-        names,
-        old_elf,
+    names = names_for_finding(
+        change.symbol, [r.mangled for r in (change.removed_instantiations or [])]
     )
+    # A skipped check must not pass as a checked one: every name must be known.
+    assert assert_binding_matches_old_elf(
+        change.kind.value, change.symbol, change.symbol_binding, names, old_elf
+    ), f"{change.kind.value} {change.symbol}: no names determinable"
 
 
 @pytest.mark.parametrize("binding", BINDINGS)

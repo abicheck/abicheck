@@ -34,6 +34,18 @@ def is_export_loss(kind_value: str) -> bool:
     return ChangeKind(kind_value) in EXPORT_LOSS_KINDS
 
 
+def names_for_finding(symbol: str, removed_mangled: Iterable[str] = ()) -> list[str]:
+    """The old-side ELF names a finding is about.
+
+    A finding that lists removed instantiations (``internal_template_leaks_via_public_api``)
+    is about those mangled names: its ``symbol`` is the template stem, which is not
+    an ELF symbol, so looking it up would skip the check and pass vacuously.
+    Every other finding is about its own symbol.
+    """
+    listed = list(removed_mangled)
+    return listed if listed else [symbol]
+
+
 def assert_binding_matches_old_elf(
     kind: str,
     symbol: str,

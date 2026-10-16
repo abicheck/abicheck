@@ -167,7 +167,7 @@ With less input abicheck degrades gracefully instead of failing. `abicheck dump 
 
 ### What each layer buys
 
-Measured on the [`examples/`](examples/README.md) catalog, which holds 218 cases today: 204 of them are compare-style cases with a minimum-evidence label, and the table shows the cumulative share of those whose *every* expected change kind is discovered once a layer is present.
+Measured on the [`examples/`](examples/README.md) catalog, which holds 218 cases today: 206 of them are compare-style cases with a minimum-evidence label, and the table shows the cumulative share of those whose *every* expected change kind is discovered once a layer is present.
 
 | Evidence available | Cases fully covered |
 |--------------------|:-------------------:|
