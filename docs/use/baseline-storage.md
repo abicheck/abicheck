@@ -129,14 +129,14 @@ gh release upload v2.0.0 libfoo-2.0.0.abicheck.json --clobber
 
 ### `abi-baseline` also understands a release-contract baseline-set archive
 
-`abi-baseline` always searches for a single `*.abicheck.json[.gz|.zst]`
-asset first — the recipe above, unchanged. When a release instead publishes
-a `publish-baseline.yml`-produced baseline-set archive (one
-`abicheck-baseline-<profile>.tar.zst` per contract profile, holding several
-libraries' snapshots plus a `manifest.json` — see the
-[`publish-baseline`/`update-main-baseline` reference](../reference/publish-baseline.md))
-and that search finds nothing, set `baseline-profile` and `baseline-target`
-to fetch the target's snapshot out of the archive instead:
+Without `baseline-profile`/`baseline-target`, `abi-baseline` searches for a
+single `*.abicheck.json[.gz|.zst]` asset — the recipe above, unchanged. When
+a release instead publishes a `publish-baseline.yml`-produced baseline-set
+archive (one `abicheck-baseline-<profile>.tar.zst` per contract profile,
+holding several libraries' snapshots plus a `manifest.json` — see the
+[`publish-baseline`/`update-main-baseline` reference](../reference/publish-baseline.md)),
+set `baseline-profile` and `baseline-target` to fetch the target's snapshot
+out of the archive:
 
 ```yaml
       - name: ABI compatibility check
@@ -159,6 +159,22 @@ staging step needed. `baseline-asset-name-template` (default
 `abicheck-baseline-{profile}.tar.zst`) only needs setting if the publishing
 workflow customized `publish-baseline.yml`'s own `asset-name-template` input
 away from its default.
+
+When `baseline-profile` and `baseline-target` are both set, the archive is the
+only baseline source: a single-snapshot asset on the same release is ignored
+(it is not compared against and cannot make the run ambiguous), and a missing
+archive fails the run and names the archive it expected.
+
+The archive's manifest `project_ref` must equal `baseline-project-ref`, which
+defaults to the release tag. That is the value `publish-baseline.yml` records
+for a set it captured itself. A set captured elsewhere records the commit it
+built instead, so set `baseline-project-ref: commit` (the commit the tag names,
+annotated tags peeled) or pass a full commit SHA. Set it to `''` to turn the
+check off. A mismatch fails the run with `outcome: wrong_project_ref`.
+
+The job summary's "Baseline source" block, and the `baseline-source`,
+`baseline-asset-name`, `baseline-project-ref`, `baseline-generation` and
+`baseline-profile` outputs, record which baseline was compared against.
 
 ## Recipe A2: Multi-Library Releases — the `baseline` Action (a generator, not a registry)
 

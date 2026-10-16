@@ -161,6 +161,10 @@ Each entry's status line says what is still open. A PARTIAL entry's write-up als
 **Status (2026-10-15): OPEN.** The headline label, the gate and the `analysis_assurance: partial` field disagree with each other, and the label is the clean one.
 `false-clean` — A real return-type change in a header-less, no-debug run is labelled `NO_CHANGE` and accepted at exit 0. [Full write-up](known-gaps/header-less-rust-runs-report-no-change-and-alignment-noise.md)
 
+#### The root Action's baseline provenance is not recorded in the JSON report (2026-10-16)
+
+**Status (2026-10-16): OPEN.** The root Action now says which baseline it compared against, in its `baseline-source`, `baseline-asset-name`, `baseline-project-ref`, `baseline-generation` and `baseline-profile` outputs and in a "Baseline source" step-summary block. The JSON report, which a downstream consumer reads on its own, does not carry that provenance, so it cannot tell a legacy asset from a baseline-set, or which `project_ref` was checked. The nearest existing owner is ADR-065's acquisition record (`abicheck/model/scope_acquisition.py`). It records a per-member *state* (`available`, `failed`, `expected_not_produced`, and so on), not the artifact or revision a member was read from, so it does not already carry this. Adding the fields there is a report-schema change with its own decision and golden updates, so it is not made here.
+
 ### False-positive risk
 
 #### `--lang c++` explicitness not threaded to remaining fan-out callers (l0_export_delta/appcompat); dump/compare fixed
