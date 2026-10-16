@@ -50,6 +50,8 @@ from __future__ import annotations
 import argparse
 import ast
 import json
+import os
+import signal
 import subprocess
 import sys
 import tomllib
@@ -68,6 +70,37 @@ _CLASS_SEP = "ǁ"
 #: 3.8.0). For a function-scoped run that is a real answer — the changed
 #: functions carry no mutable code — not an aborted measurement.
 NOTHING_MATCHES_MARKER = "Filtered for specific mutants, but nothing matches"
+
+#: The return code :func:`run_mutmut` reports for a command it stopped at its
+#: wall-clock cap (the ``timeout(1)`` convention).
+TIMED_OUT_RC = 124
+
+
+def run_mutmut(cmd: list[str], timeout: float) -> tuple[str, int]:
+    """Run a mutmut subcommand, returning ``(stdout + stderr, returncode)``.
+
+    On *timeout* the whole process group is killed, not just mutmut itself:
+    its pytest workers otherwise outlive it and keep writing results while
+    the caller reads them (CI showed them as orphans at job cleanup). The
+    output so far is returned with :data:`TIMED_OUT_RC`.
+    """
+    proc = subprocess.Popen(  # noqa: S603 — fixed argv, no shell
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        start_new_session=hasattr(os, "killpg"),
+    )
+    try:
+        out, err = proc.communicate(timeout=timeout)
+        return out + err, proc.returncode
+    except subprocess.TimeoutExpired:
+        if hasattr(os, "killpg"):
+            os.killpg(proc.pid, signal.SIGKILL)
+        else:
+            proc.kill()
+        out, err = proc.communicate()
+        return out + err, TIMED_OUT_RC
 
 #: pyproject sections whose change alters what a mutation run measures or how
 #: its suite runs. Any other pyproject edit (a dependency pin, project

@@ -90,11 +90,14 @@ from mutation_results import (  # noqa: E402
     load_cicd_stats,
     parse_mutant_records,
     parse_survivors,
+    partial_run_report,
     summary_run_is_complete,
+    survivor_listing,
     survivors_by_module,
 )
 from mutation_scope import (  # noqa: E402
     NOTHING_MATCHES_MARKER,
+    TIMED_OUT_RC,
     diff_only_stop,
     function_run_scope,
     function_scope_pattern,
@@ -105,6 +108,7 @@ from mutation_scope import (  # noqa: E402
     parse_shard,
     planned_shards,
     report_unassigned,
+    run_mutmut,
     shard_assignment,
     shard_drift_gate,
     unit_key,
@@ -699,10 +703,7 @@ def _run_mutmut(cmd: list[str]) -> tuple[str, int]:
     database in place, which would otherwise satisfy the completeness witness
     and let the gate pass on stale results (Codex review).
     """
-    proc = subprocess.run(  # noqa: S603 — fixed argv, no shell
-        cmd, capture_output=True, text=True, timeout=MUTMUT_RUN_TIMEOUT_SECONDS
-    )
-    return proc.stdout + proc.stderr, proc.returncode
+    return run_mutmut(cmd, MUTMUT_RUN_TIMEOUT_SECONDS)
 
 
 # ---------------------------------------------------------------------------
@@ -1077,14 +1078,9 @@ def _gather(
         else:
             print("mutation-score: running `mutmut run` (this is slow)…")
         run_out, run_rc = _run_mutmut(run_cmd)
-        # 5 lines was enough to see mutmut's own progress-bar summary on a
-        # clean run, but on a real pytest failure it only ever showed the
-        # tail of an assertion diff (e.g. two lines of a multi-line list/dict
-        # comparison) -- useless for root-causing which test failed or why.
-        # Widened once real CI failures under this exact "diff-scoped refuse
-        # to scope, fall back to a full run" path (see the pyproject.toml
-        # `pytest_add_cli_args` ignore-list entries' own history) repeatedly
-        # could not be diagnosed from the printed tail alone.
+        # 5 lines show mutmut's progress summary on a clean run; a real pytest
+        # failure needs 80 to be diagnosable from the log alone (the
+        # diff-scoped full-run fallback could not be root-caused with 5).
         tail_line_count = 5 if run_rc == 0 else 80
         tail = "\n".join(run_out.splitlines()[-tail_line_count:])
         print(f"mutation-score: mutmut run tail:\n{tail}")
@@ -1095,6 +1091,10 @@ def _gather(
             # this run's own: every mutant is "not checked", none in scope.
             print("mutation-score: no mutant lives in the scoped function(s)")
             run_rc = 0
+        if run_rc == TIMED_OUT_RC:
+            print(f"ERROR: `mutmut run` hit its {MUTMUT_RUN_TIMEOUT_SECONDS}s cap.")
+            print("\n".join(partial_run_report(_run_mutmut(["mutmut", "results"])[0])))
+            return None, None
         if run_rc != 0:
             # Fail here rather than reading results: with a restored cache the
             # results on disk may be a previous commit's, and they would look
@@ -1625,8 +1625,7 @@ def main(argv: list[str] | None = None) -> int:
     if timeouts:
         msg += f", {timeouts} timed out (counted as detected)"
     print(msg)
-    for module, keys in by_module.items():
-        print(f"  {module}: {len(keys)}")
+    print("\n".join(survivor_listing(by_module)))
 
     exit_code = 0
     # baseline_modules / function_baseline / total_baseline: read early, above
