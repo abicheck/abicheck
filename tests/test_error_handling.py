@@ -59,11 +59,13 @@ class TestElfParserErrorHandling:
         empty.write_bytes(b"")
         meta = parse_elf_metadata(empty)
         assert isinstance(meta, ElfMetadata)
+        assert meta.symbols == []
 
     def test_nonexistent_file(self, tmp_path):
         missing = tmp_path / "missing.so"
         meta = parse_elf_metadata(missing)
         assert isinstance(meta, ElfMetadata)
+        assert meta.symbols == []
 
     def test_truncated_elf_header(self, tmp_path):
         # ELF magic but truncated
@@ -71,10 +73,12 @@ class TestElfParserErrorHandling:
         bad_elf.write_bytes(b"\x7fELF\x02\x01\x01")
         meta = parse_elf_metadata(bad_elf)
         assert isinstance(meta, ElfMetadata)
+        assert meta.symbols == []
 
     def test_directory_instead_of_file(self, tmp_path):
         meta = parse_elf_metadata(tmp_path)
         assert isinstance(meta, ElfMetadata)
+        assert meta.symbols == []
 
 
 class TestDwarfParserErrorHandling:
@@ -91,6 +95,7 @@ class TestDwarfParserErrorHandling:
         missing = tmp_path / "missing.so"
         meta = parse_dwarf_metadata(missing)
         assert isinstance(meta, DwarfMetadata)
+        assert not meta.has_dwarf
 
     def test_advanced_dwarf_non_elf(self, tmp_path):
         bad_file = tmp_path / "bad.so"
@@ -103,6 +108,7 @@ class TestDwarfParserErrorHandling:
         missing = tmp_path / "missing.so"
         _, meta = parse_dwarf(missing)
         assert isinstance(meta, AdvancedDwarfMetadata)
+        assert not meta.has_dwarf
 
 
 class TestSerializationErrorHandling:
