@@ -29,6 +29,7 @@ from abicheck.diff_templates import (
     detect_internal_template_leaks,
     detect_missing_instantiations,
 )
+from abicheck.model.change import Change
 from abicheck.model.declarations import Function, Visibility
 from abicheck.model.elf_facts import SymbolBinding
 from abicheck.model.snapshot import AbiSnapshot
@@ -287,3 +288,40 @@ def test_namespace_fixture_is_internal() -> None:
     # Guard the fixture's own premise: `lib::__detail::` must be an internal
     # namespace, or the leak detector would never reach these snapshots.
     assert "__detail" in _INTERNAL_TEMPLATE_NAMESPACES
+
+
+# ---------------------------------------------------------------------------
+# Serialization branches: non-leak, empty set, and the suppressed-audit entry
+# ---------------------------------------------------------------------------
+
+
+def test_non_leak_change_emits_no_removed_list() -> None:
+    # Only the leak finding carries a removed set; any other kind must omit
+    # the key entirely rather than emit an empty list.
+    c = Change(kind=ChangeKind.FUNC_REMOVED, symbol="f", description="x")
+    assert "removed_instantiations" not in change_annotation_fields(c)
+
+
+def test_empty_removed_set_is_emitted_as_an_empty_array() -> None:
+    # "Computed, nothing removed" must stay distinct from "never computed".
+    c = _leak_change([("double", SymbolBinding.WEAK)])
+    c.removed_instantiations = ()
+    fields = change_annotation_fields(c)
+    assert fields["removed_instantiations"] == []
+
+
+def test_suppressed_audit_entry_carries_the_removed_list() -> None:
+    # The suppressed-audit projection is a second serializer over the same
+    # Change; it must not drop the list the main entry carries.
+    from abicheck.report.change_json import suppressed_change_entry
+
+    leak = _leak_change(
+        [("double", SymbolBinding.WEAK), ("char", SymbolBinding.GLOBAL)]
+    )
+    entry = suppressed_change_entry(leak)
+    rows = entry["removed_instantiations"]
+    assert len(rows) == 2
+    assert {r["binding"] for r in rows} == {"weak", "global"}
+
+    plain = Change(kind=ChangeKind.FUNC_REMOVED, symbol="f", description="x")
+    assert "removed_instantiations" not in suppressed_change_entry(plain)
