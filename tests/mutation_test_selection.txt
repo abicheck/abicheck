@@ -726,6 +726,7 @@ tests/test_typedef_qualified_collision.py
 tests/test_typedef_version_sentinel.py
 tests/test_typefield_case_a_facts.py
 tests/test_undeclared_export_additions.py
+tests/test_undeclared_export_binding.py
 tests/test_undocumented_export_surface_scope.py
 tests/test_unversioned_exported_symbol.py
 tests/test_use_case_impact.py
