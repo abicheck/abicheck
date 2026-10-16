@@ -261,9 +261,9 @@ class TestExtractorDispatchPriority:
             {"lib/libfoo.so": _minimal_elf_so(), "info/index.json": b"{}"},
             "w:bz2",
         )
-        assert isinstance(detect_extractor(pkg), CondaExtractor)
+        assert type(detect_extractor(pkg)) is CondaExtractor
 
     def test_plain_tarbz2_is_tar(self, tmp_path: Path) -> None:
         pkg = tmp_path / "release.tar.bz2"
         _write_tar(pkg, {"libfoo.so": _minimal_elf_so()}, "w:bz2")
-        assert isinstance(detect_extractor(pkg), TarExtractor)
+        assert type(detect_extractor(pkg)) is TarExtractor

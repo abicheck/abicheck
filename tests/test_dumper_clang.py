@@ -1681,6 +1681,7 @@ def test_id_index_falls_back_to_bare_name_for_unresolved_reference() -> None:
     )
     (t,) = _ClangAstParser(root, set(), set()).parse_types()
     assert t.fields[0].default is not None
+    assert t.fields[0].default.startswith("expr:")
 
 
 def test_id_index_not_built_for_field_without_initializer() -> None:

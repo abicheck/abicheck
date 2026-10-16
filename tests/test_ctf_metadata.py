@@ -1196,7 +1196,7 @@ class TestResolverEdgeCases:
         t1 = CtfType(type_id=1, name_off=0, info=(CTF_K_TYPEDEF << 24), size_or_type=1)
         resolver = _TypeResolver([CtfType(0, 0, 0, 0), t1], b"\x00", CTF_VERSION_3)
         # Recursion guard returns "..." when re-entered.
-        assert resolver.name(1) is not None
+        assert resolver.name(1) == "..."
 
     def test_cyclic_size_resolution(self) -> None:
 

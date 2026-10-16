@@ -154,7 +154,7 @@ class TestEndToEndMarkerBearingSnapshotLoadPreservesParamKind:
         normalize_anonymous_type_spellings_on_load(snap)
         for fn in snap.declarations.functions:
             for p in fn.params:
-                assert isinstance(p.kind, ParamKind)
+                assert p.kind is ParamKind.POINTER
 
     def test_const_overload_detector_does_not_crash_on_marker_bearing_snapshot(
         self,

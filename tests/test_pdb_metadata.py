@@ -525,6 +525,7 @@ class TestDataModelConsistency:
     def test_struct_layout_fields_present(self, pdb_with_struct_and_enum: Path) -> None:
         """StructLayout from PDB has all required attributes for checker."""
         meta, _ = parse_pdb_debug_info(pdb_with_struct_and_enum)
+        assert meta.structs
         for name, layout in meta.structs.items():
             assert isinstance(layout.name, str)
             assert isinstance(layout.byte_size, int)
@@ -542,6 +543,7 @@ class TestDataModelConsistency:
     def test_enum_info_fields_present(self, pdb_with_struct_and_enum: Path) -> None:
         """EnumInfo from PDB has all required attributes for checker."""
         meta, _ = parse_pdb_debug_info(pdb_with_struct_and_enum)
+        assert meta.enums
         for name, info in meta.enums.items():
             assert isinstance(info.name, str)
             assert isinstance(info.underlying_byte_size, int)
@@ -652,6 +654,8 @@ class TestPdbInAbiSnapshot:
         meta, adv = parse_pdb_debug_info(pdb_file)
         # Has dwarf because TPI stream exists, just no types
         assert isinstance(meta, DwarfMetadata)
+        assert meta.structs == {}
+        assert meta.enums == {}
 
     def test_forward_ref_struct_skipped(self, tmp_path: Path) -> None:
         """Forward-ref structs should not appear in metadata."""

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import sys
+from dataclasses import fields
 
 import pytest
 from click.testing import CliRunner
@@ -40,7 +41,12 @@ linux_only = pytest.mark.skipif(
 
 def test_every_profile_has_a_complete_tuning():
     for profile in PerformanceProfile:
-        assert isinstance(tuning_for(profile), ExecutionTuning)
+        tuning = tuning_for(profile)
+        assert isinstance(tuning, ExecutionTuning)
+        for f in fields(ExecutionTuning):
+            assert isinstance(getattr(tuning, f.name), bool), (profile, f.name)
+    low = tuning_for(PerformanceProfile.LOW_MEMORY)
+    assert low.sequential_sides and low.isolate_sides and low.sequential_members
 
 
 def test_default_is_balanced_and_changes_nothing():

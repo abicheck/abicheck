@@ -610,7 +610,7 @@ def test_diff_degrades_on_non_dict_nested_coverage_metadata() -> None:
     )
     new = _surface(coverage={"fact_set": ["also", "not", "a", "dict"]})
     changes = diff_source_abi(old, new)  # must not raise
-    assert isinstance(changes, list)
+    assert changes == []
 
 
 def test_diff_flags_unrecognized_family_coverage_state_as_incomplete() -> None:

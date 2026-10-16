@@ -531,3 +531,4 @@ class TestRequestEnvMatrixReachesClassification:
             env_matrix=self._matrix(),
         )
         assert request.env_matrix is not None
+        assert list(tmp_path.iterdir()) == []

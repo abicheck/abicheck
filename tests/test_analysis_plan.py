@@ -398,6 +398,8 @@ class TestBazelBuildTargetScoping:
         )
         plan = AnalysisPlanner.resolve(request)
         assert isinstance(plan, AnalysisPlan)
+        assert plan.operation == "dump"
+        assert [s.label for s in plan.sides] == ["input"]
 
     def test_pack_with_bundled_config_and_real_headers_raises_planning_error(
         self, tmp_path: Path

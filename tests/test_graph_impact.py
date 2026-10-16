@@ -17,6 +17,8 @@
 
 from __future__ import annotations
 
+import re
+
 from abicheck.buildsource.graph_impact import (
     _node_is_public,
     _path_occurrence_id,
@@ -475,7 +477,26 @@ class TestPathOccurrenceId:
         attach_impact_metadata(
             change, affected_public_roots=["pub"], path=[edge], graph=g
         )
-        assert change.impact_occurrence_id is not None
+        assert re.fullmatch(r"sha256:[0-9a-f]{64}", change.impact_occurrence_id)
+
+        other = GraphEdge(
+            src="decl://pub",
+            dst="decl://helper",
+            kind="DECL_CALLS_DECL",
+            attrs={"callsite_id": "cs2"},
+        )
+        change2 = Change(
+            kind=ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED,
+            symbol="pub",
+            description="x",
+        )
+        attach_impact_metadata(
+            change2,
+            affected_public_roots=["pub"],
+            path=[other],
+            graph=SourceGraphSummary(edges=[other]),
+        )
+        assert change2.impact_occurrence_id != change.impact_occurrence_id
 
     def test_engine_carries_occurrence_id_into_graph_proof_path(self) -> None:
         from abicheck.impact.engine import assess_change

@@ -499,6 +499,7 @@ class TestExtractionContractCleared:
         )
         projected = project_snapshot_to_depth(snap, depth)
         assert projected.contract is not None
+        assert projected.contract == snap.contract
 
 
 class TestHiddenVisibilityDropped:

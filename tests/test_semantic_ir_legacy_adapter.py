@@ -905,3 +905,5 @@ class TestConsistencyCheckedOnDeserialize:
         )
         loaded = snapshot_from_dict(snapshot_to_dict(snap))
         assert loaded.canonical_ir is not None
+        assert loaded.declarations.typedef_entity_ids == {"ns::Alias": eid}
+        assert loaded.declarations.typedefs_qualified == {"ns::Alias": "int"}

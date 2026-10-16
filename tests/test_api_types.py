@@ -422,7 +422,9 @@ class TestCompareRequestHashableWithEnvMatrix:
     def test_hash_does_not_raise(self):
         # This is the reported defect verbatim: it used to raise
         # `TypeError: unhashable type: 'EnvironmentMatrix'`.
-        assert isinstance(hash(self._request()), int)
+        first, second = self._request(), self._request()
+        assert first == second
+        assert hash(first) == hash(second)
 
     def test_two_requests_with_equal_env_matrix_hash_and_compare_equal(self):
         a = self._request()
@@ -445,7 +447,9 @@ class TestCompareRequestHashableWithEnvMatrix:
     def test_request_with_no_env_matrix_stays_hashable(self):
         # The plain default (env_matrix=None) must be unaffected.
         req = CompareRequest(old=InputSpec.of("a"), new=InputSpec.of("b"))
-        assert isinstance(hash(req), int)
+        twin = CompareRequest(old=InputSpec.of("a"), new=InputSpec.of("b"))
+        assert req == twin
+        assert hash(req) == hash(twin)
 
 
 class TestCompareRequestRuntimeResolvableAnnotations:

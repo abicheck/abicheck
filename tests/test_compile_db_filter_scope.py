@@ -1022,6 +1022,7 @@ class TestScopeGuardCoversPackAndBazelBuildInfo:
         )
         error = compile_db_filter_scope_error("foo.cpp", resolved, "build")
         assert error is not None
+        assert "build.compile_db_filter" in error
 
     def test_no_filter_pack_directory_is_unaffected(self, tmp_path: Path) -> None:
         """Control: the guard only fires when a filter is actually set."""
@@ -1131,6 +1132,7 @@ class TestScopeGuardCoversSourcesPacks:
         resolved = compile_db_for_filter_scope_check(None, pack, (tmp_path / "api.h",))
         error = compile_db_filter_scope_error("foo.cpp", resolved, "build")
         assert error is not None
+        assert "build.compile_db_filter" in error
 
     def test_an_explicit_build_info_takes_precedence_over_a_sources_pack(
         self, tmp_path: Path

@@ -324,9 +324,10 @@ class TestCompareTreatsTheAdditionAsEvolution:
 
     def test_a_verdict_is_produced(self, tmp_path):
         from abicheck.checker import compare
+        from abicheck.checker_policy import Verdict
 
         old, new = self._pair(tmp_path)
-        assert compare(old, new).verdict is not None
+        assert compare(old, new).verdict is Verdict.NO_CHANGE
 
     def test_no_assurance_reduction_is_recorded(self, tmp_path):
         """`comparability_assurance` is `None` only when no mismatch was found

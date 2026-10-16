@@ -87,7 +87,8 @@ class TestEveryPublicRendererRejectsARetiredMode:
         """The other half: rejection must not have narrowed what works."""
         result = self._result()
         for name, fn in self._entry_points().items():
-            assert fn(result, report_mode=mode) is not None, name
+            out = fn(result, report_mode=mode)
+            assert out, name
 
     def test_render_envelope_checks_the_envelope_s_own_mode(self):
         """`render_envelope` is a fifth public entry point, and the mode it

@@ -97,6 +97,8 @@ def test_no_common_anchor_across_declared_paths_does_not_crash(tmp_path, monkeyp
     contract = compute_extraction_contract(declared_headers=[h])
     assert contract is not None
     assert contract.scope_fingerprint is not None
+    again = compute_extraction_contract(declared_headers=[h])
+    assert again.scope_fingerprint == contract.scope_fingerprint
 
     monkeypatch.setattr(os.path, "commonpath", real_commonpath)
     contract_normal = compute_extraction_contract(declared_headers=[h])

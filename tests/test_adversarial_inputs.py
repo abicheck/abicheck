@@ -79,6 +79,7 @@ class TestMalformedElf:
         p.write_bytes(bytes(header) + b"\x00" * 128)
         result = parse_elf_metadata(p)
         assert isinstance(result, ElfMetadata)
+        assert result == ElfMetadata()
 
     def test_nonexistent_file(self, tmp_path: Path) -> None:
         """File that does not exist -- should return empty metadata, not raise."""
@@ -368,7 +369,8 @@ class TestEdgeCaseModelObjects:
         )
         snap.index()
         # Should not crash
-        assert snap.function_map.get("") is not None
+        assert snap.function_map[""].name == ""
+        assert snap.var_by_mangled("") is not None
 
     def test_snapshot_with_very_long_names(self) -> None:
         """Snapshot with names exceeding 1000 characters."""
@@ -407,8 +409,10 @@ class TestEdgeCaseModelObjects:
             ],
         )
         snap.index()
-        assert snap.function_map.get("_Z_unicode_\u00e4\u00f6\u00fc") is not None
-        assert snap.var_by_mangled("_emoji_var") is not None
+        assert snap.function_map["_Z_unicode_\u00e4\u00f6\u00fc"].name == (
+            "\u00e4\u00f6\u00fc\u00df_\u4e16\u754c"
+        )
+        assert snap.var_by_mangled("_emoji_var").name == "\U0001f600_emoji_var"
 
     def test_compare_snapshot_against_itself(self) -> None:
         """Comparing a snapshot against itself should yield NO_CHANGE."""
