@@ -3333,7 +3333,7 @@
         },
         "removed_instantiations": {
           "type": "array",
-          "description": "Schema 5.14: present only on internal_template_leaks_via_public_api findings. The complete, uncapped list of removed template instantiations behind the finding -- one entry per old-side declaration whose instantiation is absent from the new library. `symbol` stays the template stem; this list is where each removed instantiation's mangled name and linkage are read. `binding` is the old-side ELF linkage (null when never captured). An empty array means the comparison ran and removed none.",
+          "description": "Schema 6.2: present only on internal_template_leaks_via_public_api findings. The complete, uncapped list of removed template instantiations behind the finding -- one entry per old-side declaration whose instantiation is absent from the new library. `symbol` stays the template stem; this list is where each removed instantiation's mangled name and linkage are read. `binding` is the old-side ELF linkage (null when never captured). An empty array means the comparison ran and removed none.",
           "items": {
             "type": "object",
             "required": ["mangled", "demangled", "binding"],
