@@ -61,10 +61,14 @@ abicheck compare v1.json v2.json --policy policy.yaml
 
 ## Minimum evidence
 
-`min_evidence: L2`. Headers are needed to tell a header-declared inline
-function (`hdr_inline`) from a symbol no header declares. Without `-H` the
-run also reports `visibility_leak` and `public_surface_shrank`, which the
-binding rule does not cover, so the verdict stays `BREAKING` there.
+`min_evidence: L0`: every expected kind (`func_removed_elf_only`,
+`func_visibility_changed`) is detectable from the exported symbol table
+alone, and the gate derives the floor from those kinds.
+
+The walkthrough above still passes `-H`, because the **verdict** needs
+headers. Without `-H` the run also reports `visibility_leak` and
+`public_surface_shrank`, which the binding rule does not cover, so the
+verdict stays `BREAKING` there.
 
 ## Why abicheck catches it
 
