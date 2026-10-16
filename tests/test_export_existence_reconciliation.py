@@ -48,6 +48,7 @@ from abicheck.checker_policy import ChangeKind
 from abicheck.elf_metadata import ElfMetadata, ElfSymbol, SymbolType
 from abicheck.model import AbiSnapshot, Function, ScopeOrigin
 from abicheck.model.change import Change
+from abicheck.model.elf_facts import SymbolBinding
 from abicheck.model.evidence_status import CrossSourceEvolution
 from abicheck.policy.export_existence_fold import CAUSED_BY_PREFIX, fold_partner
 from abicheck.workflows.export_existence_wording import (
@@ -129,9 +130,13 @@ def _side(header: Path, exports: tuple[_Shape, ...], version: str) -> AbiSnapsho
     snap.elf = ElfMetadata(
         machine="EM_X86_64",
         symbols=[
-            ElfSymbol(name=_INIT, binding="GLOBAL", sym_type=SymbolType.FUNC),
+            ElfSymbol(
+                name=_INIT, binding=SymbolBinding.GLOBAL, sym_type=SymbolType.FUNC
+            ),
             *(
-                ElfSymbol(name=s.symbol, binding="GLOBAL", sym_type=s.sym_type)
+                ElfSymbol(
+                    name=s.symbol, binding=SymbolBinding.GLOBAL, sym_type=s.sym_type
+                )
                 for s in exports
             ),
         ],

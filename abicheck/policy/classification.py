@@ -632,6 +632,7 @@ _ELF_BINDING_STAMPED_KINDS: frozenset[ChangeKind] = frozenset(
         ChangeKind.FUNC_REMOVED,
         ChangeKind.FUNC_REMOVED_ELF_ONLY,
         ChangeKind.VAR_REMOVED,
+        ChangeKind.VAR_REMOVED_ELF_ONLY,
         ChangeKind.FUNC_VISIBILITY_CHANGED,
         ChangeKind.FUNC_DELETED_ELF_FALLBACK,
         ChangeKind.SYMBOL_RENAMED_BATCH,
