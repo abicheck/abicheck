@@ -32,6 +32,7 @@ Bug class: ``tests/regressions/manifest.py``'s
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -217,7 +218,11 @@ class TestTheResolvedCompileContextReachesTheParse:
                 include_dependencies=False,
             ).key()
 
-        assert _identity(self._context()) == _identity(self._context())
+        key = _identity(self._context())
+        assert key == _identity(self._context())
+        # A real digest, not an empty or constant placeholder.
+        assert re.fullmatch(r"[0-9a-f]{64}", key)
+        assert key != _identity(self._context(gcc_path="/usr/bin/gcc"))
 
     def test_every_compile_context_field_is_covered(self) -> None:
         """A new AST-affecting field must join `CONTEXT_FIELDS`, or this

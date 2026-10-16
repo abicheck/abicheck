@@ -385,6 +385,11 @@ class TestValueIdentityKey:
         # The recursion must not turn genuinely-equal values into a false
         # conflict.
         assert _value_identity_key((1, "a")) == _value_identity_key((1, "a"))
+        # Exact shape: outer tuple tagged, each element tagged with its own type.
+        assert _value_identity_key((1, "a")) == (
+            tuple,
+            ((int, 1), (str, "a")),
+        )
 
 
 class TestDetectPackConflicts:

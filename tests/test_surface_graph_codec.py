@@ -66,7 +66,11 @@ class TestPopulatedGraphRoundTrip:
         )
         d = json.loads(json.dumps(snapshot_to_dict(s)))
         reloaded = snapshot_from_dict(d)
-        assert isinstance(reloaded.surface_graph, SourceGraphSummary)
+        assert type(reloaded.surface_graph) is SourceGraphSummary
+        assert reloaded.surface_graph is not s.surface_graph
+        assert reloaded.surface_graph.has_node("decl://x")
+        (node,) = reloaded.surface_graph.nodes
+        assert (node.id, node.kind, node.label) == ("decl://x", "declaration", "x")
 
     def test_nodes_and_edges_survive(self) -> None:
         s = AbiSnapshot(
