@@ -222,7 +222,7 @@ def test_scan_frontend_context_device_reaches_dumper_dump(tmp_path):
     `scan_engine.run_scan_core` resolves its ELF input via
     `service.resolve_input(..., is_elf=True, compile=...)`, which reaches
     `abicheck.dumper.dump` through `workflows.dump.native.extract_elf`; mocking `dump` itself
-    (the same technique `test_service_unit.py::test_elf_forwards_provenance_
+    (the same technique `test_input_resolution_unit.py::test_elf_forwards_provenance_
     to_dumper` uses for `public_headers`/`public_header_dirs`) lets this test
     assert the kwarg reaches that exact call, without needing a real DPC++
     toolchain in this environment.
