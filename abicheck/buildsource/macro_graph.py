@@ -200,12 +200,12 @@ from typing import TYPE_CHECKING, Any
 from ..model.graph_facts import CONF_HIGH, CONF_REDUCED, GraphEdge
 from ..model.name_decoration import macho_underscore as macho_decoration
 from .preprocessor_facts import _DEFINE_RE
-from .type_graph import (
+from .type_graph_index import (
     _FUNCTION_DECL_KINDS,
     _OTHER_TYPE_DECL_KINDS,
     _RECORD_DECL_KINDS,
-    _function_decl_ident,
 )
+from .type_graph_walk import _function_decl_ident
 
 if TYPE_CHECKING:
     from ..model.source_graph import SourceGraphSummary

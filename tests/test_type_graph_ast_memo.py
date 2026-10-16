@@ -39,19 +39,24 @@ from typing import Any
 import pytest
 from hypothesis import given, settings, strategies as st
 
-from abicheck.buildsource import l5_ast_pass, type_graph
+from abicheck.buildsource import (
+    l5_ast_pass,
+    type_graph,
+    type_graph_index,
+    type_graph_walk,
+)
 from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
 from abicheck.buildsource.header_graph_ast_projection import project_header_graph_ast
 from abicheck.buildsource.override_graph import (
     parse_clang_ast_overrides,
     parse_clang_ast_virtual_methods,
 )
-from abicheck.buildsource.type_graph import (
+from abicheck.buildsource.type_graph_index import (
     ast_derived_scope,
     index_declared_entity_files,
     index_declared_type_files,
-    parse_clang_ast_types,
 )
+from abicheck.buildsource.type_graph_walk import parse_clang_ast_types
 
 # ── a small generator of clang-AST-shaped trees ─────────────────────────────
 
@@ -146,7 +151,10 @@ class _WalkSpy:
     def __init__(self, mp: pytest.MonkeyPatch) -> None:
         self.indexes = 0
         self.edges = 0
-        new_idx, dedupe = type_graph._new_ast_indexes, type_graph._dedupe_edges
+        new_idx, dedupe = (
+            type_graph_index._new_ast_indexes,
+            type_graph_walk._dedupe_edges,
+        )
 
         def spy_idx() -> Any:
             self.indexes += 1
@@ -156,8 +164,8 @@ class _WalkSpy:
             self.edges += 1
             return dedupe(edges)
 
-        mp.setattr(type_graph, "_new_ast_indexes", spy_idx)
-        mp.setattr(type_graph, "_dedupe_edges", spy_dedupe)
+        mp.setattr(type_graph_index, "_new_ast_indexes", spy_idx)
+        mp.setattr(type_graph_walk, "_dedupe_edges", spy_dedupe)
 
 
 # ── invariants ──────────────────────────────────────────────────────────────

@@ -40,7 +40,8 @@ def build_source_edges(
     the other's successful edges (CodeRabbit review, P2).
     """
     from ..call_graph import CallEdge, parse_clang_ast_calls
-    from ..type_graph import TypeEdge, parse_clang_ast_types
+    from ..type_graph import TypeEdge
+    from ..type_graph_walk import parse_clang_ast_types
 
     call_edges: list[CallEdge] = []
     try:

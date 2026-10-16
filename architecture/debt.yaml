@@ -310,17 +310,6 @@
       "review_by": "2026-11-30"
     },
     {
-      "path": "abicheck/buildsource/type_graph.py",
-      "baseline_lines": 1947,
-      "target": "extract/build-or-source",
-      "rule": "no_growth",
-      "disposition": "migrate",
-      "category": "legacy_extraction_monolith",
-      "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
-      "review_by": "2026-11-30"
-    },
-    {
       "path": "abicheck/bundle.py",
       "baseline_lines": 1378,
       "target": "compare",
@@ -2049,18 +2038,7 @@
     },
     {
       "path": "tests/test_type_graph.py",
-      "baseline_lines": 1867,
-      "target": "tests/unit-or-contract ownership matching production migration",
-      "rule": "no_growth",
-      "disposition": "migrate",
-      "category": "legacy_oversized_test_module",
-      "owner": "abicheck maintainers",
-      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
-      "review_by": "2026-11-30"
-    },
-    {
-      "path": "tests/test_type_graph_roles.py",
-      "baseline_lines": 1237,
+      "baseline_lines": 1839,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",

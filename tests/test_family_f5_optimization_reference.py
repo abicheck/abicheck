@@ -103,7 +103,7 @@ COVERAGE: dict[str, str] = {
     "abicheck.buildsource.source_extractors.clang::memoized::_clang_compiler_family": "UNCOVERED: L4 clang source extractor tool probe; build-source path only",
     "abicheck.buildsource.source_extractors.clang::memoized::_clang_compiler_version": "UNCOVERED: L4 clang source extractor tool probe; build-source path only",
     "abicheck.buildsource.toolchain_probe::memoized::_clang_accepts_target": "UNCOVERED: clang cross-target probe; needs clang and a --target build",
-    "abicheck.buildsource.type_graph::memoized::_base_type_name": _NEEDS_L5,
+    "abicheck.buildsource.type_graph_names::memoized::_base_type_name": _NEEDS_L5,
     "abicheck.compare.overload_ambiguity::memoized::_callable_key": H,
     "abicheck.compare.parameter_facts::memoized::_pointee_qualifier_delta": H,
     "abicheck.compatibility_evaluation_frontend::memoized::builtin_policy_identity": R,
@@ -163,7 +163,7 @@ COVERAGE: dict[str, str] = {
     "abicheck.policy.reclassify::memory_cache::_KIND_BUCKETS": "UNCOVERED: reached only when a policy carries two or more reclassify rules",
     "abicheck.policy.type_spelling::memory_cache::_strip_ptr_memo": R,
     # ---- request-scoped and instance memos ----
-    "abicheck.buildsource.type_graph::scoped_cache::_AST_DERIVED": H,
+    "abicheck.buildsource.type_graph_index::scoped_cache::_AST_DERIVED": H,
     "abicheck.comparability_fields::scoped_cache::_PATH_MEMO": H,
     "abicheck.buildsource.header_graph_ast_projection::scoped_cache::_BISECTION_SCOPE": _NEEDS_L5,
     "abicheck.buildsource.export_account_decision::scoped_cache::_CONTEXTS": H,

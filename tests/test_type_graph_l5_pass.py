@@ -11,7 +11,9 @@ from __future__ import annotations
 
 from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
 from abicheck.buildsource.source_graph import SourceGraphSummary
-from abicheck.buildsource.type_graph import CONF_HIGH, TypeEdge, parse_clang_ast_types
+from abicheck.buildsource.type_graph import TypeEdge
+from abicheck.buildsource.type_graph_walk import parse_clang_ast_types
+from abicheck.model.graph_facts import CONF_HIGH
 
 
 def _field(name: str, qual_type: str) -> dict:

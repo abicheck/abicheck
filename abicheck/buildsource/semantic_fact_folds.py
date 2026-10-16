@@ -77,7 +77,7 @@ from .template_graph import (
     TemplateParse,
     merge_template_instantiations,
 )
-from .type_graph import parse_clang_ast_types
+from .type_graph_walk import parse_clang_ast_types
 from .virtual_dispatch_graph import augment_graph_with_virtual_dispatch
 
 if TYPE_CHECKING:

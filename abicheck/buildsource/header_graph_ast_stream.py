@@ -202,12 +202,9 @@ from .call_graph import (
 )
 from .header_graph_ast_projection import HeaderGraphAstProjection
 from .semantic_fact_folds import SemanticFactStream
-from .type_graph import (
-    _dedupe_edges as _dedupe_type_edges,
-    _index_declared_entities,
-    _new_ast_indexes,
-    _walk_child_sequence,
-)
+from .type_graph import _dedupe_edges as _dedupe_type_edges
+from .type_graph_index import _index_declared_entities, _new_ast_indexes
+from .type_graph_walk import _walk_child_sequence
 
 #: Structural JSON bytes the scanner jumps between. Everything else in the
 #: document -- which on a pretty-printed clang dump is **63% insignificant

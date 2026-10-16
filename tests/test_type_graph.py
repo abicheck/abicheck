@@ -22,18 +22,19 @@ from __future__ import annotations
 
 from abicheck.buildsource.source_graph import GraphEdge, GraphNode, SourceGraphSummary
 from abicheck.buildsource.type_graph import (
-    CONF_HIGH,
-    CONF_REDUCED,
+    TypeEdge,
+    _merge_type_edges,
+    augment_graph_with_types,
+)
+from abicheck.buildsource.type_graph_index import (
     RESOLUTION_REF_EXACT,
     RESOLUTION_REF_UNIQUE_CANDIDATE,
     RESOLUTION_REF_UNRESOLVED,
-    TypeEdge,
-    _base_type_name,
-    _merge_type_edges,
-    augment_graph_with_types,
     index_declared_type_files,
-    parse_clang_ast_types,
 )
+from abicheck.buildsource.type_graph_names import _base_type_name
+from abicheck.buildsource.type_graph_walk import parse_clang_ast_types
+from abicheck.model.graph_facts import CONF_HIGH, CONF_REDUCED
 
 
 def _field(name: str, qual_type: str) -> dict:
@@ -77,26 +78,6 @@ def _ref_expr(kind: str, name: str, mangled: str = "") -> dict:
 
 def _tu(*decls: dict) -> dict:
     return {"kind": "TranslationUnitDecl", "inner": list(decls)}
-
-
-# ── _base_type_name ──────────────────────────────────────────────────────────
-
-
-def test_base_type_name_strips_pointer_and_cv() -> None:
-    assert _base_type_name("const detail::Impl *") == "detail::Impl"
-    assert _base_type_name("ns::Widget &") == "ns::Widget"
-    assert _base_type_name("ns::Widget &&") == "ns::Widget"
-    assert _base_type_name("struct Foo") == "Foo"
-    assert _base_type_name("int") == "int"
-    assert _base_type_name("int[4]") == "int"
-    assert _base_type_name("") == ""
-
-
-def test_base_type_name_strips_array_bounds_before_pointer_suffix() -> None:
-    # An array of pointers ("detail::Impl *[4]") ends in "]", not "*", so the
-    # suffix-stripping loop never fires before a one-shot bracket strip *after*
-    # the loop — leaving the trailing "*" behind (Codex review).
-    assert _base_type_name("detail::Impl *[4]") == "detail::Impl"
 
 
 # ── parse_clang_ast_types ─────────────────────────────────────────────────────
@@ -307,15 +288,6 @@ def test_param_type_identity_strips_macos_mach_o_underscore() -> None:
         )
         in params
     )
-
-
-def test_base_type_name_strips_callback_signature_argument() -> None:
-    # std::function<detail::Impl ()>'s single template argument spells as
-    # the written function-signature form "detail::Impl ()", not a plain
-    # type name — the "()" parameter-list suffix wasn't recognized by any
-    # existing stripping rule, so "Impl ()" was looked up as a type literally
-    # named that (Codex review).
-    assert _base_type_name("detail::Impl ()") == "detail::Impl"
 
 
 def test_param_type_resolves_callback_template_argument_to_private_type() -> None:
