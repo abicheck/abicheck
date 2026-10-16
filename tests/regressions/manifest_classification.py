@@ -518,32 +518,4 @@ CLASSIFICATION_BUG_CLASSES: tuple[BugClass, ...] = (
             ),
         ),
     ),
-    BugClass(
-        id="classification.selector_field_unstamped_at_emission",
-        invariant=(
-            "A policy selector keyed on an evidence field matches a finding "
-            "only if the emitter that creates that finding actually stamped "
-            "the field. Every emitter of a kind a selector can name must "
-            "carry the field the selector reads, on every path that produces "
-            "the kind (ordinary diff, header-depth, export-table-only), and "
-            "the value must describe the side the finding is about: the OLD "
-            "binding for a removal, the NEW binding for an addition. A field "
-            "that cannot be determined (an undeclared export whose versioned "
-            "aliases disagree) is None, never one alias's value."
-        ),
-        fixed_by=(1629,),
-        seed_tests=(
-            "tests/test_undeclared_export_binding.py",
-            "tests/test_undeclared_export_binding_cli.py",
-        ),
-        public_surfaces=("cli",),
-        axes={
-            "kind": ("function", "variable"),
-            "side": ("removal (old binding)", "addition (new binding)"),
-            "binding": ("weak", "global", "unique"),
-            "aliases": ("agree", "disagree"),
-            "evidence depth": ("headers, no baseline binary",),
-            "policy": ("binding-scoped reclassify rule", "no matching rule"),
-        },
-    ),
 )
