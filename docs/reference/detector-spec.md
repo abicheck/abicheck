@@ -148,7 +148,7 @@ One row per `ChangeKind` (417 total). Columns fuse the verdict partition (`check
 | `func_virtual_added` | breaking | `BREAKING` | `error` | L1 | `func_virtual_added` | [case68](examples/case68_virtual_method_added.md) |
 | `func_virtual_became_pure` | breaking | `BREAKING` | `error` | L1 | `func_virtual_became_pure` | [case23](examples/case23_pure_virtual_added.md) |
 | `func_virtual_removed` | breaking | `BREAKING` | `error` | L2 | `func_virtual_removed` | [case168](examples/case168_virtual_method_devirtualized.md) |
-| `func_visibility_changed` | breaking | `BREAKING` | `error` | L0 | `func_visibility_changed` | [case06](examples/case06_visibility.md), [case217](examples/case217_export_loss_weak_binding_demoted.md), [case218](examples/case218_export_loss_strong_binding_stays_breaking.md), [case59](examples/case59_func_became_inline.md) |
+| `func_visibility_changed` | breaking | `BREAKING` | `error` | L0 | `func_visibility_changed` | [case06](examples/case06_visibility.md), [case59](examples/case59_func_became_inline.md) |
 | `func_visibility_protected_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `func_visibility_protected_changed` | [case51](examples/case51_protected_visibility.md) |
 | `generated_file_dependency_unstable` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `generated_file_dependency_unstable` | — |
 | `generated_header_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `generated_header_changed` | — |

@@ -534,6 +534,7 @@ CLASSIFICATION_BUG_CLASSES: tuple[BugClass, ...] = (
         seed_tests=(
             "tests/test_template_finding_binding.py",
             "tests/test_export_loss_binding_unit.py",
+            "tests/test_family_f1_evidence_ablation.py",
         ),
         public_surfaces=("reclassify", "json_report"),
         axes={"evidence": ("header", "elf")},

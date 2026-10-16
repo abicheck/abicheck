@@ -51,6 +51,27 @@ deprecation-window note would need to reach.
   below is unchanged — only the command names in this ADR's own examples
   predate that consolidation; treat ADR-054 as authoritative for current
   CLI invocation syntax.
+- **2026-10-16 (release-contract baseline selection and `baseline-project-ref`).**
+  When `baseline-profile` and `baseline-target` are both set, the
+  release-contract baseline-set archive is the only baseline source the root
+  Action consults. The single-snapshot `*.abicheck.json` search is skipped, so
+  a stray legacy asset on the release neither replaces the selected baseline
+  nor makes the job ambiguous, and a missing archive fails naming the archive.
+  With the selection unset, the single-snapshot-first contract is unchanged.
+  A new input, `baseline-project-ref`, names the revision a selected
+  baseline-set's manifest `project_ref` must equal: `tag` (the default, the
+  resolved release tag, which is what `publish-baseline.yml` records for a set
+  it captured itself), `commit` (the commit the tag names, annotated tags
+  peeled, which is what a pre-captured set records), a full commit SHA, or
+  `''` to disable the check. A mismatch fails with
+  `outcome: wrong_project_ref`. **This changes the default for baseline-sets
+  whose `project_ref` is not the release tag:** such a consumer now fails
+  until it sets `baseline-project-ref: commit` (or the SHA, or `''`); it was
+  previously unchecked. The run also reports its baseline provenance
+  (`baseline-source`, `baseline-asset-name`, `baseline-project-ref`,
+  `baseline-generation`, `baseline-profile` outputs and a "Baseline source"
+  step-summary block). The JSON report does not carry that provenance yet; see
+  the gap recorded in [`known-gaps.md`](../known-gaps.md).
 
 ---
 

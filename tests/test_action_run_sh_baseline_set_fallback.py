@@ -123,18 +123,25 @@ def _make_tar_zst(archive_path: Path, src_dir: Path) -> None:
         writer.write(buf.getvalue())
 
 
+#: The release tag every fixture is published under. A baseline-set archive's
+#: manifest project_ref must equal it for the default baseline-project-ref
+#: ('tag') to accept the archive, so the two are kept in step here.
+FIXTURE_TAG = "v1.0.0"
+
+
 def _build_baseline_set_archive(
     tmp_path: Path,
     *,
     target: str = "libpvxs",
     profile: str = PROFILE,
     baseline_generation: int | None = None,
+    project_ref: str = FIXTURE_TAG,
 ) -> Path:
     src_dir = tmp_path / "baseline-set-src"
     src_dir.mkdir()
     manifest = {
         "manifest_version": 1,
-        "project_ref": "v1.0.0",
+        "project_ref": project_ref,
         "profile": profile,
         "snapshot_schema": None,
         "fact_set": None,
@@ -260,8 +267,14 @@ def _run_baseline_fallback(
     env = {**os.environ, **env_extra}
     if env.get("FIXTURE_ARCHIVE") and "FIXTURE_ASSETS_JSON" not in env_extra:
         asset_name = _resolved_asset_name(env)
+        # tagName is what `gh release view --json assets,tagName` reports,
+        # and what a latest-release lookup's baseline-project-ref='tag'
+        # default is checked against.
         env["FIXTURE_ASSETS_JSON"] = json.dumps(
-            {"assets": [{"name": asset_name, "apiUrl": "fixture://asset"}]}
+            {
+                "tagName": env.get("FIXTURE_TAG", FIXTURE_TAG),
+                "assets": [{"name": asset_name, "apiUrl": "fixture://asset"}],
+            }
         )
     script = (
         'MODE="${INPUT_MODE:-compare}"\n'
@@ -337,7 +350,9 @@ class TestBaselineSetFallback:
         assert "libpvxs.abicheck.json" in result.stdout
 
     def test_resolves_from_baseline_set_for_a_tag_release(self, tmp_path: Path) -> None:
-        archive = _build_baseline_set_archive(tmp_path)
+        # Published under v2.3.0, so the default baseline-project-ref ('tag')
+        # -- the tag abi-baseline names -- matches its manifest.
+        archive = _build_baseline_set_archive(tmp_path, project_ref="v2.3.0")
         result = self._run(
             {
                 "INPUT_MODE": "compare",
@@ -350,12 +365,15 @@ class TestBaselineSetFallback:
         assert result.returncode == 0, result.stderr
         assert "libpvxs.abicheck.json" in result.stdout
 
-    def test_single_snapshot_asset_still_takes_priority(self, tmp_path: Path) -> None:
-        # When the single-snapshot search DOES find something, the
-        # baseline-set fallback must never even be attempted -- unrelated to
-        # this test's own gh stub (which only "finds" a single-snapshot
-        # asset when pattern_count == 3), a real 3-pattern hit is simulated
-        # by a small stub override here instead of the shared one.
+    def test_single_snapshot_asset_still_takes_priority_when_no_selection(
+        self, tmp_path: Path
+    ) -> None:
+        # With baseline-profile/baseline-target UNSET, the single-snapshot
+        # search keeps priority: when it DOES find something, the baseline-set
+        # fallback must never even be attempted. (With both set, the selection
+        # wins instead -- see TestBaselineSetSelectionPriority.) A real
+        # 3-pattern hit is simulated by a small stub override here instead of
+        # the shared one.
         script = (
             'MODE="${INPUT_MODE:-compare}"\n'
             'FORCE_AUDIT_ONLY="${INPUT_AUDIT:-false}"\n'
@@ -378,8 +396,7 @@ class TestBaselineSetFallback:
             **os.environ,
             "INPUT_MODE": "compare",
             "INPUT_ABI_BASELINE": "latest-release",
-            "INPUT_BASELINE_PROFILE": PROFILE,
-            "INPUT_BASELINE_TARGET": "libpvxs",
+            # No baseline-profile/baseline-target: the selection is unset.
             # No FIXTURE_ARCHIVE -- if the fallback were mistakenly
             # attempted anyway it would find nothing and fail loudly.
         }
@@ -815,7 +832,10 @@ class TestBaselineSetFallback:
             "INPUT_BASELINE_TARGET": "libpvxs",
             "FIXTURE_ARCHIVE": str(archive),
             "FIXTURE_ASSETS_JSON": json.dumps(
-                {"assets": [{"name": asset_name, "apiUrl": "fixture://asset"}]}
+                {
+                    "tagName": FIXTURE_TAG,
+                    "assets": [{"name": asset_name, "apiUrl": "fixture://asset"}],
+                }
             ),
         }
         result = _run_bash_script(script, env)

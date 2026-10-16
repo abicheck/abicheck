@@ -2899,14 +2899,185 @@ _baseline_unavailable() {
 }
 
 # ---------------------------------------------------------------------------
-# Baseline-set fallback: when no single *.abicheck.json asset was found on
-# the release, but baseline-profile was given, try a release-contract
-# baseline-set archive instead (abicheck-baseline-<profile>.tar.zst,
-# published by publish-baseline.yml -- see docs/reference/publish-baseline.md).
-# This is the "single-snapshot and baseline-set protocols" unification: the
-# original abi-baseline contract (one *.abicheck.json[.gz|.zst] asset) still
-# works completely unchanged and takes priority when present; this fallback
-# only ever runs when that search found nothing.
+# Baseline source provenance. Every resolution path records what it used in
+# these script-globals, so the outputs block and the step summary can say
+# which baseline was compared against (ADR-067's "record before disposing"
+# applied to the Action's own operand). BASELINE_SOURCE is one of
+# legacy-asset (a single *.abicheck.json[.gz|.zst] release asset),
+# baseline-set (a release-contract archive, see _try_baseline_set_fallback),
+# or direct-path (abi-baseline given as a file path, not a release lookup).
+# Empty means no baseline was resolved by this run.
+# ---------------------------------------------------------------------------
+BASELINE_SOURCE=""
+BASELINE_SOURCE_ASSET=""
+BASELINE_SET_PROJECT_REF=""
+BASELINE_SET_GENERATION=""
+BASELINE_SET_PROFILE=""
+
+# A manifest value is publisher-controlled text. A newline in it would end
+# its $GITHUB_OUTPUT record early and smuggle in extra `name=value` outputs
+# (or a `::command::` line), so every value written to either sink is
+# flattened to one line first.
+_baseline_source_field() {
+  local value="${1:-}"
+  value="${value//$'\r'/ }"
+  value="${value//$'\n'/ }"
+  printf '%s' "$value"
+}
+
+# Markdown table cell: the single-line form, with pipes escaped so a value
+# cannot open a new column.
+_baseline_source_cell() {
+  local value
+  value="$(_baseline_source_field "${1:-}")"
+  local bar='\|'
+  printf '%s' "${value//|/$bar}"
+}
+
+# The Action's own outputs for the baseline that was compared against.
+# Only baseline-set sets the manifest fields; the others leave them empty.
+_emit_baseline_source_outputs() {
+  echo "baseline-source=$(_baseline_source_field "${BASELINE_SOURCE:-}")"
+  echo "baseline-asset-name=$(_baseline_source_field "${BASELINE_SOURCE_ASSET:-}")"
+  echo "baseline-project-ref=$(_baseline_source_field "${BASELINE_SET_PROJECT_REF:-}")"
+  echo "baseline-generation=$(_baseline_source_field "${BASELINE_SET_GENERATION:-}")"
+  echo "baseline-profile=$(_baseline_source_field "${BASELINE_SET_PROFILE:-}")"
+}
+
+# "### Baseline source" step-summary block. Prints nothing when this run
+# compared against no release baseline (a no-baseline audit, or an
+# old-library given directly), so it never claims a source it did not use.
+_write_baseline_source_summary() {
+  [[ -n "${BASELINE_SOURCE:-}" ]] || return 0
+  echo ""
+  echo "### Baseline source"
+  echo ""
+  echo "| Field | Value |"
+  echo "| --- | --- |"
+  echo "| Source | \`$(_baseline_source_cell "$BASELINE_SOURCE")\` |"
+  echo "| Asset | \`$(_baseline_source_cell "$BASELINE_SOURCE_ASSET")\` |"
+  if [[ "$BASELINE_SOURCE" == "baseline-set" ]]; then
+    echo "| Project ref | \`$(_baseline_source_cell "$BASELINE_SET_PROJECT_REF")\` |"
+    echo "| Baseline generation | \`$(_baseline_source_cell "${BASELINE_SET_GENERATION:-none}")\` |"
+    echo "| Profile | \`$(_baseline_source_cell "$BASELINE_SET_PROFILE")\` |"
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# baseline-project-ref: the revision a baseline-set's manifest project_ref
+# must equal. The unset-vs-empty distinction is load-bearing: action.yml
+# defaults the input to 'tag', so an explicit empty string arrives here as
+# "" and turns the check off, while an unset variable (direct run.sh
+# invocation) falls back to the same 'tag' default via ${x-tag}, never ${x:-}.
+#
+#   tag     the resolved release tag. What publish-baseline.yml records for a
+#           set it captured itself (its own capture stamps the tag).
+#   commit  the commit the release tag names, annotated tags peeled. What a
+#           pre-captured set records (its capture recorded the revision it
+#           built, not the tag).
+#   <sha>   a full 40/64-hex commit SHA, taken literally.
+#   ""      no project_ref check.
+#
+# Sets EXPECTED_PROJECT_REF (script-global) on success; on failure routes
+# through _baseline_unavailable and returns 1.
+# ---------------------------------------------------------------------------
+_commit_of_release_tag() {
+  local tag="$1"
+  [[ -n "${GITHUB_REPOSITORY:-}" && -n "$tag" ]] || return 1
+  local ref_file="$BASELINE_DIR/tag-ref.json"
+  local tag_object_file="$BASELINE_DIR/tag-object.json"
+  gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" > "$ref_file" 2>/dev/null || return 1
+  # Python, not jq, for the same reason as every other JSON parse in this
+  # file. tag_resolution performs no I/O: it decides what the documents mean,
+  # and this shell step is the one that fetches them.
+  local peel_sha
+  peel_sha=$( (cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" -c '
+import json
+import sys
+from abicheck.frontends.action.tag_resolution import (
+    TagResolutionError,
+    tag_object_to_fetch,
+)
+
+try:
+    with open(sys.argv[2], encoding="utf-8") as fh:
+        print(tag_object_to_fetch(sys.argv[1], json.load(fh)))
+except TagResolutionError as exc:
+    print(exc.message, file=sys.stderr)
+    sys.exit(1)
+' "$tag" "$ref_file") ) || return 1
+  local tag_object_arg=""
+  if [[ -n "$peel_sha" ]]; then
+    gh api "repos/$GITHUB_REPOSITORY/git/tags/$peel_sha" > "$tag_object_file" 2>/dev/null || return 1
+    tag_object_arg="$tag_object_file"
+  fi
+  (cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" -c '
+import json
+import sys
+from abicheck.frontends.action.tag_resolution import (
+    TagResolutionError,
+    resolve_tag_commit,
+)
+
+try:
+    with open(sys.argv[2], encoding="utf-8") as fh:
+        ref = json.load(fh)
+    tag_object = None
+    if sys.argv[3]:
+        with open(sys.argv[3], encoding="utf-8") as fh:
+            tag_object = json.load(fh)
+    print(resolve_tag_commit(sys.argv[1], ref, tag_object=tag_object).commit_sha)
+except TagResolutionError as exc:
+    print(exc.message, file=sys.stderr)
+    sys.exit(1)
+' "$tag" "$ref_file" "$tag_object_arg")
+}
+
+_resolve_expected_project_ref() {
+  local release_tag="$1"
+  local declared="${INPUT_BASELINE_PROJECT_REF-tag}"
+  EXPECTED_PROJECT_REF=""
+  case "$declared" in
+    '') ;;
+    tag)
+      if [[ -z "$release_tag" ]]; then
+        _baseline_unavailable "baseline-project-ref is 'tag', but the release tag could not be determined. Set baseline-project-ref to '' to skip the project_ref check."
+        return 1
+      fi
+      EXPECTED_PROJECT_REF="$release_tag"
+      ;;
+    commit)
+      local commit=""
+      commit=$(_commit_of_release_tag "$release_tag") || commit=""
+      if [[ -z "$commit" ]]; then
+        _baseline_unavailable "baseline-project-ref is 'commit', but release tag '$release_tag' could not be resolved to a commit via the GitHub API (GITHUB_REPOSITORY, the tag ref, and an annotated tag's peel must all be readable)."
+        return 1
+      fi
+      EXPECTED_PROJECT_REF="$commit"
+      ;;
+    *)
+      if [[ "$declared" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]]; then
+        EXPECTED_PROJECT_REF="$declared"
+      else
+        _baseline_unavailable "baseline-project-ref '$declared' is not one of '' (no check), 'tag', 'commit', or a full 40/64-character commit SHA."
+        return 1
+      fi
+      ;;
+  esac
+  return 0
+}
+
+# ---------------------------------------------------------------------------
+# Baseline-set fallback: when baseline-profile and baseline-target are both
+# set, abi-baseline's release-contract baseline-set archive
+# (abicheck-baseline-<profile>.tar.zst, published by publish-baseline.yml --
+# see docs/reference/publish-baseline.md) is the ONLY source consulted: the
+# fetch block below skips the legacy *.abicheck.json download entirely when
+# that selection is present, so a stray legacy asset on the release can
+# neither replace the selected baseline nor make the job ambiguous. With the
+# selection unset, the single *.abicheck.json[.gz|.zst] contract is
+# unchanged and this function is reached only when that search finds
+# nothing.
 #
 # Sets BASELINE_FILE (a script-global, matching the surrounding block's
 # style) on success. On any failure, routes through _baseline_unavailable
@@ -2963,10 +3134,26 @@ _try_baseline_set_fallback() {
   local set_download_dir="$BASELINE_DIR/baseline-set-download"
   mkdir -p "$set_download_dir"
   local assets_json=""
+  # tagName rides along with the asset listing (one API call, not two): a
+  # latest-release lookup has no other way to learn which tag it resolved to,
+  # which baseline-project-ref's default ('tag') needs.
+  local release_tag="$ABI_BASELINE"
   if [[ "$ABI_BASELINE" == "latest-release" ]]; then
-    assets_json=$(gh release view ${_GH_REPO_FLAG[@]+"${_GH_REPO_FLAG[@]}"} --json assets 2>/dev/null) || assets_json=""
+    assets_json=$(gh release view ${_GH_REPO_FLAG[@]+"${_GH_REPO_FLAG[@]}"} --json assets,tagName 2>/dev/null) || assets_json=""
+    release_tag=""
   else
-    assets_json=$(gh release view "$ABI_BASELINE" ${_GH_REPO_FLAG[@]+"${_GH_REPO_FLAG[@]}"} --json assets 2>/dev/null) || assets_json=""
+    assets_json=$(gh release view "$ABI_BASELINE" ${_GH_REPO_FLAG[@]+"${_GH_REPO_FLAG[@]}"} --json assets,tagName 2>/dev/null) || assets_json=""
+  fi
+  if [[ "$ABI_BASELINE" == "latest-release" && -n "$assets_json" ]]; then
+    release_tag=$(printf '%s' "$assets_json" | (cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" -c '
+import json
+import sys
+
+try:
+    print(json.load(sys.stdin).get("tagName") or "")
+except Exception:
+    print("")
+'))
   fi
   local existing_url=""
   if [[ -n "$assets_json" ]]; then
@@ -3017,7 +3204,10 @@ for asset in data.get("assets") or []:
   echo "::endgroup::"
 
   if [[ ! -f "$archive_path" ]]; then
-    _baseline_unavailable "No *.abicheck.json baseline asset, and no baseline-set archive '$asset_name' either, found in the release. Publish a single *.abicheck.json[.gz|.zst] snapshot asset (abi-baseline's original single-library contract), or a release-contract baseline-set archive whose name matches baseline-asset-name-template ('$asset_template')."
+    # Reached only with baseline-profile AND baseline-target set (the fetch
+    # block skips the legacy download in that case, so a single *.abicheck.json
+    # asset is never a substitute here -- see this function's header).
+    _baseline_unavailable "baseline-set archive '$asset_name' not found on release '${release_tag:-$ABI_BASELINE}'. baseline-profile and baseline-target select this release-contract archive, and a single *.abicheck.json asset is not used while they are set. Publish '$asset_name' to the release (the name follows baseline-asset-name-template '$asset_template'), or unset baseline-profile and baseline-target to use the single-snapshot asset."
     return 1
   fi
 
@@ -3085,8 +3275,16 @@ TarExtractor._safe_extract(Path(sys.argv[1]), Path(sys.argv[2]))
     fi
   fi
 
+  # Expected manifest project_ref, from baseline-project-ref. Resolved before
+  # the python call so an unresolvable expectation fails as its own typed
+  # error, never as a silent "no check" (an explicit '' is the only way off).
+  if ! _resolve_expected_project_ref "$release_tag"; then
+    return 1
+  fi
+
   local resolve_output
   resolve_output=$(cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" -c '
+import json
 import sys
 from abicheck.buildsource.baseline_set import resolve_target
 
@@ -3094,7 +3292,8 @@ from abicheck.buildsource.baseline_set import resolve_target
 # entirely-digits by the caller before this fallback is ever reached, so
 # int() here cannot raise -- expected_baseline_generation=None (the
 # resolve_target default) when unset, meaning this consumer has no
-# generation expectation, same as expected_project_ref="" above it.
+# generation expectation. argv[5] (the resolved baseline-project-ref) is
+# empty when the check is disabled, which resolve_target treats the same way.
 expected_generation = int(sys.argv[4]) if sys.argv[4] else None
 result = resolve_target(
     sys.argv[1],
@@ -3102,6 +3301,7 @@ result = resolve_target(
     profile=sys.argv[3],
     required=True,
     expected_baseline_generation=expected_generation,
+    expected_project_ref=sys.argv[5],
 )
 snapshot_path = result.snapshot_path
 if not snapshot_path:
@@ -3109,7 +3309,27 @@ if not snapshot_path:
 print("outcome=" + result.outcome)
 print("message=" + result.message)
 print("snapshot_path=" + snapshot_path)
-' "$manifest_root" "$baseline_target" "$INPUT_BASELINE_PROFILE" "${INPUT_BASELINE_GENERATION:-}")
+# The manifest fields the step summary and outputs report. Read after the
+# outcome is known and tolerated when unreadable: a failed resolution has
+# nothing to report, and must still print its own outcome line above.
+manifest = {}
+if result.manifest_path:
+    try:
+        with open(result.manifest_path, encoding="utf-8") as fh:
+            manifest = json.load(fh)
+    except (OSError, ValueError):
+        manifest = {}
+generation = manifest.get("baseline_generation")
+# One line per field: the caller reads this block line by line, so a newline
+# inside a publisher-controlled value is flattened here, where the whole
+# value is still in hand, rather than truncated at the first line break.
+def _one_line(value):
+    return " ".join(str(value or "").splitlines())
+
+print("project_ref=" + _one_line(manifest.get("project_ref")))
+print("generation=" + ("" if generation is None else str(generation)))
+print("profile=" + _one_line(manifest.get("profile")))
+' "$manifest_root" "$baseline_target" "$INPUT_BASELINE_PROFILE" "${INPUT_BASELINE_GENERATION:-}" "$EXPECTED_PROJECT_REF")
   local resolve_outcome resolve_message resolve_snapshot
   resolve_outcome=$(printf '%s\n' "$resolve_output" | sed -n 's/^outcome=//p')
   resolve_message=$(printf '%s\n' "$resolve_output" | sed -n 's/^message=//p')
@@ -3117,9 +3337,16 @@ print("snapshot_path=" + snapshot_path)
 
   if [[ "$resolve_outcome" == "resolved" && -n "$resolve_snapshot" ]]; then
     BASELINE_FILE="$resolve_snapshot"
+    BASELINE_SOURCE="baseline-set"
+    BASELINE_SOURCE_ASSET="$asset_name"
+    BASELINE_SET_PROJECT_REF=$(printf '%s\n' "$resolve_output" | sed -n 's/^project_ref=//p')
+    BASELINE_SET_GENERATION=$(printf '%s\n' "$resolve_output" | sed -n 's/^generation=//p')
+    BASELINE_SET_PROFILE=$(printf '%s\n' "$resolve_output" | sed -n 's/^profile=//p')
     echo "Resolved target '$baseline_target' at profile '$INPUT_BASELINE_PROFILE' from baseline-set archive '$asset_name'."
     return 0
   fi
+  # outcome: wrong_project_ref (and every other non-resolved outcome) is
+  # reported through this message, which names the outcome verbatim.
   _baseline_unavailable "could not resolve target '$baseline_target' at profile '$INPUT_BASELINE_PROFILE' from baseline-set archive '$asset_name' (outcome: $resolve_outcome): $resolve_message"
   return 1
 }
@@ -3140,6 +3367,16 @@ print("snapshot_path=" + snapshot_path)
 # instead of erroring, letting a separately-supplied old-library/against run
 # in its place (Codex review).
 ABI_BASELINE="${INPUT_ABI_BASELINE:-}"
+# baseline-profile AND baseline-target together select one target's snapshot
+# from a release-contract baseline-set archive. When they are, the legacy
+# *.abicheck.json download below is skipped outright: the selected baseline
+# is resolved from the archive alone, so a stray single-snapshot asset on the
+# release can neither win over it nor make the job ambiguous. With the
+# selection unset, the single-snapshot contract is unchanged.
+_BASELINE_SET_SELECTED=0
+if [[ -n "${INPUT_BASELINE_PROFILE:-}" && -n "${INPUT_BASELINE_TARGET:-}" ]]; then
+  _BASELINE_SET_SELECTED=1
+fi
 if [[ -n "${INPUT_BASELINE_PROFILE:-}" && -z "${INPUT_BASELINE_TARGET:-}" ]]; then
   _error_annotation "baseline-profile is set ('${INPUT_BASELINE_PROFILE}') but baseline-target is not -- both are required to resolve one target's snapshot from a release-contract baseline-set archive."
   exit 1
@@ -3196,6 +3433,8 @@ if [[ -n "$ABI_BASELINE" && "$MODE" == "compare" ]]; then
     # download and no *.abicheck.json pattern match (which would reject a
     # normal .json name; the input doc promises a path is used directly).
     BASELINE_FILE="$ABI_BASELINE"
+    BASELINE_SOURCE="direct-path"
+    BASELINE_SOURCE_ASSET="$ABI_BASELINE"
   else
     # gh release download relies on local git repo context (README: "the
     # latest release in the project") when no -R/--repo is given -- a job
@@ -3216,7 +3455,13 @@ if [[ -n "$ABI_BASELINE" && "$MODE" == "compare" ]]; then
       --pattern '*.abicheck.json.gz'
       --pattern '*.abicheck.json.zst'
     )
-    if [[ "$ABI_BASELINE" == "latest-release" ]]; then
+    if [[ "$_BASELINE_SET_SELECTED" == "1" ]]; then
+      # Selected baseline-set: no legacy download at all (see
+      # _BASELINE_SET_SELECTED above). BASELINE_DIR is empty, so the
+      # single-file lookup below finds nothing and routes into
+      # _try_baseline_set_fallback, the only source this run consults.
+      :
+    elif [[ "$ABI_BASELINE" == "latest-release" ]]; then
       echo "::group::Fetch ABI baseline from latest release"
       # ${arr[@]+"${arr[@]}"}, not a bare "${arr[@]}": under macOS's stock
       # (GPLv2-frozen) bash 3.2's set -u, expanding an *empty* array as
@@ -3262,6 +3507,8 @@ if [[ -n "$ABI_BASELINE" && "$MODE" == "compare" ]]; then
     done <<< "$(find "$BASELINE_DIR" \( -name '*.abicheck.json' -o -name '*.abicheck.json.gz' -o -name '*.abicheck.json.zst' \) 2>/dev/null)"
     if [[ ${#BASELINE_FILES[@]} -eq 1 ]]; then
       BASELINE_FILE="${BASELINE_FILES[0]}"
+      BASELINE_SOURCE="legacy-asset"
+      BASELINE_SOURCE_ASSET="$(basename "${BASELINE_FILES[0]}")"
     elif [[ ${#BASELINE_FILES[@]} -eq 0 && -n "${INPUT_BASELINE_PROFILE:-}" ]]; then
       # No single-snapshot asset -- try a release-contract baseline-set
       # archive instead (unifies the two release-baseline protocols; see
@@ -5500,6 +5747,9 @@ fi
 {
   echo "verdict=$VERDICT"
   echo "exit-code=$ABICHECK_EXIT"
+  # Provenance of the compared baseline (empty fields when none was resolved
+  # from a release). See _emit_baseline_source_outputs.
+  _emit_baseline_source_outputs
   # Only emit report-path when a real report file was produced.
   #
   # Withheld even when one exists whenever the sarif/upload-sarif mismatch
@@ -5796,6 +6046,10 @@ if [[ "${INPUT_ADD_JOB_SUMMARY:-true}" == "true" && "$MODE" != "dump" ]]; then
     # row above: a `format: json` step overridden to `-o markdown=-` (or
     # the reverse) would otherwise embed the real output under the wrong
     # rendering rule.
+    # Which baseline this run compared against, before the report itself so
+    # a reader sees the operand's provenance first (nothing when no release
+    # baseline was resolved).
+    _write_baseline_source_summary
     if [[ -n "$ABICHECK_OUTPUT" ]]; then
       echo "<details>"
       echo "<summary>Full report</summary>"

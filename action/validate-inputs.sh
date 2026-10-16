@@ -455,6 +455,19 @@ fi
 _BASELINE_PROFILE="${INPUT_BASELINE_PROFILE:-}"
 _BASELINE_TARGET="${INPUT_BASELINE_TARGET:-}"
 _BASELINE_ASSET_NAME_TEMPLATE="${INPUT_BASELINE_ASSET_NAME_TEMPLATE:-}"
+# baseline-project-ref: action.yml defaults it to 'tag', so an explicit ''
+# (check disabled) and an unset variable are told apart by ${x-tag}, never
+# ${x:-}. Only the closed value set is checked here; the release tag or
+# commit it names is resolved at fetch time, in run.sh.
+_BASELINE_PROJECT_REF="${INPUT_BASELINE_PROJECT_REF-tag}"
+case "$_BASELINE_PROJECT_REF" in
+  '' | tag | commit) ;;
+  *)
+    if ! [[ "$_BASELINE_PROJECT_REF" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]]; then
+      _fail "baseline-project-ref '$_BASELINE_PROJECT_REF' is not one of '' (no check), 'tag', 'commit', or a full 40/64-character commit SHA."
+    fi
+    ;;
+esac
 # Scope check keys off baseline-profile/baseline-target only, not
 # baseline-asset-name-template: action.yml forwards that input's own
 # manifest default ('abicheck-baseline-{profile}.tar.zst') unconditionally,
