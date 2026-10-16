@@ -66,7 +66,7 @@ no native-ABI signal at all.
       `manylinux_2_28_x86_64`, `musllinux_1_2_aarch64`,
       `macosx_11_0_arm64`, …) into a structured floor value —
       `parse_musllinux_floor`/`parse_macos_deployment_target_floor`
-      alongside G10's `parse_manylinux_glibc_floor` (`abicheck/package.py`).
+      alongside G10's `parse_manylinux_glibc_floor` (`abicheck/extract/packages.py`).
       `win_amd64` tag parsing (Windows) is not yet done — no Windows
       evidence-vs-claim check exists yet to consume it.
 - [x] For each binary, extract the corresponding evidence: `GLIBC_*`/
@@ -102,7 +102,7 @@ no native-ABI signal at all.
 
 ## Design
 
-1. A `wheel_tag.py` (or an addition to `abicheck/package.py`) parses PEP
+1. A `wheel_tag.py` (or an addition to `abicheck/extract/packages.py`) parses PEP
    425/600 wheel filename tags into a structured `WheelPlatformClaim`.
 2. Per-platform evidence extractors reuse existing metadata modules
    (`elf_metadata.py`, `macho_metadata.py`, `pe_metadata.py`) — this plan adds
@@ -124,7 +124,7 @@ no native-ABI signal at all.
 
 ## Files & surfaces
 
-- `abicheck/package.py` (wheel tag parsing), `abicheck/diff_versioning.py`
+- `abicheck/extract/packages.py` (wheel tag parsing), `abicheck/diff_versioning.py`
   (glibc/GLIBCXX/CXXABI floor, extending G10), `abicheck/macho_metadata.py`
   / `abicheck/pe_metadata.py` (deployment-target / runtime-requirement
   fields if not already exposed), a new `abicheck/diff_wheel_deployment.py`

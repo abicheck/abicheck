@@ -159,7 +159,7 @@ class TestBundleAnalysisScope:
     def test_stored_live_scopes_the_old_bundle(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        import abicheck.package as package
+        import abicheck.extract.packages as package
         from abicheck.bundle_side_input import compare_release_against_bundle_facts
 
         monkeypatch.setattr(
@@ -185,7 +185,7 @@ class TestBundleAnalysisScope:
         unsupported, so its ELF never reaches the bundle graph. The OLD
         provider must leave the graph with it -- never read as deleted while
         its consumer survives (Codex review, fifth round)."""
-        import abicheck.package as package
+        import abicheck.extract.packages as package
         import abicheck.workflows.input_resolution as input_resolution
         from abicheck.bundle_side_input import compare_release_against_bundle_facts
 
@@ -334,7 +334,7 @@ class TestStoredLiveUnsupportedMember:
     def test_unsupported_new_artifact_is_recorded_not_raised(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, exc: Exception
     ) -> None:
-        import abicheck.package as package
+        import abicheck.extract.packages as package
         import abicheck.workflows.input_resolution as input_resolution
         from abicheck.bundle_side_input import compare_release_against_bundle_facts
 
@@ -382,7 +382,7 @@ class TestStoredLiveUnsupportedMember:
         dispatcher's "nothing matched" usage error must not fire -- the
         members *did* match -- and the report carries the `unsupported`
         members and D7's `no_comparison_completed` outcome (Codex review)."""
-        import abicheck.package as package
+        import abicheck.extract.packages as package
         import abicheck.workflows.input_resolution as input_resolution
 
         monkeypatch.setattr(

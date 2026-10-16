@@ -137,7 +137,7 @@ module = [
     "abicheck.dwarf_unified",
     "abicheck.dwarf_presence",
     "abicheck.dumper",
-    "abicheck.package",
+    "abicheck.extract.packages",
     "abicheck.pdb_parser",
     "abicheck.pdb_metadata",
     "abicheck.pdb_utils",

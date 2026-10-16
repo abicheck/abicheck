@@ -259,7 +259,7 @@ def compare_release_against_bundle_facts(
         SnapshotError,
         UnsupportedArtifactError,
     )
-    from .package import discover_shared_libraries
+    from .extract.packages import discover_shared_libraries
     from .serialization import load_bundle_facts
     from .workflows.bundle_facts_compare import compare_bundle_from_facts
     from .workflows.bundle_facts_library_overrides import (

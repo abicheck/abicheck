@@ -834,7 +834,7 @@ directory export on a single pair is a usage error; the Action's
 `--devel-pkg` → `-H`, `--probe-matrix` → typed `--build-info`; net −3 on
 `compare`, a rename on `dump`. Routing is content-only
 (`workflows/evidence_transport.py`, `frontends/cli/options/evidence_roles.py`),
-which forced `abicheck/package.py`'s extractors to detect by magic bytes, not
+which forced `abicheck/extract/packages.py`'s extractors to detect by magic bytes, not
 filename; `extract/detached_debug.py` adds the bare detached-debug-file
 transport with build-id validation. **Explicitly not merged:** `--sources`
 and `--build-info`.

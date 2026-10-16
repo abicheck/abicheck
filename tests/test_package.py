@@ -23,7 +23,7 @@ from _package_fixtures import (
 )
 
 from abicheck.errors import ExtractionSecurityError
-from abicheck.package import (
+from abicheck.extract.packages import (
     CondaExtractor,
     DebExtractor,
     DirExtractor,
@@ -59,6 +59,9 @@ from abicheck.package import (
 )
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
+
+
+_PKG = "abicheck.extract.packages"
 
 
 def _make_minimal_elf_so(path: Path) -> None:
@@ -2408,7 +2411,7 @@ class TestExtractResult:
 class TestValidateMemberPathExtended:
     def test_leading_slash_rejected_crossplatform(self, tmp_path: Path) -> None:
         """Ensure /etc/passwd is caught even when os.path.isabs returns False (Windows)."""
-        with mock.patch("abicheck.package.os.path.isabs", return_value=False):
+        with mock.patch(f"{_PKG}.os.path.isabs", return_value=False):
             with pytest.raises(ExtractionSecurityError, match="absolute path"):
                 _validate_member_path("/etc/passwd", tmp_path)
 
@@ -2467,7 +2470,7 @@ class TestTarExtractorSymlinks:
         # os.symlink() fails (e.g. Windows without symlink privilege) --
         # no exception, no flag. Detected up front instead of letting a
         # confusing downstream error surface (Codex).
-        from abicheck import package as package_mod
+        from abicheck.extract import packages as package_mod
 
         archive = tmp_path / "symlink.tar.gz"
         with tarfile.open(archive, "w:gz") as tf:
@@ -2492,7 +2495,7 @@ class TestTarExtractorSymlinks:
     def test_target_supports_symlinks_probe_true_on_a_real_symlink_capable_fs(
         self, tmp_path: Path
     ) -> None:
-        from abicheck.package import _target_supports_symlinks
+        from abicheck.extract.packages import _target_supports_symlinks
 
         assert _target_supports_symlinks(tmp_path) is True
         # No leftover probe entries.
@@ -2503,7 +2506,7 @@ class TestTarExtractorSymlinks:
     ) -> None:
         import os as os_mod
 
-        from abicheck.package import _target_supports_symlinks
+        from abicheck.extract.packages import _target_supports_symlinks
 
         def _failing_symlink(*args: object, **kwargs: object) -> None:
             raise OSError("simulated: no privilege")
@@ -2523,7 +2526,7 @@ class TestTarExtractorSymlinks:
         # unconditional cleanup would then delete it. The uuid4-suffixed,
         # exclusive-create scheme can't collide with anything already
         # there (Codex).
-        from abicheck.package import _target_supports_symlinks
+        from abicheck.extract.packages import _target_supports_symlinks
 
         preexisting = tmp_path / "real-user-data.txt"
         preexisting.write_text("do not touch")
@@ -2542,7 +2545,7 @@ class TestTarExtractorSymlinks:
         # someone else's file (Codex).
         import os as os_mod
 
-        from abicheck.package import _target_supports_symlinks
+        from abicheck.extract.packages import _target_supports_symlinks
 
         real_open = os_mod.open
         captured_flags: list[int] = []
@@ -2564,7 +2567,7 @@ class TestTarExtractorSymlinks:
         # (e.g. two threads) would then collide on it. Calling the probe
         # many times back-to-back must never raise FileExistsError from a
         # stale/colliding name of its own making.
-        from abicheck.package import _target_supports_symlinks
+        from abicheck.extract.packages import _target_supports_symlinks
 
         for _ in range(20):
             assert _target_supports_symlinks(tmp_path) is True
@@ -2581,7 +2584,7 @@ class TestTarExtractorSymlinks:
         # created. By the time tarfile's own bulk extraction walked through
         # the now-real symlink, a target that validated as contained could
         # resolve outside target_root (Codex review, fresh evidence).
-        import abicheck.package as pb
+        import abicheck.extract.packages as pb
 
         monkeypatch.setattr(pb.sys, "version_info", (3, 11, 0, "final", 0))
 
@@ -2610,7 +2613,7 @@ class TestTarExtractorSymlinks:
         # Negative control for the member-by-member < 3.12 fallback: a
         # legitimate nested-directory archive with an internal symlink
         # still extracts correctly (contents present, symlink resolvable).
-        import abicheck.package as pb
+        import abicheck.extract.packages as pb
 
         monkeypatch.setattr(pb.sys, "version_info", (3, 11, 0, "final", 0))
 
@@ -2640,7 +2643,7 @@ class TestTarExtractorSymlinks:
         # just at the _validate_symlink_target primitive level -- since
         # tarfile's real extraction replaces `a` outright rather than
         # writing through the first symlink (Codex, concrete repro).
-        import abicheck.package as pb
+        import abicheck.extract.packages as pb
 
         monkeypatch.setattr(pb.sys, "version_info", (3, 11, 0, "final", 0))
 
@@ -2858,7 +2861,7 @@ class TestTarExtractorZstDecompressionBomb:
         # deadline at all, so a stalled zstd process could hang
         # extraction indefinitely (Codex review, fresh evidence).
         pytest.importorskip("zstandard")
-        import abicheck.package as package_mod
+        import abicheck.extract.packages as package_mod
         from abicheck.errors import SnapshotError
 
         monkeypatch.setattr(package_mod, "_ZSTD_CLI_TIMEOUT_S", 1)
@@ -2919,7 +2922,7 @@ class TestTarExtractorZstDecompressionBomb:
             pytest.skip("real zstd CLI not available")
         import zstandard
 
-        import abicheck.package as package_mod
+        import abicheck.extract.packages as package_mod
 
         real_queue_cls = package_mod.queue.Queue
         captured_maxsize: list[int] = []
@@ -2964,7 +2967,7 @@ class TestTarExtractorZstDecompressionBomb:
         zstandard = pytest.importorskip("zstandard")
         if shutil.which("zstd") is None:
             pytest.skip("real zstd CLI not available")
-        import abicheck.package as package_mod
+        import abicheck.extract.packages as package_mod
 
         monkeypatch.setenv("_ABICHECK_TAR_ZST_MAX_DECODED_BYTES", "1000")
         monkeypatch.setattr(package_mod, "_ZSTD_READER_QUEUE_MAXSIZE", 1)
@@ -3074,7 +3077,7 @@ class TestBoundedTarInfoExtendedHeaders:
         # is itself 2 MiB long, which a real filesystem legitimately
         # rejects as ENAMETOOLONG regardless of this guard, and that
         # unrelated OS limit would otherwise mask what's being tested.
-        from abicheck.package import _BoundedTarInfo
+        from abicheck.extract.packages import _BoundedTarInfo
 
         archive = tmp_path / "evil_gnu.tar"
         with tarfile.open(archive, "w", format=tarfile.GNU_FORMAT) as tf:
@@ -3111,7 +3114,7 @@ class TestRejectOversizedDeclaredContent:
     def test_rejects_when_declared_sizes_exceed_the_limit(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from abicheck.package import _reject_oversized_declared_content
+        from abicheck.extract.packages import _reject_oversized_declared_content
 
         monkeypatch.setenv("_ABICHECK_TAR_ZST_MAX_DECODED_BYTES", "1000")
 
@@ -3133,7 +3136,7 @@ class TestRejectOversizedDeclaredContent:
     def test_accepts_ordinary_declared_sizes(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from abicheck.package import _reject_oversized_declared_content
+        from abicheck.extract.packages import _reject_oversized_declared_content
 
         monkeypatch.setenv("_ABICHECK_TAR_ZST_MAX_DECODED_BYTES", "1000")
 
@@ -3165,7 +3168,7 @@ class TestRejectOversizedDeclaredContent:
         # all, but each still costs a retained TarInfo object -- an
         # independent, incrementally-checked count cap is what stops the
         # loop from consuming the whole malicious archive (Codex).
-        from abicheck.package import _reject_oversized_declared_content
+        from abicheck.extract.packages import _reject_oversized_declared_content
 
         monkeypatch.setenv("_ABICHECK_TAR_ZST_MAX_MEMBERS", "3")
 
@@ -3198,7 +3201,7 @@ class TestRejectOversizedDeclaredContent:
     def test_accepts_member_count_at_or_below_the_limit(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from abicheck.package import _reject_oversized_declared_content
+        from abicheck.extract.packages import _reject_oversized_declared_content
 
         monkeypatch.setenv("_ABICHECK_TAR_ZST_MAX_MEMBERS", "3")
 
@@ -3422,7 +3425,7 @@ class TestRejectHardlinkFallbackAmplification:
         # can't be exploited for amplification (extraction fails outright
         # on it either way) -- must degrade safely, not raise internally
         # (an AttributeError/KeyError escaping this check's own logic).
-        from abicheck.package import _reject_hardlink_fallback_amplification
+        from abicheck.extract.packages import _reject_hardlink_fallback_amplification
 
         archive = tmp_path / "dangling.tar"
         with tarfile.open(archive, "w") as tf:
@@ -3647,7 +3650,7 @@ class TestResolveDebugInfo:
         bid_file.parent.mkdir(parents=True)
         bid_file.write_bytes(b"debug data")
 
-        with mock.patch("abicheck.package._read_build_id", return_value="abcdef1234"):
+        with mock.patch(f"{_PKG}._read_build_id", return_value="abcdef1234"):
             result = resolve_debug_info(binary, debug_dir)
 
         assert result is not None
@@ -3665,7 +3668,7 @@ class TestResolveDebugInfo:
         bid_file.parent.mkdir(parents=True)
         bid_file.write_bytes(b"debug data")
 
-        with mock.patch("abicheck.package._read_build_id", return_value="abcdef1234"):
+        with mock.patch(f"{_PKG}._read_build_id", return_value="abcdef1234"):
             result = resolve_debug_info(binary, debug_dir)
 
         assert result is not None
@@ -3708,7 +3711,7 @@ class TestRpmExtractorExtended:
         f.write_bytes(b"\xed\xab\xee\xdb" + b"\x00" * 100)
         out = tmp_path / "output"
         out.mkdir()
-        with mock.patch("abicheck.package.shutil.which", return_value=None):
+        with mock.patch(f"{_PKG}.shutil.which", return_value=None):
             with pytest.raises(RuntimeError, match="rpm2cpio not found"):
                 RpmExtractor().extract(f, out)
 
@@ -3722,7 +3725,7 @@ class TestRpmExtractorExtended:
         def _which(cmd: str) -> str | None:
             return "/usr/bin/rpm2cpio" if cmd == "rpm2cpio" else None
 
-        with mock.patch("abicheck.package.shutil.which", side_effect=_which):
+        with mock.patch(f"{_PKG}.shutil.which", side_effect=_which):
             with pytest.raises(RuntimeError, match="cpio not found"):
                 RpmExtractor().extract(f, out)
 
@@ -3741,7 +3744,7 @@ class TestDebExtractorExtended:
         f.write_bytes(b"!<arch>\n" + b"\x00" * 100)
         out = tmp_path / "output"
         out.mkdir()
-        with mock.patch("abicheck.package.shutil.which", return_value=None):
+        with mock.patch(f"{_PKG}.shutil.which", return_value=None):
             with pytest.raises(RuntimeError, match="ar not found"):
                 DebExtractor().extract(f, out)
 
@@ -3757,12 +3760,10 @@ class TestDebExtractorExtended:
             (staging / "data.tar.zst").write_bytes(b"zstd payload")
             return mock.Mock(returncode=0)
 
-        with mock.patch("abicheck.package.shutil.which", return_value="/usr/bin/ar"):
-            with mock.patch(
-                "abicheck.package.run_bounded", side_effect=fake_run
-            ) as mock_run:
+        with mock.patch(f"{_PKG}.shutil.which", return_value="/usr/bin/ar"):
+            with mock.patch(f"{_PKG}.run_bounded", side_effect=fake_run) as mock_run:
                 with mock.patch(
-                    "abicheck.package.TarExtractor._safe_extract_zst_tar"
+                    f"{_PKG}.TarExtractor._safe_extract_zst_tar"
                 ) as extract_zst:
                     DebExtractor().extract(f, out)
 
@@ -3789,10 +3790,10 @@ class TestDebExtractorExtended:
             (staging / "control.tar.zst").write_bytes(b"zstd payload")
             return mock.Mock(returncode=0)
 
-        with mock.patch("abicheck.package.shutil.which", return_value="/usr/bin/ar"):
-            with mock.patch("abicheck.package.run_bounded", side_effect=fake_run):
+        with mock.patch(f"{_PKG}.shutil.which", return_value="/usr/bin/ar"):
+            with mock.patch(f"{_PKG}.run_bounded", side_effect=fake_run):
                 with mock.patch(
-                    "abicheck.package.TarExtractor._safe_extract_zst_tar"
+                    f"{_PKG}.TarExtractor._safe_extract_zst_tar"
                 ) as extract_zst:
                     DebExtractor().extract(f, out)
 
@@ -3825,8 +3826,8 @@ class TestDebExtractorExtended:
                 tf.addfile(info, io.BytesIO(data))
             return mock.Mock(returncode=0)
 
-        with mock.patch("abicheck.package.shutil.which", return_value="/usr/bin/ar"):
-            with mock.patch("abicheck.package.run_bounded", side_effect=fake_run):
+        with mock.patch(f"{_PKG}.shutil.which", return_value="/usr/bin/ar"):
+            with mock.patch(f"{_PKG}.run_bounded", side_effect=fake_run):
                 result = DebExtractor().extract(f, out)
 
         assert result.symbols_file is not None
@@ -3850,8 +3851,8 @@ class TestDebExtractorExtended:
                 pass
             return mock.Mock(returncode=0)
 
-        with mock.patch("abicheck.package.shutil.which", return_value="/usr/bin/ar"):
-            with mock.patch("abicheck.package.run_bounded", side_effect=fake_run):
+        with mock.patch(f"{_PKG}.shutil.which", return_value="/usr/bin/ar"):
+            with mock.patch(f"{_PKG}.run_bounded", side_effect=fake_run):
                 result = DebExtractor().extract(f, out)
 
         assert result.symbols_file is None
@@ -3879,8 +3880,8 @@ class TestDebExtractorExtended:
                 tf.addfile(info, io.BytesIO(data))
             return mock.Mock(returncode=0)
 
-        with mock.patch("abicheck.package.shutil.which", return_value="/usr/bin/ar"):
-            with mock.patch("abicheck.package.run_bounded", side_effect=fake_run):
+        with mock.patch(f"{_PKG}.shutil.which", return_value="/usr/bin/ar"):
+            with mock.patch(f"{_PKG}.run_bounded", side_effect=fake_run):
                 result = DebExtractor().extract(f, out)
 
         assert result.symbols_file is None
@@ -3915,8 +3916,8 @@ class TestDebExtractorExtended:
                 tf.addfile(info, io.BytesIO(data))
             return mock.Mock(returncode=0)
 
-        with mock.patch("abicheck.package.shutil.which", return_value="/usr/bin/ar"):
-            with mock.patch("abicheck.package.run_bounded", side_effect=fake_run):
+        with mock.patch(f"{_PKG}.shutil.which", return_value="/usr/bin/ar"):
+            with mock.patch(f"{_PKG}.run_bounded", side_effect=fake_run):
                 result = DebExtractor().extract(f, out)
 
         assert result.symbols_file is None
@@ -3951,8 +3952,8 @@ class TestDebExtractorExtended:
                 tf.addfile(info, io.BytesIO(data))
             return mock.Mock(returncode=0)
 
-        with mock.patch("abicheck.package.shutil.which", return_value="/usr/bin/ar"):
-            with mock.patch("abicheck.package.run_bounded", side_effect=fake_run):
+        with mock.patch(f"{_PKG}.shutil.which", return_value="/usr/bin/ar"):
+            with mock.patch(f"{_PKG}.run_bounded", side_effect=fake_run):
                 result = DebExtractor().extract(f, out)
 
         assert result.symbols_file is not None
@@ -3990,8 +3991,8 @@ class TestDebExtractorExtended:
                 tf.addfile(info, io.BytesIO(elf_bytes))
             return mock.Mock(returncode=0)
 
-        with mock.patch("abicheck.package.shutil.which", return_value="/usr/bin/ar"):
-            with mock.patch("abicheck.package.run_bounded", side_effect=fake_run):
+        with mock.patch(f"{_PKG}.shutil.which", return_value="/usr/bin/ar"):
+            with mock.patch(f"{_PKG}.run_bounded", side_effect=fake_run):
                 DebExtractor().extract(f, out)
 
         assert (out / ".deb_control" / "libevil.so").exists()
@@ -4020,9 +4021,9 @@ class TestDebExtractorExtended:
             (staging / "data.tar.xz").write_bytes(b"tar payload")
             return mock.Mock(returncode=0)
 
-        with mock.patch("abicheck.package.shutil.which", return_value="/usr/bin/ar"):
-            with mock.patch("abicheck.package.run_bounded", side_effect=fake_run):
-                with mock.patch("abicheck.package.TarExtractor._safe_extract"):
+        with mock.patch(f"{_PKG}.shutil.which", return_value="/usr/bin/ar"):
+            with mock.patch(f"{_PKG}.run_bounded", side_effect=fake_run):
+                with mock.patch(f"{_PKG}.TarExtractor._safe_extract"):
                     DebExtractor().extract(Path("test.deb"), out)
 
         assert ar_input_paths == [f.resolve()]
@@ -4061,9 +4062,7 @@ class TestDebExtractorExtended:
         mock_dctx.stream_reader.return_value = FakeReader()
 
         with mock.patch.dict(sys.modules, {"zstandard": mock_zstd}):
-            with mock.patch(
-                "abicheck.package.TarExtractor._safe_extract"
-            ) as safe_extract:
+            with mock.patch(f"{_PKG}.TarExtractor._safe_extract") as safe_extract:
                 TarExtractor._safe_extract_zst_tar(zst_path, target)
 
         tar_path = safe_extract.call_args.args[0]
@@ -4108,14 +4107,12 @@ class TestDebExtractorExtended:
         proc.poll.return_value = 0
 
         with mock.patch("builtins.__import__", side_effect=fake_import):
-            with mock.patch(
-                "abicheck.package.shutil.which", return_value="/usr/bin/zstd"
-            ):
+            with mock.patch(f"{_PKG}.shutil.which", return_value="/usr/bin/zstd"):
                 with mock.patch(
-                    "abicheck.package.subprocess.Popen", return_value=proc
+                    f"{_PKG}.subprocess.Popen", return_value=proc
                 ) as popen_zstd:
                     with mock.patch(
-                        "abicheck.package.TarExtractor._safe_extract"
+                        f"{_PKG}.TarExtractor._safe_extract"
                     ) as safe_extract:
                         TarExtractor._safe_extract_zst_tar(zst_path, target)
 
@@ -4330,7 +4327,7 @@ class TestCondaV2Extraction:
         out.mkdir()
 
         with mock.patch.dict("sys.modules", {"zstandard": None}):
-            with mock.patch("abicheck.package.shutil.which", return_value=None):
+            with mock.patch(f"{_PKG}.shutil.which", return_value=None):
                 with pytest.raises(RuntimeError, match="Cannot extract .tar.zst"):
                     CondaExtractor().extract(conda_pkg, out)
 
@@ -4354,8 +4351,8 @@ class TestDebExtractorNoDataTar:
             (staging / "control.tar.gz").write_bytes(b"control")
             return mock.Mock(returncode=0)
 
-        with mock.patch("abicheck.package.shutil.which", return_value="/usr/bin/ar"):
-            with mock.patch("abicheck.package.run_bounded", side_effect=fake_run):
+        with mock.patch(f"{_PKG}.shutil.which", return_value="/usr/bin/ar"):
+            with mock.patch(f"{_PKG}.run_bounded", side_effect=fake_run):
                 with pytest.raises(RuntimeError, match="No data.tar"):
                     DebExtractor().extract(f, out)
 

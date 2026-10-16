@@ -533,7 +533,7 @@ checks that each path exists. The review-trigger script
   packages-and-consumers:               # B9
     canonical_page: learn/packages-and-consumers.md
     fact_sources:
-      - abicheck/package.py
+      - abicheck/extract/packages.py
       - abicheck/debian_symbols.py
     task_pages:
       - use/python-extensions.md

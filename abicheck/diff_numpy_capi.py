@@ -222,7 +222,7 @@ def check_numpy_metadata_contract(
 
     *declared_numpy_requirement* is a PEP 508 specifier-set string (e.g.
     ``">=1.23.5,<3"``, as returned by
-    :func:`abicheck.package.parse_wheel_numpy_requirement`) or ``None``/``""``
+    :func:`abicheck.extract.packages.parse_wheel_numpy_requirement`) or ``None``/``""``
     when no unconditional ``numpy`` requirement is declared at all.
 
     Returns ``[]`` when *surface* is ``None`` (no NumPy C-API consumption —

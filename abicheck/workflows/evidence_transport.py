@@ -39,12 +39,12 @@ suffix: that is bug class
 (`tests/regressions/manifest_tool_surface.py`), whose corollary is that the
 classifier being name-independent proves nothing about the pipeline behind
 it -- which is why the transports this module names are exactly the ones
-`abicheck.package`'s extractors and
+`abicheck.extract.packages`'s extractors and
 `abicheck.extract.detached_debug` resolve content-first too, and why the
 role tests drive the whole public invocation under non-conventional names.
 
 A ``workflows`` module because it reads ``extract``-layer contracts
-(`abicheck.package`, `abicheck.extract.detached_debug`) that ADR-061 does
+(`abicheck.extract.packages`, `abicheck.extract.detached_debug`) that ADR-061 does
 not let a ``frontends`` module import; the frontend half (splitting each
 role's sided values into the per-side destinations the command bodies
 consume) is `abicheck.frontends.cli.options.evidence_roles`.
@@ -100,12 +100,12 @@ class BuildInfoTransport(Enum):
 def is_evidence_package(path: Path) -> bool:
     """Whether *path*'s content is a package archive some extractor unpacks.
 
-    Delegates to :func:`abicheck.package.is_package`, which asks the
+    Delegates to :func:`abicheck.extract.packages.is_package`, which asks the
     extractors themselves -- so this answers "the pipeline can actually
     unpack this", not "the name looks like a package", and the two cannot
     drift apart.
     """
-    from ..package import is_package
+    from ..extract.packages import is_package
 
     return is_package(path)
 

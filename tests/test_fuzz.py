@@ -90,7 +90,7 @@ def test_snapshot_json_roundtrip(name: str, version: str) -> None:
 # 2. Path validation fuzzing — _validate_member_path
 # ---------------------------------------------------------------------------
 from abicheck.errors import ExtractionSecurityError  # noqa: E402
-from abicheck.package import _validate_member_path  # noqa: E402
+from abicheck.extract.packages import _validate_member_path  # noqa: E402
 
 
 @settings(max_examples=50)

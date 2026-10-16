@@ -299,14 +299,14 @@ class TestBug5PieDetection:
     """_is_elf_shared_object must return False for PIE executables."""
 
     def test_dso_without_interp_is_shared_object(self, tmp_path: Path):
-        from abicheck.package import _is_elf_shared_object
+        from abicheck.extract.packages import _is_elf_shared_object
 
         so = tmp_path / "libfoo.so"
         _make_elf_dso_no_interp(so)
         assert _is_elf_shared_object(so) is True
 
     def test_pie_with_interp_is_not_shared_object(self, tmp_path: Path):
-        from abicheck.package import _is_elf_shared_object
+        from abicheck.extract.packages import _is_elf_shared_object
 
         exe = tmp_path / "app"
         _make_elf_pie_with_interp(exe)
@@ -320,7 +320,7 @@ class TestBug5PieDetection:
         _has_interp_segment returns None and _is_elf_shared_object returns False
         rather than guessing.
         """
-        from abicheck.package import _is_elf_shared_object
+        from abicheck.extract.packages import _is_elf_shared_object
 
         so = tmp_path / "libweird.so"
         _make_elf_pie_with_interp(so)
@@ -331,7 +331,7 @@ class TestBug5PieDetection:
         assert _is_elf_shared_object(so) is False
 
     def test_static_exec_et_exec_is_not_shared_object(self, tmp_path: Path):
-        from abicheck.package import _is_elf_shared_object
+        from abicheck.extract.packages import _is_elf_shared_object
 
         exe = tmp_path / "app"
         # ET_EXEC (type=2)

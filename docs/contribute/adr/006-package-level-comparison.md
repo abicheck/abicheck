@@ -5,7 +5,7 @@
 **Decision maker:** Nikolay Petrov
 
 > **2026-07 amendment:** The scope below (RPM, Deb, tar archives) undersells
-> current support. `abicheck/package.py` also ships `CondaExtractor` (`.conda`
+> current support. `abicheck/extract/packages.py` also ships `CondaExtractor` (`.conda`
 > v2 zip format and legacy `.tar.bz2`) and `WheelExtractor` (`.whl`), alongside
 > `RpmExtractor`/`DebExtractor`/`TarExtractor`/`DirExtractor` — all through the
 > same `detect_extractor()` auto-detection and the same path-traversal/symlink
@@ -79,7 +79,7 @@ abicheck compare-release libfoo-1.0.rpm libfoo-1.1.rpm \
 The CLI auto-detects format by extension and magic bytes. No separate `pkg-compare`
 command — it's the same `compare-release` with broader input support.
 
-### New module: `abicheck/package.py`
+### New module: `abicheck/extract/packages.py`
 
 ```python
 class PackageExtractor(Protocol):

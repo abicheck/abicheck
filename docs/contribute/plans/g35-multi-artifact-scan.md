@@ -496,7 +496,7 @@ implementation that shipped.
      where "newest version wins" is a meaningful tiebreak.
      **Correction — deduplicate symlink aliases before collision-checking,
      don't reject them.** `discover_shared_libraries()`
-     (`abicheck/package.py`, `os.walk(..., followlinks=False)`) lists a
+     (`abicheck/extract/packages.py`, `os.walk(..., followlinks=False)`) lists a
      symlink file (`libfoo.so -> libfoo.so.1`) and its real target
      (`libfoo.so.1`) as two separate discovered paths — a completely
      ordinary Unix install/package layout, not an edge case — and both

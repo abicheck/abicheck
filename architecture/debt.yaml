@@ -794,7 +794,7 @@
       "review_by": "2026-11-30"
     },
     {
-      "path": "abicheck/package.py",
+      "path": "abicheck/extract/packages.py",
       "baseline_lines": 1734,
       "target": "storage",
       "rule": "no_growth",
@@ -1763,7 +1763,7 @@
     },
     {
       "path": "tests/test_package.py",
-      "baseline_lines": 4497,
+      "baseline_lines": 4494,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",

@@ -51,7 +51,7 @@ DIRECT_CALL_ALLOWLIST: dict[str, tuple[int, str]] = {
     # Streaming zstd / rpm2cpio|cpio pipelines: each owns a size-bounded
     # reader and its own wall-clock deadline, and no child spawns
     # grandchildren; moving them onto supervised_popen is a separate slice.
-    "abicheck/package.py": (
+    "abicheck/extract/packages.py": (
         3,
         "streaming decompression pipelines with their own deadline",
     ),

@@ -47,7 +47,7 @@ given a consumer (see the plan's own A1.6 note).
 
 **S3** (2026-09-06): package component inventories and support-promise
 findings. `abicheck/model/package_inventory.py` is the declared component
-set with its own completeness flag; `abicheck/package.py`'s
+set with its own completeness flag; `abicheck/extract/packages.py`'s
 `package_component_inventory` builds one from an archive the extractor
 unpacked in full (`ExtractResult.container_complete`), which makes a live
 package operand a D2 completeness proof for the first time — a directory
@@ -146,7 +146,7 @@ The current code answers these unevenly (file references are from the
   `AnalysisPlan`) carries an expected inventory or a member/variant
   selection; no `ExitReason`/`RunOutcome` axis expresses "the inventory I
   was asked to cover was not fully covered".
-- Package extraction (`abicheck/package.py`) returns directories, never a
+- Package extraction (`abicheck/extract/packages.py`) returns directories, never a
   declared component inventory, so a component the extractor failed to
   unpack and a component the package no longer ships are indistinguishable.
   *(Closed by S3: `package_component_inventory` returns a declared component

@@ -161,7 +161,7 @@ topics:
     canonical_page: use/rust-libraries.md
     fact_sources:
       - abicheck/policies/rust_c_ffi.yaml
-      - abicheck/package.py
+      - abicheck/extract/packages.py
       - abicheck/diff_templates.py
     allowed_summaries:
       - use/policies.md
@@ -763,7 +763,7 @@ topics:
   packages-and-consumers:
     canonical_page: learn/packages-and-consumers.md
     fact_sources:
-      - abicheck/package.py
+      - abicheck/extract/packages.py
       - abicheck/debian_symbols.py
     task_pages:
       - use/python-extensions.md

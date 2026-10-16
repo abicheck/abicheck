@@ -190,7 +190,7 @@ class TestOnlyTheAssertionProves:
         dispatches to): OLD's proof follows its own assertion, so a
         NEW-only member is a proven addition iff asserted -- the identical
         reading the package form above gives."""
-        import abicheck.package as package
+        import abicheck.extract.packages as package
         from abicheck.bundle_side_input import compare_release_against_bundle_facts
         from abicheck.serialization import save_bundle_facts, save_snapshot
 
