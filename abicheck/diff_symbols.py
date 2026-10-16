@@ -175,10 +175,6 @@ from .model.surface_facts import (
 _UNKNOWN_TYPE = "?"
 
 
-def _type_unknown(type_name: str | None) -> bool:
-    return type_name is None or type_name.strip() == _UNKNOWN_TYPE
-
-
 def _is_stripped_symbols_only(snap: AbiSnapshot) -> bool:
     """True when *snap* is a stripped, symbols-only dump: it exports symbols but
     carries no type-level evidence (no records/enums/typedefs, no DWARF content)
