@@ -51,6 +51,7 @@ from .model.contract_finding_relevance import is_evaluated
 from .model.symbol_inventory import SymbolInventory
 from .policy.classification import Verdict
 from .policy.evaluate import effective_kind_sets, verdict_for
+from .report.change_operation import entity_for_change
 from .report.envelope import resolved_document as _resolved_document
 from .report.junit_disposition import (
     # ADR-061: moved to report/ (its historical private name is kept here
@@ -113,12 +114,10 @@ def _classname_for(change: Change) -> str:
     therefore disagreed with JSON and with ``--view show=`` about the same
     finding (Codex review, PR #1284).
 
-    Resolved through :func:`~abicheck.reporter_markdown.entity_for_change`,
+    Resolved through :func:`~abicheck.report.change_operation.entity_for_change`,
     the one resolver every other projection uses, so a kind added tomorrow
     lands in the right group from its single catalog registration.
     """
-    from .reporter_markdown import entity_for_change
-
     entity = entity_for_change(change, change.kind.value)
     return _ENTITY_TO_CLASSNAME.get(entity or "", "metadata")
 
