@@ -24,11 +24,15 @@ channels exist, and — the schema gap ADR-047 §3 flags and this module
 resolves — exactly which ``{channel, depth, required, gate_mode, profiles}``
 checks run against each target/bundle.
 
-This module only defines the contract and validates a hand-authored
+This module defines the contract and parses a hand-authored
 ``targets:``/``bundles:``/``profiles:``/``baseline:`` block — there is no
 run-plan generator here yet (that's G30 P1.4, which *consumes* this) and no
 ``abicheck project-targets init`` scaffolding either. Pure: parses a dict,
-never touches the filesystem beyond reading the one YAML file.
+never touches the filesystem beyond reading the one YAML file. Cross-reference
+and kind-specific validation lives in :mod:`~.project_targets_validation`;
+the compile-option denylist applied to ``compile:`` atoms lives in
+:mod:`~.project_compile_arg_guard`; runner-label routing and the
+``dependency_source`` vocabulary live in :mod:`~.project_profile_routing`.
 
 ``BuildConfig`` (:mod:`abicheck.buildsource.build_config`) recognizes
 ``targets``/``bundles``/``profiles``/``baseline`` as known top-level
@@ -89,26 +93,15 @@ baseline lookup.
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from ..model.evidence_depth_levels import USER_DEPTHS, EvidenceDepth
 from ..model.header_ast_frontends import HEADER_AST_FRONTENDS
-from .analysis_assurance_gate import analysis_assurance_issues
 from .build_config import KNOWN_TOP_LEVEL_KEYS
-
-#: The identifier charset every target/bundle/profile/channel id must satisfy
-#: — matches the per-component pattern the report-identity envelope (ADR-047
-#: §7, ``compare_report.schema.json``'s ``check_id``) already enforces for
-#: ``target@profile#baseline_channel@depth``, so a name valid here can never
-#: produce an ambiguous/unparseable check_id downstream. ``\Z``, not a
-#: trailing ``$`` -- without ``re.MULTILINE``, ``$`` also matches just
-#: before a trailing ``\n`` (a common PyYAML block-scalar artifact), which
-#: would let an embedded newline through into a generated ``check_id`` and
-#: silently break ``GITHUB_OUTPUT`` downstream (Codex review).
-_IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*\Z")
+from .project_compile_arg_guard import safe_profile_atom
+from .project_profile_routing import PROFILE_DEPENDENCY_SOURCES
 
 #: ADR-047 §3 ``targets:`` ``kind`` discriminator.
 TARGET_KIND_LIBRARY = "library"
@@ -565,227 +558,6 @@ class BundleSpec:
         return cls(id=name, targets=[str(t) for t in targets], checks=checks)
 
 
-#: Flags that reach a compiler frontend's own plugin/response-file/spec-
-#: substitution/config-file/subprocess-forwarding machinery rather than an
-#: ABI-relevant compile axis. Each is a single whitespace-free atom (so
-#: ``_safe_profile_atom``'s smuggling check alone does not reject it) that
-#: falls into one of four families:
-#:
-#: - loads arbitrary code directly into the compiler process
-#:   (``-Xclang``/``-load``/``-fplugin=``/``-fpass-plugin=``);
-#: - re-expands attacker-controlled file content into more argv
-#:   (``@response-file``; Clang's ``--config``/``--config=<file>`` -- a
-#:   "configuration file" of additional command-line options, including
-#:   ``-fplugin=``, so leaving it unblocked would let it re-smuggle back in
-#:   everything else this denylist rejects; the ``--config`` prefix below
-#:   also catches ``--config-system-dir=``/``--config-user-dir=``, which
-#:   redirect where an implicit/explicit config file is looked up);
-#: - substitutes the compiler driver's own trusted built-in command line
-#:   for one read from disk (``-specs=``/``--specs=`` -- GCC's driver
-#:   accepts both spellings, translating the GNU-style ``--specs``
-#:   long-option form to ``-specs`` internally, so both must be blocked --
-#:   and ``-wrapper``); or
-#: - **forwards its entire payload verbatim into a different subprocess**
-#:   (preprocessor/assembler/linker), which can smuggle any of the above
-#:   past a prefix check on the *outer* atom alone: GCC's ``-Wa,``/
-#:   ``-Wp,``/``-Wl,`` pass their comma-joined payload straight to the
-#:   assembler/preprocessor/linker (confirmed via ``gcc --help``) --
-#:   ``-Wp,-fplugin=./evil.so`` reaches cc1 and loads the plugin exactly as
-#:   a bare ``-fplugin=`` would, and ``-Wl,-plugin=./evil.dso`` loads an
-#:   LTO linker plugin the same way (confirmed via ``ld --help``); Clang's
-#:   separate-argument equivalents ``-Xpreprocessor``/``-Xassembler``/
-#:   ``-Xlinker`` are the same mechanism as the already-blocked
-#:   ``-Xclang``, so blocking the forwarding flag itself (its target is a
-#:   separate, otherwise-inert atom) is sufficient, same as ``-Xclang``.
-#:
-#: ``profiles.<id>.compile.args`` is documented (this module's docstring,
-#: ``ProfileCompileSpec``'s own docstring) as a "normalized extra args"
-#: escape hatch for ABI-relevant flags an auto-discovered, untrusted
-#: ``.abicheck.yml`` may declare — never an executable-code path. Checked as
-#: an exact match or a prefix (for the ``=``-/``,``-joined spellings)
-#: against each ``args`` atom; case-sensitive, matching how compiler CLIs
-#: themselves parse these flags. This denylist targets the *delivery
-#: mechanism* (a flag whose whole job is loading code or re-expanding more
-#: argv), not every dangerous flag those mechanisms could carry -- a new
-#: subprocess-forwarding mechanism found later belongs here as another
-#: blocked prefix, not as a growing list of the individual flags it could
-#: smuggle. (Codex review, PR #639: the initial denylist
-#: omitted ``--config``, the ``--specs`` double-dash spelling of
-#: ``-specs``, the whole ``-Wa,``/``-Wp,``/``-Wl,``/``-Xpreprocessor``/
-#: ``-Xassembler``/``-Xlinker`` subprocess-forwarding family, and
-#: ``--castxml-cc-``.
-#:
-#: ``--castxml-cc-`` is a different case from the rest of this list: it
-#: does not smuggle an already-blocked flag past a prefix check, it
-#: targets the trusted ``--castxml-cc-<id> <path>`` pair
-#: ``dumper_ast_config.py`` itself composes *ahead of* this denylist's
-#: ``args`` -- a second occurrence naively looks like it could replace the
-#: verified compiler path with an attacker-controlled one. Verified
-#: empirically against the installed castxml (0.6.3) that this is not
-#: actually exploitable: castxml hard-rejects any repeated
-#: ``--castxml-cc-*`` occurrence at argv-parse time --
-#: ``error: '--castxml-cc-<id>' may be given at most once!`` -- regardless
-#: of whether the ``<id>`` matches the first occurrence, so the scan fails
-#: outright rather than silently invoking a substituted binary. Blocked
-#: here anyway for defense-in-depth/a clearer abicheck-level error instead
-#: of relying on that castxml-internal invariant holding across every
-#: supported castxml version.
-#:
-#: ``-B<dir>``/``-B <dir>`` is the same shape of finding as
-#: ``--castxml-cc-`` above: real for the mechanism it names, but verified
-#: empirically to not reach abicheck's actual pipeline as claimed. GCC's
-#: ``-B<dir>`` really does add *dir* to its compiler-component search path
-#: and really does execute an attacker-supplied ``cc1``/``cc1plus`` placed
-#: there instead of the real one (confirmed: ``gcc -B./tools/ -E`` ran a
-#: planted ``./tools/cc1``) -- but every consumer of this composed string
-#: (castxml's internal bundled Clang, and the direct ``--ast-frontend
-#: clang`` backend) is Clang, not GCC, and Clang has no separate,
-#: ``-B``-discoverable ``cc1`` to substitute: it re-execs itself via
-#: ``-cc1`` instead. Confirmed empirically that ``-B./tools/`` does not
-#: run a planted ``./tools/cc1`` for either castxml or a direct ``clang -E``
-#: invocation, even though ``clang -B./tools/ -print-prog-name=cc1`` shows
-#: ``-B`` does influence *where Clang would look* for a tool named that.
-#: Blocked anyway: cheap, and closes the door in case a future toolchain-
-#: execution-contract change (AGENTS.md's "Known gaps" entry) ever forwards
-#: these flags to a real GCC invocation directly, which would restore the
-#: attack.
-#:
-#: ``/clang:<arg>`` is clang-cl's (Clang's MSVC-compatible driver mode,
-#: reachable via a Windows toolchain binding whose path stem contains
-#: "clang" -- e.g. ``clang-cl``/``clang-cl.exe``, which
-#: ``abicheck.extract.compiler_driver.is_clang_family_binary`` recognizes) own escape hatch
-#: for passing an argument straight to the underlying clang driver,
-#: bypassing clang-cl's normally-MSVC-shaped option parsing entirely --
-#: confirmed **actually exploitable** (unlike ``--castxml-cc-``/``-B``
-#: above): ``clang --driver-mode=cl "/clang:-fplugin=./evil.so" -c t.h``
-#: really does load and run the planted plugin. ``/link <options>`` is the
-#: same driver's documented "forward options to the linker" escape hatch
-#: -- the cl-mode spelling of the already-blocked ``-Wl,`` mechanism above
-#: -- blocked for the same reason, on the same LTO-linker-plugin grounds,
-#: even without a from-scratch clang-cl empirical repro of that specific
-#: sub-case.
-#:
-#: ``-cc1``/``-cc1as`` are a different shape of finding again: Clang's
-#: driver only enters its internal ``cc1``/``cc1as`` frontend mode when
-#: ``-cc1``/``-cc1as`` is literally the *first* argument after the program
-#: name -- confirmed empirically (``clang -c t.h -o t.o -cc1 -load
-#: ./evil.so`` rejects ``-cc1`` as "unknown argument"; ``clang -I. -cc1
-#: -load ./evil.so`` does too, since ``-I`` from a real header scan's
-#: ``extra_includes`` already occupies that first-argument slot), but
-#: ``clang -cc1 -load ./evil.so -plugin foo`` (nothing before ``-cc1``)
-#: really does run the planted plugin's constructor before failing on the
-#: unresolvable plugin name. This module's caller (``dumper.py``'s
-#: ``_build_clang_header_command``) builds argv as ``[cc_bin, *-I dirs,
-#: --sysroot, -nostdinc, *gcc_options tokens, ...]`` -- when a scan has no
-#: ``extra_includes``/``sysroot``/``nostdinc`` (a header with no separate
-#: ``-I`` search path, no cross sysroot), a leading ``-cc1`` in
-#: ``compile.args`` genuinely lands in that first-argument slot. Once in
-#: cc1 mode, ``-load``/``-fpass-plugin=`` are still blocked above, but cc1
-#: mode exposes an entirely different, much larger argument namespace this
-#: denylist was never designed to enumerate (Codex review found
-#: ``-fcas-plugin-path``, a cc1-only flag not in every Clang build, doing
-#: the identical thing) -- reject the *mode switch itself*, the same
-#: "block the delivery mechanism, not every payload it could carry"
-#: reasoning as ``--config`` above.
-_DANGEROUS_ARG_PREFIXES = (
-    "-Xclang",
-    "-Xpreprocessor",
-    "-Xassembler",
-    "-Xlinker",
-    "-load",
-    "-fplugin=",
-    "-fplugin-arg-",
-    "-fpass-plugin=",
-    "-specs=",
-    "-specs",
-    "--specs=",
-    "--specs",
-    "-wrapper",
-    "--config",
-    "-Wa,",
-    "-Wp,",
-    "-Wl,",
-    "--castxml-cc-",
-    "-B",
-    "/clang:",
-    "/link",
-    "-cc1",
-    "@",
-)
-
-
-def _reject_dangerous_arg(where: str, key: str, value: str) -> None:
-    if any(value == p or value.startswith(p) for p in _DANGEROUS_ARG_PREFIXES):
-        raise ValueError(
-            f"{where}.{key} entry {value!r} is not allowed: it reaches a "
-            "compiler plugin/response-file/spec-substitution mechanism, not "
-            "an ABI-relevant compile flag — an auto-discovered "
-            "profiles.compile.args cannot declare executable configuration"
-        )
-
-
-#: Characters ``shlex.split()`` (POSIX mode) treats specially: quoting and
-#: escaping. ``run_plan._compose_gcc_options`` space-joins every atom from
-#: every ``compile.*`` field (``standard``/``stdlib``/``target``/
-#: ``abi_macros``/``args``) into ONE string, and the eventual consumer
-#: (``dumper.py``'s ``--gcc-options`` handling) re-splits that whole string
-#: with ``abicheck._compiler_options.split_gcc_options`` (plain
-#: ``shlex.split(text, posix=True)`` on POSIX, real quote/backslash-run
-#: parity on Windows — quote removal AND backslash escaping both apply on
-#: either platform) to recover argv.
-#: An atom containing a quote or backslash survives every check above
-#: unchanged (neither is whitespace, and a quote-wrapped dangerous flag like
-#: ``"'-fplugin=./evil.so'"`` does not start with a bare ``-fplugin=``) but
-#: is not inert: POSIX shlex quote-removal reconstitutes it into the exact
-#: blocked flag once the composed string is re-split, and because shlex
-#: parses the WHOLE joined string in one pass, an unbalanced quote in one
-#: atom can also shift where token boundaries fall in a neighboring atom.
-#: Rejecting these characters in every atom (not just ``args``) keeps the
-#: "one atom == one post-shlex token, independent of its neighbors"
-#: invariant the denylist above and the whitespace check both already rely
-#: on. (Codex review, PR #639.)
-_SHLEX_UNSAFE_CHARS = frozenset("'\"\\")
-
-
-def _safe_profile_atom(
-    where: str, key: str, value: str, *, reject_dangerous: bool = False
-) -> str:
-    """Reject a compiler-option atom that could smuggle multiple flags/args.
-
-    Mirrors ``buildsource.build_config.BuildConfig``'s own ``_safe_compile_atom``:
-    a ``profiles:`` block is read from the same untrusted, auto-discovered
-    ``.abicheck.yml`` as ``compile:``/``build.query`` (CLAUDE.md M1's trust
-    boundary — see this module's docstring), and its ``compile.*`` overlay
-    fields are documented to eventually reach real compiler argv the same way
-    ``compile.std``/``compile.defines`` already do. Whitespace would let one
-    YAML scalar become several argv tokens (e.g. ``"gnu++17 -Xclang -load
-    ./evil.so"``), so it is rejected here at parse time regardless of whether
-    a consumer resolves this field into argv yet. A quote or backslash
-    character is rejected for the same reason — see
-    :data:`_SHLEX_UNSAFE_CHARS`'s docstring — for every field, not just
-    ``args``, since all of them land in the same shlex-re-split string.
-
-    ``reject_dangerous`` additionally runs :func:`_reject_dangerous_arg` —
-    set only for ``args`` (the one field appended to compiler argv as
-    standalone flags rather than folded into a fixed ``-std=``/``-D<name>=``
-    prefix, so it is the sole atom-level plugin/response-file injection
-    vector; see :data:`_DANGEROUS_ARG_PREFIXES`).
-    """
-    if not value or any(ch.isspace() for ch in value):
-        raise ValueError(f"{where}.{key} must be a single option atom, got {value!r}")
-    if any(ch in _SHLEX_UNSAFE_CHARS for ch in value):
-        raise ValueError(
-            f"{where}.{key} must not contain quote/backslash characters, got "
-            f"{value!r} — these survive re-parsing as inert but are not: the "
-            "composed compile_gcc_options string is later re-split with "
-            "shlex, which would reconstitute them into a different, "
-            "unvalidated token"
-        )
-    if reject_dangerous:
-        _reject_dangerous_arg(where, key, value)
-    return value
-
-
 @dataclass
 class ProfileCompileSpec:
     """Optional ``profiles.<id>.compile`` overlay (P1 toolchain-profile audit).
@@ -888,7 +660,7 @@ class ProfileCompileSpec:
             value = d[key]
             if not isinstance(value, str):
                 raise ValueError(f"{where}.{key} must be a string, got {value!r}")
-            str_fields[key] = _safe_profile_atom(where, key, value)
+            str_fields[key] = safe_profile_atom(where, key, value)
 
         frontend = ""
         if "frontend" in d:
@@ -912,8 +684,8 @@ class ProfileCompileSpec:
                     f"{where}.abi_macros entries must be string: string, "
                     f"got {macro_name!r}: {macro_value!r}"
                 )
-            abi_macros[_safe_profile_atom(where, "abi_macros", macro_name)] = (
-                _safe_profile_atom(where, "abi_macros", macro_value)
+            abi_macros[safe_profile_atom(where, "abi_macros", macro_name)] = (
+                safe_profile_atom(where, "abi_macros", macro_value)
                 if macro_value
                 else macro_value
             )
@@ -925,7 +697,7 @@ class ProfileCompileSpec:
         for a in args_raw:
             if not isinstance(a, str):
                 raise ValueError(f"{where}.args must be a list of strings, got {a!r}")
-            args.append(_safe_profile_atom(where, "args", a, reject_dangerous=True))
+            args.append(safe_profile_atom(where, "args", a, reject_dangerous=True))
 
         return cls(
             compiler_family=str_fields.get("compiler_family", ""),
@@ -938,86 +710,6 @@ class ProfileCompileSpec:
             abi_macros=abi_macros,
             args=args,
         )
-
-
-#: The GitHub-hosted runner label a profile's ``os:`` routes its check cell
-#: to (G34 Phase C). Before this, every cell ran on ``ubuntu-latest``
-#: regardless of what the profile declared, so a ``windows`` profile could
-#: not be checked natively through ``check-project.yml`` at all — the
-#: mechanical gap that blocked a genuine GCC/Clang/MSVC matrix.
-#:
-#: ``darwin`` is accepted alongside ``macos`` because both spellings occur in
-#: the wild for one platform; nothing else is guessed at.
-PROFILE_RUNNER_LABEL_BY_OS = {
-    "linux": "ubuntu-latest",
-    "windows": "windows-latest",
-    "macos": "macos-latest",
-    "darwin": "macos-latest",
-}
-
-#: What a profile with no ``os:`` at all routes to — today's behaviour for
-#: *every* profile, so an existing project's cells are unmoved by Phase C.
-DEFAULT_PROFILE_RUNNER_LABEL = "ubuntu-latest"
-
-#: A runner label is accepted verbatim when it names a GitHub-hosted image
-#: family, so a profile already written as ``os: ubuntu-24.04`` (pinning an
-#: image rather than naming a platform) keeps working. ``os:`` was a free-form,
-#: never-consulted string before this phase, so anything narrower would be a
-#: breaking config change dressed up as a feature.
-_RUNNER_LABEL_PREFIXES = ("ubuntu-", "windows-", "macos-")
-
-
-def runner_label_for_os(os_value: str) -> str | None:
-    """The runner label *os_value* routes to, or ``None`` if it routes nowhere.
-
-    ``None`` is deliberately *not* folded into
-    :data:`DEFAULT_PROFILE_RUNNER_LABEL`: silently sending an ``os: freebsd``
-    profile to a Linux runner would produce a green cell that checked the
-    wrong platform, which is the "a job reports success having gated the
-    wrong thing" failure mode ``check-project.yml``'s own guards exist to
-    close. An *unset* ``os:`` is a different question and does map to the
-    default — that is every existing project, and it is what they get today.
-    """
-    if not os_value:
-        return DEFAULT_PROFILE_RUNNER_LABEL
-    mapped = PROFILE_RUNNER_LABEL_BY_OS.get(os_value.lower())
-    if mapped is not None:
-        return mapped
-    if os_value.startswith(_RUNNER_LABEL_PREFIXES):
-        return os_value
-    return None
-
-
-def unroutable_os_message(where: str, profile_id: str, os_value: str) -> str:
-    """One shared wording for an ``os:`` no runner can be derived from, so
-    ``project validate`` and ``project plan`` say the same thing."""
-    known = ", ".join(sorted(PROFILE_RUNNER_LABEL_BY_OS))
-    return (
-        f"{where}: profiles entry {profile_id!r} has os: {os_value!r}, which "
-        f"does not name a platform check-project.yml can schedule a runner "
-        f"for — use one of {{{known}}}, or a GitHub-hosted runner label "
-        f"({', '.join(p + '…' for p in _RUNNER_LABEL_PREFIXES)}) to pin an "
-        "image directly."
-    )
-
-
-#: Accepted ``profiles.<id>.dependency_source`` values (G34 Phase C).
-#:
-#: **Not the fact owner** — the root ``action.yml``'s own ``Resolve
-#: dependency-source`` step is, and it validates the identical set. This
-#: mirror exists so a bad value fails at ``project validate`` time rather
-#: than inside a matrix cell twenty minutes later;
-#: ``tests/test_project_targets_dependency_source.py`` asserts the two agree
-#: so the copy cannot drift silently.
-PROFILE_DEPENDENCY_SOURCES = frozenset(
-    {
-        "conda-forge",
-        "conda-forge-gcc14",
-        "conda-forge-clang20",
-        "system",
-        "none",
-    }
-)
 
 
 @dataclass
@@ -1050,7 +742,7 @@ class ProfileSpec:
 
     ``os:`` is no longer purely informational (G34 Phase C): it selects the
     runner a ``check-project.yml`` check cell for this profile is scheduled
-    on (:func:`runner_label_for_os`). ``dependency_source:`` — new in the
+    on (:func:`~.project_profile_routing.runner_label_for_os`). ``dependency_source:`` — new in the
     same phase — selects how that cell provisions its own system
     dependencies, so a GCC-profile cell and a Clang-profile cell in one run
     can each get a matching conda environment instead of sharing whatever
@@ -1328,7 +1020,7 @@ class ProjectTargetsConfig:
         the rest of ``.abicheck.yml``). Cross-reference/semantic issues
         (unknown ``library``/``bundle`` reference, kind-specific required
         fields, identifier charset) are **not** raised here — see
-        :func:`validate_project_targets`, which needs the fully-assembled
+        :func:`~.project_targets_validation.validate_project_targets`, which needs the fully-assembled
         config to check references across blocks.
 
         **A clean parse from this method alone does not mean the config is
@@ -1337,7 +1029,7 @@ class ProjectTargetsConfig:
         is one of :data:`CHECK_DEPTHS`, ``gate_mode`` is one of
         :data:`GATE_MODES`, or ``channel`` resolves to a declared baseline
         channel — those (and every other cross-reference rule) are
-        :func:`validate_project_targets`'s job. Every real caller (today,
+        :func:`~.project_targets_validation.validate_project_targets`'s job. Every real caller (today,
         only ``abicheck project-targets validate``) must call both in
         sequence; treating a successful ``from_dict`` alone as "this config
         is valid" will let e.g. ``depth: "banana"`` through unnoticed.
@@ -1412,395 +1104,3 @@ def load_project_targets_config(path: Path) -> ProjectTargetsConfig:
     if not isinstance(raw, dict):
         return ProjectTargetsConfig()
     return ProjectTargetsConfig.from_dict(raw)
-
-
-@dataclass
-class ProjectTargetsValidationReport:
-    """Result of :func:`validate_project_targets` (mirrors
-    :class:`~.build_output.BuildOutputValidationReport`'s shape)."""
-
-    errors: list[str] = field(default_factory=list)
-    warnings: list[str] = field(default_factory=list)
-
-    @property
-    def ok(self) -> bool:
-        return not self.errors
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "ok": self.ok,
-            "errors": list(self.errors),
-            "warnings": list(self.warnings),
-        }
-
-
-def _identifier_issues(kind: str, name: str) -> list[str]:
-    if not _IDENTIFIER_RE.match(name):
-        return [
-            f"{kind} id {name!r} is not a valid identifier — must match "
-            f"{_IDENTIFIER_RE.pattern!r} (the same charset "
-            "check_id components require, so every id stays embeddable in a "
-            "target@profile#baseline_channel@depth string without ambiguity)."
-        ]
-    return []
-
-
-#: Every kind-specific "content" field a ``targets:`` entry can carry
-#: (excludes ``kind``/``checks``, which every kind allows).
-_ALL_KIND_FIELDS = frozenset(
-    {
-        "binary_pattern",
-        "public_headers",
-        "bundle",
-        "bundle_only",
-        "consumer_binary_pattern",
-        "library",
-        "contract_file",
-    }
-)
-#: Which of `_ALL_KIND_FIELDS` each ``kind`` allows — the complement is each
-#: kind's forbidden set, so a newly-added field is automatically forbidden
-#: everywhere it isn't explicitly allowed (CodeRabbit review: a partial,
-#: hand-maintained forbidden list previously let e.g. a `kind: library`
-#: target silently set `library:`, or an `app-consumer` silently set
-#: `bundle:`/`bundle_only:`, neither of which means anything for those kinds).
-_KIND_ALLOWED_FIELDS: dict[str, frozenset[str]] = {
-    TARGET_KIND_LIBRARY: frozenset(
-        {"binary_pattern", "public_headers", "bundle", "bundle_only"}
-    ),
-    TARGET_KIND_APP_CONSUMER: frozenset({"consumer_binary_pattern", "library"}),
-    TARGET_KIND_PLUGIN_CONTRACT: frozenset({"contract_file", "library"}),
-}
-
-
-def _forbidden_field_issues(target: TargetSpec) -> list[str]:
-    allowed = _KIND_ALLOWED_FIELDS.get(target.kind, frozenset())
-    issues: list[str] = []
-    for name in sorted(_ALL_KIND_FIELDS - allowed):
-        if getattr(target, name):
-            issues.append(
-                f"target {target.id!r}: kind: {target.kind} must not set {name}."
-            )
-    return issues
-
-
-def _library_target_issues(
-    config: ProjectTargetsConfig, target: TargetSpec
-) -> list[str]:
-    """Validate a ``kind: library`` target's own required/consistent fields."""
-    issues: list[str] = []
-    if not target.binary_pattern:
-        issues.append(f"target {target.id!r}: kind: library requires binary_pattern.")
-    if target.bundle_only and not target.bundle:
-        issues.append(f"target {target.id!r}: bundle_only requires bundle to be set.")
-    if target.bundle_only and target.checks:
-        issues.append(
-            f"target {target.id!r}: bundle_only: true target must not set "
-            "its own checks: — it is checked only as a bundle member, "
-            "never standalone, so a target-level check here would never "
-            "run; declare it under bundles:.checks instead."
-        )
-    if not target.bundle:
-        return issues
-    declared_bundle = config.bundles.get(target.bundle)
-    if declared_bundle is None:
-        issues.append(
-            f"target {target.id!r}: bundle {target.bundle!r} is not "
-            "declared under bundles:."
-        )
-    elif target.id not in declared_bundle.targets:
-        issues.append(
-            f"target {target.id!r}: declares bundle: {target.bundle!r} "
-            f"but bundles.{target.bundle}.targets does not list "
-            f"{target.id!r} back — a target's own bundle: field and its "
-            "membership in that bundle's targets: list must agree in "
-            "both directions."
-        )
-    return issues
-
-
-def _no_baseline_channel_issues(target: TargetSpec) -> list[str]:
-    """Reject ``channel: none`` on any target kind other than ``library``.
-
-    ``actions/check-target/validate-inputs.sh`` rejects ``baseline-channel:
-    none`` for any target kind other than library -- a no-baseline audit routes
-    to ``scan`` (a one-build check), which has no ``--used-by``/
-    ``--required-symbol`` equivalent to scope an app-consumer/plugin-contract
-    check against. Rejected at generation time rather than letting a
-    validated-looking config produce a run-plan cell that check-target refuses
-    with no per-cell report for aggregate to read.
-    """
-    if target.kind == TARGET_KIND_LIBRARY:
-        return []
-    return [
-        f"target {target.id!r}.checks[{i}]: channel: "
-        f"{NO_BASELINE_CHANNEL!r} is not supported for kind: "
-        f"{target.kind!r} -- a no-baseline audit check has no "
-        "--used-by/--required-symbol equivalent to scope an "
-        "app-consumer/plugin-contract check against "
-        "(actions/check-target/validate-inputs.sh). Use kind: "
-        "library for a no-baseline audit, or set a real channel."
-        for i, check in enumerate(target.checks)
-        if check.channel == NO_BASELINE_CHANNEL
-    ]
-
-
-def _target_issues(config: ProjectTargetsConfig, target: TargetSpec) -> list[str]:
-    issues = _identifier_issues("target", target.id)
-    issues.extend(_forbidden_field_issues(target))
-    if target.kind == TARGET_KIND_LIBRARY:
-        issues.extend(_library_target_issues(config, target))
-    elif target.kind == TARGET_KIND_APP_CONSUMER:
-        if not target.consumer_binary_pattern:
-            issues.append(
-                f"target {target.id!r}: kind: app-consumer requires "
-                "consumer_binary_pattern."
-            )
-        issues.extend(_library_reference_issues(config, target))
-    elif target.kind == TARGET_KIND_PLUGIN_CONTRACT:
-        if not target.contract_file:
-            issues.append(
-                f"target {target.id!r}: kind: plugin-contract requires contract_file."
-            )
-        issues.extend(_library_reference_issues(config, target))
-    issues.extend(_no_baseline_channel_issues(target))
-    for i, check in enumerate(target.checks):
-        issues.extend(_check_issues(config, f"target {target.id!r}.checks[{i}]", check))
-    return issues
-
-
-def _library_reference_issues(
-    config: ProjectTargetsConfig, target: TargetSpec
-) -> list[str]:
-    if not target.library:
-        return [f"target {target.id!r}: kind: {target.kind} requires library."]
-    referenced = config.targets.get(target.library)
-    if referenced is None:
-        return [
-            f"target {target.id!r}: library {target.library!r} is not declared "
-            "under targets:."
-        ]
-    if referenced.kind != TARGET_KIND_LIBRARY:
-        return [
-            f"target {target.id!r}: library {target.library!r} must be a "
-            f"kind: library target, not kind: {referenced.kind!r} — "
-            "app-consumer/plugin-contract targets resolve their baseline/"
-            "candidate lookup through a real library target only."
-        ]
-    return []
-
-
-def _check_issues(
-    config: ProjectTargetsConfig,
-    where: str,
-    check: CheckSpec,
-    *,
-    is_bundle: bool = False,
-) -> list[str]:
-    issues: list[str] = []
-    if (
-        check.channel != NO_BASELINE_CHANNEL
-        and check.channel not in config.baseline_channels
-    ):
-        issues.append(
-            f"{where}: channel {check.channel!r} is not declared under "
-            f"baseline.channels: (use {NO_BASELINE_CHANNEL!r} for a no-baseline "
-            "audit check)."
-        )
-    if check.depth not in CHECK_DEPTHS:
-        issues.append(
-            f"{where}: depth must be one of {sorted(CHECK_DEPTHS)}, got {check.depth!r}."
-        )
-    if check.gate_mode not in GATE_MODES:
-        issues.append(
-            f"{where}: gate_mode must be one of {sorted(GATE_MODES)}, got {check.gate_mode!r}."
-        )
-    # G42 "Explicit check identifiers": id/analysis.* charset validation,
-    # deferred here (not in from_dict) like every other identifier here.
-    if check.id and not _IDENTIFIER_RE.match(check.id):
-        issues.append(
-            f"{where}: id {check.id!r} is not a valid identifier -- must match "
-            f"{_IDENTIFIER_RE.pattern!r}."
-        )
-    for field_name, value in (
-        ("analysis.evidence", check.analysis_evidence),
-        ("analysis.policy", check.analysis_policy),
-        ("analysis.assurance", check.analysis_assurance),
-    ):
-        if value and not _IDENTIFIER_RE.match(value):
-            issues.append(
-                f"{where}: {field_name} {value!r} is not a valid identifier -- "
-                f"must match {_IDENTIFIER_RE.pattern!r}."
-            )
-    issues.extend(analysis_assurance_issues(check.analysis_assurance, where=where))
-    for profile_id in check.profiles:
-        profile = config.profiles.get(profile_id)
-        if profile is None:
-            issues.append(
-                f"{where}: profiles entry {profile_id!r} is not declared under profiles:."
-            )
-            continue
-        if not profile.contract and check.channel != NO_BASELINE_CHANNEL:
-            # contract: false profiles are documented as test-only lanes that
-            # never get a baseline (S17) -- a real-channel check scoped only
-            # to one can never be satisfied. A channel: "none" audit check has
-            # no baseline to resolve in the first place, so it's exempt (S5
-            # audits on a non-contract lane are a legitimate use case).
-            issues.append(
-                f"{where}: profiles entry {profile_id!r} has contract: false "
-                "(a test-only lane that never gets a baseline) but this check "
-                f"declares a real channel ({check.channel!r}) — only a "
-                f"{NO_BASELINE_CHANNEL!r}-channel audit check may scope to a "
-                "non-contract profile."
-            )
-        # abicheck/bundle.py's build_bundle_snapshot() skips non-ELF inputs
-        # outright (baseline_set.py's _not_elf_issue), so a bundle check
-        # explicitly scoped to a declared Windows/macOS profile can never
-        # resolve -- it always produces an operationally-failing matrix
-        # leg rather than a usable check (Codex review). An UNSET os
-        # (profile.os == "") is left unrejected -- most projects never
-        # bother declaring it, and treating "unspecified" as an error
-        # would punish that common case for a field that's still purely
-        # informational everywhere else in this module. Implicit (not
-        # explicitly profile-scoped) bundle checks are handled separately
-        # at run-plan generation time, where they're silently skipped
-        # rather than erroring, the same way a profile that simply
-        # doesn't build a given target is skipped.
-        if is_bundle and profile.os and profile.os != "linux":
-            issues.append(
-                f"{where}: profiles entry {profile_id!r} has os: {profile.os!r}, "
-                "but a bundle check's backend (abicheck/bundle.py) is ELF-only "
-                "and skips every non-ELF member -- explicitly scope this bundle "
-                "check to a linux profile, or drop it from profiles: and let "
-                "the implicit sweep skip non-ELF profiles automatically."
-            )
-    if is_bundle and check.allow_new_target:
-        issues.append(
-            f"{where}: allow_new_target is not supported for a bundle check -- "
-            "a bundle comparison needs one coherent release where every "
-            "member already coexisted, so there is no well-defined old side "
-            "for a member that's new (abicheck.buildsource.baseline_set."
-            "resolve_bundle never returns new_target). Scope the new member "
-            "individually with a channel/allow_new_target library-kind "
-            "target check instead, and add it to this bundle once a real "
-            "release has published a baseline-set covering every member."
-        )
-    return issues
-
-
-def _bundle_issues(config: ProjectTargetsConfig, bundle: BundleSpec) -> list[str]:
-    issues = _identifier_issues("bundle", bundle.id)
-    for member in bundle.targets:
-        referenced = config.targets.get(member)
-        if referenced is None:
-            issues.append(
-                f"bundle {bundle.id!r}: target {member!r} is not declared under targets:."
-            )
-        elif referenced.kind != TARGET_KIND_LIBRARY:
-            issues.append(
-                f"bundle {bundle.id!r}: target {member!r} must be kind: library, "
-                f"not kind: {referenced.kind!r}."
-            )
-        elif referenced.bundle and referenced.bundle != bundle.id:
-            issues.append(
-                f"bundle {bundle.id!r}: target {member!r} declares bundle: "
-                f"{referenced.bundle!r}, not {bundle.id!r} — a target's own "
-                "bundle: field and its membership here must agree."
-            )
-    bundle_depths = sorted(BUNDLE_CHECK_DEPTHS)
-    for i, check in enumerate(bundle.checks):
-        if check.depth not in BUNDLE_CHECK_DEPTHS and check.depth in CHECK_DEPTHS:
-            # A depth outside CHECK_DEPTHS entirely is already reported by
-            # _check_issues below -- only flag the bundle-specific
-            # restriction for an otherwise-valid depth (build/source).
-            issues.append(
-                f"bundle {bundle.id!r}.checks[{i}]: depth {check.depth!r} is not "
-                f"supported for a bundle check -- use one of "
-                f"{bundle_depths} (actions/check-target/"
-                "validate-inputs.sh rejects build/source for kind: bundle, "
-                "which always compares directories)."
-            )
-        if check.channel == NO_BASELINE_CHANNEL:
-            # channel: none routes check-target to the root Action's scan
-            # mode (no baseline to compare against) -- but a bundle check's
-            # candidate is always a staged directory of member binaries
-            # (check-project.yml's own bundle-staging step), and scan mode
-            # rejects a directory/package new-library outright (Codex
-            # review). There is no real bundle audit path today.
-            issues.append(
-                f"bundle {bundle.id!r}.checks[{i}]: channel: "
-                f"{NO_BASELINE_CHANNEL!r} is not supported for a bundle "
-                "check -- a bundle's candidate is always a staged directory "
-                "of member binaries, and action/validate-inputs.sh rejects "
-                "a directory/package new-library for scan mode (the "
-                "no-baseline routing). Set a real baseline channel for a "
-                "bundle check, or scope each member individually with a "
-                "channel: 'none' library-kind target check instead."
-            )
-        issues.extend(
-            _check_issues(
-                config, f"bundle {bundle.id!r}.checks[{i}]", check, is_bundle=True
-            )
-        )
-    return issues
-
-
-def _profile_issues(profile: ProfileSpec) -> list[str]:
-    issues = _identifier_issues("profile", profile.id)
-    # G34 Phase C: `os:` now selects a runner, so a value no runner can be
-    # derived from is a real misconfiguration rather than the harmless free
-    # text it used to be. Caught here, at `project validate` time, so it
-    # surfaces before a matrix cell exists to be scheduled wrongly.
-    if profile.os and runner_label_for_os(profile.os) is None:
-        issues.append(unroutable_os_message("profiles", profile.id, profile.os))
-    return issues
-
-
-def _baseline_channel_issues(channel: BaselineChannelSpec) -> list[str]:
-    issues = _identifier_issues("baseline channel", channel.id)
-    if channel.id == NO_BASELINE_CHANNEL:
-        issues.append(
-            f"baseline channel {channel.id!r} is reserved as the no-baseline "
-            "sentinel and cannot be declared as a real "
-            "channel — a checks[].channel: 'none' entry would then be "
-            "ambiguous between 'skip resolve-baseline' and 'resolve this "
-            "declared channel', and check-target always takes the former."
-        )
-    if channel.source == "github-release" and not channel.asset_pattern:
-        issues.append(
-            f"baseline channel {channel.id!r}: source: github-release requires "
-            "asset_pattern."
-        )
-    if channel.source == "actions-cache" and not channel.key_prefix:
-        issues.append(
-            f"baseline channel {channel.id!r}: source: actions-cache requires "
-            "key_prefix."
-        )
-    return issues
-
-
-def validate_project_targets(
-    config: ProjectTargetsConfig,
-) -> ProjectTargetsValidationReport:
-    """Validate cross-references and kind-specific rules across the whole block.
-
-    Never raises for a structurally-parsed :class:`ProjectTargetsConfig` —
-    problems are reported, not thrown, matching
-    :func:`~.build_output.validate_build_output`'s same contract. Structural/
-    type errors already raised during :meth:`ProjectTargetsConfig.from_dict`.
-    """
-    report = ProjectTargetsValidationReport()
-    if not config.targets and not config.bundles and not config.profiles:
-        report.warnings.append(
-            "no targets:/bundles:/profiles: declared — nothing for a G30 "
-            "run-plan generator to act on yet."
-        )
-    for target in config.targets.values():
-        report.errors.extend(_target_issues(config, target))
-    for bundle in config.bundles.values():
-        report.errors.extend(_bundle_issues(config, bundle))
-    for profile in config.profiles.values():
-        report.errors.extend(_profile_issues(profile))
-    for channel in config.baseline_channels.values():
-        report.errors.extend(_baseline_channel_issues(channel))
-    return report

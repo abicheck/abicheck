@@ -50,6 +50,10 @@ One row per module: name, first sentence of its role, ADR. **Read [`docs/contrib
 | `inputs_pack.py` | Flow-2 build-emitted facts protocol (**ingest** side): `InputsManifest` + `is_inputs_pack()`/`load_inputs_manifest()`/`read_source_facts()` and `ingest_inputs_pack()`. | 035 D5 (G19.4) |
 | `inputs_emit.py` | Flow-2 **producer** side (inverse of `inputs_pack`): `init_inputs_pack()`/`append_source_facts()` (incremental per-TU) write a conformant `abicheck_inputs/` pack that round-trips through … | 035 D5 (G19.4) |
 | `inline.py` | Source-tree-centric inline collection for `dump --sources`/`--build-info`: `collect_inline_pack()` (resolve compile DB → L3, replay → L4, fold → L5), `is_pack_dir()`. | 028–033 amendment, 032 (amended) |
+| `project_targets.py` | `.abicheck.yml` `targets:`/`bundles:`/`profiles:`/`baseline:` schema: dataclasses, `ProjectTargetsConfig`, and `load_project_targets_config()` (the parser). | 047 §3, G30 P1.5 |
+| `project_targets_validation.py` | Cross-reference and kind-specific validation of the parsed `targets:`/`bundles:`/`profiles:`/`baseline:` block: `validate_project_targets()` returns a `ProjectTargetsValidationReport`. | 047 §3, G30 P1.5 |
+| `project_compile_arg_guard.py` | Denylist and shlex-safety check for `profiles.<id>.compile` atoms (`safe_profile_atom`), the trust boundary for an auto-discovered `.abicheck.yml`. | G34 |
+| `project_profile_routing.py` | `profiles.<id>.os` → runner-label routing (`runner_label_for_os`) and the accepted `dependency_source` values (`PROFILE_DEPENDENCY_SOURCES`). | G34 Phase C |
 | `build_config.py` | `BuildConfig`/`load_build_config()`/`discover_build_config()`/`KNOWN_TOP_LEVEL_KEYS`. | 028 amendment D4, 037 D4, 043 |
 | `build_config_io.py` | `load_build_config_with_digest()` — `load_build_config()` plus the sha256 of the exact bytes it parsed, from one read. | 049 |
 | `inline_graph_fold.py` | `fold_call_graph()`/`fold_type_graph()`/`fold_override_graph()`/`fold_template_graph()`/`fold_include_graph()`. | 041 P0, 046 D3 |
