@@ -531,7 +531,7 @@ CLASSIFICATION_BUG_CLASSES: tuple[BugClass, ...] = (
             "that cannot be determined (an undeclared export whose versioned "
             "aliases disagree) is None, never one alias's value."
         ),
-        fixed_by=(),
+        fixed_by=(1629,),
         seed_tests=(
             "tests/test_undeclared_export_binding.py",
             "tests/test_undeclared_export_binding_cli.py",
