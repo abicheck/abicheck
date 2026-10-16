@@ -95,7 +95,7 @@ def test_matrices_differing_only_in_runtime_floor_value_are_distinguishable() ->
     a = EnvironmentMatrix(runtime_floors={"GLIBC": "2.28"})
     b = EnvironmentMatrix(runtime_floors={"GLIBC": "2.34"})
     assert a != b
-    assert {a, b} == {a, b}
+    assert len({a, b}) == 2
 
 
 def test_matrices_differing_only_in_sycl_backends_are_distinguishable() -> None:
@@ -104,7 +104,7 @@ def test_matrices_differing_only_in_sycl_backends_are_distinguishable() -> None:
     assert a != b
     # Hash collision is legal in general; the real invariant is that both
     # remain distinct set members, not that their hashes differ.
-    assert {a, b} == {a, b}
+    assert len({a, b}) == 2
 
 
 def test_sycl_and_cuda_constraints_are_independently_hashable() -> None:

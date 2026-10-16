@@ -439,7 +439,8 @@ class TestCompareRequestHashableWithEnvMatrix:
         assert a != b
         # Hash collision is legal in general, but these two floors must not
         # be treated as the same cache key/set member.
-        assert {a, b} == {a, b}
+        assert len({a, b}) == 2
+        assert {a: "old", b: "new"}[a] == "old"
 
     def test_request_with_no_env_matrix_stays_hashable(self):
         # The plain default (env_matrix=None) must be unaffected.

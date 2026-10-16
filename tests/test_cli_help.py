@@ -70,7 +70,11 @@ def test_ensure_utf8_streams_handles_stream_without_reconfigure(
     monkeypatch.setattr(cli_help.sys, "platform", "win32")
     monkeypatch.setattr(cli_help.sys, "stdout", _NoReconfigure())
     monkeypatch.setattr(cli_help.sys, "stderr", _NoReconfigure())
+    stdout, stderr = cli_help.sys.stdout, cli_help.sys.stderr
     cli_help._ensure_utf8_streams()  # must not raise
+    # Skipped, not replaced: the harness's streams are left exactly in place.
+    assert cli_help.sys.stdout is stdout
+    assert cli_help.sys.stderr is stderr
 
 
 def test_configure_rich_help_calls_ensure_utf8_streams(

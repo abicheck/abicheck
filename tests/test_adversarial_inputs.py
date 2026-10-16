@@ -45,6 +45,8 @@ class TestMalformedElf:
         p.write_bytes(b"\x7fELF" + b"\xde\xad\xbe\xef" * 64)
         result = parse_elf_metadata(p)
         assert isinstance(result, ElfMetadata)
+        # Unparseable input degrades to the empty metadata, not partial garbage.
+        assert result == ElfMetadata()
 
     def test_zero_length_file(self, tmp_path: Path) -> None:
         """Empty file -- not a valid ELF."""
@@ -85,6 +87,7 @@ class TestMalformedElf:
         p = tmp_path / "does_not_exist.so"
         result = parse_elf_metadata(p)
         assert isinstance(result, ElfMetadata)
+        assert result == ElfMetadata()
 
 
 # ---------------------------------------------------------------------------
