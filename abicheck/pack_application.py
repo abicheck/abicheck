@@ -483,9 +483,13 @@ def resolve_bundle_policy_file(
     ``dedup_validate_overrides_warnings()`` scope (e.g. the whole
     ``compare-release`` run) is not repeated per library/matrix cell.
     """
-    from .frontends.cli.options.params import _load_suppression_and_policy
+    # The Tier-2 loader each release member's own `run_compare` already uses,
+    # not the CLI's: this module is `workflows`-classified (ADR-061), and the
+    # release run's `dedup_validate_overrides_warnings()` scope keeps a
+    # warning that loader already surfaced from repeating here.
+    from .workflows.compare_policy import load_suppression_and_policy
 
-    _, pf = _load_suppression_and_policy(suppress, policy, policy_file_path)
+    _, pf = load_suppression_and_policy(suppress, policy, policy_file_path)
     if application is not None:
         pf = policy_file_with_packs(pf, application, base_policy=policy)
     if project_policy_overrides:
@@ -532,7 +536,7 @@ def apply_to_compare_config(resolved_cfg: Any, application: PackApplication) -> 
     under the legacy scheme that never reads it. There is no
     ``exit_code_scheme`` to fold any more -- ``resolved_cfg.exit_code_scheme``
     is a property derived from ``severity_active`` (see
-    ``cli_helpers_compare.ResolvedCompareConfig``'s own docstring), so
+    ``workflows.compare_configuration.ResolvedCompareConfig``'s own docstring), so
     setting ``severity_active`` here is the whole fold: the scheme recomputes
     itself, with no separate three-tier precedence to re-implement (the
     manual selector this docstring used to describe -- an explicit pack

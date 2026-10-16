@@ -29,42 +29,13 @@ from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from ..model.source_graph_coverage import ROLE_COVERAGE_MATRIX
 from .build_evidence import BuildEvidence
 from .model import ExtractorRecord
-from .virtual_dispatch_graph import augment_graph_with_virtual_dispatch
 
 if TYPE_CHECKING:
     from ..model.source_graph import SourceGraphSummary
     from .l5_ast_run import L5AstRun
-
-
-#: ADR-046 D3: the per-(kind, role) coverage matrix. ``type_graph.py``'s
-#: ``_walk_types`` (the pure-AST full walk this module's ``fold_type_graph``
-#: drives) emits exactly these role values, each from its own unconditional
-#: code path — unlike the ADR-038 C.8 clang-plugin producer (a *different*,
-#: filtered walk ingested via ``inputs_pack.py``, out of scope here), this
-#: pass has no known per-role gap, so a confirmed family-level pass may
-#: honestly claim every role below too. Kept here (not in ``type_graph.py``)
-#: since this module is the one call site that turns "family confirmed" into
-#: role-level claims.
-ROLE_COVERAGE_MATRIX: dict[str, tuple[str, ...]] = {
-    "TYPE_INHERITS": ("base",),
-    "TYPE_HAS_FIELD_TYPE": (
-        "field",
-        "alias",
-        "enum_underlying",
-        "template_param",
-        "default_template_arg",
-    ),
-    "DECL_HAS_TYPE": (
-        "var",
-        "return",
-        "param",
-        "template_param",
-        "default_template_arg",
-    ),
-    "DECL_REFERENCES_DECL": ("ref",),
-}
 
 
 def _role_coverage_key(pass_name: str, edge_kind: str, role: str) -> str:
@@ -313,7 +284,7 @@ def fold_override_graph(
     (``with_call_graph``), same as the other Clang passes.
     """
     from .call_graph import extractor_pass_fully_covered, narrowed_pass_confirmed
-    from .override_graph import augment_graph_with_overrides
+    from .semantic_fact_folds import fold_override_facts
 
     rows = extractors if extractors is not None else []
     if not run.clang_available:
@@ -328,20 +299,13 @@ def fold_override_graph(
     target, scoped_note, narrowed = run.target, run.scoped_note, run.narrowed
     scope_key = run.scope_key
     extractor = run.outcomes["override_graph"]
-    edges, virtual_methods, virtual_destructor_owners = extractor.result
-    # `virtual_methods` closes a real gap (Codex review, fresh evidence):
-    # a virtual method with no override anywhere in the scanned codebase
-    # never appears as either endpoint of an OverrideEdge at all, so
-    # augment_graph_with_overrides also needs the extractor's own
-    # per-TU-aggregated virtual-method identity set to stamp an
-    # `is_virtual` fact for `virtual_dispatch_graph.py`'s vtable-presence
-    # seeding to read (see that function's own docstring).
-    added = augment_graph_with_overrides(
-        graph,
-        edges,
-        virtual_methods=frozenset(virtual_methods),
-        virtual_destructor_owners=frozenset(virtual_destructor_owners),
-    )
+    # The virtual-method identity set closes a real gap (Codex review, fresh
+    # evidence): a virtual method with no override anywhere in the scanned
+    # codebase never appears as either endpoint of an OverrideEdge at all,
+    # so the fold also needs it to stamp an `is_virtual` fact for
+    # `virtual_dispatch_graph.py`'s vtable-presence seeding to read. One
+    # fold for both producers (`semantic_fact_folds`).
+    added = fold_override_facts(graph, extractor.result)
     # Recorded regardless of `added` — mirrors fold_call_graph/fold_type_graph's
     # coverage gate. project_source_files() isn't consulted here: unlike a call
     # or type/field edge, an override edge's endpoints are always declarations
@@ -465,7 +429,9 @@ def fold_virtual_dispatch_graph(
     does this pass count as narrowed; only when every prerequisite has its
     own confirmed full-coverage stamp does it count as fully covered.
     """
-    augment_graph_with_virtual_dispatch(graph)
+    from .semantic_fact_folds import fold_virtual_dispatch_facts
+
+    fold_virtual_dispatch_facts(graph)
     _PREREQ_PASSES = ("call_graph", "type_graph", "override_graph")
     degraded = any(graph.degraded_passes.get(p) for p in _PREREQ_PASSES)
     narrowed = any(graph.narrowed_passes.get(p) for p in _PREREQ_PASSES)
@@ -513,7 +479,7 @@ def fold_template_graph(
         narrowed_pass_confirmed,
         project_source_files,
     )
-    from .template_graph_fold import augment_graph_with_templates
+    from .semantic_fact_folds import fold_template_facts
 
     rows = extractors if extractors is not None else []
     if not run.clang_available:
@@ -530,7 +496,7 @@ def fold_template_graph(
     extractor = run.outcomes["template_graph"]
     instantiations = extractor.result
     project_files = project_source_files(merged)
-    added = augment_graph_with_templates(graph, instantiations, project_files or None)
+    added = fold_template_facts(graph, instantiations, project_files or None)
     if extractor_pass_fully_covered(target, extractor, narrowed):
         graph.extractor_passes["template_graph"] = True
     elif narrowed and narrowed_pass_confirmed(target, extractor):
@@ -672,10 +638,7 @@ def fold_callback_graph(
     empirical AST-shape findings this is grounded in).
     """
     from .call_graph import extractor_pass_fully_covered, narrowed_pass_confirmed
-    from .callback_graph import (
-        augment_graph_with_callback_invocations,
-        augment_graph_with_callback_registrations,
-    )
+    from .semantic_fact_folds import fold_callback_facts
 
     rows = extractors if extractors is not None else []
     if not run.clang_available:
@@ -691,10 +654,7 @@ def fold_callback_graph(
     scope_key = run.scope_key
     extractor = run.outcomes["callback_graph"]
     callback_edges = extractor.result
-    registration_result = augment_graph_with_callback_registrations(
-        graph, callback_edges
-    )
-    dispatch_result = augment_graph_with_callback_invocations(graph)
+    registration_result, dispatch_result = fold_callback_facts(graph, callback_edges)
     added = registration_result.edges_joined + dispatch_result.dispatch_edges_added
     # This pass's own extractor run (Part B, DECL_REGISTERS_CALLBACK/
     # DECL_TAKES_ADDRESS_OF) gives the *ceiling* on the coverage claim below;

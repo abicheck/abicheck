@@ -109,8 +109,10 @@ and ``source``). Callers that resolve build-info/source packs
 *out-of-band* (a real, pre-built pack directory, not embedded inline) must
 project or withhold those packs themselves before diffing them — this
 module only ever sees what already lives on the snapshot object it was
-handed; see ``cli_compare_helpers.run_compare``'s own comment on its
-``prepare_embedded_build_source`` call for the call-site half of that fix.
+handed. The native ``compare`` CLI attaches such a pack onto the snapshot
+*before* the shared classification projects it
+(``cli_buildsource_helpers._with_out_of_band_packs``), so it is capped here
+like an embedded one.
 
 **Deliberately out of scope, not silently assumed handled**: platform
 container facts (``elf``/``pe``/``macho``/``dwarf``/``dwarf_advanced``
@@ -146,7 +148,6 @@ if TYPE_CHECKING:
     from ..model import AbiSnapshot
 
 __all__ = [
-    "project_build_source_pack_to_depth",
     "project_pair_to_depth",
     "project_snapshot_to_depth",
 ]
@@ -510,11 +511,9 @@ def _project_build_source_pack(
 ) -> BuildSourcePack | None:
     """Degrade one already-resolved ``BuildSourcePack`` to *rank*, in place.
 
-    Shared by :func:`project_snapshot_to_depth` (for a snapshot's embedded
-    ``build_source``) and :func:`project_build_source_pack_to_depth` (for a
-    pack resolved out-of-band from an explicit ``--build-info``/``--sources``
-    path) so the L3-L5 capping rule is stated once rather than duplicated
-    between the two callers. Below ``build``, the whole pack carries no
+    Called by :func:`project_snapshot_to_depth` for a snapshot's
+    ``build_source`` -- an out-of-band ``--build-info``/``--sources`` pack
+    included, since the CLI attaches it onto the snapshot first. Below ``build``, the whole pack carries no
     evidence an explicit ``--depth`` asked for and is dropped entirely — its
     ``manifest.coverage`` goes with it, so no separate row-demotion is
     needed there. Between ``build`` and ``source``, the L3 ``build_evidence``
@@ -561,9 +560,7 @@ def project_snapshot_to_depth(
     everything.** The returned object is always a distinct ``AbiSnapshot``,
     so every field this function *rebinds* (``build_mode``, ``build_source``)
     is rebound on the copy and never on *snap* — and so is a field a caller
-    rebinds afterwards, which the native ``compare`` CLI relies on
-    (``cli_compare_helpers.run_compare`` assigns ``old.build_source`` on the
-    projected snapshot). What it owns *beneath* those fields is scoped to
+    rebinds afterwards. What it owns *beneath* those fields is scoped to
     what each rung actually writes to:
 
     * **Below ``headers``** — :func:`_strip_header_and_above_evidence`
@@ -655,36 +652,6 @@ def project_snapshot_to_depth(
         # since below `build` the pack itself is dropped.
         out.surface_graph = None
     return out
-
-
-def project_build_source_pack_to_depth(
-    pack: BuildSourcePack | None, depth: str | None
-) -> BuildSourcePack | None:
-    """Return a copy of *pack* capped to what an explicit ``--depth`` requested.
-
-    The out-of-band counterpart to :func:`project_snapshot_to_depth`'s own
-    ``build_source`` handling, for a caller that resolves an explicit
-    ``--build-info``/``--sources`` pack *itself* rather than reading one
-    already embedded on a snapshot object. ``project_snapshot_to_depth`` only
-    ever sees what already lives on the snapshot it was handed, so a raw pack
-    path threaded straight through to ``prepare_embedded_build_source``
-    bypasses it entirely (Codex review, PR #1020, third round) — a caller
-    doing that must cap the pack itself with this function before attaching
-    or diffing it. A no-op (returns *pack* itself) when *pack* or *depth* is
-    ``None``, or *depth* is not a recognized public rung — matching
-    :func:`project_snapshot_to_depth`'s identical no-op contract.
-    """
-    if pack is None or depth is None:
-        return pack
-    depth = depth.lower()
-    if depth not in DEPTH_RANK:
-        return pack
-    rank = DEPTH_RANK[depth]
-    build_rank = DEPTH_RANK["build"]
-    source_rank = DEPTH_RANK["source"]
-    return _project_build_source_pack(
-        copy.deepcopy(pack), rank, build_rank, source_rank
-    )
 
 
 def project_pair_to_depth(

@@ -14,6 +14,7 @@ import struct
 from pathlib import Path
 
 from abicheck.dwarf_metadata import DwarfMetadata, EnumInfo, FieldInfo, StructLayout
+from abicheck.extract.declaration_provenance import apply_provenance
 from abicheck.model import ScopeOrigin
 from abicheck.model.identity import EntityKind, Namespace, Record
 from abicheck.pdb_metadata import parse_pdb_debug_info
@@ -30,7 +31,6 @@ from abicheck.pdb_parser import (
     extract_udt_source_files,
     parse_tpi_stream,
 )
-from abicheck.provenance import apply_provenance
 from tests.test_pdb_parser import (
     _build_minimal_pdb,
     _build_tpi_stream,
@@ -287,14 +287,14 @@ class TestModelBridge:
 
 class TestHeaderScopeFallback:
     """The structured ``scope_fallback`` signal (ADR-024 §D5.3) returned by
-    service._try_header_scoped_dump when PE/Mach-O header scoping cannot apply.
+    header_scoped._try_header_scoped_dump when PE/Mach-O header scoping cannot apply.
     """
 
     def test_header_backend_unavailable_fallback(self, tmp_path, monkeypatch):
         import warnings as _w
 
         import abicheck.dumper as dumper
-        from abicheck import service
+        from abicheck.workflows.dump import header_scoped
 
         hdr = tmp_path / "api.h"
         hdr.write_text("int f(void);\n")
@@ -305,7 +305,7 @@ class TestHeaderScopeFallback:
         monkeypatch.setattr(dumper, "_dump_pe", _boom)
         with _w.catch_warnings():
             _w.simplefilter("ignore")
-            snap, reason = service._try_header_scoped_dump(
+            snap, reason = header_scoped._try_header_scoped_dump(
                 "pe", tmp_path / "lib.dll", [hdr], [], "1", "c++"
             )
         assert snap is None
@@ -315,8 +315,8 @@ class TestHeaderScopeFallback:
         import warnings as _w
 
         import abicheck.dumper as dumper
-        from abicheck import service
         from abicheck.model import AbiSnapshot, Function, Visibility
+        from abicheck.workflows.dump import header_scoped
 
         hdr = tmp_path / "api.h"
         hdr.write_text("int f(void);\n")
@@ -340,7 +340,7 @@ class TestHeaderScopeFallback:
         monkeypatch.setattr(dumper, "_dump_pe", _unmatched)
         with _w.catch_warnings():
             _w.simplefilter("ignore")
-            snap, reason = service._try_header_scoped_dump(
+            snap, reason = header_scoped._try_header_scoped_dump(
                 "pe", tmp_path / "lib.dll", [hdr], [], "1", "c++"
             )
         assert snap is None
@@ -348,8 +348,8 @@ class TestHeaderScopeFallback:
 
     def test_scoped_success_returns_no_fallback(self, tmp_path, monkeypatch):
         import abicheck.dumper as dumper
-        from abicheck import service
         from abicheck.model import AbiSnapshot, Function, Visibility
+        from abicheck.workflows.dump import header_scoped
 
         hdr = tmp_path / "api.h"
         hdr.write_text("int f(void);\n")
@@ -369,7 +369,7 @@ class TestHeaderScopeFallback:
             )
 
         monkeypatch.setattr(dumper, "_dump_pe", _matched)
-        snap, reason = service._try_header_scoped_dump(
+        snap, reason = header_scoped._try_header_scoped_dump(
             "pe", tmp_path / "lib.dll", [hdr], [], "1", "c++"
         )
         assert snap is not None

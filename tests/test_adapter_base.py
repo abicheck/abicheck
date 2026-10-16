@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import os
 
-from abicheck.buildsource.adapters.base import (
+from abicheck.buildsource.adapters.adapter_shared import (
     _is_msvc_command,
     msvc_driver_token,
     source_from_argv,
@@ -81,7 +81,7 @@ def test_msvc_driver_token_recognizes_versioned_clang_cl_behind_launcher():
     # P2 review finding (launcher-wrapped supported CL-style alias
     # follow-up): a versioned `clang-cl-20` behind a launcher (sccache) must
     # be recognized as the MSVC driver token -- the same broader
-    # recognition `dumper_clang._is_cl_style_driver_name` already applies
+    # recognition `abicheck.extract.compiler_driver.is_cl_style_driver_name` already applies
     # elsewhere -- not just the four exact `_MSVC_DRIVERS` spellings.
     argv = ["sccache", "clang-cl-20", "/c", "foo.cc"]
     assert _is_msvc_command(argv) is True
@@ -90,7 +90,7 @@ def test_msvc_driver_token_recognizes_versioned_clang_cl_behind_launcher():
 
 def test_msvc_driver_token_recognizes_dpcpp_cl_behind_launcher():
     # Same finding, Intel's dpcpp-cl alias (also `-cl`-suffixed, recognized
-    # by `_is_clang_family_binary`/`_is_cl_style_driver_name` elsewhere).
+    # by `is_clang_family_binary`/`is_cl_style_driver_name` elsewhere).
     argv = ["sccache", "dpcpp-cl", "/c", "foo.cc"]
     assert _is_msvc_command(argv) is True
     assert msvc_driver_token(argv) == "dpcpp-cl"
@@ -114,7 +114,7 @@ def test_msvc_driver_scan_does_not_mistake_cl_suffixed_source_for_driver():
     # P2 review finding ("Limit CL-driver matching to executable tokens"):
     # a GNU translation unit whose source basename ends in "-cl" (e.g.
     # foo-cl.cpp) must not be mistaken for a CL-style driver just because
-    # `_is_cl_style_driver_name` is a bare name-suffix check applied to
+    # `is_cl_style_driver_name` is a bare name-suffix check applied to
     # every argv token -- the match must be restricted to the command's own
     # leading executable position(s).
     argv = ["gcc", "-c", "foo-cl.cpp"]
@@ -328,7 +328,7 @@ def test_derived_gcc_path_resolves_driver_behind_env_prefix():
     # End-to-end: header_compile_context._derived_gcc_path (the consumer
     # msvc_driver_token exists for) must resolve the real clang-cl driver,
     # not "env", for an env-wrapped MSVC-dialect compile unit -- otherwise
-    # dumper_clang._resolve_clang_bin rejects "env" as not clang-family and
+    # abicheck.extract.compiler_driver.resolve_clang_bin rejects "env" as not clang-family and
     # silently falls back to plain clang++, losing the recorded toolchain's
     # built-ins, default headers, and target defaults.
     from abicheck.buildsource.build_evidence import CompileUnit
@@ -353,7 +353,7 @@ def test_derived_gcc_path_resolves_driver_behind_env_prefix():
 
 
 def test_sources_from_argv_returns_every_tu():
-    from abicheck.buildsource.adapters.base import sources_from_argv
+    from abicheck.buildsource.adapters.adapter_shared import sources_from_argv
 
     # A multi-source compile yields all TU operands, in order; forced-include
     # operands and the output are not mistaken for sources.
@@ -380,7 +380,7 @@ def test_legacy_xclang_target_feature_survivor_matches_canonical_shape():
     IDENTICAL ``(key, value)`` ``BuildOption`` shape -- otherwise
     ``build_diff`` reads a legacy-collected pack and a freshly-collected
     one as a spurious remove+add for the same effective compiler state."""
-    from abicheck.buildsource.adapters.base import derive_build_options
+    from abicheck.buildsource.adapters.adapter_shared import derive_build_options
     from abicheck.buildsource.build_evidence import CompileUnit
 
     cu_legacy = CompileUnit(
@@ -408,7 +408,7 @@ def test_legacy_xclang_target_feature_last_wins_still_applies():
     """The last-wins per-feature-name semantics (round 27 Finding 3) still
     apply correctly when the sequence mixes legacy-marked and canonical
     survivor spellings for the SAME feature name."""
-    from abicheck.buildsource.adapters.base import derive_build_options
+    from abicheck.buildsource.adapters.adapter_shared import derive_build_options
     from abicheck.buildsource.build_evidence import CompileUnit
 
     cu = CompileUnit(
@@ -431,7 +431,7 @@ def test_legacy_xclang_target_feature_negative_control_unrelated_flag_unaffected
     that is NOT a split-operand-ABI-flag survivor at all is completely
     unaffected by the new strip -- it still falls through to the generic
     option path exactly as before."""
-    from abicheck.buildsource.adapters.base import derive_build_options
+    from abicheck.buildsource.adapters.adapter_shared import derive_build_options
     from abicheck.buildsource.build_evidence import CompileUnit
 
     cu = CompileUnit(

@@ -42,13 +42,13 @@ from typing import TYPE_CHECKING
 
 import click
 
-from ...report.release_assurance import release_assurance_notice
+from ...report.release_assurance_section import release_assurance_notice
 from .release_evidence_contract import evidence_contract_notice
 
 if TYPE_CHECKING:
     # Via `report`, which re-exports it: `frontends -> policy` is forbidden
     # even for a type-only import (`architecture/modules.yaml`).
-    from ...report.release_assurance import ReleaseAssuranceDecision
+    from ...report.release_assurance_section import ReleaseAssuranceDecision
 
 __all__ = ["_exit_compare_release"]
 

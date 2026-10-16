@@ -37,7 +37,7 @@ Leaf module: no internal imports, matching `model/change_catalog/registry.py`'s
 own leaf contract.
 
 Each entry is `(member_name, member_value, comment_or_None)`; `kinds.py`
-reassembles them with `Enum(..., type=str)`. A `None` comment means the
+reassembles them with `StrEnum(...)`. A `None` comment means the
 original declaration carried no inline documentation for that member.
 """
 

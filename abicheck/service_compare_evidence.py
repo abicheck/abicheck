@@ -17,7 +17,7 @@ build/source-evidence fields into the primitives :func:`service.run_compare_requ
 already knows how to drive (a collect mode, a per-side header list, a per-side
 :class:`CompileContext`).
 
-G33 Phase 5 gave :class:`~abicheck.workflows.contracts.DumpRequest` the same fields, so
+G33 Phase 5 gave :class:`~abicheck.workflows.service_requests.DumpRequest` the same fields, so
 the per-input half of that resolution is shared:
 :func:`resolve_side_evidence` answers for one :class:`InputSpec`, and
 :func:`resolve_compare_request_evidence` / :func:`resolve_dump_request_evidence`
@@ -40,6 +40,7 @@ collect_mode_for_depth``, the one depth->collect-mode mapping.
 from __future__ import annotations
 
 import dataclasses
+import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -47,17 +48,21 @@ from .compile_context import CompileContext
 from .model.evidence_depth_levels import collect_mode_for_depth
 from .workflows.changed_paths import localized_collect_mode
 
+_logger = logging.getLogger(__name__)
+
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Callable, Iterable
 
     from .dump_manifest import DumpManifest
-    from .workflows.contracts import CompareRequest, DumpRequest
     from .workflows.request_inputs import InputSpec
+    from .workflows.service_requests import CompareRequest, DumpRequest
 
 __all__ = [
     "SideEvidence",
     "collect_mode_for",
+    "compare_collect_mode",
     "dump_collect_mode_for",
+    "without_unusable_raw_evidence",
     "effective_frontend",
     "localized_collect_mode",
     "effective_frontend_for_context",
@@ -95,12 +100,10 @@ def requested_frontend_override(
 def effective_frontend(compile: CompileContext | None, header_backend: str) -> str:
     """The L2 frontend `resolve_input`/`run_dump` actually use for *compile*
     (an explicit `compile.frontend` wins over the bare `header_backend`
-    default), resolved to a concrete backend -- reused so `embed_build_
-    source`'s `extractor` matches instead of silently diverging (Codex
-    review, three rounds: an explicit override wasn't case-normalized in the
-    first pass; "auto" itself was forwarded unresolved in the second --
-    `_make_source_extractor` doesn't special-case "auto" and falls back to
-    Clang, while L2's own "auto" resolves to castxml by default; and the
+    default), resolved to a concrete backend. L4's extractor follows it for
+    every stated frontend (:func:`source_replay_extractor`; Codex review,
+    three rounds: an explicit override wasn't case-normalized in the first
+    pass; "auto" itself was forwarded unresolved in the second; and the
     "is this actually 'auto'" check itself was still case-sensitive in the
     third -- `compile.frontend="AUTO"` is an accepted spelling
     (`frontend_value_errors` validates case-insensitively) that used to be
@@ -113,9 +116,33 @@ def effective_frontend(compile: CompileContext | None, header_backend: str) -> s
     _header_ast_parser routes ANY such context to clang unconditionally).
     See :func:`effective_frontend_for_context` for the context-aware
     prediction `service_dump_pipeline.resolve_dump_request` needs."""
-    from .dumper import _resolve_header_backend
+    from .extract.header_ast_backend import _resolve_header_backend
 
     return _resolve_header_backend(requested_frontend_override(compile, header_backend))
+
+
+def source_replay_extractor(compile: CompileContext | None, header_backend: str) -> str:
+    """The L4 source-replay extractor for *compile*: the requested frontend
+    when one is stated, else clang -- L4's documented default
+    (``docs/learn/build-source-data.md``), the only extractor that records
+    macros and inline/template/constexpr bodies.
+
+    A stated frontend is an explicit `compile.frontend`, a non-``auto``
+    *header_backend*, or an ``ABICHECK_AST_FRONTEND`` L2 honors, resolved as
+    :func:`effective_frontend` resolves it for L2. Only a bare ``auto``
+    differs: L2's ``auto`` means castxml (the layout reference), which
+    replays a translation unit's declarations but none of its macros, so an
+    L4 replay under it never saw a `#define` change.
+    """
+    from .extract.headers.backend_plan import PINNABLE_BACKENDS, ast_frontend_pin
+
+    if (
+        requested_frontend_override(compile, header_backend).lower() == "auto"
+        # The only env values L2 honors; any other (`auto`, a typo) is unset.
+        and ast_frontend_pin() not in PINNABLE_BACKENDS
+    ):
+        return "clang"
+    return effective_frontend(compile, header_backend)
 
 
 def effective_frontend_for_context(
@@ -172,7 +199,7 @@ def collect_mode_for(depth: str | None, *sides: InputSpec) -> str:
     """The build-source collect mode *depth* (or the inputs) implies.
 
     Mirrors the CLI's own --depth-omitted inference
-    (cli_compare_helpers._resolve_compare_collect_mode): explicit depth
+    (workflows.compare_configuration.resolve_compare_collect_mode): explicit depth
     always wins; else sources infers "source", build_info infers "build",
     nothing at all stays "off". Variadic in *sides* so ``compare`` asks over
     both of its inputs and ``dump`` over its single one — the rule is the
@@ -192,7 +219,7 @@ def dump_collect_mode_for(depth: str | None) -> str:
 
     Deliberately **not** :func:`collect_mode_for` (CLI cleanup phase two, PR 3A
     blocker 5, sub-issue 2). That function mirrors ``compare``'s own rule
-    (``cli_compare_helpers._resolve_compare_collect_mode``): omitted depth is
+    (``workflows.compare_configuration.resolve_compare_collect_mode``): omitted depth is
     *inferred* from whichever inputs were supplied, defaulting to ``"off"``.
     The ``dump`` CLI has always resolved omitted depth differently — one fixed
     default, ``"source-target"``, regardless of inputs
@@ -307,7 +334,7 @@ def _header_ast_frontend_only(base: CompileContext) -> CompileContext:
     ``header_backend`` (anything outside ``HEADER_AST_FRONTENDS`` falls back to
     ``"auto"``) — but ``service._run_dump_uncached`` gives an explicit
     ``compile.frontend`` *precedence* over that argument, and
-    ``dumper._resolve_header_backend`` raises ``ValidationError`` for anything
+    ``header_ast_backend._resolve_header_backend`` raises ``ValidationError`` for anything
     outside ``castxml``/``clang``/``hybrid``/``auto``. So a resolved context
     still carrying ``"android"`` made the whole extraction fail with "Unknown
     AST frontend 'android'" before any build/source evidence was embedded —
@@ -327,7 +354,7 @@ def _header_ast_frontend_only(base: CompileContext) -> CompileContext:
     if frontend in HEADER_AST_FRONTENDS:
         return base
     # Only a *known* frontend with no header path is downgraded. An unknown
-    # value falls through untouched so `dumper._resolve_header_backend` still
+    # value falls through untouched so `header_ast_backend._resolve_header_backend` still
     # raises `Unknown AST frontend` for it: rewriting a typo like "clnag" to
     # "auto" would turn it into a successful default-backend run, trading the
     # bug this function fixes for a worse one (Codex review). Both request
@@ -361,7 +388,7 @@ def resolve_side_evidence(
 
 
 def resolve_dump_request_evidence(request: DumpRequest) -> SideEvidence:
-    """Resolve a :class:`~abicheck.workflows.contracts.DumpRequest`'s single input.
+    """Resolve a :class:`~abicheck.workflows.service_requests.DumpRequest`'s single input.
 
     No pair-wide compile context: the C++20 dialect override
     (``dry_run_estimate.pair_wide_cxx20_std_override``) exists so two *sides* of a
@@ -388,6 +415,91 @@ def resolve_dump_request_evidence(request: DumpRequest) -> SideEvidence:
     )
 
 
+def compare_collect_mode(request: CompareRequest) -> str:
+    """The build-source collect mode *request*'s pair runs under.
+
+    A front end's own already-resolved mode (``resolved_collect_mode``: the
+    CLI's ``.abicheck.yml`` ``source.method`` and ``--since``) wins, as
+    ``DumpRequest.resolved_collect_mode`` does. Otherwise ADR-043 D7 (plan
+    §3 #12): a changed-path seed narrows the L4/L5 replay to the changed TUs;
+    with no seed the resolved mode stands unchanged, so a source-depth run
+    still covers the current library target rather than collapsing to zero
+    TUs. One owner for the rule, shared with the CLI.
+    """
+    if request.resolved_collect_mode is not None:
+        return request.resolved_collect_mode
+    return localized_collect_mode(
+        collect_mode_for(request.depth, request.old, request.new),
+        request.changed_paths,
+    )
+
+
+def without_unusable_raw_evidence(
+    request: CompareRequest, notify: Callable[[str], None] | None = None
+) -> CompareRequest:
+    """*request* with every side's raw ``sources``/``build_info`` dropped
+    where this run cannot collect from it.
+
+    A raw source tree or build directory (not a pack: ``is_raw_evidence_input``)
+    is collected inline by extracting its side's binary at the pair's collect
+    mode. Two cases make that impossible, and the raw input is ignored with a
+    note rather than silently deepening or changing the run:
+
+    * the collect mode is ``"off"`` (``depth`` ``binary``/``headers``): this
+      depth collects no build/source evidence;
+    * the side's operand is a recognized text operand rather than a native
+      binary (a stored JSON snapshot, a ``Module.symvers``): there is nothing
+      to re-extract it from. An operand of no recognized format is left to
+      resolution, which reports it.
+
+    Pre-built packs are kept either way -- they are evidence already
+    collected, applied as is.
+    """
+    from .workflows.extraction import is_raw_evidence_input
+    from .workflows.input_resolution import sniff_text_format
+
+    off = compare_collect_mode(request) == "off"
+
+    def _side(label: str, side: InputSpec) -> InputSpec:
+        raw = [
+            name
+            for name in ("sources", "build_info")
+            if is_raw_evidence_input(getattr(side, name))
+        ]
+        if not raw or side.path is None:
+            return side
+        # A JSON snapshot or symvers manifest is never a native binary.
+        if sniff_text_format(side.path) != "unknown":
+            reason = (
+                f"the {label} input {side.path} is not a native binary, so "
+                "there is nothing to extract it from"
+            )
+        elif off:
+            reason = (
+                "the selected depth collects no build/source evidence (use "
+                "depth build or source to collect from it)"
+            )
+        else:
+            return side
+        message = (
+            f"Warning: the {label} side's raw {' and '.join(raw)} is ignored: {reason}."
+        )
+        if notify is not None:
+            notify(message)
+        else:
+            _logger.warning("%s", message)
+        return dataclasses.replace(
+            side,
+            sources=None if "sources" in raw else side.sources,
+            build_info=None if "build_info" in raw else side.build_info,
+        )
+
+    old, new = _side("old", request.old), _side("new", request.new)
+    if old is request.old and new is request.new:
+        return request
+    return dataclasses.replace(request, old=old, new=new)
+
+
 def resolve_compare_request_evidence(
     request: CompareRequest,
     pair_compile: CompileContext | None,
@@ -404,10 +516,7 @@ def resolve_compare_request_evidence(
     # to the changed TUs; with no seed the resolved mode stands unchanged, so
     # a source-depth run still covers the current library target rather than
     # collapsing to zero TUs. One owner for the rule, shared with the CLI.
-    collect_mode = localized_collect_mode(
-        collect_mode_for(request.depth, request.old, request.new),
-        request.changed_paths,
-    )
+    collect_mode = compare_collect_mode(request)
     # Codex review: validate() accepts frontend_context case-insensitively,
     # but every real consumer compares against the lowercase "host"/"device"
     # literals -- normalize once here so an accepted "DEVICE" doesn't

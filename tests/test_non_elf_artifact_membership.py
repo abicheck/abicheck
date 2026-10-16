@@ -20,16 +20,16 @@ from pathlib import Path
 import pytest
 
 from abicheck.elf_metadata import ElfImport, ElfMetadata, ElfSymbol
-from abicheck.frontends.cli.commands.compare_bundle_facts_scope import (
-    json_scope_fields,
-    scope_terms_for,
-)
 from abicheck.model.bundle_facts import BundleFacts
 from abicheck.model.python_facts import PythonApiSurface
 from abicheck.model.snapshot import AbiSnapshot
 from abicheck.project_snapshot_store import (
     DirectoryObjectStore,
     write_project_manifest,
+)
+from abicheck.report.release_stored_scope import (
+    json_scope_fields,
+    scope_terms_for,
 )
 from abicheck.serialization import snapshot_to_dict
 from abicheck.storage.bundle_facts_package import (

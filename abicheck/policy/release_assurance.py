@@ -125,7 +125,7 @@ class MemberAssurance:
         return self.status == "complete"
 
     def to_dict(self) -> dict[str, object]:
-        """The JSON row ``report.release_assurance`` projects."""
+        """The JSON row ``report.release_assurance_section`` projects."""
         return {
             "library": self.name,
             "status": self.status,

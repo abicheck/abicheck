@@ -76,6 +76,10 @@ from abicheck.serialization import snapshot_to_json
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 import example_catalog  # noqa: E402
 
+from abicheck.workflows.dump.cache import (
+    api as dump_cache_api,
+)
+
 # ── coverage table: every inventoried site -> the cell that bypasses it ─────
 #
 # A value naming a cell is a *checked* claim: that cell asserts the site's
@@ -93,6 +97,7 @@ COVERAGE: dict[str, str] = {
     "abicheck.storage.code_identity::memoized::abicheck_code_fingerprint": B,
     "abicheck.model.semantic_ir_function_signature::memoized::_shared_present": B,
     "abicheck.storage.code_identity::memoized::abicheck_modules_fingerprint": H,
+    "abicheck.model.graph_identity::memoized::closure_discriminator_free_identity": "UNCOVERED: pure string memo over closure spellings; no reference-mode bypass cell applies. Its behaviour is pinned by tests/test_closure_respelling.py property tests instead",
     "abicheck.buildsource.header_compile_context::memoized::_include_pattern": _NEEDS_L5,
     "abicheck.buildsource.source_extractors.castxml::memoized::_castxml_tool_version": "UNCOVERED: L4 castxml source extractor tool probe; build-source path only",
     "abicheck.buildsource.source_extractors.clang::memoized::_clang_compiler_family": "UNCOVERED: L4 clang source extractor tool probe; build-source path only",
@@ -118,7 +123,7 @@ COVERAGE: dict[str, str] = {
     "abicheck.model.type_identifiers::memoized::_type_identifiers_cached": R,
     "abicheck.compare.template_surface::memoized::mask_operator_symbols": B,
     "abicheck.compare.template_surface::memoized::strip_template_args": B,
-    "abicheck.buildsource.dpcpp_jobs::memoized::_host_only_single_pass": "UNCOVERED: DPC++ driver pass probe; needs an icx/icpx compiler",
+    "abicheck.extract.dpcpp_jobs::memoized::_host_only_single_pass": "UNCOVERED: DPC++ driver pass probe; needs an icx/icpx compiler",
     "abicheck.compare.qualified_name_normalization::memoized::_segments_cached": B,
     "abicheck.diff_namespaces::memoized::_scope_path_of": "UNCOVERED: reached only for a removed experimental-namespace declaration with a signature; no cell fixture has one",
     "abicheck.policy.classification::memoized::policy_kind_sets": R,
@@ -141,7 +146,8 @@ COVERAGE: dict[str, str] = {
     "abicheck.compare.edge_query::memoized_property::EdgeEvidence.debug_types": R,
     "abicheck.compare.edge_query::memoized_property::EdgeEvidence.export_records": R,
     "abicheck.compare.edge_query::memoized_property::EdgeEvidence.exports": R,
-    "abicheck.model.elf_facts::memoized_property::ElfMetadata.symbol_map": B,
+    "abicheck.model.elf_facts::memoized_property::ElfMetadata.symbol_map": "UNCOVERED: no in-tree reader remains (the alias fix moved every reader to symbol_aliases); kept for external callers and guarded by test_no_new_code_reader_of_the_collapsed_symbol_map",
+    "abicheck.model.elf_facts::memoized_property::ElfMetadata.symbol_aliases": B,
     "abicheck.model.macho_facts::memoized_property::MachoMetadata.export_map": "UNCOVERED: Mach-O only; no Mach-O toolchain on the Linux lanes",
     "abicheck.model.pe_facts::memoized_property::PeMetadata.export_map": "UNCOVERED: PE only; no PE toolchain on the Linux lanes",
     # ---- explicitly keyed memory caches ----
@@ -159,6 +165,7 @@ COVERAGE: dict[str, str] = {
     # ---- request-scoped and instance memos ----
     "abicheck.buildsource.type_graph::scoped_cache::_AST_DERIVED": H,
     "abicheck.comparability_fields::scoped_cache::_PATH_MEMO": H,
+    "abicheck.buildsource.header_graph_ast_projection::scoped_cache::_BISECTION_SCOPE": _NEEDS_L5,
     "abicheck.buildsource.export_account_decision::scoped_cache::_CONTEXTS": H,
     "abicheck.compare.detection_memo::scoped_cache::_MEMO": R,
     "abicheck.model.comparison_memo::scoped_cache::_MEMO": R,
@@ -175,7 +182,7 @@ COVERAGE: dict[str, str] = {
     "abicheck.storage.header_ast_cache::registered::_AST_SLOT_STATS": "UNCOVERED: the per-thread AST handoff is written only by the clang header backend (--ast-frontend clang); the header cell uses castxml",
     "abicheck.storage.header_ast_cache::registered::_AST_ACQUISITION_STATS": "UNCOVERED: the request-wide AST table is opened by the release fan-out over binaries with headers; no cell builds one",
     # ---- disk caches ----
-    "abicheck.snapshot_cache::disk_cache::SNAPSHOT_DISK_CACHE": B,
+    "abicheck.workflows.dump.cache.store::disk_cache::SNAPSHOT_DISK_CACHE": B,
     "abicheck.storage.ast_cache_location::disk_cache::AST_DISK_CACHE": H,
     "abicheck.buildsource.build_cache::disk_cache::BUILD_EVIDENCE_DISK_CACHE": _NEEDS_L5,
     "abicheck.buildsource.build_cache::disk_cache::SOURCE_ABI_DISK_CACHE": _NEEDS_L5,
@@ -186,12 +193,14 @@ COVERAGE: dict[str, str] = {
     "abicheck.buildsource.include_graph_workers::pool::_shared_pool->BudgetedExecutor": _NEEDS_L5,
     "abicheck.buildsource.include_graph_workers::pool::_shared_pool->BudgetedExecutor#2": _NEEDS_L5,
     "abicheck.buildsource.pattern_facts::pool::find_pattern_facts->ProcessPoolExecutor": "UNCOVERED: process pool for large L4 pattern scans (threshold-gated); build-source path only",
+    "abicheck.extract.unparseable_header_fallback::pool::_probe_remaining->BudgetedExecutor": "UNCOVERED: parallel half-probes of an unparseable-header run; reference parity (exclusions == one-header-per-round loop) is held by tests/test_unparseable_header_round_bounds.py with a mocked frontend",
+    "abicheck.extract.unparseable_header_fallback::pool::_confirm_in_context->BudgetedExecutor": "UNCOVERED: in-context re-check of probe-blamed headers; reference parity is held by tests/test_unparseable_header_round_bounds.py with a mocked frontend",
     "abicheck.extract.headers.manifest::pool::_run_tu_fragments->BudgetedExecutor": "UNCOVERED: per-TU pool of a --dump-manifest dump; needs a manifest + castxml",
     # The one pool behind the environment-matrix probes and, since #1425,
     # every L5 clang graph pass (buildsource/l5_ast_pass.run_ast_passes) --
     # it replaced the six per-extractor ``extract_from_build`` pools.
     "abicheck.parallel_probe::pool::run_parallel_probes->BudgetedExecutor": "UNCOVERED: environment-matrix probes (--probe-matrix) and the shared L5 clang AST passes; needs a probe matrix or a compile database + clang",
-    "abicheck.service_header_graph_attach::pool::prefetch_header_graph_ast->BudgetedExecutor": _NEEDS_L5,
+    "abicheck.workflows.dump.header_graph_prefetch::pool::prefetch_header_graph_ast->BudgetedExecutor": _NEEDS_L5,
 }
 
 _SITES = scan_optimization_sites()
@@ -761,7 +770,8 @@ def test_mutant_parallel_path_dropping_a_member_is_caught(
 ) -> None:
     """A narrowed fast path returning a subset (#1336's lost members): only
     the parallel configuration drops the last member."""
-    from abicheck import cli_compare_release_pairwise as pairwise, process_resources
+    from abicheck import process_resources
+    from abicheck.workflows import release_members as pairwise
 
     old, new = _release_dirs(tmp_path / "rel", members=8)
     orig = pairwise.run_keyed_in_threads
@@ -781,13 +791,12 @@ def test_mutant_stale_disk_cache_entry_is_caught(
     monkeypatch: pytest.MonkeyPatch, binaries: tuple[Path, Path], tmp_path: Path
 ) -> None:
     """A warm disk-cache hit serving a stale/partial snapshot (#1340/#1306 shape)."""
-    from abicheck import snapshot_cache
 
     args = tuple(str(p) for p in binaries)
     spy = DiskCacheSpy()
     spy.install(monkeypatch, tmp_path / "cacheM")
     cold = _run(*args)
-    real_lookup = snapshot_cache.lookup_key
+    real_lookup = dump_cache_api._lookup_key
 
     def stale(key: str, path: Path) -> Any:
         snap = real_lookup(key, path)
@@ -795,7 +804,7 @@ def test_mutant_stale_disk_cache_entry_is_caught(
             snap.declarations.functions = snap.declarations.functions[:-1]
         return snap
 
-    monkeypatch.setattr(snapshot_cache, "lookup_key", stale)
+    monkeypatch.setattr(dump_cache_api, "_lookup_key", stale)
     warm = _run(*args)
     assert spy.hits >= 2
     assert warm != cold, "oracle missed a stale disk-cache entry"
@@ -1013,3 +1022,12 @@ def test_disk_cache_version_label_alone_keys_apart(
     assert spy.hits >= 1 and spy.misses >= 1, spy
     assert "9.0" in fresh, "the version label does not reach the report"
     _assert_same(warm, fresh, "disk.version_label")
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(shutil.which("cc") is None, reason="needs a C compiler")
+def test_cache_hit_identity_matches_cold_dump_for_a_symlink(tmp_path: Path) -> None:
+    """A warm whole-snapshot hit reached through a symlink equals an uncached dump."""
+    from tests.test_snapshot_hit_binary_identity import check_hit_matches_cold
+
+    check_hit_matches_cold("symlink", tmp_path)

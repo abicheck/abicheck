@@ -39,12 +39,15 @@ from .errors import SnapshotError
 from .workflows.extraction import PRUNED_HEADER_DIR_SEGMENTS, iter_directory_headers
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
     from .dry_run_estimate import CompileContext
     from .model import AbiSnapshot
     from .model.ownership_rules import OwnershipRequest
+    from .workflows.compare_classify import ResolvedComparePair
     from .workflows.extraction import DumpManifest
+    from .workflows.service_requests import CompareRequest
 
 
 def _click_notify(message: str) -> None:
@@ -386,7 +389,7 @@ def classify_compare_operand(path: Path) -> str:
     return "file"
 
 
-def _resolve_compare_snapshots(
+def _resolve_compare_pair(
     old_input: Path,
     new_input: Path,
     old_fmt: str | None,
@@ -425,7 +428,8 @@ def _resolve_compare_snapshots(
     # callers (`api.positional_slot_rebinding`, tests/regressions/manifest.py).
     exclude_headers: tuple[str, ...] = (),
     ownership: OwnershipRequest | None = None,  # ADR-075: both sides share it
-) -> tuple[AbiSnapshot, AbiSnapshot]:
+    prepare: Callable[[CompareRequest], CompareRequest] | None = None,
+) -> tuple[CompareRequest, ResolvedComparePair]:
     """Load both ABI snapshots and (optionally) populate ELF dependency info.
 
     ``include_dependencies`` (default ``False``, mirroring ``dump``'s own
@@ -440,7 +444,7 @@ def _resolve_compare_snapshots(
     genuinely explicit ``--lang`` on the command line rather than Click's
     own default (which is the identical, indistinguishable string) — see
     ``cli.compare_cmd``'s own detection and
-    :attr:`abicheck.workflows.contracts.CompareRequest.lang_explicit`. ``False`` (the
+    :attr:`abicheck.workflows.service_requests.CompareRequest.lang_explicit`. ``False`` (the
     default) preserves this function's pre-existing behavior for both sides.
 
     ``header_backend`` is the both-sides default; ``old_header_backend`` /
@@ -475,13 +479,13 @@ def _resolve_compare_snapshots(
     reachable from plain ``compare``.
 
     **ADR-055 D1: this no longer resolves anything itself.** It assembles a
-    :class:`~abicheck.workflows.contracts.CompareRequest` from ``compare``'s loose
+    :class:`~abicheck.workflows.service_requests.CompareRequest` from ``compare``'s loose
     arguments and hands it to the shared
     :func:`abicheck.service.resolve_compare_request`, which is the same
     resolution the typed Python API and the MCP ``abi_compare`` tool run. It
     kept a parallel implementation until now only because
     ``run_compare_request`` was one function with no seam for ``compare``'s
-    Click-dependent ADR-049 ``resolve_and_apply`` step to sit in; splitting
+    ADR-049 configuration step (``compare_configuration``) to sit in; splitting
     that function into its two phases removed the reason for the copy. What
     stays CLI-specific is exactly what is genuinely CLI-specific: the
     ``click.echo`` notifier, translating the framework-free errors into
@@ -502,7 +506,10 @@ def _resolve_compare_snapshots(
     the time it reaches ``old_h``/``new_h``). ``None``/empty is a no-op.
     """
     from .errors import PlanningError, SnapshotError, ValidationError
-    from .workflows import contracts as _contracts, request_inputs as _request_inputs
+    from .workflows import (
+        request_inputs as _request_inputs,
+        service_requests as _contracts,
+    )
 
     def _side_compile(backend_override: str | None) -> CompileContext | None:
         # The per-side --ast-frontend old=/new= rides on that side's own
@@ -574,6 +581,11 @@ def _resolve_compare_snapshots(
     from . import service
 
     try:
+        if prepare is not None:
+            # The caller's own per-side additions (`compare`'s raw `--sources`
+            # sides: `frontends.cli.compare_inline_evidence`), folded onto the
+            # request this function built before anything resolves it.
+            request = prepare(request)
         pair = service.resolve_compare_request(
             request, notify=_click_notify, allow_parallel=False
         )
@@ -581,6 +593,15 @@ def _resolve_compare_snapshots(
         raise click.UsageError(str(exc)) from exc
     except SnapshotError as exc:
         raise click.ClickException(str(exc)) from exc
+    return request, pair
+
+
+def _resolve_compare_snapshots(
+    *args: Any, **kwargs: Any
+) -> tuple[AbiSnapshot, AbiSnapshot]:
+    """:func:`_resolve_compare_pair`'s two snapshots, for a caller that needs
+    neither the request nor the resolved pair's evidence."""
+    _, pair = _resolve_compare_pair(*args, **kwargs)
     return pair.old, pair.new
 
 
@@ -596,7 +617,7 @@ def _resolve_compare_snapshots(
 # ADR-074's -D/--define) *is* threaded through the fan-out
 # (cli_compare_helpers.run_compare resolves one CompileContext for the whole release, the same way a
 # single-pair compare resolves its own, and forwards it to every library pair
-# — see cli_compare_release._run_compare_pair's compile_context parameter).
+# — see workflows.release_members.compare_member_pair's compile_context parameter).
 # Only the *sided* --ast-frontend old=/new= override has no home here: it
 # means "parse the old headers with a different frontend than the new ones",
 # which has no per-library-pair-within-a-release equivalent to mirror (a release fan-out already compares each library's own old vs. new

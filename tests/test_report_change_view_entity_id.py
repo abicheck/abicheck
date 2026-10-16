@@ -53,11 +53,18 @@ import dataclasses
 import inspect
 from collections.abc import Iterator
 
-from abicheck import finding_identity
 from abicheck.checker_policy import ChangeKind
+from abicheck.compare.finding_identity import (
+    change_identity as identity_change,
+    change_kinds,
+    declaration_identity,
+    mangled,
+)
 from abicheck.model.change import Change
 from abicheck.model.identity import EntityId, EntityKind
-from abicheck.reporter import _change_to_dict
+from abicheck.report.change_json import (
+    change_to_dict,
+)
 from abicheck.workflows.aggregate.reconcile import (
     _ReportChangeView,
     resolve_report_change_identity,
@@ -71,15 +78,15 @@ _DESCRIPTION = "Function removed"
 def test_a_live_changes_entity_id_survives_the_report_round_trip() -> None:
     """A real `Change` carrying an `entity_id` must round-trip through a
     report without raising, and `entity_id` (never serialized by
-    `_change_to_dict`) must not change the round-tripped identity relative
+    `change_to_dict`) must not change the round-tripped identity relative
     to an otherwise-identical finding that never had one."""
     eid = EntityId(scope=(), kind=EntityKind.FUNCTION, leaf_name="add")
     with_change = Change(
         kind=_KIND, symbol=_SYMBOL, description=_DESCRIPTION, entity_id=eid
     )
     without_change = Change(kind=_KIND, symbol=_SYMBOL, description=_DESCRIPTION)
-    with_id = resolve_report_change_identity(_change_to_dict(with_change))
-    without_id = resolve_report_change_identity(_change_to_dict(without_change))
+    with_id = resolve_report_change_identity(change_to_dict(with_change))
+    without_id = resolve_report_change_identity(change_to_dict(without_change))
     assert with_id.primary_id == without_id.primary_id
     assert with_id.tier == without_id.tier
 
@@ -592,11 +599,16 @@ def test_report_change_view_covers_every_attribute_resolve_change_identity_reads
     None
 ):
     """Structural enforcement of this module's own stated bug class: parse
-    `finding_identity.py`'s real source (not a hand-copied attribute list
+    the `compare.finding_identity` package's real source (not a hand-copied attribute list
     that could itself go stale) and fail if `resolve_change_identity` --
     transitively, through its own same-module helpers -- reads any `Change`
     attribute `_ReportChangeView` does not declare."""
-    tree = ast.parse(inspect.getsource(finding_identity))
+    tree = ast.parse(
+        "\n".join(
+            inspect.getsource(m)
+            for m in (identity_change, change_kinds, mangled, declaration_identity)
+        )
+    )
     funcs_by_name = _group_funcs_by_name(tree)
     attrs_read = _change_attrs_read(
         "resolve_change_identity", "change", funcs_by_name, set()

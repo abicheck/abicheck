@@ -862,7 +862,7 @@ class TestFindingEntryValidation:
     @pytest.mark.parametrize("field", ["old_value", "new_value"])
     def test_null_is_accepted_where_the_schema_allows_it(self, field: str) -> None:
         """`old_value`/`new_value` are declared `["string", "null"]` because
-        `reporter._change_to_dict` really writes them that way for a finding
+        `change_json.change_to_dict` really writes them that way for a finding
         carrying no before/after value — an ordinary report, not a malformed
         one."""
         result = parse_report_findings(
@@ -1225,7 +1225,7 @@ class TestDisplayFilteredReports:
 
 
 #: `diff_python.py` really passes a list for these findings (e.g.
-#: `new_value=sorted(group)`), and `_change_to_dict` preserves it in JSON.
+#: `new_value=sorted(group)`), and `change_to_dict` preserves it in JSON.
 _PYTHON_VIOLATION = _change_entry(
     kind="python_stable_abi_violation",
     symbol="PyFoo",

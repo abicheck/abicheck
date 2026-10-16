@@ -191,7 +191,7 @@ def recompute_verdict_after_promotion(
     """
     from .model.contract_finding_relevance import is_evaluated
     from .policy.classification import compute_verdict
-    from .policy.reclassify import _VERDICT_ORDER
+    from .policy.release_outcome import compatibility_rank
 
     changes = getattr(result, "changes", None)
     if not changes:
@@ -225,7 +225,7 @@ def recompute_verdict_after_promotion(
     #    two preserves whatever those findings contributed, without this
     #    function having to reconstruct a set the result no longer
     #    distinguishes.
-    if _VERDICT_ORDER.index(recomputed) > _VERDICT_ORDER.index(result.verdict):
+    if compatibility_rank(recomputed) > compatibility_rank(result.verdict):
         result.verdict = recomputed
 
 
@@ -326,7 +326,7 @@ def stamp_missing_contract_entry(
     A missing ``--required-symbol``/``--used-by`` label has no backing
     ``Change`` -- callers synthesize a plain dict and emit it directly in
     their ``changes`` array -- so nothing gives it the per-finding decision
-    fields an ordinary finding gets from ``reporter._change_to_dict``. It
+    fields an ordinary finding gets from ``change_json.change_to_dict``. It
     got the relevance and the evaluation status but neither the decision nor
     the contribution, which is conspicuous precisely because this entry is
     often the *only* blocking finding in the response (Codex review).
@@ -405,7 +405,10 @@ def _missing_contract_findings(result: Any) -> list[Any]:
     every report format's synthesized entry carries, so the receipt and the
     emitted findings key alike.
     """
-    from .finding_identity import missing_contract_finding, missing_contract_kind
+    from .compare.finding_identity import (
+        missing_contract_finding,
+        missing_contract_kind,
+    )
 
     kind = missing_contract_kind(getattr(result, "gate_scope", None))
     return [

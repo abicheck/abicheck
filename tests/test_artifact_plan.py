@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Tests for :mod:`abicheck.workflows.artifact.contracts` — Phase 1
+"""Tests for :mod:`abicheck.workflows.artifact.resolved_plan` — Phase 1
 (Milestones A and B) of the duplication-and-convergence plan's
 ``ResolvedArtifactPlan`` primitive."""
 
@@ -243,7 +243,7 @@ def test_resolve_dump_request_attaches_a_matching_artifact_plan(
     land on the general ResolvedArtifactPlan it attaches, verbatim -- not a
     second, independently-derived copy that could drift."""
     from abicheck.service import DumpRequest, InputSpec
-    from abicheck.workflows.dump.pipeline import resolve_dump_request
+    from abicheck.workflows.dump.request import resolve_dump_request
 
     resolved = resolve_dump_request(
         DumpRequest(input=InputSpec(path=snap_path, headers=()))
@@ -259,6 +259,6 @@ def test_resolve_dump_request_attaches_a_matching_artifact_plan(
     assert plan.public_headers == resolved.public_headers
     assert plan.public_header_dirs == resolved.public_header_dirs
     # Resolution allocates no resource today (the L3->L2 fold stays inside
-    # execute -- see workflows/artifact/contracts.py's own module
+    # execute -- see workflows/artifact/resolved_plan.py's own module
     # docstring), so the attached plan must start with nothing to clean up.
     assert plan.pending_cleanups == []

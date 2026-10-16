@@ -61,6 +61,8 @@ from abicheck.model import (
     Visibility,
 )
 from abicheck.model.change import Change
+from abicheck.policy.finding_disposition import dispose_findings
+from abicheck.policy.finding_disposition.default_pipeline import DEFAULT_PIPELINE
 
 # ---------------------------------------------------------------------------
 # Helpers — synthetic snapshot construction
@@ -1183,16 +1185,14 @@ class TestPipelineIntegration:
     """
 
     def test_pipeline_includes_step(self) -> None:
-        from abicheck.post_processing import DEFAULT_PIPELINE
 
         assert "detect_cpp_patterns" in [s.name for s in DEFAULT_PIPELINE.steps]
 
     def test_serialization_tag_finding_flows_through_pipeline(self) -> None:
-        from abicheck.post_processing import DEFAULT_PIPELINE
 
         old = _snap("lib", constants={"foo_tag": "0x1"})
         new = _snap("lib", constants={"foo_tag": "0x2"})
-        ctx = DEFAULT_PIPELINE.run([], old, new)
+        ctx = dispose_findings([], old, new)
         kinds = [c.kind for c in ctx.kept]
         assert ChangeKind.SERIALIZATION_TAG_CHANGED in kinds
 

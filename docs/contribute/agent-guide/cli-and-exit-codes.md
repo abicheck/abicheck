@@ -126,12 +126,13 @@ Once a root command genuinely clears the bar above, pick the right home:
 - `compare` command (severity-aware, with `--severity-preset` or a config `severity:` block): 0 = no error-level findings, 1 = error in addition/quality only, 2 = error in potential_breaking, 4 = error in abi_breaking
 - `scan` (including `scan --against`) was deleted by ADR-068 Phase 6; its baseline mode is `compare OLD NEW` and its audit mode is `compare --no-baseline NEW`, both covered by the `compare` rows above.
 - **Orthogonal contract-coverage axis (ADR-049 Phase 7), on `compare`
-  (single-pair and directory/package alike):** under `--contract`, the selected
+  (single-pair and directory/package alike):** under a stated domain (`--contract`,
+  `.abicheck.yml` `scope.public`, or API `contract_mode`), the selected
   domain whose required evidence is incomplete contributes
   **1**, folded with `max` (`contract_coverage_exit.py`). It raises a clean
   `0` to `1` and never lowers a `2`/`4`, and it never rewrites a finding's
-  compatibility decision or gate contribution. Without
-  `--contract` the evidence-adaptive default domain is one the run's own
+  compatibility decision or gate contribution. With no
+  stated domain the evidence-adaptive default domain is one the run's own
   evidence closes, so the contribution is normally `0`. Every consumer that publishes an
   exit status folds it and explains it — the two CLIs and the composite
   Action (`verdict: COVERAGE_INCOMPLETE`). A directory/package

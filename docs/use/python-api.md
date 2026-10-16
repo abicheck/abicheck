@@ -7,10 +7,10 @@ canonical_for:
   - python-api
 depends_on:
   - abicheck/service.py
-  - abicheck/workflows/contracts.py
+  - abicheck/workflows/service_requests.py
   - abicheck/workflows/request_inputs.py
   - abicheck/model/header_ast_frontends.py
-  - abicheck/workflows/dump/pipeline.py
+  - abicheck/workflows/dump/request.py
   - abicheck/service_compare_pipeline.py
   - abicheck/dry_run_estimate.py
   - abicheck/deadline.py
@@ -89,6 +89,13 @@ will reach for most often:
 | `suppress` | `Path` | `None` | Suppression file (YAML or ABICC format) |
 | `scope_to_public_surface` | `bool` | `True` | Restrict findings to the public ABI surface |
 | `enable_debuginfod` | `bool` | `False` | Resolve debug info via debuginfod |
+| `pattern_verdicts` | `bool` | `True` | Score findings with pattern verdicts (the CLI default). `False` returns raw detector output. |
+| `contract_evaluation` | `bool` | `True` | Judge each finding's contract relevance (the CLI default). `False` skips it. |
+
+Both defaults are the same on `run_compare` and on `CompareRequest`, and
+`run_compare_request` and the history workflow use them too. The Tier-1
+`checker.compare()` core is the exception: it defaults both to `False`, so
+it is a raw building block rather than a comparison entry point.
 
 The table above is the common subset, not the full surface. `run_compare` also
 takes per-side PDB paths, debug roots, forced public symbols, and pattern

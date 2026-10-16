@@ -900,8 +900,8 @@ else:
     # promoted, unrelated to `compile:`'s own (unchanged) exclusion. See
     # `actions/check-target/action.yml`'s own identical fix and its
     # `_sources_merge_compile` comment for the full account of the P1
-    # finding this closes -- `frontends/cli/commands/compare.py`'s
-    # `_embed_inline_source_side` always independently folds the live
+    # finding this closes -- `frontends/cli/compare_inline_evidence.py`'s
+    # `_side` always independently folds the live
     # side's own `--sources` tree's `compile:` block on top of the CLI's
     # already-resolved compile context, unconditionally, regardless of
     # whether `--config`/`build-config` was explicit -- so this overlay
@@ -918,12 +918,10 @@ else:
     # operand; see `_compile_context_sources_merge_compile`'s own
     # docstring), and unlike `compile:`, `compare`'s real pipeline never
     # resolves `source:`/`debug:` from a per-side `--sources` tree's own
-    # document at all: `frontends/cli/commands/compare.py`'s
-    # `_embed_inline_source_side` receives both as already-frozen arguments
-    # (`_resolved_collect_mode`/`_resolved_debug`), computed once from the
-    # checkout-side `resolved_cfg` before any per-side tree is even
-    # considered, and forwards them verbatim to the nested dump invocation's
-    # own private hooks of the same name -- `frontends/cli/
+    # document at all: `frontends/cli/compare_inline_evidence.py`'s
+    # `_side` receives both already frozen (`InlineEvidenceRun.collect_mode`/
+    # `.debug`), computed once from the checkout-side `resolved_cfg` before
+    # any per-side tree is even considered -- `frontends/cli/
     # dump_debug_config.resolve_dump_debug_fields` only falls back to
     # resolving a tree's own document when `resolved_debug` is `None`,
     # which never happens on `compare`'s own call path. Promoting these two
@@ -1315,8 +1313,8 @@ _compile_context_sources_pairwise() {
 # P1 fix, PR #1222 eleventh round (Codex review, fresh evidence): this
 # flag's OWN "true" value no longer causes `_sources_root_blocks` to
 # promote/merge `compile:` from the sources root at the overlay-generation
-# layer any more -- `_embed_inline_source_side` (its real name today; the
-# `_maybe_dump_side` reference above predates a rename) performs that
+# layer any more -- `compare_inline_evidence._side` (the
+# `_maybe_dump_side` reference above predates two renames) performs that
 # second merge stage unconditionally, regardless of whether `--config` was
 # explicit, so this overlay ALSO folding the sources root's `compile:` in
 # duplicated it. This function keeps echoing "true" for the identical
@@ -1853,14 +1851,16 @@ raise SystemExit(0 if is_package(Path(sys.argv[1])) else 3)
       ;;
   esac
   [[ -f "$path" ]] || return 1
-  # Extensionless RPM (0xedabeedb lead magic) / Deb (ar archive "!<arch>\n")
-  # packages — read the first 8 bytes as hex (binary-safe; a bash string
-  # would truncate at an embedded NUL) and compare.
+  # Extensionless RPM (0xedabeedb lead magic) / Deb packages — read the first
+  # 24 bytes as hex (binary-safe; a bash string would truncate at an embedded
+  # NUL) and compare. A Deb is an ar archive whose first member name field is
+  # exactly "debian-binary" (padded, or "debian-binary/"); the bare "!<arch>\n" magic also matches static archives,
+  # which are not packages (package.py's DebExtractor.detect says the same).
   local magic
-  magic=$(od -An -tx1 -N 8 "$path" 2>/dev/null | tr -d ' \n')
+  magic=$(od -An -tx1 -N 24 "$path" 2>/dev/null | tr -d ' \n')
   case "$magic" in
     edabeedb*) return 0 ;;          # RPM lead magic (first 4 bytes)
-    213c617263683e0a) return 0 ;;   # "!<arch>\n" (Deb ar archive, 8 bytes)
+    213c617263683e0a64656269616e2d62696e617279202020|213c617263683e0a64656269616e2d62696e6172792f2020) return 0 ;;   # "!<arch>\n" + name field "debian-binary" (Deb, first ar member)
   esac
   return 1
 }

@@ -40,7 +40,7 @@ def add_contract_evaluation_fields(
     """Attach ADR-049's per-finding contract decision fields to *d*, if *c*
     carries one; always stamps ``finding_id``/``canonical_finding_id`` first.
 
-    Shared by :func:`_change_to_dict` and :func:`_add_surface_scope` so a
+    Shared by :func:`change_to_dict` and :func:`add_surface_scope` so a
     demoted finding's decision is exposed the same way a kept finding's
     already is. ``contract_relevance is None`` (the default) skips only
     the contract-specific fields below.
@@ -52,7 +52,7 @@ def add_contract_evaluation_fields(
     :func:`~abicheck.policy.severity.gate_contribution_for_change`.
     """
     # The audit-ledger serializers (`_out_of_surface_entry`,
-    # `_suppressed_change_entry`, `_add_reconciled`, `_filtered_internal_entry`)
+    # `suppressed_change_entry`, `add_reconciled`, `filtered_internal_entry`)
     # build compact dicts that never emit `finding_id` themselves, so a
     # consumer can't join a demoted/suppressed/reconciled finding to its
     # decision. Stamped here, only when absent -- and unconditionally,
@@ -62,12 +62,12 @@ def add_contract_evaluation_fields(
     # this after the early return instead, silently skipping it on every
     # default-run audit-ledger entry).
     if "finding_id" not in d:
-        from ..finding_identity import report_finding_id
+        from ..compare.finding_identity import report_finding_id
 
         d["finding_id"] = report_finding_id(c)
     # Same reasoning, for finding_id's backend-independent sibling (2.36).
     if "canonical_finding_id" not in d:
-        from ..finding_identity import report_canonical_finding_id
+        from ..compare.finding_identity import report_canonical_finding_id
 
         d["canonical_finding_id"] = report_canonical_finding_id(c)
 

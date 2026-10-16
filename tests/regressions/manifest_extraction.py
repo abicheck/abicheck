@@ -261,4 +261,72 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
             "header_backend": ("hybrid",),
         },
     ),
+    BugClass(
+        id="extraction.default_extractor_lacks_the_promised_fact_family",
+        invariant=(
+            "A depth that promises a fact family runs, by default, an "
+            "extractor that records it, and runs it in the mode its input's "
+            "language needs: L4 source replay under the default frontend "
+            "runs clang (macros, inline/template/constexpr bodies), not "
+            "L2's castxml, which records none of them; a stated frontend "
+            "still selects the extractor, resolved as L2 resolves it. "
+            "castxml replays a C unit in C emulation (`--castxml-cc-gnu-c`), "
+            "never C++ emulation, which fails it outright. A capability "
+            "that holds only because a later, hidden re-run with another "
+            "extractor overwrote a failed first one is not a capability."
+        ),
+        fixed_by=(1569,),
+        seed_tests=(
+            "tests/test_source_replay_extractor.py",
+            "tests/test_castxml_source_emulation_mode.py",
+            "tests/test_l4_default_extractor_end_to_end.py",
+            "tests/test_family_f2_route_parity.py",
+        ),
+        public_surfaces=("cli", "python-api"),
+        axes={
+            "language": ("C", "C++"),
+            "frontend": ("default", "castxml", "clang", "env"),
+            "compiler_mode": ("gnu", "gnu-c", "msvc"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "Without clang on PATH, a default-frontend L4 replay "
+                    "degrades to partial coverage rather than falling back "
+                    "to castxml's declaration-only facts."
+                ),
+                reference="docs/learn/build-source-data.md",
+            ),
+        ),
+    ),
+    BugClass(
+        id="package.ar_magic_is_not_deb",
+        invariant=(
+            "A file is a Debian package iff its first ar member is "
+            "`debian-binary`; a plain ar archive (static .a / Rust .rlib) "
+            "is never routed to the Debian extractor, whatever its member "
+            "names or file suffix, in either the Python detector or the "
+            "Action's shell operand predicate."
+        ),
+        # Filled with the PR that introduced this entry (see the PR body).
+        fixed_by=(1623,),
+        seed_tests=(
+            "tests/test_deb_extractor_detection.py",
+            "tests/test_cli_compare_bundle_facts_rejections_more.py",
+            "tests/test_action_run_sh_helpers.py",
+        ),
+        axes={"sniffer": ("python-detector", "action-shell-predicate")},
+    ),
+    BugClass(
+        id="templates.fn_type_arguments_counted_as_template_arguments",
+        invariant=(
+            "Template arity counts only top-level template arguments: a "
+            "function type's parameter list (commas inside parentheses or "
+            "brackets) and the `>` of a `->` arrow never change how many "
+            "arguments a template takes, so a callback's signature change "
+            "is not reported as a template gaining a mandatory parameter."
+        ),
+        fixed_by=(1623,),
+        seed_tests=("tests/test_diff_templates_fn_type_arity.py",),
+    ),
 )

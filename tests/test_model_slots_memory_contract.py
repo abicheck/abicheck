@@ -234,7 +234,8 @@ class TestSlottingDidNotChangeBehaviour:
         # stripped from the per-entity dict by storage/extraction_scope_codec).
         # 50: schema v54 added `return_type_identities_fact` (written only
         # when captured -- storage/snapshot_encode drops an uncaptured one).
-        assert len(dataclasses.fields(Function)) == 50
+        # 51: schema v60 added `is_inline_fact` (same encode rule).
+        assert len(dataclasses.fields(Function)) == 51
         # 9: ADR-063 Phase 10 retired `is_va_list` to an InitVar view.
         # 10: schema v54 added `type_identities_fact`, same encode rule.
         assert len(dataclasses.fields(Param)) == 10

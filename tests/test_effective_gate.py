@@ -22,7 +22,7 @@ closure package's task asked for -- both callers now fold onto the *same*
 :class:`~abicheck.policy.effective_gate.GateSeverityState` shape, and both
 ``GateOptions`` (a property) and ``ResolvedCompareConfig`` (via
 ``workflows.gate.effective_gate_for_resolved_compare_config`` -- a free
-function rather than a third property, since ``cli_helpers_compare.py`` sits
+function rather than a third property, since ``cli_compare_helpers.py`` sits
 at its own ``architecture/debt.yaml`` no-growth cap) resolve to the *same*
 :class:`~abicheck.policy.effective_gate.EffectiveGate` shape -- checked
 against inputs beyond any one example, per this repo's own "General
@@ -39,7 +39,6 @@ import pytest
 from hypothesis import given, strategies as st
 from test_release_selection import _invoke, _snap, _write_snap
 
-from abicheck.cli_helpers_compare import resolve_compare_config
 from abicheck.pack_application import PackApplication, apply_to_compare_config
 from abicheck.policy.effective_gate import (
     EffectiveGate,
@@ -57,6 +56,7 @@ from abicheck.policy.release_gate_options import (
     resolve_release_gate_options,
 )
 from abicheck.policy.severity import SeverityConfig, SeverityLevel
+from abicheck.workflows.compare_configuration import resolve_compare_config
 from abicheck.workflows.gate import (
     effective_gate_for_resolved_compare_config,
     scoped_gate_selection_from_result,

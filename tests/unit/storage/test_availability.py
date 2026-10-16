@@ -15,7 +15,7 @@ import dataclasses
 import pytest
 from hypothesis import given, strategies as st
 
-from abicheck.storage.availability import (
+from abicheck.storage.availability_ledger import (
     _GAP_STATUSES as _MODULE_GAP_STATUSES,
     AvailabilityLedger,
     Confidence,
@@ -544,7 +544,7 @@ class TestRequiredFamiliesMustBeACollection:
         the point, since testing only the non-empty one is what let the
         original claim look proven.
         """
-        from abicheck.storage.identity import OccurrenceSet
+        from abicheck.storage.occurrence_identity import OccurrenceSet
 
         for scalar in ("abc", "", b"ab", b""):
             with pytest.raises(TypeError):

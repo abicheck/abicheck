@@ -178,7 +178,10 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
             "under the confirmed one."
         ),
         fixed_by=(1283,),
-        seed_tests=("tests/test_bundle.py",),
+        seed_tests=(
+            "tests/test_bundle.py",
+            "tests/test_bundle_self_compare_invariant.py",
+        ),
         known_gaps=(
             KnownGap(
                 description=(
@@ -233,7 +236,7 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
                     "snapshots built directly (no castxml/clang, no CLI). "
                     "Phase 3 (bug-class-regression-testing.md) added a "
                     "third seed test targeting the path/segment-based "
-                    "'abicheck.provenance' origin classifier "
+                    "'abicheck.extract.declaration_provenance' origin classifier "
                     "('classify_origin'/'_matches_public') with metamorphic "
                     "(checkout relocation, './..' spelling), independent-"
                     "oracle (real directory containment vs. a sibling-"
@@ -367,7 +370,7 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
             "tests/test_finding_identity_properties.py",
             "tests/unit/compare/test_dedup_key.py",
             "tests/test_diff_namespaces.py",
-            # workflows/cross_source_evolution.py's own per-side OLD/NEW
+            # workflows/cross_source_hygiene.py's own per-side OLD/NEW
             # lookup was keyed by a bare `Change.symbol` -- non-injective
             # for `private_header_leak`, whose findings are keyed by
             # `(mangled_or_name, leaked_type)` in cross_source_checks.py, so one
@@ -377,6 +380,12 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
             # to `symbol` (still correct for `unversioned_exported_symbol`)
             # and registering `(symbol, new_value)` for `private_header_leak`.
             "tests/test_cross_source_evolution.py",
+            # Graph identity reconciliation picked a redeclared entity's
+            # declaring file by edge order (last SOURCE_DECLARES edge wins),
+            # so one file set read as unchanged or as a RISK-tier move
+            # depending on run; pinned under permuted edges/inputs and
+            # several PYTHONHASHSEED values.
+            "tests/test_graph_reconcile_order_invariance.py",
         ),
         # Phase 5's own two originally-tracked gaps here (a compare()-level
         # collision test, and an adversarial generator over the shapes
@@ -457,7 +466,7 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
         known_gaps=(
             KnownGap(
                 description=(
-                    "No archive/bundle-reader (`snapshot_cache.py`, "
+                    "No archive/bundle-reader (`workflows/dump/cache/`, "
                     "the G40 bundle-facts archive path) or python-api/"
                     "CLI-level round trip has yet been generalized to "
                     "the same production scale for a mixed-container "
@@ -500,7 +509,7 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
                     'The same "short read is not EOF" shape exists in '
                     "every other bounded/streamed reader in the tree "
                     "(`workflows/bundle_compare_operand.py`'s own larger-"
-                    "window probe, `snapshot_cache.py`'s archive reader, "
+                    "window probe, `workflows/dump/cache/`'s archive reader, "
                     "the DWARF/PE section readers). Only the snapshot "
                     "storage envelope's prefix primitive has a "
                     "generalized suite; the siblings are untested against "
@@ -670,7 +679,7 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
     # shortcut from scan's own depth/headers logic -- which was deleted with
     # the rest of `cli_scan_helpers.py`. `debug_presence_only` itself is
     # still a real, plumbed-through parameter
-    # (`dumper.py`/`service_dump_cache.py`/`workflows/dump/native.py`/
+    # (`dumper.py`/`workflows/dump/cache/api.py`/`workflows/dump/native.py`/
     # `dumper_layout_backfill.py`/`workflows/input_resolution.py`), but a
     # repo-wide audit at retirement time found no remaining production call
     # site that ever passes `debug_presence_only=True` -- every live caller
@@ -1057,6 +1066,7 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
             "tests/test_disposition_scope_matrix.py",
             "tests/test_disposition_rule_identity.py",
             "tests/test_disposition_state_sweep.py",
+            "tests/test_used_by_audit_exit_consistency.py",
         ),
         axes={
             "application_point": (
@@ -1221,19 +1231,27 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
             "elsewhere in the same multi-header binary, or a name that "
             "only appears in a COMMENT/STRING LITERAL/inactive `#if 0` "
             "block are all not evidence for THIS header -- only active "
-            "declaration text correlates."
+            "declaration text correlates. Every later parse of the same "
+            "headers in the same dump (the header graph's own clang parse, "
+            "even one prefetched before the decision existed) follows the "
+            "resolved mode rather than re-deciding from header text."
         ),
-        fixed_by=(1138,),
+        fixed_by=(1138, 1565),
         seed_tests=(
             "tests/test_dumper_language_mode_export_evidence.py",
             "tests/test_crosscheck_language_mode_export_evidence.py",
+            # the header graph follows the primary decision (live dumps,
+            # both frontends, C controls) and its two seams, compiler-free.
+            "tests/test_header_graph_language_mode.py",
+            "tests/test_header_graph_language_mode_unit.py",
         ),
         public_surfaces=("python-api", "cli"),
         axes={
-            "frontend": ("castxml", "clang"),
+            "frontend": ("castxml", "clang", "hybrid"),
             "declaration_shape": ("function", "ns_function", "extern_c", "variable"),
             "export_mangling": ("itanium", "macho_itanium", "msvc", "bare_c"),
             "excluded_text_source": ("comment", "string_literal", "if_zero_block"),
+            "consumer": ("primary_parse", "header_graph_parse"),
         },
         known_gaps=(
             KnownGap(
@@ -1259,7 +1277,7 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
             "guess Darwin from host OS there). A `sys.platform` guess for a REAL probe failure lives "
             "one layer up, in `dumper._run_clang`, after `_compiler_options.explicit_target_triple`. "
             "Whether CL mode is EFFECTIVELY active (`_compiler_options.effective_driver_mode_is_cl`) is the last `--driver-mode=<value>` override if any, else the binary's own name -- not a plain OR of the two, which can never be revoked back to GNU mode. Under CL mode there is no `sys.platform` guess, and explicit-target recovery (`cl_style=True`) is narrowed to the spellings actually honored (attached `--target=<value>`, separate `-target <value>`, either `/clang:`-forwarded), never one silently ignored. "
-            "A bare re-probe of the SAME resolved `clang_bin` (keeping only its effective `--driver-mode=<value>` if any, `dumper._forwarded_driver_mode_token`) is tried under BOTH driver modes when the explicit-target recovery finds nothing -- a CL-style `-print-target-triple` is honored exactly like GNU's, so a target-prefixed CL-style name (e.g. `aarch64-apple-darwin-clang-cl`) reports its own prefixed default from the bare probe too, not just under GNU mode. Dropping the driver-mode token would silently revert a `clang-cl --driver-mode=g++` re-probe to CL mode, since the identical binary reports a different target bare vs. with that override: real evidence beats a static name-shape heuristic, since the earlier, option-bearing probe may have failed for a reason unrelated to `clang_bin`'s own identity. Only when that bare probe ALSO fails (GNU mode only) does `sys.platform` apply, gated on BOTH the RESOLVED `clang_bin` being the plain host default by invocation BASENAME (`dumper_clang._is_default_clang_bin`, version-suffix-stripped -- real Clang derives its own default target from argv[0], so basename -- not real identity, not raw spelling, and NOT merely differing from the plain name -- is what matters: an absolute path or a native version suffix still matches, a target-prefixed symlink correctly does not, and an arbitrary custom rename is answered by the bare re-probe, never by guessing it must be a cross-compiler) AND NOT `dumper_clang.clang_bin_is_explicitly_configured` (a `--compiler`/`--compiler-prefix` wrapper can coincidentally share the plain default's basename while genuinely not being it -- once BOTH probes fail for an explicitly-configured binary, that failure is itself evidence of an anomaly, not confirmation of a real native clang; this now ALSO suppresses the guess for a genuine absolute-path `--compiler` naming the real native clang, superseding this bug class's own earlier claim to the contrary). No fallback at all when no `@response-file`/`--config=<file>`/`--config-{user,system}-dir=<dir>` is forwarded AT ALL (`forwards_response_file`/`explicit_target_triple`'s shared `_opaque_option_source_tokens` void-back-to-None -- a config-*-dir points at a directory whose `clang.cfg` is loaded IMPLICITLY, no explicit `--config=` needed; real Clang scans the WHOLE arg list, response/config files included, before parsing even starts, so one could carry a later target OR retroactively flip CL-vs-GNU mode regardless of its position relative to a visible target). Shape check: `model.mangled_name.strip_macho_itanium_"
+            "A bare re-probe of the SAME resolved `clang_bin` (keeping only its effective `--driver-mode=<value>` if any, `dumper._forwarded_driver_mode_token`) is tried under BOTH driver modes when the explicit-target recovery finds nothing -- a CL-style `-print-target-triple` is honored exactly like GNU's, so a target-prefixed CL-style name (e.g. `aarch64-apple-darwin-clang-cl`) reports its own prefixed default from the bare probe too, not just under GNU mode. Dropping the driver-mode token would silently revert a `clang-cl --driver-mode=g++` re-probe to CL mode, since the identical binary reports a different target bare vs. with that override: real evidence beats a static name-shape heuristic, since the earlier, option-bearing probe may have failed for a reason unrelated to `clang_bin`'s own identity. Only when that bare probe ALSO fails (GNU mode only) does `sys.platform` apply, gated on BOTH the RESOLVED `clang_bin` being the plain host default by invocation BASENAME (`abicheck.extract.compiler_driver.is_default_clang_bin`, version-suffix-stripped -- real Clang derives its own default target from argv[0], so basename -- not real identity, not raw spelling, and NOT merely differing from the plain name -- is what matters: an absolute path or a native version suffix still matches, a target-prefixed symlink correctly does not, and an arbitrary custom rename is answered by the bare re-probe, never by guessing it must be a cross-compiler) AND NOT `abicheck.extract.compiler_driver.clang_bin_is_explicitly_configured` (a `--compiler`/`--compiler-prefix` wrapper can coincidentally share the plain default's basename while genuinely not being it -- once BOTH probes fail for an explicitly-configured binary, that failure is itself evidence of an anomaly, not confirmation of a real native clang; this now ALSO suppresses the guess for a genuine absolute-path `--compiler` naming the real native clang, superseding this bug class's own earlier claim to the contrary). No fallback at all when no `@response-file`/`--config=<file>`/`--config-{user,system}-dir=<dir>` is forwarded AT ALL (`forwards_response_file`/`explicit_target_triple`'s shared `_opaque_option_source_tokens` void-back-to-None -- a config-*-dir points at a directory whose `clang.cfg` is loaded IMPLICITLY, no explicit `--config=` needed; real Clang scans the WHOLE arg list, response/config files included, before parsing even starts, so one could carry a later target OR retroactively flip CL-vs-GNU mode regardless of its position relative to a visible target). Shape check: `model.mangled_name.strip_macho_itanium_"
             "decoration`, NOT applied to castxml."
         ),
         fixed_by=(1138, 1156, 1167),
@@ -1290,7 +1308,7 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
                     "No Mach-O toolchain here -- Codex/CodeRabbit code review, plus one real Clang 18 install (used to verify the eighteenth-through-twenty-sixth items below). "
                     'Recurred TWENTY-SIX times within #1138/#1149/#1156/#1167: Itanium/plain-C shapes reading False on a failed probe; a guess INSIDE `is_darwin_target` plus an unconditional castxml strip corrupting `asm("__Zfake")`; that guess moved back inside `is_darwin_target` (caught by real macos-latest CI); a possibly-ignored '
                     "explicit target recovered under a CL-style driver; the `sys.platform` guess leaking outside that gate; `--driver-mode=cl` on a plain `clang` name evading the name-only CL check; that gate recovering NO spelling when two are honored; a `/clang:`-forwarded spelling still missed; a CL-named binary reverted to GNU mode "
-                    "still treated as CL; the `sys.platform` guess applying to an explicit cross-compiler unrelated to host OS; that same guess wrongly suppressed for a `gcc_path` `_resolve_clang_bin` itself ignores; an absolute-path spelling of the identical native binary failing string equality; a real-executable-identity fix wrongly equating a target-prefixed symlink with plain `clang`; a `@response-file`'s own hidden target being ignored; a native versioned "
+                    "still treated as CL; the `sys.platform` guess applying to an explicit cross-compiler unrelated to host OS; that same guess wrongly suppressed for a `gcc_path` `resolve_clang_bin` itself ignores; an absolute-path spelling of the identical native binary failing string equality; a real-executable-identity fix wrongly equating a target-prefixed symlink with plain `clang`; a `@response-file`'s own hidden target being ignored; a native versioned "
                     "driver name (`clang-18`) failing the basename check; a visible target trusted despite a later response file that could override it; that same fix wrongly trusting a preceding one too, since Clang's own driver-mode scan reads the whole arg list up front regardless of position; an exact-basename comparison alone wrongly treating ANY custom rename of the native compiler (e.g. `company-clang`) as a cross-compiler, closed by trying a bare re-probe of the identical binary first; an explicit `--config=<file>` left undetected by the response-file gate, closed by folding both into one shared `_opaque_option_source_tokens` check; that bare re-probe dropping an explicit `--driver-mode=` override too, silently reverting a `clang-cl --driver-mode=g++` re-probe to CL mode; a `--config-{user,system}-dir=<dir>` implicitly loading a `clang.cfg` with no explicit `--config=` at all, left just as undetected as the file form; an explicitly-"
                     "configured `--compiler` wrapper sharing the plain default's basename while not being it, still getting the guess purely on basename evidence; and, once a genuine "
                     'Darwin target IS confirmed, a literal `asm("__Zfake")` label being indistinguishable by shape alone from a real compiler-generated decorated Itanium mangling '

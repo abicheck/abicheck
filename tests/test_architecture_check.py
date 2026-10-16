@@ -826,7 +826,7 @@ def test_selector_leaf_purity_rejects_each_denylisted_module(tmp_path: Path) -> 
         "abicheck.checker_types",
         "abicheck.suppression",
         "abicheck.policy.reclassify",
-        "abicheck.finding_identity",
+        "abicheck.compare.finding_identity",
     ):
         root = _tree(tmp_path / denied)
         _add_package(root, "policy", "")
@@ -839,13 +839,13 @@ def test_selector_leaf_purity_rejects_each_denylisted_module(tmp_path: Path) -> 
 
 
 def test_selector_leaf_purity_rejects_submodule_import_too(tmp_path: Path) -> None:
-    """A `from abicheck.finding_identity import x` -- not just a bare
-    `import abicheck.finding_identity` -- must also be caught."""
+    """A `from abicheck.compare.finding_identity import x` -- not just a bare
+    `import abicheck.compare.finding_identity` -- must also be caught."""
     root = _tree(tmp_path)
     _add_package(root, "policy", "")
     _write(
         root / "abicheck/policy/selectors.py",
-        "from abicheck.finding_identity import report_canonical_finding_id\n",
+        "from abicheck.compare.finding_identity import report_canonical_finding_id\n",
     )
 
     assert "selector-leaf-purity" in _rules(root)
@@ -973,7 +973,7 @@ def test_dynamic_import_module_with_non_literal_target_is_not_resolved(
 ) -> None:
     """A genuinely dynamic target (a variable, not a string literal) is D6's
     own narrow, documented exception -- ``detector_registry.py``'s plugin
-    discovery and ``policy/public_surface.py``'s dict-keyed re-export shim
+    discovery and ``policy/public_surface_index.py``'s dict-keyed re-export shim
     are the real examples. The checker must not guess at it, and must not
     crash trying."""
     root = _tree(tmp_path)

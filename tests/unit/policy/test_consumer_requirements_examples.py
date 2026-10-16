@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Fixed-example tests for :mod:`abicheck.policy.consumer_requirements`.
+"""Fixed-example tests for :mod:`abicheck.policy.consumer_requirement_evaluation`.
 
 The property tests live in ``test_consumer_requirements.py``; these pin the
 individual relevance rules, the RESOLVED verdict exclusion, ELF scoping and
@@ -33,7 +33,7 @@ from abicheck.model.consumer_requirements import (
     LibraryExportFacts,
 )
 from abicheck.policy.classification import Verdict
-from abicheck.policy.consumer_requirements import (
+from abicheck.policy.consumer_requirement_evaluation import (
     appcompat_verdict,
     is_relevant_to_app,
     missing_app_versions,

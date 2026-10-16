@@ -11,13 +11,13 @@ import pytest
 from abicheck.checker_types import DiffResult
 from abicheck.comparability import compute_extraction_contract
 from abicheck.errors import ScopeMismatchError, SnapshotError, ValidationError
+from abicheck.frontends.render import _render_deps_section_md
 from abicheck.model import AbiSnapshot, DependencyInfo, Function, Visibility
 from abicheck.serialization import load_snapshot, save_snapshot
 from abicheck.service import (
     CompareRequest,
     CompareResult,
     InputSpec,
-    _render_deps_section_md,
     collect_metadata,
     compare_snapshots,
     dedup_policy_override_warnings,
@@ -505,14 +505,14 @@ class TestResolveInput:
 
     def test_symvers_empty_falls_through(self, tmp_path):
         # A .symvers file with no valid records is not treated as kABI.
-        from abicheck.service import _resolve_symvers
+        from abicheck.workflows.input_resolution import _resolve_symvers
 
         p = tmp_path / "empty.symvers"
         p.write_text("# only a comment\n")
         assert _resolve_symvers(p, "1.0") is None
 
     def test_symvers_unreadable_returns_none(self, tmp_path):
-        from abicheck.service import _resolve_symvers
+        from abicheck.workflows.input_resolution import _resolve_symvers
 
         # A directory named like a manifest cannot be read as text → None.
         d = tmp_path / "Module.symvers"
@@ -605,7 +605,7 @@ class TestRunDumpHybridNormalization:
     comparison, so an indirectly-selected hybrid request (case-insensitive
     value, or the documented ABICHECK_AST_FRONTEND=hybrid pin with auto)
     fell through to the single-backend path instead of triggering the merge
-    recursion -- fixed by resolving through dumper._resolve_header_backend.
+    recursion -- fixed by resolving through header_ast_backend._resolve_header_backend.
     """
 
     def _fake_dump_elf(self, castxml_snap, clang_snap):
@@ -1371,7 +1371,7 @@ class TestHeaderScopedInferredRoots:
         return root, umb
 
     def test_pe_no_build_context_adds_root_as_I(self, tmp_path):
-        from abicheck.service import _try_header_scoped_dump
+        from abicheck.workflows.dump.header_scoped import _try_header_scoped_dump
 
         root, umb = self._umbrella(tmp_path)
         captured = {}
@@ -1389,7 +1389,7 @@ class TestHeaderScopedInferredRoots:
     def test_no_headers_skips_inferred_derivation(self, tmp_path):
         # With no -H headers the derivation is skipped: the original includes pass
         # through unchanged and nothing is deferred/hashed.
-        from abicheck.service import _try_header_scoped_dump
+        from abicheck.workflows.dump.header_scoped import _try_header_scoped_dump
 
         captured = {}
 
@@ -1406,7 +1406,7 @@ class TestHeaderScopedInferredRoots:
 
     def test_macho_build_context_defers_and_hashes(self, tmp_path):
         from abicheck.dry_run_estimate import CompileContext
-        from abicheck.service import _try_header_scoped_dump
+        from abicheck.workflows.dump.header_scoped import _try_header_scoped_dump
 
         root, umb = self._umbrella(tmp_path)
         captured = {}
@@ -1434,7 +1434,7 @@ class TestHeaderScopedInferredRoots:
         the _attach_extraction_contract call, contract would silently stay
         None for every real PE header-scoped dump, unlike the ELF service
         path (_dump_elf), which already routes through dumper.dump()."""
-        from abicheck.service import _try_header_scoped_dump
+        from abicheck.workflows.dump.header_scoped import _try_header_scoped_dump
 
         root, umb = self._umbrella(tmp_path)
 
@@ -1469,7 +1469,7 @@ class TestHeaderScopedInferredRoots:
         provenance input must also reach the scope_fingerprint here -- else
         two saved snapshots differing only in declared public-header
         provenance could share a scope_fingerprint."""
-        from abicheck.service import _try_header_scoped_dump
+        from abicheck.workflows.dump.header_scoped import _try_header_scoped_dump
 
         root, umb = self._umbrella(tmp_path)
 
@@ -1520,7 +1520,7 @@ class TestHeaderScopedInferredRoots:
         # run_scan_core's except deadline.DeadlineExceeded -> _BudgetOverflow
         # mapping applies to PE/Mach-O the same way it already does for ELF.
         from abicheck import deadline
-        from abicheck.service import _try_header_scoped_dump
+        from abicheck.workflows.dump.header_scoped import _try_header_scoped_dump
 
         root, umb = self._umbrella(tmp_path)
 
@@ -1553,7 +1553,7 @@ class TestHeaderScopedInferredRoots:
         # DeadlineExceeded test above.
         from abicheck.dry_run_estimate import CompileContext
         from abicheck.errors import AstContextMissingError
-        from abicheck.service import _try_header_scoped_dump
+        from abicheck.workflows.dump.header_scoped import _try_header_scoped_dump
 
         _root, umb = self._umbrella(tmp_path)
 
@@ -2226,6 +2226,17 @@ class TestCompareRequestAdr055Evidence:
         save_snapshot(snap, p)
         return p
 
+    def _keep_raw_evidence_on_snapshot_operands(self, monkeypatch):
+        """These cells pin how a side's ``sources``/``build_info`` are wired
+        into extraction, using stored-snapshot operands for speed. A real run
+        ignores a raw tree on a snapshot operand (nothing to re-extract it
+        from -- ``test_compare_request_inline_evidence.py`` pins that rule),
+        so it is switched off here to reach the wiring."""
+        monkeypatch.setattr(
+            "abicheck.service_compare_evidence.without_unusable_raw_evidence",
+            lambda request, notify=None: request,
+        )
+
     def _spy_resolve_input(self, monkeypatch):
         import abicheck.workflows.input_resolution as _input_resolution
         from abicheck import service as service_mod
@@ -2383,6 +2394,7 @@ class TestCompareRequestAdr055Evidence:
         assert calls_by_path[new_p]["compile"].frontend_context == "device"
 
     def test_sources_triggers_embed_build_source(self, tmp_path, monkeypatch):
+        self._keep_raw_evidence_on_snapshot_operands(monkeypatch)
         old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
         new_p = self._make_snap_file(tmp_path, "libtest", "2.0")
         src_dir = tmp_path / "src"
@@ -2520,6 +2532,7 @@ class TestCompareRequestAdr055Evidence:
         same eff_backend resolve_input/run_dump use internally (an explicit
         compile.frontend wins over the bare header_backend), not silently
         default to "auto" while L2 used a different frontend."""
+        self._keep_raw_evidence_on_snapshot_operands(monkeypatch)
         from abicheck.compile_context import CompileContext
 
         old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
@@ -2546,16 +2559,15 @@ class TestCompareRequestAdr055Evidence:
         run_compare_request(request)
         assert embed_calls[0]["extractor"] == "castxml"
 
-    def test_default_auto_frontend_resolves_to_castxml_for_extractor(
-        self, tmp_path, monkeypatch
-    ):
-        """Codex review (P2, second round): the default frontend="auto" must
-        not be forwarded to embed_build_source's extractor as the literal
-        string "auto" -- _make_source_extractor doesn't special-case "auto"
-        and falls back to Clang, while L2's own "auto" resolves to castxml by
-        default (dumper._resolve_header_backend), so the common default-
-        frontend case would otherwise silently run L2/L4 through different
-        tools."""
+    def test_default_auto_frontend_replays_l4_with_clang(self, tmp_path, monkeypatch):
+        """The default frontend="auto" replays L4 with clang, L4's documented
+        default -- not castxml, L2's ``auto``, which records no macros, so a
+        `#define` change under ``depth="source"`` went unseen (the
+        evidence-depth workflow example). Still forwarded resolved, never as
+        the literal "auto" (Codex review, P2, second round);
+        ``tests/test_source_replay_extractor.py`` pins the full rule."""
+        monkeypatch.delenv("ABICHECK_AST_FRONTEND", raising=False)
+        self._keep_raw_evidence_on_snapshot_operands(monkeypatch)
         old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
         new_p = self._make_snap_file(tmp_path, "libtest", "2.0")
         src_dir = tmp_path / "src"
@@ -2575,7 +2587,7 @@ class TestCompareRequestAdr055Evidence:
             old=InputSpec.of(old_p, sources=src_dir), new=InputSpec.of(new_p)
         )
         run_compare_request(request)
-        assert embed_calls[0]["extractor"] == "castxml"
+        assert embed_calls[0]["extractor"] == "clang"
 
     def test_uppercase_auto_compile_frontend_is_not_treated_as_explicit(
         self, monkeypatch
@@ -2608,6 +2620,7 @@ class TestCompareRequestAdr055Evidence:
         embed_build_source leaves source replay's own public-header set
         empty, so the L4 extractor can classify every declaration as non-API
         and emit an empty surface, silently hiding source-only breaks."""
+        self._keep_raw_evidence_on_snapshot_operands(monkeypatch)
         old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
         new_p = self._make_snap_file(tmp_path, "libtest", "2.0")
         src_dir = tmp_path / "src"
@@ -2649,6 +2662,7 @@ class TestCompareRequestAdr055Evidence:
         the manifest's own roots (public_header_paths/public_header_dirs)
         must still reach source replay, or it can classify the manifest's
         API declarations as non-public and omit source-only breaks."""
+        self._keep_raw_evidence_on_snapshot_operands(monkeypatch)
         from types import SimpleNamespace
 
         old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
@@ -2690,6 +2704,7 @@ class TestCompareRequestAdr055Evidence:
         L4 source replay's own public-header set would make the extractors
         treat every declaration under a private support dir as API-relevant,
         false-flagging private-header churn as a source break."""
+        self._keep_raw_evidence_on_snapshot_operands(monkeypatch)
         from types import SimpleNamespace
 
         old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
@@ -2722,11 +2737,14 @@ class TestCompareRequestAdr055Evidence:
         run_compare_request(request)
         assert "/proj/private_support" not in embed_calls[0]["public_header_dirs"]
 
-    def test_hybrid_frontend_rejected_for_explicit_source_depth(self, tmp_path):
+    def test_hybrid_frontend_rejected_for_explicit_source_depth(
+        self, tmp_path, monkeypatch
+    ):
         """Codex review (P1): mirror cli.py's own --depth source +
         --ast-frontend hybrid UsageError -- L4 source-ABI replay has no
         dual-backend hybrid extractor, so this combination must be rejected
         rather than silently reach an artifact-only verdict."""
+        self._keep_raw_evidence_on_snapshot_operands(monkeypatch)
         from abicheck.compile_context import CompileContext
 
         old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
@@ -2744,11 +2762,12 @@ class TestCompareRequestAdr055Evidence:
         with pytest.raises(ValidationError, match="hybrid"):
             run_compare_request(request)
 
-    def test_android_frontend_rejected_for_raw_source_tree(self, tmp_path):
+    def test_android_frontend_rejected_for_raw_source_tree(self, tmp_path, monkeypatch):
         """Codex review (P2): frontend="android" combined with a genuine raw
         source tree must be rejected -- embed_build_source's inline
         collection pipeline has no real Android extractor and would
         otherwise silently substitute Clang."""
+        self._keep_raw_evidence_on_snapshot_operands(monkeypatch)
         old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
         new_p = self._make_snap_file(tmp_path, "libtest", "2.0")
         src_dir = tmp_path / "src"
@@ -2917,6 +2936,7 @@ class TestCompareRequestAdr055Evidence:
         lowercase -- _make_source_extractor only recognizes lowercase
         frontend names and silently falls back to Clang otherwise, making L2
         and L4 use different frontends."""
+        self._keep_raw_evidence_on_snapshot_operands(monkeypatch)
         old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
         new_p = self._make_snap_file(tmp_path, "libtest", "2.0")
         src_dir = tmp_path / "src"
@@ -3231,8 +3251,9 @@ class TestDiagnosticComparisonThreading:
         # 2-header declared set: a single header's own name is no longer
         # load-bearing scope identity (Codex review, PR #624 follow-up —
         # the CI-red incident once the gate went live on real dumps at
-        # scale), so this needs a genuine multi-header declared-surface
-        # difference to still trigger the gate.
+        # scale). A changed header set alone is API evolution, not a
+        # scope mismatch (oneDAL 2026.0 header removal), so the drift that
+        # still triggers the gate here is manifest translation-unit drift.
         a_old = tmp_path / "old" / "a.h"
         a_new = tmp_path / "new" / "a.h"
         old_h = tmp_path / "old" / "foo.h"
@@ -3244,7 +3265,7 @@ class TestDiagnosticComparisonThreading:
         old_h.write_text("int f(void);\n")
         new_h.write_text("int f(void);\n")
 
-        def _snap(version, headers):
+        def _snap(version, headers, tu):
             return AbiSnapshot(
                 library="libtest.so",
                 version=version,
@@ -3257,13 +3278,15 @@ class TestDiagnosticComparisonThreading:
                         is_extern_c=True,
                     )
                 ],
-                contract=compute_extraction_contract(declared_headers=headers),
+                contract=compute_extraction_contract(
+                    declared_headers=headers, manifest_tu_scope=tu
+                ),
             )
 
         old_p = tmp_path / "old.json"
         new_p = tmp_path / "new.json"
-        save_snapshot(_snap("1.0", [a_old, old_h]), old_p)
-        save_snapshot(_snap("2.0", [a_new, new_h]), new_p)
+        save_snapshot(_snap("1.0", [a_old, old_h], '[{"name": "core"}]'), old_p)
+        save_snapshot(_snap("2.0", [a_new, new_h], '[{"name": "core2"}]'), new_p)
         return old_p, new_p
 
     def test_compare_snapshots_raises_by_default(self, tmp_path):
@@ -3692,7 +3715,7 @@ class TestRenderOutput:
         unchanged by this -- it passed ``True`` before and gets ``True`` now,
         verified byte-for-byte across all seven ``--format`` values against
         the pre-change revision."""
-        from abicheck.frontends.cli.runtime import _render_output
+        from abicheck.frontends.cli.compare_report import _render_output
 
         default_markdown = render_output("markdown", diff_result, snap)
         explicit_true = render_output(
@@ -4658,7 +4681,7 @@ class TestAttachHeaderGraphDeviceContext:
 
     def test_device_context_skips_include_extractor(self, tmp_path):
         from abicheck.dry_run_estimate import CompileContext
-        from abicheck.service import _attach_header_graph
+        from abicheck.service_header_graph_attach import _attach_header_graph
 
         header = tmp_path / "pub.h"
         header.write_text("int f(void);\n")
@@ -4681,7 +4704,7 @@ class TestAttachHeaderGraphDeviceContext:
 
     def test_host_context_still_uses_include_extractor(self, tmp_path):
         from abicheck.dry_run_estimate import CompileContext
-        from abicheck.service import _attach_header_graph
+        from abicheck.service_header_graph_attach import _attach_header_graph
 
         header = tmp_path / "pub.h"
         header.write_text("int f(void);\n")
@@ -4712,7 +4735,7 @@ class TestAttachHeaderGraphDeviceContext:
         otherwise a pruned dependency function/variable node would degrade
         or drop call-graph edges the graph is built to capture."""
         from abicheck.extract.headers.clang.streaming import streaming_prune_suppressed
-        from abicheck.service import _attach_header_graph
+        from abicheck.service_header_graph_attach import _attach_header_graph
 
         monkeypatch.setenv("ABICHECK_CLANG_PRUNE_DEPENDENCY_DECLS", "1")
         header = tmp_path / "pub.h"
@@ -4749,7 +4772,7 @@ class TestAttachHeaderGraphDeviceContext:
     ):
         """compile=None -- the default CompileContext() -- must behave the
         same as an explicit host request, not be silently skipped."""
-        from abicheck.service import _attach_header_graph
+        from abicheck.service_header_graph_attach import _attach_header_graph
 
         header = tmp_path / "pub.h"
         header.write_text("int f(void);\n")
@@ -4781,7 +4804,7 @@ class TestAttachHeaderGraphCompilerSelection:
     here silently misses the memo on top of picking the wrong driver."""
 
     def test_uppercase_c_selects_cc_compiler(self, tmp_path: Path):
-        from abicheck.service import _attach_header_graph
+        from abicheck.service_header_graph_attach import _attach_header_graph
 
         header = tmp_path / "pub.h"
         header.write_text("int f(void);\n")
@@ -4805,7 +4828,7 @@ class TestAttachHeaderGraphCompilerSelection:
         assert mock_ast.call_args.kwargs["compiler"] == "cc"
 
     def test_lang_none_selects_cpp_compiler(self, tmp_path: Path):
-        from abicheck.service import _attach_header_graph
+        from abicheck.service_header_graph_attach import _attach_header_graph
 
         header = tmp_path / "pub.h"
         header.write_text("void f();\n")
@@ -4833,11 +4856,11 @@ class TestAttachHeaderGraphCompilerSelection:
     ):
         """CodeRabbit review: the same case-insensitive normalization must
         also apply to the include-graph pass's own driver resolution
-        (_resolve_clang_bin/fallback) and its `language=` argument -- these
+        (resolve_clang_bin/fallback) and its `language=` argument -- these
         three were fixed alongside the compiler selection above but are
         independent code paths, each capable of drifting back to "C++" on
         its own."""
-        from abicheck.service import _attach_header_graph
+        from abicheck.service_header_graph_attach import _attach_header_graph
 
         header = tmp_path / "pub.h"
         header.write_text("int f(void);\n")
@@ -4849,7 +4872,8 @@ class TestAttachHeaderGraphCompilerSelection:
                 return_value=(ast, None, False),
             ),
             patch(
-                "abicheck.dumper._resolve_clang_bin", return_value="/opt/llvm/clang"
+                "abicheck.extract.compiler_driver.resolve_clang_bin",
+                return_value="/opt/llvm/clang",
             ) as mock_resolve,
             patch(
                 "abicheck.buildsource.header_graph.ClangHeaderIncludeExtractor"
@@ -4886,7 +4910,7 @@ class TestAttachHeaderGraphHashesIncludeSearchTokens:
 
     def test_gcc_option_tokens_include_dir_is_hashed(self, tmp_path: Path):
         from abicheck.dry_run_estimate import CompileContext
-        from abicheck.service import _attach_header_graph
+        from abicheck.service_header_graph_attach import _attach_header_graph
 
         header = tmp_path / "pub.h"
         header.write_text("int f(void);\n")
@@ -4912,7 +4936,7 @@ class TestAttachHeaderGraphHashesIncludeSearchTokens:
         assert build_inc in mock_ast.call_args.kwargs["extra_hash_dirs"]
 
     def test_no_include_tokens_hashes_nothing_extra(self, tmp_path: Path):
-        from abicheck.service import _attach_header_graph
+        from abicheck.service_header_graph_attach import _attach_header_graph
 
         header = tmp_path / "pub.h"
         header.write_text("int f(void);\n")

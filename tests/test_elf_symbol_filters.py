@@ -9,8 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from abicheck.diff_symbols import _public_functions
-from abicheck.diff_symbols_variables import _public_variables
+from abicheck.compare.public_surface import public_functions, public_variables
 from abicheck.dumper import _elf_classify_symbols, _is_abi_relevant_symbol
 from abicheck.dwarf_snapshot import _DwarfSnapshotBuilder
 from abicheck.elf_metadata import ElfMetadata, ElfSymbol, SymbolType
@@ -493,7 +492,7 @@ def test_public_functions_falls_back_without_elf_metadata() -> None:
         elf=None,
     )
 
-    assert set(_public_functions(snap)) == {"_init", "lib_init"}
+    assert set(public_functions(snap)) == {"_init", "lib_init"}
 
 
 def test_public_functions_keeps_empty_filtered_elf_exports_empty() -> None:
@@ -509,7 +508,7 @@ def test_public_functions_keeps_empty_filtered_elf_exports_empty() -> None:
         ),
     )
 
-    assert _public_functions(snap) == {}
+    assert public_functions(snap) == {}
 
 
 def test_public_functions_uses_abi_relevant_export_filter() -> None:
@@ -530,7 +529,7 @@ def test_public_functions_uses_abi_relevant_export_filter() -> None:
         ),
     )
 
-    assert set(_public_functions(snap)) == {"lib_init"}
+    assert set(public_functions(snap)) == {"lib_init"}
 
 
 def test_public_functions_preserves_runtime_owned_stdlib_exports() -> None:
@@ -550,7 +549,7 @@ def test_public_functions_preserves_runtime_owned_stdlib_exports() -> None:
         ),
     )
 
-    assert set(_public_functions(snap)) == {"_ZNSt6vectorIiSaIiEE4sizeEv"}
+    assert set(public_functions(snap)) == {"_ZNSt6vectorIiSaIiEE4sizeEv"}
 
 
 def test_public_functions_uses_elf_soname_for_runtime_context() -> None:
@@ -570,7 +569,7 @@ def test_public_functions_uses_elf_soname_for_runtime_context() -> None:
         ),
     )
 
-    assert set(_public_functions(snap)) == {"_ZNSt6vectorIiSaIiEE4sizeEv"}
+    assert set(public_functions(snap)) == {"_ZNSt6vectorIiSaIiEE4sizeEv"}
 
 
 def _variable(name: str) -> Variable:
@@ -594,7 +593,7 @@ def test_public_variables_filters_elf_only_linker_artifacts() -> None:
         ],
     )
 
-    assert set(_public_variables(snap)) == {"public_table"}
+    assert set(public_variables(snap)) == {"public_table"}
 
 
 def test_public_variables_preserves_runtime_owned_stdlib_vtables() -> None:
@@ -608,7 +607,7 @@ def test_public_variables_preserves_runtime_owned_stdlib_vtables() -> None:
         ],
     )
 
-    assert set(_public_variables(snap)) == {
+    assert set(public_variables(snap)) == {
         "_ZTVSt9exception",
         "_ZTTSt23_Sp_counted_ptr_inplaceE",
     }
@@ -626,7 +625,7 @@ def test_public_variables_uses_elf_soname_for_runtime_context() -> None:
         elf=ElfMetadata(soname="libstdc++.so.6"),
     )
 
-    assert set(_public_variables(snap)) == {
+    assert set(public_variables(snap)) == {
         "_ZTVSt9exception",
         "_ZTTSt23_Sp_counted_ptr_inplaceE",
     }

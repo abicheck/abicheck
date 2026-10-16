@@ -28,7 +28,7 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock
 
-from abicheck.cli_compare_release import _extract_if_package
+from abicheck.cli_compare_release_helpers import _extract_if_package
 from abicheck.package import ExtractResult
 
 

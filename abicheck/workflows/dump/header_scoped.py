@@ -19,12 +19,9 @@ first (the same "relocate a self-contained chunk first" playbook
 ``dumper_contract.py`` already used for ``dumper.py``, CLAUDE.md). Mostly a
 relocation -- both functions keep their prior behavior for every existing
 caller -- plus ADR-050 D1's own ``include_labels`` parameter/threading added
-in the same commit, re-exported from ``service.py`` so
-``service._try_header_scoped_dump`` / ``service._has_matched_public_surface``
-(the PE/Mach-O extractors in ``workflows.dump.pe``/``.macho`` call it through
-``workflows.dump.scoped``; tests monkeypatch it via
-``monkeypatch.setattr(service, "_try_header_scoped_dump", ...)``) keep
-working unchanged.
+in the same commit. The PE/Mach-O extractors reach it through
+``workflows.dump.scoped``; tests patch or import it from this module
+(``abicheck.workflows.dump.header_scoped``), not from ``service.py``.
 
 ``CompileContext``/``expand_header_inputs`` are imported locally inside
 :func:`_try_header_scoped_dump` rather than at module level, mirroring that
@@ -99,12 +96,17 @@ def _try_header_scoped_dump(
     ``lang_explicit`` (G31 Phase C follow-up): forces *lang* on this pass
     regardless of value when set, matching the sibling force decision
     ``service.run_dump``'s own ``_header_graph_lang`` computes for the same
-    request — see :attr:`abicheck.workflows.contracts.DumpRequest.lang_explicit`.
+    request — see :attr:`abicheck.workflows.service_requests.DumpRequest.lang_explicit`.
     ``False`` (the default) is a no-op: identical to the pre-existing
     "force only bare ``'c'``" behavior.
     """
     from ...dry_run_estimate import CompileContext, expand_header_inputs
-    from ...dumper import _dump_macho as _dumper_macho, _dump_pe as _dumper_pe
+    from ...dumper import (
+        _attach_extraction_contract,
+        _dump_macho as _dumper_macho,
+        _dump_pe as _dumper_pe,
+    )
+    from ...extract.header_order_witness import header_order_proof
 
     # Expand header directories into individual files (same as the ELF path),
     # so `--header <dir>` scopes correctly instead of feeding a directory to
@@ -159,11 +161,22 @@ def _try_header_scoped_dump(
         deferred_dirs = tuple(
             deferred_token_dirs(deferred)
         ) + cache_relevant_operand_paths(cc.gcc_option_tokens)
-    try:
+
+    def _dump_with_contract(headers: list[Path]) -> AbiSnapshot:
+        """Run the native builder and attach its per-input contract.
+
+        PE/Mach-O header-scoped extraction bypasses :func:`dumper.dump`, so
+        the header-order witness must wrap this equivalent entry point. Each
+        witness pass needs its own contract: the canonical proof is its own
+        declared ``header_sequence``, not the original request's sequence.
+
+        The parameter is named ``headers`` because the witness decorator binds
+        its arguments by that name.
+        """
         if fmt == "pe":
             snap = _dumper_pe(
                 path,
-                resolved_headers,
+                headers,
                 eff_includes,
                 version,
                 compiler,
@@ -181,7 +194,7 @@ def _try_header_scoped_dump(
         else:
             snap = _dumper_macho(
                 path,
-                resolved_headers,
+                headers,
                 eff_includes,
                 version,
                 compiler,
@@ -196,6 +209,24 @@ def _try_header_scoped_dump(
                 extra_hash_dirs=deferred_dirs,
                 frontend_context=cc.frontend_context,
             )
+        _attach_extraction_contract(
+            snap,
+            headers=headers,
+            extra_includes=eff_includes,
+            gcc_options=cc.gcc_options,
+            gcc_option_tokens=eff_tokens,
+            lang=lang_arg,
+            public_headers=public_headers,
+            public_header_dirs=public_header_dirs,
+            extra_include_labels=include_labels,
+        )
+        return snap
+
+    try:
+        # Match dumper.dump()'s witness behavior for this direct PE/Mach-O
+        # route. Without it, macOS never records header_canonical, so a safe
+        # reordered header surface still fails the profile gate.
+        snap = header_order_proof(_dump_with_contract)(resolved_headers)
     except deadline.DeadlineExceeded:
         # A --budget deadline expiring mid-parse is not "this header backend is
         # unavailable" — it's the scan's own budget guard firing. Falling back
@@ -226,31 +257,6 @@ def _try_header_scoped_dump(
             stacklevel=2,
         )
         return None, "header-backend-unavailable"
-
-    # ADR-050 D1 (Codex review, PR #624 follow-up): this path calls
-    # dumper._dump_pe/_dump_macho directly, bypassing dumper.dump() entirely
-    # -- without this call, every PE/Mach-O header-scoped dump would leave
-    # snap.contract=None regardless of whether headers were genuinely used,
-    # unlike the ELF service path (_dump_elf above), which already routes
-    # through dumper.dump() and gets this for free. public_headers/
-    # public_header_dirs are the same outer provenance inputs run_dump
-    # applies via _apply_native_provenance after this call returns (Codex
-    # review, PR #624 follow-up) -- without threading them in here too, two
-    # saved snapshots differing only in declared public-header provenance
-    # could share the same scope_fingerprint.
-    from ...dumper import _attach_extraction_contract
-
-    _attach_extraction_contract(
-        snap,
-        headers=resolved_headers,
-        extra_includes=eff_includes,
-        gcc_options=cc.gcc_options,
-        gcc_option_tokens=eff_tokens,
-        lang=lang_arg,
-        public_headers=public_headers,
-        public_header_dirs=public_header_dirs,
-        extra_include_labels=include_labels,
-    )
 
     if not _has_matched_public_surface(snap):
         warnings.warn(

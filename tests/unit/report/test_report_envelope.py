@@ -9,8 +9,8 @@ one caller's domain logic, rather than only the example-shaped tests its first
 caller happens to need. ``findings_for`` is exactly that shape -- a
 change-sequence-to-finding join over an id-keyed index with a fallback for
 objects the index cannot contain (the shallow ``Change`` copies
-``report_correlation._suppress_dangling_correlation_notes`` hands a renderer,
-and -- since ``report/build.py``'s ``_snapshot_change`` -- every ``Change``
+``report_correlation.suppress_dangling_correlation_notes`` hands a renderer,
+and -- since ``report/document_builder.py``'s ``_snapshot_change`` -- every ``Change``
 the *caller* passed into :func:`build_report_envelope` too: the envelope
 snapshots each one so a later mutation of the caller's own object cannot
 reach an already-resolved decision, which means the envelope's own
@@ -34,7 +34,7 @@ import pytest
 
 from abicheck.checker import Change, ChangeKind, DiffResult
 from abicheck.model import AbiSnapshot
-from abicheck.report.build import build_report_envelope
+from abicheck.report.document_builder import build_report_envelope
 from abicheck.report.envelope import RenderOptions, ReportEnvelope
 
 _KINDS = (

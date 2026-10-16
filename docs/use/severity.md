@@ -11,9 +11,10 @@ generated: false
 
 # Severity Configuration
 
-abicheck classifies every detected change into one of four **issue categories**,
-each with a configurable severity level that controls exit codes and report
-presentation. Severity is layered on top of the overall
+abicheck classifies every detected change into one of four configurable
+**issue categories**, each with a severity level that controls exit codes and
+report presentation. A fifth, fixed category, `informational`, holds findings
+that record that nothing changed. It never affects the exit code. Severity is layered on top of the overall
 [verdict](../learn/verdicts.md) — it doesn't replace it.
 
 > Severity is the last step of the CI gating pipeline (classify → suppress →
@@ -34,6 +35,13 @@ Every `ChangeKind` is assigned to exactly one of these categories:
 | **potential_breaking** | Source-level breaks and deployment risk (e.g. `enum_member_renamed`, `symbol_version_required_added`) | `warning` |
 | **quality_issues** | Problematic behaviors that don't break compatibility (e.g. `visibility_leak`, `soname_missing`, `func_noexcept_added`) | `warning` |
 | **addition** | New public API surface (e.g. `func_added`, `type_added`, `enum_member_added`) | `info` |
+| **informational** | Findings that record that nothing a consumer can act on changed: a reconciliation proving a declaration identical (`declaration_identity_unchanged`, `declaration_coordinates_shifted`), or an aggregate roll-up of findings reported on their own (`public_surface_grew`, `public_surface_shrank`) | `info`, **fixed** |
+
+`informational` is not configurable. No preset, `severity:` key or override
+can make it an error, so `--severity-preset strict` never fails a run on it.
+The `severity: {informational: …}` key is rejected as unknown (exit 64). The
+findings still appear in every report: the `changes` list,
+`summary.informational`, and `severity.categories.informational`.
 
 The category assignment is based on canonical kind sets defined in
 `checker_policy.py` and respects the active `--policy` (e.g. `sdk_vendor`
@@ -41,7 +49,7 @@ downgrades `enum_member_renamed` from `potential_breaking` to `quality_issues`).
 
 ## Severity levels
 
-Each category can be set to one of three levels:
+Each configurable category can be set to one of three levels:
 
 | Level | Report presentation | Exit code impact |
 |-------|-------------------|------------------|
@@ -151,7 +159,8 @@ The JSON output includes a `severity` object when severity is configured:
       "abi_breaking": {"severity": "error", "count": 2},
       "potential_breaking": {"severity": "warning", "count": 1},
       "quality_issues": {"severity": "warning", "count": 0},
-      "addition": {"severity": "info", "count": 3}
+      "addition": {"severity": "info", "count": 3},
+      "informational": {"severity": "info", "count": 1}
     },
     "exit_code": 4
   }
@@ -172,13 +181,14 @@ demoted to `warning` or `info` under the `default` preset. However, the
 `strict` preset maps **all** categories (including `quality_issues` and
 `addition`) to `error`, so `--policy sdk_vendor --severity-preset strict` will
 still exit non-zero for any detected changes, even those the policy downgrades.
+The one exception is the fixed `informational` category, which never gates.
 
 ## GitHub Action
 
 The GitHub Action supports severity configuration via inputs:
 
 ```yaml
-- uses: abicheck/abicheck@v0.6.0
+- uses: abicheck/abicheck@v0.7.0
   with:
     old-library: libfoo-v1.json
     new-library: libfoo-v2.json
@@ -197,7 +207,7 @@ severity:
 ```
 
 ```yaml
-- uses: abicheck/abicheck@v0.6.0
+- uses: abicheck/abicheck@v0.7.0
   with:
     old-library: libfoo-v1.json
     new-library: libfoo-v2.json

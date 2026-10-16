@@ -22,21 +22,28 @@ so it stays a leaf; ``reporter`` re-exports these names for backward compat.
 
 from __future__ import annotations
 
-import hashlib
 from collections.abc import Sequence
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from .policy.evaluate import effective_kind_sets
 from .report.change_operation import (
     ACTION_TOKEN_OPERATIONS as ACTION_TOKEN_OPERATIONS,
     ELEMENT_TOKEN_ENTITIES as ELEMENT_TOKEN_ENTITIES,
-    entity_for_change as entity_for_change,
     entity_for_kind as entity_for_kind,
     operation_for_change as operation_for_change,
-    operation_for_kind as operation_for_kind,
 )
 from .report.kind_rollup import roll_up_large_kinds
+from .report.not_evaluated_section import (
+    compute_not_evaluated as compute_not_evaluated,
+)
+from .report.view import (
+    apply_show_only,
+    finding_id,
+    group_changes_by_root_cause,
+    root_cause_id_for_key,
+    root_cause_key_and_display,
+    show_only_matches,
+)
 
 if TYPE_CHECKING:
     from datetime import date
@@ -51,7 +58,6 @@ from .checker import (
     LibraryMetadata,
     Verdict,
 )
-from .finding_identity import missing_contract_kind, report_finding_id
 from .impact.use_case_impact import use_cases_by_finding_for as use_cases_by_finding_for
 from .model.change_catalog.kinds import HasKind
 from .model.contract_finding_relevance import is_evaluated
@@ -76,10 +82,7 @@ from .report.render_markdown import (
     _format_change_md as _format_change_md,
     _format_change_md_oneline as _format_change_md_oneline,
 )
-from .report_correlation import (
-    _suppress_dangling_correlation_notes as _suppress_dangling_correlation_notes,
-)
-from .report_summary import build_summary, surface_breakdown
+from .report_summary import build_summary
 from .semver import recommend_release_for_report
 
 _VERDICT_EMOJI = {
@@ -129,6 +132,7 @@ def to_stat(
             "risk_changes": summary.risk_count,
             "compatible_additions": summary.compatible_additions,
             "quality_issues": summary.quality_issues,
+            "informational": summary.informational,
             "total_changes": summary.total_changes,
             "change_inventory": render_change_inventory_json(summary.inventory),
         },
@@ -155,262 +159,6 @@ def to_stat(
         )
         d["severity"] = {"exit_code": exit_code}
     return render_stat_document(ReportDocument.from_mapping(d))
-
-
-# ---------------------------------------------------------------------------
-# Show-only filter
-# ---------------------------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class ShowOnlyFilter:
-    """Parsed --show-only tokens.
-
-    Tokens fall into three dimensions; within each dimension OR logic applies,
-    across dimensions AND logic applies.
-    """
-
-    severities: frozenset[str]  # breaking, api-break, risk, compatible
-    elements: frozenset[str]  # functions, variables, types, enums, elf
-    actions: frozenset[str]  # added, removed, changed, unchanged
-
-    @classmethod
-    def parse(cls, raw: str) -> ShowOnlyFilter:
-        """Parse a comma-separated --show-only string into a filter."""
-        severity_tokens = {"breaking", "api-break", "risk", "compatible"}
-        element_tokens = set(ELEMENT_TOKEN_ENTITIES)
-        action_tokens = set(ACTION_TOKEN_OPERATIONS)
-
-        severities: set[str] = set()
-        elements: set[str] = set()
-        actions: set[str] = set()
-
-        for tok in raw.split(","):
-            tok = tok.strip().lower()
-            if not tok:
-                continue
-            if tok in severity_tokens:
-                severities.add(tok)
-            elif tok in element_tokens:
-                elements.add(tok)
-            elif tok in action_tokens:
-                actions.add(tok)
-            else:
-                raise ValueError(f"Unknown --view show= token: {tok!r}")
-
-        return cls(
-            severities=frozenset(severities),
-            elements=frozenset(elements),
-            actions=frozenset(actions),
-        )
-
-    def _check_severity(
-        self,
-        change: Change,
-        policy: str,
-        kind_sets: KindSets | None = None,
-        policy_file: object | None = None,
-        today: date | None = None,
-    ) -> bool:
-        """Return True if *change* matches the severity filter.
-
-        Resolves through ``severity.effective_verdict_for_change`` — the same
-        canonical resolver ``policy.evaluate.effective_verdict`` uses —
-        so both an A4 per-finding ``effective_verdict`` override (ADR-027) and
-        a kind-level ``PolicyFile.overrides`` entry are honoured. Without this,
-        `--show-only` could disagree with the JSON severity field and
-        filtered_summary counts for any change whose effective category
-        differs from its raw kind's policy bucket (a demoted opaque/PIMPL
-        layout change, or a kind moved by a policy-file override). *today*:
-        an envelope's ``resolved_today`` (ADR-061 gap C, Codex, fresh).
-        """
-        if not self.severities:
-            return True
-        from .policy.severity import effective_verdict_for_change
-
-        eff = effective_verdict_for_change(
-            change,
-            policy=policy,
-            kind_sets=kind_sets,
-            policy_file=policy_file,
-            today=today,
-        )
-        # NB: this maps to the CLI --show-only token vocabulary (hyphenated
-        # "api-break"), which intentionally differs from the JSON-field
-        # labels in _VERDICT_TO_SEVERITY_LABEL (underscored "api_break").
-        # The two are deliberately separate label spaces — keep them in sync
-        # by intent, not by sharing a dict.
-        label = {
-            Verdict.BREAKING: "breaking",
-            Verdict.API_BREAK: "api-break",
-            Verdict.COMPATIBLE_WITH_RISK: "risk",
-            Verdict.COMPATIBLE: "compatible",
-        }.get(eff)
-        return label in self.severities
-
-    def _check_element(self, change: object, kind_val: str) -> bool:
-        """Return True if *change* matches the element filter.
-
-        Plan slice 7o: resolves through the change catalog's own declared
-        :class:`ChangeEntity` (:func:`entity_for_change`), not through a
-        second interpretation of the kind's *name*. Takes the whole finding
-        rather than its kind because a polymorphic kind's entity is a
-        property of the finding, not of the kind.
-        """
-        if not self.elements:
-            return True
-        entity = entity_for_change(change, kind_val)
-        if entity is None:
-            return False
-        return any(
-            ELEMENT_TOKEN_ENTITIES[elem].value == entity for elem in self.elements
-        )
-
-    @staticmethod
-    def _check_action(
-        kind_val: str, actions: frozenset[str], change: object | None = None
-    ) -> bool:
-        """Return True if the finding matches the action filter.
-
-        Resolves through :func:`operation_for_change` -- the same per-finding
-        operation the JSON report serializes -- so a cross-source finding
-        stated ``introduced``/``resolved``/``persistent`` filters as
-        ``added``/``removed``/``unchanged``, not as its kind's declared
-        ``modified``. With no *change*, the kind's declared
-        :class:`ChangeOperation` answers (plan slice 7o).
-        """
-        if not actions:
-            return True
-        operation = operation_for_change(change, kind_val)
-        return any(ACTION_TOKEN_OPERATIONS[action] == operation for action in actions)
-
-    def matches(
-        self,
-        change: Change,
-        policy: str = "strict_abi",
-        kind_sets: KindSets | None = None,
-        policy_file: object | None = None,
-        today: date | None = None,
-    ) -> bool:
-        """Return True if *change* passes this filter."""
-        if not self._check_severity(change, policy, kind_sets, policy_file, today):
-            return False
-        if not self._check_element(change, change.kind.value):
-            return False
-        return self._check_action(change.kind.value, self.actions, change)
-
-
-#: Separator between OR'd ``ShowOnlyFilter`` groups in a single ``show_only``
-#: string (CodeRabbit/Codex review, PR #1154). ``--view show=...`` is
-#: repeatable; each occurrence is one AND-across-dimensions/OR-within-
-#: dimension group (``ShowOnlyFilter``'s own pre-existing single-string
-#: grammar, unchanged), and repeat occurrences must OR *those groups*
-#: together -- joining them with "," instead (the bug this fixes) collapsed
-#: two different-dimension groups into one AND-group instead, and two
-#: same-dimension groups into a wider OR *within* that one dimension, either
-#: way losing the promised "match either group" semantics. ";" was never a
-#: legal character in a single group's own token grammar (severity/element/
-#: action words only), so splitting on it first is a strict, backward-
-#: compatible generalization: a string with no ";" is exactly one group,
-#: identical to every pre-existing single-string caller/test.
-SHOW_ONLY_GROUP_SEP = ";"
-
-
-def parse_show_only_groups(show_only: str) -> tuple[ShowOnlyFilter, ...]:
-    """Parse a ``show_only`` string into its OR'd ``ShowOnlyFilter`` groups.
-
-    See ``SHOW_ONLY_GROUP_SEP``'s own comment for the grammar. Each group is parsed
-    with the existing, unchanged ``ShowOnlyFilter.parse`` -- a bad token
-    inside any group raises the identical ``ValueError`` it always did.
-    """
-    return tuple(
-        ShowOnlyFilter.parse(part) for part in show_only.split(SHOW_ONLY_GROUP_SEP)
-    )
-
-
-def render_show_only_cli_hint(show_only: str) -> str:
-    """Render *show_only* back as a literally re-runnable ``--view show=...``
-    invocation.
-
-    Codex review (PR #1154 second follow-up: "Render repeated show groups
-    as repeated view options"): the raw *show_only* string stores repeated
-    ``--view show=...`` occurrences joined by :data:`SHOW_ONLY_GROUP_SEP`
-    (``";"``), an internal transport separator -- ``ShowOnlyFilter.parse``
-    rejects it as a single value, and an unquoted shell treats a bare ``;``
-    as a command separator. Every "how to reproduce this filter" hint
-    (Markdown/HTML "Filtered by" notes) must render one ``--view show=...``
-    token per group instead of echoing the internal separator verbatim.
-    A *show_only* with no ``;`` (the common case, and every pre-existing
-    single-group caller) round-trips to exactly one ``--view show=...``
-    token, unchanged from before this function existed.
-    """
-    groups = show_only.split(SHOW_ONLY_GROUP_SEP)
-    return " ".join(f"--view show={group}" for group in groups)
-
-
-def show_only_matches(
-    show_only: str,
-    change: Change,
-    policy: str = "strict_abi",
-    kind_sets: KindSets | None = None,
-    policy_file: object | None = None,
-    today: date | None = None,
-) -> bool:
-    """Return True if *change* matches ANY OR'd group of *show_only*."""
-    return any(
-        group.matches(change, policy, kind_sets, policy_file, today)
-        for group in parse_show_only_groups(show_only)
-    )
-
-
-def show_only_matches_severity_label(show_only: str | None, label: str) -> bool:
-    """Return True if *label* passes any OR'd group's severity dimension.
-
-    For a finding with no backing ``Change`` (a missing-contract label) --
-    ``apply_show_only``'s element/action dimensions don't apply to "a symbol
-    is simply absent", so only the severity dimension is checked, the same
-    narrowing every one of this function's call sites already documented
-    for the single-group case. A group with no severity tokens at all
-    matches every label (mirrors ``ShowOnlyFilter._check_severity``'s own
-    "unconstrained dimension passes" rule) -- so this generalizes the
-    pre-existing ``not show_only_severities or label in show_only_severities``
-    check at each call site to OR across every group instead of just one.
-    """
-    if not show_only:
-        return True
-    return any(
-        not group.severities or label in group.severities
-        for group in parse_show_only_groups(show_only)
-    )
-
-
-def apply_show_only(
-    changes: Sequence[Change],
-    show_only: str,
-    policy: str = "strict_abi",
-    kind_sets: KindSets | None = None,
-    policy_file: object | None = None,
-    today: date | None = None,
-) -> list[Change]:
-    """Filter changes according to a --show-only token string.
-
-    *kind_sets* / *policy_file*, when supplied by the caller (typically
-    ``policy.evaluate.effective_kind_sets(result)`` / ``result.policy_file``), let the
-    severity dimension resolve through the same effective-verdict logic as
-    the rest of the report — including kind-level ``PolicyFile.overrides``
-    and per-finding ``effective_verdict`` — so the filter never disagrees
-    with the JSON severity field for the same change.
-
-    *show_only* may hold several ``SHOW_ONLY_GROUP_SEP``-joined OR'd groups (see
-    :func:`parse_show_only_groups`) -- a change is kept if it matches ANY
-    one of them. *today*: an envelope's ``resolved_today`` (ADR-061 gap C,
-    Codex, fresh).
-    """
-    return [
-        c
-        for c in changes
-        if show_only_matches(show_only, c, policy, kind_sets, policy_file, today)
-    ]
 
 
 def filter_release_bundle_findings(
@@ -515,6 +263,7 @@ def release_matrix_changes_for_view(
 def compute_impact_table(
     result: DiffResult,
     displayed_changes: list[Change] | None = None,
+    findings: Sequence[ReportFinding] | None = None,
 ) -> _rmd.ImpactTable | None:
     """Build the impact summary table's structured intermediate.
 
@@ -544,11 +293,23 @@ def compute_impact_table(
                     )
                 )
 
-    # Count non-type direct changes
+    # Non-type direct removals, read from each finding's resolved bucket
+    # (*findings*: the envelope's, when the caller holds one), never from a
+    # kind-name suffix -- `func_noexcept_removed` is a trait change, and
+    # `func_deleted` a removal.
+    if findings is None:
+        from .report.finding import build_report_findings
+
+        findings = build_report_findings(
+            changes,
+            policy=result.policy,
+            kind_sets=effective_kind_sets(result),
+            policy_file=result.policy_file,
+        )
     direct_removals = sum(
         1
-        for c in changes
-        if c.kind.value.endswith("_removed") and c.kind not in _ROOT_TYPE_CHANGE_KINDS
+        for f in findings
+        if f.bucket == "removed" and f.change.kind not in _ROOT_TYPE_CHANGE_KINDS
     )
 
     if not root_entries and direct_removals == 0:
@@ -564,95 +325,6 @@ def compute_impact_table(
 # ---------------------------------------------------------------------------
 
 
-#: The report's stable per-finding fingerprint. The implementation moved to
-#: the dependency-free ``finding_identity`` leaf module so ``checker.py`` can
-#: key ADR-049's decision receipt by the *same* id the report shows without
-#: importing this module -- which would close a ``checker ->
-#: reporter_markdown -> checker`` cycle the ``import-cycle-growth`` gate
-#: rejects. Re-exported here (and, transitively, from ``reporter``) so every
-#: existing import path keeps working unchanged.
-_finding_id = report_finding_id
-
-
-def _root_cause_key_and_display(
-    caused_by_type: str | None,
-    symbol: str | None,
-    kind_value: str,
-    finding_id: str,
-    *,
-    referenced_causes: frozenset[str] = frozenset(),
-) -> tuple[str, str]:
-    """Grouping key + display root for one root-cause finding: ``caused_by_type``
-    when set, else its own ``symbol`` -- but only as a *grouping* key when
-    some other finding's ``caused_by_type`` actually names that symbol
-    (Codex review: two independent findings that merely share a symbol with
-    no producer-set correlation, e.g. ``func_return_changed`` and
-    ``func_params_changed`` both on ``foo``, must stay singleton -- the
-    first-slice contract is that only ``caused_by_type`` correlates
-    findings). Otherwise a unique per-finding key, with the symbol (or, if
-    empty, the kind) still used as the *display* root. Shared by
-    :func:`abicheck.reporter._to_json_root_cause`, :func:`_to_markdown_root_cause`,
-    and the scoped-gate fold-in in ``cli_compare_fold.py``, which appends
-    synthetic findings afterwards.
-    """
-    if caused_by_type:
-        return caused_by_type, caused_by_type
-    if symbol:
-        if symbol in referenced_causes:
-            return symbol, symbol
-        return f"finding:{finding_id}", symbol
-    return f"finding:{finding_id}", kind_value
-
-
-def _group_changes_by_root_cause(
-    changes: list[Change],
-    *,
-    extra_causes: frozenset[str] = frozenset(),
-) -> list[tuple[str, str, list[Change]]]:
-    """Group ``changes`` into root-cause buckets, in first-seen order.
-
-    Returns ``(key, root_display, changes_in_group)`` triples. ``key`` is the
-    raw grouping key (a stable hash of it becomes ``root_cause_id``);
-    ``root_display`` is the human-readable root shown to a consumer. Shared
-    by the JSON and markdown ``--report-mode root-cause`` renderers so the
-    two formats can never disagree about which findings share a root cause
-    (Codex review; see :func:`_root_cause_key_and_display` for the key/display
-    rules, including the ``referenced_causes`` guard against grouping
-    independent findings that merely share a symbol).
-
-    *extra_causes* folds in ``caused_by_type`` values from findings outside
-    *changes* itself (e.g. JSON's scoped-only ``--used-by``/
-    ``--required-symbol`` changes, appended to the report only after this
-    grouping runs) -- without this, a change in *changes* whose symbol only
-    became a real correlation via one of those later-appended findings would
-    already be locked into its own singleton group, unable to join the
-    combined root cause the scoped-gate fold-in later assembles (Codex
-    review: JSON's two-phase build let a scoped-only finding's
-    ``caused_by_type`` disagree with SARIF's single-pass grouping of the
-    identical changes).
-    """
-    referenced_causes = (
-        frozenset(c.caused_by_type for c in changes if c.caused_by_type) | extra_causes
-    )
-    groups: dict[str, list[Change]] = {}
-    roots: dict[str, str] = {}
-    order: list[str] = []
-    for c in changes:
-        key, root_display = _root_cause_key_and_display(
-            c.caused_by_type,
-            c.symbol,
-            c.kind.value,
-            _finding_id(c),
-            referenced_causes=referenced_causes,
-        )
-        if key not in groups:
-            groups[key] = []
-            roots[key] = root_display
-            order.append(key)
-        groups[key].append(c)
-    return [(key, roots[key], groups[key]) for key in order]
-
-
 def root_cause_for_change(
     c: Change, *, referenced_causes: frozenset[str] = frozenset()
 ) -> tuple[str, str] | None:
@@ -660,7 +332,7 @@ def root_cause_for_change(
     has no real correlation signal (G29 Phase 3 follow-up, ADR-052).
 
     Uses the exact same grouping key ``--report-mode root-cause`` computes
-    (:func:`_root_cause_key_and_display`), hashed the same way
+    (:func:`root_cause_key_and_display`), hashed the same way
     :func:`~abicheck.reporter._to_json_root_cause`/``sarif._root_cause_for``
     already do — so a finding's ``root_cause_id`` here is always identical to
     its ``root_causes[].root_cause_id`` in JSON root-cause mode, or its
@@ -675,8 +347,8 @@ def root_cause_for_change(
     nothing but the finding's own identity is not real information; see
     :func:`root_cause_lookup_for_changes`.
     """
-    fid = _finding_id(c)
-    key, root_display = _root_cause_key_and_display(
+    fid = finding_id(c)
+    key, root_display = root_cause_key_and_display(
         c.caused_by_type,
         c.symbol,
         c.kind.value,
@@ -685,7 +357,7 @@ def root_cause_for_change(
     )
     if key == f"finding:{fid}":
         return None
-    return hashlib.sha256(key.encode("utf-8")).hexdigest()[:16], root_display
+    return root_cause_id_for_key(key), root_display
 
 
 def root_cause_lookup_for_changes(
@@ -709,7 +381,7 @@ def root_cause_lookup_for_changes(
     for c in changes:
         rc = root_cause_for_change(c, referenced_causes=referenced_causes)
         if rc is not None:
-            lookup[_finding_id(c)] = rc
+            lookup[finding_id(c)] = rc
     return lookup
 
 
@@ -747,69 +419,12 @@ def root_cause_evidence_lookup_for_changes(
     lookup: dict[str, dict[str, object]] = {}
     for group in correlate_root_causes(changes):
         for member_change, level in group.members:
-            lookup[_finding_id(member_change)] = {
+            lookup[finding_id(member_change)] = {
                 "evidence_level": level,
                 "strongest_evidence_level": group.strongest_evidence_level,
                 "evidence_levels": list(group.evidence_levels),
             }
     return lookup
-
-
-def _resolve_scoped_gate_findings(
-    result: DiffResult,
-    severity_config: SeverityConfig | None,
-    show_only: str | None,
-) -> tuple[list[Change], list[str], bool, str]:
-    """Resolve the scoped-only ``Change``s and missing-contract labels relevant
-    to the ``--used-by``/``--required-symbol`` gate, deduped against
-    ``result.changes`` and filtered by ``--show-only``.
-
-    Factored out of ``cli_compare_fold.py``'s JSON branch so markdown/text/
-    review output can render the identical actionable findings instead of
-    only a bare count (Codex review: a scoped run whose only gated issue was
-    a missing contract member or a scoped-only change like
-    ``PE_ORDINAL_RETARGETED`` didn't name either one in the default text
-    report, unlike JSON/SARIF/JUnit). Lives here (not ``cli_compare_fold.py``)
-    so ``_to_markdown_root_cause`` below can also call it directly to merge
-    these into its own root-cause groups, without ``cli_compare_fold``
-    importing back into this leaf module -- ``cli_compare_fold.py`` imports
-    it from ``reporter``'s re-export, same as every other name in this
-    module.
-
-    Returns ``(scoped_only_changes, missing_labels, blocks, missing_kind)``.
-    """
-    from .policy.severity import missing_contract_exit_code
-
-    existing_ids = {_finding_id(c) for c in result.changes}
-    eff_sets = effective_kind_sets(result)
-    scoped_only = list(getattr(result, "scoped_only_changes", ()) or ())
-    if show_only and scoped_only:
-        scoped_only = apply_show_only(
-            scoped_only,
-            show_only,
-            policy=result.policy,
-            kind_sets=eff_sets,
-            policy_file=result.policy_file,
-        )
-    scoped_only = [c for c in scoped_only if _finding_id(c) not in existing_ids]
-
-    gate_scope = getattr(result, "gate_scope", None)
-    missing_kind = missing_contract_kind(gate_scope)
-    blocks = severity_config is None or missing_contract_exit_code(severity_config) != 0
-    # A missing-contract label has no backing Change/ChangeKind, so it can't
-    # run through apply_show_only -- but --show-only's severity dimension
-    # still applies: without this, a --show-only run that excludes breaking
-    # findings would still include a blocking missing-contract entry the
-    # filter was meant to exclude (Codex review, mirrors the identical
-    # sarif.to_sarif fix). Element/action tokens don't cleanly apply to "a
-    # symbol is simply absent", so only the severity dimension is checked.
-    missing_severity_label = "breaking" if blocks else "compatible"
-    missing_labels = list(
-        getattr(result, "scoped_missing_labels", ()) or ()
-        if show_only_matches_severity_label(show_only, missing_severity_label)
-        else ()
-    )
-    return scoped_only, missing_labels, blocks, missing_kind
 
 
 def compute_root_cause_section(
@@ -825,10 +440,10 @@ def compute_root_cause_section(
     """The structured intermediate for ``--report-mode root-cause``'s
     "## Root Causes" section.
 
-    Groups *changes* + *scoped_only* by root cause (:func:`_group_changes_by_root_cause`)
+    Groups *changes* + *scoped_only* by root cause (:func:`group_changes_by_root_cause`)
     and merges each *missing_labels* entry into a matching group -- or starts
     a new singleton group -- by the identical key
-    :func:`_root_cause_key_and_display` computes. Returns ``None`` (no
+    :func:`root_cause_key_and_display` computes. Returns ``None`` (no
     section at all) only when there is neither a real group nor a missing
     label to show.
 
@@ -856,11 +471,11 @@ def compute_root_cause_section(
     and could demote a consumer-proven finding to "plausible, not
     confirmed" (Codex review, fresh evidence).
     """
-    groups = _group_changes_by_root_cause(changes + scoped_only)
+    groups = group_changes_by_root_cause(changes + scoped_only)
     if not groups and not missing_labels:
         return None
 
-    scoped_only_ids = {_finding_id(c) for c in scoped_only}
+    scoped_only_ids = {finding_id(c) for c in scoped_only}
 
     order: list[str] = []
     root_by_key: dict[str, str] = {}
@@ -873,7 +488,7 @@ def compute_root_cause_section(
             return None
         evidence_status = (
             EvidenceStatus.CONSUMER_PROVEN
-            if _finding_id(c) in scoped_only_ids
+            if finding_id(c) in scoped_only_ids
             else evidence_status_for_result(c, evidence_tiers)
         )
         return impact_for(kind, evidence_status)
@@ -894,7 +509,7 @@ def compute_root_cause_section(
         )
         severity_tag = "breaking" if blocks else "compatible"
         for label in missing_labels:
-            key, root_display = _root_cause_key_and_display(
+            key, root_display = root_cause_key_and_display(
                 None,
                 label,
                 missing_kind,
@@ -966,47 +581,6 @@ def _fmt_size(size_bytes: int) -> str:
     return f"{size_bytes / (1024 * 1024):.1f} MB"
 
 
-def compute_redundancy_note(result: DiffResult) -> _rmd.RedundancyNote | None:
-    """The structured intermediate for :func:`~abicheck.report.render_markdown.render_redundancy_note`."""
-    if result.redundant_count > 0:
-        return _rmd.RedundancyNote(redundant_count=result.redundant_count)
-    return None
-
-
-def compute_out_of_surface_note(result: DiffResult) -> _rmd.OutOfSurfaceNote | None:
-    """The structured intermediate for :func:`~abicheck.report.render_markdown.render_out_of_surface_note`."""
-    if result.scope_to_public_surface and result.out_of_surface_count:
-        return _rmd.OutOfSurfaceNote(count=result.out_of_surface_count)
-    return None
-
-
-def compute_suppression_note(result: DiffResult) -> _rmd.SuppressionNote | None:
-    """The structured intermediate for :func:`~abicheck.report.render_markdown.render_suppression_note`."""
-    if not result.suppression_file_provided:
-        return None
-    entries: list[_rmd.SuppressedEntry] = []
-    if result.suppressed_count != 0:
-        for sc in result.suppressed_changes:
-            contract_text = None
-            relevance = getattr(sc, "contract_relevance", None)
-            if relevance is not None:
-                reason_code = getattr(sc, "contract_reason_code", None)
-                assurance = getattr(sc, "contract_assurance", None)
-                contract_text = _contract_decision_text(
-                    relevance, reason_code, assurance
-                )
-            entries.append(
-                _rmd.SuppressedEntry(
-                    symbol=sc.symbol,
-                    description=sc.description,
-                    contract_text=contract_text,
-                )
-            )
-    return _rmd.SuppressionNote(
-        suppressed_count=result.suppressed_count, entries=tuple(entries)
-    )
-
-
 # ---------------------------------------------------------------------------
 # Severity section helpers
 # ---------------------------------------------------------------------------
@@ -1017,6 +591,7 @@ _RISK_ICON = "⚠️"  # ⚠️
 _HYGIENE_ICON = "\U0001f9f9"  # 🧹
 _QUALITY_ICON = "\U0001f50d"  # 🔍
 _ADDITION_ICON = "✅"  # ✅
+_INFORMATIONAL_ICON = "ℹ️"  # ℹ️
 
 
 def _hygiene_evolution_counts_line(hygiene: list[Change]) -> str:
@@ -1196,6 +771,23 @@ def compute_severity_summary(
                 impact=impact,
             )
         )
+    # ADR-078: the informational category has no configurable level and
+    # never gates; it gets a row only when it holds something to disclose.
+    info_count = (
+        scoped_counts.get("informational", 0)
+        if scoped_counts is not None
+        else len(categorized.informational)
+    )
+    if info_count:
+        rows.append(
+            _rmd.SeverityRow(
+                label="Informational (no material change)",
+                emoji=_SEVERITY_EMOJI.get(SeverityLevel.INFO.value, ""),
+                level_upper=SeverityLevel.INFO.value.upper(),
+                count=info_count,
+                impact="no exit impact",
+            )
+        )
 
     return _rmd.SeveritySummary(rows=tuple(rows))
 
@@ -1255,7 +847,7 @@ def compute_severity_sections(
         # ADR-068 finding A: RISK_KINDS mixes two different stories --
         # ordinary deployment-compatibility risk (a new GLIBC version
         # requirement, etc.) and the cross-source hygiene checks
-        # (workflows.cross_source_evolution) `compare()` runs automatically
+        # (workflows.cross_source_hygiene) `compare()` runs automatically
         # on every invocation. The latter are stamped with an OLD->NEW
         # evolution state (introduced/resolved/persistent/not_evaluated) --
         # a `persistent` finding is pre-existing hygiene debt, not new
@@ -1314,10 +906,18 @@ def compute_severity_sections(
             )
 
     if compatible:
-        from .policy.classification import ADDITION_KINDS as _ADDITION_KINDS
+        from .policy.classification import (
+            ADDITION_KINDS as _ADDITION_KINDS,
+            INFORMATIONAL_KINDS as _INFORMATIONAL_KINDS,
+        )
 
-        quality = [c for c in compatible if c.kind not in _ADDITION_KINDS]
+        quality = [
+            c
+            for c in compatible
+            if c.kind not in _ADDITION_KINDS and c.kind not in _INFORMATIONAL_KINDS
+        ]
         additions_list = [c for c in compatible if c.kind in _ADDITION_KINDS]
+        informational = [c for c in compatible if c.kind in _INFORMATIONAL_KINDS]
         if quality:
             sev_label = _section_severity_label(severity_config, "quality_issues")
             quality_items, quality_rollups = roll_up_large_kinds(
@@ -1349,38 +949,22 @@ def compute_severity_sections(
                     oneline=False,
                 )
             )
+        if informational:
+            # ADR-078: recorded, never gated -- no configurable level, so the
+            # heading carries no severity label.
+            info_items, info_rollups = roll_up_large_kinds(
+                informational, severity_level=None
+            )
+            groups.append(
+                _rmd.ChangeGroup(
+                    heading=f"## {_INFORMATIONAL_ICON} Informational (no material change)",
+                    changes=tuple(info_items),
+                    rollups=info_rollups,
+                    oneline=True,
+                )
+            )
 
     return _rmd.SeveritySectionsData(groups=tuple(groups))
-
-
-def compute_not_evaluated(
-    not_evaluated: list[Change],
-) -> _rmd.NotEvaluatedSection | None:
-    """The structured intermediate for :func:`~abicheck.report.render_markdown.render_not_evaluated_section`.
-
-    Disclose the findings compatibility policy did not score (ADR-049 D1).
-
-    These are real detector facts that carry no verdict: contract evaluation
-    either proved the entity outside the declared contract, or could not
-    resolve it from the evidence the run had. They are deliberately absent
-    from the four verdict sections above -- filing an unscored finding under
-    "Breaking Changes" would contradict the verdict printed at the top of the
-    same report -- so this section is what keeps them visible, with the
-    relevance and reason code that explain *why* they did not gate.
-
-    ``None`` (and so entirely absent) unless the run opted into
-    ``--contract``.
-    """
-    if not not_evaluated:
-        return None
-    entries = []
-    for c in not_evaluated:
-        relevance = getattr(c, "contract_relevance", None)
-        reason = getattr(c, "contract_reason_code", None)
-        label = getattr(relevance, "value", None) or "UNKNOWN"
-        suffix = f" ({reason})" if reason else ""
-        entries.append(_rmd.NotEvaluatedEntry(change=c, label=label, suffix=suffix))
-    return _rmd.NotEvaluatedSection(entries=tuple(entries))
 
 
 def compute_environment_drift(
@@ -1576,9 +1160,10 @@ def compute_review_digest(
         # (report_schema_version 4.0) already counts only genuine additions
         # -- use it directly, no second `quality_issues` subtraction (that
         # is `pr_comment.py`'s own release-field derivation, a separate,
-        # differently-scoped field -- `cli_compare_release_pairwise.py`).
+        # differently-scoped field -- `workflows/release_members.py`).
         additions_count=summary.compatible_additions,
         quality_issues_count=summary.quality_issues,
+        informational_count=summary.informational,
         scoped=bool(scoped),
         out_of_surface_count=result.out_of_surface_count,
         bump_value=rec.bump.value,
@@ -1587,7 +1172,7 @@ def compute_review_digest(
             _review.ImpactedSymbol(
                 symbol=c.symbol or "?",
                 kind=c.kind.value,
-                use_cases=(uc or {}).get(_finding_id(c), ()),
+                use_cases=(uc or {}).get(finding_id(c), ()),
             )
             for c in impacted
         ),
@@ -1612,16 +1197,6 @@ def compute_review_digest(
         policy_acceptance=(
             None if rec.policy_acceptance is None else rec.policy_acceptance.to_dict()
         ),
-    )
-
-
-def compute_rtti_note(breaking: list[Change]) -> _rmd.RttiNote | None:
-    """The structured intermediate for :func:`~abicheck.report.render_markdown.render_rtti_note`."""
-    bd = surface_breakdown(breaking)
-    if not (bd.rtti or bd.internal):
-        return None
-    return _rmd.RttiNote(
-        rtti=bd.rtti, internal=bd.internal, total=bd.total, public=bd.public
     )
 
 
@@ -1729,7 +1304,7 @@ def compute_policy_section(
     reclassify_text = None
     if result.policy_file and result.policy_file.reclassify:
         # Codex review: mirrors the JSON `policy_reclassify` disclosure
-        # (reporter.py's `_add_policy_overrides`) -- the active rule set,
+        # (reporter.py's `add_policy_overrides`) -- the active rule set,
         # not a per-finding "which rule fired" attribution (see that
         # function's docstring / schema 2.30 history entry). Filtered
         # through active_reclassify_rules so an expired rule -- which
@@ -1775,33 +1350,3 @@ def compute_recommendation_section(result: DiffResult) -> _rmd.RecommendationSec
             None if rec.policy_acceptance is None else rec.policy_acceptance.to_dict()
         ),
     )
-
-
-# ADR-063 T10: `to_markdown`/`to_review_digest`/`_to_markdown_leaf`/
-# `_to_markdown_root_cause`/`_markdown_alternate_rendering` moved to
-# `report/dispatch_markdown.py` (see that module's own docstring for why --
-# this module used to import them back function-locally, which is exactly
-# the cycle this move retires). This lazy `__getattr__` preserves every
-# existing `from abicheck.reporter_markdown import to_markdown`-shaped call
-# site (tests included) without reintroducing a module-level import back to
-# `report/` here -- the same shim shape `cli_buildsource.py`'s own tail uses
-# when a helper moves out from under a re-exporting module (root
-# `AGENTS.md`'s "Moving helpers out of a module that re-exports them?").
-_DISPATCH_MARKDOWN_NAMES = frozenset(
-    {
-        "to_markdown",
-        "to_review_digest",
-        "_to_markdown_root_cause",
-        "_markdown_alternate_rendering",
-    }
-)
-
-
-def __getattr__(name: str) -> Any:
-    if name in _DISPATCH_MARKDOWN_NAMES:
-        import importlib
-
-        return getattr(
-            importlib.import_module(".report.dispatch_markdown", __package__), name
-        )
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

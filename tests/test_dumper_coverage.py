@@ -1241,6 +1241,8 @@ class TestDwarfLayoutCoherencePopulation:
         so.write_bytes(b"\x7fELF")
 
         parser = MagicMock(spec=_ClangAstParser)
+        # The real clang backend stamps its producer; the dump reads it back.
+        parser._abicheck_ast_toolchain = {"producer": "clang"}
         parser.parse_functions.return_value = []
         parser.parse_variables.return_value = []
         parser.parse_types.return_value = []
@@ -1305,6 +1307,8 @@ class TestDwarfLayoutCoherencePopulation:
         so.write_bytes(b"\x7fELF")
 
         parser = MagicMock(spec=_ClangAstParser)
+        # The real clang backend stamps its producer; the dump reads it back.
+        parser._abicheck_ast_toolchain = {"producer": "clang"}
         parser.parse_functions.return_value = []
         parser.parse_variables.return_value = []
         parser.parse_types.return_value = []

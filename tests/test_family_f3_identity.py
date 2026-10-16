@@ -190,6 +190,10 @@ def test_entity_id_constructors_keep_similar_shapes_distinct() -> None:
     assert cat.entity_id_collisions() == []
 
 
+def test_graph_edges_keep_role_distinct_relations_distinct() -> None:
+    assert cat.edge_role_collisions() == []
+
+
 # ---------------------------------------------------------------------------
 # Snapshot level (default lane): load path + compare
 # ---------------------------------------------------------------------------
@@ -408,17 +412,15 @@ def test_castxml_redundant_path_segments_are_no_change(castxml_base) -> None:
 
 
 @pytest.mark.integration
-def test_castxml_reversed_header_order_keeps_identity_and_refuses_explicitly(
+def test_castxml_reversed_header_order_keeps_identity_and_is_comparable_on_proof(
     castxml_base,
 ) -> None:
-    """Header *order* is part of the parse context (a header's macros change
-    how every later one parses -- ``comparability_sequences.
-    _header_sequence_is_additive_reorder_free``), so it is not a
-    ``must_not_change`` transform for the *verdict*: the comparison is
-    refused as not comparable. What must not change is entity identity, and
-    a refusal must never surface as a manufactured finding."""
+    """Header *order* is part of the parse context, so a reorder is proven
+    before it is compared (ADR-082). Here ``extra.h`` includes ``api.h`` itself,
+    so both orders extract the same declarations: the dump proves the canonical
+    order on both sides and the reorder is comparable. Entity identity must not
+    change under the reorder, and the comparison must not manufacture a finding."""
     from abicheck.checker import compare
-    from abicheck.errors import ProfileMismatchError
 
     so, api, extra, base = castxml_base
     reordered = _dump(so, [extra, api])
@@ -426,8 +428,9 @@ def test_castxml_reversed_header_order_keeps_identity_and_refuses_explicitly(
     ids_b = Counter(f.entity_id for f in reordered.declarations.functions)
     assert ids_a == ids_b
     assert all(n == 1 for n in ids_b.values())
-    with pytest.raises(ProfileMismatchError, match="header_sequence"):
-        compare(base, reordered, cross_source_checks=False)
+    assert base.contract.header_canonical is not None
+    assert base.contract.header_canonical == reordered.contract.header_canonical
+    compare(base, reordered, cross_source_checks=False)
 
 
 # ---------------------------------------------------------------------------
@@ -520,7 +523,7 @@ _IDENTITY_NAME_RE = re.compile(
 _EXTRA_REGISTERED = {
     "abicheck.extract.export_symbol_identity:msvc_export_function",
     "abicheck.model.special_member_identity:special_member_variant_aliases",
-    "abicheck.model.name_decoration.macho:decode_itanium",
+    "abicheck.model.name_decoration.macho_underscore:decode_itanium",
     "abicheck.model.name_decoration.pe_x86:decode_c_name",
     "abicheck.model.name_decoration.elf_version:unversioned_name",
     "abicheck.model.symbol_leaf:symbol_leaf_identifier",
@@ -532,10 +535,12 @@ _EXTRA_REGISTERED = {
 _U = "UNCOVERED: "
 COVERAGE: dict[str, str] = {
     # -- exercised --------------------------------------------------------
+    "abicheck.extract.binary_identity:stamp_binary_identity": "symlink x rename transforms (test_snapshot_hit_binary_identity)",
     "abicheck.name_classification:strip_anonymous_type_location": "string probe x path transforms",
     "abicheck.name_classification:canonicalize_type_name": "string probe x path transforms",
     "abicheck.model.graph_identity:checkout_stable_spelling": "string probe x path transforms",
     "abicheck.model.graph_identity:closure_location_free_identity": "string probe x path transforms",
+    "abicheck.model.graph_identity:closure_discriminator_free_identity": "string probe x path transforms; tests/test_closure_respelling.py property tests",
     "abicheck.model.graph_entity_identity:signature_key": "string probe x path transforms; mutant M1",
     "abicheck.model.graph_entity_identity:type_identity": "string probe x path transforms",
     "abicheck.model.graph_entity_identity:unresolved_identity": "string probe x path transforms",
@@ -544,14 +549,16 @@ COVERAGE: dict[str, str] = {
     "abicheck.model.export_index:pe_decoration_aliases": "x86 PE codec (the join's alias table)",
     "abicheck.model.name_decoration.elf_version:unversioned_name": "ELF version codec",
     "abicheck.model.symbol_leaf:symbol_leaf_identifier": "ELF version codec",
+    "abicheck.compare.elf_capture_identity:both_captured_elf_identity": "G23 ELF capture gate (tests/test_g23_elf_facts.py legacy-baseline cases)",
     "abicheck.model.source_graph:function_decl_identity": "string probe x path transforms",
-    "abicheck.model.name_decoration.macho:decode_itanium": "Mach-O codec; mutant M2",
+    "abicheck.model.name_decoration.macho_underscore:decode_itanium": "Mach-O codec; mutant M2",
     "abicheck.extract.headers.clang.context:strip_darwin_itanium_decoration": "Mach-O codec",
     "abicheck.extract.export_symbol_identity:msvc_export_function": "x86 PE codec",
     "abicheck.model.special_member_identity:special_member_variant_aliases": "ctor/dtor codec; mutant M6",
-    "abicheck.finding_identity:resolve_function_identity": "string probe + snapshot level",
-    "abicheck.finding_identity:resolve_variable_identity": "snapshot level identity keys",
-    "abicheck.finding_identity:resolve_change_identity": "snapshot level report finding ids (via report_canonical_finding_id); path probe",
+    "abicheck.compare.finding_identity.declaration_identity:resolve_function_identity": "string probe + snapshot level",
+    "abicheck.compare.finding_identity.declaration_identity:resolve_variable_identity": "snapshot level identity keys",
+    "abicheck.compare.finding_identity.change_identity:resolve_change_identity": "snapshot level report finding ids (via report_canonical_finding_id); path probe",
+    "abicheck.report.json_sections:add_check_identity": "JSON report check_identity block (tests/test_report_schema.py)",
     "abicheck.model.identity:entity_id_for_function": "negative control + castxml dumps; mutant M4",
     "abicheck.model.identity:entity_id_for_variable": "negative control",
     "abicheck.model.identity:entity_id_for_type": "negative control",
@@ -561,7 +568,7 @@ COVERAGE: dict[str, str] = {
     # -- path probes (Phase 3: identity takes a RootRelativePath) ---------
     "abicheck.model.entity_identity:source_relative_identity": "path probe x path transforms",
     "abicheck.model.entity_identity:resolve_canonical_identity": "path probe (graph def_file) x path transforms",
-    "abicheck.finding_identity:resolve_symbol_identity": "path probe x path transforms",
+    "abicheck.compare.finding_identity.declaration_identity:resolve_symbol_identity": "path probe x path transforms",
     "abicheck.workflows.aggregate.reconcile:resolve_report_change_identity": "path probe (report entry) x path transforms",
     # -- environment cells (tests/test_family_f3_identity_cells.py) -------
     "abicheck.model.identity_tiers:snapshot_local_identity": "cell: decoded spelling joins",
@@ -618,9 +625,18 @@ def test_covered_rows_are_really_registered_in_the_catalogue() -> None:
         | set(cat._path_probes())
         | set(cat.ENVIRONMENT_CELLS)
         | {
+            # Exercised by the symlink and rename cells in
+            # tests/test_snapshot_hit_binary_identity.py, not a catalogue transform.
+            "abicheck.extract.binary_identity:stamp_binary_identity",
             "abicheck.model.special_member_identity:special_member_variant_aliases",
-            "abicheck.finding_identity:resolve_variable_identity",
-            "abicheck.finding_identity:resolve_change_identity",
+            "abicheck.compare.finding_identity.declaration_identity:resolve_variable_identity",
+            "abicheck.compare.finding_identity.change_identity:resolve_change_identity",
+            # Exercised by the JSON report check_identity assertions in
+            # tests/test_report_schema.py, not a catalogue transform.
+            "abicheck.report.json_sections:add_check_identity",
+            # A capture-state gate, not a catalogue transform: exercised by the
+            # G23 ELF legacy-baseline cases in tests/test_g23_elf_facts.py.
+            "abicheck.compare.elf_capture_identity:both_captured_elf_identity",
         }
         | {
             f"abicheck.model.identity:entity_id_for_{k}"

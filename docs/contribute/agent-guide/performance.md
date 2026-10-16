@@ -33,7 +33,17 @@ Manual-only investigation tools (never gates):
 - **Where time goes:** `python -m cProfile -o out.prof -m abicheck compare OLD NEW`
   then `python -m pstats out.prof`; `py-spy record -o flame.svg -- abicheck compare OLD NEW`
   for a flame graph (installed ad hoc, not a dependency). Memory:
-  `docs/contribute/memory.md` / `ABICHECK_MEMORY_TRACE`.
+  `docs/contribute/memory.md` / `ABICHECK_MEMORY_TRACE`. A cold compare of
+  two live binaries resolves each side in a forked child, and an in-process
+  profiler sees only the parent: profile with `ABICHECK_SIDE_PROCESSES=0`
+  (serial sides, one process), or `py-spy record --subprocesses`. py-spy
+  cannot read CPython 3.15 yet; there `python -m profiling.sampling` works
+  but does not follow forks, exits 0 whatever abicheck returned, and on a
+  free-threaded build reports enough sample errors that its proportions are
+  approximate.
+  Summed RSS of forked children double-counts shared pages (compare PSS);
+  `tracemalloc` is for memory only (it ~3x the wall time). On a warm snapshot
+  cache the `dump.*` marks vanish -- read `dump.cache.lookup`/`dump.cache.store`.
 
 Use-case reach (weekly `usecase-paths.yml`, never on a PR):
 `python scripts/usecase_paths.py ratchet REC --strict` fails when a function

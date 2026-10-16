@@ -31,11 +31,8 @@ from collections.abc import Iterable, Sequence
 from typing import TYPE_CHECKING, cast
 
 from .policy.evaluate import effective_kind_sets
-from .reporter_markdown import (
-    _finding_id,
-    apply_show_only,
-    root_cause_evidence_lookup_for_changes,
-)
+from .report.view import apply_show_only, finding_id
+from .reporter_markdown import root_cause_evidence_lookup_for_changes
 
 if TYPE_CHECKING:
     from .checker_types import DiffResult
@@ -136,7 +133,7 @@ def root_cause_group_evidence(
     :func:`fold_evidence_summaries` for why this isn't a
     ``root_cause_id``-matched re-derivation)."""
     return fold_evidence_summaries(
-        rc_evidence.get(_finding_id(c)) for c in group_changes
+        rc_evidence.get(finding_id(c)) for c in group_changes
     )
 
 

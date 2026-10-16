@@ -73,7 +73,9 @@ not been observed:
 
 from __future__ import annotations
 
-from abicheck.finding_identity import _TYPE_BEARING_DISCRIMINATOR_KINDS
+from abicheck.compare.finding_identity.change_kinds import (
+    _TYPE_BEARING_DISCRIMINATOR_KINDS,
+)
 
 #: Values are type spellings and are canonicalized for identity.
 #: Single source of truth: the runtime set itself.
@@ -328,6 +330,7 @@ UNVERIFIED = frozenset(
         "param_pointee_qualifier_changed",
         "func_return_pointee_qualifier_added",
         "func_return_pointee_qualifier_removed",
+        "func_return_pointee_qualifier_changed",
         "overload_ambiguity_introduced",
         "param_renamed",
         "param_restrict_added",
@@ -345,6 +348,8 @@ UNVERIFIED = frozenset(
         "protected_visibility_changed",
         "public_api_exposes_stl_by_value",
         "public_api_internal_dependency_added",
+        "public_dependency_role_changed",
+        "public_dependency_role_unknown",
         "public_macro_removed",
         "public_macro_value_changed",
         "public_not_exported",

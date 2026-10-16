@@ -455,8 +455,8 @@ def note_if_same_binary_compared(
     case are indistinguishable without this warning.
 
     Uses ``LibraryMetadata.sha256`` (populated post-``compare()`` by each
-    caller that has real file paths -- ``cli._finalize_compare_result``,
-    ``service_compare_pipeline.classify_compare_pair``) rather than any
+    caller that has real file paths -- ``workflows.compare_classify``, the
+    one classification every scalar ``compare`` route runs) rather than any
     ELF-level identity (build-id, soname, symbol-table digest): the sha256
     is the only signal available that is unconditionally exact regardless
     of binary format (ELF/PE/Mach-O) or whether the snapshot carries ELF
@@ -470,8 +470,7 @@ def note_if_same_binary_compared(
     "not a binary, so a same-binary comparison must never claim it"), so
     without this fallback the guard could never fire on that pattern even
     when the two snapshots are content-identical. A caller with real
-    ``AbiSnapshot`` objects in scope (``service_compare_pipeline.
-    classify_compare_pair``) passes a canonical content digest of each
+    ``AbiSnapshot`` objects in scope (``workflows.compare_classify``) passes a canonical content digest of each
     (e.g. a sha256 of ``serialization.snapshot_to_json``); this function
     only ever compares the two strings it is given -- it never computes one
     itself, keeping this module's own "depends only on the snapshot model

@@ -1,11 +1,11 @@
---- a/abicheck/workflows/member_compare.py
-+++ b/abicheck/workflows/member_compare.py
-@@ -49,7 +49,7 @@ def compare_member(
-     overrides are already on *request*. It is passed separately only for the
-     rich-tier config record below.
-     """
--    result = run_compare(**run_compare_kwargs(request))
-+    result = run_compare(**{**run_compare_kwargs(request), "suppress": None})
-     # The rich-tier config is recorded under exactly the condition the
-     # single-pair CLI (`resolve_and_apply`) and the typed API
-     # (`install_resolved_gate_receipt`) record one: a contract evaluation, or
+--- a/abicheck/workflows/release_member_request.py
++++ b/abicheck/workflows/release_member_request.py
+@@ -240,7 +240,7 @@
+         lang_explicit=request.lang_explicit,
+         policy=request.policy,
+         policy_file_path=request.policy_file_path,
+-        suppress=request.suppress,
++        suppress=None,
+         scope_public=request.scope_to_public_surface,
+         pattern_verdicts=request.pattern_verdicts,
+         contract_evaluation=request.contract_evaluation,

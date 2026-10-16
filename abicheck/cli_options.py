@@ -1415,7 +1415,7 @@ def abi3_option(func: F) -> F:
 #: stable project property, now ``.abicheck.yml``'s ``deployment:`` config
 #: key (``buildsource.build_config.BuildConfig.deployment``, parsed via
 #: ``EnvironmentMatrix.from_dict``), resolved through
-#: ``cli_helpers_compare.resolve_compare_config``'s ``deployment`` field
+#: ``workflows.compare_configuration.resolve_compare_config``'s ``deployment`` field
 #: with no surviving CLI override (guard #2 -- no escape hatch). See
 #: ``scripts/retired_surfaces.py`` for the retired spelling.
 
@@ -1439,7 +1439,7 @@ def set_input_options(func: F) -> F:
     ``--dso-only`` (Phase 7d, one-comparison-product.md §4.1) is gone too --
     ``release.dso_only`` in ``.abicheck.yml`` is its only source now (a
     stable release-topology property, no surviving CLI override), resolved
-    onto :class:`abicheck.cli_helpers_compare.ResolvedCompareConfig`.
+    onto :class:`abicheck.workflows.compare_configuration.ResolvedCompareConfig`.
     """
     func = click.option(
         "--select-required",
@@ -1488,7 +1488,7 @@ def set_input_options(func: F) -> F:
 #: standalone leaf module (see its own docstring for why it isn't declared
 #: inline on ``compare_cmd``). Re-exported here for the same reason as
 #: ``contract_options``/``pack_option`` below.
-from .frontends.cli.options.bundle_facts import (  # noqa: E402
+from .frontends.cli.options.bundle_facts_library_manifest import (  # noqa: E402
     bundle_facts_manifest_options as bundle_facts_manifest_options,
     reject_bundle_facts_manifest_without_old_bundle_facts as reject_bundle_facts_manifest_without_old_bundle_facts,
 )

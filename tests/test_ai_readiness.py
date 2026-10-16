@@ -1164,11 +1164,12 @@ def test_adr_status_sync_rejects_a_future_receipt_date(car, ass, tmp_path, monke
     )
 
 
-def test_adr_status_sync_warns_when_status_edited_after_verification(
+def test_adr_status_sync_fails_when_status_edited_after_verification(
     car, ass, tmp_path, monkeypatch
 ):
     """A Status edited after the receipt's date, without moving the receipt
-    forward, leaves the receipt vouching for claims nobody checked."""
+    forward, leaves the receipt vouching for claims nobody checked. That is
+    the gate's failing signal for an ADR not already grandfathered."""
     _receipt_fixture(tmp_path, monkeypatch, ass)
     inner = _fake_git(is_ancestor=True)
 
@@ -1183,9 +1184,40 @@ def test_adr_status_sync_warns_when_status_edited_after_verification(
     monkeypatch.setattr(ass, "_git_output", fake)
     f = car.Findings()
     car.check_adr_status_sync(f)
-    assert any("vouches for claims" in msg for _, msg in f.warnings), (
-        f"expected a status-edited-after-verification warning, got: {f.warnings}"
+    assert any("vouches for claims" in msg for _, msg in f.errors), (
+        f"expected a status-edited-after-verification error, got: {f.errors}"
     )
+
+
+def test_adr_status_sync_grandfathered_status_edit_only_warns(
+    car, ass, tmp_path, monkeypatch
+):
+    """An ADR already recorded in STATUS_EDIT_GRANDFATHERED keeps its finding
+    visible as a WARN, so the gate still passes on the existing debt."""
+    _receipt_fixture(tmp_path, monkeypatch, ass)
+    monkeypatch.setattr(ass, "STATUS_EDIT_GRANDFATHERED", frozenset({"001-example.md"}))
+    inner = _fake_git(is_ancestor=True)
+
+    def fake(*args: str) -> str | None:
+        if args[0] == "rev-list":
+            return "0123456\n"
+        if args[0] == "show":
+            return "# ADR-001\n\n**Status:** Accepted — partially implemented.\n"
+        return inner(*args)
+
+    monkeypatch.setattr(ass, "_git_output", fake)
+    f = car.Findings()
+    car.check_adr_status_sync(f)
+    assert f.errors == [], f.errors
+    assert any("vouches for claims" in msg for _, msg in f.warnings), f.warnings
+
+
+def test_grandfathered_adr_statuses_exist_in_the_repo(car, ass):
+    """A grandfathered ADR name with no file behind it is a stale record."""
+    adr_dir = car.ROOT / "docs" / "contribute" / "adr"
+    names = {p.name for p in adr_dir.glob("*.md")}
+    missing = sorted(ass.STATUS_EDIT_GRANDFATHERED - names)
+    assert missing == [], f"grandfathered ADRs with no file: {missing}"
 
 
 def test_adr_status_sync_accepts_a_receipt_written_with_the_status(
@@ -1415,14 +1447,26 @@ def test_adr_status_sync_warns_when_named_module_moved_since_verification(
         "**Verified:** main@abc1234 on 2026-01-01\n",
         encoding="utf-8",
     )
-    monkeypatch.setattr(
-        ass, "_git_output", lambda *a: "" if a[0] == "cat-file" else "deadbee\n"
+    status_text = (
+        "# ADR-001\n\n**Status:** Accepted — implemented in "
+        "`abicheck/contract_evaluation.py`.\n"
     )
+
+    def fake(*a: str) -> str:
+        if a[0] == "cat-file":
+            return ""
+        if a[0] == "show":
+            return status_text
+        return "deadbee\n"
+
+    monkeypatch.setattr(ass, "_git_output", fake)
     f = car.Findings()
     car.check_adr_status_sync(f)
     assert f.errors == []
-    assert any("verified at abc1234" in msg for _, msg in f.warnings), (
-        f"expected a staleness warning, got: {f.warnings}"
+    # Commit-count staleness is informational: it neither warns nor fails.
+    assert f.warnings == [], f.warnings
+    assert any("verified at abc1234" in msg for _, msg in f.infos), (
+        f"expected a staleness info note, got: {f.infos}"
     )
 
 
@@ -1592,7 +1636,7 @@ def test_file_sizes_covers_first_party_roots_beyond_abicheck(
     assert any("oversized.py" in msg for _, msg in f.errors), f.errors
 
 
-def test_file_sizes_allowlisted_file_only_warns(car, tmp_path, monkeypatch):
+def test_file_sizes_allowlisted_file_is_silent(car, tmp_path, monkeypatch):
     fake_root = tmp_path / "scripts"
     fake_root.mkdir()
     (fake_root / "big.py").write_text(
@@ -1605,7 +1649,7 @@ def test_file_sizes_allowlisted_file_only_warns(car, tmp_path, monkeypatch):
     f = car.Findings()
     car.check_file_sizes(f)
     assert f.errors == []
-    assert any("big.py" in msg for _, msg in f.warnings)
+    assert f.warnings == [], f.warnings
 
 
 def test_agent_instructions_coverage_catches_missing_dir(car, tmp_path, monkeypatch):

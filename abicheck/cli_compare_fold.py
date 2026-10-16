@@ -160,7 +160,7 @@ def _fold_scoped_compat_into_text(
     below need no separate stamping here: the caller
     (``cli_compare_helpers.run_compare``) already stamps them (and any
     matching ``result.changes`` entry) in place before this function runs,
-    so ``_change_to_dict`` picks up the decision for free the same way it
+    so ``change_to_dict`` picks up the decision for free the same way it
     does for any other already-stamped ``Change``.
 
     *demangle*, when True, demangles the ``into_text`` append (missing
@@ -234,9 +234,9 @@ class _ScopedFold:
     def _scoped_gate_findings(self) -> tuple[Any, Any, bool, Any]:
         """The scoped-only changes, missing-contract labels, and gate blocking
         decision this run's scoped gate actually rests on."""
-        from .reporter import _resolve_scoped_gate_findings
+        from .report.view import resolve_scoped_gate_findings
 
-        return _resolve_scoped_gate_findings(
+        return resolve_scoped_gate_findings(
             self.result, self.severity_config, self.show_only
         )
 
@@ -516,14 +516,14 @@ def _fold_use_case_impact_into_text(
     if not isinstance(impact, UseCaseImpact) or fmt not in TEXT_REPORT_FORMATS:
         return text
     if show_only:
-        from .reporter import apply_show_only
+        from .report.view import apply_show_only
         from .root_cause_evidence import scoped_only_changes_filtered
 
         # Every argument the JSON paths pass, so a policy-sensitive token
         # ("breaking") filters identically in both renders rather than
         # against the default policy here. Scoped-only findings are appended
         # through the shared filter for the same reason the JSON paths' own
-        # `_displayed_with_scoped_only` does: this fold runs alongside
+        # `displayed_with_scoped_only` does: this fold runs alongside
         # `_fold_scoped_compat_into_text`, which puts them in the findings
         # list above, so projecting onto `result.changes` alone would drop
         # every attribution that landed on one.

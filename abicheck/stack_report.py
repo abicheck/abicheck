@@ -37,8 +37,8 @@ from .report.stack import (
     compute_stack_report_document,
     show_environment_section,
 )
-from .resolver import DependencyGraph
 from .stack_checker import StackChange, StackCheckResult, StackVerdict
+from .workflows.elf_dependency_resolver import DependencyGraph
 
 _VERDICT_EMOJI = {
     StackVerdict.PASS: "✅",

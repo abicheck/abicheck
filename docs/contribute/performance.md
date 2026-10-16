@@ -559,7 +559,7 @@ wrongly, and py-spy corrected it. Before → after, 4 CPUs, cold cache:
 and 16 libraries 32.2 s → 19.1 s.
 The 1.7 budget catches regression; lower it toward ~1.1 once members stop
 receiving the union set. Recorded in
-[Known gaps](known-gaps.md#multi-library-l2-compare-scales-quadratically-with-library-count).
+[Known gaps](known-gaps/multi-library-l2-compare-scales-quadratically-with-library-count.md).
 
 ### Real-integration profiles (oneDAL, SVS, PVXS)
 
@@ -1174,7 +1174,7 @@ owner of oneDAL/SVS/PVXS claims.
 - **Include-tree inventory for cache keys** (`extract/cache_header_scan.py`).
   Every header-parse cache key walks each include root to fold in
   (path, mtime) for every header-like descendant -- `dumper_ast_config.
-  _cache_key` for the AST cache, `snapshot_cache` for the whole-snapshot one.
+  _cache_key` for the AST cache, `workflows/dump/cache` for the whole-snapshot one.
   `Path.rglob("*")` materializes a `Path` per entry *visited* and then sorts
   those objects; carrying path strings through the traversal and building a
   `Path` only for the surviving, already-ordered entries measured **2.4x**

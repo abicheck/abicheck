@@ -169,6 +169,8 @@ def test_the_fallback_is_specifically_about_branch_coverage() -> None:
     future interpreter that fixes it is recognised. Skipped where the
     running interpreter selects sysmon for branches already (3.14+), since
     there is then no fallback to attribute."""
+    if not hasattr(sys, "monitoring"):
+        pytest.skip("no sys.monitoring before 3.12, so there is no sysmon core")
     with_branch = _selected_core(branch=True)
     without_branch = _selected_core(branch=False)
     if with_branch.lower().startswith("sysmon"):

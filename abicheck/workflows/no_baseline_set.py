@@ -51,7 +51,7 @@ import logging
 import tempfile
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -259,9 +259,9 @@ def cleanup_no_baseline_set_plan(plan: NoBaselineSetPlan) -> None:
         shutil.rmtree(path, ignore_errors=True)
 
 
-class MemberAuditStatus(str, Enum):
+class MemberAuditStatus(StrEnum):
     """How one selected member's audit ended -- the three outcomes the
-    two-sided release path's ``release_member_errors`` distinguishes,
+    two-sided release path's ``release_member_failures`` distinguishes,
     minus ``not_comparable`` (a one-sided audit has no pair to refuse)."""
 
     COMPLETED = "completed"
@@ -344,7 +344,7 @@ def run_no_baseline_set(
     """Audit every selected member of *plan*, sequentially, and record it.
 
     The error taxonomy mirrors the two-sided release path
-    (``frontends/cli/release_member_errors.py``): an
+    (``workflows/release_member_failures.py``): an
     :class:`~abicheck.errors.UnsupportedArtifactError` (or a snapshot newer
     than this reader) makes the member ``unsupported`` -- the completeness
     axis; anything else -- a :class:`~abicheck.errors.ValidationError`

@@ -104,6 +104,21 @@ SYMBOLS_ENTRIES_2: list[ChangeKindMeta] = [
         operation=_OP.MODIFIED,
     ),
     _E(
+        "func_return_pointee_qualifier_changed",
+        _A,
+        impact="The pointee of a returned multi-level pointer lost "
+        "const/volatile at a level the old type did not protect with "
+        "`const` at every level above it (`const char **f()` -> "
+        "`char **f()`). The return register is unchanged, so built "
+        "binaries keep working, but the new result no longer converts "
+        "implicitly to the old type ([conv.qual]: `char **` is not a "
+        "`const char **`), so a caller binding it to the old type "
+        "(`const char **p = f();`) no longer compiles.",
+        description_template="Return pointee qualifier changed: {name}: {old} → {new}",
+        entity=_ENT.FUNCTION,
+        operation=_OP.MODIFIED,
+    ),
+    _E(
         "overload_ambiguity_introduced",
         _R,
         impact="A new overload joined an existing one with the same arity, "

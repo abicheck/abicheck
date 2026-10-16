@@ -3,9 +3,9 @@
 
 """ADR-061 Phase 2 gap C: the shared report-document choke point.
 
-``report.build.build_report_document`` is the one format-neutral build
+``report.document_builder.build_report_document`` is the one format-neutral build
 routed through the ADR-061 "one build, many projections" shape -- see
-``report/build.py``'s own module docstring for the precise, current
+``report/document_builder.py``'s own module docstring for the precise, current
 per-format scope. These tests state the two guarantees that choke point
 exists to provide, for JSON and (below) SARIF's own reuse of it:
 
@@ -41,13 +41,13 @@ from abicheck.policy.disposition_ledger import DispositionLedger
 from abicheck.policy.reclassify import ReclassifyRule
 from abicheck.policy.severity import SeverityConfig, SeverityLevel
 from abicheck.policy_file import PolicyFile
-from abicheck.report.build import (
+from abicheck.report.disposition_audit import compute_disposition_audit
+from abicheck.report.document import ReportDocument
+from abicheck.report.document_builder import (
     _snapshot_change,
     build_report_document,
     build_report_envelope,
 )
-from abicheck.report.disposition_audit import compute_disposition_audit
-from abicheck.report.document import ReportDocument
 from abicheck.report.envelope import RenderOptions, ReportEnvelope
 from abicheck.report.render_json import render_json
 from abicheck.reporter import to_json
@@ -118,7 +118,7 @@ class TestBuildCalledExactlyOnce:
         new = _snapshot("2.0")
 
         with mock.patch(
-            "abicheck.report.build.build_report_document",
+            "abicheck.report.document_builder.build_report_document",
             wraps=build_report_document,
         ) as spy:
             render_output("json", result, old, new)
@@ -187,7 +187,7 @@ class TestSarifReusesSharedDocument:
         new = _snapshot("2.0")
 
         with mock.patch(
-            "abicheck.report.build.build_report_document",
+            "abicheck.report.document_builder.build_report_document",
             wraps=build_report_document,
         ) as spy:
             render_output("sarif", result, old, new)
@@ -204,7 +204,7 @@ class TestSarifReusesSharedDocument:
         new = _snapshot("2.0")
 
         with mock.patch(
-            "abicheck.report.build.build_report_document",
+            "abicheck.report.document_builder.build_report_document",
             wraps=build_report_document,
         ) as spy:
             render_output("sarif", result, old, new, report_mode="root-cause")
@@ -275,7 +275,7 @@ class TestJunitReusesSharedDocument:
         new = _snapshot("2.0")
 
         with mock.patch(
-            "abicheck.report.build.build_report_document",
+            "abicheck.report.document_builder.build_report_document",
             wraps=build_report_document,
         ) as spy:
             render_output("junit", result, old, new)
@@ -291,7 +291,7 @@ class TestJunitReusesSharedDocument:
         new = _snapshot("2.0")
 
         with mock.patch(
-            "abicheck.report.build.build_report_document",
+            "abicheck.report.document_builder.build_report_document",
             wraps=build_report_document,
         ) as spy:
             render_output("junit", result, old, new, report_mode="root-cause")
@@ -344,7 +344,7 @@ class TestRendererOrderIndependence:
 
         for formats in (self._FORMATS, tuple(reversed(self._FORMATS))):
             with mock.patch(
-                "abicheck.report.build.build_report_document",
+                "abicheck.report.document_builder.build_report_document",
                 wraps=build_report_document,
             ) as spy:
                 self._render_all(formats, result, old, new)
@@ -376,12 +376,12 @@ class TestRendererOrderIndependence:
     #: call issued through either bound reference; the patch must target the
     #: name each consumer actually calls (CodeRabbit review).
     _DECISION_SITES = (
-        "abicheck.report.build.build_report_document",
+        "abicheck.report.document_builder.build_report_document",
         "abicheck.policy.gate_decision.gate_decision_for_result",
         "abicheck.report.finding.build_report_findings",
         "abicheck.report.finding.report_findings_for",
         "abicheck.report.surface_changes.build_report_findings",
-        "abicheck.report.build.build_report_findings",
+        "abicheck.report.document_builder.build_report_findings",
         "abicheck.report.envelope.build_report_findings",
     )
 
@@ -501,10 +501,10 @@ class TestRendererOrderIndependence:
                 self._render_all_from(formats, envelope)
             after = {t: s.call_count for t, s in spies.items()}
 
-        assert build_calls["abicheck.report.build.build_report_document"] == 1
-        assert (
-            build_calls["abicheck.policy.gate_decision.gate_decision_for_result"] == 1
-        )
+        doc_key = "abicheck.report.document_builder.build_report_document"
+        gate_key = "abicheck.policy.gate_decision.gate_decision_for_result"
+        assert build_calls[doc_key] == 1
+        assert build_calls[gate_key] == 1
         for target in self._DECISION_SITES:
             assert after[target] == build_calls[target], (
                 f"{target} ran again while projecting an already-completed "
@@ -1009,7 +1009,7 @@ class TestRendererOrderIndependence:
     def test_resolve_fallback_reuses_the_envelope_s_frozen_today(self) -> None:
         """Codex review, fresh evidence: ``ReportEnvelope._resolve`` -- the
         fallback for a display-only ``Change`` copy
-        ``_suppress_dangling_correlation_notes`` hands a renderer under
+        ``suppress_dangling_correlation_notes`` hands a renderer under
         ``--show-only`` -- called ``build_report_findings`` with no
         ``today``, reading a fresh ``date.today()`` instead of the date
         the rest of the envelope's findings were resolved against.
@@ -1020,7 +1020,7 @@ class TestRendererOrderIndependence:
         old, new = _snapshot("1.0"), _snapshot("2.0")
         envelope = build_report_envelope(result, old, new)
 
-        # Stands in for `_suppress_dangling_correlation_notes`'s own
+        # Stands in for `suppress_dangling_correlation_notes`'s own
         # display-only copy: a different object with no entry in the
         # envelope's identity index, so `findings_for` must fall to
         # `_resolve`.
@@ -1309,8 +1309,8 @@ class TestRendererOrderIndependence:
         ``build_report_findings``, but its own ``build_report_document`` call
         (which builds the frozen JSON document *during the same
         construction*) received ``gate`` and nothing else -- ``_add_changes_
-        block``, ``_add_policy_overrides``, and ``_build_severity_json`` (via
-        ``_change_to_dict``/``active_reclassify_rules``/``categorize_changes``)
+        block``, ``add_policy_overrides``, and ``build_severity_json`` (via
+        ``change_to_dict``/``active_reclassify_rules``/``categorize_changes``)
         still resolved a fresh ``date.today()``. If construction straddles
         midnight on a dated ``reclassify`` rule's expiry, the document could
         report a finding as breaking and omit the still-active rule while
@@ -1347,7 +1347,7 @@ class TestRendererOrderIndependence:
         # resolves *after* it -- the two mocks stand in for the same wall
         # clock read a moment apart, not two different clocks.
         with (
-            mock.patch("abicheck.report.build.date") as fake_build_date,
+            mock.patch("abicheck.report.document_builder.date") as fake_build_date,
             mock.patch("abicheck.policy.selectors.date") as fake_selectors_date,
         ):
             fake_build_date.today.return_value = captured_today
@@ -1403,7 +1403,7 @@ class TestRendererOrderIndependence:
         old, new = _snapshot("1.0"), _snapshot("2.0")
 
         with (
-            mock.patch("abicheck.report.build.date") as fake_build_date,
+            mock.patch("abicheck.report.document_builder.date") as fake_build_date,
             mock.patch("abicheck.policy.selectors.date") as fake_selectors_date,
         ):
             fake_build_date.today.return_value = captured_today

@@ -66,7 +66,6 @@ from typing import Any
 from ....buildsource.build_query import PRUNED_HEADER_DIR_SEGMENTS
 from ....deadline import run_bounded
 from ....dumper_ast_config_cpp20 import _detect_cpp20_headers
-from ....dumper_clang import _resolve_clang_bin
 from ....dumper_clang_errors import _is_missing_cpp_stdlib_header_error
 from ....errors import SnapshotError, ValidationError
 from ....extract.headers.ast_config import _build_clang_header_command
@@ -76,6 +75,7 @@ from ....extract.headers.sysinc import _resolve_clang_system_includes
 from ....header_utils import iter_directory_headers, resolve_inferred_header_roots
 from ....model import AbiSnapshot, RecordType, replace_with_fact_sync
 from ....name_classification import strip_anonymous_type_location
+from ...compiler_driver import resolve_clang_bin
 
 log = logging.getLogger(__name__)
 
@@ -163,7 +163,7 @@ def run_layout_tool(
     if not resolved_headers:
         return None
     try:
-        clang_bin = _resolve_clang_bin(compiler, gcc_path, gcc_prefix)
+        clang_bin = resolve_clang_bin(compiler, gcc_path, gcc_prefix)
     except Exception:  # noqa: BLE001 -- best-effort enrichment, never raises
         return None
     force_cpp, force_cpp20, _explicit_c, cc_id = resolve_clang_langmode(

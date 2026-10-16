@@ -16,10 +16,12 @@ from typing import Any
 
 import pytest
 
-from abicheck import snapshot_cache
 from abicheck.compile_context import CompileContext
 from abicheck.model import AbiSnapshot
-from abicheck.service_dump_cache import cached_run_dump
+from abicheck.workflows.dump.cache import (
+    api as dump_cache_api,
+)
+from abicheck.workflows.dump.cache.api import cached_run_dump
 
 # Folded into the key: varying the value must change it.
 KEYED: dict[str, Any] = {
@@ -47,10 +49,13 @@ GATED: dict[str, Any] = {
     "debug_presence_only": True,
     "include_labels": "<label>",
 }
+# Keyed by content, but its path still names the snapshot's identity fields
+# (library, source_path, source_mtime, source_size). A hit re-derives them from
+# this call's path; test_snapshot_hit_binary_identity.py holds the real oracle.
+RESTAMPED = {"path"}
 # Cannot change the produced snapshot on a cacheable call.
 INERT = {
     "run_dump",
-    "path",  # its content is the key's base material
     "notify",  # progress callback only
     "debuginfod_url",  # only read when enable_debuginfod (GATED)
     "dump_manifest",  # keyed structurally; covered by the manifest cache tests
@@ -59,7 +64,7 @@ INERT = {
 
 def test_classification_is_exhaustive():
     params = set(inspect.signature(cached_run_dump).parameters)
-    classified = set(KEYED) | set(GATED) | INERT
+    classified = set(KEYED) | set(GATED) | RESTAMPED | INERT
     assert params == classified, (params - classified, classified - params)
 
 
@@ -76,13 +81,13 @@ def env(tmp_path: Path, monkeypatch):
     alt_hdr = alt_dir / "b.h"
     alt_hdr.write_text("int b;\n")
     keys: list[str] = []
-    real_lookup = snapshot_cache.lookup_key
+    real_lookup = dump_cache_api._lookup_key
 
     def spy(key: str, path: Path):
         keys.append(key)
         return real_lookup(key, path)
 
-    monkeypatch.setattr(snapshot_cache, "lookup_key", spy)
+    monkeypatch.setattr(dump_cache_api, "_lookup_key", spy)
     subst = {
         "<alt-header>": [alt_hdr],
         "<alt-dir>": [alt_dir],

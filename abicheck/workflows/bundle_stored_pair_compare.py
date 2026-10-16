@@ -48,7 +48,7 @@ if TYPE_CHECKING:
     from ..checker_types import DiffResult
     from ..environment_matrix import EnvironmentMatrix
     from ..policy_file import PolicyFile
-    from .suppression import SuppressionList
+    from .suppression_input import SuppressionList
 from ..errors import ProfileMismatchError, ScopeMismatchError
 from .release_scope import (
     build_stored_baseline_scope_record,

@@ -114,7 +114,7 @@ def discover_build_config(source_tree: Path | None) -> Path | None:
     ``.github/abicheck/.abicheck.yml`` — but only at *source_tree* itself,
     never walking up to its parents: ``dump --sources``/``--build-info``
     is anchored to the tree it was pointed at, unlike `compare`'s
-    ``discover_project_config()`` (``cli_helpers_compare.py``), which walks
+    ``discover_project_config()`` (defined in this module), which walks
     up from the current directory.
     """
     if source_tree is None or not source_tree.is_dir():

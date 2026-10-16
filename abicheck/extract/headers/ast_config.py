@@ -27,7 +27,6 @@ from ..._compiler_options import (
     split_gcc_options,
 )
 from ...dumper_ast_config_cpp20 import _preprocessed_header_content
-from ...dumper_clang import _needs_sycl_host_only
 from ...extract.cache_header_scan import iter_cache_header_files
 from ...extract.castxml_compiler_emulation import (
     castxml_parser_arguments,
@@ -40,6 +39,7 @@ from ...extract.castxml_header_compat import (
 )
 from ...extract.header_ast_cache_producers import clang_ast_output_fingerprint
 from ...header_utils import drop_include_tokens_duplicating_paths
+from ..compiler_driver import needs_sycl_host_only
 
 #: Bumped once (Codex review, fresh evidence, P2): a pre-existing on-disk
 #: entry an OLDER binary wrote for a self-healed C-to-C++ dump was stored
@@ -65,7 +65,9 @@ _CLANG_CACHE_SCHEMA_VERSION = 4
 #: (complete) AST.
 #: Bumped to 4 when the cached document started carrying the compiler-resolved
 #: calling-convention macro table (`extract.headers.castxml.macro_table`).
-_CASTXML_CACHE_SCHEMA_VERSION = 4
+#: Bumped to 5 when that table was replaced by the preprocessed text of each
+#: convention-bearing declaration (`extract.headers.castxml.preprocessed_text`).
+_CASTXML_CACHE_SCHEMA_VERSION = 5
 
 #: Which module constant salts each backend's header-parse cache key. Named,
 #: not copied, so the key always reads the constant's current value.
@@ -648,13 +650,13 @@ def _build_clang_header_command(
     ``-isystem`` for a cross/hermetic SDK wins. Skipped under ``-nostdinc``.
 
     On an Intel oneAPI driver, ``-fsycl-host-only`` is appended per
-    :func:`_needs_sycl_host_only` (PR #643) -- skipped when
+    :func:`needs_sycl_host_only` (PR #643) -- skipped when
     ``dpcpp_multi_context`` is set, since that request wants both passes.
 
     ``dpcpp_host_context`` requests the same SYCL-enabled host compilation
     directly, rather than producing a complete device AST only to frame and
     discard it. ``dpcpp_multi_context`` (ADR-050 D5, G32 Phase D) adds ``-fsycl -v``
-    when *cc_bin* is DPC++-capable (:func:`_is_dpcpp_family_binary`) --
+    when *cc_bin* is DPC++-capable (:func:`is_dpcpp_family_binary`) --
     ``-fsycl`` splits the driver into a host + one-or-more-device
     compilation passes, and ``-v`` emits the ``-cc1 ... -triple <T> ...
     -fsycl-is-(host|device)`` stderr lines :mod:`abicheck.sycl_context`
@@ -679,7 +681,7 @@ def _build_clang_header_command(
             cmd.append("-fsycl")
         if "-fsycl-host-only" not in cmd:
             cmd.append("-fsycl-host-only")
-    elif not dpcpp_multi_context and _needs_sycl_host_only(cc_bin, cmd):
+    elif not dpcpp_multi_context and needs_sycl_host_only(cc_bin, cmd):
         cmd.append("-fsycl-host-only")
     # Auto-probed host system dirs go *after* the user's pass-through flags, so a
     # user-supplied -isystem (cross/hermetic SDK) keeps higher priority (Codex review).

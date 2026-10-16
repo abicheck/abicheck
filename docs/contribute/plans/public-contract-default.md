@@ -947,7 +947,7 @@ provenance-receipt entry per resolved field.
   stated choice.** An explicit `--exit-code-scheme auto` contributes a
   candidate carrying the answer to "is a severity setting in effect?", so it
   outranks a lower layer's concrete scheme exactly as any other explicit
-  value would — matching `cli_helpers_compare.resolve_compare_config`, where
+  value would — matching `workflows.compare_configuration.resolve_compare_config`, where
   the CLI value wins whatever it is. (A first cut treated `auto` as "not
   stated" at every layer, which let a project config's concrete scheme beat
   an explicitly typed `--exit-code-scheme auto`; caught in review.) A
@@ -1254,8 +1254,12 @@ point — `service.py`'s `compare_snapshots`/`run_compare`/`CompareRequest`
 all accept and forward `contract_evaluation` (`tests/test_service_unit.py`'s
 `TestContractEvaluationThreading`).
 
-What is genuinely still missing, now that the false "not wired at all"
-claim is corrected: **no live front end sets `contract_evaluation=True`.**
+What was still missing as of 2026-07-29, now that the false "not wired at
+all" claim is corrected: **no live front end set `contract_evaluation=True`.**
+**Correction (2026-10-12):** that is no longer true. The `compare` CLI passes
+`contract_evaluation=True` on every run (`resolve_contract_evaluation` always
+returns `True`; `tests/test_cli_compare_contract_evaluation.py` pins it). The
+Tier-1 core `checker.compare()` default stays `False`.
 It is reachable only by calling the Python API directly. The obvious next
 front end, the `abi_compare` MCP tool (`mcp_server.py`), does not accept it
 either (confirmed: no `contract_evaluation` mention in that file at all) —

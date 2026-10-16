@@ -22,14 +22,14 @@ from typing import Any
 import pytest
 from hypothesis import given, strategies as st
 
-from abicheck.storage.availability import (
+from abicheck.storage.availability_ledger import (
     _GAP_STATUSES as _MODULE_GAP_STATUSES,
     AvailabilityLedger,
     Confidence,
     FactAvailability,
     FactStatus,
 )
-from abicheck.storage.identity import EntityId, OccurrenceId
+from abicheck.storage.occurrence_identity import EntityId, OccurrenceId
 from abicheck.storage.versioning import (
     COMPARISON_CONTRACT_VERSION,
     PACKAGE_FORMAT_VERSION,

@@ -20,16 +20,18 @@ branch-specific reference behind a trigger-worded pointer).
 abicheck helps library and package maintainers understand and validate
 API/ABI evolution: it compares two versions of a native library (ELF, PE/COFF,
 Mach-O, plus optional debug info, headers, build data and sources — evidence
-levels L0–L5), classifies every change into one of 414 `ChangeKind`s
+levels L0–L5), classifies every change into one of 417 `ChangeKind`s
 (`BREAKING_KINDS`, `API_BREAK_KINDS`, `COMPATIBLE_KINDS`, `RISK_KINDS`), and
 gates CI on the result while reporting what the evidence could not establish.
 Pure Python, 3.11+. Product direction: [`vision.md`](vision.md); this file owns
 development procedure.
 
 **Python versions:** `requires-python = ">=3.11"` is the supported minimum;
-**3.13** is the canonical development/CI version (full suite, 95% coverage
-floor, `ai-readiness` job). Develop against 3.13. Other versions run a smoke
-lane (`.github/workflows/python-compat.yml`).
+**3.13** is the canonical development/CI version (full suite, 80% coverage
+floor, `ai-readiness` job). Develop against 3.13. 3.11, 3.15 and 3.15t also
+run the full fast suite on every PR; 3.12/3.14 a smoke lane
+(`.github/workflows/python-compat.yml`). Use `enum.StrEnum`, never a
+`(str, Enum)` mixin: 3.15's `json` writes the latter as `"Cls.NAME"`.
 
 ## Product decisions and change routing
 
@@ -148,10 +150,14 @@ python scripts/check_ai_readiness.py   # structural repo gates
 ### Definition of done: `scripts/verify.py`
 
 `scripts/verify.py` is the single verification orchestrator that pixi,
-pre-commit, CI and this file all route through
-(`tests/test_verify_profiles.py` enforces that). **Before opening a PR, run
+pre-commit, CI and this file all route through. `tests/test_verify_profiles.py`
+checks that the `ai-readiness`, `lint-and-types` and `fair-metadata` jobs in
+`ci.yml` invoke `verify.py` with their expected steps, that the canonical unit
+lane uses `unit-pr`'s marker expression, and that every `pr`-profile step is
+named by some CI job's `--only` list (`unit-pr` runs directly in the
+unit-tests matrix); it does not check the rest of CI's commands. **Before opening a PR, run
 `python scripts/verify.py --profile pr`** (same as `pixi run check`) — it adds
-golden tests, the 95% coverage floor and ai-readiness on top of the fast loop.
+golden tests, the 80% coverage floor and ai-readiness on top of the fast loop.
 
 ```bash
 python scripts/verify.py --profile fast            # the commands above
@@ -168,15 +174,18 @@ PR description. To change a check, change it in `verify.py` and let
 `tests/test_verify_profiles.py` say what else must follow.
 
 **Long runs.** The `pr` profile and the full fast suite take 13–25 min, past
-the 10-min foreground tool limit. Start them once with the Bash tool's
-`run_in_background` and let its completion notification wake you; a shell
+the 10-min foreground tool limit. Start them once in the background, with
+an explicit timeout, and wait for their result in the same turn: a
+completion notification is not guaranteed to resume the agent. If the run
+does not finish within its timeout, stop it and name the blocker in the
+final message. Do not end the turn while a run is still in progress. A shell
 wait loop (`until … sleep`, `pgrep -f`, `pkill -f`) matches its own command
 line and hangs or kills itself. Keep the tree still while a run is live —
 `test_code_identity` hashes the source tree, so a commit mid-run fails it —
-and push once the run is green; an "unpushed changes" stop-hook nag is
-answered by the running verify, not by an early push.
+and push once the run is green.
 
-**PR body.** Write the description to a file and run
+**PR body.** Write every PR description with the `pr` skill
+(`.claude/skills/pr/`), whatever tool opens the PR. Write the description to a file and run
 `BUGFIX_CONTRACT_BODY_FILE=<file> python scripts/check_bugfix_test_contract.py`
 before every `create_pull_request`/`update_pull_request`; CI's test-contract
 check parses the same rows.
@@ -205,20 +214,20 @@ Follow the pointer whose trigger matches your task:
 | `abicheck/<layer>/AGENTS.md` | editing code inside that layer (`model`, `extract`, `compare`, `policy`, `workflows`, `storage`, `report`, `frontends`) |
 | [`docs/contribute/agent-guide/quality-gates.md`](docs/contribute/agent-guide/quality-gates.md) | an `ai-readiness`/coverage/mutation/FP-rate gate failed, or you are writing tests for a bug fix, a matrix, a differential comparison or a reusable primitive |
 | [`docs/contribute/agent-guide/performance.md`](docs/contribute/agent-guide/performance.md) | touching a hot path, a call-count/cost-budget/`perf-antipatterns` gate failed, or a user reports "slow" |
-| [`docs/contribute/agent-guide/cli-and-exit-codes.md`](docs/contribute/agent-guide/cli-and-exit-codes.md) | adding a CLI command or flag, changing an exit code, or editing a file over 1500 lines |
+| [`docs/contribute/agent-guide/cli-and-exit-codes.md`](docs/contribute/agent-guide/cli-and-exit-codes.md) | adding a CLI command or flag, changing an exit code, or editing a file over its size cap (`architecture/modules.yaml`) |
 | [`docs/contribute/agent-guide/decision-principles.md`](docs/contribute/agent-guide/decision-principles.md) | filling the PR template's "Bug class / General invariant" rows |
 | [`docs/contribute/known-gaps.md`](docs/contribute/known-gaps.md) | about to fix something in an area with a known gap or a reverted fix — read it **before** re-attempting |
 | [`tests/regressions/manifest.py`](tests/regressions/manifest.py) | writing a regression test — reuse a matching `BugClass` first |
 | [`docs/contribute/adr/index.md`](docs/contribute/adr/index.md) | a change touches a default, schema, exit code or public interface |
 | [`agent-guide/quality-gates.md` § ADR surface traceability](docs/contribute/agent-guide/quality-gates.md#adr-surface-traceability-adr-surfaces) | adding an ADR, or adding/renaming/removing a CLI flag, Action input, API symbol, report field, use case or scenario |
 
-**Repository skills** (`.claude/skills/`): `diagnosing-bugs` (load for a bug report, failing behavior or perf regression), `writing-for-agents` (load before editing any `AGENTS.md`/`CLAUDE.md`/skill), and the user-invoked `/handoff` and `/retro`.
+**Repository skills** (`.claude/skills/`): `diagnosing-bugs` (load for a bug report, failing behavior or perf regression), `writing-for-agents` (load before editing any `AGENTS.md`/`CLAUDE.md`/skill), `pr` (load before creating or updating any PR), `two-axis-review` (standards + spec review of a branch or PR), `codebase-design`/`domain-modeling`/`grilling` (module design, glossary/ADR terms, stress-testing a plan), and the user-invoked `/handoff`, `/retro` and `/improve-codebase-architecture`.
 
 ## Key types
 
 - `AbiSnapshot` (`model/snapshot.py`) — serializable snapshot of a library's ABI surface
 - `DiffResult` (`checker_types.py`) — comparison result: changes, verdict, context
-- `ChangeKind` (`model/change_catalog/kinds.py`, re-exported by `checker_policy.py`) — the 414 change types
+- `ChangeKind` (`model/change_catalog/kinds.py`, re-exported by `checker_policy.py`) — the 417 change types
 - `Verdict` (`checker.py`) — overall result (compatible/source_break/breaking)
 
 ## Adding a new ChangeKind
@@ -240,7 +249,7 @@ Follow the pointer whose trigger matches your task:
 4. Add a unit test.
 5. Classify the kind in `tests/canonical_identity_contract.py` — exactly one
    of `TYPE_BEARING` (also add it to
-   `finding_identity._TYPE_BEARING_DISCRIMINATOR_KINDS`), `VALUE_INSENSITIVE`,
+   `compare/finding_identity/change_kinds._TYPE_BEARING_DISCRIMINATOR_KINDS`), `VALUE_INSENSITIVE`,
    or `UNVERIFIED`. `tests/test_canonical_finding_id_completeness.py` fails
    until you do.
 
@@ -261,10 +270,18 @@ Follow the pointer whose trigger matches your task:
 - **mypy**: keep `mypy abicheck/` at 0 errors. A needed third-party
   suppression goes into that module's `disable_error_code` override in
   `pyproject.toml`, not a scattered `# type: ignore`.
-- **Large files**: check `python scripts/check_ai_readiness.py 2>&1 | grep
-  "exceeds soft limit"` (WARN > 1500 lines, ERROR > 2000) and
-  `architecture/debt.yaml`'s `no_growth` baselines before growing a big file;
-  shrink by moving a responsibility to a properly-owned module.
+- **Large files**: one rule. The caps are `architecture/modules.yaml`
+  `limits` (800 lines for production code, 1200 for tests), and both
+  `check_architecture.py` and `check_ai_readiness.py` read them from there.
+  A file over its cap needs a grandfather record: an `architecture/debt.yaml`
+  entry (its `no_growth` baseline, which may not be raised), or, for a
+  `scripts/`, `skills-src/` or `action/` file with none, an entry in
+  `FILE_SIZE_GRANDFATHERED` in `scripts/check_ai_readiness.py` recording its
+  current length. Growing past that record fails. Any file over 2000 lines
+  fails outright unless it is in `LARGE_FILE_ALLOWLIST`. Nothing warns. Check
+  with `python scripts/check_architecture.py` and
+  `python scripts/check_ai_readiness.py`; shrink by moving a responsibility to
+  a properly-owned module.
 
 ## Decision-making principles
 

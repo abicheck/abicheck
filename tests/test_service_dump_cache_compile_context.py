@@ -13,13 +13,15 @@ from pathlib import Path
 
 from abicheck.compile_context import CompileContext
 from abicheck.model import AbiSnapshot
-from abicheck.service_dump_cache import (
+from abicheck.workflows.dump.cache import store as dump_cache_store
+from abicheck.workflows.dump.cache.api import cached_run_dump
+from abicheck.workflows.dump.cache.key import (
     _dump_cache_extra_key,
-    _dump_is_cacheable,
-    cached_run_dump,
     compile_context_cache_field,
+    compile_context_header_inputs,
     effective_header_backend,
 )
+from tests._dump_cache_request import dump_is_cacheable
 
 
 def _variants() -> dict[str, CompileContext]:
@@ -37,7 +39,7 @@ def _variants() -> dict[str, CompileContext]:
 
 
 def _cacheable(compile: object | None) -> bool:
-    return _dump_is_cacheable(
+    return dump_is_cacheable(
         pdb_path=None,
         dwarf_only=False,
         debug_roots=None,
@@ -156,7 +158,6 @@ def test_non_default_contexts_cache_separately_and_warm(tmp_path):
 # entry point: editing a header under that input forces a re-dump, and an
 # unchanged tree keeps the warm hit. Oracle: run_dump's own call count.
 
-from abicheck.service_dump_cache import compile_context_header_inputs  # noqa: E402
 
 _DIR_OPTS = (
     "-I",
@@ -212,7 +213,6 @@ def _edit_busts_and_idle_hits(tmp_path, cc: CompileContext, target: Path) -> Non
 
 
 def test_every_dir_option_spelling_tracks_header_edits(tmp_path, monkeypatch):
-    from abicheck import snapshot_cache
 
     n = 0
     for opt in _DIR_OPTS:
@@ -225,14 +225,13 @@ def test_every_dir_option_spelling_tracks_header_edits(tmp_path, monkeypatch):
             hdr.write_text("int x;\n")
             root = case / "inc"
             cc = _replace_placeholder(cc_template, root)
-            monkeypatch.setattr(snapshot_cache, "_CACHE_DIR", case / "cache")
+            monkeypatch.setattr(dump_cache_store, "_CACHE_DIR", case / "cache")
             assert _cacheable(cc), cc
             _edit_busts_and_idle_hits(case, cc, hdr)
     assert n >= len(_DIR_OPTS) * 4
 
 
 def test_every_file_option_spelling_tracks_edits(tmp_path, monkeypatch):
-    from abicheck import snapshot_cache
 
     n = 0
     for opt in _FILE_OPTS:
@@ -243,7 +242,7 @@ def test_every_file_option_spelling_tracks_edits(tmp_path, monkeypatch):
             forced = case / "forced.h"
             forced.write_text("int y;\n")
             cc = _replace_placeholder(cc_template, forced)
-            monkeypatch.setattr(snapshot_cache, "_CACHE_DIR", case / "cache")
+            monkeypatch.setattr(dump_cache_store, "_CACHE_DIR", case / "cache")
             assert _cacheable(cc), cc
             _edit_busts_and_idle_hits(case, cc, forced)
     assert n >= len(_FILE_OPTS) * 4

@@ -30,7 +30,7 @@ them from what a release front end has already resolved.
 ``_diff_result``/bundle-evidence keys are stripped from the release's
 library entries, because the export index is built from them. The report
 section is assembled afterwards, from the returned stage, by
-``report.release_public_surface.assemble_release_public_surface``.
+``report.release_public_surface_section.assemble_release_public_surface``.
 """
 
 from __future__ import annotations
@@ -351,7 +351,7 @@ def member_pass_scope(expected_members: Collection[str]) -> Iterator[None]:
 
     Entered around a driver's *member loop*, in the thread that runs it: a
     copy of that thread's ``contextvars.Context`` is what reaches a parallel
-    worker (see ``cli_compare_release_pairwise._compare_release_parallel``),
+    worker (see ``workflows.release_members._compare_parallel``),
     so entering it inside a worker would not propagate.
     """
     owned = release_level_checks() if len(set(expected_members)) > 1 else frozenset()

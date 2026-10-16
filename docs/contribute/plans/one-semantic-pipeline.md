@@ -67,7 +67,7 @@ assume:
 | ADR-055 (typed request/result) | D1 implemented for `compare` only | Phase 1 extends the existing `CompareRequest`/`service_compare_pipeline.py` shape to `dump` (a real `DumpRequest`/`resolve_dump_request`/`execute_dump_request` pair, already built) and finishes routing `dump`'s own real execution onto it — `scan`'s `ScanRequest` already exists separately and its candidate resolution already converges on the shared execution primitive, so Phase 1 does not extend this shape to `scan`, only to `dump` |
 | ADR-061 (responsibility packages) | Phases 0-1 implemented; Phase 5 (`model` package) begun | Phase 0/2/4/7 of this plan land inside the `model`/`compare`/`policy` packages ADR-061 already created; this plan does not create new top-level packages beyond what ADR-061 names |
 | ADR-062 (storage v2) | Phase 0 primitives (`abicheck/storage/`: `FactStatus`/`FactAvailability`, occurrence-preserving identity, canonical encoding, version axes) implemented and **inert** — nothing wired to a producer/reader | Phase 0/5 of this plan is the *generalization* of these primitives into the domain layer; Phase 8 of this plan is the *wiring* ADR-062 Phase 1 still needs, done jointly rather than twice |
-| ADR-042 (compatibility/gate separation) | Implemented for JSON/SARIF/`compare-release`; `workflows/aggregate/gate.py`/`fold.py` still decode exit codes inline | Phase 7 of this plan closes the `gate.py`/`fold.py` gap — not a redesign of ADR-042 itself. `junit_report.py`'s own inline `_is_failure` computation is **not** one of the gaps Phase 7 closes: that phase's own corrected design leaves it exactly as it is, since it is a legitimate per-render function of each call's own `SeverityConfig`/`relevant_ids`, not a property a finding carries — there is no `RunOutcome` field for it to read instead, so it stays inline by design, not as an unclosed gap |
+| ADR-042 (compatibility/gate separation) | Implemented for JSON/SARIF/`compare-release`; `workflows/aggregate/report_gate.py`/`fold.py` still decode exit codes inline | Phase 7 of this plan closes the `gate.py`/`fold.py` gap — not a redesign of ADR-042 itself. `junit_report.py`'s own inline `_is_failure` computation is **not** one of the gaps Phase 7 closes: that phase's own corrected design leaves it exactly as it is, since it is a legitimate per-render function of each call's own `SeverityConfig`/`relevant_ids`, not a property a finding carries — there is no `RunOutcome` field for it to read instead, so it stays inline by design, not as an unclosed gap |
 | AGENTS.md "PR C" (dump/scan typed convergence) | `resolve_dump_request`/`execute_dump_request` split landed; `scan`'s candidate resolution already converges on the shared `workflows.artifact.execute._resolve_side_snapshot_impl` primitive that `execute_dump_request` itself calls internally (`resolve_dump_request` only validates evidence and builds a `ResolvedDumpRequest` — it never calls the primitive; `service_input_resolution` is only a delegating facade re-exporting this module's owner), but `dump`'s own real ELF/PE/Mach-O execution still runs the legacy path, blocked on two named items (castxml availability for parity testing, `--compile-db-filter` typed surface — now closed) | Phase 1 of this plan is exactly "finish PR C" for the `dump` half, not a new design |
 
 ## Phase 2B-8B: consumer-cutover extension (accepted 2026-09-02)
@@ -7920,7 +7920,7 @@ accepted, one-time migration-boundary gap, not a property the wire format
 promises going forward. This is the identical domain/DTO split D8 already
 establishes for Phase 8's storage writer, applied one phase earlier because
 the domain type it wraps already existed before this phase, not invented
-by it. `storage/identity.py`'s own re-export of both names is unaffected —
+by it. `storage/occurrence_identity.py`'s own re-export of both names is unaffected —
 it already imports them from `storage/entity_ids.py`, and continues to.
 
 **Files.** `abicheck/model/identity.py` (new, leaf — no dependency on
@@ -9549,7 +9549,7 @@ versioned (`DOMAIN_ENTITY_ID_SCHEMA_VERSION = 2`) pair operating on
 `model.identity.EntityId` directly -- kept deliberately separate from this
 module's own pre-existing `EntityId`/`OccurrenceId` packed-key wire DTO
 (unchanged, still the shape a caller that only needs a flat, orderable,
-key-producing identity reaches for; `storage/identity.py`'s re-export is
+key-producing identity reaches for; `storage/occurrence_identity.py`'s re-export is
 therefore unaffected, exactly as the Design section's own note predicted).
 `domain_entity_id_to_dto` encodes `ScopePath` as an explicit list of typed
 segment records (`{"kind": "namespace"|"record"|"inline_namespace"|
@@ -12010,7 +12010,7 @@ backend already resolved" when building a real `SemanticIR` occurrence for
 a function -- there is no second, independently-derived representation for
 `finding_identity.resolve_function_identity` to prefer over the flat
 `Function` object it already reads. A first draft of
-`abicheck/compare/functions.py`'s `function_identity_index` built a
+`abicheck/compare/function_cutover.py`'s `function_identity_index` built a
 `SemanticIRIndex` per comparison (real IR when the snapshot carried one
 covering `FUNCTION`, else a new `legacy_function_ir` adapter projection)
 and looked up each function's `entity_id` in it -- but discarded the
@@ -12032,7 +12032,7 @@ same precedent `SemanticIRIndex` itself was accepted under -- "landed and
 proven correct in isolation first"): `abicheck/model/
 semantic_ir_legacy_adapter.py`'s `legacy_function_ir`, a real `SemanticIR`
 projection of the flat function map shaped like `legacy_typedef_ir`/
-`legacy_constant_ir`, and the `compare/functions.py` module boundary itself
+`legacy_constant_ir`, and the `compare/function_cutover.py` module boundary itself
 as the one place a future consumer belongs.
 
 *What a real cohort 3 would still need.* `CanonicalEntity` growing
@@ -12203,7 +12203,7 @@ plain attributes — required to satisfy mypy's covariance check against
 `SourceGraphSummary`'s mutable `list` fields); `AbiSnapshot.surface_graph`
 (unconditional, schema v29) and its `storage/surface_graph_codec.py`
 encode/decode pair; `compare/surface_graph.py` (the new `compare/`-layer
-builder, `build_public_surface_facts`); `policy/public_surface.py`
+builder, `build_public_surface_facts`); `policy/public_surface_index.py`
 (`PublicSurfaceQuery`, `.resolve()`/`.resolve_public_domain()`/
 `.resolve_export_domain()`); `surface_graph.py`'s (root module)
 `public_entity_ids` threading through `build_surface_graph()`/
@@ -12231,7 +12231,7 @@ established convention).** `surface.py`'s closure-walk implementation
 `_walk_exact_type_closure`/`_record_exact_identities`/
 `_record_nested_in_known_record`/`_record_is_confirmed_public_seed`, plus
 the `PublicSurface` result type itself) moved to a leaf module pair,
-`policy/public_surface.py` (the dataclass + `_index_surface_types`'
+`policy/public_surface_index.py` (the dataclass + `_index_surface_types`'
 indexing/bookkeeping) and `policy/public_surface_closure.py` (the actual
 walk, plus the real `resolve_public_surface()` entry point) — split purely
 to stay under the 800-line new-file production cap, not a design split.
@@ -12276,7 +12276,7 @@ behavior, preserved exactly for the one case the graph's shared-node model
 cannot represent precisely. The declaration/type *indexing* itself
 (`_index_surface_types`, `ambiguous_type_names`, `origin_by_key`) was
 **not** re-pointed at the graph's node set for the identical structural
-reason — see `policy/public_surface.py`'s own module docstring.
+reason — see `policy/public_surface_index.py`'s own module docstring.
 
 A second correctness hazard was found by post-merge review (Codex, PR #979)
 rather than caught before landing — and a more consequential one than it
@@ -12405,7 +12405,7 @@ there is no lazy, graph-reading legacy-snapshot backfill path (`compute_
 public_surface()`'s signature was never changed to accept a structured
 `resolution` parameter, since nothing inside it reads the graph yet);
 `type_reachability.directly_referenced_stdlib_types()` was not migrated
-into `policy/public_surface.py` (doing so would require reclassifying
+into `policy/public_surface_index.py` (doing so would require reclassifying
 `type_reachability.py` into the `policy` layer, which would introduce a
 genuine new `policy -> extract` architecture violation — that module
 imports two already-`extract`-classified siblings); and `compare/
@@ -12417,7 +12417,7 @@ instance (real, tested) without deduping onto a common node for a
 declaration both builders see. `surface.py`'s own traversal deletion and
 the node-id unification are both real, separate follow-up phases, not
 silently-abandoned scope — see `compare/surface_graph.py`'s and
-`policy/public_surface.py`'s own module docstrings for the exact reasoning
+`policy/public_surface_index.py`'s own module docstrings for the exact reasoning
 each carries.
 
 **Two corrections to this section's own design text below**, found while
@@ -12578,7 +12578,7 @@ sibling:
   directly would make `surface_graph.py` — a comparison/index-layer
   module (ADR-025's A1-A4 surface-intelligence substrate, the same role
   `idioms.py`/`pattern_verdicts.py`/`diff_surface_metrics.py` already play)
-  — import `policy/public_surface.py`, reversing ADR-061's required
+  — import `policy/public_surface_index.py`, reversing ADR-061's required
   `policy -> compare` direction (`policy/` is allowed to depend on
   `compare/`, never the reverse). Second, `PublicSurfaceQuery.resolve()`
   returns `frozenset[EntityId]` (per this phase's own primitive below),
@@ -12595,7 +12595,7 @@ sibling:
   assembly step this phase's earlier bullets already describe) resolves
   the public `EntityId` set *once* and threads it down to
   `build_surface_graph`/`compute_surface_metrics` — `surface_graph.py`
-  itself never imports `policy/public_surface.py`, it only receives an
+  itself never imports `policy/public_surface_index.py`, it only receives an
   already-resolved answer, same direction as every other `policy ->
   compare` edge in this plan.
 
@@ -13018,7 +13018,7 @@ sibling:
   read header origin/declaration/export-table data out of.** The backfill
   therefore runs one layer up, in a single shared helper every caller of
   `PublicSurfaceQuery.resolve()` routes through rather than each
-  reimplementing its own `None` check — `policy.public_surface.
+  reimplementing its own `None` check — `policy.public_surface_index.
   resolve_public_surface(snapshot, explicit_roots)` (a thin wrapper, not a
   second query implementation): it reads `snapshot.surface_graph`,
   lazily builds one on the fly, in memory, using the flat `AbiSnapshot`
@@ -13332,7 +13332,7 @@ sibling:
   extracted or freshly re-saved snapshot, whose `surface_graph` has
   genuinely been through the public-surface builder — not retroactively
   forced onto a document this phase never touched.
-- **The relevance query** — `abicheck/policy/public_surface.py` (new):
+- **The relevance query** — `abicheck/policy/public_surface_index.py` (new):
   `PublicSurfaceQuery.resolve(graph, explicit_roots) -> frozenset[EntityId]`,
   a traversal from explicit public roots through `includes`/`declares`
   edges (closing the reachable-header surface) and `references`/
@@ -13418,7 +13418,7 @@ sibling:
 
 `type_reachability.py`'s `directly_referenced_stdlib_types()` — itself a
 relevance decision (it un-filters a record for suppression purposes) —
-becomes a second, narrower query in `policy/public_surface.py` over the
+becomes a second, narrower query in `policy/public_surface_index.py` over the
 same graph (a one-hop `references` filter) rather than its own independent
 scan with its own ambiguity-tracking machinery — the machinery this phase
 removes is exactly what Phase 2 already started removing for the identity
@@ -13461,7 +13461,7 @@ symbol spelling, per the correction above (`_root_seed_types`/
 `reachable_types`/`idioms.py`'s create/destroy regexes are all keyed on
 this plain name already) — preserving its existing `frozenset[str]`
 return type exactly — `surface_graph.py` itself still never imports
-`policy/public_surface.py`, per the note above).
+`policy/public_surface_index.py`, per the note above).
 
   **Threading `public_entity_ids` into `compute_surface_metrics()`'s own
   signature does not, by itself, make its *metrics* reflect the resolved
@@ -13530,7 +13530,7 @@ a first draft of this phase's text said exactly that ("the same
 which is the identical `policy -> compare` direction violation this
 phase's own `surface_graph.py` fix (above) already corrected once, just
 reappearing at a second call site `compare()` itself.** `checker.compare()`
-stays `compare/`-layer code with no import of `policy/public_surface.py`
+stays `compare/`-layer code with no import of `policy/public_surface_index.py`
 anywhere in it; the actual
 `resolve_public_surface()` call (the snapshot-aware wrapper around
 `PublicSurfaceQuery.resolve()`, per the backfill fix below) moves to the
@@ -13582,7 +13582,7 @@ an optimization avoiding redundant recomputation — never because the
 function would otherwise fail to run.
 
 **That internal fallback call is itself `surface.py` importing from
-`policy/public_surface.py`, and a further review round correctly asked
+`policy/public_surface_index.py`, and a further review round correctly asked
 whether this reintroduces the exact `compare -> policy` direction this
 phase's own design elsewhere forbids.** Checked against the actual
 enforcement, not assumed either way: `scripts/check_architecture.py`'s
@@ -13594,11 +13594,11 @@ processing.py`, and `contract_pipeline.py` are all still flat, top-level
 modules today — none of them has been migrated into `abicheck/compare/`
 (or any other ADR-061 package) by any phase in this plan — so
 `source_layer` resolves to `None` for every one of them, and the gate
-checks nothing about what they import, `policy/public_surface.py`
+checks nothing about what they import, `policy/public_surface_index.py`
 included. There is therefore no currently-enforced violation this design
 introduces, and the `policy -> compare` directionality this phase
 enforces elsewhere is specifically about code that *has* migrated into a
-package — `policy/public_surface.py` itself, which the gate does check,
+package — `policy/public_surface_index.py` itself, which the gate does check,
 imports only `compare/` and `model/`, never backward. This is a real
 residual nonetheless, not a closed question: the moment a *future* phase
 migrates `surface.py` (or any of its callers) into `abicheck/compare/`,
@@ -13608,7 +13608,7 @@ public_surface()` into `policy/` alongside the query it already calls,
 or relocate the lazy-resolve fallback itself to whichever workflow-layer
 caller triggers that migration — named here so that phase's own
 implementation PR inherits the constraint explicitly rather than
-discovering it as a fresh gate failure. `abicheck/policy/public_surface.py`
+discovering it as a fresh gate failure. `abicheck/policy/public_surface_index.py`
 (new — `PublicSurfaceQuery`, migrated from `surface.py`'s existing
 traversal logic); `surface.py` (`compute_public_surface(snapshot,
 resolution: PublicSurfaceResolution | None = None)` — **not
@@ -16543,7 +16543,7 @@ three real callers of the not-comparable refusal document
 JSON branch, and `cli_compare_release_pairwise.py`'s per-library refusal
 branch — this last one is the file the plan's own Files list named
 `cli_compare_release.py` for, corrected here against the real call site).
-`workflows/aggregate/gate.py` reads structured-first with legacy decode as
+`workflows/aggregate/report_gate.py` reads structured-first with legacy decode as
 the named fallback, exactly as designed; `fold.py` needed no change, as
 predicted. `buildsource/check_report.py`'s `_neutralize_gate()`/
 `_escalate_removed_library_severity()` both gained the identical
@@ -16634,7 +16634,7 @@ logic, which this phase now leaves alone entirely.
 
 **`junit_report.py` is not the only remaining inline exit-code consumer —
 a first draft of this phase missed the multi-target aggregate path
-entirely.** `abicheck/workflows/aggregate/gate.py`'s `GateInfo.
+entirely.** `abicheck/workflows/aggregate/report_gate.py`'s `GateInfo.
 from_report_data`/`from_scan_report` decode a persisted report's raw `exit_code` integer back
 into `blocking`/severity semantics, and `abicheck/workflows/aggregate/
 fold.py`'s own `exit_code()` aggregates every target's gate by `max()`-ing
@@ -16721,7 +16721,7 @@ since its `_is_failure` stays the unchanged, per-render function it
 already is. `html_report.py`'s CI Gate card (already `RunOutcome`-shaped
 per ADR-042 — confirm it reads the new object directly rather than a
 precursor shape, closing ADR-036 Increment 3 as a side effect if it
-hasn't landed separately by then); `abicheck/workflows/aggregate/gate.py`
+hasn't landed separately by then); `abicheck/workflows/aggregate/report_gate.py`
 (`GateInfo.from_report_data`/`from_scan_report` read structured
 `RunOutcome.gate`/`.operational` fields first, folding both into the one
 returned `GateInfo` by `max()` over the shared exit-code scheme; legacy
@@ -17859,7 +17859,7 @@ This checklist is re-run, and re-verified, at the end of the
 | 4 | M | Planner rejecting a request current behavior silently accepted — must ship with a migration note in `CHANGELOG.md`/docs, not only a changelog fragment, since it is a user-visible behavior change (a previously-silent no-op becomes an error) |
 | 5 | L (mechanical, field-by-field) | Scope creep — cap each commit to one field |
 | 6 | XL | Largest blast radius in this plan (every backend parser); sequence last among the "hard" phases, after 0/2/3 give it primitives to build on |
-| 7 | M | Two independent exit-code consumers, not one: JUnit output is consumed by external CI systems (`_is_failure` stays per-finding, parity testing not redesign), and the multi-target aggregate path (`workflows/aggregate/gate.py`/`fold.py`) was missed entirely in this phase's first draft — its report-schema addition needs the legacy-decode fallback proven bit-for-bit equivalent on every existing fixture, not just new ones |
+| 7 | M | Two independent exit-code consumers, not one: JUnit output is consumed by external CI systems (`_is_failure` stays per-finding, parity testing not redesign), and the multi-target aggregate path (`workflows/aggregate/report_gate.py`/`fold.py`) was missed entirely in this phase's first draft — its report-schema addition needs the legacy-decode fallback proven bit-for-bit equivalent on every existing fixture, not just new ones |
 | 8 | XL | Shared with ADR-062's own Phase 1 risk profile; do not duplicate that ADR's own risk analysis here, defer to it |
 | 9 | S | Low technical risk (extracting already-shared logic into a leaf module), but skippable-looking — it has no dependency on any other phase, which makes it easy to defer indefinitely rather than land; don't let "independent" read as "optional" |
 | 10 | S per row, continuous | The easiest phase to skip under time pressure — explicitly called out as required, not optional, per ADR-063's decision drivers |

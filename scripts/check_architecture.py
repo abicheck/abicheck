@@ -16,12 +16,17 @@ import ast
 import datetime as dt
 import json
 import os
+import re
 import subprocess
 import sys
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
+
+if str(Path(__file__).resolve().parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+from architecture_graph import find_cycle  # noqa: E402 -- sibling leaf, see that module
 
 SCHEMA_VERSION = 1
 GENERIC_NAMES = frozenset(
@@ -40,6 +45,13 @@ DEBT_FIELDS = frozenset(
         "rationale",
         "review_by",
     }
+)
+#: Longest rationale a raised or new debt entry may carry. Existing entries
+#: over this length are grandfathered until they are raised again.
+DEBT_RATIONALE_MAX_CHARS = 1500
+#: A raised or new debt entry must cite the plan or ADR that owns its move.
+_DEBT_PLAN_OR_ADR_REFERENCE = re.compile(
+    r"docs/contribute/(?:plans|adr)/[A-Za-z0-9_./-]+\.md(?![A-Za-z0-9_])"
 )
 
 #: ADR-061 gap F / definition-of-done item 16: every no-growth debt entry
@@ -61,8 +73,8 @@ DEBT_DISPOSITIONS = frozenset({"migrate", "accept"})
 # to work around that with a runtime `importlib.import_module` call). That
 # only holds if the leaf itself never imports back into any module on that
 # cycle -- and this denylist is strictly narrower than the general
-# `policy -> compare` layer edge already permits (`finding_identity.py` is
-# classified into the `compare` layer, which `policy` may otherwise import),
+# `policy -> compare` layer edge already permits (`compare.finding_identity` is
+# owned by the `compare` layer, which `policy` may otherwise import),
 # so the general dependency-direction check below would not catch a
 # regression here on its own. Checked directly against each leaf file's own
 # imports, not modeled as a layer.
@@ -80,7 +92,7 @@ _SELECTOR_LEAF_DENYLIST: tuple[str, ...] = (
     "abicheck.checker_types",
     "abicheck.suppression",
     "abicheck.policy.reclassify",
-    "abicheck.finding_identity",
+    "abicheck.compare.finding_identity",
 )
 
 
@@ -131,32 +143,6 @@ def _safe_relative_path(
         )
         return None
     return value
-
-
-def _find_cycle(graph: Mapping[str, set[str]]) -> list[str] | None:
-    active: list[str] = []
-    done: set[str] = set()
-
-    def visit(node: str) -> list[str] | None:
-        if node in active:
-            start = active.index(node)
-            return [*active[start:], node]
-        if node in done:
-            return None
-        active.append(node)
-        for target in sorted(graph.get(node, ())):
-            cycle = visit(target)
-            if cycle:
-                return cycle
-        active.pop()
-        done.add(node)
-        return None
-
-    for node in sorted(graph):
-        cycle = visit(node)
-        if cycle:
-            return cycle
-    return None
 
 
 def _validate_modules(
@@ -238,7 +224,7 @@ def _validate_modules(
                         f"legacy path {legacy_path!r} is classified by both {previous!r} and {name!r}",
                     )
                 )
-    cycle = _find_cycle(
+    cycle = find_cycle(
         {name: imports & graph.keys() for name, imports in graph.items()}
     )
     if cycle:
@@ -627,6 +613,14 @@ def _base_debt_tracked_paths(root: Path, revision: str) -> frozenset[str]:
     ledger, which they don't control. Best-effort: any git/JSON failure
     yields an empty set, which makes every rename fall through to the
     ordinary (stricter) new-file path."""
+    return frozenset(_base_debt_records(root, revision))
+
+
+def _base_debt_records(root: Path, revision: str) -> dict[str, dict[str, Any]]:
+    """The raw ``files`` entry per debt path at *revision*.
+
+    Best-effort like ``_base_debt_tracked_paths``: any git/JSON failure
+    yields an empty map."""
     proc = subprocess.run(
         ["git", "show", f"{revision}:architecture/debt.yaml"],
         cwd=root,
@@ -634,19 +628,24 @@ def _base_debt_tracked_paths(root: Path, revision: str) -> frozenset[str]:
         text=True,
     )
     if proc.returncode != 0:
-        return frozenset()
+        return {}
     try:
         data = json.loads(proc.stdout)
     except json.JSONDecodeError:
-        return frozenset()
+        return {}
+    return _debt_file_records(data)
+
+
+def _debt_file_records(data: object) -> dict[str, dict[str, Any]]:
+    """Raw ``files`` entry per well-formed path in a parsed debt ledger."""
     files = data.get("files") if isinstance(data, dict) else None
     if not isinstance(files, list):
-        return frozenset()
-    return frozenset(
-        entry["path"]
+        return {}
+    return {
+        entry["path"]: entry
         for entry in files
         if isinstance(entry, dict) and isinstance(entry.get("path"), str)
-    )
+    }
 
 
 def _base_has_architecture_contract(root: Path, revision: str) -> bool | None:
@@ -1063,6 +1062,17 @@ def _check_debt_entry(
         )
         return
     lines = _line_count(path)
+    if lines < baseline:
+        # Slack: a baseline above the real size lets the file grow back up to
+        # it unseen, so the ratchet must follow every shrink down.
+        findings.append(
+            Finding(
+                "debt-slack",
+                f"{relative}: baseline_lines {baseline} is {baseline - lines} above "
+                f"the actual {lines} lines; lower it with "
+                "`python scripts/tighten_debt_baselines.py`",
+            )
+        )
     base_lines = _debt_base_lines(
         root,
         relative,
@@ -1100,12 +1110,48 @@ def _check_debt_entry(
         )
 
 
+def _check_raised_debt_entry(
+    root: Path, relative: str, raw: dict[str, Any], findings: list[Finding]
+) -> None:
+    """Require a raised or new debt entry to say why and where the plan is."""
+    rationale = raw.get("rationale")
+    if not isinstance(rationale, str):
+        return  # the schema check already reports a missing rationale
+    if len(rationale) > DEBT_RATIONALE_MAX_CHARS:
+        findings.append(
+            Finding(
+                "debt-raise-rationale",
+                f"{relative}: raised or new debt rationale is {len(rationale)} "
+                f"characters; the limit is {DEBT_RATIONALE_MAX_CHARS} -- move the "
+                "detail into the plan or ADR it links",
+            )
+        )
+    references = sorted(set(_DEBT_PLAN_OR_ADR_REFERENCE.findall(rationale)))
+    if not references:
+        findings.append(
+            Finding(
+                "debt-raise-link",
+                f"{relative}: raised or new debt entry must link the plan or ADR "
+                "that owns its move (docs/contribute/plans/ or docs/contribute/adr/)",
+            )
+        )
+    for reference in references:
+        if not (root / reference).is_file():
+            findings.append(
+                Finding(
+                    "debt-raise-link",
+                    f"{relative}: rationale links {reference}, which does not exist",
+                )
+            )
+
+
 def _check_debt_baselines(
     root: Path,
     modules: dict[str, Any],
     baselines: dict[str, int],
     base_revision: str | None,
     findings: list[Finding],
+    debt_records: dict[str, dict[str, Any]],
 ) -> None:
     """Check the adoption debt ledger's no-growth and no-new-entry rules."""
     base_has_contract = (
@@ -1146,6 +1192,29 @@ def _check_debt_baselines(
             pending_renames,
             base_debt_tracked_paths,
             findings,
+        )
+    if not base_revision or adopting_contract:
+        return
+    # A raised or new entry must carry a plan/ADR link and a bounded rationale.
+    # Lowered and unchanged entries are grandfathered, however long they are.
+    base_records = _base_debt_records(root, base_revision)
+    for relative, baseline in baselines.items():
+        base_path = relative
+        if (
+            relative not in base_records
+            and pending_renames.get(relative) in base_records
+        ):
+            base_path = pending_renames[relative]
+        base_entry = base_records.get(base_path)
+        base_baseline = base_entry.get("baseline_lines") if base_entry else None
+        if (
+            base_entry is not None
+            and isinstance(base_baseline, int)
+            and baseline <= base_baseline
+        ):
+            continue
+        _check_raised_debt_entry(
+            root, relative, debt_records.get(relative, {}), findings
         )
 
 
@@ -1484,7 +1553,7 @@ def _check_dependency_graph(
             graph,
             findings,
         )
-    cycle = _find_cycle(graph)
+    cycle = find_cycle(graph)
     if cycle:
         findings.append(
             Finding(
@@ -1532,7 +1601,14 @@ def check_repository(root: Path, *, base_revision: str | None = None) -> list[Fi
     dependency_direction_exceptions = _validate_dependency_direction_exceptions(
         debt, layers, findings
     )
-    _check_debt_baselines(root, modules, baselines, base_revision, findings)
+    _check_debt_baselines(
+        root,
+        modules,
+        baselines,
+        base_revision,
+        findings,
+        _debt_file_records(debt),
+    )
     _check_new_file_sizes(root, baselines, production_limit, test_limit, findings)
     _check_frozen_root_families(root, modules, findings)
     _check_root_modules(root, modules, layers, findings)

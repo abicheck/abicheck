@@ -116,7 +116,7 @@ __all__ = [
 class ReleaseCompareRequest:
     """A fully-specified directory/package release-comparison *resolution*
     request -- the release fan-out's counterpart to
-    :class:`abicheck.workflows.contracts.CompareRequest`, scoped to the
+    :class:`abicheck.workflows.service_requests.CompareRequest`, scoped to the
     pre-execution half (:func:`resolve_release_compare_plan` resolves it;
     it does not itself run any per-library dump/compare).
 
@@ -349,7 +349,7 @@ def resolve_release_compare_plan(
             # (report-only -- the selected variants are what gets compared).
             from dataclasses import replace as _replace
 
-            from .variant_pairing import release_variant_pairing
+            from .stored_variant_pairing import release_variant_pairing
 
             scope_plan = _replace(
                 scope_plan,

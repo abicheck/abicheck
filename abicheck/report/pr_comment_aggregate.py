@@ -60,7 +60,6 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
-from ..pr_comment_base import CommentModel, Finding
 from .change_summary import ChangeSummary, fold_change_summaries
 from .pr_comment_members import (
     MAX_FOLDED_TARGETS,
@@ -71,6 +70,7 @@ from .pr_comment_members import (
     load_member_report,
     resolve_member_path,
 )
+from .pr_comment_model import CommentModel, Finding
 
 #: Gate categories that mean *this target never reached a comparison*, as
 #: opposed to *this target compared and broke*. ``aggregate`` forces a
@@ -291,7 +291,7 @@ def _tag(findings: Sequence[Finding], component: str) -> list[Finding]:
 
     :func:`dataclasses.replace`, not a field-by-field constructor call: the
     hand-written version silently dropped whichever field was added to
-    :class:`~abicheck.pr_comment_base.Finding` next (it lost
+    :class:`~abicheck.report.pr_comment_model.Finding` next (it lost
     ``evolution``, so every folded member's pre-existing hygiene finding
     came back through the fan-in unstamped, and therefore counted as a
     change the comparison introduced). A copy that enumerates fields is a

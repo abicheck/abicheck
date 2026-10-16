@@ -134,7 +134,7 @@ class TestGenuinelyExportedSymbolStaysBreaking:
 
     def test_symbol_exported_only_under_its_export_alias_is_not_demoted(self) -> None:
         """Codex review, fresh evidence: `change.symbol` can be a guessed
-        mangling from `_public_functions`' own bare-name export fallback --
+        mangling from `public_functions`' own bare-name export fallback --
         the function is retained because its real display name ("process")
         is exported, even though the *dict key*/`change.symbol` itself
         (here, a mangling that matches no real dynsym entry) never is.
@@ -416,14 +416,14 @@ class TestSyntheticCtorDtorTemplateBaseNamePrimitive:
     brackets) are otherwise unreached from that one call site."""
 
     def test_non_synthetic_symbol_returns_none(self) -> None:
-        from abicheck.finding_identity_ctor_dtor import (
+        from abicheck.compare.finding_identity.ctor_dtor import (
             synthetic_ctor_dtor_template_base_name,
         )
 
         assert synthetic_ctor_dtor_template_base_name("_ZN3Foo3barEv") is None
 
     def test_scope_with_no_template_args_returns_the_bare_name(self) -> None:
-        from abicheck.finding_identity_ctor_dtor import (
+        from abicheck.compare.finding_identity.ctor_dtor import (
             synthetic_ctor_dtor_template_base_name,
         )
 
@@ -432,7 +432,7 @@ class TestSyntheticCtorDtorTemplateBaseNamePrimitive:
     def test_nested_template_brackets_stop_at_the_outermost_open_bracket(
         self,
     ) -> None:
-        from abicheck.finding_identity_ctor_dtor import (
+        from abicheck.compare.finding_identity.ctor_dtor import (
             synthetic_ctor_dtor_template_base_name,
         )
 
@@ -450,7 +450,9 @@ class TestItaniumSourceNameTokenUsesEncodedByteLength:
     "is this template exported anywhere" check for such a name."""
 
     def test_multi_byte_identifier_uses_byte_length_not_char_length(self) -> None:
-        from abicheck.finding_identity_ctor_dtor import itanium_source_name_token
+        from abicheck.compare.finding_identity.ctor_dtor import (
+            itanium_source_name_token,
+        )
 
         # "Café" is 4 Python characters but 5 UTF-8 bytes (the "é" is 2
         # bytes) -- the real Itanium encoding is "5Café", not "4Café".
@@ -458,7 +460,9 @@ class TestItaniumSourceNameTokenUsesEncodedByteLength:
         assert len("Café") == 4
 
     def test_ascii_identifier_byte_length_equals_char_length(self) -> None:
-        from abicheck.finding_identity_ctor_dtor import itanium_source_name_token
+        from abicheck.compare.finding_identity.ctor_dtor import (
+            itanium_source_name_token,
+        )
 
         assert itanium_source_name_token("raii_guard") == "10raii_guard"
 
@@ -497,10 +501,10 @@ class TestItaniumStandardSubstitutionToken:
     read such a class as "never exported" regardless of the truth."""
 
     def test_known_std_names_map_to_their_fixed_substitution(self) -> None:
-        from abicheck.extract.headers.castxml.dumper import SYNTHETIC_CTOR_KEY_PREFIX
-        from abicheck.finding_identity_ctor_dtor import (
+        from abicheck.compare.finding_identity.ctor_dtor import (
             itanium_standard_substitution_token,
         )
+        from abicheck.extract.headers.castxml.dumper import SYNTHETIC_CTOR_KEY_PREFIX
 
         cases = {
             "allocator": "Sa",
@@ -514,25 +518,25 @@ class TestItaniumStandardSubstitutionToken:
             assert itanium_standard_substitution_token(symbol) == expected
 
     def test_non_std_owner_returns_none(self) -> None:
-        from abicheck.extract.headers.castxml.dumper import SYNTHETIC_CTOR_KEY_PREFIX
-        from abicheck.finding_identity_ctor_dtor import (
+        from abicheck.compare.finding_identity.ctor_dtor import (
             itanium_standard_substitution_token,
         )
+        from abicheck.extract.headers.castxml.dumper import SYNTHETIC_CTOR_KEY_PREFIX
 
         symbol = f"{SYNTHETIC_CTOR_KEY_PREFIX}raii_guard<(lambda:f.h:1:1)>()"
         assert itanium_standard_substitution_token(symbol) is None
 
     def test_std_name_outside_the_fixed_set_returns_none(self) -> None:
-        from abicheck.extract.headers.castxml.dumper import SYNTHETIC_CTOR_KEY_PREFIX
-        from abicheck.finding_identity_ctor_dtor import (
+        from abicheck.compare.finding_identity.ctor_dtor import (
             itanium_standard_substitution_token,
         )
+        from abicheck.extract.headers.castxml.dumper import SYNTHETIC_CTOR_KEY_PREFIX
 
         symbol = f"{SYNTHETIC_CTOR_KEY_PREFIX}std::vector<(lambda:f.h:1:1)>()"
         assert itanium_standard_substitution_token(symbol) is None
 
     def test_non_synthetic_symbol_returns_none(self) -> None:
-        from abicheck.finding_identity_ctor_dtor import (
+        from abicheck.compare.finding_identity.ctor_dtor import (
             itanium_standard_substitution_token,
         )
 

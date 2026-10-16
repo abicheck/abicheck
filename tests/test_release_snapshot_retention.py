@@ -150,7 +150,7 @@ class TestConsumerInventory:
     def test_no_module_reads_a_new_side_snapshot_it_would_not_find(self) -> None:
         """``_new_snapshot`` is never *read* outside the tolerant fold.
 
-        ``_collect_bundle_result`` reads it with a ``.get`` that falls back
+        ``collect_bundle_result`` reads it with a ``.get`` that falls back
         to the compact evidence, which is why it is exempt; anything else
         reading it would now silently get ``None``.
         """
@@ -160,7 +160,7 @@ class TestConsumerInventory:
             if rel in (
                 # The producer, and the tolerant fold / strip pass.
                 "workflows/release_snapshot_retention.py",
-                "cli_compare_release_helpers.py",
+                "workflows/release_bundle.py",
                 "cli_compare_release_matrix.py",
             ):
                 continue
@@ -183,7 +183,7 @@ class TestConsumerInventory:
         -- the "do not drop required evidence to hit a memory target" rule,
         made executable.
         """
-        src = (_ROOT / "cli_compare_release_helpers.py").read_text(encoding="utf-8")
+        src = (_ROOT / "workflows" / "release_bundle.py").read_text(encoding="utf-8")
         assert 'entry.get("_new_snapshot") or entry.get("_new_bundle_evidence")' in src
         assert 'entry.get("_old_snapshot") or entry.get("_old_bundle_evidence")' in src
 
@@ -261,7 +261,7 @@ class TestConsumerInventory:
         It iterates ``diff_pairs``, whose second element is the OLD
         snapshot by construction (see the pair builder above).
         """
-        src = (_ROOT / "cli_compare_release_helpers.py").read_text(encoding="utf-8")
+        src = (_ROOT / "workflows" / "release_bundle.py").read_text(encoding="utf-8")
         assert "for diff, old_snapshot in diff_pairs:" in src
 
 
@@ -271,7 +271,7 @@ class TestTheFoldSeesTheSameEvidence:
     The per-symbol equivalence of the projection itself is established in
     ``tests/test_bundle_signature_evidence_projection.py``. What is checked
     here is the *fold* this change actually touches: the mapping
-    ``_collect_bundle_result`` hands to the bundle analysis must answer
+    ``collect_bundle_result`` hands to the bundle analysis must answer
     identically whichever shape the member entry carried, or the retention
     decision would be silently deciding evidence.
     """
@@ -342,9 +342,11 @@ class TestTheFoldSeesTheSameEvidence:
         case, so the mapping builder has to accept one of each.
         """
         from abicheck.bundle_models import BundleSignatureEvidence
-        from abicheck.cli_compare_release_helpers import _collect_bundle_result
         from abicheck.workflows.bundle_symbol_status import (
             build_bundle_signature_evidence,
+        )
+        from abicheck.workflows.release_bundle import (
+            collect_bundle_result as _collect_bundle_result,
         )
 
         snap = self._snapshot()
@@ -356,19 +358,19 @@ class TestTheFoldSeesTheSameEvidence:
         }
         captured: dict[str, object] = {}
 
-        import abicheck.cli_compare_release_helpers as helpers
+        import abicheck.workflows.release_bundle as helpers
 
-        original = helpers._run_bundle_analysis
+        original = helpers.run_bundle_analysis
 
         def _capture(*args: object, **kwargs: object) -> None:
             captured.update(kwargs)
             return None
 
-        helpers._run_bundle_analysis = _capture  # type: ignore[assignment]
+        helpers.run_bundle_analysis = _capture  # type: ignore[assignment]
         try:
             _collect_bundle_result([entry], {}, {}, "NO_CHANGE", None, ())
         finally:
-            helpers._run_bundle_analysis = original  # type: ignore[assignment]
+            helpers.run_bundle_analysis = original  # type: ignore[assignment]
         assert captured["old_snapshots"] == {"libx.so": snap}
         new_map = captured["new_snapshots"]
         assert isinstance(new_map, dict)

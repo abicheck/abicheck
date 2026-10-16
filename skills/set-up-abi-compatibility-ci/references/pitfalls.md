@@ -70,7 +70,7 @@ workflow against every one.
   job holding `contents: write` or `security-events: write` lets a repointed
   ref run with that token. Pin by commit SHA, tag in a trailing comment.
   `abicheck/abicheck` is pre-1.0 with no floating major tag: pin an exact
-  release (`@v0.6.0`) everywhere.
+  release (`@v0.7.0`) everywhere.
 
 ## Repairing an existing check
 

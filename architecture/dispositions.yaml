@@ -27,15 +27,6 @@
       "review_by": "2026-12-15"
     },
     {
-      "path": "abicheck/compatibility_evaluation_resolver.py",
-      "disposition": "migrate",
-      "target_layer": "policy",
-      "slice": "policy/effective_config_resolver.py -- D1 names 'effective configuration' as a policy responsibility; its own siblings (compatibility_evaluation_frontend.py, compatibility_evaluation_wiring.py, compatibility_evaluation_versioning_wiring.py) are already classified `workflows`.",
-      "rationale": "frontends (cli_compare_helpers.py, cli_compare_receipt.py) import this module directly today. Trial classification into `policy` measured 9 new frontends -> policy violations. Those call sites need to route through workflows first, the same way the already-classified compatibility_evaluation_* siblings do.",
-      "owner": "abicheck maintainers",
-      "review_by": "2026-12-15"
-    },
-    {
       "path": "abicheck/contract_evidence.py",
       "disposition": "migrate",
       "target_layer": "policy",
@@ -80,29 +71,11 @@
       "review_by": "2026-12-15"
     },
     {
-      "path": "abicheck/pack_application.py",
-      "disposition": "migrate",
-      "target_layer": "policy",
-      "slice": "policy/pack_application.py -- ADR-049 Phase 5's pack-to-engine application layer, alongside its sibling policy-classified compatibility_evaluation_config.py.",
-      "rationale": "frontends imports this module directly across dozens of call sites (cli_compare_receipt.py alone three times, plus cli_compare_release*.py and cli_scan_*.py). Trial classification into `policy` measured 41 new frontends -> policy violations -- by far the largest of any module in this ledger. Needs those call sites routed through workflows first, mirroring gap A's own cli_dump_helpers.py precedent, before this file can move.",
-      "owner": "abicheck maintainers",
-      "review_by": "2026-12-15"
-    },
-    {
       "path": "abicheck/serialization.py",
       "disposition": "migrate",
       "target_layer": "storage",
       "slice": "storage/serialization.py -- gap E's own open item, verbatim: 'its own ~1500 remaining lines of codec logic are a separate, not-yet-attempted classification.'",
       "rationale": "frontends (cli_buildsource.py, cli_buildsource_merge.py, and others) import this module directly across 19 measured call sites. Trial classification into `storage` measured 19 new frontends -> storage violations. Needs those call sites routed through workflows first (gap E names workflows/snapshot_load.py as the precedent for the one legacy-backfill responsibility already split out of this file).",
-      "owner": "abicheck maintainers",
-      "review_by": "2026-12-15"
-    },
-    {
-      "path": "abicheck/snapshot_cache.py",
-      "disposition": "migrate",
-      "target_layer": "storage",
-      "slice": "storage/cache.py per ADR-061 D2's end-state layout, alongside storage's other snapshot-cache-shaped modules.",
-      "rationale": "This module's own body imports the extract layer directly and imports serialization.py (itself still unclassified, see its own record above) -- storage may only import model. Trial classification into `storage` measured 5 new violations, including a new extract <-> storage responsibility cycle. Needs its extract-layer reads removed or routed through a model-shared cache key before reclassification, and depends on serialization.py's own disposition closing first.",
       "owner": "abicheck maintainers",
       "review_by": "2026-12-15"
     },

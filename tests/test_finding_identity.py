@@ -18,14 +18,11 @@
 from __future__ import annotations
 
 from abicheck.checker_policy import ChangeKind
-from abicheck.finding_identity import (
+from abicheck.compare.finding_identity import (
     IDENTITY_TIER_CANONICAL,
     IDENTITY_TIER_NORMALIZED,
     IDENTITY_TIER_REDUCED,
     FindingIdentity,
-    _looks_like_itanium_encoding,
-    _source_name_end,
-    _stringify_change_value,
     is_real_mangled_name,
     normalize_mangled_name,
     normalized_signature,
@@ -33,6 +30,11 @@ from abicheck.finding_identity import (
     resolve_function_identity,
     resolve_symbol_identity,
     resolve_variable_identity,
+)
+from abicheck.compare.finding_identity.change_identity import _stringify_change_value
+from abicheck.compare.finding_identity.mangled import (
+    _looks_like_itanium_encoding,
+    _source_name_end,
 )
 from abicheck.model import Function, Param, Variable
 from abicheck.model.change import Change
@@ -1211,7 +1213,7 @@ class TestResolveChangeIdentity:
     def test_enum_member_value_changed_collapses_across_ast_and_dwarf_wording(
         self,
     ) -> None:
-        # Codex review: diff_filtering._dedup_enum_same_kind already
+        # Codex review: finding_dedup._dedup_enum_same_kind already
         # collapses ENUM_MEMBER_VALUE_CHANGED/ENUM_MEMBER_REMOVED/
         # ENUM_LAST_MEMBER_VALUE_CHANGED findings by (kind, symbol) alone --
         # diff_types.py's AST detector uses the bare registry description
@@ -1392,7 +1394,7 @@ class TestResolveChangeIdentity:
         assert set(return_changed.aliases).isdisjoint(params_changed.aliases)
 
     def test_equivalent_removal_kinds_collide_on_the_same_mangled_symbol(self) -> None:
-        # Codex review: diff_filtering._deduplicate_cross_detector already
+        # Codex review: finding_dedup.deduplicate_cross_detector already
         # treats FUNC_REMOVED (rich detector) and FUNC_REMOVED_ELF_ONLY (L0)
         # as one logical event for the same symbol -- this identity must
         # collide too, or it can never drive that same reconciliation once
@@ -1466,7 +1468,7 @@ class TestResolveChangeIdentity:
         assert rich.primary_id == l0.primary_id
 
     def test_dwarf_ast_equivalent_type_size_kinds_collide(self) -> None:
-        # Codex review: diff_filtering._DWARF_TO_AST_EQUIV already treats
+        # Codex review: finding_dedup._DWARF_TO_AST_EQUIV already treats
         # STRUCT_SIZE_CHANGED (DWARF) and TYPE_SIZE_CHANGED (AST) as one
         # logical event for the same type -- this identity must collide too.
         dwarf = resolve_change_identity(

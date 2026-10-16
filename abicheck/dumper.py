@@ -19,8 +19,6 @@ from __future__ import annotations
 import logging
 import shutil as shutil  # noqa: F401  # legacy test patch target
 import warnings
-from collections.abc import Callable
-from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -31,13 +29,7 @@ if TYPE_CHECKING:
 
 from .dumper_ast_config_cpp20 import _detect_cpp20_headers as _detect_cpp20_headers
 from .dumper_clang import (
-    _clang_available as _clang_available,
     _ClangAstParser as _ClangAstParser,
-    _is_cl_style_driver_name as _is_cl_style_driver_name,
-    _is_default_clang_bin as _is_default_clang_bin,
-    _is_dpcpp_family_binary as _is_dpcpp_family_binary,
-    _needs_sycl_host_only as _needs_sycl_host_only,
-    _resolve_clang_bin as _resolve_clang_bin,
 )
 from .dumper_clang_errors import (
     _is_direct_include_guard_failure,
@@ -53,6 +45,8 @@ from .errors import (
     UnsupportedCastxmlVersionError,
     ValidationError,
 )
+from .extract.binary_format import _FormatHandler
+from .extract.compiler_driver import resolve_clang_bin
 from .extract.debug_dump import (
     # DWARF/BTF/CTF format resolution + the kernel-binary heuristic live in the
     # sibling module (dumper.py is at the file-size cap); re-exported here so
@@ -93,11 +87,11 @@ from .extract.header_ast_backend import (
     HEADER_BACKENDS as HEADER_BACKENDS,
     _is_hybrid_request,
     _resolve_effective_ast_backend as _resolve_effective_ast_backend,
-    _resolve_header_backend as _resolve_header_backend,
     _resolve_single_ast_backend as _resolve_single_ast_backend,
     lang_to_profile,
 )
 from .extract.header_ast_fields import parse_header_ast_fields
+from .extract.header_order_witness import header_order_proof
 from .extract.headers.ast_config import (
     _CPP_ONLY_PATTERNS as _CPP_ONLY_PATTERNS,
     _build_castxml_command as _build_castxml_command,
@@ -106,7 +100,8 @@ from .extract.headers.ast_config import (
     _detect_cpp_headers as _detect_cpp_headers,
     _resolve_compiler_binary as _resolve_compiler_binary,
 )
-from .extract.headers.backend import HeaderAstBackend, HeaderParseRequest
+from .extract.headers.backend_plan import BackendPlan
+from .extract.headers.backend_protocol import HeaderAstBackend, HeaderParseRequest
 from .extract.headers.castxml.backend import CastxmlBackend, CastxmlRunError
 from .extract.headers.castxml.dumper import (
     _CastxmlParser as _CastxmlParser,
@@ -130,10 +125,7 @@ from .extract.headers.sysinc import (
     _resolve_probe_compiler as _resolve_probe_compiler,
 )
 from .extract.headers.toolchain import (
-    _allow_unsupported_castxml_enabled as _allow_unsupported_castxml_enabled,
     _ast_compile_provenance as _ast_compile_provenance,
-    _ast_fallback_enabled as _ast_fallback_enabled,
-    _auto_ast_fallback_eligible as _auto_ast_fallback_eligible,
     _configured_target_triple as _configured_target_triple,
     _cplusplus_macro_for_standard as _cplusplus_macro_for_standard,
     _parser_ast_fallback_reason as _parser_ast_fallback_reason,
@@ -186,6 +178,7 @@ def _castxml_fallback_reason(
     compiler: str,
     gcc_path: str | None,
     gcc_prefix: str | None,
+    plan: BackendPlan,
 ) -> str | None:
     """Decide whether a failed castxml dump may fall back to the clang backend.
 
@@ -220,12 +213,12 @@ def _castxml_fallback_reason(
     # review).
     def _clang_fallback_ready() -> bool:
         try:
-            _resolve_clang_bin(compiler, gcc_path, gcc_prefix)
+            resolve_clang_bin(compiler, gcc_path, gcc_prefix)
             return True
         except SnapshotError:
             return False
 
-    if not _ast_fallback_enabled() or not _clang_fallback_ready():
+    if not plan.ast_fallback_enabled or not _clang_fallback_ready():
         message = (
             f"{exc}\n\nAutomatic CastXML-to-Clang fallback is disabled because "
             "the two frontends can produce materially different findings. "
@@ -314,7 +307,8 @@ def _header_ast_parser(
     if effective == "clang":
         return _run_clang()
 
-    auto_selected = _auto_ast_fallback_eligible(backend)
+    plan = BackendPlan.from_environment()
+    auto_selected = plan.auto_selected(backend)
     try:
         return cast(
             _CastxmlParser,
@@ -327,6 +321,7 @@ def _header_ast_parser(
             compiler=compiler,
             gcc_path=gcc_path,
             gcc_prefix=gcc_prefix,
+            plan=plan,
         )
         if fallback_reason is None:
             raise exc.original from None
@@ -334,39 +329,6 @@ def _header_ast_parser(
 
 
 # castxml parser + helpers moved to dumper_castxml (see top-of-file imports)
-
-
-@dataclass(frozen=True)
-class _FormatHandler:
-    """One binary format: how to recognise it and how to dump it (C3).
-
-    The registry collapses the per-format magic-byte knowledge and the
-    ``dump()`` dispatch into a single declarative entry — adding a new binary
-    format is a new ``_FormatHandler`` in ``_FORMAT_HANDLERS`` rather than edits
-    scattered across ``_detect_format`` and ``dump``'s if/elif chain.
-
-    ``accepts_dwarf_only`` / ``accepts_debug_format`` record which optional
-    kwargs the format's builder takes, so ``dump()`` forwards exactly the same
-    arguments each ``_dump_*`` accepted before (ELF: both; Mach-O: dwarf_only
-    only; PE: neither).
-    """
-
-    name: str
-    builder: Callable[..., AbiSnapshot]
-    magics: tuple[bytes, ...] = ()
-    magic_prefix: bytes | None = None
-    accepts_dwarf_only: bool = False
-    accepts_debug_format: bool = False
-
-    def matches_magic(self, magic: bytes) -> bool:
-        if magic in self.magics:
-            return True
-        if (
-            self.magic_prefix is not None
-            and magic[: len(self.magic_prefix)] == self.magic_prefix
-        ):
-            return True
-        return False
 
 
 def _detect_format(path: Path) -> str:
@@ -382,6 +344,7 @@ def _detect_format(path: Path) -> str:
     return "unknown"
 
 
+@header_order_proof
 @reference_scratch_scoped
 def dump(
     so_path: Path,
@@ -681,6 +644,7 @@ def dump(
         effective_public_header_dirs,
         include_search_dirs=public_include_search_dirs,
         read_dwarf=not (symbols_only or debug_presence_only),  # shallow: .comment only
+        debug_info_path=debug_info_path,
     )
 
 
@@ -1042,7 +1006,7 @@ def _dump_macho(
     )
 
     _dylib_mtime, _dylib_mtime_epoch = _safe_mtime(dylib_path)
-    _ast_producer = "clang" if isinstance(parser, _ClangAstParser) else "castxml"
+    _ast_producer = _parser_ast_toolchain(parser).get("producer", "castxml")
     _ast = parse_header_ast_fields(parser, producer=_ast_producer)
     return finish_binary_snapshot(
         new_snapshot(
@@ -1180,7 +1144,7 @@ def _dump_pe(
     )
 
     _dll_mtime, _dll_mtime_epoch = _safe_mtime(dll_path)
-    _ast_producer = "clang" if isinstance(parser, _ClangAstParser) else "castxml"
+    _ast_producer = _parser_ast_toolchain(parser).get("producer", "castxml")
     _ast = parse_header_ast_fields(parser, producer=_ast_producer)
     return finish_binary_snapshot(
         new_snapshot(

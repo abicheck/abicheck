@@ -627,6 +627,13 @@ gets two additional fields alongside the existing `config`/`categories`/
   *and* are configured `error` — i.e. the categories actually responsible for
   the non-zero exit code, mirroring SARIF's `properties.severityGate` block.
 
+  `categories` also carries `informational` (schema 6.0): findings that
+  record that nothing changed. Its level is always `info`, it is absent
+  from `config`, and it never appears in `blocking_categories`.
+  `summary.informational` gives the same count without a severity setting.
+  As of 6.0, `summary.quality_issues` excludes it; the pre-6.0 value is
+  `quality_issues + informational`.
+
 ```json
 {
   "severity": {
@@ -812,7 +819,7 @@ Every JSON report carries a top-level `report_schema_version` field
 
 ```json
 {
-  "report_schema_version": "5.14",
+  "report_schema_version": "6.1",
   "library": "libfoo.so.1",
   "verdict": "BREAKING"
 }

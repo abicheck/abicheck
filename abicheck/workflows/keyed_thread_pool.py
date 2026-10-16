@@ -16,7 +16,7 @@
 """A keyed thread-pool runner that carries the caller's ``contextvars``
 context into every task -- the release fan-out's parallel member loop.
 
-Moved out of ``cli_compare_release_pairwise._compare_release_parallel`` (at
+Moved out of ``workflows.release_members._compare_parallel`` (at
 its ``no_growth`` baseline) as a responsibility of its own: nothing in it is
 about comparing libraries. Its docstring records two concurrency subtleties
 found by real test failures; keep them with the code.

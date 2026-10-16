@@ -26,7 +26,7 @@ attempt itself happens.
 
 Before this split, :func:`abicheck.dumper._header_ast_parser` computed its
 own dispatch inline, and
-:func:`abicheck.workflows.dump.pipeline.resolve_dump_request` independently
+:func:`abicheck.workflows.dump.request.resolve_dump_request` independently
 re-derived the identical prediction a second time for its own
 reporting-only ``effective_header_backend`` field -- duplicating both the
 override-precedence rule and the "any non-host context forces clang" rule.
@@ -40,19 +40,14 @@ flat ``abicheck/dumper_*.py`` sibling) because ``architecture/modules.yaml``'s
 ``frozen_root_families`` closes that flat namespace to new members and
 :mod:`abicheck.dumper`/:mod:`abicheck.extract.headers.toolchain` were both already
 at their own no-growth debt-ledger line-count baseline with no room for a
-new function. Both re-export every name here
-(``abicheck.dumper._resolve_header_backend`` and siblings keep resolving
-unchanged) via the same explicit ``X as X`` re-export
-:mod:`abicheck.dumper` already uses for its other split-out sibling
-modules, so every existing call site, monkeypatch target, and cross-module
-``from .dumper import _resolve_header_backend`` import is unaffected.
+new function. Callers import ``_resolve_header_backend`` from this module
+directly; :mod:`abicheck.dumper` does not re-export it.
 """
 
 from __future__ import annotations
 
-import os
-
 from ..errors import AstContextMissingError, ValidationError
+from .headers.backend_plan import ast_frontend_pin
 
 __all__ = [
     "HEADER_BACKENDS",
@@ -85,7 +80,7 @@ def _resolve_header_backend(backend: str | None) -> str:
         raise ValidationError(
             f"Unknown AST frontend {backend!r}; expected one of {HEADER_BACKENDS}."
         )
-    env = os.environ.get("ABICHECK_AST_FRONTEND", "").strip().lower()
+    env = ast_frontend_pin()
     if env in ("castxml", "clang", "hybrid"):
         return env
     return "castxml"
@@ -141,7 +136,7 @@ def _resolve_single_ast_backend(backend: str, frontend_context: str) -> str:
         )
     # `resolved` alone can't tell explicit/env-pinned/defaulted castxml apart; an env pin counts as explicit (environment.md: "honoured verbatim").
     _env_pinned_castxml = (backend or "auto").lower() == "auto" and (
-        os.environ.get("ABICHECK_AST_FRONTEND", "").strip().lower() == "castxml"
+        ast_frontend_pin() == "castxml"
     )
     if (
         resolved == "castxml"

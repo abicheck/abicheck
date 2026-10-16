@@ -32,7 +32,7 @@ import click
 
 if TYPE_CHECKING:
     from ....workflows.policy_file import PolicyFile
-    from ....workflows.suppression import SuppressionList
+    from ....workflows.suppression_input import SuppressionList
 
 
 #: The built-in verdict-classification profiles ``--policy`` accepts by name,
@@ -294,7 +294,7 @@ def _load_suppression_and_policy(
         PolicyFile,
         pending_validate_overrides_warnings,
     )
-    from ....workflows.suppression import SuppressionList
+    from ....workflows.suppression_input import SuppressionList
 
     suppression: SuppressionList | None = None
     if suppress is not None:

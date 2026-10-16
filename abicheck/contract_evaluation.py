@@ -55,6 +55,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from .compare.finding_identity import IDENTITY_TIER_REDUCED, resolve_change_identity
 from .contract_relevance_types import (
     CONTRACT_REASON_CODES,
     NON_ENTITY_RELEVANCE,
@@ -64,7 +65,6 @@ from .contract_relevance_types import (
     coerce_contract_mode,
 )
 from .export_surface import ExportSurface
-from .finding_identity import IDENTITY_TIER_REDUCED, resolve_change_identity
 from .model import ScopeOrigin
 from .model.change import Change
 from .model.change_catalog.kinds import ChangeKind
@@ -77,12 +77,12 @@ from .policy.finding_type_candidates import (
     qualified_type_candidates as _qualified_type_candidates,
     type_candidates as _type_candidates,
 )
-from .post_processing import _PUBLIC_SOURCE_ABI_KINDS, _change_matches_symbols
+from .post_processing import _change_matches_symbols
+from .post_processing_reachability import _PUBLIC_SOURCE_ABI_KINDS
 from .surface import (
     _HIDDEN_FRIEND_KIND_NAMES,
-    _MEMBER_LEVEL_TYPE_KIND_NAMES,
-    _NEVER_FILTER_KIND_NAMES,
-    _TYPE_LEVEL_KIND_NAMES,
+    MEMBER_LEVEL_TYPE_KIND_NAMES,
+    NEVER_FILTER_KIND_NAMES,
     REASON_NO_PROVENANCE,
     REASON_NON_PUBLIC_TYPE,
     REASON_NOT_EXPORTED,
@@ -90,6 +90,7 @@ from .surface import (
     REASON_PRIVATE_HEADER,
     REASON_PRIVATE_INTERNAL_UNREACHABLE,
     REASON_SYSTEM_HEADER,
+    TYPE_LEVEL_KIND_NAMES,
     PublicSurface,
     SurfaceUnions,
     _hidden_friend_owner_effective_origin,
@@ -730,7 +731,7 @@ def _in_surface_result_is_confirmed(
     ``classify_change_surface`` returns ``(True, None)`` from several
     distinct sources with very different confidence:
 
-    - ``_NEVER_FILTER_KIND_NAMES`` (a leak finding, or a ``constant_*``
+    - ``NEVER_FILTER_KIND_NAMES`` (a leak finding, or a ``constant_*``
       finding -- public-contract by construction per the dumper's own
       extraction rule, so it would never even appear in
       ``public_symbols``/``public_types``) and ``python_*``-prefixed
@@ -752,7 +753,7 @@ def _in_surface_result_is_confirmed(
       universe (a hidden friend never becomes a real export) nor the
       ordinary type-candidate derivation (``change.symbol`` names a
       function, not a type) applies to this kind at all.
-    - A member-level finding (``_MEMBER_LEVEL_TYPE_KIND_NAMES``, e.g.
+    - A member-level finding (``MEMBER_LEVEL_TYPE_KIND_NAMES``, e.g.
       ``TYPE_FIELD_OFFSET_CHANGED`` with ``symbol="Point::x"``) must be
       confirmed against its *owner* type -- handled by :func:`_type_candidates`
       (see its docstring); before that, this case always failed confirmation
@@ -761,7 +762,7 @@ def _in_surface_result_is_confirmed(
     - Every other ``True`` comes from ``_classify_symbol_level``/
       ``_classify_type_level``, where ``sym in public_symbols``/``known &
       public_types`` is genuine confirmation. The ``public_symbols`` check
-      here is gated to non-``_TYPE_LEVEL_KIND_NAMES`` findings, mirroring
+      here is gated to non-``TYPE_LEVEL_KIND_NAMES`` findings, mirroring
       ``classify_change_surface``'s own gating -- a type-level finding's
       ``symbol`` can coincidentally collide with an unrelated real
       function/variable of the same spelling (Codex review, fourteenth
@@ -923,7 +924,7 @@ def _symbol_matches(
     type-level kind at all (``_classify_symbol_level`` is only called when
     ``not type_level_finding``) -- exactly to prevent a type name colliding
     with an unrelated exported function/variable of the same spelling
-    (surface.py's own ``_TYPE_LEVEL_KIND_NAMES`` docstring: castxml
+    (surface.py's own ``TYPE_LEVEL_KIND_NAMES`` docstring: castxml
     represents an implicit same-named constructor unmangled, so a type
     "Foo" can share a bare name with a real symbol "Foo" that has nothing
     to do with it). Confirmed empirically: a type completely unknown to
@@ -951,7 +952,7 @@ def _symbol_matches(
     which cannot tell a leaf from a different symbol entirely, is dropped.
     """
     sym = change.symbol or ""
-    if change.kind.value in _TYPE_LEVEL_KIND_NAMES:
+    if change.kind.value in TYPE_LEVEL_KIND_NAMES:
         # ...but a *mangled* symbol carries no such collision risk, and one
         # type-level producer emits exactly that: `diff_symbols.
         # _check_vtable_index_change` reuses `TYPE_VTABLE_CHANGED` for a
@@ -1069,7 +1070,7 @@ def _is_trusted_by_construction(change: Change) -> bool:
     """
     return (
         change.kind.value.startswith("python_")
-        or change.kind.value in _NEVER_FILTER_KIND_NAMES
+        or change.kind.value in NEVER_FILTER_KIND_NAMES
         or change.kind.value in _PUBLIC_SOURCE_ABI_KIND_SLUGS
     )
 
@@ -1190,8 +1191,8 @@ def _exports_mode_decision(
     # Its own membership is decided by its own linker symbol being a root,
     # which the check above already answered.
     type_scoped = (
-        change.kind.value in _TYPE_LEVEL_KIND_NAMES
-        or change.kind.value in _MEMBER_LEVEL_TYPE_KIND_NAMES
+        change.kind.value in TYPE_LEVEL_KIND_NAMES
+        or change.kind.value in MEMBER_LEVEL_TYPE_KIND_NAMES
     )
     candidates = _type_candidates(change) if type_scoped else set()
     if _confirmed_type_matches(
@@ -1270,7 +1271,7 @@ def _mode_dispatch_decision(
     if change.kind.value in _NOT_APPLICABLE_KIND_SLUGS:
         return _not_applicable_decision()
     # A cross-source hygiene finding (`exported_not_public`,
-    # `private_header_leak`, ...; `workflows.cross_source_evolution`) states
+    # `private_header_leak`, ...; `workflows.cross_source_hygiene`) states
     # how one build's evidence sources agree, not that a contract entity
     # changed between OLD and NEW -- its evolution stamp is what says so.
     # Relevance is therefore not the question for it: `NOT_APPLICABLE` keeps
@@ -1354,7 +1355,7 @@ def _pipeline_authority_decision(
     # API/stub surface) the C/C++ header-surface universes below don't cover
     # at all -- public by construction, exactly like
     # `classify_change_surface`'s own unconditional trust for this prefix.
-    # `_NEVER_FILTER_KIND_NAMES` (a leak finding, or a `constant_*` finding)
+    # `NEVER_FILTER_KIND_NAMES` (a leak finding, or a `constant_*` finding)
     # is the identical "trusted by construction, independent of any
     # universe/identity evidence" shape -- both checked here, before the
     # resolvable-surface gate *and* the identity-ambiguity gate immediately
@@ -1365,7 +1366,7 @@ def _pipeline_authority_decision(
     # per-entity symbol) -- confirmed empirically -- so the identity check
     # below downgraded every visibility-leak finding to
     # `UNKNOWN_UNRESOLVED`/`identity_ambiguous` before this module's own
-    # unconditional-trust rule for `_NEVER_FILTER_KIND_NAMES` ever got a
+    # unconditional-trust rule for `NEVER_FILTER_KIND_NAMES` ever got a
     # chance to apply (Codex review, thirteenth round). Gating a
     # Python-axis or never-filter finding on C/C++ header surface
     # resolvability or on this module's own identity-ambiguity tiering would
@@ -1378,7 +1379,7 @@ def _pipeline_authority_decision(
     # (a macro/inline-function/typedef/template/etc. name) is never a real
     # C/C++ header-surface function/variable/type `classify_change_surface`
     # can place -- checked here, at the same early point as `python_*`/
-    # `_NEVER_FILTER_KIND_NAMES`, for the identical reason: gating it on
+    # `NEVER_FILTER_KIND_NAMES`, for the identical reason: gating it on
     # C/C++ header surface resolvability or on this module's own
     # identity-ambiguity tiering would downgrade a definitive
     # `PUBLIC_MACRO_REMOVED`/`INLINE_FUNCTION_REMOVED`/etc. event purely

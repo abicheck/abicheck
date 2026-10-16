@@ -99,10 +99,10 @@ def crosscheck_finding_set(snapshot: Any, config: Any = None) -> FindingSet:
 
     Calls :func:`abicheck.buildsource.cross_source_checks.run_crosschecks`
     directly -- the primitive ``compare()``'s automatic cross-source stage
-    (``workflows/cross_source_evolution.py``) runs.
+    (``workflows/cross_source_hygiene.py``) runs.
     """
     from abicheck.buildsource.cross_source_checks import run_crosschecks
-    from abicheck.finding_identity import report_finding_id
+    from abicheck.compare.finding_identity import report_finding_id
 
     result = run_crosschecks(snapshot, config)
     findings = set()
@@ -197,7 +197,7 @@ class RunOutcome:
     #: (kind, identity, finding_id) -> ADR-049 D1 ``gate_contribution`` for
     #: this run, or ``None`` when the raw finding dict never carries the
     #: key at all (`compare`'s `changes[]` entries always carry it --
-    #: `reporter.py`'s `_change_to_dict` stamps it unconditionally, `0`
+    #: `reporter.py`'s `change_to_dict` stamps it unconditionally, `0`
     #: included -- a real, computed "no contribution"). `None` here keeps
     #: "genuinely absent" distinguishable from "computed as 0" for any
     #: caller that needs the distinction.

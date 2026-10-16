@@ -24,7 +24,7 @@ inside an evidence pack.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
@@ -35,7 +35,7 @@ from .comdat_groups import ComdatScan, collect_vague_linkage_symbols
 BUILD_EVIDENCE_VERSION: int = 1
 
 
-class TargetKind(str, Enum):
+class TargetKind(StrEnum):
     SHARED_LIBRARY = "shared_library"
     STATIC_LIBRARY = "static_library"
     OBJECT_LIBRARY = "object_library"
@@ -44,7 +44,7 @@ class TargetKind(str, Enum):
     UNKNOWN = "unknown"
 
 
-class Confidence(str, Enum):
+class Confidence(StrEnum):
     HIGH = "high"
     REDUCED = "reduced"
     UNKNOWN = "unknown"

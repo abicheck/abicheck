@@ -35,6 +35,7 @@ from abicheck.storage.header_ast_cache import (
     retain_ast_context_object,
     run_ast_acquisition,
 )
+from abicheck.workflows.dump.cache import store as dump_cache_store
 
 
 def _run_in_context(ctx: contextvars.Context, key: str, producer: object) -> object:
@@ -353,9 +354,9 @@ def test_castxml_singleflight_binds_producer_to_registered_key(
 
 def _stub_clang_resolution(monkeypatch: pytest.MonkeyPatch, cache: Path) -> None:
     """Pin every input of the clang cache key so the test owns the key."""
-    monkeypatch.setattr(clang_backend, "_resolve_clang_bin", lambda *a, **k: "clang")
+    monkeypatch.setattr(clang_backend, "resolve_clang_bin", lambda *a, **k: "clang")
     monkeypatch.setattr(
-        clang_backend, "_resolve_dpcpp_acquisition", lambda *a, **k: (False, False)
+        clang_backend, "resolve_dpcpp_acquisition", lambda *a, **k: (False, False)
     )
     monkeypatch.setattr(
         clang_backend,
@@ -406,7 +407,7 @@ def test_warm_clang_disk_hit_is_decoded_once_per_request(
     # context kind and post-retry language mode alike.
     assert second == first == graph
     # No unconsumed legacy handoff is left behind holding the tree.
-    assert _ast_memo_slot.get() is None
+    assert _ast_memo_slot.value is None
 
 
 def test_warm_clang_disk_hit_keeps_legacy_handoff_without_acquisition(
@@ -425,13 +426,13 @@ def test_warm_clang_disk_hit_keeps_legacy_handoff_without_acquisition(
     root, _kind, _force_cpp = clang_backend.clang_header_dump(
         [header], [], lang="c++", memoize=True
     )
-    slot = _ast_memo_slot.get()
+    slot = _ast_memo_slot.value
     assert slot is not None and slot[0] == "clang" and slot[2] is root
     # ... and the pending handoff is what the next same-thread caller gets.
     again = clang_backend.clang_header_dump([header], [], lang="c++", memoize=True)
     assert again[0] is root
     assert decodes() == 1
-    assert _ast_memo_slot.get() is None
+    assert _ast_memo_slot.value is None
 
 
 def test_warm_clang_distinct_contexts_are_not_merged(
@@ -528,7 +529,7 @@ def test_warm_clang_failed_acquisition_is_retryable(
         )
     assert attempts == 1
     assert root == {"kind": "TranslationUnitDecl"}
-    assert _ast_memo_slot.get() is None
+    assert _ast_memo_slot.value is None
 
 
 def test_warm_castxml_disk_hit_shares_producer_metadata(
@@ -879,7 +880,6 @@ def test_directory_l2_compare_acquires_one_ast_per_key(
 
     from click.testing import CliRunner
 
-    from abicheck import snapshot_cache
     from abicheck.cli import main
 
     def run(tag: str) -> Path:
@@ -891,7 +891,7 @@ def test_directory_l2_compare_acquires_one_ast_per_key(
         # the warm AST-cache path this test is about.
         cache_dir = tmp_path / f"snapshots-{tag}"
         cache_dir.mkdir()
-        monkeypatch.setattr(snapshot_cache, "_CACHE_DIR", cache_dir)
+        monkeypatch.setattr(dump_cache_store, "_CACHE_DIR", cache_dir)
         report = tmp_path / f"{tag}.json"
         result = CliRunner().invoke(
             main,
@@ -1114,3 +1114,74 @@ def test_cold_castxml_acquisition_shares_the_producer_run(
     # `cc`, not the requested `c++`: the producer's own C-mode compiler
     # selection is what both consumers are told.
     assert first_meta == second_meta == [("cc", False)]
+
+
+def test_waiter_reacquires_when_the_shared_producer_was_cancelled() -> None:
+    """A cancelled leader is its own request's business: a waiter that still
+    needs the value must not inherit the cancellation, it must acquire it."""
+    from abicheck.deadline import ProcessCancelled
+
+    entered = threading.Event()
+    release = threading.Event()
+
+    def cancelled_produce() -> str:
+        entered.set()
+        assert release.wait(timeout=2)
+        raise ProcessCancelled()
+
+    def fresh_produce() -> str:
+        return "fresh"
+
+    with ast_acquisition_scope():
+        parent = contextvars.copy_context()
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            leader = pool.submit(
+                _run_in_context, parent.copy(), "same", cancelled_produce
+            )
+            assert entered.wait(timeout=2)
+            waiter = pool.submit(
+                parent.copy().run,
+                run_ast_acquisition,
+                "clang",
+                "same",
+                fresh_produce,
+            )
+            time.sleep(0.05)
+            release.set()
+            with pytest.raises(ProcessCancelled):
+                leader.result(timeout=2)
+            assert waiter.result(timeout=2) == "fresh"
+
+
+def test_a_failed_entry_is_unregistered_before_its_waiters_wake() -> None:
+    """set_exception wakes waiters, and a waiter that retries must find no entry
+    for the failed producer: found, it would re-read that future and recurse.
+    The done-callback runs inside set_exception, so the ordering is checked
+    directly rather than inferred from thread timing."""
+    from abicheck.deadline import ProcessCancelled
+
+    registered_when_woken: list[bool] = []
+    entered = threading.Event()
+    release = threading.Event()
+
+    def cancelled_produce() -> str:
+        entered.set()
+        assert release.wait(timeout=2)
+        raise ProcessCancelled()
+
+    with ast_acquisition_scope() as scope:
+        parent = contextvars.copy_context()
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            leader = pool.submit(
+                _run_in_context, parent.copy(), "same", cancelled_produce
+            )
+            assert entered.wait(timeout=2)
+            scope._entries[("clang", "same")].add_done_callback(
+                lambda _f: registered_when_woken.append(
+                    ("clang", "same") in scope._entries
+                )
+            )
+            release.set()
+            with pytest.raises(ProcessCancelled):
+                leader.result(timeout=2)
+    assert registered_when_woken == [False]

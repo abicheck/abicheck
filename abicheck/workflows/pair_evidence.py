@@ -3,12 +3,12 @@
 
 """The evidence fold every compare route runs on a resolved snapshot pair.
 
-Both comparison entry points -- the typed pipeline's
-``service_compare_pipeline.classify_compare_pair`` (which the release
+Every scalar comparison route -- the typed pipeline (which the release
 fan-out reaches through ``member_compare.compare_member``) and the native
-``compare`` CLI -- resolve their operands and policy their own way, then
-call :func:`fold_pair_evidence` and the Tier-2 ``compare_snapshots``
-chokepoint. The fold happens here once, in one order:
+``compare`` CLI -- resolves its operands and policy its own way, then
+classifies through ``workflows.compare_classify``, which calls
+:func:`fold_pair_evidence` and the Tier-2 ``compare_snapshots`` chokepoint.
+The fold happens here once, in one order:
 
 1. hard ELF-only removals a header-scoped pair hides (case97,
    :func:`~abicheck.l0_export_delta.fold_l0_hard_removals`);
@@ -53,7 +53,7 @@ def load_probe_matrix_changes(
         return None
     if old_matrix is None or new_matrix is None:
         from ..errors import ValidationError
-        from .contracts import PROBE_MATRIX_ONE_SIDED
+        from .service_requests import PROBE_MATRIX_ONE_SIDED
 
         raise ValidationError(PROBE_MATRIX_ONE_SIDED)
     from .findings import diff_matrix, load_matrix_snapshot

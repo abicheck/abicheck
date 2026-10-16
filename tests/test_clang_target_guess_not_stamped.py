@@ -40,6 +40,11 @@ def test_sys_platform_guess_is_never_stamped_as_the_effective_target(
     from abicheck.extract import target_platform_probe
 
     ast = _tu({"kind": "TranslationUnitDecl", "inner": []})
+    # The binary's presence is not under test; without this the parser setup
+    # raises on hosts with no clang on PATH (the windows-latest CI lane).
+    monkeypatch.setattr(
+        "abicheck.extract.compiler_driver.clang_available", lambda *a, **k: True
+    )
     monkeypatch.setattr(
         clang_backend, "clang_header_dump", lambda *a, **k: (ast, None, False)
     )

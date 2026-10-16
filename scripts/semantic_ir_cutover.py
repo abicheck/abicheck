@@ -224,7 +224,7 @@ MIGRATED_COHORTS: tuple[MigratedCohort, ...] = (
         adapter="abicheck/model/semantic_ir_legacy_adapter.py",
     ),
     # `functions` is deliberately NOT registered here yet. A first attempt
-    # (abicheck/compare/functions.py's function_identity_index) built a
+    # (abicheck/compare/function_cutover.py's function_identity_index) built a
     # SemanticIRIndex per comparison but only ever looked up a function's
     # entity_id and discarded the result -- the resolved identity itself
     # still came from the flat Function object regardless, so the lookup
@@ -233,7 +233,7 @@ MIGRATED_COHORTS: tuple[MigratedCohort, ...] = (
     # still cannot influence function matching -- exactly the false
     # assurance this gate exists to prevent. See
     # docs/_meta/one-semantic-pipeline-status.yaml's `semantic_ir` concept
-    # entry (2026-09-11 note) and abicheck/compare/functions.py's own
+    # entry (2026-09-11 note) and abicheck/compare/function_cutover.py's own
     # module docstring for the full account of what landed instead (a
     # tested but unconsumed legacy_function_ir adapter projection) and what
     # a genuine cohort 3 would still need.

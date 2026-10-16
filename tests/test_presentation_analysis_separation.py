@@ -364,8 +364,8 @@ class TestF20ExplainPatternsNeverChangesAnalysis:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """The most direct proof of the fix: patches the exact chokepoint
-        (``service.compare_snapshots``, imported by name inside
-        ``cli_compare_helpers.run_compare``) that used to receive
+        (``workflows.compare_policy.compare_snapshots``, which the shared
+        classification ``cli_compare_helpers.run_compare`` calls) that used to receive
         ``pattern_verdicts=apply_patterns`` -- the historically buggy
         ``pattern_verdicts or explain_patterns`` expression -- and asserts
         it is now called with ``pattern_verdicts=True`` (and
@@ -373,7 +373,7 @@ class TestF20ExplainPatternsNeverChangesAnalysis:
         row went all the way to removing the parameter from the Tier-2 verb,
         which forces it on for every caller) regardless of whether
         ``--view patterns`` was given."""
-        import abicheck.service as service_module
+        import abicheck.workflows.compare_policy as service_module
 
         old_p, new_p = _write_pair(tmp_path)
         captured: list[dict[str, Any]] = []
@@ -599,7 +599,7 @@ class TestShowOnlyCliHintIsReRunnable:
     ) -> None:
         import re
 
-        from abicheck.frontends.cli.options.view import parse_view_tokens
+        from abicheck.frontends.cli.options.compare_view import parse_view_tokens
 
         old_p, new_p = _write_pair(tmp_path)
         result = CliRunner().invoke(
@@ -879,7 +879,7 @@ def _engine_oracle(old_p: Path, new_p: Path, suppress: Path) -> dict[str, Any]:
     """
     from abicheck.serialization import load_snapshot
     from abicheck.workflows.compare_policy import compare_snapshots
-    from abicheck.workflows.suppression import SuppressionList
+    from abicheck.workflows.suppression_input import SuppressionList
 
     result = compare_snapshots(
         load_snapshot(str(old_p)),

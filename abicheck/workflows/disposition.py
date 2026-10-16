@@ -16,18 +16,19 @@
 """The policy-disposition ledger operations a frontend legitimately performs.
 
 Same rule and same shape as ``workflows/policy_file.py`` and
-``workflows/suppression.py`` (ADR-061 Phase 4 item 2): ``policy`` is not in
+``workflows/suppression_input.py`` (ADR-061 Phase 4 item 2): ``policy`` is not in
 ``frontends.may_import``, so a CLI module that has to close the run's
 disposition ledger reaches it through the workflow layer rather than
 importing ``policy/disposition_ledger.py`` directly.
 
 One frontend needed this originally, for one reason: the scoped-gate
-orchestrators (``cli_helpers_compare._apply_used_by_scoping`` and
+orchestrators (``workflows.consumer_scope_gate._apply_used_by_scoping`` and
 ``_apply_required_symbol_scoping``) are the only code that knows the *union*
 of relevant findings across every ``--used-by`` consumer, and
 ``close_consumer_scope`` has to be called once with that union rather than
-once per consumer (``apply_scope`` only demotes, so per-consumer calls would
-intersect the consumers' sets). See that function's own docstring.
+once per consumer (under a scoped gate ``apply_scope`` only demotes, so
+per-consumer calls would intersect the consumers' sets). See that
+function's own docstring.
 ``supersede_as_suppressed`` joined it for a second: the release fan-out's
 lockstep-SONAME suppression is decided after every member's ledger closed
 (see its own docstring).
@@ -72,7 +73,7 @@ def supersede_as_suppressed(
     DispositionLedger.with_suppressed` -- see that method's own docstring
     for the full rationale: a release-level policy decision made strictly
     after a per-comparison ledger already closed, e.g.
-    ``cli_compare_release_pairwise._suppress_lockstep_soname_findings``).
+    ``workflows.release_members.suppress_lockstep_soname_findings``).
     *rule_id*/*reason* name the synthetic policy decision responsible (there
     is no real ``Suppression`` from a ``--suppress`` document behind it) --
     without a rule, the audit's own ``rules()`` tally silently omits the row

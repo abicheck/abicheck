@@ -52,7 +52,7 @@ def _cli_collect_mode(
     from abicheck.cli_dump_helpers import resolve_dump_collect_context
 
     collect_mode, _headers = resolve_dump_collect_context(
-        depth, None, sources, build_info, ()
+        depth, sources, build_info, ()
     )
     return collect_mode
 
@@ -103,18 +103,13 @@ class TestCollectModeParity:
     def test_resolved_collect_mode_wins_over_the_depth_derivation(
         self, tmp_path: Path
     ) -> None:
-        """`compare`'s implicit-dump path forwards an already-resolved mode.
+        """A stated ``resolved_collect_mode`` wins over the ``depth`` derivation.
 
-        Codex review on #814: ``cli_compare_helpers._embed_inline_source_side``
-        calls ``ctx.invoke(dump_cmd, ..., _resolved_collect_mode=collect_mode)``
-        with no ``depth=`` kwarg at all (Click's own default, ``None``, wins)
-        -- the real run's collect mode comes entirely from the pair-resolved
-        override, not from ``depth``. A ``DumpRequest`` built for that same
-        invocation (e.g. by ``--dry-run``) must record that override rather
-        than let ``resolve_dump_request_evidence`` re-derive a *different*
-        mode from the absent ``depth`` -- exactly the "preview describes a
-        run that never happened" hazard this whole request object exists to
-        foreclose.
+        Codex review on #814: a ``DumpRequest`` that records an
+        already-resolved mode must keep it rather than let
+        ``resolve_dump_request_evidence`` re-derive a *different* mode from
+        an absent ``depth`` -- the "preview describes a run that never
+        happened" hazard the request object exists to foreclose.
         """
         from abicheck.service_compare_evidence import resolve_dump_request_evidence
 
@@ -219,16 +214,14 @@ class TestCollectModeParity:
         from abicheck.cli_dump_helpers import resolve_dump_collect_context
 
         header = tmp_path / "api.h"
-        _mode, headers = resolve_dump_collect_context(
-            "BINARY", None, None, None, (header,)
-        )
+        _mode, headers = resolve_dump_collect_context("BINARY", None, None, (header,))
         assert headers == ()
 
     def test_compare_keeps_its_own_inference_rule(self, tmp_path: Path) -> None:
         """`compare`'s rule is deliberately NOT changed by the dump fix.
 
-        `collect_mode_for` mirrors `cli_compare_helpers.
-        _resolve_compare_collect_mode`, where an omitted depth is *inferred*
+        `collect_mode_for` mirrors `workflows.compare_configuration.
+        resolve_compare_collect_mode`, where an omitted depth is *inferred*
         from the supplied inputs and defaults to "off" -- correct for that
         front end, and a different question from `dump`'s fixed default.
         """

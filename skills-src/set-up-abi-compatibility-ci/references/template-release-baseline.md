@@ -98,7 +98,7 @@ jobs:
       <build-steps>
 
       - name: Compare against the last release
-        uses: abicheck/abicheck@v0.6.0
+        uses: abicheck/abicheck@v0.7.0
         with:
           abi-baseline: latest-release
           new-library: <lib-path>
@@ -139,7 +139,7 @@ In the PR workflow, replace `abi-baseline` with an explicit download plus
         run: gh release download --pattern '${{ matrix.lib }}.abicheck.json' --dir baseline
         env:
           GH_TOKEN: ${{ github.token }}
-      - uses: abicheck/abicheck@v0.6.0
+      - uses: abicheck/abicheck@v0.7.0
         with:
           old-library: baseline/${{ matrix.lib }}.abicheck.json
           new-library: ${{ matrix.path }}

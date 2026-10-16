@@ -18,11 +18,11 @@
 ADR-068 Phase 4 (the typed-API slice) retired this module's own request and
 result types. :class:`ScanRequest`/:class:`ScanResult` (and their
 ``--artifact-set`` siblings) are gone: a comparison's typed input is
-:class:`~abicheck.workflows.contracts.CompareRequest`, its typed output
-:class:`~abicheck.workflows.contracts.CompareResult`, and there is exactly one of each.
+:class:`~abicheck.workflows.service_requests.CompareRequest`, its typed output
+:class:`~abicheck.workflows.service_requests.CompareResult`, and there is exactly one of each.
 What remains here is the ADR-035 D10 dry-run *cost model* --
 :func:`estimate_scan` projects the per-layer cost of resolving one
-:class:`~abicheck.workflows.contracts.InputSpec` at a given evidence depth, without
+:class:`~abicheck.workflows.service_requests.InputSpec` at a given evidence depth, without
 running a compiler or parsing a binary -- and the header-input expansion
 helpers the extractors share.
 
@@ -61,7 +61,7 @@ if TYPE_CHECKING:
 _logger = logging.getLogger(__name__)
 
 # Header file extensions recognised during directory expansion. Shared with the
-# AST-cache include walk (dumper._cache_key) via the leaf header_utils module so
+# AST-cache include walk (extract.headers.ast_config._cache_key) via the leaf header_utils module so
 # expansion and cache-invalidation can never drift (Codex review).
 _HEADER_EXTS = HEADER_SUFFIXES
 
@@ -596,7 +596,7 @@ def estimate_scan(
     ``_COST_PER_*``): ranks layers for a depth/budget pick, not a precise
     wall-clock prediction.
 
-    Takes the canonical :class:`~abicheck.workflows.contracts.InputSpec` one
+    Takes the canonical :class:`~abicheck.workflows.service_requests.InputSpec` one
     side of a comparison is already described by, plus what the run resolved
     for the pair: its ``(S-method, depth)`` level, its collect mode (already
     narrowed to *changed_paths* when the run has a seed) and the seed itself.

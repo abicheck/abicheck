@@ -30,7 +30,7 @@ straight from an ordinary L2 header scan:
 - :func:`build_header_only_graph` seeds ``source_decl`` nodes for every
   function/variable in the already-parsed :class:`~abicheck.model.AbiSnapshot`
   (visibility from ``Function.origin``/``Variable.origin`` — the same
-  ``ScopeOrigin`` classification :func:`abicheck.provenance.apply_provenance`
+  ``ScopeOrigin`` classification :func:`abicheck.extract.declaration_provenance.apply_provenance`
   already computes when a public-header set is given),
   then folds ``type_graph.parse_clang_ast_types()``/
   ``call_graph.parse_clang_ast_calls()`` over the *same* header-aggregate
@@ -92,6 +92,11 @@ from dataclasses import dataclass
 from functools import partial
 from typing import TYPE_CHECKING, Any
 
+from ..extract.declaration_provenance import (
+    build_public_set,
+    classify_origin,
+    split_include_roots,
+)
 from ..fact_provenance import func_fact_key, var_fact_key
 from ..model import AbiSnapshot, ScopeOrigin, resolved_fact_value
 from ..model.graph_entity_identity import (
@@ -107,16 +112,12 @@ from ..model.graph_facts import (
     GraphEdge,
     GraphNode,
 )
+from ..model.graph_identity import header_node_id
 from ..model.snapshot_identity_table import identities_for_snapshot
-from ..model.source_graph import SourceGraphSummary, _header_node_id
+from ..model.source_graph import SourceGraphSummary
 from ..model.source_graph_coverage import (
     HEADER_DECLARATIONS_PASS,
     HEADER_INCLUDE_GRAPH_PASS as _HEADER_INCLUDE_GRAPH_PASS,
-)
-from ..provenance import (
-    build_public_set,
-    classify_origin,
-    split_include_roots,
 )
 from .header_graph_ast_projection import (
     _PROVENANCE,
@@ -173,7 +174,7 @@ def _seed_flat_type_node(
 
     Unlike the AST path above, ``RecordType``/``EnumType`` already carry their
     own ``origin``/``source_header`` (ADR-015 provenance, populated by
-    :func:`abicheck.provenance.apply_provenance` from the same
+    :func:`abicheck.extract.declaration_provenance.apply_provenance` from the same
     public-header inputs) — no
     ``classify_origin`` re-derivation needed here.
     """
@@ -400,7 +401,7 @@ def build_header_only_graph(
 
     *public_header_paths*/*public_dir_paths* are the same public-header
     inputs already threaded through
-    :func:`abicheck.provenance.apply_provenance` — required for anything to
+    :func:`abicheck.extract.declaration_provenance.apply_provenance` — required for anything to
     classify as ``public_header``/``private_header`` rather than ``unknown``
     (provenance stays opt-in, matching the rest of the L2 pipeline).
 
@@ -486,7 +487,7 @@ def build_header_only_graph(
         node_id = header_ids.get(path)
         if node_id is not None:
             return node_id
-        node_id = _header_node_id(path)
+        node_id = header_node_id(path)
         origin = classify(path)
         attrs = {"visibility": origin.value} if origin != ScopeOrigin.UNKNOWN else {}
         graph.add_node(
@@ -589,7 +590,7 @@ class ClangHeaderIncludeExtractor:
     drives it through a throwaway :class:`~abicheck.buildsource.build_evidence.BuildEvidence`
     with one synthetic :class:`~abicheck.buildsource.build_evidence.CompileUnit`
     per header — its ``id`` set to that header's graph node id
-    (:func:`abicheck.model.source_graph._header_node_id`), so
+    (:func:`abicheck.model.graph_identity.header_node_id`), so
     :func:`abicheck.buildsource.include_graph.augment_graph_with_includes`
     can fold the result straight onto the already-built
     :class:`~abicheck.model.source_graph.SourceGraphSummary` without any
@@ -705,7 +706,7 @@ class ClangHeaderIncludeExtractor:
             toolchain_tokens.append("-nostdinc")
         compile_units = [
             CompileUnit(
-                id=_header_node_id(h),
+                id=header_node_id(h),
                 source=h,
                 argv=[
                     *(f"-I{i}" for i in includes),
@@ -733,7 +734,7 @@ class ClangHeaderIncludeExtractor:
 
         filtered: dict[str, list[str]] = {}
         for h in headers:
-            paths = include_map.get(_header_node_id(h), [])
+            paths = include_map.get(header_node_id(h), [])
             if not paths:
                 continue
             try:
@@ -749,5 +750,5 @@ class ClangHeaderIncludeExtractor:
                     pass
                 kept.append(p)
             if kept:
-                filtered[_header_node_id(h)] = kept
+                filtered[header_node_id(h)] = kept
         return filtered, list(extractor.diagnostics)

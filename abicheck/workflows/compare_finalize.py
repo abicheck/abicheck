@@ -1,30 +1,28 @@
 # Copyright 2026 Nikolay Petrov
 # SPDX-License-Identifier: Apache-2.0
 
-"""The report fields a classified pair owes before it is a :class:`CompareResult`.
+"""The gate a classified pair is scored under, and its :class:`CompareResult`.
 
-The second half of :func:`abicheck.service_compare_pipeline.classify_compare_pair`:
-everything after ``compare_snapshots`` and the evidence fold -- operand metadata
-and the same-binary note, ``requested_depth``, analysis assurance, evidence
-depths, the suppression audit, the exit decision and the resolved gate receipt.
-Split out so a front end that classifies through the shared core can run these
-once, in the order its own post-processing needs, instead of twice.
+The last step of :func:`abicheck.service_compare_pipeline.classify_compare_pair`,
+after :func:`~abicheck.workflows.compare_classify.classify_resolved_pair` has
+classified the pair and attached its report fields: the suppression audit, the
+exit decision and the resolved gate receipt. The gate is resolved from a typed
+request's own settings; the native ``compare`` CLI resolves its gate from its
+``ResolvedCompareConfig`` instead (``cli_compare_receipt.record_resolved_config``)
+and audits suppressions after its ``--used-by`` scoping, so it does not call
+this.
 """
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from ..confidence import note_if_same_binary_compared
 from . import gate as gate_workflow
-from .contracts import CompareRequest, CompareResult
-from .input_resolution import collect_metadata, sniff_text_format
-from .request_inputs import required_path
+from .service_requests import CompareRequest, CompareResult
 
 if TYPE_CHECKING:
     from ..checker_types import DiffResult
-    from ..model import AbiSnapshot
+    from .compare_classify import ClassifiedPair
     from .resolved_execution_context import ResolvedExecutionContext
 
 __all__ = ["finalize_classified_pair"]
@@ -33,70 +31,20 @@ __all__ = ["finalize_classified_pair"]
 def finalize_classified_pair(
     request: CompareRequest,
     context: ResolvedExecutionContext | None,
-    result: DiffResult,
-    old: AbiSnapshot,
-    new: AbiSnapshot,
+    classified: ClassifiedPair,
     suppression: Any,
     evaluation_config: Any,
+    *,
+    pack_application: Any = None,
 ) -> CompareResult:
-    """Attach the post-classification report fields and build the result."""
-    # Hash through the full GNU ld linker-script chain to its final resolved
-    # target -- resolve_side_snapshot() already followed the identical chain
-    # to produce `old`/`new` above -- so a (possibly multi-hop) script vs.
-    # its target DSO given as the other `CompareRequest` side still reads as
-    # byte-identical (mirrors the same fix on the retired
-    # `cli_scan_baseline._run_baseline_compare`).
-    from ..binary_utils import resolve_linker_script_chain
+    """Audit suppressions, resolve the gate and build the result.
 
-    # A text snapshot/manifest can coincidentally match the INPUT()/GROUP()
-    # probe -- skip linker-script resolution for it.
-    def _hashable_path(p: Path) -> Path:
-        return (
-            p
-            if sniff_text_format(p) in ("json", "symvers")
-            else resolve_linker_script_chain(p)
-        )
-
-    result.old_metadata = collect_metadata(
-        _hashable_path(required_path(request.old, "old"))
-    )
-    result.new_metadata = collect_metadata(
-        _hashable_path(required_path(request.new, "new"))
-    )
-    # Item 4 fix: collect_metadata() is a no-op for a JSON/text snapshot
-    # path, so a snapshot-input compare left note_if_same_binary_compared
-    # unable to fire on content-identical snapshots. Digest fallback below
-    # requires *both* sides missing metadata (`and`, not `or`): a mixed
-    # live-binary-vs-snapshot compare has one side absent by design.
-    old_digest = new_digest = None
-    if result.old_metadata is None and result.new_metadata is None:
-        from .gate import snapshot_identity_digests
-
-        old_digest, new_digest = snapshot_identity_digests(old, new)
-    note_if_same_binary_compared(
-        result, old_snapshot_digest=old_digest, new_snapshot_digest=new_digest
-    )
-
-    # P0.4 follow-up (P2 review, discussion_r3787839902): stamps
-    # `DiffResult.requested_depth` for `analysis_assurance` below, preferring
-    # `pair.resolved_execution_context`'s value over `request.depth` only
-    # when the two agree (a caller may pass a *different* `request` than
-    # built `pair`; a disagreement defers to `request.depth`, what `old`/
-    # `new` above were actually projected to -- Codex review).
-    normalized_request_depth = (
-        request.depth.lower() if request.depth is not None else None
-    )
-    if context is not None and context.requested_depth == normalized_request_depth:
-        result.requested_depth = context.requested_depth
-    elif normalized_request_depth is not None:
-        result.requested_depth = normalized_request_depth
-    # Depths and suppression audit: report fields every pairwise route owes
-    # (F2 route parity), once set by the native CLI alone.
-    from . import analysis_assurance_attach as assurance_attach
+    *pack_application* is the request's selected ``pack_paths`` contribution
+    (``RequestPolicyInputs.pack_application``): a gate pack's severity levels
+    fold into the gate here, as the native CLI folds them into its own."""
     from .suppression_audit_attach import attach_suppression_audit
 
-    assurance_attach.attach_analysis_assurance(result, old, new)
-    assurance_attach.attach_evidence_depths(result, old, new)
+    result, old, new = classified.result, classified.old, classified.new
     attach_suppression_audit(result, suppression)
     # ADR-064/PR G2: resolve severity into the same `GateOptions` the
     # release fan-out uses, then the canonical decision. No manual
@@ -104,7 +52,7 @@ def finalize_classified_pair(
     # derived from whether `severity_preset` (or a resolved gate pack) put a
     # severity setting in effect.
     gate = gate_workflow.resolve_release_gate_options(
-        None,
+        pack_application,
         severity_preset=request.severity_preset,
         severity_abi_breaking=None,
         severity_potential_breaking=None,
@@ -125,7 +73,8 @@ def finalize_classified_pair(
         evaluation_config,
         gate,
         packs_forwarded=bool(request.pack_policy_overrides)
-        or request.pack_internal_namespaces is not None,
+        or request.pack_internal_namespaces is not None
+        or bool(request.pack_paths),
     )
     if context is not None:
         context = context.for_classification(evaluation_config, result.requested_depth)
@@ -142,3 +91,14 @@ def finalize_classified_pair(
         severity_config=gate.severity,
         resolved_execution_context=context,
     )
+
+
+def _merge_redundant_changes(result: DiffResult) -> None:
+    """Re-merge redundant changes back into the main change list."""
+    for c in result.changes:
+        c.caused_count = 0
+    for c in result.redundant_changes:
+        c.caused_by_type = None
+    result.changes = result.changes + result.redundant_changes
+    result.redundant_changes = []
+    result.redundant_count = 0

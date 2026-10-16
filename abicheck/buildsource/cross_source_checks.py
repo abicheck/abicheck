@@ -37,7 +37,7 @@ Check                             Inputs                                  Tier
 All eleven checks (this table's eight plus the three in
 :mod:`cross_source_checks_coherence`) now run automatically inside every
 :func:`abicheck.checker.compare` call (``cross_source_checks=True`` by
-default, ADR-068 D3/D4/D5, via :mod:`abicheck.workflows.cross_source_evolution`),
+default, ADR-068 D3/D4/D5, via :mod:`abicheck.workflows.cross_source_hygiene`),
 as well as from ``scan --audit``'s ADR-035 D8 single-release hygiene case.
 
 Per ADR-035 D1/D4 the findings are **never** ``BREAKING`` on their own (an
@@ -1035,6 +1035,13 @@ def _check_unversioned_exported_symbol(
 
     An unattached ``*PRIVATE*``-only marker is bookkeeping, not a real
     scheme -- reuses ``diff_versioning``'s own definition of that.
+
+    Only ``ElfVersionBinding.UNVERSIONED`` is flagged. A symbol bound to the
+    library's ``VER_FLG_BASE`` definition (``BASE``) is the permanent,
+    conventional home of the API that predates the version script --
+    retagging it would itself break consumers. An ``UNKNOWN`` binding (a
+    pre-v58 snapshot) cannot tell the two apart, so it is counted in the
+    detail and never flagged.
     """
     providers = [PROVIDER_BINARY_EXPORTS]
     elf = snapshot.elf
@@ -1059,10 +1066,17 @@ def _check_unversioned_exported_symbol(
         )
 
     from ..elf_symbol_filter import is_abi_relevant_elf_symbol
+    from ..model.elf_facts import ElfVersionBinding
 
     findings: list[Change] = []
+    unknown = 0
     for sym in elf.symbols:
         if not sym.name or not sym.is_default or sym.version:
+            continue
+        if sym.version_binding is ElfVersionBinding.UNKNOWN:
+            unknown += 1
+            continue
+        if sym.version_binding is not ElfVersionBinding.UNVERSIONED:
             continue
         if sym.visibility not in ("default", "protected"):
             continue
@@ -1091,6 +1105,12 @@ def _check_unversioned_exported_symbol(
         f"binary exports ↔ version table: {len(findings)} exported symbol(s) with no "
         f"version under a {len(real_versions_defined)}-node scheme"
     )
+    if unknown:
+        detail += (
+            f"; {unknown} export(s) with no named version not evaluated: the "
+            "snapshot does not record base-version binding (re-dump to check them)"
+        )
+        return _CheckOutput(findings, "partial", detail, providers)
     return _CheckOutput(findings, "present", detail, providers)
 
 

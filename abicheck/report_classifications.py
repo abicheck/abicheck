@@ -26,40 +26,10 @@ from .checker import _BREAKING_KINDS as _CHECKER_BREAKING_KINDS_ENUM
 # Change-kind classification
 # ---------------------------------------------------------------------------
 
-#: Kinds that count as "removed" (symbol no longer available).
-REMOVED_KINDS: frozenset[str] = frozenset(
-    {
-        "func_removed",
-        # Pre-existing omission, found by `test_evidence_tier_registry_
-        # parity.py` while registering this kind's *addition* counterpart: an
-        # export that disappeared is a removal whether the headers declared
-        # it or not, so HTML and the compat XML were rendering it as a
-        # "changed" symbol and counting zero removals for it.
-        "func_removed_elf_only",
-        "var_removed",
-        "var_removed_elf_only",
-        "type_removed",
-        "typedef_removed",
-        "union_field_removed",
-        "enum_member_removed",
-    }
-)
-
-#: Kinds that count as "added" (new API surface — compatible).
-ADDED_KINDS: frozenset[str] = frozenset(
-    {
-        "func_added",
-        "func_added_elf_only",
-        "var_added",
-        "var_added_elf_only",
-        "type_added",
-        "func_virtual_added",
-        "enum_member_added",
-        "union_field_added",
-        "type_field_added",
-        "type_field_added_compatible",
-    }
-)
+#: The superseded ``REMOVED_KINDS``/``ADDED_KINDS`` hand-maintained subsets
+#: lived here; HTML now reads each finding's effective bucket from
+#: ``report.finding.ReportFinding.bucket`` (the registry-declared operation),
+#: which they disagreed with for 70+ kinds.
 
 #: Environment / toolchain drift kinds — findings caused by the *build
 #: environment* (compiler, binutils/linker defaults, glibc/sysroot version)

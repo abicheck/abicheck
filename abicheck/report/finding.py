@@ -33,9 +33,12 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date
+from typing import cast
 
+from ..change_registry import REGISTRY
 from ..checker_types import DiffResult
 from ..model.change import Change
+from ..model.change_catalog.kinds import HasKind
 from ..policy.evaluate import effective_kind_sets
 from ..policy.severity import (
     IssueCategory,
@@ -43,16 +46,79 @@ from ..policy.severity import (
     Verdict,
     classify_effective_change,
     effective_verdict_for_change,
+    reclassify_rule_for_change,
 )
+from .change_operation import entity_for_change, operation_for_change
+
+#: The three display buckets every renderer groups a finding into.
+BUCKET_ADDED = "added"
+BUCKET_REMOVED = "removed"
+BUCKET_CHANGED = "changed"
 
 
 @dataclass(frozen=True, slots=True)
 class ReportFinding:
-    """One change's pre-resolved verdict and issue category."""
+    """One change's pre-resolved verdict, issue category and display facts.
+
+    ``bucket`` is the *effective* display bucket (``added``/``removed``/
+    ``changed``, see :func:`effective_bucket`), ``entity`` the canonical
+    :class:`~abicheck.change_registry.ChangeEntity` value (``None`` for an
+    unregistered kind), and ``reclassified_by`` the deciding
+    ``reclassify:`` rule's audit label -- the same value the JSON report
+    stamps on the change -- or ``None``. Resolved here once so HTML,
+    Markdown and JSON cannot each re-derive them differently.
+    """
 
     change: Change
     verdict: Verdict
     category: IssueCategory
+    bucket: str = BUCKET_CHANGED
+    entity: str | None = None
+    reclassified_by: str | None = None
+
+
+def effective_bucket(change: object, verdict: Verdict | None) -> str:
+    """The display bucket for *change* given its resolved *verdict*.
+
+    Starts from the canonical, registry-declared observed operation
+    (:func:`~abicheck.report.change_operation.operation_for_change`, the
+    same value the JSON report serializes as ``operation``): ``removed``
+    stays ``removed``; ``modified``/``unchanged`` read ``changed``. An
+    observed *addition* is ``added`` only while its effective verdict is
+    ``COMPATIBLE`` -- a policy that escalates e.g. ``func_added`` to any
+    other verdict makes it a finding to review, and the "Added" section
+    reads as safe. ``verdict=None`` (no policy resolution available) falls
+    back to the kind's declared default verdict.
+    """
+    kind_obj = getattr(change, "kind", "")
+    kind_val = str(getattr(kind_obj, "value", kind_obj))
+    operation = operation_for_change(change, kind_val)
+    if operation == BUCKET_REMOVED:
+        return BUCKET_REMOVED
+    if operation != BUCKET_ADDED:
+        return BUCKET_CHANGED
+    if verdict is None:
+        meta = REGISTRY.get(kind_val)
+        verdict = getattr(meta, "default_verdict", Verdict.COMPATIBLE)
+    return BUCKET_ADDED if verdict == Verdict.COMPATIBLE else BUCKET_CHANGED
+
+
+def reclassified_by_label(
+    change: object, policy_file: object | None, today: date | None = None
+) -> str | None:
+    """The ``reclassify:`` rule label that decided *change*, or ``None``.
+
+    The single owner of the JSON report's per-change ``reclassified_by``
+    value (``change_json.change_to_dict`` delegates here). Falls back to
+    ``rule.to_verdict.value`` rather than ``rule.to``, since a directly-
+    constructed ``ReclassifyRule`` could leave the latter empty.
+    """
+    if policy_file is None:
+        return None
+    rule = reclassify_rule_for_change(cast(HasKind, change), policy_file, today)
+    if rule is None:
+        return None
+    return str(rule.label or rule.reason or rule.to_verdict.value)
 
 
 def build_report_findings(
@@ -91,8 +157,16 @@ def build_report_findings(
             today=today,
             verdict=verdict,
         )
+        kind_val = str(getattr(change.kind, "value", change.kind))
         findings.append(
-            ReportFinding(change=change, verdict=verdict, category=category)
+            ReportFinding(
+                change=change,
+                verdict=verdict,
+                category=category,
+                bucket=effective_bucket(change, verdict),
+                entity=entity_for_change(change, kind_val),
+                reclassified_by=reclassified_by_label(change, policy_file, today),
+            )
         )
     return tuple(findings)
 

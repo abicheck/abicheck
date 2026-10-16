@@ -386,10 +386,17 @@ def _expand(argv: list[str], inputs: dict[str, str]) -> list[str]:
     return [str(a).format(**inputs) for a in argv]
 
 
+#: coverage.py core for per-context recording. On 3.14+ the default
+#: ``sysmon`` core stops reporting a line once it has fired, so code a later
+#: context re-runs is never attributed to it; ``ctrace`` records every
+#: context on every interpreter.
+CONTEXT_COVERAGE_ENV = {"COVERAGE_CORE": "ctrace"}
+
+
 def _env_for(root: Path, **extra: str) -> dict[str, str]:
     """Child environment importing ``abicheck`` from *root*, ahead of any
     installed copy, so a base checkout is measured with its own code."""
-    env = dict(os.environ, **extra)
+    env = dict(os.environ, **CONTEXT_COVERAGE_ENV, **extra)
     env["PYTHONPATH"] = os.pathsep.join(
         p for p in (str(root), env.get("PYTHONPATH", "")) if p
     )

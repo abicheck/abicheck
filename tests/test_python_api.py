@@ -978,7 +978,8 @@ def _ext_with_api(tmp_path, module: str = "foo"):
 
 
 def _run_demote(old_snap, new_snap, changes):
-    from abicheck.post_processing import DemoteOffPythonSurface, PipelineContext
+    from abicheck.policy.finding_disposition import PipelineContext
+    from abicheck.post_processing import DemoteOffPythonSurface
 
     ctx = PipelineContext(old=old_snap, new=new_snap, scope_to_public_surface=True)
     kept = DemoteOffPythonSurface().run(list(changes), ctx)
@@ -1067,7 +1068,8 @@ def test_oracle_defers_to_resolved_old_header_surface(tmp_path) -> None:
     # func_removed demoted — the old header proved the symbol was public.
     from types import SimpleNamespace
 
-    from abicheck.post_processing import DemoteOffPythonSurface, PipelineContext
+    from abicheck.policy.finding_disposition import PipelineContext
+    from abicheck.post_processing import DemoteOffPythonSurface
 
     ext = _ext_with_api(tmp_path)
     ctx = PipelineContext(old=ext, new=ext, scope_to_public_surface=True)
@@ -1079,7 +1081,8 @@ def test_oracle_defers_to_resolved_old_header_surface(tmp_path) -> None:
 
 
 def test_oracle_disabled_when_scoping_off(tmp_path) -> None:
-    from abicheck.post_processing import DemoteOffPythonSurface, PipelineContext
+    from abicheck.policy.finding_disposition import PipelineContext
+    from abicheck.post_processing import DemoteOffPythonSurface
 
     ext = _ext_with_api(tmp_path)
     internal = _c(ChangeKind.FUNC_REMOVED, "_Z8internalv")

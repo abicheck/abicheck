@@ -36,7 +36,7 @@ __all__ = ["RELEASE_SCHEMA_VERSION"]
 
 #: SemVer-style (MAJOR.MINOR) version of the directory/package release JSON
 #: envelope (`compare-release`'s per-run document,
-#: ``cli_compare_release_helpers._format_release_json``).
+#: ``report.release_document.release_json_document``).
 #:
 #: 1.0 -- introduced (Codex review, findings-fixes round 11): this document
 #:       had no schema-version field at all before this constant, so a
@@ -87,7 +87,7 @@ __all__ = ["RELEASE_SCHEMA_VERSION"]
 #:       ``contract_coverage_exit_contribution``, and the key report schema
 #:       2.40 defined for this axis) -- emitted on the release document and on
 #:       ``--output-dir``'s ``summary.json`` alike, because that top-level key
-#:       is what ``workflows.aggregate.gate._analysis_assurance_exit`` and the
+#:       is what ``workflows.aggregate.report_gate._analysis_assurance_exit`` and the
 #:       composite Action's ``gate_mode: deferred`` path read. Emitting the
 #:       floor only inside ``exit``/``analysis_assurance`` left both reading
 #:       ``0`` for a run whose real exit was ``1`` (Codex security review,
@@ -167,7 +167,7 @@ __all__ = ["RELEASE_SCHEMA_VERSION"]
 #:       carries a block, rather than an all-zero aggregate.
 #: - ``1.8`` adds the top-level ``public_surface_reconciliation`` object: the
 #:       release's one public contract reconciled against the union of its
-#:       members' exports (``report.release_public_surface``). It states, per
+#:       members' exports (``report.release_public_surface_section``). It states, per
 #:       side, how many public declarations carry an export obligation, how
 #:       many the bundle satisfies, which are missing, which are *unresolved*
 #:       because a member was unread, the export totals and the
@@ -227,4 +227,20 @@ __all__ = ["RELEASE_SCHEMA_VERSION"]
 #:       stderr, so neither the JSON nor the Markdown artifact could say a
 #:       rule had gone stale or had hidden a breaking change. Present only
 #:       when an audit was attached. Additive.
-RELEASE_SCHEMA_VERSION = "1.12"
+#: - ``1.13`` adds ``public_surface_reconciliation.missing_exports[].
+#:       confidence`` (``high``/``low``), always present: ``low`` marks a
+#:       declaration outside the run's declared ``-H`` surface (reached only
+#:       through ``#include`` and an include root), whose export obligation
+#:       is reported but not established -- the release counterpart of the
+#:       member check's narrowing. The same obligations in
+#:       ``sides.*.missing_from_bundle``/``unresolved_under_incomplete_coverage``
+#:       carry ``outside_declared_surface: true``, present only when true.
+#:       Additive; no verdict or exit code changes.
+#: - ``2.0`` (ADR-078, BREAKING): every ``libraries[]`` entry's
+#:       ``quality_issues`` narrows to exclude informational outcomes
+#:       (``INFORMATIONAL_KINDS``), counted in the new always-present
+#:       ``informational`` field beside it -- the report schema 6.0 change
+#:       applied to the release envelope. The pre-2.0 value is
+#:       ``quality_issues + informational``. Each such finding's ``bucket``
+#:       reads ``informational`` under a severity setting.
+RELEASE_SCHEMA_VERSION = "2.0"

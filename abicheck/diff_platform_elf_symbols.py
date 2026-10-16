@@ -26,6 +26,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from .compare.elf_alias_pairs import pair_elf_aliases
+from .compare.elf_capture_identity import both_captured_elf_identity
 from .diff_helpers import make_change
 from .diff_versioning import (  # noqa: F401 — re-exported for existing callers
     _UNPARSEABLE_VERSION as _UNPARSEABLE_VERSION,
@@ -303,20 +305,19 @@ def _diff_elf_symbol_metadata(
     assert old_elf is not None
     assert new_elf is not None
     changes: list[Change] = []
-    old_syms = old_elf.symbol_map
-    new_syms = new_elf.symbol_map
+    old_syms = old_elf.symbol_aliases
+    new_syms = new_elf.symbol_aliases
 
-    for sym_name, s_old in old_syms.items():
-        s_new = new_syms.get(sym_name)
-        if s_new is None:
-            continue
+    for sym_name, s_old, s_new in pair_elf_aliases(old_elf, new_elf):
         changes.extend(_diff_elf_symbol_pair(old, new, sym_name, s_old, s_new))
 
-    for sym_name, s_new in new_syms.items():
-        if s_new.sym_type != SymbolType.COMMON:
+    # A COMMON alias is risky unless some old alias of the same bare name was
+    # already COMMON; checking every alias keeps a non-last one from hiding.
+    for sym_name, new_list in new_syms.items():
+        if not any(s.sym_type == SymbolType.COMMON for s in new_list):
             continue
-        old_common = old_syms.get(sym_name)
-        if old_common is None or old_common.sym_type != SymbolType.COMMON:
+        old_list = old_syms.get(sym_name, [])
+        if not any(s.sym_type == SymbolType.COMMON for s in old_list):
             changes.append(
                 make_change(
                     ChangeKind.COMMON_SYMBOL_RISK,
@@ -332,8 +333,8 @@ def _diff_elf_symbol_metadata(
 
 
 def _check_gained_gnu_unique(
-    old_syms: dict[str, Any],
-    new_syms: dict[str, Any],
+    old_syms: dict[str, list[Any]],
+    new_syms: dict[str, list[Any]],
     *,
     old_captured: bool = True,
 ) -> list[Change]:
@@ -354,12 +355,12 @@ def _check_gained_gnu_unique(
         # newly introduced. A genuinely-empty *captured* table (old_captured=True,
         # old_syms empty) does prove absence, so it falls through and reports.
         return []
-    if any(s.binding == SymbolBinding.UNIQUE for s in old_syms.values()):
+    if any(s.binding == SymbolBinding.UNIQUE for lst in old_syms.values() for s in lst):
         return []  # already non-unloadable; adding more changes nothing
     added_unique = sorted(
         name
-        for name, s in new_syms.items()
-        if s.binding == SymbolBinding.UNIQUE and name not in old_syms
+        for name, lst in new_syms.items()
+        if name not in old_syms and any(s.binding == SymbolBinding.UNIQUE for s in lst)
     )
     if not added_unique:
         return []
@@ -729,9 +730,7 @@ def _diff_elf_import_set(old_elf: Any, new_elf: Any) -> list[Change]:
     or dropping the last one must still report; only a header-only or legacy
     baseline (no parsed identity) is skipped.
     """
-    from .diff_platform_elf_dynamic import _both_captured_elf_identity
-
-    if not _both_captured_elf_identity(old_elf, new_elf):
+    if not both_captured_elf_identity(old_elf, new_elf):
         return []
     old_imports = getattr(old_elf, "imports", None) or []
     new_imports = getattr(new_elf, "imports", None) or []
@@ -804,9 +803,7 @@ def _diff_allocator_replacement(old_elf: Any, new_elf: Any) -> list[Change]:
     symbol lists being non-empty — an export table that is empty on one side
     is still evidence about which allocator symbols it (doesn't) export.
     """
-    from .diff_platform_elf_dynamic import _both_captured_elf_identity
-
-    if not _both_captured_elf_identity(old_elf, new_elf):
+    if not both_captured_elf_identity(old_elf, new_elf):
         return []
     old_syms = getattr(old_elf, "symbols", None) or []
     new_syms = getattr(new_elf, "symbols", None) or []

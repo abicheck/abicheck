@@ -333,7 +333,7 @@ class AbiSnapshot:
     # Used by binary-only fallback detectors that need lightweight disassembly.
     source_path: str | None = field(default=None, kw_only=True)
     # mtime (st_mtime, seconds) of source_path at dump time. Lets a later
-    # best-effort re-probe against source_path (e.g. cli_helpers_compare's
+    # best-effort re-probe against source_path (e.g. l0_export_delta's
     # fold_l0_hard_removals) detect that the on-disk binary has since changed
     # — e.g. rebuilt in place after this snapshot was dumped to JSON — and
     # decline to trust it, keeping a pre-dumped-snapshot compare reproducible.
@@ -387,7 +387,7 @@ class AbiSnapshot:
     # every freshly extracted snapshot whose headers were parsed gets one.
     # `None` only for a snapshot predating this field, or one whose headers
     # were never parsed at all (a pure binary-only L0/L1 dump); a query over
-    # such a snapshot goes through `policy.public_surface.
+    # such a snapshot goes through `policy.public_surface_index.
     # resolve_public_surface()`'s lazy, in-memory approximate backfill
     # instead — never through `PublicSurfaceQuery.resolve()` directly, and
     # never persisted back onto the loaded object. `build_source.source_graph`

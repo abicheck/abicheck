@@ -429,7 +429,7 @@ _ARTIFACT_NAMES = frozenset(
 #: 2.33 — the same optional ``symbol_binding`` key (see 2.32) is now also
 #:       propagated onto ``suppression.suppressed_changes[]`` entries, not
 #:       just the top-level ``changes[]``/``root_causes[]`` array -- a
-#:       separate projector (``reporter._suppressed_change_entry``) that
+#:       separate projector (``change_json.suppressed_change_entry``) that
 #:       the 2.32 fix didn't reach, so a binding-scoped suppression's audit
 #:       trail couldn't show why it matched. Additive optional key (Codex
 #:       review, fresh evidence).
@@ -831,7 +831,7 @@ _ARTIFACT_NAMES = frozenset(
 #:       default verdict. A companion PR (same schema version -- no shape
 #:       change) added a second check onto this exact mechanism,
 #:       ``private_header_leak`` (plan §5 P2 / §3 #3-#4), generalizing
-#:       ``workflows.cross_source_evolution``'s per-finding identity (a
+#:       ``workflows.cross_source_hygiene``'s per-finding identity (a
 #:       check whose findings are not uniquely keyed by ``symbol`` alone --
 #:       e.g. one function leaking two distinct private types -- registers
 #:       its own identity function) in the process. The wire shape this
@@ -1075,19 +1075,24 @@ _ARTIFACT_NAMES = frozenset(
 #:        counterpart of ``not_evaluated``. A detector is now listed when it
 #:        declined anything, even with no findings and no coverage gap.
 #: 5.13 -- additive ``exit.additions_review_contribution`` (ADR-067 D6): the
-#:        additions-review floor is folded inside ``ExitDecision`` rather
-#:        than after it, so ``exit.code`` equals the process exit when the
-#:        axis fires. ``0`` for every run without acknowledgment records.
-#: 5.14 -- additive ``removed_instantiations`` on each ``changes`` entry of an
-#:        internal_template_leaks_via_public_api finding: the uncapped list of
-#:        every removed template instantiation behind it (``mangled``,
-#:        ``demangled``, ``binding``), where ``detail`` names only three. Also
-#:        additive ``symbol_binding`` on instantiation_missing_from_binary and
-#:        internal_template_leaks_via_public_api findings, which previously
-#:        omitted it: the old-side linkage, or for the leak finding the
-#:        aggregate over its removed set (``"weak"`` only when every member is
-#:        WEAK). ``symbol`` on the leak finding is unchanged.
-REPORT_SCHEMA_VERSION = "5.14"
+#:        additions-review floor is folded inside ``ExitDecision`` rather than
+#:        after it, so ``exit.code`` equals the process exit when the axis
+#:        fires. ``0`` for every run without acknowledgment records.
+#: 6.0 -- BREAKING (ADR-078): ``summary.quality_issues`` narrows -- a required
+#:        field's own meaning changing is breaking under this policy (the 4.0
+#:        precedent). Findings recording that nothing a consumer can act on
+#:        changed (``INFORMATIONAL_KINDS``: ``declaration_coordinates_shifted``,
+#:        ``declaration_identity_ unchanged``, ``public_surface_grew``,
+#:        ``public_surface_shrank``) leave ``quality_issues`` for the new
+#:        ``summary.informational`` count; the pre-6.0 value is ``quality_issues
+#:        + informational``. ``severity.categories`` gains an ``informational``
+#:        entry (level fixed at ``info``, absent from ``severity.config`` and
+#:        never in ``blocking_categories``), and those findings' per-change
+#:        ``category`` reads ``informational``. Exit codes move only under a
+#:        severity setting that made ``quality_issues`` an error: such a finding
+#:        no longer gates.
+#: 6.1 -- additive ``removed_instantiations`` (uncapped removed set) on internal-template leak findings; ``symbol_binding`` on missing-instantiation and leak findings (aggregate, ``weak`` only if all WEAK).
+REPORT_SCHEMA_VERSION = "6.1"
 
 # The directory/package release envelope's own version and version history
 # live in `release_schema.py` (see that module's docstring for why); the

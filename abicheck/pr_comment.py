@@ -80,6 +80,7 @@ from .demangle import demangle_batch
 from .pr_comment_base import (
     _ADDITION_KIND_VALUES,
     _EVIDENCE_KIND_VALUES,
+    _INFORMATIONAL_KIND_VALUES,
     _SEVERITY_BUCKET,
     CommentModel,
     Finding,
@@ -283,7 +284,7 @@ def _introduced_changes(changes: object) -> list[dict[str, object]]:
 
 #: ``Change.cross_source_evolution`` states that mean *this comparison did
 #: not introduce the finding* (ADR-068 D3, stamped by
-#: ``workflows/cross_source_evolution.py``). A one-sided hygiene check is
+#: ``workflows/cross_source_hygiene.py``). A one-sided hygiene check is
 #: re-run against the baseline and its findings paired, so the comparison
 #: layer already knows which of them are new; this renderer reads that
 #: answer and never re-derives it (ADR-072 D1).
@@ -527,7 +528,7 @@ def _incomplete_is_blocking(
 def _suppressed_count(report: dict[str, object]) -> int:
     """The number of findings a ``--suppress`` rule removed from ``changes``.
 
-    Reads ``reporter._add_suppression``'s ``suppression`` block
+    Reads ``json_sections.add_suppression``'s ``suppression`` block
     (``suppression.suppressed_count``) -- ``0`` (not an error) for a report
     without it, which is every run that didn't pass ``--suppress``.
     """
@@ -553,9 +554,9 @@ def _disposition_audit(report: dict[str, object]) -> dict[str, object] | None:
 def _reclassified_count(report: dict[str, object]) -> int:
     """The number of ``changes`` whose verdict was moved to a different
     bucket by a ``--policy-file`` reclassification -- either a kind-global
-    ``overrides:`` entry (``reporter._add_policy_overrides``'s
+    ``overrides:`` entry (``json_sections.add_policy_overrides``'s
     ``policy_overrides`` map: ``ChangeKind`` value -> overridden ``Verdict``)
-    or a selector-scoped ``reclassify:`` rule (``reporter._change_to_dict``'s
+    or a selector-scoped ``reclassify:`` rule (``change_json.change_to_dict``'s
     per-change ``reclassified_by`` marker).
 
     Counts each matching change once even if both mechanisms could apply --
@@ -1002,13 +1003,10 @@ def _append_release_global_row(
         add_err = levels.get("addition") == "error"
         qual_err = levels.get("quality_issues") == "error"
         if add_err or qual_err:
-            n_add = sum(
-                1
-                for f in findings
-                if isinstance(f, dict)
-                and str(f.get("kind", "")) in _ADDITION_KIND_VALUES
-            )
-            n_qual = n - n_add
+            kinds = [str(f.get("kind", "")) for f in findings if isinstance(f, dict)]
+            n_add = sum(k in _ADDITION_KIND_VALUES for k in kinds)
+            # ADR-078: an informational finding never gates, so never a blocker.
+            n_qual = n - n_add - sum(k in _INFORMATIONAL_KIND_VALUES for k in kinds)
             nb = (n_add if add_err else 0) + (n_qual if qual_err else 0)
             if add_err and n_add:
                 categories.add("addition")
@@ -1065,7 +1063,7 @@ def _release_lib_row(
     # (round 11) confirms this document was written after the correction;
     # its absence is ambiguous (see `RELEASE_SCHEMA_VERSION`'s own
     # docstring), so this reader assumes the current writer's semantics
-    # either way, matching `cli_compare_release_pairwise.py`'s own values.
+    # either way, matching `workflows/release_members.py`'s own values.
     quality = _as_int(lib.get("quality_issues"))
     additions = _as_int(lib.get("compatible_additions"))
     pot_err = levels.get("potential_breaking") == "error"
@@ -1104,6 +1102,7 @@ def _release_lib_row(
         nb += quality
     else:
         ns += quality
+    ns += _as_int(lib.get("informational"))  # ADR-078: never gates
     return name, verdict, nb, nr, ns
 
 

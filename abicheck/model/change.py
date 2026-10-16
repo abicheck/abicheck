@@ -46,13 +46,13 @@ from .identity import EntityId
 from .snapshot import AbiSnapshot
 
 if TYPE_CHECKING:
-    from ..impact.model import ImpactAssessment
+    from ..impact.assessment import ImpactAssessment
 
 # Marker appended to a ``SYMBOL_VERSION_ALIAS_CHANGED`` description when the old
 # default symbol version is NOT retained as a non-default alias (so consumers of
 # the old version fail to resolve). Shared between the producer
 # (``diff_platform._diff_symbol_version_aliases``) and the cross-detector dedup
-# (``diff_filtering._deduplicate_cross_detector``), which only collapses an
+# (``finding_dedup.deduplicate_cross_detector``), which only collapses an
 # alias-change into a co-reported node-move in this not-retained case — when the
 # old alias IS retained the alias-change is compatible and must survive.
 SYMBOL_VERSION_ALIAS_NOT_RETAINED_MARKER = "old version NOT retained as alias"
@@ -76,7 +76,7 @@ def validate_evidence_depth(field_name: str, value: str) -> None:
     for any future caller (G30 P1.3) that sets it from a less-validated
     source, since a bad value would otherwise only be caught by the JSON
     Schema — which production code never runs against (only opt-in tests
-    do). Shared by ``reporter._add_check_identity`` (compare) and
+    do). Shared by ``json_sections.add_check_identity`` (compare) and
     ``ScanOutcome.to_dict`` (scan) so both validate identically.
     """
     if value not in EVIDENCE_DEPTH_VALUES:
@@ -123,7 +123,7 @@ def validate_check_id(value: str) -> None:
     Same rationale as ``validate_evidence_depth``: a future caller (G30 P1.3)
     setting a malformed ``check_id`` would otherwise only be caught by the
     JSON Schema, which production code never runs against. Fail fast here
-    instead, at the point ``reporter._add_check_identity`` sets the field.
+    instead, at the point ``json_sections.add_check_identity`` sets the field.
     """
     if not CHECK_ID_PATTERN.match(value):
         raise ValueError(
@@ -283,7 +283,7 @@ class Change:
     # the matching ``Suppression`` rule's ``label`` (falling back to
     # ``reason`` when the rule has no label — both are free-form and either
     # may be unset, so this can still be ``None``). Feeds
-    # ``impact.model.FindingDecision.suppression_rule`` — the piece ADR-052
+    # ``impact.assessment.FindingDecision.suppression_rule`` — the piece ADR-052
     # slice 1 deliberately left unwired. Never set for a change that stays
     # visible, nor for the appcompat.py/cli_compare_helpers.py consumer/
     # runtime overlays a suppression rule discards outright (those never
@@ -398,7 +398,7 @@ class Change:
     symbol_binding: str | None = field(default=None, kw_only=True)
     # Structured field identity for a field-level Change ("x" in "Widget::x"),
     # stamped by the six TYPE_FIELD_*/STRUCT_FIELD_* emitters
-    # (diff_types.py/diff_platform.py) so diff_filtering._dedup_cross_kind's
+    # (diff_types.py/diff_platform.py) so finding_dedup._dedup_cross_kind's
     # parent-type match can require field agreement instead of dropping any
     # DWARF field finding whose *type* has an AST-tier finding, regardless of
     # *which* field changed (Codex review). None for every other kind.

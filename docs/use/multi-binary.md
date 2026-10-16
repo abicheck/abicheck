@@ -12,7 +12,7 @@ depends_on:
   - abicheck/workflows/release_scope.py
   - abicheck/report/comparison_scope.py
   - abicheck/policy/release_assurance.py
-  - abicheck/report/release_assurance.py
+  - abicheck/report/release_assurance_section.py
   - abicheck/workflows/release_assurance_members.py
   - abicheck/frontends/cli/options/release.py
   - abicheck/bundle.py
@@ -93,12 +93,12 @@ through) accepts and forwards the same parameter. The **stored
 `bundle_side_input.compare_release_against_bundle_facts()` — resolves and threads a real
 `policy_file` through to it, and so does the CLI's directory/package
 `compare-release` fan-out: `pack_application.resolve_bundle_policy_file()`
-resolves it (called from `cli_compare_release.py`), and
-`cli_compare_release_helpers._collect_bundle_result()` sets it on the
-`BundleDiffResult` it already got back from `_run_bundle_analysis()`
+resolves it (called from `workflows/release_compare.py`), and
+`workflows.release_bundle.collect_bundle_result()` sets it on the
+`BundleDiffResult` it already got back from `run_bundle_analysis()`
 before reading `bundle_verdict` — `policy_file` is a plain mutable field
 and `bundle_verdict` a lazily-computed property, so this reaches the
-identical outcome without changing `_run_bundle_analysis()`'s own
+identical outcome without changing `run_bundle_analysis()`'s own
 signature — so a `--policy custom.yaml` document's `overrides:` entry for e.g.
 `bundle_intra_dep_removed` now reaches the release fan-out's aggregate
 bundle verdict on every entry point. See
@@ -532,6 +532,7 @@ for why a per-member answer is a Cartesian product (787,833 findings on a
       "kind": "public_not_exported",
       "symbol": "api_b",
       "scope": "release",
+      "confidence": "high",               // "low": header reached only via #include, outside -H
       "description": "The release's public headers declare function 'api_b' …",
       "old_value": "api_b",
       "source_location": "include/product.h:6",
@@ -929,7 +930,8 @@ new = build_bundle_snapshot({p.name: p for p in Path("new/").glob("*.so")})
 manifest = load_manifest(Path("manifest.yaml"))   # optional
 
 # per_library_results is the list of DiffResult returned by
-# abicheck.checker.compare() for each library pair.
+# abicheck.service.compare_snapshots() for each library pair -- the same
+# defaults `compare` runs under, not the raw core.
 result = compare_bundle(old, new, per_library_results, manifest=manifest)
 print(result.bundle_verdict)        # Verdict.BREAKING / COMPATIBLE / ...
 for f in result.bundle_findings:

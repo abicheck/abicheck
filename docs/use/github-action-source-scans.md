@@ -122,7 +122,7 @@ jobs:
         run: cmake -B build -S . && cmake --build build
 
       - name: Source-aware comparison
-        uses: abicheck/abicheck@v0.6.0
+        uses: abicheck/abicheck@v0.7.0
         with:
           old-library: abi-baseline.json   # committed, or use abi-baseline: latest-release
           new-library: build/libfoo.so
@@ -162,7 +162,7 @@ case — a stored-snapshot operand pinned to `depth: build`/`source` is not
 checked against the pin, while a live one is.
 
 ```yaml
-      - uses: abicheck/abicheck@v0.6.0
+      - uses: abicheck/abicheck@v0.7.0
         with:
           old-library: abi-baseline.json
           new-library: build/libfoo.so
@@ -207,7 +207,7 @@ replacement for legacy `mode: scan` with no baseline (see
 > for the migration details).
 
 ```yaml
-      - uses: abicheck/abicheck@v0.6.0
+      - uses: abicheck/abicheck@v0.7.0
         with:
           mode: compare
           new-library: build/libfoo.so
@@ -244,7 +244,7 @@ both the two-sided and audit-only shapes. Handy when sizing a job for a
 large repo:
 
 ```yaml
-      - uses: abicheck/abicheck@v0.6.0
+      - uses: abicheck/abicheck@v0.7.0
         with:
           old-library: abi-baseline.json
           new-library: build/libfoo.so
@@ -265,7 +265,7 @@ replacement is `.abicheck.yml`'s `policy.overrides.<CHANGE_KIND>: error`,
 passed as `build-config`:
 
 ```yaml
-      - uses: abicheck/abicheck@v0.6.0
+      - uses: abicheck/abicheck@v0.7.0
         with:
           mode: compare
           old-library: abi-baseline.json
@@ -301,7 +301,7 @@ such snapshots) carries the L3/L4/L5 findings — no out-of-band directories:
 
 ```yaml
       - name: Dump baseline with build + source evidence
-        uses: abicheck/abicheck@v0.6.0
+        uses: abicheck/abicheck@v0.7.0
         with:
           mode: dump
           new-library: build/libfoo.so

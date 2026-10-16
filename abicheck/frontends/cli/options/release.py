@@ -71,7 +71,7 @@ def release_options(func: F) -> F:
     ``.abicheck.yml``'s ``bundle:`` block now
     (:data:`abicheck.buildsource.build_config.BuildConfig.bundle_system_providers`/
     ``bundle_cohorts``, resolved onto
-    :class:`abicheck.cli_helpers_compare.ResolvedCompareConfig`).
+    :class:`abicheck.workflows.compare_configuration.ResolvedCompareConfig`).
 
     Phase 7d (one-comparison-product.md §4.1, ADR-068 D5): ``--fail-on-
     removed-library``/``--on-incomplete-scope``/``--include-private-dso``
@@ -79,7 +79,7 @@ def release_options(func: F) -> F:
     (prerequisite vision A-S4/ADR-065 S4 landed 2026-09-06),
     ``scope.on_incomplete``, and ``release.include_private_dso`` in
     ``.abicheck.yml`` are their only source now, no surviving CLI override,
-    resolved the same way onto :class:`abicheck.cli_helpers_compare.
+    resolved the same way onto :class:`abicheck.workflows.compare_configuration.
     ResolvedCompareConfig`. ``--dso-only`` (the fourth Phase 7d topology
     flag, ``release.dso_only``) lived in ``cli_options.set_input_options``
     instead, not here.
@@ -275,7 +275,7 @@ def app_usage_scope_options(func: F) -> F:
     one of its repeatable values -- two spellings of "name a required
     symbol" collapse into one flag, matching how the file form and the
     inline form always fed the identical contract (see
-    :func:`~abicheck.cli_helpers_compare.load_required_symbols`).
+    :func:`~abicheck.workflows.compare_configuration.load_required_symbols`).
     """
     func = click.option(
         "--used-by-manifest",

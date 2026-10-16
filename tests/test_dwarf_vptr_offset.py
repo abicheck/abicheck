@@ -42,7 +42,7 @@ _HAS_GPP = _has_gpp()
 class TestDwarfSnapshotVptrOffset:
     """Real bit offset of a class's vtable pointer, read from DWARF's own
     artificial ``_vptr.<Class>`` member instead of assumed to be 0 for any
-    polymorphic type -- see ``_finalize_vptr_offsets``'s docstring.
+    polymorphic type -- see ``extract.dwarf_vptr_resolution.finalize_vptr_offsets``'s docstring.
     """
 
     @pytest.fixture()

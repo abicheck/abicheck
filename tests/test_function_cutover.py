@@ -20,7 +20,7 @@ plus the architecture gate this module deliberately does NOT register a
 Unlike ``tests/test_typedef_cutover.py``/``tests/test_constant_cutover.py``,
 this investigation found no payload fact -- or anything else -- for a
 matching-time ``SemanticIR`` lookup to meaningfully consume; see
-``compare/functions.py``'s own module docstring for the full account of why
+``compare/function_cutover.py``'s own module docstring for the full account of why
 and what landed instead. So the property under test here is narrower: since
 ``function_identity_index`` currently performs no ``SemanticIR``/adapter
 read at all, it must be indistinguishable, from every caller's perspective,
@@ -36,8 +36,8 @@ infrastructure that did land: ``legacy_function_ir``.
 from __future__ import annotations
 
 from abicheck.checker import compare
-from abicheck.compare.functions import function_identity_index
-from abicheck.finding_identity import SymbolIdentityIndex
+from abicheck.compare.finding_identity import SymbolIdentityIndex
+from abicheck.compare.function_cutover import function_identity_index
 from abicheck.model import AbiSnapshot, Function, Param, Visibility
 from abicheck.model.fact import Fact
 from abicheck.model.identity import EntityKind, Namespace, entity_id_for_function
@@ -283,7 +283,7 @@ class TestThroughCompare:
 
 class TestSemanticIrCutoverGate:
     """``functions`` is deliberately NOT a closed ``MIGRATED_COHORTS`` entry
-    -- see ``compare/functions.py``'s own module docstring for why (a
+    -- see ``compare/function_cutover.py``'s own module docstring for why (a
     matching-time lookup with nothing real to consume would have been
     registered infrastructure theater, not a migration; Codex review,
     PR #1224). These tests exercise the gate's own mechanics generically

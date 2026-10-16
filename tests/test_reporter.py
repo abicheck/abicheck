@@ -563,7 +563,7 @@ class TestEvidenceStatusInJson:
 
     def test_root_cause_mode_root_type_change_carries_evidence_status(self):
         # Regression (Codex review): --report-mode leaf serializes root type
-        # changes via a separate _leaf_entry() path, not _change_to_dict() —
+        # changes via a separate _leaf_entry() path, not change_to_dict() —
         # evidence_status must be populated there too.
         c = Change(ChangeKind.TYPE_SIZE_CHANGED, "Cfg", "struct Cfg grew")
         r = _result(Verdict.BREAKING, changes=[c])
@@ -575,7 +575,7 @@ class TestEvidenceStatusInJson:
 
     def test_root_cause_mode_root_type_change_carries_schema_2_3_fields(self):
         """Codex review on #557: _leaf_entry() builds its own dict rather
-        than routing through _change_to_dict(), so root type changes in
+        than routing through change_to_dict(), so root type changes in
         leaf_changes[]/changes[] were missing the schema 2.3 `operation`/
         `finding_id` fields present on non-type leaf entries and full-mode
         entries — breaking finding_id correlation for leaf-mode reports."""
@@ -603,7 +603,7 @@ class TestEvidenceStatusInJson:
         assert d["changes"][0]["recommended_action"] == "recompile_and_relink_required"
 
     def test_root_cause_mode_root_type_change_carries_reviewer_action(self):
-        # enum_member_added is both a root-type-change kind (routed through _leaf_entry, which builds its own dict rather than reusing _change_to_dict) and an addition -- must carry reviewer_action in both leaf_changes[] and changes[], matching full-mode entries.
+        # enum_member_added is both a root-type-change kind (routed through _leaf_entry, which builds its own dict rather than reusing change_to_dict) and an addition -- must carry reviewer_action in both leaf_changes[] and changes[], matching full-mode entries.
         c = Change(ChangeKind.ENUM_MEMBER_ADDED, "E::X", "added")
         r = _result(Verdict.COMPATIBLE, changes=[c])
         d = json.loads(to_json(r, report_mode="root-cause"))
@@ -615,7 +615,7 @@ class TestEvidenceStatusInJson:
         type kind (type_size_changed) to COMPATIBLE must not silently drop a
         frozen_namespace_violation-tagged finding below its raw severity in
         leaf_changes — the top-level `severity` block already honours
-        policy_file (via _build_severity_json), so leaf_changes reading
+        policy_file (via build_severity_json), so leaf_changes reading
         "compatible" for the same finding would be a direct contradiction."""
         from abicheck.policy.severity import PRESET_DEFAULT
         from abicheck.policy_file import PolicyFile
@@ -638,7 +638,7 @@ class TestEvidenceStatusInJson:
     def test_root_cause_mode_non_type_change_honours_frozen_namespace_floor(self):
         """Codex review on #549 (follow-on to the root-type leaf-entry fix):
         the adjacent non_type_changes path in the same leaf-mode function
-        called _change_to_dict without policy_file, so a non-root-type kind
+        called change_to_dict without policy_file, so a non-root-type kind
         (func_removed) demoted by a policy override, but tagged
         frozen_namespace_violation, read "compatible" in non_type_changes
         (and the backward-compat changes union) while the top-level severity
@@ -766,7 +766,7 @@ class TestRootCauseReporter:
 
     def test_root_cause_mode_carries_redundant_count_and_pattern_modulations(self):
         """Codex review: root-cause JSON built its own payload from scratch
-        instead of going through _add_changes_block (or mirroring leaf mode's
+        instead of going through add_changes_block (or mirroring leaf mode's
         own copy of the same fields), silently dropping the
         redundant_count/pattern_modulations audit trail full/leaf JSON both
         surface whenever they're non-empty."""
@@ -898,7 +898,7 @@ class TestImpactAssessmentRootCause:
         entry in result.changes itself) must still get impact_assessment.
         root_cause_id in full mode -- matching --report-mode root-cause,
         SARIF, and JUnit, which already fold scoped_only_changes into their
-        own root-cause grouping (see reporter._scoped_only_extra_causes)."""
+        own root-cause grouping (see json_sections.scoped_only_extra_causes)."""
         root = Change(
             ChangeKind.FUNC_REMOVED,
             "ns::internal::helper",
@@ -1060,7 +1060,7 @@ class TestImpactAssessmentRootCause:
 
     def test_suppressed_changes_share_root_cause_id(self):
         # A suppressed finding's root cause is resolved against other
-        # *suppressed* findings (reporter._suppressed_change_entry's own
+        # *suppressed* findings (change_json.suppressed_change_entry's own
         # scoping docstring) -- both correlated findings need to be
         # suppressed together for the grouping to be visible here.
         root = Change(
@@ -1092,7 +1092,7 @@ class TestImpactAssessmentRootCause:
 
 class TestRootCauseMarkdown:
     """G29 Phase 3 slice 4 (ADR-052): --report-mode root-cause markdown/text
-    rendering, sharing reporter._group_changes_by_root_cause with the JSON
+    rendering, sharing report.view.group_changes_by_root_cause with the JSON
     renderer so the two formats can never disagree about grouping."""
 
     def test_groups_findings_sharing_caused_by_type(self):
@@ -1485,7 +1485,7 @@ class TestMarkdownReporter:
         stale reference, so the filtered JSON's nested impact_assessment
         block kept publishing it even though the top-level field was
         correctly cleared (Codex review, fresh evidence)."""
-        from abicheck.impact.model import ImpactAssessment
+        from abicheck.impact.assessment import ImpactAssessment
 
         layout_change = Change(
             ChangeKind.LAYOUT_UNVERIFIABLE,

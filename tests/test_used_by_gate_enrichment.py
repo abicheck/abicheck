@@ -43,7 +43,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 from click.testing import CliRunner
-from hypothesis import given, strategies as st
+from hypothesis import given, settings, strategies as st
 
 from abicheck.checker import DiffResult
 from abicheck.checker_policy import Verdict
@@ -189,6 +189,10 @@ class TestCliExitCodeInvariantToConsumerScope:
         new.write_bytes(b"\x7fELF" + b"\x00" * 200)
         return app, old, new
 
+    # Each example runs two real `compare` CLI invocations (dump, compare and
+    # report rendering), which exceeds Hypothesis's default 200 ms per-example
+    # deadline on a loaded runner. The deadline is not what this test checks.
+    @settings(deadline=None)
     @given(
         removed=st.booleans(),
         consumer_verdict=st.sampled_from(

@@ -22,6 +22,10 @@ from collections.abc import Collection, Mapping
 from .compare.base_class_diff import diff_bases as _diff_bases
 from .compare.enum_sentinel import is_confirmed_enum_sentinel
 from .compare.fact_gate import both_facts_present
+from .compare.public_surface import (
+    reconciled_function_surfaces,
+    should_filter_transitive_runtime_symbols,
+)
 from .compare.record_layout import (
     RecordLayoutIndex,
     record_layout_changes,
@@ -39,10 +43,6 @@ from .diff_helpers import (
     lookup_matched_type as _lookup_matched_type,
     make_change,
     typedef_diff_maps as _typedef_diff_maps,
-)
-from .diff_symbols import (
-    _reconciled_function_surfaces,
-    _should_filter_transitive_runtime_symbols,
 )
 from .diff_types_abicc_parity import (
     # Re-exported (`as`-aliased, not just imported) so both the registration
@@ -169,7 +169,7 @@ def _exported_elf_symbol_names(
     the DWARF-derived Function/Variable lists. Transitive runtime/compiler
     exports are excluded so they can't inflate retention.
     """
-    filter_transitive_runtime_symbols = _should_filter_transitive_runtime_symbols(snap)
+    filter_transitive_runtime_symbols = should_filter_transitive_runtime_symbols(snap)
     return exported_symbol_names(
         getattr(snap, "elf", None),
         symbol_types,
@@ -328,7 +328,7 @@ def _diff_types(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         # use internally. Keeping emitted symbols bare preserves the identity
         # every other consumer already keys on: dumper_hybrid's per-fact
         # provenance dict (type_fact_key/field_fact_key, Codex review PR #608)
-        # and diff_filtering._dedup_cross_kind's DWARF<->AST redundancy
+        # and finding_dedup._dedup_cross_kind's DWARF<->AST redundancy
         # correlation (FIX-F), which bridges a namespaced type's bare-vs-
         # qualified spelling via the separate ``qualified_name`` field rather
         # than requiring ``symbol`` itself to be qualified.
@@ -424,7 +424,7 @@ def _diff_overload_additions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]
     uniqueness test is per scope: ``A::size`` stays distinct from ``B::size``
     even when the dumper recorded both as the leaf ``size``.
     """
-    old_map, new_map = _reconciled_function_surfaces(old, new)
+    old_map, new_map = reconciled_function_surfaces(old, new)
 
     old_by_key: dict[str, list[Function]] = {}
     for f in old_map.values():
@@ -1289,7 +1289,7 @@ def _diff_method_qualifiers(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     to find cross-qualifier pairs in the removed/added sets.
     """
     changes: list[Change] = []
-    old_by_mangled, new_by_mangled = _reconciled_function_surfaces(old, new)
+    old_by_mangled, new_by_mangled = reconciled_function_surfaces(old, new)
 
     # --- Same-mangled checks: pure_virtual and is_static don't change mangling ---
     # is_static: Itanium ABI does NOT encode static-ness in the mangled name

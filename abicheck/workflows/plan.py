@@ -20,7 +20,7 @@ collector/backend combination can produce) is rejected before extraction, with
 a named reason, instead of discovered as a silent no-op mid-run or not
 discovered at all. :func:`AnalysisPlanner.resolve` runs first inside
 :func:`abicheck.service_compare_pipeline.resolve_compare_request` and
-:func:`abicheck.workflows.dump.pipeline.resolve_dump_request` — before either
+:func:`abicheck.workflows.dump.request.resolve_dump_request` — before either
 function touches a header-AST backend, a build-info adapter, or the
 filesystem beyond the small, already-in-hand request paths a check needs to
 classify (e.g. sniffing a ``--build-info`` file's own format) — so a request
@@ -40,9 +40,9 @@ else:
   cannot be determined without invoking it, and it can raise
   ``HeaderCompileContextAmbiguousError`` on genuinely ambiguous build
   evidence — exactly why
-  :class:`abicheck.workflows.dump.pipeline.ResolvedDumpRequest` already
+  :class:`abicheck.workflows.dump.request.ResolvedDumpRequest` already
   excludes the fold's result and runs it only inside
-  :func:`~abicheck.workflows.dump.pipeline.execute_dump_request`, never during
+  :func:`~abicheck.workflows.dump.request.execute_dump_request`, never during
   a side-effect-free resolve step. Running it here, before an
   ``AnalysisPlan`` is returned, would be the identical contract change to
   ``--dry-run``'s "never raises but a usage error" guarantee that decision
@@ -52,7 +52,7 @@ else:
   Those answer a later question — how an already-extracted comparison is
   classified and scored — and for the native ``compare``/``scan`` CLIs that
   question is not even answerable at the point a plan is built:
-  ``cli_compare_receipt.resolve_and_apply()`` (ADR-049 Phase 5) is a
+  ``workflows.compare_configuration.resolve_compare_configuration()`` (ADR-049 Phase 5) is a
   separate, Click-dependent step that runs strictly *after* snapshot
   resolution, over CLI-specific inputs (``--policy``/``--pack``/a discovered
   ``.abicheck.yml``) this module's plain ``CompareRequest``/``DumpRequest``
@@ -61,8 +61,8 @@ else:
   than not recording it.
 
 **One planner, two request shapes.** :func:`AnalysisPlanner.resolve` accepts
-either a :class:`~abicheck.workflows.contracts.CompareRequest` (two sides) or a
-:class:`~abicheck.workflows.contracts.DumpRequest` (one side) and normalizes both into
+either a :class:`~abicheck.workflows.service_requests.CompareRequest` (two sides) or a
+:class:`~abicheck.workflows.service_requests.DumpRequest` (one side) and normalizes both into
 the same per-side :class:`SidePlan` shape before running every registered
 check — so a check that only cares about one side's own requested inputs
 (every check today is exactly this shape) never needs to know which request
@@ -105,8 +105,8 @@ from typing import TYPE_CHECKING
 from ..errors import PlanningError
 
 if TYPE_CHECKING:
-    from .contracts import CompareRequest, DumpRequest
     from .request_inputs import InputSpec
+    from .service_requests import CompareRequest, DumpRequest
 
 __all__ = [
     "AnalysisPlan",
@@ -155,8 +155,7 @@ class SidePlan:
     build_info: Path | None
     build_targets: tuple[str, ...]
     gcc_path: str | None
-    #: ``DumpRequest.resolved_collect_mode`` (``None`` for every ``compare``
-    #: side, which has no such field) -- when set, it is what actually runs,
+    #: ``DumpRequest``/``CompareRequest.resolved_collect_mode`` -- when set, it is what actually runs,
     #: overriding whatever ``requested_depth`` alone would resolve to.
     resolved_collect_mode: str | None = None
     #: The raw, requested ``InputSpec.headers`` -- *not* the effective
@@ -211,7 +210,13 @@ def _side_plan(
         gcc_path=gcc_path,
         resolved_collect_mode=resolved_collect_mode,
         headers=side.headers,
-        build_config=side.build_config,
+        # The planner checks an *explicit* config only; an execution plan's
+        # discovered config is not one (``build_config_explicit``).
+        build_config=(
+            side.execution.build_config
+            if side.execution is not None and side.execution.build_config_explicit
+            else side.build_config
+        ),
     )
 
 
@@ -235,7 +240,7 @@ def _discovered_config_build_targets(
     ``dump``/``compare``'s ``--config``) wins outright; otherwise falls back
     to auto-discovering one at *sources*. CLI cleanup phase two, Block 7 (PR
     C's tail): ``dump``/``compare`` now have this request-level seam too --
-    :class:`~abicheck.workflows.contracts.InputSpec.build_config`, threaded from
+    :class:`~abicheck.workflows.service_requests.InputSpec.build_config`, threaded from
     ``cli_dump_request.build_dump_request`` and from ``compare``'s inline
     ``--old/new-sources`` embed path's nested ``dump_cmd`` invocation, into
     :attr:`SidePlan.build_config` -- so a call site that resolves its
@@ -340,8 +345,8 @@ def bazel_target_scoping_failure(
     A free function, not a method on :class:`SidePlan`/:class:`AnalysisPlan`
     — the known-gap entry names this same silent no-op on ``scan --against``
     too, and the retired ``scan_engine.py``'s candidate resolution (``_build_new_snapshot``)
-    builds a raw ``InputSpec`` directly rather than a :class:`~abicheck.workflows.contracts.CompareRequest`/
-    :class:`~abicheck.workflows.contracts.DumpRequest`, so it has no :class:`AnalysisPlan`
+    builds a raw ``InputSpec`` directly rather than a :class:`~abicheck.workflows.service_requests.CompareRequest`/
+    :class:`~abicheck.workflows.service_requests.DumpRequest`, so it has no :class:`AnalysisPlan`
     of its own to resolve through. Exposing the check itself, over plain
     ``(build_info, build_targets)`` values, lets that call site reuse the
     identical logic instead of a second, independently-maintained copy.
@@ -501,7 +506,7 @@ class AnalysisPlanner:
                 failure found is reported together (:attr:`PlanningError.failures`),
                 not only the first.
         """
-        from .contracts import DumpRequest as _DumpRequest
+        from .service_requests import DumpRequest as _DumpRequest
 
         sides: tuple[SidePlan, ...]
         if isinstance(request, _DumpRequest):
@@ -522,12 +527,16 @@ class AnalysisPlanner:
             operation = "compare"
             sides = (
                 _replace_lang_frontend(
-                    _side_plan("old", request.old, request.depth),
+                    _side_plan(
+                        "old", request.old, request.depth, request.resolved_collect_mode
+                    ),
                     request.lang,
                     request.frontend,
                 ),
                 _replace_lang_frontend(
-                    _side_plan("new", request.new, request.depth),
+                    _side_plan(
+                        "new", request.new, request.depth, request.resolved_collect_mode
+                    ),
                     request.lang,
                     request.frontend,
                 ),

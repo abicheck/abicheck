@@ -55,7 +55,7 @@ from pathlib import Path
 
 import click
 
-from .buildsource.adapters.base import (
+from .buildsource.adapters.adapter_shared import (
     compile_unit_id,
     effective_language,
     extract_abi_relevant_flags,
@@ -154,7 +154,7 @@ def emit_facts_for_command(
         return None
     from .buildsource.source_extractors._argv import strip_launchers
     from .buildsource.source_extractors.resolver import select_source_backend
-    from .dumper_clang import resolve_source_frontend_clang_bin
+    from .extract.compiler_driver import resolve_source_frontend_clang_bin
 
     # The wrapper's whole job is to replay the TU under the *exact* compiler
     # the real build invoked (argv[0], after unwrapping a ccache/distcc-style

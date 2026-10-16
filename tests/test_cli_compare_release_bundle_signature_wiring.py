@@ -36,16 +36,18 @@ import abicheck.bundle as bundle_mod
 from abicheck.bundle_models import BundleSnapshot
 from abicheck.checker_policy import ChangeKind, Verdict
 from abicheck.checker_types import DiffResult
-from abicheck.cli_compare_release_helpers import (
-    _collect_bundle_result,
-    _format_release_json,
-    _release_md_bundle_findings,
-    _run_bundle_analysis,
-)
 from abicheck.elf_metadata import ElfImport, ElfMetadata, ElfSymbol
+from abicheck.frontends.cli.release_report import render_release_summary
 from abicheck.model import AbiSnapshot, Function, Visibility
+from abicheck.report.render_release_markdown import (
+    _release_md_bundle_findings,
+)
 from abicheck.workflows.bundle_symbol_status import (
     build_bundle_signature_evidence,
+)
+from abicheck.workflows.release_bundle import (
+    collect_bundle_result as _collect_bundle_result,
+    run_bundle_analysis as _run_bundle_analysis,
 )
 
 
@@ -436,7 +438,8 @@ class TestBundleAnalysisErrorsAreStructural:
         )
         assert result is not None
 
-        doc = _format_release_json(
+        doc = render_release_summary(
+            "json",
             "COMPATIBLE",
             Path("/old"),
             Path("/new"),
@@ -458,7 +461,8 @@ class TestBundleAnalysisErrorsAreStructural:
         from abicheck.bundle import BundleDiffResult
 
         clean_result = BundleDiffResult(old_root=Path("/old"), new_root=Path("/new"))
-        doc = _format_release_json(
+        doc = render_release_summary(
+            "json",
             "COMPATIBLE",
             Path("/old"),
             Path("/new"),

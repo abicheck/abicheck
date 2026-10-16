@@ -225,15 +225,12 @@ class TestKnownGapStaysDocumented:
     def test_bare_name_collision_is_still_reachable_when_the_change_has_no_identity(
         self,
     ) -> None:
-        """**Documented, still-open** (see ``OpaqueTypeIndex.contains``'s
-        own docstring): narrowing (below) closes the bare-``RecordType.name``
-        collision for a change that carries its own resolvable stable
-        identity -- but a change with no ``entity_id`` at all has nothing
-        for ``strict`` to narrow: it falls straight through to the spelling
-        tier, collision and all, exactly as before. Pinned as a test so the
-        residual gap is executable rather than prose -- change this
-        assertion only if a producer starts stamping every structural-type
-        ``Change`` with an ``entity_id`` unconditionally, do not delete it.
+        """A change with no ``entity_id`` falls through to the spelling tier,
+        which still suppresses it when *no visible declaration* shares the
+        spelling -- the one collision left open here is the one where the
+        spelling is unique to an opaque declaration, which the identity can
+        not disambiguate and no visible namesake contradicts. The visible-
+        namesake case is closed (see ``TestVisibleNamesakeIsNeverSuppressedBySpelling``). Pinned so this by-design suppression stays executable.
         """
         snap = _snap([_opaque("Handle", _STABLE_ID)])
         # A finding about `other::Handle`, rendered bare, with no resolved
@@ -621,3 +618,140 @@ def test_find_by_value_types_ignores_a_braced_structural_template_argument():
         functions=[Function(name="f", mangled="f", return_type=template_by_value)],
     )
     assert "S" in _find_by_value_types(snap_by_value, opaque)
+
+
+class TestIncompletePairingNeverMatchesAcrossScopesByBareName:
+    """Regression: when the stable pairing is not proven complete, the
+    spelling tier must not suppress a finding on a *visible* type merely
+    because an opaque declaration shares its bare ``RecordType.name``
+    (``docs/contribute/known-gaps/opaque-type-suppression-still-falls-back-
+    to-bare-recordtypename.md``, false-clean).
+
+    The oracle is written from the declarations themselves, not from
+    ``OpaqueTypeIndex``: under an incomplete pairing a finding is kept iff its
+    spelling also names a visible (non-opaque) declaration on either side.
+    Opaque namesakes stay suppressed, since both are opaque.
+    """
+
+    @pytest.mark.parametrize("unresolved_side", ["old", "new"])
+    @pytest.mark.parametrize("visible_on", ["none", "old", "new", "both"])
+    def test_a_spelling_shared_with_a_visible_type_is_kept_when_incomplete(
+        self, unresolved_side: str, visible_on: str
+    ) -> None:
+        ns1_id = entity_id_for_type((Namespace("ns1"),), "Handle")
+        ns2_id = entity_id_for_type((Namespace("ns2"),), "Handle")
+        resolved = _opaque("Handle", ns1_id)  # opaque, stable id resolved
+        unresolved = _opaque("Handle")  # opaque, no stable id on this side
+        visible = RecordType(
+            name="Handle", kind="struct", entity_id=ns2_id, size_bits=64
+        )
+
+        def side(name: str, opaque_decl: RecordType) -> AbiSnapshot:
+            decls = [opaque_decl]
+            if visible_on in (name, "both"):
+                decls.append(visible)
+            return _snap(decls)
+
+        if unresolved_side == "old":
+            old = side("old", unresolved)
+            new = side("new", resolved)
+        else:
+            old = side("old", resolved)
+            new = side("new", unresolved)
+
+        # Precondition: this really is the incomplete-pairing case.
+        assert not _find_opaque_types(old).intersect(_find_opaque_types(new)).complete
+
+        # Oracle, from the declarations alone.
+        def named(snap: AbiSnapshot) -> list[RecordType]:
+            return [t for t in snap.declarations.types if t.name == "Handle"]
+
+        visible_namesake = any(not t.is_opaque for t in named(old) + named(new))
+        expected = ["Handle"] if visible_namesake else []
+
+        change = _size_change("Handle", ns2_id)
+        assert _survivors([change], old, new) == expected
+
+    def test_a_visible_type_sharing_an_opaque_spelling_is_kept_under_a_qualified_symbol(
+        self,
+    ) -> None:
+        """The same bug class with a qualified finding symbol: the spelling
+        ``ns2::Handle`` does not match the bare opaque ``Handle`` in the spelling
+        tier, so this pins that qualification never widens a match."""
+        ns1_id = entity_id_for_type((Namespace("ns1"),), "Handle")
+        ns2_id = entity_id_for_type((Namespace("ns2"),), "Handle")
+        old = _snap(
+            [
+                _opaque("Handle", ns1_id),
+                RecordType(
+                    name="Handle", kind="struct", entity_id=ns2_id, size_bits=64
+                ),
+            ]
+        )
+        new = _snap(
+            [
+                _opaque("Handle"),
+                RecordType(
+                    name="Handle", kind="struct", entity_id=ns2_id, size_bits=64
+                ),
+            ]
+        )
+        assert not _find_opaque_types(old).intersect(_find_opaque_types(new)).complete
+        assert _survivors([_size_change("ns2::Handle", ns2_id)], old, new) == [
+            "ns2::Handle"
+        ]
+
+
+class TestVisibleNamesakeIsNeverSuppressedBySpelling:
+    """Closes the two residual gaps the known-gap write-up named for the
+    opaque-type path: a change with no resolvable identity on a
+    *complete* comparison, and an opaque declaration whose stable id is also
+    carried by a visible declaration in the same snapshot.
+
+    Oracle, from the declarations alone: a finding is suppressed only when
+    its declaration is opaque and no visible declaration shares its spelling
+    (for the spelling tier) or its stable identity (for the stable tier) on
+    either side.
+    """
+
+    def test_a_complete_comparison_keeps_a_no_identity_change_on_a_shared_spelling(
+        self,
+    ) -> None:
+        ns1_id = entity_id_for_type((Namespace("ns1"),), "Handle")
+        ns2_id = entity_id_for_type((Namespace("ns2"),), "Handle")
+        snap = _snap(
+            [
+                _opaque("Handle", ns1_id),
+                RecordType(
+                    name="Handle", kind="struct", entity_id=ns2_id, size_bits=64
+                ),
+            ]
+        )
+        # Same snapshot both sides: the pairing is complete by construction.
+        assert _find_opaque_types(snap).intersect(_find_opaque_types(snap)).complete
+        assert _survivors([_size_change("Handle")], snap, snap) == ["Handle"]
+
+    def test_an_opaque_declaration_sharing_a_stable_id_with_a_visible_one_is_kept(
+        self,
+    ) -> None:
+        """Two entries carry one stable identity: one opaque, one a complete
+        definition of the same entity. Under identity semantics the entity is
+        visible here, so a finding on it must not be dropped by the stable tier."""
+        snap = _snap(
+            [
+                _opaque("Handle", _STABLE_ID),
+                RecordType(
+                    name="Handle", kind="struct", entity_id=_STABLE_ID, size_bits=64
+                ),
+            ]
+        )
+        assert _survivors([_size_change("Handle", _STABLE_ID)], snap, snap) == [
+            "Handle"
+        ]
+
+    def test_a_unique_opaque_declaration_is_still_suppressed(self) -> None:
+        """Negative control: with no visible declaration sharing its identity or
+        spelling, the pre-existing suppression still applies."""
+        snap = _snap([_opaque("Handle", _STABLE_ID)])
+        assert _survivors([_size_change("Handle")], snap, snap) == []
+        assert _survivors([_size_change("Handle", _STABLE_ID)], snap, snap) == []

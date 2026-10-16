@@ -41,11 +41,11 @@ from abicheck.model.consumer_requirements import (
     LibraryExportFacts,
 )
 from abicheck.pe_metadata import PeExport, PeMetadata
-from abicheck.policy.consumer_requirements import resolve_pe_ordinal_imports
-from abicheck.resolver import DependencyGraph, ResolvedDSO
+from abicheck.policy.consumer_requirement_evaluation import resolve_pe_ordinal_imports
 from abicheck.stack_binding_diff import diff_runtime_bindings
 from abicheck.stack_checker import StackVerdict, _compute_abi_risk
 from abicheck.workflows.consumer_scope import scope_diff_to_consumer_facts
+from abicheck.workflows.elf_dependency_resolver import DependencyGraph, ResolvedDSO
 
 
 def _elf_snap(elf: ElfMetadata) -> AbiSnapshot:

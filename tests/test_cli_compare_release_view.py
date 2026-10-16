@@ -466,7 +466,7 @@ class TestReleaseViewShowOnly:
         ``findings_truncated_kinds`` from the unfiltered projection must
         still be dropped, not left describing a view the render never
         shows."""
-        from abicheck.cli_compare_release_helpers import _release_findings_for_render
+        from abicheck.report.release_document import release_findings_for_render
 
         library_results = [
             {
@@ -478,7 +478,7 @@ class TestReleaseViewShowOnly:
                 "findings_view_truncated": False,
             }
         ]
-        rendered = _release_findings_for_render(library_results, "functions")
+        rendered = release_findings_for_render(library_results, "functions")
         lib = rendered[0]
         assert lib["findings"] == [{"kind": "func_removed", "symbol": "a"}]
         assert "findings_truncated" not in lib

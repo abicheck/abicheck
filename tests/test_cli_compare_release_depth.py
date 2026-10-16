@@ -66,6 +66,7 @@ import json
 import re
 import subprocess
 from pathlib import Path
+from typing import Any
 
 import pytest
 from click.testing import CliRunner
@@ -260,7 +261,7 @@ class TestEveryDepthRungReachesTheFanOut:
     def test_every_rung_is_forwarded_verbatim_to_every_pair(
         self, tmp_path: Path, requested: str, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Proves the value reaches ``service.run_compare``, not merely that
+        """Proves the value reaches the member's typed request, not merely that
         the CLI stopped rejecting it — a guard could equally have been
         "fixed" by accepting the flag and dropping it on the floor, which is
         the silent-no-op failure the sibling ``--sources`` guard exists to
@@ -269,13 +270,13 @@ class TestEveryDepthRungReachesTheFanOut:
 
         old_dir, new_dir = _release_dirs(tmp_path, "build")
         captured: list[object] = []
-        real_run_compare = service.run_compare
+        real_run_compare_request = service.run_compare_request
 
-        def _capturing(*args: object, **kwargs: object) -> object:
-            captured.append(kwargs.get("depth"))
-            return real_run_compare(*args, **kwargs)
+        def _capturing(request: Any, *args: Any, **kwargs: Any) -> Any:
+            captured.append(request.depth)
+            return real_run_compare_request(request, *args, **kwargs)
 
-        monkeypatch.setattr(service, "run_compare", _capturing)
+        monkeypatch.setattr(service, "run_compare_request", _capturing)
         _invoke(
             "compare",
             str(old_dir),

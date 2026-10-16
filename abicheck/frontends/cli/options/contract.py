@@ -107,7 +107,7 @@ def contract_options(f: F) -> F:
     carried in ``-o json=...``/sarif/junit/html unconditionally, so the
     flag only ever chose whether the markdown/text/review render echoed it
     -- a rendering selector, which is what ``--view suppressions`` is for
-    (:mod:`abicheck.frontends.cli.options.view`).
+    (:mod:`abicheck.frontends.cli.options.compare_view`).
     """
     f = click.option(
         "--contract",
@@ -210,7 +210,7 @@ def resolve_contract_domain(
 
     Normalizing the local value alone is not enough: the two front ends read
     the raw parameters differently -- ``compare`` hands
-    ``cli_compare_receipt.resolve_and_apply`` explicit values, but
+    ``workflows.compare_configuration.resolve_compare_configuration`` explicit values, but
     the retired ``cli_scan._resolve_scan_evaluation_config`` rebuilt its inputs from
     ``ctx.params`` and its typed-parameter set from
     ``ctx.get_parameter_source``. Given *ctx*, the normalization is applied

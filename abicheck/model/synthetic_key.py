@@ -39,7 +39,7 @@ from __future__ import annotations
 #: qualified scope and parameter signature after it (see
 #: ``extract/headers/castxml/functions.py``'s ``function_display_name``).
 #: It is intentionally not a real ABI symbol, only a stable per-overload
-#: identity -- ``diff_symbols._public_functions()`` reads this to exempt such
+#: identity -- ``public_surface.public_functions()`` reads this to exempt such
 #: entries from its ELF-export-set narrowing, which they could never pass (the
 #: key has no real exported symbol to match).
 SYNTHETIC_CTOR_KEY_PREFIX = "__abicheck_ctor__"
@@ -65,7 +65,7 @@ def synthetic_ctor_owner(key: str) -> str | None:
 #: needed: the synthesized "~ClassName" display name is itself already a
 #: stable, unique identity. It is intentionally not a real ABI symbol (a real
 #: Itanium destructor mangling always starts with ``_Z``, never ``~``), only
-#: a stable key — ``diff_symbols._public_functions()`` reads this the same
+#: a stable key — ``public_surface.public_functions()`` reads this the same
 #: way it already does :data:`SYNTHETIC_CTOR_KEY_PREFIX`/
 #: :func:`is_synthetic_ctor_key`, to exempt such entries from its
 #: ELF-export-set narrowing, which they could never pass. Without this, a

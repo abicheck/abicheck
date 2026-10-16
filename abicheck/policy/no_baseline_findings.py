@@ -42,7 +42,7 @@ on "both" sides and the fold called the result present-on-both. It claimed
 history nobody observed. With the baseline genuinely absent, ``compare()``
 stamps :attr:`~abicheck.model.evidence_status.CrossSourceEvolution.
 NOT_EVALUATED` on every candidate-side finding by construction
-(``workflows.cross_source_evolution.
+(``workflows.cross_source_hygiene.
 compute_candidate_cross_source_findings``), so there is no second set of
 states to permit and nothing for a mode-specific rule to police. Deleting
 it is the point: ADR-068 D3's real content -- never report a pre-existing

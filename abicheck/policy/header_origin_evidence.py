@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING, Any
 from ..model.availability import FactStatus
 from ..model.fact import Fact
 from ..model.vocabulary import ScopeOrigin
-from .public_surface import _DEMOTE_ORIGINS, PublicSurface
+from .public_surface_index import _DEMOTE_ORIGINS, PublicSurface
 
 if TYPE_CHECKING:
     from ..model.entities import RecordType

@@ -31,7 +31,7 @@ about after the fact.
 
 **Values and provenance come from different places for the gate, on purpose.**
 The scheme and the four severity levels are resolved by
-``cli_helpers_compare.resolve_compare_config`` *before* this runs, and that
+``workflows.compare_configuration.resolve_compare_config`` *before* this runs, and that
 resolution is what the run's verdict and exit code were computed from -- so
 those are the values a receipt must report, and they are written through
 :func:`~abicheck.contract_context.with_resolved_gate` unchanged. The
@@ -52,13 +52,11 @@ from __future__ import annotations
 
 from collections.abc import Collection, Mapping
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from .frontends.cli.options.params import DEFAULT_POLICY_PROFILE
 
 if TYPE_CHECKING:
-    from .bundle_models import BundleDiffResult
-    from .checker_types import DiffResult
     from .pack_application import PackApplication
     from .workflows.gate import SeverityConfig
 
@@ -115,7 +113,7 @@ def _suppression_source(suppression: Any, path: Any) -> Any:
     )
 
 
-def resolve_cli_config(
+def cli_configuration_inputs(
     params: Mapping[str, Any],
     *,
     typed: Collection[str],
@@ -130,9 +128,13 @@ def resolve_cli_config(
     project_sha256: str | None = None,
     symbols_list: Any = None,
     project_overlays_applied: bool = False,
-) -> Any:
-    """Resolve one :class:`CompatibilityEvaluationConfig` for this invocation.
+) -> tuple[Any, Any]:
+    """This invocation's ``(explicit, project)`` resolver inputs.
 
+    *typed* names the parameters the user really typed (the CLI answers that
+    from Click's ``ParameterSource`` at its own call site and hands it over as
+    data -- the same stated-settings set a typed caller puts in
+    ``CompareRequest.stated_settings``).
     *policy_option* names the flag that selected ``policy`` when it was not
     ``--policy`` -- ``--required-symbol``, whose contract switches an
     untouched ``--policy`` to ``plugin_abi``, with *policy_path*/
@@ -142,16 +144,10 @@ def resolve_cli_config(
     *project_overlays_applied*: this route applies the config's
     ``contract.overlays`` (a single-pair compare under an explicit
     ``--config``), so the receipt states them at ``project_config`` tier.
-
-    Raises whatever the canonical resolver raises (a D7 same-tier conflict, a
-    D8 pack conflict, a malformed pack manifest); mapping those onto an exit
-    code is the caller's job, as that module documents.
     """
     from .compatibility_evaluation_frontend import (
-        FrontEnd,
         ProjectCompatibilityInputs,
         compare_cli_inputs,
-        resolve_compatibility_evaluation_config,
     )
 
     # The declared contract, enforced rather than only documented: every one
@@ -165,25 +161,41 @@ def resolve_cli_config(
             "COMPARE_CONFIG_PARAMS must be forwarded, since an absent one "
             "resolves as unstated rather than failing"
         )
+    explicit = compare_cli_inputs(
+        params,
+        explicit_parameters=typed,
+        policy_file=policy_file,
+        suppression=_suppression_source(suppression, suppress_path),
+        policy_base_option=policy_option,
+        policy_base_path=str(policy_path) if policy_path is not None else None,
+        policy_base_sha256=policy_sha256,
+        public_symbols_list=symbols_list,
+    )
+    project = ProjectCompatibilityInputs.from_build_config(
+        project_cfg,
+        path=project_path,
+        sha256=project_sha256,
+        overlays_applied=project_overlays_applied,
+    )
+    return explicit, project
 
+
+def resolve_cli_config(params: Mapping[str, Any], **kwargs: Any) -> Any:
+    """Resolve one :class:`CompatibilityEvaluationConfig` for this invocation.
+
+    :func:`cli_configuration_inputs` through the canonical resolver. Raises
+    whatever that resolver raises (a D7 same-tier conflict, a D8 pack
+    conflict, a malformed pack manifest); mapping those onto an exit code is
+    the caller's job, as that module documents.
+    """
+    from .compatibility_evaluation_frontend import (
+        FrontEnd,
+        resolve_compatibility_evaluation_config,
+    )
+
+    explicit, project = cli_configuration_inputs(params, **kwargs)
     return resolve_compatibility_evaluation_config(
-        front_end=FrontEnd.CLI,
-        explicit=compare_cli_inputs(
-            params,
-            explicit_parameters=typed,
-            policy_file=policy_file,
-            suppression=_suppression_source(suppression, suppress_path),
-            policy_base_option=policy_option,
-            policy_base_path=str(policy_path) if policy_path is not None else None,
-            policy_base_sha256=policy_sha256,
-            public_symbols_list=symbols_list,
-        ),
-        project=ProjectCompatibilityInputs.from_build_config(
-            project_cfg,
-            path=project_path,
-            sha256=project_sha256,
-            overlays_applied=project_overlays_applied,
-        ),
+        front_end=FrontEnd.CLI, explicit=explicit, project=project
     )
 
 
@@ -286,84 +298,6 @@ def validate_pack_manifests(
     )
 
 
-def resolve_and_apply(
-    params: Mapping[str, Any],
-    *,
-    resolved_cfg: Any,
-    policy: str,
-    contract_evaluation: bool = False,
-    **kwargs: Any,
-) -> tuple[Any, Any, Any]:
-    """Resolve this invocation's configuration, then let its packs configure it.
-
-    Returns ``(config, policy_file, resolved_cfg)``: the resolved
-    configuration (``None`` when nothing would read one -- see
-    :func:`record_resolved_config`), and the policy file and compare config
-    the comparison should actually run with.
-
-    The selected packs are read from ``params['pack_paths']`` and nowhere
-    else. An earlier revision also took them as a keyword and let that
-    overwrite the ``params`` entry, so the two could silently disagree -- and
-    the branches below read only the keyword, meaning a caller that filled
-    ``params`` alone would have its packs *recorded in the receipt and
-    applied to nothing*. That is precisely the decorative-``--pack``
-    regression this module exists to prevent, so there is one source
-    (CodeRabbit review).
-
-    Both halves come from the *same* resolution, which is what makes
-    ``--pack`` real rather than decorative: the resolver has already applied
-    D7 precedence and D8 conflict detection, and
-    :func:`~abicheck.pack_application.pack_application` reads back only the
-    fields whose provenance names a pack. Nothing here decides precedence.
-
-    The order matters and is not incidental: the configuration is resolved
-    from the *explicitly given* ``policy_file`` (``kwargs['policy_file']``),
-    and only then are the packs' contributions folded into a new one. Folding
-    first would present a pack's override to the resolver as an explicitly
-    stated ``--policy-file`` value -- outranking the packs it came from, and
-    misreported in the receipt.
-
-    Raises what the canonical resolver and the pack loader raise; mapping
-    those onto exit 64 is the caller's job, as both modules document.
-    """
-    pack_paths = tuple(params.get("pack_paths") or ())
-    if not contract_evaluation and not pack_paths:
-        # Nothing would read a resolution: no context exists to record one
-        # onto, and no pack can contribute to the run. Resolving anyway would
-        # make every ordinary `compare` newly able to fail on a D7 conflict
-        # it never previously computed.
-        return None, kwargs.get("policy_file"), resolved_cfg
-    config = resolve_cli_config(params, **kwargs)
-    policy_file = kwargs.get("policy_file")
-    if not pack_paths:
-        return config, policy_file, resolved_cfg
-    from .pack_application import (
-        apply_to_compare_config,
-        check_resolved_config_applies_packs,
-        pack_application,
-        policy_file_with_packs,
-    )
-
-    # Checked again here -- but against the *resolution*, not a second read of
-    # the files. `validate_pack_manifests` ran much earlier (before the
-    # dry-run emit) and validated whatever was on disk then; re-reading here
-    # would only move that window rather than close it, since the resolver had
-    # already loaded its own copy. Asking the resolved config is exact: it is
-    # the revision that configures the run, by construction.
-    # `contract_evaluation` is passed because a field like
-    # `contract.unresolved` only has a consumer when a domain is selected --
-    # accepting it otherwise would record active configuration that reads
-    # back as nothing, the decorative-pack failure again (Codex review).
-    check_resolved_config_applies_packs(config, contract_evaluation=contract_evaluation)
-
-    application = pack_application(config, policy_file=policy_file)
-    return (
-        config,
-        policy_file_with_packs(policy_file, application, base_policy=policy),
-        apply_to_compare_config(resolved_cfg, application),
-    )
-
-
 def resolve_release_pack_application(
     params: Mapping[str, Any],
     *,
@@ -380,8 +314,9 @@ def resolve_release_pack_application(
     into each library's own ``CompareRequest`` fields the same way, folded
     per library by :func:`~abicheck.service_compare_pipeline.classify_compare_pair`.
 
-    Distinct from :func:`resolve_and_apply`, which also merges the packs into
-    *one* ``PolicyFile``/``ResolvedCompareConfig`` -- fits a single-pair
+    Distinct from the single-pair ``workflows.compare_configuration.
+    resolve_compare_configuration``, which folds the packs into *one*
+    ``PolicyFile`` -- fits a single-pair
     ``compare``'s single ambient policy file, but the release fan-out
     reloads its own ``PolicyFile`` fresh per library, so this returns the
     pack's *contribution* for the caller to fold in once per library.
@@ -432,37 +367,29 @@ def resolve_release_pack_application(
     ``--contract`` is still rejected as decorative, and with ``--contract``
     it is accepted and threaded through like every other pack field.
 
-    Raises what the canonical resolver and the pack loader raise (a D7
-    same-tier conflict, a D8 pack conflict, an inapplicable, gate-only, or
-    unresolved-only pack); mapping those onto exit 64 is the caller's job.
+    Raises :class:`~abicheck.workflows.compare_configuration.
+    ConfigurationConflictError` (a D7 same-tier conflict, a D8 pack conflict,
+    an inapplicable, gate-only, or unresolved-only pack) or
+    ``ProjectPolicyOverridesError``; mapping those onto exit 64 is the
+    caller's job.
     """
-    pack_paths = tuple(params.get("pack_paths") or ())
     # Runs regardless of `pack_paths` (finding 1) -- see docstring above.
-    config = resolve_cli_config(params, **kwargs)
-    from .pack_application import (
-        PackApplication,
-        check_resolved_config_applies_packs,
-        pack_application,
+    # This function supplies the CLI's inputs only; the resolution itself is
+    # the one the typed release route shares.
+    from .compatibility_evaluation_frontend import FrontEnd
+    from .workflows.compare_configuration import (
+        resolve_release_pack_application as _resolve_release_configuration,
     )
 
-    if not pack_paths:
-        return PackApplication(policy_overrides={}, resolved_config=config)
-    check_resolved_config_applies_packs(
-        config,
-        # A `kind: gate` pack needs no check here: since CLI cleanup phase two
-        # "PR B" slice 2, the release fan-out folds its `severity.*` (no
-        # `exit_code_scheme` any more, PR G2) into its own raw severity inputs
-        # (`cli_compare_release_helpers.apply_release_gate_pack`) the same way
-        # `compare --pack` folds them into `ResolvedCompareConfig` -- see this
-        # function's own docstring.
-        # `contract_evaluation` is this release invocation's own real value
-        # (whether *this* run passed `--contract`) -- the same gate the
-        # single-pair path applies via `resolve_and_apply`, now that this
-        # function's own docstring has confirmed there is no release-specific
-        # hazard left to guard against beyond that.
+    explicit, project = cli_configuration_inputs(params, **kwargs)
+    return _resolve_release_configuration(
+        explicit,
+        front_end=FrontEnd.CLI,
+        project=project,
+        policy_file=kwargs.get("policy_file"),
+        base_policy=params.get("policy") or DEFAULT_POLICY_PROFILE,
         contract_evaluation=contract_evaluation,
     )
-    return pack_application(config, policy_file=kwargs.get("policy_file"))
 
 
 def resolve_release_pack_application_from_ctx(
@@ -498,10 +425,6 @@ def resolve_release_pack_application_from_ctx(
     import click
     import yaml
 
-    from .compatibility_evaluation_resolver import (
-        FieldResolutionError,
-        PackConflictError,
-    )
     from .errors import PackManifestError
     from .workflows.policy_file import PolicyFile
 
@@ -546,8 +469,8 @@ def resolve_release_pack_application_from_ctx(
             symbols_list=None,
         )
     except (
-        FieldResolutionError,
-        PackConflictError,
+        # A D7 same-tier / D8 pack conflict is a `ValueError` subclass of the
+        # resolver's own, covered by the `ValueError` arm below.
         PackManifestError,
         # `resolve_release_pack_application`'s own `resolve_cli_config` call
         # loads `--policy`'s document a *second* time (for D7 provenance,
@@ -677,14 +600,14 @@ def _release_summary_effective_config_block(
     resolving it once more here the same way
     (:func:`~abicheck.frontends.cli.options.params._load_suppression_and_policy`,
     folding *pack_application* like
-    :func:`~abicheck.cli_compare_release_matrix._collect_matrix_result`
+    :func:`~abicheck.workflows.release_compare.collect_matrix_result`
     does) reproduces what any one library's own report shows for these
     fields; reloaded rather than threaded down since no per-library
     ``PolicyFile`` is retained at this scope (the reload runs inside the
     same ``dedup_validate_overrides_warnings()`` scope ``compare_release_cmd``
     opens, so it doesn't duplicate a per-library warning).
 
-    Called from ``cli_compare_release_helpers``/``cli_compare_release_matrix``/
+    Called from ``frontends.cli.release_report``/``cli_compare_release_matrix``/
     ``frontends.cli.release_summary`` (all three at their own ``no_growth``
     cap, hence living here).
 
@@ -770,191 +693,3 @@ def _release_summary_effective_config_block(
     resolved = getattr(pack_application, "resolved_config", None)
     ec_fields = release_summary_fields(resolved, ec_result, policy_file=pf, gate=gate)
     return effective_config_digest(ec_fields), ec_fields
-
-
-def _release_md_library_findings(
-    library_results: list[dict[str, object]],
-    *,
-    display_cap: int | None = None,
-) -> list[str]:
-    """Per-library findings (kind/symbol/description) -- symbol names
-    included. R2 (CLI-audit): the release Markdown report's own
-    ``## Libraries`` table is counts only; reuses ``entry["findings"]`` --
-    the same capped list ``cli_compare_release_matrix._release_finding_dicts``
-    already projects, built regardless of output format -- mirroring
-    ``cli_compare_release_helpers``'s existing per-finding sections
-    (``_release_md_bundle_findings``/``_release_md_matrix_findings``, which
-    call this). Notes a truncated list (``entry["findings_truncated"]``)
-    rather than presenting it as complete. Lives here (not next to its
-    callers) for the identical reason as
-    :func:`_release_summary_effective_config_block` above -- both
-    ``cli_compare_release_helpers.py``/``cli_compare_release_matrix.py``
-    are at their own ``no_growth`` cap.
-
-    **Not routed through ``report/`` (Codex review, PR #1016), checked
-    rather than assumed fine:** AGENTS.md's task-routing table says a new
-    output-format section belongs in ``report/``, and this genuinely is one.
-    Two things stop a clean move today, though -- this function's own real
-    siblings, not just this one: neither ``_release_md_bundle_findings`` nor
-    ``_release_md_matrix_findings`` (the two existing per-finding sections
-    this mirrors) lives in ``report/`` either (``cli_compare_release_helpers.py``/
-    ``bundle.py``), so this is an already-unmigrated neighborhood, not one
-    function breaking an otherwise-followed rule. More fundamentally, this
-    function's input is *not* the shape ``report/``'s ``compute_*``/``render_*``
-    split is built around: every per-library ``DiffResult`` is deliberately
-    discarded before this ever runs (``cli_compare_release_matrix.
-    _strip_diff_results_and_adjust_verdict``, to bound peak memory across a
-    whole release run's ``library_results``), so this reads an already-
-    flattened ``list[dict]`` projection, not a live ``DiffResult``/
-    ``ReportDocument``. Moving only the rendering half into ``report/``
-    while leaving that flattening decision here would be a new, unreviewed
-    input shape for the package to accept, not a mechanical relocation --
-    real, separately-justified follow-up work (migrating this whole
-    three-function neighborhood together, once its memory-lifecycle
-    constraint has a place in that package's own model), not a same-PR fix.
-    """
-    from .reporter import release_finding_detail_lines
-
-    lines: list[str] = []
-    for lib in library_results:
-        findings = lib.get("findings")
-        impact_table = lib.get("impact_table")
-        impact_root_entries = (
-            impact_table.get("root_entries") if isinstance(impact_table, dict) else None
-        ) or []
-        impact_direct_removals = (
-            impact_table.get("direct_removals", 0)
-            if isinstance(impact_table, dict)
-            else 0
-        )
-        has_impact = bool(impact_root_entries) or bool(impact_direct_removals)
-        if not findings and not has_impact:
-            continue
-        lines += ["", f"### `{lib['library']}` Findings", ""]
-        all_findings = cast(list[dict[str, object]], findings or [])
-        # The presentation cap lives here, at render time, not in the
-        # projection every format shares: a human summary may be bounded, a
-        # machine document may not be silently truncated (see
-        # `report.release_display_limits`, which owns the one automatic cap
-        # since plan slice 7m retired every way of overriding it).
-        shown = all_findings if display_cap is None else all_findings[:display_cap]
-        rendered_truncated = len(shown) < len(all_findings)
-        for f in shown:
-            symbol = f.get("symbol")
-            lines.append(
-                f"- **{f.get('kind')}**" + (f" — `{symbol}`" if symbol else "")
-            )
-            lines.extend(release_finding_detail_lines(f))
-        if rendered_truncated or lib.get("findings_truncated"):
-            # `-o json=...` *is* a complete-list source now, unless this
-            # run explicitly asked for a cap (`--max-findings-per-library`
-            # or the env var), which is what this note distinguishes. It
-            # used not to be: the release JSON carried the identical capped
-            # projection, so a reader following the old advice met the same
-            # truncated list again.
-            complete_report = lib.get("complete_report")
-            if lib.get("findings_truncated"):
-                where = (
-                    f"`{complete_report}`"
-                    if complete_report
-                    else "a per-component export (`-o json=DIR/`), or compare this library individually"
-                )
-                lines.append(
-                    f"  - _...additional findings omitted; see {where} for "
-                    "the complete list._"
-                )
-            else:
-                lines.append(
-                    "  - _...additional findings omitted from this summary; "
-                    "`-o json=...` carries the complete list._"
-                )
-        if has_impact:
-            # `--view impact`'s aggregate counterpart (Codex review, PR
-            # #1154 follow-up: "Reject unsupported impact views instead of
-            # silently dropping them") -- same shape
-            # `reporter_markdown.compute_impact_table` produces for a
-            # single-pair `compare` report, rendered per library here since
-            # a release has one impact table per library, not one overall.
-            lines.append("")
-            lines.append(f"**Impact** for `{lib['library']}`:")
-            for entry in impact_root_entries:
-                lines.append(
-                    f"- `{entry.get('symbol')}` ({entry.get('kind')}): "
-                    f"{entry.get('iface_count', 0)} interface(s), "
-                    f"{entry.get('caused', 0)} caused change(s)"
-                )
-            if impact_direct_removals:
-                lines.append(f"- {impact_direct_removals} direct removal(s)")
-    return ["", "## Per-Library Findings", *lines] if lines else []
-
-
-def release_disposition_audit_block(
-    library_results: list[dict[str, object]],
-    matrix_result: DiffResult | None = None,
-    severity_config: SeverityConfig | None = None,
-    bundle_result: BundleDiffResult | None = None,
-) -> dict[str, object]:
-    """ADR-067 C-S2: the release/bundle fan-out's own ``disposition_audit``.
-
-    Folds every library's already-computed per-library block (each library
-    entry carries one, set alongside ``entry["findings"]`` in
-    ``cli_compare_release_pairwise._compare_one_library`` -- the identical
-    scalar-``compare`` shape, so a consumer parses one shape everywhere),
-    the release-global probe-matrix comparison's own audit, and the
-    cross-library bundle-analysis findings (*bundle_result*, Codex review,
-    fresh evidence: "Include bundle findings in the release disposition
-    audit" -- without this, a release whose only change is a
-    ``bundle_library_removed``-shaped bundle finding reported a breaking
-    ``bundle_findings`` entry alongside a ``detected_total: 0``/
-    ``effective_total: 0`` audit, breaking D3's "every observed change is
-    accounted for" conservation rule), into one release-level total via
-    :func:`~abicheck.report.disposition_audit.fold_disposition_audits`. A
-    library entry with no ``disposition_audit`` (an operational-error/
-    not-comparable/unsupported outcome that never reached a real
-    comparison) contributes nothing, the same way such a library
-    contributes no ``findings`` either -- it is not a comparison the
-    audit's raw total should silently pretend happened.
-
-    ``BundleDiffResult`` carries no ``changes``/``redundant_changes``/etc.
-    buckets of its own (only ``bundle_findings``, a distinct ``BundleFinding``
-    type) -- unlike ``matrix_result``, a real ``DiffResult`` `checker.compare`
-    already built -- so a real (not merely duck-typed) minimal ``DiffResult``
-    is built here with ``changes`` set from ``bundle_findings.to_change()``,
-    scored under the bundle's own policy/policy_file, for
-    :func:`~abicheck.report.disposition_audit.compute_disposition_audit` to
-    read.
-
-    Lives here rather than in ``cli_compare_release_helpers.py``/
-    ``cli_compare_release_matrix.py`` for the identical reason
-    :func:`_release_summary_effective_config_block`/
-    :func:`_release_md_library_findings` above do: both original candidate
-    homes are at their own ``no_growth`` cap with zero headroom, and this
-    module is the established shared home for a release-summary-wide fold
-    neither has room for.
-    """
-    from .checker_types import DiffResult as _DiffResult
-    from .report.disposition_audit import (
-        DispositionAudit,
-        compute_disposition_audit,
-        fold_disposition_audits,
-    )
-
-    audits: list[DispositionAudit] = []
-    for lib in library_results:
-        block = lib.get("disposition_audit")
-        if isinstance(block, dict):
-            audits.append(DispositionAudit.from_dict(block))
-    if matrix_result is not None:
-        audits.append(compute_disposition_audit(matrix_result, severity_config))
-    if bundle_result is not None and bundle_result.bundle_findings:
-        bundle_as_diff_result = _DiffResult(
-            old_version="",
-            new_version="",
-            library="<bundle>",
-            changes=[f.to_change() for f in bundle_result.bundle_findings],
-            verdict=bundle_result.bundle_verdict,
-            policy=bundle_result.policy,
-            policy_file=bundle_result.policy_file,
-        )
-        audits.append(compute_disposition_audit(bundle_as_diff_result, severity_config))
-    return fold_disposition_audits(audits).to_dict()

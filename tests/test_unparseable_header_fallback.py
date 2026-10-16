@@ -19,6 +19,7 @@ from abicheck.errors import HeaderToolchainError, SnapshotError
 from abicheck.extract.castxml_header_compat import write_castxml_aggregate
 from abicheck.extract.unparseable_header_fallback import (
     _scan_diagnostics,
+    attribute_failing_headers,
     parse_excluding_unparseable_headers,
 )
 from abicheck.model.header_exclusion_record import (
@@ -561,3 +562,85 @@ def test_real_castxml_attributes_the_failing_header_at_every_position(tmp_path, 
         _castxml_dump, headers, [tmp_path], "cc", lang="c"
     )
     assert excluded == [headers[bad]]
+
+
+@pytest.mark.parametrize("seed", range(20))
+def test_attribution_names_exactly_the_failing_headers_or_nothing(seed):
+    """The header graph's one-shot re-parse trusts this list; it must equal the
+    headers that fail on their own, and be empty whenever the exclusion loop
+    would refuse (every header blamed, nothing attributable)."""
+    rng = random.Random(seed)
+    headers = _headers(rng.randint(2, 9))
+    bad = set(rng.sample(headers, rng.randint(1, len(headers))))
+    exc = SnapshotError("clang failed (exit 1)")
+    exc.stderr = _stderr_for(headers, bad, seed % 3)
+    expected = [] if len(bad) == len(headers) else [h for h in headers if h in bad]
+    assert attribute_failing_headers(exc, headers) == expected
+
+
+def test_attribution_is_empty_for_an_unattributable_error():
+    exc = SnapshotError("clang failed")
+    exc.stderr = f"{AGG}:1:1: error: something in the aggregate itself"
+    assert attribute_failing_headers(exc, _headers(4)) == []
+
+
+@pytest.mark.parametrize("width", [10, 999, 1000, 5000])
+def test_clang_failure_carries_full_diagnostics_for_attribution(tmp_path, width):
+    """The message truncates clang's stderr; the attached ``stderr`` never
+    does, so a late header's error (past the 1000-char message cut) is still
+    attributable."""
+    from types import SimpleNamespace
+
+    from abicheck.dumper_clang_errors import _parse_clang_ast_result
+
+    headers = _headers(3)
+    tail = f"In file included from {AGG}:9:\n{headers[2]}:1:2: error: late\n"
+    stderr = "x" * width + "\n" + tail
+    with pytest.raises(SnapshotError) as info:
+        _parse_clang_ast_result(
+            SimpleNamespace(returncode=1, stderr=stderr),
+            tmp_path / "ast.json",
+            tmp_path / "cache.json",
+            cache_write=False,
+        )
+    assert info.value.stderr == stderr
+    assert attribute_failing_headers(info.value, headers) == [headers[2]]
+
+
+@pytest.mark.parametrize("bad_index", [0, 1, 3])
+def test_castxml_selected_meta_comes_from_the_returned_full_parse(tmp_path, bad_index):
+    """Probe and confirmation attempts parse other header sets (concurrently);
+    only the final full-set parse that produced the returned root may report
+    its selected tool/metadata. Oracle: each fake call tags its metadata with
+    the exact header set it parsed."""
+    from xml.etree.ElementTree import Element
+
+    from abicheck.extract.headers.castxml.probe import (
+        castxml_dump_excluding_unparseable,
+    )
+
+    headers = [tmp_path / f"h{i}.h" for i in range(5)]
+    bad = headers[bad_index]
+
+    def fake_dump(active, *, _selected_tool_out=None, _selected_meta_out=None):
+        tag = ",".join(p.name for p in active)
+        _selected_tool_out.append(f"tool:{tag}")
+        _selected_meta_out.append((f"cc:{tag}", False))
+        if bad in active:
+            exc = SnapshotError("castxml failed")
+            exc.stderr = f"{bad}:1:2: fatal error: nope\n"
+            raise exc
+        root = Element("root")
+        root.set("set", tag)
+        return root
+
+    tools: list = []
+    metas: list = []
+    root, excluded = castxml_dump_excluding_unparseable(
+        fake_dump, headers, _selected_tool_out=tools, _selected_meta_out=metas
+    )
+    assert excluded == [bad]
+    final = ",".join(p.name for p in headers if p != bad)
+    assert root.get("set") == final
+    assert tools == [f"tool:{final}"]
+    assert metas == [(f"cc:{final}", False)]

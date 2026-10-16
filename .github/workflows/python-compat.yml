@@ -1,19 +1,18 @@
 name: Python compatibility
 
-# Tiered Python testing. The *full* suite runs on one modern interpreter --
-# `ci.yml`'s `unit-tests` job, canonical Python 3.13 (Linux, plus the macOS
-# and Windows legs), which also owns the 95% coverage floor. Re-running all
-# ~50,000 tests on every other supported interpreter mostly re-proved the
-# same thing at a full suite's cost per leg, while 3.11 -- the floor
-# `requires-python = ">=3.11"` promises -- were not tested at all.
-#
-# This workflow covers the rest of the supported range cheaply instead:
-# every non-canonical interpreter builds the sdist+wheel, installs the
-# *wheel* (not an editable checkout) into a clean venv, imports every
-# `abicheck` module (catches syntax/stdlib-API drift, which is what actually
-# breaks across versions), exercises the CLI, and runs a small, broad smoke
-# subset of the unit suite. The newest in-development CPython is tested as
-# a prerelease and is non-blocking until its final release.
+# Tiered Python testing. `ci.yml`'s `unit-tests` job runs the full suite
+# with coverage (80% floor) on canonical 3.14. This workflow adds, on every
+# PR, with no continue-on-error (required in .github/AGENTS.md terms; no check
+# is mechanically merge-blocking on main):
+#   * full-suite: the same full fast suite on 3.15 (3.14 is already covered by
+#     ci.yml's canonical lane);
+#   * free-threading: the full fast suite on 3.15t with the GIL disabled;
+#   * smoke: sdist+wheel build, *wheel* install into a clean venv, import of
+#     every module, CLI and a smoke subset on 3.11/3.12/3.14/3.15. 3.11 (the
+#     `requires-python` floor) is smoke-only by design: it proves the package
+#     still imports and installs there, not that the full suite passes.
+# A smoke-only, non-blocking 3.15 lane is how a str-Enum serialization
+# break (~1,265 failing tests on 3.15) went unnoticed; don't regress to it.
 
 on:
   push:
@@ -37,34 +36,28 @@ jobs:
     name: smoke (py${{ matrix.python-version }})
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    # A prerelease interpreter (or a dependency without wheels for it yet)
-    # must not block merges; drop the flag once that version is final.
-    continue-on-error: ${{ matrix.experimental }}
     strategy:
       fail-fast: false
       matrix:
-        python-version: ['3.11', '3.12', '3.14']
-        experimental: [false]
-        # The 3.15 prerelease leg is non-blocking (continue-on-error), so on a
-        # PR it only occupied a runner. It runs on `main` pushes, the weekly
-        # schedule, dispatch, and PRs labelled `ci:full`.
-        include: >-
-          ${{ (github.event_name != 'pull_request'
-               || contains(github.event.pull_request.labels.*.name, 'ci:full'))
-              && fromJSON('[{"python-version": "3.15", "experimental": true}]')
-              || fromJSON('[]') }}
+        # 3.15 (and 3.15t below) are required lanes: a continue-on-error leg went red
+        # on a str-mixin Enum serialization break and nobody noticed.
+        python-version: ['3.11', '3.12', '3.14', '3.15']
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
         with:
           python-version: ${{ matrix.python-version }}
-          allow-prereleases: ${{ matrix.experimental }}
+          allow-prereleases: true
           cache: 'pip'
       - name: Build sdist and wheel
+        # verify.py's `distribution-build` step: the isolated `build` run, the
+        # `twine check` and the metadata validation that ci.yml's
+        # fair-metadata job runs on every PR. Replaces the inline
+        # `python -m build` + `twine check dist/*` pair. --require-complete
+        # makes a missing build/twine fail instead of skipping.
         run: |
           python -m pip install --upgrade pip build twine
-          python -m build
-          twine check dist/*
+          python scripts/verify.py --profile pr --only distribution-build --require-complete
       - name: Install the built wheel into a clean venv
         run: |
           python -m venv "$RUNNER_TEMP/venv"
@@ -121,6 +114,7 @@ jobs:
             tests/test_cli_root_surface.py \
             tests/test_checker.py \
             tests/test_serialization.py \
+            tests/test_str_enum_serialized_token.py \
             tests/test_packaged_policy_examples.py \
             tests/test_castxml_free_examples.py
 
@@ -135,17 +129,15 @@ jobs:
     # 3.15t is the base free-threaded interpreter this project tests; 3.14t is
     # deliberately not covered. Taken from conda-forge (its `python_rc` label
     # while 3.15 is a release candidate) via the same pinned, sha256-verified
-    # micromamba `scripts/setup_dev_env.sh` uses. Non-blocking until 3.15 is
-    # final, like the 3.15 smoke leg above.
-    name: free-threading (py3.15t)
-    # Non-blocking like the 3.15 smoke leg, so off plain PR pushes for the
-    # same reason; `ci:full` opts a PR in (e.g. one touching concurrency).
-    if: >-
-      github.event_name != 'pull_request'
-      || contains(github.event.pull_request.labels.*.name, 'ci:full')
+    # micromamba `scripts/setup_dev_env.sh` uses. Required, like the 3.15
+    # smoke leg above.
+    name: free-threading (py3.15t, shard ${{ matrix.shard }}/3)
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-    continue-on-error: true
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
     env:
       MICROMAMBA_VERSION: '2.9.0-0'
       MICROMAMBA_SHA256: '366cd9cd8be14df1ab8ed50352a82111082a36686b2d389fdb79a92c3fafb3e3'
@@ -163,6 +155,9 @@ jobs:
             "python=3.15=*_cp315t" pip
           "$RUNNER_TEMP/py315t/bin/python" -VV
           echo "PY=$RUNNER_TEMP/py315t/bin/python" >> "$GITHUB_ENV"
+          # Action-lane tests shell out to `python3` on PATH; it must be the
+          # interpreter abicheck is installed into, not the runner's system one.
+          echo "$RUNNER_TEMP/py315t/bin" >> "$GITHUB_PATH"
       - name: Install abicheck
         run: |
           "$PY" -m pip install -e ".[dev]"
@@ -189,23 +184,46 @@ jobs:
               sys.exit("an imported extension module re-enabled the GIL")
           print("all abicheck modules imported; GIL still disabled")
           EOF
-      - name: Concurrency and smoke tests without the GIL
+      - name: Keep this job's temporary files off the shared /tmp
+        run: echo "TMPDIR=$RUNNER_TEMP" >> "$GITHUB_ENV"
+      - name: Full fast suite without the GIL (one shard)
         env:
           PYTHON_GIL: '0'
         run: |
-          "$PY" -m pytest -q --tb=short -r fE -n auto \
-            -m "not integration and not libabigail and not abicc and not slow" \
-            tests/test_release_concurrency_policy.py \
-            tests/test_include_graph_parallel.py \
-            tests/test_include_graph.py \
-            tests/test_parallel_probe.py \
-            tests/test_ast_acquisition_retention.py \
-            tests/test_ast_acquisition_raw_entry_bound.py \
-            tests/test_l2_ast_acquisition_singleflight.py \
-            tests/test_spelling_match_cache_concurrency.py \
-            tests/test_release_admission.py \
-            tests/test_compare_release_concurrency_integration.py \
-            tests/test_process_resources.py \
-            tests/test_cli_root_surface.py \
-            tests/test_checker.py \
-            tests/test_serialization.py
+          "$PY" -m pytest tests/ -q --tb=short -r fE -n auto --dist worksteal \
+            -m "not integration and not libabigail and not abicc and not slow and not repo_scan" \
+            --shard=${{ matrix.shard }}/3
+
+  full-suite:
+    # The full fast suite (same selection as ci.yml's canonical 3.14
+    # `unit-tests`, minus coverage) on 3.15, on every PR. A smoke subset on
+    # these interpreters let a 3.15 json/str-Enum serialization break
+    # (~1,265 failing tests) go unnoticed.
+    name: full-suite (py${{ matrix.python-version }}, shard ${{ matrix.shard }}/3)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.15']
+        shard: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
+        with:
+          python-version: ${{ matrix.python-version }}
+          allow-prereleases: true
+          cache: 'pip'
+      - name: Keep this job's temporary files off the shared /tmp
+        run: echo "TMPDIR=$RUNNER_TEMP" >> "$GITHUB_ENV"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+      - name: Full fast suite (one shard)
+        run: |
+          pytest tests/ -q --tb=short -r fE -n auto --dist worksteal \
+            -m "not integration and not libabigail and not abicc and not slow and not repo_scan" \
+            --shard=${{ matrix.shard }}/3

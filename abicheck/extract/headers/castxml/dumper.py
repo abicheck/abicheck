@@ -76,7 +76,7 @@ from ....extract.headers.castxml import (
     records as _castxml_records,
     scope as _castxml_scope,
     type_resolution as _castxml_type_resolution,
-    typedefs as _typedefs_helpers,
+    typedef_parsing as _typedefs_helpers,
 )
 from ....extract.headers.castxml.names import (
     _SYNTHETIC_DTOR_KEY_PREFIX as _SYNTHETIC_DTOR_KEY_PREFIX,
@@ -89,7 +89,7 @@ from ....extract.headers.castxml.names import (
     is_synthetic_ctor_key as is_synthetic_ctor_key,
     is_synthetic_dtor_key as is_synthetic_dtor_key,
 )
-from ....extract.headers.castxml.typedefs import (
+from ....extract.headers.castxml.typedef_parsing import (
     _deprecation_marker as _deprecation_marker,
     _extract_contract_attributes as _extract_contract_attributes,
 )
@@ -115,7 +115,7 @@ from ....model.identity import (
     entity_id_for_typedef,
     entity_id_for_variable,
 )
-from ....provenance import header_from_location
+from ...declaration_provenance import header_from_location
 
 
 class _CastxmlParser:

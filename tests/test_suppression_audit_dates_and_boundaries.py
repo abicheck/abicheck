@@ -172,7 +172,7 @@ class TestPersistentHygieneUsesTheCompatibleSet:
 
 def test_a_finding_id_rule_matches_at_the_callers_date() -> None:
     """The `finding_id` selector path decides expiry at *today* too."""
-    from abicheck.finding_identity import report_canonical_finding_id
+    from abicheck.compare.finding_identity import report_canonical_finding_id
 
     change = _change()
     rule = Suppression(
@@ -190,7 +190,7 @@ def test_a_finding_id_rule_matches_at_the_callers_date() -> None:
 def test_a_finding_id_rule_still_checks_its_other_selectors() -> None:
     """`finding_id` narrows the rule's other selectors; it does not replace
     them, so the change itself is still matched against `symbol`."""
-    from abicheck.finding_identity import report_canonical_finding_id
+    from abicheck.compare.finding_identity import report_canonical_finding_id
 
     change = _change()
     finding_id = report_canonical_finding_id(change)

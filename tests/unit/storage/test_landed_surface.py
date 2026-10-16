@@ -45,8 +45,8 @@ _PLAN = (
 )
 
 _MODULES = (
-    "abicheck.storage.availability",
-    "abicheck.storage.identity",
+    "abicheck.storage.availability_ledger",
+    "abicheck.storage.occurrence_identity",
     "abicheck.storage.canonical",
     "abicheck.storage.versioning",
     "abicheck.storage.package",
@@ -81,6 +81,7 @@ _INTERNAL_MODULES = (
     "abicheck.storage.atomic_file",
     "abicheck.storage.project_package_archive",
     "abicheck.storage.zip_member",
+    "abicheck.storage.generation_scope",
 )
 
 

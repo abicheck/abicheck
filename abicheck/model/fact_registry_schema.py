@@ -273,6 +273,7 @@ REFERENCE_FLAG_COVERAGE: dict[str, tuple[tuple[str, str], ...]] = {
     "clang_va_list_facts_reliable": (("Param", "is_va_list"),),
     "castxml_var_access_facts_reliable": (("Variable", "access"),),
     "param_kind_facts_reliable": (("Param", "kind"),),
+    "inline_facts_reliable": (("Function", "is_inline"),),
 }
 
 
@@ -298,6 +299,9 @@ REFERENCE_FLAG_COVERAGE: dict[str, tuple[tuple[str, str], ...]] = {
 #: not an absent constant a future contributor would have to reinvent. An
 #: entry that no longer matches a real, still-unconverted field fails the
 #: same check, so neither half can quietly go stale.
+# Function.is_inline (ADR-081, guarded by the stale 'inline' family) was the last
+# case-(a) field left unconverted; it now carries a Fact[bool] sibling
+# (schema v60, storage/fact_codec.py), so nothing is listed here.
 _CASE_A_UNCONVERTED: tuple[tuple[str, str], ...] = ()
 
 #: Case (b) — see the note above; emptied in Phase 5's seventh batch

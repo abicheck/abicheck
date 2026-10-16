@@ -36,7 +36,7 @@ one permitted difference (*which* front end stated a value: ``explicit_cli``
 vs. ``api_request``, and the option spelling that goes with it), and
 ``tests/test_compatibility_evaluation_frontend.py`` runs the CLI's own
 ``compare`` kwargs against the equivalent
-:class:`~abicheck.workflows.contracts.CompareRequest` through it:
+:class:`~abicheck.workflows.service_requests.CompareRequest` through it:
 
 - :func:`compare_cli_inputs` -- the ``compare`` command's real kwargs
   (``cli.py``'s option destinations: ``--contract``, ``--scope-public-headers``,
@@ -46,7 +46,7 @@ vs. ``api_request``, and the option spelling that goes with it), and
   caller would pass), since several of those options carry a non-``None``
   click default that must not be mistaken for a stated value.
 - :func:`compare_request_inputs` -- the same semantic fields off a typed
-  :class:`~abicheck.workflows.contracts.CompareRequest`.
+  :class:`~abicheck.workflows.service_requests.CompareRequest`.
 - :meth:`ProjectCompatibilityInputs.from_build_config` -- the project's own
   ``.abicheck.yml`` (``buildsource.build_config.BuildConfig``), contributing
   at ``project_config`` tier.
@@ -74,7 +74,7 @@ import hashlib
 import json
 from collections.abc import Collection, Hashable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, cast
@@ -133,7 +133,7 @@ from .workflows.ownership_contract_inputs import (
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from .buildsource.build_config import BuildConfig
     from .policy_file import PolicyFile
-    from .workflows.contracts import CompareRequest
+    from .workflows.service_requests import CompareRequest
 
 # Field names double as provenance-receipt keys. Declared once so the receipt
 # a consumer reads and the pack-route table in
@@ -162,7 +162,7 @@ SEVERITY_CATEGORY_FIELDS: Mapping[str, str] = {
 }
 
 
-class FrontEnd(str, Enum):
+class FrontEnd(StrEnum):
     """Which front end stated a run's explicit inputs.
 
     ADR-049 D7 puts "explicit CLI" and "explicit API request" in the *same*
@@ -749,9 +749,7 @@ def collect_force_public_symbols(
     ignored (à la abi-compliance-checker ``-symbols-list``). Inline trailing
     comments are not stripped — a ``#`` must start the line to be a comment.
 
-    Lives here rather than in ``cli_helpers_compare.py`` (which re-exports it
-    as ``_collect_force_public_symbols`` for its existing callers) so this
-    module can build ``surface.explicit_scope`` from *both* sources without
+    Lives here rather than in the CLI layer, so this module can build ``surface.explicit_scope`` from *both* sources without
     importing a CLI-layer module. Reading only the inline tuple made a
     list-file-only invocation resolve to no explicit scope at all, and a
     mixed one silently drop every symbol the file supplied (Codex review).
@@ -877,7 +875,7 @@ def _explicit_scope(
     """Resolve ``surface.explicit_scope`` -- an *additive* overlay field.
 
     ``--public-symbol``, ``--public-symbols-list`` and ``scope.public_symbols``
-    are documented (ADR-037 D4, ``cli_helpers_compare.resolve_compare_config``)
+    are documented (ADR-037 D4, ``workflows.compare_configuration.resolve_compare_config``)
     as merging, not overriding: the CLI list widens the project's rather than
     replacing it. Each of the three is recorded as its own ``selected_by``
     entry, with the path of the file it came from where there is one. That is a genuine exception to D7's per-field
@@ -1012,7 +1010,7 @@ def resolve_compatibility_evaluation_config(
     any more (CLI cleanup phase two PR G2 deleted the manual algorithm
     selector everywhere): the gate algorithm is fully determined by whether
     a severity setting is in effect, resolved the identical way
-    ``cli_helpers_compare.resolve_compare_config`` computes it, so there is
+    ``workflows.compare_configuration.resolve_compare_config`` computes it, so there is
     nothing left for this D7 resolution to decide about it.
 
     Raises :class:`~abicheck.compatibility_evaluation_resolver.FieldResolutionError`
@@ -1037,7 +1035,7 @@ def resolve_compatibility_evaluation_config(
         ``None`` for an input only the CLI can state, where the CLI spelling
         is the only truthful one.
 
-        *api_field* is the :class:`~abicheck.workflows.contracts.CompareRequest`
+        *api_field* is the :class:`~abicheck.workflows.service_requests.CompareRequest`
         spelling, because that is the typed surface this resolver was built
         against -- but "the API" is not one namespace. ``ScanRequest`` names
         the same three inputs ``scope_to_public_surface``/``policy_file``/
@@ -1557,7 +1555,7 @@ def _severity_active(
 ) -> bool:
     """Whether *any* severity setting is in effect (drives ``auto``).
 
-    Mirrors ``cli_helpers_compare.resolve_compare_config``'s own
+    Mirrors ``workflows.compare_configuration.resolve_compare_config``'s own
     ``severity_active`` -- a preset or any per-category value, from the CLI
     or the project config -- and additionally counts a ``kind: gate`` pack
     that assigns a category, since a pack-supplied severity is no less "in
@@ -1796,9 +1794,11 @@ def compare_request_inputs(
     policy_file: PolicyFile | None = None,
     suppression: SuppressionSource | None = None,
 ) -> ExplicitCompatibilityInputs:
-    """Normalize a typed :class:`~abicheck.workflows.contracts.CompareRequest`.
+    """Normalize a typed :class:`~abicheck.workflows.service_requests.CompareRequest`.
 
-    Every field is read as *stated*: unlike the CLI, the typed request has no
+    Every field is read as *stated* unless ``request.stated_settings`` names
+    the stated ones (then an unnamed ``policy`` is the built-in default, as
+    for the CLI); unlike the CLI, the typed request has no
     "unset" representation for ``policy`` (defaults to ``"strict_abi"``) or
     ``scope_public`` (defaults to ``True``) -- a caller constructing the
     request chose those values, whether deliberately or by accepting the
@@ -1825,11 +1825,16 @@ def compare_request_inputs(
         # Phase 7, states no domain: the evidence-adaptive built-in default
         # decides. Only `False` (the legacy alias for `all`) is a statement.
         scope_public_headers=None if request.scope_public else False,
-        policy_base=stated_policy_base(request.policy, policy_file),
+        policy_base=(
+            stated_policy_base(request.policy, policy_file)
+            if request.stated_settings is None or "policy" in request.stated_settings
+            else None
+        ),
         policy_file=policy_file,
         public_symbols=tuple(sorted(request.force_public_symbols or ())),
         suppression=suppression,
         severity_preset=request.severity_preset,
+        pack_paths=tuple(str(p) for p in request.pack_paths),
         header_dirs=header_dir_spellings(
             (*request.new.headers, *request.new.public_header_dirs)
         ),

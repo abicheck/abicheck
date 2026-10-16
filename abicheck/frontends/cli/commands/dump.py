@@ -35,14 +35,6 @@ from ....cli_dump_helpers import (
     resolve_dump_collect_context,
     resolve_dump_debug_format,
 )
-from ....cli_helpers_compare import (  # noqa: F401  — re-exported to keep cli import sites stable
-    _canonical_library_key as _canonical_library_key,
-    _collect_force_public_symbols as _collect_force_public_symbols,
-    _merge_redundant_changes as _merge_redundant_changes,
-    _provenance_timestamp as _provenance_timestamp,
-    _version_sort_key as _version_sort_key,
-    _warn_ignored_flags as _warn_ignored_flags,
-)
 from ....cli_options import (
     LANG_DEFAULT,
     apply_compile_config_env_toggles,
@@ -65,7 +57,6 @@ from ....service_compare_evidence import (
     dump_cli_compile_db_path,
 )
 from ..dump_debug_config import (
-    DumpDebugConfig,
     resolve_dump_compile_context,
     resolve_dump_project_config,
 )
@@ -74,19 +65,16 @@ from ..options.params import (
 )
 
 if TYPE_CHECKING:
-    from ....dry_run_estimate import CompileContext
+    pass
 
 
 # `main` is the Click group this command registers on; importing it here and
 # importing this module from `cli.py`'s registration block is the same
 # side-effect pattern every sibling `cli_*` command module already uses.
 from ....cli import main
-from ..options.provenance import dump_provenance_option, parse_provenance_tokens
-from ..runtime import (
-    _resolve_debug_artifact,
-    _setup_verbosity,
-    _stamp_provenance,
-)
+from ....workflows.provenance import stamp_provenance
+from ..options.dump_provenance import dump_provenance_option, parse_provenance_tokens
+from ..runtime import _setup_verbosity
 
 
 def _load_dump_manifest_or_reject(
@@ -269,14 +257,6 @@ def dump_cmd(
     # and is never populated from the CLI. ADR-074's -D/--define is NOT this: it
     # is a typed macro list (`defines` above), folded by name in the resolver.
     gcc_options: str | None = None,
-    _resolved_compile_context: CompileContext | None = None,
-    _resolved_collect_mode: str | None = None,
-    _resolved_include_labels: dict[Path, str] | None = None,
-    _resolved_lang_explicit: bool | None = None,
-    _resolved_changed_paths: tuple[str, ...] = (),
-    # Phase 7: no CLI spelling; compare's inline embed still forwards these.
-    lang: str | None = None,
-    _resolved_debug: DumpDebugConfig | None = None,
 ) -> None:
     """Dump ABI snapshot of a shared library to JSON.
 
@@ -319,11 +299,11 @@ def dump_cmd(
         click.get_current_context(),
         build_config=build_config,
         sources=sources,
-        lang=lang,
+        lang=None,
         lang_default=LANG_DEFAULT,
         apply_env_toggles=apply_compile_config_env_toggles,
         exclude_headers=tuple(exclude_headers),
-        resolved_debug=_resolved_debug,
+        resolved_debug=None,
         debug_roots=debug_roots,
     )
     config_path, lang, _config_lang_explicit = (
@@ -356,20 +336,10 @@ def dump_cmd(
     # bookkeeping, and threaded through so the primary snapshot pass and the
     # header-graph pass agree on the same explicit-vs-auto-detected decision.
     #
-    # `_resolved_lang_explicit` (Codex review): the private hook
-    # `_embed_inline_source_side`'s nested `ctx.invoke(dump_cmd, ...)` uses to
-    # hand in an explicitness already computed against *compare*'s own real
-    # ctx -- mirrors `_resolved_compile_context`/`_resolved_collect_mode`/
-    # `_resolved_include_labels` immediately above. Phase 7 removed `--lang`
-    # from `dump`'s CLI entirely, so `resolve_dump_lang_and_env_toggles`
-    # above is now the only source of an explicit request (`compile.lang`);
-    # `_resolved_lang_explicit` still wins when the caller (compare's inline
-    # embed) forwards its own already-resolved value.
-    lang_explicit = (
-        _resolved_lang_explicit
-        if _resolved_lang_explicit is not None
-        else _config_lang_explicit
-    )
+    # `--lang` has no CLI spelling on `dump` (Phase 7):
+    # `resolve_dump_lang_and_env_toggles` above is the only source of an
+    # explicit request (`compile.lang`).
+    lang_explicit = _config_lang_explicit
 
     # ADR-050 D3: parsed before the collect/compile-context resolution below so
     # a bad manifest fails fast, and validated against the *raw* CLI values
@@ -386,7 +356,6 @@ def dump_cmd(
     # suppression, and warn on an explicitly-requested deep depth without sources.
     collect_mode, headers = resolve_dump_collect_context(
         depth,
-        _resolved_collect_mode,
         sources,
         build_info,
         headers,
@@ -468,7 +437,6 @@ def dump_cmd(
     # Phase 7: every argument below is now a fixed "nothing explicit" input
     # (compile: config only, no escape hatch, ADR-068 D5 guard #2).
     _cc, includes = resolve_dump_compile_context(
-        _resolved_compile_context,
         gcc_options=gcc_options,
         sysroot=None,
         nostdinc=False,
@@ -621,8 +589,6 @@ def dump_cmd(
         follow_deps=follow_deps,
         search_paths=search_paths,
         ld_library_path=ld_library_path,
-        include_labels=_resolved_include_labels,
-        resolved_collect_mode=_resolved_collect_mode,
         compile_db_filter=compile_db_filter,
         build_config=build_config,
         ownership=dump_ownership_request(config_path),
@@ -642,7 +608,7 @@ def dump_cmd(
     # `try_match_compile_db`'s own docstring for the one accepted
     # imprecision vs. the real run's `match_compile_db`.
     from ....workflows.artifact.compile_db_match import try_match_compile_db
-    from ....workflows.dump.pipeline import DumpExecutionOptions
+    from ....workflows.dump.request import DumpExecutionOptions
     from ..dump_build_context_preview import (
         add_execution_options_dry_run_section,
         add_ownership_dry_run_section,
@@ -658,12 +624,6 @@ def dump_cmd(
             compile_db_filter=compile_db_filter,
             seed_collect_mode=_resolved.collect_mode,
             source_frontend_from_folded_context=True,
-            # `_resolved_changed_paths` (ADR-068 Phase 2c): the changed-path
-            # seed `compare`'s own inline `--sources` embed resolved, so this
-            # nested dump's L4/L5 collection narrows by the same seed the
-            # caller narrowed its collect mode by. `()` -- every direct `dump`
-            # invocation -- is the pre-existing behaviour unchanged.
-            changed_paths=_resolved_changed_paths,
         ),
     )
 
@@ -733,7 +693,7 @@ def dump_cmd(
                 notify=_click_notify,
                 build_config=config_path,
                 build_config_explicit=_project.explicit,
-                stamp_provenance=_stamp_provenance,
+                stamp_provenance=stamp_provenance,
                 write_snapshot_output=_write_snapshot_output_fn,
                 git_tag=git_tag,
                 build_id=build_id,
@@ -857,11 +817,13 @@ def dump_cmd(
         # resolved a detached debug artifact from here either, before this
         # migration.
         if debug_roots or debuginfod:
-            artifact = _resolve_debug_artifact(
+            from ....workflows.extraction import resolve_debug_info
+
+            artifact = resolve_debug_info(
                 so_path,
-                debug_roots,
-                debuginfod,
-                debuginfod_url,
+                debug_roots=list(debug_roots) or None,
+                enable_debuginfod=debuginfod,
+                debuginfod_urls=[debuginfod_url] if debuginfod_url else None,
             )
             if artifact:
                 click.echo(f"Debug info: {artifact.source}", err=True)
@@ -900,7 +862,7 @@ def dump_cmd(
     )
     from ....workflows.extraction import (
         dump_manifest_header_roots,
-        resolve_source_frontend_clang_bin,
+        resolve_l4_replay_clang_bin,
     )
     from ..dump_execute import execute_and_write_dump_cli_run
 
@@ -909,7 +871,7 @@ def dump_cmd(
         notify=_click_notify,
         build_config=config_path,
         build_config_explicit=_project.explicit,
-        stamp_provenance=_stamp_provenance,
+        stamp_provenance=stamp_provenance,
         write_snapshot_output=_write_snapshot_output_fn,
         git_tag=git_tag,
         build_id=build_id,
@@ -929,11 +891,7 @@ def dump_cmd(
         + dump_manifest_header_roots(parsed_dump_manifest)
         + tuple(_resolved.public_headers)
         + tuple(_resolved.public_header_dirs),
-        clang_bin=resolve_source_frontend_clang_bin(
-            gcc_path,
-            gcc_prefix,
-            exclude_cl_style=False,
-        ),
+        clang_bin=resolve_l4_replay_clang_bin(gcc_path, gcc_prefix),
         snapshot_compression=snapshot_compression,
         # L4 replay classifies declarations against these roots; with none it
         # classifies everything private and links nothing (measurement in

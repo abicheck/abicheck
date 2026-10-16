@@ -12,13 +12,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Shared CLI runtime: verbosity, output, provenance, and the exit decision.
+"""Shared CLI runtime: verbosity, output, and the exit decision.
 
 ADR-061 Phase 4. These are the pieces every command needs and none of them
-owns -- setting up logging, writing or echoing a rendered report, stamping
-provenance onto a snapshot, and turning a finished comparison into a process
-exit status. They were ``cli.py``'s, which is why that file could not become a
-registration facade while they lived there.
+owns -- setting up logging, writing or echoing a rendered report, and turning
+a finished comparison into a process exit status. They were ``cli.py``'s,
+which is why that file could not become a registration facade while they
+lived there. Work that is not a terminal concern lives with its owner, so the
+typed API reaches the same code: snapshot provenance in
+:mod:`abicheck.workflows.provenance`, operand metadata and the same-binary
+note in :mod:`abicheck.workflows.compare_classify`.
 
 The exit path is the one worth reading: ``_exit_with_severity_or_verdict``
 folds three orthogonal axes -- the compatibility verdict, the ADR-049
@@ -53,20 +56,9 @@ except ImportError:  # pragma: no cover - rich-click is a declared dependency
 # import for two value types.
 from ...checker_types import DiffResult
 from ...cli_audit import echo_filtered_surface, echo_reconciled
-from ...cli_helpers_compare import (  # noqa: F401  — re-exported to keep cli import sites stable
-    _canonical_library_key as _canonical_library_key,
-    _collect_force_public_symbols as _collect_force_public_symbols,
-    _merge_redundant_changes as _merge_redundant_changes,
-    _provenance_timestamp as _provenance_timestamp,
-    _version_sort_key as _version_sort_key,
-    _warn_ignored_flags as _warn_ignored_flags,
-)
-from ...cli_resolve import (
-    _detect_binary_format,
-    _sniff_text_format,
-)
+from ...cli_resolve import _detect_binary_format
 from ...frontends.cli import help as cli_help
-from ...model.change import LibraryMetadata
+from ...workflows.compare_finalize import _merge_redundant_changes
 from .options.export import ExportSet
 from .options.params import (
     _load_suppression_and_policy as _load_suppression_and_policy,  # noqa: F401  — re-exported to keep cli import sites (test suite) stable
@@ -74,10 +66,8 @@ from .options.params import (
 
 if TYPE_CHECKING:
     from ...model.change import Change
-    from ...workflows.extraction import DebugArtifact
     from ...workflows.gate import EffectiveGate, SeverityConfig
 
-from ...model import AbiSnapshot
 
 _logger = logging.getLogger("abicheck")
 # `extract.progress`'s logger, by name: frontends may not import `extract`
@@ -138,66 +128,6 @@ def _safe_write_output(output: Path, text: str) -> None:
         output.write_text(text, encoding="utf-8")
     except OSError as exc:
         raise click.ClickException(f"Cannot write to {output}: {exc}") from exc
-
-
-def _stamp_provenance(
-    snap: AbiSnapshot,
-    *,
-    git_tag: str | None,
-    build_id: str | None,
-    no_git: bool,
-) -> None:
-    """Fill provenance metadata on a snapshot (mutates in place).
-
-    ``created_at`` honours ``SOURCE_DATE_EPOCH`` (the reproducible-builds
-    standard): when set to a Unix timestamp, that fixed time is used instead of
-    the wall clock, so two dumps of an identical library are byte-identical —
-    enabling content-addressable caching and reproducible-build verification.
-    An unset or malformed value falls back to the current time.
-    """
-    import os
-    import subprocess
-
-    snap.created_at = _provenance_timestamp(os.environ.get("SOURCE_DATE_EPOCH"))
-    snap.git_tag = git_tag
-    snap.build_id = build_id
-
-    if not no_git:
-        try:
-            result = subprocess.run(
-                ["git", "rev-parse", "HEAD"],
-                capture_output=True,
-                text=True,
-                timeout=5,
-                check=False,
-            )
-            if result.returncode == 0:
-                snap.git_commit = result.stdout.strip()
-        except (FileNotFoundError, subprocess.TimeoutExpired):
-            pass  # git not available or not a repo — leave as None
-
-
-def _collect_metadata(path: Path) -> LibraryMetadata | None:
-    """Compute SHA-256 and file size for a library artifact, or ``None`` for a text-based snapshot/manifest (JSON, ``Module.symvers``) -- not a binary, so a same-binary comparison must never claim it."""
-    if path.is_dir():
-        # A storage-v2 `ProjectSnapshot` package dir (the one directory
-        # `classify_compare_operand` still routes through the single-pair
-        # path) is not a single hashable file -- same "not a binary" no-op
-        # `_sniff_text_format`'s own text-format branches below already
-        # apply, without `read_bytes()` raising `IsADirectoryError` first.
-        return None
-    text_fmt = _sniff_text_format(path)
-    if text_fmt in ("json", "symvers"):
-        return None
-
-    import hashlib
-
-    data = path.read_bytes()
-    return LibraryMetadata(
-        path=str(path),
-        sha256=hashlib.sha256(data).hexdigest(),
-        size_bytes=len(data),
-    )
 
 
 # Exit code for an invalid invocation (bad arguments, unknown option, invalid
@@ -306,98 +236,6 @@ class _AbicheckGroup(_RootGroupBase):
 
 
 cli_help.configure_rich_help()  # register --help option-group panels (G21.8 / M1)
-
-
-def _resolve_debug_artifact(
-    so_path: Path,
-    debug_roots: tuple[Path, ...],
-    debuginfod: bool,
-    debuginfod_url: str | None,
-) -> DebugArtifact | None:
-    """Resolve optional separate debug artifacts for dump."""
-    from ...workflows.extraction import resolve_debug_info
-
-    return resolve_debug_info(
-        so_path,
-        debug_roots=list(debug_roots) or None,
-        enable_debuginfod=debuginfod,
-        debuginfod_urls=[debuginfod_url] if debuginfod_url else None,
-    )
-
-
-def _validate_view(
-    ctx: click.Context,
-    param: click.Parameter,
-    value: tuple[str, ...],
-) -> tuple[str, ...]:
-    """Eagerly validate ``--view`` tokens (ADR-068 D4/Phase 5) so an
-    unrecognized token or a malformed ``show=...`` filter surfaces before
-    any work runs, the same eagerness ``--show-only`` already had.
-
-    Returns the raw token tuple unchanged (Click needs a value on this
-    dest); the real derived values are computed once more, cheaply, by
-    :func:`abicheck.frontends.cli.options.view.parse_view_tokens` right
-    before ``run_compare`` is called, so there is exactly one place that
-    ever turns tokens into ``report_mode``/``show_only``/``demangle``/
-    ``explain_patterns``.
-    """
-    from .options.view import parse_view_tokens
-
-    try:
-        parse_view_tokens(value)
-    except ValueError as exc:
-        raise click.BadParameter(str(exc)) from exc
-    return value
-
-
-def _render_output(
-    fmt: str,
-    result: DiffResult,
-    old: AbiSnapshot,
-    new: AbiSnapshot | None = None,
-    *,
-    follow_deps: bool = False,
-    show_only: str | None = None,
-    report_mode: str = "full",
-    show_impact: bool = False,
-    severity_config: SeverityConfig | None = None,
-    demangle: bool = False,
-    contract_evaluation: bool = False,
-    require_complete_analysis: bool = False,
-) -> str:
-    """Render comparison result in the requested output format.
-
-    No ``stat``/``show_recommendation`` parameters: the one-line summary is
-    reached only via ``fmt == service_render.ONELINE_FORMAT``
-    (``-o oneline=...``), and the summary-only JSON via
-    ``service.to_stat_json``.
-
-    ``show_recommendation=True`` is still passed explicitly below even though
-    :func:`service.render_output`'s own default is now ``True`` as well. It is
-    redundant, deliberately: this wrapper states the CLI's own contract (the
-    release recommendation is unconditional for every CLI invocation) rather
-    than inheriting it, so a future change to the library default cannot alter
-    CLI output without a test here failing first. It previously *compensated*
-    for a ``False`` default, which is the divergence the defaults-alignment
-    pass removed.
-    """
-    from ...service import render_output
-
-    return render_output(
-        fmt,
-        result,
-        old,
-        new,
-        follow_deps=follow_deps,
-        show_only=show_only,
-        report_mode=report_mode,
-        show_impact=show_impact,
-        severity_config=severity_config,
-        demangle=demangle,
-        contract_evaluation=contract_evaluation,
-        show_recommendation=True,
-        require_complete_analysis=require_complete_analysis,
-    )
 
 
 def _load_probe_matrix_changes(
@@ -642,74 +480,17 @@ def _log_debug_resolution(
 
 def _finalize_compare_result(
     result: DiffResult,
-    metadata_old_input: Path,
-    metadata_new_input: Path,
     *,
     show_redundant: bool,
     severity_config: SeverityConfig | None = None,
     contract_evaluation: bool = False,
-    old_snapshot: AbiSnapshot | None = None,
-    new_snapshot: AbiSnapshot | None = None,
 ) -> None:
-    """Attach metadata and emit redundancy/filter/suppression output.
+    """Emit redundancy/filter/suppression output for a classified result.
 
-    ``metadata_old_input``/``metadata_new_input`` must be the *original*
-    library paths -- resolved through any GNU ld linker-script chain, but
-    from *before* ``_embed_inline_source_sides`` may have rewritten
-    ``old_input``/``new_input`` to a temporary embedded-snapshot ``.abi.json``
-    path (Codex review). ``_collect_metadata`` returns ``None`` for a
-    JSON/Perl-text path, so passing the post-embed operands here would
-    silently drop ``note_if_same_binary_compared``'s byte-identical-binaries
-    warning for any ``--old/new-sources``/raw ``--build-info`` comparison,
-    even when the two underlying native binaries really are identical.
-    Callers already resolve this same pre-embed pair for
-    ``--used-by``/``--required-symbol`` scoping (``used_by_old_input``/
-    ``used_by_new_input``) -- reuse that pair here rather than threading a
-    third copy of the same resolution through.
-
-    ``old_snapshot``/``new_snapshot``, when given, feed Item 4's snapshot-
-    content-digest fallback (Codex review, fresh evidence: this native CLI
-    path was missing it entirely, unlike the typed-API path's
-    ``service_compare_pipeline.classify_compare_pair``) -- only consulted
-    when neither side got real metadata above.
+    Operand metadata and the same-binary note are attached by the shared
+    classification (``workflows.compare_classify``), from the pre-embed
+    operand paths the CLI hands it.
     """
-    # Routed through `workflows.extraction`/`workflows.gate`, not
-    # `binary_utils`/`confidence` directly, and not through `service` --
-    # this module is `frontends` layer under ADR-061, which may import
-    # `workflows` but must never import back through the `service`/`cli`
-    # compatibility facades (abicheck/frontends/AGENTS.md).
-    # `note_if_same_binary_compared` lives in `workflows.gate` rather than
-    # `workflows.extraction` (Codex review): it decides part of the process
-    # response a completed comparison returns, not an operation performed on
-    # an input, which is what `extraction.py`'s own docstring scopes it to.
-    from ...workflows.extraction import resolve_linker_script_chain
-    from ...workflows.gate import note_if_same_binary_compared
-
-    def _hashable_path(
-        p: Path,
-    ) -> Path:  # a text snapshot/manifest can coincidentally match the INPUT()/GROUP() probe -- skip linker-script resolution for it (Codex review)
-        return (
-            p
-            if _sniff_text_format(p) in ("json", "symvers")
-            else resolve_linker_script_chain(p)
-        )
-
-    result.old_metadata = _collect_metadata(_hashable_path(metadata_old_input))
-    result.new_metadata = _collect_metadata(_hashable_path(metadata_new_input))
-    old_digest = new_digest = None
-    if (
-        result.old_metadata is None
-        and result.new_metadata is None
-        and old_snapshot is not None
-        and new_snapshot is not None
-    ):
-        from ...workflows.gate import snapshot_identity_digests
-
-        old_digest, new_digest = snapshot_identity_digests(old_snapshot, new_snapshot)
-    note_if_same_binary_compared(
-        result, old_snapshot_digest=old_digest, new_snapshot_digest=new_digest
-    )
-
     if show_redundant and result.redundant_changes:
         _merge_redundant_changes(result)
     # Plan slice 7o: both ledgers are unconditional. They used to be gated
@@ -725,7 +506,9 @@ def _finalize_compare_result(
     # batched call a host with no in-process `cxxfilt` forks a `c++filt`
     # per distinct symbol in the loops below (Codex review, PR #1284).
     if result.out_of_surface_changes or result.reconciled_changes:
-        from ...reporter import prewarm_change_demangling
+        from ...report.change_json import (
+            prewarm_change_demangling,
+        )
 
         prewarm_change_demangling(result)
     if result.out_of_surface_changes:

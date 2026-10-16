@@ -369,7 +369,7 @@ def test_msvc_driver_scan_malformed_env_split_string_does_not_raise() -> None:
     """The same malformed ``-S`` value must not raise through the real
     ``adapters.base._msvc_driver_scan`` chokepoint either -- not merely
     through ``strip_launchers`` in isolation."""
-    from abicheck.buildsource.adapters.base import _msvc_driver_scan
+    from abicheck.buildsource.adapters.adapter_shared import _msvc_driver_scan
 
     argv = ["env", "-S", "clang-cl -DFOO='a /c x.cc"]
     # Must not raise; degrades to a best-effort scan over the whitespace-
@@ -1006,7 +1006,7 @@ def test_is_msvc_command_true_for_env_split_string_clang_cl() -> None:
     landed on index 0 (``"env"``) for this exact input shape, since the
     expanded-and-stripped result happened to share the same length as the
     original three-token input."""
-    from abicheck.buildsource.adapters.base import _is_msvc_command
+    from abicheck.buildsource.adapters.adapter_shared import _is_msvc_command
 
     assert _is_msvc_command(["env", "-S", "clang-cl /c x.cc"]) is True
 
@@ -1014,7 +1014,7 @@ def test_is_msvc_command_true_for_env_split_string_clang_cl() -> None:
 def test_msvc_driver_token_resolves_through_env_split_string() -> None:
     """The driver TOKEN itself, not merely the boolean, must also resolve
     correctly through the same expansion."""
-    from abicheck.buildsource.adapters.base import msvc_driver_token
+    from abicheck.buildsource.adapters.adapter_shared import msvc_driver_token
 
     assert msvc_driver_token(["env", "-S", "clang-cl /c x.cc"]) == "clang-cl"
 
@@ -1022,7 +1022,7 @@ def test_msvc_driver_token_resolves_through_env_split_string() -> None:
 def test_is_msvc_command_env_split_string_with_launcher() -> None:
     """A compiler-cache launcher inside the split string is still unwrapped
     before CL-style driver-name matching."""
-    from abicheck.buildsource.adapters.base import _is_msvc_command
+    from abicheck.buildsource.adapters.adapter_shared import _is_msvc_command
 
     assert _is_msvc_command(["env", "-S", "sccache clang-cl /c x.cc"]) is True
 
@@ -1031,7 +1031,7 @@ def test_is_msvc_command_negative_control_env_split_string_gnu_driver() -> None:
     """Negative control: an ``env -S``-expanded GNU (non-CL) command must
     still read as non-MSVC -- the fix must not flip every ``-S``-expanded
     command to MSVC dialect indiscriminately."""
-    from abicheck.buildsource.adapters.base import _is_msvc_command
+    from abicheck.buildsource.adapters.adapter_shared import _is_msvc_command
 
     assert _is_msvc_command(["env", "-S", "gcc -c x.c"]) is False
 
@@ -1039,7 +1039,7 @@ def test_is_msvc_command_negative_control_env_split_string_gnu_driver() -> None:
 def test_is_msvc_command_negative_control_ordinary_command_unaffected() -> None:
     """Negative control: an ordinary (non-``env``) MSVC command is
     completely unaffected by the expansion step."""
-    from abicheck.buildsource.adapters.base import _is_msvc_command
+    from abicheck.buildsource.adapters.adapter_shared import _is_msvc_command
 
     assert _is_msvc_command(["clang-cl", "/c", "x.cc"]) is True
     assert _is_msvc_command(["gcc", "-c", "x.c"]) is False
@@ -1065,7 +1065,7 @@ def test_expand_env_split_prefixes_follows_launcher_then_nested_env_s() -> None:
 def test_is_msvc_command_true_for_launcher_then_nested_env_split_string() -> None:
     """End-to-end through the real consumer: ``sccache env -S 'clang-cl /c
     x.cc'`` must be recognized as MSVC-dialect."""
-    from abicheck.buildsource.adapters.base import (
+    from abicheck.buildsource.adapters.adapter_shared import (
         _is_msvc_command,
         msvc_driver_token,
     )
@@ -1079,7 +1079,7 @@ def test_is_msvc_command_negative_control_launcher_only_no_nested_env() -> None:
     """Negative control: a launcher with NO nested ``env -S`` behaves
     exactly as before -- the fix must not spuriously expand anything when
     there is nothing to expand."""
-    from abicheck.buildsource.adapters.base import _is_msvc_command
+    from abicheck.buildsource.adapters.adapter_shared import _is_msvc_command
 
     assert _is_msvc_command(["sccache", "clang-cl", "/c", "x.cc"]) is True
     assert _is_msvc_command(["sccache", "gcc", "-c", "x.c"]) is False

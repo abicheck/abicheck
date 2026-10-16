@@ -246,4 +246,64 @@ INTEGRATION_BUG_CLASSES: tuple[BugClass, ...] = (
             "persisted_encoding": ("schema1", "schema2"),
         },
     ),
+    BugClass(
+        id="imports.side_effect_import_reorders_registration",
+        invariant=(
+            "Detector execution order is detector priority order (the order "
+            "findings are produced and reported in, and the tie-break "
+            "cross-detector dedup keeps), and it is the same whichever "
+            "abicheck module a process imports first: it is declared "
+            "(`detector_registry.DETECTOR_MODULE_ORDER`), never implied by the "
+            "registration counter. Reported twice in one PR: deleting a "
+            "`checker.py` re-export import of `diff_filtering` (whose side "
+            "effect imported `diff_symbols`) reordered every report, and the "
+            "mutation lane's traced run -- where some test imported "
+            "`diff_symbols` before `checker` -- rendered every golden with "
+            "`kabi`/`elf_layout` in another position."
+        ),
+        fixed_by=(1564,),
+        seed_tests=(
+            # Every detector-hosting module (and four transitive importers)
+            # imported first in a fresh interpreter must give the checker-first
+            # order; the checker-first order is checked against anchor pairs
+            # recorded from main, an oracle independent of the declared tuple.
+            "tests/test_detector_registration_order.py",
+        ),
+    ),
+    BugClass(
+        id="identity.edge_matched_on_coarse_key",
+        invariant=(
+            "A graph diff matches edges on their full identity "
+            "(`GraphEdge.relation_key()`: src, dst, kind, role), never on a "
+            "coarser projection: a dependency kept on both sides whose role "
+            "set differs is reported as a changed relation, never dropped "
+            "and never split into a removed+added pair, and identical role "
+            "sets report nothing. When exactly one side carries no role "
+            "data (a graph stored before roles were stamped) the relation "
+            "is a coverage gap, never a fabricated change. The reported "
+            "instance was `diff_source_graph` keying on `(src, dst, kind)`, "
+            "so `param` -> `return` on a public declaration diffed empty."
+        ),
+        fixed_by=(1557,),
+        seed_tests=(
+            # Exhaustive domain: every pair of role sets of size 0-2 over
+            # each role-bearing kind's roles plus the role-less case, against
+            # the raw per-side relation_key() sets as oracle; plus real gcc
+            # libraries through `abicheck dump`/`compare`.
+            "tests/test_source_graph_role_diff.py",
+            # Harness H3 cell: role-distinct relations keep distinct keys.
+            "tests/test_family_f3_identity.py",
+        ),
+        public_surfaces=("cli",),
+        axes={
+            "edge_kind": (
+                "DECL_HAS_TYPE",
+                "TYPE_HAS_FIELD_TYPE",
+                "TYPE_INHERITS",
+                "DECL_REFERENCES_DECL",
+            ),
+            "role_data": ("stamped", "role_less_one_side", "role_less_both_sides"),
+            "entry_visibility": ("public", "private"),
+        },
+    ),
 )

@@ -15,7 +15,7 @@
 
 """One fact family's availability record — the leaf half of ADR-062 D3.
 
-Split out of :mod:`abicheck.storage.availability` when that module crossed
+Split out of :mod:`abicheck.storage.availability_ledger` when that module crossed
 the 800-line production cap, along the same line as
 :mod:`abicheck.storage.entity_ids`: the record knows nothing about the
 ledger that indexes it, while the ledger cannot be expressed without it.

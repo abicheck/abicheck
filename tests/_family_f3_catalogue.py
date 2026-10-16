@@ -40,6 +40,7 @@ reports it.
 from __future__ import annotations
 
 import copy
+import itertools
 import json
 import re
 from collections.abc import Callable
@@ -47,15 +48,15 @@ from dataclasses import dataclass
 from typing import Any
 
 import abicheck.checker as checker_mod
+import abicheck.compare.finding_identity as finding_mod
 import abicheck.extract.export_symbol_identity as export_ident_mod
 import abicheck.extract.headers.clang.context as clang_ctx_mod
-import abicheck.finding_identity as finding_mod
 import abicheck.model.export_index as export_index_mod
 import abicheck.model.graph_entity_identity as gei_mod
 import abicheck.model.graph_identity as gid_mod
 import abicheck.model.identity as ident_mod
 import abicheck.model.name_decoration.elf_version as elf_codec
-import abicheck.model.name_decoration.macho as macho_codec
+import abicheck.model.name_decoration.macho_underscore as macho_codec
 import abicheck.model.name_decoration.pe_x86 as pe_codec
 import abicheck.model.source_graph as sg_mod
 import abicheck.model.special_member_identity as smi_mod
@@ -205,6 +206,11 @@ STRING_PROBES: tuple[Probe, ...] = (
         distinguishes_same_header_lambdas=False,
     ),
     Probe(
+        "abicheck.model.graph_identity:closure_discriminator_free_identity",
+        lambda s: gid_mod.closure_discriminator_free_identity(s),
+        distinguishes_same_header_lambdas=False,
+    ),
+    Probe(
         "abicheck.model.graph_entity_identity:signature_key",
         lambda s: gei_mod.signature_key(f"int ({s})"),
     ),
@@ -231,7 +237,7 @@ STRING_PROBES: tuple[Probe, ...] = (
     Probe(
         # resolve_function_identity folds each parameter spelling through
         # canonicalize_type_name, which drops :line:col by design.
-        "abicheck.finding_identity:resolve_function_identity",
+        "abicheck.compare.finding_identity.declaration_identity:resolve_function_identity",
         _fn_identity,
         distinguishes_same_header_lambdas=False,
     ),
@@ -316,14 +322,14 @@ def _path_probes() -> dict[str, Callable[[str], str]]:
                 ).primary_id
             )
         ),
-        "abicheck.finding_identity:resolve_symbol_identity": (
+        "abicheck.compare.finding_identity.declaration_identity:resolve_symbol_identity": (
             lambda p: (
                 finding_mod.resolve_symbol_identity(
                     kind="function", source_location=rel(f"{p}:3")
                 ).primary_id
             )
         ),
-        "abicheck.finding_identity:resolve_change_identity": (
+        "abicheck.compare.finding_identity.change_identity:resolve_change_identity": (
             lambda p: (
                 finding_mod.resolve_change_identity(
                     Change(
@@ -398,7 +404,7 @@ def macho_encode(name: str) -> str:
 def macho_decoders() -> dict[str, Callable[[str, str, bool], str]]:
     """decoder(linker_spelling, plain_name, is_extern_c) -> identity key."""
     return {
-        "abicheck.model.name_decoration.macho:decode_itanium": (
+        "abicheck.model.name_decoration.macho_underscore:decode_itanium": (
             lambda s, _plain, c: s if c else macho_codec.decode_itanium(s)
         ),
         "abicheck.model.graph_entity_identity:declaration_identity": (
@@ -882,3 +888,37 @@ def entity_id_collisions() -> list[str]:
         ),
     }
     return [f"{label}: {a}" for label, (a, b) in cases.items() if a == b]
+
+
+# ---------------------------------------------------------------------------
+# Negative control over graph edge identity (identity.edge_matched_on_coarse_key)
+# ---------------------------------------------------------------------------
+
+
+def edge_role_collisions() -> list[str]:
+    """Two edges that differ only by role are two relations: their
+    ``relation_key()`` differs, and a diff from one to the other is reported
+    (as a changed relation), never read as no change."""
+    from abicheck.buildsource.source_graph_compare import diff_source_graph
+    from abicheck.model.graph_facts import GraphEdge, GraphNode
+    from abicheck.model.source_graph import SourceGraphSummary
+    from abicheck.model.source_graph_coverage import ROLE_COVERAGE_MATRIX
+
+    def graph(kind: str, role: str) -> SourceGraphSummary:
+        g = SourceGraphSummary()
+        g.add_node(GraphNode(id="decl://f", kind="source_decl"))
+        g.add_node(GraphNode(id="type://T", kind="record_type"))
+        g.add_edge(
+            GraphEdge(src="decl://f", dst="type://T", kind=kind, attrs={"role": role})
+        )
+        return g
+
+    out: list[str] = []
+    for kind, roles in ROLE_COVERAGE_MATRIX.items():
+        for a, b in itertools.combinations(roles, 2):
+            old, new = graph(kind, a), graph(kind, b)
+            if old.edges[0].relation_key() == new.edges[0].relation_key():
+                out.append(f"{kind} {a}/{b}: one relation key")
+            if not diff_source_graph(old, new).changed:
+                out.append(f"{kind} {a} -> {b}: diffs as no change")
+    return out

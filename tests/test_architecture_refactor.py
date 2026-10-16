@@ -3,7 +3,7 @@
 Covers:
 - A: ChangeKindRegistry — single-declaration metadata, derived sets
 - B: DetectorRegistry — self-registering detectors
-- C: PostProcessingPipeline — explicit step pipeline
+- C: DispositionPipeline — explicit step pipeline
 """
 
 from __future__ import annotations
@@ -30,6 +30,8 @@ from abicheck.checker_policy import (
     SDK_VENDOR_COMPAT_KINDS,
     ChangeKind,
 )
+from abicheck.policy.finding_disposition import dispose_findings
+from abicheck.policy.finding_disposition.default_pipeline import DEFAULT_PIPELINE
 
 
 def _entry(*args: object, **kwargs: object) -> ChangeKindMeta:
@@ -96,9 +98,9 @@ class TestChangeKindRegistry:
         registry_additions = {ChangeKind(v) for v in REGISTRY.addition_kinds()}
         assert ADDITION_KINDS == registry_additions
 
-    def test_quality_kinds_is_compatible_minus_additions(self):
-        """QUALITY_KINDS = COMPATIBLE_KINDS - ADDITION_KINDS."""
-        assert QUALITY_KINDS == frozenset(COMPATIBLE_KINDS - ADDITION_KINDS)
+    def test_quality_kinds_is_compatible_minus_additions_and_informational(self):
+        info = {ChangeKind(v) for v in REGISTRY.informational_kinds()}  # ADR-078
+        assert QUALITY_KINDS == frozenset(COMPATIBLE_KINDS - ADDITION_KINDS - info)
 
     def test_impact_text_derived_from_registry(self):
         """IMPACT_TEXT dict matches registry impact fields."""
@@ -1056,15 +1058,14 @@ class TestDetectorRegistry:
                 return []
 
 
-# ─── Part C: PostProcessingPipeline tests ────────────────────────────────────
+# ─── Part C: DispositionPipeline tests ────────────────────────────────────
 
 
-class TestPostProcessingPipeline:
+class TestDispositionPipeline:
     """Pipeline-based post-processing."""
 
     def test_default_pipeline_has_expected_steps(self):
         """DEFAULT_PIPELINE has all expected steps in order."""
-        from abicheck.post_processing import DEFAULT_PIPELINE
 
         expected_names = [
             "filter_reserved_field_renames",
@@ -1097,11 +1098,10 @@ class TestPostProcessingPipeline:
     def test_pipeline_runs_on_empty_changes(self):
         """Pipeline produces valid context with empty change list."""
         from abicheck.model import AbiSnapshot
-        from abicheck.post_processing import DEFAULT_PIPELINE
 
         old = AbiSnapshot(library="test", version="1.0")
         new = AbiSnapshot(library="test", version="2.0")
-        ctx = DEFAULT_PIPELINE.run([], old, new)
+        ctx = dispose_findings([], old, new)
         assert ctx.kept == []
         assert ctx.redundant == []
         assert ctx.suppressed == []
@@ -1111,7 +1111,6 @@ class TestPostProcessingPipeline:
         from abicheck.checker_policy import ChangeKind
         from abicheck.model import AbiSnapshot, Function, Visibility
         from abicheck.model.change import Change
-        from abicheck.post_processing import DEFAULT_PIPELINE
 
         old = AbiSnapshot(
             library="test",
@@ -1134,7 +1133,7 @@ class TestPostProcessingPipeline:
                 description="function removed",
             ),
         ]
-        ctx = DEFAULT_PIPELINE.run(changes, old, new)
+        ctx = dispose_findings(changes, old, new)
         assert len(ctx.kept) == 1
         assert ctx.kept[0].kind == ChangeKind.FUNC_REMOVED
 
@@ -1155,7 +1154,8 @@ class TestPostProcessingPipeline:
         from abicheck.checker_policy import ChangeKind
         from abicheck.model import AbiSnapshot
         from abicheck.model.change import Change
-        from abicheck.post_processing import FilterRedundant, PostProcessingPipeline
+        from abicheck.policy.finding_disposition.pipeline import DispositionPipeline
+        from abicheck.post_processing import FilterRedundant
 
         class _ReboundStep:
             name = "rebinds_changes_bug"
@@ -1170,7 +1170,7 @@ class TestPostProcessingPipeline:
         changes = [
             Change(kind=ChangeKind.FUNC_ADDED, symbol="foo", description="added"),
         ]
-        pipeline = PostProcessingPipeline([FilterRedundant(), _ReboundStep()])
+        pipeline = DispositionPipeline([FilterRedundant(), _ReboundStep()])
         with pytest.raises(RuntimeError, match="aliasing contract"):
             pipeline.run(changes, old, new)
 
@@ -1183,7 +1183,6 @@ class TestPostProcessingPipeline:
         from abicheck.checker_policy import ChangeKind
         from abicheck.model import AbiSnapshot
         from abicheck.model.change import Change
-        from abicheck.post_processing import DEFAULT_PIPELINE
 
         old = AbiSnapshot(library="test", version="1.0")
         new = AbiSnapshot(library="test", version="2.0")
@@ -1194,20 +1193,20 @@ class TestPostProcessingPipeline:
                 description="size changed",
             ),
         ]
-        ctx = DEFAULT_PIPELINE.run(changes, old, new)
+        ctx = dispose_findings(changes, old, new)
         assert any(c.symbol == "ns::detail::Private" for c in ctx.out_of_surface)
         assert all(c.symbol != "ns::detail::Private" for c in ctx.kept)
 
     def test_custom_pipeline_with_subset_of_steps(self):
         """Custom pipeline with only some steps."""
         from abicheck.model import AbiSnapshot
+        from abicheck.policy.finding_disposition.pipeline import DispositionPipeline
         from abicheck.post_processing import (
             DeduplicateAstDwarf,
             FilterReservedFieldRenames,
-            PostProcessingPipeline,
         )
 
-        pipeline = PostProcessingPipeline(
+        pipeline = DispositionPipeline(
             [
                 FilterReservedFieldRenames(),
                 DeduplicateAstDwarf(),

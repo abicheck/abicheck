@@ -23,7 +23,7 @@ signature drift across the DSO boundary, cross-DSO type drift, provider
 migration, instantiation-manifest drift) is invisible to per-library diff.
 
 This module computes a *bundle finding* layer on top of per-library diff
-results. It reuses :mod:`abicheck.resolver` for the dependency graph and
+results. It reuses :mod:`abicheck.workflows.elf_dependency_resolver` for the dependency graph and
 :mod:`abicheck.elf_metadata` for ELF parsing. The actual per-library diff
 input is what ``compare-release`` already produces.
 
@@ -121,7 +121,7 @@ def build_bundle_snapshot(libraries: dict[str, Path]) -> BundleSnapshot:
 
     Args:
         libraries: A {canonical_name: path} map (the same shape
-            ``_build_match_map`` produces in :mod:`abicheck.cli`).
+            ``binary_utils.build_match_map`` produces).
 
     Returns:
         A :class:`BundleSnapshot` with all libraries' :class:`ElfMetadata`
@@ -1002,7 +1002,7 @@ def discover_artifact_set(paths: list[Path], *, explicit: bool) -> dict[str, Pat
       the same library name (e.g. an explicit ``dir1/libfoo.so,
       dir2/libfoo.so`` naming two unrelated real files) are rejected
       outright — unlike ``compare``'s two-sided old-vs-new matching
-      (``_build_match_map``), a one-sided audit set has no "newest version
+      (``binary_utils.build_match_map``), a one-sided audit set has no "newest version
       wins" tiebreak that would be sound here.
 
     For the explicit-list form, every named path must look like a real ELF

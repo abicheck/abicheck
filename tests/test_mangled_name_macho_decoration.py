@@ -45,7 +45,7 @@ from abicheck.model.mangled_name import (
     _itanium_strip_prefix,
     itanium_scope_components,
 )
-from abicheck.model.name_decoration.macho import (
+from abicheck.model.name_decoration.macho_underscore import (
     decode_itanium as strip_macho_itanium_decoration,
 )
 

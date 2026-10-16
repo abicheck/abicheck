@@ -27,6 +27,7 @@ from abicheck.bundle_models import BundleSnapshot
 from abicheck.checker_policy import ChangeKind, Verdict
 from abicheck.checker_types import DiffResult
 from abicheck.elf_metadata import ElfImport, ElfMetadata, ElfSymbol
+from abicheck.errors import ReleaseOperandUsageError
 from abicheck.model import AbiSnapshot, Function, Visibility
 from abicheck.model.bundle_facts import (
     BUNDLE_FACTS_BASE_SCHEMA_VERSION,
@@ -1212,7 +1213,7 @@ class TestWriteBundleFactsOut:
         return {"resolve_stranded_library": resolve_stranded_library}
 
     def test_writes_a_loadable_facts_file(self, tmp_path: Path) -> None:
-        from abicheck.cli_compare_release_helpers import write_bundle_facts_out
+        from abicheck.workflows.release_bundle import write_bundle_facts_out
 
         out = tmp_path / "old.bundlefacts.json"
         write_bundle_facts_out(
@@ -1228,16 +1229,15 @@ class TestWriteBundleFactsOut:
         assert loaded.manifest is None
 
     def test_malformed_manifest_raises_usage_error(self, tmp_path: Path) -> None:
-        import click
         import pytest
 
-        from abicheck.cli_compare_release_helpers import write_bundle_facts_out
+        from abicheck.workflows.release_bundle import write_bundle_facts_out
 
         bad_manifest = tmp_path / "bad.yaml"
         bad_manifest.write_text("provides: not-a-list\n")
         out = tmp_path / "old.bundlefacts.json"
 
-        with pytest.raises(click.UsageError, match="bundle-facts-out"):
+        with pytest.raises(ReleaseOperandUsageError, match="bundle-facts-out"):
             write_bundle_facts_out(
                 out,
                 self._diff_pairs(),
@@ -1248,10 +1248,9 @@ class TestWriteBundleFactsOut:
         assert not out.exists()
 
     def test_unwritable_output_path_raises_usage_error(self, tmp_path: Path) -> None:
-        import click
         import pytest
 
-        from abicheck.cli_compare_release_helpers import write_bundle_facts_out
+        from abicheck.workflows.release_bundle import write_bundle_facts_out
 
         # save_bundle_facts()/write_snapshot_bytes() auto-creates missing
         # parent directories, so the reliable way to force a real OSError is
@@ -1262,7 +1261,7 @@ class TestWriteBundleFactsOut:
         blocking_file.write_text("not a directory")
         out = blocking_file / "old.bundlefacts.json"
 
-        with pytest.raises(click.UsageError, match="bundle-facts-out"):
+        with pytest.raises(ReleaseOperandUsageError, match="bundle-facts-out"):
             write_bundle_facts_out(
                 out,
                 self._diff_pairs(),
@@ -1280,7 +1279,7 @@ class TestWriteBundleFactsOut:
         findings for it, the same way a live ``compare_bundle()`` run
         would.
         """
-        from abicheck.cli_compare_release_helpers import write_bundle_facts_out
+        from abicheck.workflows.release_bundle import write_bundle_facts_out
 
         old_map = self._old_map(tmp_path)
         removed_path = tmp_path / "libremoved.so"
@@ -1320,7 +1319,7 @@ class TestWriteBundleFactsOut:
         ``diff_pairs`` didn't capture, not just the ones the caller
         happens to also classify as removed.
         """
-        from abicheck.cli_compare_release_helpers import write_bundle_facts_out
+        from abicheck.workflows.release_bundle import write_bundle_facts_out
 
         old_map = self._old_map(tmp_path)
         failed_path = tmp_path / "libfailed.so"
@@ -1347,7 +1346,7 @@ class TestWriteBundleFactsOut:
         overwrite an already-captured, fully-dumped snapshot with a bare
         ELF-metadata-only stand-in.
         """
-        from abicheck.cli_compare_release_helpers import write_bundle_facts_out
+        from abicheck.workflows.release_bundle import write_bundle_facts_out
 
         old_map = self._old_map(tmp_path)
         out = tmp_path / "old.bundlefacts.json"
@@ -1369,7 +1368,7 @@ class TestWriteBundleFactsOut:
         resolve a ``DT_NEEDED`` edge naming that alias without touching the
         filesystem itself.
         """
-        from abicheck.cli_compare_release_helpers import write_bundle_facts_out
+        from abicheck.workflows.release_bundle import write_bundle_facts_out
 
         old_map = self._old_map(tmp_path)
         # The discovered path for "libcore.so" is a symlink named exactly
@@ -1405,7 +1404,7 @@ class TestWriteBundleFactsOut:
         reading as a false ``bundle_library_removed``/``_added`` pair for
         an unchanged library.
         """
-        from abicheck.cli_compare_release_helpers import write_bundle_facts_out
+        from abicheck.workflows.release_bundle import write_bundle_facts_out
 
         real_path = tmp_path / "libfoo.so.1.2"
         real_path.write_bytes(b"")
@@ -1435,7 +1434,7 @@ class TestWriteBundleFactsOut:
         bundle (built the same way ``_run_bundle_analysis`` builds one)
         for the *same* library must not report it removed or added.
         """
-        from abicheck.cli_compare_release_helpers import write_bundle_facts_out
+        from abicheck.workflows.release_bundle import write_bundle_facts_out
 
         real_path = tmp_path / "libfoo.so.1.2"
         real_path.write_bytes(b"")
@@ -1516,7 +1515,7 @@ class TestWriteBundleFactsOutCapturesARealSnapshot:
     def test_removed_library_gets_a_full_dump_not_bare_elf_metadata(
         self, tmp_path: Path
     ) -> None:
-        from abicheck.cli_compare_release_helpers import write_bundle_facts_out
+        from abicheck.workflows.release_bundle import write_bundle_facts_out
 
         real_so = self._build_tiny_so(tmp_path)
         old_map = {"libreal.so": real_so}

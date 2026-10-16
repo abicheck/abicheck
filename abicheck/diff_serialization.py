@@ -64,7 +64,7 @@ _TAG_SUFFIX_PATTERNS: tuple[str, ...] = (
 #: than repeated as a bare literal at each of the three pools below, so the
 #: three cannot drift apart; spelled out rather than imported from
 #: ``ChangeEntity`` because that enum lives in `model`, and the resolver
-#: (`reporter_markdown.entity_for_change`) validates the string against it
+#: (`report.change_operation.entity_for_change`) validates the string against it
 #: anyway -- an unrecognized spelling falls back to the declared entity.
 _ENTITY_VARIABLE = "variable"
 _ENTITY_ENUM = "enum"

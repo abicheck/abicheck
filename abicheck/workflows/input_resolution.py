@@ -60,7 +60,7 @@ from ..extract.header_exclusions import (
 from ..model import AbiSnapshot, Function
 from ..model.change import LibraryMetadata
 from ..serialization import load_snapshot
-from ..service_dump_cache import cached_run_dump
+from .dump.cache.api import cached_run_dump
 from .dump.formats import emit_notice
 from .header_exclusion_audit import record_achieved_header_exclusions
 from .project_package_input import resolve_project_package
@@ -226,12 +226,11 @@ def side_is_live(path: Path, *, had_raw_evidence: bool = False) -> bool:
 
 
 def input_spec_is_live(spec: Any) -> bool:
-    """:func:`side_is_live` for a typed :class:`~abicheck.workflows.contracts.InputSpec`.
+    """:func:`side_is_live` for a typed :class:`~abicheck.workflows.service_requests.InputSpec`.
 
-    The typed API's counterpart to the native CLI's own
-    ``side_is_live(path, had_raw_evidence=_needs_inline_embed(...))`` call --
-    same rule, same owner, so the two front ends cannot answer "did this run
-    extract it?" differently. A stored-snapshot operand handed a raw
+    Both front ends reach it through the shared resolution, so they cannot
+    answer "did this run extract it?" differently. A stored-snapshot operand
+    handed a raw
     ``sources``/``build_info`` tree *is* extracted by this run, so the depth
     floor applies to it even though the operand itself was pre-built.
 
@@ -507,7 +506,7 @@ def _resolve_input_impl(
             logger. The CLI passes a ``click.echo(..., err=True)`` wrapper.
         lang_explicit: Whether *lang* is a genuinely explicit request rather
             than the request-level default (G31 Phase C follow-up — see
-            :attr:`abicheck.workflows.contracts.DumpRequest.lang_explicit`). ``False``
+            :attr:`abicheck.workflows.service_requests.DumpRequest.lang_explicit`). ``False``
             (the default) preserves this function's pre-existing behavior:
             *lang* is honored only when it equals ``"c"``, otherwise the
             header-AST pass auto-detects. ``True`` forces *lang* on the
@@ -693,10 +692,9 @@ def collect_metadata(path: Path) -> LibraryMetadata | None:
         # `resolve_input` resolves rather than rejecting) is not a single
         # hashable file -- the same "not a binary" no-op the text-format
         # branches below already apply, without `read_bytes()` raising
-        # `IsADirectoryError` first. `frontends/cli/runtime.py`'s own
-        # `_collect_metadata` guards this for the CLI path; the typed
-        # Python API (`service.run_compare_request`) calls this function
-        # directly and needs the identical guard (Codex review).
+        # `IsADirectoryError` first. Both the CLI and the typed Python API
+        # reach this through `compare_classify._attach_pair_report_fields`
+        # (Codex review).
         return None
     text_fmt = sniff_text_format(path)
     if text_fmt in ("json", "symvers"):

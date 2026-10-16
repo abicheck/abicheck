@@ -452,7 +452,7 @@ class TestTheStoredEnvelopeCarriesTheSection:
         )
 
     def test_the_json_envelope_carries_the_block(self) -> None:
-        from abicheck.frontends.cli.commands.compare_bundle_facts_sections import (
+        from abicheck.report.release_stored_sections import (
             public_surface_terms,
         )
 
@@ -464,14 +464,14 @@ class TestTheStoredEnvelopeCarriesTheSection:
     def test_a_comparison_with_no_contract_omits_it(self) -> None:
         """Absent rather than an empty section: an empty one reads as "the
         product promises nothing" instead of "no contract was recorded"."""
-        from abicheck.frontends.cli.commands.compare_bundle_facts_sections import (
+        from abicheck.report.release_stored_sections import (
             public_surface_terms,
         )
 
         assert public_surface_terms(self._Result(None)) is None
 
     def test_the_markdown_reader_sees_it_too(self) -> None:
-        from abicheck.frontends.cli.commands.compare_bundle_facts_sections import (
+        from abicheck.report.release_stored_sections import (
             public_surface_markdown_lines,
         )
 
@@ -484,7 +484,7 @@ class TestTheStoredEnvelopeCarriesTheSection:
         """The vacuity guard on the assertion above: the same renderer over
         a satisfied contract must not name a symbol, or "api_c appears"
         would hold for a renderer that printed every obligation."""
-        from abicheck.frontends.cli.commands.compare_bundle_facts_sections import (
+        from abicheck.report.release_stored_sections import (
             public_surface_markdown_lines,
         )
 
@@ -568,7 +568,7 @@ class TestTheResolvedPolicyDocumentReachesReleaseScoring:
         parameter cannot quietly stop being forwarded."""
         import inspect
 
-        from abicheck import cli_compare_release
+        from abicheck.workflows import release_compare
         from abicheck.workflows.release_public_surface import (
             release_surface_severity_exit,
         )
@@ -576,9 +576,10 @@ class TestTheResolvedPolicyDocumentReachesReleaseScoring:
         assert (
             "policy_file" in inspect.signature(release_surface_severity_exit).parameters
         )
-        source = inspect.getsource(cli_compare_release)
-        # Both release-level scoring paths read one resolved object.
-        assert source.count("_release_policy_file") >= 3
+        source = inspect.getsource(release_compare)
+        # Every release-level scoring path (surface verdict, bundle, severity
+        # exit) reads one resolved object.
+        assert source.count("policy_file=release_policy_file") >= 3
 
 
 class TestTheOutputDirectorySummaryCarriesTheContract:
@@ -590,7 +591,7 @@ class TestTheOutputDirectorySummaryCarriesTheContract:
     """
 
     def _terms(self, *, missing: bool):
-        from abicheck.report.release_public_surface import (
+        from abicheck.report.release_public_surface_section import (
             compute_release_public_surface,
         )
 
@@ -668,7 +669,7 @@ class TestTheStoredEnvelopesGateBearingKeys:
         )
 
     def test_the_gate_bearing_scalar_is_emitted_under_the_setting(self) -> None:
-        from abicheck.frontends.cli.commands.compare_bundle_facts_sections import (
+        from abicheck.report.release_stored_sections import (
             assurance_sections,
         )
 
@@ -680,7 +681,7 @@ class TestTheStoredEnvelopesGateBearingKeys:
         """Present-and-zero, not absent: a consumer reading the gate must be
         able to tell "the axis ran and found nothing" from "the axis did not
         run", which is the whole reason this key is a plain scalar."""
-        from abicheck.frontends.cli.commands.compare_bundle_facts_sections import (
+        from abicheck.report.release_stored_sections import (
             assurance_sections,
         )
 
@@ -693,7 +694,7 @@ class TestTheStoredEnvelopesGateBearingKeys:
     def test_without_the_setting_nothing_is_emitted(self, decision: str) -> None:
         """D4: present only under the setting, so every run that never asked
         for the axis is byte-identical to before it existed."""
-        from abicheck.frontends.cli.commands.compare_bundle_facts_sections import (
+        from abicheck.report.release_stored_sections import (
             assurance_sections,
         )
 
@@ -703,7 +704,7 @@ class TestTheStoredEnvelopesGateBearingKeys:
     def test_an_unevaluated_surface_renders_no_markdown_lines(self) -> None:
         """The empty-render branch: a reconciliation that states nothing
         contributes no lines rather than a bare heading."""
-        from abicheck.frontends.cli.commands.compare_bundle_facts_sections import (
+        from abicheck.report.release_stored_sections import (
             public_surface_markdown_lines,
         )
 
@@ -806,7 +807,7 @@ class TestAnUnresolvedContractIsStatedNotOmitted:
     """
 
     def _unresolved_terms(self):
-        from abicheck.report.release_public_surface import (
+        from abicheck.report.release_public_surface_section import (
             compute_release_public_surface,
         )
 

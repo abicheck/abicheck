@@ -157,7 +157,7 @@ class TestCanonicalResolverIsWhatRuns:
         inc.mkdir()
         (inc / "a.h").write_text("int api_a(void);\n", encoding="utf-8")
         seen: dict = {}
-        real = receipt.resolve_and_apply
+        real = receipt.cli_configuration_inputs
 
         def _spy(params: dict, **kwargs: Any) -> Any:
             seen.update(params)
@@ -166,7 +166,7 @@ class TestCanonicalResolverIsWhatRuns:
         import pytest as _pytest
 
         with _pytest.MonkeyPatch.context() as mp:
-            mp.setattr(receipt, "resolve_and_apply", _spy)
+            mp.setattr(receipt, "cli_configuration_inputs", _spy)
             # Two stored snapshots: `-H` is ignored, so nothing was classified
             # under it and the receipt must not claim it as a root.
             old_p, new_p = _write_pair(tmp_path)
@@ -422,7 +422,7 @@ class TestGateParityWithTheLiveRun:
     ):
         from abicheck.buildsource.inline import BuildConfig
         from abicheck.cli_compare_receipt import resolve_cli_config
-        from abicheck.cli_helpers_compare import resolve_compare_config
+        from abicheck.workflows.compare_configuration import resolve_compare_config
 
         full = {
             "contract_mode": None,
@@ -680,12 +680,13 @@ class TestWiringContract:
         from abicheck.cli_compare_receipt import COMPARE_CONFIG_PARAMS
 
         seen: dict = {}
+        real = receipt.cli_configuration_inputs
 
-        def _spy(params: dict, **kwargs: Any) -> tuple[Any, Any, Any]:
+        def _spy(params: dict, **kwargs: Any) -> Any:
             seen.update(params)
-            return None, kwargs.get("policy_file"), kwargs["resolved_cfg"]
+            return real(params, **kwargs)
 
-        monkeypatch.setattr(receipt, "resolve_and_apply", _spy)
+        monkeypatch.setattr(receipt, "cli_configuration_inputs", _spy)
         old_p, new_p = _write_pair(tmp_path)
         CliRunner().invoke(main, ["compare", str(old_p), str(new_p), "-o", "json=-"])
         assert set(seen) == set(COMPARE_CONFIG_PARAMS)
@@ -694,13 +695,15 @@ class TestWiringContract:
         """The resolver documents mapping its errors to an exit code as the
         front end's job; a D7 same-tier conflict or a malformed pack manifest
         is a usage error like any other bad flag combination."""
-        import abicheck.cli_compare_receipt as receipt
+        import abicheck.compatibility_evaluation_frontend as frontend
         from abicheck.compatibility_evaluation_resolver import FieldResolutionError
 
         def _boom(*args, **kwargs):
             raise FieldResolutionError("contract.mode: two explicit values")
 
-        monkeypatch.setattr(receipt, "resolve_and_apply", _boom)
+        # Patched at its owner: the shared `workflows.compare_configuration`
+        # resolution imports it per call and maps it to a typed error.
+        monkeypatch.setattr(frontend, "resolve_compatibility_evaluation_config", _boom)
         old_p, new_p = _write_pair(tmp_path)
         result = CliRunner().invoke(
             main,

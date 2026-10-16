@@ -17,7 +17,7 @@
 severity gate must trace back to the *same* :class:`GateDecision`.
 
 Before ``abicheck.policy.gate_decision.gate_decision_for_result`` existed,
-``reporter._build_severity_json``, ``sarif._severity_gate_properties``, and
+``json_sections.build_severity_json``, ``sarif._severity_gate_properties``, and
 ``html_report``'s CI-gate card each independently imported
 ``compute_gate_decision`` and hand-assembled the same arguments from a
 ``DiffResult``. They already agreed in practice -- this suite is not a

@@ -288,7 +288,7 @@ STRUCTURED_TOOLCHAIN_FLAG_PREFIXES = ("--sysroot", "-isysroot", "--target", "-ta
 #: docstring), so the distinction bought nothing at decode time while
 #: actively breaking two consumers that compare/key on this raw string
 #: *without* decoding it first (``header_compile_context.
-#: _EffectiveContextSignature``, :func:`~abicheck.buildsource.adapters.base.
+#: _EffectiveContextSignature``, :func:`~abicheck.buildsource.adapters.adapter_shared.
 #: derive_build_options`) -- two semantically-equivalent units captured via
 #: different argv shapes compared unequal for those. The marker is still
 #: recognized on *decode* (:data:`_XCLANG_WRAPPED_ABI_FLAG_MARKER`,
@@ -301,7 +301,7 @@ STRUCTURED_TOOLCHAIN_FLAG_PREFIXES = ("--sysroot", "-isysroot", "--target", "-ta
 #: below (the L4 source-replay decode path, P2 review "Decode normalized cc1
 #: flags in every replay path") needs it too, and ``adapters.base`` already
 #: imports :func:`strip_launchers` from this module at its own top level
-#: (:func:`~abicheck.buildsource.adapters.base._executable_token_positions`)
+#: (:func:`~abicheck.buildsource.adapters.adapter_shared._executable_token_positions`)
 #: -- a reverse ``_argv -> adapters.base`` import would be a genuine import
 #: cycle (the ai-readiness ``import-cycle-growth`` gate walks the full AST,
 #: function-local imports included, so a deferred import does not avoid it
@@ -620,7 +620,7 @@ def _skip_env_prefix(
     never examined the actual compiler: ``_msvc_driver_scan`` found no
     ``cl``/``clang-cl``-basename token at any recognized executable
     position, ``msvc_driver_token`` returned ``None``, ``_derived_gcc_path``
-    fell back to ``argv[0]`` (``"env"``), and ``dumper_clang._resolve_clang_bin``
+    fell back to ``argv[0]`` (``"env"``), and ``abicheck.extract.compiler_driver.resolve_clang_bin``
     rejected that name and silently substituted plain ``clang++`` -- losing
     the recorded toolchain's built-ins, default headers, and target
     defaults.
@@ -656,7 +656,7 @@ def _skip_env_prefix(
       environment override) means a *bare* driver name that follows
       (``env PATH=/opt/llvm/bin clang-cl ...``) may only be resolvable
       through that overridden ``PATH``, not abicheck's own inherited one --
-      every downstream ``shutil.which``-style lookup (``_resolve_clang_bin``,
+      every downstream ``shutil.which``-style lookup (``resolve_clang_bin``,
       replay subprocess spawning) searches the wrong list of directories
       without it.
 
@@ -1040,7 +1040,7 @@ def expand_env_split_prefixes(argv: list[str]) -> list[str]:
     subtraction spuriously computes index 0 -- ``argv[0]`` (``"env"``), not
     the real driver -- purely by length coincidence, not because index 0 is
     actually correct. See
-    :func:`~abicheck.buildsource.adapters.base._executable_token_positions`
+    :func:`~abicheck.buildsource.adapters.adapter_shared._executable_token_positions`
     for the caller this primitive fixes: it now computes its own
     length-subtraction index BETWEEN two results of calling
     :func:`strip_launchers` on THIS function's return value, so both sides
@@ -1059,7 +1059,7 @@ def expand_env_split_prefixes(argv: list[str]) -> list[str]:
     ``argv[0]`` is ``"sccache"``, not ``"env"``, so the loop's own
     condition never even entered and the ``-S`` value was left completely
     unexpanded. This function's one caller,
-    :func:`~abicheck.buildsource.adapters.base._msvc_driver_scan`, then
+    :func:`~abicheck.buildsource.adapters.adapter_shared._msvc_driver_scan`, then
     scanned the raw, unexpanded 4-token argv -- seeing neither a real
     ``/c`` marker nor a ``clang-cl``-basename token at any position --
     and returned ``(False, None)`` for a genuinely MSVC-dialect command.
@@ -1428,7 +1428,7 @@ def pick_compiler_binary(compile_unit: CompileUnit, override: str | None) -> str
     correctly leaves a bare token (e.g. ``"cc"`` from ``env -i cc ...``)
     unresolved rather than guessing -- but returning it here unchanged
     would let a downstream ``shutil.which``-style lookup (``dumper_clang.
-    _resolve_clang_bin``, or the eventual subprocess spawn itself) resolve
+    resolve_clang_bin``, or the eventual subprocess spawn itself) resolve
     it against ABICHECK'S OWN inherited ``PATH``, which the real recorded
     command -- genuinely PATH-less under ``env -i`` -- could never have
     done. See :func:`env_path_cleared_for_bare_token`'s own docstring for
@@ -1511,7 +1511,7 @@ def is_msvc_mode(cc_bin: str) -> bool:
     packaged ``clang-cl-20``/``clang-cl-20.exe`` is still recognized.
     """
     # The name test itself is header_utils.is_msvc_driver_stem -- the one
-    # vocabulary buildsource.adapters.base._is_msvc_command now shares, after
+    # vocabulary buildsource.adapters.adapter_contract._is_msvc_command now shares, after
     # the two drifted apart (Codex review, PR D). Behaviour here is unchanged:
     # that function is this test, relocated. Only the basename derivation
     # stays local, since the adapter's is backslash-aware and this one is not.
@@ -1541,7 +1541,7 @@ def _carry_abi_relevant_flags(
     ``-target`` prefix that filter drops as redundant for the *unrelated*,
     already-structured ``target_triple``/``sysroot`` survivors -- but none of
     these four flags has a structured field of its own). Decoded first, via
-    the same :func:`~abicheck.buildsource.adapters.base.split_operand_survivor`
+    the same :func:`~abicheck.buildsource.adapters.adapter_shared.split_operand_survivor`
     the L2 header-compile-context replay path already used, so both replay
     paths reconstruct the identical, real argv token(s) from one shared
     implementation.
@@ -1565,7 +1565,7 @@ def _carry_abi_relevant_flags(
     every occurrence of a flag genuinely repeated within
     ``abi_relevant_flags`` itself is now carried through faithfully, in
     the real build's own order and multiplicity, so last-flag-wins
-    scanning downstream (e.g. ``dumper_clang._needs_sycl_host_only``) sees
+    scanning downstream (e.g. ``abicheck.extract.compiler_driver.needs_sycl_host_only``) sees
     the same sequence the real compiler did.
     """
     i = 0

@@ -272,7 +272,7 @@ class TestResolveDemangle:
         assert list(inspect.signature(_resolve_demangle).parameters) == ["fmt"]
 
 
-# ── _resolve_compare_collect_mode (CLI-audit P1: --depth inference) ──────
+# ── resolve_compare_collect_mode (CLI-audit P1: --depth inference) ──────
 #
 # Precedence: explicit --depth > .abicheck.yml source.method > inferred from
 # raw --sources/--build-info > off. Before this fix, omitting --depth always
@@ -290,9 +290,11 @@ class TestResolveCompareCollectMode:
         old_build_info=None,
         new_build_info=None,
     ):
-        from abicheck.cli_compare_helpers import _resolve_compare_collect_mode
+        from abicheck.workflows.compare_configuration import (
+            resolve_compare_collect_mode,
+        )
 
-        return _resolve_compare_collect_mode(
+        return resolve_compare_collect_mode(
             depth,
             source_method,
             old_sources,
@@ -347,10 +349,10 @@ class TestResolveCompareCollectMode:
         assert mode == "source-target"
         assert "--depth source" in label
 
-    def test_invalid_source_method_raises_usage_error(self):
-        import click
+    def test_invalid_source_method_raises_settings_error(self):
+        from abicheck.workflows.compare_configuration import CompareSettingsError
 
-        with pytest.raises(click.UsageError, match="source.method"):
+        with pytest.raises(CompareSettingsError, match="source.method"):
             self._call(source_method="not-a-method")
 
 
@@ -472,7 +474,7 @@ class TestCompareWrite:
         directly by counting real ``assess_change`` calls keyed by
         ``id(change)``, instead of trusting that claim un-measured."""
         import abicheck.impact.engine as engine_mod
-        import abicheck.reporter as reporter_mod
+        import abicheck.report.change_json as change_json_mod
         import abicheck.sarif as sarif_mod
 
         calls: list[int] = []
@@ -484,7 +486,7 @@ class TestCompareWrite:
 
         monkeypatch_targets = [
             (engine_mod, "assess_change"),
-            (reporter_mod, "assess_change"),
+            (change_json_mod, "assess_change"),
             (sarif_mod, "assess_change"),
         ]
         originals = [

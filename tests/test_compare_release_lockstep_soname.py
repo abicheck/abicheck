@@ -62,7 +62,10 @@ class TestLockstepSonameCoupling:
 
     def test_suppressed_when_sibling_breaks(self):
         from abicheck.checker import Change, ChangeKind, Verdict
-        from abicheck.cli_compare_release import _suppress_lockstep_soname_findings
+        from abicheck.frontends.cli.release_member_reporter import CliReleaseReporter
+        from abicheck.workflows.release_members import (
+            suppress_lockstep_soname_findings as _suppress_lockstep_soname_findings,
+        )
 
         umbrella = self._entry(
             "libonedal.so",
@@ -76,7 +79,9 @@ class TestLockstepSonameCoupling:
             [Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed")],
             Verdict.BREAKING,
         )
-        n = _suppress_lockstep_soname_findings([umbrella, core], "BREAKING", None)
+        n = _suppress_lockstep_soname_findings(
+            [umbrella, core], "BREAKING", CliReleaseReporter(output_dir=None)
+        )
         assert n == 1
         kinds = [c.kind for c in umbrella["_diff_result"].changes]
         assert ChangeKind.SONAME_BUMP_UNNECESSARY not in kinds
@@ -84,7 +89,10 @@ class TestLockstepSonameCoupling:
 
     def test_kept_when_no_real_break_in_release(self):
         from abicheck.checker import Change, ChangeKind, Verdict
-        from abicheck.cli_compare_release import _suppress_lockstep_soname_findings
+        from abicheck.frontends.cli.release_member_reporter import CliReleaseReporter
+        from abicheck.workflows.release_members import (
+            suppress_lockstep_soname_findings as _suppress_lockstep_soname_findings,
+        )
 
         umbrella = self._entry(
             "libonedal.so",
@@ -93,7 +101,9 @@ class TestLockstepSonameCoupling:
             ],
             Verdict.COMPATIBLE,
         )
-        n = _suppress_lockstep_soname_findings([umbrella], "COMPATIBLE", None)
+        n = _suppress_lockstep_soname_findings(
+            [umbrella], "COMPATIBLE", CliReleaseReporter(output_dir=None)
+        )
         assert n == 0
         kinds = [c.kind for c in umbrella["_diff_result"].changes]
         assert ChangeKind.SONAME_BUMP_UNNECESSARY in kinds
@@ -102,7 +112,10 @@ class TestLockstepSonameCoupling:
         # A SONAME bump is only justified by a *binary* ABI break; a source-only
         # API_BREAK elsewhere must NOT suppress the relink-forcing warning.
         from abicheck.checker import Change, ChangeKind, Verdict
-        from abicheck.cli_compare_release import _suppress_lockstep_soname_findings
+        from abicheck.frontends.cli.release_member_reporter import CliReleaseReporter
+        from abicheck.workflows.release_members import (
+            suppress_lockstep_soname_findings as _suppress_lockstep_soname_findings,
+        )
 
         umbrella = self._entry(
             "libonedal.so",
@@ -111,14 +124,19 @@ class TestLockstepSonameCoupling:
             ],
             Verdict.COMPATIBLE,
         )
-        n = _suppress_lockstep_soname_findings([umbrella], "API_BREAK", None)
+        n = _suppress_lockstep_soname_findings(
+            [umbrella], "API_BREAK", CliReleaseReporter(output_dir=None)
+        )
         assert n == 0
         kinds = [c.kind for c in umbrella["_diff_result"].changes]
         assert ChangeKind.SONAME_BUMP_UNNECESSARY in kinds
 
     def test_rewrites_per_library_json(self, tmp_path):
         from abicheck.checker import Change, ChangeKind, Verdict
-        from abicheck.cli_compare_release import _suppress_lockstep_soname_findings
+        from abicheck.frontends.cli.release_member_reporter import CliReleaseReporter
+        from abicheck.workflows.release_members import (
+            suppress_lockstep_soname_findings as _suppress_lockstep_soname_findings,
+        )
 
         umbrella = self._entry(
             "libonedal.so.3",
@@ -132,7 +150,9 @@ class TestLockstepSonameCoupling:
             [Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed")],
             Verdict.BREAKING,
         )
-        _suppress_lockstep_soname_findings([umbrella, core], "BREAKING", tmp_path)
+        _suppress_lockstep_soname_findings(
+            [umbrella, core], "BREAKING", CliReleaseReporter(output_dir=tmp_path)
+        )
         data = json.loads((tmp_path / "libonedal.so.json").read_text())
         assert all(c["kind"] != "soname_bump_unnecessary" for c in data["changes"])
 
@@ -185,7 +205,10 @@ class TestLockstepSonameSuppressionUpdatesDispositionAudit:
 
     def test_suppressed_finding_moves_to_the_suppressed_disposition(self) -> None:
         from abicheck.checker import Change, ChangeKind, DiffResult, Verdict
-        from abicheck.cli_compare_release import _suppress_lockstep_soname_findings
+        from abicheck.frontends.cli.release_member_reporter import CliReleaseReporter
+        from abicheck.workflows.release_members import (
+            suppress_lockstep_soname_findings as _suppress_lockstep_soname_findings,
+        )
 
         umbrella = self._entry_with_real_ledger("libonedal.so", Verdict.COMPATIBLE)
         # Before suppression: the finding is detected and labelled
@@ -212,7 +235,9 @@ class TestLockstepSonameSuppressionUpdatesDispositionAudit:
             "compatible_additions": 0,
             "_diff_result": core_result,
         }
-        n = _suppress_lockstep_soname_findings([umbrella, core], "BREAKING", None)
+        n = _suppress_lockstep_soname_findings(
+            [umbrella, core], "BREAKING", CliReleaseReporter(output_dir=None)
+        )
         assert n == 1
 
         after = umbrella["disposition_audit"]
@@ -238,7 +263,10 @@ class TestLockstepSonameSuppressionUpdatesDispositionAudit:
         list for a library whose `disposition_audit` said one finding was
         suppressed."""
         from abicheck.checker import Change, ChangeKind, DiffResult, Verdict
-        from abicheck.cli_compare_release import _suppress_lockstep_soname_findings
+        from abicheck.frontends.cli.release_member_reporter import CliReleaseReporter
+        from abicheck.workflows.release_members import (
+            suppress_lockstep_soname_findings as _suppress_lockstep_soname_findings,
+        )
 
         umbrella = self._entry_with_real_ledger("libonedal.so", Verdict.COMPATIBLE)
         umbrella_result = umbrella["_diff_result"]
@@ -262,7 +290,9 @@ class TestLockstepSonameSuppressionUpdatesDispositionAudit:
             "compatible_additions": 0,
             "_diff_result": core_result,
         }
-        n = _suppress_lockstep_soname_findings([umbrella, core], "BREAKING", None)
+        n = _suppress_lockstep_soname_findings(
+            [umbrella, core], "BREAKING", CliReleaseReporter(output_dir=None)
+        )
         assert n == 1
 
         assert umbrella_result.suppressed_count == 1
@@ -282,8 +312,11 @@ class TestLockstepSonameSuppressionUpdatesDispositionAudit:
         library's own entry weren't updated, the release-level total would
         still show the finding as non_gating too."""
         from abicheck.checker import Change, ChangeKind, DiffResult, Verdict
-        from abicheck.cli_compare_receipt import release_disposition_audit_block
-        from abicheck.cli_compare_release import _suppress_lockstep_soname_findings
+        from abicheck.frontends.cli.release_member_reporter import CliReleaseReporter
+        from abicheck.report.release_document import release_disposition_audit_block
+        from abicheck.workflows.release_members import (
+            suppress_lockstep_soname_findings as _suppress_lockstep_soname_findings,
+        )
 
         umbrella = self._entry_with_real_ledger("libonedal.so", Verdict.COMPATIBLE)
         core_result = DiffResult(
@@ -307,7 +340,9 @@ class TestLockstepSonameSuppressionUpdatesDispositionAudit:
                 "counts": {"gating": 1},
             },
         }
-        _suppress_lockstep_soname_findings([umbrella, core], "BREAKING", None)
+        _suppress_lockstep_soname_findings(
+            [umbrella, core], "BREAKING", CliReleaseReporter(output_dir=None)
+        )
         folded = release_disposition_audit_block([umbrella, core])
         assert folded["counts"]["non_gating"] == 0
         assert folded["counts"]["suppressed"] == 1

@@ -4909,5 +4909,120 @@
   "subjects": [
    "function-signature-and-source-api-changes"
   ]
+ },
+ "case212_calling_convention_macro_undefined_after_use": {
+  "entity": "rule",
+  "scenario_kind": null,
+  "operation": "compare",
+  "ecosystem": "generic",
+  "topics": [
+   "symbols"
+  ],
+  "languages": [
+   "c"
+  ],
+  "scope": "single-library",
+  "artifact_shape": "compiled-pair",
+  "validation_owner": "compiler-pair",
+  "related_rules": [],
+  "rule_slug": "calling-convention-macro-undefined-after-use",
+  "variant_of": null,
+  "relation_type": null,
+  "relation_axis": null,
+  "subjects": [
+   "calling-convention-and-integer-model-changes"
+  ]
+ },
+ "case213_calling_convention_function_like_macro_changed": {
+  "entity": "rule",
+  "scenario_kind": null,
+  "operation": "compare",
+  "ecosystem": "generic",
+  "topics": [
+   "symbols"
+  ],
+  "languages": [
+   "c"
+  ],
+  "scope": "single-library",
+  "artifact_shape": "compiled-pair",
+  "validation_owner": "compiler-pair",
+  "related_rules": [],
+  "rule_slug": "calling-convention-function-like-macro-changed",
+  "variant_of": null,
+  "relation_type": null,
+  "relation_axis": null,
+  "subjects": [
+   "calling-convention-and-integer-model-changes"
+  ]
+ },
+ "case214_calling_convention_macro_redefined_after_use": {
+  "entity": "rule",
+  "scenario_kind": null,
+  "operation": "compare",
+  "ecosystem": "generic",
+  "topics": [
+   "controls"
+  ],
+  "languages": [
+   "c"
+  ],
+  "scope": "single-library",
+  "artifact_shape": "compiled-pair",
+  "validation_owner": "compiler-pair",
+  "related_rules": [],
+  "rule_slug": "calling-convention-macro-redefined-after-use",
+  "variant_of": null,
+  "relation_type": null,
+  "relation_axis": null,
+  "subjects": [
+   "safe-changes-correctly-not-flagged"
+  ]
+ },
+ "case215_return_double_pointer_lost_const": {
+  "entity": "rule",
+  "scenario_kind": null,
+  "operation": "compare",
+  "ecosystem": "generic",
+  "topics": [
+   "symbols"
+  ],
+  "languages": [
+   "cpp"
+  ],
+  "scope": "single-library",
+  "artifact_shape": "compiled-pair",
+  "validation_owner": "compiler-pair",
+  "related_rules": [],
+  "rule_slug": "return-double-pointer-lost-const",
+  "variant_of": null,
+  "relation_type": null,
+  "relation_axis": null,
+  "subjects": [
+   "function-signature-and-source-api-changes"
+  ]
+ },
+ "case216_overload_added_beside_initializer_list": {
+  "entity": "rule",
+  "scenario_kind": null,
+  "operation": "compare",
+  "ecosystem": "generic",
+  "topics": [
+   "symbols"
+  ],
+  "languages": [
+   "cpp"
+  ],
+  "scope": "single-library",
+  "artifact_shape": "compiled-pair",
+  "validation_owner": "compiler-pair",
+  "related_rules": [],
+  "rule_slug": "overload-added-beside-initializer-list",
+  "variant_of": null,
+  "relation_type": null,
+  "relation_axis": null,
+  "subjects": [
+   "safe-changes-correctly-not-flagged"
+  ]
  }
 }

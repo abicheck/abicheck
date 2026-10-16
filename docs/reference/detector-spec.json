@@ -1,6 +1,6 @@
 {
   "description": "Formal detector specification matrix (generated).",
-  "count": 414,
+  "count": 417,
   "detectors": [
     {
       "kind": "abi_relevant_build_flag_changed",
@@ -306,7 +306,7 @@
       "severity": "error",
       "min_evidence": "L1",
       "doc_slug": "calling_convention_changed",
-      "examples": "case209_calling_convention_changed_via_macro,case64_calling_convention_changed"
+      "examples": "case209_calling_convention_changed_via_macro,case212_calling_convention_macro_undefined_after_use,case213_calling_convention_function_like_macro_changed,case64_calling_convention_changed"
     },
     {
       "kind": "cet_protection_improved",
@@ -481,7 +481,7 @@
     },
     {
       "kind": "declaration_coordinates_shifted",
-      "category": "quality",
+      "category": "informational",
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
       "min_evidence": "L5",
@@ -508,7 +508,7 @@
     },
     {
       "kind": "declaration_identity_unchanged",
-      "category": "quality",
+      "category": "informational",
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
       "min_evidence": "L5",
@@ -972,7 +972,7 @@
       "severity": "warning",
       "min_evidence": "L0",
       "doc_slug": "func_added",
-      "examples": "case03_compat_addition,case141_versioned_symbol_scheme,case185_inherited_override_reuses_slot,case200_new_entry_point_instead_of_parameter_added,case204_class_gained_non_virtual_method,case53_namespace_pollution,case62_type_field_added_compatible,case99_experimental_graduated"
+      "examples": "case03_compat_addition,case141_versioned_symbol_scheme,case185_inherited_override_reuses_slot,case200_new_entry_point_instead_of_parameter_added,case204_class_gained_non_virtual_method,case216_overload_added_beside_initializer_list,case53_namespace_pollution,case62_type_field_added_compatible,case99_experimental_graduated"
     },
     {
       "kind": "func_added_elf_only",
@@ -1207,6 +1207,15 @@
       "min_evidence": "L2",
       "doc_slug": "func_return_pointee_qualifier_added",
       "examples": "case211_return_pointee_gained_const"
+    },
+    {
+      "kind": "func_return_pointee_qualifier_changed",
+      "category": "api_break",
+      "default_verdict": "API_BREAK",
+      "severity": "warning",
+      "min_evidence": "L2",
+      "doc_slug": "func_return_pointee_qualifier_changed",
+      "examples": "case215_return_double_pointer_lost_const"
     },
     {
       "kind": "func_return_pointee_qualifier_removed",
@@ -2064,6 +2073,24 @@
       "examples": "case160_public_api_internal_dep_added,case187_public_struct_private_field_type,case188_public_class_private_base_class,case189_public_function_private_parameter_type,case190_public_inline_function_references_internal_constant,case191_header_only_graph_field_type,case194_header_graph_rename_reconciled,case195_header_graph_ambiguous_rename_not_reconciled,case196_header_graph_move_reconciled,case197_header_graph_identity_reconciled"
     },
     {
+      "kind": "public_dependency_role_changed",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "L5",
+      "doc_slug": "public_dependency_role_changed",
+      "examples": ""
+    },
+    {
+      "kind": "public_dependency_role_unknown",
+      "category": "quality",
+      "default_verdict": "COMPATIBLE",
+      "severity": "warning",
+      "min_evidence": "L5",
+      "doc_slug": "public_dependency_role_unknown",
+      "examples": ""
+    },
+    {
       "kind": "public_macro_removed",
       "category": "api_break",
       "default_verdict": "API_BREAK",
@@ -2101,7 +2128,7 @@
     },
     {
       "kind": "public_surface_grew",
-      "category": "quality",
+      "category": "informational",
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
       "min_evidence": "unspecified",
@@ -2110,7 +2137,7 @@
     },
     {
       "kind": "public_surface_shrank",
-      "category": "quality",
+      "category": "informational",
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
       "min_evidence": "unspecified",

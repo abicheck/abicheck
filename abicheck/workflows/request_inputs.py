@@ -15,12 +15,12 @@
 """``InputSpec`` -- the per-side typed operand of a comparison/dump request
 (ADR-037 D2; ADR-061 gap B).
 
-The real owner behind the flat ``abicheck.workflows.contracts`` compatibility
+The real owner behind the flat ``abicheck.workflows.service_requests`` compatibility
 facade's input-side half: the supported-choice constants
 (``SUPPORTED_LANGS``/``SUPPORTED_FRONTENDS``/``SUPPORTED_DEBUG_FORMATS``),
 ``InputSpec`` itself, and its validation helpers. ``CompareRequest``/
 ``DumpRequest``/``CompareResult`` -- the pair/result half that builds on
-this one -- live in the sibling module :mod:`abicheck.workflows.contracts`,
+this one -- live in the sibling module :mod:`abicheck.workflows.service_requests`,
 split out purely to keep each module under the 800-line new-file ceiling.
 
 :data:`~abicheck.model.header_ast_frontends.HEADER_AST_FRONTENDS` (the
@@ -28,7 +28,7 @@ subset of :data:`SUPPORTED_FRONTENDS` valid for header-AST parsing) moved to
 `model` instead of staying here -- see that module's own docstring for the
 second, independent `extract`-layer need that motivated the move; it is
 re-exported here unchanged for every existing
-``from abicheck.workflows.contracts import HEADER_AST_FRONTENDS`` caller.
+``from abicheck.workflows.service_requests import HEADER_AST_FRONTENDS`` caller.
 """
 
 from __future__ import annotations
@@ -45,6 +45,7 @@ if TYPE_CHECKING:
     from ..compile_context import CompileContext
     from ..dump_manifest import DumpManifest
     from ..model.ownership_rules import OwnershipRequest
+    from .artifact.dump_execution_options import DumpExecutionOptions
 
 #: Languages the C/C++ frontends accept (mirrors the CLI ``--lang`` choices).
 SUPPORTED_LANGS = frozenset({"c", "c++"})
@@ -212,6 +213,16 @@ class InputSpec:
     # by ``resolve_input`` either way. Build it with
     # ``workflows.ownership_request.ownership_request_from_config``.
     ownership: OwnershipRequest | None = None
+    # A compare side's own execution plan, stated by a front end that
+    # resolves this side's raw ``sources``/``build_info`` the way ``dump``
+    # does: the same :class:`DumpExecutionOptions` the ``dump`` CLI hands
+    # ``execute_dump_request`` (config and its trust, the ``-p`` compile-DB
+    # match, the L2 seed's collect mode, the folded L4 compiler, the
+    # changed-path seed). ``None``: this side runs under the request-level
+    # ``build_config``/``allow_build_query``/``changed_paths`` defaults.
+    # States its own ``build_config``, so ``build_config`` above must be
+    # ``None`` alongside it.
+    execution: DumpExecutionOptions | None = None
 
     @classmethod
     def of(
@@ -235,6 +246,7 @@ class InputSpec:
         compile_db_filter: str | None = None,
         build_config: Path | str | None = None,
         ownership: OwnershipRequest | None = None,
+        execution: DumpExecutionOptions | None = None,
     ) -> InputSpec:
         """Build an :class:`InputSpec`, coercing loose front-end values."""
         return cls(
@@ -256,6 +268,7 @@ class InputSpec:
             compile_db_filter=compile_db_filter,
             build_config=Path(build_config) if build_config is not None else None,
             ownership=ownership,
+            execution=execution,
         )
 
 
@@ -520,6 +533,11 @@ def _side_errors(label: str, side: InputSpec) -> list[str]:
       this pre-flight is front-running).
     """
     errors: list[str] = []
+    if side.execution is not None and side.build_config is not None:
+        errors.append(
+            f"the {label} side states build_config twice -- set it on "
+            "InputSpec.execution only"
+        )
     # The per-side `compile.frontend` was unvalidated: the request-level
     # `frontend` is checked, but a typo in `InputSpec.compile` reached the
     # extraction layer and (once the source-ABI-only downgrade existed) was

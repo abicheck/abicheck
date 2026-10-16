@@ -85,7 +85,7 @@ from .graph_identity import (
     checkout_stable_spelling,
 )
 from .identity import _packed
-from .name_decoration import macho as macho_decoration
+from .name_decoration import macho_underscore as macho_decoration
 from .special_member_identity import (
     resolve_special_member_linker_names,
     special_member_variant_aliases,
@@ -128,7 +128,7 @@ UNRESOLVED_PREFIX = _UNRESOLVED_PREFIX
 IDENTITY_STATE_ATTR = "identity"
 
 
-class IdentityState(str, enum.Enum):
+class IdentityState(enum.StrEnum):
     RESOLVED = "resolved"
     UNRESOLVED = "unresolved"
 

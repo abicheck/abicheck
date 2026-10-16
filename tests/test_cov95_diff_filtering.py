@@ -17,11 +17,11 @@
 from __future__ import annotations
 
 from abicheck.checker_policy import ChangeKind, Confidence, EvidenceTier
+from abicheck.compare.finding_dedup import _dedup_enum_same_kind
 from abicheck.confidence import _compute_confidence, _determine_confidence_level
 from abicheck.detectors import DetectorResult
 from abicheck.diff_filtering import (
     _build_location_index,
-    _dedup_enum_same_kind,
     _downgrade_opaque_struct_changes,
     _downgrade_opaque_type_changes,
     _enrich_affected_symbols,
@@ -644,22 +644,11 @@ def test_find_by_value_types_leaf_widening_splits_at_depth_zero_only():
     assert _find_by_value_types(snap, opaque) == {"api::Wrapper<dep::Tag>"}
 
 
-def test_find_by_value_types_leaf_widening_bare_reference_in_another_scope_is_a_documented_gap():
-    """**Documented, still-open** (Codex review on PR #1041, follow-up
-    round; see ``_type_is_by_value_referenced``'s own docstring): the leaf
-    widening's ``::``-prefix rejection closes the *qualified* collision
-    (``other::Handle``, see the sibling test above), but a genuinely
-    different scope's *bare* same-leaf reference carries no qualifier to
-    reject on at all, so it still matches ``ns::Handle``'s leaf candidate.
-    This mirrors the identical, already-accepted bare-name collision on the
-    suppression side (``TestKnownGapStaysDocumented`` in
-    ``tests/test_opaque_identity_tiers.py``) -- both are the same
-    limitation of spelling-only matching without an entity's real owning
-    scope, which only ``EntityId``-based identity resolution actually
-    closes. Pinned so a future tightening of this predicate doesn't
-    silently start relying on token boundaries to solve a problem only
-    scope-aware identity can solve -- change this assertion when that
-    lands, do not delete it."""
+def test_find_by_value_types_leaf_widening_bare_reference_without_scope_evidence_stays_exposed():
+    """A bare ``Handle`` in a function with no known scope, and no other
+    same-leaf declaration in the snapshot, cannot be proven to name anything
+    but ``ns::Handle``: the leaf widening keeps it exposed by value. The
+    scope-proven case is covered in ``tests/test_opaque_leaf_lookup.py``."""
     opaque = {"ns::Handle"}
     snap = _snap(
         functions=[
@@ -667,11 +656,6 @@ def test_find_by_value_types_leaf_widening_bare_reference_in_another_scope_is_a_
                 "other_consume",
                 "other_consume",
                 return_type="void",
-                # In a real header this bare `Handle` would mean
-                # `other::Handle` (a function declared inside a different
-                # namespace) -- indistinguishable, from rendered text
-                # alone, from a bare reference that really does mean
-                # `ns::Handle`.
                 params=[Param(name="h", type="Handle", pointer_depth=0)],
             )
         ]

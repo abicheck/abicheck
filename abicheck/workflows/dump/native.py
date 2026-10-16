@@ -64,8 +64,6 @@ from ...service_header_graph_attach import (
     _HEADER_GRAPH_ENABLED,
     _HEADER_GRAPH_INCLUDES_ENABLED,
     _attach_header_graph,
-    prefetch_graph_if_useful,
-    prefetch_settled_on_failure,
 )
 from ...storage import closure_identity
 from ...workflows.dump.formats import (
@@ -73,6 +71,10 @@ from ...workflows.dump.formats import (
     BinaryFormatAdapter,
     NativeExtractRequest,
     emit_notice,
+)
+from ...workflows.dump.header_graph_prefetch import (
+    prefetch_graph_if_useful,
+    prefetch_settled_on_failure,
 )
 from ...workflows.dump.hybrid import compose_hybrid
 from ...workflows.run_dump_scope import (
@@ -373,7 +375,9 @@ def _extract_and_finish(
             # declaration-provenance classification above, not silently
             # re-widen it.
             include_search_dirs=_public_include_search_dirs,
-            prefetched=_prefetched_graph,
+            prefetched=(
+                _prefetched_graph.future if _prefetched_graph is not None else None
+            ),
         )
         snap = attach_clang_layout(
             snap, _headers, _includes, lang=lang, compile=compile
@@ -472,7 +476,13 @@ def _finish_native_snapshot(
 
 @functools.wraps(_run_dump_uncached)  # name lookup below so patching sticks
 def _call_run_dump_uncached(*args: Any, **kwargs: Any) -> AbiSnapshot:
-    return _run_dump_uncached(*args, **kwargs)
+    from ...model.performance import current_performance_profile, tuning_for
+    from ...storage.acyclic_json import gc_relaxed
+
+    # The one funnel every live extraction passes through, so every front
+    # end gets the same collector setting; a cache hit never gets here.
+    with gc_relaxed(tuning_for(current_performance_profile()).relaxed_gc):
+        return _run_dump_uncached(*args, **kwargs)
 
 
 run_dump = granting_live_source_licence(

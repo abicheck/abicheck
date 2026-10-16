@@ -156,6 +156,25 @@ def _strip_anonymous_type_locations(
             _set_identity_container(snapshot, field_name, new_container)
 
 
+def _clear_ambiguous_elf_facts(snap: AbiSnapshot, elf: Any) -> None:
+    """Unset binding/visibility for names whose versioned aliases disagree."""
+    for func in snap.declarations.functions:
+        if _has_disagreeing_aliases(elf, func.mangled):
+            func.elf_binding = None
+            func.elf_binding_fact = Fact.not_collected()
+            func.elf_visibility = None
+    for var in snap.declarations.variables:
+        if _has_disagreeing_aliases(elf, var.mangled):
+            var.elf_binding = None
+            var.elf_binding_fact = Fact.not_collected()
+            var.elf_visibility = None
+
+
+def _has_disagreeing_aliases(elf: Any, name: str) -> bool:
+    """True when *name* has aliases but they disagree on binding or visibility."""
+    return bool(elf.symbol_aliases.get(name)) and elf.unambiguous_symbol(name) is None
+
+
 def backfill_missing_elf_binding(snap: AbiSnapshot) -> None:
     """Backfill Function/Variable.elf_binding from an already-loaded
     ``elf.symbols`` for a snapshot serialized before this field existed
@@ -175,13 +194,19 @@ def backfill_missing_elf_binding(snap: AbiSnapshot) -> None:
     Deliberately scoped to ``elf_binding`` alone -- ``elf_visibility`` has
     the identical legacy-backfill gap but predates this PR, is unrelated to
     the field this PR adds, and is left as it already was.
+
+    Before filling anything, a declaration whose bare name has symbol-versioned
+    aliases that disagree on binding or visibility is cleared. A snapshot written
+    before the alias fix took its value from the last alias, which is the wrong
+    answer for such a name, so the stored value is not kept.
     """
     if snap.elf is None:
         return
-    sym_map = snap.elf.symbol_map
+    elf = snap.elf
+    _clear_ambiguous_elf_facts(snap, elf)
     for func in snap.declarations.functions:
         if func.elf_binding is None:
-            elf_sym = sym_map.get(func.mangled)
+            elf_sym = elf.unambiguous_symbol(func.mangled)
             if elf_sym is not None:
                 func.elf_binding = elf_sym.binding
                 # Plain attribute assignment never re-runs __post_init__, so
@@ -191,7 +216,7 @@ def backfill_missing_elf_binding(snap: AbiSnapshot) -> None:
                 func.elf_binding_fact = Fact.present(elf_sym.binding)
     for var in snap.declarations.variables:
         if var.elf_binding is None:
-            elf_sym = sym_map.get(var.mangled)
+            elf_sym = elf.unambiguous_symbol(var.mangled)
             if elf_sym is not None:
                 var.elf_binding = elf_sym.binding
                 var.elf_binding_fact = Fact.present(elf_sym.binding)
@@ -248,6 +273,7 @@ def extraction_contract_from_dict(raw: Any) -> ExtractionContract | None:
     profile_fingerprint = raw.get("profile_fingerprint")
     scope_fingerprint = raw.get("scope_fingerprint")
     compiler_identity_status = raw.get("compiler_identity_status")
+    header_canonical = raw.get("header_canonical")
     return ExtractionContract(
         profile_fingerprint=profile_fingerprint
         if isinstance(profile_fingerprint, str)
@@ -263,6 +289,12 @@ def extraction_contract_from_dict(raw: Any) -> ExtractionContract | None:
         # status; only a genuine matching string round-trips.
         compiler_identity_status=compiler_identity_status
         if isinstance(compiler_identity_status, str)
+        else None,
+        # ADR-082: a proof only counts when it is a list of identity strings;
+        # anything else (absent on a pre-v59 snapshot, or malformed) is unproven.
+        header_canonical=list(header_canonical)
+        if isinstance(header_canonical, list)
+        and all(isinstance(x, str) for x in header_canonical)
         else None,
     )
 

@@ -31,6 +31,7 @@ from pathlib import PurePosixPath
 from hypothesis import given, settings, strategies as st
 
 from abicheck.extract import ownership as own
+from abicheck.extract.declaration_provenance import is_system_header
 from abicheck.extract.ownership import (
     DeclarationSite,
     OwnershipDecision,
@@ -49,7 +50,6 @@ from abicheck.model.ownership_rules import (
     DependencyRoots,
     OwnershipRules,
 )
-from abicheck.provenance import is_system_header
 
 
 def _reference_classify(

@@ -278,10 +278,11 @@ class TestCompareOldBundleFactsEarlyRejections:
         facts_path.write_text(_STUB_BUNDLE_FACTS_JSON)
         staging = tmp_path / "staging"
         staging.mkdir()
+        (staging / "debian-binary").write_text("2.0\n")
         (staging / "dummy.txt").write_text("dummy\n")
         fake_deb = tmp_path / "fake.deb"
         subprocess.run(
-            [ar, "rcs", str(fake_deb), "dummy.txt"],
+            [ar, "rcs", str(fake_deb), "debian-binary", "dummy.txt"],
             cwd=staging,
             check=True,
             capture_output=True,
@@ -301,7 +302,7 @@ class TestCompareOldBundleFactsEarlyRejections:
 
     def test_config_source_method_is_rejected(self, tmp_path: Path) -> None:
         # Codex review: source.method (s1-s6) drives run_compare's own
-        # _resolve_compare_collect_mode, which this dispatcher never calls
+        # resolve_compare_collect_mode, which this dispatcher never calls
         # -- same root cause as --depth build/source, no channel for L3-L5
         # build/source evidence collection, config-declared or not.
         facts_path = tmp_path / "old.bundlefacts.json"

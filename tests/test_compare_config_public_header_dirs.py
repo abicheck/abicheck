@@ -8,7 +8,7 @@
 ``cli_resolve._resolve_compare_snapshots``'s ``config_public_header_dirs``
 parameter -> ``InputSpec.public_header_dirs`` (the same field a ``-H``
 directory argument already populates, per
-``workflows.cross_source_evolution``'s own module docstring).
+``workflows.cross_source_hygiene``'s own module docstring).
 
 These tests exercise the *wiring*, not the boundary-derivation machinery
 itself (``provenance.apply_provenance``/``workflows.scan_config.
@@ -319,7 +319,7 @@ class TestStrandedLibraryInlineInputSpecReachesConfigDirs:
         monkeypatch.chdir(tmp_path)
 
         captured: dict[str, object] = {}
-        from abicheck.workflows.dump.pipeline import (
+        from abicheck.workflows.dump.request import (
             resolve_dump_request as _real_resolve_dump_request,
         )
 
@@ -331,7 +331,7 @@ class TestStrandedLibraryInlineInputSpecReachesConfigDirs:
             return _real_resolve_dump_request(request)  # type: ignore[arg-type]
 
         monkeypatch.setattr(
-            "abicheck.workflows.dump.pipeline.resolve_dump_request",
+            "abicheck.workflows.dump.request.resolve_dump_request",
             _fake_resolve_dump_request,
         )
 

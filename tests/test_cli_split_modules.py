@@ -24,7 +24,9 @@ import pytest
 from click.testing import CliRunner
 
 from abicheck.cli import main
+from abicheck.errors import ReleaseOperandContentError
 from abicheck.model import AbiSnapshot
+from abicheck.workflows import release_compare
 
 #: Placeholder snapshots for the CompareResult stubs below — these tests read
 #: only the diff, but the struct carries both sides.
@@ -39,9 +41,9 @@ class TestCompareReleaseErrorPaths:
     def test_error_message_when_pair_raises(self, tmp_path: Path) -> None:
         """When _compare_one_library raises an unexpected exception, the
         per-library entry should carry an ERROR verdict with the message."""
-        from abicheck.cli_compare_release import _compare_one_library
-        from abicheck.cli_compare_release_pairwise import (
+        from abicheck.workflows.release_members import (
             ReleaseMemberContext,
+            compare_release_member as _compare_one_library,
             release_parent_request,
         )
 
@@ -51,7 +53,7 @@ class TestCompareReleaseErrorPaths:
         new_path.write_bytes(b"\x7fELF")
 
         with patch(
-            "abicheck.cli_compare_release_pairwise._run_compare_pair",
+            "abicheck.workflows.release_members.compare_member_pair",
             side_effect=RuntimeError("boom"),
         ):
             entry = _compare_one_library(
@@ -76,9 +78,9 @@ class TestCompareReleaseErrorPaths:
         and converted to an ERROR entry rather than aborting the run."""
         import click
 
-        from abicheck.cli_compare_release import _compare_one_library
-        from abicheck.cli_compare_release_pairwise import (
+        from abicheck.workflows.release_members import (
             ReleaseMemberContext,
+            compare_release_member as _compare_one_library,
             release_parent_request,
         )
 
@@ -88,7 +90,7 @@ class TestCompareReleaseErrorPaths:
         new_path.write_bytes(b"\x7fELF")
 
         with patch(
-            "abicheck.cli_compare_release_pairwise._run_compare_pair",
+            "abicheck.workflows.release_members.compare_member_pair",
             side_effect=click.ClickException("nope"),
         ):
             entry = _compare_one_library(
@@ -112,12 +114,12 @@ class TestCompareReleaseErrorPaths:
         """ADR-050 D2: a ProfileMismatchError/ScopeMismatchError must not
         fall into the same ERROR/exit-4 bucket a genuine crash uses -- it
         gets its own not_comparable verdict string with a reason field."""
-        from abicheck.cli_compare_release import _compare_one_library
-        from abicheck.cli_compare_release_pairwise import (
+        from abicheck.errors import ScopeMismatchError
+        from abicheck.workflows.release_members import (
             ReleaseMemberContext,
+            compare_release_member as _compare_one_library,
             release_parent_request,
         )
-        from abicheck.errors import ScopeMismatchError
 
         old_path = tmp_path / "libfoo.so"
         new_path = tmp_path / "libfoo.so"
@@ -125,7 +127,7 @@ class TestCompareReleaseErrorPaths:
         new_path.write_bytes(b"\x7fELF")
 
         with patch(
-            "abicheck.cli_compare_release_pairwise._run_compare_pair",
+            "abicheck.workflows.release_members.compare_member_pair",
             side_effect=ScopeMismatchError("scope drift"),
         ):
             entry = _compare_one_library(
@@ -149,12 +151,13 @@ class TestCompareReleaseErrorPaths:
     def test_not_comparable_writes_verdict_null_per_library_report(
         self, tmp_path: Path
     ) -> None:
-        from abicheck.cli_compare_release import _compare_one_library
-        from abicheck.cli_compare_release_pairwise import (
+        from abicheck.errors import ProfileMismatchError
+        from abicheck.frontends.cli.release_member_reporter import CliReleaseReporter
+        from abicheck.workflows.release_members import (
             ReleaseMemberContext,
+            compare_release_member as _compare_one_library,
             release_parent_request,
         )
-        from abicheck.errors import ProfileMismatchError
 
         old_path = tmp_path / "libfoo.so"
         new_path = tmp_path / "libfoo.so"
@@ -164,7 +167,7 @@ class TestCompareReleaseErrorPaths:
         output_dir.mkdir()
 
         with patch(
-            "abicheck.cli_compare_release_pairwise._run_compare_pair",
+            "abicheck.workflows.release_members.compare_member_pair",
             side_effect=ProfileMismatchError("profile drift"),
         ):
             _compare_one_library(
@@ -179,7 +182,7 @@ class TestCompareReleaseErrorPaths:
                     old_map={"libfoo.so": old_path},
                     new_map={"libfoo.so": new_path},
                     resolve_debug_info=lambda *_a, **_kw: None,
-                    output_dir=output_dir,
+                    reporter=CliReleaseReporter(output_dir=output_dir),
                 ),
             )
         doc = json.loads((output_dir / "libfoo.json").read_text(encoding="utf-8"))
@@ -228,9 +231,9 @@ class TestCompareReleaseErrorPaths:
     def test_format_release_summary_json(self, tmp_path: Path) -> None:
         """_format_release_summary returns a parseable JSON object when
         fmt=\"json\"."""
-        from abicheck.cli_compare_release import _format_release_summary
+        from abicheck.frontends.cli.release_report import render_release_summary
 
-        text = _format_release_summary(
+        text = render_release_summary(
             fmt="json",
             worst_verdict="COMPATIBLE",
             old_dir=tmp_path / "old",
@@ -258,9 +261,9 @@ class TestCompareReleaseErrorPaths:
 
     def test_format_release_summary_markdown(self, tmp_path: Path) -> None:
         """Markdown format includes a header and per-library lines."""
-        from abicheck.cli_compare_release import _format_release_summary
+        from abicheck.frontends.cli.release_report import render_release_summary
 
-        text = _format_release_summary(
+        text = render_release_summary(
             fmt="markdown",
             worst_verdict="BREAKING",
             old_dir=tmp_path / "old",
@@ -312,9 +315,9 @@ class TestCompareReleaseErrorPaths:
 
     def test_format_release_summary_json_matrix_findings(self, tmp_path: Path) -> None:
         """Release-global matrix findings surface in the JSON summary."""
-        from abicheck.cli_compare_release import _format_release_summary
+        from abicheck.frontends.cli.release_report import render_release_summary
 
-        text = _format_release_summary(
+        text = render_release_summary(
             fmt="json",
             worst_verdict="API_BREAK",
             old_dir=tmp_path / "old",
@@ -343,9 +346,9 @@ class TestCompareReleaseErrorPaths:
         self, tmp_path: Path
     ) -> None:
         """Markdown renders a build-configuration findings section."""
-        from abicheck.cli_compare_release import _format_release_summary
+        from abicheck.frontends.cli.release_report import render_release_summary
 
-        text = _format_release_summary(
+        text = render_release_summary(
             fmt="markdown",
             worst_verdict="API_BREAK",
             old_dir=tmp_path / "old",
@@ -364,9 +367,9 @@ class TestCompareReleaseErrorPaths:
     def test_format_release_summary_junit_matrix_findings(self, tmp_path: Path) -> None:
         """JUnit output includes a testsuite for the matrix finding so CI
         dashboards reading the report see the ABI failure (Codex review)."""
-        from abicheck.cli_compare_release import _format_release_summary
+        from abicheck.frontends.cli.release_report import render_release_summary
 
-        text = _format_release_summary(
+        text = render_release_summary(
             fmt="junit",
             worst_verdict="API_BREAK",
             old_dir=tmp_path / "old",
@@ -384,7 +387,9 @@ class TestCompareReleaseErrorPaths:
 
     def test_collect_matrix_result_no_snapshots(self) -> None:
         """Without matrix snapshots the result is None and verdict unchanged."""
-        from abicheck.cli_compare_release import _collect_matrix_result
+        from abicheck.workflows.release_compare import (
+            collect_matrix_result as _collect_matrix_result,
+        )
 
         result, verdict = _collect_matrix_result(
             None,
@@ -397,15 +402,13 @@ class TestCompareReleaseErrorPaths:
 
     def test_collect_matrix_result_folds_verdict(self, tmp_path: Path) -> None:
         """Matrix findings escalate the worst-of release verdict."""
-        from abicheck import cli_compare_release
-
         fake = [self._matrix_change()]
         old_m, new_m = tmp_path / "o.json", tmp_path / "n.json"
         with patch(
-            "abicheck.frontends.cli.runtime._load_probe_matrix_changes",
+            "abicheck.workflows.pair_evidence.load_probe_matrix_changes",
             return_value=fake,
         ):
-            result, verdict = cli_compare_release._collect_matrix_result(
+            result, verdict = release_compare.collect_matrix_result(
                 old_m,
                 new_m,
                 "strict_abi",
@@ -422,8 +425,6 @@ class TestCompareReleaseErrorPaths:
     ) -> None:
         """A --policy override (e.g. ignore) applies to matrix findings,
         matching the single-pair compare path (checker.compare → PolicyFile)."""
-        from abicheck import cli_compare_release
-
         policy_file = tmp_path / "policy.yaml"
         policy_file.write_text(
             "base_policy: strict_abi\n"
@@ -434,10 +435,10 @@ class TestCompareReleaseErrorPaths:
         fake = [self._matrix_change()]
         old_m, new_m = tmp_path / "o.json", tmp_path / "n.json"
         with patch(
-            "abicheck.frontends.cli.runtime._load_probe_matrix_changes",
+            "abicheck.workflows.pair_evidence.load_probe_matrix_changes",
             return_value=fake,
         ):
-            _, verdict = cli_compare_release._collect_matrix_result(
+            _, verdict = release_compare.collect_matrix_result(
                 old_m,
                 new_m,
                 "strict_abi",
@@ -455,7 +456,6 @@ class TestCompareReleaseErrorPaths:
         it via `pack_application.policy_file_with_packs` directly, since it
         builds its own local `PolicyFile` rather than routing through
         `service.run_compare`."""
-        from abicheck import cli_compare_release
         from abicheck.change_registry_types import Verdict
         from abicheck.checker_policy import ChangeKind
         from abicheck.pack_application import PackApplication
@@ -466,10 +466,10 @@ class TestCompareReleaseErrorPaths:
         fake = [self._matrix_change()]
         old_m, new_m = tmp_path / "o.json", tmp_path / "n.json"
         with patch(
-            "abicheck.frontends.cli.runtime._load_probe_matrix_changes",
+            "abicheck.workflows.pair_evidence.load_probe_matrix_changes",
             return_value=fake,
         ):
-            _, verdict = cli_compare_release._collect_matrix_result(
+            _, verdict = release_compare.collect_matrix_result(
                 old_m,
                 new_m,
                 "strict_abi",
@@ -484,8 +484,6 @@ class TestCompareReleaseErrorPaths:
     def test_collect_matrix_result_respects_suppression(self, tmp_path: Path) -> None:
         """A --suppress rule applies to matrix findings, matching the compare
         path (which routes extra_changes through checker.compare). (Codex P2)"""
-        from abicheck import cli_compare_release
-
         supp = tmp_path / "supp.yaml"
         supp.write_text(
             "version: 1\n"
@@ -498,10 +496,10 @@ class TestCompareReleaseErrorPaths:
         fake = [self._matrix_change()]
         old_m, new_m = tmp_path / "o.json", tmp_path / "n.json"
         with patch(
-            "abicheck.frontends.cli.runtime._load_probe_matrix_changes",
+            "abicheck.workflows.pair_evidence.load_probe_matrix_changes",
             return_value=fake,
         ):
-            result, verdict = cli_compare_release._collect_matrix_result(
+            result, verdict = release_compare.collect_matrix_result(
                 old_m,
                 new_m,
                 "strict_abi",
@@ -516,14 +514,14 @@ class TestCompareReleaseErrorPaths:
 
     def test_exit_compare_release_breaking(self) -> None:
         """_exit_compare_release maps BREAKING verdict to exit 4."""
-        from abicheck.cli_compare_release import _exit_compare_release
+        from abicheck.frontends.cli.release_exit import _exit_compare_release
 
         with pytest.raises(SystemExit) as exc_info:
             _exit_compare_release("BREAKING", fail_on_removed=False, removed_keys=[])
         assert exc_info.value.code == 4
 
     def test_exit_compare_release_api_break(self) -> None:
-        from abicheck.cli_compare_release import _exit_compare_release
+        from abicheck.frontends.cli.release_exit import _exit_compare_release
 
         with pytest.raises(SystemExit) as exc_info:
             _exit_compare_release("API_BREAK", fail_on_removed=False, removed_keys=[])
@@ -532,7 +530,7 @@ class TestCompareReleaseErrorPaths:
     def test_exit_compare_release_removed_library_fail(self) -> None:
         """When --fail-on-removed-library is set and a library was removed,
         exit with code 8 even if the verdict itself is compatible."""
-        from abicheck.cli_compare_release import _exit_compare_release
+        from abicheck.frontends.cli.release_exit import _exit_compare_release
 
         with pytest.raises(SystemExit) as exc_info:
             _exit_compare_release(
@@ -547,7 +545,9 @@ class TestCompareReleaseErrorPaths:
     ) -> None:
         """If build_bundle_snapshot raises, _run_bundle_analysis should
         log a warning and return None instead of crashing the run."""
-        from abicheck.cli_compare_release import _run_bundle_analysis
+        from abicheck.workflows.release_bundle import (
+            run_bundle_analysis as _run_bundle_analysis,
+        )
 
         old_path = tmp_path / "libfoo.so"
         new_path = tmp_path / "libfoo.so"
@@ -574,7 +574,9 @@ class TestCompareReleaseErrorPaths:
         a literal comma (a real, if unusual, valid SONAME character) must
         reach analyze_bundle() as one entry, not two."""
         from abicheck.bundle import BundleDiffResult
-        from abicheck.cli_compare_release import _run_bundle_analysis
+        from abicheck.workflows.release_bundle import (
+            run_bundle_analysis as _run_bundle_analysis,
+        )
 
         fake_snap = type("S", (), {"root": tmp_path})()
         old_path = tmp_path / "libfoo.so"
@@ -612,7 +614,9 @@ class TestCompareReleaseErrorPaths:
         """If compare_bundle itself raises, _run_bundle_analysis returns
         an empty BundleDiffResult (degraded mode) rather than failing."""
         from abicheck.bundle import BundleDiffResult
-        from abicheck.cli_compare_release import _run_bundle_analysis
+        from abicheck.workflows.release_bundle import (
+            run_bundle_analysis as _run_bundle_analysis,
+        )
 
         fake_snap = type("S", (), {"root": tmp_path})()
         old_path = tmp_path / "libfoo.so"
@@ -639,9 +643,10 @@ class TestCompareReleaseErrorPaths:
 
     def test_bundle_analysis_bad_manifest_raises(self, tmp_path: Path) -> None:
         """A malformed --instantiation-manifest path raises ClickException."""
-        import click
 
-        from abicheck.cli_compare_release import _run_bundle_analysis
+        from abicheck.workflows.release_bundle import (
+            run_bundle_analysis as _run_bundle_analysis,
+        )
 
         fake_snap = type("S", (), {"root": tmp_path})()
         bad_manifest = tmp_path / "nope.toml"
@@ -659,7 +664,9 @@ class TestCompareReleaseErrorPaths:
                 side_effect=FileNotFoundError("missing"),
             ),
         ):
-            with pytest.raises(click.ClickException, match="Failed to load manifest"):
+            with pytest.raises(
+                ReleaseOperandContentError, match="Failed to load manifest"
+            ):
                 _run_bundle_analysis(
                     old_map={"libfoo.so": old_path},
                     new_map={"libfoo.so": old_path},
@@ -673,7 +680,9 @@ class TestCompareReleaseErrorPaths:
         silently default to strict_abi for bundle-level findings (Codex
         review, fresh evidence)."""
         from abicheck.bundle import BundleDiffResult
-        from abicheck.cli_compare_release import _run_bundle_analysis
+        from abicheck.workflows.release_bundle import (
+            run_bundle_analysis as _run_bundle_analysis,
+        )
 
         fake_snap = type("S", (), {"root": tmp_path})()
         old_path = tmp_path / "libfoo.so"
@@ -710,7 +719,9 @@ class TestCompareReleaseErrorPaths:
         """_collect_bundle_result() -- the real call site compare-release
         uses -- must pass its own policy through to _run_bundle_analysis(),
         not just accept it and drop it (Codex review, fresh evidence)."""
-        from abicheck.cli_compare_release_helpers import _collect_bundle_result
+        from abicheck.workflows.release_bundle import (
+            collect_bundle_result as _collect_bundle_result,
+        )
 
         old_path = tmp_path / "libfoo.so"
         old_path.write_bytes(b"\x7fELF")
@@ -721,7 +732,7 @@ class TestCompareReleaseErrorPaths:
             return None
 
         with patch(
-            "abicheck.cli_compare_release_helpers._run_bundle_analysis",
+            "abicheck.workflows.release_bundle.run_bundle_analysis",
             side_effect=_fake_run_bundle_analysis,
         ):
             _collect_bundle_result(
@@ -737,9 +748,9 @@ class TestCompareReleaseErrorPaths:
 
     def test_format_release_summary_junit(self, tmp_path: Path) -> None:
         """JUnit format emits XML with <testsuites>."""
-        from abicheck.cli_compare_release import _format_release_summary
+        from abicheck.frontends.cli.release_report import render_release_summary
 
-        text = _format_release_summary(
+        text = render_release_summary(
             fmt="junit",
             worst_verdict="COMPATIBLE",
             old_dir=tmp_path / "old",

@@ -52,7 +52,7 @@ short:
 GateDecision`` is confined to the small set of encoders ADR-063 D6 names:
 ``policy/outcome.py`` itself (this module -- the one place a
 ``RunOutcome`` axis is decoded from raw report fields), plus
-``workflows/aggregate/gate.py``, ``cli.py``, ``service.py``, and
+``workflows/aggregate/report_gate.py``, ``cli.py``, ``service.py``, and
 ``workflows/aggregate/fold.py``/``aggregate``'s own ``exit_code()``. No
 other module should compare a ``PolicyGateDecision``/``OperationalStatus``
 against a raw integer or literal -- see
@@ -64,7 +64,7 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from ..model.change_catalog.registry import Verdict
@@ -117,7 +117,7 @@ def run_outcome_scope_required(schema_version: object) -> bool:
     )
 
 
-class PolicyGateDecision(str, Enum):
+class PolicyGateDecision(StrEnum):
     """The compatibility-policy gate axis -- ordered, exit-code-free.
 
     Mirrors the ``IssueCategory`` ordering ``severity.compute_exit_code``
@@ -134,7 +134,7 @@ class PolicyGateDecision(str, Enum):
 
 #: The one place ``PolicyGateDecision`` is given exit-code meaning -- the
 #: same 0/1/2/4 severity-aware scheme ``policy.severity._CATEGORY_EXIT_
-#: CODES``/``workflows.aggregate.gate._VALID_GATE_EXIT`` already share, so a
+#: CODES``/``workflows.aggregate.report_gate._VALID_GATE_EXIT`` already share, so a
 #: ``PolicyGateDecision`` and a legacy-scheme ``GateDecision.exit_code`` map
 #: onto exactly the same four values.
 _GATE_EXIT_CODE: dict[PolicyGateDecision, int] = {
@@ -158,7 +158,7 @@ def policy_gate_decision_for_exit_code(code: int) -> PolicyGateDecision:
     represents.
 
     *code* must be one of ``0``/``1``/``2``/``4`` -- the same scheme
-    ``workflows.aggregate.gate._VALID_GATE_EXIT`` already validates against.
+    ``workflows.aggregate.report_gate._VALID_GATE_EXIT`` already validates against.
     An unrecognized code fails safe to :attr:`PolicyGateDecision.ABI_
     BREAKING`, matching ``severity.classify_change``'s own "unclassified is
     treated as breaking" fail-safe convention, rather than silently
@@ -167,7 +167,7 @@ def policy_gate_decision_for_exit_code(code: int) -> PolicyGateDecision:
     return _EXIT_CODE_GATE.get(code, PolicyGateDecision.ABI_BREAKING)
 
 
-class OperationalStatus(str, Enum):
+class OperationalStatus(StrEnum):
     """A run that never produced a real compatibility verdict at all.
 
     ``PolicyGateDecision`` alone cannot represent this: it only orders
@@ -204,7 +204,7 @@ def operational_status_exit_code(operational: OperationalStatus) -> int:
     """*operational*'s own contribution to the shared 0/1/2/4 scheme.
 
     ``NONE`` contributes ``0``; every other member contributes ``1`` --
-    mirroring ``workflows.aggregate.gate.COVERAGE_INCOMPLETE_EXIT`` and the
+    mirroring ``workflows.aggregate.report_gate.COVERAGE_INCOMPLETE_EXIT`` and the
     identical orthogonal-axis fold ADR-049 Phase 7's contract-coverage
     contribution already uses (a real, independent failure that must never
     be masked by, nor mask, the compatibility gate's own contribution).
@@ -219,7 +219,7 @@ def fold_gate_and_operational(
     the shared 0/1/2/4 scheme -- neither axis is allowed to mask the other.
 
     This is the one fold ADR-063 D6 assigns to ``gate.py``'s own readers
-    (:mod:`abicheck.workflows.aggregate.gate`): two independent axes folded
+    (:mod:`abicheck.workflows.aggregate.report_gate`): two independent axes folded
     once per target, rather than two separate values every later consumer
     has to remember to fold itself.
     """
@@ -228,7 +228,7 @@ def fold_gate_and_operational(
     )
 
 
-class TargetLifecycle(str, Enum):
+class TargetLifecycle(StrEnum):
     """A target's own lifecycle state within an ``aggregate`` baseline-set.
 
     Grounded in vocabulary ``workflows.aggregate.contracts.py`` already
@@ -248,7 +248,7 @@ class TargetLifecycle(str, Enum):
     NEW_TARGET = "new_target"
 
 
-class ScopeCompleteness(str, Enum):
+class ScopeCompleteness(StrEnum):
     """ADR-065 D6's completeness axis: was every *selected, expected*
     member of the comparison scope actually compared?
 
@@ -333,8 +333,8 @@ class RunOutcome:
         if not isinstance(data, dict):
             return None
         try:
-            gate = PolicyGateDecision(data.get("gate"))
-            operational = OperationalStatus(data.get("operational"))
+            gate = PolicyGateDecision(data.get("gate", ""))
+            operational = OperationalStatus(data.get("operational", ""))
         except ValueError:
             return None
         lifecycle_raw = data.get("lifecycle")
@@ -350,7 +350,7 @@ class RunOutcome:
         # writer described the one pair it ran); later ones must carry it.
         required = run_outcome_scope_required(data.get("schema_version"))
         try:
-            scope = ScopeCompleteness(data.get("scope"))
+            scope = ScopeCompleteness(data.get("scope", ""))
         except ValueError:
             if required:
                 return None
@@ -392,7 +392,7 @@ _SCAN_ABORT_VERDICT_OPERATIONAL: dict[str, OperationalStatus] = {
 #: ``scan``'s own legacy top-level exit codes that mean "the compatibility
 #: axis contributed nothing; this is an operational condition" -- 5 (budget
 #: overflow) and 6 (not-comparable), the two codes
-#: ``workflows.aggregate.gate.GateInfo.from_scan_report`` already treats as
+#: ``workflows.aggregate.report_gate.GateInfo.from_scan_report`` already treats as
 #: real, independent blocking conditions outside its own 0/2/4 native scheme.
 _SCAN_EXIT_CODE_OPERATIONAL: dict[int, OperationalStatus] = {
     5: OperationalStatus.BUDGET_OVERFLOW,
@@ -403,7 +403,7 @@ _SCAN_EXIT_CODE_OPERATIONAL: dict[int, OperationalStatus] = {
 def _is_valid_coverage_contribution(raw: object) -> bool:
     """Whether *raw* is a usable ``0``/``1`` contract-coverage contribution.
 
-    Mirrors ``workflows.aggregate.gate._is_valid_contribution``'s own
+    Mirrors ``workflows.aggregate.report_gate._is_valid_contribution``'s own
     bool-before-int check exactly (``True == 1`` in Python) -- duplicated
     here since that module may depend on this leaf, never the reverse.
     """
@@ -438,7 +438,7 @@ def run_outcome_for_scan_fields(
     block -- preferred over deriving the compatibility axis from the
     top-level *exit_code*, which under the severity scheme already folds in
     the orthogonal contract-coverage/analysis-assurance contributions
-    (mirrors ``workflows.aggregate.gate._scan_severity_gate``'s own
+    (mirrors ``workflows.aggregate.report_gate._scan_severity_gate``'s own
     preference for the identical nested block).
 
     *contract_coverage_contribution*, when given, is the report's own
@@ -455,7 +455,7 @@ def run_outcome_for_scan_fields(
     blocker). Confirmed via the report's own declared contribution, never
     guessed: an unconfirmed ``1`` stays a compatibility-gate contribution,
     fail-closed, like the reader this mirrors
-    (``workflows.aggregate.gate._contract_coverage_exit``).
+    (``workflows.aggregate.report_gate._contract_coverage_exit``).
 
     *analysis_assurance_contribution*, when given, is the report's own P0.4
     ``analysis_assurance_exit_contribution`` (``0``/``1``) -- the sibling
@@ -655,7 +655,7 @@ def worst_real_verdict(candidates: Iterable[object]) -> Verdict | None:
     """Worst real :class:`Verdict` among *candidates* (declaration order),
     skipping every non-parseable entry (``None``, an operational sentinel)
     -- ``None`` if nothing parses. Sibling of ``cli_compare_release_
-    helpers._release_completed_compatibility_verdict`` (a `frontends`
+    release_outcome.fold_release_outcome`` (a `frontends`
     module `policy`/`buildsource` may not import) shared by the scan-set
     (below) and legacy-release-backfill callers instead of each re-deriving
     "worst real verdict, sentinels excluded".

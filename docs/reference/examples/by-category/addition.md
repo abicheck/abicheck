@@ -3,7 +3,7 @@
 
 Listed in `ADDITION_KINDS` — backward-compatible additions.
 
-_11 case(s)._ [← back to all examples](../index.md)
+_12 case(s)._ [← back to all examples](../index.md)
 
 | Case | Title | Verdict | Category |
 |------|-------|---------|----------|
@@ -18,3 +18,4 @@ _11 case(s)._ [← back to all examples](../index.md)
 | [case185_inherited_override_reuses_slot](../case185_inherited_override_reuses_slot.md) | Inherited override reuses the base's vtable slot | 🟢 COMPATIBLE | Addition (Compatible) |
 | [case200_new_entry_point_instead_of_parameter_added](../case200_new_entry_point_instead_of_parameter_added.md) | New Entry Point Instead of a Changed Arity | 🟢 COMPATIBLE | Addition (Compatible) |
 | [case204_class_gained_non_virtual_method](../case204_class_gained_non_virtual_method.md) | Class Gained a Non-Virtual Method | 🟢 COMPATIBLE | Addition (Compatible) |
+| [case216_overload_added_beside_initializer_list](../case216_overload_added_beside_initializer_list.md) | Overload Added Beside an `initializer_list` Overload | 🟢 COMPATIBLE | Addition (Compatible) |

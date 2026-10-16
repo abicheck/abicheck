@@ -43,7 +43,7 @@ import re
 from bisect import bisect_left
 from collections.abc import Iterable
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
@@ -82,7 +82,7 @@ from .source_inputs import (
 PATTERN_FACTS_VERSION: int = 1
 
 
-class PatternCategory(str, Enum):
+class PatternCategory(StrEnum):
     """The ABI dimension a construct touches — drives the escalation hint."""
 
     LAYOUT = "layout"  # record size/alignment/packing
@@ -95,7 +95,7 @@ class PatternCategory(str, Enum):
     ALLOCATION = "allocation"  # operator new/delete
 
 
-class PatternKind(str, Enum):
+class PatternKind(StrEnum):
     """One named ABI-risk construct the lexical scan recognizes (ADR-035 D2)."""
 
     PRAGMA_PACK = "pragma_pack"

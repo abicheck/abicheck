@@ -24,54 +24,10 @@ Provides framework-agnostic functions for the core abicheck operations:
 
 from __future__ import annotations
 
-import importlib as _importlib
-from typing import TYPE_CHECKING
-
-from .model import AbiSnapshot
-
-# `_attach_header_graph` moved to `service_header_graph_attach.py`, purely to
-# stay under the AI-readiness 2000-line hard cap -- the identical reason
-# `service_render.py`/`dry_run_estimate.py`/`service_compare_pipeline.py`/
-# `service_dump_pipeline.py` (re-exported further down this file) already
-# moved out. Imported here, eagerly, rather than down with those: unlike
-# them, this module has no import-cycle relationship with `service.py`
-# itself (it reaches `.compile_context`/`.dry_run_estimate`/`.header_utils`/
-# `.errors` directly, none of which import `.service`), so there is no
-# ordering constraint forcing it to the tail. Re-exported under its original
-# private name so both `monkeypatch.setattr("abicheck.service.
-# _attach_header_graph", ...)` and `from abicheck.service import
-# _attach_header_graph` keep resolving unchanged for the many existing
-# tests that patch/import it this way.
-from .service_header_graph_attach import _attach_header_graph as _attach_header_graph
-from .workflows.contracts import (
-    CompareRequest,
-    CompareResult,
-    DumpRequest,
-    OutputSpec,
-)
-
-# ── Input resolution (ADR-061 Phase 4): moved to
-# ``workflows.input_resolution`` -- the one slice of this module with zero
-# ``PolicyFile`` dependency, so it could move into a real `workflows`
-# package location with ordinary static imports first. `compare_snapshots`/
-# `load_suppression_and_policy`/`_validate_contract_mode`/
-# `dedup_policy_override_warnings` needed `PolicyFile` classified before they
-# could follow -- see `workflows/compare_policy.py`'s own docstring for that
-# blocker's resolution and where they live now. Imported as a plain
-# static import block -- every real caller reaches these through dotted
-# attribute access (`service.resolve_input(...)`) or a fresh per-call
-# import, so `monkeypatch.setattr(service, "resolve_input", ...)` and
-# `from abicheck.service import resolve_input` both keep resolving exactly
-# as before this split. Names not in `__all__` (the private helpers plus
-# `load_env_matrix`) are re-exported via an explicit self-alias so a static
-# checker doesn't flag them as unused -- existing tests patch/import them
-# directly off `abicheck.service` (some) and off
-# `abicheck.workflows.input_resolution` (the ones that need to influence a
-# call made *inside* `resolve_input`'s own body, same rule
-# `workflows/dump/native.py`'s own re-export block documents above). ────────
+# ── Input resolution (ADR-061 Phase 4): moved to ``workflows.input_resolution``.
+# Re-exported under their public names so ``from abicheck.service import
+# resolve_input`` keeps working. Private helpers are imported from their owner.
 from .workflows.input_resolution import (
-    _resolve_symvers as _resolve_symvers,
-    _typeinfo_functions as _typeinfo_functions,
     collect_metadata,
     detect_binary_format,
     load_env_matrix as load_env_matrix,
@@ -79,38 +35,12 @@ from .workflows.input_resolution import (
     sniff_text_format,
 )
 from .workflows.request_inputs import InputSpec
-
-# PE/Mach-O header-scoped dump lives in the sibling module service_header_scoped
-# (service.py is at the file-size cap). Bound via importlib rather than a static
-# `from .service_header_scoped import ...` -- service_header_scoped reaches
-# dry_run_estimate, which reaches back to service through the pre-existing,
-# already-baselined cli_buildsource SCC (scan_engine was retired by ADR-068 Phase 6) (AGENTS.md "M1-3"/CLAUDE.md
-# "What NOT to do"); a static import here would pull this new leaf module into
-# that same cycle, which the AI-readiness import-cycle-growth gate rejects. An
-# `importlib.import_module` call is a plain function call, not an
-# `ast.ImportFrom` node, so it is invisible to that gate's static AST walk (the
-# same escape hatch `cli_buildsource.py`'s own back-compat re-export shim
-# documents) while still binding real module-level names here, so
-# `from abicheck.service
-# import _try_header_scoped_dump`, and every test's
-# `monkeypatch.setattr(service, "_try_header_scoped_dump", ...)` all keep
-# working exactly as before this module existed.
-_service_header_scoped = _importlib.import_module(
-    ".workflows.dump.header_scoped", __package__
+from .workflows.service_requests import (
+    CompareRequest,
+    CompareResult,
+    DumpRequest,
+    OutputSpec,
 )
-# Explicitly typed (not left as the `Any` importlib.import_module's attribute
-# access would otherwise infer) so a caller returning this call's result
-# still gets a real return-type check instead of a silent `no-any-return`.
-_has_matched_public_surface: Callable[[AbiSnapshot], bool] = (
-    _service_header_scoped._has_matched_public_surface
-)
-_try_header_scoped_dump: Callable[..., tuple[AbiSnapshot | None, str | None]] = (
-    _service_header_scoped._try_header_scoped_dump
-)
-del _service_header_scoped
-
-if TYPE_CHECKING:
-    from collections.abc import Callable
 
 # ── Binary dumping: ``run_dump`` lives in ``workflows.dump.native``; each
 # format's primary extraction is a ``workflows.dump.formats`` adapter. To
@@ -123,18 +53,19 @@ if TYPE_CHECKING:
 # classify_compare_pair already use.
 # ── Compare pipeline (ADR-055 D1): `run_compare_request`'s two phases live in
 # the leaf module ``service_compare_pipeline`` so the native ``compare`` CLI can
-# run its Click-dependent ADR-049 ``resolve_and_apply`` step between them and
+# run its ADR-049 configuration step (``workflows.compare_configuration``) between them and
 # still share this resolution instead of keeping a second copy. Re-exported here
 # so ``from abicheck.service import resolve_compare_request`` works.
 # ``run_compare_request``/``run_compare`` (their composition and its
 # keyword-argument shim) live there too now, for the same file-size reason. ──
+# isort: split
 # ── Dry-run cost model (ADR-035 D10's `[CostEstimate]`) extracted to the leaf
 # module dry_run_estimate, same size-cap/re-export/non-circular-import rationale
 # as service_render above. ADR-068's Phase 4 typed-API slice retired that
 # module's own `ScanRequest`/`ScanResult` (and their `--artifact-set`
 # siblings) along with `run_scan`/`run_scan_set`: `CompareRequest` ->
 # `CompareResult` is the one typed contract now. ────────────────────────────
-from .dry_run_estimate import (  # noqa: E402,F401
+from .dry_run_estimate import (  # noqa: F401
     CompileContext,
     CostEstimate,
     estimate_scan,
@@ -146,8 +77,7 @@ from .dry_run_estimate import (  # noqa: E402,F401
 # and this facade are both `frontends` (ADR-061 "composition at the outer
 # boundary"), so this is an ordinary `frontends -> frontends` import. The
 # render module is a leaf: it does not import `abicheck.service`.
-from .frontends.render import (  # noqa: E402,F401
-    _render_deps_section_md,
+from .frontends.render import (
     render_output,
     # The summary-only documents, re-exported through `frontends.render` (which
     # renders with them) because they are the direct replacement for
@@ -159,7 +89,7 @@ from .frontends.render import (  # noqa: E402,F401
     to_stat,
     to_stat_json,
 )
-from .service_compare_pipeline import (  # noqa: E402,F401
+from .service_compare_pipeline import (  # noqa: F401
     ResolvedComparePair,
     classify_compare_pair,
     resolve_compare_request,
@@ -181,18 +111,18 @@ from .service_compare_pipeline import (  # noqa: E402,F401
 # attribute access (`service.compare_snapshots(...)`) or fresh per-call
 # import keeps resolving -- and keeps being monkeypatchable -- exactly as
 # before this split.
-from .workflows.compare_policy import (  # noqa: E402,F401
+from .workflows.compare_policy import (  # noqa: F401
     compare_snapshots,
     dedup_policy_override_warnings,
     load_suppression_and_policy,
 )
-from .workflows.dump.native import run_dump  # noqa: E402,F401
+from .workflows.dump.native import run_dump
 
 # ── Dump pipeline (G33 Phase 5): ``dump``'s counterpart to the above, in the
 # leaf module ``service_dump_pipeline``. Re-exported for the same reason:
 # ``from abicheck.service import run_dump_request`` is the typed entry point
 # every front end (CLI, typed Python) builds a request for. ──────────────────
-from .workflows.dump.pipeline import run_dump_request  # noqa: E402,F401
+from .workflows.dump.request import run_dump_request
 
 # ADR-061 gap D, closed: the directory/package release fan-out's
 # pre-execution resolution is one typed request/plan pair, reachable from
@@ -206,7 +136,7 @@ from .workflows.dump.pipeline import run_dump_request  # noqa: E402,F401
 # translates both at its own boundary, back into the two `click` types that
 # produce the two exit codes this command always produced, so no
 # user-visible message or exit code changed.
-from .workflows.release_request import (  # noqa: E402,F401
+from .workflows.release_request import (
     ReleaseComparePlan as ReleaseComparePlan,
     ReleaseCompareRequest as ReleaseCompareRequest,
     cleanup_release_compare_plan as cleanup_release_compare_plan,

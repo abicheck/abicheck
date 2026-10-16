@@ -34,7 +34,7 @@ from hypothesis import given, strategies as st
 from abicheck.checker import compare
 from abicheck.checker_policy import ChangeKind, FindingEvolution
 from abicheck.checker_types import DiffResult
-from abicheck.finding_identity import report_finding_id
+from abicheck.compare.finding_identity import report_finding_id
 from abicheck.model import AbiSnapshot, Function, Visibility
 from abicheck.model.change import Change
 from abicheck.policy.finding_evolution import (
@@ -42,7 +42,7 @@ from abicheck.policy.finding_evolution import (
     compute_finding_evolution,
     compute_resolved_findings,
 )
-from abicheck.report.finding_evolution import (
+from abicheck.report.finding_evolution_section import (
     FindingEvolutionSummary,
     compute_finding_evolution_summary,
 )
@@ -235,7 +235,7 @@ class TestFindingEvolutionProperties:
 
 
 # ---------------------------------------------------------------------------
-# report/finding_evolution.py -- the compute/render half
+# report/finding_evolution_section.py -- the compute/render half
 # ---------------------------------------------------------------------------
 
 
@@ -277,7 +277,7 @@ class TestFindingEvolutionSummary:
 
     def test_add_finding_evolution_is_unconditional(self) -> None:
         """Matches ``add_disposition_audit``'s own "never omitted" rule."""
-        from abicheck.report.finding_evolution import add_finding_evolution
+        from abicheck.report.finding_evolution_section import add_finding_evolution
 
         current = _result_for(set(), tag="current")
         d: dict[str, object] = {}

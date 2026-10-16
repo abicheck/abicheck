@@ -45,7 +45,7 @@ from .pr_comment_base import (
     Finding,
     _component_key,
     _component_tag,
-    _esc,
+    escape_cell,
 )
 from .pr_comment_sections import (
     _BODY_BUDGET,
@@ -154,18 +154,20 @@ def _flat_row(f: Finding) -> str:
     visible at binary level — so labelling every one of them as a "fix"
     would misrepresent entries that carry no remediation at all.
     """
-    loc = f" · `{_esc(f.location)}`" if f.location else ""
-    cell = (_esc(f.detail) + loc) if f.detail else _esc(f.location or "—")
+    loc = f" · `{escape_cell(f.location)}`" if f.location else ""
+    cell = (escape_cell(f.detail) + loc) if f.detail else escape_cell(f.location or "—")
     if f.mangled:
-        cell += f"<br>linker: `{_esc(f.mangled)}`"
+        cell += f"<br>linker: `{escape_cell(f.mangled)}`"
     if f.impact:
-        cell += f"<br>**Impact:** {_esc(f.impact)}"
-    return f"| `{_esc(f.kind)}` | `{_esc(f.symbol)}`{_component_tag(f)} | {cell} |"
+        cell += f"<br>**Impact:** {escape_cell(f.impact)}"
+    return f"| `{escape_cell(f.kind)}` | `{escape_cell(f.symbol)}`{_component_tag(f)} | {cell} |"
 
 
 def _group_row(key: str, members: list[Finding]) -> str:
     """Render an API family as a single aggregated row (kinds, key, members)."""
-    kinds = ", ".join(f"`{_esc(k)}`" for k in dict.fromkeys(m.kind for m in members))
+    kinds = ", ".join(
+        f"`{escape_cell(k)}`" for k in dict.fromkeys(m.kind for m in members)
+    )
     syms = [m.symbol for m in members]
     shown = syms[:_GROUP_MEMBERS_INLINE]
     more = (
@@ -173,8 +175,8 @@ def _group_row(key: str, members: list[Finding]) -> str:
         if len(syms) > _GROUP_MEMBERS_INLINE
         else ""
     )
-    members_cell = ", ".join(f"`{_esc(x)}`" for x in shown) + more
-    return f"| {kinds} | `{_esc(key)}` ({len(members)}) | {members_cell} |"
+    members_cell = ", ".join(f"`{escape_cell(x)}`" for x in shown) + more
+    return f"| {kinds} | `{escape_cell(key)}` ({len(members)}) | {members_cell} |"
 
 
 #: Default total member rows in the "All grouped members" block when no
@@ -350,8 +352,8 @@ def _safe_section(
         shown = findings if row_cap is None else findings[:row_cap]
         for f in shown:
             out.append(
-                f"| `{_esc(f.kind)}` | `{_esc(f.symbol)}`{_component_tag(f)} | "
-                f"{_esc(f.detail)} |"
+                f"| `{escape_cell(f.kind)}` | `{escape_cell(f.symbol)}`{_component_tag(f)} | "
+                f"{escape_cell(f.detail)} |"
             )
         if len(findings) > len(shown):
             out.append(_omitted_row(len(findings) - len(shown), report_url))
@@ -380,8 +382,8 @@ def _safe_section(
                 if len(syms) > _SAFE_SYMBOLS_PER_KIND
                 else ""
             )
-            joined = ", ".join(f"`{_esc(x)}`" for x in shown_syms)
-            parts.append(f"`{_esc(kind)}`: {joined}{more}")
+            joined = ", ".join(f"`{escape_cell(x)}`" for x in shown_syms)
+            parts.append(f"`{escape_cell(kind)}`: {joined}{more}")
         out.append(" · ".join(parts))
         # Disclosed in *findings*, not groups: a reader counting what is
         # accounted for is counting findings, and the section heading above
@@ -425,7 +427,9 @@ def _release_table(
     ]
     for name, verdict, nb, nr, ns in shown:
         em = _VERDICT_EMOJI.get(verdict, "•")
-        out.append(f"| `{_esc(name)}` | {em} {_esc(verdict)} | {nb} | {nr} | {ns} |")
+        out.append(
+            f"| `{escape_cell(name)}` | {em} {escape_cell(verdict)} | {nb} | {nr} | {ns} |"
+        )
     if cap is not None and len(ordered) > cap:
         out.append(f"| … | … | | | _{len(ordered) - cap} more_ |")
     out += ["</details>", ""]
@@ -440,13 +444,13 @@ def _header_block(model: CommentModel, short_sha: str) -> list[str]:
     # scanned-artifact basename (the Action's `run.sh` passes it through
     # `--subject`) -- a crafted filename containing a backtick or newline
     # could terminate this code span and inject arbitrary Markdown into the
-    # sticky comment otherwise. `_esc` (used everywhere else a value is
+    # sticky comment otherwise. `escape_cell` (used everywhere else a value is
     # rendered inside a code span) neutralizes both.
     if model.no_baseline_audit:
         # No comparison ran at all (`old_acquisition_state: declared_absent`
         # in the report) -- "vs `baseline`" would claim one did (Codex
         # review, PR #1210, round 4).
-        context = f"{head_ref} — audit, no baseline · `{_esc(model.policy)}` · `{_esc(model.subject)}`"
+        context = f"{head_ref} — audit, no baseline · `{escape_cell(model.policy)}` · `{escape_cell(model.subject)}`"
     elif model.mode == "aggregate":
         # There is no single baseline here: each folded target was compared
         # against its own, and naming one would claim a shared operand this
@@ -454,13 +458,13 @@ def _header_block(model: CommentModel, short_sha: str) -> list[str]:
         # `report/pr_comment_aggregate.py`), rendered as prose rather than
         # in a code span so it cannot read as a path.
         context = (
-            f"{head_ref} — {_esc(model.old_label)} · `{_esc(model.policy)}` · "
-            f"`{_esc(model.subject)}`"
+            f"{head_ref} — {escape_cell(model.old_label)} · `{escape_cell(model.policy)}` · "
+            f"`{escape_cell(model.subject)}`"
         )
     else:
         context = (
-            f"{head_ref} vs `{_esc(model.old_label)}` · `{_esc(model.policy)}` · "
-            f"`{_esc(model.subject)}`"
+            f"{head_ref} vs `{escape_cell(model.old_label)}` · `{escape_cell(model.policy)}` · "
+            f"`{escape_cell(model.subject)}`"
         )
     counts_line = f"**{b} breaking** · {r} needs review · {s} safe"
     # The incomplete count is a distinct axis (analysis quality, not

@@ -927,29 +927,29 @@ def detect_overload_set_rerouted(
 
 
 def _count_top_level_template_args(name: str) -> int | None:
-    """Count the comma-separated top-level template arguments in
-    ``name<...>``. Returns ``None`` if there is no top-level ``<``.
+    """Count the top-level template arguments in ``name<...>``; ``None`` with no
+    ``<``. Commas inside ``(...)``/``[...]`` (a function type's parameters) and
+    the ``>`` of a ``->`` arrow are not argument separators.
 
-    ``Foo<int, std::pair<int, char>>`` → 2.
+    ``Foo<int, std::pair<int, char>>`` → 2, ``std::function<void(int, int)>`` → 1.
     """
     if "<" not in name:
         return None
-    depth = 0
-    args = 0
-    saw_any = False
-    for ch in name:
-        if ch == "<":
+    depth = group = args = 0
+    for i, ch in enumerate(name):
+        if ch == ">" and name[i - 1 : i] == "-":
+            continue
+        if ch in "([":
+            group += 1
+        elif ch in ")]":
+            group -= 1
+        elif ch == "<":
             depth += 1
-            if depth == 1:
-                saw_any = True
-            continue
-        if ch == ">":
-            if depth > 0:
-                depth -= 1
-            continue
-        if depth == 1 and ch == ",":
+        elif ch == ">":
+            depth = max(depth - 1, 0)
+        elif ch == "," and depth == 1 and group == 0:
             args += 1
-    return args + 1 if saw_any else None
+    return args + 1
 
 
 def detect_mandatory_template_param_added(
@@ -1342,13 +1342,13 @@ def demote_lambda_closure_unexported_findings(
     ``changes``.
     """
     from .change_registry import API_BREAK_KINDS, BREAKING_KINDS
-    from .diff_symbols import _reconciled_function_surfaces
-    from .elf_symbol_filter import FUNCTION_SYMBOL_TYPES, exported_symbol_names
-    from .finding_identity_ctor_dtor import (
+    from .compare.finding_identity.ctor_dtor import (
         itanium_source_name_token,
         itanium_standard_substitution_token,
         synthetic_ctor_dtor_template_base_name,
     )
+    from .compare.public_surface import reconciled_function_surfaces
+    from .elf_symbol_filter import FUNCTION_SYMBOL_TYPES, exported_symbol_names
     from .model.change_catalog.registry import Verdict
     from .model.synthetic_key import is_synthetic_ctor_key, is_synthetic_dtor_key
 
@@ -1366,11 +1366,11 @@ def demote_lambda_closure_unexported_findings(
     old_exported = exported_symbol_names(old_elf, FUNCTION_SYMBOL_TYPES)
     new_exported = exported_symbol_names(new_elf, FUNCTION_SYMBOL_TYPES)
     # `change.symbol` (the detector's match key) can differ from a function's
-    # real accepted export spelling, `Function.name` -- `_public_functions`'s
+    # real accepted export spelling, `Function.name` -- `public_functions`'s
     # own bare-name export fallback exists because castxml/DWARF can
     # under-mangle a name the real ELF table still carries correctly, so both
     # spellings must be checked before ever claiming absence.
-    old_map, new_map = _reconciled_function_surfaces(old, new)
+    old_map, new_map = reconciled_function_surfaces(old, new)
 
     for change in changes:
         if change.kind not in _LAMBDA_CLOSURE_DEMOTABLE_KINDS:

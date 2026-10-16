@@ -26,7 +26,7 @@ snapshot content; it only moves bytes/text in and out of files, honestly
 and atomically.
 
 Deliberately dependency-free of the rest of ``abicheck`` (a leaf module) so
-it can be imported from ``serialization.py``, ``snapshot_cache.py``, and
+it can be imported from ``serialization.py``, ``workflows/dump/cache/``, and
 CLI/service code without creating an import cycle.
 """
 
@@ -40,7 +40,7 @@ import os
 import stat
 from collections.abc import Iterable
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
@@ -57,7 +57,7 @@ from .storage.zstd_frame_guard import (
 # ── Compression selector ────────────────────────────────────────────────────
 
 
-class SnapshotCompression(str, Enum):
+class SnapshotCompression(StrEnum):
     """One project-wide vocabulary for snapshot storage encoding.
 
     ``AUTO`` is a *request*, never a stored/resolved value: callers resolve

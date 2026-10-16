@@ -425,7 +425,7 @@ class TestLangCFallsBackToCpp:
         modes: list[bool] = []
 
         def fake_run(cmd, **kwargs):  # noqa: ANN001
-            if "-dM" in cmd:  # the macro-table preprocess run (macro_table)
+            if "-dD" in cmd:  # the preprocess run (preprocessed_text)
                 return _completed(returncode=1)
             c_mode = _in_c_mode(cmd)
             modes.append(c_mode)
@@ -657,7 +657,7 @@ class TestHeaderToolchainErrorClass:
 
 class TestG16ClangFallbackRespectsConfiguredDriver:
     """The G16 recoverable-fallback guard must probe the exact clang driver
-    _run_clang() would actually invoke (_resolve_clang_bin honors
+    _run_clang() would actually invoke (resolve_clang_bin honors
     --compiler/--compiler-prefix), not a bare "clang" on PATH -- a caller-
     configured or prefixed clang may be available and should let the
     fallback recover even when bare "clang" isn't on PATH at all (Codex

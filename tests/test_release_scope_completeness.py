@@ -339,7 +339,7 @@ class TestZeroPairRelease:
         assert doc["run_outcome"]["operational"] == "no_comparison_completed"
 
     def test_exit_function_folds_the_axis_like_coverage(self) -> None:
-        from abicheck.cli_compare_release_helpers import _exit_compare_release
+        from abicheck.frontends.cli.release_exit import _exit_compare_release
 
         with pytest.raises(SystemExit) as info:
             _exit_compare_release(
@@ -766,8 +766,8 @@ class TestDegradedStrandedCapture:
     def test_failed_stranded_dump_is_persisted_as_degraded(
         self, tmp_path: Path
     ) -> None:
-        from abicheck.cli_compare_release_helpers import write_bundle_facts_out
         from abicheck.serialization import load_bundle_facts
+        from abicheck.workflows.release_bundle import write_bundle_facts_out
         from abicheck.workflows.release_scope import StrandedLibraryResolution
 
         old_map = {"libx.so": tmp_path / "libx.so", "liby.so": tmp_path / "liby.so"}

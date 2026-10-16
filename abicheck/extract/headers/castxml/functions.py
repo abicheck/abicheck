@@ -137,7 +137,7 @@ def ctor_or_dtor_visibility(
     constructor overload (case78: FUNC_REMOVED never fired for
     ``task_arena(attach_mode_t)``) and an added one (case111: FUNC_ADDED
     never fired for the new ``std::function<int()>`` overload) behind
-    ``_public_functions()``'s PUBLIC/ELF_ONLY filter.
+    ``public_functions()``'s PUBLIC/ELF_ONLY filter.
 
     castxml ALSO omits the mangled name for every ``<Destructor>``
     (never just user-declared/overloaded ones — a class has at most one

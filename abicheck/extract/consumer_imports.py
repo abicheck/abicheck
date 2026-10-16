@@ -20,7 +20,7 @@ from an ELF, PE, or Mach-O executable: its needed libraries, the undefined
 symbols it resolves from the target library, and (ELF) the version tags it
 requires from it. An unrecognised format or a parser error is reported as a
 ``FAILED`` fact with a reason, never as a bare empty requirement set.
-Evaluating those requirements is ``policy.consumer_requirements``' job.
+Evaluating those requirements is ``policy.consumer_requirement_evaluation``' job.
 """
 
 from __future__ import annotations

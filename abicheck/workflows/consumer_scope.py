@@ -19,7 +19,7 @@ Answers "will my application (or plugin host) still work with the new
 library version?" by intersecting a consumer's requirements with an
 already-computed library diff. This module is the workflow glue:
 ``extract.consumer_imports``/``extract.library_export_facts`` read the facts,
-``policy.consumer_requirements`` evaluates them, and this module adds the
+``policy.consumer_requirement_evaluation`` evaluates them, and this module adds the
 suppressible consumer-overlay findings, the disposition-ledger bookkeeping
 and the result types. It is the documented public import path
 (``docs/use/python-api.md``).
@@ -61,7 +61,7 @@ from ..model.consumer_spec import (
 )
 from ..model.evidence_status import ReachabilityState
 from ..policy.classification import Verdict
-from ..policy.consumer_requirements import (
+from ..policy.consumer_requirement_evaluation import (
     appcompat_verdict,
     evaluate_consumer_requirements,
     missing_app_versions,
@@ -137,7 +137,7 @@ class AppCompatResult:
 
     # Set only for an ADVISORY consumer that could not be read (a REQUIRED
     # one raises instead); left at its NO_CHANGE/empty defaults and excluded
-    # from a scoped gate's worst-wins (cli_helpers_compare._apply_used_by_scoping).
+    # from a scoped gate's worst-wins (workflows.consumer_scope_gate._apply_used_by_scoping).
     unreadable: bool = False
     unreadable_reason: str | None = None
 
@@ -423,9 +423,10 @@ def scope_diff_to_consumer_facts(
         diff, overlay_ledger, breaking_for_app, policy=policy, policy_file=policy_file
     )
     # ADR-067: the ledger is *not* closed here. This runs once per `--used-by`
-    # consumer and `apply_scope` only ever demotes, so closing per consumer
-    # would intersect the consumers' relevant sets instead of unioning them.
-    # The scoped gate's orchestrator (`cli_helpers_compare.
+    # consumer, and under a scoped gate (`scope_decides_exit=True`)
+    # `apply_scope` only ever demotes, so closing per consumer would
+    # intersect the consumers' relevant sets instead of unioning them.
+    # The scoped gate's orchestrator (`consumer_scope_gate.
     # _apply_used_by_scoping`, or `check_appcompat` below) makes the single
     # `close_consumer_scope` call.
     return AppCompatResult(

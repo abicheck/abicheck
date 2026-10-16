@@ -44,6 +44,8 @@ from .html_template import _CSS as _CSS
 from .model.change_catalog.kinds import HasKind
 from .policy.classification import evidence_status_for_result, impact_for
 from .policy.evaluate import effective_kind_sets
+from .report.change_operation import entity_for_change
+from .report.change_summary import ENTITY_LABELS, UNCLASSIFIED_LABEL
 
 # ADR-061 Phase 2 item 1: the pure HTML projection half of this module.
 # Every ``compute_*`` below returns one of these frozen structs (or, for the
@@ -58,6 +60,8 @@ from .report.disposition_audit import DispositionAudit, compute_disposition_audi
 from .report.document import ReportDocument
 from .report.edge_coverage_section import compute_edge_coverage_section
 from .report.envelope import ReportEnvelope, resolved_document, resolved_gate
+from .report.finding import effective_bucket
+from .report.redundancy_reasons import redundancy_reason_text
 from .report.render_html import (
     ChangeRow,
     ConfidenceData,
@@ -74,10 +78,6 @@ from .report.render_html import (
 )
 from .report.render_html_document import render_html_document
 from .report_classifications import (
-    ADDED_KINDS,
-    BREAKING_KINDS,
-    CATEGORY_PREFIXES,
-    REMOVED_KINDS,
     category,
     kind_str,
     severity,
@@ -158,44 +158,6 @@ def compute_full_change_rows(
     return tuple(rows)
 
 
-def _change_bucket(
-    change: object,
-    effective_verdict: Callable[[object], object] | None = None,
-) -> str:
-    """Classify a change into 'removed', 'added', or 'changed'.
-
-    A kind in ``ADDED_KINDS`` is excluded from the 'added' bucket when it is
-    also a canonical breaking kind (e.g. ``type_field_added`` — appending a
-    field to a non-final/polymorphic type can break binary layout, unlike
-    its sibling ``type_field_added_compatible``). Without this guard, a
-    structurally-additive but ABI-breaking finding would render under the
-    green "Added" section, reading as safe when it is not.
-
-    *effective_verdict*, when given (typically
-    ``policy.evaluate.effective_verdict``), is also consulted for
-    otherwise-additive kinds: a policy file can escalate an inherently
-    additive kind (e.g. ``func_added``) to ``Verdict.BREAKING``,
-    ``Verdict.API_BREAK``, or ``Verdict.COMPATIBLE_WITH_RISK`` — none of
-    which the canonical ``BREAKING_KINDS`` membership check above can ever
-    see, since it only looks at the kind's own default classification.
-    Any effective verdict other than ``Verdict.COMPATIBLE`` means the
-    finding needs review, so it is excluded from "added" here too — not
-    just the ``BREAKING`` case — to match the compatibility metrics and
-    verdict banner on the same page.
-    """
-    ks = kind_str(change)
-    if ks in REMOVED_KINDS:
-        return "removed"
-    if ks in ADDED_KINDS and ks not in BREAKING_KINDS:
-        if effective_verdict is not None:
-            from .checker import Verdict
-
-            if effective_verdict(change) != Verdict.COMPATIBLE:
-                return "changed"
-        return "added"
-    return "changed"
-
-
 # ---------------------------------------------------------------------------
 # HTML generation helpers
 # ---------------------------------------------------------------------------
@@ -228,34 +190,43 @@ def compute_summary_table(
     added: list[object],
     suppressed_count: int,
     audit: object | None = None,
+    *,
+    entity_of: Callable[[object], str | None] | None = None,
 ) -> SummaryTableData:
-    """Bucket the three change lists by category (mirrors ABICC's overview).
+    """Bucket the three change lists by canonical entity (ABICC-style overview).
 
-    Which category a change belongs to, and which rows are worth showing at
-    all (an all-zero category is dropped), are report decisions -- so they are
-    resolved here; the row order is the catalog's own ``CATEGORY_PREFIXES``
-    order with ``Other`` last.
+    The rows are the catalog's declared ``ChangeEntity`` per finding
+    (*entity_of*, normally the render's ``ReportFinding.entity``), labelled
+    and ordered exactly as the PR comment's entity-by-operation summary
+    (:data:`abicheck.report.change_summary.ENTITY_LABELS`), so the two
+    cannot disagree about which row a finding belongs to. An all-zero row is
+    dropped. A superseded revision classified by kind-*name* prefix
+    (``func_``/``type_``/...), which filed e.g. ``needed_added`` and every
+    ``python_api_*`` kind under a row other than its declared entity.
     """
-    cats: dict[str, dict[str, int]] = {}
-    for label, _ in CATEGORY_PREFIXES:
-        cats[label] = {"removed": 0, "changed": 0, "added": 0}
-    cats["Other"] = {"removed": 0, "changed": 0, "added": 0}
-
-    for ch in removed:
-        cats[category(kind_str(ch))]["removed"] += 1
-    for ch in changed:
-        cats[category(kind_str(ch))]["changed"] += 1
-    for ch in added:
-        cats[category(kind_str(ch))]["added"] += 1
+    resolve_entity = entity_of or (lambda ch: entity_for_change(ch, kind_str(ch)))
+    labels = [*ENTITY_LABELS, UNCLASSIFIED_LABEL]
+    cats: dict[str, dict[str, int]] = {
+        key: {"removed": 0, "changed": 0, "added": 0} for key in labels
+    }
+    for bucket_name, members in (
+        ("removed", removed),
+        ("changed", changed),
+        ("added", added),
+    ):
+        for ch in members:
+            entity = resolve_entity(ch)
+            key = entity if entity in ENTITY_LABELS else UNCLASSIFIED_LABEL
+            cats[key][bucket_name] += 1
 
     rows = []
-    for label in [lbl for lbl, _ in CATEGORY_PREFIXES] + ["Other"]:
-        c = cats[label]
+    for key in labels:
+        c = cats[key]
         if c["removed"] == 0 and c["changed"] == 0 and c["added"] == 0:
             continue
         rows.append(
             SummaryCategoryRow(
-                label=label,
+                label=ENTITY_LABELS.get(key, UNCLASSIFIED_LABEL),
                 removed=c["removed"],
                 changed=c["changed"],
                 added=c["added"],
@@ -316,7 +287,7 @@ def compute_confidence(
     ``active_reclassify_rules`` here rather than on the render side: whether
     a rule is still in effect is a policy question, and disclosing an expired
     one as though it were would misstate the run (Codex review, mirroring the
-    JSON ``policy_reclassify`` disclosure in ``reporter._add_policy_overrides``
+    JSON ``policy_reclassify`` disclosure in ``json_sections.add_policy_overrides``
     -- the active rule set, not a per-finding "which rule fired" attribution).
     *today* (ADR-061 gap C): an envelope's own ``resolved_today``, so that
     expiry check can't drift from the envelope's own finalized verdicts
@@ -400,7 +371,7 @@ def compute_gate_card(
 
     The gate decision itself is not computed here -- it is projected from
     :func:`abicheck.policy.gate_decision.gate_decision_for_result`, the same
-    single call site ``reporter._build_severity_json`` and
+    single call site ``json_sections.build_severity_json`` and
     ``sarif._severity_gate_properties`` read (ADR-061 D9): this function makes
     no policy decision of its own.
 
@@ -510,10 +481,10 @@ def build_html_document(
     # Apply show_only filter (display-only, does not affect metrics)
     if show_only:
         from .checker import Change as _Change
-        from .reporter import _suppress_dangling_correlation_notes, apply_show_only
+        from .report.view import display_changes as _display_changes
 
         typed_changes = [c for c in all_changes if isinstance(c, _Change)]
-        filtered = apply_show_only(
+        filtered = _display_changes(
             typed_changes,
             show_only,
             policy=result.policy,
@@ -523,7 +494,6 @@ def build_html_document(
             policy_file=getattr(result, "policy_file", None),
             today=None if envelope is None else envelope.resolved_today,
         )
-        filtered = _suppress_dangling_correlation_notes(filtered)
         display_changes: list[object] = list(filtered)
     else:
         display_changes = all_changes
@@ -536,15 +506,23 @@ def build_html_document(
     # ReportFinding resolved once per change; a stub falls back as before.
     # report_findings_for needs policy/policy_file too, absent from a
     # verdict-only stub (Codex review).
-    _effective_verdict_fn: Callable[[object], object] | None = None
+    # A stub result carries no policy inputs: its bucket and entity come
+    # from the kind's declared defaults, the same primitives
+    # `build_report_findings` applies to a real one.
+    def _bucket_of(change: object) -> str:
+        return effective_bucket(change, None)
+
+    def _entity_of(change: object) -> str | None:
+        return entity_for_change(change, kind_str(change))
+
     if isinstance(result, DiffResult):
-        from .report.finding import findings_by_change_id, report_findings_for
+        from .report.finding import build_report_findings, findings_by_change_id
 
         # ADR-061 gap C: the envelope resolved these once for the whole
         # render (over the same `result.changes`); resolve them here only for
         # a direct caller that supplied none. Read through `findings_for`
         # rather than the bare `.findings` tuple: `display_changes` can hold
-        # `_suppress_dangling_correlation_notes`' own shallow `Change` copies
+        # `suppress_dangling_correlation_notes`' own shallow `Change` copies
         # (a `--show-only` render with a dangling `correlated_change_kind`),
         # which have no entry in an id-keyed index built from `.findings`
         # alone -- `findings_for` is exactly the primitive that resolves
@@ -553,13 +531,22 @@ def build_html_document(
         if envelope is not None:
             _resolved_findings = envelope.findings_for(display_changes)  # type: ignore[arg-type]
         else:
-            _resolved_findings = report_findings_for(result)  # type: ignore[arg-type]
+            _resolved_findings = build_report_findings(
+                display_changes,  # type: ignore[arg-type]
+                policy=result.policy,
+                kind_sets=effective_kind_sets(result),
+                policy_file=result.policy_file,
+            )
         _findings_by_id = findings_by_change_id(_resolved_findings)
 
-        def _lookup_verdict(change: object) -> object:
-            return _findings_by_id[id(change)].verdict
+        def _lookup_bucket(change: object) -> str:
+            return _findings_by_id[id(change)].bucket
 
-        _effective_verdict_fn = _lookup_verdict
+        def _lookup_entity(change: object) -> str | None:
+            return _findings_by_id[id(change)].entity
+
+        _bucket_of = _lookup_bucket
+        _entity_of = _lookup_entity
     # ADR-049 D1: a NOT_EVALUATED finding is partitioned out of the three
     # verdict buckets before they are built, the same way Markdown's own
     # "Not Evaluated (Contract)" section works -- bucketing one by its raw
@@ -577,7 +564,7 @@ def build_html_document(
     changed: list[object] = []
     _buckets = {"removed": removed, "added": added, "changed": changed}
     for ch in scored_changes:
-        _buckets[_change_bucket(ch, _effective_verdict_fn)].append(ch)
+        _buckets[_bucket_of(ch)].append(ch)
 
     # Metrics always use the full (unfiltered) change list. policy/kind_sets/
     # policy_file make the Binary Compatibility % agree with the verdict
@@ -685,6 +672,7 @@ def build_html_document(
             "all_changes_count": len(all_changes),
             "display_changes_count": len(display_changes),
             "redundant_count": getattr(result, "redundant_count", 0),
+            "redundant_reasons": redundancy_reason_text(result),
             "nav_bar": dataclasses.asdict(
                 compute_nav_bar(removed, changed, added, suppressed_count)
             ),
@@ -695,6 +683,7 @@ def build_html_document(
                     added,
                     suppressed_count,
                     shared_disposition_audit,
+                    entity_of=_entity_of,
                 )
             ),
             "confidence": (

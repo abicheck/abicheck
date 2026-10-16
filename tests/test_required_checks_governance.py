@@ -15,9 +15,10 @@
 
 """Structural guards for the required-status-check governance artifacts.
 
-`main` deliberately requires no status checks (`.github/AGENTS.md`,
-"Required-status-check configuration"). These tests keep the ruleset
-artifact honest about that, and keep the retired polling bridge jobs and
+`main` requires exactly one status check, `lint-and-types`
+(`.github/AGENTS.md`, "Required-status-check configuration"). These tests
+keep the ruleset artifact pinned to that decision, keep the required job
+running on every pull request, and keep the retired polling bridge jobs and
 the retired `test-action summary` roll-up job from coming back.
 """
 
@@ -99,12 +100,12 @@ class TestTestActionHasNoRollUpJob:
 
 
 class TestBranchRulesetArtifact:
-    """`.github/branch-protection-ruleset.json` records the *non-fast-forward*
-    protection this repo actually wants on `main`. It deliberately carries no
-    `required_status_checks` rule -- see `.github/AGENTS.md`'s
-    "Required-status-check configuration" section: this repo made a conscious
-    choice not to block a merge on CI completion, so there is no
-    required-check list left for this artifact to keep in sync with."""
+    """`.github/branch-protection-ruleset.json` is the applied Ruleset for
+    `main`. Its one required check is `lint-and-types` (`.github/AGENTS.md`,
+    "Required-status-check configuration", decision 2026-10-15). Making any
+    other check merge-blocking is a decision that must change this test too."""
+
+    REQUIRED_CONTEXTS = {"lint-and-types"}
 
     @staticmethod
     def _ruleset() -> dict[str, Any]:
@@ -115,6 +116,11 @@ class TestBranchRulesetArtifact:
         assert isinstance(data, dict)
         return data
 
+    def _rules_of_type(self, rule_type: str) -> list[dict[str, Any]]:
+        rules = self._ruleset().get("rules")
+        assert isinstance(rules, list) and rules
+        return [r for r in rules if r.get("type") == rule_type]
+
     def test_targets_main_and_is_active(self) -> None:
         ruleset = self._ruleset()
         assert ruleset.get("target") == "branch"
@@ -122,14 +128,44 @@ class TestBranchRulesetArtifact:
         include = ruleset.get("conditions", {}).get("ref_name", {}).get("include", [])
         assert "refs/heads/main" in include
 
-    def test_carries_no_required_status_checks_rule(self) -> None:
-        """The one thing this test suite must keep true: no rule of type
-        `required_status_checks` sneaks back into the applied ruleset without
-        a deliberate decision to re-enable merge-blocking on CI -- see
-        `.github/AGENTS.md`'s "Required-status-check configuration" section."""
-        rules = self._ruleset().get("rules")
-        assert isinstance(rules, list) and rules
-        assert not [r for r in rules if r.get("type") == "required_status_checks"]
+    def test_keeps_non_fast_forward_protection(self) -> None:
+        assert len(self._rules_of_type("non_fast_forward")) == 1
+
+    def test_exactly_one_required_status_check_rule(self) -> None:
+        assert len(self._rules_of_type("required_status_checks")) == 1
+
+    def test_requires_exactly_lint_and_types_and_nothing_else(self) -> None:
+        """The one thing this suite must keep true: the required set is
+        `lint-and-types` and no other check is merge-blocking."""
+        (rule,) = self._rules_of_type("required_status_checks")
+        contexts = {c["context"] for c in rule["parameters"]["required_status_checks"]}
+        assert contexts == self.REQUIRED_CONTEXTS
+
+    def test_repository_admin_bypass_is_declared(self) -> None:
+        """Maintainer choice (removable): repository admins may merge past a
+        red `lint-and-types` for an urgent fix. Role id 5 is the admin
+        repository role in GitHub's Rulesets API."""
+        bypass = self._ruleset().get("bypass_actors")
+        assert bypass == [
+            {"actor_id": 5, "actor_type": "RepositoryRole", "bypass_mode": "always"}
+        ]
+
+    def test_required_check_is_a_job_that_runs_on_every_pull_request(self) -> None:
+        """The required context must name a job whose check-run name is the
+        job id (no `name:` override), that has no `if:`/`needs:` gate, and
+        whose workflow runs on every pull request to `main` with no path
+        filter. Otherwise the check is missing on some PRs and the Ruleset
+        would wait on it forever."""
+        wf = _load_workflow("ci.yml")
+        job = _jobs(wf)["lint-and-types"]
+        assert "name" not in job, "check-run name must equal the job id"
+        assert "if" not in job and "needs" not in job
+        triggers = wf.get("on", wf.get(True)) or {}
+        assert "pull_request" in triggers
+        pull_request = triggers.get("pull_request") or {}
+        assert "main" in pull_request.get("branches", [])
+        assert "paths" not in pull_request
+        assert "paths-ignore" not in pull_request
 
     def test_runbook_references_the_json_file_and_gh_command(self) -> None:
         runbook = (ROOT / ".github" / "branch-protection-ruleset.md").read_text(

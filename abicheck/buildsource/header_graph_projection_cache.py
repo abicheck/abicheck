@@ -37,7 +37,7 @@ Why a *sidecar* rather than its own keyed cache
 -----------------------------------------------
 The projection is valid for exactly the inputs its AST was, so it must
 invalidate exactly when the AST cache entry does. Re-deriving the AST cache
-key here would mean a second copy of ``dumper_ast_config._cache_key``'s
+key here would mean a second copy of ``extract.headers.ast_config._cache_key``'s
 inputs -- including the ones ``clang_header_dump`` resolves internally
 (system includes, tool identities, the C-vs-C++ decision) -- and a copy that
 missed one of them would serve a *stale projection*, which is silent wrong
@@ -65,11 +65,16 @@ import json
 import os
 from dataclasses import fields
 from pathlib import Path
+from typing import Any
 
 from ..storage.acyclic_json import loads_acyclic
 from ..storage.code_identity import abicheck_code_fingerprint
 from .call_graph import CallEdge
+from .callback_graph import CallbackEdge
 from .header_graph_ast_projection import HeaderGraphAstProjection
+from .override_graph import OverrideEdge
+from .semantic_fact_folds import SemanticFacts
+from .template_graph import TemplateArgUse, TemplateInstantiation
 from .type_graph import TypeEdge
 
 __all__ = [
@@ -86,10 +91,71 @@ __all__ = [
 #: caught by the field lists themselves. ``/2``: ``type_files`` is in
 #: document order; a ``/1`` entry holds it in per-process string-hash order,
 #: which the header graph's node order inherited.
-PROJECTION_CACHE_SCHEMA = "abicheck-header-graph-projection/3"
+PROJECTION_CACHE_SCHEMA = "abicheck-header-graph-projection/4"
 
 _TYPE_EDGE_FIELDS = [f.name for f in fields(TypeEdge)]
 _CALL_EDGE_FIELDS = [f.name for f in fields(CallEdge)]
+_OVERRIDE_EDGE_FIELDS = [f.name for f in fields(OverrideEdge)]
+_CALLBACK_EDGE_FIELDS = [f.name for f in fields(CallbackEdge)]
+_TEMPLATE_FIELDS = [f.name for f in fields(TemplateInstantiation)]
+_TEMPLATE_ARG_FIELDS = [f.name for f in fields(TemplateArgUse)]
+#: Every positional row layout, checked as a whole on load.
+_ROW_FIELDS = {
+    "type_edge_fields": _TYPE_EDGE_FIELDS,
+    "call_edge_fields": _CALL_EDGE_FIELDS,
+    "override_edge_fields": _OVERRIDE_EDGE_FIELDS,
+    "callback_edge_fields": _CALLBACK_EDGE_FIELDS,
+    "template_fields": _TEMPLATE_FIELDS,
+    "template_arg_fields": _TEMPLATE_ARG_FIELDS,
+}
+
+
+def _row(obj: object, names: list[str]) -> list[Any]:
+    return [getattr(obj, n) for n in names]
+
+
+def _encode_template(inst: TemplateInstantiation) -> list[Any]:
+    row = _row(inst, _TEMPLATE_FIELDS)
+    for i, name in enumerate(_TEMPLATE_FIELDS):
+        if name == "args":
+            row[i] = [_row(a, _TEMPLATE_ARG_FIELDS) for a in inst.args]
+        elif name == "emitted_symbols":
+            row[i] = list(inst.emitted_symbols)
+    return row
+
+
+def _decode_template(row: list[Any]) -> TemplateInstantiation:
+    values: dict[str, Any] = dict(zip(_TEMPLATE_FIELDS, row, strict=True))
+    values["args"] = tuple(TemplateArgUse(*a) for a in values["args"])
+    values["emitted_symbols"] = tuple(values["emitted_symbols"])
+    return TemplateInstantiation(**values)
+
+
+def _encode_semantic(facts: SemanticFacts | None) -> dict[str, Any] | None:
+    if facts is None:
+        return None
+    edges, virtual_methods, owners = facts.overrides
+    return {
+        "override_edges": [_row(e, _OVERRIDE_EDGE_FIELDS) for e in edges],
+        "virtual_methods": sorted(virtual_methods),
+        "virtual_destructor_owners": sorted(owners),
+        "templates": [_encode_template(t) for t in facts.templates],
+        "callbacks": [_row(e, _CALLBACK_EDGE_FIELDS) for e in facts.callbacks],
+    }
+
+
+def _decode_semantic(doc: dict[str, Any] | None) -> SemanticFacts | None:
+    if doc is None:
+        return None
+    return SemanticFacts(
+        (
+            [OverrideEdge(*row) for row in doc["override_edges"]],
+            frozenset(doc["virtual_methods"]),
+            frozenset(doc["virtual_destructor_owners"]),
+        ),
+        [_decode_template(row) for row in doc["templates"]],
+        [CallbackEdge(*row) for row in doc["callbacks"]],
+    )
 
 
 def projection_sidecar_path(ast_cache_path: Path) -> Path:
@@ -108,8 +174,7 @@ def encode_projection(projection: HeaderGraphAstProjection) -> str:
         {
             "schema": PROJECTION_CACHE_SCHEMA,
             "code": abicheck_code_fingerprint(),
-            "type_edge_fields": _TYPE_EDGE_FIELDS,
-            "call_edge_fields": _CALL_EDGE_FIELDS,
+            **_ROW_FIELDS,
             "type_files": projection.type_files,
             "entity_files": projection.entity_files,
             "special_member_names": sorted(projection.special_member_names),
@@ -121,6 +186,8 @@ def encode_projection(projection: HeaderGraphAstProjection) -> str:
                 [getattr(e, n) for n in _CALL_EDGE_FIELDS]
                 for e in projection.call_edges
             ],
+            "semantic_facts": _encode_semantic(projection.semantic_facts),
+            "function_bodies": sorted(projection.function_bodies),
         },
         separators=(",", ":"),
     )
@@ -144,9 +211,7 @@ def decode_projection(blob: str) -> HeaderGraphAstProjection | None:
     # the AST, not the walker that projected it (`storage.code_identity`).
     if doc.get("code") != abicheck_code_fingerprint():
         return None
-    if doc.get("type_edge_fields") != _TYPE_EDGE_FIELDS:
-        return None
-    if doc.get("call_edge_fields") != _CALL_EDGE_FIELDS:
+    if any(doc.get(key) != names for key, names in _ROW_FIELDS.items()):
         return None
     try:
         return HeaderGraphAstProjection(
@@ -155,8 +220,10 @@ def decode_projection(blob: str) -> HeaderGraphAstProjection | None:
             type_edges=[TypeEdge(*row) for row in doc["type_edges"]],
             call_edges=[CallEdge(*row) for row in doc["call_edges"]],
             special_member_names=frozenset(doc["special_member_names"]),
+            semantic_facts=_decode_semantic(doc["semantic_facts"]),
+            function_bodies=frozenset(doc["function_bodies"]),
         )
-    except (KeyError, TypeError, ValueError):
+    except (KeyError, TypeError, ValueError, AttributeError):
         return None
 
 

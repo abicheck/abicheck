@@ -44,14 +44,7 @@ from ...._compiler_options import (
     forwards_response_file as _forwards_response_file,
 )
 from ....dumper_ast_config_cpp20 import _detect_cpp20_headers
-from ....dumper_clang import (
-    _ClangAstParser,
-    _is_cl_style_driver_name,
-    _is_default_clang_bin,
-    _resolve_clang_bin,
-    _resolve_dpcpp_acquisition,
-    clang_bin_is_explicitly_configured as _clang_bin_is_explicitly_configured,
-)
+from ....dumper_clang import _ClangAstParser
 from ....dumper_clang_errors import (
     _is_missing_cpp_stdlib_header_error,
     _parse_clang_ast_result,
@@ -78,8 +71,15 @@ from ....storage.header_ast_cache import (
     run_ast_acquisition_offering_entry,
     store_cached_ast,
 )
+from ...compiler_driver import (
+    clang_bin_is_explicitly_configured as _clang_bin_is_explicitly_configured,
+    is_cl_style_driver_name,
+    is_default_clang_bin,
+    resolve_clang_bin,
+    resolve_dpcpp_acquisition,
+)
 from ...path_aliases import absolutize_include_roots
-from ..backend import HeaderParseRequest
+from ..backend_protocol import HeaderParseRequest
 from .error_header_retry import retry_excluding_error_headers
 from .locations import materialize_locations
 
@@ -156,6 +156,7 @@ def clang_header_dump(
     memoize: bool | None = None,
     pruning_header_roots: tuple[str, ...] | None = None,
     exported_symbols: frozenset[str] = frozenset(),
+    resolved_lang_mode: str | None = None,
     _coordinated: bool = False,
     _expected_acquisition_key: str | None = None,
     run_ast: ClangAstRunner = run_clang_ast,
@@ -173,6 +174,13 @@ def clang_header_dump(
     stale guess once this already resolved the real answer).
 
     ``frontend_context`` selects the host or device DPC++ evidence.
+
+    ``resolved_lang_mode`` (``"c"``/``"c++"``) is the mode an earlier pass
+    over the same headers already resolved, from evidence this call may not
+    have -- the primary dump's export table (``_resolve_force_cpp``). With no
+    explicit ``lang``, ``"c++"`` is used instead of re-deriving C from header
+    text alone; the cache key is then the one that pass produced. It never
+    demotes: header text that already proves C++ stays C++.
     """
     # The acquisition key folds the ``-I`` spelling in, so the spelling is
     # canonicalized here -- the one choke point every caller reaches --
@@ -180,8 +188,8 @@ def clang_header_dump(
     # an absolute one on another made two keys (and two full parses) for
     # one header set. Idempotent for absolute roots.
     extra_includes = absolutize_include_roots(list(extra_includes))
-    clang_bin = _resolve_clang_bin(compiler, gcc_path, gcc_prefix)
-    dpcpp_multi_context, dpcpp_host_context = _resolve_dpcpp_acquisition(
+    clang_bin = resolve_clang_bin(compiler, gcc_path, gcc_prefix)
+    dpcpp_multi_context, dpcpp_host_context = resolve_dpcpp_acquisition(
         clang_bin, frontend_context, gcc_options, gcc_option_tokens
     )
     force_cpp, force_cpp20, explicit_c_request, cc_id = resolve_clang_langmode(
@@ -192,6 +200,9 @@ def clang_header_dump(
         gcc_option_tokens,
         exported_symbols,
     )
+    if not lang and resolved_lang_mode == "c++" and not force_cpp:
+        force_cpp = True
+        force_cpp20 = _detect_cpp20_headers(headers)
 
     def _resolve_sysinc(*, force_cpp: bool) -> tuple[str, ...]:
         return _resolve_clang_system_includes(
@@ -283,6 +294,7 @@ def clang_header_dump(
                 memoize=memoize,
                 pruning_header_roots=pruning_header_roots,
                 exported_symbols=exported_symbols,
+                resolved_lang_mode=resolved_lang_mode,
                 _coordinated=True,
                 _expected_acquisition_key=key,
                 run_ast=run_ast,
@@ -412,7 +424,7 @@ def clang_header_dump(
 
 
 class ClangBackend:
-    """The ``clang`` :class:`~abicheck.extract.headers.backend.HeaderAstBackend`.
+    """The ``clang`` :class:`~abicheck.extract.headers.backend_protocol.HeaderAstBackend`.
 
     *runner* runs one clang command and returns the completed process; the
     default is :func:`~abicheck.dumper_clang_errors.run_clang_ast`.
@@ -432,7 +444,7 @@ class ClangBackend:
         is the auto-fallback from a failed castxml attempt.
         """
         r = request
-        clang_bin = _resolve_clang_bin(r.compiler, r.gcc_path, r.gcc_prefix)
+        clang_bin = resolve_clang_bin(r.compiler, r.gcc_path, r.gcc_prefix)
         ast_root, resolved_kind, resolved_force_cpp = clang_header_dump(
             r.headers,
             r.extra_includes,
@@ -453,7 +465,7 @@ class ClangBackend:
             run_ast=self.runner,
         )
         is_cl_mode = _effective_driver_mode_is_cl(
-            _is_cl_style_driver_name(clang_bin), r.gcc_options, r.gcc_option_tokens
+            is_cl_style_driver_name(clang_bin), r.gcc_options, r.gcc_option_tokens
         )
         _target_known = not _forwards_response_file(r.gcc_options, r.gcc_option_tokens)
         _bare_reprobe_args = _forwarded_driver_mode_token(
@@ -469,7 +481,7 @@ class ClangBackend:
 
         _guess_ok = (
             _target_known
-            and _is_default_clang_bin(clang_bin, r.compiler)
+            and is_default_clang_bin(clang_bin, r.compiler)
             and not _clang_bin_is_explicitly_configured(r.gcc_path, r.gcc_prefix)
         )
         # ``established_triple`` is what the compiler (or an explicit target

@@ -41,7 +41,7 @@ use_cases:
   # ── change_class ──────────────────────────────────────────────────────────
   - id: UC-CHANGE-taxonomy
     axis: change_class
-    name: ABI/API change taxonomy (414 ChangeKinds, 5-tier policy)
+    name: ABI/API change taxonomy (417 ChangeKinds, 5-tier policy)
     status: complete
     user_task: [pr_review, release]
     adrs: [ADR-010, ADR-011]
@@ -362,7 +362,7 @@ use_cases:
     name: Pairwise compare (CI PR gate)
     status: complete
     user_task: [pr_review, local_check, release]
-    adrs: [ADR-002, ADR-006, ADR-009, ADR-013, ADR-017, ADR-042, ADR-049, ADR-055, ADR-064, ADR-065, ADR-067, ADR-068, ADR-071]
+    adrs: [ADR-002, ADR-006, ADR-009, ADR-013, ADR-017, ADR-042, ADR-049, ADR-055, ADR-064, ADR-065, ADR-067, ADR-068, ADR-071, ADR-078]
     evidence:
       tests: [tests/test_reporter.py]
       examples: [catalog/ground_truth.json]
@@ -423,7 +423,7 @@ use_cases:
     user_task: [release, audit]
     adrs: [ADR-008]
     evidence:
-      modules: [abicheck/cli_stack.py, abicheck/resolver.py]
+      modules: [abicheck/cli_stack.py, abicheck/workflows/elf_dependency_resolver.py]
       tests: [tests/test_stack_checker.py]
 
   - id: UC-WF-mcp
@@ -538,7 +538,7 @@ use_cases:
       canonical logical SONAME regardless of a hash-suffix rebuild.
     evidence:
       modules: [
-        abicheck/cli_helpers_compare.py,
+        abicheck/binary_utils.py,
         abicheck/bundle.py,
         abicheck/diff_cpp_patterns.py,
       ]

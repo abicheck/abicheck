@@ -256,19 +256,23 @@ def test_impact_for_artifact_proven_is_unchanged() -> None:
 def test_reporter_json_impact_carries_the_unattributed_caveat() -> None:
     """End-to-end: a downgraded finding's rendered JSON `impact` field
     carries the evidence caveat, not the bare unconditional claim."""
-    from abicheck.reporter import _change_to_dict
+    from abicheck.report.change_json import (
+        change_to_dict,
+    )
 
     c = _change(ChangeKind.FUNC_REMOVED)  # symbol_binding left unset
-    d = _change_to_dict(c, evidence_tiers=["header", "elf"])
+    d = change_to_dict(c, evidence_tiers=["header", "elf"])
     assert d["evidence_status"] == EvidenceStatus.UNATTRIBUTED.value
     assert "available evidence does not fully confirm" in d["impact"]
 
 
 def test_reporter_json_impact_stays_bare_when_artifact_proven() -> None:
-    from abicheck.reporter import _change_to_dict
+    from abicheck.report.change_json import (
+        change_to_dict,
+    )
 
     c = _change(ChangeKind.FUNC_REMOVED, symbol_binding="global")
-    d = _change_to_dict(c, evidence_tiers=["header", "elf"])
+    d = change_to_dict(c, evidence_tiers=["header", "elf"])
     assert d["evidence_status"] == EvidenceStatus.ARTIFACT_PROVEN.value
     assert "available evidence does not fully confirm" not in d["impact"]
 

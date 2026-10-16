@@ -103,7 +103,8 @@ class TestFlagForwarded:
             )
 
         monkeypatch.setattr(
-            "abicheck.service.compare_snapshots", _fake_compare_snapshots
+            "abicheck.workflows.compare_policy.compare_snapshots",
+            _fake_compare_snapshots,
         )
 
         result = CliRunner().invoke(
@@ -129,7 +130,8 @@ class TestFlagForwarded:
             )
 
         monkeypatch.setattr(
-            "abicheck.service.compare_snapshots", _fake_compare_snapshots
+            "abicheck.workflows.compare_policy.compare_snapshots",
+            _fake_compare_snapshots,
         )
 
         result = CliRunner().invoke(main, ["compare", str(old_p), str(new_p)])

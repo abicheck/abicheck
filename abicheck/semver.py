@@ -48,7 +48,7 @@ Cross-references:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 
 from .checker_types import DiffResult
 from .contract_relevance_types import ContractRelevance
@@ -63,7 +63,7 @@ from .policy.versioning_policy import (
 )
 
 
-class SemverBump(str, Enum):
+class SemverBump(StrEnum):
     """Recommended semantic-version increment for the next release."""
 
     MAJOR = "major"
@@ -72,7 +72,7 @@ class SemverBump(str, Enum):
     NONE = "none"
 
 
-class SonameAction(str, Enum):
+class SonameAction(StrEnum):
     """Recommended action for the binary soname / compatibility-version."""
 
     #: Binary ABI break detected and the soname does not appear to have moved —
@@ -95,7 +95,7 @@ class SonameAction(str, Enum):
     NOT_DETERMINED = "not_determined"
 
 
-class ReleaseRecommendationState(str, Enum):
+class ReleaseRecommendationState(StrEnum):
     """How much weight the recommendation itself can bear.
 
     Distinct from ``SonameAction``/``SemverBump`` (*what* to do): this is

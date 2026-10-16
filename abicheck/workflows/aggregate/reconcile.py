@@ -51,8 +51,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
+from abicheck.compare.finding_identity import FindingIdentity, resolve_change_identity
 from abicheck.diff_cxx_rules import itanium_qualified_name, msvc_qualified_name
-from abicheck.finding_identity import FindingIdentity, resolve_change_identity
 
 if TYPE_CHECKING:
     from abicheck.model.change import Change
@@ -88,7 +88,7 @@ class _ReportChangeView:
     #: ``Change`` annotates these ``str | None``, but the annotation is not
     #: runtime-enforced and ``diff_python.py`` really does pass a list (e.g.
     #: ``new_value=sorted(group)`` for ``python_stable_abi_violation``), which
-    #: ``_change_to_dict`` preserves verbatim into JSON.
+    #: ``change_to_dict`` preserves verbatim into JSON.
     #: ``finding_identity._stringify_change_value`` was hardened for exactly
     #: that shape, so it is forwarded rather than dropped (Codex review).
     old_value: str | list[Any] | tuple[Any, ...] | None
@@ -96,7 +96,7 @@ class _ReportChangeView:
     source_location: str | None
     affected_symbols: list[str] | None
     qualified_name: str | None
-    #: Never serialized by ``_change_to_dict`` (same as ``qualified_name``
+    #: Never serialized by ``change_to_dict`` (same as ``qualified_name``
     #: above), so a report-derived view always reads this as absent rather
     #: than lossy — ``resolve_change_identity`` only folds a set
     #: ``change.entity_id`` in as an additional alias, never into
@@ -110,7 +110,7 @@ def resolve_report_change_identity(entry: Mapping[str, Any]) -> FindingIdentity:
     """Tiered identity for a finding read back from a **report's** ``changes[]``.
 
     The same :func:`resolve_change_identity` resolution, over a JSON entry
-    (``reporter._change_to_dict``'s output) instead of a live ``Change`` —
+    (``change_json.change_to_dict``'s output) instead of a live ``Change`` —
     what a cross-report consumer needs, since a report is the only artifact
     that survives a CI matrix leg. Used by
     :attr:`abicheck.workflows.aggregate.AggregateResult.finding_matrix` to decide
@@ -118,7 +118,7 @@ def resolve_report_change_identity(entry: Mapping[str, Any]) -> FindingIdentity:
     (G34 Phase D).
 
     **Identity is comparable across reports, not with a live ``Change``.**
-    ``_change_to_dict`` does not serialize ``qualified_name``, so it reads
+    ``change_to_dict`` does not serialize ``qualified_name``, so it reads
     back as ``None`` here and a finding whose live identity was promoted via
     that field resolves one tier lower on the round trip. That is a
     consistent loss — every report on every profile loses the same field, so
@@ -170,7 +170,7 @@ def resolve_report_change_identity(entry: Mapping[str, Any]) -> FindingIdentity:
         new_value=_opt_value("new_value"),
         source_location=_opt_str("source_location"),
         affected_symbols=affected,
-        # Never serialized by `_change_to_dict` — see this function's own
+        # Never serialized by `change_to_dict` — see this function's own
         # docstring for why an absent value here is consistent rather than
         # lossy for the cross-report comparison it exists to serve.
         qualified_name=None,
@@ -395,7 +395,7 @@ class ReportFindings:
 
 
 #: Finding arrays a ``compare-release`` report carries instead of ``changes``
-#: (``cli_compare_release_helpers._format_release_json``) — the shape a
+#: (``report.release_document.release_json_document``) — the shape a
 #: ``kind: bundle`` check produces, since a bundle comparison routes through
 #: the per-library release fan-out. Both carry the same
 #: ``kind``/``symbol``/``description``/``old_value``/``new_value`` fields

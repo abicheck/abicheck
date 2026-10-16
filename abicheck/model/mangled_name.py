@@ -41,7 +41,7 @@ from .mangled_name_template_args import (
     read_length_prefixed_name as _read_length_prefixed_name,
     skip_template_args as _skip_template_args,
 )
-from .name_decoration import macho as macho_decoration
+from .name_decoration import macho_underscore as macho_decoration
 
 _ASCII_DIGITS = "0123456789"
 

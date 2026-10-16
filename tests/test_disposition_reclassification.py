@@ -18,7 +18,7 @@
 Before this slice, ``DispositionRecord.reclassified_by`` was populated by
 ``getattr(change, "reclassified_by", None)`` -- and ``Change`` carries no
 such attribute (the audit value is computed on demand by
-``reporter._reclassified_by_for_change``/``reclassify.reclassify_rule_for_
+``change_json.reclassified_by_for_change``/``reclassify.reclassify_rule_for_
 change``), so every record's ``reclassified_by`` was always ``None``.
 ``DispositionLedger.resolve_reclassifications`` closes that gap the same way
 ``resolve_verdict_classes`` already resolves a suppressed record's verdict
@@ -141,7 +141,7 @@ def test_reclassification_is_read_not_recomputed_by_the_ledger(
     tmp_path: Path, verdict: Verdict
 ) -> None:
     """`resolve_reclassifications` reads `reclassify.reclassify_rule_for_
-    change` -- the same resolver `reporter._reclassified_by_for_change`
+    change` -- the same resolver `change_json.reclassified_by_for_change`
     uses -- so it cannot invent a rule the policy file never declared."""
     to = "risk" if verdict is Verdict.COMPATIBLE_WITH_RISK else "ignore"
     p = tmp_path / "policy.yaml"
@@ -182,7 +182,7 @@ def test_every_finding_dict_builder_agrees_on_reclassified_by(
     general invariant is *parity*: every per-finding entry-builder that
     exists to report a shared ``Change`` must resolve the same
     ``reclassified_by`` value for it, via the one canonical helper
-    (``reporter._reclassified_by_for_change``), rather than some builders
+    (``change_json.reclassified_by_for_change``), rather than some builders
     computing it and a sibling silently omitting it.
 
     Covers all three of this codebase's finding-dict builders (`compare`'s
@@ -214,15 +214,18 @@ def test_every_finding_dict_builder_agrees_on_reclassified_by(
     assert reclassified_total(ledger) == 1
     assert reclassifications(ledger) == (("inlines-hidden-demotion", 1),)
 
-    from abicheck.reporter import _change_to_dict, _reclassified_by_for_change
+    from abicheck.report.change_json import (
+        change_to_dict,
+        reclassified_by_for_change,
+    )
 
-    expected = _reclassified_by_for_change(change, pf)
+    expected = reclassified_by_for_change(change, pf)
     assert expected == "inlines-hidden-demotion"
 
-    # 1. `compare`'s own full-mode JSON entry (`_change_to_dict`) -- needs
+    # 1. `compare`'s own full-mode JSON entry (`change_to_dict`) -- needs
     # real `kind_sets` (as a live `compare()` run always supplies) for the
     # reclassify resolution branch to run at all.
-    full_entry = _change_to_dict(
+    full_entry = change_to_dict(
         change, policy_file=pf, kind_sets=effective_kind_sets(diff)
     )
     assert full_entry["reclassified_by"] == expected

@@ -28,7 +28,7 @@ worker-sizing pattern through the same shared, dependency-free
 :mod:`abicheck.process_resources` probe -- one RAM-probing/pool-sizing
 implementation, not two independently maintained copies. Lives under
 ``workflows/`` (a thin ``workflows -> extract`` wrapper) rather than being
-called directly from :mod:`abicheck.cli_compare_release_pairwise`: that
+called directly from :mod:`abicheck.workflows.release_members`: that
 module is ``frontends``-classified, and ``frontends -> extract`` is a
 forbidden edge (`architecture/modules.yaml`) -- sizing a release's own
 worker pool is exactly the kind of "coordinate release behavior" concern
@@ -293,6 +293,12 @@ class ReleaseWorkerPlan:
     budget_gib: float
     pool_size: int
     admission: MemoryAdmission
+    #: What set ``initial_jobs``: ``"memory"`` (the RAM cap, with
+    #: *clamped_from* set), ``"gil"`` (the interpreter's member parallelism),
+    #: or ``None`` (the CPU count, an explicit *jobs*, or a cap that did not
+    #: bind). The memory notice fires only for ``"memory"``, so a run the
+    #: interpreter limits is never told it was memory-bound.
+    limited_by: str | None = None
 
 
 def plan_release_workers(
@@ -337,6 +343,7 @@ def plan_release_workers(
         committable, default_cost_gib=budget, floor_gib=_RELEASE_JOB_MEM_BUDGET_GIB
     )
     pool = clamped_from if gated and clamped_from is not None else effective
+    limited_by = "memory" if clamped_from is not None else None
     if jobs <= 0:
         # Level 1 of `process_resources`' concurrency policy: a member is
         # Python-heavy work, so no more of them run -- or even exist as
@@ -347,6 +354,8 @@ def plan_release_workers(
         # working sets resident for ~0% speedup under the GIL. An explicit
         # *jobs* is an instruction and is not capped here.
         parallel = python_parallelism()
+        if parallel < effective:
+            limited_by = "gil"  # the interpreter binds before memory does
         effective, pool = min(effective, parallel), min(pool, parallel)
     # The process-wide thread budget bounds every pool, an explicit *jobs*
     # included. Applying it here, rather than only when the pool borrows its
@@ -355,5 +364,9 @@ def plan_release_workers(
     # one worker.
     cap = max_threads()
     if cap is not None:
+        if cap < effective:
+            limited_by = "threads"  # the process-wide thread budget binds last
         effective, pool = min(effective, cap), min(pool, cap)
-    return ReleaseWorkerPlan(effective, clamped_from, budget, pool, admission)
+    return ReleaseWorkerPlan(
+        effective, clamped_from, budget, pool, admission, limited_by
+    )

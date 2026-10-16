@@ -21,25 +21,77 @@ that would hide a public break can be flagged rather than silently applied
 three module-level names from its parent, which made it the natural seam once
 :mod:`abicheck.post_processing` hit the 2000-line hard cap.
 
-Those three names now live in :mod:`abicheck.post_processing_context`, which
-both modules import — so the dependency runs one way (``post_processing`` ->
-this module -> ``post_processing_context``) and no cycle is possible.
+The two kind sets this pass reads are defined here, beside their one real
+consumer; the pipeline's shared state is
+:mod:`abicheck.policy.finding_disposition.run_state`.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from .model.change_catalog.kinds import ChangeKind
 from .model.evidence_status import ReachabilityState
-from .post_processing_context import (
-    _ENUM_MEMBER_KINDS,
-    _PUBLIC_SOURCE_ABI_KINDS,
-    PipelineContext,
-)
 
 if TYPE_CHECKING:
     from .model import AbiSnapshot
     from .model.change import Change
+    from .policy.finding_disposition.run_state import PipelineContext
+
+# diff_types.py builds ENUM_MEMBER_*/ENUM_LAST_MEMBER_VALUE_CHANGED's symbol
+# as "EnumName::member" (unlike TYPE_FIELD_* kinds, which carry the
+# containing type name directly) — MarkReachability.run needs this set to
+# know when to peel the member suffix before checking the owning EnumType's
+# public-header origin.
+_ENUM_MEMBER_KINDS = frozenset(
+    {
+        ChangeKind.ENUM_MEMBER_REMOVED,
+        ChangeKind.ENUM_MEMBER_ADDED,
+        ChangeKind.ENUM_MEMBER_VALUE_CHANGED,
+        ChangeKind.ENUM_LAST_MEMBER_VALUE_CHANGED,
+    }
+)
+
+# L4 (source_diff.py) / L5 (source_graph_findings.py) findings below are
+# public *by construction* -- each built only from an already-proven-public
+# entity, never a bare namespace-name heuristic (Codex review, many passes).
+# NOT extended to SOURCE_BINARY_PROVENANCE_MISMATCH (aggregate, symbol="")
+# or ODR_SOURCE_CONFLICT's sibling checks not scoped to public types.
+_PUBLIC_SOURCE_ABI_KINDS = frozenset(
+    {
+        ChangeKind.PUBLIC_TYPEDEF_REMOVED,
+        ChangeKind.PUBLIC_TYPEDEF_TARGET_CHANGED,
+        ChangeKind.PUBLIC_MACRO_REMOVED,
+        ChangeKind.PUBLIC_MACRO_VALUE_CHANGED,
+        ChangeKind.INLINE_FUNCTION_REMOVED,
+        ChangeKind.UNINSTANTIATED_TEMPLATE_REMOVED,
+        ChangeKind.CONCEPT_TIGHTENED,
+        ChangeKind.CONSTEXPR_VALUE_CHANGED,
+        ChangeKind.DEFAULT_ARGUMENT_CHANGED,
+        ChangeKind.INLINE_BODY_CHANGED,
+        ChangeKind.TEMPLATE_BODY_CHANGED,
+        ChangeKind.GENERATED_HEADER_CHANGED,
+        ChangeKind.SOURCE_DECL_BINARY_SYMBOL_MISMATCH,
+        ChangeKind.ODR_SOURCE_CONFLICT,
+        # L5 (source_graph_findings.py) kinds whose subject is itself a
+        # proven-public entry/decl/symbol, not just something touching one.
+        # NOT extended to BUILD_OPTION_REACHES_PUBLIC_SYMBOL/TARGET_DEPENDENCY_
+        # ADDED -- keyed on an option/target that merely reaches something
+        # public, not a public entity itself.
+        ChangeKind.PUBLIC_REACHABILITY_CHANGED,
+        ChangeKind.GENERATED_HEADER_REACHES_PUBLIC_API,
+        ChangeKind.CALL_GRAPH_PUBLIC_ENTRY_REACHABILITY_CHANGED,
+        ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED,
+        ChangeKind.INCLUDE_GRAPH_PUBLIC_HEADER_DRIFT,
+        ChangeKind.EXPORTED_SYMBOL_SOURCE_OWNER_CHANGED,
+        # _mapping_drift_findings fires only on old_sym != new_sym, and a
+        # SOURCE_DECL_MAPS_TO_SYMBOL edge's target is always a genuinely
+        # *exported* symbol (source_link.relink_surface_exports matches only
+        # against the real export set) -- so at least one side has this decl
+        # actually exported whenever it fires (Codex review).
+        ChangeKind.SOURCE_TO_BINARY_MAPPING_CHANGED,
+    }
+)
 
 
 class MarkReachability:
@@ -112,7 +164,7 @@ class MarkReachability:
 
     ADR-052 D2 follow-up (G29 Phase 3 slice 10): once this step actually
     tags a change (the branch above did *not* early-return), it also caches
-    that change's :class:`~abicheck.impact.model.ImpactAssessment` via
+    that change's :class:`~abicheck.impact.assessment.ImpactAssessment` via
     :func:`impact.engine.assess_change` right at the point its own
     reachability/evidence fields become final -- see the ``_cache_assessment``
     closure below for the specific per-field safety audit. This is the
@@ -155,7 +207,7 @@ class MarkReachability:
 
         def _cache_assessment(c: Change) -> None:
             """ADR-052 D2 follow-up (G29 Phase 3 slice 10): cache *c*'s
-            :class:`~abicheck.impact.model.ImpactAssessment` right after this
+            :class:`~abicheck.impact.assessment.ImpactAssessment` right after this
             step finalizes its reachability/evidence fields.
 
             Verified safe, not assumed, per the same discipline Slice 8/9 used
@@ -186,7 +238,7 @@ class MarkReachability:
             ``_run_post_processing`` (this step included) and only ever sets
             ``evidence_category`` on a change it is simultaneously moving out
             of ``kept`` into ``DiffResult.reconciled_changes``.
-            ``reporter._add_reconciled`` renders that list from its own
+            ``json_sections.add_reconciled`` renders that list from its own
             hand-built dict and never reads ``Change.impact_assessment`` for
             it (confirmed by reading ``reporter.py``), so a change that ends
             up reconciled never has its (by-then-stale) cached
@@ -210,7 +262,7 @@ class MarkReachability:
 
         from .compare.internal_namespaces import DEFAULT_INTERNAL_NAMESPACES
         from .internal_leak import (
-            _IDENTITY_VTABLE_KINDS,
+            IDENTITY_VTABLE_KINDS,
             INTERNAL_NAMESPACE,
             _format_path,
             _path_has_indirection,
@@ -520,7 +572,7 @@ class MarkReachability:
                 # suppression_would_hide_public_break diagnostic for churn
                 # that was always going to be demoted as unreachable by
                 # DemoteUnreachableInternalChurn, a false alarm.
-                identity_or_vtable = c.kind in _IDENTITY_VTABLE_KINDS
+                identity_or_vtable = c.kind in IDENTITY_VTABLE_KINDS
                 all_indirect = bool(paths) and all(
                     _path_has_indirection(p) for p in paths
                 )

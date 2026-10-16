@@ -37,11 +37,11 @@ import sys
 import pytest
 
 from abicheck.dumper import _header_ast_parser
-from abicheck.dumper_clang import (
-    _ClangAstParser,
-    _default_clang_bin_name,
-    _is_default_clang_bin,
+from abicheck.dumper_clang import _ClangAstParser
+from abicheck.extract.compiler_driver import (
     clang_bin_is_explicitly_configured,
+    default_clang_bin_name,
+    is_default_clang_bin,
 )
 from abicheck.extract.headers.clang import backend as clang_backend
 
@@ -58,11 +58,11 @@ class TestDefaultClangBinName:
 
     def test_cpp_style_compiler_selects_clangxx(self) -> None:
         for compiler in ("c++", "g++", "clang++"):
-            assert _default_clang_bin_name(compiler) == "clang++"
+            assert default_clang_bin_name(compiler) == "clang++"
 
     def test_other_compiler_selects_clang(self) -> None:
         for compiler in ("cc", "gcc", "clang", "icpx"):
-            assert _default_clang_bin_name(compiler) == "clang"
+            assert default_clang_bin_name(compiler) == "clang"
 
 
 class TestIsDefaultClangBin:
@@ -81,21 +81,21 @@ class TestIsDefaultClangBin:
     behavior."""
 
     def test_bare_default_name_matches(self) -> None:
-        assert _is_default_clang_bin("clang", "cc") is True
+        assert is_default_clang_bin("clang", "cc") is True
 
     def test_absolute_path_to_the_plain_binary_matches(self) -> None:
-        assert _is_default_clang_bin("/usr/bin/clang", "cc") is True
-        assert _is_default_clang_bin("/opt/llvm/bin/clang++", "c++") is True
+        assert is_default_clang_bin("/usr/bin/clang", "cc") is True
+        assert is_default_clang_bin("/opt/llvm/bin/clang++", "c++") is True
 
     def test_a_target_prefixed_symlink_does_not_match(self) -> None:
         # Real evidence: a Clang 20 symlink named this way resolves to
         # the identical binary as plain `clang` but reports a DIFFERENT
         # -print-target-triple, driven entirely by this basename.
-        assert _is_default_clang_bin("aarch64-apple-darwin-clang", "cc") is False
+        assert is_default_clang_bin("aarch64-apple-darwin-clang", "cc") is False
 
     def test_a_target_prefixed_symlink_by_absolute_path_does_not_match(self) -> None:
         assert (
-            _is_default_clang_bin("/usr/bin/aarch64-apple-darwin-clang", "cc") is False
+            is_default_clang_bin("/usr/bin/aarch64-apple-darwin-clang", "cc") is False
         )
 
     def test_a_native_versioned_driver_still_matches(self) -> None:
@@ -103,15 +103,15 @@ class TestIsDefaultClangBin:
         # still the plain host default -- the version suffix carries no
         # target information (Codex review, twelfth round, fresh
         # evidence).
-        assert _is_default_clang_bin("clang-18", "cc") is True
-        assert _is_default_clang_bin("/usr/bin/clang-18", "cc") is True
-        assert _is_default_clang_bin("clang++-18", "c++") is True
+        assert is_default_clang_bin("clang-18", "cc") is True
+        assert is_default_clang_bin("/usr/bin/clang-18", "cc") is True
+        assert is_default_clang_bin("clang++-18", "c++") is True
 
     def test_a_versioned_target_prefixed_symlink_still_does_not_match(self) -> None:
         # Stripping the version suffix must not eat into the target
         # prefix itself -- only a trailing numeric suffix is version
         # information.
-        assert _is_default_clang_bin("aarch64-apple-darwin-clang-18", "cc") is False
+        assert is_default_clang_bin("aarch64-apple-darwin-clang-18", "cc") is False
 
 
 class TestClangBinIsExplicitlyConfigured:
@@ -120,7 +120,7 @@ class TestClangBinIsExplicitlyConfigured:
     can coincidentally share the plain default's basename while still
     genuinely not being it (Codex review, fresh evidence: such a wrapper
     can produce a real AST while not implementing ``-print-target-triple``
-    at all, so `_is_default_clang_bin`'s basename check alone would wrongly
+    at all, so `is_default_clang_bin`'s basename check alone would wrongly
     let the last-resort `sys.platform` guess apply to it)."""
 
     def test_neither_given(self) -> None:
@@ -130,7 +130,7 @@ class TestClangBinIsExplicitlyConfigured:
         assert clang_bin_is_explicitly_configured("/opt/wrapper/clang", None) is True
 
     def test_a_non_clang_family_compiler_path_is_not_explicit(self) -> None:
-        # Mirrors `_resolve_clang_bin`'s own adoption condition: a
+        # Mirrors `resolve_clang_bin`'s own adoption condition: a
         # `gcc_path` naming a non-clang-family binary is silently ignored,
         # so its mere presence isn't "explicitly configured" for clang.
         assert clang_bin_is_explicitly_configured("/usr/bin/gcc", None) is False
@@ -232,7 +232,7 @@ def test_probe_failure_with_a_response_file_does_not_guess_sys_platform(
     monkeypatch.setattr(
         clang_backend, "_configured_target_triple", lambda *a, **k: None
     )
-    monkeypatch.setattr(clang_backend, "_resolve_clang_bin", lambda *a, **k: "clang++")
+    monkeypatch.setattr(clang_backend, "resolve_clang_bin", lambda *a, **k: "clang++")
     monkeypatch.setattr(sys, "platform", "darwin")
 
     parser = _header_ast_parser(
@@ -276,7 +276,7 @@ def test_probe_failure_with_a_response_file_alongside_a_target_does_not_recover_
     monkeypatch.setattr(
         clang_backend, "_configured_target_triple", lambda *a, **k: None
     )
-    monkeypatch.setattr(clang_backend, "_resolve_clang_bin", lambda *a, **k: "clang++")
+    monkeypatch.setattr(clang_backend, "resolve_clang_bin", lambda *a, **k: "clang++")
 
     parser = _header_ast_parser(
         [],
@@ -328,7 +328,7 @@ def test_probe_failure_with_an_explicit_absolute_path_no_longer_guesses(
         clang_backend, "_configured_target_triple", lambda *a, **k: None
     )
     monkeypatch.setattr(
-        clang_backend, "_resolve_clang_bin", lambda *a, **k: resolved_native_clang
+        clang_backend, "resolve_clang_bin", lambda *a, **k: resolved_native_clang
     )
     monkeypatch.setattr(sys, "platform", "darwin")
 
@@ -357,7 +357,7 @@ def test_probe_failure_with_a_resolved_cross_compiler_does_not_guess_sys_platfor
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """An explicit ``--compiler``/``--compiler-prefix`` cross-toolchain that
-    ``_resolve_clang_bin`` actually adopts (its own resolved ``clang_bin``
+    ``resolve_clang_bin`` actually adopts (its own resolved ``clang_bin``
     differs from the plain host default) carries no relationship to the
     HOST OS at all -- an Apple-targeting compiler run on Linux, or vice
     versa. Guessing `sys.platform` there risks the same misclassification
@@ -374,7 +374,7 @@ def test_probe_failure_with_a_resolved_cross_compiler_does_not_guess_sys_platfor
     )
     monkeypatch.setattr(
         clang_backend,
-        "_resolve_clang_bin",
+        "resolve_clang_bin",
         lambda *a, **k: "aarch64-apple-darwin-clang++",
     )
     monkeypatch.setattr(sys, "platform", "darwin")
@@ -415,7 +415,7 @@ def test_probe_failure_with_a_resolved_cross_compiler_still_recovers_explicit_ta
     )
     monkeypatch.setattr(
         clang_backend,
-        "_resolve_clang_bin",
+        "resolve_clang_bin",
         lambda *a, **k: "aarch64-apple-darwin-clang++",
     )
 
@@ -456,7 +456,7 @@ def test_probe_failure_with_an_explicit_config_file_does_not_guess_sys_platform(
     monkeypatch.setattr(
         clang_backend, "_configured_target_triple", lambda *a, **k: None
     )
-    monkeypatch.setattr(clang_backend, "_resolve_clang_bin", lambda *a, **k: "clang++")
+    monkeypatch.setattr(clang_backend, "resolve_clang_bin", lambda *a, **k: "clang++")
     monkeypatch.setattr(sys, "platform", "darwin")
 
     parser = _header_ast_parser(
@@ -483,7 +483,7 @@ def test_probe_failure_with_an_explicit_config_file_does_not_guess_sys_platform(
 def test_probe_failure_with_a_custom_renamed_compiler_recovers_via_bare_reprobe(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Codex review, fresh evidence: `_is_default_clang_bin`'s exact-
+    """Codex review, fresh evidence: `is_default_clang_bin`'s exact-
     basename comparison alone wrongly treated ANY custom rename of the
     native compiler (e.g. a company-specific wrapper symlink such as
     ``company-clang``) as if it were a cross-compiler, silently
@@ -512,7 +512,7 @@ def test_probe_failure_with_a_custom_renamed_compiler_recovers_via_bare_reprobe(
         clang_backend, "_configured_target_triple", _fake_configured_target_triple
     )
     monkeypatch.setattr(
-        clang_backend, "_resolve_clang_bin", lambda *a, **k: "company-clang"
+        clang_backend, "resolve_clang_bin", lambda *a, **k: "company-clang"
     )
 
     parser = _header_ast_parser(
@@ -541,7 +541,7 @@ def test_probe_failure_with_a_custom_renamed_compiler_falls_back_when_bare_repro
 ) -> None:
     """Negative control for the test above: when even the bare re-probe
     fails (the binary cannot be invoked at all), the caller falls back to
-    `_is_default_clang_bin`'s exact-name comparison for the final,
+    `is_default_clang_bin`'s exact-name comparison for the final,
     narrowest `sys.platform` guess -- which stays conservative (``None``)
     for a name it cannot positively identify as the plain default."""
     ast = _tu({"kind": "TranslationUnitDecl", "inner": []})
@@ -552,7 +552,7 @@ def test_probe_failure_with_a_custom_renamed_compiler_falls_back_when_bare_repro
         clang_backend, "_configured_target_triple", lambda *a, **k: None
     )
     monkeypatch.setattr(
-        clang_backend, "_resolve_clang_bin", lambda *a, **k: "company-clang"
+        clang_backend, "resolve_clang_bin", lambda *a, **k: "company-clang"
     )
     monkeypatch.setattr(sys, "platform", "linux")
 
@@ -581,7 +581,7 @@ def test_probe_failure_with_a_gcc_path_resolve_ignores_still_guesses_sys_platfor
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A ``gcc_path`` naming a non-clang-family binary (e.g. a plain GCC
-    path) is silently ignored by ``_resolve_clang_bin``, which falls back
+    path) is silently ignored by ``resolve_clang_bin``, which falls back
     to the plain host default regardless (Codex review, fresh evidence,
     ninth round): the RESOLVED `clang_bin` is what determines whether the
     guess applies, not whether `gcc_path`/`gcc_prefix` was merely passed
@@ -594,9 +594,9 @@ def test_probe_failure_with_a_gcc_path_resolve_ignores_still_guesses_sys_platfor
     monkeypatch.setattr(
         clang_backend, "_configured_target_triple", lambda *a, **k: None
     )
-    # Simulates _resolve_clang_bin ignoring a non-clang-family gcc_path and
+    # Simulates resolve_clang_bin ignoring a non-clang-family gcc_path and
     # falling back to the plain default, exactly as the real function does.
-    monkeypatch.setattr(clang_backend, "_resolve_clang_bin", lambda *a, **k: "clang++")
+    monkeypatch.setattr(clang_backend, "resolve_clang_bin", lambda *a, **k: "clang++")
     monkeypatch.setattr(sys, "platform", "darwin")
 
     parser = _header_ast_parser(
@@ -675,7 +675,7 @@ def test_probe_failure_under_a_cl_style_driver_recovers_the_honored_spelling(
     monkeypatch.setattr(
         clang_backend, "_configured_target_triple", lambda *a, **k: None
     )
-    monkeypatch.setattr(clang_backend, "_resolve_clang_bin", lambda *a, **k: "clang-cl")
+    monkeypatch.setattr(clang_backend, "resolve_clang_bin", lambda *a, **k: "clang-cl")
     monkeypatch.setattr(sys, "platform", "darwin")
 
     parser = _header_ast_parser(
@@ -716,7 +716,7 @@ def test_probe_failure_under_a_cl_style_driver_recovers_the_separate_short_spell
     monkeypatch.setattr(
         clang_backend, "_configured_target_triple", lambda *a, **k: None
     )
-    monkeypatch.setattr(clang_backend, "_resolve_clang_bin", lambda *a, **k: "clang-cl")
+    monkeypatch.setattr(clang_backend, "resolve_clang_bin", lambda *a, **k: "clang-cl")
     monkeypatch.setattr(sys, "platform", "darwin")
 
     parser = _header_ast_parser(
@@ -768,7 +768,7 @@ def test_probe_failure_under_a_cl_style_driver_ignores_unhonored_spellings(
     monkeypatch.setattr(
         clang_backend, "_configured_target_triple", lambda *a, **k: None
     )
-    monkeypatch.setattr(clang_backend, "_resolve_clang_bin", lambda *a, **k: "clang-cl")
+    monkeypatch.setattr(clang_backend, "resolve_clang_bin", lambda *a, **k: "clang-cl")
     monkeypatch.setattr(sys, "platform", "darwin")
 
     parser = _header_ast_parser(
@@ -823,7 +823,7 @@ def test_probe_failure_under_a_cl_style_driver_recovers_via_bare_reprobe(
     )
     monkeypatch.setattr(
         clang_backend,
-        "_resolve_clang_bin",
+        "resolve_clang_bin",
         lambda *a, **k: "aarch64-apple-darwin-clang-cl",
     )
 
@@ -871,7 +871,7 @@ def test_successful_probe_skips_the_bare_reprobe_entirely(
     monkeypatch.setattr(
         clang_backend, "_configured_target_triple", _fake_configured_target_triple
     )
-    monkeypatch.setattr(clang_backend, "_resolve_clang_bin", lambda *a, **k: "clang")
+    monkeypatch.setattr(clang_backend, "resolve_clang_bin", lambda *a, **k: "clang")
 
     parser = _header_ast_parser(
         [],
@@ -911,7 +911,7 @@ def test_successful_probe_still_honored_for_a_cl_style_driver(
         "_configured_target_triple",
         lambda *a, **k: "x86_64-pc-windows-msvc",
     )
-    monkeypatch.setattr(clang_backend, "_resolve_clang_bin", lambda *a, **k: "clang-cl")
+    monkeypatch.setattr(clang_backend, "resolve_clang_bin", lambda *a, **k: "clang-cl")
 
     parser = _header_ast_parser(
         [],
@@ -949,7 +949,7 @@ def test_probe_failure_under_a_cl_style_driver_recovers_clang_forwarded_spelling
     monkeypatch.setattr(
         clang_backend, "_configured_target_triple", lambda *a, **k: None
     )
-    monkeypatch.setattr(clang_backend, "_resolve_clang_bin", lambda *a, **k: "clang-cl")
+    monkeypatch.setattr(clang_backend, "resolve_clang_bin", lambda *a, **k: "clang-cl")
     monkeypatch.setattr(sys, "platform", "darwin")
 
     parser = _header_ast_parser(
@@ -989,7 +989,7 @@ def test_a_cl_style_name_explicitly_overridden_to_gnu_mode_is_not_cl_style(
     monkeypatch.setattr(
         clang_backend, "_configured_target_triple", lambda *a, **k: None
     )
-    monkeypatch.setattr(clang_backend, "_resolve_clang_bin", lambda *a, **k: "clang-cl")
+    monkeypatch.setattr(clang_backend, "resolve_clang_bin", lambda *a, **k: "clang-cl")
 
     parser = _header_ast_parser(
         [],
@@ -1037,7 +1037,7 @@ def test_probe_failure_bare_reprobe_preserves_the_driver_mode_override(
     monkeypatch.setattr(
         clang_backend, "_configured_target_triple", _fake_configured_target_triple
     )
-    monkeypatch.setattr(clang_backend, "_resolve_clang_bin", lambda *a, **k: "clang-cl")
+    monkeypatch.setattr(clang_backend, "resolve_clang_bin", lambda *a, **k: "clang-cl")
 
     parser = _header_ast_parser(
         [],
@@ -1074,7 +1074,7 @@ def test_probe_failure_with_a_config_user_dir_does_not_guess_sys_platform(
     monkeypatch.setattr(
         clang_backend, "_configured_target_triple", lambda *a, **k: None
     )
-    monkeypatch.setattr(clang_backend, "_resolve_clang_bin", lambda *a, **k: "clang++")
+    monkeypatch.setattr(clang_backend, "resolve_clang_bin", lambda *a, **k: "clang++")
     monkeypatch.setattr(sys, "platform", "darwin")
 
     parser = _header_ast_parser(
@@ -1103,7 +1103,7 @@ def test_probe_failure_with_an_explicitly_configured_wrapper_does_not_guess(
 ) -> None:
     """Codex review, fresh evidence: an explicit ``--compiler`` wrapper can
     be installed at a path whose basename happens to be plain ``clang``
-    (`_is_default_clang_bin` alone would call it the native default) while
+    (`is_default_clang_bin` alone would call it the native default) while
     still not implementing ``-print-target-triple`` at all, failing both
     the option-bearing probe and the bare re-probe. Its explicit
     provenance (`--compiler` was actually adopted, per
@@ -1118,7 +1118,7 @@ def test_probe_failure_with_an_explicitly_configured_wrapper_does_not_guess(
         clang_backend, "_configured_target_triple", lambda *a, **k: None
     )
     monkeypatch.setattr(
-        clang_backend, "_resolve_clang_bin", lambda *a, **k: "/opt/wrapper/clang"
+        clang_backend, "resolve_clang_bin", lambda *a, **k: "/opt/wrapper/clang"
     )
     monkeypatch.setattr(sys, "platform", "linux")
 
@@ -1162,7 +1162,7 @@ def test_probe_failure_with_option_selected_cl_mode_recovers_the_honored_spellin
     monkeypatch.setattr(
         clang_backend, "_configured_target_triple", lambda *a, **k: None
     )
-    monkeypatch.setattr(clang_backend, "_resolve_clang_bin", lambda *a, **k: "clang")
+    monkeypatch.setattr(clang_backend, "resolve_clang_bin", lambda *a, **k: "clang")
     monkeypatch.setattr(sys, "platform", "darwin")
 
     parser = _header_ast_parser(

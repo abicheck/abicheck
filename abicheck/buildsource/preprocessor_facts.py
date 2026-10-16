@@ -50,7 +50,7 @@ import shutil
 import subprocess  # noqa: S404 - preprocessor scan shells out to clang (never shell=True)
 import threading
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any, cast
 
@@ -257,7 +257,7 @@ def select_abi_macros(defs: dict[str, str]) -> dict[str, str]:
 # ---------------------------------------------------------------------------
 
 
-class IncludeClass(str, Enum):
+class IncludeClass(StrEnum):
     """Provenance class of an included header, for leak detection (ADR-035 D2)."""
 
     PUBLIC = "public"  # an installed / public-API header

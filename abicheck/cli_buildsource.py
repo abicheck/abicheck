@@ -49,8 +49,8 @@ from .workflows.snapshot_factory import new_snapshot
 
 if TYPE_CHECKING:
     from .model import AbiSnapshot
-    from .workflows.contracts import DumpRequest
-    from .workflows.dump.pipeline import ResolvedDumpRequest
+    from .workflows.dump.request import ResolvedDumpRequest
+    from .workflows.service_requests import DumpRequest
 
 
 # ── Attach / compare integration (ADR-028 D6, D7; ADR-029 D9) ─────────────────
@@ -145,8 +145,8 @@ def dump_source_only(
     either), forwarded to ``_write_snapshot_output`` so L4 source-ABI replay
     honors the same compiler override a binary dump would.
     """
-    from .frontends.cli.runtime import _stamp_provenance
-    from .workflows.extraction import resolve_source_frontend_clang_bin
+    from .workflows.extraction import resolve_l4_replay_clang_bin
+    from .workflows.provenance import stamp_provenance
 
     if sources is None and build_info is None:
         raise click.UsageError(
@@ -158,7 +158,7 @@ def dump_source_only(
     hint = sources if sources is not None else build_info
     library = hint.name if hint is not None else "source"
     snap = new_snapshot(library=library, version=version)
-    _stamp_provenance(snap, git_tag=git_tag, build_id=build_id, no_git=no_git)
+    stamp_provenance(snap, git_tag=git_tag, build_id=build_id, no_git=no_git)
     _write_snapshot_output(
         snap,
         output,
@@ -169,9 +169,7 @@ def dump_source_only(
         extractor=extractor,
         depth=depth,
         include_dependencies=include_dependencies,
-        clang_bin=resolve_source_frontend_clang_bin(
-            gcc_path, gcc_prefix, exclude_cl_style=False
-        ),
+        clang_bin=resolve_l4_replay_clang_bin(gcc_path, gcc_prefix),
         snapshot_compression=snapshot_compression,
         build_config_explicit=build_config_explicit,
     )
@@ -471,7 +469,7 @@ def _write_snapshot_output(
 
 
 def resolve_dump_request_for_cli(request: DumpRequest) -> ResolvedDumpRequest:
-    """:func:`~abicheck.workflows.dump.pipeline.resolve_dump_request`, with the
+    """:func:`~abicheck.workflows.dump.request.resolve_dump_request`, with the
     CLI's error contract.
 
     The Tier-2 pipeline signals a bad request as
@@ -500,7 +498,7 @@ def resolve_dump_request_for_cli(request: DumpRequest) -> ResolvedDumpRequest:
     `cli_buildsource` already is.
     """
     from .errors import PlanningError, ValidationError
-    from .workflows.dump.pipeline import resolve_dump_request
+    from .workflows.dump.request import resolve_dump_request
 
     try:
         return resolve_dump_request(request)

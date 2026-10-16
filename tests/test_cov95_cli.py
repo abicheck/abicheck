@@ -34,24 +34,16 @@ from click.testing import CliRunner
 from abicheck.checker import Change, DiffResult
 from abicheck.checker_policy import ChangeKind, Verdict
 from abicheck.cli import main
-from abicheck.cli_compare_release import (
-    _exit_compare_release,
-    _format_release_json,
-    _format_release_markdown,
-    _release_md_bundle_findings,
-    _release_md_matrix_findings,
-    _resolve_release_severity_config,
-)
-from abicheck.cli_helpers_compare import (
-    _warn_ignored_flags,
-)
 from abicheck.cli_resolve import (
     _expand_header_inputs,
     _resolve_linker_script,
     _sniff_text_format,
 )
 from abicheck.elf_metadata import ElfMetadata, ElfSymbol
+from abicheck.frontends.cli.ignored_flag_warnings import _warn_ignored_flags
 from abicheck.frontends.cli.options.params import _load_suppression_and_policy
+from abicheck.frontends.cli.release_exit import _exit_compare_release
+from abicheck.frontends.cli.release_report import render_release_summary
 from abicheck.frontends.cli.runtime import (
     _announce_exit_scheme,
     _exit_with_severity_or_verdict,
@@ -61,12 +53,21 @@ from abicheck.frontends.cli.runtime import (
 )
 from abicheck.model import AbiSnapshot, Function, Visibility
 from abicheck.policy.effective_gate import EffectiveGate
+from abicheck.report.render_release_markdown import (
+    _release_md_bundle_findings,
+    _release_md_matrix_findings,
+)
 from abicheck.serialization import snapshot_to_json
+from abicheck.workflows.gate import _resolve_release_severity_config
+from abicheck.workflows.release_compare_reporter import SilentReleaseReporter
 from abicheck.workflows.release_exit_fold import fold_release_global_severity
+from abicheck.workflows.release_members import suppress_lockstep_soname_findings
 from tests._dump_format_fakes import fake_format_adapter
 from tests.schema_validation import validate_instance
 
 # ── snapshot helpers (mirror tests/test_compare_release.py) ───────────────────
+
+_SILENT = SilentReleaseReporter()
 
 
 def _snap(version: str = "1.0", funcs=None, library: str = "libfoo.so") -> AbiSnapshot:
@@ -104,7 +105,7 @@ def _gate(preset, abi=None, potential=None, quality=None, addition=None):
     ``SeverityConfig``, a combination the resolver can never produce. -- since
     ADR-064's rewrite, ``fold_release_global_severity`` takes the resolved
     object, not the six raw preset/category/scheme strings directly."""
-    from abicheck.cli_compare_release_helpers import GateOptions
+    from abicheck.workflows.gate import GateOptions
 
     severity = _resolve_release_severity_config(
         preset, abi, potential, quality, addition
@@ -261,7 +262,7 @@ class TestSafeWriteOutput:
         assert "to-stdout" in capsys.readouterr().out
 
 
-# ── _merge_gcc_options (cli.py helpers) ───────────────────────────────────────
+# ── small CLI helpers ───────────────────────────────────────
 
 
 class TestSmallHelpers:
@@ -515,7 +516,7 @@ class TestSmallHelpers:
         assert rejected.exit_code != 0
 
 
-# ── _warn_ignored_flags (cli.py:949-971) ──────────────────────────────────────
+# ── _warn_ignored_flags (frontends/cli/ignored_flag_warnings.py) ──────────────────────────────────────
 
 
 class TestWarnIgnoredFlags:
@@ -898,7 +899,8 @@ class TestCompareReleaseFormatHelpers:
         }
 
     def test_format_json_basic(self, tmp_path: Path) -> None:
-        text = _format_release_json(
+        text = render_release_summary(
+            "json",
             "NO_CHANGE",
             tmp_path / "old",
             tmp_path / "new",
@@ -908,15 +910,16 @@ class TestCompareReleaseFormatHelpers:
             {},
             {},
             [],
-            None,
-            None,
+            bundle_result=None,
+            matrix_result=None,
         )
         data = json.loads(text)
         assert data["verdict"] == "NO_CHANGE"
         assert data["changed_libraries"] == []
 
     def test_format_json_changed_libraries(self, tmp_path: Path) -> None:
-        text = _format_release_json(
+        text = render_release_summary(
+            "json",
             "BREAKING",
             tmp_path / "old",
             tmp_path / "new",
@@ -926,14 +929,15 @@ class TestCompareReleaseFormatHelpers:
             {},
             {},
             [],
-            None,
-            None,
+            bundle_result=None,
+            matrix_result=None,
         )
         data = json.loads(text)
         assert data["changed_libraries"] == ["libfoo.so"]
 
     def test_format_markdown_basic(self, tmp_path: Path) -> None:
-        text = _format_release_markdown(
+        text = render_release_summary(
+            "markdown",
             "NO_CHANGE",
             tmp_path / "old",
             tmp_path / "new",
@@ -942,8 +946,9 @@ class TestCompareReleaseFormatHelpers:
             [],
             {},
             {},
-            None,
-            None,
+            [],
+            bundle_result=None,
+            matrix_result=None,
         )
         assert "# ABI Release Comparison" in text
         assert "libfoo.so" in text
@@ -1039,17 +1044,6 @@ class TestExitCompareRelease:
                 "not_comparable", True, ["libgone.so"], severity_exit_code=2
             )
         assert exc.value.code == 16
-
-
-class TestReleaseVerdictOrder:
-    def test_not_comparable_ranks_above_error(self) -> None:
-        # ADR-050 D2: not_comparable dominates the release-level "worst
-        # verdict wins" rollup over every other outcome, including ERROR.
-        from abicheck.cli_compare_release_helpers import _RELEASE_VERDICT_ORDER
-
-        assert (
-            _RELEASE_VERDICT_ORDER["not_comparable"] > _RELEASE_VERDICT_ORDER["ERROR"]
-        )
 
 
 class TestFoldReleaseGlobalSeverity:
@@ -1213,7 +1207,7 @@ class TestCompareReleaseCommand:
 # was deleted; its full-mode (old/new pair) scoping behavior folded into
 # `compare --used-by APP` (repeatable), which floors the exit code/verdict on the
 # worst app-scoped result while keeping the full diff as informational context
-# (`cli_compare_helpers._apply_used_by_scoping`, confirmed by direct CLI experiment).
+# (`workflows.consumer_scope_gate._apply_used_by_scoping`, confirmed by direct CLI experiment).
 #
 # Dropped, no equivalent surface:
 # - `_validate_appcompat_args`/`_handle_list_required_symbols` -- functions are
@@ -2001,7 +1995,8 @@ class TestUsedByScoping:
         # pattern for the other surface-metrics-affected tests in this file.
         # public_surface_shrank is QUALITY_ISSUES, not an addition (defect 4).
         assert result.stdout.strip().startswith("BREAKING: 1 breaking (2 total)")
-        assert "2 detected, 0 gating, 2 non_gating" in result.stdout
+        # D-S1: the audit counts what the full-library exit (4) is decided on.
+        assert "2 detected, 1 gating, 1 non_gating" in result.stdout
 
     def test_oneline_format_does_not_count_a_scoped_only_finding(
         self, tmp_path, monkeypatch
@@ -2043,7 +2038,8 @@ class TestUsedByScoping:
         )
         assert result.exit_code == 0
         assert result.stdout.strip().startswith("NO_CHANGE: no changes (0 total)")
-        assert "1 detected, 1 gating" in result.stdout
+        # The scoped-only consumer finding never reaches the exit-0 gate.
+        assert "1 detected, 0 gating, 1 non_gating" in result.stdout
 
     def test_oneline_format_unaffected_by_show_only(
         self, tmp_path, monkeypatch
@@ -2080,7 +2076,8 @@ class TestUsedByScoping:
         )
         assert result.exit_code == 0
         assert result.stdout.strip().startswith("NO_CHANGE: no changes (0 total)")
-        assert "1 detected, 1 gating" in result.stdout
+        # The scoped-only consumer finding never reaches the exit-0 gate.
+        assert "1 detected, 0 gating, 1 non_gating" in result.stdout
 
     def test_oneline_format_counts_an_ordinary_in_scope_removal(
         self, tmp_path, monkeypatch
@@ -2462,7 +2459,7 @@ class TestUsedByScoping:
         # CONSUMER_REQUIRED_SYMBOL_REMOVED sibling of a real FUNC_REMOVED
         # change is a genuine RootCauseCorrelator two-piece group -- both the
         # pre-existing regular `changes[]` entry (root, via
-        # reporter._add_changes_block) and the newly-appended scoped-only
+        # json_sections.add_changes_block) and the newly-appended scoped-only
         # entry (via cli_compare_fold.py's own fold-in) must carry the same
         # correlator evidence for the same underlying group.
         from abicheck import dumper as dumper_mod
@@ -2518,7 +2515,7 @@ class TestUsedByScoping:
         # "only caused_by_type correlates findings" contract keeps each its
         # own singleton --report-mode root-cause group (one built by
         # _to_json_root_cause before the fold-in, one newly created by
-        # _add_entries_to_root_causes during it). Both singletons must carry
+        # add_entries_to_root_causes during it). Both singletons must carry
         # the same group-level evidence their shared correlator group has.
         from abicheck import dumper as dumper_mod
 
@@ -3130,7 +3127,8 @@ class TestReleaseFormatWithBundleAndMatrix:
         assert any("consumer" in ln for ln in lines)
 
     def test_markdown_with_bundle_and_matrix(self, tmp_path) -> None:
-        text = _format_release_markdown(
+        text = render_release_summary(
+            "markdown",
             "BREAKING",
             tmp_path / "old",
             tmp_path / "new",
@@ -3139,14 +3137,16 @@ class TestReleaseFormatWithBundleAndMatrix:
             [],
             {},
             {},
-            _bundle_with_findings(),
-            _matrix_with_changes(),
+            [],
+            bundle_result=_bundle_with_findings(),
+            matrix_result=_matrix_with_changes(),
         )
         assert "Bundle" in text
         assert "Matrix" in text
 
     def test_json_with_bundle(self, tmp_path) -> None:
-        text = _format_release_json(
+        text = render_release_summary(
+            "json",
             "BREAKING",
             tmp_path / "old",
             tmp_path / "new",
@@ -3156,8 +3156,8 @@ class TestReleaseFormatWithBundleAndMatrix:
             {},
             {},
             [],
-            _bundle_with_findings(),
-            None,
+            bundle_result=_bundle_with_findings(),
+            matrix_result=None,
         )
         data = json.loads(text)
         assert "bundle_verdict" in data
@@ -3185,13 +3185,9 @@ class TestFoldReleaseGlobalSeverityBundle:
 
 class TestSuppressLockstepSoname:
     def test_non_breaking_returns_zero(self) -> None:
-        from abicheck.cli_compare_release import _suppress_lockstep_soname_findings
-
-        assert _suppress_lockstep_soname_findings([], "NO_CHANGE", None) == 0
+        assert suppress_lockstep_soname_findings([], "NO_CHANGE", _SILENT) == 0
 
     def test_suppresses_unnecessary_soname_bump(self) -> None:
-        from abicheck.cli_compare_release import _suppress_lockstep_soname_findings
-
         result = DiffResult(
             old_version="1",
             new_version="2",
@@ -3213,7 +3209,7 @@ class TestSuppressLockstepSoname:
             "risk_changes": 0,
             "compatible_additions": 0,
         }
-        n = _suppress_lockstep_soname_findings([entry], "BREAKING", None)
+        n = suppress_lockstep_soname_findings([entry], "BREAKING", _SILENT)
         assert n == 1
         # The finding was stripped from the diff result.
         assert all(c.kind != ChangeKind.SONAME_BUMP_UNNECESSARY for c in result.changes)
@@ -3300,12 +3296,12 @@ class TestCompareReleaseExtraFlows:
         _write_snap(old_dir / "libfoo.json", _snap())
         _write_snap(new_dir / "libfoo.json", _snap())
 
-        import abicheck.cli_compare_release_pairwise as cr_mod
+        import abicheck.workflows.release_members as cr_mod
 
         def boom(*a, **k):
             raise ValueError("corrupt snapshot")
 
-        monkeypatch.setattr(cr_mod, "_run_compare_pair", boom)
+        monkeypatch.setattr(cr_mod, "compare_member_pair", boom)
         result = _invoke(
             "compare",
             str(old_dir),
@@ -3369,31 +3365,6 @@ class TestLinkerScriptKeywordSkip:
         resolved, is_ld = _resolve_linker_script(script)
         assert is_ld is True
         assert resolved is None
-
-
-# ── cli.py: _resolve_debug_artifact ────────────────────────────────────────
-
-
-class TestResolveDebugArtifact:
-    def test_delegates_to_resolver(self, tmp_path, monkeypatch) -> None:
-        from types import SimpleNamespace
-
-        import abicheck.frontends.cli.runtime as cli_mod
-
-        binary = tmp_path / "lib.so"
-        binary.write_bytes(b"\x7fELF" + b"\x00" * 50)
-        sentinel = SimpleNamespace(source="x.debug")
-        monkeypatch.setattr(
-            "abicheck.workflows.extraction.resolve_debug_info",
-            lambda *a, **k: sentinel,
-        )
-        out = cli_mod._resolve_debug_artifact(
-            binary,
-            (tmp_path,),
-            False,
-            None,
-        )
-        assert out is sentinel
 
 
 # ── cli.py: _log_debug_resolution drives both sides when requested ────────────

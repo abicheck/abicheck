@@ -53,20 +53,103 @@ from ...cli_compare_fold import (
 from ...cli_compare_options import (
     _reject_set_input_flags,
 )
-from ...cli_helpers_compare import (
-    _apply_required_symbol_scoping,
-    _apply_used_by_scoping,
-)
 from ...cli_resolve import (
     _reject_evidence_flags_for_set_inputs,
 )
 from ...model.consumer_requirements import LibraryExportsUnreadableError
 from ...model.consumer_spec import ConsumerUnreadableError
-from .runtime import _render_output
+from ...workflows.consumer_scope_gate import (
+    _apply_required_symbol_scoping,
+    _apply_used_by_scoping,
+    resolve_scoping_libs,
+)
 
 if TYPE_CHECKING:
+    from ...checker_types import DiffResult
+    from ...model import AbiSnapshot
     from ...model.consumer_spec import ConsumerAppInput
+    from ...workflows.gate import SeverityConfig
     from ...workflows.policy_file import PolicyFile
+
+
+def _render_output(
+    fmt: str,
+    result: DiffResult,
+    old: AbiSnapshot,
+    new: AbiSnapshot | None = None,
+    *,
+    follow_deps: bool = False,
+    show_only: str | None = None,
+    report_mode: str = "full",
+    show_impact: bool = False,
+    severity_config: SeverityConfig | None = None,
+    demangle: bool = False,
+    contract_evaluation: bool = False,
+    require_complete_analysis: bool = False,
+) -> str:
+    """Render comparison result in the requested output format.
+
+    No ``stat``/``show_recommendation`` parameters: the one-line summary is
+    reached only via ``fmt == frontends.render.ONELINE_FORMAT``
+    (``-o oneline=...``), and the summary-only JSON via
+    ``reporter.to_stat_json``.
+
+    ``show_recommendation=True`` is still passed explicitly below even though
+    :func:`~abicheck.frontends.render.render_output`'s own default is now ``True`` as well. It is
+    redundant, deliberately: this wrapper states the CLI's own contract (the
+    release recommendation is unconditional for every CLI invocation) rather
+    than inheriting it, so a future change to the library default cannot alter
+    CLI output without a test here failing first. It previously *compensated*
+    for a ``False`` default, which is the divergence the defaults-alignment
+    pass removed.
+    """
+    # `frontends.render` directly, not the `service` facade that re-exports
+    # it (abicheck/frontends/AGENTS.md).
+    from ..render import render_output
+
+    return render_output(
+        fmt,
+        result,
+        old,
+        new,
+        follow_deps=follow_deps,
+        show_only=show_only,
+        report_mode=report_mode,
+        show_impact=show_impact,
+        severity_config=severity_config,
+        demangle=demangle,
+        contract_evaluation=contract_evaluation,
+        show_recommendation=True,
+        require_complete_analysis=require_complete_analysis,
+    )
+
+
+def _require_used_by_binary_evidence(
+    old_lib: Any,
+    new_lib: Any,
+    old_input: Path,
+    new_input: Path,
+) -> None:
+    """Reject a ``--used-by`` run whose OLD/NEW side carries no binary evidence.
+
+    A real library path always qualifies; a JSON snapshot qualifies only when it
+    carries an ``elf``/``pe``/``macho`` block (i.e. it is a ``dump`` of a real
+    library, not a headers-only one) -- that is what supplies the SONAME/export
+    table/version list/PE ordinal table the scoping needs.
+    """
+    for lib, path, label in (
+        (old_lib, old_input, "OLD"),
+        (new_lib, new_input, "NEW"),
+    ):
+        has_binary_evidence = isinstance(lib, Path) or any(
+            getattr(lib, field, None) is not None for field in ("elf", "pe", "macho")
+        )
+        if not has_binary_evidence:
+            raise click.UsageError(
+                f"--used-by requires OLD/NEW to be real library binaries, or "
+                f"JSON snapshots carrying binary evidence (a `dump` of a real "
+                f"library, not headers-only); {label} ({path}) is neither."
+            )
 
 
 def _apply_scoped_gating(
@@ -92,6 +175,12 @@ def _apply_scoped_gating(
     """
     if used_by_apps:
         try:
+            old_lib, new_lib = resolve_scoping_libs(
+                used_by_old_input, used_by_new_input, old, new
+            )
+            _require_used_by_binary_evidence(
+                old_lib, new_lib, used_by_old_input, used_by_new_input
+            )
             return _apply_used_by_scoping(
                 result,
                 used_by_apps,
@@ -149,7 +238,7 @@ def _render_compare_report(
     they share this one function rather than keeping two copies that can drift.
 
     No ``stat``/``recommend`` parameters (CLI cleanup phase two, PR 1): see
-    ``_render_output``/``service_render.render_output`` for where the
+    ``_render_output``/``frontends.render.render_output`` for where the
     one-line format and the unconditional recommendation now live.
 
     ADR-061 Phase 2 item 5: this used to be a four-fold pipeline -- the

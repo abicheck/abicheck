@@ -78,7 +78,7 @@ def structured_proof_path(
             {
                 "type": "edge",
                 "kind": e.kind,
-                "role": str(e.attrs.get("role", "")),
+                "role": e.role,
                 "confidence": e.confidence,
             }
         )
@@ -240,7 +240,7 @@ def select_preferred_graph_path(
 def _path_occurrence_id(path: list[GraphEdge]) -> str | None:
     """A stable id for *path*'s underlying graph occurrences (ADR-046 D1,
     ADR-052's ``occurrence_id`` follow-up), independent of ``description``
-    text — distinct from ``reporter._finding_id``, which deliberately still
+    text — distinct from ``report.view.finding_id``, which deliberately still
     includes it.
 
     Folds every edge's own :attr:`GraphEdge.occurrences` (ADR-046 D1's

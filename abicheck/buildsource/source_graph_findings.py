@@ -53,6 +53,7 @@ from ..model.source_graph_coverage import (
     HEADER_PASS_ALIAS,
     PASS_EDGE_KINDS,
     TYPE_GRAPH_PASS,
+    body_scoped_closures,
     graph_records_passes,
     trusted_kinds,
 )
@@ -509,7 +510,8 @@ def _disagreeing_roles(
     dependency across every future release, the identical false-negative
     shape the whole-kind-discard bug above had, just one layer deeper.
     """
-    from .inline_graph_fold import ROLE_COVERAGE_MATRIX, _role_coverage_key
+    from ..model.source_graph_coverage import ROLE_COVERAGE_MATRIX
+    from .inline_graph_fold import _role_coverage_key
 
     header_name = _HEADER_PASS_ALIAS.get(pass_name, "")
 
@@ -567,7 +569,7 @@ def _untrusted_dependency_roles(
     producer version examined -- the role-scoped counterpart of the whole-
     kind exclusion :func:`_common_dependency_edge_kinds` used to apply.
     Only kinds with at least one disagreeing role are present."""
-    from .inline_graph_fold import ROLE_COVERAGE_MATRIX
+    from ..model.source_graph_coverage import ROLE_COVERAGE_MATRIX
 
     out: dict[str, frozenset[str]] = {}
     for pass_name, family in _DEPENDENCY_EDGE_FAMILIES.items():
@@ -578,13 +580,6 @@ def _untrusted_dependency_roles(
             if disagreeing:
                 out[kind] = disagreeing
     return out
-
-
-def _edge_role(e: GraphEdge) -> str:
-    """The effective role an edge carries -- the D2-merged ``resolved`` view
-    when present, falling back to raw ``attrs`` pre-registration, mirroring
-    :meth:`~abicheck.model.graph_facts.GraphEdge.relation_key`."""
-    return str((e.resolved or e.attrs).get("role", ""))
 
 
 def _drop_untrusted_role_edges(
@@ -604,7 +599,7 @@ def _drop_untrusted_role_edges(
     kept = [
         e
         for e in graph.edges
-        if e.kind not in untrusted_roles or _edge_role(e) not in untrusted_roles[e.kind]
+        if e.kind not in untrusted_roles or e.role not in untrusted_roles[e.kind]
     ]
     if len(kept) == len(graph.edges):
         return graph
@@ -1408,16 +1403,16 @@ def _internal_dependency_findings(
     # public closure, or no semantic pass at all) cannot make every
     # pre-existing internal dependency look newly added (earlier Codex review).
     common_kinds = _common_dependency_edge_kinds(old, new)
-    # Role-scoped, not kind-scoped (Codex review, fresh evidence, second
-    # round): a producer-version disagreement on one ROLE_COVERAGE_MATRIX
-    # role (e.g. G29 Phase 5 item 5's `enum_underlying`) must not untrust
-    # a *different*, agreed-upon role sharing the same kind (`field`/
-    # `alias`) — see `_untrusted_dependency_roles`'s own docstring. Only the
-    # disputed roles' own edges are excluded from the closure below; every
-    # role both sides confirm stays fully trusted.
+    # Role-scoped, not kind-scoped: only disputed ROLE_COVERAGE_MATRIX
+    # roles' own edges leave the closure (`_untrusted_dependency_roles`).
     untrusted_roles = _untrusted_dependency_roles(old, new)
-    old_closure = _drop_untrusted_role_edges(old, untrusted_roles)
-    new_closure = _drop_untrusted_role_edges(new, untrusted_roles)
+    # A body-dependent kind neither pass trusts project-wide is still judged
+    # per declaration whose body both sides saw in full (ADR-077 D5).
+    old_closure, new_closure, common_kinds = body_scoped_closures(
+        _drop_untrusted_role_edges(old, untrusted_roles),
+        _drop_untrusted_role_edges(new, untrusted_roles),
+        common_kinds,
+    )
     if _has_internal_reach_coverage(
         old_closure, common_kinds
     ) and _has_internal_reach_coverage(new_closure, common_kinds):
@@ -1707,7 +1702,9 @@ def diff_source_graph_findings(
       (:func:`_internal_dependency_findings`);
     - ``TARGET_DEPENDENCY_ADDED`` (:func:`_target_dependency_findings`);
     - ``EXPORTED_SYMBOL_SOURCE_OWNER_CHANGED``
-      (:func:`_symbol_owner_findings`).
+      (:func:`_symbol_owner_findings`);
+    - ``PUBLIC_DEPENDENCY_ROLE_CHANGED``/``_UNKNOWN`` (ADR-077 D4,
+      ``policy.source_graph_role_findings``).
 
     Per ADR-028 D3 / ADR-031 D6 these explain and prioritize; the caller folds
     them into the verdict pipeline as ordinary RISK changes that never override
@@ -1741,6 +1738,9 @@ def diff_source_graph_findings(
     findings += _target_dependency_findings(old, new, new_labels, boundary)
     findings += _symbol_owner_findings(old, new, old_labels, new_labels, boundary)
     findings += _reconciliation_findings(old, new)
+    from ..policy.source_graph_role_findings import role_change_findings
+
+    findings += role_change_findings(old, new, _untrusted_dependency_roles(old, new))
     return findings
 
 

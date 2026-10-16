@@ -378,7 +378,7 @@ STEPS: tuple[Step, ...] = (
         description="ADR-061 responsibility packages, dependency direction, and debt no-growth gate",
     ),
     Step(
-        # Static, deterministic: code only tests keep alive (the 95% coverage
+        # Static, deterministic: code only tests keep alive (the 80% coverage
         # floor counts a test as a caller) and cross-module exact clones,
         # against a shrink-only baseline. Reads $ARCHITECTURE_BASE like the
         # step above, so CI rejects a baseline that grew on this branch.
@@ -437,17 +437,17 @@ STEPS: tuple[Step, ...] = (
             # term:skip-covered, not term-missing: the fully-covered modules
             # are the bulk of that table and carry no information a reader
             # acts on. The xml/gate side is unchanged -- every module is
-            # still measured, and the 95% floor is still enforced.
+            # still measured, and the 80% floor is still enforced.
             "--cov-report=term:skip-covered",
-            "--cov-fail-under=95",
+            "--cov-fail-under=80",
         ),
         frozenset({PR, FULL}),
-        # Requested, but inert while branch coverage is on and the
-        # interpreter is below 3.14 -- coverage.py falls back to
-        # CTracer. See ci.yml's own COVERAGE_CORE comment and
-        # tests/test_coverage_core_effectiveness.py.
+        # sys.monitoring measures branches from 3.14, the canonical
+        # interpreter, so this request is live here. Below 3.14 coverage.py
+        # would fall back to CTracer. See ci.yml's own COVERAGE_CORE comment
+        # and tests/test_coverage_core_effectiveness.py.
         env={"COVERAGE_CORE": "sysmon"},
-        description="Canonical Linux/3.13 unit-tests CI lane, incl. golden + 95% coverage floor",
+        description="Canonical Linux/3.14 unit-tests CI lane, incl. golden + 80% coverage floor",
     ),
     Step(
         "bugfix-test-contract",

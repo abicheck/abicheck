@@ -35,7 +35,7 @@ from abicheck.model.consumer_requirements import (
     LibraryExportFacts,
 )
 from abicheck.policy.classification import Verdict
-from abicheck.policy.consumer_requirements import (
+from abicheck.policy.consumer_requirement_evaluation import (
     evaluate_consumer_requirements,
     missing_app_versions,
     resolve_pe_ordinal_imports,

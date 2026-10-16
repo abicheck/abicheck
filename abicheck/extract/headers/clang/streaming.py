@@ -63,7 +63,7 @@ built, whenever that subtree:
    we cannot see from inside a bottom-up hook (see "What this deliberately
    does NOT attempt" below); and
 2. that file is confidently a toolchain/dependency header per
-   :func:`abicheck.provenance.is_dependency_header`, given the real
+   :func:`abicheck.extract.declaration_provenance.is_dependency_header`, given the real
    ``-H``/``--header`` root set this dump was invoked with (so an installed
    library analyzed via its own system-prefixed install path is never
    misclassified -- the identical rule ``dumper_scoping.py`` itself relies
@@ -459,7 +459,7 @@ def load_pruned_clang_ast(
     Returns ``(root, pruned_count)``. *fh* is a binary file object (matching
     the existing ``json.load(fh)`` call this replaces, which lets the
     stdlib ``json`` module detect the stream's encoding itself). Safe to
-    call with an empty *header_roots* -- :func:`abicheck.provenance.
+    call with an empty *header_roots* -- :func:`abicheck.extract.declaration_provenance.
     is_dependency_header` then falls back to a bare toolchain-path
     heuristic, same as ``dumper_scoping.py`` does in that situation.
     """

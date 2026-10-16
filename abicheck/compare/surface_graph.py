@@ -35,7 +35,7 @@ node carrying its join state, so an orphan on either side stays visible.
 function/variable's ``Visibility.PUBLIC`` is already resolved
 per-declaration at parse time (ADR-016), so this phase's own relevance
 query does not need a transitive header-inclusion walk to seed roots (see
-``policy/public_surface.py``'s own scoping note for the query side of this
+``policy/public_surface_index.py``'s own scoping note for the query side of this
 same decision); ``instantiates`` (template-specific, ADR-053/057
 territory); ``owned_by_target``.
 
@@ -72,6 +72,7 @@ from ..model.graph_evidence_class import (
     EdgeEvidenceClass,
 )
 from ..model.graph_facts import GraphEdge, GraphNode
+from ..model.graph_identity import header_node_id
 from ..model.graph_join import (
     EDGE_KIND_DEBUG_TYPE_OF,
     EDGE_KIND_EXPORTS,
@@ -165,16 +166,12 @@ def _identity_attrs(ident: GraphEntityIdentity) -> dict[str, object]:
     return {} if ident.resolved else {IDENTITY_STATE_ATTR: ident.state.value}
 
 
-def _header_node_id(header: str) -> str:
-    return f"header://{header}"
-
-
 def _add_header_declares(
     graph: SurfaceGraphLike, source_header: str | None, decl_node_id: str
 ) -> None:
     if not source_header:
         return
-    header_id = _header_node_id(source_header)
+    header_id = header_node_id(source_header)
     graph.add_node(
         GraphNode(
             provenance=PUBLIC_SURFACE_FACTS_PRODUCER,
@@ -242,7 +239,7 @@ def referenced_identifiers_by_node(snap: AbiSnapshot) -> ReferencedIdentifiers:
     sorted union of every type-identifier string that *any* declaration/
     record/typedef mapping to that id references in its own signature/
     fields/bases/target (ADR-063 Phase 3 D5's own follow-up: the actual
-    ``policy.public_surface`` traversal migration reads this attrs entry
+    ``policy.public_surface_index`` traversal migration reads this attrs entry
     instead of re-parsing ``fn.return_type``/``rec.fields``/etc. a second,
     third, and fourth time the way ``surface.py``'s own closure walk used
     to) -- plus which node ids that union is *not* safe to trust for a

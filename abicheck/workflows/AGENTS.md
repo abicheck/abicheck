@@ -19,15 +19,18 @@ locator.
 Each major operation converges on `Request -> ResolvedPlan -> Result`, with
 `contracts.py`, `resolve.py`, and `execute.py` as the standard ownership split.
 Aggregation currently exposes
-`workflows.aggregate.execute.aggregate_reports_dir` as its canonical composed
-entry point. `workflows.artifact.contracts.ResolvedArtifactPlan` (ADR-061
+`workflows.aggregate.fan_in_execution.aggregate_reports_dir` as its canonical composed
+entry point. `workflows.artifact.resolved_plan.ResolvedArtifactPlan` (ADR-061
 Phase 3) is the shared, dependency-free `contracts.py` half of the dump/scan
 artifact-resolution contract — a session type owning cleanup-thunk lifetime
 across a resolve/execute pipeline.
 
-`member_compare.compare_member` is the one per-member compare primitive (a
-release member scores as the scalar compare of its pair; pinned by
-`tests/test_compare_cardinality_invariance.py`) -- extend it, not the frontend.
+`release_compare.execute_release_compare` runs a resolved release plan
+(member fan-out: `release_members`; bundle stage: `release_bundle`), reporting
+through the `release_compare_reporter` port; the CLI only parses and renders.
+Each member goes through `member_compare.compare_member`, the one per-member
+compare primitive (a member scores as the scalar compare of its pair; pinned by
+`tests/test_release_compare_workflow.py`) -- extend these, not the frontend.
 
 `workflows.artifact` is now complete as a `Request -> ResolvedPlan -> Result`
 trio (ADR-061 Phase 3): `resolve.py` decides what an extraction will do
@@ -84,7 +87,7 @@ format up in `workflows.dump.native.FORMAT_ADAPTERS` and passes the
 in a test, swap the registry entry (helper: `tests/_dump_format_fakes.py`);
 the extractor names themselves are owned, not patch points.
 
-`abicheck/workflows/dump/pipeline.py` owns `DumpRequest ->
+`abicheck/workflows/dump/request.py` owns `DumpRequest ->
 ResolvedDumpRequest -> DumpResult` and is free of CLI imports. It lives in
 this package, so `check_architecture.py` classifies it as `workflows` by
 path and rejects a forbidden *direction* (a `workflows -> report` import

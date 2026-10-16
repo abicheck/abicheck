@@ -30,7 +30,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..model.name_decoration import macho as macho_decoration
+from ..model.name_decoration import macho_underscore as macho_decoration
 
 __all__ = ["collect_special_member_names"]
 

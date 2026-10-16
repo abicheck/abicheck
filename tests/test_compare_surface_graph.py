@@ -281,7 +281,7 @@ class TestReferencedIdentifiersAttr:
     """``referenced_identifiers`` (ADR-063 Phase 3's follow-up traversal
     migration): the union of every type-identifier string a declaration/
     type's own signature/fields/bases/target names, cached on the node so
-    ``policy.public_surface`` can read it instead of re-parsing the same
+    ``policy.public_surface_index`` can read it instead of re-parsing the same
     strings a second time."""
 
     def test_function_node_carries_its_own_referenced_identifiers(self) -> None:

@@ -198,7 +198,7 @@ from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
 from ..model.graph_facts import CONF_HIGH, CONF_REDUCED, GraphEdge
-from ..model.name_decoration import macho as macho_decoration
+from ..model.name_decoration import macho_underscore as macho_decoration
 from .preprocessor_facts import _DEFINE_RE
 from .type_graph import (
     _FUNCTION_DECL_KINDS,

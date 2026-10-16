@@ -31,12 +31,12 @@ import pytest
 
 from abicheck.checker_policy import ChangeKind
 from abicheck.checker_types import DiffResult
-from abicheck.diff_helpers import make_change
-from abicheck.finding_identity import (
+from abicheck.compare.finding_identity import (
     report_canonical_finding_id,
     report_finding_id,
     resolve_change_identity,
 )
+from abicheck.diff_helpers import make_change
 from abicheck.model.change import Change
 from abicheck.reporter import to_json
 from abicheck.suppression import Suppression, SuppressionList
@@ -1063,7 +1063,7 @@ class TestFindingIdSuppressionSelector:
 class TestReportFindingIdDisambiguator:
     """Regression coverage for Codex review, PR #1078, eighteenth round:
     two ODR/multi-TU occurrence findings that now legitimately survive
-    `diff_filtering._dedup_exact` (distinguished only by `Change.
+    `finding_dedup._dedup_exact` (distinguished only by `Change.
     disambiguator`) would otherwise collide on the same `report_finding_id`
     too, since that function never looked at `disambiguator` at all.
     """

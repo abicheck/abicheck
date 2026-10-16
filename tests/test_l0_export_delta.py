@@ -14,7 +14,7 @@
 # limitations under the License.
 
 """ADR-049 Phase 5 §6.3: the shared L0 hard-removal extraction used by both
-``cli_helpers_compare.fold_l0_hard_removals`` (direct ``compare``) and
+``fold_l0_hard_removals`` (direct ``compare``) and
 ``cli_scan_baseline._run_baseline_compare`` (``scan --against``)."""
 
 from __future__ import annotations

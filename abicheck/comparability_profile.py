@@ -45,10 +45,11 @@ from .comparability import (
     ComparabilityMismatch,
     _binary_platform_components,
     _build_context_corroborated,
+    _contract_scope_headers,
     _differing_keys,
     _dimensions_for_fields,
     _fingerprint_is_authentic,
-    _scope_growth_corroborated,
+    _scope_evolution_delta,
     _unknown_differing_keys,
 )
 from .comparability_language_mode import (
@@ -58,9 +59,8 @@ from .comparability_language_mode import (
 from .comparability_sequences import (
     _HEADER_SEQUENCE_FIELDS,
     _INCLUDE_SEQUENCE_FIELDS,
-    _header_sequence_is_scope_confirmed_growth,
-    _include_sequence_is_additive_owned_growth,
-    _scope_newly_added_headers,
+    header_sequence_is_scope_confirmed_evolution,
+    include_sequence_is_scope_confirmed_evolution,
 )
 from .model import AbiSnapshot, ExtractionContract, FactStatus
 
@@ -126,6 +126,23 @@ def _platform_identity_confirmed(
         return old_components[field] != new_components[field]
 
     return all(_field_verified(field) for field in platform_candidate)
+
+
+def _canonical_orders_proven_equal(
+    old_contract: ExtractionContract, new_contract: ExtractionContract
+) -> bool:
+    """Whether both sides carry a dump-time proof of the same canonical order.
+
+    ``header_canonical`` is None unless the dump's witness proved it (ADR-082),
+    so an unproven side -- including every pre-v59 snapshot -- never matches.
+    """
+    old_canonical = old_contract.header_canonical
+    new_canonical = new_contract.header_canonical
+    return (
+        old_canonical is not None
+        and new_canonical is not None
+        and old_canonical == new_canonical
+    )
 
 
 def _unexplained_profile_fields(
@@ -233,62 +250,47 @@ def _unexplained_profile_fields(
         unexplained.discard("language_standard")
         unexplained.discard("compiler_version")
 
-    # Both sequence carve-outs below additionally require
-    # _scope_growth_corroborated (Codex review, PR #641 follow-up, P1):
-    # an additive-shaped header_sequence/include_sequence on its own is
-    # not sufficient evidence -- a header already declared identically
-    # on both sides as public headers, but fed to the L2 frontend via
-    # -H only on the new side, produces the identical additive-growth
-    # SHAPE with scope_fingerprint completely UNCHANGED, even though the
-    # old snapshot never actually parsed that header's content at all
-    # (see _scope_growth_corroborated's own docstring for why that's
-    # unsafe to wave through). Requiring a genuinely differing,
-    # independently-verified scope-level growth corroborates that the
-    # sequence growth reflects real new declared content, not just a
-    # same-declared-surface extraction-mechanism difference.
-    scope_growth_corroborated = _scope_growth_corroborated(old_contract, new_contract)
-    # The specific set of header identities the sequence carve-outs
-    # below are allowed to treat an appended/newly-owned entry as
-    # corresponding to (Codex review, PR #641 follow-up, ninth P1) --
-    # see _scope_newly_added_headers's own docstring for why
-    # scope_growth_corroborated alone (proving the scope grew by SOME
-    # header) isn't enough; the carve-outs must additionally verify
-    # they're waiving growth in the SAME header(s).
-    scope_new_headers = _scope_newly_added_headers(
-        old_contract.scope_fields.get("headers"),
-        new_contract.scope_fields.get("headers"),
-    )
+    # Both sequence carve-outs below require the declared scope to corroborate
+    # the specific headers whose parsing/ownership changed (Codex review, PR
+    # #641 follow-up, P1/eighth/ninth P1): a header declared identically on
+    # both sides but fed to the L2 frontend on only one changes the sequence
+    # without changing the scope, and the side that never parsed it would hide
+    # a removal inside it. _scope_evolution_delta returns the scope-confirmed
+    # added AND removed identities (a release may delete public headers --
+    # oneDAL 2026.0 removed 122 -- which is API evolution, not drift).
+    delta = _scope_evolution_delta(old_contract, new_contract)
 
     header_seq_candidate = unexplained & _HEADER_SEQUENCE_FIELDS
-    if (
-        header_seq_candidate
-        and scope_growth_corroborated
-        and _header_sequence_is_scope_confirmed_growth(
-            old_fields.get("header_sequence"),
-            new_fields.get("header_sequence"),
-            scope_new_headers,
-        )
+    if header_seq_candidate and header_sequence_is_scope_confirmed_evolution(
+        old_fields.get("header_sequence"),
+        new_fields.get("header_sequence"),
+        delta,
+        old_scope=_contract_scope_headers(old_contract),
+        new_scope=_contract_scope_headers(new_contract),
     ):
-        # Header-sequence-growth carve-out (PR #641 follow-up, third
-        # round) -- see check_contracts_comparable's own docstring, and
-        # `_header_sequence_is_scope_confirmed_growth` for why a
-        # scope-confirmed public-header addition is waived wherever the new
-        # header sorts, rather than only when it sorts last.
+        # Header-sequence-evolution carve-out -- see check_contracts_comparable's
+        # own docstring: waived wherever an added header sorts and whichever
+        # declared headers were removed, never for a reordered survivor.
         unexplained -= header_seq_candidate
 
-    include_seq_candidate = unexplained & _INCLUDE_SEQUENCE_FIELDS
-    if (
-        include_seq_candidate
-        and scope_growth_corroborated
-        and _include_sequence_is_additive_owned_growth(
-            old_fields.get("include_sequence"),
-            new_fields.get("include_sequence"),
-            scope_new_headers,
-        )
+    # ADR-082 reorder carve-out: a header set declared in a different order is
+    # comparable when both dumps proved their declarations equal the canonical
+    # (sorted) order's. Equal proven canonical sequences mean both sides are the
+    # canonical extraction of the same header set, so the only difference is the
+    # order the user declared. Unproven on either side keeps the refusal.
+    if unexplained & _HEADER_SEQUENCE_FIELDS and _canonical_orders_proven_equal(
+        old_contract, new_contract
     ):
-        # Include-sequence-owned-growth carve-out (PR #641 follow-up,
-        # fourth round) -- see check_contracts_comparable's own
-        # docstring.
+        unexplained -= _HEADER_SEQUENCE_FIELDS
+
+    include_seq_candidate = unexplained & _INCLUDE_SEQUENCE_FIELDS
+    if include_seq_candidate and include_sequence_is_scope_confirmed_evolution(
+        old_fields.get("include_sequence"),
+        new_fields.get("include_sequence"),
+        delta,
+    ):
+        # Include-sequence-owned-evolution carve-out -- see
+        # check_contracts_comparable's own docstring.
         unexplained -= include_seq_candidate
 
     return unexplained
@@ -504,4 +506,50 @@ def check_build_identity_comparable(
     reason, fatal = divergence
     return ComparabilityMismatch(
         "profile", reason, dimensions=BUILD_IDENTITY_DIMENSIONS, fatal=fatal
+    )
+
+
+#: Which comparability dimensions a compiler-family switch leaves unverified:
+#: the pair ``_PROFILE_FIELD_DIMENSIONS["compiler_family"]`` names for the
+#: header-parse profile -- struct layout and calling-convention/runtime
+#: behavior are what a different compiler can change without touching a
+#: single exported name.
+BUILD_MODE_DIMENSIONS = _PROFILE_FIELD_DIMENSIONS["compiler_family"]
+
+
+def check_build_mode_comparable(
+    old: AbiSnapshot, new: AbiSnapshot
+) -> ComparabilityMismatch | None:
+    """``check_contracts_comparable``'s build-mode axis: the compiler family
+    each side's own binary records (``AbiSnapshot.build_mode``, captured at
+    dump time from ``DW_AT_producer``/``.comment``).
+
+    Both sides record a known family and they differ: a **non-fatal**
+    mismatch bounding ``layout``/``runtime``, the same treatment an untagged
+    ``dependency_scope`` gets. It does not refuse: checking a toolchain
+    switch is legitimate, and the stdlib/dual-ABI dimensions it can move are
+    already compared as findings (``diff_stdlib_impl``,
+    ``diff_platform._diff_glibcxx_dual_abi``). What it must not do is read
+    as a clean, like-for-like comparison. A family unrecorded or
+    ``unknown`` on either side is unknown, never a mismatch. A header parse
+    under a different compiler is refused earlier, by the profile
+    fingerprint's own ``compiler_family`` field, which wins over this.
+    """
+    from .model.build_mode_facts import CompilerFamily
+
+    old_bm, new_bm = old.build_mode, new.build_mode
+    if old_bm is None or new_bm is None:
+        return None
+    old_family, new_family = old_bm.compiler_family, new_bm.compiler_family
+    if CompilerFamily.UNKNOWN in (old_family, new_family) or old_family == new_family:
+        return None
+    return ComparabilityMismatch(
+        "profile",
+        "build mode: compiler family differs (old: "
+        f"{old_family.value}; new: {new_family.value}) -- the two binaries "
+        "were built by different toolchains, so layout and runtime "
+        "conventions are not verified like-for-like; rebuild the baseline "
+        "with the same compiler to verify them",
+        dimensions=BUILD_MODE_DIMENSIONS,
+        fatal=False,
     )

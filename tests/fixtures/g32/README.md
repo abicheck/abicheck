@@ -97,7 +97,7 @@ rollup, exit `16`, though it does not itself accept
 `service.py`'s `CompareRequest`/`run_compare_request`/legacy `run_compare`
 shim (threads `diagnostic_comparison` through to whichever front-end called
 it).
-`snapshot_cache.py`'s cache-key order-sensitivity, and SARIF/JUnit
+`workflows/dump/cache/`'s cache-key order-sensitivity, and SARIF/JUnit
 rendering of a `not_comparable` outcome (native `compare` and
 `compare-release`'s own JUnit report), and `aggregate.py`'s multi-target
 fan-in gate (a `not_comparable` per-target report now blocks unconditionally

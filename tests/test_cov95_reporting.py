@@ -45,9 +45,9 @@ from abicheck.model import (
     Visibility,
 )
 from abicheck.model.change import Change, LibraryMetadata
-from abicheck.resolver import DependencyGraph, ResolvedDSO
 from abicheck.stack_checker import StackChange, StackCheckResult, StackVerdict
 from abicheck.suppression import SuppressionOutcome
+from abicheck.workflows.elf_dependency_resolver import DependencyGraph, ResolvedDSO
 
 # ===========================================================================
 # Shared builders
@@ -129,7 +129,7 @@ class _AllSuppression:
         return True
 
     def evaluate(self, change: Change) -> SuppressionOutcome:
-        # _merge_findings_respecting_suppression (post_processing.py) calls
+        # merge_late_findings (post_processing.py) calls
         # evaluate(), not is_suppressed(), so this duck-typed double needs a
         # matching method too.
         return SuppressionOutcome(suppressed=True, withheld_rule=None)
@@ -147,7 +147,7 @@ class TestReporterShowOnly:
         # as a "functions" match, which was true only of the superseded
         # name-based exact-match list -- that kind reports an anonymous
         # member of a matched *record* and is declared TYPE.
-        from abicheck.reporter import ShowOnlyFilter
+        from abicheck.report.view import ShowOnlyFilter
 
         filt = ShowOnlyFilter.parse("functions")
         assert filt._check_element(None, "func_removed") is True
@@ -157,7 +157,7 @@ class TestReporterShowOnly:
 
     def test_parse_skips_empty_tokens(self) -> None:
         # Line 105: empty token after split is skipped.
-        from abicheck.reporter import ShowOnlyFilter
+        from abicheck.report.view import ShowOnlyFilter
 
         filt = ShowOnlyFilter.parse("breaking,, ,functions")
         assert "breaking" in filt.severities
@@ -212,8 +212,10 @@ class TestReporterStat:
 
 class TestReporterChangeToDict:
     def test_change_to_dict_without_kind_sets_uses_policy(self) -> None:
-        # Lines 721-722 + _kind_to_severity 48-57: no kind_sets path.
-        from abicheck.reporter import _change_to_dict
+        # Lines 721-722 + kind_to_severity 48-57: no kind_sets path.
+        from abicheck.report.change_json import (
+            change_to_dict,
+        )
 
         c = _change(
             ChangeKind.FUNC_REMOVED,
@@ -223,7 +225,7 @@ class TestReporterChangeToDict:
         )
         c.source_location = "header.h:42"
         c.affected_symbols = ["a", "b"]
-        d = _change_to_dict(c, policy="strict_abi")
+        d = change_to_dict(c, policy="strict_abi")
         assert d["severity"] == "breaking"
         assert d["caused_by_type"] == "root::Type"
         assert d["caused_count"] == 3
@@ -231,8 +233,10 @@ class TestReporterChangeToDict:
         assert d["affected_symbols"] == ["a", "b"]
 
     def test_change_to_dict_severities_all_branches(self) -> None:
-        # _kind_to_severity api_break / risk / compatible branches (51-57).
-        from abicheck.reporter import _change_to_dict
+        # kind_to_severity api_break / risk / compatible branches (51-57).
+        from abicheck.report.change_json import (
+            change_to_dict,
+        )
 
         sev = {
             ChangeKind.METHOD_ACCESS_CHANGED: "api_break",
@@ -240,38 +244,44 @@ class TestReporterChangeToDict:
             ChangeKind.FUNC_ADDED: "compatible",
         }
         for kind, expected in sev.items():
-            d = _change_to_dict(_change(kind, "s"), policy="strict_abi")
+            d = change_to_dict(_change(kind, "s"), policy="strict_abi")
             assert d["severity"] == expected
 
     def test_change_to_dict_no_kind(self) -> None:
         # Line 724: object without a kind attribute → "unknown".
-        from abicheck.reporter import _change_to_dict
+        from abicheck.report.change_json import (
+            change_to_dict,
+        )
 
         class _Bare:
             symbol = "x"
             description = "y"
 
-        d = _change_to_dict(_Bare())
+        d = change_to_dict(_Bare())
         assert d["severity"] == "unknown"
         assert d["kind"] == ""
 
     def test_change_to_dict_surfaces_correlated_change_kind(self) -> None:
         # ADR-041 P0 roadmap item 2: a structured, machine-readable sibling
         # to the description-prose correlation source_graph_findings emits.
-        from abicheck.reporter import _change_to_dict
+        from abicheck.report.change_json import (
+            change_to_dict,
+        )
 
         c = _change(
             ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED,
             "demo::compute",
             correlated_change_kind=ChangeKind.INLINE_BODY_CHANGED.value,
         )
-        d = _change_to_dict(c, policy="strict_abi")
+        d = change_to_dict(c, policy="strict_abi")
         assert d["correlated_change_kind"] == "inline_body_changed"
 
     def test_change_to_dict_omits_correlated_change_kind_when_unset(self) -> None:
-        from abicheck.reporter import _change_to_dict
+        from abicheck.report.change_json import (
+            change_to_dict,
+        )
 
-        d = _change_to_dict(
+        d = change_to_dict(
             _change(ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED, "demo::compute"),
             policy="strict_abi",
         )
@@ -281,7 +291,9 @@ class TestReporterChangeToDict:
         # ADR-044 P1 item 4: structured reachability evidence, previously
         # description-prose-only (inside the suppression_would_hide_public_break
         # diagnostic).
-        from abicheck.reporter import _change_to_dict
+        from abicheck.report.change_json import (
+            change_to_dict,
+        )
 
         c = _change(
             ChangeKind.FUNC_REMOVED,
@@ -290,7 +302,7 @@ class TestReporterChangeToDict:
             reachability_kind="symbol_availability",
             reachability_proof_path="pubFn --[DECL_CALLS_DECL]--> ns::detail::train_ops_dispatcher",
         )
-        d = _change_to_dict(c, policy="strict_abi")
+        d = change_to_dict(c, policy="strict_abi")
         assert d["public_reachable"] is True
         assert d["reachability_kind"] == "symbol_availability"
         assert d["reachability_proof_path"] == (
@@ -298,9 +310,11 @@ class TestReporterChangeToDict:
         )
 
     def test_change_to_dict_omits_reachability_fields_when_unset(self) -> None:
-        from abicheck.reporter import _change_to_dict
+        from abicheck.report.change_json import (
+            change_to_dict,
+        )
 
-        d = _change_to_dict(
+        d = change_to_dict(
             _change(ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED, "demo::compute"),
             policy="strict_abi",
         )
@@ -334,7 +348,7 @@ class TestReporterJsonLeaf:
         self,
     ) -> None:
         # ADR-044 P1 item 4: a root TYPE_* change routes through the
-        # hand-rolled _leaf_entry, not _change_to_dict — it needs its own
+        # hand-rolled _leaf_entry, not change_to_dict — it needs its own
         # copy of the same structured reachability fields, since this is
         # exactly the category the layout-reachability walk tags most often.
         from abicheck.reporter import to_json
@@ -600,7 +614,8 @@ class TestDetectInternalLeaksStep:
         return old, new
 
     def test_leak_finding_added(self) -> None:
-        from abicheck.post_processing import DetectInternalLeaks, PipelineContext
+        from abicheck.policy.finding_disposition import PipelineContext
+        from abicheck.post_processing import DetectInternalLeaks
 
         old, new = self._leak_snaps()
         changes = [_change(ChangeKind.TYPE_SIZE_CHANGED, "ns::detail::Impl", "size")]
@@ -610,7 +625,8 @@ class TestDetectInternalLeaksStep:
 
     def test_leak_finding_suppressed(self) -> None:
         # Lines 613-614: synthetic leak finding respects suppression.
-        from abicheck.post_processing import DetectInternalLeaks, PipelineContext
+        from abicheck.policy.finding_disposition import PipelineContext
+        from abicheck.post_processing import DetectInternalLeaks
 
         old, new = self._leak_snaps()
         changes = [_change(ChangeKind.TYPE_SIZE_CHANGED, "ns::detail::Impl", "size")]
@@ -625,7 +641,8 @@ class TestDetectInternalLeaksStep:
         )
 
     def test_no_leak_returns_unchanged(self) -> None:
-        from abicheck.post_processing import DetectInternalLeaks, PipelineContext
+        from abicheck.policy.finding_disposition import PipelineContext
+        from abicheck.post_processing import DetectInternalLeaks
 
         old = _snap(functions=[_public_fn("foo", "int", [])])
         new = _snap(functions=[_public_fn("foo", "int", [])])
@@ -636,7 +653,8 @@ class TestDetectInternalLeaksStep:
 
     def test_leak_finding_dedup_when_already_present(self) -> None:
         # Branch 615->611: a pre-existing leak finding is not duplicated.
-        from abicheck.post_processing import DetectInternalLeaks, PipelineContext
+        from abicheck.policy.finding_disposition import PipelineContext
+        from abicheck.post_processing import DetectInternalLeaks
 
         old, new = self._leak_snaps()
         changes = [
@@ -682,7 +700,8 @@ class TestDetectNamespacePatternsStep:
         return old, new
 
     def test_namespace_finding_added(self) -> None:
-        from abicheck.post_processing import DetectNamespacePatterns, PipelineContext
+        from abicheck.policy.finding_disposition import PipelineContext
+        from abicheck.post_processing import DetectNamespacePatterns
 
         old, new = self._ns_snaps()
         ctx = PipelineContext(old=old, new=new)
@@ -691,7 +710,8 @@ class TestDetectNamespacePatternsStep:
 
     def test_namespace_finding_suppressed(self) -> None:
         # Lines 570-571: namespace finding respects suppression.
-        from abicheck.post_processing import DetectNamespacePatterns, PipelineContext
+        from abicheck.policy.finding_disposition import PipelineContext
+        from abicheck.post_processing import DetectNamespacePatterns
 
         old, new = self._ns_snaps()
         ctx = PipelineContext(old=old, new=new, suppression=_AllSuppression())  # type: ignore[arg-type]
@@ -703,7 +723,8 @@ class TestDetectNamespacePatternsStep:
 
     def test_namespace_finding_deduped(self) -> None:
         # Lines 573-574: a finding whose (kind, symbol) already exists is dropped.
-        from abicheck.post_processing import DetectNamespacePatterns, PipelineContext
+        from abicheck.policy.finding_disposition import PipelineContext
+        from abicheck.post_processing import DetectNamespacePatterns
 
         old, new = self._ns_snaps()
         ctx = PipelineContext(old=old, new=new)
@@ -722,10 +743,8 @@ class TestDetectNamespacePatternsStep:
 
 class TestDemoteUnreachableInternalChurn:
     def test_demotes_unreachable_internal_change(self) -> None:
-        from abicheck.post_processing import (
-            DemoteUnreachableInternalChurn,
-            PipelineContext,
-        )
+        from abicheck.policy.finding_disposition import PipelineContext
+        from abicheck.post_processing import DemoteUnreachableInternalChurn
 
         old, new = _snap(), _snap()
         c = _change(ChangeKind.TYPE_SIZE_CHANGED, "ns::detail::Private", "size")
@@ -735,10 +754,8 @@ class TestDemoteUnreachableInternalChurn:
         assert ctx.out_of_surface == [c]
 
     def test_frozen_internal_namespace_kept(self) -> None:
-        from abicheck.post_processing import (
-            DemoteUnreachableInternalChurn,
-            PipelineContext,
-        )
+        from abicheck.policy.finding_disposition import PipelineContext
+        from abicheck.post_processing import DemoteUnreachableInternalChurn
 
         old, new = _snap(), _snap()
         c = _change(ChangeKind.TYPE_SIZE_CHANGED, "ns::detail::Frozen", "size")
@@ -755,10 +772,8 @@ class TestDemoteUnreachableInternalChurn:
 
 class TestEscalateFrozenNamespaceViolations:
     def test_tags_frozen_violation(self) -> None:
-        from abicheck.post_processing import (
-            EscalateFrozenNamespaceViolations,
-            PipelineContext,
-        )
+        from abicheck.policy.finding_disposition import PipelineContext
+        from abicheck.post_processing import EscalateFrozenNamespaceViolations
 
         old, new = _snap(), _snap()
         c = _change(ChangeKind.FUNC_REMOVED, "ns::detail::r1::foo")
@@ -772,10 +787,8 @@ class TestEscalateFrozenNamespaceViolations:
         assert c.description.startswith("[frozen-namespace violation")
 
     def test_no_frozen_namespaces_returns_early(self) -> None:
-        from abicheck.post_processing import (
-            EscalateFrozenNamespaceViolations,
-            PipelineContext,
-        )
+        from abicheck.policy.finding_disposition import PipelineContext
+        from abicheck.post_processing import EscalateFrozenNamespaceViolations
 
         old, new = _snap(), _snap()
         c = _change(ChangeKind.FUNC_REMOVED, "ns::detail::r1::foo")
@@ -785,10 +798,8 @@ class TestEscalateFrozenNamespaceViolations:
         assert c.frozen_namespace_violation is None
 
     def test_redundant_findings_also_tagged(self) -> None:
-        from abicheck.post_processing import (
-            EscalateFrozenNamespaceViolations,
-            PipelineContext,
-        )
+        from abicheck.policy.finding_disposition import PipelineContext
+        from abicheck.post_processing import EscalateFrozenNamespaceViolations
 
         old, new = _snap(), _snap()
         kept = _change(ChangeKind.FUNC_REMOVED, "ns::frozen::a")
@@ -800,10 +811,8 @@ class TestEscalateFrozenNamespaceViolations:
         assert redundant.frozen_namespace_violation == "ns::frozen::*"
 
     def test_already_tagged_change_not_reprefixed(self) -> None:
-        from abicheck.post_processing import (
-            EscalateFrozenNamespaceViolations,
-            PipelineContext,
-        )
+        from abicheck.policy.finding_disposition import PipelineContext
+        from abicheck.post_processing import EscalateFrozenNamespaceViolations
 
         old, new = _snap(), _snap()
         c = _change(ChangeKind.FUNC_REMOVED, "ns::frozen::x")
@@ -818,15 +827,13 @@ class TestEscalateFrozenNamespaceViolations:
 class TestPipelineFallbackKept:
     def test_pipeline_sets_kept_when_filter_redundant_absent(self) -> None:
         # Line 868: ctx.kept fallback when FilterRedundant didn't run.
-        from abicheck.post_processing import (
-            EnrichSourceLocations,
-            PostProcessingPipeline,
-        )
+        from abicheck.policy.finding_disposition.pipeline import DispositionPipeline
+        from abicheck.post_processing import EnrichSourceLocations
 
         old = _snap(functions=[_public_fn("foo")])
         new = _snap(functions=[_public_fn("foo")])
         changes = [_change(ChangeKind.FUNC_ADDED, "bar")]
-        pipeline = PostProcessingPipeline([EnrichSourceLocations()])
+        pipeline = DispositionPipeline([EnrichSourceLocations()])
         ctx = pipeline.run(list(changes), old, new)
         assert [c.symbol for c in ctx.kept] == ["bar"]
         assert [s.name for s in pipeline.steps] == ["enrich_source_locations"]

@@ -32,10 +32,10 @@ kind-set data, so they live there.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from enum import Enum
+from enum import StrEnum
 
 
-class Confidence(str, Enum):
+class Confidence(StrEnum):
     """Evidence confidence level for a comparison result."""
 
     HIGH = "high"
@@ -43,7 +43,7 @@ class Confidence(str, Enum):
     LOW = "low"
 
 
-class EvidenceTier(str, Enum):
+class EvidenceTier(StrEnum):
     """Canonical analysis tier achieved for a comparison.
 
     Unlike :data:`DiffResult.evidence_tiers` — a list of the *raw* data
@@ -84,7 +84,7 @@ _EVIDENCE_TIER_RANK: dict[EvidenceTier, int] = {
 }
 
 
-class ReachabilityState(str, Enum):
+class ReachabilityState(StrEnum):
     """Tri-state public-reachability verdict for a single ``Change`` (ADR-044
     follow-up — impact-analysis-layer P0 slice).
 
@@ -114,7 +114,7 @@ class ReachabilityState(str, Enum):
     UNKNOWN = "unknown"
 
 
-class FindingEvolution(str, Enum):
+class FindingEvolution(StrEnum):
     """Where one finding sits across a chain of more than one comparison
     (ADR-068 Phase 1 item 2, ``one-comparison-product.md``).
 
@@ -156,7 +156,7 @@ class FindingEvolution(str, Enum):
     NOT_EVALUATED = "not_evaluated"
 
 
-class CrossSourceEvolution(str, Enum):
+class CrossSourceEvolution(StrEnum):
     """How a one-sided (candidate-side) finding behaves across OLD → NEW
     *within a single* :func:`~abicheck.checker.compare` **call**
     (ADR-068 D3; ``docs/contribute/plans/one-comparison-product.md`` P2).
@@ -259,7 +259,7 @@ def is_cross_source_persistent(change: object) -> bool:
     )
 
 
-class EvidenceStatus(str, Enum):
+class EvidenceStatus(StrEnum):
     """The epistemic status of a single finding — *how* it was proven, not just
     *what* it is (its ``Verdict``/severity already say that).
 

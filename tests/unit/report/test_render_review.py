@@ -340,7 +340,7 @@ def test_review_group_note_omission_is_measured_against_the_authoritative_total(
 ):
     """A filtered list shorter than the headline must still disclose the gap.
 
-    `report/build.py` builds `review_groups` from the *displayed* findings
+    `report/document_builder.py` builds `review_groups` from the *displayed* findings
     under `--view show=`, while `result_counts` is computed over every
     retained finding. So the itemized list can be shorter than the headline
     without the display cap ever being reached -- and an omission derived

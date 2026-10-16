@@ -18,6 +18,22 @@ consumer-conditional break (only callers passing ``{}`` there are affected),
 so it is reported as a risk naming the witness call, never as an unconditional
 API break. Templates, variadics and reference/class parameters are left alone:
 their ranking rules are not decided by this witness.
+
+The witness is a claim about the *whole* overload set, not the pair: a third
+overload can win the call outright. Against two scalar identity conversions
+the only way to rank strictly better at a ``{}`` position is a
+``std::initializer_list`` parameter ([over.ics.rank]/3.1), so ``f({})`` keeps
+calling ``f(std::initializer_list<int>)`` when ``f(double)`` joins ``f(int)``
+(2026-10-11 re-audit). Any other member taking an ``initializer_list`` at a
+``{}`` position therefore withdraws the witness; every other third candidate
+can at best tie, which leaves the call ambiguous.
+
+The call must also have been valid before: the old overload must have been
+the unique best candidate. Any other old member that could tie with it --
+an identity conversion at every ``{}`` position (a scalar, or a reference to
+one: ``S(int)`` next to ``S(const int &)`` was already ambiguous) and the same
+type, or a reference to it, at every other position -- or that could win
+(``initializer_list``) withdraws the witness too.
 """
 
 from __future__ import annotations
@@ -28,11 +44,12 @@ from typing import TYPE_CHECKING
 from ..detector_registry import registry
 from ..diff_cxx_rules import itanium_qualified_name
 from ..diff_helpers import make_change
-from ..diff_symbols import _both_header_aware, _reconciled_function_surfaces
 from ..model.change_catalog.kinds import ChangeKind
 from ..model.execution_cache import memoized
+from ..model.snapshot_reliability import both_header_aware
 from ..model.synthetic_key import synthetic_ctor_owner
 from ..name_classification import canonicalize_type_name
+from .public_surface import reconciled_function_surfaces
 
 if TYPE_CHECKING:
     from ..model import AbiSnapshot, Function, Param
@@ -173,15 +190,78 @@ def ambiguity_witness(
 ) -> str | None:
     """The argument list (``"(x, {})"``) whose call resolves to *old* alone
     but is ambiguous between *old* and *new*; ``None`` when there is none."""
+    args = _witness_args(old, new, typedefs, enums)
+    return None if args is None else f"({', '.join(args)})"
+
+
+def _witness_args(
+    old: Function,
+    new: Function,
+    typedefs: Mapping[str, str],
+    enums: frozenset[str],
+) -> list[str] | None:
+    """The arguments of :func:`ambiguity_witness`, one per position."""
     if not _comparable_pair(old, new):
         return None
     args = [
         _witness_argument(p_old, p_new, typedefs, enums)
         for p_old, p_new in zip(old.params, new.params, strict=True)
     ]
-    if None in args or "{}" not in args:
+    if "{}" not in args:
         return None
-    return f"({', '.join(a for a in args if a is not None)})"
+    return [a for a in args if a is not None] if None not in args else None
+
+
+def _strip_reference(spelling: str) -> str:
+    """*spelling* (already resolved) without a top-level ``&``/``&&``
+    (canonical spellings write ``&&`` as ``& &``). A top-level reference
+    always ends the spelling; a nested one is followed by ``>`` or ``)``."""
+    bare = spelling.rstrip(" &")
+    return spelling if bare == spelling else _strip_cv(bare.strip())
+
+
+def _viable_arity(f: Function, n: int) -> bool:
+    if len(f.params) == n:
+        return True
+    return len(f.params) > n and all(p.default is not None for p in f.params[n:])
+
+
+def _may_tie_or_win(
+    rival: Function,
+    best: Function,
+    args: list[str],
+    typedefs: Mapping[str, str],
+    enums: frozenset[str],
+) -> bool:
+    """Whether *rival* could rank at least as well as *best* for the witness
+    call *args* (``{}`` or an lvalue of *best*'s parameter type), so that
+    *best* was not the unique best candidate."""
+    if rival.is_variadic or not _viable_arity(rival, len(args)):
+        return bool(rival.is_variadic)  # unknown ranking: assume it could
+    braced = [i for i, a in enumerate(args) if a == "{}"]
+    if _wins_braced_call(rival, braced, typedefs):
+        return True
+    for i, arg in enumerate(args):
+        theirs = _strip_reference(_resolve(rival.params[i].type, typedefs))
+        if arg == "{}":
+            if not is_scalar_type(theirs, typedefs, enums):
+                return False  # a user-defined conversion: worse
+        elif theirs != _resolve(best.params[i].type, typedefs):
+            return False  # a conversion where *best* binds exactly: worse
+    return True
+
+
+def _wins_braced_call(
+    other: Function, braced: list[int], typedefs: Mapping[str, str]
+) -> bool:
+    """Whether *other* may rank better than every scalar candidate for a
+    call passing ``{}`` at the *braced* positions: it takes a
+    ``std::initializer_list`` at one of them (see the module docstring)."""
+    return any(
+        i < len(other.params)
+        and "initializer_list" in _resolve(other.params[i].type, typedefs)
+        for i in braced
+    )
 
 
 def _signature(f: Function) -> str:
@@ -204,9 +284,9 @@ def _diff_overload_ambiguity(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]
     Header-tier only: the witness needs each parameter's declared type, which
     a symbol table or a demangled name does not give reliably.
     """
-    if not _both_header_aware(old, new):
+    if not both_header_aware(old, new):
         return []
-    old_map, new_map = _reconciled_function_surfaces(old, new)
+    old_map, new_map = reconciled_function_surfaces(old, new)
     typedefs = {**old.declarations.typedefs, **new.declarations.typedefs}
     enums = frozenset(
         e.name for e in (*old.declarations.enums, *new.declarations.enums)
@@ -217,7 +297,9 @@ def _diff_overload_ambiguity(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]
         previous = old_groups.get(key, [])
         kept = [f for f in previous if f.mangled in new_map]
         for n in (f for f in members if f.mangled not in old_map):
-            change = _first_new_ambiguity(key, n, kept, previous, typedefs, enums)
+            change = _first_new_ambiguity(
+                key, n, kept, previous, members, typedefs, enums
+            )
             if change is not None:
                 changes.append(change)
     return changes
@@ -228,21 +310,31 @@ def _first_new_ambiguity(
     added: Function,
     kept: list[Function],
     previous: list[Function],
+    current: list[Function],
     typedefs: Mapping[str, str],
     enums: frozenset[str],
 ) -> Change | None:
     """The finding for the first kept overload *added* makes ambiguous with a
-    call that was not already ambiguous among the old overloads."""
+    call that was not already ambiguous among the old overloads and that no
+    other member of the *current* overload set wins outright."""
     for o in kept:
-        witness = ambiguity_witness(o, added, typedefs, enums)
-        if witness is None:
+        args = _witness_args(o, added, typedefs, enums)
+        if args is None:
             continue
+        braced = [i for i, a in enumerate(args) if a == "{}"]
         if any(
-            ambiguity_witness(o, o2, typedefs, enums) == witness
+            _wins_braced_call(f, braced, typedefs)
+            for f in current
+            if f is not o and f is not added
+        ):
+            continue  # a third overload takes the call
+        witness = f"({', '.join(args)})"
+        if any(
+            _may_tie_or_win(o2, o, args, typedefs, enums)
             for o2 in previous
             if o2 is not o
         ):
-            continue  # already ambiguous before
+            continue  # the call did not select *o* alone before
         return make_change(
             ChangeKind.OVERLOAD_AMBIGUITY_INTRODUCED,
             symbol=added.mangled,

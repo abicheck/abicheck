@@ -6,24 +6,25 @@ project-wide contract — this file only covers what's specific to this tree.
 
 ## Required vs. informational workflows
 
-Not every workflow here blocks a merge — and, per the decision below, as of
-2026-09 **none of them mechanically can**: `main` carries no
-`required_status_checks` Ruleset rule, so GitHub's merge button is never
-disabled by CI state. The table's "Required?" column is retained as
-*guidance* — which checks a human (or reviewing agent) should treat as
-"fix this before merging" — not as a description of an enforced gate.
-Before assuming a red check means "fix this before merging," check which
-bucket it's in:
+Not every workflow here blocks a merge. Since 2026-10-15 (PR #1612), exactly
+one check is the required merge gate on `main`: `lint-and-types` (see the
+"Required-status-check configuration" section below). That is the decision.
+The Ruleset that enforces it is applied by a repository admin; until that is
+done, GitHub's merge button is not gated by CI state. The table's "Required?"
+column is retained as *guidance* — which checks a human (or reviewing agent)
+should treat as "fix this before merging" — and apart from `lint-and-types`
+it is not a description of an enforced gate. Before assuming a red check
+means "fix this before merging," check which bucket it's in:
 
 | Workflow | Required on every PR? | Notes |
 |----------|------------------------|-------|
-| `ci.yml` | **Yes** — `ai-readiness`, `fair-metadata`, `lint-and-types`, `unit-tests` (canonical Linux/3.13 lane, three `--shard=K/3` jobs) + `unit-tests-coverage` (combines their coverage data and enforces the 95% floor once), `unit-tests-other-os` (macOS/Windows, no coverage; runs on `main` pushes, dispatch, and PRs labelled `ci:full` — add the label to a platform-sensitive PR), `slow-tests`, `packaging` (Windows; the Linux build is `fair-metadata`'s `distribution-build`) jobs | The core gate. Tests marked `repo_scan` (whole-tree structural scans, OS- and coverage-independent) are excluded from every unit leg and run once, as a step of `ai-readiness` (`python scripts/verify.py --profile pr --only repo-scan-tests`) — it was its own `repo-scan-tests` job until 2026-10, folded in because both jobs had the identical Python 3.13 + `[dev]` setup and neither is on the critical path. `lint-and-types` is the one PR-time docs build owner (`docs-build` + `examples-docs`, installing the `[docs]` extra). The real-toolchain lanes (integration, native PE/Mach-O compare, MSVC+PDB, libabigail/ABICC parity) live in `integration.yml`, below. `ai-readiness` also runs the ADR-061 bounded-module architecture gate as its own step (`scripts/verify.py --profile pr --only architecture`, i.e. `scripts/check_architecture.py`) — there is no separate `module-architecture.yml` workflow or check. `slow-tests` is the `slow` marker lane, split out of `unit-tests`' canonical leg (where it ran as a step behind the ~23-minute main suite) so it runs concurrently instead — still required on every PR, still every `slow`-marked test. The job itself runs `python scripts/verify.py --profile full --only slow,slow-perf --junit-dir .` (no inline pytest copy; `tests/test_verify_profiles.py` enforces it), so the local command is the CI command. |
+| `ci.yml` | **Yes** — `ai-readiness`, `fair-metadata`, `lint-and-types`, `unit-tests` (canonical Linux/3.14 lane, three `--shard=K/3` jobs) + `unit-tests-coverage` (combines their coverage data and enforces the 80% floor once), `unit-tests-other-os` (macOS/Windows, no coverage; runs on `main` pushes, dispatch, and PRs labelled `ci:full` — add the label to a platform-sensitive PR), `slow-tests`, `packaging` (Windows; the Linux build is `fair-metadata`'s `distribution-build`) jobs | The core gate. Tests marked `repo_scan` (whole-tree structural scans, OS- and coverage-independent) are excluded from every unit leg and run once, as a step of `ai-readiness` (`python scripts/verify.py --profile pr --only repo-scan-tests`) — it was its own `repo-scan-tests` job until 2026-10, folded in because both jobs had the identical Python 3.13 + `[dev]` setup and neither is on the critical path. `lint-and-types` is the one PR-time docs build owner (`docs-build` + `examples-docs`, installing the `[docs]` extra). The real-toolchain lanes (integration, native PE/Mach-O compare, MSVC+PDB, libabigail/ABICC parity) live in `integration.yml`, below. `ai-readiness` also runs the ADR-061 bounded-module architecture gate as its own step (`scripts/verify.py --profile pr --only architecture`, i.e. `scripts/check_architecture.py`) — there is no separate `module-architecture.yml` workflow or check. `slow-tests` is the `slow` marker lane, split out of `unit-tests`' canonical leg (where it ran as a step behind the ~23-minute main suite) so it runs concurrently instead — still required on every PR, still every `slow`-marked test. The job itself runs `python scripts/verify.py --profile full --only slow,slow-perf --junit-dir .` (no inline pytest copy; `tests/test_verify_profiles.py` enforces it), so the local command is the CI command. |
 | `changelog-check.yml` | Yes, only when the diff touches `abicheck/**/*.py` | Bypass with the `skip-changelog` label |
 | `cli-interface-check.yml` | Yes, when the CLI surface changes | Diffs `dump_cli_surface.py` output old vs. new |
 | `dependency-review.yml` | Yes | GitHub's built-in dependency-review action. PR-only, path-filtered to dependency manifests (`pyproject.toml`, `requirements*.txt`, `pixi.lock`, `action.yml`, workflows) — it diffs those only. Complements, does not duplicate, `security.yml`'s pip-audit (whole resolved tree, every advisory). |
 | `docs-review-triggers.yml` | No (informational) | Diffs the PR's changed files against every docs page's front-matter `depends_on` list (`scripts/check_docs_review_triggers.py`) and posts an `::notice::`/step-summary when they overlap — a nudge to re-check that page, never a merge blocker. |
 | `security.yml` | Yes | One job (`Security Scan & CodeQL`): CodeQL (python, `build-mode: none`, `.github/codeql/codeql-config.yml` ignores `tests/`/`examples/`/`docs/`/`catalog/`), then pip-audit + bandit. PRs path-filtered to non-test `*.py`, `pyproject.toml`, this file and the CodeQL config; push to main and a Sunday 03:37 UTC cron run unfiltered. |
-| `python-compat.yml` | **Yes** for 3.11/3.12/3.14; 3.15 (prerelease) and `free-threading` (3.15t) are `continue-on-error` and run on `main`/schedule/dispatch and `ci:full`-labelled PRs only | Tiered Python coverage: every non-canonical interpreter builds the sdist+wheel, installs the wheel into a clean venv, imports every module, smokes the CLI, and runs a small unit-test subset. The `free-threading` job runs the free-threaded 3.15t interpreter (conda-forge, the base no-GIL version this project tests; 3.14t is deliberately skipped), fails if any import re-enables the GIL, and runs the concurrency test subset with `PYTHON_GIL=0`. The full suite runs only on `ci.yml`'s canonical 3.13 `unit-tests`. |
+| `python-compat.yml` | **Yes**, every lane, on every PR (no `continue-on-error`; maintainer decision 2026-10-11, superseding the 2026-09-30 `ci:full`-only rule for 3.15/3.15t) | `full-suite` runs the full fast suite (same selection as `ci.yml`'s canonical `unit-tests`, uncovered, three shards) on 3.11 (the `requires-python` floor) and 3.15; `free-threading` runs it on conda-forge 3.15t with `PYTHON_GIL=0` after checking no import re-enables the GIL (3.14t is deliberately skipped); `smoke` builds the sdist+wheel, installs the wheel into a clean venv, imports every module, smokes the CLI and runs a small subset on 3.11/3.12/3.14/3.15. A smoke-only, non-blocking 3.15 lane let a 3.15 `json`/str-Enum break (~1,265 failing tests) go unnoticed. `tests/test_python_compat_workflow.py` pins this contract. |
 | `integration.yml` — one `integration (<os>)` job per OS (`ubuntu-24.04`, `macos-latest`, `windows-latest`) | Conditional on PRs; always on `main` pushes and dispatch | Every lane is a `scripts/verify.py --profile full` step, run as a step of its OS's job: `integration` on all three (xdist via `PYTEST_ADDOPTS`; Linux adds coverage for the Codecov `integration` flag and raises the executed-test floor to 20), `native-compare` (macOS clang / Windows MinGW, floor 5), `msvc` (Windows, step-level `continue-on-error` — the PDB parser is still maturing, informational only), `libabigail-parity` and `abicc-parity` (Linux). Later test steps run whatever an earlier one concluded, so one red lane never hides another. PRs trigger it only when one of `abicheck/**`, `tests/**`, `examples/**`, `catalog/**`, `.github/workflows/**`, `pyproject.toml`, `action/**`, `.github/actions/**`, `scripts/verify.py`, or `scripts/demo_libz.py` changed — a trigger-level `paths:` filter, not a gate job. The last four paths are the lanes' own *infrastructure* (they pip-install the package, set CastXML up via the composite action, and run `verify.py` steps), so omitting them let a re-pin of CastXML merge without a single CastXML-using job running. This replaced nine `ci.yml` runners (`heavy-parity-gate`, `integration-tests` x3, `cross-platform-e2e` x2, `windows-msvc`, `libabigail-parity`, `abicc-parity`); the gate existed to keep a stable required check, which stopped mattering once no check was merge-blocking. Every step passes `--require-complete`, so a step whose precondition fails (a tool the leg installs went missing) fails instead of exiting 0 as a skip. The Linux leg also runs `demo-libz` (formerly `ci.yml`'s `e2e` job). |
 | `clang-plugin.yml` | **No** | Standalone, path-filtered to `contrib/abicheck-clang-plugin/**`; never a required abicheck-CI gate (see `contrib/abicheck-clang-plugin/AGENTS.md`) |
 | `mutation.yml` | No | **Auto-runs on any PR touching a mutated module** (path-filtered to `[tool.mutmut].only_mutate` **and each module's own `tests/test_<stem>*.py`** — a naming-convention match, not a complete one: 257 of ~450 test files import a mutated module directly, so a complete trigger is effectively `tests/**`, i.e. a two-hour job on most PRs; the weekly run and the `mutation` label stay the complete checks — a PR that only weakens a detector test changes no production file, so the source-path entries alone never started the lane; both halves kept in sync by `tests/test_mutation_workflow_contract.py`), gating `--diff-scoped`: a surviving mutant in a function the branch changed fails, with no baseline needed. A test-only diff has no changed function to scope to, so such a run says it gated nothing rather than printing OK — that case is only checkable as drift, and when the trigger was a *detector test* — or the `mutation` label, which is documented as the complete check — the PR lane passes `--require-baseline` so it fails closed instead of going green on a run that checked nothing — **once `mutation-baseline.json` is committed**. Before that no run can answer drift, so the PR step gates the changed functions and emits a `Mutation drift not checked` warning instead of failing every such PR in two minutes. Also weekly (per-module baseline drift, `--require-baseline`; with no committed baseline the weekly run *records* one instead and uploads it as the `mutation-baseline` artifact for a human to commit) and on dispatch (record the baseline). The `mutation` label still forces a run on a PR the path filter misses. **Run cost:** with no baseline recorded, the PR run executes only the mutants of the `only_mutate` functions the branch changed (`--scope-run-to-functions`; without a baseline the diff-scoped gate is the only reader of any mutant's outcome, so nothing it reads is dropped — and touching a changelog fragment or test no longer forces a full run). A `--require-baseline` run fails before invoking mutmut when no baseline exists, instead of after the full run. Any run that must measure the whole population is split across 12 matrix shards (`--shard K/12`, a size-balanced partition of `only_mutate`'s *functions*, each shard gating its functions against the baseline's per-function counts and failing if any mutant mutmut produced belongs to no shard), rolled up under the single `mutmut (detector core)` check. The matrix is planned by the `resolve` job (`check_mutation_score.py --plan-shards 12`, the same scoping decision each shard takes, stopped before mutmut), so a run that is not split — a diff-scoped PR run, or a `--require-baseline` run that will fail fast — starts **one** shard runner, not twelve of which eleven only skipped. `[tool.mutmut]` excludes the `repo_scan` marker: those tests read the tree as text, which mutmut 3's runtime trampoline leaves identical for every mutant, so they cannot kill one (they run once in `ci.yml`'s `repo-scan-tests`); its stats pass runs only `tests/mutation_test_selection.txt` (the test files that can reach `only_mutate` code in-process, generated by `scripts/gen_mutation_test_selection.py`; a PR's own changed test files are appended for its run, and a changed `tests/` helper appends the test files importing it (`mutation_scope.helper_importers`) — it used to widen the stats pass to the whole ~50k-test suite, which made most PR runs hit mutmut's 5h45m timeout; a `conftest.py` change appends nothing, and the `selection-check` job verifies completeness on every full run and on PRs touching that machinery, in parallel with the shards); and it loads `scripts/mutmut_stable_param_ids.py`, without which pytest re-escapes explicit parametrize ids in mutmut's later in-process sessions and the clean run aborts on an id the stats pass recorded; a dispatch baseline recording merges the per-shard parts (`scripts/mutation_scope.py merge-baselines`, which refuses parts that do not partition the function units). `pyproject.toml` starts the lane only when `[tool.mutmut]`/`[tool.pytest]` changed (`mutation_scope.py pyproject-changed`), not on a dependency pin. |
@@ -41,71 +42,46 @@ bucket it's in:
 | `bugfix-test-contract.yml` | Yes, on `fix:`/`perf:`/`security:` PRs | Structural half: a fix changing shipped code must change a test. Declared half: the PR body must answer the bug-fix test contract, plus any conditional the diff triggers. Bypass with the `skip-test-contract` label. See `scripts/check_bugfix_test_contract.py` for what each answer is for. |
 | `publish.yml` / `pages.yml` | N/A (release/deploy only) | Not PR gates |
 
-## Required-status-check configuration — deliberately not enforced (2026-09)
+## Required-status-check configuration — `lint-and-types` required (2026-10-15)
 
-**Decision: `main` does not require status checks to pass before a merge,
-and this is intentional, not an oversight or an outstanding admin TODO.**
+**Decision (2026-10-15, merged as PR #1612): exactly one check gates merges into `main`: the
+`lint-and-types` job in `.github/workflows/ci.yml`. No other check is
+required.** This reverses the 2026-09 decision that `main` requires no status
+checks. The maintainer decided that a lint, format, type or strict-docs
+failure should block a merge, and accepts the cost of waiting for that one
+job. It has no path filter, runs on every pull request to `main`, and has a
+10-minute timeout.
 
-CLI cleanup phase two's PR A / PR 0B originally built toward the opposite —
-a real GitHub required-status-checks Ruleset that would block the merge
-button until every check in a derived 14-name list passed on the PR's head
-SHA, plus `verify-merge-checks.yml` as a post-merge audit to catch a merge
-that slipped through before that Ruleset was actually applied. Both pieces
-were built, tested, and the Ruleset was eventually applied by an admin. It
-worked as designed: merges to `main` were blocked until CI finished.
+What is enforced and how:
 
-The maintainer then decided that trade-off isn't wanted going forward —
-waiting for CI to complete before a push/merge can land is a real cost to
-iteration speed, and this repo chooses to accept the risk of an occasional
-red or incomplete merge over paying it on every merge. Concretely:
-
-- The Ruleset's `required_status_checks` rule has been removed.
-  `.github/branch-protection-ruleset.json` now carries only a
-  `non_fast_forward` rule (no force-pushes/history rewrites on `main`) —
-  see `.github/branch-protection-ruleset.md` for the current runbook.
-- `.github/workflows/verify-merge-checks.yml` has been **removed outright**,
-  along with its dedicated tests (`tests/test_verify_merge_checks_race_logic.py`,
-  `tests/verify_merge_checks_harness.mjs`). That workflow's entire purpose
-  was catching a merge whose required checks hadn't actually finished before
-  `merged_at` — the ADR-style problem statement was "a required check that
-  didn't block a merge is a detectable gap, not a policy". Once the policy
-  itself became "don't require checks to block a merge," every merge it
-  used to flag as a finding became expected, normal behavior instead — an
-  audit that fires on every single merge, correctly, is not an audit
-  anymore, it's noise. There is no compensating mechanism to re-add in its
-  place; the absence of merge-blocking is the accepted state, not a gap.
-- The rest of this file's "Required vs. informational workflows" table is
-  kept as-is and still means what it says as *review guidance* — which
-  checks a human or reviewing agent should treat as "fix this before
-  merging" — it just no longer describes anything GitHub itself enforces
-  mechanically on the merge button.
-
-**If this decision is ever reversed**, the mechanical pieces this repo built
-for it are still intact and don't need to be reinvented — see the
-now-historical "PR 0 — restore a green CI baseline first" section of
-`docs/contribute/plans/cli-cleanup-phase-two.md` for the full original
-design (the required-check derivation rule and the
-one-stable-aggregate-check-per-workflow principle). The `docs-pr (required)`/
-`test-action (required)` bridge jobs that design put in `ci.yml` were
-**deleted** (2026-09-30): with nothing required they only polled another
-workflow's check for up to 25/35 minutes each, holding a runner on every PR.
-Re-enabling merge-blocking must bridge a path-filtered workflow with a
-reusable-workflow call and ordinary `needs:` instead (plan
-`docs/contribute/plans/ci-cost-and-assurance.md`, Phase 1) —
-`tests/test_required_checks_governance.py` rejects a sleep-loop poller. Re-deriving the
-required-check list from this file's "Required vs. informational workflows"
-table, adding a `required_status_checks` rule with that list to
-`branch-protection-ruleset.json`, and applying it is enough on its own —
-re-adding a `verify-merge-checks.yml`-style post-merge audit is optional at
-that point (it only earns its keep while the Ruleset's enforcement itself is
-still being rolled out or is unverified, per its original design rationale),
-not a required companion piece.
+- `.github/branch-protection-ruleset.json` carries a `non_fast_forward` rule
+  and a `required_status_checks` rule whose only context is
+  `lint-and-types`. The check-run name equals the job id, because the job
+  sets no `name:`.
+- The Ruleset has a repository-admin bypass (`RepositoryRole`, admin) so an
+  urgent merge is possible. This is a maintainer choice and can be removed.
+- **Applying the JSON is an admin step.** No repository workflow applies it.
+  Until a repository admin applies it, `main` does not enforce the check. The
+  runbook is `.github/branch-protection-ruleset.md`.
+- `tests/test_required_checks_governance.py` pins the required set to exactly
+  `lint-and-types`, and asserts that the job still runs on every pull request.
+  Changing the required set means changing the JSON, that test and this
+  section together.
+- The "Required vs. informational workflows" table below keeps its meaning as
+  review guidance. Only `lint-and-types` is merge-blocking.
+- The `docs-pr (required)` / `test-action (required)` bridge jobs and the
+  `test-action summary` roll-up job stay removed. If another check is ever
+  required, bridge a path-filtered workflow with a reusable-workflow call and
+  ordinary `needs:`, never a sleep loop (plan
+  `docs/contribute/plans/ci-cost-and-assurance.md`, Phase 1).
+- `.github/workflows/verify-merge-checks.yml` stays removed. It is not needed
+  to enforce the required check.
 
 ## Local equivalence (CLAUDE.md "M0-3")
 
 `ci.yml`'s always-required jobs (`ai-readiness` — which includes the
 ADR-061 architecture step — `fair-metadata`, `lint-and-types`, the
-canonical `unit-tests` Linux/3.13 lane, and `packaging`, reproduced by the
+canonical `unit-tests` Linux/3.14 lane, and `packaging`, reproduced by the
 `pr` profile's own `distribution-build` step) are reproducible through
 `python scripts/verify.py --profile pr` — `tests/test_verify_profiles.py`
 asserts the core `ci.yml` catalog stays in sync. **Don't add a new required

@@ -38,8 +38,8 @@ from abicheck.extract.headers.castxml.dumper import (
     _extract_contract_attributes,
 )
 from abicheck.model import AbiSnapshot, Function, Variable
-from abicheck.service import _typeinfo_functions
 from abicheck.type_metadata import FuncProto
+from abicheck.workflows.input_resolution import _typeinfo_functions
 
 
 def _snap(functions=None, variables=None) -> AbiSnapshot:

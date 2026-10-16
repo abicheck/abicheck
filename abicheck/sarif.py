@@ -27,13 +27,12 @@ SARIF spec: https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html
 
 from __future__ import annotations
 
-import hashlib
 from importlib.metadata import version as _pkg_version
 from typing import TYPE_CHECKING, Any, cast
 
 from abicheck.checker import Change, ChangeKind, DiffResult
+from abicheck.compare.finding_identity import missing_contract_kind
 from abicheck.contract_relevance_types import CompatibilityEvaluationStatus
-from abicheck.finding_identity import missing_contract_kind
 from abicheck.impact import assess_change
 from abicheck.model.contract_finding_relevance import (
     contract_relevance_of,
@@ -48,22 +47,23 @@ from abicheck.policy.classification import (
     policy_for,
 )
 from abicheck.policy.severity import missing_contract_exit_code
+from abicheck.report.change_json import resolve_demangled_symbol
 from abicheck.report.disposition_audit import disposition_audit_dict_reusing_document
 from abicheck.report.envelope import ReportEnvelope, resolved_document, resolved_gate
 from abicheck.report.render_json import render_mapping_as_json
 from abicheck.report.sarif_invocation import compute_sarif_invocation_exit
-from abicheck.report_model import VERDICT_TO_SARIF_LEVEL as _VERDICT_TO_SARIF_LEVEL
-from abicheck.reporter import (
-    _finding_id,
-    _suppress_dangling_correlation_notes,
+from abicheck.report.view import (
     apply_show_only,
-    resolve_demangled_symbol,
+    display_changes,
+    finding_id,
+    root_cause_id_for_key,
+    root_cause_key_and_display,
+    show_only_matches_severity_label,
 )
+from abicheck.report_model import VERDICT_TO_SARIF_LEVEL as _VERDICT_TO_SARIF_LEVEL
 from abicheck.reporter_markdown import (
-    _root_cause_key_and_display,
     root_cause_evidence_lookup_for_changes,
     root_cause_lookup_for_changes,
-    show_only_matches_severity_label,
 )
 
 from .policy.evaluate import effective_kind_sets, effective_verdict
@@ -402,7 +402,7 @@ def _result_for(
 
     *relevant_ids*, when not ``None``, means a ``--used-by``/``--required-symbol``
     consumer was supplied: ``properties.relevantToConsumerScope`` records
-    whether *change* is relevant to that consumer (:func:`_finding_id` present
+    whether *change* is relevant to that consumer (:func:`finding_id` present
     in the set), purely informational. Workstream D-S1 (vision-api-abi-
     evolution.md "D. Optional prebuilt-consumer lifecycle") reverted the
     earlier design where an out-of-scope change's ``level`` was downgraded to
@@ -509,7 +509,7 @@ def _result_for(
     if not is_evaluated(change):
         level = "note"
     if relevant_ids is not None:
-        properties["relevantToConsumerScope"] = _finding_id(change) in relevant_ids
+        properties["relevantToConsumerScope"] = finding_id(change) in relevant_ids
 
     return {
         "ruleId": change.kind.value,
@@ -539,7 +539,7 @@ def _severity_gate_properties(
     """Build a compact, auditable ``severityGate`` block for SARIF ``properties``.
 
     Mirrors the categories/exit-code contract of JSON's ``severity`` block
-    (:func:`abicheck.reporter._build_severity_json`) so a SARIF consumer can
+    (:func:`abicheck.report.json_sections.build_severity_json`) so a SARIF consumer can
     tell *why* the invocation's exit code is what it is without
     cross-referencing the JSON report separately. *gate* is the caller's
     already-computed
@@ -641,7 +641,7 @@ def _scoped_gate_properties(result: DiffResult) -> dict[str, Any] | None:
     gate_scope = getattr(result, "gate_scope", None)
     relevant_ids = getattr(result, "scoped_relevant_finding_ids", None) or frozenset()
     relevant_in_changes = sum(
-        1 for c in result.changes if _finding_id(c) in relevant_ids
+        1 for c in result.changes if finding_id(c) in relevant_ids
     )
     # scoped-only changes (e.g. PE_ORDINAL_RETARGETED) and missing-contract
     # members are relevant by construction -- they exist only because
@@ -770,7 +770,7 @@ def to_sarif(
     # host with no in-process `cxxfilt` forks one `c++filt` per distinct
     # symbol while building `demangledSymbol` properties (Codex review, PR
     # #1284).
-    from .reporter import prewarm_change_demangling
+    from .report.change_json import prewarm_change_demangling
 
     prewarm_change_demangling(result)
 
@@ -799,15 +799,14 @@ def to_sarif(
 
     changes = list(result.changes)
     if show_only:
-        changes = apply_show_only(
+        changes = display_changes(
             changes,
             show_only,
-            result.policy,
-            effective_kind_sets(result),
-            result.policy_file,
-            _resolved_today,
+            policy=result.policy,
+            kind_sets=effective_kind_sets(result),
+            policy_file=result.policy_file,
+            today=_resolved_today,
         )
-        changes = _suppress_dangling_correlation_notes(changes)
 
     # Collect unique rules used
     rules_seen: dict[str, dict[str, Any]] = {}
@@ -844,7 +843,7 @@ def to_sarif(
     # restructuring SARIF's flat one-result-per-finding shape. referenced_causes
     # spans `changes` and `scoped_only_changes` (computed once, up front) so a
     # scoped-only change's own caused_by_type can still correlate with a
-    # regular change the same run of _root_cause_key_and_display would see --
+    # regular change the same run of root_cause_key_and_display would see --
     # mirrors the identical computation in cli_compare_fold.py's JSON fold-in.
     root_cause_mode = report_mode == "root-cause"
     referenced_causes: frozenset[str] = frozenset()
@@ -876,14 +875,14 @@ def to_sarif(
     ) -> tuple[str, str] | None:
         if not root_cause_mode:
             return None
-        key, root_display = _root_cause_key_and_display(
+        key, root_display = root_cause_key_and_display(
             caused_by_type,
             symbol,
             kind_value,
             finding_id,
             referenced_causes=referenced_causes,
         )
-        return hashlib.sha256(key.encode("utf-8")).hexdigest()[:16], root_display
+        return root_cause_id_for_key(key), root_display
 
     # When --used-by/--required-symbol scoping is active, relevant_ids makes
     # each result's own level follow the scoped gate rather than the full
@@ -918,10 +917,10 @@ def to_sarif(
                     change.caused_by_type,
                     change.symbol,
                     change.kind.value,
-                    _finding_id(change),
+                    finding_id(change),
                 ),
-                impact_root_cause=_impact_rc_lookup.get(_finding_id(change)),
-                impact_root_cause_evidence=_impact_rc_evidence.get(_finding_id(change)),
+                impact_root_cause=_impact_rc_lookup.get(finding_id(change)),
+                impact_root_cause_evidence=_impact_rc_evidence.get(finding_id(change)),
                 finding=finding_by_id.get(id(change)),
                 today=_resolved_today,
             )
@@ -987,10 +986,10 @@ def to_sarif(
                     change.caused_by_type,
                     change.symbol,
                     change.kind.value,
-                    _finding_id(change),
+                    finding_id(change),
                 ),
-                impact_root_cause=_impact_rc_lookup.get(_finding_id(change)),
-                impact_root_cause_evidence=_impact_rc_evidence.get(_finding_id(change)),
+                impact_root_cause=_impact_rc_lookup.get(finding_id(change)),
+                impact_root_cause_evidence=_impact_rc_evidence.get(finding_id(change)),
                 finding=finding_by_id.get(id(change)),
                 today=_resolved_today,
             )

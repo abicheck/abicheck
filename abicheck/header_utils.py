@@ -56,7 +56,7 @@ HEADER_SUFFIXES = frozenset(
 )
 
 #: Header-like suffixes whose edits must invalidate the AST cache
-#: (``dumper._cache_key``'s include-dir mtime walk). A **superset** of
+#: (``extract.headers.ast_config._cache_key``'s include-dir mtime walk). A **superset** of
 #: :data:`HEADER_SUFFIXES`: cache invalidation has the opposite bias from
 #: expansion — it must be *generous* (any file that can change the parsed AST),
 #: so it also covers the ``.inl``/``.tcc`` template-implementation includes that
@@ -844,7 +844,7 @@ def is_msvc_driver_stem(stem: str) -> bool:
     The single vocabulary behind both dialect decisions this codebase makes,
     which had drifted apart: ``source_extractors._argv.is_msvc_mode`` (the L4
     replay path) recognized ``dpcpp-cl`` and version-suffixed drivers, while
-    ``buildsource.adapters.base._is_msvc_command`` (which decides the dialect
+    ``buildsource.adapters.adapter_contract._is_msvc_command`` (which decides the dialect
     for source detection, forced-language detection, structured-field masking
     and — since PR D — the L2 forced-include render) listed only ``cl`` and
     unversioned ``clang-cl``. A ``dpcpp-cl``/``clang-cl-20`` command spelled
@@ -999,7 +999,7 @@ def forced_include_operand_paths(tokens: Sequence[str]) -> tuple[Path, ...]:
     An earlier revision returned the parent alone, on the assumption that the
     cache key's directory walk would then cover it. It does not in general:
     that walk (:func:`iter_cache_header_files`, via
-    ``dumper_ast_config._cache_key``) is suffix-filtered by
+    ``extract.headers.ast_config._cache_key``) is suffix-filtered by
     :data:`CACHE_HEADER_SUFFIXES` — correct for "catch transitive includes
     under a search root", wrong for a file named explicitly because it is
     *itself* part of the parse. A forced include routinely carries a suffix
@@ -1068,7 +1068,7 @@ def cache_relevant_operand_paths(tokens: Sequence[str]) -> tuple[Path, ...]:
     own PE/Mach-O round).
 
     Mixed files and directories: the consuming ``extra_hash_dirs`` channel
-    accepts both (see ``dumper_ast_config._cache_key``), since a forced
+    accepts both (see ``extract.headers.ast_config._cache_key``), since a forced
     pre-include is a file whose content is part of the parse rather than a
     directory to search.
     """

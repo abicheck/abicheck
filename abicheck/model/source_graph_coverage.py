@@ -27,11 +27,22 @@ Scope units are compile-unit / file paths, with
 
 from __future__ import annotations
 
+import dataclasses
 from collections.abc import Mapping
+from dataclasses import dataclass
 from types import MappingProxyType
-from typing import Protocol
+from typing import Any, Protocol, TypeVar, cast
 
 from .edge_coverage import ALL_UNITS, CoverageRecord, ProducerRun
+from .graph_vocabulary import (
+    CALLBACK_EDGE_KINDS,
+    TEMPLATE_EDGE_KINDS,
+    TEMPLATE_NODE_KINDS,
+    VIRTUAL_DISPATCH_EDGE_KINDS,
+    VIRTUAL_DISPATCH_NODE_KINDS,
+)
+
+_G = TypeVar("_G")
 
 
 class SourceGraphSummary(Protocol):
@@ -51,6 +62,7 @@ __all__ = [
     "HEADER_DECLARATIONS_PASS",
     "SOURCE_ABI_PASS",
     "graph_records_passes",
+    "HEADER_BODY_ATTR",
     "HEADER_CALL_GRAPH_PASS",
     "HEADER_FULL_VISIBILITY_KINDS",
     "HEADER_INCLUDE_GRAPH_PASS",
@@ -60,7 +72,13 @@ __all__ = [
     "INCLUDE_GRAPH_PASS",
     "L5_EDGE_KINDS",
     "PASS_EDGE_KINDS",
+    "ROLE_COVERAGE_MATRIX",
     "TYPE_GRAPH_PASS",
+    "SEMANTIC_FAMILIES",
+    "SemanticFamily",
+    "bodies_seen",
+    "body_scoped_closures",
+    "family_collected",
     "pass_coverage_records",
     "pass_for_edge_kind",
     "trusted_kinds",
@@ -78,6 +96,102 @@ INCLUDE_GRAPH_PASS = "include_graph"
 HEADER_CALL_GRAPH_PASS = "header_call_graph"
 HEADER_TYPE_GRAPH_PASS = "header_type_graph"
 HEADER_INCLUDE_GRAPH_PASS = "header_include_graph"
+OVERRIDE_GRAPH_PASS = "override_graph"
+TEMPLATE_GRAPH_PASS = "template_graph"
+CALLBACK_GRAPH_PASS = "callback_graph"
+VIRTUAL_DISPATCH_GRAPH_PASS = "virtual_dispatch_graph"
+HEADER_OVERRIDE_GRAPH_PASS = "header_override_graph"
+HEADER_TEMPLATE_GRAPH_PASS = "header_template_graph"
+HEADER_CALLBACK_GRAPH_PASS = "header_callback_graph"
+HEADER_VIRTUAL_DISPATCH_GRAPH_PASS = "header_virtual_dispatch_graph"
+
+
+@dataclass(frozen=True)
+class SemanticFamily:
+    """One AST-derived semantic fact family (override, virtual dispatch,
+    template, callback): the pass flag each producer stamps, and the edges,
+    node kinds and provenance the family alone contributes.
+
+    Both producers -- the L5 per-TU pass and the default L2 header pass --
+    fold the family through one owner (``buildsource/semantic_fact_folds``),
+    so their facts are the same; only the pass flag says which ran. A graph
+    carrying neither flag (one stored before the header pass projected these
+    facts) never looked for the family: its silence is a coverage gap, not
+    an absence (``source_graph_compare.diff_source_graph``)."""
+
+    name: str
+    build_pass: str
+    header_pass: str
+    edge_kinds: frozenset[str]
+    node_kinds: frozenset[str]
+    #: The provenance its fold stamps on what it mints.
+    provenance: str
+
+
+SEMANTIC_FAMILIES: tuple[SemanticFamily, ...] = (
+    SemanticFamily(
+        "override", OVERRIDE_GRAPH_PASS, HEADER_OVERRIDE_GRAPH_PASS,
+        frozenset({"METHOD_POSSIBLE_OVERRIDE"}), frozenset(), "override_graph",
+    ),
+    SemanticFamily(
+        "virtual_dispatch", VIRTUAL_DISPATCH_GRAPH_PASS,
+        HEADER_VIRTUAL_DISPATCH_GRAPH_PASS, VIRTUAL_DISPATCH_EDGE_KINDS,
+        VIRTUAL_DISPATCH_NODE_KINDS, "virtual_dispatch_graph",
+    ),
+    SemanticFamily(
+        "template", TEMPLATE_GRAPH_PASS, HEADER_TEMPLATE_GRAPH_PASS,
+        TEMPLATE_EDGE_KINDS, TEMPLATE_NODE_KINDS, "template_graph",
+    ),
+    SemanticFamily(
+        "callback", CALLBACK_GRAPH_PASS, HEADER_CALLBACK_GRAPH_PASS,
+        CALLBACK_EDGE_KINDS, frozenset(), "callback_graph",
+    ),
+)  # fmt: skip
+
+
+def family_collected(graph: SourceGraphSummary, family: SemanticFamily) -> bool:
+    """Whether either producer of *family* left any flag on *graph* (ran in
+    full, narrowed, or degraded): the family was looked for."""
+    return any(
+        name in flags
+        for name in (family.build_pass, family.header_pass)
+        for flags in (
+            graph.extractor_passes,
+            graph.narrowed_passes,
+            graph.degraded_passes,
+        )
+    )
+
+
+#: ADR-046 D3: the roles each role-bearing edge kind can carry, per kind --
+#: the vocabulary ``GraphEdge.role`` takes on these kinds. ``type_graph.py``'s
+#: ``_walk_types`` emits exactly these role values, each from its own
+#: unconditional code path, so a confirmed family-level pass may honestly
+#: claim every role below (``inline_graph_fold._mark_role_coverage``); the
+#: ADR-038 C.8 clang-plugin producer is a different, filtered walk and is out
+#: of scope here. The structural diff's role-change finding reads the same
+#: table to tell a usage role from a role-shaped discriminator such as
+#: ``CALLBACK_MAY_INVOKE``'s slot id.
+ROLE_COVERAGE_MATRIX: Mapping[str, tuple[str, ...]] = MappingProxyType(
+    {
+        "TYPE_INHERITS": ("base",),
+        "TYPE_HAS_FIELD_TYPE": (
+            "field",
+            "alias",
+            "enum_underlying",
+            "template_param",
+            "default_template_arg",
+        ),
+        "DECL_HAS_TYPE": (
+            "var",
+            "return",
+            "param",
+            "template_param",
+            "default_template_arg",
+        ),
+        "DECL_REFERENCES_DECL": ("ref",),
+    }
+)
 
 #: Build-integrated pass -> the edge kinds it produces.
 PASS_EDGE_KINDS: Mapping[str, frozenset[str]] = MappingProxyType(
@@ -128,6 +242,11 @@ HEADER_FULL_VISIBILITY_KINDS: frozenset[str] = frozenset(
 #: The one unit a header-only pass covers for a body-dependent kind.
 HEADER_INLINE_BODIES = "header_inline_bodies"
 
+#: The ``source_decl`` node attribute a header-only pass sets on each
+#: declaration whose body it parsed in full -- per-declaration body coverage
+#: (ADR-077 D5). Read through :func:`bodies_seen`.
+HEADER_BODY_ATTR = "header_body"
+
 L5_EDGE_KINDS: frozenset[str] = frozenset().union(*PASS_EDGE_KINDS.values())
 
 #: The kinds a header pass sees only inside a header-written body.
@@ -140,6 +259,58 @@ def pass_for_edge_kind(edge_kind: str) -> str | None:
         if edge_kind in kinds:
             return pass_name
     return None
+
+
+def bodies_seen(graph: object, pass_name: str) -> frozenset[str] | None:
+    """The ``decl://`` node ids whose body *graph*'s *pass_name* family saw
+    in full: ``None`` for a confirmed build-integrated pass (every body), the
+    :data:`HEADER_BODY_ATTR`-marked nodes for a clean header-only pass, and
+    nothing otherwise -- a narrowed, degraded or absent pass vouches for no
+    single body."""
+    passes: Mapping[str, bool] = getattr(graph, "extractor_passes", {})
+    if passes.get(pass_name, False):
+        return None
+    header = HEADER_PASS_ALIAS.get(pass_name, "")
+    degraded: Mapping[str, bool] = getattr(graph, "degraded_passes", {})
+    if not header or not passes.get(header, False) or degraded.get(header, False):
+        return frozenset()
+    return frozenset(
+        n.id
+        for n in getattr(graph, "nodes", ())
+        if n.attrs.get(HEADER_BODY_ATTR) is True
+    )
+
+
+def body_scoped_closures(
+    old: _G, new: _G, common: frozenset[str]
+) -> tuple[_G, _G, frozenset[str]]:
+    """Admit a body-dependent kind missing from *common* per declaration.
+
+    For each of ``DECL_CALLS_DECL``/``DECL_REFERENCES_DECL`` not already
+    trusted on both sides, keep only edges whose source declaration's body
+    was seen in full on **both** sides (:func:`bodies_seen`) -- there an
+    edge's absence on either side is a verified zero -- and drop that kind's
+    other edges from both graphs, so an unseen body is declined (never a
+    clean pass, never an invented finding). Returns the narrowed graphs and
+    the widened kind set; the inputs unchanged when no body qualifies."""
+    keep: dict[str, frozenset[str]] = {}
+    for kind in sorted(_BODY_KINDS - common):
+        pass_name = pass_for_edge_kind(kind) or ""
+        o, n = bodies_seen(old, pass_name), bodies_seen(new, pass_name)
+        joint = (n or frozenset()) if o is None else o if n is None else o & n
+        if joint:
+            keep[kind] = joint
+    if not keep:
+        return old, new, common
+    return _narrow(old, keep), _narrow(new, keep), common | frozenset(keep)
+
+
+def _narrow(graph: _G, keep: Mapping[str, frozenset[str]]) -> _G:
+    edges = getattr(graph, "edges", ())
+    kept = [e for e in edges if e.kind not in keep or e.src in keep[e.kind]]
+    if len(kept) == len(edges):
+        return graph
+    return cast(_G, dataclasses.replace(cast(Any, graph), edges=kept))
 
 
 def trusted_kinds(

@@ -205,24 +205,24 @@ class TestDowngradeOpaqueStructChangesIdentityTiers:
         assert not filtered
         assert out[0].kind == ChangeKind.STRUCT_SIZE_CHANGED
 
-    def test_a_visible_types_bare_name_fallback_is_unaffected_by_the_is_opaque_filter(
+    def test_a_no_identity_change_on_a_spelling_a_visible_type_also_carries_is_kept(
         self,
     ) -> None:
-        """The local (bare-spelling) tier must still match on the shared
-        spelling "Handle" alone when the change carries no identity of its
-        own -- the ``is_opaque`` filter added for the collision fix above
-        only narrows which declaration's *stable* id enters the index, not
-        the local tier's membership (``SnapshotLocalIdentity`` compares by
-        spelling only, per its own docstring), so this reproduces the
-        pre-migration bare ``c.symbol in truly_opaque`` behavior exactly."""
+        """Flipped from the earlier pinned behavior. A change with no identity
+        on the spelling ``"Handle"`` cannot be attributed to the opaque
+        declaration when a visible ``Handle`` (a different entity, id
+        ``_OTHER_STABLE_ID``) is declared on the same side: the bare-spelling
+        fallback suppressed it, which is the namesake collision this module
+        was meant to close. The finding is kept, the false-positive direction
+        the vision prefers over a silent false-clean."""
         opaque_handle = _record("Handle", is_opaque=True, entity_id=_STABLE_ID)
         visible_handle = _record("Handle", is_opaque=False, entity_id=_OTHER_STABLE_ID)
         old = _snap([opaque_handle, visible_handle])
         new = _snap([opaque_handle, visible_handle])
         change = _struct_size_change("Handle")
         out, filtered = _downgrade_opaque_struct_changes([change], old, new)
-        assert not out
-        assert filtered[0].kind == ChangeKind.STRUCT_SIZE_CHANGED
+        assert not filtered
+        assert [c.kind for c in out] == [ChangeKind.STRUCT_SIZE_CHANGED]
 
     def test_a_now_visible_types_own_stable_id_is_not_smuggled_in_via_a_namesake(
         self,

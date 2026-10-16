@@ -305,6 +305,7 @@ _SEVERITY_TO_SARIF_LEVEL = {
     "potential_breaking": "warning",
     "quality_issues": "warning",
     "addition": "note",
+    "informational": "note",
 }
 
 

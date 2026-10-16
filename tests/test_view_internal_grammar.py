@@ -49,20 +49,19 @@ import textwrap
 import pytest
 
 from abicheck.change_registry import REGISTRY
-from abicheck.frontends.cli.options.view import (
+from abicheck.frontends.cli.options.compare_view import (
     REPORT_MODES,
     RETIRED_TOKENS,
     parse_view_tokens,
 )
 from abicheck.model.change_catalog.kinds import ChangeKind
 from abicheck.model.change_catalog.registry import ChangeEntity, ChangeOperation
+from abicheck.report.change_operation import operation_for_kind
+from abicheck.report.view import SHOW_ONLY_GROUP_SEP, ShowOnlyFilter
 from abicheck.reporter_markdown import (
     ACTION_TOKEN_OPERATIONS,
     ELEMENT_TOKEN_ENTITIES,
-    SHOW_ONLY_GROUP_SEP,
-    ShowOnlyFilter,
     entity_for_kind,
-    operation_for_kind,
 )
 
 # ── Shared real-binary corpus ───────────────────────────────────────────────
@@ -569,7 +568,8 @@ class TestPublishedSchemaDeclaresTheNewContract:
         the schema's own policy reserves MAJOR for removing a key."""
         from abicheck.schemas import REPORT_SCHEMA_VERSION
 
-        assert REPORT_SCHEMA_VERSION.split(".")[0] == "5"
+        # >= 5: ADR-078's `quality_issues` narrowing bumped it again to 6.
+        assert int(REPORT_SCHEMA_VERSION.split(".")[0]) >= 5
 
     def test_a_real_report_validates_against_the_published_schema(self, tmp_path):
         from abicheck.schemas import load_compare_report_schema
@@ -817,7 +817,9 @@ class TestMachOSymbolsResolveTheirDemangledName:
             self.symbol = symbol
 
     def test_the_macho_spelling_resolves(self):
-        from abicheck.reporter import resolve_demangled_symbol
+        from abicheck.report.change_json import (
+            resolve_demangled_symbol,
+        )
 
         if not _demangler_available():
             pytest.skip("no demangler available")
@@ -827,7 +829,9 @@ class TestMachOSymbolsResolveTheirDemangledName:
         )
 
     def test_the_elf_spelling_still_resolves(self):
-        from abicheck.reporter import resolve_demangled_symbol
+        from abicheck.report.change_json import (
+            resolve_demangled_symbol,
+        )
 
         if not _demangler_available():
             pytest.skip("no demangler available")
@@ -836,7 +840,9 @@ class TestMachOSymbolsResolveTheirDemangledName:
     def test_an_msvc_decorated_symbol_still_resolves_to_nothing(self):
         """The documented limitation, asserted so the opt-in above cannot
         quietly turn into "demangle anything that looks mangled"."""
-        from abicheck.reporter import resolve_demangled_symbol
+        from abicheck.report.change_json import (
+            resolve_demangled_symbol,
+        )
 
         assert resolve_demangled_symbol(self._Finding("?gone@lib@@YAXH@Z")) is None
 
@@ -977,7 +983,7 @@ class TestOneEnvelopeProjectsCorrectlyIntoEveryFormat:
         from abicheck.model import AbiSnapshot
         from abicheck.model.change import Change
         from abicheck.model.change_catalog.kinds import ChangeKind
-        from abicheck.report.build import build_report_envelope
+        from abicheck.report.document_builder import build_report_envelope
         from abicheck.report.envelope import RenderOptions
 
         result = DiffResult(
@@ -1023,7 +1029,7 @@ class TestOneEnvelopeProjectsCorrectlyIntoEveryFormat:
     def test_the_two_public_entry_points_agree(self):
         """The drift itself: same evaluation, same format, same bytes."""
         from abicheck.frontends.render import render_envelope, render_output
-        from abicheck.report.build import build_report_envelope
+        from abicheck.report.document_builder import build_report_envelope
         from abicheck.report.envelope import RenderOptions
 
         envelope = self._envelope()
@@ -1038,7 +1044,7 @@ class TestOneEnvelopeProjectsCorrectlyIntoEveryFormat:
         from abicheck.demangle import demangle
         from abicheck.frontends.render import render_envelope
         from abicheck.model import AbiSnapshot
-        from abicheck.report.build import build_report_envelope
+        from abicheck.report.document_builder import build_report_envelope
         from abicheck.report.envelope import RenderOptions
 
         if demangle("_ZN3lib4goneEi") is None:
@@ -1055,7 +1061,7 @@ class TestOneEnvelopeProjectsCorrectlyIntoEveryFormat:
 
 class TestEveryCollectionThatSerializesIsPrewarmed:
     """The demangle prewarm has to cover every collection whose entries reach
-    `_change_to_dict`, not only `result.changes`.
+    `change_to_dict`, not only `result.changes`.
 
     `scoped_only_changes` is the one that was missed: `apply_scoped_gate`
     synthesizes it *after* the document is built, for a `--used-by` /
@@ -1104,7 +1110,9 @@ class TestEveryCollectionThatSerializesIsPrewarmed:
     def test_every_collection_reaches_the_batch(self):
         from unittest import mock
 
-        from abicheck.reporter import prewarm_change_demangling
+        from abicheck.report.change_json import (
+            prewarm_change_demangling,
+        )
 
         result, expected = self._result_with_a_distinct_symbol_per_collection()
         with mock.patch("abicheck.demangle.prewarm_demangle_batch") as batch:

@@ -24,12 +24,11 @@ thing keeping ``service_compare_pipeline`` importing a ``cli_*`` module.
 ``click.echo`` now *renders* its report as ``list[str]`` and hands the lines to
 an optional ``on_output`` sink. This replaced a ``quiet: bool`` flag, for the
 same reason the ``embed_build_source`` move replaced one: a ``quiet`` flag is
-only meaningful to a caller that has a stream in the first place, and
-``service.run_compare_request`` never did -- it had to pass ``quiet=True``
-forever to suppress writes to a stream it does not own. A sink makes the
-default (no sink, no output) the correct one for an engine caller, and lets the
-CLI adapter decide that its sink writes to *stderr* so ``-o json=...``
-stdout stays parseable.
+only meaningful to a caller that has a stream in the first place. A sink
+makes the default (no sink, no output) the correct one for an engine caller --
+``workflows.compare_classify`` takes one as ``on_output`` -- and lets the CLI
+adapter decide that its sink writes to *stderr* so ``-o json=...`` stdout
+stays parseable.
 
 **The error contract is preserved, not tidied.** ``resolve_side_pack`` raises
 ``SnapshotError`` for an unloadable pack -- *operational*, not a usage error:

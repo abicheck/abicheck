@@ -43,6 +43,7 @@ Phase 5 section for the design this page's data comes from.
 | `Function.is_compiler_generated` | `bool \| None` | castxml | persisted | ✅ | — | ✅ | — | ✅ |
 | `Function.is_explicit` | `bool \| None` | castxml, clang, dwarf | persisted | ✅ | — | ✅ | — | ✅ |
 | `Function.is_hidden_friend` | `bool \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
+| `Function.is_inline` | `bool` | castxml, clang | consumed | ✅ | — | ✅ | — | ✅ |
 | `Function.is_override` | `bool \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
 | `Function.is_variadic` | `bool \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
 | `Function.ownership` | `EntityOwnership` | castxml, clang | persisted | ✅ | — | — | — | ✅ |
@@ -100,6 +101,7 @@ is the authoritative source for each row.
 | `clang_va_list_facts_reliable` | `Param.is_va_list` |
 | `clang_vtable_facts_reliable` | `RecordType.vtable`, `RecordType.vptr_offset_bits` |
 | `header_cv_facts_reliable` | `TypeField.is_const`, `TypeField.is_volatile`, `TypeField.is_mutable` |
+| `inline_facts_reliable` | `Function.is_inline` |
 | `param_kind_facts_reliable` | `Param.kind` |
 
 ## Eligible but not yet converted

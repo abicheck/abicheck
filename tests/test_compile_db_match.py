@@ -1,7 +1,7 @@
 """Unit tests for :mod:`abicheck.workflows.artifact.compile_db_match`.
 
 The legacy ``-p``/``--build-info`` compile-database match used to live in
-``cli_helpers_compare`` as a Click-raising resolver plus a silent dry-run
+the CLI layer as a Click-raising resolver plus a silent dry-run
 twin; ADR-063 Phase 1 gave it one owner in the typed dump pipeline. These are
 the former CLI helper tests, ported onto that owner: ``_legacy`` is the strict
 form the real run uses, ``_dry`` the non-raising form ``dump --dry-run`` uses,
@@ -18,9 +18,9 @@ import pytest
 from abicheck.errors import AbicheckError
 from abicheck.workflows.artifact.compile_db_match import (
     match_compile_db,
+    match_side_compile_db,
     try_match_compile_db,
 )
-from abicheck.workflows.dump.pipeline import _announce_compile_db_match
 
 
 def _write_compile_db(directory, entries):
@@ -43,7 +43,7 @@ def _dry(db, headers, source_filter):
 
 def _announced(db, headers) -> str:
     lines: list[str] = []
-    _announce_compile_db_match(lines.append, db, match_compile_db(db, headers, None))
+    match_side_compile_db(db, headers, None, lines.append)
     return "\n".join(lines)
 
 
@@ -194,7 +194,7 @@ def test_try_match_compile_db_none_without_a_db():
 
 
 def test_try_match_compile_db_true_for_matching_header(tmp_path, capsys):
-    """Mirrors _resolve_build_context_flags's own matched=True case, but
+    """Mirrors match_compile_db's own matched=True case, but
     silently -- no 'Build context: ...' stderr echo (that announcement
     belongs to the real run, not a dry run)."""
     src = tmp_path / "foo.cpp"
@@ -218,7 +218,7 @@ def test_try_match_compile_db_true_for_matching_header(tmp_path, capsys):
 
 def test_try_match_compile_db_alias_path_used_when_primary_absent(tmp_path):
     """The -p alias (second positional arg) is honored, same as
-    _resolve_build_context_flags's effective_compile_db resolution."""
+    match_compile_db's effective_compile_db resolution."""
     header = tmp_path / "foo.h"
     header.write_text("int f(void);\n", encoding="utf-8")
     db = _write_compile_db(
@@ -236,7 +236,7 @@ def test_try_match_compile_db_alias_path_used_when_primary_absent(tmp_path):
 
 def test_try_match_compile_db_union_fallback_without_headers(tmp_path):
     """No headers -> build_context_union_fallback branch (mirrors
-    _resolve_build_context_flags's identical no-headers path)."""
+    match_compile_db's identical no-headers path)."""
     db = _write_compile_db(
         tmp_path,
         [
@@ -260,7 +260,7 @@ def test_try_match_compile_db_false_for_empty_db(tmp_path):
 
 
 def test_try_match_compile_db_false_for_missing_db():
-    """A missing compile database file: _resolve_build_context_flags raises
+    """A missing compile database file: match_compile_db raises
     (AbicheckError, OSError) for this, but a dry run must never raise -- it's a
     definite False (the invocation cannot succeed), not a crash."""
     assert _dry(Path("/nonexistent/compile_commands.json"), (), None) is False
@@ -282,7 +282,7 @@ def test_a_bad_database_is_an_operational_failure_not_a_usage_error(tmp_path, co
     from unittest import mock
 
     from abicheck.errors import SnapshotError, ValidationError
-    from abicheck.workflows.dump.pipeline import (
+    from abicheck.workflows.dump.request import (
         DumpExecutionOptions,
         execute_dump_request,
     )

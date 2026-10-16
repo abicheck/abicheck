@@ -3,7 +3,7 @@
 the rest of ADR-068 §1's list).
 
 All eleven checks are migrated onto ``compare()``'s automatic pipeline now
-(plan §3 #3, ``workflows/cross_source_evolution.py``), so every check gets
+(plan §3 #3, ``workflows/cross_source_hygiene.py``), so every check gets
 its own positive "reaches compare" test below, and
 ``test_every_crosscheck_has_a_reaches_compare_test`` keeps that list
 complete. The

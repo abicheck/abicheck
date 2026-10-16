@@ -79,7 +79,7 @@ def test_the_pair_sets_are_not_empty() -> None:
 def test_operation_classification_ignores_the_evidence_tier(
     added: ChangeKind, removed: ChangeKind
 ) -> None:
-    from abicheck.reporter_markdown import operation_for_kind
+    from abicheck.report.change_operation import operation_for_kind
 
     assert operation_for_kind(added.value) == "added"
     assert operation_for_kind(removed.value) == "removed"
@@ -93,11 +93,9 @@ def _registry_pairs() -> list[tuple[str, set[object], set[object]]]:
     two stay symmetric, and a set with no removal counterpart has nothing to
     be symmetric with.
     """
-    from abicheck.report_classifications import ADDED_KINDS, REMOVED_KINDS
     from abicheck.workflows.history import _ADDED_KINDS, _REMOVED_KINDS
 
     return [
-        ("report_classifications", set(ADDED_KINDS), set(REMOVED_KINDS)),
         ("workflows.history", set(_ADDED_KINDS), set(_REMOVED_KINDS)),
     ]
 

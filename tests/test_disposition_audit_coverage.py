@@ -289,7 +289,7 @@ class TestDispositionAuditBlockAbsent:
 
 class TestReleaseDispositionAuditBlockWithMatrixResult:
     def test_matrix_result_contributes_its_own_audit(self) -> None:
-        from abicheck.cli_compare_receipt import release_disposition_audit_block
+        from abicheck.report.release_document import release_disposition_audit_block
 
         matrix_result = DiffResult(
             changes=[Change(kind=ChangeKind.FUNC_REMOVED, symbol="m", description="x")],
@@ -326,7 +326,7 @@ class TestTargetReportToDictCarriesDispositionAudit:
 
 class TestReleaseSummarySidecarCarriesDispositionAudit:
     def test_output_dir_summary_carries_disposition_audit(self, tmp_path: Path) -> None:
-        from abicheck.cli_compare_release import _write_release_summary_file
+        from abicheck.frontends.cli.release_summary import _write_release_summary_file
 
         entries: list[dict[str, object]] = [
             {
@@ -358,7 +358,7 @@ class TestReleaseSummarySidecarCarriesDispositionAudit:
 
         from abicheck.bundle_models import BundleDiffResult, BundleFinding
         from abicheck.checker_policy import ChangeKind
-        from abicheck.cli_compare_release import _write_release_summary_file
+        from abicheck.frontends.cli.release_summary import _write_release_summary_file
 
         bundle_result = BundleDiffResult(
             old_root=Path("/o"),

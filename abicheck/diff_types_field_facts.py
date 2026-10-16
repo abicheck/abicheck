@@ -34,15 +34,14 @@ from __future__ import annotations
 
 from .compare.fact_comparison import compare_facts
 from .compare.fact_gate import both_facts_present
+from .compare.type_map_pair import type_map_key
 from .detector_registry import registry
 from .diff_helpers import (
     build_type_map as _build_type_map,
     fact_same_producer_qualified,
     lookup_matched_type as _lookup_matched_type,
     make_change,
-    type_map_key,
 )
-from .diff_symbols import _both_header_aware
 from .diff_types_surface import (
     RESERVED_FIELD,
     _directly_referenced,
@@ -58,7 +57,7 @@ from .model import (
 from .model.change import Change
 from .model.change_catalog.kinds import ChangeKind
 from .model.identity import EntityId
-from .model.snapshot_reliability import family_reliable
+from .model.snapshot_reliability import both_header_aware, family_reliable
 
 
 @registry.detector("enum_renames")
@@ -320,7 +319,7 @@ def _diff_field_default_initializer(old: AbiSnapshot, new: AbiSnapshot) -> list[
     ``PARAM_DEFAULT_VALUE_*``'s convention).
 
     Gates per-field on :func:`diff_helpers.fact_same_producer_qualified`, in
-    addition to ``_both_header_aware`` up front (the producer check alone
+    addition to ``both_header_aware`` up front (the producer check alone
     would treat an unconfirmed/legacy side's unset ``ast_producer`` as
     "unknown, don't skip"). Used to be ``both_castxml_backed_fact`` because
     clang did not populate this fact at all (Codex review, PR #582); G31
@@ -360,7 +359,7 @@ def _diff_field_default_initializer(old: AbiSnapshot, new: AbiSnapshot) -> list[
     itself the signal that this needs a data-model change, not another
     heuristic.
     """
-    if not _both_header_aware(old, new):
+    if not both_header_aware(old, new):
         return []
     changes: list[Change] = []
     excl = _exclude_stdlib_namespaces(old, new)
@@ -573,7 +572,7 @@ def _diff_type_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     Header-tier only — see ``FIELD_DEFAULT_INITIALIZER_REMOVED``'s docstring
     above / ``Function.deprecated``'s in model.py for why this gates
     per-type on :func:`compare.fact_gate.both_facts_present` (ADR-063 5B: the per-declaration ``FactStatus``) rather than a
-    per-pair None check or plain ``_both_header_aware`` (both backends
+    per-pair None check or plain ``both_header_aware`` (both backends
     populate ``RecordType.deprecated`` today, G31 Phase C, with directly
     cross-comparable values; per-type gating is what correctly supports a
     ``--ast-frontend hybrid`` snapshot, G28 Phase 3).

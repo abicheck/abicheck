@@ -160,6 +160,13 @@ REPORT_BUG_CLASSES: tuple[BugClass, ...] = (
             # configuration. The harness diffs whole reports across routes over
             # an operand corpus x config axes, with an empty KNOWN_DIVERGENCES.
             "tests/test_family_f2_route_parity.py",
+            # Between formats, for a *derived* fact: HTML bucketed findings
+            # by two hand-kept kind subsets and Markdown counted removals by
+            # a `*_removed` name suffix, while JSON and the PR comment read
+            # the registry-declared operation/entity. The seed test renders
+            # one policy-bearing fixture in every format against a
+            # hand-written oracle table.
+            "tests/test_report_format_bucket_parity.py",
         ),
         axes={
             # Only what a seed test really drives -- and *all* of it. This
@@ -224,7 +231,7 @@ REPORT_BUG_CLASSES: tuple[BugClass, ...] = (
                     "`Change.suppression_rule`, the `label or reason` "
                     "display collapse, while the same run's JSON already "
                     "publishes the full ADR-067 record via "
-                    "`reporter.py`'s `_suppressed_change_entry` -- the same "
+                    "`reporter.py`'s `suppressed_change_entry` -- the same "
                     "between-formats split the audit's SARIF had. (2) "
                     "`cli_scan_baseline.py`'s baseline `findings[]` entries "
                     "carry the display label only, with no provenance field "
@@ -664,7 +671,7 @@ REPORT_BUG_CLASSES: tuple[BugClass, ...] = (
                 description=(
                     "The aggregate is verified over hand-built and "
                     "`add_member_review_summary`-stamped member entries and "
-                    "through `_format_release_json`, not through a real "
+                    "through `release_json_document`, not through a real "
                     "multi-binary `compare` of a directory pair: no native "
                     "toolchain fixture in this workspace produces members "
                     "carrying cross-source hygiene findings. The JUnit and "

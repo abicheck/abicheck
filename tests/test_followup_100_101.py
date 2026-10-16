@@ -212,7 +212,10 @@ class TestCliPolicy:
                 verdict=Verdict.NO_CHANGE,
             )
 
-        with patch("abicheck.service.compare_snapshots", side_effect=_fake_compare):
+        with patch(
+            "abicheck.workflows.compare_policy.compare_snapshots",
+            side_effect=_fake_compare,
+        ):
             result = CliRunner().invoke(
                 main, ["compare", str(old_p), str(new_p), "--policy", "plugin_abi"]
             )
@@ -252,7 +255,10 @@ class TestCliPolicy:
                 verdict=Verdict.NO_CHANGE,
             )
 
-        with patch("abicheck.service.compare_snapshots", side_effect=_fake_compare):
+        with patch(
+            "abicheck.workflows.compare_policy.compare_snapshots",
+            side_effect=_fake_compare,
+        ):
             result = CliRunner().invoke(
                 main,
                 ["compare", str(old_p), str(new_p), "--policy", str(policy_p)],
@@ -295,7 +301,10 @@ class TestCliPolicy:
 
         # A document last: the document is loaded, the profile slot falls back
         # to the default rather than keeping the earlier profile name.
-        with patch("abicheck.service.compare_snapshots", side_effect=_fake_compare):
+        with patch(
+            "abicheck.workflows.compare_policy.compare_snapshots",
+            side_effect=_fake_compare,
+        ):
             result = CliRunner().invoke(
                 main,
                 [
@@ -313,7 +322,10 @@ class TestCliPolicy:
 
         # A profile name last: no document is loaded at all.
         captured.clear()
-        with patch("abicheck.service.compare_snapshots", side_effect=_fake_compare):
+        with patch(
+            "abicheck.workflows.compare_policy.compare_snapshots",
+            side_effect=_fake_compare,
+        ):
             result = CliRunner().invoke(
                 main,
                 [

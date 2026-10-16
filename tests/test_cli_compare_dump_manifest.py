@@ -32,6 +32,7 @@ import pytest
 from click.testing import CliRunner
 
 from abicheck.cli import main
+from tests._fake_compare_resolution import fake_resolved_pair
 
 
 def _have(tool: str) -> bool:
@@ -385,13 +386,13 @@ def test_compare_dump_manifest_and_release_manifest_coexist(
 
     def _fake_resolve(*_a, **kw):
         captured["old_dump_manifest"] = kw.get("old_dump_manifest")
-        return snap, snap
+        return fake_resolved_pair(snap, operands=(_a[0], _a[1]))
 
     monkeypatch.setattr(
-        "abicheck.cli_compare_helpers._resolve_compare_snapshots", _fake_resolve
+        "abicheck.cli_compare_helpers._resolve_compare_pair", _fake_resolve
     )
     monkeypatch.setattr(
-        "abicheck.service.compare_snapshots",
+        "abicheck.workflows.compare_policy.compare_snapshots",
         lambda *_a, **_kw: DiffResult(
             old_version="1",
             new_version="1",

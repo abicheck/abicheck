@@ -542,7 +542,7 @@ def test_reclassified_finding_is_identified_via_classify_effective_change(
     """A `reclassify:`-demoted BREAKING finding that lands in `diff.compatible`
     (as QUALITY_ISSUES, since func_removed isn't an ADDITION_KINDS member)
     must still be nameable as a gate-relevant finding -- not just correctly
-    gated (that already worked; `_build_severity_json` passes `policy_file`)
+    gated (that already worked; `build_severity_json` passes `policy_file`)
     but correctly *classified*, via `severity.classify_effective_change` (Codex
     review). This test used to also check `cli_scan_baseline.
     _blocking_compatible_changes` reached the identical conclusion --
@@ -811,7 +811,7 @@ reclassify:
 def test_reclassify_disclosed_in_markdown_report(tmp_path: Path) -> None:
     """Codex review: Markdown must disclose active reclassify: rules the
     same way it already discloses overrides:."""
-    from abicheck.reporter_markdown import to_markdown
+    from abicheck.report.dispatch_markdown import to_markdown
 
     diff = _reclassify_diff_and_policy_path(tmp_path)
     md = to_markdown(diff)
@@ -828,7 +828,7 @@ def test_reclassify_markdown_disclosure_is_code_span_wrapped(
     as emphasis markers, which can mangle a mangled-name selector's
     rendering. Must be code-span-wrapped, same as the `Policy overrides`
     line already wraps its own values."""
-    from abicheck.reporter_markdown import to_markdown
+    from abicheck.report.dispatch_markdown import to_markdown
 
     diff = _reclassify_diff_and_policy_path(tmp_path)
     md = to_markdown(diff)
@@ -933,7 +933,7 @@ def test_expired_reclassify_rule_absent_from_json_report(tmp_path: Path) -> None
 
 
 def test_expired_reclassify_rule_absent_from_markdown_report(tmp_path: Path) -> None:
-    from abicheck.reporter_markdown import to_markdown
+    from abicheck.report.dispatch_markdown import to_markdown
 
     diff = _expired_reclassify_diff(tmp_path)
     assert "Policy reclassify" not in to_markdown(diff)
@@ -1728,12 +1728,12 @@ def test_reclassified_by_and_policy_reclassify_present_in_root_cause_mode(
 ) -> None:
     """Codex review: a grouping mode builds its own finding dict
     (`_leaf_entry`, for root TYPE_* kinds) rather than routing through
-    `_change_to_dict`, and never called `_add_policy_overrides` at all --
+    `change_to_dict`, and never called `add_policy_overrides` at all --
     both `changes[].reclassified_by` and the run-level `policy_reclassify`
     key were silently absent from leaf-mode output even though the
     identical comparison's full-mode report carried both. `type_size_changed`
     is a root TYPE_* kind (`_ROOT_TYPE_CHANGE_KINDS`), so it's built by
-    `_leaf_entry`, not `_change_to_dict`, exercising the leaf-only path."""
+    `_leaf_entry`, not `change_to_dict`, exercising the leaf-only path."""
     import json
 
     from abicheck.checker_types import DiffResult

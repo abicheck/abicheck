@@ -22,14 +22,93 @@ They are consolidated into a concise release summary when a version ships.
 
 <!-- scriv-insert-here -->
 
-## [0.6.0] — not yet released
+## [0.7.0] — not yet released
 
 > **This release has not been published.** The latest release on PyPI,
-> conda-forge and GitHub Releases is **0.5.0**. The entries below describe
-> what `main` currently carries and will ship as `0.6.0`; the date will be
-> filled in when the tag is cut. See
-> [Upgrading from 0.5 to 0.6](docs/start/upgrading-to-0.6.md) for the
-> migration.
+> conda-forge and GitHub Releases is **0.6.0**. The entries below describe
+> what `main` currently carries and will ship as `0.7.0`; the date will be
+> filled in when the tag is cut.
+
+### Compatibility contract and gating
+
+- Contract evaluation is now on by default for `compare` (CLI, typed API and
+  the Action). With no `--contract`, the domain follows the evidence:
+  `public` when header evidence covers every side, otherwise `exports`, then
+  `all`. Findings outside the selected contract no longer gate, and the
+  contract-coverage exit (`1`) can apply without `--contract`.
+  `--contract all` restores the 0.6 behaviour exactly.
+- `--contract` is now `compare`'s one contract mechanism:
+  `--scope-public-headers`/`--no-scope-public-headers` and `--post-manifest`
+  are removed (the POST manifest moves to `contract.overlays.post_manifest`
+  in `.abicheck.yml`).
+- Every compare report states the versioning-policy verdict when the policy
+  declares a `versioning:` block, without changing the verdict or exit code.
+- Many false positives and hidden breaks fixed across contract placement,
+  symbol-versioned aliases, macro-spelled calling conventions, unresolved
+  pointees, same-name records in different namespaces, enum sentinels,
+  `public_not_exported`, linker-reserved symbols and AArch64 targets.
+
+### Releases, reports, and CI integration
+
+- Directory/package `compare` gained a release HTML report with a per-member
+  table, comparison scope and a dependency graph (release JSON schema 1.9),
+  and runs each member through the same compare primitive, configuration and
+  exit fold as a single-library comparison.
+- HTML reports gained consumer-impact (`--use-cases`) sections, and
+  `project history -o html` renders a release timeline. HTML, Markdown and
+  PR comments now agree with JSON on added/removed/changed counts.
+- New report-only Actions for fork pull requests (`actions/report`,
+  `actions/verify-source-run`) publish an already-produced report without
+  running contributor code in a privileged job.
+- `publish-baseline.yml` can publish a pre-captured baseline-set, including
+  one captured by a different, verified producer run; per-profile compile
+  context is honoured when capturing baselines.
+- `actions/baseline` supports declarative component selection, and
+  `.abicheck.yml` can capture multiple variants.
+
+### Performance and execution
+
+- `ABICHECK_MAX_THREADS` caps abicheck's total thread count across all
+  nested pools; `ABICHECK_REFERENCE_MODE=1` disables every cache and
+  parallel path for differential testing and debugging.
+- Faster header and source analysis: the header graph parses alongside the
+  primary dump, `--depth source` dumps each translation unit once for all
+  graph families, and ELF, DWARF, clang-AST and type-spelling hot paths were
+  reworked. Warm `compare` runs hit the whole-snapshot cache again, and disk
+  caches no longer serve output from a different abicheck build.
+- Timed-out external tools get a graceful SIGTERM and all extraction child
+  processes run under one supervisor.
+
+### Internal architecture
+
+- Continued the ADR-061/063 migration: finding disposition, identity, report
+  views, rendering, the native dump, header backends and release workflows
+  moved to their responsibility owners, and the declaration fields of
+  `AbiSnapshot` now live in its semantic IR.
+
+### Upgrade notes
+
+- Pin `abicheck/abicheck@v0.7.0` and re-check gates: the evidence-adaptive
+  contract default can change which findings gate and may surface exit `1`
+  for incomplete contract evidence. Use `--contract all` to keep the 0.6
+  reading while migrating.
+- `abicheck compat` (the ABICC drop-in, including ABICC XML descriptors and
+  Perl `ABI.dump` inputs) is removed; use `compare`. The CLI now has five root
+  commands.
+- Python API (pre-1.0): read snapshot declarations as
+  `snapshot.declarations.<kind>`; the flat re-export modules
+  (`abicheck.severity`, `abicheck.exit_decision`, `abicheck.reclassify`,
+  `abicheck.appcompat`, `abicheck.finding_identity`, `abicheck.post_processing`,
+  and others) and undocumented API with no caller are gone. Import from the
+  owning packages (see `docs/use/python-api.md`).
+- `ChangeKind`s `frame_register_changed` and
+  `bundle_variant_coverage_regressed` are removed; a policy file naming them
+  no longer loads.
+
+## [0.6.0] — 2026-09-13
+
+See [Upgrading from 0.5 to 0.6](docs/start/upgrading-to-0.6.md) for the
+migration.
 
 ### Comparison, release, and assurance
 
@@ -248,8 +327,9 @@ They are consolidated into a concise release summary when a version ships.
   pin versions in automation and keep source/debug artifacts alongside the
   binaries being checked.
 
-[Unreleased]: https://github.com/abicheck/abicheck/compare/v0.5.0...HEAD
-[0.6.0]: https://github.com/abicheck/abicheck/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/abicheck/abicheck/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/abicheck/abicheck/compare/v0.6.0...v0.7.0
+[0.6.0]: https://github.com/abicheck/abicheck/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/abicheck/abicheck/releases/tag/v0.5.0
 [0.4.0]: https://github.com/abicheck/abicheck/releases/tag/v0.4.0
 [0.3.0]: https://github.com/abicheck/abicheck/releases/tag/v0.3.0

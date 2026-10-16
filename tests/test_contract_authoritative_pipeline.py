@@ -751,7 +751,7 @@ class TestExplicitScopeReachesTheGateBeforeItComputes:
     ) -> None:
         """A missing required symbol with no backing library-diff `Change`
         used to reach the report only as a bespoke synthesized entry that
-        bypassed `_change_to_dict` entirely and got neither decision nor
+        bypassed `change_to_dict` entirely and got neither decision nor
         contribution — on what was, under the pre-D-S1 design, frequently
         the response's only blocking finding (Codex review). Runs under
         both the derived-legacy (no severity setting) and severity
@@ -762,7 +762,7 @@ class TestExplicitScopeReachesTheGateBeforeItComputes:
         `CONSUMER_REQUIRED_SYMBOL_REMOVED` overlay `--used-by` has carried
         since ADR-044 P2, so this label is no longer the bespoke
         `required_symbol_missing` synthetic kind at all -- it is a real
-        `Change` that routes through the ordinary `_change_to_dict` path,
+        `Change` that routes through the ordinary `change_to_dict` path,
         which is a strictly more complete representation (impact_assessment,
         evidence description, reachability) than the bespoke entry this test
         used to assert completeness *despite*.
@@ -823,12 +823,12 @@ class TestExplicitScopeReachesTheGateBeforeItComputes:
             # orthogonal contract-coverage floor).
             assert entry["gate_contribution"] == 4
             # Regression (Codex review, PR #753, fresh evidence): the
-            # pre-C-S2 bespoke synthetic entry bypassed _change_to_dict
+            # pre-C-S2 bespoke synthetic entry bypassed change_to_dict
             # entirely, so it never picked up canonical_finding_id
             # (schema 2.35) the way every other changes[] entry does --
             # exactly the entry most likely to be the response's only
             # blocking finding. The overlay Change never had that gap
-            # (routes through _change_to_dict like any other finding), but
+            # (routes through change_to_dict like any other finding), but
             # the assertion stays as the executable statement of the
             # property this test exists to pin.
             assert entry["canonical_finding_id"]
@@ -846,7 +846,7 @@ class TestEveryRendererTellsTheSameStory:
         verdict. (Stated against `leaf` until plan slice 7o retired that
         mode against `root-cause`; the claim is about the *grouped*
         document, which is what the surviving mode produces.)"""
-        from abicheck.reporter_markdown import to_markdown
+        from abicheck.report.dispatch_markdown import to_markdown
 
         result = _compare(
             _unreached_public_type_pair(),
@@ -863,7 +863,7 @@ class TestEveryRendererTellsTheSameStory:
 
     def test_root_cause_markdown_keeps_a_scored_finding_disclosed(self) -> None:
         """The control: the partition only moves excluded findings."""
-        from abicheck.reporter_markdown import to_markdown
+        from abicheck.report.dispatch_markdown import to_markdown
 
         result = _compare(
             _unreached_public_type_pair(),
@@ -938,14 +938,14 @@ class TestEveryRendererTellsTheSameStory:
         """The digest prints its merge advice from the verdict and its
         impacted-symbol list from the raw change set, so it said "safe to
         merge" directly above the symbol it called impacted (Codex review)."""
-        from abicheck.reporter_markdown import to_review_digest
+        from abicheck.report.dispatch_markdown import to_review_digest
 
         digest = to_review_digest(self._excluded())
         assert "safe to merge" in digest
         assert "Top impacted symbols" not in digest
 
     def test_the_review_digest_lists_a_scored_finding(self) -> None:
-        from abicheck.reporter_markdown import to_review_digest
+        from abicheck.report.dispatch_markdown import to_review_digest
 
         digest = to_review_digest(self._scored())
         # The story, not the section heading that happens to carry it.
@@ -1052,7 +1052,7 @@ class TestTheReleaseRecommendationDoesNotOverclaim:
     ) -> None:
         """`Exit Impact` is a claim about the gate, so it has to be
         classified over the set the gate scores — not over every change."""
-        from abicheck.reporter_markdown import to_markdown
+        from abicheck.report.dispatch_markdown import to_markdown
 
         config = SeverityConfig()
         result = _compare(
@@ -1156,7 +1156,7 @@ class TestAnExcludedFindingCannotLaunderItselfBack:
 
 class TestEveryReportModeStatesTheSameGateContribution:
     """`--report-mode leaf` builds its own entry dicts rather than routing
-    through `_change_to_dict`, so it can silently miss a field the other
+    through `change_to_dict`, so it can silently miss a field the other
     modes carry -- which is exactly what happened to `gate_contribution`."""
 
     @staticmethod
@@ -1229,7 +1229,7 @@ class TestExplicitConsumerEvidencePromotesAFinding:
     @staticmethod
     def _unresolved_removal():
         from abicheck.contract_pipeline import build_contract_stage
-        from abicheck.post_processing import PipelineContext
+        from abicheck.policy.finding_disposition import PipelineContext
 
         old, new = _removal_pair()
         stage = build_contract_stage(
@@ -1245,8 +1245,8 @@ class TestExplicitConsumerEvidencePromotesAFinding:
         return change
 
     def test_promotion_carries_status_and_decision(self) -> None:
+        from abicheck.compare.finding_identity import report_finding_id
         from abicheck.contract_scoped_promotion import stamp_scoped_result_findings
-        from abicheck.finding_identity import report_finding_id
         from abicheck.model.contract_finding_relevance import is_evaluated
 
         change = self._unresolved_removal()
@@ -1342,7 +1342,7 @@ class TestNothingIsLost:
         assert len(result.not_evaluated) == 1
 
     def test_the_markdown_report_discloses_what_it_did_not_score(self) -> None:
-        from abicheck.reporter_markdown import to_markdown
+        from abicheck.report.dispatch_markdown import to_markdown
 
         result = _compare(
             _unreached_public_type_pair(),
@@ -1440,7 +1440,7 @@ class TestTheStageClassifiesEveryFinding:
         """`_compute_verdict_for` calls it on every recomputation, so a
         second pass must not duplicate a finding in the decision receipt."""
         from abicheck.contract_pipeline import build_contract_stage
-        from abicheck.post_processing import PipelineContext
+        from abicheck.policy.finding_disposition import PipelineContext
 
         old, new = _unreached_public_type_pair()
         stage = build_contract_stage(

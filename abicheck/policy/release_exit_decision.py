@@ -29,7 +29,7 @@ along a real seam rather than a convenient line number: everything here
 reads *release-shaped reported input*, and everything left there is pure
 arithmetic over already-resolved integers. It is also the half both
 consumers now share -- ``frontends.cli.release_exit`` for the process status
-and ``cli_compare_release_helpers._format_release_json`` for the persisted
+and ``report.release_document.release_json_document`` for the persisted
 ``exit`` block -- so giving it its own name makes "one resolution, two
 readers" legible instead of implied.
 
@@ -151,7 +151,7 @@ def _compute_release_legacy_exit_code(
 
     ADR-064 stage 1b. Mirrors ``cli_compare_release_helpers.
     _compute_release_severity_exit_code``'s per-library independence for
-    the *legacy* scheme: ``_RELEASE_VERDICT_ORDER``'s collapsed
+    the *legacy* scheme: ``release_outcome.RELEASE_VERDICT_ORDER``'s collapsed
     ``worst_verdict`` ranks ``"ERROR"``/``"not_comparable"`` above every
     real :class:`~abicheck.checker_policy.Verdict`, so using it directly as
     the legacy compatibility-gate contribution would let an unrelated
@@ -162,7 +162,7 @@ def _compute_release_legacy_exit_code(
     *library_results* alone, though, misses the opposite case (Codex
     review, fresh evidence): a bundle or probe-matrix break with every
     library itself ``NO_CHANGE`` raises the *aggregate* ``worst_verdict``
-    (``cli_compare_release._collect_bundle_result``/``_collect_matrix_
+    (``workflows.release_bundle.collect_bundle_result``/``_collect_matrix_
     result``) without ever setting any library's own ``"verdict"`` key, so
     the per-library scan alone would find ``0``. Folding in *worst_verdict*
     itself (when it names a real ``Verdict``, i.e. not ``"ERROR"``/
@@ -254,7 +254,7 @@ def resolve_release_exit_decision_for_report(
     records. Concretely, a release with one ``BREAKING`` library and a
     second, unrelated library that failed to compare (an ``"ERROR"``
     verdict) collapses to ``worst_verdict == "ERROR"`` in today's
-    ``_RELEASE_VERDICT_ORDER`` rollup (ADR-050 D2's ``"not_comparable"``
+    ``release_outcome.RELEASE_VERDICT_ORDER`` rollup (ADR-050 D2's ``"not_comparable"``
     ranks higher still, but is handled by its own dominant branch below) --
     ``_exit_compare_release`` never even computes the ``BREAKING``
     library's own code in that case, since its ``ERROR`` short-circuit
@@ -283,7 +283,7 @@ def resolve_release_exit_decision_for_report(
     (Codex review, fresh evidence) rather than checking ``worst_verdict ==
     "ERROR"`` -- an earlier revision did the latter, which reads ``0``
     whenever a *different* library's ``"not_comparable"`` verdict outranks
-    ``"ERROR"`` in ``_RELEASE_VERDICT_ORDER`` and becomes the aggregate
+    ``"ERROR"`` in ``release_outcome.RELEASE_VERDICT_ORDER`` and becomes the aggregate
     ``worst_verdict``, even though a real operational failure still
     happened elsewhere in the release and `resolve_release_exit_decision`'s
     own ``not_comparable`` branch already preserves this value for exactly

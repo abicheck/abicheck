@@ -76,7 +76,7 @@ if TYPE_CHECKING:
 
     from .compile_context import CompileContext
     from .model.ownership_rules import OwnershipRequest
-    from .workflows.contracts import DumpRequest
+    from .workflows.service_requests import DumpRequest
 
 __all__ = ["build_dump_request"]
 
@@ -107,8 +107,6 @@ def build_dump_request(
     follow_deps: bool,
     search_paths: tuple[Path, ...],
     ld_library_path: str,
-    include_labels: dict[Path, str] | None,
-    resolved_collect_mode: str | None = None,
     compile_db_filter: str | None = None,
     build_config: Path | None = None,
     ownership: OwnershipRequest | None = None,
@@ -117,7 +115,7 @@ def build_dump_request(
 
     *so_path* may be ``None``: that is the source-only shape
     (``dump --sources ./tree`` with no ``SO_PATH``), which
-    :attr:`~abicheck.workflows.contracts.InputSpec.path` can express since PR 3A
+    :attr:`~abicheck.workflows.service_requests.InputSpec.path` can express since PR 3A
     blocker 5 widened it to ``Path | None``. ``DumpRequest.validate()``
     accepts it only alongside real ``sources``/``build_info``, matching
     ``cli_buildsource.dump_source_only``'s own "a bare dump errors clearly
@@ -135,17 +133,8 @@ def build_dump_request(
     ``service_compare_evidence.effective_frontend`` reads an explicit override
     from.
 
-    *resolved_collect_mode* is the CLI's private ``_resolved_collect_mode``
-    hook verbatim (Codex review) — set only when this invocation was itself
-    driven by another already-resolved decision (``compare``'s implicit-dump
-    path resolves collect mode from the *pair*, a materially different rule
-    from a lone ``dump``'s own ``depth``-only default; see
-    ``api_types.DumpRequest.resolved_collect_mode``'s own docstring). ``None``
-    for an ordinary ``dump`` invocation, which lets
-    ``resolve_dump_request()`` derive it from *depth* as usual.
-
     *compile_db_filter* is ``dump``'s own ``--compile-db-filter`` value,
-    forwarded onto :attr:`~abicheck.workflows.contracts.InputSpec.compile_db_filter`
+    forwarded onto :attr:`~abicheck.workflows.service_requests.InputSpec.compile_db_filter`
     verbatim (PR 3A investigation, 2026-08-21) so a ``--dry-run`` resolved
     from this request reports the same
     ``compile_db_filter_scope_error`` refusal ``dump_cmd`` already raises
@@ -153,7 +142,7 @@ def build_dump_request(
     narrow the header parse were the real run migrated onto it.
 
     *build_config* is ``dump``'s own ``--config`` value, forwarded onto
-    :attr:`~abicheck.workflows.contracts.InputSpec.build_config` verbatim (CLI cleanup
+    :attr:`~abicheck.workflows.service_requests.InputSpec.build_config` verbatim (CLI cleanup
     phase two, Block 7 -- PR C's tail) so the resolved request's own
     ``workflows.plan.AnalysisPlanner.resolve`` pre-flight check sees the
     same explicit config ``embed_build_source`` already honors at
@@ -165,8 +154,8 @@ def build_dump_request(
     existed; this only closes the gap between what the pre-flight check (and
     therefore ``--dry-run``) sees and what execution does.
     """
-    from .workflows.contracts import DumpRequest
     from .workflows.request_inputs import InputSpec
+    from .workflows.service_requests import DumpRequest
 
     return DumpRequest(
         input=InputSpec(
@@ -193,13 +182,11 @@ def build_dump_request(
         debug_format=debug_format,
         enable_debuginfod=debuginfod,
         debuginfod_url=debuginfod_url,
-        include_labels=tuple((include_labels or {}).items()),
         follow_dependencies=follow_deps,
         dependency_search_paths=tuple(search_paths),
         ld_library_path=ld_library_path,
         frontend_context=frontend_context,
         lang_explicit=lang_explicit,
-        resolved_collect_mode=resolved_collect_mode,
     )
 
 

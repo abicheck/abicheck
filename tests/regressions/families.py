@@ -67,7 +67,10 @@ FAMILIES: dict[str, Family] = {
                 "through every route (CLI, typed API, scalar vs release member, "
                 "stored vs live operand, dry run vs execution)."
             ),
-            harness_tests=("tests/test_family_f2_route_parity.py",),
+            harness_tests=(
+                "tests/test_family_f2_route_parity.py",
+                "tests/test_family_f2_release_member_parity.py",
+            ),
         ),
         Family(
             key="F3",
@@ -135,6 +138,36 @@ FAMILIES: dict[str, Family] = {
             harness_tests=("tests/test_family_f8_target_parity.py",),
         ),
         Family(
+            key="F9",
+            title="Host-interpreter parity",
+            invariant=(
+                "abicheck produces the same persisted tokens and the same "
+                "thread isolation on every supported Python, GIL and "
+                "free-threaded alike; behavior that newer interpreters change "
+                "(how json encodes str subclasses, whether a thread inherits "
+                "its parent's context) is pinned against a declared oracle, "
+                "not a same-interpreter round trip."
+            ),
+            harness_tests=(
+                "tests/test_str_enum_serialized_token.py",
+                "tests/test_ast_memo_slot_thread_context.py",
+            ),
+        ),
+        Family(
+            key="F10",
+            title="Process lifecycle on failure paths",
+            invariant=(
+                "After an owner fails or is interrupted, no child process it started "
+                "outlives it and no shared budget slot stays held; a successful owner "
+                "is never cancelled. The interpreter joins pool workers at exit, so an "
+                "abandoned child delays the whole process, not only the failing call."
+            ),
+            harness_tests=(
+                "tests/test_cancel_token.py",
+                "tests/test_header_graph_prefetch.py",
+            ),
+        ),
+        Family(
             key="OTHER",
             title="CI, tooling, storage and trust-boundary surfaces",
             invariant=(
@@ -171,12 +204,22 @@ _F1 = (
     "guard.absent_capability_vs_real_failure",
     "registry.kind_completeness",
     "evidence.optional_layer_prerequisite_for_a_stated_fact",
+    # An empty `ElfSymbol.version` stood for both "base-bound" and "no version".
+    "evidence.distinct_encoded_states_collapsed_to_one_value",
 )
 _F2 = (
     "report.cross_producer_disagreement_on_one_symbol",
+    # The L2 header pass and the L5 pass derived different fact families
+    # from the same AST.
+    "evidence.producer_drops_facts_its_input_holds",
+    # Member check and release reconciliation disagreed on one obligation.
+    "evidence.narrowed_conclusion_not_carried_across_cardinality",
     # The CLI and `dumper.dump` hybrid routes disagreed on the parse-time
     # dependency skip.
     "extraction.recorded_scope_matches_parse_skip",
+    # L4's default extractor was castxml on the typed path but clang via the
+    # `dump` CLI's re-embed, so the same C tree's macros reached one route only.
+    "extraction.default_extractor_lacks_the_promised_fact_family",
     "serialization.persisted_field_not_decoded",
     "cardinality.member_request_drops_scalar_field",
     "config.front_end_default_divergence",
@@ -201,10 +244,14 @@ _F2 = (
     "adapter.duck_typed_view_attribute_drift",
     "api.positional_slot_rebinding",
     "evidence.compare_dump_inline_routing_parity",
+    # A release member and its scalar pair disagreed when a header existed on one
+    # side only; H2's asymmetric-header cell pins the route parity.
+    "evidence.per_side_operand_divergence",
 )
 _F3 = (
     "config.location_dependent_fingerprint",
     "extract.aggregate_layout_header_attribution",
+    "identity.edge_matched_on_coarse_key",
     "identity.environment_taint",
     "identity.name_and_referent_compared_as_one",
     "identity.pe_x86_c_decoration_alias",
@@ -263,6 +310,7 @@ _F5 = tuple(
         "concurrency.forked_child_unbounded_reap",
         "serialization.pure_projection_mutates_its_own_input",
         "serialization.whole_document_materialised_to_write_it",
+        "cache.hit_identity_follows_the_requested_path",
     ]
 )
 _F8 = (
@@ -275,6 +323,7 @@ _F7 = (
     # Masked by suite-wide shared interpreter state: passed in a full run,
     # failed alone (test isolation), hence F7 rather than OTHER.
     "imports.first_import_order_cycle",
+    "imports.side_effect_import_reorders_registration",
     "guard.differential_test_shares_state_with_itself",
     "invariant.blanket_assertion_over_widened_population",
     "test_double.narrower_than_the_real_signature",
@@ -289,7 +338,14 @@ _F7 = (
     "tests.fixture_fabricates_a_state_the_types_forbid",
     "tests.locale_dependent_repo_text_read",
     "tests.host_dependent_expectation",
+    "tests.language_rule_oracle_restates_the_detector",
 )
+_F9 = (
+    "serialization.interpreter_dependent_str_subclass_token",
+    "concurrency.per_thread_state_in_inherited_context",
+)
+_F10 = ("concurrency.abandoned_child_outlives_failed_owner",)
+
 #: id -> reason it belongs to no shared family.
 OTHER_REASONS: dict[str, str] = {
     "guard.platform_convention_without_a_gate": "platform convention lint gate",
@@ -314,6 +370,9 @@ OTHER_REASONS: dict[str, str] = {
     "storage.third_party_contract_at_scale": "third-party codec contracts",
     "serialization.str_enum_downcast_via_generic_rewrite": "serialization codec",
     "policy.disposition_conservation": "policy disposition audit (ADR-067)",
+    "compare.order_independent_reorder_refused": "comparability gate header-order proof (ADR-082)",
+    "package.ar_magic_is_not_deb": "package format sniffing (ar archives)",
+    "templates.fn_type_arguments_counted_as_template_arguments": "template argument counting",
 }
 
 FAMILY_OF: dict[str, str] = {}
@@ -325,6 +384,8 @@ for _key, _ids in (
     ("F5", _F5),
     ("F7", _F7),
     ("F8", _F8),
+    ("F9", _F9),
+    ("F10", _F10),
     ("OTHER", tuple(OTHER_REASONS)),
 ):
     for _id in _ids:

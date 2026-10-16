@@ -21,7 +21,7 @@ actually runs today.
 Both of those functions lost their production caller when ADR-063 Phase 1
 routed ``dump_cmd``'s real run (ELF *and* PE/Mach-O) through the shared
 typed executor -- ``frontends.cli.dump_execute.execute_and_write_dump_cli_run``
--> :func:`abicheck.workflows.dump.pipeline.execute_dump_request` ->
+-> :func:`abicheck.workflows.dump.request.execute_dump_request` ->
 :func:`abicheck.workflows.artifact.execute._resolve_side_snapshot_impl` ->
 ``service.resolve_input``. They stayed alive only through their own unit
 tests, which is exactly the shape the duplication-and-convergence plan's
@@ -63,10 +63,10 @@ from typing import Any
 import pytest
 from click.testing import CliRunner
 
-from abicheck import snapshot_cache
 from abicheck.cli import main
 from abicheck.errors import AbicheckError
 from abicheck.model import AbiSnapshot
+from abicheck.workflows.dump.cache import store as dump_cache_store
 
 
 @pytest.fixture()
@@ -303,7 +303,7 @@ def test_dump_dwarf_only_does_not_stamp_build_context(
 
     The stamped object is read back off the *write* step, not off the
     snapshot the parse returned: the whole-snapshot cache
-    (``service_dump_cache.cached_run_dump``) can hand the pipeline a copy, so
+    (``workflows/dump/cache/api.py's `cached_run_dump```) can hand the pipeline a copy, so
     an identity-based assertion would silently pass against an unstamped
     original.
     """
@@ -334,7 +334,7 @@ def test_dump_dwarf_only_does_not_stamp_build_context(
             # serve the previous iteration's snapshot and this would compare
             # the stamp of an extraction that never ran.
             monkeypatch.setattr(
-                snapshot_cache, "_CACHE_DIR", Path(tempfile.mkdtemp(dir=tmp_path))
+                dump_cache_store, "_CACHE_DIR", Path(tempfile.mkdtemp(dir=tmp_path))
             )
             _stub_elf_parse(
                 monkeypatch,
@@ -355,7 +355,7 @@ def test_dump_dwarf_only_does_not_stamp_build_context(
         cfg = tmp_path / ".abicheck.yml"
         cfg.write_text("debug:\n  dwarf_only: true\n", encoding="utf-8")
         monkeypatch.setattr(
-            snapshot_cache, "_CACHE_DIR", Path(tempfile.mkdtemp(dir=tmp_path))
+            dump_cache_store, "_CACHE_DIR", Path(tempfile.mkdtemp(dir=tmp_path))
         )
         _stub_elf_parse(
             monkeypatch,

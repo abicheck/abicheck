@@ -49,10 +49,13 @@ A fully-specified comparison request — the single input to ``run_compare``.
 | `old_probe_matrix` | `Path \| None` | `None` |
 | `new_probe_matrix` | `Path \| None` | `None` |
 | `pack_internal_namespaces` | `tuple[str, ...] \| None` | `None` |
+| `pack_paths` | `tuple[Path, ...]` | `()` |
+| `stated_settings` | `frozenset[str] \| None` | `None` |
 | `severity_preset` | `str \| None` | `None` |
 | `changed_paths` | `tuple[str, ...]` | `()` |
 | `abi3_floor` | `tuple[int, int] \| None` | `None` |
 | `collapse_versioned_symbols` | `bool` | `False` |
+| `resolved_collect_mode` | `str \| None` | `None` |
 | `allow_build_query` | `bool` | `False` |
 | `performance_profile` | `PerformanceProfile \| None` | `None` |
 
@@ -156,6 +159,7 @@ One side of a comparison: a binary/snapshot path plus its build context.
 | `compile_db_filter` | `str \| None` | `None` |
 | `build_config` | `Path \| None` | `None` |
 | `ownership` | `OwnershipRequest \| None` | `None` |
+| `execution` | `DumpExecutionOptions \| None` | `None` |
 
 ## `OutputSpec`
 
@@ -195,7 +199,7 @@ Where/how a result is rendered — the invocation-level output choice.
 
 ## `ReleaseCompareRequest`
 
-A fully-specified directory/package release-comparison *resolution* request -- the release fan-out's counterpart to :class:`abicheck.workflows.contracts.CompareRequest`, scoped to the pre-execution half (:func:`resolve_release_compare_plan` resolves it; it does not itself run any per-library dump/compare).
+A fully-specified directory/package release-comparison *resolution* request -- the release fan-out's counterpart to :class:`abicheck.workflows.service_requests.CompareRequest`, scoped to the pre-execution half (:func:`resolve_release_compare_plan` resolves it; it does not itself run any per-library dump/compare).
 
 *Dataclass.*
 

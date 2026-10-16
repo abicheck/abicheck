@@ -117,8 +117,19 @@ def _test_globs() -> set[str]:
     wait for the weekly run (Codex review). Derived from `source_paths` rather
     than listed, so a module added there without its tests fails the contract
     below instead of silently losing its trigger.
+
+    A module inside a sub-package below a layer
+    (``abicheck/<layer>/<package>/<module>.py``) is keyed by its *package*:
+    ``compare/finding_identity/change_identity.py``'s tests are
+    ``tests/test_finding_identity*.py``, and a per-file stem (``change``,
+    ``symbols``) would both miss them and match unrelated test files.
     """
-    return {f"tests/test_{PurePosixPath(p).stem}*.py" for p in _only_mutate()}
+    globs = set()
+    for path in _only_mutate():
+        parts = PurePosixPath(path).parts
+        name = parts[-2] if len(parts) >= 4 else PurePosixPath(path).stem
+        globs.add(f"tests/test_{name}*.py")
+    return globs
 
 
 def test_paths_filter_covers_every_mutated_modules_tests() -> None:
@@ -335,38 +346,48 @@ def test_the_run_decision_is_path_match_or_label() -> None:
     assert 'if [ "$GITHUB_EVENT_NAME" != "pull_request" ]' in script
 
 
-def test_a_detector_test_change_makes_the_pr_lane_fail_closed() -> None:
-    """A test-only diff has no changed production function to scope to, so
-    --diff-scoped alone reports "gated nothing" and exits 0 — green for a run
-    that checked nothing (Codex review)."""
+def test_a_pr_run_is_diff_only_and_never_widens_to_the_population() -> None:
+    """The PR lane gates only the functions its diff changed. Widening it to
+    the whole population was the cost this lane was cut down to avoid, so the
+    PR step must pass --diff-only and must not pass --require-baseline."""
     steps = _workflow()["jobs"]["mutmut"]["steps"]
     pr_step = next(
         s for s in steps if "--diff-scoped" in str(s.get("run", "")) and "run" in s
     )
-    assert "--require-baseline" in pr_step["run"]
-    assert "require_baseline" in pr_step["env"]["REQUIRE_BASELINE"]
+    assert "$diff_only" in pr_step["run"]
+    assert 'DIFF_ONLY" = "true"' in pr_step["run"]
+    assert pr_step["env"]["DIFF_ONLY"] == "${{ needs.resolve.outputs.diff_only }}"
 
 
-def test_a_label_forced_run_also_fails_closed() -> None:
-    """The `mutation` label is documented as the complete check, so a
-    label-forced run on a test-only diff outside the globs must not go green
-    on "gated nothing" — the one run someone explicitly asked to be thorough
+def test_a_label_forced_run_is_the_complete_check() -> None:
+    """The `mutation` label is the complete check on demand: it alone turns
+    diff-only off and requires the baseline when one is recorded, so it never
+    goes green on "gated nothing" for the run someone asked to be thorough
     (Codex review)."""
     steps = _workflow()["jobs"]["resolve"]["steps"]
     decide = next(s for s in steps if s.get("id") == "decide")
+    lines = decide["run"].splitlines()
     # Anchored on the branch that sets the flag, not on the condition text
-    # alone: the run decision one block up ORs the same three variables, so a
-    # bare substring match passed against a version that dropped the label
-    # from *this* branch (caught by falsifying the fix).
-    guard = next(
-        line
-        for line, nxt in zip(
-            decide["run"].splitlines(), decide["run"].splitlines()[1:], strict=False
-        )
-        if "require_baseline=true" in nxt
+    # alone: a bare substring match would pass against a version that dropped
+    # the label from *this* branch.
+    set_true = next(
+        i for i, line in enumerate(lines) if "require_baseline=true" in line
     )
-    assert '"$LABELLED" = "true"' in guard, guard
-    assert '"$MATCHED_TESTS" = "true"' in guard, guard
+    branch = next(
+        line for line in reversed(lines[:set_true]) if line.lstrip().startswith("if ")
+    )
+    assert '"$LABELLED" = "true"' in branch, branch
+    assert "diff_only=false" in lines[set_true - 1], lines[set_true - 1]
+
+
+def test_a_pr_without_the_label_is_diff_only() -> None:
+    """Every PR run that is not label-forced sets diff_only=true and no
+    drift reference, and the resolve job publishes that signal."""
+    steps = _workflow()["jobs"]["resolve"]["steps"]
+    decide = next(s for s in steps if s.get("id") == "decide")
+    assert "diff_only=true" in decide["run"]
+    outputs = _workflow()["jobs"]["resolve"]["outputs"]
+    assert "diff_only" in outputs
 
 
 def test_the_require_baseline_signal_is_published_by_resolve() -> None:
@@ -627,12 +648,18 @@ _ACCEPTED_KILL_LOSS = {
     # its pyproject --ignore comment. Surfaced by PR #1505.
     "tests/test_compare_cost_budgets.py": frozenset(
         {
+            "abicheck.compare.finding_dedup",
+            "abicheck.compare.finding_redundancy",
             "abicheck.diff_filtering",
             "abicheck.diff_platform",
             "abicheck.diff_symbols",
             "abicheck.diff_types",
             "abicheck.diff_vtable_layout",
-            "abicheck.finding_identity",
+            "abicheck.compare.finding_identity.change_identity",
+            "abicheck.compare.finding_identity.change_kinds",
+            "abicheck.compare.finding_identity.mangled",
+            "abicheck.compare.finding_identity.report_ids",
+            "abicheck.compare.finding_identity.declaration_identity",
             "abicheck.idioms",
             "abicheck.model.evidence_status",
             "abicheck.name_classification",
@@ -640,7 +667,6 @@ _ACCEPTED_KILL_LOSS = {
             "abicheck.policy.classification",
             "abicheck.policy.selectors",
             "abicheck.policy.selectors_namespace_glob",
-            "abicheck.snapshot_io",
             "abicheck.storage.snapshot_encode",
             "abicheck.storage.snapshot_schema_versions",
             "abicheck.suppression",
@@ -668,12 +694,18 @@ _ACCEPTED_KILL_LOSS = {
     # config -- the same class as the entries above. Surfaced by PR #1356.
     "tests/test_action_analysis_context.py": frozenset(
         {
+            "abicheck.compare.finding_dedup",
+            "abicheck.compare.finding_redundancy",
             "abicheck.diff_filtering",
             "abicheck.diff_platform",
             "abicheck.diff_symbols",
             "abicheck.diff_types",
             "abicheck.diff_vtable_layout",
-            "abicheck.finding_identity",
+            "abicheck.compare.finding_identity.change_identity",
+            "abicheck.compare.finding_identity.change_kinds",
+            "abicheck.compare.finding_identity.mangled",
+            "abicheck.compare.finding_identity.report_ids",
+            "abicheck.compare.finding_identity.declaration_identity",
             "abicheck.idioms",
             "abicheck.name_classification",
             "abicheck.pattern_verdicts",
@@ -705,14 +737,17 @@ _ACCEPTED_KILL_LOSS = {
         {
             "abicheck.model.evidence_status",
             "abicheck.name_classification",
-            "abicheck.snapshot_io",
         }
     ),
     "tests/test_action_check_target.py": frozenset(
         {
             "abicheck.policy.classification",
             "abicheck.model.evidence_status",
-            "abicheck.finding_identity",
+            "abicheck.compare.finding_identity.change_identity",
+            "abicheck.compare.finding_identity.change_kinds",
+            "abicheck.compare.finding_identity.mangled",
+            "abicheck.compare.finding_identity.report_ids",
+            "abicheck.compare.finding_identity.declaration_identity",
             "abicheck.name_classification",
             "abicheck.policy.selectors",
             "abicheck.policy.selectors_namespace_glob",
@@ -728,7 +763,7 @@ _ACCEPTED_KILL_LOSS = {
     # (whose own imports are just `bundle_manifest`/`model.snapshot`), not
     # the old flat `bundle_facts.py`, whose function-scoped imports of
     # `bundle_analysis.py`/`bundle.py`/etc. used to drag in the
-    # checker_policy/diff_symbols/finding_identity/policy.selectors chain
+    # checker_policy/diff_symbols/compare.finding_identity/policy.selectors chain
     # transitively. `name_classification`/`serialization`/`snapshot_io`
     # were already reached independently of that chain and still are.
     # Widened (ADR-061 gap E closure package 6): `serialization.py`'s real
@@ -777,7 +812,7 @@ _ACCEPTED_KILL_LOSS = {
     # Narrowed by one entry (ADR-061 gap E, same reasoning as the two
     # entries above): this file's own other import paths (not through
     # `serialization.py`'s `BundleFacts` reference) still reach
-    # checker_policy/finding_identity/policy.selectors/suppression, but no
+    # checker_policy/compare.finding_identity/policy.selectors/suppression, but no
     # longer reach diff_symbols now that the `BundleFacts` chain is gone.
     # Widened (ADR-061 gap E closure package 6), same reason as the two
     # entries above: this file's own `abicheck.serialization` reachability
@@ -786,7 +821,11 @@ _ACCEPTED_KILL_LOSS = {
         {
             "abicheck.policy.classification",
             "abicheck.model.evidence_status",
-            "abicheck.finding_identity",
+            "abicheck.compare.finding_identity.change_identity",
+            "abicheck.compare.finding_identity.change_kinds",
+            "abicheck.compare.finding_identity.mangled",
+            "abicheck.compare.finding_identity.report_ids",
+            "abicheck.compare.finding_identity.declaration_identity",
             "abicheck.name_classification",
             "abicheck.policy.selectors",
             "abicheck.policy.selectors_namespace_glob",

@@ -114,6 +114,7 @@ from .edge_coverage_section import (
 from .envelope import ReportEnvelope, resolved_document
 from .finding import build_report_findings
 from .kind_rollup import KindRollup, render_kind_rollups
+from .not_evaluated_section import compute_not_evaluated
 from .pattern_modulations_markdown import render_pattern_modulations_from_mapping
 from .render_edge_coverage import render_edge_coverage_markdown
 from .render_markdown import (
@@ -152,11 +153,18 @@ from .review_digest_document import (
     render_review_digest_document as render_review_digest_document,
 )
 from .review_groups import build_review_groups
+from .section_notes import (
+    compute_out_of_surface_note,
+    compute_redundancy_note,
+    compute_rtti_note,
+    compute_suppression_note,
+)
 from .surface_changes import (
     SurfaceChangeSection,
     compute_surface_changes,
     render_surface_changes_section,
 )
+from .view import display_changes, render_show_only_cli_hint
 
 
 def _reporter_markdown() -> Any:
@@ -186,24 +194,22 @@ def _resolve_displayed_changes(
     from it. *today*: an envelope's ``resolved_today`` (ADR-061 gap C,
     Codex, fresh).
     """
-    rm = _reporter_markdown()
     changes = list(result.changes)
     show_only_note: dict[str, Any] | None = None
     if show_only:
-        changes = rm.apply_show_only(
+        changes = display_changes(
             changes,
             show_only,
-            result.policy,
-            effective_kind_sets(result),
-            result.policy_file,
-            today,
+            policy=result.policy,
+            kind_sets=effective_kind_sets(result),
+            policy_file=result.policy_file,
+            today=today,
         )
         show_only_note = {
             "show_only": show_only,
             "shown": len(changes),
             "total": len(result.changes),
         }
-        changes = rm._suppress_dangling_correlation_notes(changes)
     return changes, show_only_note
 
 
@@ -234,7 +240,7 @@ def _change_row(
     every pre-existing caller -- which has no evidence_tiers to hand --
     byte-identical to before this parameter existed.
     """
-    from ..finding_identity import report_finding_id
+    from ..compare.finding_identity import report_finding_id
     from ..policy.classification import evidence_status_for_result, impact_for
 
     kind = getattr(c, "kind", None)
@@ -260,7 +266,7 @@ def _change_row(
         # ADR-068 finding A: this row type feeds the default full-mode
         # Markdown report (`to_markdown`'s primary view) -- until this fix
         # it never carried the OLD->NEW evolution state
-        # `workflows.cross_source_evolution` stamps on every hygiene
+        # `workflows.cross_source_hygiene` stamps on every hygiene
         # finding, so a `persistent` (pre-existing) finding rendered
         # indistinguishably from newly `introduced` drift.
         "cross_source_evolution": getattr(cse, "value", None),
@@ -476,7 +482,7 @@ def build_markdown_document(
     severity_data = rm.compute_severity_sections(
         breaking, source_breaks, risk, compatible, severity_config=severity_config
     )
-    not_evaluated = rm.compute_not_evaluated(model.not_evaluated)
+    not_evaluated = compute_not_evaluated(model.not_evaluated)
 
     # The headline's own totals are deliberately over the *full*, unfiltered
     # `result.changes` (a different population than the severity groups
@@ -503,7 +509,7 @@ def build_markdown_document(
         "report_mode": "full",
         "demangle": demangle,
         "headline": asdict(headline_table),
-        "rtti_note": _opt_asdict(rm.compute_rtti_note(breaking)),
+        "rtti_note": _opt_asdict(compute_rtti_note(breaking)),
         "confidence": _opt_asdict(rm.compute_confidence_section(result)),
         "edge_coverage": _opt_asdict(compute_edge_coverage_section(result)),
         "contract_conflicts": _opt_asdict(
@@ -601,12 +607,20 @@ def build_markdown_document(
                 )
             ]
         ),
-        "redundancy_note": _opt_asdict(rm.compute_redundancy_note(result)),
-        "suppression_note": _opt_asdict(rm.compute_suppression_note(result)),
-        "out_of_surface_note": _opt_asdict(rm.compute_out_of_surface_note(result)),
+        "redundancy_note": _opt_asdict(compute_redundancy_note(result)),
+        "suppression_note": _opt_asdict(compute_suppression_note(result)),
+        "out_of_surface_note": _opt_asdict(compute_out_of_surface_note(result)),
         "show_impact": show_impact,
         "impact_table": (
-            _opt_asdict(rm.compute_impact_table(result, displayed_changes=changes))
+            _opt_asdict(
+                rm.compute_impact_table(
+                    result,
+                    displayed_changes=changes,
+                    findings=None
+                    if envelope is None
+                    else envelope.findings_for(changes),
+                )
+            )
             if show_impact
             else None
         ),
@@ -744,7 +758,7 @@ def render_markdown_document(doc: ReportDocument) -> str:
         # groups as repeated view options") -- render each `;`-joined
         # internal group as its own `--view show=...` token rather than
         # echoing the raw internal separator into a suggested invocation.
-        cli_hint = _reporter_markdown().render_show_only_cli_hint(note["show_only"])
+        cli_hint = render_show_only_cli_hint(note["show_only"])
         lines.append(
             f"> Filtered by: `{cli_hint}` "
             f"({note['shown']} of {note['total']} changes shown)"

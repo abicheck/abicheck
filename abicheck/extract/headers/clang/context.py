@@ -52,9 +52,9 @@ from typing import Any
 from ....model import AccessLevel, ScopeOrigin, Visibility
 from ....model.export_index import ExportMatch, match_export
 from ....model.identity import ScopePath
-from ....model.name_decoration import macho as macho_decoration
+from ....model.name_decoration import macho_underscore as macho_decoration
 from ....name_classification import strip_anonymous_type_location
-from ....provenance import classify_origin, header_from_location
+from ...declaration_provenance import classify_origin, header_from_location
 from ...surface_fact_producers import header_ast_surface_facts
 from .template_param_indexes import TemplateParamIndex
 from .templates import build_specialization_index

@@ -232,6 +232,7 @@ CLASSIFICATION_BUG_CLASSES: tuple[BugClass, ...] = (
             "tests/test_surface_breakdown.py",
             "tests/test_policy_experimental_namespaces.py",
             "tests/test_diff_namespaces.py",
+            "tests/test_cxx_artifact_symbol_kind.py",
         ),
         known_gaps=(
             KnownGap(
@@ -307,6 +308,12 @@ CLASSIFICATION_BUG_CLASSES: tuple[BugClass, ...] = (
             # which called the shared fold and discarded the half carrying
             # the answer.
             "tests/test_dependency_include_root_ownership.py",
+            # Third instance, one layer up (ADR-078): `classify_effective_
+            # change`'s final `return QUALITY_ISSUES` -- the residue of
+            # COMPATIBLE minus additions -- claimed "a quality problem" for
+            # findings proving nothing changed, and strict gated on it.
+            # Informational outcomes now get their own category.
+            "tests/test_informational_never_gates.py",
         ),
         public_surfaces=("cli",),
         axes={
@@ -468,7 +475,7 @@ CLASSIFICATION_BUG_CLASSES: tuple[BugClass, ...] = (
                     "either, so they still require the declared and "
                     "reported spellings to agree lexically."
                 ),
-                reference="abicheck/provenance.py",
+                reference="abicheck/extract/declaration_provenance.py",
             ),
         ),
     ),

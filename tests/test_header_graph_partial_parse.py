@@ -97,6 +97,17 @@ def test_single_header_is_reported_failed_without_reparse() -> None:
     assert parts == [] and failed == ["a.h"] and calls == []
 
 
+def test_everything_blamed_reports_all_without_parsing() -> None:
+    calls: list[list[str]] = []
+    parts, failed = parse_header_groups_bisecting(
+        ["a.h", "b.h"],
+        _parser({"a.h", "b.h"}, calls),
+        (_Boom,),
+        known_failed=["b.h", "a.h"],
+    )
+    assert parts == [] and failed == ["a.h", "b.h"] and calls == []
+
+
 def test_unexpected_exception_type_propagates() -> None:
     def parse(group):
         raise KeyError("not a parse failure")
@@ -220,3 +231,90 @@ def test_recovery_parses_run_with_streaming_prune_suppressed(
     acquire_header_graph_ast([good, bad], [], "c++", None)
     assert len(prune_seen) == 3  # batch + two halves
     assert all(prune_seen)
+
+
+def test_diagnostics_blamed_headers_cost_one_reparse_and_never_change_the_result() -> (
+    None
+):
+    """With the failed batch's own diagnostics naming the bad headers, the rest
+    parse in ONE call; when the diagnostics name only some of them, the bisect
+    still finds the others. Oracle as above: lost iff it fails on its own."""
+    rng = random.Random(99)
+    for headers, bad in _cases():
+        if not bad or len(bad) == len(headers):
+            continue
+        blamed_sets = [set(bad), set(rng.sample(sorted(bad), rng.randint(1, len(bad))))]
+        for blamed in blamed_sets:
+            calls: list[list[str]] = []
+            parts, failed = parse_header_groups_bisecting(
+                headers,
+                _parser(bad, calls),
+                (_Boom,),
+                known_failed=[h for h in headers if h in blamed],
+            )
+            merged = merge_header_graph_ast_projections(parts)
+            assert sorted(failed) == sorted(bad)
+            assert set(merged.type_files.values()) == set(headers) - bad
+            if blamed == bad:
+                assert len(calls) == 1
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("bad_names", [("b.h",), ("a.h", "d.h"), ("c.h",)])
+def test_real_clang_diagnostics_blame_exactly_the_failing_headers(
+    tmp_path, bad_names
+) -> None:
+    """Against real clang: the failed batch's diagnostics name the headers that
+    fail alone (direct ``#error`` and a failing private include alike), so the
+    rest re-parses in one call."""
+    import shutil
+
+    from abicheck.buildsource.header_graph_ast_projection import (
+        project_header_graph_ast,
+    )
+    from abicheck.errors import SnapshotError
+    from abicheck.extract.headers.clang.backend import clang_header_dump
+    from abicheck.extract.unparseable_header_fallback import (
+        attribute_failing_headers,
+    )
+
+    if shutil.which("clang++") is None:
+        pytest.skip("clang++ not installed")
+    (tmp_path / "detail").mkdir()
+    (tmp_path / "detail" / "broken.h").write_text("unknown_type_t x;\n")
+    headers = []
+    for i, name in enumerate(("a.h", "b.h", "c.h", "d.h")):
+        body = f"int f{i}(int);\nstruct S{i} {{ int v; }};\n"
+        if name in bad_names:
+            body = (
+                '#error "Unsupported compiler"\n'
+                if i % 2
+                else '#include "detail/broken.h"\n'
+            ) + body
+        (tmp_path / name).write_text(body)
+        headers.append(tmp_path / name)
+
+    def parse(group):
+        tree, _kind, _force = clang_header_dump(group, [tmp_path], memoize=False)
+        return project_header_graph_ast(tree)
+
+    with pytest.raises(SnapshotError) as info:
+        parse(headers)
+    blamed = attribute_failing_headers(info.value, headers)
+    assert [h.name for h in blamed] == sorted(bad_names)
+
+    calls: list[list[Path]] = []
+
+    def counting(group):
+        calls.append(group)
+        return parse(group)
+
+    parts, failed = parse_header_groups_bisecting(
+        headers, counting, (SnapshotError,), known_failed=blamed
+    )
+    assert len(calls) == 1 and sorted(h.name for h in failed) == sorted(bad_names)
+    good = {h.name for h in headers} - set(bad_names)
+    assert {
+        Path(f).name
+        for f in merge_header_graph_ast_projections(parts).type_files.values()
+    } >= good

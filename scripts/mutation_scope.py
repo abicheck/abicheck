@@ -56,6 +56,8 @@ import tomllib
 from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path, PurePosixPath
 
+from baseline_loader import BaselineFormatError, read_baseline
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 #: mutmut's separator in a method's mangled name: ``xǁClassǁmethod``.
@@ -306,6 +308,87 @@ def check_shard_drift(
                 f"  {module}: {recorded} -> {current} (+{current - recorded})"
             )
     return failures
+
+
+def load_baseline(path: Path) -> dict[str, int] | None:
+    """Read ``{module_path: survivor_count}``, or ``None`` if absent/invalid.
+
+    A ``NaN``/``Infinity`` baseline raises :class:`BaselineFormatError` instead
+    of returning ``None``: ``None`` means "no per-module baseline", which would
+    quietly skip the per-module drift check. Raising fails the run.
+    """
+    try:
+        doc = read_baseline(path)
+    except BaselineFormatError:
+        raise
+    except (OSError, json.JSONDecodeError):
+        return None
+    modules = doc.get("modules") if isinstance(doc, dict) else None
+    if not isinstance(modules, dict):
+        return None
+    out: dict[str, int] = {}
+    for module, entry in modules.items():
+        if isinstance(entry, dict) and isinstance(entry.get("survivors"), int):
+            out[module] = entry["survivors"]
+        elif isinstance(entry, int):
+            out[module] = entry
+    return out
+
+
+def load_function_baseline(path: Path) -> dict[tuple[str, str], int]:
+    """Read per-function survivor counts from a current baseline document.
+
+    Old baselines intentionally yield no entries: treating their module total
+    as a function total would hide a regression in one function paid for by an
+    improvement in another. A ``NaN``/``Infinity`` baseline raises
+    :class:`BaselineFormatError`, as in :func:`load_baseline`.
+    """
+    try:
+        doc = read_baseline(path)
+    except BaselineFormatError:
+        raise
+    except (OSError, json.JSONDecodeError):
+        return {}
+    modules = doc.get("modules") if isinstance(doc, dict) else None
+    if not isinstance(modules, dict):
+        return {}
+    out: dict[tuple[str, str], int] = {}
+    for module, entry in modules.items():
+        funcs = entry.get("functions") if isinstance(entry, dict) else None
+        if not isinstance(funcs, dict):
+            continue
+        for function, survivors in funcs.items():
+            if isinstance(function, str) and isinstance(survivors, int):
+                out[(module, function)] = survivors
+    return out
+
+
+def diff_only_stop(plan_shards: int | None, nothing_in_scope: bool) -> int:
+    """Stop a ``--diff-only`` run that has no function scope to measure.
+
+    ``nothing_in_scope``: the diff changed no ``only_mutate`` function, so there
+    is nothing to gate and nothing to run. Otherwise the diff could not be
+    scoped at all, which fails closed instead of widening to the whole
+    population -- the cost this lane exists to avoid. Under ``--plan-shards``
+    the answer is one shard, so the run job still reports the outcome.
+    """
+    if nothing_in_scope:
+        print(
+            "mutation-score: --diff-only: this diff changes no only_mutate "
+            "function, so nothing is measured here. Survivor drift is checked "
+            "by the weekly full run and the `mutation` label."
+        )
+        code = 0
+    else:
+        print(
+            "ERROR: --diff-only could not establish a function scope for this "
+            "diff, so it refuses to widen the run to the whole population."
+        )
+        code = 1
+    if plan_shards:
+        print(json.dumps([1]))
+        return 0
+    return code
 
 
 def is_splittable(

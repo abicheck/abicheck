@@ -66,11 +66,12 @@ class TestStoredBundleMarkdownDemanglesLikeEveryOtherHumanRenderer:
 
     def _render(self, symbol: str, tmp_path: Path) -> str:
         from abicheck.frontends.cli.commands.compare_bundle_facts import (
-            _render_markdown,
+            _render as render_stored,
         )
 
-        return _render_markdown(
+        return render_stored(
             self._result(symbol),
+            "markdown",
             old_facts_path=tmp_path / "old.bundlefacts.json",
             new_dir=tmp_path / "new",
         )
@@ -113,7 +114,7 @@ class TestStoredBundleJsonCarriesBothSymbolNames:
     owes the same "both names" guarantee every other one gives.
 
     It emitted only the mangled `symbol` (Codex review, PR #1284). The
-    oracle is `reporter.resolve_demangled_symbol` -- the same resolver every
+    oracle is `change_json.resolve_demangled_symbol` -- the same resolver every
     other machine projection uses -- not a hand-written expected string, so
     this agrees with them by construction rather than by coincidence.
     """
@@ -145,11 +146,12 @@ class TestStoredBundleJsonCarriesBothSymbolNames:
         )
 
     def _findings(self, symbol: str, tmp_path: Path) -> list[dict]:
-        from abicheck.frontends.cli.commands.compare_bundle_facts import _render_json
+        from abicheck.frontends.cli.commands.compare_bundle_facts import _render
 
         payload = json.loads(
-            _render_json(
+            _render(
                 self._result(symbol),
+                "json",
                 old_facts_path=tmp_path / "old.bundlefacts.json",
                 new_dir=tmp_path / "new",
             )
@@ -157,7 +159,9 @@ class TestStoredBundleJsonCarriesBothSymbolNames:
         return payload["bundle_findings"]
 
     def test_a_mangled_finding_carries_both(self, tmp_path: Path) -> None:
-        from abicheck.reporter import resolve_demangled_symbol
+        from abicheck.report.change_json import (
+            resolve_demangled_symbol,
+        )
 
         symbol = "_ZN3lib4goneEi"
         expected = resolve_demangled_symbol(
@@ -170,7 +174,7 @@ class TestStoredBundleJsonCarriesBothSymbolNames:
         assert finding["demangled_symbol"] == expected
 
     def test_an_unmangled_finding_omits_the_key(self, tmp_path: Path) -> None:
-        """Omitted rather than null, matching `_change_to_dict`."""
+        """Omitted rather than null, matching `change_to_dict`."""
         finding = self._findings("plain_c_function", tmp_path)[0]
         assert finding["symbol"] == "plain_c_function"
         assert "demangled_symbol" not in finding
@@ -223,12 +227,13 @@ class TestTheHumanLedgersDemangleToo:
         disposition differently from a single comparison."""
         import inspect
 
-        from abicheck import cli_audit, cli_compare_release_pairwise
+        from abicheck import cli_audit
+        from abicheck.frontends.cli import release_member_reporter
 
         for fn in (cli_audit.echo_filtered_surface, cli_audit.echo_reconciled):
             src = inspect.getsource(fn)
             assert "_ledger_line(" in src or "ledger_lines_for(" in src, fn.__name__
-        assert "ledger_lines_for(" in inspect.getsource(cli_compare_release_pairwise), (
+        assert "ledger_lines_for(" in inspect.getsource(release_member_reporter), (
             "the release fan-out must reuse the same rows"
         )
 

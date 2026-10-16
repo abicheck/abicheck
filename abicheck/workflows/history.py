@@ -88,9 +88,8 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Literal
 
-from ..checker import compare
 from ..checker_types import DiffResult
-from ..finding_identity import report_finding_id
+from ..compare.finding_identity import report_finding_id
 from ..model.change import Change
 from ..model.change_catalog.kinds import ChangeKind
 from ..model.evidence_status import Confidence, FindingEvolution
@@ -100,6 +99,7 @@ from ..policy.finding_evolution import apply_finding_evolution
 from ..policy.versioning_policy import VersioningPolicy, stated_versioning_policy_of
 from ..policy_file import PolicyFile
 from ..serialization import load_snapshot
+from .compare_policy import compare_snapshots
 from .history_deprecation import (
     DeprecationComplianceFinding,
     evaluate_deprecation_compliance,
@@ -335,10 +335,10 @@ def _display_name(change: Change) -> str:
 def _resolved_finding_dict(change: Change) -> dict[str, object]:
     """JSON-safe projection of one ``FindingEvolution.RESOLVED`` finding.
 
-    Deliberately not the full ``reporter._change_to_dict`` shape (severity,
+    Deliberately not the full ``change_json.change_to_dict`` shape (severity,
     gate contribution, ...) -- a resolved finding is a historical fact about
     the *previous* pair's own comparison, not one this pair's own policy
-    classified -- mirrors ``report.finding_evolution.ResolvedFindingEntry``
+    classified -- mirrors ``report.finding_evolution_section.ResolvedFindingEntry``
     field-for-field without importing it: ``workflows/`` may not import
     ``report/`` (ADR-061's dependency direction is the other way around), so
     this stays a small, self-contained projection rather than a new
@@ -358,7 +358,7 @@ def _resolved_finding_dict(change: Change) -> dict[str, object]:
 def _evolution_counts(result: DiffResult) -> tuple[tuple[str, int], ...]:
     """Per-``FindingEvolution``-state counts over *result*'s own findings,
     after :func:`~abicheck.policy.finding_evolution.apply_finding_evolution`
-    has stamped it. Mirrors ``report.finding_evolution.
+    has stamped it. Mirrors ``report.finding_evolution_section.
     compute_finding_evolution_summary``'s counting rule field-for-field
     (zero-inclusive, ``RESOLVED`` counted from ``resolved_findings`` rather
     than ``changes`` -- see that function's own comment for why) without
@@ -588,7 +588,11 @@ def build_longitudinal_history(
     # pairwise engine (module docstring). Not recorded in `pairwise`, and its
     # confidence is not consulted for `evidence_uncertain`: nothing was removed.
     def _pair(a: AbiSnapshot, b: AbiSnapshot) -> DiffResult:
-        return compare(
+        # The Tier-2 chokepoint, not the Tier-1 core: it carries the same
+        # defaults `compare` runs under (pattern verdicts, contract
+        # evaluation, surface metrics), so a history's pairwise verdicts and
+        # findings match the pair's own `compare` result.
+        return compare_snapshots(
             a, b, policy=policy, policy_file=policy_file, scope_to_public_surface=True
         )
 

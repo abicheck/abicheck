@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING
 
 from .checker import _BREAKING_KINDS, DiffResult
 from .model.change_catalog.kinds import HasKind
-from .policy.evaluate import effective_kind_sets, effective_verdict, evaluated_changes
+from .policy.evaluate import effective_kind_sets, evaluated_changes, verdict_for
 from .report.change_inventory import ChangeInventorySplit, compute_change_inventory
 
 if TYPE_CHECKING:
@@ -96,19 +96,23 @@ class ReportSummary:
     #: first shipped as a MINOR 3.15 bump; a field's own meaning changing is
     #: breaking under this schema's own policy, so it was renumbered to the
     #: MAJOR 4.0 -- see ``schemas/__init__.py``'s own history comment).
-    #: ``cli_compare_release_pairwise.py``'s per-library
+    #: ``workflows/release_members.py``'s per-library
     #: ``"compatible_additions"`` entry now calls :func:`build_summary`
     #: directly to stay consistent with this field (Codex review, findings-
     #: fixes round 10/11 -- it previously computed its own, still-inflated
     #: total independently, and ``pr_comment.py``'s ``_release_lib_row``
     #: compounded the gap with its own now-removed re-subtraction).
     compatible_additions: int
-    #: The subset of *all* ``COMPATIBLE`` changes that is not a genuine
-    #: addition (``ADDITION_KINDS``) -- e.g. ``public_surface_shrank``.
-    #: :attr:`compatible_additions` above no longer includes this subset
-    #: (report_schema_version 4.0); a consumer that summed the two
-    #: pre-4.0 to recover "every compatible change" still can. Additive
-    #: field; introduced in ``report_schema_version`` 3.13.
+    #: The ``COMPATIBLE`` changes that are neither a genuine addition
+    #: (``ADDITION_KINDS``) nor an informational outcome
+    #: (``INFORMATIONAL_KINDS``, :attr:`informational`) -- e.g. a std-symbol
+    #: leak. :attr:`compatible_additions` above no longer includes this
+    #: subset (report_schema_version 4.0). Introduced in
+    #: ``report_schema_version`` 3.13; narrowed in 6.0 (ADR-078), when the
+    #: informational outcomes it used to hold (``public_surface_shrank``,
+    #: ``declaration_identity_unchanged``, ...) moved to
+    #: :attr:`informational` -- the pre-6.0 value is
+    #: ``quality_issues + informational``.
     quality_issues: int
     total_changes: int
     binary_compatibility_pct: float
@@ -121,6 +125,13 @@ class ReportSummary:
     #: so this is the field a reader (or a headline) consults to avoid
     #: announcing pre-existing debt as this release's risk.
     inventory: ChangeInventorySplit
+    #: ADR-078 (report_schema_version 6.0): ``COMPATIBLE`` findings recording
+    #: that nothing a consumer can act on changed (``INFORMATIONAL_KINDS`` --
+    #: e.g. ``declaration_identity_unchanged``, ``public_surface_grew``).
+    #: Disjoint from :attr:`compatible_additions` and :attr:`quality_issues`;
+    #: the three sum to every ``COMPATIBLE`` finding. Defaulted so a caller
+    #: building the pre-6.0 shape keeps working.
+    informational: int = 0
 
 
 @dataclass(frozen=True)
@@ -272,9 +283,11 @@ def build_summary(
     )
 
     def verdict_of(c: Change) -> Verdict:
-        if findings is not None:
-            return finding_by_id[id(c)].verdict
-        return effective_verdict(result, c)
+        return verdict_for(
+            c,
+            result,
+            finding=finding_by_id[id(c)] if findings is not None else None,
+        )
 
     breaking = [c for c in evaluated if verdict_of(c) == Verdict.BREAKING]
     source_breaks = [c for c in evaluated if verdict_of(c) == Verdict.API_BREAK]
@@ -289,25 +302,22 @@ def build_summary(
     # that modulation actually decided. With *findings* given, its own
     # already-resolved ``category`` is reused instead of a second
     # ``classify_effective_change`` call.
-    if findings is not None:
-        quality_issues = sum(
-            1
-            for c in compatible
-            if finding_by_id[id(c)].category == IssueCategory.QUALITY_ISSUES
+    def category_of(c: Change) -> IssueCategory:
+        if findings is not None:
+            return finding_by_id[id(c)].category
+        return classify_effective_change(
+            c,
+            policy=result.policy,
+            kind_sets=effective_kind_sets(result),
+            policy_file=result.policy_file,
+            verdict=Verdict.COMPATIBLE,
         )
-    else:
-        quality_issues = sum(
-            1
-            for c in compatible
-            if classify_effective_change(
-                c,
-                policy=result.policy,
-                kind_sets=effective_kind_sets(result),
-                policy_file=result.policy_file,
-                verdict=Verdict.COMPATIBLE,
-            )
-            == IssueCategory.QUALITY_ISSUES
-        )
+
+    compatible_categories = [category_of(c) for c in compatible]
+    quality_issues = compatible_categories.count(IssueCategory.QUALITY_ISSUES)
+    # ADR-078: a finding recording that nothing changed is neither growth nor
+    # a quality problem, so it is counted on its own.
+    informational = compatible_categories.count(IssueCategory.INFORMATIONAL)
 
     # ADR-049 D1: the percentages are the compatibility axis, so they read
     # the same evaluated subset the four buckets above do. Passing every
@@ -338,8 +348,9 @@ def build_summary(
         # reintroduced the pre-4.0 `len(compatible)` total here, which this
         # merge resolution restores to the additions-only value (Codex
         # review, findings-fixes round 10/11's original fix).
-        compatible_additions=len(compatible) - quality_issues,
+        compatible_additions=len(compatible) - quality_issues - informational,
         quality_issues=quality_issues,
+        informational=informational,
         total_changes=len(result.changes),
         binary_compatibility_pct=metrics.binary_compatibility_pct,
         affected_pct=metrics.affected_pct,

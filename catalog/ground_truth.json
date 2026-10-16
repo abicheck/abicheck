@@ -4191,6 +4191,130 @@
      "code": "#include \"v2.h\"\n/* An old consumer that stores the returned name in a plain char *, which\n   v1's declaration permits. In C this initialisation is a constraint\n   violation once the pointee is const (GCC 13 only warns by default, GCC 14+\n   and C++ reject it), so the smoke states the same requirement as a hard check. */\n_Static_assert(__builtin_types_compatible_p(__typeof__(get_name()), char *),\n               \"get_name() no longer returns char *: char *p = get_name(); breaks\");\nint main(void) { char *p = get_name(); return p != 0 ? 0 : 1; }\n"
     }
    }
+  },
+  "case212_calling_convention_macro_undefined_after_use": {
+   "abi_break": true,
+   "api_break": false,
+   "architectures": [
+    "x86_64"
+   ],
+   "platforms": [
+    "linux"
+   ],
+   "bad_practice": false,
+   "category": "breaking",
+   "description": "Macro-scoped sibling of case209_calling_convention_changed_via_macro (2026-10-11 re-audit). vector_dot is declared `MATHLIB_CALL double vector_dot(...)` and the header #undefs MATHLIB_CALL right after the declaration, so the macro no longer exists at the end of the translation unit. MATHLIB_CALL is __attribute__((sysv_abi)) in v1 and __attribute__((ms_abi)) in v2: parameters move from rdi/rsi/rdx to rcx/rdx/r8 and an unchanged old consumer computes a wrong result (CALLING_CONVENTION_CHANGED). Calibrates that the convention is read from the preprocessor state at the declaration, not from the final macro table, under both header backends.",
+   "expected": "BREAKING",
+   "expected_kinds": [
+    "calling_convention_changed"
+   ],
+   "min_evidence": "L1"
+  },
+  "case213_calling_convention_function_like_macro_changed": {
+   "abi_break": true,
+   "api_break": false,
+   "architectures": [
+    "x86_64"
+   ],
+   "platforms": [
+    "linux"
+   ],
+   "bad_practice": false,
+   "category": "breaking",
+   "description": "Function-like-macro sibling of case209_calling_convention_changed_via_macro (2026-10-11 re-audit). vector_dot is declared `double MATHLIB_CC(cc) vector_dot(...)` with `#define MATHLIB_CC(cc) __attribute__((cc))`; only the macro argument changes, sysv_abi in v1 and ms_abi in v2, so an unchanged old consumer passes arguments in the wrong registers (CALLING_CONVENTION_CHANGED). func_return_changed must stay absent: clang prints the macro invocation into the function's qualType, which is sugar, not a return-type change.",
+   "expected": "BREAKING",
+   "expected_kinds": [
+    "calling_convention_changed"
+   ],
+   "expected_absent_kinds": [
+    "func_return_changed"
+   ],
+   "min_evidence": "L1"
+  },
+  "case214_calling_convention_macro_redefined_after_use": {
+   "abi_break": false,
+   "api_break": false,
+   "architectures": [
+    "x86_64"
+   ],
+   "platforms": [
+    "linux"
+   ],
+   "bad_practice": false,
+   "category": "no_change",
+   "description": "Negative control for case212_calling_convention_macro_undefined_after_use (2026-10-11 re-audit). vector_dot is declared through MATHLIB_CALL = __attribute__((ms_abi)) in both versions; after the declaration the header #undefs and redefines MATHLIB_CALL for later use, and only that later definition differs (sysv_abi in v1, ms_abi in v2). Both libraries are ms_abi, so an unchanged old consumer works against either. A later redefinition cannot reach an earlier declaration: calling_convention_changed must stay absent under every header backend.",
+   "expected": "NO_CHANGE",
+   "expected_kinds": [],
+   "expected_absent_kinds": [
+    "calling_convention_changed",
+    "func_return_changed"
+   ],
+   "min_evidence": "L2"
+  },
+  "case215_return_double_pointer_lost_const": {
+   "abi_break": false,
+   "api_break": true,
+   "bad_practice": false,
+   "category": "api_break",
+   "description": "Multi-level sibling of case211_return_pointee_gained_const (2026-10-11 re-audit). mylib::get_names() changes its return type from const char ** to char **. The symbol, the return register and the pointer value are unchanged, so every prebuilt consumer keeps working. Losing const is not a widening here: char ** does not convert to const char ** in C++ ([conv.qual] needs const at every intermediate level), so a caller that binds the result to v1's type -- `const char **p = mylib::get_names();` -- no longer compiles with GCC or Clang. Reported as func_return_pointee_qualifier_changed (API_BREAK), not the func_return_pointee_qualifier_removed risk a convertible loss (const char * const * -> char * const *) gets.",
+   "expected": "API_BREAK",
+   "expected_kinds": [
+    "func_return_pointee_qualifier_changed"
+   ],
+   "expected_absent_kinds": [
+    "func_return_changed",
+    "func_return_pointee_qualifier_removed"
+   ],
+   "min_evidence": "L2",
+   "platforms": [
+    "linux",
+    "macos"
+   ],
+   "source_smoke": {
+    "mode": "syntax",
+    "proof": "consumer binding smoke: `const char **p = mylib::get_names();` compiles against v1 and is rejected against v2 (char ** does not convert to const char **)",
+    "standard": "c++17",
+    "v1": {
+     "expect": "success",
+     "code": "#include \"v1.h\"\nint main() {\n    const char **p = mylib::get_names();\n    return p[0] != nullptr ? 0 : 1;\n}\n"
+    },
+    "v2": {
+     "expect": "failure",
+     "code": "#include \"v2.h\"\nint main() {\n    const char **p = mylib::get_names();\n    return p[0] != nullptr ? 0 : 1;\n}\n"
+    }
+   }
+  },
+  "case216_overload_added_beside_initializer_list": {
+   "abi_break": false,
+   "api_break": false,
+   "bad_practice": false,
+   "category": "addition",
+   "description": "Negative control for case111_enumerable_thread_specific_lambda_ambiguity (2026-10-11 re-audit). mylib::pick(int) and mylib::pick(std::initializer_list<int>) exist; v2 adds mylib::pick(double). pick(int) and pick(double) both take an empty braced argument by the identity conversion, but the initializer_list overload ranks better for a braced argument ([over.ics.rank]/3.1), so `mylib::pick({})` selects it before and after (GCC and Clang return 2 both ways). The change is a plain addition: overload_ambiguity_introduced must stay absent, because the whole overload set decides the call, not the (int, double) pair.",
+   "expected": "COMPATIBLE",
+   "expected_kinds": [
+    "func_added"
+   ],
+   "expected_absent_kinds": [
+    "overload_ambiguity_introduced"
+   ],
+   "min_evidence": "L0",
+   "platforms": [
+    "linux",
+    "macos"
+   ],
+   "source_smoke": {
+    "mode": "syntax",
+    "proof": "consumer overload-resolution smoke: mylib::pick({}) compiles and selects the initializer_list overload against both v1 and v2",
+    "standard": "c++17",
+    "v1": {
+     "expect": "success",
+     "code": "#include \"v1.h\"\nint main() { return mylib::pick({}) == 2 ? 0 : 1; }\n"
+    },
+    "v2": {
+     "expect": "success",
+     "code": "#include \"v2.h\"\nint main() { return mylib::pick({}) == 2 ? 0 : 1; }\n"
+    }
+   }
   }
  },
  "version": "4",

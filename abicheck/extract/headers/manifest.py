@@ -57,7 +57,6 @@ from typing import TYPE_CHECKING
 import abicheck.deadline as deadline
 
 from ...dump_manifest import DumpManifest, IncludeEntry, TranslationUnit
-from ...dumper_clang import _ClangAstParser
 from ...extract.header_ast_fields import parse_header_ast_fields
 from ...extract.headers.clang.streaming import (
     streaming_prune_suppressed,
@@ -87,6 +86,7 @@ from ...tu_fragment import (
 from ...tu_merge import merge_fragments as merge_tu_fragments
 
 if TYPE_CHECKING:
+    from ...dumper_clang import _ClangAstParser
     from ...extract.headers.castxml.dumper import _CastxmlParser
 
 log = logging.getLogger(__name__)
@@ -187,7 +187,7 @@ def run_tu_fragment(
         pruning_header_roots=pruning_header_roots,
         no_binary_evidence=no_binary_evidence,
     )
-    producer = "clang" if isinstance(parser, _ClangAstParser) else "castxml"
+    producer = _parser_ast_toolchain(parser).get("producer", "castxml")
     fields = parse_header_ast_fields(parser, producer=producer)
     return TuFragment(
         tu_name=tu.name,

@@ -1,0 +1,283 @@
+# Copyright 2026 Nikolay Petrov
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Unified impact-assessment dataclasses (G29 Phase 3 slice 1, ADR-052).
+
+``ImpactAssessment``/``GraphProofPath``/``FindingDecision`` are a shared,
+queryable shape over reachability/impact fields that
+``source_graph_findings.py``, ``internal_leak.py``, ``post_processing.py``,
+``suppression.py``, and ``appcompat.py`` each independently set on
+``Change`` today. This module only defines the shape; :mod:`.engine` builds
+one from an existing ``Change`` object. See ADR-052 for the full decision
+record, including which plan-described fields (``changed_entities``,
+``affected_consumers``, ``affected_use_cases``, ``coverage``,
+``root_cause_id``) are deliberately absent from this slice.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+from ..model.evidence_status import Confidence, ReachabilityState
+
+
+@dataclass(frozen=True)
+class ProofStep:
+    """One typed node or edge reference in a :class:`GraphProofPath`.
+
+    The dataclass counterpart of one entry in
+    ``buildsource.graph_impact.structured_proof_path``'s ``list[dict]``
+    shape (``{"type": "node", "id", "kind", "label"}`` /
+    ``{"type": "edge", "kind", "role", "confidence"}``).
+    """
+
+    step_type: str  # "node" | "edge"
+    label: str
+    kind: str | None = None
+    role: str | None = None
+    confidence: str | None = None
+    node_id: str | None = None
+
+    @classmethod
+    def from_dict(cls, raw: dict[str, object]) -> ProofStep:
+        step_type = str(raw.get("type", ""))
+        kind = raw.get("kind")
+        if step_type == "node":
+            node_id = raw.get("id")
+            return cls(
+                step_type="node",
+                label=str(raw.get("label", node_id or "")),
+                kind=str(kind) if kind else None,
+                node_id=str(node_id) if node_id else None,
+            )
+        role = raw.get("role")
+        confidence = raw.get("confidence")
+        return cls(
+            step_type="edge",
+            label=str(kind) if kind else "",
+            kind=str(kind) if kind else None,
+            role=str(role) if role else None,
+            confidence=str(confidence) if confidence else None,
+        )
+
+    def to_dict(self) -> dict[str, object]:
+        d: dict[str, object] = {"type": self.step_type, "label": self.label}
+        if self.kind is not None:
+            d["kind"] = self.kind
+        if self.role is not None:
+            d["role"] = self.role
+        if self.confidence is not None:
+            d["confidence"] = self.confidence
+        if self.node_id is not None:
+            d["id"] = self.node_id
+        return d
+
+
+@dataclass(frozen=True)
+class GraphProofPath:
+    """Structured reachability evidence for one finding.
+
+    ``prose`` carries the existing ``Change.reachability_proof_path``
+    string verbatim rather than re-deriving it — there is exactly one
+    producer of that rendering today (``internal_leak._format_path``) and
+    duplicating its logic here would be a second, driftable implementation.
+    ``steps`` is empty when only the prose rendering is available (no
+    structured ``impact_proof_path`` was attached for this finding).
+
+    ``alternative_paths``/``discarded_path_count`` (ADR-046 D6, G29 Phase 2
+    follow-up) are this path's runner-ups: when a producer had more than one
+    candidate path and picked this one as primary via a preference order
+    (e.g. ``buildsource.graph_impact.select_preferred_graph_path``), the
+    next-best candidates (capped by the producer) are kept here as their own
+    ``GraphProofPath``s (typically with their own, different ``target`` —
+    see that function's docstring), and ``discarded_path_count`` is how many
+    more existed beyond the cap. Both are empty/zero when only one candidate
+    path was ever available, which is still the common case today.
+
+    ``occurrence_id`` (ADR-052's stable-identifier follow-up, built on top of
+    ADR-046 D1) is a hash over this path's edges' own graph occurrence trail
+    — independent of ``description`` text, unlike ``report.view.finding_id``.
+    ``None`` whenever no edge on the path carries occurrence-level attrs
+    (``buildsource.graph_impact._path_occurrence_id``) — still the common
+    case today, since no producer populates them yet. ``root_cause_id``/
+    ``impact_group_id`` stay out of this dataclass: unlike a path's own
+    occurrences, correctly computing either needs whole-``DiffResult``
+    context (which findings elsewhere reference this one) that a single
+    ``Change``'s read view can't see — see ADR-052's "Deliberately not
+    implemented" section and Phase 6's ``RootCauseCorrelator``.
+    """
+
+    target: str
+    root: str | None = None
+    is_direct: bool | None = None
+    steps: tuple[ProofStep, ...] = ()
+    prose: str | None = None
+    alternative_paths: tuple[GraphProofPath, ...] = ()
+    discarded_path_count: int = 0
+    occurrence_id: str | None = None
+
+    def to_dict(self) -> dict[str, object]:
+        d: dict[str, object] = {"target": self.target}
+        if self.root is not None:
+            d["root"] = self.root
+        if self.is_direct is not None:
+            d["is_direct"] = self.is_direct
+        if self.steps:
+            d["steps"] = [s.to_dict() for s in self.steps]
+        if self.prose is not None:
+            d["prose"] = self.prose
+        if self.alternative_paths:
+            d["alternative_paths"] = [p.to_dict() for p in self.alternative_paths]
+        if self.discarded_path_count:
+            d["discarded_path_count"] = self.discarded_path_count
+        if self.occurrence_id is not None:
+            d["occurrence_id"] = self.occurrence_id
+        return d
+
+
+@dataclass(frozen=True)
+class FindingDecision:
+    """Whether a finding was kept or suppressed, and why.
+
+    ``suppression_rule`` (G29 Phase 3 slice 2, ADR-052 follow-up) is the
+    label (falling back to ``reason``) of the ``Suppression`` rule that
+    actually suppressed the change, read from ``Change.suppression_rule`` —
+    set directly on the change by whichever suppression call site moved it
+    into ``DiffResult.suppressed_changes``. ``None`` for a kept change, and
+    for a suppressed one whose matching rule set neither ``label`` nor
+    ``reason``.
+
+    ``verdict_override`` is deliberately not named "demotion" — a
+    ``Change.effective_verdict`` override (ADR-025 A4/D4.1) can *raise* a
+    finding's category too (e.g. ``STDLIB_IMPLEMENTATION_CHANGED`` promoted
+    to ``BREAKING`` when layout evidence proves public ``std::`` embedding),
+    not just lower it. Labeling every override a demotion would misrepresent
+    an escalation as a downgrade to a consumer keying off this field (Codex
+    review).
+    """
+
+    state: str = "kept"  # "kept" | "suppressed"
+    reason_code: str | None = None
+    suppression_rule: str | None = None
+    verdict_override: str | None = None
+
+    def to_dict(self) -> dict[str, object]:
+        d: dict[str, object] = {"state": self.state}
+        if self.reason_code is not None:
+            d["reason_code"] = self.reason_code
+        if self.suppression_rule is not None:
+            d["suppression_rule"] = self.suppression_rule
+        if self.verdict_override is not None:
+            d["verdict_override"] = self.verdict_override
+        return d
+
+
+@dataclass(frozen=True)
+class ImpactAssessment:
+    """A single queryable view over one finding's reachability/impact data.
+
+    Every field is read from a ``Change`` attribute that already exists and
+    is already independently populated by one of the producer modules named
+    in this module's docstring — this dataclass adds no new signal, only a
+    shared shape to query it through (ADR-052 D1).
+
+    ``root_cause_id``/``root_cause_display``/``impact_group_id`` (G29 Phase 3
+    follow-up) are the report-level root-cause grouping key
+    (``reporter_markdown.root_cause_for_change``, the same
+    ``_root_cause_key_and_display`` computation ``--report-mode root-cause``
+    uses) surfaced as a per-finding identifier, independent of report mode —
+    unlike ``--report-mode root-cause``'s own grouping (which buckets *every*
+    finding, including singletons), these three fields are deliberately
+    ``None`` for a finding with no real correlation signal (no
+    ``caused_by_type``, and not itself referenced by another finding's
+    ``caused_by_type``) — the trivial self-referencing
+    ``f"finding:{finding_id}"`` case — so a plain, uncorrelated finding's
+    ``impact_assessment`` doesn't balloon with a rootCauseId that names
+    nothing but itself. ``impact_group_id`` is currently always identical to
+    ``root_cause_id`` — a placeholder alias, not yet a distinct concept
+    (a genuine divergence would need bucketing several distinct root causes
+    that share one broader consumer-visible event under one group while
+    keeping their own individual root-cause identities, which no producer
+    does yet); see ADR-052's "Deliberately not implemented" section.
+
+    ``root_cause_evidence`` (G29 Phase 6 follow-up) is this finding's own
+    entry from :func:`~abicheck.impact.correlation.correlate_root_causes`,
+    when *this* finding is a member of one of that composer's multi-piece
+    groups — the four load-failure kinds named in that module's docstring,
+    correlated by shared symbol identity. Unlike ``root_cause_id`` (a bare
+    grouping key shared by *any* two findings with the same
+    ``caused_by_type``/``symbol``, regardless of kind), this field only ever
+    populates for the narrower, ranked-evidence family the correlator
+    covers, and carries this finding's own ``evidence_level`` alongside the
+    whole group's ``strongest_evidence_level``/``evidence_levels`` — so a
+    consumer can tell "this piece is only artifact-proven, but the group as
+    a whole also has consumer proof" without re-running the correlator
+    itself. ``None`` whenever this finding isn't a correlator-group member,
+    which includes every finding of a kind the correlator doesn't cover.
+    """
+
+    reachability_state: ReachabilityState = ReachabilityState.UNKNOWN
+    public_reachable: bool = False
+    reachability_kind: str | None = None
+    confidence: Confidence = Confidence.HIGH
+    proof_path: GraphProofPath | None = None
+    decision: FindingDecision = field(default_factory=FindingDecision)
+    evidence_category: str | None = None
+    correlated_change_kind: str | None = None
+    root_cause_id: str | None = None
+    root_cause_display: str | None = None
+    impact_group_id: str | None = None
+    root_cause_evidence: dict[str, object] | None = None
+
+    def has_signal(self) -> bool:
+        """True when this assessment carries information beyond the
+        all-defaults case — the gate ``reporter.py``/``sarif.py`` use to
+        decide whether emitting the full object is worth the report-size
+        cost (ADR-052 D3)."""
+        return (
+            self.proof_path is not None
+            or self.reachability_state != ReachabilityState.UNKNOWN
+            or self.public_reachable
+            or self.confidence != Confidence.HIGH
+            or self.decision.state != "kept"
+            or self.decision.reason_code is not None
+            or self.decision.verdict_override is not None
+            or self.correlated_change_kind is not None
+            or self.evidence_category is not None
+            or self.root_cause_id is not None
+            or self.root_cause_evidence is not None
+        )
+
+    def to_dict(self) -> dict[str, object]:
+        d: dict[str, object] = {
+            "reachability_state": self.reachability_state.value,
+            "public_reachable": self.public_reachable,
+            "confidence": self.confidence.value,
+            "decision": self.decision.to_dict(),
+        }
+        if self.reachability_kind is not None:
+            d["reachability_kind"] = self.reachability_kind
+        if self.proof_path is not None:
+            d["proof_path"] = self.proof_path.to_dict()
+        if self.evidence_category is not None:
+            d["evidence_category"] = self.evidence_category
+        if self.correlated_change_kind is not None:
+            d["correlated_change_kind"] = self.correlated_change_kind
+        if self.root_cause_id is not None:
+            d["root_cause_id"] = self.root_cause_id
+            d["root_cause_display"] = self.root_cause_display
+            d["impact_group_id"] = self.impact_group_id
+        if self.root_cause_evidence is not None:
+            d["root_cause_evidence"] = dict(self.root_cause_evidence)
+        return d

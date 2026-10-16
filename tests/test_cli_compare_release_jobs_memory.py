@@ -26,8 +26,8 @@ mirroring ``buildsource/source_replay.py``'s identical L4 pattern) -- an
 from __future__ import annotations
 
 import abicheck.process_resources as process_resources
-from abicheck import cli_compare_release_pairwise as release_pairwise
-from abicheck.workflows import release_jobs
+from abicheck.frontends.cli.release_member_reporter import CliReleaseReporter
+from abicheck.workflows import release_jobs, release_members as release_pairwise
 
 
 class TestReleaseJobsMemCap:
@@ -57,28 +57,21 @@ class TestReleaseJobsMemCap:
 
 
 class TestCompareReleaseLibrariesMemoryClamp:
-    """End-to-end proof against the real ``_compare_release_libraries``
+    """End-to-end proof against the real ``compare_release_members``
     entry point, not just the cap primitives above."""
 
-    def _common_kwargs(self, matched_keys, old_map, new_map):
-        return dict(
-            matched_keys=matched_keys,
-            old_map=old_map,
-            new_map=new_map,
-            old_debug_dir=None,
-            new_debug_dir=None,
-            resolve_debug_info=lambda *a, **k: None,
-            old_h=[],
-            new_h=[],
-            old_inc=[],
-            new_inc=[],
-            old_version="1.0",
-            new_version="1.0",
-            lang="c++",
-            suppress=None,
-            policy="strict_abi",
-            policy_file_path=None,
-            output_dir=None,
+    def _run(self, matched_keys, old_map, new_map, *, jobs):
+        return release_pairwise.compare_release_members(
+            matched_keys,
+            release_pairwise.ReleaseMemberContext(
+                request=release_pairwise.release_parent_request(
+                    old_version="1.0", new_version="1.0", lang="c++"
+                ),
+                old_map=old_map,
+                new_map=new_map,
+                reporter=CliReleaseReporter(),
+            ),
+            jobs=jobs,
         )
 
     def test_auto_jobs_are_reduced_to_fit_memory(self, monkeypatch, capsys) -> None:
@@ -100,24 +93,15 @@ class TestCompareReleaseLibrariesMemoryClamp:
         def _fake_sequential(matched_keys, ctx):
             return []
 
-        def _fake_parallel(matched_keys, ctx, old_map, max_workers, admission=None):
+        def _fake_parallel(matched_keys, ctx, max_workers, admission=None):
             captured_jobs.append(max_workers)
             captured_admission.append(admission)
             return []
 
-        monkeypatch.setattr(
-            release_pairwise, "_compare_release_sequential", _fake_sequential
-        )
-        monkeypatch.setattr(
-            release_pairwise, "_compare_release_parallel", _fake_parallel
-        )
+        monkeypatch.setattr(release_pairwise, "_compare_sequential", _fake_sequential)
+        monkeypatch.setattr(release_pairwise, "_compare_parallel", _fake_parallel)
 
-        release_pairwise._compare_release_libraries(
-            **self._common_kwargs(
-                ["a", "b"], {"a": None, "b": None}, {"a": None, "b": None}
-            ),
-            jobs=0,
-        )
+        self._run(["a", "b"], {"a": None, "b": None}, {"a": None, "b": None}, jobs=0)
         # Binary depth: the AST-costed gate is header-only, so the clamp
         # alone sizes the pool, as before.
         assert captured_jobs == [2]
@@ -132,22 +116,87 @@ class TestCompareReleaseLibrariesMemoryClamp:
         captured_jobs: list[int] = []
         captured_admission: list[object] = []
 
-        def _fake_parallel(matched_keys, ctx, old_map, max_workers, admission=None):
+        def _fake_parallel(matched_keys, ctx, max_workers, admission=None):
             captured_jobs.append(max_workers)
             captured_admission.append(admission)
             return []
 
+        monkeypatch.setattr(release_pairwise, "_compare_parallel", _fake_parallel)
+
+        self._run(["a", "b"], {"a": None, "b": None}, {"a": None, "b": None}, jobs=8)
+        assert captured_jobs == [8]
+        assert "reduced" not in capsys.readouterr().err
+
+
+class TestReleaseWorkerLimitCause:
+    """The fan-out notice names the limit that actually bound the pool.
+
+    A 64-CPU host with ample RAM is bound by the interpreter's member cap,
+    not memory: it must not be announced as a memory clamp, and the pure-JSON
+    stdout contract means the designed default stays silent.
+    """
+
+    def test_interpreter_bound_pool_is_attributed_to_gil(self, monkeypatch) -> None:
+        monkeypatch.setattr("os.cpu_count", lambda: 64)
+        monkeypatch.setattr(process_resources, "available_mem_gib", lambda: None)
+        monkeypatch.setattr(process_resources, "python_parallelism", lambda: 2)
+        monkeypatch.delenv("ABICHECK_RELEASE_JOB_MEM_GIB", raising=False)
+        plan = release_jobs.plan_release_workers(0, depth="headers")
+        assert (plan.initial_jobs, plan.limited_by) == (2, "gil")
+
+    def test_memory_bound_pool_below_the_interpreter_is_attributed_to_memory(
+        self, monkeypatch
+    ) -> None:
+        monkeypatch.setattr("os.cpu_count", lambda: 64)
+        monkeypatch.setattr(process_resources, "python_parallelism", lambda: 4)
         monkeypatch.setattr(
-            release_pairwise, "_compare_release_parallel", _fake_parallel
+            release_jobs, "release_jobs_mem_cap", lambda depth=None, **kw: 1
+        )
+        monkeypatch.delenv("ABICHECK_RELEASE_JOB_MEM_GIB", raising=False)
+        plan = release_jobs.plan_release_workers(0, depth="headers")
+        assert (plan.initial_jobs, plan.limited_by, plan.clamped_from) == (
+            1,
+            "memory",
+            64,
         )
 
-        release_pairwise._compare_release_libraries(
-            **self._common_kwargs(
-                ["a", "b"], {"a": None, "b": None}, {"a": None, "b": None}
-            ),
-            jobs=8,
+    def test_thread_budget_below_memory_is_attributed_to_threads(
+        self, monkeypatch
+    ) -> None:
+        monkeypatch.setattr("os.cpu_count", lambda: 64)
+        monkeypatch.setattr(process_resources, "python_parallelism", lambda: 10)
+        monkeypatch.setattr(
+            release_jobs, "release_jobs_mem_cap", lambda depth=None, **kw: 8
         )
-        assert captured_jobs == [8]
+        monkeypatch.setattr(process_resources, "max_threads", lambda: 2)
+        monkeypatch.delenv("ABICHECK_RELEASE_JOB_MEM_GIB", raising=False)
+        plan = release_jobs.plan_release_workers(0, depth="headers")
+        assert (plan.initial_jobs, plan.limited_by) == (2, "threads")
+
+    def test_interpreter_bound_run_prints_no_memory_note(
+        self, monkeypatch, capsys
+    ) -> None:
+        monkeypatch.setattr("os.cpu_count", lambda: 64)
+        monkeypatch.setattr(process_resources, "python_parallelism", lambda: 2)
+        monkeypatch.setattr(
+            release_jobs, "release_jobs_mem_cap", lambda depth=None, **kw: 100
+        )
+        monkeypatch.setattr(
+            "abicheck.process_resources.available_mem_gib", lambda: 12.0
+        )
+        monkeypatch.delenv("ABICHECK_RELEASE_JOB_MEM_GIB", raising=False)
+        captured: list[int] = []
+
+        def _fake_parallel(matched_keys, ctx, max_workers, admission=None):
+            captured.append(max_workers)
+            return []
+
+        monkeypatch.setattr(release_pairwise, "_compare_parallel", _fake_parallel)
+        monkeypatch.setattr(release_pairwise, "_compare_sequential", lambda k, c: [])
+        TestCompareReleaseLibrariesMemoryClamp()._run(
+            ["a", "b"], {"a": None, "b": None}, {"a": None, "b": None}, jobs=0
+        )
+        assert captured == [2]
         assert "reduced" not in capsys.readouterr().err
 
 

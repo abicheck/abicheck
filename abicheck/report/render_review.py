@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .disposition_audit import DispositionAudit, render_disposition_audit_lines
+from .result_counts import held_out_note
 from .surface_changes import SurfaceChangeSection, render_surface_changes_lines
 
 
@@ -45,6 +46,8 @@ class ReviewDigest:
     disposition_audit: DispositionAudit | None = None
     surface_changes: SurfaceChangeSection | None = None  #: workstream G S1
     quality_issues_count: int = 0  #: non-addition compatible findings, own row
+    #: ADR-078: informational outcomes (nothing changed), own row; never gate.
+    informational_count: int = 0
     env_matrix_source_sha256: str | None = None
     #: ADR-067: the rules that reclassified findings, as
     #: `PatternModulation.to_dict()` rows. The digest is the summary a
@@ -149,6 +152,10 @@ def render_review_digest(digest: ReviewDigest) -> str:
     ]
     if digest.quality_issues_count:  # own row, not part of Additions above
         lines.append(f"| ℹ️ Quality issues | {digest.quality_issues_count} |")
+    if digest.informational_count:  # ADR-078: recorded, never gated
+        lines.append(
+            f"| ℹ️ Informational (no material change) | {digest.informational_count} |"
+        )
     if digest.scoped:
         lines.append(
             f"| 🔒 Filtered (internal/private) | {digest.out_of_surface_count} |"
@@ -160,7 +167,8 @@ def render_review_digest(digest: ReviewDigest) -> str:
         lines += [
             "**Count populations:** "
             f"{counts['raw_detected']} detected; {counts['retained']} retained "
-            f"({counts['gating']} gating, {counts['non_gating']} non-gating); "
+            f"({counts['gating']} gating, {counts['non_gating']} non-gating)"
+            f"{held_out_note(counts, digest.disposition_audit)}; "
             f"{counts['review_groups']} review group(s).",
             "",
             "**Public surface:** "
@@ -307,7 +315,8 @@ def render_terminal_digest(digest: ReviewDigest) -> str:
         c = digest.result_counts
         lines += [
             f"Findings: {c['raw_detected']} detected; {c['retained']} retained "
-            f"({c['gating']} gating, {c['non_gating']} non-gating); "
+            f"({c['gating']} gating, {c['non_gating']} non-gating)"
+            f"{held_out_note(c, digest.disposition_audit)}; "
             f"{c['review_groups']} review groups.",
             f"Public surface: {c['public_additions']} additions, "
             f"{c['public_removals']} removals, {c['public_modifications']} modifications.",

@@ -186,6 +186,11 @@
         "value": null
       },
       "is_inline": false,
+      "is_inline_fact": {
+        "diagnostics": [],
+        "status": "not_collected",
+        "value": null
+      },
       "is_noexcept": false,
       "is_override": null,
       "is_override_fact": {
@@ -225,6 +230,7 @@
   "git_tag": null,
   "header_cv_facts_reliable": true,
   "header_only": false,
+  "inline_facts_reliable": true,
   "kabi": null,
   "language_profile": null,
   "library": "libdemo.so",
@@ -236,7 +242,7 @@
   "platform": null,
   "python_api": null,
   "python_ext": null,
-  "schema_version": 56,
+  "schema_version": 60,
   "scope_fallback": null,
   "source_mtime": null,
   "source_mtime_epoch": false,

@@ -190,6 +190,7 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
+from ..extract.headers.clang.locations import LocationMaterializer
 from ..storage.acyclic_json import gc_paused, loads_acyclic
 from .ast_special_members import collect_special_member_names
 from .call_graph import (
@@ -197,8 +198,10 @@ from .call_graph import (
     _fill_callee_files,
     _index_member_decls,
     _walk_calls,
+    collect_function_bodies,
 )
 from .header_graph_ast_projection import HeaderGraphAstProjection
+from .semantic_fact_folds import SemanticFactStream
 from .type_graph import (
     _dedupe_edges as _dedupe_type_edges,
     _index_declared_entities,
@@ -575,7 +578,10 @@ def stream_top_level_decls(
 
 
 def stream_recorded_decls(
-    path: Path, extents: list[tuple[int, int]]
+    path: Path,
+    extents: list[tuple[int, int]],
+    containing: bytes = b"",
+    location_states: list[tuple[Any, Any]] | None = None,
 ) -> Iterator[dict[str, Any]]:
     """Re-yield the elements :func:`stream_top_level_decls` recorded *extents* for.
 
@@ -586,11 +592,26 @@ def stream_recorded_decls(
     which took this module's projection of a 263 MiB document from 21.7 s to
     13.1 s, and its peak from 336 MiB to 298 MiB: a seek-and-read holds one
     element and no read buffer around it.
+
+    *containing*, when given, skips every element whose bytes do not
+    contain it, without decoding it: a pass that acts only on one node kind
+    reads every element but decodes only the ones that can hold it.
+
+    *location_states*, when given, is each element's
+    :class:`~abicheck.extract.headers.clang.locations.LocationMaterializer`
+    state as the first pass recorded it: each element is materialized from
+    its own recorded state, so it reads exactly as it did then.
     """
     with path.open("rb") as fh:
-        for start, end in extents:
+        for i, (start, end) in enumerate(extents):
             fh.seek(start)
-            yield loads_acyclic(fh.read(end - start))
+            raw = fh.read(end - start)
+            if containing and containing not in raw:
+                continue
+            element = loads_acyclic(raw)
+            if location_states is not None:
+                LocationMaterializer(location_states[i])(element)
+            yield element
 
 
 def project_header_graph_ast_file(path: Path) -> HeaderGraphAstProjection:
@@ -618,10 +639,23 @@ def project_header_graph_ast_file(path: Path) -> HeaderGraphAstProjection:
     cur_file = ""
     extents: list[tuple[int, int]] = []
     special: set[str] = set()
+    semantic = SemanticFactStream()
+    # The whole-tree path reads a tree whose locations are materialized
+    # (`dumper_clang_errors`: every reader sees explicit locations), while
+    # the document streamed here keeps clang's sticky ones. Materializing
+    # each element as it arrives, with the writer state carried across the
+    # boundary, gives every reader below the same tree the whole-tree path
+    # sees; each element's starting state is kept so the later passes
+    # re-read it identically.
+    materialize = LocationMaterializer()
+    location_states: list[tuple[Any, Any]] = []
     for element in stream_top_level_decls(path, extents):
+        location_states.append(materialize.state)
+        materialize(element)
         collect_special_member_names(element, special)
         _index_member_decls(element, member_index)
         cur_file = _index_declared_entities(element, [], cur_file, idx)
+        semantic.index(element)
         del element
 
     type_edges: list[Any] = []
@@ -630,7 +664,11 @@ def project_header_graph_ast_file(path: Path) -> HeaderGraphAstProjection:
     id_index: dict[str, str] = {}
     pending_anon_enum: dict[str, Any] | None = None
     call_file = ""
-    for element in stream_recorded_decls(path, extents):
+    bodies: set[str] = set()
+    for element in stream_recorded_decls(
+        path, extents, location_states=location_states
+    ):
+        collect_function_bodies(element, [], bodies)
         pending_anon_enum = _walk_child_sequence(
             (element,), [], "", type_edges, idx, pending_anon_enum
         )
@@ -645,6 +683,19 @@ def project_header_graph_ast_file(path: Path) -> HeaderGraphAstProjection:
             id_index,
             member_index,
         )
+        semantic.walk(element)
+        del element
+    # The template parse's third walk resolves function templates against
+    # the whole TU's class-template registrations, which the second pass
+    # only just completed -- so it is a third read of the document. It acts
+    # on nothing but a FunctionTemplateDecl, so only an element whose bytes
+    # name one is decoded (measured on a 114 MB <functional> AST: the
+    # unfiltered pass cost ~1 s of a 4.5 s projection).
+    semantic.start_late()
+    for element in stream_recorded_decls(
+        path, extents, b'"FunctionTemplateDecl"', location_states
+    ):
+        semantic.walk_late(element)
         del element
 
     type_edges = _dedupe_type_edges(type_edges)
@@ -661,4 +712,6 @@ def project_header_graph_ast_file(path: Path) -> HeaderGraphAstProjection:
         call_edges=_dedupe_call_edges(_fill_callee_files(call_edges, decl_files)),
         entity_files=dict(idx.decl_file) if needs_entity_files else {},
         special_member_names=frozenset(special),
+        semantic_facts=semantic.finish(type_edges),
+        function_bodies=frozenset(bodies),
     )

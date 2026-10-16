@@ -395,15 +395,15 @@ class TestReportSerialization:
         )
 
     def test_json_report_includes_symbol_binding(self) -> None:
-        from abicheck.reporter import _change_annotation_fields
+        from abicheck.report.change_annotations import change_annotation_fields
 
-        fields = _change_annotation_fields(self._change("weak"))
+        fields = change_annotation_fields(self._change("weak"))
         assert fields["symbol_binding"] == "weak"
 
     def test_json_report_omits_symbol_binding_when_unset(self) -> None:
-        from abicheck.reporter import _change_annotation_fields
+        from abicheck.report.change_annotations import change_annotation_fields
 
-        fields = _change_annotation_fields(self._change(None))
+        fields = change_annotation_fields(self._change(None))
         assert "symbol_binding" not in fields
 
     def test_sarif_includes_symbol_binding(self) -> None:
@@ -428,13 +428,17 @@ class TestReportSerialization:
         # suppression.suppressed_changes[] -- the audit trail for *why* a
         # binding-scoped rule matched needs the field too (Codex review,
         # fresh evidence, schema 2.31).
-        from abicheck.reporter import _suppressed_change_entry
+        from abicheck.report.change_json import (
+            suppressed_change_entry,
+        )
 
-        entry = _suppressed_change_entry(self._change("weak"))
+        entry = suppressed_change_entry(self._change("weak"))
         assert entry["symbol_binding"] == "weak"
 
     def test_suppressed_change_entry_omits_symbol_binding_when_unset(self) -> None:
-        from abicheck.reporter import _suppressed_change_entry
+        from abicheck.report.change_json import (
+            suppressed_change_entry,
+        )
 
-        entry = _suppressed_change_entry(self._change(None))
+        entry = suppressed_change_entry(self._change(None))
         assert "symbol_binding" not in entry

@@ -43,6 +43,7 @@ was not asked at the time and is exactly what unblocks ``extract``.
 from __future__ import annotations
 
 import re
+from collections.abc import Set as AbstractSet
 
 from .graph_facts import GraphNode
 from .source_graph import SourceGraphSummary, _symbol_node_id
@@ -138,16 +139,54 @@ def looks_like_system_name(name: str) -> bool:
 
 
 def decl_declaring_files(graph: SourceGraphSummary) -> dict[str, str]:
-    """Map each decl/type id to its declaring file via ``SOURCE_DECLARES`` edges."""
+    """Map each decl/type id to its declaring file via ``SOURCE_DECLARES`` edges.
+
+    A declaration redeclared in several headers maps to the smallest of
+    :func:`decl_declaring_file_sets`' labels, never to whichever edge the
+    graph happens to list first.
+    """
+    return {d: files[0] for d, files in decl_declaring_file_sets(graph).items()}
+
+
+def decl_declaring_file_sets(
+    graph: SourceGraphSummary, decl_ids: AbstractSet[str] | None = None
+) -> dict[str, tuple[str, ...]]:
+    """Every declaring-header label of each decl/type id, sorted.
+
+    A declaration redeclared in several headers has one ``SOURCE_DECLARES``
+    edge per header. Edge order is not a fact about the declaration: picking
+    the first (or last) edge made the declaring file -- and with it graph
+    reconciliation's unchanged-vs-moved outcome -- vary between runs over
+    identical inputs. *decl_ids*, when given, restricts the result to those
+    ids; each restricted entry equals the unrestricted one.
+    """
     node_by_id = {n.id: n for n in graph.nodes}
-    decl_to_file: dict[str, str] = {}
+    found: dict[str, set[str]] = {}
     for e in graph.edges:
         if e.kind != "SOURCE_DECLARES":
             continue
+        if decl_ids is not None and e.dst not in decl_ids:
+            continue
         header = node_by_id.get(e.src)
         if header is not None and header.label:
-            decl_to_file.setdefault(e.dst, header.label)
-    return decl_to_file
+            found.setdefault(e.dst, set()).add(str(header.label))
+    return {d: tuple(sorted(files)) for d, files in found.items()}
+
+
+def representative_declaring_files(
+    old_files: tuple[str, ...], new_files: tuple[str, ...]
+) -> tuple[str, str]:
+    """One declaring file per side of an old/new pair, independent of order.
+
+    A file both sides declare the entity in is shared evidence that it did
+    not move, so the smallest shared file represents both sides; otherwise
+    each side's smallest file stands for it. ``""`` for a side with no
+    declaring-file evidence at all.
+    """
+    shared = sorted(set(old_files) & set(new_files))
+    if shared:
+        return shared[0], shared[0]
+    return (min(old_files) if old_files else ""), (min(new_files) if new_files else "")
 
 
 def is_public_dependency_node(

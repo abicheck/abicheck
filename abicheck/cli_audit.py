@@ -76,7 +76,7 @@ def ledger_lines_for(
 
     The release fan-out needs the same rows this module echoes for a single
     comparison, but captured in a worker and printed later in library order
-    (see `cli_compare_release_pairwise`), so the two cannot render the
+    (see `workflows.release_members`), so the two cannot render the
     disposition differently.
     """
     return [_ledger_line(c, contract_evaluation) for c in changes]

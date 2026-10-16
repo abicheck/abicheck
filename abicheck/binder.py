@@ -24,15 +24,15 @@ from __future__ import annotations
 import logging
 from collections import deque
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 
 from .model.elf_facts import SymbolBinding as ElfSymbolBinding
-from .resolver import DependencyGraph
+from .workflows.elf_dependency_resolver import DependencyGraph
 
 log = logging.getLogger(__name__)
 
 
-class BindingStatus(str, Enum):
+class BindingStatus(StrEnum):
     RESOLVED_OK = "resolved_ok"
     MISSING = "missing"
     VERSION_MISMATCH = "version_mismatch"

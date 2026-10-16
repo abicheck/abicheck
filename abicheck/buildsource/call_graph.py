@@ -58,7 +58,7 @@ from ..model.graph_vocabulary import (
     RESOLUTION_OVERAPPROX,
     RESOLUTION_UNKNOWN,
 )
-from ..model.name_decoration import macho as macho_decoration
+from ..model.name_decoration import macho_underscore as macho_decoration
 from ..model.source_graph import function_decl_identity
 from .call_decl_record import (
     _OVERRIDE_MARKER_KINDS,
@@ -566,9 +566,10 @@ def _node_file(node: dict[str, Any]) -> str:
 
 
 def _has_function_body(node: dict[str, Any]) -> bool:
-    """Whether a function-decl node carries a definition body (a ``CompoundStmt`` child)."""
+    """Whether a function-decl node carries a definition body: a ``CompoundStmt``
+    child, or a ``CXXTryStmt`` child for a function-try-block."""
     return any(
-        isinstance(ch, dict) and ch.get("kind") == "CompoundStmt"
+        isinstance(ch, dict) and ch.get("kind") in ("CompoundStmt", "CXXTryStmt")
         for ch in node.get("inner", []) or []
     )
 
@@ -694,6 +695,32 @@ def _walk_calls(
             member_index,
         )
     return cur_file
+
+
+def collect_function_bodies(
+    node: Any, scope: list[str] | None = None, out: set[str] | None = None
+) -> set[str]:
+    """Identities of every function declaration under *node* whose body this
+    AST carries (a ``CompoundStmt`` child) -- the per-declaration body
+    coverage fact (ADR-077 D5): a body listed here was walked in full by
+    :func:`_walk_calls` and ``type_graph``'s reference walk, so the absence
+    of a call/reference edge from it is a verified zero. Uses
+    :func:`_walk_calls`'s own scope tracking and :func:`_function_identity`,
+    so an identity lands on the same ``decl://`` node as its edges."""
+    scope = scope if scope is not None else []
+    out = out if out is not None else set()
+    if not isinstance(node, dict):
+        return out
+    kind = str(node.get("kind", ""))
+    name = str(node.get("name") or "")
+    if kind in _FUNCTION_DECL_KINDS and _has_function_body(node):
+        ident = _function_identity(node, scope)
+        if ident:
+            out.add(ident)
+    child_scope = [*scope, name] if kind in _SCOPE_DECL_KINDS and name else scope
+    for child in node.get("inner", []) or []:
+        collect_function_bodies(child, child_scope, out)
+    return out
 
 
 def _fill_callee_files(

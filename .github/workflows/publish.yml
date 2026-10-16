@@ -30,16 +30,16 @@ jobs:
           python-version: "3.14"  # consistent with main CI matrix
 
       - name: Install build tools
-        run: python -m pip install --upgrade build
+        run: python -m pip install --upgrade build "twine>=5.1"
 
-      - name: Build sdist and wheel
-        run: python -m build
+      - name: Build, check and validate dist contents
+        # verify.py's `distribution-build` step: isolated build, `twine check`
+        # and metadata validation, the same gate ci.yml's fair-metadata job
+        # runs on every PR. --require-complete: missing build/twine fails.
+        run: python scripts/verify.py --profile pr --only distribution-build --require-complete
 
-      - name: Check dist contents
-        run: |
-          pip install "twine>=5.1"
-          twine check dist/*
-          ls -lh dist/
+      - name: List dist contents
+        run: ls -lh dist/
 
       - name: Smoke-test wheel install
         run: |

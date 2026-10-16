@@ -43,6 +43,11 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
+from abicheck.workflows.dump.cache import (
+    api as dump_cache_api,
+    store as dump_cache_store,
+)
+
 _HEADERS = {
     "foo": """
 #ifndef FOO_H
@@ -160,9 +165,7 @@ def _graphs_attached(
     # and the parity comparison would silently compare against an empty map.
     import tempfile
 
-    from abicheck import snapshot_cache
-
-    monkeypatch.setattr(snapshot_cache, "_CACHE_DIR", Path(tempfile.mkdtemp()))
+    monkeypatch.setattr(dump_cache_store, "_CACHE_DIR", Path(tempfile.mkdtemp()))
     CliRunner().invoke(main, argv)
     return seen
 
@@ -228,7 +231,6 @@ def test_warm_snapshot_cache_hit_keeps_the_header_graph(
     """A snapshot served from the whole-snapshot cache carries the same header
     graph the cold dump attached: warm ``compare`` runs must not lose L5
     evidence just because the attach step itself is skipped on a hit."""
-    from abicheck import snapshot_cache
     from abicheck.cli import main
 
     old_dir, new_dir, inc = two_library_release
@@ -245,7 +247,7 @@ def test_warm_snapshot_cache_hit_keeps_the_header_graph(
     assert cold.get("libfoo.so"), cold
 
     hits: list[tuple[str, ...]] = []
-    real_lookup = snapshot_cache.lookup_key
+    real_lookup = dump_cache_api._lookup_key
 
     def _recording_lookup(*args: object, **kwargs: object) -> object:
         snap = real_lookup(*args, **kwargs)
@@ -255,7 +257,7 @@ def test_warm_snapshot_cache_hit_keeps_the_header_graph(
         return snap
 
     # Same (now warm) cache directory as the cold run above.
-    monkeypatch.setattr(snapshot_cache, "lookup_key", _recording_lookup)
+    monkeypatch.setattr(dump_cache_api, "_lookup_key", _recording_lookup)
     CliRunner().invoke(main, argv)
     assert hits, "the second run never hit the cache, so nothing was compared"
     assert all(ids == cold["libfoo.so"] for ids in hits), hits

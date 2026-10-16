@@ -96,7 +96,7 @@ def reject_hybrid_source_frontend(
                 "depth='source' is incompatible with the 'hybrid' AST "
                 "frontend: L4 source-ABI replay has no dual-backend hybrid "
                 "extractor. Use 'castxml' or 'clang' for a depth='source' "
-                "request."
+                "request (compile.frontend: castxml in .abicheck.yml)."
             )
 
 
@@ -177,17 +177,11 @@ def _fold_compile_db_tokens(
     interleaved as ``(*tokens, *split(ctx.gcc_options), *ctx.gcc_option_
     tokens)``: the legacy tokens first (lowest precedence), then whatever
     *ctx* already carried, in the same relative order it always had.
-    Mirrors ``cli_helpers_compare._merge_gcc_options``'s own ordering intent
-    (that function cannot be imported here: it lives in a ``cli_*`` module,
-    and this file is under ``workflows/artifact/`` -- an engine-layer tree
-    ``scripts/check_ai_readiness.py``'s ``engine-cli-boundary`` check
-    forbids importing a CLI sibling from) -- the combined *effective* token
-    sequence a real ``-p compile_commands.json`` run would produce is
-    identical to what ``_merge_gcc_options``'s own string-join path
-    produces for any token *without* embedded whitespace (every existing
-    precedence test's fixture shape); it is *this* function that is now
-    correct where ``_merge_gcc_options`` still is not, for a token that
-    does carry embedded whitespace.
+    The identical splitter every consumer applies downstream is used here,
+    so a token with embedded whitespace is never re-joined by a string
+    round-trip. (This function cannot import a CLI helper: ``workflows/artifact/``
+    is an engine-layer tree that ``scripts/check_ai_readiness.py``'s
+    ``engine-cli-boundary`` check keeps free of CLI siblings.)
     """
     if not tokens:
         return ctx
@@ -480,7 +474,7 @@ def _seeded_includes_and_compile_context(
     # individual kwargs above, never literally `ctx` -- so a no-op fold
     # (`applied=False`) with no caller-supplied context would otherwise
     # silently turn a `None` into a default-valued CompileContext() here.
-    # That distinction is load-bearing: service_dump_cache._dump_is_cacheable
+    # That distinction is load-bearing: workflows/dump/cache/api.py's `_dump_is_cacheable`
     # only permits caching when `compile is None` (Codex review, fresh
     # evidence) -- preserve `None` in exactly that case so an otherwise
     # cacheable typed dump/compare operand doesn't lose caching merely

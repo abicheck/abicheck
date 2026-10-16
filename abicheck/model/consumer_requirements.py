@@ -23,7 +23,7 @@ between them:
   :class:`ConsumerImportFacts`; ``extract.library_export_facts`` reads an
   old/new library (a real binary or a saved snapshot) into
   :class:`LibraryExportFacts`.
-* ``policy.consumer_requirements`` evaluates requirements against exports
+* ``policy.consumer_requirement_evaluation`` evaluates requirements against exports
   -- pure, no I/O.
 * ``workflows.consumer_scope`` wires the two and owns the result types.
 

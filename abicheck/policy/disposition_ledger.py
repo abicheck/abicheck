@@ -68,6 +68,7 @@ from .disposition_gate import (
     _reset_dated_overlays as _reset_dated_overlays,
 )
 from .disposition_types import (
+    CONSUMER_ONLY_APPLICATION_POINTS as _CONSUMER_ONLY,
     Disposition as Disposition,
     DispositionRecord as DispositionRecord,
 )
@@ -341,14 +342,17 @@ class DispositionLedger:
         *,
         application_point: str,
         rule: RuleProvenance | None = None,
+        disposition: Disposition = Disposition.SUPPRESSED,
     ) -> DispositionLedger:
-        """A copy with each of *changes* now labelled ``SUPPRESSED``.
+        """A copy with each of *changes* now labelled *disposition*
+        (``SUPPRESSED`` by default; the release's unreached-type pass uses
+        ``OUT_OF_CONTRACT``, ``workflows.release_member_attribution``).
 
         For a release-level policy decision applied strictly *after* the
         per-comparison ledger closed -- a cross-member decision an individual
         comparison cannot make on its own, since it depends on every
-        sibling's own outcome (e.g. ``cli_compare_release_pairwise.
-        _suppress_lockstep_soname_findings``'s lockstep-SONAME-bump
+        sibling's own outcome (e.g. ``workflows.release_members.
+        suppress_lockstep_soname_findings``'s lockstep-SONAME-bump
         downgrade, which only fires once the *release's* worst verdict is
         known, long after this library's own ledger finalized). Without
         this, mutating ``result.changes`` alone leaves the finding's
@@ -381,7 +385,7 @@ class DispositionLedger:
         superseded._records = [
             replace(
                 record,
-                disposition=Disposition.SUPPRESSED,
+                disposition=disposition,
                 application_point=application_point,
                 rule=rule,
                 gate_excluded=True,
@@ -567,7 +571,7 @@ class DispositionLedger:
         ``Change`` carries no such attribute -- the value is computed on
         demand, like :meth:`resolve_verdict_classes` computes
         ``verdict_class``, so every record started out ``None`` here. Mirrors
-        :func:`abicheck.reporter._reclassified_by_for_change`'s own
+        :func:`abicheck.change_json.reclassified_by_for_change`'s own
         precedence (``rule.label or rule.reason or rule.to_verdict.value``)
         without importing that ``frontends``-adjacent helper (``policy/``
         may not depend on it); both read
@@ -758,13 +762,15 @@ class DispositionLedger:
 
         ``semver.recommend_release``'s conserved-delta input (ADR-067's
         consequences section): a major-class break that a rule hid is still a
-        major-class break.
+        major-class break -- unless a consumer-only one the full-library gate
+        never scored (``disposition_close.exclude_from_gate``).
         """
         return tuple(
             r
             for r in self._records
             if r.disposition is Disposition.SUPPRESSED
             and r.verdict_class in {v.value for v in _GATING_VERDICTS}
+            and not (r.gate_excluded and r.application_point in _CONSUMER_ONLY)
         )
 
     def rules(self) -> tuple[tuple[RuleProvenance, int], ...]:

@@ -625,8 +625,8 @@ class TestStackCheckCommand:
 
     def test_stack_check_with_mock(self, tmp_path: Path) -> None:
         """stack-check with mocked resolver produces proper output."""
-        from abicheck.resolver import DependencyGraph
         from abicheck.stack_checker import StackCheckResult, StackVerdict
+        from abicheck.workflows.elf_dependency_resolver import DependencyGraph
 
         baseline = tmp_path / "baseline"
         candidate = tmp_path / "candidate"
@@ -661,8 +661,8 @@ class TestStackCheckCommand:
 
     def test_stack_check_json_format(self, tmp_path: Path) -> None:
         """stack-check with --format json produces JSON output."""
-        from abicheck.resolver import DependencyGraph
         from abicheck.stack_checker import StackCheckResult, StackVerdict
+        from abicheck.workflows.elf_dependency_resolver import DependencyGraph
 
         baseline = tmp_path / "baseline"
         candidate = tmp_path / "candidate"
@@ -703,8 +703,8 @@ class TestStackCheckCommand:
 
     def test_stack_check_fail_exit_code(self, tmp_path: Path) -> None:
         """stack-check returns exit 4 when loadability is fail."""
-        from abicheck.resolver import DependencyGraph
         from abicheck.stack_checker import StackCheckResult, StackVerdict
+        from abicheck.workflows.elf_dependency_resolver import DependencyGraph
 
         baseline = tmp_path / "baseline"
         candidate = tmp_path / "candidate"
@@ -739,8 +739,8 @@ class TestStackCheckCommand:
 
     def test_stack_check_warn_exit_code(self, tmp_path: Path) -> None:
         """stack-check returns exit 1 when abi_risk is warn."""
-        from abicheck.resolver import DependencyGraph
         from abicheck.stack_checker import StackCheckResult, StackVerdict
+        from abicheck.workflows.elf_dependency_resolver import DependencyGraph
 
         baseline = tmp_path / "baseline"
         candidate = tmp_path / "candidate"
@@ -775,8 +775,8 @@ class TestStackCheckCommand:
 
     def test_stack_check_to_file(self, tmp_path: Path) -> None:
         """stack-check with --output writes report to file."""
-        from abicheck.resolver import DependencyGraph
         from abicheck.stack_checker import StackCheckResult, StackVerdict
+        from abicheck.workflows.elf_dependency_resolver import DependencyGraph
 
         baseline = tmp_path / "baseline"
         candidate = tmp_path / "candidate"

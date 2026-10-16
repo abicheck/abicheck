@@ -189,7 +189,7 @@ def test_main_never_fails_on_diff_error(
         ),
         ("abicheck/model/evidence_status.py", "docs/learn/verdicts.md"),
         ("abicheck/policy/reclassify.py", "docs/use/policies.md"),
-        ("abicheck/workflows/contracts.py", "docs/use/python-api.md"),
+        ("abicheck/workflows/service_requests.py", "docs/use/python-api.md"),
         ("abicheck/workflows/request_inputs.py", "docs/use/python-api.md"),
         ("abicheck/model/header_ast_frontends.py", "docs/use/python-api.md"),
     ],

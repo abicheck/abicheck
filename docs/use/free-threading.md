@@ -82,7 +82,7 @@ module re-enables the GIL.
 In the GitHub Action, set the interpreter with the existing input:
 
 ```yaml
-- uses: abicheck/abicheck@v0.6.0
+- uses: abicheck/abicheck@v0.7.0
   with:
     python-version: '3.15t'
 ```

@@ -1197,7 +1197,7 @@ class TestProvenanceReasons:
 # ── hidden-friend surface classification (origin-before-exemption fix) ──────
 #
 # hidden_friend_removed/added used to be unconditionally retained regardless
-# of where the befriending class lived (_NEVER_FILTER_KIND_NAMES). That is
+# of where the befriending class lived (NEVER_FILTER_KIND_NAMES). That is
 # right for the not-exported gate (a hidden friend can never have an ELF
 # export) but wrong for header provenance: a hidden friend whose owner class
 # is a system/private-header declaration is exactly as out-of-surface as any
@@ -1860,7 +1860,8 @@ class TestWideningOverlay:
     public surface even when header provenance/export would demote it."""
 
     def _run(self, changes, old, new, force_public):
-        from abicheck.post_processing import FilterNonPublicSurface, PipelineContext
+        from abicheck.policy.finding_disposition import PipelineContext
+        from abicheck.post_processing import FilterNonPublicSurface
 
         ctx = PipelineContext(
             old=old,
@@ -1914,10 +1915,12 @@ class TestWideningOverlay:
 
 
 def test_collect_force_public_symbols_no_file():
-    from abicheck.cli_helpers_compare import _collect_force_public_symbols
+    from abicheck.compatibility_evaluation_frontend import (
+        collect_force_public_symbols,
+    )
 
-    assert _collect_force_public_symbols((), None) == set()
-    assert _collect_force_public_symbols(("a", " ", "b"), None) == {"a", "b"}
+    assert collect_force_public_symbols((), None) == set()
+    assert collect_force_public_symbols(("a", " ", "b"), None) == {"a", "b"}
 
 
 class TestWideningCLI:

@@ -428,6 +428,17 @@ FACT_ROWS: tuple[FactRow, ...] = (
     ),
     FactRow(
         "Function",
+        "is_inline_fact",
+        _NONE,
+        _NONE,
+        note=(
+            "Fact[bool] sibling of is_inline, bridge-derived on both backends the "
+            "same way is_restrict_fact is; guarded by the stale 'inline' fact "
+            "family (model.snapshot_reliability)."
+        ),
+    ),
+    FactRow(
+        "Function",
         "is_compiler_generated",
         _FULL,
         _NONE,

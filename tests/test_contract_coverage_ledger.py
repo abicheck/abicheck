@@ -54,6 +54,7 @@ from abicheck.policy.coverage_ledger import (
     coverage_exit_contribution,
     coverage_failures,
     coverage_failures_for_context,
+    record_closes_domain,
     suppression_reaches_coverage_failures,
 )
 from abicheck.serialization import snapshot_to_json
@@ -143,19 +144,20 @@ class TestDerivation:
         (failure,) = coverage_failures(block, ContractMode.PUBLIC)
         assert failure.reason == "search_incomplete"
 
-    def test_partial_identity_coverage_alone_is_a_failure(self) -> None:
-        """Section 4.2 requires identity coverage separately from overall
-        completeness: a complete search whose identity coverage is partial
-        cannot support a proven exclusion for the ambiguous spellings."""
-        block = _block(
-            _record(
-                "public_header",
-                "old",
-                identity_coverage=EvidenceCompleteness.PARTIAL,
-            )
+    def test_partial_identity_coverage_alone_is_not_an_exit_failure(self) -> None:
+        """Identity coverage is partial *for affected entities* (ADR-049 D5,
+        plan Section 4.2). An ambiguous spelling somewhere on the surface
+        fails nothing by itself -- an unchanged library once exited 1 over
+        ``byte`` vs ``std::byte`` -- while the domain still does not count as
+        closed for proving an exclusion; a finding that does touch the
+        ambiguity is ``UNKNOWN_UNRESOLVED`` and is listed per finding."""
+        record = _record(
+            "public_header",
+            "old",
+            identity_coverage=EvidenceCompleteness.PARTIAL,
         )
-        (failure,) = coverage_failures(block, ContractMode.PUBLIC)
-        assert failure.reason == "identity_coverage_incomplete"
+        assert coverage_failures(_block(record), ContractMode.PUBLIC) == ()
+        assert not record_closes_domain(record.record)
 
     def test_not_started_configuration_coverage_is_not_a_failure(self) -> None:
         """Every record this build produces has `configuration_coverage:
@@ -704,7 +706,12 @@ class TestUnresolvedFindingsReachTheLedger:
     """
 
     @staticmethod
-    def _ctx(mode: ContractMode, provider_failed: bool, relevance: dict):  # type: ignore[no-untyped-def]
+    def _ctx(  # type: ignore[no-untyped-def]
+        mode: ContractMode,
+        provider_failed: bool,
+        relevance: dict,
+        identity_partial: bool = False,
+    ):
         from types import SimpleNamespace
 
         from abicheck.contract_evidence import DecisionReceiptBlock
@@ -716,7 +723,18 @@ class TestUnresolvedFindingsReachTheLedger:
             else EvidenceProviderStatus.AVAILABLE
         )
         return SimpleNamespace(
-            contract_evidence=_block(_record(provider, "old", status=status)),
+            contract_evidence=_block(
+                _record(
+                    provider,
+                    "old",
+                    status=status,
+                    identity_coverage=(
+                        EvidenceCompleteness.PARTIAL
+                        if identity_partial
+                        else EvidenceCompleteness.COMPLETE
+                    ),
+                )
+            ),
             evaluation_context=SimpleNamespace(
                 resolved_config=SimpleNamespace(
                     contract=SimpleNamespace(mode=mode.value, unresolved=None)
@@ -735,11 +753,15 @@ class TestUnresolvedFindingsReachTheLedger:
         disagreements: list[str] = []
         saw_unresolved_entry = saw_clean = False
         for mode in (ContractMode.PUBLIC, ContractMode.EXPORTS):
-            for provider_failed in (False, True):
+            for provider_failed, identity_partial in itertools.product(
+                (False, True), repeat=2
+            ):
                 for n in range(4):
                     for combo in itertools.product(values, repeat=n):
                         relevance = {f"f{i}": r for i, r in enumerate(combo)}
-                        ctx = self._ctx(mode, provider_failed, relevance)
+                        ctx = self._ctx(
+                            mode, provider_failed, relevance, identity_partial
+                        )
                         ledger = coverage_failures_for_context(ctx)
                         unresolved = sorted(
                             k

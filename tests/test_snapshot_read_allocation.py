@@ -94,13 +94,23 @@ def _written(tmp_path: Path, content: bytes, compression: SnapshotCompression) -
 
 def _peak_bytes(path: Path, cap: int) -> int:
     read_snapshot_bytes(path, max_decoded_bytes=cap)  # warm any lazy imports
-    tracemalloc.start()
+    # Another test may already be tracing: ``memory_trace`` switches tracemalloc
+    # on for the whole process and never switches it off, and a traced worker
+    # keeps the high-water mark of everything it allocated before. Measure the
+    # transient allocation of this read alone, from a reset peak, and only stop
+    # the tracing this helper started.
+    owned = not tracemalloc.is_tracing()
+    if owned:
+        tracemalloc.start()
     try:
+        tracemalloc.reset_peak()
+        before, _ = tracemalloc.get_traced_memory()
         read_snapshot_bytes(path, max_decoded_bytes=cap)
         _, peak = tracemalloc.get_traced_memory()
     finally:
-        tracemalloc.stop()
-    return peak
+        if owned:
+            tracemalloc.stop()
+    return peak - before
 
 
 @pytest.mark.parametrize("compression", _COMPRESSIONS, ids=lambda c: c.value)

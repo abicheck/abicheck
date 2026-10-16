@@ -28,7 +28,7 @@ post-suppression change list — the one behavior change, carried with a
 migration note. What S2 added on top: the release/bundle fan-out's JSON/
 Markdown reports and `--output-dir` `summary.json` sidecar gain a folded
 `disposition_audit` block over every library
-(`abicheck/cli_compare_receipt.py`'s `release_disposition_audit_block`,
+(`abicheck/report/release_document.py`'s `release_disposition_audit_block`,
 `abicheck/report/disposition_audit.py`'s `fold_disposition_audits`);
 `abicheck aggregate --format json` gains the same folded block plus a
 `disposition_audit_missing_targets` list (aggregate schema 1.9,
@@ -103,6 +103,19 @@ member's contribution with `max`; `CompareRequest.acknowledgments_path`/
 `acknowledgment_unacknowledged_additions` carry both settings. See
 [Change acknowledgment](../../use/acknowledgments.md) for the user-facing
 format and gate contract.
+
+**Owner (2026-10, behavior-preserving refactor).** D1's "record before
+disposing" is now owned by one module rather than by caller discipline:
+`abicheck/policy/finding_disposition/` runs the disposition steps in their
+default order (`dispose_findings`, `default_pipeline.py`), always with a
+disposition ledger (one is created when the caller supplies none), and every
+suppression application point named above shares one primitive,
+`dispose_by_suppression`. Root-type redundancy and deduplication live in
+`abicheck/compare/finding_redundancy.py`/`finding_dedup.py`, finding identity
+in `abicheck/compare/finding_identity/`. References above to
+`post_processing.ApplySuppression`, `checker._filter_suppressed_changes` and
+`finding_identity.py` describe where those mechanisms lived when each slice
+landed.
 
 Implementation is sequenced in
 [`plans/vision-api-abi-evolution.md`](../plans/vision-api-abi-evolution.md)

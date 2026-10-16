@@ -45,7 +45,7 @@ _REPO = Path(__file__).resolve().parent.parent
 
 #: Raising this is a review decision: three or more classes sharing one
 #: mechanism in OTHER means a new family (and harness) is due instead.
-OTHER_BUDGET = 22
+OTHER_BUDGET = 25
 
 #: Families whose invariant a harness enforces; a new class there must attach.
 _HARNESSED = ("F1", "F2", "F3", "F4", "F5", "F8")

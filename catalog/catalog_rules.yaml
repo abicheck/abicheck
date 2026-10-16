@@ -88,6 +88,15 @@ rules:
   calling-convention-changed-via-macro:
     title: Calling convention changed via a macro
     definition: An exported function's calling convention changes through the expansion of a convention macro defined in an included config header, while the declaration text in the public header stays identical.
+  calling-convention-function-like-macro-changed:
+    title: Calling convention changed via a function-like macro
+    definition: An exported function's calling convention changes through the argument of a function-like convention macro used in its declaration.
+  calling-convention-macro-redefined-after-use:
+    title: Calling convention macro redefined after use
+    definition: A convention macro is redefined after the declaration that uses it; only the later definition differs, so the declared convention and the binary interface are unchanged.
+  calling-convention-macro-undefined-after-use:
+    title: Calling convention macro undefined after use
+    definition: An exported function's calling convention changes through a convention macro that the header undefines right after the declaration, so the macro is absent from the final preprocessor state.
   calling-convention-respelled-via-macro:
     title: Calling convention respelled via a macro
     definition: A declaration's calling-convention attribute moves from a literal spelling to a macro that expands to the same convention, so the binary interface is unchanged.
@@ -319,6 +328,9 @@ rules:
   overload-added:
     title: Overload added
     definition: An overload is added to an existing name, which can make previously unambiguous consumer calls ambiguous.
+  overload-added-beside-initializer-list:
+    title: Overload added beside an initializer_list overload
+    definition: A new scalar overload joins a set that already has a std::initializer_list overload, which keeps winning braced calls, so no call becomes ambiguous.
   param-defaults:
     title: Parameter default value changed
     definition: A parameter's default changes, so already-compiled consumers keep passing the old default while newly-compiled ones pass the new one.
@@ -394,6 +406,9 @@ rules:
   restrict-added-to-definition-only:
     title: restrict added to the definition only
     definition: An implementation gains `restrict` on its parameters while the declaration in the public header is untouched, so the contract consumers compile against is unchanged.
+  return-double-pointer-lost-const:
+    title: Returned double pointer lost const
+    definition: A function returning a pointer to pointer loses const below the first level -- binary-identical, but the new result no longer converts to the old type, so callers binding it to the old type no longer compile.
   return-pointee-gained-const:
     title: Return pointee gained const
     definition: A function returning a pointer gains const on the pointee -- binary-identical, but callers that store the result in a non-const pointer no longer compile.

@@ -178,6 +178,7 @@ _SCRIPTS_DIR = Path(__file__).resolve().parent
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 
+from baseline_loader import read_baseline  # noqa: E402
 from perf_measurement import (  # noqa: E402
     GateThreshold,
     finite_nonnegative_float_arg,
@@ -404,7 +405,7 @@ def _build_fixture(
 
     Called once per (size, backend, repeat) inside a fresh temp directory
     (see ``_measure_one``) — the resolved header *path* is part of the AST
-    disk-cache key (``dumper_ast_config._cache_key`` hashes each header's
+    disk-cache key (``extract.headers.ast_config._cache_key`` hashes each header's
     resolved path + mtime, not its content), so a fresh directory alone is
     enough to guarantee a cold cache on every call, with no need to vary the
     header content itself (Codex review: a shared fixture reused across
@@ -604,7 +605,7 @@ def _measure_one(n: int, backend: str, repeat: int) -> dict[str, Any]:
     """
     from abicheck.compile_context import CompileContext
     from abicheck.dumper import dump
-    from abicheck.service import _attach_header_graph
+    from abicheck.service_header_graph_attach import _attach_header_graph
 
     dumper_cache = _header_ast_cache_module()
 
@@ -754,7 +755,7 @@ def _memory_probe(n: int, backend: str) -> dict[str, float]:
     """
     from abicheck.compile_context import CompileContext
     from abicheck.dumper import dump
-    from abicheck.service import _attach_header_graph
+    from abicheck.service_header_graph_attach import _attach_header_graph
 
     dumper_cache = _header_ast_cache_module()
 
@@ -920,18 +921,20 @@ def _load_baseline(path: Path) -> dict[tuple[int, str], dict[str, float]]:
     original single-``attach_ms`` gate impossible to extend without silently
     dropping the other two.
 
-    Only :func:`is_gateable` values are retained. A ``NaN``/``Infinity``
-    baseline (both of which ``json.load`` accepts and happily round-trips) is
-    dropped rather than kept, because ``current > base + allowed`` is ``False``
-    for either -- a single poisoned number would otherwise turn this gate into
-    an unconditional pass that still prints ``OK``. Dropping it makes the point
-    read as *ungated*, which :func:`main` then surfaces (and, when nothing at
-    all survives, fails on) instead.
+    The file is parsed by :func:`baseline_loader.read_baseline`, which refuses a
+    ``NaN``/``Infinity`` anywhere in it: ``current > base + allowed`` is ``False``
+    for either, so a poisoned baseline would turn this gate into an
+    unconditional pass that still prints ``OK``. The refusal fails the whole
+    file (reported by the caller as an unreadable ``--baseline``).
+
+    Only :func:`is_gateable` values are retained (a zero or negative metric is
+    not a measurement either). A point that retains no metric reads as *ungated*,
+    which :func:`main` surfaces.
 
     ``baseline_ms`` is accepted as an alias for ``dump_ms`` -- see
     :data:`LEGACY_METRIC_ALIASES`.
     """
-    data = json.loads(path.read_text())
+    data = read_baseline(path)
     points = data if isinstance(data, list) else data.get("points", [])
     out: dict[tuple[int, str], dict[str, float]] = {}
     for p in points:

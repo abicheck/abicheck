@@ -45,6 +45,7 @@ from pathlib import Path
 import pytest
 
 from abicheck.checker import compare
+from abicheck.compare.finding_identity import report_finding_id
 from abicheck.contract_context import finding_key
 from abicheck.contract_context_io import (
     persisted_context_from_dict,
@@ -56,7 +57,6 @@ from abicheck.contract_replay import (
     reevaluate_from_evidence,
     replay_original_decisions,
 )
-from abicheck.finding_identity import report_finding_id
 from abicheck.model import (
     AbiSnapshot,
     EnumMember,

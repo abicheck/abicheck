@@ -2,7 +2,7 @@
 
 # Detector specification matrix
 
-One row per `ChangeKind` (414 total). Columns fuse the verdict partition (`checker_policy`), default policy (`policy_for`), the weakest evidence layer at which the kind becomes detectable (`scripts/evidence_tiers`), and the example case(s) that demonstrate the kind (`catalog/ground_truth.json`). The **Examples** column is capped at 4 links per kind; the full mapping is in `detector-spec.json`.
+One row per `ChangeKind` (417 total). Columns fuse the verdict partition (`checker_policy`), default policy (`policy_for`), the weakest evidence layer at which the kind becomes detectable (`scripts/evidence_tiers`), and the example case(s) that demonstrate the kind (`catalog/ground_truth.json`). The **Examples** column is capped at 4 links per kind; the full mapping is in `detector-spec.json`.
 
 | ChangeKind | Category | Default verdict | Severity | Min evidence | Doc slug | Examples |
 |---|---|---|---|---|---|---|
@@ -39,7 +39,7 @@ One row per `ChangeKind` (414 total). Columns fuse the verdict partition (`check
 | `bundle_soname_skew` | breaking | `BREAKING` | `error` | L0 | `bundle_soname_skew` | [case84](examples/case84_bundle_soname_skew.md) |
 | `bundle_unresolved_intra_dependency` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `bundle_unresolved_intra_dependency` | — |
 | `call_graph_public_entry_reachability_changed` | quality | `COMPATIBLE` | `warning` | unspecified | `call_graph_public_entry_reachability_changed` | — |
-| `calling_convention_changed` | breaking | `BREAKING` | `error` | L1 | `calling_convention_changed` | [case209](examples/case209_calling_convention_changed_via_macro.md), [case64](examples/case64_calling_convention_changed.md) |
+| `calling_convention_changed` | breaking | `BREAKING` | `error` | L1 | `calling_convention_changed` | [case209](examples/case209_calling_convention_changed_via_macro.md), [case212](examples/case212_calling_convention_macro_undefined_after_use.md), [case213](examples/case213_calling_convention_function_like_macro_changed.md), [case64](examples/case64_calling_convention_changed.md) |
 | `cet_protection_improved` | quality | `COMPATIBLE` | `warning` | L0 | `cet_protection_improved` | — |
 | `cet_protection_weakened` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `cet_protection_weakened` | [case179](examples/case179_cet_protection_weakened.md) |
 | `char8t_migration` | breaking | `BREAKING` | `error` | L1 | `char8t_migration` | [case114](examples/case114_char8t_migration.md) |
@@ -59,10 +59,10 @@ One row per `ChangeKind` (414 total). Columns fuse the verdict partition (`check
 | `ctor_explicit_removed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `ctor_explicit_removed` | — |
 | `ctor_overload_ambiguity_risk` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L2 | `ctor_overload_ambiguity_risk` | — |
 | `cxx_standard_floor_raised` | api_break | `API_BREAK` | `warning` | unspecified | `cxx_standard_floor_raised` | — |
-| `declaration_coordinates_shifted` | quality | `COMPATIBLE` | `warning` | L5 | `declaration_coordinates_shifted` | — |
+| `declaration_coordinates_shifted` | informational | `COMPATIBLE` | `warning` | L5 | `declaration_coordinates_shifted` | — |
 | `declaration_identity_reconciled` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L5 | `declaration_identity_reconciled` | — |
 | `declaration_identity_reconciled_unresolved` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L5 | `declaration_identity_reconciled_unresolved` | [case197](examples/case197_header_graph_identity_reconciled.md) |
-| `declaration_identity_unchanged` | quality | `COMPATIBLE` | `warning` | L5 | `declaration_identity_unchanged` | — |
+| `declaration_identity_unchanged` | informational | `COMPATIBLE` | `warning` | L5 | `declaration_identity_unchanged` | — |
 | `declaration_moved` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L5 | `declaration_moved` | [case196](examples/case196_header_graph_move_reconciled.md) |
 | `declaration_renamed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L5 | `declaration_renamed` | [case194](examples/case194_header_graph_rename_reconciled.md) |
 | `default_argument_changed` | api_break | `API_BREAK` | `warning` | unspecified | `default_argument_changed` | — |
@@ -113,7 +113,7 @@ One row per `ChangeKind` (414 total). Columns fuse the verdict partition (`check
 | `flexible_array_member_changed` | quality | `COMPATIBLE` | `warning` | L1 | `flexible_array_member_changed` | [case70](examples/case70_flexible_array_member_changed.md) |
 | `float_abi_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L3 | `float_abi_changed` | — |
 | `fortify_source_weakened` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `fortify_source_weakened` | — |
-| `func_added` | addition | `COMPATIBLE` | `warning` | L0 | `func_added` | [case03](examples/case03_compat_addition.md), [case141](examples/case141_versioned_symbol_scheme.md), [case185](examples/case185_inherited_override_reuses_slot.md), [case200](examples/case200_new_entry_point_instead_of_parameter_added.md), +4 |
+| `func_added` | addition | `COMPATIBLE` | `warning` | L0 | `func_added` | [case03](examples/case03_compat_addition.md), [case141](examples/case141_versioned_symbol_scheme.md), [case185](examples/case185_inherited_override_reuses_slot.md), [case200](examples/case200_new_entry_point_instead_of_parameter_added.md), +5 |
 | `func_added_elf_only` | addition | `COMPATIBLE` | `warning` | L0 | `func_added_elf_only` | — |
 | `func_became_inline` | api_break | `API_BREAK` | `warning` | unspecified | `func_became_inline` | — |
 | `func_contract_attribute_added` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L2 | `func_contract_attribute_added` | — |
@@ -140,6 +140,7 @@ One row per `ChangeKind` (414 total). Columns fuse the verdict partition (`check
 | `func_removed_elf_only` | breaking | `BREAKING` | `error` | L0 | `func_removed_elf_only` | [case182](examples/case182_accidental_export_removed_still_breaking.md), [case59](examples/case59_func_became_inline.md), [case86](examples/case86_tag_struct_renamed.md), [case97](examples/case97_api_depends_on_consumer_env.md) |
 | `func_return_changed` | breaking | `BREAKING` | `error` | L1 | `func_return_changed` | [case102](examples/case102_frozen_runtime_signature_changed.md), [case10](examples/case10_return_type.md), [case46](examples/case46_pointer_chain_type_change.md), [case70](examples/case70_flexible_array_member_changed.md), +1 |
 | `func_return_pointee_qualifier_added` | api_break | `API_BREAK` | `warning` | L2 | `func_return_pointee_qualifier_added` | [case211](examples/case211_return_pointee_gained_const.md) |
+| `func_return_pointee_qualifier_changed` | api_break | `API_BREAK` | `warning` | L2 | `func_return_pointee_qualifier_changed` | [case215](examples/case215_return_double_pointer_lost_const.md) |
 | `func_return_pointee_qualifier_removed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L2 | `func_return_pointee_qualifier_removed` | — |
 | `func_static_changed` | breaking | `BREAKING` | `error` | L1 | `func_static_changed` | [case21](examples/case21_method_became_static.md) |
 | `func_variadic_added` | breaking | `BREAKING` | `error` | L2 | `func_variadic_added` | — |
@@ -235,12 +236,14 @@ One row per `ChangeKind` (414 total). Columns fuse the verdict partition (`check
 | `protected_visibility_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `protected_visibility_changed` | — |
 | `public_api_exposes_stl_by_value` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `public_api_exposes_stl_by_value` | — |
 | `public_api_internal_dependency_added` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L5 | `public_api_internal_dependency_added` | [case160](examples/case160_public_api_internal_dep_added.md), [case187](examples/case187_public_struct_private_field_type.md), [case188](examples/case188_public_class_private_base_class.md), [case189](examples/case189_public_function_private_parameter_type.md), +6 |
+| `public_dependency_role_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L5 | `public_dependency_role_changed` | — |
+| `public_dependency_role_unknown` | quality | `COMPATIBLE` | `warning` | L5 | `public_dependency_role_unknown` | — |
 | `public_macro_removed` | api_break | `API_BREAK` | `warning` | L4 | `public_macro_removed` | [case156](examples/case156_public_macro_removed.md) |
 | `public_macro_value_changed` | api_break | `API_BREAK` | `warning` | unspecified | `public_macro_value_changed` | — |
 | `public_not_exported` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L2 | `public_not_exported` | [case150](examples/case150_xcheck_export_public_pair.md) |
 | `public_reachability_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `public_reachability_changed` | — |
-| `public_surface_grew` | quality | `COMPATIBLE` | `warning` | unspecified | `public_surface_grew` | — |
-| `public_surface_shrank` | quality | `COMPATIBLE` | `warning` | unspecified | `public_surface_shrank` | — |
+| `public_surface_grew` | informational | `COMPATIBLE` | `warning` | unspecified | `public_surface_grew` | — |
+| `public_surface_shrank` | informational | `COMPATIBLE` | `warning` | unspecified | `public_surface_shrank` | — |
 | `public_to_internal_dependency` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L5 | `public_to_internal_dependency` | [case181](examples/case181_xcheck_public_to_internal_dependency.md) |
 | `public_typedef_removed` | api_break | `API_BREAK` | `warning` | L4 | `public_typedef_removed` | [case158](examples/case158_public_typedef_removed.md) |
 | `public_typedef_target_changed` | api_break | `API_BREAK` | `warning` | unspecified | `public_typedef_target_changed` | — |

@@ -36,7 +36,12 @@ import string
 import pytest
 from hypothesis import assume, given, settings, strategies as st
 
-from abicheck.model.name_decoration import elf_version, itanium_structors, macho, pe_x86
+from abicheck.model.name_decoration import (
+    elf_version,
+    itanium_structors,
+    macho_underscore,
+    pe_x86,
+)
 from abicheck.model.root_relative_path import (
     PROJECT_LAYOUT_MARKERS,
     RootRelativePath,
@@ -135,22 +140,23 @@ def test_pe_cxx_manglings_are_not_c_names() -> None:
 @given(body=st.text(alphabet=_IDENT_REST, max_size=20))
 def test_macho_itanium_round_trip(body) -> None:
     pure = "_Z" + body
-    assert macho.decode_itanium("_" + pure) == pure
-    assert macho.encode(pure) == "_" + pure
-    assert macho.decode_itanium(pure) == pure  # idempotent on decoded input
+    assert macho_underscore.decode_itanium("_" + pure) == pure
+    assert macho_underscore.encode(pure) == "_" + pure
+    assert macho_underscore.decode_itanium(pure) == pure  # idempotent on decoded input
 
 
 @given(a=c_identifiers, b=c_identifiers)
 def test_macho_c_codec_is_injective(a, b) -> None:
-    assert macho.decode_c("_" + a) == a
-    assert (macho.decode_c(macho.encode(a)) == macho.decode_c(macho.encode(b))) == (
-        a == b
-    )
+    assert macho_underscore.decode_c("_" + a) == a
+    assert (
+        macho_underscore.decode_c(macho_underscore.encode(a))
+        == macho_underscore.decode_c(macho_underscore.encode(b))
+    ) == (a == b)
 
 
 @given(s=c_identifiers)
 def test_macho_shifted_spellings_are_one_step_away(s) -> None:
-    for c in macho.shifted_spellings(s):
+    for c in macho_underscore.shifted_spellings(s):
         assert c in (s[1:], "_" + s)
         assert c != s
 

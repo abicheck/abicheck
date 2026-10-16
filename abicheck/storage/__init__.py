@@ -45,7 +45,7 @@ limits) stays in
 
 from __future__ import annotations
 
-from .availability import (
+from .availability_ledger import (
     AvailabilityLedger,
     Confidence,
     FactAvailability,
@@ -99,15 +99,6 @@ from .dto import (
     types_from_dto,
     types_to_dto,
 )
-from .identity import (
-    EntityId,
-    EntityKind,
-    IdentityConflict,
-    ObservationKind,
-    OccurrenceId,
-    OccurrenceSet,
-    elf_symbol_occurrence,
-)
 from .import_baseline_set import export_baseline_set, import_baseline_set
 from .import_bundle_facts import (
     BUNDLE_FACTS_ARTIFACT_TYPE,
@@ -121,6 +112,15 @@ from .legacy_sections import (
     join_legacy_document,
     missing_required_section_fields,
     split_legacy_document,
+)
+from .occurrence_identity import (
+    EntityId,
+    EntityKind,
+    IdentityConflict,
+    ObservationKind,
+    OccurrenceId,
+    OccurrenceSet,
+    elf_symbol_occurrence,
 )
 from .package import (
     MANIFEST_RELPATH,

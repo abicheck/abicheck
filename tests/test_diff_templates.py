@@ -35,6 +35,7 @@ from abicheck.model import (
     Variable,
     Visibility,
 )
+from abicheck.policy.finding_disposition.default_pipeline import DEFAULT_PIPELINE
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -1106,7 +1107,6 @@ class TestCombined:
 
 class TestPipelineIntegration:
     def test_default_pipeline_includes_template_step(self) -> None:
-        from abicheck.post_processing import DEFAULT_PIPELINE
 
         assert "detect_template_patterns" in [s.name for s in DEFAULT_PIPELINE.steps]
 

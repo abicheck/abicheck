@@ -111,7 +111,7 @@ from dataclasses import replace
 from typing import Any
 
 from ...comparability_fields import PROFILE_FIELD_KEYS, _sha256_of
-from ...diff_helpers import type_map_key
+from ...compare.type_map_pair import type_map_key
 from ...extract.semantic_ir_merge import merge_semantic_ir
 from ...fact_provenance import (
     backfill_fact,

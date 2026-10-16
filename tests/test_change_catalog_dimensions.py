@@ -36,11 +36,8 @@ import pytest
 from abicheck.change_registry import REGISTRY
 from abicheck.model.change_catalog.kinds import ChangeKind
 from abicheck.model.change_catalog.registry import ChangeEntity, ChangeOperation
-from abicheck.reporter_markdown import (
-    ShowOnlyFilter,
-    entity_for_change,
-    entity_for_kind,
-)
+from abicheck.report.change_operation import entity_for_change, entity_for_kind
+from abicheck.report.view import ShowOnlyFilter
 
 
 class TestBaseClassLayoutFindingsAreTypeEntities:
@@ -73,9 +70,9 @@ class TestBaseClassLayoutFindingsAreTypeEntities:
 
     def test_it_agrees_with_the_type_level_surface_routing(self):
         """The independent oracle: `surface.py`'s own type-level family."""
-        from abicheck.surface import _TYPE_LEVEL_KIND_NAMES
+        from abicheck.surface import TYPE_LEVEL_KIND_NAMES
 
-        for kind in _TYPE_LEVEL_KIND_NAMES:
+        for kind in TYPE_LEVEL_KIND_NAMES:
             if entity_for_kind(kind) is None:
                 continue
             assert entity_for_kind(kind) in {
@@ -808,7 +805,8 @@ class TestInlineNamespaceVersionBumpTakesItsEntityFromTheFinding:
     def _changes(*, funcs=(), types=()):
         """Through the real pipeline stage, the way the existing
         `inline_namespace_version_bumped` tests reach this detector."""
-        from abicheck.post_processing import DetectNamespacePatterns, PipelineContext
+        from abicheck.policy.finding_disposition import PipelineContext
+        from abicheck.post_processing import DetectNamespacePatterns
         from tests.test_diff_namespaces import _fn, _rec, _snap
 
         old = _snap(

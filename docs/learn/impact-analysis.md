@@ -8,7 +8,7 @@ canonical_for:
   - impact-analysis
 depends_on:
   - abicheck/impact/consumer_graph.py
-  - abicheck/impact/model.py
+  - abicheck/impact/assessment.py
   - abicheck/impact/engine.py
   - abicheck/buildsource/graph_impact.py
   - abicheck/junit_report.py
@@ -52,7 +52,7 @@ and [§ `impact_assessment`](../reference/source-graph-schema.md#impact_assessme
 `--view root-cause` groups findings that share a root cause —
 today, findings whose `caused_by_type` names the same internal entity, or
 that share a `symbol` another finding's `caused_by_type` actually
-references (see `reporter_markdown._root_cause_key_and_display` for the
+references (see `report.view.root_cause_key_and_display` for the
 exact grouping rule). JSON nests grouped findings under a `root_causes[]`
 array; markdown renders one section per root cause; SARIF and JUnit keep
 their existing flat shapes and instead add `rootCauseId`/`rootCause` to

@@ -37,7 +37,7 @@ Leaf module: no internal imports, matching `model/change_catalog/registry.py`'s
 own leaf contract.
 
 Each entry is `(member_name, member_value, comment_or_None)`; `kinds.py`
-reassembles them with `Enum(..., type=str)`. A `None` comment means the
+reassembles them with `StrEnum(...)`. A `None` comment means the
 original declaration carried no inline documentation for that member.
 """
 
@@ -481,6 +481,11 @@ KIND_NAMES_1: tuple[tuple[str, str, str | None], ...] = (
         "Pointee of a returned pointer/reference lost const/volatile -- direct calls fine, function-pointer consumers break",
     ),
     (
+        "FUNC_RETURN_POINTEE_QUALIFIER_CHANGED",
+        "func_return_pointee_qualifier_changed",
+        "Pointee of a returned pointer lost const/volatile below a level the old type does not protect with const -- the result no longer converts to the old type",
+    ),
+    (
         "OVERLOAD_AMBIGUITY_INTRODUCED",
         "overload_ambiguity_introduced",
         "A new overload makes an existing call form ambiguous (e.g. a {} argument where both overloads take a scalar)",
@@ -532,6 +537,16 @@ KIND_NAMES_1: tuple[tuple[str, str, str | None], ...] = (
         "DECLARATION_IDENTITY_RECONCILED_UNRESOLVED",
         "declaration_identity_reconciled_unresolved",
         "graph-reconciled with SOME identity evidence differing that the classifier cannot attribute to a rename or a move → COMPATIBLE_WITH_RISK",
+    ),
+    (
+        "PUBLIC_DEPENDENCY_ROLE_CHANGED",
+        "public_dependency_role_changed",
+        "ADR-077 D4: a public entry keeps its L5 graph dependency on an entity but uses it in a different role (param -> return, field -> alias, ...) → RISK",
+    ),
+    (
+        "PUBLIC_DEPENDENCY_ROLE_UNKNOWN",
+        "public_dependency_role_unknown",
+        "ADR-077 D4: one side's L5 graph carries no role data for a public entry's dependency (stored before roles were stamped), so a role change can be neither confirmed nor ruled out → COMPATIBLE (coverage note)",
     ),
     (
         "VAR_REMOVED_ELF_ONLY",

@@ -42,6 +42,7 @@ from abicheck.errors import ProfileMismatchError, ScopeMismatchError
 from abicheck.model import AbiSnapshot
 from abicheck.reporter import to_json
 from abicheck.serialization import snapshot_to_json
+from tests._fake_compare_resolution import fake_resolved_pair
 
 
 def _write_placeholder_inputs(tmp_path: Path) -> tuple[Path, Path]:
@@ -66,7 +67,9 @@ class TestNotComparableExitCode:
                 "the old side"
             )
 
-        monkeypatch.setattr("abicheck.service.compare_snapshots", _raise)
+        monkeypatch.setattr(
+            "abicheck.workflows.compare_policy.compare_snapshots", _raise
+        )
 
         result = CliRunner().invoke(main, ["compare", str(old_p), str(new_p)])
         assert result.exit_code == 16
@@ -83,7 +86,9 @@ class TestNotComparableExitCode:
         def _raise(*_a, **_kw):
             raise ProfileMismatchError("profile_fingerprint mismatch: dep.h changed")
 
-        monkeypatch.setattr("abicheck.service.compare_snapshots", _raise)
+        monkeypatch.setattr(
+            "abicheck.workflows.compare_policy.compare_snapshots", _raise
+        )
 
         result = CliRunner().invoke(main, ["compare", str(old_p), str(new_p)])
         assert result.exit_code == 16
@@ -126,7 +131,9 @@ class TestNotComparableExitCode:
         def _raise(*_a, **_kw):
             raise ScopeMismatchError("scope drift")
 
-        monkeypatch.setattr("abicheck.service.compare_snapshots", _raise)
+        monkeypatch.setattr(
+            "abicheck.workflows.compare_policy.compare_snapshots", _raise
+        )
 
         out_p = tmp_path / "report.json"
         result = CliRunner().invoke(
@@ -151,7 +158,9 @@ class TestNotComparableExitCode:
         def _raise(*_a, **_kw):
             raise ScopeMismatchError("scope drift")
 
-        monkeypatch.setattr("abicheck.service.compare_snapshots", _raise)
+        monkeypatch.setattr(
+            "abicheck.workflows.compare_policy.compare_snapshots", _raise
+        )
 
         out_p = tmp_path / "report.sarif"
         result = CliRunner().invoke(
@@ -179,7 +188,9 @@ class TestNotComparableExitCode:
         def _raise(*_a, **_kw):
             raise ProfileMismatchError("dep.h changed")
 
-        monkeypatch.setattr("abicheck.service.compare_snapshots", _raise)
+        monkeypatch.setattr(
+            "abicheck.workflows.compare_policy.compare_snapshots", _raise
+        )
 
         out_p = tmp_path / "report.xml"
         result = CliRunner().invoke(
@@ -220,7 +231,8 @@ class TestNotComparableExitCode:
             )
 
         monkeypatch.setattr(
-            "abicheck.service.compare_snapshots", _fake_compare_snapshots
+            "abicheck.workflows.compare_policy.compare_snapshots",
+            _fake_compare_snapshots,
         )
         monkeypatch.setattr(
             "abicheck.frontends.render.to_markdown", lambda _r, **_kw: "REPORT"
@@ -253,13 +265,13 @@ class TestNotComparableExitCode:
 
         def _fake_resolve(*_a, **kw):
             captured["include_labels"] = kw.get("include_labels")
-            return snap, snap
+            return fake_resolved_pair(snap, operands=(_a[0], _a[1]))
 
         monkeypatch.setattr(
-            "abicheck.cli_compare_helpers._resolve_compare_snapshots", _fake_resolve
+            "abicheck.cli_compare_helpers._resolve_compare_pair", _fake_resolve
         )
         monkeypatch.setattr(
-            "abicheck.service.compare_snapshots",
+            "abicheck.workflows.compare_policy.compare_snapshots",
             lambda *_a, **_kw: DiffResult(
                 old_version="1",
                 new_version="1",
@@ -292,63 +304,52 @@ class TestNotComparableExitCode:
 
     def test_labeled_include_reaches_inline_source_embed(self, tmp_path, monkeypatch):
         """A labeled ``--include old:LABEL=PATH`` combined with a raw
-        ``--old-sources`` tree (the inline-embed path,
-        ``cli._embed_inline_source_side``) must also carry the resolved
-        ``include_labels`` map through its own nested ``dump`` invocation —
-        found via CodeRabbit review: ``include_labels`` reached
-        ``_resolve_compare_snapshots`` (the test above) but was never
-        threaded into the *inline*-embed call sites, so a raw source tree's
-        temporary snapshot silently lost the label the non-inline path
-        already carried."""
-        old_p, new_p = _write_placeholder_inputs(tmp_path)
+        ``--sources old=`` tree must label that side's collection too --
+        found via CodeRabbit review when the tree was collected by a nested
+        ``dump`` that never received ``include_labels``. The tree is now
+        collected by the shared resolution itself, from the same request that
+        carries the labels, so this pins that one request carries both."""
+        import abicheck.service as service
+
+        _, new_p = _write_placeholder_inputs(tmp_path)
+        old_p = tmp_path / "libfoo.so.1"  # a native operand: the tree is collected
+        old_p.write_bytes(b"\x7fELF\x02\x01\x01" + b"\0" * 57)
         old_src = tmp_path / "old" / "src"
         old_sources = tmp_path / "old" / "tree"
         old_src.mkdir(parents=True)
         old_sources.mkdir(parents=True)
 
-        captured: dict[str, object] = {}
+        captured: list = []
 
-        def _fake_embed(*_a, **kw):
-            captured["include_labels"] = kw.get("include_labels")
-            return old_p, None, None
+        class _Stop(Exception):
+            pass
 
-        monkeypatch.setattr(
-            "abicheck.frontends.cli.commands.compare_routing._embed_inline_source_side",
-            _fake_embed,
-        )
-        snap = AbiSnapshot(library="libfoo.so.1", version="1.0")
-        monkeypatch.setattr(
-            "abicheck.cli_compare_helpers._resolve_compare_snapshots",
-            lambda *_a, **_kw: (snap, snap),
-        )
-        monkeypatch.setattr(
-            "abicheck.service.compare_snapshots",
-            lambda *_a, **_kw: DiffResult(
-                old_version="1",
-                new_version="1",
-                library="libfoo.so.1",
-                verdict=Verdict.NO_CHANGE,
-                assurance="none",
-            ),
-        )
-        monkeypatch.setattr(
-            "abicheck.frontends.render.to_markdown", lambda _r, **_kw: "REPORT"
-        )
+        def _capture(request, *_a, **_kw):
+            captured.append(request)
+            raise _Stop
 
-        result = CliRunner().invoke(
-            main,
-            [
-                "compare",
-                str(old_p),
-                str(new_p),
-                "--sources",
-                f"old={old_sources}",
-                "--include",
-                f"old:support={old_src}",
-            ],
-        )
-        assert result.exit_code == 0, result.output
-        assert captured["include_labels"] == {old_src: "support"}
+        monkeypatch.setattr(service, "resolve_compare_request", _capture)
+
+        with pytest.raises(_Stop):
+            CliRunner().invoke(
+                main,
+                [
+                    "compare",
+                    str(old_p),
+                    str(new_p),
+                    "--sources",
+                    f"old={old_sources}",
+                    "--depth",
+                    "source",
+                    "--include",
+                    f"old:support={old_src}",
+                ],
+                catch_exceptions=False,
+            )
+        (request,) = captured
+        assert request.old.sources == old_sources
+        assert request.old.execution is not None
+        assert dict(request.include_labels) == {old_src: "support"}
 
 
 class TestCompareReleaseNotComparable:
@@ -367,23 +368,24 @@ class TestCompareReleaseNotComparable:
         new_dir = tmp_path / "new"
         old_dir.mkdir()
         new_dir.mkdir()
+        # Manifest translation-unit drift: a changed header set alone is API
+        # evolution, not a scope mismatch.
         a = tmp_path / "v1" / "a.h"
-        old_h = tmp_path / "v1" / "foo.h"
-        new_h = tmp_path / "v2" / "bar.h"
-        old_h.parent.mkdir(parents=True)
-        new_h.parent.mkdir(parents=True)
+        a.parent.mkdir(parents=True)
         a.write_text("int g(void);\n")
-        old_h.write_text("int f(void);\n")
-        new_h.write_text("int f(void);\n")
         old = AbiSnapshot(
             library="libtest.so",
             version="1.0",
-            contract=compute_extraction_contract(declared_headers=[a, old_h]),
+            contract=compute_extraction_contract(
+                declared_headers=[a], manifest_tu_scope='[{"name": "core"}]'
+            ),
         )
         new = AbiSnapshot(
             library="libtest.so",
             version="2.0",
-            contract=compute_extraction_contract(declared_headers=[a, new_h]),
+            contract=compute_extraction_contract(
+                declared_headers=[a], manifest_tu_scope='[{"name": "core2"}]'
+            ),
         )
         (old_dir / "libtest.json").write_text(snapshot_to_json(old), encoding="utf-8")
         (new_dir / "libtest.json").write_text(snapshot_to_json(new), encoding="utf-8")
@@ -424,7 +426,7 @@ class TestCompareReleaseNotComparable:
 
 class TestJsonReporterContractFields:
     """reporter.to_json's ADR-050 D2 (schema 2.17) contract_coverage/assurance
-    fields -- a unit test of _add_confidence_evidence directly, since neither
+    fields -- a unit test of add_confidence_evidence directly, since neither
     field is reachable through the CLI-level tests above (those exercise the
     hard-fail path, where no DiffResult is ever constructed, not an ordinary
     completed diff carrying one of these two fields)."""
@@ -504,7 +506,9 @@ class TestRefusalReachesEverySecondaryOutput:
         def _raise(*_a, **_kw):
             raise exc
 
-        monkeypatch.setattr("abicheck.service.compare_snapshots", _raise)
+        monkeypatch.setattr(
+            "abicheck.workflows.compare_policy.compare_snapshots", _raise
+        )
         args = ["compare", str(old_p), str(new_p)]
         for fmt, path in targets:
             args += ["-o", f"{fmt}={path}"]

@@ -25,7 +25,7 @@ mixes it with real policy algorithms (``compute_verdict``,
 every member here is a bare ``(name, value)`` pair plus a documentation
 comment, no policy logic at all -- so it moves cleanly.
 
-Assembled via the functional ``Enum()`` API from three sibling files
+Assembled via the functional ``StrEnum()`` API from three sibling files
 (``kind_names_1.py``/``kind_names_2.py``/``kind_names_3.py``), concatenated
 in that order, rather than declared as one class body: a single ~950-line
 class definition exceeds this repository's 800-line production file-size
@@ -53,7 +53,7 @@ three sibling files rather than deriving one from the other.
 
 The ``_missing_`` back-compat hook (accepting the pre-rename
 ``evidence_coverage_asymmetric`` serialized value) cannot be passed through
-the functional ``Enum()`` call directly -- that API only accepts member
+the functional ``StrEnum()`` call directly -- that API only accepts member
 names/values -- so it is attached by plain attribute assignment on the class
 *after* construction, not via a custom mixin type passed through ``type=``.
 A first version used a ``str`` subclass (``_ChangeKindBase``) as the mixin
@@ -65,7 +65,7 @@ representer lookup is exactly this -- then raises (``RepresenterError`` on
 ``isinstance(x, str)`` check still passed (a Codex review finding on this
 PR, reproduced directly before trusting it: confirmed the exact
 ``RepresenterError`` against the mixin version, confirmed it's gone with
-plain ``type=str``). Assigning ``_missing_`` after construction keeps
+plain ``type=str``; ``StrEnum`` keeps the same exact-``str`` values). Assigning ``_missing_`` after construction keeps
 ``.value`` an exact ``str`` while still working -- enum special-method
 lookup doesn't care whether the method was defined in the class body or
 attached afterward, verified directly (`_missing_` fires correctly, JSON
@@ -88,7 +88,7 @@ Leaf module: no internal imports beyond its three sibling data files
 
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 from typing import Protocol
 
 from .kind_names_1 import KIND_NAMES_1
@@ -102,10 +102,9 @@ _ALL_KIND_NAMES: tuple[tuple[str, str, str | None], ...] = (
 )
 
 
-ChangeKind = Enum(
+ChangeKind = StrEnum(
     "ChangeKind",
     [(name, value) for name, value, _comment in _ALL_KIND_NAMES],
-    type=str,
     module=__name__,
     qualname="ChangeKind",
 )

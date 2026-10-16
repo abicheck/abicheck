@@ -322,11 +322,16 @@ def build_castxml_command(
         cmd.append(f"--target={compile_unit.target_triple}")
     cmd += _replay_extra_flags(compile_unit, cmd, cc_id)
     cmd = castxml_parser_arguments(cmd)
+    # A C unit needs castxml's C emulation: in `--castxml-cc-gnu` mode castxml
+    # injects the emulated compiler's C++ `-std=gnu++NN`, which its parser
+    # rejects for a C source ("not allowed with 'C'"). The L2 header path
+    # picks the same mode for a C parse (`extract.headers.ast_config`).
+    emulation_id = "gnu-c" if cc_id == "gnu" and compile_unit.language == "C" else cc_id
     return [
         castxml_bin,
         "--castxml-output=1",
-        f"--castxml-cc-{cc_id}",
-        *emulated_compiler_command(cc_bin, cc_id, cmd),
+        f"--castxml-cc-{emulation_id}",
+        *emulated_compiler_command(cc_bin, emulation_id, cmd),
         *cmd,
         "-o",
         str(out_xml),
@@ -523,9 +528,13 @@ class CastxmlSourceExtractor:
         """
         # Imported lazily: the castxml parser pulls in the heavy dumper model
         # graph, which the lightweight evidence layer should not load eagerly.
+        from ...extract.declaration_provenance import (
+            build_public_set,
+            is_generated_header,
+            tag_provenance,
+        )
         from ...extract.headers.castxml.dumper import _CastxmlParser
         from ...model import EnumType, Function, RecordType, ScopeOrigin, Variable
-        from ...provenance import build_public_set, is_generated_header, tag_provenance
 
         # A public root may be a directory (`--headers include/`); split it from
         # file roots so a decl under the directory is classified public, not

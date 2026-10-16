@@ -44,14 +44,14 @@ from .contracts import (
     DEFAULT_REPORT_PREFIX,
     GateInfo,
     _LoadedReport,
-    _malformed_gate_report,
+    malformed_gate_report,
 )
 from .disposition_axis import disposition_audit_block
-from .gate import (
+from .no_baseline_load import load_no_baseline_report
+from .reconcile import ReportFindings, parse_report_findings
+from .report_gate import (
     _VALID_GATE_EXIT,
     COVERAGE_INCOMPLETE_EXIT,
-    _analysis_assurance_exit,
-    _contract_coverage_declared,
     _contract_coverage_exit,
     _contract_coverage_incomplete,
     _has_valid_run_outcome_block,
@@ -61,10 +61,10 @@ from .gate import (
     _run_outcome_compatibility_verdict,
     _run_outcome_gate_and_operational,
     _run_outcome_gate_exit_and_category,
+    analysis_assurance_exit,
     contract_coverage_blocks,
+    contract_coverage_declared,
 )
-from .no_baseline_load import load_no_baseline_report
-from .reconcile import ReportFindings, parse_report_findings
 from .scope_axis import (
     declares_null_compatibility,
     scope_completeness_exit,
@@ -352,7 +352,7 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
         try:
             _, error_gate_category = _run_outcome_gate_exit_and_category(data)
         except _MalformedGate as exc:
-            return _malformed_gate_report(
+            return malformed_gate_report(
                 target_id,
                 data.get("library"),
                 head_sha,
@@ -388,8 +388,8 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
             path=path,
             contract_coverage_exit=_contract_coverage_exit(data),
             contract_coverage_incomplete=_contract_coverage_incomplete(data),
-            contract_coverage_declared=_contract_coverage_declared(data),
-            analysis_assurance_exit=_analysis_assurance_exit(data),
+            contract_coverage_declared=contract_coverage_declared(data),
+            analysis_assurance_exit=analysis_assurance_exit(data),
             scope_completeness_exit=scope_completeness_exit(data),
             scope_completeness_incomplete=scope_completeness_incomplete(data),
             disposition_audit=disposition_audit_block(data),
@@ -442,7 +442,7 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
                 _run_outcome_gate_exit_and_category(data)
             )
         except _MalformedGate as exc:
-            return _malformed_gate_report(
+            return malformed_gate_report(
                 target_id,
                 data.get("library"),
                 head_sha,
@@ -483,9 +483,9 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
                 _contract_coverage_incomplete(data) or contract_axis == 1
             ),
             contract_coverage_declared=(
-                _contract_coverage_declared(data) or contract_declared
+                contract_coverage_declared(data) or contract_declared
             ),
-            analysis_assurance_exit=max(_analysis_assurance_exit(data), assurance_axis),
+            analysis_assurance_exit=max(analysis_assurance_exit(data), assurance_axis),
             scope_completeness_exit=scope_completeness_exit(data),
             scope_completeness_incomplete=scope_completeness_incomplete(data),
             disposition_audit=disposition_audit_block(data),
@@ -514,7 +514,7 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
             release_gate = GateInfo.from_report_data(data)
             run_outcome_pair = _run_outcome_gate_and_operational(data)
         except _MalformedGate as exc:
-            return _malformed_gate_report(
+            return malformed_gate_report(
                 target_id,
                 data.get("library"),
                 head_sha,
@@ -523,7 +523,7 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
             )
         contradiction = _not_comparable_contradiction_reason(run_outcome_pair)
         if contradiction is not None:
-            return _malformed_gate_report(
+            return malformed_gate_report(
                 target_id, data.get("library"), head_sha, path, contradiction
             )
         if release_gate is None:
@@ -550,8 +550,8 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
             path=path,
             contract_coverage_exit=_contract_coverage_exit(data),
             contract_coverage_incomplete=_contract_coverage_incomplete(data),
-            contract_coverage_declared=_contract_coverage_declared(data),
-            analysis_assurance_exit=_analysis_assurance_exit(data),
+            contract_coverage_declared=contract_coverage_declared(data),
+            analysis_assurance_exit=analysis_assurance_exit(data),
             scope_completeness_exit=scope_completeness_exit(data),
             scope_completeness_incomplete=scope_completeness_incomplete(data),
             disposition_audit=disposition_audit_block(data),
@@ -632,7 +632,7 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
             try:
                 run_outcome = _run_outcome_gate_and_operational(data)
             except _MalformedGate as exc:
-                return _malformed_gate_report(
+                return malformed_gate_report(
                     target_id,
                     data.get("library"),
                     head_sha,
@@ -641,7 +641,7 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
                 )
             contradiction = _not_comparable_contradiction_reason(run_outcome)
             if contradiction is not None:
-                return _malformed_gate_report(
+                return malformed_gate_report(
                     target_id, data.get("library"), head_sha, path, contradiction
                 )
             if run_outcome is not None:
@@ -676,8 +676,8 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
                 path=path,
                 contract_coverage_exit=_contract_coverage_exit(data),
                 contract_coverage_incomplete=_contract_coverage_incomplete(data),
-                contract_coverage_declared=_contract_coverage_declared(data),
-                analysis_assurance_exit=_analysis_assurance_exit(data),
+                contract_coverage_declared=contract_coverage_declared(data),
+                analysis_assurance_exit=analysis_assurance_exit(data),
                 scope_completeness_exit=scope_completeness_exit(data),
                 scope_completeness_incomplete=scope_completeness_incomplete(data),
                 disposition_audit=disposition_audit_block(data),
@@ -709,7 +709,7 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
         except _MalformedGate as exc:
             # Fail closed: a present-but-corrupt gate makes the target
             # unavailable (unknown), never silently the greener legacy path.
-            return _malformed_gate_report(
+            return malformed_gate_report(
                 target_id,
                 data.get("library"),
                 head_sha,
@@ -754,8 +754,8 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
         path=path,
         contract_coverage_exit=_contract_coverage_exit(data),
         contract_coverage_incomplete=_contract_coverage_incomplete(data),
-        contract_coverage_declared=_contract_coverage_declared(data),
-        analysis_assurance_exit=_analysis_assurance_exit(data),
+        contract_coverage_declared=contract_coverage_declared(data),
+        analysis_assurance_exit=analysis_assurance_exit(data),
         scope_completeness_exit=scope_completeness_exit(data),
         scope_completeness_incomplete=scope_completeness_incomplete(data),
         disposition_audit=disposition_audit_block(data),

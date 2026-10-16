@@ -115,7 +115,7 @@ def backfill_run_outcome(out: dict[str, Any]) -> None:
     ``compatibility`` verdict is recovered from the worst REAL per-library
     result via :func:`~abicheck.policy.outcome.worst_real_verdict` -- the
     same sentinel-excluding precision ``cli_compare_release_helpers.
-    _release_completed_compatibility_verdict`` gives a native release
+    fold_release_outcome`` gives a native release
     writer, reimplemented here since that helper lives in a `frontends`-
     classified module this leaf may not import -- rather than the raw
     top-level ``verdict`` alone, so a legacy release whose top-level
@@ -351,7 +351,7 @@ def backfill_run_outcome(out: dict[str, Any]) -> None:
         # entirely (Codex review, fresh evidence): a release produced before
         # `not_comparable_contribution`/`operational_error_contribution`
         # existed can still have a top-level or member verdict of
-        # `"not_comparable"`/`"ERROR"` (`_RELEASE_OPERATIONAL_SENTINELS`),
+        # `"not_comparable"`/`"ERROR"` (`RELEASE_OPERATIONAL_SENTINELS`),
         # and forwarding that legacy `exit` block unchanged left `run_
         # outcome.operational: none` despite a library having failed or
         # refused comparison -- unlike the native writer, which always

@@ -11,16 +11,7 @@ from click.testing import CliRunner
 
 from abicheck.binary_utils import build_match_map as _build_match_map
 from abicheck.cli import main
-from abicheck.cli_compare_release import (
-    _discover_include_roots,
-    _format_release_json,
-    _prepare_compare_release_inputs,
-)
-from abicheck.cli_helpers_compare import (
-    _canonical_library_key,
-    _version_sort_key,
-    strip_vendor_hash,
-)
+from abicheck.frontends.cli.release_report import render_release_summary
 from abicheck.model import (
     AbiSnapshot,
     Function,
@@ -29,9 +20,16 @@ from abicheck.model import (
     TypeField,
     Visibility,
 )
+from abicheck.model.binary_naming import strip_vendor_hash
 from abicheck.serialization import snapshot_to_json
 from abicheck.workflows.extraction import (
+    _canonical_library_key,
+    _version_sort_key,
     is_supported_compare_input as _is_supported_compare_input,
+)
+from abicheck.workflows.release_inputs import (
+    discover_include_roots as _discover_include_roots,
+    prepare_release_inputs as _prepare_compare_release_inputs,
 )
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -818,7 +816,8 @@ class TestDirVsDir:
         findings_by_kind = {f["kind"]: f for f in lib["findings"]}
         assert findings_by_kind["func_added"]["symbol"] == "_Z6new_apiv"
         assert findings_by_kind["func_added"]["bucket"] == "addition"
-        assert findings_by_kind["public_surface_grew"]["bucket"] == "quality_issues"
+        # ADR-078: an aggregate roll-up is informational, still listed.
+        assert findings_by_kind["public_surface_grew"]["bucket"] == "informational"
 
     def test_breaking_overrides_api_break(self, tmp_path: Path) -> None:
         """Aggregate verdict is BREAKING even when another lib has API_BREAK."""
@@ -1679,7 +1678,8 @@ def test_release_json_emits_severity_block() -> None:
     from abicheck.policy.severity import resolve_severity_config
 
     cfg = resolve_severity_config("default", addition="error")
-    out = _format_release_json(
+    out = render_release_summary(
+        "json",
         "COMPATIBLE",
         Path("/o"),
         Path("/n"),
@@ -1689,8 +1689,8 @@ def test_release_json_emits_severity_block() -> None:
         {},
         {},
         [],
-        None,
-        None,
+        bundle_result=None,
+        matrix_result=None,
         severity_config=cfg,
         severity_exit_code=1,
     )
@@ -1700,7 +1700,8 @@ def test_release_json_emits_severity_block() -> None:
 
 
 def test_release_json_omits_severity_block_without_config() -> None:
-    out = _format_release_json(
+    out = render_release_summary(
+        "json",
         "COMPATIBLE",
         Path("/o"),
         Path("/n"),
@@ -1710,8 +1711,8 @@ def test_release_json_omits_severity_block_without_config() -> None:
         {},
         {},
         [],
-        None,
-        None,
+        bundle_result=None,
+        matrix_result=None,
     )
     assert "severity" not in json.loads(out)
 

@@ -46,8 +46,7 @@ apply it that way. It moved here once ``reporter.to_json``/``to_stat_json``
 themselves gained a real ``contract_evaluation`` parameter, threaded from
 the CLI the same way ``severity_config``/``show_only`` already were -- the
 other inputs the fold needs (``used_by``, ``required_symbols``, and every
-``scoped_*`` ``DiffResult`` attribute ``cli_helpers_compare.py``/
-``cli_compare_helpers.py`` stamp before rendering) were already plain
+``scoped_*`` ``DiffResult`` attribute ``cli_compare_helpers.py`` stamp before rendering) were already plain
 attributes read off *result* via ``getattr``, so nothing about *how* they
 reach this fold changed -- only *when* the fold itself runs.
 ``cli_compare_fold._fold_scoped_compat_into_text``'s JSON branch is now a
@@ -97,7 +96,7 @@ class ScopedGateChangeHelpers:
 
     Supplied by the caller (``reporter_contract_blocks.
     render_json_with_side_facts``, via ``reporter.py``'s own
-    :data:`~abicheck.reporter._SCOPED_GATE_HELPERS`) rather than resolved
+    :data:`~abicheck.json_sections.SCOPED_GATE_HELPERS`) rather than resolved
     here via ``importlib`` -- see this module's own docstring for why.
     """
 
@@ -153,7 +152,7 @@ def apply_scoped_gate(
     """Fold ``--used-by``/``--required-symbol(s)`` *enrichment* into *payload*.
 
     No-op unless *result* carries a stamped ``used_by``/``required_symbols``
-    (set by ``cli_helpers_compare.py`` before rendering ever starts) --
+    (set by ``cli_compare_helpers.py`` before rendering ever starts) --
     every other caller of ``to_json``/``to_stat_json`` is unaffected.
 
     Workstream D-S1: ``verdict``/``severity``/``run_outcome``/``summary`` are
@@ -268,10 +267,8 @@ def _fold_findings_into_changes(
     summary counts are recomputed afterwards from the now-complete array.
     """
     from ..model.evidence_status import EvidenceStatus, ReachabilityState
-    from ..reporter_markdown import (
-        apply_show_only,
-        root_cause_evidence_lookup_for_changes,
-    )
+    from ..reporter_markdown import root_cause_evidence_lookup_for_changes
+    from .view import apply_show_only
 
     _add_entries_to_root_causes = helpers.add_entries_to_root_causes
     _change_to_dict = helpers.change_to_dict

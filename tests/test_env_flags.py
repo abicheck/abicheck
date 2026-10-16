@@ -153,6 +153,9 @@ READERS: dict[str, Callable[[], bool]] = {
     "ABICHECK_SIDE_PROCESSES": lambda: __import__(
         "abicheck.workflows.side_isolation", fromlist=["x"]
     ).side_processes_enabled(),
+    "ABICHECK_SNAPSHOT_CACHE_WRITE": lambda: __import__(
+        "abicheck.workflows.dump.cache.store", fromlist=["x"]
+    )._write_enabled(),
     "ABICHECK_PROGRESS": lambda: __import__(
         "abicheck.extract.progress", fromlist=["enabled_by_env"]
     ).enabled_by_env(),

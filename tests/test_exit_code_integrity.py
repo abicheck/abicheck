@@ -76,7 +76,7 @@ def _exit_code_of(callable_, *args, **kwargs) -> int:
 
 @pytest.mark.parametrize("worst", ["BREAKING", "API_BREAK", "COMPATIBLE", "NO_CHANGE"])
 def test_compare_release_flow_matches_canonical(worst: str) -> None:
-    from abicheck.cli_compare_release import _exit_compare_release
+    from abicheck.frontends.cli.release_exit import _exit_compare_release
 
     got = _exit_code_of(
         _exit_compare_release, worst, False, [], severity_exit_code=None
@@ -101,7 +101,7 @@ def test_compare_flow_matches_canonical() -> None:
 
 def test_compare_and_release_agree_for_each_verdict() -> None:
     # The cross-flow guarantee: identical verdict → identical exit code.
-    from abicheck.cli_compare_release import _exit_compare_release
+    from abicheck.frontends.cli.release_exit import _exit_compare_release
 
     for v in (
         Verdict.BREAKING,
@@ -125,7 +125,7 @@ class TestReleaseContractCoverageFold:
     "не смешивая его с entity contract relevance")."""
 
     def test_raises_a_clean_compatible_exit_to_one(self) -> None:
-        from abicheck.cli_compare_release import _exit_compare_release
+        from abicheck.frontends.cli.release_exit import _exit_compare_release
 
         code = _exit_code_of(
             _exit_compare_release,
@@ -138,7 +138,7 @@ class TestReleaseContractCoverageFold:
         assert code == 1
 
     def test_never_lowers_a_real_breaking_exit(self) -> None:
-        from abicheck.cli_compare_release import _exit_compare_release
+        from abicheck.frontends.cli.release_exit import _exit_compare_release
 
         code = _exit_code_of(
             _exit_compare_release,
@@ -154,7 +154,7 @@ class TestReleaseContractCoverageFold:
         # A removed library's own exit 8 is checked ahead of the
         # coverage-only fallback -- the same precedence the pre-existing
         # severity-scheme branch already gives fail_on_removed.
-        from abicheck.cli_compare_release import _exit_compare_release
+        from abicheck.frontends.cli.release_exit import _exit_compare_release
 
         code = _exit_code_of(
             _exit_compare_release,
@@ -167,7 +167,7 @@ class TestReleaseContractCoverageFold:
         assert code == 8
 
     def test_error_verdict_still_floors_at_four_with_coverage_folded(self) -> None:
-        from abicheck.cli_compare_release import _exit_compare_release
+        from abicheck.frontends.cli.release_exit import _exit_compare_release
 
         code = _exit_code_of(
             _exit_compare_release,
@@ -180,7 +180,7 @@ class TestReleaseContractCoverageFold:
         assert code == 4
 
     def test_severity_scheme_folds_coverage_too(self) -> None:
-        from abicheck.cli_compare_release import _exit_compare_release
+        from abicheck.frontends.cli.release_exit import _exit_compare_release
 
         code = _exit_code_of(
             _exit_compare_release,
@@ -193,7 +193,7 @@ class TestReleaseContractCoverageFold:
         assert code == 1
 
     def test_severity_scheme_removed_library_still_wins(self) -> None:
-        from abicheck.cli_compare_release import _exit_compare_release
+        from abicheck.frontends.cli.release_exit import _exit_compare_release
 
         code = _exit_code_of(
             _exit_compare_release,
@@ -213,7 +213,7 @@ class TestReleaseContractCoverageFold:
         # pre-existing exit code exactly -- this is what
         # test_compare_release_flow_matches_canonical already asserts
         # without the new keyword; this locks the explicit-zero case too.
-        from abicheck.cli_compare_release import _exit_compare_release
+        from abicheck.frontends.cli.release_exit import _exit_compare_release
 
         code = _exit_code_of(
             _exit_compare_release,
@@ -240,7 +240,7 @@ class TestReleaseExitDecisionForReportAgreesWithRealExit:
         "worst", ["BREAKING", "API_BREAK", "COMPATIBLE", "NO_CHANGE"]
     )
     def test_agrees_for_each_verdict_legacy_scheme(self, worst: str) -> None:
-        from abicheck.cli_compare_release import _exit_compare_release
+        from abicheck.frontends.cli.release_exit import _exit_compare_release
         from abicheck.workflows.gate import resolve_release_exit_decision_for_report
 
         real = _exit_code_of(
@@ -252,7 +252,7 @@ class TestReleaseExitDecisionForReportAgreesWithRealExit:
         assert mine.code == real
 
     def test_agrees_removed_library_wins_over_coverage_only(self) -> None:
-        from abicheck.cli_compare_release import _exit_compare_release
+        from abicheck.frontends.cli.release_exit import _exit_compare_release
         from abicheck.workflows.gate import resolve_release_exit_decision_for_report
 
         real = _exit_code_of(
@@ -269,7 +269,7 @@ class TestReleaseExitDecisionForReportAgreesWithRealExit:
         assert mine.code == real == 8
 
     def test_agrees_error_verdict_floors_at_four_with_coverage(self) -> None:
-        from abicheck.cli_compare_release import _exit_compare_release
+        from abicheck.frontends.cli.release_exit import _exit_compare_release
         from abicheck.workflows.gate import resolve_release_exit_decision_for_report
 
         real = _exit_code_of(
@@ -286,7 +286,7 @@ class TestReleaseExitDecisionForReportAgreesWithRealExit:
         assert mine.code == real == 4
 
     def test_agrees_severity_scheme_folds_coverage(self) -> None:
-        from abicheck.cli_compare_release import _exit_compare_release
+        from abicheck.frontends.cli.release_exit import _exit_compare_release
         from abicheck.workflows.gate import resolve_release_exit_decision_for_report
 
         real = _exit_code_of(
@@ -303,7 +303,7 @@ class TestReleaseExitDecisionForReportAgreesWithRealExit:
         assert mine.code == real == 1
 
     def test_agrees_severity_scheme_removed_library_wins(self) -> None:
-        from abicheck.cli_compare_release import _exit_compare_release
+        from abicheck.frontends.cli.release_exit import _exit_compare_release
         from abicheck.workflows.gate import resolve_release_exit_decision_for_report
 
         real = _exit_code_of(
@@ -320,7 +320,7 @@ class TestReleaseExitDecisionForReportAgreesWithRealExit:
         assert mine.code == real == 8
 
     def test_agrees_not_comparable(self) -> None:
-        from abicheck.cli_compare_release import _exit_compare_release
+        from abicheck.frontends.cli.release_exit import _exit_compare_release
         from abicheck.workflows.gate import resolve_release_exit_decision_for_report
 
         real = _exit_code_of(_exit_compare_release, "not_comparable", False, [])
@@ -337,7 +337,7 @@ class TestReleaseExitDecisionForReportAgreesWithRealExit:
         identical either way, since ERROR's floor and BREAKING's own code
         both cap at 4. This resolver additionally names both reasons.
         """
-        from abicheck.cli_compare_release import _exit_compare_release
+        from abicheck.frontends.cli.release_exit import _exit_compare_release
         from abicheck.workflows.gate import resolve_release_exit_decision_for_report
 
         real = _exit_code_of(
@@ -363,7 +363,7 @@ class TestReleaseExitDecisionForReportAgreesWithRealExit:
         resolver did) found `0` while `_exit_compare_release` exits `4`
         from the same `worst_verdict`.
         """
-        from abicheck.cli_compare_release import _exit_compare_release
+        from abicheck.frontends.cli.release_exit import _exit_compare_release
         from abicheck.workflows.gate import resolve_release_exit_decision_for_report
 
         real = _exit_code_of(
@@ -385,7 +385,7 @@ class TestReleaseExitDecisionForReportAgreesWithRealExit:
         """Codex review, fresh evidence: one library `not_comparable` and a
         *different* library `ERROR` collapses `worst_verdict` to
         `"not_comparable"` (it outranks `"ERROR"` in
-        `_RELEASE_VERDICT_ORDER`). `.code` is correctly `16` either way, but
+        `RELEASE_VERDICT_ORDER`). `.code` is correctly `16` either way, but
         an earlier revision computed `operational_error_contribution` from
         `worst_verdict == "ERROR"` alone, reading `0` and silently dropping
         the real operational failure from the persisted decision even
@@ -428,7 +428,7 @@ class TestReleaseExitDecisionForReportAgreesWithRealExit:
         `library_results` (see `_compute_release_legacy_exit_code`'s own
         docstring) -- it only ever reaches this resolver through the
         already-collapsed `worst_verdict`. When an unrelated library's
-        `"ERROR"` outranks that same `BREAKING` in `_RELEASE_VERDICT_ORDER`,
+        `"ERROR"` outranks that same `BREAKING` in `RELEASE_VERDICT_ORDER`,
         `worst_verdict` becomes `"ERROR"` and the release-global break is
         gone from both inputs. `.code` still comes out `4` either way (the
         `ERROR` floor), but without `release_global_verdict` passed through
@@ -454,34 +454,40 @@ class TestReleaseExitDecisionForReportAgreesWithRealExit:
         assert "operational_error" in mine.reasons
 
 
+def _release_global_verdict(bundle: Any, matrix: Any) -> str:
+    from abicheck.policy.release_outcome import (
+        fold_release_outcome,
+        release_global_verdicts,
+    )
+
+    return fold_release_outcome(
+        (), release_global_verdicts(bundle, matrix)
+    ).global_verdict
+
+
 class TestReleaseGlobalVerdict:
-    """`cli_compare_release_helpers._release_global_verdict` -- the
+    """`policy.release_outcome.fold_release_outcome(...).global_verdict` -- the
     uncollapsed bundle/probe-matrix verdict `resolve_release_exit_decision_
     for_report` needs independently of `worst_verdict` (Codex review, fresh
     evidence, second round)."""
 
     def test_no_bundle_or_matrix_is_no_change(self) -> None:
-        from abicheck.cli_compare_release_helpers import _release_global_verdict
-
         assert _release_global_verdict(None, None) == "NO_CHANGE"
 
     def test_bundle_verdict_alone(self) -> None:
         from abicheck.checker_policy import Verdict
-        from abicheck.cli_compare_release_helpers import _release_global_verdict
 
         bundle = cast(Any, SimpleNamespace(bundle_verdict=Verdict.BREAKING))
         assert _release_global_verdict(bundle, None) == "BREAKING"
 
     def test_matrix_verdict_alone(self) -> None:
         from abicheck.checker_policy import Verdict
-        from abicheck.cli_compare_release_helpers import _release_global_verdict
 
         matrix = cast(Any, SimpleNamespace(verdict=Verdict.API_BREAK))
         assert _release_global_verdict(None, matrix) == "API_BREAK"
 
     def test_the_worse_of_bundle_and_matrix_wins(self) -> None:
         from abicheck.checker_policy import Verdict
-        from abicheck.cli_compare_release_helpers import _release_global_verdict
 
         bundle = cast(Any, SimpleNamespace(bundle_verdict=Verdict.COMPATIBLE))
         matrix = cast(Any, SimpleNamespace(verdict=Verdict.BREAKING))

@@ -3,7 +3,7 @@
 
 """One completed evaluation -> one envelope -> every format (ADR-061 gap C).
 
-``report/build.py`` already gave every output format one shared *document*
+``report/document_builder.py`` already gave every output format one shared *document*
 build. What it did not give them was one shared *build call*:
 ``service_render.render_output`` still dispatched the ``DiffResult``, the
 snapshots, the severity configuration and the presentation options down six
@@ -18,7 +18,7 @@ exactly what ADR-061's gap C says, and what
 ``ReportEnvelope`` names as the missing single document.
 
 :class:`ReportEnvelope` is that document. Its builder,
-``report.build.build_report_envelope``, runs **once per completed evaluation,
+``report.document_builder.build_report_envelope``, runs **once per completed evaluation,
 above format selection**, and resolves every decision a format could
 otherwise reach for on its own:
 
@@ -61,7 +61,7 @@ new ones:
 
 This module is deliberately a **leaf** -- the envelope type, the presentation
 options, and the two ``resolved_*`` accessors, nothing that builds anything.
-The builder lives in ``report/build.py`` beside the document build it
+The builder lives in ``report/document_builder.py`` beside the document build it
 composes, because ``build.py`` reaches back into the still-flat
 ``reporter.py`` for its ``_add_*`` helpers, and ``reporter.py`` reaches
 ``report/dispatch_markdown.py``, which needs this envelope type: an
@@ -210,7 +210,7 @@ class ReportEnvelope:
         Every change the completed evaluation already resolved is *read* from
         this envelope, never re-decided. The one case that cannot be is a
         change object the display layer itself created:
-        ``report_correlation._suppress_dangling_correlation_notes`` hands a
+        ``report_correlation.suppress_dangling_correlation_notes`` hands a
         renderer shallow *copies* of the changes whose correlation note would
         dangle under ``--show-only``, and a copy is a different object with no
         entry in the index. Those are resolved individually through the same

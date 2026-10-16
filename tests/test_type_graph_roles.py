@@ -36,7 +36,6 @@ import subprocess
 
 import pytest
 
-from abicheck.buildsource.inline_graph_fold import ROLE_COVERAGE_MATRIX
 from abicheck.buildsource.type_graph import (
     CONF_HIGH,
     EDGE_DECL_HAS_TYPE,
@@ -47,6 +46,7 @@ from abicheck.buildsource.type_graph import (
     _declares_anonymous_enum_type,
     parse_clang_ast_types,
 )
+from abicheck.model.source_graph_coverage import ROLE_COVERAGE_MATRIX
 
 # ── fixture builders (real clang AST shapes, verified by the integration
 #    tests at the bottom of this file) ────────────────────────────────────

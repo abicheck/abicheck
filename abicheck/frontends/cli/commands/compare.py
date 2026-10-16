@@ -26,14 +26,6 @@ from typing import TYPE_CHECKING, Any
 
 import click
 
-from ....cli_helpers_compare import (  # noqa: F401  — re-exported to keep cli import sites stable
-    _canonical_library_key as _canonical_library_key,
-    _collect_force_public_symbols as _collect_force_public_symbols,
-    _merge_redundant_changes as _merge_redundant_changes,
-    _provenance_timestamp as _provenance_timestamp,
-    _version_sort_key as _version_sort_key,
-    _warn_ignored_flags as _warn_ignored_flags,
-)
 from ....cli_options import (
     LANG_DEFAULT,
     abi3_option,
@@ -69,9 +61,7 @@ if TYPE_CHECKING:
 
 
 from ....cli import main
-from ..runtime import (
-    _validate_view,
-)
+from ..options.compare_view import validate_view
 
 #: `oneline` and `html` render the aggregate release document alone
 #: (`report/release_oneline.py`, `report/render_release_html.py`); the two still
@@ -147,7 +137,7 @@ from .compare_routing import _RELEASE_FORMATS
     "--view",
     "view",
     multiple=True,
-    callback=_validate_view,
+    callback=validate_view,
     expose_value=True,
     metavar="TOKEN",
     help="Repeatable rendering selector: never changes the "
@@ -460,9 +450,9 @@ def compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
     )
 
     # ADR-068 D4/Phase 5, rewritten by plan slice 7o: resolve --view
-    # (frontends.cli.options.view) into the two dest names it still carries,
+    # (frontends.cli.options.compare_view) into the two dest names it still carries,
     # report_mode/show_only. No profile injects those dests.
-    from ..options.view import parse_view_tokens
+    from ..options.compare_view import parse_view_tokens
 
     kwargs.update(parse_view_tokens(kwargs.pop("view", ())))
 

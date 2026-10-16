@@ -16,6 +16,390 @@ re-verification status line (2026-10-09, `456989f`). Do not re-open an
 entry from here without reproducing it on current `main`; record a new
 gap on the main page instead.
 
+### Opaque-type suppression fell back to bare RecordType.name when stable identities were incomplete (closed 2026-10-14)
+
+**Status (2026-10-14): CLOSED.** Both remaining mechanical parts are fixed. `find_by_value_types`'s leaf widening now applies C++ unqualified lookup (`compare/opaque_leaf_lookup.py`): a bare leaf reference written inside a known scope does not expose `ns::Handle` when the snapshot declares a same-leaf type in a scope that lookup reaches first; with no such declaration, or no known scope, the reference stays exposed. `find_opaque_struct_types`' asymmetric-existence rule now pairs a forward declaration with a definition under either spelling (`name` or `qualified_name`), so a DWARF forward declaration keyed `ns::Handle` and a header definition keyed `Handle`/`ns::Handle` (or the reverse) are no longer read as "absent", and a visible declaration's `qualified_name` also blocks the spelling tier. Accepted by design, not a gap: a change with no identity whose spelling is shared only by opaque declarations is suppressed by spelling, since no identity or visible namesake contradicts it. Regression: `tests/test_opaque_leaf_lookup.py`.
+
+[Full write-up](../known-gaps/opaque-type-suppression-still-falls-back-to-bare-recordtypename.md)
+
+### A snapshot's `build_mode` is captured only for ELF, and only from the main image (closed 2026-10-14)
+
+**Status (2026-10-14): CLOSED.** `comparability_profile.check_build_mode_comparable` bounds a run whose two snapshots record different known compiler families (non-fatal; `layout`/`runtime` unverified plus a `coverage_warnings` reason; unrecorded or `unknown` on either side is not a mismatch). `extract/build_mode_capture.py` reads the producer from the dump's detached debug file when the ELF main image has none, and from a Mach-O `__DWARF` segment (object, dSYM) via `extract/macho_build_signals.py`. PE stays `None` by design: no reliable compiler-family signal.
+
+[Full write-up](../known-gaps/a-snapshots-build-mode-is-captured-only-for-elf-and-only-from.md)
+
+### `Function.elf_binding`/`Variable.elf_binding` (and the pre-existing `elf_visibility`) collapsed mixed bindings across symbol-versioned aliases (closed 2026-10-12)
+
+**Status (2026-10-12): CLOSED.** Every ELF reader that compared a binding, visibility, size, COMMON or UNIQUE state, origin, or presence per bare name now pairs symbol-versioned aliases by version tag (`compare/elf_alias_pairs.py`, `ElfMetadata.symbol_aliases`, `ElfMetadata.unambiguous_symbol`). Nothing under `abicheck/` reads `symbol_map` any more, and a repo-scan test keeps it that way. Unpairable leftovers are recorded as declined comparisons, not dropped.
+
+[Full write-up](../known-gaps/functionelf-bindingvariableelf-binding-and-the-pre-existing-elf.md)
+
+### The header-graph parse picks C mode for C++ headers without a recognised C++ construct (closed 2026-10-12)
+
+**Status (2026-10-12): CLOSED.** With no explicit `--lang`, the header graph's own clang parse now follows the language mode the primary pass resolved from header text and the binary's mangled exports (`ast_toolchain["resolved_lang_mode"]`, or a hybrid merge's agreeing legs -> `clang_header_dump(resolved_lang_mode=...)`); a prefetched parse that ran or failed as C under a C++ decision is re-parsed once. `tests/test_header_graph_language_mode.py` covers four C++ headers with no textual C++ marker and two C controls, under the castxml, clang and hybrid frontends.
+
+[Full write-up](../known-gaps/header-graph-parse-picks-c-mode-for-cxx-headers.md)
+
+### A typed release compare did not record the gate on its members (closed 2026-10-12)
+
+**Status (2026-10-12): CLOSED.** A release run through the typed workflow (`workflows.release_compare.execute_release_compare`) without a `pack_application` now resolves its own configuration. It uses the resolver the CLI's release route and the scalar compare share, `workflows.compare_configuration.resolve_release_pack_application`. The plan's gate, the policy, the suppression and the project overrides are stated at the `API_REQUEST`/`PROJECT_CONFIG` tiers, so each member records the gate the identical typed scalar compare records. The CLI route now goes through the same function and supplies only its own inputs. Regression: `tests/test_release_compare_workflow.py`'s `severity_strict` cells, previously a strict xfail, pass for cardinality 1–3. The former write-up is [here](../known-gaps/a-typed-release-compare-does-not-record-the-gate-on-its-members.md).
+
+### An informational, no-material-change reconciliation outcome gated the build under `--severity-preset strict` (closed 2026-10-12)
+
+**Status (2026-10-12): CLOSED.** ADR-078 gives these findings a home of their own. `ChangeKindMeta.is_informational` marks a kind whose finding records that nothing a consumer can act on changed. Two shapes qualify: a reconciliation that proves a declaration identical (`declaration_identity_unchanged`, `declaration_coordinates_shifted`), and an aggregate roll-up of findings that are each reported and gated on their own (`public_surface_grew`, `public_surface_shrank`). The flag derives `INFORMATIONAL_KINDS`, a third COMPATIBLE sub-partition beside `ADDITION_KINDS` and `QUALITY_KINDS`. The partition is asserted at import, by `changekind-partition`, and by the tests. Those findings land in `IssueCategory.INFORMATIONAL`, which has no `SeverityConfig` field. Its level is fixed at `info`, so no preset or override gates on it. The findings stay in every report: `summary.informational`, `severity.categories.informational`, a Markdown section, the release count and bucket, and the PR comment, which no longer says "Quality policy violation" for them. `summary.quality_issues` narrows, so the report schema is now 6.0 and the release schema 2.0. Regression test: `tests/test_informational_never_gates.py`. Through the CLI it covers every informational kind under every preset and the legacy scheme, the full `quality_issues`×`addition` level domain, and every COMPATIBLE kind under `strict` as a control. It also covers the whole `SeverityConfig` domain through the typed API, and the catalog validation. Kinds deliberately left in `quality_issues` (hardening improvements, metadata drift, `typedef_version_sentinel`, `abi_surface_explosion`) are listed with the reasons in ADR-078 D2.
+
+[Full write-up](../known-gaps/an-informational-no-material-change-reconciliation-outcome.md)
+
+### The structural source-graph diff was role-blind (closed 2026-10-12)
+
+**Status (2026-10-12): CLOSED.** `buildsource/source_graph_compare.py::diff_source_graph` now matches edges on their full identity (`GraphEdge.relation_key()`: src, dst, kind, role). The coarse `added_edges`/`removed_edges` keep ADR-046 D1's `(src, dst, kind)` promise. A dependency kept on both sides with a different role set is a new `changed_edges` entry (ADR-077 D4's changed-relation result, role half), never a removed+added pair, so `param` -> `return` and a second role added beside an existing one both surface. One side carrying role-less edges for that dependency (a graph stored before roles were stamped) goes to `role_unknown_edges`, a coverage gap, never a change. `GraphEdge.role` is now the one reader of an edge's role: `relation_key()`, `source_graph_findings`, `graph_reconcile` and `graph_impact` all go through it. Findings (`policy/source_graph_role_findings.py`): a public entry's comparable role change is `public_dependency_role_changed` (RISK, like every L5 graph finding); a non-comparable one, or a role only one side's producer examined, is `public_dependency_role_unknown` (COMPATIBLE coverage note, one per edge kind). Identical graphs diff empty. No default, schema version or exit code changed. Regression: `tests/test_source_graph_role_diff.py`, an exhaustive domain of role-set transitions (size 0-2 over each role-bearing kind's roles plus the role-less case) against a raw `relation_key()` oracle, plus real C libraries through `abicheck dump`/`compare`; bug class `identity.edge_matched_on_coarse_key`. The former write-up is [here](../known-gaps/source-graph-structural-diff-is-role-blind.md).
+
+### The default L2 header projection drops template/override/callback facts (closed 2026-10-12)
+
+**Status (2026-10-12): CLOSED.** `buildsource/semantic_fact_folds.py` is the one owner that parses, merges and folds the override, template and callback families for both the L5 pass and the default L2 header pass; the header projection (whole-tree, streamed, cached) carries them from the same parse and stamps `header_*` passes, and a graph that never ran a family is a coverage gap in `diff_source_graph`, not a removal. Headers-only == L5 parity is asserted on four C++ fixtures (`tests/test_header_graph_semantic_facts.py`).
+
+[Full write-up](../known-gaps/l2-header-projection-drops-template-override-callback-facts.md)
+
+### `unversioned_exported_symbol` false-positives on base-version (VER_FLG_BASE) symbols of versioned libraries (closed 2026-10-12)
+
+**Status (2026-10-12): CLOSED.** The model now records which `.gnu.version` node an export is bound to: `ElfSymbol.version_binding` (`model/elf_facts.ElfVersionBinding`: `base`, `unversioned`, `named`, `unknown`), filled by `extract/elf_symbol_versions.py` (index 1 with a `VER_FLG_BASE` definition is `base`; no `.gnu.version`, index 0, or index 1 without a base definition is `unversioned`; an unreadable table or dangling index stays `unknown`). `ElfSymbol.version` is unchanged, so no other detector's reading of `version == ""` moved. `_check_unversioned_exported_symbol` flags only `unversioned`; an `unknown` binding (a pre-v58 snapshot) is never flagged and turns the check's coverage row `partial`, so the evolution stage reads that side as not evaluated. Snapshot schema v58 persists the field only where `version` cannot say it; an absent key decodes as `named` when `version` is set and `unknown` otherwise (v57 is a retired number and is refused). PE/Mach-O are untouched: the check skips them as before. The realworld zlib smoke now asserts no `unversioned_exported_symbol` finding (41 before the fix on Ubuntu's `libz.so.1.3`). Regression: `tests/test_unversioned_exported_symbol.py` (real gcc libraries linked by GNU ld, gold and lld with version scripts -- base-only, base plus named, an index-0 export inside a versioned library, an unversioned library -- checked through `compare` against `objdump -T` as the oracle), bug class `evidence.distinct_encoded_states_collapsed_to_one_value`. What this does not change: an export a version script forgot to name is bound to the base version by every linker tested, so it is indistinguishable from intended base API in the binary and is not flagged; only an index-0 export (no linker tested emits one) is. The former write-up is [here](../known-gaps/unversioned-exported-symbol-false-positives-on-base-version-ver.md).
+
+### A lost return-pointee qualifier was judged by the C++ conversion rule, not C's (closed 2026-10-11)
+
+**Status (2026-10-11): CLOSED.** `compare/parameter_facts.py`'s `_qualification_converts` now takes the C rule (C11 6.5.16.1: only the first pointed-to type may gain qualifiers, deeper levels must match) for a function C can call -- C linkage or an unmangled name (`diff_symbols._c_callable`) -- and keeps C++ [conv.qual] for a C++-only (mangled) one. So `const char * const *f()` -> `char * const *f()` is `func_return_pointee_qualifier_changed` (API break) for a C library and stays the `_removed` risk for a C++-only function. Checked against the compilers: `tests/test_return_pointee_qualifier_compiler_integration.py` runs a gcc `-x c` matrix (also under clang) beside the g++ one, and `tests/test_header_backend_parity_probes_integration.py` runs real C libraries through both header backends. The former write-up is [here](../known-gaps/return-pointee-qualifier-loss-is-judged-by-the-c-plus-plus-conversion-rule.md).
+
+### `--exclude-header` cannot stop a transitively-included header being analyzed (closed 2026-10-11)
+
+**Status (2026-10-11): CLOSED.** Already fixed in code before this re-verification: the exclusion is honoured post-parse by declaring header, not only on the parse roots. `extract/header_exclusions.py::scoping_header_predicate` widens the dump's dependency scope (`workflows/dump/dependency_scope.py`) so a declaration whose `source_header` matches a pattern is scoped out like a toolchain header's, for both castxml and clang (each records the declaring file); `workflows/header_exclusion_audit.py` records a pattern as achieved when it matched only a transitively reached header. The headers are still parsed, so types the public header needs still resolve. Decision for a public declaration whose *type* lives in an excluded header: the type is kept and checked (direct-reference retention, same as a toolchain type a public signature names), because its layout is part of the public ABI. Disposition stays recorded (ADR-067): a `coverage_warnings` line names the excluded patterns, edge coverage carries `dependency_headers_excluded`, and an exported symbol declared only in an excluded header is reported as `exported_not_public` naming that header. No schema, default or exit code changed. Regression: `tests/test_exclude_header_transitive_integration.py` (public.h includes internal.h; internal-only layout/enum change reported without the flag, not with it; a public.h break still exits 4 with it; castxml and clang over g++-built libs), alongside `tests/test_exclude_header_dependency_scope.py` and the embedded-type case in `tests/test_checkout_root_independence_integration.py`. Out of scope: `dump --include-system-declarations` (full dependency scope) does not apply the transitive half, by that flag's own contract.
+
+[Full write-up](../known-gaps/exclude-header-cannot-stop-a-transitively-included-header-being.md)
+
+### A directory `compare` still feeds the union `-H` set to every member (no per-member header operand) (closed 2026-10-11, step 2 reopened 2026-10-12)
+
+**Status (2026-10-12): step 2 REOPENED.** The per-member header operand below was reverted: it broke oneDAL releases (three of four members refused, exit 4 to 16). Only the verdict half of step 3 stays closed. The description that follows is the 2026-10-11 landing and is kept as history. The live entry is in [known-gaps](../known-gaps.md).
+
+**Status (2026-10-11, as landed): CLOSED.** Both remaining items landed. (1) Step 2: each member of a directory/package `compare` is parsed with the headers it claims, not the union. `workflows/release_member_headers.py` reads every header once and every member's ELF export table once, and assigns a header to the members whose exported names appear in it as identifiers. The per-member operand rides the existing request path as optional `MemberDelta` header fields (`workflows/release_member_request.py`); there is no second path, and the scalar single-pair path is untouched. Each rule errs toward the union: a header no member claims reaches every member, and a member that claims nothing, or whose export table cannot be read (PE/Mach-O today), keeps the whole union. A `-H` directory is expanded for the assignment and stays that member's include root and public-header directory. This removes the per-member union walk. (2) The verdict half of step 3: once every member has been compared, a type that a member's own evidence proves unreachable (`proven_unreachable`) leaves that member's verdict, counts and exit contribution, but only when a sibling member's exports reach it (`policy.member_type_attribution.unreached_types_owned_elsewhere`). That sibling still gates the finding. The finding stays recorded: it moves to the member's `surface_scope.out_of_surface_changes` with a reason naming the reaching member, and its ledger record becomes `out_of_contract` under the rule `member_type_unreached` (ADR-067, "record before disposing"). The pass is `frontends/cli/release_member_restamp.py`, and it runs only when public-surface scoping is on. A type that no member reaches keeps counting where it was found. No schema, default or exit-code mapping changed. Regression tests: `tests/test_release_member_headers_integration.py` (real gcc libraries through `abicheck compare <dir> <dir>`: a type change in A's header is not a finding of B, A still breaks with exit 4, a shared header's unreached type leaves B's verdict and is recorded, plus negative controls) and `tests/test_release_member_headers.py` (assignment and verdict-rule invariants over an exhaustive small domain). Residual, tracked separately on the main page: the narrowing is ELF-only.
+
+**Update (2026-09-17), read this first.** The release product model landed:
+a directory/package comparison now judges **one** public contract backed by
+**several** binary providers (`docs/learn/products-not-libraries.md` § "One
+public surface, many providers"). Concretely, against the three steps this
+entry proposes below:
+
+- **Step 1 ("de-duplicate first") is done.** A finding several members report
+  identically is rendered once, release-scoped, naming every affected library
+  (`report.release_public_surface_section.dedupe_shared_member_findings`), and each
+  member entry records how many of its findings were folded there
+  (`product_level_findings`). Counts, verdicts and exit codes are untouched by
+  the fold, so nothing is hidden or downgraded — only the duplicated evidence
+  stops being emitted N times.
+- **The `public_not_exported` half is not merely de-duplicated, it is
+  answered correctly.** It was never a duplication problem at heart: the
+  obligation is satisfied by *any* member, so the per-member answer was a
+  Cartesian product. It now runs once, at release level, against the union of
+  the bundle's usable exports (`policy.release_contract_reconciliation`), with
+  the member pass no longer running it at all
+  (`workflows.crosscheck_ownership`). Measured on a 12-library / 480-declaration
+  fixture: 5,280 findings -> 0, report 8.7 MiB -> 77 KiB.
+- **`exported_not_public` stayed per member, deliberately.** The example below
+  reads it as the same defect, and it is not: the exporting member *is* its
+  correct attribution. It is judged against the one shared declaration index
+  and folded only when several members really do export the same symbol.
+- **Steps 2 and 3 remain open exactly as written below** (a per-member header
+  operand; reachability-based attribution where no map is declared). The type
+  findings in the example above are still not *attributed* to the member whose
+  surface reaches `Widget` — they are now reported once for the release,
+  naming both members, which is the honest "which member this affects was not
+  established" reading step 1 asks for, not the attribution step 3 would give.
+  Over-reporting attribution, not duplication, is what is left.
+
+**Performance face of the same gap (2026-09).** Every member walks the
+union header set, so the release cost grows super-linearly with its member
+count. See "Multi-library L2 compare scales quadratically with library count"
+above for the measurements, what has been memoized, and why steps 2/3 in this entry
+are the complete fix.
+
+**Update (2026-09-18).** The model is no longer scoped to the live
+directory/package fan-out. The other three drivers that compare several
+libraries at once — a stored `BundleFacts` baseline against a live release
+(`workflows.release_public_surface.stored_old_live_new_reconciliation`), two
+stored documents (`workflows.bundle_stored_pair_compare`), and a
+multi-library ABICC descriptor (`compat.multi_library_run`, removed with the
+`compat` front end in 2026-10) — each reconcile
+one product contract through the same
+`workflows.release_public_surface.reconcile_member_sets` and enter the same
+`member_pass_scope` ownership for their member pass. What remains scoped to
+the live path: only that path acquires a surface (the other three read a
+recorded or projected one), so the acquisition ledger's instrumentation is
+empty on a stored comparison, and only that path performs the
+`shared_findings` fold — the stored documents already emit one product-level
+finding rather than repeating it per member. The driver inventory is not
+mechanically enforced: nothing fails when a fifth multi-member driver is
+added, so `tests/test_release_public_surface_drivers.py` is a hand-maintained
+list (recorded in `tests/regressions/manifest_classification.py`'s
+`release.cartesian_product_contract` known gaps).
+
+**Known dormant branch (2026-09-18).** `storage/bundle_facts_archive.py`'s
+public-surface blob carries the same second-materialization byte charge
+`manifest_blob` does (a blob served from cache still builds a second object
+graph, so its bytes are charged again -- the object-count amplification the
+aggregate budget bounds). Through the public loader that branch is
+currently **unreachable**: every other slot that could share the surface's
+hash decodes it under a different shape first (the instantiation manifest
+demands a top-level `provides:` list, a library slot demands a snapshot),
+so a shared hash is refused before the surface slot runs. The guard is kept
+because it is cheap and becomes load-bearing the moment slot ordering or a
+shape check changes;
+`tests/test_release_public_surface_persistence.py::TestTheSurfaceBlobIsReadExactlyOnce`
+pins the property that makes it dormant, so that change cannot happen
+silently. It is also why that file's own patch coverage will not reach
+100% -- the uncovered lines are this guard, and covering them would mean
+reaching past the public entry point, which this repo's own
+third-party-boundary rule refuses.
+
+**Update (2026-10-01): step 3 landed as attribution, not yet as a
+verdict change.** `workflows/release_member_attribution.py` computes each
+member's export surfaces and `policy/member_type_attribution.py` answers,
+per type finding, `reaches`/`proven_unreachable`/`unestablished`; the
+release fold attaches that partition to each product-level finding
+(`shared_findings[].attribution`, release schema 1.11). On the example
+below, `Widget` is now `reaches: libfoo.so`, `unestablished: libbar.so` —
+libbar's only export has no declaration, so its reach cannot be decided,
+and saying so is the honest answer. What remains open:
+
+- **Member verdicts and counts still include unreached findings.**
+  `libbar.so` above is still `BREAKING` on `Widget`. Excluding a
+  `proven_unreachable` finding from a member's own verdict is the policy
+  half; it was deliberately not bundled with the report half, because it
+  changes exit codes and `--contract exports` already offers that scoping
+  explicitly per member.
+- **Step 2 (a per-member header operand) is still open**, and with it the
+  quadratic cost: every member still parses the union header set.
+- Making this work exposed an `export_surface` defect that was its own
+  bug: the C tag idiom `typedef struct X {...} X;` was flagged as an
+  ambiguous name, so every such type was undecidable under
+  `--contract exports` too. Fixed in the same change.
+
+The original entry follows, unchanged.
+
+
+Reproduced while verifying the `--depth`/header-graph behaviour above, on a
+two-member fixture (`libfoo.so` built from `foo.h`, `libbar.so` from nothing
+but its own source):
+
+```
+abicheck compare old/ new/ --header old=inc/foo.h --header new=inc_new/foo.h
+libbar.so BREAKING  type_size_changed:Widget, type_alignment_changed:Widget,
+                    type_field_type_changed:Widget, type_field_offset_changed:Widget,
+                    exported_not_public:bar_fn, public_not_exported:widget_area, ...
+libfoo.so BREAKING  type_size_changed:Widget, ... (the same four)
+```
+
+`Widget` lives in `foo.h` and is nothing to do with `libbar.so`, yet the
+whole `Widget` change set is reported once per member, and `libbar.so`
+additionally earns `exported_not_public`/`public_not_exported` findings for
+the mismatch between its own exports and a header set describing a different
+library. A release's finding count therefore scales with member count rather
+than with what changed, and `--output-dir`'s per-library reports carry the
+duplicates too.
+
+The cause is a missing *transport*, not a missing model. `cli_compare_release.py`
+resolves one `old_h`/`new_h`/`old_inc`/`new_inc` set for the whole release and
+passes it unchanged to every `_compare_one_library` call — but that function
+already takes its header list **per member** (`cli_compare_release_pairwise.py`'s
+`old_h` parameter, forwarded straight to `_run_compare_pair`); only the caller
+flattens it. And the per-member mapping already exists upstream:
+`build-output.json` carries per-target `public_header_roots`/
+`generated_header_roots`, `buildsource/baseline_publish.py`'s
+`derive_baseline_libraries()` turns those into `actions/baseline`'s
+`libraries[].header`, and `publish-baseline.yml` already dumps **each library
+with its own headers** at a selectable `depth`. `BundleSpec.targets` is a list
+of target ids and `TargetSpec.public_headers` exists per target, so the
+declaration is in the project schema too.
+
+So an earlier revision of this entry was wrong to frame this as "decide what
+the attribution model is" and to propose naming conventions or a new
+`.abicheck.yml` key. The model is declared; `compare` simply has no operand
+shape that carries it. Three things close this, in increasing order of scope:
+
+1. **De-duplicate first.** A header-derived finding that cannot be attributed
+   to one member should be reported **once**, release-scoped, rather than once
+   per member. That is the honest reading of the evidence ("which member this
+   affects was not established") and it removes most of the pain with no
+   guessing at all. The current N× duplication is the actual defect.
+2. **Carry the map into `compare`.** A per-member header operand (mirroring
+   `actions/baseline`'s own `libraries` JSON) so the fan-out resolves
+   `old_h`/`new_h` per member. Small, given the seam already exists.
+3. **Attribute by reachability** where no map is declared: a header-derived
+   finding belongs to the member(s) whose export surface reaches the entity —
+   `export_surface.compute_export_surface` and `type_reachability.py` already
+   do exactly this per library. Must fall back to (1), never to silence.
+
+Note that this is only half of header-aware package comparison. The other
+half is where OLD's headers come from at all:
+`buildsource/project_targets.py`'s `BUNDLE_CHECK_DEPTHS = {binary}` exists
+because a bundle baseline stages raw binaries and `check-project.yml` has one
+project-wide `header:` input, so `depth: headers` would parse *both* sides
+with the current checkout's headers and make a header-only change silently
+invisible — a false negative, strictly worse than this entry's over-reporting.
+Staging bundle baselines as per-member snapshots (what single-target mode
+already does) is what would let that restriction be relaxed.
+
+Deliberately not attempted as part of the `--depth` fix: it is a separate
+change in a different layer. Over-reporting is the safe direction — no finding
+is *lost* today — which is why this is a gap rather than a blocker on the fix
+that surfaced it.
+
+### An `-I`-reached sibling library's headers yield LOW-confidence export obligations — release reconciliation and JSON confidence narrowed too (closed 2026-10-11)
+
+**Status (2026-10-11): CLOSED.** All three open items are resolved. (1) The member finding's LOW confidence was already on the scalar JSON wire as `changes[].impact_assessment.confidence` (report schema 2.15), which the entry had missed; it is now pinned by a test. (2) The release reconciliation applies the same narrowing: `surface_from_snapshot` records `PublicObligation.outside_declared_surface` from the member check's own `obligation_standing`, and `policy.release_contract_reconciliation` reports such an absent obligation at LOW confidence, worded as not established. The release JSON's `public_surface_reconciliation.missing_exports[].confidence` carries it as a field (release schema 1.13), and stored surfaces keep it. No verdict, default or exit code changed. (3) The umbrella-header cost is the accepted trade of the 2026-10-01 ruling, not a defect: pass the directory as `-H` to declare it. Regression: `tests/test_release_obligation_standing.py`, bug class `evidence.narrowed_conclusion_not_carried_across_cardinality`.
+
+
+> **Update (2026-10-01): the PVXS case is narrowed, per the maintainer's
+> ruling.** Recording the declared `-H` set turned out to need no
+> `SCHEMA_VERSION` bump: ADR-075's `extraction_scope.ownership_rules.
+> target_roots` (schema v52) already persists the run's target roots. It
+> took only `-H` *directories*, so a run naming files recorded no root and
+> every declaration read `unresolved`/`no_root` alike.
+> `workflows.ownership_request.with_target_roots` now makes every existing
+> `-H` entry a root (a file covers exactly itself). A declaration no root
+> covers -- reached only through `#include` and an `-I` root -- is still
+> reported as `public_not_exported`, but at LOW confidence and worded as
+> *not established* (`buildsource/export_obligation_ownership.py`), and the
+> check's coverage detail counts them. The declared header's own missing
+> exports keep HIGH confidence (the positive control), and a `-H`
+> *directory* declares everything under it, so nothing changes there.
+> `tests/test_include_root_export_obligation.py` pins both, with the
+> reported-symbol set checked against the fixture's undefined declarations
+> so nothing can be dropped.
+>
+> **Still open.** (1) Per-finding `confidence` is not on the JSON wire
+> format, so a JSON reader sees the narrowing only in the description and
+> the check detail, not as a field. (2) The release surface's obligations
+> (`policy.release_contract_reconciliation`) do not apply the narrowing;
+> in a multi-member release the union of exports satisfies a sibling's
+> declarations anyway, but a declaration *no* member exports is still
+> reported at full strength. (3) An umbrella header (`-H foo.h` including
+> the library's own `foo/bar.h`) now gets LOW-confidence findings for
+> `bar.h` -- the accepted cost; pass the directory as `-H` to declare it.
+
+> **Partially closed (2026-09-16).** An `-I` root now widens public
+> provenance only where the run's own *declared* public headers live
+> underneath it (`extract/public_root_ownership.py`, applied by
+> `provenance.public_dirs_with_owned_roots` and, identically,
+> `buildsource/header_graph.py`). That is a fourth route none of the three
+> candidates below considered, and it needs no new `ScopeOrigin` member, no
+> `Fact` retightening and no `SCHEMA_VERSION` bump: the evidence to separate
+> the two questions was already in hand at classification time, in the
+> declared `-H`/`--public-header-dir`/`sources.public_headers` set the
+> caller passes alongside the `-I` list.
+>
+> A root the rule declines is classified `UNKNOWN`, **not**
+> `PRIVATE_HEADER`. That distinction is the whole safety argument and was
+> not in the first version of the fix: `PUBLIC_HEADER` is what creates an
+> export obligation, so a dependency's declarations must not have it; but
+> `PRIVATE_HEADER` is a *confident* signal that public-surface scoping acts
+> on to drop findings, so a root the run merely could not place must not
+> have it either, or a library whose own public headers are split across
+> include roots loses real breaking changes from its verdict. Raised as a
+> P1 by Codex's security review on the PR; four attempted repros were each
+> caught by some other mechanism (the undeclared-export removal exemption,
+> the export-table closure, the conservative-unknown fallback), but the
+> safety of a demotion rule must not rest on unrelated mechanisms
+> happening to cover it.
+>
+> **What it closes:** a *dependency's* include tree. Intel MKL passes an MPI
+> include directory solely so `mkl_cdft.h` can parse `#include <mpi.h>`; no
+> MKL public header lives under it, so it no longer widens anything, and the
+> 2,211 `MPI_*`/`PMPI_*`/`QMPIX_*` `public_not_exported` findings are gone.
+> Regression tests: `tests/test_dependency_include_root_ownership.py`,
+> including a property-style statement of the containment predicate.
+>
+> **What it does not close, and this is the reported PVXS case above.**
+> `-H include/pvxs/iochooks.h` with `-I <pvxs>/include` is containment:
+> the declared header lives *under* that root, so the root keeps its
+> widening power and `version.h` beside it is still `PUBLIC_HEADER` — still
+> charging libpvxsIoc for libpvxs's exports. Containment separates "a
+> dependency's tree" from "the library's own tree"; it cannot separate *two
+> sibling libraries sharing one include tree*, because from one snapshot's
+> point of view those are the same tree. Everything below still applies to
+> that case, and the three candidate fixes are still the options — the
+> narrowest (recording the declared `-H` set on `AbiSnapshot`) remains the
+> most promising, since "which headers this run declared" is exactly the
+> evidence a shared tree makes unrecoverable at classification time.
+>
+> The positive control the entry demands is kept and tested: a symbol
+> declared in a header that *is* in `-H` and genuinely absent from the
+> binary still reports.
+
+
+**Reported on a real PVXS build** (abicheck `3737f9f9`, CastXML 0.7.0, EPICS
+Base 7.0, gcc 13, `-std=c++11`), and reproduced by comparing one snapshot
+against *itself* — byte-identical operands, verdict `NO_CHANGE`:
+
+```
+abicheck dump lib/linux-x86_64/libpvxsIoc.so.1.5 \
+  -H include/pvxs/iochooks.h \
+  -I <pvxs>/include -I <epics>/include ... --depth headers
+```
+
+`-H` names exactly one file. `include/pvxs/version.h` is reachable only
+because `iochooks.h` `#include`s it and `-I <pvxs>/include` makes it
+findable; the symbols it declares (`pvxs::version_int()`,
+`version_str()`, `version_abi_int()`) are exported by **libpvxs**, a
+different library. The comparison charged **libpvxsIoc** with three
+`public_not_exported` findings for them.
+
+**Root cause, confirmed by reading both halves.**
+`provenance.apply_provenance` deliberately folds the `-I` roots into the
+public-*directory* set once a real `-H` set has opted classification in
+(`provenance.py`, the `include_search_dirs` parameter and
+`_public_dirs_from_include_roots`). That fold exists for a real defect it
+fixed: without it every transitively-`#include`d header classified
+`PRIVATE_HEADER`, and a genuine breaking layout change reached only through
+an umbrella header silently dropped out of the compared surface. So the
+declaration's `ScopeOrigin` becomes `PUBLIC_HEADER`, and
+`buildsource/cross_source_checks.py`'s `_has_export_obligation` /
+`_var_has_export_obligation` gate on exactly `origin == PUBLIC_HEADER`.
+
+The two questions are being conflated:
+
+1. *Is this declaration in the component's compared public surface?* — the
+   fold's answer (yes) is defensible: an API change to it matters.
+2. *Does **this binary** owe an exported symbol for it?* — the fold's answer
+   is not implied by (1) at all, and for a shared include tree serving
+   several libraries it is wrong.
+
+Note the reported case used a `-H` **file**, so this is not the documented
+"a directory entry tags everything under it public" behaviour; a directory
+`-H` root reaches the same place through the same fold.
+
+**Not fixed here, and why.** The evidence needed to separate (1) from (2) —
+which headers the run's own `-H` set *declared*, as opposed to which the
+`-I` widening admitted — is not recorded anywhere a check can read it after
+serialization. `ScopeOrigin` collapses both to `PUBLIC_HEADER`, and
+`ExtractionContract` keeps fingerprints rather than paths. The three
+candidate fixes each carry real blast radius:
+
+- **A new `ScopeOrigin` member** (`INCLUDE_CONTEXT_HEADER`): 52 existing
+  `ScopeOrigin.PUBLIC_HEADER` sites must each decide whether they mean
+  "in the compared surface" or "owned by this component", and the value is
+  persisted vocabulary.
+- **Tighten `in_public_contract_fact` to the declared set** (already
+  persisted, schema v46): but `compare/export_transition.py` already keys on
+  `is_confirmed_false(in_public_contract(...))` to decide *not* to suppress a
+  removal, so a confirmed-false for widened declarations would add findings
+  elsewhere.
+- **Record the declared `-H` files/dirs on `AbiSnapshot`** and re-classify in
+  the check: the narrowest of the three, and independently useful (a stored
+  baseline records nothing about the contract it was dumped under), but it is
+  a `SCHEMA_VERSION` bump inside ADR-050's comparability contract.
+
+Whichever is taken, the fix must keep the positive control: a symbol declared
+in a header that *is* in `-H` and genuinely absent from the binary must still
+report. A suppression rule or a per-project carve-out is explicitly not the
+answer.
+
 ### `--build-target` silently does nothing when combined with a pre-captured Bazel `--build-info` (an `aquery`/`cquery` jsonproto), on both `dump` and `scan` — investigated, not fixed (Codex review, fresh evidence, P0.2 follow-up). Fixed (ADR-063 Phase 4, "option 2" below): the combination now raises a clean usage error instead of silently collecting an unscoped graph
 
 **Status (re-verified 2026-10-09 at `456989f`): CLOSED.** The entry says it was fixed (ADR-063 Phase 4), and the dump --build-target flag and scan were later removed. Only removal comments are left: cli_buildsource.py:335 and frontends/cli/options/rulings.py:452. The scoping check lives in workflows.plan.bazel_target_scoping_failure.
@@ -4733,7 +5117,7 @@ ADR amendment for the full reasoning each):
   `scope.on_incomplete`, a directory `unproven`, a fully extracted archive or
   an asserting stored package `proven`), each member is audited by the same
   sequence a scalar audit runs, and the result is one `audit_set` document
-  (`report/no_baseline_set.py`, `audit_set_report.schema.json`). Still open:
+  (`report/audit_set.py`, `audit_set_report.schema.json`). Still open:
   the Action's `new-library-set` input keeps its usage error -- wiring it to
   this command is an Action-side slice, not done here.
 
@@ -5807,3 +6191,6 @@ either `--include-system-declarations` on both `dump` invocations, or comparing
 two default-scoped persisted snapshots against each other rather than
 mixing a persisted baseline JSON with a live-binary operand.
 
+### A stored package's generation drift is reported only for `ProjectSnapshot` packages, and generations are bumped by hand (2026-10-11)
+
+**Status: CLOSED 2026-10-12.** Two defects, both fixed. (a) A `BundleFacts` package's reader computed `semantics_differ` and dropped it; `storage/bundle_facts_package.read_bundle_facts_package` now stamps the same runtime-only notice a drifted `ProjectSnapshot` package carries onto each per-library snapshot (`load_notices`), so it reaches each `DiffResult.coverage_warnings` through `confidence.snapshot_load_notices`. Verdict and exit code are unchanged (`tests/unit/storage/test_bundle_facts_generation_drift.py`). (b) Nothing forced a generation bump when extraction or resolution semantics changed. `storage/generation_scope.py` names the extractor scope (`abicheck/extract/**` plus the root parse-stage modules) and the resolver scope, and `storage/generation_fingerprints.json` records a content fingerprint of each at the generation it was recorded at. `tests/unit/storage/test_generation_fingerprint.py` fails when a scoped module changes without a re-record, names the changed files, and prints both fix commands; `scripts/record_generation_fingerprints.py --bump` or `--no-semantic-change --reason` is the only way to re-record. Edits outside those scopes do not move the gate. **Residual, by design:** a hash cannot tell a refactor from a semantic change, so `--no-semantic-change` is a reviewed claim, not a proof; a resolver-named module outside the explicit list must be classified, which the test enforces. Extraction code outside the named root-level globs is not in scope and would need its own entry if it starts to shape recorded facts.

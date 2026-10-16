@@ -113,6 +113,7 @@
         "sym_type": "func",
         "value_alignment": 0,
         "version": null,
+        "version_binding": "unversioned",
         "visibility": "default"
       }
     ],
@@ -133,6 +134,7 @@
   "git_tag": null,
   "header_cv_facts_reliable": true,
   "header_only": false,
+  "inline_facts_reliable": true,
   "kabi": null,
   "language_profile": null,
   "library": "libdemo.so",
@@ -144,7 +146,7 @@
   "platform": null,
   "python_api": null,
   "python_ext": null,
-  "schema_version": 56,
+  "schema_version": 60,
   "scope_fallback": null,
   "source_mtime": null,
   "source_mtime_epoch": false,

@@ -31,7 +31,7 @@ turn overrides the built-in defaults (`CLI > config > default`).
 - Loader (build/source blocks): `load_build_config()` in
   `abicheck/buildsource/inline.py`; parsed into the `BuildConfig` dataclass.
 - Precedence resolver (`compare` project-contract blocks):
-  `resolve_compare_config()` in `abicheck/cli_helpers_compare.py`.
+  `resolve_compare_config()` in `abicheck/workflows/compare_configuration.py`.
 
 ---
 
@@ -707,9 +707,11 @@ performance:
 
 - **`balanced`** — fastest. Two live binaries are resolved concurrently in
   two child processes on Linux (when the caller runs no other threads, and
-  `ABICHECK_SIDE_PROCESSES` is not `0`). Any other pair is resolved one side
-  after the other by the `compare` CLI, and in two threads of one process by
-  the typed API. A directory/package comparison sizes its worker
+  `ABICHECK_SIDE_PROCESSES` is not `0`); a side the snapshot cache serves
+  whole is loaded in the parent instead of a child. With
+  `ABICHECK_SIDE_PROCESSES=0`, and for any other pair, the `compare` CLI
+  resolves one side after the other and the typed API uses two threads of
+  one process. A directory/package comparison sizes its worker
   pool to the host. Measured on a cold compare of two 60-module C++
   libraries: 64 s one side at a time, 42 s with concurrent children, at
   about 1.5x the peak memory. `ABICHECK_PARALLEL_EXTRACTION=0` resolves the

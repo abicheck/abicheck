@@ -45,7 +45,7 @@ contains no conflation the ADR explicitly rejects:
 
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 from types import MappingProxyType
 
 # --------------------------------------------------------------------------
@@ -53,7 +53,7 @@ from types import MappingProxyType
 # --------------------------------------------------------------------------
 
 
-class ContractMode(str, Enum):
+class ContractMode(StrEnum):
     """Which evidence domain defines the declared consumer contract.
 
     Exactly three values (ADR-049 D2) -- resist adding a fourth: a
@@ -90,7 +90,7 @@ def coerce_contract_mode(mode: ContractMode | str) -> ContractMode:
         ) from exc
 
 
-class LegacyScopeFlag(str, Enum):
+class LegacyScopeFlag(StrEnum):
     """The two pre-ADR-049 ``--[no-]scope-public-headers`` CLI flags."""
 
     NO_SCOPE_PUBLIC_HEADERS = "no_scope_public_headers"
@@ -120,7 +120,7 @@ LEGACY_SCOPE_FLAG_CONTRACT_MODE: MappingProxyType[LegacyScopeFlag, ContractMode]
 # --------------------------------------------------------------------------
 
 
-class ContractRelevance(str, Enum):
+class ContractRelevance(StrEnum):
     """Whether a normalized finding's entity belongs to the declared contract.
 
     Exactly five values (ADR-049 D1). ``PROVEN_OUT_OF_CONTRACT`` deliberately
@@ -143,7 +143,7 @@ deployment, security state, ...) is ``NOT_APPLICABLE`` under every
 source of truth for that constant fact."""
 
 
-class ContractAssurance(str, Enum):
+class ContractAssurance(StrEnum):
     """Coverage of the evidence a contract-relevance decision rests on."""
 
     COMPLETE = "complete"
@@ -151,14 +151,14 @@ class ContractAssurance(str, Enum):
     UNAVAILABLE = "unavailable"
 
 
-class AnalysisStatus(str, Enum):
+class AnalysisStatus(StrEnum):
     """Whether the run's contract-coverage evidence was sufficient to check."""
 
     CHECKABLE = "CHECKABLE"
     NOT_CHECKABLE = "NOT_CHECKABLE"
 
 
-class CompatibilityEvaluationStatus(str, Enum):
+class CompatibilityEvaluationStatus(StrEnum):
     """Whether compatibility policy ran for a finding.
 
     Only ``IN_CONTRACT`` and ``NOT_APPLICABLE`` findings are ``EVALUATED``;
@@ -202,7 +202,7 @@ def evaluation_status_for(
 # --------------------------------------------------------------------------
 
 
-class EvidenceProviderStatus(str, Enum):
+class EvidenceProviderStatus(StrEnum):
     """Outcome of one provider's evidence search for one domain/entity scope."""
 
     AVAILABLE = "available"
@@ -212,7 +212,7 @@ class EvidenceProviderStatus(str, Enum):
     STALE = "stale"
 
 
-class EvidenceCompleteness(str, Enum):
+class EvidenceCompleteness(StrEnum):
     """How much of the requested scope a provider's search actually covered."""
 
     COMPLETE = "complete"
@@ -225,7 +225,7 @@ class EvidenceCompleteness(str, Enum):
 # --------------------------------------------------------------------------
 
 
-class SelectorLayer(str, Enum):
+class SelectorLayer(StrEnum):
     """Where an effective configuration field's value was selected from.
 
     Precedence (ADR-049 D7, highest first): ``EXPLICIT_CLI``/``API_REQUEST``

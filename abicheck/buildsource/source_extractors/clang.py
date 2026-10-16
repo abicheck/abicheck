@@ -62,7 +62,7 @@ from typing import Any
 from ... import deadline
 from ..._compiler_options import clang_ast_dump_tail
 from ...deadline import run_bounded
-from ...dumper_clang import _is_intel_sycl_driver, _needs_sycl_host_only
+from ...extract.compiler_driver import is_intel_sycl_driver, needs_sycl_host_only
 from ...header_conditionals import _include_guard_macro, _strip_comments
 from ...model.execution_cache import memoized, path_witness
 from ..build_evidence import CompileUnit
@@ -149,7 +149,7 @@ from .clang_source_edges import build_source_edges
 #: selectors symmetrically; a bare, unselected ``-fsycl`` (ambiguous, no
 #: explicit pin either way) is left carried through as-is, matching the L2
 #: header-AST backend's own established "accepted approximation" for that
-#: shape (see ``_needs_sycl_host_only``'s own docstring). 0.12:
+#: shape (see ``needs_sycl_host_only``'s own docstring). 0.12:
 #: ``_argv._carry_abi_relevant_flags`` (shared by castxml/clang) no longer
 #: dedups a repeated flag WITHIN ``abi_relevant_flags`` itself -- a real,
 #: layered build config can legitimately record the same toggle-style flag
@@ -186,7 +186,7 @@ def _clang_compiler_family(clang_bin: str) -> str:
     version`'s identical cost shape at the same per-TU call site, so this
     costs one extra subprocess call per unique *clang_bin* for a whole scan,
     not one per TU). Falls back to :func:`abicheck.dumper_clang.
-    _is_intel_sycl_driver`'s name-based recognition (icx/icpx/dpcpp/dpcpp-cl)
+    is_intel_sycl_driver`'s name-based recognition (icx/icpx/dpcpp/dpcpp-cl)
     only if the macro probe itself fails to run at all (compiler not found,
     times out, or rejects ``-dM -E``) -- a real, if weaker, signal is still
     better than silently defaulting to "clang" (Codex review: an earlier
@@ -223,7 +223,7 @@ def _clang_compiler_family(clang_bin: str) -> str:
             return "intel-llvm" if "__INTEL_LLVM_COMPILER" in r.stdout else "clang"
     except (OSError, subprocess.TimeoutExpired):
         pass
-    return "intel-llvm" if _is_intel_sycl_driver(clang_bin) else "clang"
+    return "intel-llvm" if is_intel_sycl_driver(clang_bin) else "clang"
 
 
 @memoized(maxsize=8, witness=path_witness)
@@ -328,7 +328,7 @@ def _clang_context_args(
     reader and the macro pass's single-stream text reader. Mirrors the fix
     already shipped for the L2 header-AST backend
     (``dumper_ast_config._build_clang_header_command`` /
-    ``dumper_clang._needs_sycl_host_only``): append ``-fsycl-host-only`` here
+    ``abicheck.extract.compiler_driver.needs_sycl_host_only``): append ``-fsycl-host-only`` here
     too, collapsing the compile back to the single host-side pass that
     actually links into the scanned binary — the device pass describes
     SPIR-V kernel code that never becomes part of the host ``.so``'s
@@ -336,7 +336,7 @@ def _clang_context_args(
     any non-Intel driver, or when the caller's own flags already pin a
     single pass (``-fsycl-host-only``/``-fsycl-device-only``) or explicitly
     disable SYCL (``-fno-sycl`` last-flag-wins) — see
-    ``_needs_sycl_host_only``'s own docstring for the full precedence.
+    ``needs_sycl_host_only``'s own docstring for the full precedence.
 
     The host-only decision is gated on *clang_bin* — the binary this command
     will actually be run with — not on ``pick_compiler_binary``'s *emulated*
@@ -444,7 +444,7 @@ def _clang_context_args(
             if not flag.startswith("-std=")
             and not flag.lower().startswith(("/std:", "-std:"))
         ]
-    if not _is_intel_sycl_driver(clang_bin):
+    if not is_intel_sycl_driver(clang_bin):
         # A real build's own recorded -fsycl-host-only/-fsycl-device-only
         # (carried through above via replay_extra_flags's abi_relevant_flags/
         # argv scan) each pin a SPECIFIC SYCL compilation pass -- and stock
@@ -479,7 +479,7 @@ def _clang_context_args(
                 "wrong compilation context -- set compile.compiler in "
                 ".abicheck.yml to the real icx/icpx/dpcpp driver to extract it."
             )
-    if _needs_sycl_host_only(clang_bin, [*cmd, *extra]):
+    if needs_sycl_host_only(clang_bin, [*cmd, *extra]):
         extra = [*extra, "-fsycl-host-only"]
     cmd += extra
     return cmd, msvc
@@ -530,7 +530,7 @@ class _ClassifyContext:
     """Public-surface classification for clang file paths (ADR-024 / ADR-030)."""
 
     def __init__(self, public_header_roots: list[str]) -> None:
-        from ...provenance import build_public_set
+        from ...extract.declaration_provenance import build_public_set
 
         # A public root may be a *directory* (`--headers include/`). Feeding it to
         # build_public_set as a header file would never match a decl under it
@@ -550,8 +550,11 @@ class _ClassifyContext:
         owns it); a generated *private* header (not in the public set) is demoted
         off the public surface.
         """
+        from ...extract.declaration_provenance import (
+            classify_origin,
+            is_generated_header,
+        )
         from ...model import ScopeOrigin
-        from ...provenance import classify_origin, is_generated_header
 
         if _matches_exact_public_header(file, self.exact_header_segs):
             if is_generated_header(file):

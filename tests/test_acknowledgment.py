@@ -243,7 +243,7 @@ def test_expires_datetime_is_normalized_to_a_date_on_direct_construction() -> No
 def test_matches_via_finding_id_selector(tmp_path: Path) -> None:
     """The `finding_id`-selector branch of `matches()` (as opposed to every
     other test here, which matches via `symbol`)."""
-    from abicheck.finding_identity import report_canonical_finding_id
+    from abicheck.compare.finding_identity import report_canonical_finding_id
 
     change = Change(kind=ChangeKind.FUNC_REMOVED, symbol="foo", description="x")
     fid = report_canonical_finding_id(change)
@@ -930,7 +930,9 @@ def test_resolving_acknowledgments_twice_is_idempotent(tmp_path: Path) -> None:
     before = ledger.record_for(change)
     assert before is not None and before.acknowledged_by == "*::*::*::foo"
 
-    close_consumer_scope(ledger, diff, gating=[change])  # resolves again
+    close_consumer_scope(
+        ledger, diff, gating=[change], scope_decides_exit=True
+    )  # resolves again
     after = ledger.record_for(change)
     assert after is not None
     assert after.acknowledged_by == before.acknowledged_by

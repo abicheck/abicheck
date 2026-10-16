@@ -33,8 +33,8 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from .model import AbiSnapshot
-    from .workflows.contracts import CompareRequest
     from .workflows.request_inputs import InputSpec
+    from .workflows.service_requests import CompareRequest
 
 
 def populate_dependency_info(
@@ -55,7 +55,7 @@ def populate_dependency_info(
     """
     from .binder import BindingStatus, compute_bindings
     from .model import DependencyInfo
-    from .resolver import resolve_dependencies
+    from .workflows.elf_dependency_resolver import resolve_dependencies
 
     graph = resolve_dependencies(
         so_path,

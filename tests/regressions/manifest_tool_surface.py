@@ -85,7 +85,7 @@ TOOL_SURFACE_BUG_CLASSES: tuple[BugClass, ...] = (
                     "The invariant is stated and tested only for the "
                     "snapshot storage reader. Other bounded readers in "
                     "the tree take a limit-shaped argument the same way "
-                    "(`snapshot_cache.py`'s archive member reads, the "
+                    "(`workflows/dump/cache/`'s archive member reads, the "
                     "PE/Mach-O section readers, "
                     "`workflows/bundle_compare_operand.py`'s probe); none "
                     "is tested against the allocation half of this class, "

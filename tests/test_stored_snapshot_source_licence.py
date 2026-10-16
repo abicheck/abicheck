@@ -288,7 +288,7 @@ class TestTypedPythonApiGetsTheSameLicenceAsTheCli:
         funnels through, so a front end cannot be added that silently skips it.
         `cached_run_dump` keeps its own grant only for the *cache-hit* path,
         which never calls `run_dump` at all."""
-        from abicheck import service_dump_cache
+
         from abicheck.buildsource import source_inputs
         from abicheck.workflows.dump import native
 
@@ -296,7 +296,9 @@ class TestTypedPythonApiGetsTheSameLicenceAsTheCli:
         assert native.granting_live_source_licence is (
             source_inputs.granting_live_source_licence
         )
-        cache_src = Path(service_dump_cache.__file__).read_text()
+        from abicheck.workflows.dump.cache import api as dump_cache_api
+
+        cache_src = Path(dump_cache_api.__file__).read_text()
         # Exactly one grant in the cache module, and it is on the hit path.
         assert cache_src.count("live_source_evidence = True") == 1
         assert "cached.live_source_evidence = True" in cache_src
@@ -801,7 +803,7 @@ class TestEveryDumpExecutionBranchGrantsTheLicence:
         one rather than a hand-set flag.
         """
         from abicheck.service import DumpRequest, InputSpec
-        from abicheck.workflows.dump.pipeline import resolve_dump_request
+        from abicheck.workflows.dump.request import resolve_dump_request
 
         if branch == "binary":
             spec = InputSpec(path=Path("libfoo.so"), version="1.0")
@@ -824,7 +826,7 @@ class TestEveryDumpExecutionBranchGrantsTheLicence:
         `from_headers=False` arm keeps the grant conditional, so a DWARF-only
         dump through any branch is still denied.
         """
-        import abicheck.workflows.dump.pipeline as pipeline
+        import abicheck.workflows.dump.request as pipeline
 
         produced = AbiSnapshot(
             library="libfoo.so", version="1.0", from_headers=from_headers

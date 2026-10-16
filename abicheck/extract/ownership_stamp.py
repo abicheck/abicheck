@@ -107,7 +107,7 @@ def recorded_rules(request: OwnershipRequest) -> OwnershipRules:
 def _declaring_file(decl: object) -> str | None:
     header = getattr(decl, "source_header", None)
     if not header:
-        from ..provenance import header_from_location
+        from .declaration_provenance import header_from_location
 
         header = header_from_location(getattr(decl, "source_location", None))
     if not header:

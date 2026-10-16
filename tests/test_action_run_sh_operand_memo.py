@@ -72,7 +72,7 @@ def _operands(tmp_path: Path) -> dict[str, tuple[Path, bool]]:
     snap = tmp_path / "snapshot.json"
     snap.write_text("{}", encoding="utf-8")
     deb = tmp_path / "pkg.deb"
-    deb.write_bytes(b"!<arch>\n")
+    deb.write_bytes(b"!<arch>\n" + b"debian-binary".ljust(60))
     return {
         "libdir": (libdir, True),
         "plain": (plain, False),

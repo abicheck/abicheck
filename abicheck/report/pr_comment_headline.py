@@ -34,7 +34,7 @@ carries or falls through; none infers a clean result from an empty bucket.
 
 from __future__ import annotations
 
-from ..pr_comment_base import CommentModel
+from .pr_comment_model import CommentModel
 
 _VERDICT_EMOJI = {
     "BREAKING": "❌",

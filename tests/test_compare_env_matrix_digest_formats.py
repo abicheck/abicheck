@@ -14,7 +14,7 @@
 
 """Every ``compare`` output format must carry ``env_matrix_source_sha256``.
 
-Codex review, P2 (Finding 4, round 7): ``reporter.py``'s ``_build_json_base``
+Codex review, P2 (Finding 4, round 7): ``reporter.py``'s ``build_json_base``
 adds the declared-deployment-floor digest to the full/leaf JSON mapping via
 ``reporter_contract_blocks.add_env_matrix_digest``, but the earlier round
 never checked whether the *other* ``compare`` output formats -- Markdown,

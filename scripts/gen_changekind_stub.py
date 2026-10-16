@@ -77,10 +77,10 @@ _HEADER = """# Copyright 2026 Nikolay Petrov
 # Not scanned by scripts/check_architecture.py (*.py only), so it carries
 # the full 397-member declaration in one file rather than being split.
 
-from enum import Enum
+from enum import StrEnum
 from typing import Protocol
 
-class ChangeKind(str, Enum):
+class ChangeKind(StrEnum):
 """
 
 _FOOTER = """

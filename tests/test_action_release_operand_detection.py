@@ -157,7 +157,7 @@ def _shapes(tmp_path: Path) -> dict[str, Path]:
     rpm = tmp_path / "operand-rpm"
     rpm.write_bytes(b"\xed\xab\xee\xdb" + b"\x00" * 64)
     deb = tmp_path / "operand-deb"
-    deb.write_bytes(b"!<arch>\n" + b"\x00" * 64)
+    deb.write_bytes(b"!<arch>\n" + b"debian-binary".ljust(60) + b"\x00" * 64)
     return {
         "rpm": rpm,
         "deb": deb,

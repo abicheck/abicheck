@@ -65,12 +65,15 @@ from typing import TYPE_CHECKING, Any
 from ..contract_relevance_types import SelectorLayer
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from ..compatibility_evaluation_config import CompatibilityEvaluationConfig
     from ..compatibility_evaluation_frontend import ProjectCompatibilityInputs
     from ..policy.release_gate_options import GateOptions
     from ..policy_file import PolicyFile
     from ..suppression import SuppressionList
-    from .contracts import CompareRequest
+    from .compare_configuration import CompareConfiguration
+    from .service_requests import CompareRequest
 
 
 def _project_inputs_for_request(
@@ -107,19 +110,26 @@ def _project_inputs_for_request(
     request states no project overrides, so an unaffected request builds
     the identical config it always has.
     """
-    if not request.project_policy_overrides:
-        return None
+    return project_inputs_for_overrides(request.project_policy_overrides or ())
+
+
+def project_inputs_for_overrides(
+    overrides: Iterable[tuple[Any, Any]],
+) -> ProjectCompatibilityInputs | None:
+    """Already-parsed ``ChangeKind -> Verdict`` project overrides as the
+    resolver's ``PROJECT_CONFIG`` input (``None`` when there are none), the
+    one projection every typed route -- a request, a release -- shares."""
     from ..compatibility_evaluation_frontend import ProjectCompatibilityInputs
     from ..policy_file import severity_value_for_verdict
 
-    overrides = {
+    raw = {
         kind.value: severity
-        for kind, verdict in request.project_policy_overrides
+        for kind, verdict in overrides
         if (severity := severity_value_for_verdict(verdict)) is not None
     }
-    if not overrides:
+    if not raw:
         return None
-    return ProjectCompatibilityInputs(policy_overrides=overrides)
+    return ProjectCompatibilityInputs(policy_overrides=raw)
 
 
 def resolve_request_evaluation_config(
@@ -140,9 +150,6 @@ def resolve_request_evaluation_config(
     which could digest a different file than the one that scored the
     findings if it changed between the two reads -- Codex review).
     """
-    packs_forwarded = bool(request.pack_policy_overrides) or (
-        request.pack_internal_namespaces is not None
-    )
     from ..compatibility_evaluation_frontend import (
         SuppressionSource,
         compatibility_config_from_compare_request,
@@ -154,9 +161,47 @@ def resolve_request_evaluation_config(
         suppression=SuppressionSource.from_loaded(suppression, path=request.suppress),
         project=_project_inputs_for_request(request),
     )
-    if packs_forwarded:
-        config = _with_pack_forwarded_provenance(config, request)
-    return config
+    return _with_pack_forwarded_provenance(config, request)
+
+
+def resolve_request_pack_configuration(
+    request: CompareRequest,
+    policy_file: PolicyFile | None,
+    suppression: SuppressionList | None,
+) -> CompareConfiguration:
+    """:func:`resolve_request_evaluation_config` for a request selecting
+    ``pack_paths``: the same resolution, through the shared
+    :func:`~abicheck.workflows.compare_configuration.resolve_compare_configuration`
+    so the packs are checked, applied to the policy file, and returned for the
+    gate exactly as the native CLI applies them."""
+    from ..compatibility_evaluation_frontend import (
+        FrontEnd,
+        SuppressionSource,
+        compare_request_inputs,
+    )
+    from .compare_configuration import resolve_compare_configuration
+
+    configuration = resolve_compare_configuration(
+        compare_request_inputs(
+            request,
+            policy_file=policy_file,
+            suppression=SuppressionSource.from_loaded(
+                suppression, path=request.suppress
+            ),
+        ),
+        front_end=FrontEnd.API,
+        project=_project_inputs_for_request(request),
+        policy_file=policy_file,
+        base_policy=request.policy,
+        contract_evaluation=request.contract_evaluation,
+        always_resolve=True,
+    )
+    return replace(
+        configuration,
+        evaluation_config=_with_pack_forwarded_provenance(
+            configuration.evaluation_config, request
+        ),
+    )
 
 
 def install_resolved_gate_receipt(
@@ -179,7 +224,7 @@ def install_resolved_gate_receipt(
     comparison -- read here, never re-resolved (sub-phase 4B).
 
     Stamps ``result.evaluation_config`` exactly when the native CLI's
-    ``resolve_and_apply`` records one: under contract evaluation, or when a
+    ``resolve_compare_configuration`` records one: under contract evaluation, or when a
     pack contributed (*packs_forwarded*; a pack-only run never builds a
     ``PersistedContractContext``, so without the stamp
     ``effective_config_digest``'s rich tier would be unreachable for it).
@@ -258,6 +303,8 @@ def _with_pack_forwarded_provenance(
     from ..compatibility_evaluation_frontend import POLICY_OVERRIDES_FIELD
     from ..compatibility_evaluation_wiring import INTERNAL_NAMESPACES_FIELD
 
+    if not request.pack_policy_overrides and request.pack_internal_namespaces is None:
+        return config
     provenance = dict(config.provenance)
     if request.pack_policy_overrides:
         prior = provenance.get(POLICY_OVERRIDES_FIELD)

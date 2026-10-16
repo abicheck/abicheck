@@ -42,7 +42,7 @@ from __future__ import annotations
 import string
 from collections.abc import Mapping
 from dataclasses import MISSING, dataclass, field, fields
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from ._immutable_mapping import _ImmutableDict as _ImmutableDict
@@ -52,7 +52,7 @@ from .dimensions import (
 )
 
 
-class Verdict(str, Enum):
+class Verdict(StrEnum):
     NO_CHANGE = "NO_CHANGE"
     COMPATIBLE = "COMPATIBLE"
     COMPATIBLE_WITH_RISK = "COMPATIBLE_WITH_RISK"
@@ -200,6 +200,14 @@ class ChangeKindMeta:
     # hand-built ``Change``), so the filter never loses a finding to an
     # unresolvable dimension.
     entity_from_field: str | None = field(default=None, kw_only=True)
+    # ADR-078: the finding records that nothing a consumer can act on
+    # changed -- a reconciliation proving a declaration identical, or an
+    # aggregate roll-up of findings each reported (and gated) on their own.
+    # Such a kind lands in ``IssueCategory.INFORMATIONAL``, which has no
+    # ``SeverityConfig`` level and so never gates under any preset. Only a
+    # COMPATIBLE, non-addition kind may carry it (``_validate_entry``).
+    # Appended last for the same pickle-order reason as the fields above.
+    is_informational: bool = field(default=False, kw_only=True)
 
     def __post_init__(self) -> None:
         # ``frozen=True`` only stops reassigning the *attribute*
@@ -567,6 +575,20 @@ def _validate_entry(e: ChangeKindMeta) -> None:
             f"Verdict.COMPATIBLE (addition_kinds() is a subset of "
             f"COMPATIBLE_KINDS), got {e.default_verdict!r}"
         )
+    if e.is_informational and (
+        e.default_verdict != Verdict.COMPATIBLE or e.is_addition or e.policy_overrides
+    ):
+        # informational_kinds() is the third COMPATIBLE sub-partition beside
+        # addition_kinds() and the quality residue (ADR-078): a kind that is
+        # not COMPATIBLE, is also an addition, or that a built-in policy
+        # re-verdicts is making a claim about change, not recording its
+        # absence.
+        raise ValueError(
+            f"{e.kind!r}: is_informational=True requires default_verdict == "
+            f"Verdict.COMPATIBLE, is_addition=False and no policy_overrides "
+            f"(informational_kinds() is a COMPATIBLE sub-partition disjoint "
+            f"from addition_kinds())"
+        )
     if e.description_template is not None:
         # diff_helpers.make_change() formats description_template via
         # ``template.format(symbol=..., name=..., old=..., new=...,
@@ -688,6 +710,13 @@ class ChangeKindRegistry:
     def addition_kinds(self) -> frozenset[str]:
         """Return kind values flagged as additions (subset of COMPATIBLE)."""
         return frozenset(e.kind for e in self._entries.values() if e.is_addition)
+
+    def informational_kinds(self) -> frozenset[str]:
+        """Return kind values flagged informational (ADR-078).
+
+        A subset of COMPATIBLE disjoint from :meth:`addition_kinds`.
+        """
+        return frozenset(e.kind for e in self._entries.values() if e.is_informational)
 
     def entity_for(self, kind_value: str) -> ChangeEntity | None:
         """The declared display *entity* for a kind, or ``None`` if unknown.

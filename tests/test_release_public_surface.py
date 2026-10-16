@@ -57,7 +57,7 @@ from abicheck.policy.release_contract_reconciliation import (
     release_owned_checks,
     undocumented_exports_by_member,
 )
-from abicheck.report.release_public_surface import (
+from abicheck.report.release_public_surface_section import (
     compute_release_public_surface,
     dedupe_shared_member_findings,
     render_release_public_surface_markdown,
@@ -652,7 +652,9 @@ class TestScalarPathUnchanged:
         """There is no union to take and no sibling to resolve against, so
         the per-member answer is already exactly right -- which is what keeps
         a one-member package and the scalar path agreeing."""
-        from abicheck.cli_compare_release_pairwise import _release_owned_crosschecks
+        from abicheck.workflows.release_members import (
+            release_owned_crosschecks as _release_owned_crosschecks,
+        )
 
         assert _release_owned_crosschecks() == frozenset({"public_not_exported"})
 

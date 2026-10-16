@@ -111,6 +111,25 @@ def test_materialize_is_idempotent_and_passes_non_trees_through():
     assert materialize_locations(marker) is marker
 
 
+@pytest.mark.parametrize(
+    "first",
+    [
+        {"offset": 1, "col": 2},
+        {"offset": 1, "col": 2, "line": 4},
+        {"offset": 1, "col": 2, "file": "/a.h"},
+    ],
+)
+def test_nothing_is_invented_before_the_first_explicit_value(first):
+    """A location that omits ``file``/``line`` before any location has set
+    them inherits nothing: there is no earlier value to replay."""
+    second = {"offset": 3, "col": 1}
+    tree = {"inner": [{"loc": dict(first)}, {"loc": second}]}
+    materialize_locations(tree)
+    assert tree["inner"][0]["loc"] == first
+    assert second.get("file") == first.get("file")
+    assert second.get("line") == first.get("line")
+
+
 def test_included_from_does_not_move_the_current_file():
     tree = {
         "inner": [

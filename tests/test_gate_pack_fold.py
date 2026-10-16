@@ -32,7 +32,6 @@ import dataclasses
 import pytest
 from hypothesis import given, settings, strategies as st
 
-from abicheck.cli_helpers_compare import ResolvedCompareConfig, resolve_compare_config
 from abicheck.policy.gate_pack_fold import (
     GATE_SEVERITY_CATEGORIES,
     LEGACY_SCHEME,
@@ -42,6 +41,10 @@ from abicheck.policy.gate_pack_fold import (
 )
 from abicheck.policy.release_gate_options import GateOptions
 from abicheck.policy.severity import SeverityConfig, SeverityLevel
+from abicheck.workflows.compare_configuration import (
+    ResolvedCompareConfig,
+    resolve_compare_config,
+)
 
 # Deliberately not `SeverityLevel` members: the fold is generic over the
 # per-category value type on purpose (its two production callers pass

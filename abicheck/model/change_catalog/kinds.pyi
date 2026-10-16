@@ -22,10 +22,10 @@
 # Not scanned by scripts/check_architecture.py (*.py only), so it carries
 # the full 397-member declaration in one file rather than being split.
 
-from enum import Enum
+from enum import StrEnum
 from typing import Protocol
 
-class ChangeKind(str, Enum):
+class ChangeKind(StrEnum):
     FUNC_REMOVED = 'func_removed'
     FUNC_REMOVED_ELF_ONLY = 'func_removed_elf_only'
     FUNC_ADDED = 'func_added'
@@ -160,6 +160,7 @@ class ChangeKind(str, Enum):
     PARAM_POINTEE_QUALIFIER_CHANGED = 'param_pointee_qualifier_changed'
     FUNC_RETURN_POINTEE_QUALIFIER_ADDED = 'func_return_pointee_qualifier_added'
     FUNC_RETURN_POINTEE_QUALIFIER_REMOVED = 'func_return_pointee_qualifier_removed'
+    FUNC_RETURN_POINTEE_QUALIFIER_CHANGED = 'func_return_pointee_qualifier_changed'
     OVERLOAD_AMBIGUITY_INTRODUCED = 'overload_ambiguity_introduced'
     PARAM_BECAME_VA_LIST = 'param_became_va_list'
     PARAM_LOST_VA_LIST = 'param_lost_va_list'
@@ -173,6 +174,8 @@ class ChangeKind(str, Enum):
     DECLARATION_COORDINATES_SHIFTED = 'declaration_coordinates_shifted'
     DECLARATION_IDENTITY_UNCHANGED = 'declaration_identity_unchanged'
     DECLARATION_IDENTITY_RECONCILED_UNRESOLVED = 'declaration_identity_reconciled_unresolved'
+    PUBLIC_DEPENDENCY_ROLE_CHANGED = 'public_dependency_role_changed'
+    PUBLIC_DEPENDENCY_ROLE_UNKNOWN = 'public_dependency_role_unknown'
     VAR_REMOVED_ELF_ONLY = 'var_removed_elf_only'
     FUNC_BECAME_INLINE = 'func_became_inline'
     FUNC_LOST_INLINE = 'func_lost_inline'

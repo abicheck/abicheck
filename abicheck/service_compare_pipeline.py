@@ -17,9 +17,9 @@
 ``run_compare_request`` was one function doing two separable things — turning a
 :class:`CompareRequest` into a resolved pair of snapshots, then classifying that
 pair. The native ``compare`` CLI needs to run its own ADR-049 step *between*
-those two (``cli_compare_receipt.resolve_and_apply`` needs the Click context to
-answer "did the user type this?", and a ``--pack`` it selects can move the
-policy file and severity levels the classification is then scored under), so as
+those two (its ADR-049 configuration step, now the shared
+``workflows.compare_configuration``, can move the policy file and severity
+levels the classification is then scored under via a ``--pack``), so as
 one function it could not reuse either half and kept a parallel resolution
 implementation of its own (``cli_resolve._resolve_compare_snapshots``).
 
@@ -54,40 +54,39 @@ import functools
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from .buildsource.header_graph_ast_projection import header_graph_bisection_scope
 from .compile_context import CompileContext
 from .dependency_info import populate_pair_dependency_info
 from .environment_matrix import EnvironmentMatrix
 from .errors import ValidationError
 from .extract.env_flags import env_flag
 from .policy.depth_projection import (
-    project_build_source_pack_to_depth,
     project_pair_to_depth,
     project_snapshot_to_depth,
 )
 from .process_resources import BudgetedExecutor
 from .serialization import run_scoped_digest_cache
 from .storage.header_ast_cache import ast_acquisition_scope
-from .workflows import abi3_audit
 from .workflows.artifact.compile_context_gate import (
     SideCompileInput,
     resolved_pair_compile_contexts,
 )
+from .workflows.artifact.compile_db_match import match_side_compile_db
+from .workflows.artifact.dump_execution_options import DumpExecutionOptions
 from .workflows.artifact.execute import _resolve_side_snapshot_impl
-from .workflows.contracts import CompareRequest, CompareResult
+from .workflows.compare_classify import ResolvedComparePair
 from .workflows.request_inputs import InputSpec, required_path
+from .workflows.service_requests import CompareRequest, CompareResult
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from .model import AbiSnapshot
     from .service_compare_evidence import SideEvidence
     from .workflows.artifact.execute import SideResolution
-    from .workflows.resolved_execution_context import ResolvedExecutionContext
 
 __all__ = [
     "ResolvedComparePair",
     "classify_compare_pair",
-    "project_build_source_pack_to_depth",
     "project_pair_to_depth",
     "project_snapshot_to_depth",
     "resolve_compare_request",
@@ -95,31 +94,6 @@ __all__ = [
     "run_compare",
     "run_compare_request",
 ]
-
-
-@dataclasses.dataclass(frozen=True)
-class ResolvedComparePair:
-    """Both sides of a comparison, resolved and ready to classify.
-
-    The seam between :func:`resolve_compare_request` and
-    :func:`classify_compare_pair`: the detected binary formats, and each
-    side's resolved ``SideEvidence`` (``collect_mode`` drives the embed diff).
-
-    ``resolved_execution_context`` (One Semantic Pipeline plan, sub-phase 4B)
-    is the :class:`~abicheck.workflows.resolved_execution_context.
-    ResolvedExecutionContext` built from this request's own AnalysisPlan,
-    plus each side's resolved ``CompileContext`` when ``compile_context_gate``
-    judges it safe — still no ``evaluation_config`` (resolves one layer up).
-
-    """
-
-    old: AbiSnapshot
-    new: AbiSnapshot
-    old_fmt: str | None
-    new_fmt: str | None
-    old_evidence: SideEvidence
-    new_evidence: SideEvidence
-    resolved_execution_context: ResolvedExecutionContext | None = None
 
 
 def resolve_sides_sequentially(request: CompareRequest) -> bool:
@@ -272,6 +246,27 @@ def _reject_unsupported_frontends(
     )
 
 
+def _side_execution(request: CompareRequest, side: InputSpec) -> DumpExecutionOptions:
+    """*side*'s execution plan: its own ``InputSpec.execution``, else the
+    request-level defaults.
+
+    The defaults are ADR-068 Phase 4's absorption of
+    ``ScanRequest.allow_build_query``: ``None`` (not ``False``) when unset, so
+    the primitive keeps its own documented default -- under which
+    ``_gated_build_query_inputs`` nulls ``build_config`` outright, passive
+    keys included, so a request that states no consent resolves as if it
+    passed no ``build_config`` at all (see
+    ``CompareRequest.allow_build_query``'s own docstring).
+    """
+    if side.execution is not None:
+        return side.execution
+    return DumpExecutionOptions(
+        build_config=side.build_config,
+        changed_paths=request.changed_paths,
+        allow_build_query=request.allow_build_query or None,
+    )
+
+
 def resolve_compare_request(
     request: CompareRequest,
     *,
@@ -315,6 +310,10 @@ def resolve_compare_request(
     from .workflows.plan import AnalysisPlanner
 
     request.validate()
+    # Raw sources/build_info this run cannot collect from (depth binary/
+    # headers, or a non-binary operand) are ignored with a note, before the
+    # planner or any extraction sees them.
+    request = _sce.without_unusable_raw_evidence(request, notify)
     # Codex review (fresh evidence, PR #1178): a stored-snapshot-only pair
     # needs no subprocess/extraction work at all, so nothing inside this
     # resolution would otherwise ever call `deadline.check()` -- an
@@ -376,6 +375,10 @@ def resolve_compare_request(
         public_headers: list[Path],
         public_header_dirs: list[Path],
     ) -> SideResolution:
+        options = _side_execution(request, side)
+        compile_db = match_side_compile_db(
+            options.compile_db, evidence.headers, options.compile_db_filter, notify
+        )
         return _resolve_side_snapshot_impl(
             side,
             evidence,
@@ -391,10 +394,16 @@ def resolve_compare_request(
             debug_format=debug_format,
             include_labels=dict(request.include_labels) or None,
             notify=notify,
-            changed_paths=request.changed_paths,  # ADR-043 D7 POI scoping
-            # ADR-068 Phase 4, absorbed from `ScanRequest.allow_build_query` (with `ScanRequest.build_config`'s own already-present `InputSpec.build_config` counterpart, which nothing on this path read before). `None` (not `False`) when unset, so the primitive keeps its own documented default rather than this request restating it -- and under that default `_gated_build_query_inputs` nulls `build_config` outright, passive keys included, so every pre-existing request resolves exactly as it did (it passed no `build_config` here at all). `compare` deliberately keeps the whole config behind that consent: reading a discovered config's passive settings without it would newly let them affect a comparison -- a behaviour change this field's absorption does not carry. See `CompareRequest.allow_build_query`'s own docstring.
-            build_config=side.build_config,
-            allow_build_query=request.allow_build_query or None,
+            build_config=options.build_config,
+            build_config_explicit=options.build_config_explicit,
+            build_query=options.build_query,
+            build_compile_db=options.build_compile_db,
+            changed_paths=options.changed_paths,  # ADR-043 D7 POI scoping
+            allow_build_query=options.allow_build_query,
+            compile_db_tokens=compile_db.tokens,
+            compile_db_matched=compile_db.matched,
+            seed_collect_mode=options.seed_collect_mode,
+            source_frontend_from_folded_context=options.source_frontend_from_folded_context,
         )
 
     def _resolve_old_side() -> SideResolution:
@@ -420,7 +429,7 @@ def resolve_compare_request(
         parse_performance_profile,
         tuning_for,
     )
-    from .workflows.side_isolation import concurrent_children_apply, run_isolated
+    from .workflows.side_isolation import concurrent_children_apply, run_cold_isolated
 
     tuning = tuning_for(
         parse_performance_profile(request.performance_profile)
@@ -430,16 +439,18 @@ def resolve_compare_request(
     # `allow_parallel` permits two *threads*; two live binaries may still go
     # to two concurrent child processes without it (`concurrent_children_apply`).
     concurrent = not tuning.sequential_sides and not resolve_sides_sequentially(request)
-    with ast_acquisition_scope():
+    # One header-graph bisection memo per request, joined by an enclosing
+    # release fan-out's; the side workers below inherit it (copy_context).
+    with ast_acquisition_scope(), header_graph_bisection_scope():
         if tuning.isolate_sides or (
             concurrent and concurrent_children_apply(tuning, old_fmt, new_fmt)
         ):
             _deadline_ts = deadline.current_deadline_ts()
-            old_res, new_res = run_isolated(
-                [
-                    functools.partial(_deadline_bound_side_worker, _deadline_ts, fn)
-                    for fn in (_resolve_old_side, _resolve_new_side)
-                ],
+            old_res, new_res = run_cold_isolated(
+                (_resolve_old_side, _resolve_new_side),
+                lambda fn: functools.partial(
+                    _deadline_bound_side_worker, _deadline_ts, fn
+                ),
                 concurrent=not tuning.isolate_sides,
             )
         elif not (concurrent and allow_parallel):
@@ -511,42 +522,24 @@ def classify_compare_pair(
 ) -> CompareResult:
     """Classify an already-resolved pair — the second half of ``run_compare_request``.
 
-    Loads the request's suppression list and policy file, diffs whatever
-    build-source evidence the snapshots carry into ``extra_changes`` (without
-    it a source-only change reads as artifact-only compatible), classifies
-    through the Tier-2 ``compare_snapshots`` chokepoint, and attaches the
-    coverage/metrics the diff itself does not produce -- plus ADR-068 D3's candidate-only ``--abi3`` enrichment (Phase 2d), folded into ``extra_changes`` *before* classification so policy scores it; a no-op unless ``CompareRequest.abi3_floor`` is set.
-
-    A front end that must configure the run between the two phases (the native
-    ``compare`` CLI's ADR-049 ``resolve_and_apply``, which can move the policy
-    file and severity levels a ``--pack`` selects) calls
-    :func:`resolve_compare_request` and then classifies on its own terms
-    instead of calling this; everything else composes the two through
-    :func:`abicheck.service.run_compare_request`.
+    Resolves the request's policy inputs (suppression list, policy file,
+    forwarded and selected packs, evaluation config, project fold,
+    acknowledgments), classifies through
+    :func:`~abicheck.workflows.compare_classify.classify_resolved_pair` -- the
+    one classification implementation, which the native ``compare`` CLI calls
+    too with the policy inputs its own ADR-049 configuration step resolved --
+    and then scores the result under the request's gate
+    (:func:`~abicheck.workflows.compare_finalize.finalize_classified_pair`).
 
     The environment matrix is read straight off ``request.env_matrix``: the
-    former ``env_matrix_path`` alternative was retired, so the field already
-    holds the resolved :class:`~abicheck.environment_matrix.EnvironmentMatrix`
-    (``.abicheck.yml``'s ``deployment:`` key, resolved once by
-    ``resolve_compare_config``) and there is nothing left to load here.
+    field already holds the resolved
+    :class:`~abicheck.environment_matrix.EnvironmentMatrix`.
     """
-    from . import deadline
-    from .buildsource.evidence_report import attach_evidence_metrics
+    from .workflows.compare_classify import classify_resolved_pair
     from .workflows.compare_finalize import finalize_classified_pair
-    from .workflows.compare_policy import compare_snapshots, load_suppression_and_policy
-    from .workflows.pair_evidence import fold_pair_evidence, load_probe_matrix_changes
+    from .workflows.compare_policy import load_suppression_and_policy
+    from .workflows.compare_request_policy import resolve_request_policy_inputs
 
-    # Same classify-stage boundary check as `resolve_compare_request`'s own
-    # (PR #1178): `compare_snapshots` below may do no extraction work at all.
-    deadline.check()
-    # ADR-020b / ADR-068 D5: already resolved on the request itself.
-    env_matrix: EnvironmentMatrix | None = request.env_matrix
-
-    # ADR-063 Phase 8's "--depth floor vs ceiling" gap: the *ceiling* half,
-    # narrowing what this classification may see to the requested rung. The
-    # floor is the exit-7 axis below; the ceiling applies either way. A *view*,
-    # not a mutation of `pair.old`/`pair.new` (`project_pair_to_depth`'s docstring).
-    old, new = project_pair_to_depth(pair.old, pair.new, request.depth)
     suppression, pf = load_suppression_and_policy(
         request.suppress,
         request.policy,
@@ -554,97 +547,15 @@ def classify_compare_pair(
         strict_suppressions=request.strict_suppressions,
         require_justification=request.require_justification,
     )
-    # A forwarded pack's policy contribution, folded as `pack_application.
-    # policy_file_with_packs` does; a no-op unless the pack fields are set.
-    if request.pack_policy_overrides or request.pack_internal_namespaces is not None:
-        from .pack_application import PackApplication, policy_file_with_packs
-
-        pf = policy_file_with_packs(
-            pf,
-            PackApplication(
-                policy_overrides=dict(request.pack_policy_overrides or {}),
-                internal_namespaces=request.pack_internal_namespaces,
-            ),
-            base_policy=request.policy,
-        )
-    # The rest of the request's policy inputs (evaluation config, project
-    # fold, acknowledgments), resolved once in `workflows`.
-    from .workflows.compare_request_policy import resolve_request_policy_inputs
-
     policy_inputs = resolve_request_policy_inputs(request, suppression, pf)
-    suppression, pf = policy_inputs.suppression, policy_inputs.policy_file
-    evaluation_config = policy_inputs.evaluation_config
-    # The shared evidence fold the CLI runs too (probe matrix, L0, embedded facts, abi3).
-    folded = fold_pair_evidence(
-        old,
-        new,
-        collect_mode=pair.old_evidence.collect_mode,
-        extra_changes=load_probe_matrix_changes(
-            request.old_probe_matrix, request.new_probe_matrix
-        ),
-        policy_file=pf,
-        lang=request.lang,
-        abi3_floor=request.abi3_floor,
-    )
-    extra_changes, layer_coverage_rows = (
-        folded.extra_changes,
-        folded.layer_coverage_rows,
-    )
-    result = compare_snapshots(
-        old,
-        new,
-        suppression=suppression,
-        policy=request.policy,
-        policy_file=pf,
-        acknowledgments=policy_inputs.acknowledgments.records,
-        acknowledgment_policy=policy_inputs.acknowledgments.policy,
-        scope_to_public_surface=request.scope_public,
-        force_public_symbols=(
-            set(request.force_public_symbols) if request.force_public_symbols else None
-        ),
-        extra_changes=extra_changes,
-        public_surface_allowlist=(
-            set(request.public_surface_allowlist)
-            if request.public_surface_allowlist is not None
-            else None
-        ),
-        # Forwards the request's own field: a bare `CompareRequest()`/
-        # `run_compare()` keeps ADR-027's accepted opt-in default (its
-        # default-on flip is deferred pending release-cycle FP-rate/parity
-        # validation). The native CLI and the release fan-out's
-        # `_run_compare_pair` pass `True` at their own call sites; that
-        # front-end divergence is pinned by the F2 route-parity harness's
-        # strict xfail, and closing it is a default change needing an
-        # ADR-027 amendment (ADR-068 D4, now accepted, calls modulation
-        # automatic), not an edit here. A prior fix forcing it on here was
-        # reverted for exactly that reason (PR #1154 follow-up).
-        # `surface_metrics`/`reconcile_build_context` are not request fields:
-        # `compare_snapshots` forces both on for every caller.
-        pattern_verdicts=request.pattern_verdicts,
-        collapse_versioned_symbols=request.collapse_versioned_symbols,
-        env_matrix=env_matrix,
-        diagnostic_comparison=request.diagnostic_comparison,
-        contract_evaluation=request.contract_evaluation,
-        contract_mode=request.contract_mode,
-    )
-    evidence_metrics, _fail = folded.evidence_metrics, folded.abi3_failure
-    if layer_coverage_rows:
-        result.layer_coverage = layer_coverage_rows
-    attach_evidence_metrics(result, evidence_metrics, extra_changes or [])
-    abi3_audit.record_abi3_evidence_contract_error(result, _fail)
-    # ADR-068 §3 #28 -- `compare`'s only depth-floor mechanism since PR #1195.
-    # The liveness rule it needs lives with the axis, not here.
-    from .workflows import depth_evidence_contract
-
-    depth_evidence_contract.record_for_compare_request(result, request, old, new)
+    classified = classify_resolved_pair(request, pair, policy_inputs)
     return finalize_classified_pair(
         request,
         pair.resolved_execution_context,
-        result,
-        old,
-        new,
-        suppression,
-        evaluation_config,
+        classified,
+        policy_inputs.suppression,
+        policy_inputs.evaluation_config,
+        pack_application=policy_inputs.pack_application,
     )
 
 
@@ -659,12 +570,12 @@ def run_compare_request(request: CompareRequest) -> CompareResult:
     Exactly the composition of this module's own two phases --
     :func:`resolve_compare_request` then :func:`classify_compare_pair`. A
     front end that must configure the run between them (the native
-    ``compare`` CLI's ADR-049 ``resolve_and_apply``, whose ``--pack`` can
+    ``compare`` CLI's ADR-049 ``resolve_compare_configuration``, whose ``--pack`` can
     move the policy file and severity levels the classification is scored
     under) calls the two phases directly rather than keeping a second
     resolution implementation.
 
-    Returns a :class:`~abicheck.workflows.contracts.CompareResult` (ADR-055 D2), not the
+    Returns a :class:`~abicheck.workflows.service_requests.CompareResult` (ADR-055 D2), not the
     bare ``(DiffResult, old, new)`` tuple it returned before 0.6: a struct can
     gain a field without breaking positional callers, which a tuple cannot.
     ``CompareResult.as_tuple()`` reproduces the old shape for a caller that
@@ -698,6 +609,16 @@ def run_compare_request(request: CompareRequest) -> CompareResult:
         return classify_compare_pair(request, pair)
 
 
+def _declared_default(owner: type, name: str) -> Any:
+    """A request field's declared default, read from its dataclass.
+
+    The keyword shim restates the defaults of the ``CompareRequest``/
+    ``InputSpec`` fields it forwards onto; reading them here keeps the shim
+    and the request from disagreeing. The signature shows the same values.
+    """
+    return next(f.default for f in dataclasses.fields(owner) if f.name == name)
+
+
 def run_compare(
     old_input: Path,
     new_input: Path,
@@ -705,30 +626,34 @@ def run_compare(
     new_headers: list[Path] | None = None,
     old_includes: list[Path] | None = None,
     new_includes: list[Path] | None = None,
-    old_version: str = "",
-    new_version: str = "",
-    lang: str = "c++",
-    lang_explicit: bool = False,
-    frontend: str = "auto",
+    old_version: str = _declared_default(InputSpec, "version"),
+    new_version: str = _declared_default(InputSpec, "version"),
+    lang: str = _declared_default(CompareRequest, "lang"),
+    lang_explicit: bool = _declared_default(CompareRequest, "lang_explicit"),
+    frontend: str = _declared_default(CompareRequest, "frontend"),
     suppress: Path | None = None,
-    policy: str = "strict_abi",
+    policy: str = _declared_default(CompareRequest, "policy"),
     policy_file_path: Path | None = None,
     old_pdb_path: Path | None = None,
     new_pdb_path: Path | None = None,
     old_debug_roots: list[Path] | None = None,
     new_debug_roots: list[Path] | None = None,
-    enable_debuginfod: bool = False,
-    scope_to_public_surface: bool = True,
+    enable_debuginfod: bool = _declared_default(CompareRequest, "enable_debuginfod"),
+    scope_to_public_surface: bool = _declared_default(CompareRequest, "scope_public"),
     force_public_symbols: set[str] | None = None,
-    pattern_verdicts: bool = True,
+    pattern_verdicts: bool = _declared_default(CompareRequest, "pattern_verdicts"),
     public_surface_allowlist: set[str] | None = None,
     debuginfod_url: str | None = None,
-    diagnostic_comparison: bool = False,
-    contract_evaluation: bool = True,
+    diagnostic_comparison: bool = _declared_default(
+        CompareRequest, "diagnostic_comparison"
+    ),
+    contract_evaluation: bool = _declared_default(
+        CompareRequest, "contract_evaluation"
+    ),
     # `False` matches the CLI flag and every other typed surface; this one
     # matters most, since it is written into *both* `InputSpec`s below and so
     # overrides their own field default (Codex review, PR #1258).
-    include_dependencies: bool = False,
+    include_dependencies: bool = _declared_default(InputSpec, "include_dependencies"),
     contract_mode: str | None = None,
     pack_policy_overrides: dict[Any, Any] | None = None,
     pack_internal_namespaces: tuple[str, ...] | None = None,
@@ -737,10 +662,12 @@ def run_compare(
     *,
     severity_preset: str | None = None,
     public_header_dirs: list[Path] | None = None,
-    collapse_versioned_symbols: bool = False,
+    collapse_versioned_symbols: bool = _declared_default(
+        CompareRequest, "collapse_versioned_symbols"
+    ),
     project_policy_overrides: dict[Any, Any] | None = None,
     env_matrix: EnvironmentMatrix | None = None,
-    exclude_headers: tuple[str, ...] = (),
+    exclude_headers: tuple[str, ...] = _declared_default(InputSpec, "exclude_headers"),
     acknowledgments_path: Path | None = None,
     acknowledgment_unacknowledged_additions: str | None = None,
 ) -> CompareResult:
@@ -784,7 +711,7 @@ def run_compare(
     no-op, matching every pre-existing caller.
 
     ``depth`` forwards straight onto :class:`CompareRequest.depth` -- the
-    release fan-out's ``_run_compare_pair`` needed a way to forward its own
+    release fan-out's ``compare_member_pair`` needed a way to forward its own
     resolved ``--depth binary`` per pair; every other caller passes ``None``.
 
     ``severity_preset`` (Codex review): forwards onto ``CompareRequest``'s
@@ -793,7 +720,7 @@ def run_compare(
     ``public_header_dirs`` (CodeRabbit review, PR #1138): a project's
     ``scope.public_header_dirs``, folded unchanged into both sides'
     ``InputSpec.public_header_dirs`` -- closes the release fan-out's own
-    gap, since ``cli_compare_release_pairwise._run_compare_pair`` calls
+    gap, since ``workflows.release_members.compare_member_pair`` calls
     this shim rather than ``cli_resolve._resolve_compare_snapshots``
     (which already threads this config key for a single-pair compare).
     ``None`` is a no-op, matching every pre-existing caller.
@@ -815,7 +742,7 @@ def run_compare(
 
     This shim is the release fan-out's only route to the exclusion rules: a
     directory/package ``compare`` reaches it through
-    ``cli_compare_release_pairwise._run_compare_pair``, not through
+    ``workflows.release_members.compare_member_pair``, not through
     ``cli_resolve._resolve_compare_snapshots`` (which already threaded them
     for a single-pair compare). Without this parameter the patterns were
     accepted on the command line, dropped at the directory branch, and every
@@ -836,7 +763,7 @@ def run_compare(
     every pre-existing caller.
 
     Returns:
-        A :class:`~abicheck.workflows.contracts.CompareResult`. This returned the bare
+        A :class:`~abicheck.workflows.service_requests.CompareResult`. This returned the bare
         ``(DiffResult, old, new)`` tuple before 0.6; ``.as_tuple()`` gives that
         shape back for a caller that unpacks positionally.
     Raises:

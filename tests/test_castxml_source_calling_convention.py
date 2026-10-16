@@ -24,24 +24,24 @@ from abicheck.extract.headers.castxml.calling_convention import (
     calling_conventions_in,
     source_calling_conventions,
 )
-from abicheck.extract.headers.castxml.macro_table import (
-    MacroTable,
-    attach_macro_table,
-    calling_convention_macros,
-    expand,
-    macro_dump_command,
-    parse_object_macros,
-    read_macro_table,
+from abicheck.extract.headers.castxml.preprocessed_text import (
+    PreprocessedText,
+    attach_preprocessed_text,
+    declaration_windows,
+    file_key,
+    parse_preprocessed,
+    preprocess_command,
+    read_preprocessed_text,
     target_default_convention,
 )
 from abicheck.model.cc_attributes import CC_ATTRIBUTE_BASES
 
 
-def _ctx(path: Path, table: MacroTable | None = None) -> SimpleNamespace:
+def _ctx(path: Path, table: PreprocessedText | None = None) -> SimpleNamespace:
     return SimpleNamespace(
         id_map={"f1": Element("File", {"id": "f1", "name": str(path)})},
         source_lines_cache={},
-        cc_macro_table=table,
+        preprocessed=table,
     )
 
 
@@ -228,15 +228,28 @@ def test_castxml_reported_convention_is_not_second_guessed(tmp_path: Path) -> No
     assert _contract_attributes_with_source_cc(_ctx(plain), el, "target") == []
 
 
-# --- macros: the compiler-resolved expansion decides (2026-10-08 re-audit) ---
+# --- macros: the preprocessed text at the declaration decides ------------
+# (2026-10-08 re-audit introduced a final ``-dM`` table; the 2026-10-11
+# re-audit showed it wrong for ``#undef``/later redefinition and blind to
+# function-like macros, so the declaration's own preprocessed line is read.)
 
-_DM = """#define __x86_64__ 1
-#define MS __attribute__((ms_abi))
-#define CALL MS
-#define SYSV __attribute__((sysv_abi))
-#define EMPTY
-#define FN(x) __attribute__((ms_abi)) x
-#define SELF SELF
+_PP = """# 1 "/inc/api.h"
+# 1 "<built-in>" 1
+#define __x86_64__ 1
+#define unix 1
+# 1 "<command line>" 1
+# 1 "<built-in>" 2
+# 1 "/inc/api.h" 2
+#define CALL __attribute__((ms_abi))
+
+__attribute__((ms_abi)) int target(int a,
+
+    int b);
+#undef CALL
+# 20 "/inc/api.h"
+int other(void);
+# 1 "/inc/plain.h" 1
+int plain(void);
 """
 
 
@@ -244,80 +257,179 @@ def _has_cc(text: str) -> bool:
     return bool(calling_conventions_in(text))
 
 
-def test_parse_and_resolve_macro_table() -> None:
-    defs = parse_object_macros(_DM)
-    assert "FN" not in defs  # function-like macros are not substituted
-    assert expand("CALL int", defs) == "__attribute__((ms_abi)) int"
-    assert expand("SELF", defs) == "SELF"  # no self-recursion
-    assert calling_convention_macros(defs, _has_cc) == {
-        "MS": "__attribute__((ms_abi))",
-        "CALL": "__attribute__((ms_abi))",
-        "SYSV": "__attribute__((sysv_abi))",
+def test_parse_preprocessed_maps_lines_back_to_source() -> None:
+    files, defined = parse_preprocessed(_PP)
+    assert files[file_key("/inc/api.h")] == {
+        1: "#define CALL __attribute__((ms_abi))",
+        3: "__attribute__((ms_abi)) int target(int a,",
+        5: "    int b);",
+        6: "#undef CALL",
+        20: "int other(void);",
     }
-    assert target_default_convention(defs) == "sysv_abi"
-    assert target_default_convention({**defs, "_WIN32": "1"}) == "ms_abi"
-    assert target_default_convention({}) == ""
+    assert files[file_key("/inc/plain.h")] == {1: "int plain(void);"}
+    assert not any(k.startswith("<") for k in files)  # pseudo files dropped
+    assert {"__x86_64__", "CALL"} <= defined
+    assert target_default_convention(defined) == "sysv_abi"
+    assert target_default_convention(defined | {"_WIN32"}) == "ms_abi"
+    assert target_default_convention(set()) == ""
 
 
-def test_macro_table_round_trips_through_the_document() -> None:
+def test_line_marker_escapes_and_line_directive_spelling() -> None:
+    files, _ = parse_preprocessed('#line 7 "C:\\\\x\\"y.h"\nint f(void);\n')
+    assert files == {'C:\\x"y.h': {7: "int f(void);"}}
+
+
+def _root(*decls: tuple[str, int]) -> Element:
     root = Element("CastXML")
-    assert read_macro_table(root) is None  # no table: not "no macros"
-    attach_macro_table(
-        root, MacroTable({"CALL": "__attribute__((ms_abi))"}, "sysv_abi")
+    root.append(Element("File", {"id": "f1", "name": "/inc/api.h"}))
+    root.append(Element("File", {"id": "f2", "name": "/inc/plain.h"}))
+    for fid, line in decls:
+        root.append(Element("Function", {"file": fid, "line": str(line)}))
+    return root
+
+
+def test_only_convention_bearing_files_keep_declaration_windows() -> None:
+    files, _ = parse_preprocessed(_PP)
+    kept = declaration_windows(_root(("f1", 3), ("f2", 1)), files, _has_cc)
+    assert set(kept) == {file_key("/inc/api.h")}  # plain.h spells no convention
+    assert set(kept[file_key("/inc/api.h")]) == {1, 3, 5, 6}  # line 20 out of window
+    # No convention-bearing file at all: nothing kept.
+    assert (
+        declaration_windows(_root(("f2", 1)), {"/p.h": {1: "int f();"}}, _has_cc) == {}
     )
-    table = read_macro_table(root)
-    assert table is not None
-    assert table.macros == {"CALL": "__attribute__((ms_abi))"}
-    assert table.default_cc == "sysv_abi"
+
+
+def test_a_convention_only_in_a_directive_does_not_mark_the_file() -> None:
+    files = {"/inc/api.h": {1: "#define LATE __attribute__((ms_abi))", 2: "int f();"}}
+    assert declaration_windows(_root(("f1", 2)), files, _has_cc) == {}
+
+
+def test_preprocessed_text_round_trips_through_the_document() -> None:
+    root = Element("CastXML")
+    assert read_preprocessed_text(root) is None  # no table: not "no lines"
+    table = PreprocessedText({file_key("/inc/api.h"): {2: "int f()\x01;"}}, "sysv_abi")
+    attach_preprocessed_text(root, table)
+    got = read_preprocessed_text(root)
+    assert got is not None and got.default_cc == "sysv_abi"
+    # XML-unsafe char blanked
+    assert got.lines == {file_key("/inc/api.h"): {2: "int f() ;"}}
+    assert got.source_lines("/inc/./api.h") == ["", "int f() ;"]
+    assert got.source_lines("/inc/other.h") is None
     empty = Element("CastXML")
-    attach_macro_table(empty, MacroTable({}, ""))
-    got = read_macro_table(empty)
-    assert got is not None and got.macros == {}
+    attach_preprocessed_text(empty, PreprocessedText({}, ""))
+    got = read_preprocessed_text(empty)
+    assert got is not None and got.lines == {}
 
 
-def test_macro_dump_command_shape(tmp_path: Path) -> None:
+def test_preprocess_command_shape(tmp_path: Path) -> None:
     out = tmp_path / "m.txt"
     cmd = ["castxml", "--castxml-output=1", "--castxml-cc-gnu", "gcc", "-x", "c",
            "-o", "x.xml", "agg.h"]  # fmt: skip
-    assert macro_dump_command(cmd, out) == [
+    assert preprocess_command(cmd, out) == [
         "castxml", "--castxml-cc-gnu", "gcc", "-x", "c", "-o", str(out),
-        "-E", "-dM", "agg.h",
+        "-E", "-dD", "agg.h",
     ]  # fmt: skip
-    assert macro_dump_command(["castxml", "agg.h"], out) is None
-
-
-_TABLE = MacroTable(
-    calling_convention_macros(parse_object_macros(_DM), _has_cc), "sysv_abi"
-)
+    assert preprocess_command(["castxml", "agg.h"], out) is None
+    assert (
+        preprocess_command(["castxml", "--castxml-output=1", "a.h", "-o"], out) is None
+    )
 
 
 @pytest.mark.parametrize(
-    ("decl", "want"),
+    ("pp_lines", "want"),
     [
-        ("CALL int target(int a);", {"ms_abi"}),
-        ("int CALL target(int a);", {"ms_abi"}),
-        ("MS int target(int a);", {"ms_abi"}),
-        ("SYSV int target(int a);", set()),  # the target default
-        ("__attribute__((sysv_abi)) int target(int a);", set()),
-        ("EMPTY int target(int a);", set()),
-        ("int target(void (CALL *cb)(int));", set()),  # a parameter's, not ours
-        # A directive above the declaration is not part of it (Codex review):
-        ("#define UNUSED_CC CALL\nint target(int a);", set()),
-        ("#define LIT __attribute__((ms_abi))\nint target(int a);", set()),
-        ("#define LONG \\\n  CALL\nint target(int a);", set()),
-        ("#define UNUSED_CC CALL\nCALL int target(int a);", {"ms_abi"}),
+        # What the preprocessor produced at the declaration decides.
+        (["__attribute__((ms_abi)) int target(int a);"], {"ms_abi"}),
+        (["int __attribute__((ms_abi)) target(int a);"], {"ms_abi"}),
+        (["__attribute__((sysv_abi)) int target(int a);"], set()),  # default
+        (["     int target(int a);"], set()),  # CALL expanded to nothing
+        (["int target(void (__attribute__((ms_abi)) *cb)(int));"], set()),
+        # A directive -dD kept in place is not part of the declaration.
+        (["#define CALL __attribute__((ms_abi))", "int target(int a);"], set()),
+        (["int target(int a);", "#define CALL __attribute__((ms_abi))"], set()),
     ],
 )
-def test_macro_spelled_convention(tmp_path: Path, decl: str, want: set[str]) -> None:
+def test_preprocessed_lines_are_read_instead_of_the_header(
+    tmp_path: Path, pp_lines: list[str], want: set[str]
+) -> None:
     hdr = tmp_path / "h.h"
-    # A longer line before the declaration: offsets shift under expansion.
-    text = "MS int other_function_with_a_long_name(int);\n" + decl + "\n"
-    hdr.write_text(text)
-    line = next(i for i, ln in enumerate(text.splitlines(), 1) if "target" in ln)
-    assert source_calling_conventions(_ctx(hdr, _TABLE), _el(line), "target") == want
+    # The raw header says the opposite: it must not be read.
+    hdr.write_text("CALL int target(int a) __attribute__((fastcall));\n" * 3)
+    table = PreprocessedText(
+        {file_key(str(hdr)): dict(enumerate(pp_lines, 1))}, "sysv_abi"
+    )
+    line = next(i for i, ln in enumerate(pp_lines, 1) if "target" in ln)
+    assert source_calling_conventions(_ctx(hdr, table), _el(line), "target") == want
+
+
+def test_a_file_without_preprocessed_lines_spells_no_convention(tmp_path: Path) -> None:
+    hdr = tmp_path / "h.h"
+    hdr.write_text("int target(int a) __attribute__((ms_abi));\n")
+    ctx = _ctx(hdr, PreprocessedText({}, "sysv_abi"))
+    assert source_calling_conventions(ctx, _el(1), "target") == set()
+    # Past the recorded lines: nothing, not a crash.
+    ctx = _ctx(hdr, PreprocessedText({file_key(str(hdr)): {1: "int target(int);"}}, ""))
+    assert source_calling_conventions(ctx, _el(5), "target") == set()
+
+
+def test_preprocessed_lines_are_cached(tmp_path: Path) -> None:
+    hdr = tmp_path / "h.h"
+    table = PreprocessedText(
+        {file_key(str(hdr)): {1: "int target(int) __attribute__((ms_abi));"}}
+    )
+    ctx = _ctx(hdr, table)
+    assert source_calling_conventions(ctx, _el(1), "target") == {"ms_abi"}
+    table.lines.clear()  # a second lookup must use the cache
+    assert source_calling_conventions(ctx, _el(1), "target") == {"ms_abi"}
 
 
 def test_without_a_table_text_is_read_literally(tmp_path: Path) -> None:
     hdr = tmp_path / "h.h"
     hdr.write_text("CALL int target(int a);\n")
     assert source_calling_conventions(_ctx(hdr), _el(1), "target") == set()
+
+
+def _completed(rc: int) -> SimpleNamespace:
+    return SimpleNamespace(returncode=rc, stdout="", stderr="")
+
+
+_CMD = ["castxml", "--castxml-output=1", "-o", "x.xml", "agg.h"]
+
+
+def test_resolve_preprocessed_text_end_to_end_and_failures(tmp_path: Path) -> None:
+    from abicheck.extract.headers.castxml.preprocessed_text import (
+        resolve_preprocessed_text,
+    )
+
+    root = _root(("f1", 3))
+
+    def ok(cmd: list[str], **_: object) -> SimpleNamespace:
+        Path(cmd[cmd.index("-o") + 1]).write_text(_PP)
+        return _completed(0)
+
+    got = resolve_preprocessed_text(_CMD, root, tmp_path, ok, _has_cc)
+    assert got is not None and got.default_cc == "sysv_abi"
+    assert set(got.lines) == {file_key("/inc/api.h")}
+    # Unusable command shape, failing run, missing output, raising runner.
+    assert (
+        resolve_preprocessed_text(["castxml", "a.h"], root, tmp_path, ok, _has_cc)
+        is None
+    )
+    (tmp_path / "preprocessed.txt").unlink()
+    assert (
+        resolve_preprocessed_text(
+            _CMD, root, tmp_path, lambda c, **k: _completed(1), _has_cc
+        )
+        is None
+    )
+    assert (
+        resolve_preprocessed_text(
+            _CMD, root, tmp_path, lambda c, **k: _completed(0), _has_cc
+        )
+        is None
+    )
+
+    def boom(cmd: list[str], **_: object) -> SimpleNamespace:
+        raise OSError("no castxml")
+
+    assert resolve_preprocessed_text(_CMD, root, tmp_path, boom, _has_cc) is None

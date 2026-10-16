@@ -128,6 +128,15 @@ from ..policy.release_gate_options import (
     apply_release_gate_pack,
     resolve_release_gate_options,
 )
+from ..policy.release_outcome import (
+    RELEASE_OPERATIONAL_SENTINELS,
+    ReleaseOutcome,
+    apply_removed_member_floor,
+    consumer_verdict_rank,
+    fold_release_outcome,
+    release_global_verdicts,
+    worse_release_verdict,
+)
 from ..policy.scope_completeness import (
     INCOMPLETE_SCOPE_POLICIES,
     ScopeDecision,
@@ -159,6 +168,13 @@ if TYPE_CHECKING:
 
 __all__ = [
     "ClassifiedDiff",
+    "ReleaseOutcome",
+    "RELEASE_OPERATIONAL_SENTINELS",
+    "apply_removed_member_floor",
+    "consumer_verdict_rank",
+    "worse_release_verdict",
+    "fold_release_outcome",
+    "release_global_verdicts",
     "effective_kind_sets",
     "effective_verdict",
     "evaluate",
@@ -229,12 +245,9 @@ def snapshot_identity_digest(snap: AbiSnapshot) -> str:
     :func:`note_if_same_binary_compared`'s snapshot-digest fallback.
 
     Thin re-export of ``serialization.snapshot_content_digest`` -- exists so
-    a ``frontends`` caller (``frontends/cli/runtime.py``'s own
-    ``_finalize_compare_result``, Codex review: importing ``serialization``
-    directly there crossed the documented ``frontends`` dependency boundary,
-    which permits only ``model``/``workflows``/``report``) can reach the
-    identical computation ``service_compare_pipeline.classify_compare_pair``
-    uses without importing a non-permitted module itself.
+    a ``workflows`` caller (``workflows.compare_classify``, the one
+    classification every scalar ``compare`` route runs) reaches it without
+    importing ``serialization`` itself.
     """
     from ..serialization import snapshot_content_digest
 
@@ -260,10 +273,8 @@ def effective_gate_for_resolved_compare_config(
     result: Any = None,
     require_complete_analysis: bool = False,
 ) -> EffectiveGate:
-    """*cfg* (a ``cli_helpers_compare.ResolvedCompareConfig``, taken as
-    ``Any`` rather than imported -- that module is ``frontends``-classified,
-    and ``workflows -> frontends`` is exactly the reverse of the permitted
-    direction), projected onto the plan's shared ``EffectiveGate`` shape
+    """*cfg* (a ``workflows.compare_configuration.ResolvedCompareConfig``, taken as
+    ``Any`` so this module needs no import of it), projected onto the plan's shared ``EffectiveGate`` shape
     (duplication-and-convergence-assessment P0's "Effective configuration
     and pack application" target). ``policy.release_gate_options.
     GateOptions.effective_gate`` exposes the identical shape for the

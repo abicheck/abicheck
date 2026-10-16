@@ -1,43 +1,35 @@
 # `main` branch-protection Ruleset — admin runbook
 
-**Decision (2026-09): `main` does not require status checks to pass before a
-merge.** This repo previously worked toward making CI completion a hard
-merge gate (CLI cleanup phase two's PR 0B/P0 — see
-`docs/contribute/plans/cli-cleanup-phase-two.md`'s "PR 0" section for that
-history). That required-status-checks Ruleset was applied, and it did what
-it says: it blocked pushes/merges to `main` until every required check
-finished. The maintainer decided that trade-off isn't wanted — waiting on
-CI to merge is a real cost, and this repo chooses to accept the risk of an
-occasional red merge over paying it. See `.github/AGENTS.md`'s
-"Required-status-check configuration" section for the full rationale and
-what replaces the mechanism this runbook used to apply.
+**Decision (2026-10-15): one check gates merges into `main`: `lint-and-types`.**
+The `lint-and-types` job in `.github/workflows/ci.yml` (lint, format, mypy,
+strict docs build, generated example docs) is the only required status check.
+No other check is required. This reverses the 2026-09 decision that `main`
+requires no status checks. See `.github/AGENTS.md`'s
+"Required-status-check configuration" section for the rationale.
 
-Concretely, that means:
+What the Ruleset enforces on `main`:
 
-- `branch-protection-ruleset.json` in this directory carries **no**
-  `required_status_checks` rule anymore. `main`'s only Ruleset-enforced
-  protection is `non_fast_forward` (no force-pushes/history rewrites).
-- `.github/workflows/verify-merge-checks.yml` — the post-merge audit that
-  used to flag a merge whose required checks hadn't actually finished — was
-  **removed**. It existed only to compensate for the required-status-checks
-  gate not yet being enforced; once the decision became "don't enforce that
-  gate at all," the audit had nothing left to usefully report — every merge
-  that skips ahead of CI is now expected behavior, not a finding.
-- CI still runs on every PR and still matters for review — it's just
-  informational with respect to the merge button. A red check does not
-  block a maintainer who chooses to merge anyway.
+- `non_fast_forward`: no force-pushes or history rewrites.
+- `required_status_checks` with the single context `lint-and-types`. The
+  check-run name is the job id, because the job sets no `name:`. The job has
+  no path filter and runs on every pull request to `main`.
+- A repository-admin bypass (`bypass_actors`, `RepositoryRole`, admin, actor
+  id `5`, `bypass_mode: always`) so an urgent merge is possible. This is a
+  maintainer choice. Remove the entry to make the gate bind admins too.
 
-**If this decision is ever reversed** and required-status-checks blocking
-is wanted again: re-derive the required-check list from `.github/AGENTS.md`'s
-"Required vs. informational workflows" table using that file's own rule (its
-"Required-status-check configuration" section), add a `required_status_checks`
-rule with that list to `branch-protection-ruleset.json`, and apply it the
-same way described below for the `non_fast_forward` rule. Re-adding
-`verify-merge-checks.yml` as a compensating post-merge audit is optional at
-that point, not required — it only earns its keep while the Ruleset's
-enforcement itself is unverified or being rolled out.
+Applying the JSON is an **admin step**. Nothing in this repository applies
+it. Until a repository admin applies it, `main` does not enforce the check.
 
-## Apply (`non_fast_forward` only)
+`.github/workflows/verify-merge-checks.yml` (the post-merge audit from the
+2026-09 era) stays removed. It is not needed to enforce the required check.
+
+**To change the required set:** edit `branch-protection-ruleset.json`, then
+update `tests/test_required_checks_governance.py` (it pins the set to exactly
+`lint-and-types`) and `.github/AGENTS.md`'s section together. Re-apply the
+Ruleset afterwards. Do not add a bridge job that polls another workflow's
+check: `tests/test_required_checks_governance.py` rejects it.
+
+## Apply
 
 `branch-protection-ruleset.json` in this directory is the exact API payload.
 Create it with the GitHub CLI (needs an admin-scoped token / `gh auth login`
@@ -50,9 +42,11 @@ gh api --method POST -H "Accept: application/vnd.github+json" \
 ```
 
 Equivalently, in the web UI: **Settings → Rules → Rulesets → New branch
-ruleset**, target branch `main`, enforcement **Active**, add a "Restrict
-force pushes" (non-fast-forward) rule. Do **not** add a "Require status
-checks to pass" rule — that's the part this repo deliberately opted out of.
+ruleset**, target branch `main`, enforcement **Active**. Add a "Restrict
+force pushes" (non-fast-forward) rule and a "Require status checks to pass"
+rule with the single check `lint-and-types`. Under bypass, add the
+Repository admin role (the bypass the JSON declares), or omit it if the gate
+should bind admins too.
 
 ## Update instead of duplicate
 
@@ -74,11 +68,9 @@ signed-commit rules, merge-queue settings, `bypass_actors`, or broader
 `conditions` (e.g. it also targets release branches, not just `main`),
 overwriting it with this file's payload silently deletes or narrows every
 one of those, not just `rules`/`bypass_actors`. In particular, if the
-existing ruleset still carries a `required_status_checks` rule from before
-this decision was made, fetch it first and remove that rule deliberately
-rather than overwriting blind — the point of this update is specifically to
-drop that rule, not to leave it in place by accident. Fetch the existing
-ruleset first and decide from there:
+existing ruleset carries a `required_status_checks` rule, check that its
+contexts are exactly `lint-and-types` before overwriting it, rather than
+overwriting blind. Fetch the existing ruleset first and decide from there:
 
 ```bash
 gh api /repos/abicheck/abicheck/rulesets | jq '.[] | {id, name}'
@@ -99,9 +91,10 @@ gh api /repos/abicheck/abicheck/rulesets/<id> > /tmp/existing-ruleset.json
 
 - If it carries anything else in *any* of those three fields, **merge by
   hand instead of running the command above**: start from
-  `/tmp/existing-ruleset.json`, drop any `required_status_checks` rule entry
-  (per this decision) and keep/update the `non_fast_forward` rule, keep its
-  `conditions` and every other rule/`bypass_actors` entry untouched, save
+  `/tmp/existing-ruleset.json`, make its `required_status_checks` rule require
+  exactly `lint-and-types`; if no such rule exists, add it. Keep the
+  `non_fast_forward` rule,
+  keep its `conditions` and every other rule/`bypass_actors` entry untouched, save
   the merged result to a file, and `PUT` *that* file (same command as
   above, with `--input` pointed at the merged file) — not
   `branch-protection-ruleset.json` verbatim. **Strip GET-only fields
@@ -128,9 +121,9 @@ gh api /repos/abicheck/abicheck/rulesets/<id> > /tmp/existing-ruleset.json
   touching the existing one at all — GitHub enforces every active ruleset
   matching a ref simultaneously, so a second ruleset adds to the existing
   protections instead of risking removing them. Note this cuts both ways
-  here: a second ruleset can't *remove* a `required_status_checks` rule an
-  existing one still enforces, so if the goal is dropping that rule, it has
-  to be edited or deleted directly, not shadowed by an additional ruleset.
+  here: a second ruleset can't *narrow* a `required_status_checks` rule an
+  existing one already enforces (for example, one requiring more checks than
+  `lint-and-types`), so such a rule has to be edited directly.
 
 **If `main` is instead protected by *classic* branch protection** (the
 `GET /repos/.../rulesets` call above returns nothing, but
@@ -138,8 +131,10 @@ gh api /repos/abicheck/abicheck/rulesets/<id> > /tmp/existing-ruleset.json
 `branch-protection-ruleset.json`'s Ruleset payload doesn't apply there at
 all; a Ruleset object and a classic protection config are different
 resources with different shapes. If that classic config has
-`required_status_checks` enabled, disable/clear it there directly (GitHub's
-[branch-protection endpoint](https://docs.github.com/en/rest/branches/branch-protection#update-branch-protection))
-per this decision, and separately apply this Ruleset's `non_fast_forward`
-rule as a new, additional Ruleset (the `POST` command in "Apply" above) if
-force-push protection isn't already covered by the classic config too.
+`required_status_checks` enabled, make it require exactly `lint-and-types`
+there. If it is absent or disabled, enable required status checks and
+configure `lint-and-types` as the sole context (GitHub's
+[branch-protection endpoint](https://docs.github.com/en/rest/branches/branch-protection#update-branch-protection)),
+and separately apply this Ruleset (the `POST` command in "Apply" above) if
+force-push protection or the admin bypass isn't already covered by the
+classic config too.

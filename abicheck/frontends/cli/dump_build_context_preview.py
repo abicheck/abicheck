@@ -17,7 +17,7 @@
 the pipeline's compile-database match would derive).
 
 ADR-063 Track T4 ("Dump request contract") follow-up. A genuinely new
-module rather than an addition to ``cli_helpers_compare.py`` (its own
+module rather than an addition to ``cli_compare_helpers.py`` (its own
 ``no_growth`` debt entry, ``architecture/debt.yaml``) or ``cli_dump_helpers.py``
 (same) -- both are already at or over their adoption baseline, with zero
 headroom for either this preview function or the report section it feeds.
@@ -43,7 +43,10 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from ...dry_run import DryRunResult
-    from ...workflows.dump.pipeline import DumpExecutionOptions, ResolvedDumpRequest
+    from ...workflows.dump.request import (
+        DumpExecutionOptions,
+        ResolvedDumpRequest,
+    )
 
 __all__ = [
     "add_execution_options_dry_run_section",

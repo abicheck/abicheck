@@ -33,7 +33,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from .fact_schema_versions import _MIN_SCHEMA_VERSION_FOR_PARAM_KIND_FACT
+from .fact_schema_versions import (
+    _MIN_SCHEMA_VERSION_FOR_INLINE_FACTS,
+    _MIN_SCHEMA_VERSION_FOR_PARAM_KIND_FACT,
+)
 from .snapshot_schema_versions import (
     _MIN_SCHEMA_VERSION_FOR_CASTXML_VAR_ACCESS_FACTS,
     _MIN_SCHEMA_VERSION_FOR_CLANG_DEPRECATION_FACTS,
@@ -228,6 +231,16 @@ def decode_reliability_flags(
             or schema_version >= _MIN_SCHEMA_VERSION_FOR_PARAM_KIND_FACT
         )
 
+    # Same round-trip reasoning as header_cv_facts_reliable: an explicit
+    # persisted marker wins, so a stale baseline that was loaded and written
+    # back at the current schema version stays stale.
+    if "inline_facts_reliable" in d:
+        inline_facts_reliable_value = bool(d["inline_facts_reliable"])
+    else:
+        inline_facts_reliable_value = (
+            not from_headers or schema_version >= _MIN_SCHEMA_VERSION_FOR_INLINE_FACTS
+        )
+
     return {
         "header_cv_facts_reliable": header_cv_facts_reliable_value,
         "clang_deprecation_facts_reliable": clang_deprecation_facts_reliable_value,
@@ -239,4 +252,5 @@ def decode_reliability_flags(
         "clang_va_list_facts_reliable": clang_va_list_facts_reliable_value,
         "castxml_var_access_facts_reliable": castxml_var_access_facts_reliable_value,
         "param_kind_facts_reliable": param_kind_facts_reliable_value,
+        "inline_facts_reliable": inline_facts_reliable_value,
     }

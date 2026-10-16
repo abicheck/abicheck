@@ -108,7 +108,8 @@ class TestResolvedContractModeWiring:
             return _real_compare_snapshots(*args, **kwargs)
 
         monkeypatch.setattr(
-            "abicheck.service.compare_snapshots", _capturing_compare_snapshots
+            "abicheck.workflows.compare_policy.compare_snapshots",
+            _capturing_compare_snapshots,
         )
 
         result = CliRunner().invoke(
@@ -140,7 +141,8 @@ class TestResolvedContractModeWiring:
             return _real_compare_snapshots(*args, **kwargs)
 
         monkeypatch.setattr(
-            "abicheck.service.compare_snapshots", _capturing_compare_snapshots
+            "abicheck.workflows.compare_policy.compare_snapshots",
+            _capturing_compare_snapshots,
         )
 
         result = CliRunner().invoke(
@@ -155,7 +157,7 @@ class TestResolvedContractModeWiring:
     ):
         """Regression (full-suite run, fresh evidence): a ``--pack``-only run
         with no ``--contract`` still resolves a non-``None``
-        ``evaluation_config`` (``resolve_and_apply``'s early-return only skips
+        ``evaluation_config`` (``resolve_compare_configuration``'s early-return only skips
         when *neither* ``contract_evaluation`` nor a pack applies), and
         ``ContractConfig.mode`` always carries a concrete default -- so
         naively threading ``evaluation_config.contract.mode`` through
@@ -183,7 +185,8 @@ class TestResolvedContractModeWiring:
             return _real_compare_snapshots(*args, **kwargs)
 
         monkeypatch.setattr(
-            "abicheck.service.compare_snapshots", _capturing_compare_snapshots
+            "abicheck.workflows.compare_policy.compare_snapshots",
+            _capturing_compare_snapshots,
         )
 
         result = CliRunner().invoke(

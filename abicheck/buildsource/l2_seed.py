@@ -217,8 +217,8 @@ def _merge_l3_compile_context(
 ) -> CompileContext | None:
     """Fold *derived* (L3-derived, P0.3) ahead of *explicit* (user-supplied).
 
-    Mirrors ``-p``/``--compile-db``'s existing precedence for ``dump``
-    (``cli_helpers_compare._merge_gcc_options``): the build-derived flags lead
+    Mirrors ``-p``/``--compile-db``'s existing precedence for ``dump``:
+    the build-derived flags lead
     and the caller's own explicit representation is appended after — so an
     explicit, later token still wins any literal redefinition (e.g. a
     caller's own ``-DFOO=2`` after a derived ``-DFOO=1`` — the compiler uses
@@ -291,7 +291,7 @@ def _merge_l3_compile_context(
 
     **``gcc_path``/``gcc_prefix`` are one logical compiler-selector, not two
     independent fields (P2 review, ``discussion_r3788073754``, fresh
-    evidence).** ``dumper_clang._resolve_clang_bin`` always checks
+    evidence).** ``abicheck.extract.compiler_driver.resolve_clang_bin`` always checks
     ``gcc_path`` before ``gcc_prefix`` (a resolvable ``gcc_path`` wins
     outright; ``gcc_prefix`` is only ever consulted when ``gcc_path`` is
     absent or not clang-family) — so treating the two fields as
@@ -299,7 +299,7 @@ def _merge_l3_compile_context(
     explicitly set *only* ``gcc_prefix`` (meaning "use this prefix, no
     literal-path override"): a *different* ``derived.gcc_path`` from the
     matched compile unit would still get merged in for the unset
-    ``explicit.gcc_path`` slot, and since ``_resolve_clang_bin`` checks
+    ``explicit.gcc_path`` slot, and since ``resolve_clang_bin`` checks
     ``gcc_path`` first, the caller's actual intent (the explicit prefix) was
     silently overridden by the derived path instead of winning. Fixed by
     resolving both fields together as a single unit: if the caller

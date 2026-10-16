@@ -23,7 +23,7 @@ re-export shim for one release so existing `abicheck.storage.
 availability_status.*` imports keep working; import from
 `abicheck.model.availability` in new code. `FactAvailability` (the ledger
 record, which legitimately depends on `model`) stays in
-`abicheck.storage.availability` unchanged.
+`abicheck.storage.availability_ledger` unchanged.
 """
 
 from __future__ import annotations

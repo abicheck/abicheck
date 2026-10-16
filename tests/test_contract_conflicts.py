@@ -39,11 +39,11 @@ from abicheck.model.contract_conflicts import (
     ConflictSourceClaim,
     ContractSourceConflict,
 )
-from abicheck.policy.contract_conflicts import (
+from abicheck.policy.contract_conflict_detectors import (
     detect_exported_but_undeclared,
     detect_manifest_narrowing_since_baseline,
 )
-from abicheck.workflows.contract_conflicts import detect_package_binary_mismatch
+from abicheck.workflows.package_claim_conflicts import detect_package_binary_mismatch
 
 
 def _fn(name, mangled, ret="void", params=(), vis=Visibility.PUBLIC):

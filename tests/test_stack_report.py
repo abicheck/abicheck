@@ -21,9 +21,9 @@ from pathlib import Path
 
 from abicheck.binder import BindingStatus, SymbolBinding
 from abicheck.checker import Change, ChangeKind, DiffResult, Verdict
-from abicheck.resolver import DependencyGraph, ResolvedDSO
 from abicheck.stack_checker import StackChange, StackCheckResult, StackVerdict
 from abicheck.stack_report import stack_to_json, stack_to_markdown
+from abicheck.workflows.elf_dependency_resolver import DependencyGraph, ResolvedDSO
 
 
 def _binding(

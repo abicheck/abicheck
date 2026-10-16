@@ -34,6 +34,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 
+from .compare.public_surface import reconciled_variable_surfaces
 from .compare.template_surface import reconciled_abi_visible_functions
 from .detector_registry import registry
 from .diff_helpers import (
@@ -41,7 +42,6 @@ from .diff_helpers import (
     lookup_matched_type as _lookup_matched_type,
     make_change,
 )
-from .diff_symbols import _reconciled_variable_surfaces
 from .diff_types_surface import (
     RESERVED_FIELD,
     _directly_referenced,
@@ -60,12 +60,12 @@ def _diff_var_values(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     use stale compile-time-inlined values (constant propagation).
     """
     changes: list[Change] = []
-    # The shared evidence-gap-reconciled join, not a bare `_public_variables`
+    # The shared evidence-gap-reconciled join, not a bare `public_variables`
     # pair: a promised-but-unexported variable whose captured value moved
     # from 1 to 2 reported nothing at all when only one side's run
     # established contract evidence, because the surviving pair never met
     # (Codex review, P1). See abicheck.compare.surface_reconcile.
-    old_map, new_map = _reconciled_variable_surfaces(old, new)
+    old_map, new_map = reconciled_variable_surfaces(old, new)
 
     for mangled, v_old in old_map.items():
         v_new = new_map.get(mangled)

@@ -35,7 +35,6 @@ from ..._compiler_options import (
 from ...buildsource.redaction import DEFAULT_REDACTION
 from ...deadline import run_bounded, supervised_popen, terminate_process_tree
 from ...dumper_ast_config_cpp20 import _detect_cpp20_headers
-from ...extract.env_flags import env_flag
 from ...extract.headers.ast_config import (
     _detect_cpp_headers,
     _exported_symbols_indicate_cpp,
@@ -56,6 +55,12 @@ from ...model.execution_cache import memoized, path_witness
 from ...model.header_parse_coverage import HEADER_PARSE_EXCLUDED_METADATA
 from ...model.language_standard import language_standard_is_cxx, language_standard_year
 from ...storage.ast_parse_exclusions import HEADER_PARSE_EXCLUDED_KEY
+from .backend_plan import (
+    allow_unsupported_castxml_enabled,
+    ast_fallback_enabled,
+    ast_frontend_pin,
+    auto_selected,
+)
 
 log = logging.getLogger(__name__)
 
@@ -362,21 +367,15 @@ def _stamp_ast_parser(
 
 
 def _ast_fallback_enabled() -> bool:
-    return env_flag("ABICHECK_ALLOW_AST_FALLBACK")
+    return ast_fallback_enabled()
 
 
 def _allow_unsupported_castxml_enabled() -> bool:
-    """Explicit opt-in override for the CastXML version gate
-    (``castxml_policy``). Same convention as ``_ast_fallback_enabled`` — a
-    hard failure by default, degraded only on deliberate request."""
-    return env_flag("ABICHECK_ALLOW_UNSUPPORTED_CASTXML")
+    return allow_unsupported_castxml_enabled()
 
 
 def _auto_ast_fallback_eligible(backend: str) -> bool:
-    """Whether this request is genuinely unpinned ``auto`` selection."""
-    choice = (backend or "auto").strip().lower()
-    env_pin = os.environ.get("ABICHECK_AST_FRONTEND", "").strip().lower()
-    return choice == "auto" and env_pin not in {"castxml", "clang", "hybrid"}
+    return auto_selected(backend, ast_frontend_pin())
 
 
 def _parser_ast_toolchain(parser: Any) -> dict[str, str]:

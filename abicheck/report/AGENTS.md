@@ -30,9 +30,9 @@ default view), and `render_markdown_alternate.py` (Markdown's `--report-mode lea
 Phase 2's Markdown item is closed in full.** JSON, SARIF, JUnit, `--stat`,
 HTML, and every Markdown view (default, review digest, leaf, root-cause)
 construct a `ReportDocument` and project it purely; `reporter_markdown.py`
-builds no report section directly any more — `_to_markdown_leaf`/
-`_to_markdown_root_cause` are thin `build_*`/`render_*` delegates, same
-shape as `to_markdown`'s full-mode branch. Markdown's per-`Change` sections
+renders no report section: its `compute_*` functions return section data
+only, and the per-mode glue (`_to_markdown_root_cause` and friends) lives in
+`dispatch_markdown.py`. Markdown's per-`Change` sections
 need a JSON-safe row `Change` isn't, mirroring HTML's `ChangeRow`:
 `render_markdown_document.py`'s `_change_row`/`_row_contract_tag` family
 resolves `impact_for` compute-side and is shared (imported, not duplicated)
@@ -53,17 +53,18 @@ its lossless encoding; `render_xml_document` is the projection. Put a report
 *fact* in the document, a *formatting* choice (indentation, XML declaration)
 in the projection. `finding.py` is the per-`Change` counterpart to `document.py`'s whole-report
 value: `ReportFinding` holds one change's already-resolved `verdict`/
-`category`, built once per render by `build_report_findings` rather than
-re-derived at each renderer's own call site. `report_findings_for` is the
+`category`/`bucket`/`entity`/`reclassified_by`, built once per render by `build_report_findings`; never bucket or count by kind-name affixes or a hand-kept kind set (`test_report_format_bucket_parity.py`). `report_findings_for` is the
 per-`DiffResult` convenience (not a `DiffResult` method — `model` may not
 import this package); it recomputes every call rather than caching on the
 result instance, since a mutable `DiffResult` cache went stale across two
 renders with a mutation between them (Codex review). `findings_by_change_id`
 indexes by `id(change)` for O(1) lookup within one render only (`Change` has
 no `__hash__`).
+`view.py` is the shared presentation view (show-only filter, `display_changes`, `finding_id`, root-cause keys).
 
-`envelope.py` is gap C's closure and the whole-*render* counterpart to `document.py`'s whole-report value: `ReportEnvelope` holds one completed evaluation's finalized decisions — the shared `ReportDocument`, the severity `GateDecision`, one `ReportFinding` per `Change` (`scoped_only_changes` included) — plus presentation-only `RenderOptions`. `report.build.build_report_envelope` builds it once above format selection (there, not here, so `envelope.py` stays a leaf: an `envelope -> build` edge closes a real cycle through `reporter.py`); `service_render.render_envelope(fmt, envelope)` projects it. A renderer takes an `envelope` parameter and *reads* decisions from it — `resolved_gate`/`resolved_document` keep a direct Tier-2/test caller without one working as before. **Never resolve a gate, a verdict, or a document inside a renderer handed an envelope.** `sarif_invocation.py` (SARIF's published invocation exit code — an exit decision, not a rendering choice) and `junit_disposition.py` moved out of the legacy monoliths for this; read `envelope.py`'s own docstring before adding a projection.
+`envelope.py` is gap C's closure and the whole-*render* counterpart to `document.py`'s whole-report value: `ReportEnvelope` holds one completed evaluation's finalized decisions — the shared `ReportDocument`, the severity `GateDecision`, one `ReportFinding` per `Change` (`scoped_only_changes` included) — plus presentation-only `RenderOptions`. `report.document_builder.build_report_envelope` builds it once above format selection (there, not here, so `envelope.py` stays a leaf: an `envelope -> build` edge closes a real cycle through `reporter.py`); `service_render.render_envelope(fmt, envelope)` projects it. A renderer takes an `envelope` parameter and *reads* decisions from it — `resolved_gate`/`resolved_document` keep a direct Tier-2/test caller without one working as before. **Never resolve a gate, a verdict, or a document inside a renderer handed an envelope.** `sarif_invocation.py` (SARIF's published invocation exit code — an exit decision, not a rendering choice) and `junit_disposition.py` moved out of the legacy monoliths for this; read `envelope.py`'s own docstring before adding a projection.
 
+`release_document.py` is the release (directory/package) counterpart: `build_release_report` takes a live `ReleaseEvaluation` or a stored `StoredReleaseEvaluation` to one typed view, and `render_release_report.py` projects every release format from it. Add a release field or format there, never in the CLI helpers. The frontend resolves the effective-config receipt before calling, because it reloads policy files.
 `render_markdown.py` and `render_html.py`/`render_html_document.py` are the
 prose/markup projections, and they follow one shape you should copy for any
 new format: the *source* module (`reporter_markdown.py`, `html_report.py`)
@@ -102,11 +103,11 @@ history); a name with a real surviving caller (e.g. `_abbr_symbol_text`/
 
 ADR-061 Phase 2 item 5 is closed: `scoped_gate.py`'s `apply_scoped_gate`
 folds scoped-gate JSON natively (pre-render), not a render -> parse -> patch
--> render pass. It and both `render_markdown_*.py` document modules reach
-legacy, still-flat `reporter`/`reporter_markdown` via `importlib`, never a
-static import (`modules.yaml`'s `frozen_root_families` forbids a new
-`abicheck/reporter_*.py` sibling, and a static import would close a real
-import-cycle-growth violation).
+-> render pass. Legacy `reporter_markdown` is imported at module level by
+`render_markdown_document.py` and `review_digest_document.py`, and
+function-locally by `scoped_gate.py`; no `importlib` load remains. That is
+acyclic only while `reporter_markdown.py` never imports them back
+(`modules.yaml`'s `frozen_root_families` forbids a new `abicheck/reporter_*.py`).
 
 ## Tests
 

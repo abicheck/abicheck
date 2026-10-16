@@ -197,15 +197,15 @@ def _parse_run_plan_gate(d: dict[str, Any]) -> tuple[str | None, str | None]:
 
     The key absent -> ``(None, None)``, same as everywhere else in this
     module. Present but malformed -- not an object, an unknown key, or
-    a value outside :class:`~abicheck.workflows.aggregate.resolve.OnMissingRequired`/
-    :class:`~abicheck.workflows.aggregate.resolve.OnUnexpectedTarget` -- is a loud
-    :class:`~abicheck.workflows.aggregate.resolve.AggregateError`, not a silent
+    a value outside :class:`~abicheck.workflows.aggregate.expected_targets.OnMissingRequired`/
+    :class:`~abicheck.workflows.aggregate.expected_targets.OnUnexpectedTarget` -- is a loud
+    :class:`~abicheck.workflows.aggregate.expected_targets.AggregateError`, not a silent
     coercion to "no gate" (Codex review, fresh evidence: an earlier revision
     treated any non-dict/malformed ``gate`` the same as an absent one, so a
     corrupted or hand-authored v2 plan's requested policy could be silently
     discarded and `aggregate` would fall back to the hard-coded defaults --
     potentially reversing the requested CI outcome instead of failing loud).
-    Mirrors :func:`abicheck.workflows.aggregate.resolve._parse_manifest_gate`'s own
+    Mirrors :func:`abicheck.workflows.aggregate.expected_targets._parse_manifest_gate`'s own
     key/value validation exactly, kept as a separate function here (not a
     shared call) since that function's own version check is shaped for the
     manifest's ``MAJOR.MINOR`` scheme, not this module's ``vN`` one -- the

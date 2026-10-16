@@ -36,7 +36,7 @@ Three orthogonal axes, kept separate on purpose (ADR-042):
   block (``addition=error``) or a ``BREAKING`` report pass (a demoted preset).
 * **gate** — whether CI should fail. Each report already carries its own gate
   decision (``severity.{exit_code,blocking,blocking_categories}``, computed by
-  ``reporter._build_severity_json`` → ``severity.compute_gate_decision``);
+  ``json_sections.build_severity_json`` → ``severity.compute_gate_decision``);
   ``aggregate`` combines those, it never recomputes a gate from the verdict.
   Reports produced without a severity policy carry no gate block, so
   they fall back to the legacy verdict→exit mapping.
@@ -56,13 +56,20 @@ from __future__ import annotations
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
 from abicheck.change_registry_types import Verdict
 
-from .gate import GateInfo as GateInfo
+from .expected_targets import (
+    AGGREGATE_MANIFEST_VERSION as AGGREGATE_MANIFEST_VERSION,
+    AggregateError as AggregateError,
+    ExpectedTargets as ExpectedTargets,
+    OnMissingRequired as OnMissingRequired,
+    OnUnexpectedTarget as OnUnexpectedTarget,
+    resolve_gate_policy as resolve_gate_policy,
+)
 from .matrix import (
     FindingMatrixEntry as FindingMatrixEntry,
     ProfileContractState as ProfileContractState,
@@ -75,14 +82,7 @@ from .reconcile import (
     ReportFinding as ReportFinding,
     ReportFindings as ReportFindings,
 )
-from .resolve import (
-    AGGREGATE_MANIFEST_VERSION as AGGREGATE_MANIFEST_VERSION,
-    AggregateError as AggregateError,
-    ExpectedTargets as ExpectedTargets,
-    OnMissingRequired as OnMissingRequired,
-    OnUnexpectedTarget as OnUnexpectedTarget,
-    resolve_gate_policy as resolve_gate_policy,
-)
+from .report_gate import GateInfo as GateInfo
 
 #: Machine-readable schema version of the ``to_dict()`` / ``-o json=...``
 #: output. Bump on any incompatible change to that structure.
@@ -344,7 +344,7 @@ _BOOTSTRAP_VERDICT = "NO_BASELINE"
 _NEW_TARGET_VERDICT = "NEW_TARGET"
 
 
-class CoverageStatus(str, Enum):
+class CoverageStatus(StrEnum):
     """Was every *required* expected target actually analyzed?"""
 
     COMPLETE = "complete"  # every required target reported
@@ -389,7 +389,7 @@ class _LoadedReport:
     #: when ``contract.unresolved=warn`` zeroed the contribution above.
     contract_coverage_incomplete: bool = False
     #: Whether the report stated a usable contribution at all -- see
-    #: :func:`~abicheck.workflows.aggregate.gate._contract_coverage_declared`.
+    #: :func:`~abicheck.workflows.aggregate.report_gate._contract_coverage_declared`.
     contract_coverage_declared: bool = False
     #: ``None`` on every failure branch below (none establishes what the
     #: comparison found); otherwise ``parse_report_findings``'s result.
@@ -417,7 +417,7 @@ class _LoadedReport:
     completed_without_compatibility_verdict: bool = False
 
 
-def _malformed_gate_report(
+def malformed_gate_report(
     target_id: str, library: str | None, head_sha: str | None, path: Path, reason: str
 ) -> _LoadedReport:
     """The shared "gate decision is malformed" unavailable shape every
@@ -444,6 +444,12 @@ def _malformed_gate_report(
         reason=reason,
         path=path,
     )
+
+
+#: Pre-promotion name, kept so existing ``_malformed_gate_report`` importers
+#: (``no_baseline_load.py``, the aggregate import-compatibility tests) keep
+#: working. New sibling imports use :func:`malformed_gate_report`.
+_malformed_gate_report = malformed_gate_report
 
 
 @dataclass(frozen=True)

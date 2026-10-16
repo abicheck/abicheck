@@ -27,13 +27,13 @@ with its parser").
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 
 from .execution_cache import memoized_property
 from .fact import Fact, bridge_legacy_and_fact
 
 
-class SymbolBinding(str, Enum):
+class SymbolBinding(StrEnum):
     GLOBAL = "global"
     WEAK = "weak"
     LOCAL = "local"
@@ -41,7 +41,7 @@ class SymbolBinding(str, Enum):
     OTHER = "other"
 
 
-class SymbolType(str, Enum):
+class SymbolType(StrEnum):
     FUNC = "func"
     OBJECT = "object"
     TLS = "tls"
@@ -49,6 +49,28 @@ class SymbolType(str, Enum):
     COMMON = "common"  # STT_COMMON
     NOTYPE = "notype"
     OTHER = "other"
+
+
+class ElfVersionBinding(StrEnum):
+    """Which ``.gnu.version`` node an exported symbol is bound to.
+
+    ``version == ""`` alone cannot say this: a symbol bound to a versioned
+    library's base definition (``VER_FLG_BASE``, index 1 -- the SONAME node
+    every symbol present before the library adopted versioning stays on) and
+    a symbol carrying no version at all both leave it empty.
+    """
+
+    #: Not recorded: a pre-v58 snapshot, a non-ELF producer, or a
+    #: ``.gnu.version`` entry that could not be read or resolved.
+    UNKNOWN = "unknown"
+    #: No ``.gnu.version`` section, ``VER_NDX_LOCAL`` (0), or index 1 in a
+    #: library that defines no base version.
+    UNVERSIONED = "unversioned"
+    #: Index 1 in a library whose ``.gnu.version_d`` carries the
+    #: ``VER_FLG_BASE`` definition (``objdump -T`` prints ``Base``).
+    BASE = "base"
+    #: A named version node (``version`` holds its name).
+    NAMED = "named"
 
 
 @dataclass
@@ -71,6 +93,8 @@ class ElfSymbol:
     # unreadable, or a pre-v56 snapshot). Equal hashes mean identical bytes;
     # unequal hashes are no evidence (PC-relative displacements move).
     code_hash: str = ""
+    # What ``version == ""`` cannot say on its own (``ElfVersionBinding``).
+    version_binding: ElfVersionBinding = ElfVersionBinding.UNKNOWN
 
 
 @dataclass
@@ -238,7 +262,40 @@ class ElfMetadata:
     def symbol_map(self) -> dict[str, ElfSymbol]:
         """Name → ElfSymbol mapping (built once, cached on first access).
 
+        One entry per bare name, last ``.dynsym`` entry wins. It hides
+        symbol-versioned aliases (``foo@VER1`` and ``foo@@VER2`` share a name),
+        so a reader that must see every alias uses :attr:`symbol_aliases`.
+
         Thread safety: benign race — both threads compute the same dict;
         the last write wins. Functionally correct for read-only use.
         """
         return {s.name: s for s in self.symbols}
+
+    @memoized_property
+    def symbol_aliases(self) -> dict[str, list[ElfSymbol]]:
+        """Bare name → every ElfSymbol carrying it, in ``.dynsym`` order.
+
+        Unlike :attr:`symbol_map`, keeps each symbol-versioned alias. Built
+        once and cached like :attr:`symbol_map`.
+        """
+        out: dict[str, list[ElfSymbol]] = {}
+        for s in self.symbols:
+            out.setdefault(s.name, []).append(s)
+        return out
+
+    def unambiguous_symbol(self, name: str) -> ElfSymbol | None:
+        """The symbol for *name* if every versioned alias agrees, else None.
+
+        Binding and visibility are read from one symbol. When aliases of one
+        bare name disagree, no single value is true of the name, so this
+        returns None instead of the last alias's value. None also covers an
+        absent name.
+        """
+        aliases = self.symbol_aliases.get(name)
+        if not aliases:
+            return None
+        first = aliases[0]
+        for alias in aliases[1:]:
+            if alias.binding != first.binding or alias.visibility != first.visibility:
+                return None
+        return first

@@ -130,7 +130,7 @@ settled there.
 catalogue). S1 selection by identity/coordinates with a `--dry-run` plan
 view, on the typed API and the release/bundle CLI — **landed 2026-09-06**:
 `model/release_selection.py`'s `ReleaseSelection` (`{canonical key:
-required}`, mirroring `workflows.aggregate.resolve.ExpectedTargets`'s own
+required}`, mirroring `workflows.aggregate.expected_targets.ExpectedTargets`'s own
 required/optional shape rather than inventing a second one), `--select`/
 `--select-required` on `compare`'s directory/package fan-out (forwarded
 through `_dispatch_release_compare` to `compare_release_cmd`),
@@ -502,7 +502,7 @@ toolchain identity rather than `FAILED`~~ — **closed by S1**:
 failure, and `comparability_profile.py` refuses comparison whenever either
 side is `FAILED`; ~~no reverse declared/observed
 detector (exported but undeclared) and no manifest-narrowing detector~~ —
-**closed by S3**: `policy.contract_conflicts.detect_exported_but_undeclared`/
+**closed by S3**: `policy.contract_conflict_detectors.detect_exported_but_undeclared`/
 `detect_manifest_narrowing_since_baseline` (see the S3 slice entry below for
 the full account, including package-claim-vs-binary, the third case S3
 covers that this original assessment did not separately call out here);
@@ -532,8 +532,8 @@ implemented ([#1126](https://github.com/abicheck/abicheck/pull/1126)):**
 `model/contract_conflicts.py` (shape:
 `ContractSourceConflict`/`ConflictSourceClaim`, never fewer than two
 sources per conflict, ADR-067 "record before disposing"),
-`policy/contract_conflicts.py` (cases 1-2), and
-`workflows/contract_conflicts.py` (case 3 -- split from cases 1-2 by
+`policy/contract_conflict_detectors.py` (cases 1-2), and
+`workflows/package_claim_conflicts.py` (case 3 -- split from cases 1-2 by
 ADR-061 layering: it needs `debian_symbols`/`elf_metadata`, both above
 `policy` in the dependency direction) cover exported-but-undeclared
 (reusing `ExportSurface.unmatched_exports`, wired into
@@ -546,7 +546,7 @@ vs. contained-binary (a Debian `.symbols` file vs. the SONAME/exports of
 the binary actually inside the same package, reusing
 `debian_symbols.validate_symbols`; wired into the directory/package release
 fan-out's existing `_debian_symbols_warning` call site via
-`workflows.contract_conflicts.debian_symbols_release_conflict_lines`,
+`workflows.package_claim_conflicts.debian_symbols_release_conflict_lines`,
 checking each side's OWN package against its OWN contained binary rather
 than only diffing two packages' declared contracts against each other).
 Surfaced via `DiffResult.contract_conflicts` (opt-in, `None` unless

@@ -89,7 +89,7 @@ decides. Both sides must be built identically
 
 ## Step 4 — Write the workflow (every rule below is required)
 
-- `abicheck/abicheck@v0.6.0` — exact tag. In a job holding `contents: write`
+- `abicheck/abicheck@v0.7.0` — exact tag. In a job holding `contents: write`
   or `security-events: write`, pin **every** action to a commit SHA with the
   tag in a comment, resolved only with:
   `git ls-remote https://github.com/<owner>/<repo> 'refs/tags/<tag>' 'refs/tags/<tag>^{}' | sort -k2 | tail -1 | cut -f1`

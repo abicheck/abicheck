@@ -18,10 +18,10 @@ from typing import Any
 import pytest
 from adr062_scope import adr062_module_paths
 
-from abicheck.storage.availability import AvailabilityLedger, FactAvailability
+from abicheck.storage.availability_ledger import AvailabilityLedger, FactAvailability
 from abicheck.storage.availability_status import FactStatus
 from abicheck.storage.entity_ids import EntityKind, ObservationKind
-from abicheck.storage.identity import (
+from abicheck.storage.occurrence_identity import (
     EntityId,
     IdentityConflict,
     OccurrenceId,
@@ -599,7 +599,7 @@ class TestEveryContainerGuardRefusesABinaryBuffer:
 
     def test_the_doors_that_use_them_refuse_it_too(self) -> None:
         """The guards are only worth what their call sites do with them."""
-        from abicheck.storage.identity import OccurrenceSet
+        from abicheck.storage.occurrence_identity import OccurrenceSet
 
         for buffer in (bytearray(), memoryview(b""), bytearray(b"ab")):
             with pytest.raises(TypeError):
