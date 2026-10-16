@@ -1427,13 +1427,7 @@ def test_evidence_policy_invalid_action_rejected(tmp_path):
     new_snap = _make_snap(tmp_path, "new.json", "2.0")
     result = CliRunner().invoke(
         main,
-        [
-            "compare",
-            str(old_snap),
-            str(new_snap),
-            "--policy",
-            str(pol),
-        ],
+        ["compare", str(old_snap), str(new_snap), "--policy", str(pol)],
     )
     assert result.exit_code != 0
     assert "graph_risk_findings" in result.output

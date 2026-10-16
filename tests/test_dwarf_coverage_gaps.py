@@ -270,11 +270,9 @@ class TestParseUnified:
         ):
             meta, adv = parse_dwarf(fake_path)
 
-        # Should still return (possibly partial) results without raising, and
-        # the independent advanced pass still runs for the same CU.
+        # Should still return (possibly partial) results without raising
         assert meta is not None
-        assert adv is not None
-        adv_mock.assert_called_once()
+        assert adv is not None and adv_mock.call_count == 1
 
     def test_adv_process_cu_raises_elferror(self, tmp_path):
         """Lines 100-101: _adv_process_cu ELFError is caught and logged."""
@@ -308,8 +306,7 @@ class TestParseUnified:
             meta, adv = parse_dwarf(fake_path)
 
         assert meta is not None
-        assert adv is not None
-        meta_mock.assert_called_once()
+        assert adv is not None and meta_mock.call_count == 1
 
     def test_unified_path_sets_target_arch(self, tmp_path):
         """parse_dwarf() records the normalized target arch on AdvancedDwarfMetadata.
@@ -395,8 +392,7 @@ class TestParseUnified:
         ):
             result = parse_dwarf_metadata(fake_path)
 
-        assert isinstance(result, DwarfMetadata)
-        assert result == DwarfMetadata()
+        assert isinstance(result, DwarfMetadata) and result == DwarfMetadata()
 
 
 # ===========================================================================
@@ -918,8 +914,7 @@ class TestUnwrapQualifiers:
         first_die = dies[100]
         result = _unwrap_qualifiers(first_die, cu)
         # Bounded walk: returns the last typedef reached without crashing.
-        assert result is not None
-        assert result.offset == 1300
+        assert result is not None and result.offset == 1300
 
 
 class TestIsNontrivialAggregate:

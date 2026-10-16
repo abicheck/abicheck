@@ -1148,12 +1148,7 @@ class TestTypeAndFieldFactBackfill:
 
     def test_layout_scalar_fields_never_override_castxml(self):
         # castxml's own real layout, when present, always wins.
-        t_old = RecordType(
-            name="Widget",
-            kind="class",
-            size_bits=64,
-            data_size_bits=64,
-        )
+        t_old = RecordType(name="Widget", kind="class", size_bits=64, data_size_bits=64)
         t_clang = RecordType(
             name="Widget",
             kind="class",

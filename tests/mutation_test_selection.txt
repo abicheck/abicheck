@@ -627,6 +627,7 @@ tests/test_service_dump_cache_compile_context.py
 tests/test_service_dump_cache_key_audit.py
 tests/test_service_dump_cache_write.py
 tests/test_service_unit.py
+tests/test_service_unit_depth_satisfaction.py
 tests/test_severity.py
 tests/test_shared_build_evidence_dedup.py
 tests/test_sided_include_composition.py

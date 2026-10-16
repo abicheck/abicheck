@@ -1191,7 +1191,7 @@
     },
     {
       "path": "tests/test_build_source_cli.py",
-      "baseline_lines": 3786,
+      "baseline_lines": 3783,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -1565,7 +1565,7 @@
     },
     {
       "path": "tests/test_dumper_hybrid.py",
-      "baseline_lines": 1778,
+      "baseline_lines": 1776,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -1774,7 +1774,7 @@
     },
     {
       "path": "tests/test_pdb_parser.py",
-      "baseline_lines": 1454,
+      "baseline_lines": 1453,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -1917,7 +1917,7 @@
     },
     {
       "path": "tests/test_service_unit.py",
-      "baseline_lines": 5634,
+      "baseline_lines": 5578,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",
