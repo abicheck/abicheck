@@ -1092,7 +1092,7 @@ _ARTIFACT_NAMES = frozenset(
 #:        ``category`` reads ``informational``. Exit codes move only under a
 #:        severity setting that made ``quality_issues`` an error: such a
 #:        finding no longer gates.
-REPORT_SCHEMA_VERSION = "6.0"
+REPORT_SCHEMA_VERSION = "6.1"
 
 # The directory/package release envelope's own version and version history
 # live in `release_schema.py` (see that module's docstring for why); the
