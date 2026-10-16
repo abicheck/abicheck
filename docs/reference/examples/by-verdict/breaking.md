@@ -3,7 +3,7 @@
 
 ABI breaks: existing consumers will fail at runtime.
 
-_115 case(s)._ [← back to all examples](../index.md)
+_116 case(s)._ [← back to all examples](../index.md)
 
 | Case | Title | Verdict | Category |
 |------|-------|---------|----------|
@@ -122,3 +122,4 @@ _115 case(s)._ [← back to all examples](../index.md)
 | [case209_calling_convention_changed_via_macro](../case209_calling_convention_changed_via_macro.md) | Calling Convention Changed via a Macro | 🔴 BREAKING | Breaking |
 | [case212_calling_convention_macro_undefined_after_use](../case212_calling_convention_macro_undefined_after_use.md) | Calling Convention Macro `#undef`'d After Use | 🔴 BREAKING | Breaking |
 | [case213_calling_convention_function_like_macro_changed](../case213_calling_convention_function_like_macro_changed.md) | Calling Convention via a Function-Like Macro | 🔴 BREAKING | Breaking |
+| [case218_export_loss_strong_binding_stays_breaking](../case218_export_loss_strong_binding_stays_breaking.md) | a GLOBAL export loss stays BREAKING under a `binding: weak` rule | 🔴 BREAKING | Breaking |

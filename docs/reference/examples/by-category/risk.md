@@ -3,7 +3,7 @@
 
 Listed in `RISK_KINDS` — symbol-compatible but behaviorally risky.
 
-_35 case(s)._ [← back to all examples](../index.md)
+_36 case(s)._ [← back to all examples](../index.md)
 
 | Case | Title | Verdict | Category |
 |------|-------|---------|----------|
@@ -42,3 +42,4 @@ _35 case(s)._ [← back to all examples](../index.md)
 | [case196_header_graph_move_reconciled](../case196_header_graph_move_reconciled.md) | Declaration Reconciled as Moved Across a Compound Edit | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case197_header_graph_identity_reconciled](../case197_header_graph_identity_reconciled.md) | Declaration Reconciled as Identity-Reconciled (Header Unchanged) | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case207_pointer_parameter_gained_restrict](../case207_pointer_parameter_gained_restrict.md) | Pointer Parameter Gained `restrict` | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case217_export_loss_weak_binding_demoted](../case217_export_loss_weak_binding_demoted.md) | WEAK export loss demoted to a risk by a `binding: weak` rule | 🟡 COMPATIBLE_WITH_RISK | Risk |

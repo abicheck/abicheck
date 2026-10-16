@@ -1092,16 +1092,7 @@ _ARTIFACT_NAMES = frozenset(
 #:        ``category`` reads ``informational``. Exit codes move only under a
 #:        severity setting that made ``quality_issues`` an error: such a
 #:        finding no longer gates.
-#: 6.2 -- additive ``removed_instantiations`` on each ``changes`` entry of an
-#:        internal_template_leaks_via_public_api finding: the uncapped list of
-#:        every removed template instantiation behind it (``mangled``,
-#:        ``demangled``, ``binding``), where ``detail`` names only three. Also
-#:        additive ``symbol_binding`` on instantiation_missing_from_binary and
-#:        internal_template_leaks_via_public_api findings, which previously
-#:        omitted it: the old-side linkage, or for the leak finding the
-#:        aggregate over its removed set (``"weak"`` only when every member is
-#:        WEAK). ``symbol`` on the leak finding is unchanged.
-REPORT_SCHEMA_VERSION = "6.2"
+REPORT_SCHEMA_VERSION = "6.2"  # 6.2 is additive: see compare_report.schema.json
 
 # The directory/package release envelope's own version and version history
 # live in `release_schema.py` (see that module's docstring for why); the

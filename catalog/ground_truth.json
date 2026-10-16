@@ -4315,6 +4315,38 @@
      "code": "#include \"v2.h\"\nint main() { return mylib::pick({}) == 2 ? 0 : 1; }\n"
     }
    }
+  },
+  "case217_export_loss_weak_binding_demoted": {
+    "abi_break": false,
+    "api_break": false,
+    "bad_practice": false,
+    "category": "risk",
+    "description": "Binding-scoped policy demotion. OLD exports three WEAK symbols that NEW loses: header-declared inline hdr_inline (hidden by NEW no longer calling it), an undeclared WEAK export weak_undeclared (not declared in any header), and the P<float> template constructor in the internal ns::detail namespace (NEW no longer instantiates it). Default verdict is BREAKING (func_visibility_changed / func_removed_elf_only). policy.yaml reclassifies every WEAK finding under _ZN2ns.* to risk, so the verdict is COMPATIBLE_WITH_RISK and the run exits 0. This is the binding: selector that did not reach these findings before PRs #1629 and #1630.",
+    "expected": "COMPATIBLE_WITH_RISK",
+    "expected_kinds": [
+      "func_removed_elf_only",
+      "func_visibility_changed"
+    ],
+    "min_evidence": "L2",
+    "platforms": [
+      "linux"
+    ]
+  },
+  "case218_export_loss_strong_binding_stays_breaking": {
+    "abi_break": true,
+    "api_break": false,
+    "bad_practice": false,
+    "category": "breaking",
+    "description": "Sibling of case217 with the same policy.yaml. NEW loses the same WEAK exports, and also the GLOBAL strong_fn (declared in v2.h, not defined in v2.cpp). The binding: weak rule matches only WEAK findings, so the strong removal keeps the run at BREAKING and exit 4. Shows the binding selector separates a WEAK loss from a GLOBAL one.",
+    "expected": "BREAKING",
+    "expected_kinds": [
+      "func_removed_elf_only",
+      "func_visibility_changed"
+    ],
+    "min_evidence": "L2",
+    "platforms": [
+      "linux"
+    ]
   }
  },
  "version": "4",

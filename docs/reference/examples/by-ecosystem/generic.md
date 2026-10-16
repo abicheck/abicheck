@@ -3,7 +3,7 @@
 
 Cases modeling the Generic (language/platform-level, no specific project) ecosystem.
 
-_203 case(s)._ [← back to all examples](../index.md)
+_205 case(s)._ [← back to all examples](../index.md)
 
 | Case | Title | Verdict | Category |
 |------|-------|---------|----------|
@@ -210,3 +210,5 @@ _203 case(s)._ [← back to all examples](../index.md)
 | [case214_calling_convention_macro_redefined_after_use](../case214_calling_convention_macro_redefined_after_use.md) | Convention Macro Redefined After Use (Negative Control) | ✅ NO_CHANGE | No Change |
 | [case215_return_double_pointer_lost_const](../case215_return_double_pointer_lost_const.md) | Returned Double Pointer Lost `const` | 🟠 API_BREAK | API Break |
 | [case216_overload_added_beside_initializer_list](../case216_overload_added_beside_initializer_list.md) | Overload Added Beside an `initializer_list` Overload | 🟢 COMPATIBLE | Addition (Compatible) |
+| [case217_export_loss_weak_binding_demoted](../case217_export_loss_weak_binding_demoted.md) | WEAK export loss demoted to a risk by a `binding: weak` rule | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case218_export_loss_strong_binding_stays_breaking](../case218_export_loss_strong_binding_stays_breaking.md) | a GLOBAL export loss stays BREAKING under a `binding: weak` rule | 🔴 BREAKING | Breaking |
