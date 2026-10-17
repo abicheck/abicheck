@@ -287,6 +287,7 @@ tests/test_diff_symbols_type_matching.py
 tests/test_diff_templates.py
 tests/test_diff_types_bases_fact_status.py
 tests/test_diff_types_deep.py
+tests/test_diff_types_field_mutation_gaps.py
 tests/test_diff_types_mutation_gaps.py
 tests/test_diff_versioning_baseline_promotion.py
 tests/test_diff_wheel_deployment.py
