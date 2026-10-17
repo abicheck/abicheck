@@ -92,15 +92,23 @@ def test_no_common_anchor_across_declared_paths_does_not_crash(tmp_path, monkeyp
     def _raising_commonpath(paths):
         raise ValueError("simulated: no common anchor (e.g. mixed drives)")
 
+    def _fingerprint(headers):
+        return compute_extraction_contract(declared_headers=headers).scope_fingerprint
+
+    h1 = _write(tmp_path / "v1" / "foo.h", "int add(int, int);\n")
+    h2 = _write(tmp_path / "v2" / "bar.h", "int sub(int, int);\n")
+    h3 = _write(tmp_path / "v1" / "baz.h", "int mul(int, int);\n")
+
     monkeypatch.setattr(os.path, "commonpath", _raising_commonpath)
-    h = _write(tmp_path / "v1" / "foo.h", "int add(int, int);\n")
-    contract = compute_extraction_contract(declared_headers=[h])
-    assert contract is not None
-    assert contract.scope_fingerprint is not None
+    degraded = _fingerprint([h1, h2])
+    assert degraded is not None
+    # Deterministic under the degraded path ...
+    assert _fingerprint([h1, h2]) == degraded
+    # ... and still distinguishes a different declared scope.
+    assert _fingerprint([h1, h3]) != degraded
 
     monkeypatch.setattr(os.path, "commonpath", real_commonpath)
-    contract_normal = compute_extraction_contract(declared_headers=[h])
-    assert contract_normal.scope_fingerprint is not None
+    assert _fingerprint([h1, h2]) == _fingerprint([h1, h2])
 
 
 def test_no_common_anchor_fallback_still_distinguishes_different_headers(

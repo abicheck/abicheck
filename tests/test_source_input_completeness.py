@@ -549,6 +549,10 @@ class TestExpectedInputSetEdgeCases:
         from abicheck.buildsource.source_inputs import _rank
 
         assert isinstance(_rank(disposition), int)
+        # The resolver keeps the stronger claim when a path is seen twice, and
+        # EXCLUDED is the weakest: nothing may downgrade a path to EXCLUDED.
+        if disposition is not SourceInputDisposition.EXCLUDED:
+            assert _rank(disposition) > _rank(SourceInputDisposition.EXCLUDED)
 
     def test_a_gap_never_downgrades_to_a_weaker_disposition(
         self, tmp_path: Path

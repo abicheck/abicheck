@@ -55,6 +55,10 @@ from abicheck.buildsource.header_graph_projection_cache import (
     store_cached_projection,
 )
 from abicheck.buildsource.type_graph import TypeEdge
+from abicheck.model.source_graph_coverage import (
+    HEADER_CALL_GRAPH_PASS,
+    HEADER_DECLARATIONS_PASS,
+)
 
 PUBLIC_HEADER = "/proj/include/pub.h"
 PRIVATE_HEADER = "/proj/include/detail/impl.h"
@@ -592,6 +596,17 @@ class TestThePathsWhereNoAstIsAcquired:
             public_header_dirs=None,
         )
 
+    @staticmethod
+    def _assert_declaration_only_graph(snap) -> None:
+        """The degraded attach keeps the declaration graph and marks exactly
+        the AST-derived call graph as not collected (degraded), rather than
+        either crashing or claiming a full call graph it never built."""
+        graph = snap.surface_graph
+        assert graph is not None
+        assert graph.degraded_passes.get(HEADER_CALL_GRAPH_PASS) is True
+        assert graph.extractor_passes.get(HEADER_DECLARATIONS_PASS) is True
+        assert HEADER_CALL_GRAPH_PASS not in graph.extractor_passes
+
     def _snapshot(self):
         from abicheck.model import AbiSnapshot
 
@@ -614,8 +629,7 @@ class TestThePathsWhereNoAstIsAcquired:
         without reproducing how a caller reaches it.
         """
         snap = self._attach(self._snapshot(), [Path("no-such-header.h")])
-        assert snap.surface_graph is not None
-        assert snap.surface_graph is not None
+        self._assert_declaration_only_graph(snap)
 
     @pytest.mark.parametrize("exc_name", ["SnapshotError", "ValidationError"])
     def test_a_failed_clang_acquisition_still_attaches_a_graph(
@@ -642,8 +656,7 @@ class TestThePathsWhereNoAstIsAcquired:
         )
 
         snap = self._attach(self._snapshot(), [Path(PUBLIC_HEADER)])
-        assert snap.surface_graph is not None
-        assert snap.surface_graph is not None
+        self._assert_declaration_only_graph(snap)
 
     @pytest.mark.parametrize(
         ("label", "ast"),
@@ -697,8 +710,11 @@ class TestThePathsWhereNoAstIsAcquired:
         )
 
         snap = self._attach(self._snapshot(), [Path(PUBLIC_HEADER)])
-        assert snap.surface_graph is not None
-        assert snap.surface_graph is not None
+        graph = snap.surface_graph
+        assert graph is not None
+        # The declaration pass reads the header text, not the corrupt AST,
+        # so it stays collected whichever shape the walk tripped on.
+        assert graph.extractor_passes.get(HEADER_DECLARATIONS_PASS) is True
 
     def test_the_misshapen_asts_really_do_break_the_readers(self) -> None:
         """Vacuity guard: each fixture above must actually raise.

@@ -3487,7 +3487,14 @@ def test_embedded_source_graph_l5_roundtrips(tmp_path):
     save_snapshot(snap, out)
     reloaded = load_snapshot(out)
     assert reloaded.build_source is not None
-    assert reloaded.build_source.source_graph is not None
+    graph = reloaded.build_source.source_graph
+    assert graph is not None
+    original = snap.build_source.source_graph
+    assert [n.id for n in graph.nodes] == [n.id for n in original.nodes]
+    assert sorted((e.kind, e.src, e.dst) for e in graph.edges) == sorted(
+        (e.kind, e.src, e.dst) for e in original.edges
+    )
+    assert any(e.kind == "COMPILE_UNIT_BUILDS_SOURCE" for e in graph.edges)
 
 
 def test_build_info_invalid_compile_db_is_graceful(tmp_path):
@@ -3541,7 +3548,11 @@ def test_dump_sources_and_build_info_together(tmp_path):
     snap = AbiSnapshot(library="libfoo.so", version="1")
     embed_build_source(snap, cdb, tree)  # build_info=cdb, sources=tree
     assert snap.build_source is not None
-    assert snap.build_source.build_evidence is not None  # L3 from --build-info
+    evidence = snap.build_source.build_evidence  # L3 from --build-info
+    assert evidence is not None
+    assert [cu.standard for cu in evidence.compile_units] == ["c++17"]
+    # The compile database names src/foo.cpp relative to tmp_path.
+    assert evidence.compile_units[0].source == str(tmp_path / "src" / "foo.cpp")
 
 
 def test_collect_no_input_is_noop(tmp_path):
@@ -3549,7 +3560,10 @@ def test_collect_no_input_is_noop(tmp_path):
     out = tmp_path / "ev"
     # Must not raise — a graceful empty pack, never a traceback.
     pack = _collect(out)
-    assert pack is not None
+    assert pack.build_evidence is None
+    assert pack.source_abi is None
+    assert pack.source_graph is None
+    assert not pack.live_source_evidence
 
 
 def test_relink_source_surface_with_binary_exports(tmp_path):

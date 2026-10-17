@@ -41,9 +41,13 @@ def test_writing_a_removed_name_raises_and_creates_nothing(kind: str) -> None:
 
 @pytest.mark.parametrize("kind", DECLARATION_KINDS)
 def test_every_kind_is_reachable_through_the_store(kind: str) -> None:
-    snap = _snap()
-    value = getattr(snap.declarations, kind)
-    assert isinstance(value, (list, dict))
+    value = getattr(_snap().declarations, kind)
+    if kind == "functions":
+        assert [f.name for f in value] == ["f"]
+    elif kind == "constants":
+        assert value == {"K": "1"}
+    else:
+        assert not value
 
 
 @pytest.mark.parametrize(

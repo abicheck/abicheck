@@ -3429,15 +3429,20 @@ class TestRejectHardlinkFallbackAmplification:
 
         archive = tmp_path / "dangling.tar"
         with tarfile.open(archive, "w") as tf:
+            info = tarfile.TarInfo(name="real.bin")
+            info.size = 600
+            tf.addfile(info, io.BytesIO(b"x" * 600))
             link = tarfile.TarInfo(name="alias.bin")
             link.type = tarfile.LNKTYPE
             link.linkname = "nonexistent.bin"
             link.size = 0
             tf.addfile(link)
         with tarfile.open(archive) as tf:
-            # Doesn't raise: the dangling link's own declared size (0)
-            # never approaches this generous limit.
-            _reject_hardlink_fallback_amplification(tf, 1_000_000)
+            # The dangling link contributes exactly its declared 0 bytes, so
+            # the total is the real file's 600 -- at the limit, not over it.
+            _reject_hardlink_fallback_amplification(tf, 600)
+            with pytest.raises(ExtractionSecurityError, match="hard-link members"):
+                _reject_hardlink_fallback_amplification(tf, 599)
 
 
 _real_import = __import__

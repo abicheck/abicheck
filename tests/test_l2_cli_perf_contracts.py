@@ -292,12 +292,14 @@ class TestDurationArgumentsRejectZero:
 
     @pytest.mark.parametrize("flag", ["--timeout-seconds", "--rss-interval-seconds"])
     def test_a_small_positive_value_is_accepted(self, flag):
-        assert harness.parse_args([flag, "0.001"]) is not None
+        args = harness.parse_args([flag, "0.001"])
+        assert getattr(args, flag.removeprefix("--").replace("-", "_")) == 0.001
 
     def test_a_regression_floor_of_zero_is_still_accepted(self):
         # The two families differ on exactly this value: zero is meaningful for a
         # regression floor (pure percentage tolerance) and not for a duration.
-        assert harness.parse_args(["--regress-min-delta-seconds", "0"]) is not None
+        args = harness.parse_args(["--regress-min-delta-seconds", "0"])
+        assert args.regress_min_delta_seconds == 0.0
 
 
 class TestMeasuredSubprocessesGetANeutralCwd:

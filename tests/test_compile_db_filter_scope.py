@@ -634,7 +634,11 @@ class TestCompareRequestAppliesTheSameScopeGuard:
         )
         request = CompareRequest(old=side, new=side, frontend="clang", depth="headers")
         pair = resolve_compare_request(request)
-        assert pair.old is not None and pair.new is not None
+        # The filter selected a.cpp, so the header parse saw WIDE undefined:
+        # the guard let the request through and the filtered parse took effect.
+        assert pair.old.from_headers is True
+        assert [f.name for f in pair.old.type_by_name("S").fields] == ["a"]
+        assert [f.name for f in pair.new.type_by_name("S").fields] == ["a"]
 
 
 @pytest.mark.integration
@@ -1020,8 +1024,10 @@ class TestScopeGuardCoversPackAndBazelBuildInfo:
         resolved = compile_db_for_filter_scope_check(
             aquery, None, (tmp_path / "api.h",)
         )
+        assert resolved == aquery
         error = compile_db_filter_scope_error("foo.cpp", resolved, "build")
         assert error is not None
+        assert "build.compile_db_filter scopes the L2 header parse only" in error
 
     def test_no_filter_pack_directory_is_unaffected(self, tmp_path: Path) -> None:
         """Control: the guard only fires when a filter is actually set."""
@@ -1129,8 +1135,10 @@ class TestScopeGuardCoversSourcesPacks:
 
         pack = self._classic_pack(tmp_path)
         resolved = compile_db_for_filter_scope_check(None, pack, (tmp_path / "api.h",))
+        assert resolved == pack
         error = compile_db_filter_scope_error("foo.cpp", resolved, "build")
         assert error is not None
+        assert "build.compile_db_filter scopes the L2 header parse only" in error
 
     def test_an_explicit_build_info_takes_precedence_over_a_sources_pack(
         self, tmp_path: Path

@@ -249,10 +249,7 @@ def test_hostile_pr_body_is_data_not_commands(payload: str, tmp_path: Path) -> N
 
 
 @_needs_bash
-@pytest.mark.parametrize("payload", HOSTILE_PAYLOADS)
-def test_the_harness_detects_a_genuinely_unsafe_step(
-    payload: str, tmp_path: Path
-) -> None:
+def test_the_harness_detects_a_genuinely_unsafe_step(tmp_path: Path) -> None:
     """Negative control. The same harness against a script that
     interpolates the value the way `${{ }}` substitution would must catch
     at least one payload — otherwise the two tests above prove nothing.
@@ -262,11 +259,16 @@ def test_the_harness_detects_a_genuinely_unsafe_step(
     `::error::` newline forgery each need a different surrounding
     context), so requiring every one to fire would pin the control to the
     one unsafe script written here instead of to the harness."""
-    unsafe = f'printf %s "{payload}" > pr-body.md'
-    written, pwned = _run_body_step(unsafe, payload, tmp_path)
-    if pwned or written != payload:
-        return  # The attack fired, or corrupted the command around it.
-    pytest.skip(f"payload {payload!r} is inert in this unsafe shape")
+    fired: list[str] = []
+    for index, payload in enumerate(HOSTILE_PAYLOADS):
+        case_dir = tmp_path / f"case-{index}"
+        case_dir.mkdir()
+        unsafe = f'printf %s "{payload}" > pr-body.md'
+        written, pwned = _run_body_step(unsafe, payload, case_dir)
+        # The attack fired, or corrupted the command around it.
+        if pwned or written != payload:
+            fired.append(payload)
+    assert fired, "no hostile payload broke the unsafe interpolation shape"
 
 
 @_needs_bash

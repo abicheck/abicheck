@@ -408,7 +408,9 @@ class TestRequireBashSkipsRatherThanRunsTheStub:
         """The other direction, so a guard that always skipped -- which would
         silently empty every shell-based module -- fails here."""
         monkeypatch.setattr(_workflow_exec, "have_bash", lambda: True)
-        require_bash()
+        # Returns normally (no Skipped raised) and yields nothing to the caller:
+        # the guard only gates, the caller then resolves its own executable.
+        assert require_bash() is None
 
 
 class TestRunStepNeverFabricatesAVanishedWorkspace:

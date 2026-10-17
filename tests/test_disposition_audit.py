@@ -828,6 +828,9 @@ def test_every_rule_less_suppressed_bucket_write_is_recorded() -> None:
     attributed — which is exactly what made `recommend_release` misread them.
     """
     from abicheck.model.change import Change
+    from abicheck.policy.finding_disposition import PipelineContext
+    from abicheck.policy.finding_disposition.pipeline import record_collapsed_findings
+    from abicheck.post_processing import DetectCppPatterns
 
     old, new = _snapshots()
     inputs = [
@@ -846,6 +849,33 @@ def test_every_rule_less_suppressed_bucket_write_is_recorded() -> None:
             assert record.rule is not None, (
                 f"{change.symbol!r} is labelled suppressed with no rule attributed"
             )
+
+    # The default pipeline reaches neither rule-less writer for these inputs,
+    # so the sweep above is vacuous on its own. Drive both writers on one
+    # context: the grouped-children drop and the versioned-symbol collapse.
+    ledger = DispositionLedger()
+    ctx = PipelineContext(old=old, new=new, disposition_ledger=ledger)
+    grouped = list(inputs)
+    ctx.kept = grouped
+    DetectCppPatterns._suppress_grouped_children(grouped, {"dup"}, ctx)
+    collapsed = [
+        Change(kind=ChangeKind.FUNC_REMOVED, symbol="u_foo_70", description="x"),
+        Change(kind=ChangeKind.FUNC_ADDED, symbol="u_foo_71", description="x"),
+    ]
+    record_collapsed_findings(
+        collapsed, ctx, application_point="versioned_symbol_collapse"
+    )
+    ctx.suppressed.extend(collapsed)
+
+    assert [c.symbol for c in ctx.suppressed] == ["dup", "dup", "u_foo_70", "u_foo_71"]
+    for change in ctx.suppressed:
+        record = ledger.record_for(change)
+        assert record is not None, (
+            "a rule-less suppression bucket write went unrecorded"
+        )
+        # Grouped / collapsed findings are deduplicated, never a user waiver.
+        assert record.disposition is Disposition.DEDUPLICATED
+        assert record.rule is None
 
 
 def test_a_substituting_step_records_one_observation_not_two() -> None:

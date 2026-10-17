@@ -219,11 +219,6 @@ class TestElfSymbolOriginLib:
         sym = ElfSymbol(name="my_func")
         assert sym.origin_lib is None
 
-    def test_origin_lib_can_be_set(self):
-        """ElfSymbol.origin_lib can be set to a library name."""
-        sym = ElfSymbol(name="_ZNSt6thread8_M_startEv", origin_lib="libstdc++.so.6")
-        assert sym.origin_lib == "libstdc++.so.6"
-
     def test_origin_lib_none_for_native(self):
         """ElfSymbol.origin_lib is None for native symbols."""
         sym = ElfSymbol(name="native_func", origin_lib=None)

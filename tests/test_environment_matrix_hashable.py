@@ -57,30 +57,38 @@ from abicheck.environment_matrix import (
 
 
 def test_default_construction_is_hashable() -> None:
-    assert isinstance(hash(EnvironmentMatrix()), int)
+    a, b = EnvironmentMatrix(), EnvironmentMatrix()
+    assert a == b
+    assert hash(a) == hash(b)
+    assert len({a, b}) == 1
 
 
 def test_fully_populated_matrix_is_hashable() -> None:
-    matrix = EnvironmentMatrix(
-        compilers=["gcc-13", "clang-17"],
-        abi_version="18",
-        libstdcxx_dual_abi="cxx11",
-        runtime_floors={"GLIBC": "2.28", "CXXABI": "1.3.13"},
-        sycl=SyclConstraints(
-            implementation="dpcpp",
-            backends=["level_zero", "opencl"],
-            min_pi_version="1",
-        ),
-        cuda=CudaConstraints(
-            gpu_architectures=["sm_80", "sm_90"],
-            driver_range=("525.0", "580.0"),
-            toolkit_version="12.4",
-            require_ptx=True,
-        ),
-        target_os="linux",
-        target_arch="x86_64",
-    )
-    assert isinstance(hash(matrix), int)
+    def build() -> EnvironmentMatrix:
+        return EnvironmentMatrix(
+            compilers=["gcc-13", "clang-17"],
+            abi_version="18",
+            libstdcxx_dual_abi="cxx11",
+            runtime_floors={"GLIBC": "2.28", "CXXABI": "1.3.13"},
+            sycl=SyclConstraints(
+                implementation="dpcpp",
+                backends=["level_zero", "opencl"],
+                min_pi_version="1",
+            ),
+            cuda=CudaConstraints(
+                gpu_architectures=["sm_80", "sm_90"],
+                driver_range=("525.0", "580.0"),
+                toolkit_version="12.4",
+                require_ptx=True,
+            ),
+            target_os="linux",
+            target_arch="x86_64",
+        )
+
+    a, b = build(), build()
+    assert a == b
+    assert hash(a) == hash(b)
+    assert len({a, b}) == 1
 
 
 def test_equal_matrices_hash_equal_even_with_different_dict_insertion_order() -> None:
@@ -108,25 +116,23 @@ def test_matrices_differing_only_in_sycl_backends_are_distinguishable() -> None:
 
 
 def test_sycl_and_cuda_constraints_are_independently_hashable() -> None:
-    assert isinstance(
-        hash(
-            SyclConstraints(
-                implementation="dpcpp", backends=["level_zero"], min_pi_version="1"
-            )
-        ),
-        int,
-    )
-    assert isinstance(
-        hash(
-            CudaConstraints(
-                gpu_architectures=["sm_80"],
-                driver_range=("525.0", "580.0"),
-                toolkit_version="12.4",
-                require_ptx=True,
-            )
-        ),
-        int,
-    )
+    def sycl() -> SyclConstraints:
+        return SyclConstraints(
+            implementation="dpcpp", backends=["level_zero"], min_pi_version="1"
+        )
+
+    def cuda() -> CudaConstraints:
+        return CudaConstraints(
+            gpu_architectures=["sm_80"],
+            driver_range=("525.0", "580.0"),
+            toolkit_version="12.4",
+            require_ptx=True,
+        )
+
+    assert hash(sycl()) == hash(sycl())
+    assert hash(cuda()) == hash(cuda())
+    assert len({sycl(), sycl()}) == 1
+    assert len({cuda(), cuda()}) == 1
 
 
 def test_matrix_usable_as_dict_key_and_set_member() -> None:
@@ -236,11 +242,11 @@ class TestGenuineImmutability:
 
     def test_sycl_backends_is_a_tuple(self) -> None:
         sycl = SyclConstraints(backends=["level_zero", "opencl"])
-        assert isinstance(sycl.backends, tuple)
+        assert sycl.backends == ("level_zero", "opencl")
 
     def test_cuda_gpu_architectures_is_a_tuple(self) -> None:
         cuda = CudaConstraints(gpu_architectures=["sm_80", "sm_90"])
-        assert isinstance(cuda.gpu_architectures, tuple)
+        assert cuda.gpu_architectures == ("sm_80", "sm_90")
 
     def test_cuda_driver_range_from_list_is_a_tuple_and_hashable(self) -> None:
         """Codex review, P2, follow-up finding: a typed caller constructing
@@ -280,7 +286,17 @@ class TestGenuineImmutability:
                 driver_range=["525.0", "580.0"],
             )
         )
-        assert hash(matrix) is not None
+        # The list-built matrix must equal and hash like the tuple-built one.
+        tuple_built = EnvironmentMatrix(
+            cuda=CudaConstraints(
+                gpu_architectures=["sm_80"],
+                driver_range=("525.0", "580.0"),
+            )
+        )
+        assert matrix.cuda is not None
+        assert matrix.cuda.driver_range == ("525.0", "580.0")
+        assert matrix == tuple_built
+        assert len({matrix, tuple_built}) == 1
 
     def test_dict_lookup_survives_a_mutation_that_would_have_broken_it(
         self,

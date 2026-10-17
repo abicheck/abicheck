@@ -142,7 +142,7 @@ class TestObjectRef:
 
 
 class TestPathLayout:
-    def test_manifest_relpath_is_fixed(self) -> None:
+    def test_manifest_relpath_is_fixed(self) -> None:  # test-quality: ok layout pin
         assert MANIFEST_RELPATH == "manifest.json"
 
     def test_object_relpath_shards_by_the_first_two_hex_characters(self) -> None:

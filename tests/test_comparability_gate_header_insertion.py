@@ -323,10 +323,14 @@ class TestCompareTreatsTheAdditionAsEvolution:
         )
 
     def test_a_verdict_is_produced(self, tmp_path):
-        from abicheck.checker import compare
+        from abicheck.checker import Verdict, compare
 
         old, new = self._pair(tmp_path)
-        assert compare(old, new).verdict is not None
+        result = compare(old, new)
+        # An added header with no symbol change is not an ABI break: the
+        # insertion must read as no change, not as a break or a gate failure.
+        assert result.verdict == Verdict.NO_CHANGE
+        assert result.changes == []
 
     def test_no_assurance_reduction_is_recorded(self, tmp_path):
         """`comparability_assurance` is `None` only when no mismatch was found

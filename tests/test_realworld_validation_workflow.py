@@ -124,7 +124,11 @@ class TestContractEvaluationStepAgainstARealPackage:
         )
 
     def test_the_step_exists(self) -> None:
-        assert self._step() is not None
+        # The step must really invoke a compare of the real package, with
+        # the public-header evidence wired in, not merely carry the name.
+        run = self._step()["run"]
+        assert "abicheck compare" in run
+        assert "-H " in run
 
     def test_the_step_passes_a_contract_domain(self) -> None:
         run = self._step()["run"]

@@ -475,7 +475,18 @@ class TestPathOccurrenceId:
         attach_impact_metadata(
             change, affected_public_roots=["pub"], path=[edge], graph=g
         )
+        # The attached id is the one for exactly this path's occurrences: it
+        # is set, and it differs from the id of an unrelated occurrence.
         assert change.impact_occurrence_id is not None
+        assert change.impact_occurrence_id == _path_occurrence_id([edge])
+        other = GraphEdge(
+            src="decl://pub",
+            dst="decl://helper",
+            kind="DECL_CALLS_DECL",
+            attrs={"callsite_id": "cs2"},
+        )
+        SourceGraphSummary(edges=[other])
+        assert change.impact_occurrence_id != _path_occurrence_id([other])
 
     def test_engine_carries_occurrence_id_into_graph_proof_path(self) -> None:
         from abicheck.impact.engine import assess_change

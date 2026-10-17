@@ -148,6 +148,10 @@ def _written_pack(tmp_path):
 def test_an_untouched_pack_loads(tmp_path) -> None:
     pack = load_pack_or_raise(_written_pack(tmp_path))
     assert pack.build_evidence is not None
+    # The round-trip must return the same compile unit that was written.
+    assert [(cu.id, cu.source) for cu in pack.build_evidence.compile_units] == [
+        ("cu://a", "a.cpp")
+    ]
 
 
 @pytest.mark.parametrize(

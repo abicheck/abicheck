@@ -798,21 +798,32 @@ class TestParseFull:
         `.dynsym` is the authoritative export surface."""
         from elftools.elf.sections import SymbolTableSection
 
+        def _sym(name: str) -> MagicMock:
+            sym = MagicMock()
+            sym.name = name
+            sym.entry.st_shndx = 1  # normal .text section
+            sym.entry.st_info.bind = "STB_GLOBAL"
+            sym.entry.st_info.type = "STT_FUNC"
+            sym.entry.st_other.visibility = "STV_DEFAULT"
+            sym.entry.st_size = 8
+            return sym
+
         dynsym = MagicMock(spec=SymbolTableSection)
         dynsym.name = ".dynsym"
-        dynsym.iter_symbols.return_value = []
+        dynsym.iter_symbols.return_value = [_sym("exported_fn")]
         symtab = MagicMock(spec=SymbolTableSection)
         symtab.name = ".symtab"
-        symtab.iter_symbols.return_value = []
+        symtab.iter_symbols.return_value = [_sym("local_only_fn")]
 
         elf = MagicMock()
         elf.iter_sections.return_value = [dynsym, symtab]
 
         f = MagicMock()
         with patch("abicheck.elf_metadata.ELFFile", return_value=elf):
-            _parse(f, Path("test.so"))
+            meta = _parse(f, Path("test.so"))
 
         symtab.iter_symbols.assert_not_called()  # .dynsym wins
+        assert [s.name for s in meta.symbols] == ["exported_fn"]
 
     def test_symtab_parsed_as_fallback_without_dynsym(self):
         """A relocatable `.o` has no `.dynsym`; `.symtab` is parsed as the

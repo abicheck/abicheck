@@ -246,6 +246,16 @@ def test_init_inputs_pack_race_loser_agreeing_target_succeeds(
     monkeypatch.setattr(os_module, "link", _racing_link)
     m = init_inputs_pack(pack, library="libfoo.so", created_by="abicheck-cc")
     assert m.library == "libfoo.so"
+    # The loser must hand back the winner's manifest, not a fresh one: the
+    # file on disk is still the winner's bytes, untouched by the loser.
+    on_disk = json.loads((pack / "manifest.json").read_text())
+    assert on_disk == {
+        "kind": "abicheck_inputs",
+        "abicheck_inputs_version": 1,
+        "library": "libfoo.so",
+        "version": "",
+    }
+    assert m.version == on_disk["version"]
 
 
 def test_init_inputs_pack_rejects_wrong_kind_manifest(tmp_path: Path) -> None:
@@ -282,6 +292,10 @@ def test_init_inputs_pack_recovers_from_truly_malformed_manifest(
     (pack / "manifest.json").write_text('{"kind": "abicheck_inputs", "library":')
     manifest = init_inputs_pack(pack, library="libfoo.so", created_by="abicheck-cc")
     assert manifest.library == "libfoo.so"
+    # Recovery must persist a well-formed manifest, not just return one.
+    on_disk = json.loads((pack / "manifest.json").read_text())
+    assert on_disk["kind"] == "abicheck_inputs"
+    assert on_disk["library"] == "libfoo.so"
 
 
 def test_facts_filename_deterministic_and_collision_resistant() -> None:

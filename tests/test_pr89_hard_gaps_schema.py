@@ -71,7 +71,7 @@ def _kinds(result: object) -> set[ChangeKind]:
 class TestFuncDeletedElfFallbackPolicy:
     """Policy checks: enum value, BREAKING_KINDS membership."""
 
-    def test_enum_value(self) -> None:
+    def test_enum_value(self) -> None:  # test-quality: ok JSON kind wire value
         assert ChangeKind.FUNC_DELETED_ELF_FALLBACK.value == "func_deleted_elf_fallback"
 
     def test_in_breaking_kinds(self) -> None:
@@ -319,7 +319,7 @@ class TestTemplatePolicyKinds:
     def test_template_return_type_changed_breaking(self) -> None:
         assert ChangeKind.TEMPLATE_RETURN_TYPE_CHANGED in BREAKING_KINDS
 
-    def test_enum_values(self) -> None:
+    def test_enum_values(self) -> None:  # test-quality: ok JSON kind wire values
         assert (
             ChangeKind.TEMPLATE_PARAM_TYPE_CHANGED.value
             == "template_param_type_changed"
@@ -706,12 +706,6 @@ class TestSchemaVersionBaseline:
         d = snapshot_to_dict(snap)
         assert "schema_version" in d
         assert d["schema_version"] == SCHEMA_VERSION
-
-    def test_schema_version_is_int(self) -> None:
-        """schema_version in the serialized dict must be an int."""
-        snap = _snap()
-        d = snapshot_to_dict(snap)
-        assert isinstance(d["schema_version"], int)
 
     def test_schema_version_survives_json_roundtrip(self) -> None:
         """schema_version must survive JSON serialization and deserialization."""

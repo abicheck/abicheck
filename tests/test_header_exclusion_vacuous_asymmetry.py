@@ -60,14 +60,18 @@ def test_refused_when_other_side_parsed_a_matching_header():
 def test_refused_when_other_side_has_no_header_evidence():
     old = AbiSnapshot(library="libdnnl.so.3", version="1")
     new = _snap(["/n/include/dnnl.h"], ("*_ze*",))
-    assert exclusion_asymmetry_reason_for(old, new) is not None
+    reason = exclusion_asymmetry_reason_for(old, new)
+    assert reason is not None
+    assert "new: *_ze*" in reason
 
 
 def test_refused_under_non_glob_rule():
     old = _snap(["/o/include/dnnl.h"])
     new = _snap(["/n/include/dnnl.h"], ("dnnl_ze.h",))
     new.excluded_header_matching = "exact"
-    assert exclusion_asymmetry_reason_for(old, new) is not None
+    reason = exclusion_asymmetry_reason_for(old, new)
+    assert reason is not None
+    assert "old: glob; new: exact" in reason
 
 
 _HEADERS = ["/p/a.h", "/p/b_ze.h", "/p/sub/c.hpp"]

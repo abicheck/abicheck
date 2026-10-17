@@ -450,7 +450,7 @@ class TestClosureLocationFreeIdentityProperties:
         twice = closure_location_free_identity(once)
         assert once == twice
 
-    @given(
+    @given(  # test-quality: ok must-not-raise smoke over hostile text
         st.text(
             alphabet=st.characters(blacklist_categories=("Cs",)),
             min_size=0,

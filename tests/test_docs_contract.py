@@ -1590,7 +1590,9 @@ def test_a_malformed_page_list_is_reported_not_raised(
     monkeypatch.setattr(dc, "DOCS", tmp_path / "docs")
     f = dc.Findings()
     dc._check_external_pages_claim_only_registered_topics(f, topics)  # must not raise
-    assert f is not None
+    # The fragment's claim is valid, and the malformed list is the registry
+    # check's finding to report, not this one's: no spurious error from here.
+    assert f.errors == []
 
 
 def test_an_external_fragment_may_not_declare_itself_generated(
@@ -1627,7 +1629,24 @@ def test_a_malformed_topic_id_is_reported_not_raised(
     monkeypatch.setattr(dc, "DOCS", tmp_path / "docs")
     f = dc.Findings()
     dc._check_external_summary_pages_claim_their_topics(f, topics)  # must not raise
-    assert f is not None
+    assert f.errors == []
+
+
+def test_a_malformed_topic_id_does_not_hide_a_real_missing_claim(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Companion to the no-raise guard above: with the malformed id present,
+    the valid topic's registry-to-page check must still run and report a
+    fragment that fails to claim its topic."""
+    topics, fragment = _external_registry(tmp_path)
+    topics[123] = {"canonical_page": "learn/owner.md"}  # type: ignore[index]
+    fragment.write_text("---\ndoc_type: reference\n---\n\n# F\n", encoding="utf-8")
+    monkeypatch.setattr(dc, "ROOT", tmp_path)
+    monkeypatch.setattr(dc, "DOCS", tmp_path / "docs")
+    f = dc.Findings()
+    dc._check_external_summary_pages_claim_their_topics(f, topics)
+    assert [check for check, _ in f.errors] == ["front-matter"]
+    assert "'a-topic'" in f.errors[0][1]
 
 
 @pytest.mark.parametrize(

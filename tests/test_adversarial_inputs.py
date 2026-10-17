@@ -364,8 +364,9 @@ class TestEdgeCaseModelObjects:
             ],
         )
         snap.index()
-        # Should not crash
-        assert snap.function_map.get("") is not None
+        # The empty-string key indexes the very objects that were supplied.
+        assert snap.function_map[""] is snap.declarations.functions[0]
+        assert snap.var_by_mangled("") is snap.declarations.variables[0]
 
     def test_snapshot_with_very_long_names(self) -> None:
         """Snapshot with names exceeding 1000 characters."""
@@ -404,8 +405,10 @@ class TestEdgeCaseModelObjects:
             ],
         )
         snap.index()
-        assert snap.function_map.get("_Z_unicode_\u00e4\u00f6\u00fc") is not None
-        assert snap.var_by_mangled("_emoji_var") is not None
+        func = snap.declarations.functions[0]
+        assert func.name == "\u00e4\u00f6\u00fc\u00df_\u4e16\u754c"
+        assert snap.function_map["_Z_unicode_\u00e4\u00f6\u00fc"] is func
+        assert snap.var_by_mangled("_emoji_var") is snap.declarations.variables[0]
 
     def test_compare_snapshot_against_itself(self) -> None:
         """Comparing a snapshot against itself should yield NO_CHANGE."""

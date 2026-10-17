@@ -162,13 +162,13 @@ class TestAnalyzeBundleBothStagesSucceed:
         metadata = _bundle_metadata()
         old = _snapshot(metadata)
         new = _snapshot(metadata)
-        result = analyze_bundle(
-            old,
-            new,
-            [_diff("libcore.so"), _diff("libconsumer.so")],
-            policy="plugin_abi",
-        )
-        assert result.policy == "plugin_abi"
+        diffs = [_diff("libcore.so"), _diff("libconsumer.so")]
+        explicit = analyze_bundle(old, new, diffs, policy="plugin_abi")
+        assert explicit.policy == "plugin_abi"
+        # Omitting the policy resolves to the default, not to whatever the
+        # last caller passed: the two calls must differ in what they report.
+        default = analyze_bundle(old, new, diffs)
+        assert default.policy == "strict_abi"
 
 
 class TestAnalyzeBundleCompactVsFullSnapshotInterchangeable:

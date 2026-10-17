@@ -290,7 +290,16 @@ class TestAffectedSymbolsComputation:
         result = compare(old, new)
         # Should have field-related changes with Container as root
         field_changes = [c for c in result.changes if "Container" in c.symbol]
-        assert len(field_changes) >= 1
+        assert {c.kind.value for c in field_changes} == {
+            "type_field_removed",
+            "type_field_offset_changed",
+        }
+        # The base-type-stripped symbol is what resolves the affected users.
+        for change in field_changes:
+            assert set(change.affected_symbols) == {
+                "_Z13use_container9Container",
+                "use_container",
+            }
 
 
 class TestRedundantChangeFiltering:
@@ -440,8 +449,16 @@ class TestEnumEdgeCases:
 
         result = compare(old, new)
         # FLAG_A removed because two new members share value=1 (no unique rename candidate)
-        # Should have some enum changes
-        assert len(result.changes) > 0
+        removed = [
+            c for c in result.changes if c.kind == ChangeKind.ENUM_MEMBER_REMOVED
+        ]
+        assert [c.symbol for c in removed] == ["Flags::FLAG_A"]
+        assert removed[0].old_value == "1"
+        assert removed[0].new_value is None
+        assert not [
+            c for c in result.changes if c.kind == ChangeKind.ENUM_MEMBER_RENAMED
+        ]
+        assert result.verdict == Verdict.BREAKING
 
 
 # ===========================================================================

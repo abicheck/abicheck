@@ -126,7 +126,9 @@ class TestVtableSeverity:
         result = compare(old, new)
         assert not result.changes
 
-    def test_vtable_change_kind_value(self) -> None:
+    def test_vtable_change_kind_value(  # test-quality: ok JSON kind wire pin
+        self,
+    ) -> None:
         """TYPE_VTABLE_CHANGED enum value is 'type_vtable_changed'."""
         assert ChangeKind.TYPE_VTABLE_CHANGED.value == "type_vtable_changed"
 

@@ -462,7 +462,12 @@ def test_cell_cpo_identity() -> None:
 
 def test_registry_names_real_functions() -> None:
     import importlib
+    import inspect
 
     for qual in cat.ENVIRONMENT_CELLS:
         module, func = qual.split(":")
-        assert callable(getattr(importlib.import_module(module), func)), qual
+        obj = getattr(importlib.import_module(module), func)
+        # Defined in the named module, not re-exported or aliased from
+        # elsewhere: the cell must test the function the registry names.
+        assert inspect.isfunction(obj), qual
+        assert obj.__module__ == module, qual

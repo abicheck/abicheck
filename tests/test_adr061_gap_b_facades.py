@@ -173,7 +173,12 @@ def test_already_classified_facades_keep_their_public_surface(
     """
     module = importlib.import_module(module_name)
     for name in names:
-        assert hasattr(module, name)
+        # The public path resolves to the definition in this very module, not
+        # to a stub or a re-export that could drift away from it.
+        assert getattr(module, name).__module__ == module_name
+    # The error types keep their documented hierarchy through the public path.
+    if module_name == "abicheck.errors":
+        assert issubclass(module.ValidationError, module.AbicheckError)
 
 
 def test_public_root_surfaces_matches_the_reviewed_exception_set() -> None:

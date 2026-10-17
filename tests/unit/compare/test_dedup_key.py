@@ -130,11 +130,16 @@ _UNHASHABLE = [
 class TestTheResultIsAlwaysHashable:
     @given(_EXACT)
     def test_any_value_yields_a_hashable_result(self, value: object) -> None:
-        hash(hashable_value(value))
+        first, second = hashable_value(value), hashable_value(value)
+        # Same input, same key: the result must be usable as a set member.
+        assert first is second or first == second
+        assert hash(first) == hash(second)
 
     @pytest.mark.parametrize("value", _UNHASHABLE)
     def test_known_unhashable_shapes(self, value: object) -> None:
-        hash(hashable_value(value))
+        key = hashable_value(value)
+        assert key == hashable_value(copy.deepcopy(value))
+        assert hash(key) == hash(hashable_value(copy.deepcopy(value)))
 
     @pytest.mark.parametrize("value", _UNHASHABLE)
     def test_the_result_survives_entering_a_set(self, value: object) -> None:
@@ -145,7 +150,10 @@ class TestTheResultIsAlwaysHashable:
             def __hash__(self) -> int:
                 raise TypeError("unhashable by design")
 
-        hash(hashable_value(Hostile()))
+        obj = Hostile()
+        key = hashable_value(obj)
+        assert key == hashable_value(obj)
+        assert len({key, hashable_value(obj)}) == 1
 
 
 class TestEqualValuesKeyEqually:
@@ -252,7 +260,10 @@ class TestOpaqueValuesKeyByIdentity:
         return _OpaqueFixture(text)
 
     def test_an_opaque_value_is_hashable(self) -> None:
-        hash(hashable_value(self._opaque("x")))
+        value = self._opaque("x")
+        key = hashable_value(value)
+        assert key == hashable_value(value)
+        assert len({key, hashable_value(value)}) == 1
 
     def test_the_same_object_keys_equally_every_time(self) -> None:
         value = self._opaque("x")
@@ -270,8 +281,9 @@ class TestOpaqueValuesKeyByIdentity:
 
     def test_the_key_holds_the_value_so_its_id_cannot_be_reused(self) -> None:
         """Identity keying is only sound while the object stays alive."""
-        key = hashable_value(self._opaque("x"))
-        assert getattr(key, "value", None) is not None
+        value = self._opaque("x")
+        key = hashable_value(value)
+        assert key.value is value
 
 
 class TestHashableScalarsArePassedThroughUnchanged:

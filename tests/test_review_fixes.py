@@ -12,6 +12,7 @@ Covers:
 from __future__ import annotations
 
 import copy
+import json
 from datetime import date, timedelta
 
 from abicheck.checker import Change, ChangeKind, compare
@@ -204,7 +205,9 @@ class TestConfidenceComputation:
         result = compare(old, new)
         assert isinstance(result.confidence, Confidence)
 
-    def test_confidence_str_comparison_still_works(self):
+    def test_confidence_str_comparison_still_works(  # test-quality: ok JSON wire pin
+        self,
+    ):
         """Confidence enum is str-based so string comparisons keep working."""
         assert Confidence.HIGH == "high"
         assert Confidence.MEDIUM == "medium"
@@ -609,9 +612,14 @@ class TestRenderOutputValidation:
     def test_supported_formats_do_not_raise(self):
         from abicheck.service import render_output
 
-        for fmt in ("json", "markdown", "md"):
-            output = render_output(fmt, self._make_result(), self._make_snap())
-            assert isinstance(output, str)
+        result = self._make_result()
+        snap = self._make_snap()
+        json_out = render_output("json", result, snap)
+        assert json.loads(json_out)["verdict"] == "NO_CHANGE"
+        markdown = render_output("markdown", result, snap)
+        assert markdown.startswith("# ABI Report: libtest.so")
+        # "md" is an alias of "markdown".
+        assert render_output("md", result, snap) == markdown
 
 
 # ---------------------------------------------------------------------------

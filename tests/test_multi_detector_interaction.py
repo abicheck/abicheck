@@ -451,7 +451,7 @@ class TestMissingMetadata:
     """Detectors handle missing metadata gracefully."""
 
     def test_elf_present_old_missing_new(self):
-        """Old has ELF metadata, new does not → no crash."""
+        """Old has ELF metadata, new does not → no crash, no fabricated break."""
         old_elf = ElfMetadata(
             soname="libfoo.so.1",
             symbols=[
@@ -461,7 +461,10 @@ class TestMissingMetadata:
             ],
         )
         r = compare(_snap(elf=old_elf), _snap())
-        assert r.verdict is not None  # Should not crash
+        # Missing evidence never fabricates a break: the old-only symbol is not
+        # reported as removed, and the run stays a clean no-change.
+        assert _kinds(r) == set()
+        assert r.verdict == Verdict.NO_CHANGE
 
     def test_dwarf_present_old_missing_new(self):
         """Old has DWARF, new does not → DWARF_INFO_MISSING."""

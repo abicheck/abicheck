@@ -388,6 +388,12 @@ class TestDeadlineBoundaryCheck:
         request = self._request(tmp_path, budget_s=300)
         result = run_compare_request(request)
         assert result.diff is not None
+        # Two empty snapshots of one library: nothing changed, so the run
+        # completes with no findings rather than an expiry or a spurious break.
+        assert result.diff.changes == []
+        from abicheck.model.change_catalog.registry import Verdict
+
+        assert result.diff.verdict == Verdict.NO_CHANGE
 
 
 class TestRequestEnvMatrixReachesClassification:
@@ -530,4 +536,4 @@ class TestRequestEnvMatrixReachesClassification:
             new=InputSpec.of(str(tmp_path / "never-written-new.abi.json")),
             env_matrix=self._matrix(),
         )
-        assert request.env_matrix is not None
+        assert request.env_matrix == self._matrix()

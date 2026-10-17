@@ -37,11 +37,15 @@ class TestRenderOutput:
 
     def test_markdown_format(self, diff_result, snap):
         out = render_output("markdown", diff_result, snap)
-        assert isinstance(out, str)
+        assert out.startswith("# ABI Report: libtest\n")
+        assert "| **Old version** | `1.0` |" in out
+        assert "| **New version** | `2.0` |" in out
+        assert "| Breaking changes | 0 |" in out
 
     def test_md_format(self, diff_result, snap):
+        # "md" is an alias of "markdown": same renderer, same output.
         out = render_output("md", diff_result, snap)
-        assert isinstance(out, str)
+        assert out == render_output("markdown", diff_result, snap)
 
     def test_sarif_format(self, diff_result, snap):
         out = render_output("sarif", diff_result, snap)
@@ -178,7 +182,8 @@ class TestRenderOutput:
             old_version="1.0", new_version="2.0", library="libtest"
         )
         out = render_output("html", diff_result, snap, new=new_snap)
-        assert isinstance(out, str)
+        assert out.startswith("<!DOCTYPE html>")
+        assert "<title>ABI Report: libtest 1.0 → 2.0</title>" in out
 
 
 # ── _render_deps_section_md() ──────────────────────────────────────────────

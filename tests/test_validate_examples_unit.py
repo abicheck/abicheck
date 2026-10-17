@@ -541,12 +541,16 @@ class TestSourcesPath:
         # Every ground_truth case flagged sources must ship both per-side trees.
         gt = json.loads(_GROUND_TRUTH.read_text())["verdicts"]
         examples_dir = _CASES_DIR
+        checked = 0
         for name, v in gt.items():
             if not v.get("sources"):
                 continue
+            checked += 1
             case_dir = examples_dir / name
-            assert _sources_path(case_dir, "v1", True) is not None, name
-            assert _sources_path(case_dir, "v2", True) is not None, name
+            assert _sources_path(case_dir, "v1", True) == case_dir / "v1.sources", name
+            assert _sources_path(case_dir, "v2", True) == case_dir / "v2.sources", name
+        if not checked:
+            pytest.skip("no ground_truth case is flagged sources in this checkout")
 
 
 # ── CLI entry-point ───────────────────────────────────────────────────────

@@ -179,9 +179,9 @@ class TestEvaluateLocationExpr:
 
     def test_tuple_plus_insufficient_stack(self) -> None:
         """Tuple DW_OP_plus with insufficient stack."""
-        # Only implicit 0 on stack, DW_OP_plus needs 2
-        result = _evaluate_location_expr([(0x22, 0)])
-        assert isinstance(result, int)
+        # Only the implicit base 0 is on the stack; DW_OP_plus needs two
+        # values, so it is a no-op and the result stays the base address.
+        assert _evaluate_location_expr([(0x22, 0)]) == 0
 
     def test_unknown_tuple_opcode(self) -> None:
         """Unknown tuple opcode should be skipped."""
@@ -1224,7 +1224,9 @@ extern "C" SensorData make_sensor(int c, int s) {
         )
 
     def test_cpp_const_variable(self, cpp_lib: Path) -> None:
-        """Const global variable should be extracted."""
+        """A namespace-scope C++ ``const`` has internal linkage: it is not part
+        of the binary's ABI, so the snapshot must not report it as a variable,
+        and building the snapshot must not crash on it."""
         from abicheck.dwarf_unified import parse_dwarf
         from abicheck.elf_metadata import parse_elf_metadata
 
@@ -1237,9 +1239,8 @@ extern "C" SensorData make_sensor(int c, int s) {
             dwarf_adv,
         )
 
-        # MAGIC may or may not be exported depending on linker, but
-        # the build_snapshot should not crash processing it
         assert snap is not None
+        assert "MAGIC" not in {v.name for v in snap.declarations.variables}
 
     def test_version_and_language_profile(self, cpp_lib: Path) -> None:
         """build_snapshot_from_dwarf should accept version and language_profile."""
@@ -1259,6 +1260,8 @@ extern "C" SensorData make_sensor(int c, int s) {
 
         assert snap.version == "2.0.0"
         assert snap.language_profile == "cpp"
+        # The arguments must not displace the extracted declarations.
+        assert {"Base", "Derived", "Flags"} <= {t.name for t in snap.declarations.types}
 
     def test_rvalue_reference_param(self, cpp_lib: Path) -> None:
         """Rvalue reference parameters should be detected."""

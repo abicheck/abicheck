@@ -317,7 +317,9 @@ def _canary_strictness_violation(source: str) -> str | None:
 
 class TestRegistryShape:
     def test_registry_is_non_empty(self) -> None:
-        assert len(BUG_CLASSES) > 0
+        # Non-emptiness alone would let the parametrized per-entry tests
+        # vanish silently; a known escape-history entry must be registered.
+        assert "extraction.ast_wrapper_chain_traversal" in all_ids()
 
     def test_every_entry_is_a_bug_class(self) -> None:
         assert all(isinstance(bc, BugClass) for bc in BUG_CLASSES)
@@ -486,19 +488,27 @@ class TestCanaryStrictnessViolation:
 
     def test_a_bare_xfail_is_rejected(self) -> None:
         source = "@pytest.mark.xfail\ndef test_x(): ...\n"
-        assert _canary_strictness_violation(source) is not None
+        violation = _canary_strictness_violation(source)
+        assert violation is not None
+        assert "non-strict" in violation
 
     def test_a_non_strict_xfail_is_rejected(self) -> None:
         source = "@pytest.mark.xfail(reason='tracked gap')\ndef test_x(): ...\n"
-        assert _canary_strictness_violation(source) is not None
+        violation = _canary_strictness_violation(source)
+        assert violation is not None
+        assert "non-strict" in violation
 
     def test_strict_false_is_rejected(self) -> None:
         source = "@pytest.mark.xfail(reason='tracked gap', strict=False)\ndef test_x(): ...\n"
-        assert _canary_strictness_violation(source) is not None
+        violation = _canary_strictness_violation(source)
+        assert violation is not None
+        assert "non-strict" in violation
 
     def test_a_skip_is_rejected_even_with_a_reason(self) -> None:
         source = "@pytest.mark.skip(reason='not implemented yet')\ndef test_x(): ...\n"
-        assert _canary_strictness_violation(source) is not None
+        violation = _canary_strictness_violation(source)
+        assert violation is not None
+        assert "uses @pytest.mark.skip," in violation
 
     def test_skipif_is_not_confused_with_skip(self) -> None:
         """`skip` is a literal prefix of `skipif` — a naive substring search
@@ -554,7 +564,9 @@ class TestCanaryStrictnessViolation:
             "@pytest.mark.xfail(reason='no strict here')\n"
             "def test_b(): ...\n"
         )
-        assert _canary_strictness_violation(source) is not None
+        violation = _canary_strictness_violation(source)
+        assert violation is not None
+        assert "non-strict" in violation
 
     def test_strict_true_mentioned_only_inside_the_reason_string_is_rejected(
         self,
@@ -568,7 +580,9 @@ class TestCanaryStrictnessViolation:
             "@pytest.mark.xfail(reason='TODO: make strict=True after fix')\n"
             "def test_x(): ...\n"
         )
-        assert _canary_strictness_violation(source) is not None
+        violation = _canary_strictness_violation(source)
+        assert violation is not None
+        assert "non-strict" in violation
 
     def test_a_non_literal_strict_expression_is_rejected(self) -> None:
         """`strict=True if flag else False` only *sometimes* evaluates to
@@ -579,14 +593,18 @@ class TestCanaryStrictnessViolation:
         source = (
             "@pytest.mark.xfail(strict=True if flag else False)\ndef test_x(): ...\n"
         )
-        assert _canary_strictness_violation(source) is not None
+        violation = _canary_strictness_violation(source)
+        assert violation is not None
+        assert "non-strict" in violation
 
     def test_strict_as_a_string_literal_is_rejected(self) -> None:
         """`strict="True"` is a string, not the boolean pytest's `xfail`
         marker actually requires — truthy in casual reading, but not a
         literal `True`."""
         source = '@pytest.mark.xfail(strict="True")\ndef test_x(): ...\n'
-        assert _canary_strictness_violation(source) is not None
+        violation = _canary_strictness_violation(source)
+        assert violation is not None
+        assert "non-strict" in violation
 
     def test_a_class_level_xfail_decorator_is_inspected(self) -> None:
         """`@pytest.mark.xfail` applied to a test *class* — applying to
@@ -597,7 +615,9 @@ class TestCanaryStrictnessViolation:
             "class TestCanary:\n"
             "    def test_x(self): ...\n"
         )
-        assert _canary_strictness_violation(source) is not None
+        violation = _canary_strictness_violation(source)
+        assert violation is not None
+        assert "non-strict" in violation
 
     def test_a_strict_class_level_xfail_decorator_is_accepted(self) -> None:
         source = (
@@ -616,7 +636,9 @@ class TestCanaryStrictnessViolation:
             "\n"
             "def test_x(): ...\n"
         )
-        assert _canary_strictness_violation(source) is not None
+        violation = _canary_strictness_violation(source)
+        assert violation is not None
+        assert "non-strict" in violation
 
     def test_a_module_level_pytestmark_list_is_inspected(self) -> None:
         """`pytestmark` may also be a list of several markers."""
@@ -625,7 +647,9 @@ class TestCanaryStrictnessViolation:
             "\n"
             "def test_x(): ...\n"
         )
-        assert _canary_strictness_violation(source) is not None
+        violation = _canary_strictness_violation(source)
+        assert violation is not None
+        assert "non-strict" in violation
 
     def test_a_strict_module_level_pytestmark_is_accepted(self) -> None:
         source = (
@@ -644,7 +668,9 @@ class TestCanaryStrictnessViolation:
             "\n"
             "    def test_x(self): ...\n"
         )
-        assert _canary_strictness_violation(source) is not None
+        violation = _canary_strictness_violation(source)
+        assert violation is not None
+        assert "uses @pytest.mark.skip," in violation
 
     def test_strict_xfail_with_run_false_is_rejected(self) -> None:
         """`run=False` tells pytest to never execute the test body at all
@@ -652,7 +678,9 @@ class TestCanaryStrictnessViolation:
         can never XPASS even after the tracked residual genuinely closes,
         regardless of `strict=True` (Codex review, PR #885, sixth round)."""
         source = "@pytest.mark.xfail(strict=True, run=False)\ndef test_x(): ...\n"
-        assert _canary_strictness_violation(source) is not None
+        violation = _canary_strictness_violation(source)
+        assert violation is not None
+        assert "run=False" in violation
 
     def test_strict_xfail_with_run_true_is_still_accepted(self) -> None:
         source = "@pytest.mark.xfail(strict=True, run=True)\ndef test_x(): ...\n"
@@ -669,7 +697,9 @@ class TestCanaryStrictnessViolation:
         source = (
             f"@pytest.mark.xfail(strict=True, run={run_value})\ndef test_x(): ...\n"
         )
-        assert _canary_strictness_violation(source) is not None
+        violation = _canary_strictness_violation(source)
+        assert violation is not None
+        assert "non-strict" in violation
 
     def test_a_strict_xfail_via_from_pytest_import_mark_is_inspected(self) -> None:
         """`from pytest import mark` then `@mark.xfail(...)` is a real,
@@ -682,7 +712,9 @@ class TestCanaryStrictnessViolation:
             "@mark.xfail(reason='tracked gap')\n"
             "def test_x(): ...\n"
         )
-        assert _canary_strictness_violation(source) is not None
+        violation = _canary_strictness_violation(source)
+        assert violation is not None
+        assert "non-strict" in violation
 
     def test_a_strict_xfail_via_aliased_mark_import_is_accepted_when_strict(
         self,
@@ -704,7 +736,9 @@ class TestCanaryStrictnessViolation:
             "@pt.mark.xfail(reason='tracked gap')\n"
             "def test_x(): ...\n"
         )
-        assert _canary_strictness_violation(source) is not None
+        violation = _canary_strictness_violation(source)
+        assert violation is not None
+        assert "non-strict" in violation
 
     def test_a_strict_xfail_via_aliased_pytest_import_is_accepted(self) -> None:
         source = (
@@ -719,7 +753,9 @@ class TestCanaryStrictnessViolation:
         """A canary file that isn't valid Python at all fails closed rather
         than silently reading as compliant."""
         source = "def test_x(:\n    this is not python\n"
-        assert _canary_strictness_violation(source) is not None
+        violation = _canary_strictness_violation(source)
+        assert violation is not None
+        assert "could not be parsed as Python" in violation
 
     def test_a_non_strict_xfail_nested_in_a_param_mark_is_inspected(self) -> None:
         """`pytest.param(..., marks=pytest.mark.xfail(...))` is pytest's
@@ -735,7 +771,9 @@ class TestCanaryStrictnessViolation:
             ")\n"
             "def test_x(x): ...\n"
         )
-        assert _canary_strictness_violation(source) is not None
+        violation = _canary_strictness_violation(source)
+        assert violation is not None
+        assert "non-strict" in violation
 
     def test_a_strict_xfail_nested_in_a_param_mark_is_accepted(self) -> None:
         source = (
@@ -762,7 +800,9 @@ class TestCanaryStrictnessViolation:
             ")\n"
             "def test_x(x): ...\n"
         )
-        assert _canary_strictness_violation(source) is not None
+        violation = _canary_strictness_violation(source)
+        assert violation is not None
+        assert "non-strict" in violation
 
     def test_an_unconditional_skipif_is_rejected(self) -> None:
         """`@pytest.mark.skipif(True, ...)` behaves exactly like a bare
@@ -772,14 +812,18 @@ class TestCanaryStrictnessViolation:
             "@pytest.mark.skipif(True, reason='not implemented yet')\n"
             "def test_x(): ...\n"
         )
-        assert _canary_strictness_violation(source) is not None
+        violation = _canary_strictness_violation(source)
+        assert violation is not None
+        assert "statically-truthy" in violation
 
     def test_an_unconditional_skipif_via_condition_keyword_is_rejected(self) -> None:
         source = (
             "@pytest.mark.skipif(condition=True, reason='not implemented yet')\n"
             "def test_x(): ...\n"
         )
-        assert _canary_strictness_violation(source) is not None
+        violation = _canary_strictness_violation(source)
+        assert violation is not None
+        assert "statically-truthy" in violation
 
     def test_a_genuinely_conditional_skipif_is_not_flagged(self) -> None:
         """A real, environment-dependent `skipif` is a legitimate exclusion
@@ -805,7 +849,9 @@ class TestCanaryStrictnessViolation:
         be sound over literal-constant conditions, not exhaustive over
         every truthy Python expression shape)."""
         source = f"@pytest.mark.skipif({condition}, reason='x')\ndef test_x(): ...\n"
-        assert _canary_strictness_violation(source) is not None
+        violation = _canary_strictness_violation(source)
+        assert violation is not None
+        assert "statically-truthy" in violation
 
     @pytest.mark.parametrize("condition", ["0", "''", "None", "False"])
     def test_statically_falsy_skipif_conditions_are_not_flagged(

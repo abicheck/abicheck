@@ -121,9 +121,14 @@ class TestBuildCalledExactlyOnce:
             "abicheck.report.document_builder.build_report_document",
             wraps=build_report_document,
         ) as spy:
-            render_output("json", result, old, new)
+            rendered = render_output("json", result, old, new)
 
         assert spy.call_count == 1
+        assert [c.kind for c in spy.call_args.args[0].changes] == [
+            c.kind for c in result.changes
+        ]
+        payload = json.loads(rendered)
+        assert [c["kind"] for c in payload["changes"]] == ["func_removed", "func_added"]
 
     def test_full_mode_json_never_falls_back_to_the_legacy_to_json_pipeline(
         self,
@@ -139,9 +144,12 @@ class TestBuildCalledExactlyOnce:
         new = _snapshot("2.0")
 
         with mock.patch("abicheck.reporter.to_json") as legacy:
-            render_output("json", result, old, new)
+            rendered = render_output("json", result, old, new)
 
         legacy.assert_not_called()
+        payload = json.loads(rendered)
+        assert [c["kind"] for c in payload["changes"]] == ["func_removed"]
+        assert payload["summary"]["breaking"] == 1
 
 
 class TestSarifReusesSharedDocument:
@@ -190,9 +198,17 @@ class TestSarifReusesSharedDocument:
             "abicheck.report.document_builder.build_report_document",
             wraps=build_report_document,
         ) as spy:
-            render_output("sarif", result, old, new)
+            rendered = render_output("sarif", result, old, new)
 
         assert spy.call_count == 1
+        assert [c.kind for c in spy.call_args.args[0].changes] == [
+            c.kind for c in result.changes
+        ]
+        sarif = json.loads(rendered)
+        assert [r["ruleId"] for r in sarif["runs"][0]["results"]] == [
+            "func_removed",
+            "func_added",
+        ]
 
     def test_sarif_root_cause_mode_also_reuses_the_shared_document(self) -> None:
         """SARIF's own ``report_mode="root-cause"`` only adds per-result
@@ -207,9 +223,19 @@ class TestSarifReusesSharedDocument:
             "abicheck.report.document_builder.build_report_document",
             wraps=build_report_document,
         ) as spy:
-            render_output("sarif", result, old, new, report_mode="root-cause")
+            rendered = render_output(
+                "sarif", result, old, new, report_mode="root-cause"
+            )
 
         assert spy.call_count == 1
+        assert [c.kind for c in spy.call_args.args[0].changes] == [
+            c.kind for c in result.changes
+        ]
+        sarif = json.loads(rendered)
+        assert [r["ruleId"] for r in sarif["runs"][0]["results"]] == [
+            "func_removed",
+            "func_added",
+        ]
 
 
 class TestJunitReusesSharedDocument:
@@ -278,9 +304,19 @@ class TestJunitReusesSharedDocument:
             "abicheck.report.document_builder.build_report_document",
             wraps=build_report_document,
         ) as spy:
-            render_output("junit", result, old, new)
+            rendered = render_output("junit", result, old, new)
 
         assert spy.call_count == 1
+        assert [c.kind for c in spy.call_args.args[0].changes] == [
+            c.kind for c in result.changes
+        ]
+        suite = ET.fromstring(rendered)
+        assert suite.get("tests") == "2"
+        assert suite.get("failures") == "1"
+        assert [tc.get("name") for tc in suite.iter("testcase")] == [
+            "_Z3foov",
+            "_Z3newv",
+        ]
 
     def test_junit_root_cause_mode_also_reuses_the_shared_document(self) -> None:
         """JUnit's own ``report_mode="root-cause"`` only adds ``rootCauseId``/
@@ -294,9 +330,17 @@ class TestJunitReusesSharedDocument:
             "abicheck.report.document_builder.build_report_document",
             wraps=build_report_document,
         ) as spy:
-            render_output("junit", result, old, new, report_mode="root-cause")
+            rendered = render_output(
+                "junit", result, old, new, report_mode="root-cause"
+            )
 
         assert spy.call_count == 1
+        assert [c.kind for c in spy.call_args.args[0].changes] == [
+            c.kind for c in result.changes
+        ]
+        suite = ET.fromstring(rendered)
+        assert suite.get("tests") == "2"
+        assert suite.get("failures") == "1"
 
 
 class TestRendererOrderIndependence:
@@ -347,13 +391,22 @@ class TestRendererOrderIndependence:
                 "abicheck.report.document_builder.build_report_document",
                 wraps=build_report_document,
             ) as spy:
-                self._render_all(formats, result, old, new)
+                rendered = self._render_all(formats, result, old, new)
             # One call per format render (markdown's report_mode="full"
             # branch builds it too) -- never zero (would mean a format fell
             # back to its own legacy independent build) and never more than
             # len(formats) (would mean a format rebuilt the document a
             # second time within its own render).
             assert spy.call_count == len(formats)
+            assert all(
+                [c.kind for c in call.args[0].changes]
+                == [c.kind for c in result.changes]
+                for call in spy.call_args_list
+            )
+            # The wrapped build is a pass-through: the outputs it feeds are
+            # the real, non-empty renders of every requested format.
+            assert set(rendered) == set(formats)
+            assert all(rendered[fmt] for fmt in formats)
 
     # ------------------------------------------------------------------
     # ADR-061 gap C closure package 3: the same guarantees for ONE shared
@@ -1567,9 +1620,13 @@ class TestSarifAndJunitDecisionBoundary:
         with mock.patch(
             "abicheck.report.disposition_audit.compute_disposition_audit"
         ) as spy:
-            to_sarif(result, envelope=envelope)
+            sarif = to_sarif(result, envelope=envelope)
 
         spy.assert_not_called()
+        assert [r["ruleId"] for r in sarif["runs"][0]["results"]] == [
+            "func_removed",
+            "func_added",
+        ]
 
     def test_to_junit_xml_does_not_recompute_disposition_audit_when_document_given(
         self,
@@ -1580,9 +1637,12 @@ class TestSarifAndJunitDecisionBoundary:
         with mock.patch(
             "abicheck.report.disposition_audit.compute_disposition_audit"
         ) as spy:
-            to_junit_xml(result, envelope=envelope)
+            xml = to_junit_xml(result, envelope=envelope)
 
         spy.assert_not_called()
+        suite = ET.fromstring(xml)
+        assert suite.get("tests") == "2"
+        assert suite.get("failures") == "1"
 
     def test_sarif_and_junit_reuse_helper_is_the_single_disposition_audit_source(
         self,

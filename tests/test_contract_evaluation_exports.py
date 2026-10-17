@@ -950,10 +950,14 @@ class TestCompareSnapshotsContractModeValidation:
         result = compare_snapshots(
             old, new, contract_mode="exports", contract_evaluation=True
         )
-        assert result.verdict is not None
+        # Identical surfaces have nothing to report under the exports contract.
+        assert result.verdict is Verdict.NO_CHANGE
+        assert result.changes == []
 
     def test_omitting_the_mode_is_accepted(self) -> None:
         from abicheck.service import compare_snapshots
 
         old, new = self._snaps()
-        assert compare_snapshots(old, new).verdict is not None
+        result = compare_snapshots(old, new)
+        assert result.verdict is Verdict.NO_CHANGE
+        assert result.changes == []

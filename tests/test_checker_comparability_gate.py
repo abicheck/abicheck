@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from abicheck.checker import compare
+from abicheck.checker import Verdict, compare
 from abicheck.comparability import IncludeDir, compute_extraction_contract
 from abicheck.errors import ProfileMismatchError, ScopeMismatchError
 from abicheck.model import AbiSnapshot, Function, Visibility
@@ -346,12 +346,18 @@ class TestDependencyScopeComparabilityGate:
     def test_both_filtered_is_comparable(self):
         old = _scoped_snap("1.0", from_headers=True, dependency_scope="filtered")
         new = _scoped_snap("2.0", from_headers=True, dependency_scope="filtered")
-        assert compare(old, new) is not None  # must not raise
+        result = compare(old, new)  # must not raise
+        assert result.verdict == Verdict.NO_CHANGE
+        assert result.changes == []
+        assert result.comparability_assurance is None
 
     def test_both_full_is_comparable(self):
         old = _scoped_snap("1.0", from_headers=True, dependency_scope="full")
         new = _scoped_snap("2.0", from_headers=True, dependency_scope="full")
-        assert compare(old, new) is not None  # must not raise
+        result = compare(old, new)  # must not raise
+        assert result.verdict == Verdict.NO_CHANGE
+        assert result.changes == []
+        assert result.comparability_assurance is None
 
     def test_both_none_is_comparable(self):
         # A pair of legacy/untagged snapshots (pre-v18, or an in-memory one
@@ -366,7 +372,10 @@ class TestDependencyScopeComparabilityGate:
         # docstring.
         old = _scoped_snap("1.0", from_headers=True, dependency_scope=None)
         new = _scoped_snap("2.0", from_headers=True, dependency_scope=None)
-        assert compare(old, new) is not None  # must not raise
+        result = compare(old, new)  # must not raise
+        assert result.verdict == Verdict.NO_CHANGE
+        assert result.changes == []
+        assert result.comparability_assurance is None
 
     def test_binary_only_snapshots_are_unaffected(self):
         # from_headers=False on both sides: the dependency-scope axis is
@@ -374,7 +383,10 @@ class TestDependencyScopeComparabilityGate:
         # happens to carry a value.
         old = _scoped_snap("1.0", from_headers=False, dependency_scope="filtered")
         new = _scoped_snap("2.0", from_headers=False, dependency_scope="full")
-        assert compare(old, new) is not None  # must not raise
+        result = compare(old, new)  # must not raise
+        assert result.verdict == Verdict.NO_CHANGE
+        assert result.changes == []
+        assert result.comparability_assurance is None
 
     def test_one_sided_from_headers_with_differing_scope_still_raises(self):
         # The gate's guard is `old.from_headers or new.from_headers` -- only

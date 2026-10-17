@@ -512,43 +512,36 @@ class TestDataModelConsistency:
         """DwarfMetadata from PDB has all required attributes."""
         meta, _ = parse_pdb_debug_info(pdb_with_struct_and_enum)
 
-        # Core attributes
-        assert hasattr(meta, "structs")
-        assert hasattr(meta, "enums")
-        assert hasattr(meta, "has_dwarf")
-
-        # Types match
-        assert isinstance(meta.structs, dict)
-        assert isinstance(meta.enums, dict)
-        assert isinstance(meta.has_dwarf, bool)
+        # The fixture defines exactly these records; PDB output must carry
+        # them under their names, not merely as empty containers.
+        assert set(meta.structs) == {"Vec3", "Data"}
+        assert set(meta.enums) == {"Access"}
+        assert meta.structs["Vec3"].name == "Vec3"
+        assert meta.enums["Access"].name == "Access"
 
     def test_struct_layout_fields_present(self, pdb_with_struct_and_enum: Path) -> None:
         """StructLayout from PDB has all required attributes for checker."""
         meta, _ = parse_pdb_debug_info(pdb_with_struct_and_enum)
-        for name, layout in meta.structs.items():
-            assert isinstance(layout.name, str)
-            assert isinstance(layout.byte_size, int)
-            assert isinstance(layout.alignment, int)
-            assert isinstance(layout.is_union, bool)
-            assert isinstance(layout.fields, list)
-            for f in layout.fields:
-                assert isinstance(f.name, str)
-                assert isinstance(f.type_name, str)
-                assert isinstance(f.byte_offset, int)
-                assert isinstance(f.byte_size, int)
-                assert isinstance(f.bit_offset, int)
-                assert isinstance(f.bit_size, int)
+        vec3 = meta.structs["Vec3"]
+        assert vec3.byte_size == 16
+        assert vec3.is_union is False
+        assert [(f.name, f.byte_offset, f.byte_size) for f in vec3.fields] == [
+            ("x", 0, 4),
+            ("y", 4, 4),
+            ("z", 8, 8),
+        ]
+        assert all(f.bit_offset == 0 and f.bit_size == 0 for f in vec3.fields)
+        data = meta.structs["Data"]
+        assert data.is_union is True
+        assert data.byte_size == 4
+        assert [(f.name, f.byte_offset) for f in data.fields] == [("i", 0), ("f", 0)]
 
     def test_enum_info_fields_present(self, pdb_with_struct_and_enum: Path) -> None:
         """EnumInfo from PDB has all required attributes for checker."""
         meta, _ = parse_pdb_debug_info(pdb_with_struct_and_enum)
-        for name, info in meta.enums.items():
-            assert isinstance(info.name, str)
-            assert isinstance(info.underlying_byte_size, int)
-            assert isinstance(info.members, dict)
-            for member_name, member_val in info.members.items():
-                assert isinstance(member_name, str)
-                assert isinstance(member_val, int)
+        info = meta.enums["Access"]
+        assert info.underlying_byte_size == 4  # LF_ENUM over T_INT4
+        assert info.members == {"NONE": 0, "READ": 1, "WRITE": 2, "READWRITE": 3}
 
     def test_advanced_metadata_fields_present(
         self, pdb_with_struct_and_enum: Path
@@ -569,10 +562,9 @@ class TestDataModelConsistency:
         """ToolchainInfo from PDB has all required attributes."""
         _, adv = parse_pdb_debug_info(pdb_with_struct_and_enum)
         tc = adv.toolchain
-        assert isinstance(tc.producer_string, str)
-        assert isinstance(tc.compiler, str)
-        assert isinstance(tc.version, str)
-        assert isinstance(tc.abi_flags, set)
+        assert tc.compiler == "MSVC"
+        assert "MSVC" in tc.producer_string
+        assert "-m64" in tc.abi_flags  # AMD64 fixture
 
     def test_checker_diff_dwarf_compatible(
         self, pdb_with_struct_and_enum: Path

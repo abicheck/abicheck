@@ -203,6 +203,7 @@ class TestRenderOutputForwardsReportModeToJunit:
         fail = _parse(xml).find(".//failure")
         assert fail is not None
         assert fail.get("rootCauseId") is not None
+        assert fail.get("rootCause") == "ns::detail::Impl"
 
     def test_render_output_junit_full_mode_unaffected(self) -> None:
         from abicheck.service import render_output

@@ -24,6 +24,7 @@ from abicheck.dwarf_utils import (
     resolve_die_ref,
     resolve_type_die,
 )
+from abicheck.model.dwarf_facts import AdvancedExtractionStatus
 
 # ---------------------------------------------------------------------------
 # Mock helpers
@@ -94,8 +95,8 @@ class TestAttrStr:
     def test_bytes_invalid_utf8(self):
         die = MockDIE(attributes={"DW_AT_name": MockAttr(b"\xff\xfe")})
         result = attr_str(die, "DW_AT_name")
-        assert isinstance(result, str)
-        assert len(result) > 0
+        # Invalid UTF-8 decodes with replacement, one U+FFFD per bad byte.
+        assert result == "\ufffd\ufffd"
 
     def test_none_value(self):
         die = MockDIE(attributes={"DW_AT_name": MockAttr(None)})
@@ -255,6 +256,7 @@ class TestParseUnified:
 
         fake_stat = MagicMock()
         fake_stat.st_mode = stat.S_IFREG | 0o644
+        adv_pass = MagicMock(side_effect=lambda cu, adv: None)
 
         with (
             patch("abicheck.dwarf_unified.os.fstat", return_value=fake_stat),
@@ -263,16 +265,16 @@ class TestParseUnified:
                 "abicheck.dwarf_unified._meta_process_cu",
                 side_effect=RuntimeError("meta boom"),
             ),
-            patch(
-                "abicheck.dwarf_unified._adv_process_cu",
-                side_effect=lambda cu, adv: None,
-            ),
+            patch("abicheck.dwarf_unified._adv_process_cu", adv_pass),
         ):
             meta, adv = parse_dwarf(fake_path)
 
-        # Should still return (possibly partial) results without raising
-        assert meta is not None
-        assert adv is not None
+        # The failing meta pass is skipped, not fatal: the advanced pass still
+        # visits the same CU, and both results come back populated.
+        adv_pass.assert_called_once()
+        assert adv_pass.call_args.args[0] is mock_cu
+        assert meta.has_dwarf is True
+        assert adv.extraction == AdvancedExtractionStatus.COMPLETED
 
     def test_adv_process_cu_raises_elferror(self, tmp_path):
         """Lines 100-101: _adv_process_cu ELFError is caught and logged."""
@@ -290,14 +292,12 @@ class TestParseUnified:
 
         fake_stat = MagicMock()
         fake_stat.st_mode = stat.S_IFREG | 0o644
+        meta_pass = MagicMock(side_effect=lambda cu, meta, tc: None)
 
         with (
             patch("abicheck.dwarf_unified.os.fstat", return_value=fake_stat),
             patch("abicheck.dwarf_unified.ELFFile", return_value=mock_elf),
-            patch(
-                "abicheck.dwarf_unified._meta_process_cu",
-                side_effect=lambda cu, meta, tc: None,
-            ),
+            patch("abicheck.dwarf_unified._meta_process_cu", meta_pass),
             patch(
                 "abicheck.dwarf_unified._adv_process_cu",
                 side_effect=ELFError("adv boom"),
@@ -305,8 +305,13 @@ class TestParseUnified:
         ):
             meta, adv = parse_dwarf(fake_path)
 
-        assert meta is not None
-        assert adv is not None
+        # The ELFError is logged and the CU skipped: the meta pass ran on it,
+        # and the advanced status stays COMPLETED (a per-CU skip is not a
+        # whole-binary FAILED extraction).
+        meta_pass.assert_called_once()
+        assert meta_pass.call_args.args[0] is mock_cu
+        assert meta.has_dwarf is True
+        assert adv.extraction == AdvancedExtractionStatus.COMPLETED
 
     def test_unified_path_sets_target_arch(self, tmp_path):
         """parse_dwarf() records the normalized target arch on AdvancedDwarfMetadata.
@@ -913,8 +918,9 @@ class TestUnwrapQualifiers:
         cu = MockCU(cu_offset=0, die_map=dies)
         first_die = dies[100]
         result = _unwrap_qualifiers(first_die, cu)
-        # Should return some typedef DIE without crashing
-        assert result is not None
+        # Twelve hops are taken, then the walk stops on the 13th typedef
+        # (returned as-is, not the base type behind it).
+        assert result is dies[1300]
 
 
 class TestIsNontrivialAggregate:

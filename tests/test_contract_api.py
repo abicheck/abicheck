@@ -260,7 +260,8 @@ class TestSarifOutputSchema:
         diff = _make_diff(changes=[c], verdict=Verdict.BREAKING)
         doc = self._get_sarif(diff)
         results = doc["runs"][0]["results"]
-        assert len(results) > 0
+        assert len(results) == 1
+        assert results[0]["ruleId"]
 
     def test_sarif_result_has_required_fields(self) -> None:
         c = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "Function foo removed")
@@ -384,14 +385,12 @@ class TestDiffResultApiContract:
     def test_breaking_property_returns_list(self) -> None:
         c = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed")
         diff = _make_diff(changes=[c], verdict=Verdict.BREAKING)
-        assert isinstance(evaluate(diff).breaking, list)
-        assert len(evaluate(diff).breaking) > 0
+        assert [c.kind for c in evaluate(diff).breaking] == [ChangeKind.FUNC_REMOVED]
 
     def test_compatible_property_returns_list(self) -> None:
         c = Change(ChangeKind.FUNC_ADDED, "_Z3barv", "added")
         diff = _make_diff(changes=[c], verdict=Verdict.COMPATIBLE)
-        assert isinstance(evaluate(diff).compatible, list)
-        assert len(evaluate(diff).compatible) > 0
+        assert [c.kind for c in evaluate(diff).compatible] == [ChangeKind.FUNC_ADDED]
 
     def test_changes_contain_expected_fields(self) -> None:
         c = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed")
@@ -424,7 +423,13 @@ class TestChangeKindCompleteness:
         for kind in ChangeKind:
             entry = policy_for(kind)
             assert entry is not None, f"policy_for({kind}) returned None"
-            assert entry.default_verdict is not None
+            assert entry.default_verdict in {
+                Verdict.BREAKING,
+                Verdict.API_BREAK,
+                Verdict.COMPATIBLE_WITH_RISK,
+                Verdict.COMPATIBLE,
+            }, kind
+            assert entry.impact.strip(), kind
 
     def test_all_changekind_values_in_policy_registry(self) -> None:
         """Every ChangeKind should be explicitly categorized in the registry."""
@@ -435,9 +440,7 @@ class TestChangeKindCompleteness:
                 f"ChangeKind.{kind.name} is not in POLICY_REGISTRY"
             )
 
-    def test_impact_for_does_not_raise(self) -> None:
-        """impact_for must not raise for any ChangeKind value."""
+    def test_impact_for_is_non_empty_for_every_kind(self) -> None:
+        """Every ChangeKind carries a non-empty impact sentence (ChangeKindMeta)."""
         for kind in ChangeKind:
-            # Should return a string (possibly empty), never raise
-            result = impact_for(kind)
-            assert isinstance(result, str)
+            assert impact_for(kind).strip(), kind

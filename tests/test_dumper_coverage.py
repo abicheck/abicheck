@@ -1158,8 +1158,14 @@ class TestFromHeadersProvenance:
             patch.object(dumper, "_resolve_debug_metadata", side_effect=_fake_resolve),
             patch.object(dumper, "_try_dwarf_snapshot") as mock_try_dwarf,
         ):
-            dumper._dump_elf(so, [], [], "1.0", "c++")
+            snap = dumper._dump_elf(so, [], [], "1.0", "c++")
         mock_try_dwarf.assert_not_called()
+        # The BTF-resolved path produced the ordinary no-headers ELF snapshot.
+        assert snap.from_headers is False
+        # Only the ELF export table contributes: no header AST, no DWARF walk.
+        assert [(f.name, f.visibility) for f in snap.declarations.functions] == [
+            ("foo", "elf_only")
+        ]
 
     def test_dwarf_only_with_resolved_btf_does_not_trigger_dwarf_snapshot(
         self,

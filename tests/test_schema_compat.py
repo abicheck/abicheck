@@ -319,7 +319,12 @@ class TestReserialization:
         d["from_headers"] = False
         with warnings.catch_warnings():
             warnings.simplefilter("error")
-            snapshot_from_dict(d)
+            snap = snapshot_from_dict(d)
+        # Silent *and* loaded: the fixture's content came through intact.
+        assert snap.library == "libcompat.so.1"
+        assert len(snap.declarations.functions) == len(
+            _load_fixture("v4.json")["functions"]
+        )
 
     def test_older_version_silent_for_hybrid_producer_flags_no_detector_reads(self):
         """clang_va_list_facts_reliable / castxml_var_access_facts_reliable

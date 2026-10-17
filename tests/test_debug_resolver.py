@@ -649,7 +649,9 @@ class TestResolveDebugInfo:
 
         result = resolve_debug_info(binary)
         assert result is not None
-        assert result.dsym_path is not None
+        assert result.dsym_path == tmp_path / "libfoo.dylib.dSYM"
+        assert result.dwarf_path == dsym / "libfoo.dylib"
+        assert result.source == "dSYM bundle (adjacent)"
 
     def test_with_debuginfod_disabled(self, tmp_path: Path) -> None:
         result = resolve_debug_info(

@@ -985,13 +985,21 @@ def test_cache_key_uses_path_string_for_missing_root(tmp_path: Path) -> None:
     src = tmp_path / "a.cpp"
     src.write_text("int a;\n")
     cu = _cu("cu://x", str(src))
-    key = compute_tu_cache_key(
-        extractor_name="clang-source",
-        extractor_version="0.1",
-        compile_unit=cu,
-        public_header_roots=["does/not/exist.h"],
-    )
+
+    def _key(roots: list[str]) -> str | None:
+        return compute_tu_cache_key(
+            extractor_name="clang-source",
+            extractor_version="0.1",
+            compile_unit=cu,
+            public_header_roots=roots,
+        )
+
+    key = _key(["does/not/exist.h"])
     assert key is not None
+    # The missing root is keyed by its path string: the same string keys the
+    # same way, and a different missing path must not share the entry.
+    assert _key(["does/not/exist.h"]) == key
+    assert _key(["other/missing.h"]) != key
 
 
 # -- driver ------------------------------------------------------------------

@@ -808,7 +808,12 @@ def test_resolve_driver_disagreement_excused_when_caller_pins_explicit_gcc_path(
     ev = BuildEvidence(compile_units=[cu_a, cu_b])
     explicit = CompileContext(gcc_path="/opt/custom/clang-cl")
     result = resolve_header_compile_context(ev, [header], explicit=explicit)
+    # Excused rather than raised: both units matched, and the derived context
+    # comes from the clang-cl unit's own driver. The caller's pin is merged
+    # over it later (see _merge_l3_compile_context), not here.
+    assert len(result.matched_units) == 2
     assert result.context is not None
+    assert result.context.gcc_path == "clang-cl"
 
 
 def test_resolve_side_snapshot_seeds_clang_cl_gcc_path_end_to_end(

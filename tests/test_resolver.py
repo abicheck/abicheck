@@ -151,8 +151,14 @@ class TestResolveDependencies:
 
     def test_elf_metadata_populated(self, real_binary):
         graph = resolve_dependencies(real_binary)
+        assert graph.nodes
         for key, node in graph.nodes.items():
             assert node.elf_metadata is not None, f"Node {key} has no elf_metadata"
+            # Real ELF objects carry a dynamic symbol table, and the attached
+            # metadata describes this node's own file, not another one's.
+            assert node.elf_metadata.symbols, f"Node {key} has no symbols"
+            if node.elf_metadata.soname:
+                assert node.elf_metadata.soname == node.soname, key
 
     def test_nonexistent_binary(self, tmp_path):
         graph = resolve_dependencies(tmp_path / "nonexistent")
