@@ -316,10 +316,12 @@ tests/test_dump_resolved_execution_context.py
 tests/test_dump_source_only_execution.py
 tests/test_dumper_clang.py
 tests/test_dumper_clang_vtable.py
+tests/test_dumper_clang_vtable_redecl.py
 tests/test_dumper_contract_wiring.py
 tests/test_dumper_coverage.py
 tests/test_dumper_hybrid.py
 tests/test_dumper_manifest.py
+tests/test_dumper_manifest_semantic_ir.py
 tests/test_dumper_members.py
 tests/test_dumper_presence_semantic_ir.py
 tests/test_dumper_scoping.py
@@ -386,6 +388,7 @@ tests/test_family_f3_identity.py
 tests/test_family_f3_identity_cells.py
 tests/test_family_f4_heuristics.py
 tests/test_family_f5_optimization_reference.py
+tests/test_field_added_unknown_polymorphism.py
 tests/test_field_qualifier_fact_status.py
 tests/test_finding_disposition_pipeline.py
 tests/test_finding_disposition_suppression.py
@@ -411,6 +414,7 @@ tests/test_gate_decision_shared.py
 tests/test_golden_output.py
 tests/test_golden_review_digest.py
 tests/test_golden_root_cause.py
+tests/test_graph_entity_identity.py
 tests/test_graph_observed_persistence.py
 tests/test_graph_reconcile.py
 tests/test_graph_reconcile_candidate_index.py
