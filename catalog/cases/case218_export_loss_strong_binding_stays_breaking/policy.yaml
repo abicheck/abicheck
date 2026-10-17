@@ -1,0 +1,14 @@
+# Example policy for case218 (the same rule as case217): a binding-scoped
+# reclassify rule. A WEAK export
+# loss (header-declared inline, template instantiation, or undeclared WEAK
+# symbol) is a copy the consumer embeds itself, so the rule demotes it to a
+# risk. `binding:` is conjunctive-only, so the rule also names a
+# symbol_pattern that scopes it to the library's namespace.
+#
+# Run abicheck with:
+#   abicheck compare libv1.so libv2.so --policy policy.yaml
+reclassify:
+  - symbol_pattern: '_ZN2ns.*'
+    binding: weak
+    to: risk
+    reason: WEAK inline/template/undeclared export, consumers embed their own copy

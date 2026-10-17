@@ -199,7 +199,7 @@ def test_scoring_matrix_is_not_vacuous() -> None:
 
 
 _REFUSED = {
-    "report_schema_version": "6.1",
+    "report_schema_version": "6.2",
     "verdict": None,
     "reason": {"kind": "scope_mismatch", "message": "not comparable"},
     "run_outcome": {"operational": "not_comparable", "compatibility": None},

@@ -32,6 +32,22 @@ from ..policy.classification import Verdict
 from .cross_source_evolution import change_cross_source_evolution_field as _cse
 
 
+def removed_instantiations_field(c: Any) -> list[dict[str, Any]] | None:
+    """The uncapped ``removed_instantiations`` JSON list for *c*, or ``None``
+    when the finding carries none (every kind except
+    INTERNAL_TEMPLATE_LEAKS_VIA_PUBLIC_API). An empty list is emitted as
+    ``[]``, not omitted, so "computed, nothing removed" stays distinct from
+    "never computed". Shared by the main and suppressed-audit entries so the
+    two projections cannot drift."""
+    records = getattr(c, "removed_instantiations", None)
+    if records is None:
+        return None
+    return [
+        {"mangled": r.mangled, "demangled": r.demangled, "binding": r.binding}
+        for r in records
+    ]
+
+
 def change_annotation_fields(c: Any) -> dict[str, Any]:
     """Optional per-change attribution/annotation fields for the JSON report.
 
@@ -72,6 +88,9 @@ def change_annotation_fields(c: Any) -> dict[str, Any]:
         out["correlated_change_kind"] = correlated
     if getattr(c, "symbol_binding", None):
         out["symbol_binding"] = c.symbol_binding
+    removed_insts = removed_instantiations_field(c)
+    if removed_insts is not None:
+        out["removed_instantiations"] = removed_insts
     # ADR-068 D3 / plan P2 — this finding's OLD->NEW evolution *within this
     # one comparison* (a one-sided cross-source check re-run against the
     # baseline), distinct from the cross-comparison-chain `evolution` field.
