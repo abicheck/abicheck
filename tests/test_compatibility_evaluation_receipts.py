@@ -45,15 +45,19 @@ from abicheck.compatibility_evaluation_frontend import (
     ExplicitCompatibilityInputs,
     FrontEnd,
     ProjectCompatibilityInputs,
-    PublicSymbolsList,
-    SuppressionSource,
-    compare_cli_inputs,
-    compatibility_config_from_compare_request,
 )
 from abicheck.contract_relevance_types import SelectorLayer
 from abicheck.policy.suppression.rules import SuppressionList
 from abicheck.policy_file import PolicyFile
 from abicheck.service import CompareRequest, InputSpec
+from abicheck.workflows.compare_input_adapters import (
+    compare_cli_inputs,
+    compatibility_config_from_compare_request,
+)
+from abicheck.workflows.compare_input_sources import (
+    PublicSymbolsList,
+    SuppressionSource,
+)
 
 
 class TestReplayProvenance:

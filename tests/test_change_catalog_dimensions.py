@@ -860,6 +860,8 @@ class TestSourceTemplateFindingsKeepTheirDeclarationKind:
         """The claim this rests on: the mapping's keys are the spellings the
         extractor actually writes, not ones invented here."""
         from abicheck.buildsource.source_diff import _ENTITY_FOR_TEMPLATE_KIND
-        from abicheck.buildsource.source_extractors.clang import _TEMPLATE_NODE_KINDS
+        from abicheck.buildsource.source_extractors.clang_node_predicates import (
+            _TEMPLATE_NODE_KINDS,
+        )
 
         assert set(_ENTITY_FOR_TEMPLATE_KIND) == set(_TEMPLATE_NODE_KINDS)

@@ -94,7 +94,7 @@ def _project_inputs_for_request(
     ``policy_file_path``) rather than the ``PROJECT_CONFIG`` layer D7
     actually places it at, disagreeing with what the same fold already did
     for the CLI's identical ``.abicheck.yml`` route
-    (``compatibility_evaluation_frontend.compare_request_inputs``'s own
+    (``abicheck.workflows.compare_input_adapters.compare_request_inputs``'s own
     ``project`` parameter). Threaded through the canonical resolver's
     existing ``project`` channel rather than a third parallel provenance
     patch, closing the same bug class round 3 finding 1 (the native CLI) and
@@ -150,10 +150,8 @@ def resolve_request_evaluation_config(
     which could digest a different file than the one that scored the
     findings if it changed between the two reads -- Codex review).
     """
-    from ..compatibility_evaluation_frontend import (
-        SuppressionSource,
-        compatibility_config_from_compare_request,
-    )
+    from .compare_input_adapters import compatibility_config_from_compare_request
+    from .compare_input_sources import SuppressionSource
 
     config = compatibility_config_from_compare_request(
         request,
@@ -174,12 +172,10 @@ def resolve_request_pack_configuration(
     :func:`~abicheck.workflows.compare_configuration.resolve_compare_configuration`
     so the packs are checked, applied to the policy file, and returned for the
     gate exactly as the native CLI applies them."""
-    from ..compatibility_evaluation_frontend import (
-        FrontEnd,
-        SuppressionSource,
-        compare_request_inputs,
-    )
+    from ..compatibility_evaluation_frontend import FrontEnd
     from .compare_configuration import resolve_compare_configuration
+    from .compare_input_adapters import compare_request_inputs
+    from .compare_input_sources import SuppressionSource
 
     configuration = resolve_compare_configuration(
         compare_request_inputs(
@@ -234,7 +230,7 @@ def install_resolved_gate_receipt(
     for the same configuration (F2 route-parity harness). Additionally
     merges the gate into ``result.contract_context`` when one exists.
     """
-    from ..compatibility_evaluation_frontend import SEVERITY_CATEGORY_FIELDS
+    from .evaluation_identities import SEVERITY_CATEGORY_FIELDS
 
     if getattr(result, "contract_context", None) is None and not packs_forwarded:
         return

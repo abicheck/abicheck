@@ -200,7 +200,7 @@ class TestCanonicalResolverIsWhatRuns:
 
         # A side this run extracts: the -H directory (not the file) is the
         # explicit root the receipt records.
-        from abicheck.compatibility_evaluation_frontend import compare_cli_inputs
+        from abicheck.workflows.compare_input_adapters import compare_cli_inputs
 
         params = {"headers": (inc, inc / "a.h")}
         assert compare_cli_inputs(params, explicit_parameters=set()).header_dirs == (

@@ -62,7 +62,7 @@ _T = TypeVar("_T")
 #: The four severity categories a ``kind: gate`` pack can assign, in
 #: :class:`~abicheck.policy.severity.SeverityConfig` field-name spelling --
 #: which is also ``PackApplication.severity_levels``' key spelling and
-#: ``compatibility_evaluation_frontend.SEVERITY_CATEGORY_FIELDS``' key
+#: ``abicheck.workflows.evaluation_identities.SEVERITY_CATEGORY_FIELDS``' key
 #: spelling, so no translation happens anywhere in this fold.
 #: ``tests/test_gate_pack_fold.py`` pins this tuple against
 #: ``SeverityConfig``'s own fields, so a fifth category cannot be added

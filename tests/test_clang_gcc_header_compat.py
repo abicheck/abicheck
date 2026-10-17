@@ -47,7 +47,7 @@ class TestEveryAstBuilderCarriesTheShim:
             assert cmd[-1] == "agg.h"
 
     def test_l4_ast_command_but_not_macro_command(self) -> None:
-        from abicheck.buildsource.source_extractors.clang import (
+        from abicheck.buildsource.source_extractors.clang_command import (
             build_clang_command,
             build_clang_macro_command,
         )

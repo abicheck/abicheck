@@ -188,7 +188,7 @@ def test_cell_rule_identity() -> None:
 
 
 _SEED_SCRIPT = (
-    "from abicheck.compatibility_evaluation_frontend import "
+    "from abicheck.workflows.evaluation_identities import "
     "builtin_policy_identity as p, severity_preset_identity as s\n"
     "from abicheck.checker_policy import VALID_BASE_POLICIES\n"
     "from abicheck.policy.severity import SEVERITY_PRESETS\n"
@@ -220,7 +220,7 @@ def test_cell_builtin_policy_identity(builtin_digests: dict[str, str]) -> None:
     """A digest over code-defined kind *sets*: it must not follow the
     per-process set iteration order, and two bases must not share one."""
     from abicheck.checker_policy import VALID_BASE_POLICIES
-    from abicheck.compatibility_evaluation_frontend import builtin_policy_identity
+    from abicheck.workflows.evaluation_identities import builtin_policy_identity
 
     assert len(set(builtin_digests.values())) == 1, builtin_digests
     digests = {builtin_policy_identity(n).sha256 for n in VALID_BASE_POLICIES}
@@ -228,7 +228,7 @@ def test_cell_builtin_policy_identity(builtin_digests: dict[str, str]) -> None:
 
 
 def test_cell_severity_preset_identity(builtin_digests: dict[str, str]) -> None:
-    from abicheck.compatibility_evaluation_frontend import severity_preset_identity
+    from abicheck.workflows.evaluation_identities import severity_preset_identity
 
     assert len(set(builtin_digests.values())) == 1, builtin_digests
     assert severity_preset_identity("info-only") == severity_preset_identity(

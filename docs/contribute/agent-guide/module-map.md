@@ -284,6 +284,7 @@ Core pipeline (in order of data flow):
      per-kind route table — a contract/gate pack's own typed target fields;
      an assignment outside its namespace, `contract.mode` included, is a
      hard `PackManifestError`)
+   - `workflows/compare_input_sources.py`, `workflows/compare_input_adapters.py`, `workflows/evaluation_identities.py` — the inputs `compatibility_evaluation_frontend.py` resolves: already-read suppression/symbol-list sources, the `compare`-kwargs and typed-request adapters, and the built-in policy/preset identities.
    - `compatibility_evaluation_frontend.py` — ADR-049 Phase 1's whole-object
      resolver: assembles one `CompatibilityEvaluationConfig` (all seven
      namespaces + a per-field provenance receipt) from a front end's real

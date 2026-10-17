@@ -50,11 +50,10 @@ from .castxml import (
 from .clang import (
     CLANG_EXTRACTOR_VERSION,
     ClangSourceExtractor,
-    build_clang_command,
-    build_clang_macro_command,
-    macros_from_preprocessor,
     source_abi_from_clang_ast,
 )
+from .clang_command import build_clang_command, build_clang_macro_command
+from .clang_macros import macros_from_preprocessor
 from .resolver import (
     ALL_CAPABILITIES,
     AUTO_PREFERENCE,
