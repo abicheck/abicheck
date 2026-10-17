@@ -343,7 +343,7 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
             "tuple opcode was skipped (0), and a truncated LEB128 operand "
             "was read as its partial value."
         ),
-        fixed_by=(),
+        fixed_by=(1649,),
         seed_tests=(
             "tests/test_dwarf_snapshot.py",
             "tests/test_phase3_dwarf_helpers.py",
