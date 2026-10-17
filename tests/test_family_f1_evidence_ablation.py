@@ -723,3 +723,26 @@ def test_unknown_template_binding_never_demotes(kind: str, size: int) -> None:
         assert {f.symbol for f in cut} == {f.symbol for f in full}
         # ... and never lets the unknown member be demoted as WEAK.
         assert any(not rule.matches(f) for f in cut)
+
+
+# -- DWARF member location: malformed evidence is unknown, never a value ----
+#
+# An expression with no exact offset (underflowing, truncated, unsupported op)
+# is evidence that failed to read. It must reach the layout as "unknown"
+# (``None``), never as a plausible offset, the same way an unread Fact does.
+
+
+@pytest.mark.parametrize(
+    "expr",
+    [
+        pytest.param([0x22], id="raw-plus-underflow"),
+        pytest.param([(0x22, 0)], id="tuple-plus-underflow"),
+        pytest.param([0x31, 0x22, 0x22], id="plus-underflow-after-valid-plus"),
+        pytest.param([0x23, 0x80], id="truncated-uleb128"),
+        pytest.param([(0x99, 0)], id="unsupported-opcode"),
+    ],
+)
+def test_malformed_member_location_is_unknown_not_a_value(expr: list[object]) -> None:
+    from abicheck.dwarf_utils import decode_member_location
+
+    assert decode_member_location(expr) is None

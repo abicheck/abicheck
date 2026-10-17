@@ -301,7 +301,7 @@ def _process_struct_named(
         child_name = _attr_str(child, "DW_AT_name")
         if not child_name:
             # Anonymous member — may be an anonymous struct/union; inline its fields
-            anon_offset = 0
+            anon_offset: int | None = 0
             if "DW_AT_data_member_location" in child.attributes:
                 anon_offset = _decode_member_location(
                     child.attributes["DW_AT_data_member_location"].value
@@ -319,7 +319,13 @@ def _process_struct_named(
                 return
             layout.fields.extend(expanded.value or [])
         else:
-            fi = _process_member(child, CU, type_cache)
+            try:
+                fi = _process_member(child, CU, type_cache)
+            except _UnevaluableMemberLocation as exc:
+                # Same rule as an unknown anonymous member: no layout for this
+                # name rather than one that is missing the field.
+                log.debug("DWARF layout of %s not recorded: %s", name, exc)
+                return
             if fi is not None:
                 layout.fields.append(fi)
 
@@ -356,7 +362,7 @@ def _expand_anonymous_member(
     die: Any,
     CU: Any,
     type_cache: dict[tuple[int, int], tuple[str, int]],
-    byte_offset: int,
+    byte_offset: int | None,
 ) -> Fact[list[FieldInfo]]:
     """Inline the fields of an anonymous struct/union member.
 
@@ -367,8 +373,11 @@ def _expand_anonymous_member(
     ``FAILED`` when the member's type cannot be read (no ``DW_AT_type``, or a
     reference that does not resolve): its fields are unknown, not absent.
     ``PRESENT([])`` for an unnamed member that is not an aggregate (it
-    contributes no named field).
+    contributes no named field). ``FAILED`` as well when its location is
+    unevaluable, since every inlined offset depends on it.
     """
+    if byte_offset is None:
+        return Fact.failed("unnamed member location is unevaluable")
     if "DW_AT_type" not in die.attributes:
         return Fact.failed("unnamed member has no DW_AT_type")
     try:
@@ -386,7 +395,10 @@ def _expand_anonymous_member(
     for child in target.iter_children():
         if child.tag != "DW_TAG_member":
             continue
-        fi = _process_member(child, CU, type_cache)
+        try:
+            fi = _process_member(child, CU, type_cache)
+        except _UnevaluableMemberLocation as exc:
+            return Fact.failed(f"inner member location is unevaluable: {exc}")
         if fi is None:
             continue
         # Adjust offset: anonymous member byte_offset + inner field offset
@@ -403,6 +415,10 @@ def _expand_anonymous_member(
     return Fact.present(fields)
 
 
+class _UnevaluableMemberLocation(Exception):
+    """A named member's DW_AT_data_member_location has no exact offset."""
+
+
 def _process_member(
     die: Any,
     CU: Any,
@@ -415,9 +431,12 @@ def _process_member(
     # Byte offset — DW_AT_data_member_location can be a simple int or a DW_OP block
     byte_offset = 0
     if "DW_AT_data_member_location" in die.attributes:
-        byte_offset = _decode_member_location(
+        decoded = _decode_member_location(
             die.attributes["DW_AT_data_member_location"].value
         )
+        if decoded is None:
+            raise _UnevaluableMemberLocation(name)
+        byte_offset = decoded
 
     # Bitfield offsets:
     # DWARF 4+: DW_AT_data_bit_offset = offset from LSB of the container (preferred)
