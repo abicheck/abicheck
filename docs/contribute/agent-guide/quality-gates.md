@@ -327,6 +327,18 @@ Several mechanisms guard test quality so coverage can't be "filled" without veri
   a comment, so a raw substring search reported the very thing it was checking
   for absent.
 
+- **Test redundancy report** — `scripts/test_redundancy.py` (report only, not a gate;
+  `.github/workflows/test-redundancy.yml`, manual). Reads the per-test coverage contexts
+  (`pytest --cov-context=test`) and classifies each test case and function as `unique`,
+  `coverage-redundant` (every line it covers is also covered by another test; names the
+  test(s) that cover all of its lines alone), `fully-redundant` (also kills no mutant no
+  other test kills), or `unknown` (no covered line recorded). **Coverage alone never
+  makes a test `fully-redundant`:** mutmut 3.7.0 does not record which tests killed each
+  mutant, so kill uniqueness needs a `--kills` file from a recorder that does not exist
+  yet, and without one every redundancy is `coverage-redundant`. Coverage uniqueness is
+  relative to the run measured, so a subset run can flag a test whose coverage is held by
+  a test outside it. Mutate before deleting: a clone group is a review queue, not a verdict.
+
 ## Line-coverage floor
 
 The `pr` profile's `unit-pr` step (`scripts/verify.py`) enforces a **95%**

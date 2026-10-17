@@ -1,0 +1,62 @@
+name: Test redundancy report
+
+# Manual only. Reports which tests add nothing to a coverage run
+# (scripts/test_redundancy.py): tests whose covered lines every other test
+# also covers. Report only -- it fails no check and edits no test.
+#
+# Measures the fast unit lane (the same marker expression as ci.yml's
+# unit-tests job, minus repo_scan), with per-test coverage contexts. No
+# mutation kill data is supplied, so the report cannot say a test is
+# fully-redundant; see the script's docstring for why mutmut cannot provide
+# that yet.
+on:
+  workflow_dispatch:
+    inputs:
+      scope:
+        description: "Report only tests whose file matches this glob (empty = all), e.g. tests/test_diff_*.py"
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  redundancy:
+    name: test redundancy (ubuntu-latest, 3.13)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      SCOPE: ${{ inputs.scope }}
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
+        with:
+          python-version: '3.13'
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+      - name: Run the fast unit lane with per-test coverage contexts
+        run: |
+          pytest tests/ -q --tb=short -p no:cacheprovider -m "not integration and not libabigail and not abicc and not slow and not repo_scan" -n auto --dist worksteal --cov=abicheck --cov-context=test --cov-report=
+      - name: Classify tests
+        run: |
+          if [ -n "$SCOPE" ]; then
+            python scripts/test_redundancy.py --scope "$SCOPE" \
+              --json test-redundancy.json --markdown test-redundancy.md | tee test-redundancy-summary.md
+          else
+            python scripts/test_redundancy.py \
+              --json test-redundancy.json --markdown test-redundancy.md | tee test-redundancy-summary.md
+          fi
+      - name: Publish the summary
+        run: cat test-redundancy-summary.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload the report
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: test-redundancy-${{ github.run_id }}
+          path: |
+            test-redundancy.json
+            test-redundancy.md
+          if-no-files-found: error
+          retention-days: 30
