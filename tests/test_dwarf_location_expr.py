@@ -162,6 +162,9 @@ class TestLocationExprUnderflowClass:
             pytest.param([(0x10, 5), (0x10, 3), (0x22, 0)], 8, id="tuple-plus"),
             pytest.param([0x33, 0x22], 3, id="base-plus-one-operand"),
             pytest.param([], 0, id="empty-is-base"),
+            # SLEB128 0x7F is -1 (sign bit 0x40 set); 0x80 0x7F is -128
+            pytest.param([0x11, 0x7F, 0x22], -1, id="consts-negative-sign-extended"),
+            pytest.param([0x11, 0x80, 0x7F, 0x22], -128, id="consts-two-byte-negative"),
         ],
     )
     def test_well_formed_controls(self, expr: list[object], expected: int) -> None:
