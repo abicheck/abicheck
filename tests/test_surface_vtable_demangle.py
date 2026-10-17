@@ -229,7 +229,9 @@ class TestMangledVtableSymbolSurfaceClassification:
             # Not in public_symbols on either side (removed) -> a definite
             # symbol-level verdict, resolved without ever touching
             # candidates/demangle().
-            assert classify_change_surface(c, s, s) is not None
+            # A public function is in the public surface, so its removal is
+            # in scope with no demotion reason.
+            assert classify_change_surface(c, s, s) == (True, None)
         finally:
             demangle_mod.demangle = original
 

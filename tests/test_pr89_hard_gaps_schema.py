@@ -712,6 +712,7 @@ class TestSchemaVersionBaseline:
         snap = _snap()
         d = snapshot_to_dict(snap)
         assert isinstance(d["schema_version"], int)
+        assert d["schema_version"] == SCHEMA_VERSION
 
     def test_schema_version_survives_json_roundtrip(self) -> None:
         """schema_version must survive JSON serialization and deserialization."""

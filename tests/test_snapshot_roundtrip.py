@@ -351,9 +351,16 @@ class TestStableSerialization:
         """snapshot_to_dict output can be round-tripped through json.dumps."""
         orig = _rich_snap()
         d = snapshot_to_dict(orig)
-        # Should not raise
+        # Should not raise, and the text must decode back to the same dict.
         json_str = json.dumps(d)
-        assert isinstance(json_str, str)
+        assert d["library"] == "librich.so"
+        assert d["version"] == "2.5.0"
+        # The JSON text must rebuild a snapshot whose JSON-normalised dict is
+        # identical (snapshot_to_dict emits tuples, so compare after a JSON pass).
+        restored = snapshot_from_dict(json.loads(json_str))
+        assert json.loads(json.dumps(snapshot_to_dict(restored))) == json.loads(
+            json_str
+        )
 
     def test_json_is_valid_json(self) -> None:
         """snapshot_to_json output is valid JSON."""

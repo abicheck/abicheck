@@ -921,7 +921,7 @@ class TestEntryMatchesFilter:
         )
         # Falls through to CWD-relative, may or may not match
         result = _entry_matches_filter(entry, "nonexistent/*")
-        assert isinstance(result, bool)
+        assert result is False
 
 
 # ---------------------------------------------------------------------------

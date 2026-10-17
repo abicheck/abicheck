@@ -508,6 +508,7 @@ class TestTypesSectionDTO:
         entry = section2.to_document()["types"][0]
         assert isinstance(entry, dict)
         assert isinstance(entry["bases"], list)
+        assert entry["bases"] == ["Base"]
         # json.dumps must accept the reconstructed document -- a leftover
         # MappingProxyType/tuple would raise.
         import json
@@ -601,6 +602,7 @@ class TestGraphSectionDTO:
         document = section2.to_document()
         assert isinstance(document["surface_graph"], dict)
         assert isinstance(document["surface_graph"]["nodes"], list)
+        assert document["surface_graph"]["nodes"] == ["a", "b"]
         import json
 
         json.dumps(document)

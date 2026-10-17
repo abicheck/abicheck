@@ -16,10 +16,12 @@ import fnmatch
 import importlib.util
 import itertools
 import json
+import os
 import random
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -494,6 +496,58 @@ def test_an_unrelated_abort_still_fails(
     )  # fmt: skip
     assert rc == 1
     assert ["mutmut", "results"] not in seen
+
+
+def test_a_timed_out_run_fails_but_logs_the_survivors_it_measured(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A shard that hits its cap still fails (its remainder is unmeasured),
+    but the log names every survivor found so far -- before this, a timed-out
+    shard printed no score line at all and its partial results reached only
+    an artifact."""
+    seen: list[list[str]] = []
+    monkeypatch.setattr(
+        gate, "_run_mutmut", _fake_mutmut(seen, ("partial", scope.TIMED_OUT_RC))
+    )
+    rc = gate.main(["--run", "--baseline-file", str(repo / "none.json")])
+    out = capsys.readouterr().out
+    assert rc == 1
+    assert ["mutmut", "results"] in seen
+    assert "abicheck.diff_types.x_alpha__mutmut_1" in out
+    # Only `survived` is a survivor: the not-checked and timeout keys are not.
+    assert "x_untouched__mutmut_1" not in out
+    assert "diff_symbols.x_alpha__mutmut_1" not in out
+    assert "2 mutant(s) measured, 1 surviving" in out
+
+
+def test_a_completed_run_logs_every_surviving_key(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(gate, "_run_mutmut", _fake_mutmut([]))
+    gate.main(["--run"])
+    out = capsys.readouterr().out
+    assert (
+        "  abicheck/diff_types.py: 1\n    abicheck.diff_types.x_alpha__mutmut_1\n"
+        in out
+    )
+
+
+@pytest.mark.skipif(not hasattr(os, "killpg"), reason="process groups are POSIX")
+def test_run_mutmut_kills_the_whole_process_group_on_timeout(tmp_path: Path) -> None:
+    """mutmut's pytest workers outlived the old `subprocess.run` timeout
+    (CI listed them as orphans at job cleanup); the cap must stop them too."""
+    marker = tmp_path / "child-still-running"
+    script = f"echo started; (sleep 2; touch {marker}) & sleep 30"
+    out, rc = scope.run_mutmut(["sh", "-c", script], timeout=0.5)
+    assert rc == scope.TIMED_OUT_RC
+    assert "started" in out
+    time.sleep(2.5)
+    assert not marker.exists()
+
+
+def test_run_mutmut_returns_a_finished_commands_output_and_code() -> None:
+    out, rc = scope.run_mutmut(["sh", "-c", "echo out; echo err >&2; exit 3"], 10)
+    assert (rc, sorted(out.split())) == (3, ["err", "out"])
 
 
 def test_require_baseline_fails_before_running_mutmut(

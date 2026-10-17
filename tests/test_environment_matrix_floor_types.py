@@ -458,4 +458,6 @@ class TestScalarFieldsAndHashabilityRoundTrip:
         assert cache[lookup] == "resolved"
 
     def test_empty_matrix_still_hashes(self) -> None:
-        assert isinstance(hash(EnvironmentMatrix.from_dict({})), int)
+        assert hash(EnvironmentMatrix.from_dict({})) == hash(
+            EnvironmentMatrix.from_dict({})
+        )

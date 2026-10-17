@@ -508,6 +508,7 @@ class TestSourceTierBroken:
         payload = {"source_results": [self._row("zlib", l3_status="not_collected")]}
         reason = runner.source_tier_broken(payload)
         assert reason is not None
+        assert reason.startswith("1/1 source-tier scans reported success")
 
     def test_flags_partial_status_on_only_one_side(self) -> None:
         # A degraded status on just the OLD side (new side fully "present")
@@ -516,6 +517,7 @@ class TestSourceTierBroken:
         payload = {"source_results": [self._row("zlib", old_l5_status="partial")]}
         reason = runner.source_tier_broken(payload)
         assert reason is not None
+        assert reason.startswith("1/1 source-tier scans reported success")
 
     def test_none_when_every_layer_status_is_present(self) -> None:
         # Sanity check: the default _row() (all "present") must still pass,

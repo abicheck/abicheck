@@ -203,6 +203,7 @@ class TestConfidenceComputation:
         new = AbiSnapshot(library="lib.so", version="2.0")
         result = compare(old, new)
         assert isinstance(result.confidence, Confidence)
+        assert result.confidence is Confidence.LOW
 
     def test_confidence_str_comparison_still_works(self):
         """Confidence enum is str-based so string comparisons keep working."""
@@ -612,6 +613,7 @@ class TestRenderOutputValidation:
         for fmt in ("json", "markdown", "md"):
             output = render_output(fmt, self._make_result(), self._make_snap())
             assert isinstance(output, str)
+            assert output.strip()
 
 
 # ---------------------------------------------------------------------------

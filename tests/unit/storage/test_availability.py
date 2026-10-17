@@ -245,12 +245,22 @@ class TestLedgerLookupIsTotal:
         self, declarations: list[tuple[str, FactStatus]]
     ) -> None:
         ledger = AvailabilityLedger()
+        # Oracle: last declaration wins per family (the documented contract).
+        expected: dict[str, FactStatus] = {}
         for family, status in declarations:
             ledger.declare(family, FactAvailability(status))
+            expected[family] = status
 
-        for family in ("a", "b", "c", "never-declared"):
-            assert isinstance(ledger.for_family(family), FactAvailability)
-            assert isinstance(ledger.for_entity(family, "x"), FactAvailability)
+        for family in ("a", "b", "c"):
+            if family in expected:
+                assert ledger.for_family(family).status is expected[family]
+            else:
+                assert (
+                    ledger.for_family(family) == ledger.effective_unknown_family_default
+                )
+        undeclared = ledger.effective_unknown_family_default
+        assert ledger.for_family("never-declared") == undeclared
+        assert isinstance(ledger.for_entity("never-declared", "x"), FactAvailability)
 
 
 class TestMissingFamilies:

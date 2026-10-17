@@ -1427,13 +1427,7 @@ def test_evidence_policy_invalid_action_rejected(tmp_path):
     new_snap = _make_snap(tmp_path, "new.json", "2.0")
     result = CliRunner().invoke(
         main,
-        [
-            "compare",
-            str(old_snap),
-            str(new_snap),
-            "--policy",
-            str(pol),
-        ],
+        ["compare", str(old_snap), str(new_snap), "--policy", str(pol)],
     )
     assert result.exit_code != 0
     assert "graph_risk_findings" in result.output
@@ -3542,6 +3536,9 @@ def test_dump_sources_and_build_info_together(tmp_path):
     embed_build_source(snap, cdb, tree)  # build_info=cdb, sources=tree
     assert snap.build_source is not None
     assert snap.build_source.build_evidence is not None  # L3 from --build-info
+    units = snap.build_source.build_evidence.compile_units
+    assert len(units) == 1
+    assert units[0].source.endswith("src/foo.cpp")
 
 
 def test_collect_no_input_is_noop(tmp_path):

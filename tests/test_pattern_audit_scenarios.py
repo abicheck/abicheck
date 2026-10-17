@@ -445,7 +445,7 @@ class TestS2PointerReturnedInfoStructAppended:
             "consumer vs old lib = read-past-end). abicheck currently "
             "reports a single severity. Tracked as gap S2-policy."
         ),
-        strict=False,
+        strict=True,
     )
     def test_severity_should_reflect_forward_only_break(self) -> None:
         # Sentinel test — when the policy lands, the change should carry
@@ -537,7 +537,7 @@ class TestS3FeatureMacroGatedEnumSkew:
             "CONSTANT_REMOVED but do not correlate the two as 'same "
             "source, different -D'. Tracked as gap S3-policy."
         ),
-        strict=False,
+        strict=True,
     )
     def test_member_disappearance_is_correlated_with_macro_change(self) -> None:
         # Aspirational: a follow-up detector should notice that the
@@ -618,7 +618,7 @@ class TestS4InternalValueRangeLeak:
             "the affected enum-or-int type with (b) an internal-named "
             "constant whose value changed. Tracked as gap S4."
         ),
-        strict=False,
+        strict=True,
     )
     def test_internal_value_range_leak_overlay(self) -> None:
         # Public function accepts the value, internal constant changes.
@@ -779,7 +779,7 @@ class TestS5ForwardCompatTagAppended:
             "forward-compat (new data → old lib). abicheck reports a "
             "single severity. Tracked as gap S5-policy (related to S2)."
         ),
-        strict=False,
+        strict=True,
     )
     def test_forward_compat_severity_hint(self) -> None:
         old = _snap(

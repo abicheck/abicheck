@@ -1068,11 +1068,13 @@ class TestTypeDatabaseExtended:
 
     def test_procedure_lookup(self) -> None:
         db = self._make_db([(LF_PROCEDURE, _make_lf_procedure(0x74, 0, 0, 0))])
-        assert db.get_procedure(0x1000) is not None
+        assert (p := db.get_procedure(0x1000)) is not None
+        assert (p.type_index, p.return_type_ti, p.param_count) == (0x1000, 0x74, 0)
 
     def test_mfunction_lookup(self) -> None:
         db = self._make_db([(LF_MFUNCTION, _make_lf_mfunction(0x74, 0, 0, 0, 0, 0))])
-        assert db.get_mfunction(0x1000) is not None
+        assert (p := db.get_mfunction(0x1000)) is not None
+        assert (p.type_index, p.return_type_ti, p.param_count) == (0x1000, 0x74, 0)
 
     def test_modifier_volatile(self) -> None:
         mod_payload = _make_lf_modifier(0x74, is_volatile=True)
@@ -1249,15 +1251,12 @@ class TestFieldlistExtended:
         db = self._make_db([(LF_FIELDLIST, fl_data)])
         # Should not raise (infinite recursion guarded)
         members = db.get_fieldlist(0x1000)
-        assert isinstance(members, list)
+        assert members == []
 
     def test_padding_bytes(self) -> None:
         """Padding bytes (>= 0xF0) should be skipped correctly."""
         fl = _make_lf_fieldlist(
-            [
-                _make_lf_member(0, 0x74, 0, "a"),
-                _make_lf_member(0, 0x74, 4, "b"),
-            ]
+            [_make_lf_member(0, 0x74, 0, "a"), _make_lf_member(0, 0x74, 4, "b")]
         )
         db = self._make_db([(LF_FIELDLIST, fl)])
         members = db.get_fieldlist(0x1000)

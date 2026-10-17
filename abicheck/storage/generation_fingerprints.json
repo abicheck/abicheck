@@ -7,7 +7,7 @@
       "abicheck/dwarf_advanced.py": "ac7ed6d945a00dedbfb71d79f98b2be5b9b42d2bbe4810babfe485aad266b5cb",
       "abicheck/dwarf_metadata.py": "d558cc589ad135f68197c686cc21a8755a1949d6a43df8aed5b212ceb69f0c57",
       "abicheck/dwarf_presence.py": "7e73580ec7a02fdf24e3815cb89e42aa6fe00e46e8cda6b7fe9d547f06ac3f06",
-      "abicheck/dwarf_snapshot.py": "04e8ef2438afdeb5adcb6c30c1bd9d22b17b1f69092203d339d633aaee12d079",
+      "abicheck/dwarf_snapshot.py": "99e765f7b47d3ffa12f843f8526e49b569c017e538b50e656284a924f25b8b8f",
       "abicheck/dwarf_snapshot_datasources.py": "e337f8be3a8ae16350c0639d0be10670d4d5d1197108659fa210fcbbf8a5bdde",
       "abicheck/dwarf_unified.py": "9ecb70b59bb26674ac98ba14ad1211b4103e3a78426a91ed7901e59f1a7d9cdf",
       "abicheck/dwarf_utils.py": "6ee41866da4385813645aeb615b6ed44b93e666692adb07dab87c262c15f25ce",
@@ -148,9 +148,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "8a28cf9cc69a669fe1e2a354b4ab53eb8f5cf9b859bdc04e3afbe460512cf970",
+    "fingerprint": "6f80bd7ec4f8feb48c18016a2f3dab9b6be9429f718f21b1a12b353644f89c12",
     "generation": 3,
-    "reason": "pure relocation: abicheck/package.py moved to abicheck/extract/packages.py, imports rewritten; no logic change"
+    "reason": "dead-code removal: dwarf_snapshot dropped a never-read _elf_meta attribute"
   },
   "resolver": {
     "files": {

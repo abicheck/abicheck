@@ -408,7 +408,13 @@ class TestRequireBashSkipsRatherThanRunsTheStub:
         """The other direction, so a guard that always skipped -- which would
         silently empty every shell-based module -- fails here."""
         monkeypatch.setattr(_workflow_exec, "have_bash", lambda: True)
-        require_bash()
+        # Returns normally (no Skipped raised) and yields nothing to the caller.
+        assert require_bash() is None
+        # The guard consults the probe it was given, not a cached answer.
+        monkeypatch.setattr(_workflow_exec, "have_bash", lambda: False)
+        with pytest.raises(BaseException) as excinfo:
+            require_bash()
+        assert type(excinfo.value).__name__ == "Skipped"
 
 
 class TestRunStepNeverFabricatesAVanishedWorkspace:

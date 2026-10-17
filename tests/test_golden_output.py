@@ -19,6 +19,7 @@ from pathlib import Path
 import pytest
 
 from abicheck.checker import compare
+from abicheck.checker_policy import ChangeKind, Verdict
 from abicheck.model import (
     AbiSnapshot,
     EnumMember,
@@ -61,8 +62,13 @@ def _run_golden(
     old: AbiSnapshot,
     new: AbiSnapshot,
     update: bool,
-) -> None:
-    """Run one golden comparison: either update or verify."""
+):
+    """Run one golden comparison: either update or verify.
+
+    Returns the ``DiffResult`` so each caller can also pin the semantic
+    contract (verdict, ChangeKind) rather than relying on the markdown
+    text alone.
+    """
     golden_path = GOLDEN_DIR / f"{case_id}.md"
     result = compare(old, new)
     actual = to_markdown(result)
@@ -71,7 +77,7 @@ def _run_golden(
         GOLDEN_DIR.mkdir(exist_ok=True)
         golden_path.write_text(actual, encoding="utf-8")
         pytest.skip(f"Updated golden: {golden_path.name}")
-        return
+        return result
 
     if not golden_path.exists():
         pytest.fail(
@@ -92,6 +98,7 @@ def _run_golden(
             )
         )
         pytest.fail(f"Golden mismatch for {case_id}:\n{diff}")
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -104,7 +111,9 @@ def test_golden_no_change(update_goldens: bool) -> None:
     """Identical snapshots → NO_CHANGE output is stable."""
     old = _snap(ver="1.0", funcs=[_fn("compute", "_Z7computei")])
     new = _snap(ver="2.0", funcs=[_fn("compute", "_Z7computei")])
-    _run_golden("no_change", old, new, update_goldens)
+    result = _run_golden("no_change", old, new, update_goldens)
+    assert result.verdict == Verdict.NO_CHANGE
+    assert result.changes == []
 
 
 @pytest.mark.golden
@@ -114,7 +123,9 @@ def test_golden_func_removed(update_goldens: bool) -> None:
         ver="1.0", funcs=[_fn("compute", "_Z7computei"), _fn("helper", "_Z6helperi")]
     )
     new = _snap(ver="2.0", funcs=[_fn("compute", "_Z7computei")])
-    _run_golden("func_removed", old, new, update_goldens)
+    result = _run_golden("func_removed", old, new, update_goldens)
+    assert result.verdict == Verdict.BREAKING
+    assert [c.kind for c in result.changes] == [ChangeKind.FUNC_REMOVED]
 
 
 @pytest.mark.golden
@@ -146,7 +157,9 @@ def test_golden_struct_size_change(update_goldens: bool) -> None:
             )
         ],
     )
-    _run_golden("struct_size_change", old, new, update_goldens)
+    result = _run_golden("struct_size_change", old, new, update_goldens)
+    assert result.verdict == Verdict.BREAKING
+    assert ChangeKind.TYPE_SIZE_CHANGED in {c.kind for c in result.changes}
 
 
 @pytest.mark.golden
@@ -178,7 +191,9 @@ def test_golden_enum_change(update_goldens: bool) -> None:
             )
         ],
     )
-    _run_golden("enum_change", old, new, update_goldens)
+    result = _run_golden("enum_change", old, new, update_goldens)
+    assert result.verdict == Verdict.BREAKING
+    assert [c.kind for c in result.changes] == [ChangeKind.ENUM_MEMBER_VALUE_CHANGED]
 
 
 @pytest.mark.golden
@@ -188,7 +203,9 @@ def test_golden_compatible_addition(update_goldens: bool) -> None:
     new = _snap(
         ver="2.0", funcs=[_fn("compute", "_Z7computei"), _fn("helper", "_Z6helperi")]
     )
-    _run_golden("compatible_addition", old, new, update_goldens)
+    result = _run_golden("compatible_addition", old, new, update_goldens)
+    assert result.verdict == Verdict.COMPATIBLE
+    assert [c.kind for c in result.changes] == [ChangeKind.FUNC_ADDED]
 
 
 @pytest.mark.golden
@@ -200,7 +217,12 @@ def test_golden_compatible_with_risk(update_goldens: bool) -> None:
     old.elf = ElfMetadata(versions_required={"libc.so.6": ["GLIBC_2.5"]})
     new = _snap(ver="2.0")
     new.elf = ElfMetadata(versions_required={"libc.so.6": ["GLIBC_2.5", "GLIBC_2.34"]})
-    _run_golden("compatible_with_risk", old, new, update_goldens)
+    result = _run_golden("compatible_with_risk", old, new, update_goldens)
+    assert result.verdict == Verdict.COMPATIBLE_WITH_RISK
+    assert {c.kind for c in result.changes} == {
+        ChangeKind.SYMBOL_VERSION_REQUIRED_ADDED,
+        ChangeKind.RUNTIME_FLOOR_RAISED,
+    }
 
 
 @pytest.mark.golden
@@ -248,4 +270,8 @@ def test_golden_leaked_dependency_symbol(update_goldens: bool) -> None:
     old.from_headers = True
     new.from_headers = True
 
-    _run_golden("leaked_dependency_symbol", old, new, update_goldens)
+    result = _run_golden("leaked_dependency_symbol", old, new, update_goldens)
+    assert result.verdict == Verdict.COMPATIBLE_WITH_RISK
+    assert [c.kind for c in result.changes] == [
+        ChangeKind.SYMBOL_LEAKED_FROM_DEPENDENCY_CHANGED
+    ]

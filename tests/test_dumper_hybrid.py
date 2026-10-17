@@ -119,7 +119,7 @@ class TestMergeSnapshotsBasics:
         merged = merge_snapshots(castxml, clang)
         # A fresh lookup must reflect the merged functions list, not a stale
         # cached index carried over from the castxml snapshot via replace().
-        assert merged.function_map.get("_Z3foov") is not None
+        assert merged.function_map["_Z3foov"].name == "foo"
 
     def test_clang_backfills_ms_abi_when_castxml_drops_it(self):
         castxml_fn = Function(
@@ -532,10 +532,10 @@ class TestCtorDtorReconciliation:
 
         # Neither synthetic key got (wrongly) rewritten to either real
         # mangled name -- both sets of functions coexist unreconciled.
-        assert merged.function_map.get(int_synthetic) is not None
-        assert merged.function_map.get(double_synthetic) is not None
-        assert merged.function_map.get(int_real) is not None
-        assert merged.function_map.get(double_real) is not None
+        assert merged.function_map[int_synthetic].mangled == int_synthetic
+        assert merged.function_map[double_synthetic].mangled == double_synthetic
+        assert merged.function_map[int_real].mangled == int_real
+        assert merged.function_map[double_real].mangled == double_real
 
     def test_constructor_synthetic_key_reconciled_to_real_mangled_name(self):
         synthetic = f"{SYNTHETIC_CTOR_KEY_PREFIX}ns::Widget(int)"
@@ -732,8 +732,8 @@ class TestCtorDtorReconciliation:
         merged = merge_snapshots(castxml, clang)
 
         # Falls back to today's (buggy-but-safe) behavior: synthetic key kept.
-        assert merged.function_map.get(synthetic) is not None
-        assert merged.function_map.get("_ZN2ns6WidgetC1Ed") is not None
+        assert merged.function_map[synthetic].params[0].type == "int"
+        assert merged.function_map["_ZN2ns6WidgetC1Ed"].params[0].type == "double"
 
     def test_constructor_no_match_when_scope_differs(self):
         synthetic = f"{SYNTHETIC_CTOR_KEY_PREFIX}ns::Widget(int)"
@@ -744,7 +744,8 @@ class TestCtorDtorReconciliation:
         castxml = _snap(functions=[castxml_ctor], ast_producer="castxml")
         clang = _snap(functions=[unrelated_class_ctor], ast_producer="clang")
         merged = merge_snapshots(castxml, clang)
-        assert merged.function_map.get(synthetic) is not None
+        assert merged.function_map[synthetic].mangled == synthetic
+        assert merged.function_map["_ZN3ns26WidgetC1Ei"].name == "Widget"
 
     def test_destructor_ambiguous_when_two_candidates(self):
         # Two dtor-shaped candidates under the identical (marker, scope) key
@@ -757,14 +758,16 @@ class TestCtorDtorReconciliation:
         castxml = _snap(functions=[castxml_dtor], ast_producer="castxml")
         clang = _snap(functions=[cand1, cand2], ast_producer="clang")
         merged = merge_snapshots(castxml, clang)
-        assert merged.function_map.get(synthetic) is not None
+        assert merged.function_map[synthetic].mangled == synthetic
+        assert merged.function_map["_ZN2ns5Base1D1Ev"].name == "~Base1"
+        assert merged.function_map["_ZN2ns5Base1D2Ev"].name == "~Base1"
 
     def test_ordinary_mangled_function_is_untouched(self):
         f = Function(name="foo", mangled="_Z3foov", return_type="void")
         castxml = _snap(functions=[f], ast_producer="castxml")
         clang = _snap(ast_producer="clang")
         merged = merge_snapshots(castxml, clang)
-        assert merged.function_map.get("_Z3foov") is not None
+        assert merged.function_map["_Z3foov"].name == "foo"
 
     def test_nested_class_inside_template_scope_normalized(self):
         # Codex review: a last-component-only normalization leaves an
@@ -1145,12 +1148,7 @@ class TestTypeAndFieldFactBackfill:
 
     def test_layout_scalar_fields_never_override_castxml(self):
         # castxml's own real layout, when present, always wins.
-        t_old = RecordType(
-            name="Widget",
-            kind="class",
-            size_bits=64,
-            data_size_bits=64,
-        )
+        t_old = RecordType(name="Widget", kind="class", size_bits=64, data_size_bits=64)
         t_clang = RecordType(
             name="Widget",
             kind="class",

@@ -249,27 +249,6 @@ def test_hostile_pr_body_is_data_not_commands(payload: str, tmp_path: Path) -> N
 
 
 @_needs_bash
-@pytest.mark.parametrize("payload", HOSTILE_PAYLOADS)
-def test_the_harness_detects_a_genuinely_unsafe_step(
-    payload: str, tmp_path: Path
-) -> None:
-    """Negative control. The same harness against a script that
-    interpolates the value the way `${{ }}` substitution would must catch
-    at least one payload — otherwise the two tests above prove nothing.
-
-    Asserted over the payload set rather than per payload: a single
-    payload is shell-specific (backticks, `$()`, quote-breaking and the
-    `::error::` newline forgery each need a different surrounding
-    context), so requiring every one to fire would pin the control to the
-    one unsafe script written here instead of to the harness."""
-    unsafe = f'printf %s "{payload}" > pr-body.md'
-    written, pwned = _run_body_step(unsafe, payload, tmp_path)
-    if pwned or written != payload:
-        return  # The attack fired, or corrupted the command around it.
-    pytest.skip(f"payload {payload!r} is inert in this unsafe shape")
-
-
-@_needs_bash
 def test_at_least_one_payload_fires_against_the_unsafe_script(
     tmp_path: Path,
 ) -> None:

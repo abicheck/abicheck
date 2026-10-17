@@ -266,13 +266,13 @@ class TestParseUnified:
             patch(
                 "abicheck.dwarf_unified._adv_process_cu",
                 side_effect=lambda cu, adv: None,
-            ),
+            ) as adv_mock,
         ):
             meta, adv = parse_dwarf(fake_path)
 
         # Should still return (possibly partial) results without raising
         assert meta is not None
-        assert adv is not None
+        assert adv is not None and adv_mock.call_count == 1
 
     def test_adv_process_cu_raises_elferror(self, tmp_path):
         """Lines 100-101: _adv_process_cu ELFError is caught and logged."""
@@ -297,7 +297,7 @@ class TestParseUnified:
             patch(
                 "abicheck.dwarf_unified._meta_process_cu",
                 side_effect=lambda cu, meta, tc: None,
-            ),
+            ) as meta_mock,
             patch(
                 "abicheck.dwarf_unified._adv_process_cu",
                 side_effect=ELFError("adv boom"),
@@ -306,7 +306,7 @@ class TestParseUnified:
             meta, adv = parse_dwarf(fake_path)
 
         assert meta is not None
-        assert adv is not None
+        assert adv is not None and meta_mock.call_count == 1
 
     def test_unified_path_sets_target_arch(self, tmp_path):
         """parse_dwarf() records the normalized target arch on AdvancedDwarfMetadata.
@@ -392,7 +392,7 @@ class TestParseUnified:
         ):
             result = parse_dwarf_metadata(fake_path)
 
-        assert isinstance(result, DwarfMetadata)
+        assert isinstance(result, DwarfMetadata) and result == DwarfMetadata()
 
 
 # ===========================================================================
@@ -913,8 +913,8 @@ class TestUnwrapQualifiers:
         cu = MockCU(cu_offset=0, die_map=dies)
         first_die = dies[100]
         result = _unwrap_qualifiers(first_die, cu)
-        # Should return some typedef DIE without crashing
-        assert result is not None
+        # Bounded walk: returns the last typedef reached without crashing.
+        assert result is not None and result.offset == 1300
 
 
 class TestIsNontrivialAggregate:

@@ -112,3 +112,4 @@ def test_record_digest_survives_a_read_only_sidecar(tmp_path, monkeypatch):
     monkeypatch.setattr(ci.tempfile, "mkstemp", refuse)
     monkeypatch.setattr(Path, "unlink", refuse)
     ci.record_digest(entry)  # must not raise
+    assert entry.read_text() == "{}"

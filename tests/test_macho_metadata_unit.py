@@ -628,13 +628,13 @@ class TestParseMachoMetadata:
         f = tmp_path / "bad.dylib"
         f.write_bytes(b"not a macho file" + b"\x00" * 100)
         meta = parse_macho_metadata(f)
-        assert isinstance(meta, MachoMetadata)
+        assert meta == MachoMetadata()
 
     def test_truncated_header_returns_empty(self, tmp_path):
         f = tmp_path / "trunc.dylib"
         f.write_bytes(b"\xcf\xfa\xed\xfe" + b"\x00" * 4)
         meta = parse_macho_metadata(f)
-        assert isinstance(meta, MachoMetadata)
+        assert meta == MachoMetadata()
 
     def test_parse_minimal_dylib(self, tmp_path):
         """Parse a synthetic Mach-O 64-bit LE dylib with basic metadata."""

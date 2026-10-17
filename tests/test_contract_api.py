@@ -424,7 +424,7 @@ class TestChangeKindCompleteness:
         for kind in ChangeKind:
             entry = policy_for(kind)
             assert entry is not None, f"policy_for({kind}) returned None"
-            assert entry.default_verdict is not None
+            assert isinstance(entry.default_verdict, Verdict)
 
     def test_all_changekind_values_in_policy_registry(self) -> None:
         """Every ChangeKind should be explicitly categorized in the registry."""
@@ -441,3 +441,4 @@ class TestChangeKindCompleteness:
             # Should return a string (possibly empty), never raise
             result = impact_for(kind)
             assert isinstance(result, str)
+            assert result.strip(), f"empty impact for {kind}"

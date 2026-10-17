@@ -380,7 +380,13 @@ class TestNoReaderDiscardsTheContractSilently:
         document shape -- otherwise every ordinary import breaks."""
         doc = self._document(with_version=False)
         del doc["public_surface"]
-        assert self._import(doc, tmp_path) is not None
+        manifest = self._import(doc, tmp_path)
+        # The import produced the one declared variant, with its
+        # bundle_composition section stored, and no artifacts.
+        assert [v.variant_id for v in manifest.variant_refs] == ["default"]
+        (variant,) = manifest.variant_refs
+        assert set(variant.sections) == {"bundle_composition"}
+        assert manifest.artifact_refs == ()
 
 
 class TestACaptureStampsTheVersionItsContentsNeed:

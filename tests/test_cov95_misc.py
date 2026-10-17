@@ -142,7 +142,7 @@ class TestPolicyLookups:
     def test_impact_for_returns_string(self) -> None:
         """impact_for returns a (possibly empty) string for every kind (line 700)."""
         for kind in ChangeKind:
-            assert isinstance(impact_for(kind), str)
+            assert impact_for(kind).strip(), kind
 
 
 class TestPolicyKindSets:

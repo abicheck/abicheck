@@ -221,6 +221,8 @@ class TestReportValidatesAgainstSchema:
         snap = AbiSnapshot(library="libfoo.so.1", version="1.0", functions=[f])
         payload = json.loads(reporter.to_json(compare(snap, snap)))
         self._validate(payload)
+        assert payload["verdict"] == "NO_CHANGE"
+        assert payload["changes"] == []
 
     def test_env_matrix_source_sha256_validates_when_present(self):
         """Schema 4.2 (Codex review, P2): a run resolving a declared
@@ -313,6 +315,8 @@ class TestReportValidatesAgainstSchema:
         old, new = _breaking_pair()
         payload = json.loads(reporter.to_json(compare(old, new), show_only="breaking"))
         self._validate(payload)
+        assert payload["verdict"] == "BREAKING"
+        assert payload["summary"]["breaking"] > 0
 
     def test_severity_report_validates(self):
         old, new = _breaking_pair()
@@ -320,6 +324,7 @@ class TestReportValidatesAgainstSchema:
             reporter.to_json(compare(old, new), severity_config=SeverityConfig())
         )
         self._validate(payload)
+        assert payload["verdict"] == "BREAKING"
 
     def test_addition_reviewer_action_validates_against_packaged_schema(self):
         # Regression guard (Codex review, PR #595): reviewer_action was added
@@ -803,6 +808,8 @@ class TestNotComparableReportSchema:
             "reason": {"kind": "scope_mismatch", "message": "scope drift"},
         }
         self._validate(payload)
+        assert payload["verdict"] is None
+        assert payload["reason"]["kind"] == "scope_mismatch"
 
     def test_not_comparable_report_without_reason_is_rejected(self):
         # CodeRabbit review, PR #631: `reason` was documented as always
@@ -847,6 +854,8 @@ class TestCheckTargetSyntheticReportsValidateAgainstSchema:
             resolve_message="target 'libpvxs' is not in this baseline-set's manifest.",
         )
         self._validate(report)
+        assert report["verdict"] == "ERROR"
+        assert report["target"] == "libpvxs"
 
     def test_bootstrap_report_validates(self):
         from abicheck.buildsource.check_report import build_bootstrap_report
@@ -859,6 +868,8 @@ class TestCheckTargetSyntheticReportsValidateAgainstSchema:
             resolve_message="no baseline set exists yet.",
         )
         self._validate(report)
+        assert report["verdict"] == "NO_BASELINE"
+        assert report["target"] == "libpvxs"
 
     def test_new_target_report_validates(self):
         from abicheck.buildsource.check_report import build_new_target_report
@@ -871,6 +882,8 @@ class TestCheckTargetSyntheticReportsValidateAgainstSchema:
             resolve_message="target 'libnew' is not in this baseline-set's manifest.",
         )
         self._validate(report)
+        assert report["verdict"] == "NEW_TARGET"
+        assert report["target"] == "libnew"
 
 
 class TestEvidenceDepthValidator:

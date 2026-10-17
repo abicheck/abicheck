@@ -54,6 +54,7 @@ from abicheck.buildsource.header_graph_projection_cache import (
     projection_sidecar_path,
     store_cached_projection,
 )
+from abicheck.buildsource.source_graph import SourceGraphSummary
 from abicheck.buildsource.type_graph import TypeEdge
 
 PUBLIC_HEADER = "/proj/include/pub.h"
@@ -614,8 +615,8 @@ class TestThePathsWhereNoAstIsAcquired:
         without reproducing how a caller reaches it.
         """
         snap = self._attach(self._snapshot(), [Path("no-such-header.h")])
-        assert snap.surface_graph is not None
-        assert snap.surface_graph is not None
+        assert isinstance(snap.surface_graph, SourceGraphSummary)
+        assert snap.surface_graph.edges == []
 
     @pytest.mark.parametrize("exc_name", ["SnapshotError", "ValidationError"])
     def test_a_failed_clang_acquisition_still_attaches_a_graph(
@@ -642,8 +643,8 @@ class TestThePathsWhereNoAstIsAcquired:
         )
 
         snap = self._attach(self._snapshot(), [Path(PUBLIC_HEADER)])
-        assert snap.surface_graph is not None
-        assert snap.surface_graph is not None
+        assert isinstance(snap.surface_graph, SourceGraphSummary)
+        assert snap.surface_graph.edges == []
 
     @pytest.mark.parametrize(
         ("label", "ast"),
@@ -697,8 +698,8 @@ class TestThePathsWhereNoAstIsAcquired:
         )
 
         snap = self._attach(self._snapshot(), [Path(PUBLIC_HEADER)])
-        assert snap.surface_graph is not None
-        assert snap.surface_graph is not None
+        assert isinstance(snap.surface_graph, SourceGraphSummary)
+        assert snap.surface_graph.edges == []
 
     def test_the_misshapen_asts_really_do_break_the_readers(self) -> None:
         """Vacuity guard: each fixture above must actually raise.

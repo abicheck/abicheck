@@ -38,10 +38,12 @@ class TestRenderOutput:
     def test_markdown_format(self, diff_result, snap):
         out = render_output("markdown", diff_result, snap)
         assert isinstance(out, str)
+        assert "libtest" in out
 
     def test_md_format(self, diff_result, snap):
         out = render_output("md", diff_result, snap)
         assert isinstance(out, str)
+        assert "libtest" in out
 
     def test_sarif_format(self, diff_result, snap):
         out = render_output("sarif", diff_result, snap)
@@ -179,6 +181,8 @@ class TestRenderOutput:
         )
         out = render_output("html", diff_result, snap, new=new_snap)
         assert isinstance(out, str)
+        assert "<html" in out.lower()
+        assert "libtest" in out
 
 
 # ── _render_deps_section_md() ──────────────────────────────────────────────
