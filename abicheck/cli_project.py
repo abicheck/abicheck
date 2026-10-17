@@ -60,7 +60,8 @@ from .buildsource.build_output import (
     load_build_output,
     validate_build_output,
 )
-from .buildsource.project_targets import ProjectTargetsConfig, validate_project_targets
+from .buildsource.project_targets import ProjectTargetsConfig
+from .buildsource.project_targets_validation import validate_project_targets
 from .buildsource.run_plan import generate_run_plan
 from .buildsource.validation_input import (
     ValidationInputError,

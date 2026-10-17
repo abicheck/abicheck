@@ -37,11 +37,8 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
-from abicheck.buildsource.project_targets import (
-    CheckSpec,
-    ProjectTargetsConfig,
-    validate_project_targets,
-)
+from abicheck.buildsource.project_targets import CheckSpec, ProjectTargetsConfig
+from abicheck.buildsource.project_targets_validation import validate_project_targets
 from abicheck.cli import main
 
 

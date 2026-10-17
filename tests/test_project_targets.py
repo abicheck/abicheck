@@ -40,8 +40,8 @@ from abicheck.buildsource.project_targets import (
     ProjectTargetsConfig,
     TargetSpec,
     load_project_targets_config,
-    validate_project_targets,
 )
+from abicheck.buildsource.project_targets_validation import validate_project_targets
 from abicheck.cli import main
 
 # A full, valid PVXS-shaped example matching ADR-047 §3's excerpt.
