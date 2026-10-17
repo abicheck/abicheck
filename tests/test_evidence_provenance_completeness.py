@@ -135,8 +135,9 @@ class TestFieldDefaultsToNone:
         surface facts -- see `model/surface_facts.py`) immediately after
         `demangled_symbol`, then `entity_discriminator` (plan slice 7o's
         per-finding entity for a polymorphic `ChangeKind`), and finally
-        `review_evidence`, then `cross_source_providers`, which is the newest
-        -- all eleven must stay keyword-only. (`library`, which sat between the last two, was removed
+        `review_evidence`, then `cross_source_providers`, then
+        `removed_instantiations` (the template-leak finding's uncapped removed
+        set, the newest) -- all twelve must stay keyword-only. (`library`, which sat between the last two, was removed
         with the multi-library ABICC `compat` merge that set it.)
 
         The last two arrived on separate branches that merged here, which is
@@ -158,13 +159,20 @@ class TestFieldDefaultsToNone:
         all_names = [f.name for f in dataclasses.fields(Change)]
         assert by_name["review_evidence"].kw_only is True
         assert by_name["cross_source_providers"].kw_only is True
-        assert all_names[-1] == "cross_source_providers", (
-            "cross_source_providers must be the last-declared field on Change"
+        assert by_name["removed_instantiations"].kw_only is True
+        assert all_names[-1] == "removed_instantiations", (
+            "removed_instantiations must be the last-declared field on Change"
         )
         assert (
             all_names.index("cross_source_providers")
             == all_names.index("review_evidence") + 1
         ), "cross_source_providers must be appended immediately after review_evidence"
+        assert (
+            all_names.index("removed_instantiations")
+            == all_names.index("cross_source_providers") + 1
+        ), (
+            "removed_instantiations must be appended immediately after cross_source_providers"
+        )
         assert (
             all_names.index("surface_facts") == all_names.index("demangled_symbol") + 1
         ), "surface_facts must be appended immediately after demangled_symbol"

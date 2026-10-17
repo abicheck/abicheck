@@ -27,7 +27,7 @@ of in a detector module already at its debt baseline.
 from __future__ import annotations
 
 import re
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 if TYPE_CHECKING:
@@ -39,8 +39,11 @@ from ..elf_symbol_filter import (
     exported_symbol_names,
 )
 from ..model import Function
+from ..model.change import RemovedInstantiation
 from ..model.comparison_memo import comparison_memo_active, comparison_memoized
+from ..model.elf_facts import SymbolBinding
 from ..model.execution_cache import memoized
+from ..model.graph_identity import _normalize_graph_identity
 from ..model.surface_facts import in_public_surface, is_abi_visible
 from .surface_reconcile import (
     RECONCILED_ABI_VISIBLE,
@@ -645,3 +648,98 @@ def alias_identity(decl: Function | Variable) -> str:
     head, sep, _ = qualified.partition("(")
     stem = head.rstrip() if sep else qualified
     return _ABI_TAG_RE.sub("", stem)
+
+
+# ---------------------------------------------------------------------------
+# Removed template instantiations (INTERNAL_TEMPLATE_LEAKS_VIA_PUBLIC_API)
+# ---------------------------------------------------------------------------
+
+#: One removed-or-kept instantiation's comparable identity: ``(identity, signature)``.
+InstantiationSig = tuple[str, tuple[str, int, str]]
+
+#: Linkage strength used to report one binding for a mixed removed set. ``WEAK``
+#: ranks strictly lowest because it is the only value a consumer's ``binding:
+#: weak`` policy dismisses, so a mixed set never reports ``"weak"``. Ties break
+#: on the value string, so the result never depends on snapshot ordering.
+REMOVED_BINDING_STRENGTH: dict[SymbolBinding, int] = {
+    SymbolBinding.GLOBAL: 3,
+    SymbolBinding.UNIQUE: 3,
+    SymbolBinding.OTHER: 2,
+    SymbolBinding.LOCAL: 2,
+    SymbolBinding.WEAK: 1,
+}
+
+
+def function_signature(f: Function) -> tuple[str, int, str]:
+    """Comparable ``(return type, arity, parameter types)`` for *f*."""
+    norm = _normalize_graph_identity
+    return (
+        norm(f.return_type),
+        len(f.params),
+        "|".join(norm(p.type) for p in f.params),
+    )
+
+
+def instantiation_set(
+    funcs: Iterable[Function],
+    identity_of: Callable[[Function], str],
+) -> set[InstantiationSig]:
+    """``(identity, signature)`` pairs for *funcs*."""
+    return {(identity_of(f), function_signature(f)) for f in funcs}
+
+
+def removed_instantiations(
+    old_by_stem: dict[str, list[Function]],
+    stem: str,
+    new_sigs: set[InstantiationSig],
+    identity_of: Callable[[Function], str],
+) -> list[tuple[Function, str]]:
+    """``(old Function, identity)`` for each old-side instantiation of *stem*
+    whose pair is absent from *new_sigs*. The pairs are exactly
+    ``old_sigs - new_sigs``, the set the leak fact confirms on, with the
+    Function objects kept alongside."""
+    removed: list[tuple[Function, str]] = []
+    for f in old_by_stem.get(stem, []):
+        pair = (identity_of(f), function_signature(f))
+        if pair not in new_sigs:
+            removed.append((f, pair[0]))
+    return removed
+
+
+def aggregate_removed_binding(removed: Sequence[tuple[Function, str]]) -> str | None:
+    """``Change.symbol_binding`` for a removed set.
+
+    Fails closed: ``None`` when the set is empty or any member's binding is
+    unknown. ``"weak"`` only when every member is WEAK; otherwise the strongest
+    binding present (see :data:`REMOVED_BINDING_STRENGTH`).
+    """
+    if not removed:
+        return None
+    bindings: list[SymbolBinding] = []
+    for f, _ in removed:
+        b = f.elf_binding
+        if b is None or b not in REMOVED_BINDING_STRENGTH:
+            return None
+        bindings.append(b)
+    if all(b is SymbolBinding.WEAK for b in bindings):
+        return SymbolBinding.WEAK.value
+    strongest = max(bindings, key=lambda b: (REMOVED_BINDING_STRENGTH[b], b.value))
+    return strongest.value
+
+
+def removed_instantiation_records(
+    removed: Sequence[tuple[Function, str]],
+) -> tuple[RemovedInstantiation, ...]:
+    """The uncapped, deterministically ordered records for *removed* (exact
+    duplicates collapsed)."""
+    records = {
+        RemovedInstantiation(
+            mangled=f.mangled,
+            demangled=identity,
+            binding=f.elf_binding.value if f.elf_binding else None,
+        )
+        for f, identity in removed
+    }
+    return tuple(
+        sorted(records, key=lambda r: (r.mangled, r.demangled, r.binding or ""))
+    )

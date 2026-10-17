@@ -57,7 +57,10 @@ FAMILIES: dict[str, Family] = {
                 "the result cleaner, never adds a BREAKING finding, and never "
                 "raises assurance."
             ),
-            harness_tests=("tests/test_family_f1_evidence_ablation.py",),
+            harness_tests=(
+                "tests/test_family_f1_evidence_ablation.py",
+                "tests/test_export_loss_binding_unit.py",
+            ),
         ),
         Family(
             key="F2",
@@ -184,6 +187,7 @@ FAMILIES: dict[str, Family] = {
 
 
 _F1 = (
+    "detector.selector_axis_unstamped",
     "evidence.unread_producer_read_as_confirmed_absence",
     "evidence.container_presence_read_as_evidence_content",
     "evidence.silent_degradation_to_clean_verdict",
