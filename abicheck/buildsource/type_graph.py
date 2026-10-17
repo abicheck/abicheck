@@ -125,6 +125,21 @@ class TypeEdge:
     resolution: str = field(default="", compare=False)
 
 
+def _node_file(node: dict[str, Any]) -> str:
+    """The source file a node names, if any (clang emits ``file`` only when it
+    *changes* — sticky — so the caller tracks the last-seen value; mirrors
+    ``call_graph._node_file``)."""
+    loc = node.get("loc")
+    if isinstance(loc, dict) and loc.get("file"):
+        return str(loc["file"])
+    rng = node.get("range")
+    if isinstance(rng, dict):
+        beg = rng.get("begin")
+        if isinstance(beg, dict) and beg.get("file"):
+            return str(beg["file"])
+    return ""
+
+
 def _dedupe_edges(edges: list[TypeEdge]) -> list[TypeEdge]:
     """Dedup on ``(src, dst, kind, role)``, not just ``(src, dst, kind)``
     (Codex review, fresh evidence): a function that both returns and takes

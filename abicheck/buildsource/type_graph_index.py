@@ -32,6 +32,7 @@ from typing import Any
 from ..model.execution_cache import request_key
 from ..model.execution_cache_scoped import ScopedCache
 from ..model.name_decoration import macho_underscore as macho_decoration
+from .type_graph import _node_file
 
 _RECORD_DECL_KINDS = frozenset(
     {"CXXRecordDecl", "RecordDecl", "ClassTemplateSpecializationDecl"}
@@ -92,21 +93,6 @@ def _decl_identity(node: dict[str, Any]) -> str:
     return macho_decoration.decode_itanium(
         str(node.get("mangledName") or node.get("name") or "")
     )
-
-
-def _node_file(node: dict[str, Any]) -> str:
-    """The source file a node names, if any (clang emits ``file`` only when it
-    *changes* — sticky — so the caller tracks the last-seen value; mirrors
-    ``call_graph._node_file``)."""
-    loc = node.get("loc")
-    if isinstance(loc, dict) and loc.get("file"):
-        return str(loc["file"])
-    rng = node.get("range")
-    if isinstance(rng, dict):
-        beg = rng.get("begin")
-        if isinstance(beg, dict) and beg.get("file"):
-            return str(beg["file"])
-    return ""
 
 
 def _looks_like_record_definition(node: dict[str, Any]) -> bool:

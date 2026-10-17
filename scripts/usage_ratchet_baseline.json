@@ -7,7 +7,7 @@
   ],
   "cross_module_exact_clones": [
     "abicheck.buildsource.adapters.bazel#_as_text = abicheck.buildsource.adapters.make#_as_text",
-    "abicheck.buildsource.call_graph#_node_file = abicheck.buildsource.type_graph_index#_node_file",
+    "abicheck.buildsource.call_graph#_node_file = abicheck.buildsource.type_graph#_node_file",
     "abicheck.buildsource.extractor_manifest#_file_sha256 = abicheck.buildsource.pack_io#_file_sha256 = abicheck.buildsource.source_replay#_digest_file",
     "abicheck.buildsource.source_extractors.clang#_typedef_underlying = abicheck.dumper_clang#_typedef_underlying",
     "abicheck.buildsource.source_extractors.clang_nodes#_node_file = abicheck.dumper_clang#_node_file",
