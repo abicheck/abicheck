@@ -161,6 +161,8 @@ rules:
   - case214_calling_convention_macro_redefined_after_use
   - case215_return_double_pointer_lost_const
   - case216_overload_added_beside_initializer_list
+  - case217_export_loss_weak_binding_demoted
+  - case218_export_loss_strong_binding_stays_breaking
   - case19_enum_member_removed
   - case20_enum_member_value_changed
   - case21_method_became_static

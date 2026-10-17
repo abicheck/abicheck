@@ -37,6 +37,12 @@ rules:
   accidental-export-removed-still-breaking:
     title: Accidental export removed
     definition: A symbol that was never meant to be public is withdrawn, which is still a break for the consumers that had already come to depend on it.
+  export-loss-strong-binding-stays-breaking:
+    title: Strong export loss stays breaking under a binding rule
+    definition: A GLOBAL export is withdrawn alongside WEAK losses, and a binding-scoped weak reclassify rule must not demote it, so the run stays breaking.
+  export-loss-weak-binding-demoted:
+    title: WEAK export loss demoted by a binding rule
+    definition: WEAK inline, template, or undeclared exports that the new library no longer exports are reclassified to a risk by a binding-scoped policy rule.
   allocator-nested-typedef-removed:
     title: Allocator nested typedef removed
     definition: An allocator-like template drops a nested typedef the standard library contract requires, breaking generic code that names it.
