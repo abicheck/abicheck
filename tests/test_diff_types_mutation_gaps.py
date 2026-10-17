@@ -7,6 +7,8 @@ Grouped by the five helpers that carried surviving mutants:
 * ``_try_match_reserved_field`` (reserved-field-put-into-use matching)
 * ``_new_field_change_kind`` (field addition kind for polymorphic types)
 * ``_exported_elf_symbol_names`` (ELF dynamic-export name retention)
+* ``_diff_removed_field`` (removed-field classification: reserved use,
+  rename, type change, or plain removal)
 
 Expected values come from each helper's docstring and the registry
 description templates for the emitted kinds, not from running the code.
@@ -22,6 +24,7 @@ from abicheck.checker import ChangeKind
 from abicheck.diff_types import (
     _append_enum_scoped_changes,
     _append_type_abstract_changes,
+    _diff_removed_field,
     _exported_elf_symbol_names,
     _new_field_change_kind,
     _try_match_reserved_field,
@@ -509,3 +512,159 @@ def test_exported_names_filter_by_symbol_type():
 def test_exported_names_empty_without_elf():
     snap = AbiSnapshot(library="libfoo.so.1", version="1.0")
     assert _exported_elf_symbol_names(snap, symbol_types={"func"}) == set()
+
+
+# ── _diff_removed_field ─────────────────────────────────────────────────────
+#
+# Contract (docstring + diff_types._diff_record_fields caller): a removed field
+# is classified, in order, as a reserved field put into use (USED_RESERVED_FIELD),
+# a pure rename at the same offset with an identical type (FIELD_RENAMED), a
+# retype at the same offset (TYPE_FIELD_TYPE_CHANGED, the candidate is recorded
+# as consumed so it is not also reported as an addition), or otherwise a plain
+# TYPE_FIELD_REMOVED. Every emitted Change carries the record's qualified name,
+# the removed field name and the compare-time entity id.
+
+
+def _removed(
+    fname: str,
+    f_old: TypeField,
+    added: list[TypeField],
+    *,
+    name: str = "S",
+    reserved: tuple[str, ...] = (),
+    renamed: tuple[str, ...] = (),
+    qualified_name: str | None = None,
+    entity_id: EntityId | None = None,
+):
+    """Call ``_diff_removed_field`` with fresh mutable containers per call.
+
+    The function mutates the two consumed-name sets, so they are rebuilt from
+    the immutable tuples here rather than shared across pytest sessions.
+    """
+    by_offset, by_type = _index(added)
+    reserved_set = set(reserved)
+    renamed_set = set(renamed)
+    ch = _diff_removed_field(
+        name,
+        fname,
+        f_old,
+        by_offset,
+        by_type,
+        reserved_set,
+        renamed_set,
+        qualified_name=qualified_name,
+        entity_id=entity_id,
+    )
+    return ch, reserved_set, renamed_set
+
+
+@pytest.mark.parametrize(
+    ("record", "fname", "description"),
+    [
+        ("S", "x", "Field removed: S::x"),
+        ("Outer::Inner", "count", "Field removed: Outer::Inner::count"),
+    ],
+)
+def test_removed_field_plain_removal_description_is_exact(record, fname, description):
+    ch, _, _ = _removed(fname, _field(fname, offset_bits=32), [], name=record)
+    assert ch is not None
+    assert ch.kind == ChangeKind.TYPE_FIELD_REMOVED
+    assert ch.symbol == record
+    assert ch.description == description
+    assert ch.field_name == fname
+
+
+def test_removed_field_plain_removal_carries_qualified_name_and_entity_id():
+    ch, reserved, renamed = _removed(
+        "x",
+        _field("x", offset_bits=32),
+        [],
+        qualified_name="ns::S",
+        entity_id=_ID_A,
+    )
+    assert ch is not None
+    assert ch.kind == ChangeKind.TYPE_FIELD_REMOVED
+    assert ch.qualified_name == "ns::S"
+    assert ch.entity_id == _ID_A
+    assert reserved == set()
+    assert renamed == set()
+
+
+def test_removed_field_reserved_put_into_use_carries_entity_id():
+    ch, reserved, _ = _removed(
+        "reserved0",
+        _field("reserved0", offset_bits=64),
+        [_field("newf", offset_bits=64)],
+        entity_id=_ID_A,
+    )
+    assert ch is not None
+    assert ch.kind == ChangeKind.USED_RESERVED_FIELD
+    assert ch.old_value == "reserved0"
+    assert ch.new_value == "newf"
+    assert ch.entity_id == _ID_A
+    assert reserved == {"newf"}
+
+
+def test_removed_field_reserved_dwarf_only_fallback_matches_by_type():
+    # No offsets on either side: the match must come from the by-type index.
+    ch, reserved, _ = _removed(
+        "reserved0",
+        _field("reserved0", type_="int"),
+        [_field("newf", type_="int")],
+    )
+    assert ch is not None
+    assert ch.kind == ChangeKind.USED_RESERVED_FIELD
+    assert ch.new_value == "newf"
+    assert reserved == {"newf"}
+
+
+def test_removed_field_pure_rename_is_field_renamed_with_entity_id():
+    ch, _, renamed = _removed(
+        "old_name",
+        _field("old_name", offset_bits=32),
+        [_field("new_name", offset_bits=32)],
+        name="S",
+        entity_id=_ID_A,
+    )
+    assert ch is not None
+    assert ch.kind == ChangeKind.FIELD_RENAMED
+    assert ch.description == "Field renamed: S::old_name → new_name"
+    assert ch.old_value == "old_name"
+    assert ch.new_value == "new_name"
+    assert ch.entity_id == _ID_A
+    assert renamed == {"new_name"}
+
+
+def test_removed_field_retype_is_type_changed_with_all_identity_fields():
+    ch, _, renamed = _removed(
+        "old_name",
+        _field("old_name", type_="int", offset_bits=32),
+        [_field("new_name", type_="long", offset_bits=32)],
+        qualified_name="ns::S",
+        entity_id=_ID_A,
+    )
+    assert ch is not None
+    assert ch.kind == ChangeKind.TYPE_FIELD_TYPE_CHANGED
+    assert ch.description == "Field type changed: S::old_name -> new_name"
+    assert ch.old_value == "int"
+    assert ch.new_value == "long"
+    assert ch.qualified_name == "ns::S"
+    assert ch.field_name == "old_name"
+    assert ch.entity_id == _ID_A
+    # The retyped candidate is consumed, so the caller will not also report
+    # it as an added field.
+    assert renamed == {"new_name"}
+
+
+def test_removed_field_consumed_candidates_are_skipped():
+    # new_name is already consumed by an earlier match at this offset, so the
+    # retype search finds nothing and the removal stands on its own.
+    ch, _, renamed = _removed(
+        "old_name",
+        _field("old_name", type_="int", offset_bits=32),
+        [_field("new_name", type_="long", offset_bits=32)],
+        renamed=("new_name",),
+    )
+    assert ch is not None
+    assert ch.kind == ChangeKind.TYPE_FIELD_REMOVED
+    assert renamed == {"new_name"}
