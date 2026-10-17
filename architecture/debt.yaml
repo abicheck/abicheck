@@ -245,7 +245,7 @@
     },
     {
       "path": "abicheck/buildsource/source_extractors/clang.py",
-      "baseline_lines": 1872,
+      "baseline_lines": 1221,
       "target": "extract/build-or-source",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -421,13 +421,13 @@
     },
     {
       "path": "abicheck/compatibility_evaluation_frontend.py",
-      "baseline_lines": 1859,
+      "baseline_lines": 1395,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "disposition": "migrate",
       "category": "legacy_oversized_module",
       "owner": "workflows",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Baseline raised 1996 -> 2000 (the file's own hard cap, Codex review, PR #1032, fresh evidence following CLI cleanup phase two PR G2's typed-API parity slice): compare_request_inputs() now forwards CompareRequest.severity_preset/exit_code_scheme into ExplicitCompatibilityInputs, which already carried fields for them -- without this, a --contract JSON report's persisted gate.* receipt block could disagree with CompareResult.exit_decision (which reads the two fields directly) for a typed caller combining contract_evaluation=True with either field. The minimum, already-comment-trimmed footprint (two keyword arguments plus the docstring correction the omission required); this file is already the canonical D7 resolver for exactly this kind of field, so there is no responsibility to move elsewhere. Baseline raised 2000 -> 2006 by the one-time `ruff format` pass that made `fmt-check` a real CI gate (see docs/contribute/known-gaps.md). No responsibility was added or moved: the formatter only rewrapped call sites and expanded magic trailing commas, and the file's parsed statement count is byte-for-byte unchanged (verified by comparing `ast.dump` of this file before and after). This is the one bump that \"move responsibility instead of raising the baseline\" cannot be answered by moving anything; physical line counts are formatter-stable from here, because `fmt-check` now gates them. Raised 876 -> 884 (PR #1283, Codex review round 7): `extend_records`, the one API a merge of several comparisons' ledgers needs. A multi-library `compat check` dropped every per-library ledger, so a release whose policy demonstrably acted reported an empty policy trail -- ADR-067's \"every disposition keeps its rule and reason\" lost at the aggregation step. `record()` cannot serve the merge: it is keyed on the live `Change` object a disposition was applied to, and a merge holds the records rather than the objects behind them. The merge itself, and all of its reasoning, lives in the new `policy/disposition_merge.py`; what is here is the seven-line accessor into this class's own private list, which cannot live anywhere else without a cross-module private access. The alternative considered and rejected was a parallel merged-ledger type in the new module, which would have had to duplicate this class's whole query surface (`records`/`__len__`/`__iter__`/`detected_total`/`scope_reasons`/`suppressed_gating_records`) to be usable by the same reporters -- strictly more duplication than eight lines.",
+      "rationale": "Responsibilities moved out (split-compat-eval-frontend): already-read input sources and symbol-list readers to workflows/compare_input_sources.py, built-in policy/preset identities to workflows/evaluation_identities.py, and the compare kwargs/request adapters to workflows/compare_input_adapters.py (they stay in workflows/, not frontends/, because workflows callers import them). Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Baseline raised 1996 -> 2000 (the file's own hard cap, Codex review, PR #1032, fresh evidence following CLI cleanup phase two PR G2's typed-API parity slice): compare_request_inputs() now forwards CompareRequest.severity_preset/exit_code_scheme into ExplicitCompatibilityInputs, which already carried fields for them -- without this, a --contract JSON report's persisted gate.* receipt block could disagree with CompareResult.exit_decision (which reads the two fields directly) for a typed caller combining contract_evaluation=True with either field. The minimum, already-comment-trimmed footprint (two keyword arguments plus the docstring correction the omission required); this file is already the canonical D7 resolver for exactly this kind of field, so there is no responsibility to move elsewhere. Baseline raised 2000 -> 2006 by the one-time `ruff format` pass that made `fmt-check` a real CI gate (see docs/contribute/known-gaps.md). No responsibility was added or moved: the formatter only rewrapped call sites and expanded magic trailing commas, and the file's parsed statement count is byte-for-byte unchanged (verified by comparing `ast.dump` of this file before and after). This is the one bump that \"move responsibility instead of raising the baseline\" cannot be answered by moving anything; physical line counts are formatter-stable from here, because `fmt-check` now gates them. Raised 876 -> 884 (PR #1283, Codex review round 7): `extend_records`, the one API a merge of several comparisons' ledgers needs. A multi-library `compat check` dropped every per-library ledger, so a release whose policy demonstrably acted reported an empty policy trail -- ADR-067's \"every disposition keeps its rule and reason\" lost at the aggregation step. `record()` cannot serve the merge: it is keyed on the live `Change` object a disposition was applied to, and a merge holds the records rather than the objects behind them. The merge itself, and all of its reasoning, lives in the new `policy/disposition_merge.py`; what is here is the seven-line accessor into this class's own private list, which cannot live anywhere else without a cross-module private access. The alternative considered and rejected was a parallel merged-ledger type in the new module, which would have had to duplicate this class's whole query surface (`records`/`__len__`/`__iter__`/`detected_total`/`scope_reasons`/`suppressed_gating_records`) to be usable by the same reporters -- strictly more duplication than eight lines.",
       "review_by": "2026-11-30"
     },
     {
@@ -1345,7 +1345,7 @@
     },
     {
       "path": "tests/test_compatibility_evaluation_frontend.py",
-      "baseline_lines": 1437,
+      "baseline_lines": 1427,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -1631,7 +1631,7 @@
     },
     {
       "path": "tests/test_effective_config_digest.py",
-      "baseline_lines": 1473,
+      "baseline_lines": 1471,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -1994,7 +1994,7 @@
     },
     {
       "path": "tests/test_surface.py",
-      "baseline_lines": 1982,
+      "baseline_lines": 1980,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",

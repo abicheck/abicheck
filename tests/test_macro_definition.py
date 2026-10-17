@@ -416,7 +416,9 @@ class TestFrontendSpellingMatrix:
         """The one place ``/D`` is correct: a driver genuinely invoked in
         cl mode (L4 compile-database replay). No CLI ``-D`` reaches it -- the
         L2 header backends both drive a GNU-style driver."""
-        from abicheck.buildsource.source_extractors.clang import _clang_context_args
+        from abicheck.buildsource.source_extractors.clang_command import (
+            _clang_context_args,
+        )
 
         args, _msvc = _clang_context_args(self._unit(compiler), None)
         assert f"{prefix}FEATURE_API" in args

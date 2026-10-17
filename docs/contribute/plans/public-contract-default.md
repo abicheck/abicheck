@@ -2689,7 +2689,7 @@ entry for four independently-resolved categories, so
 `--severity-abi-breaking` beside an `addition` level only `.abicheck.yml`
 supplied labelled both `EXPLICIT_CLI` — and used a key the canonical resolver
 does not have (it tracks `gate.severity.<category>`,
-`compatibility_evaluation_frontend.SEVERITY_CATEGORY_FIELDS`).
+`abicheck.workflows.evaluation_identities.SEVERITY_CATEGORY_FIELDS`).
 `with_resolved_gate` now takes a per-category mapping, and both front ends
 supply one: the CLI per typed flag (with `--severity-preset` counting for all
 four), the MCP tool uniformly, since one `SeverityConfig` argument genuinely

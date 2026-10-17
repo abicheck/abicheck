@@ -234,7 +234,7 @@ def build_evaluation_context(
     evidence ledger; ``None`` means no overlay was applied.
     """
     mode = coerce_contract_mode(mode)
-    from .compatibility_evaluation_frontend import builtin_policy_identity
+    from .workflows.evaluation_identities import builtin_policy_identity
 
     overlays = overlays or OverlaySelection(selectors=(), scope=None)
     resolved_namespaces = tuple(internal_namespaces)
@@ -455,7 +455,7 @@ def with_resolved_gate(
     supplied. Collapsing them into a single ``gate.severity`` entry labelled
     the project-config category as CLI-selected, and used a key the canonical
     resolver does not have -- it tracks ``gate.severity.<category>``
-    (``compatibility_evaluation_frontend.SEVERITY_CATEGORY_FIELDS``), which
+    (``abicheck.workflows.evaluation_identities.SEVERITY_CATEGORY_FIELDS``), which
     is what this writes (Codex review, fresh evidence). An unsupplied
     category simply gets no entry, the same "absent, not defaulted" rule the
     rest of this receipt follows.
@@ -477,10 +477,10 @@ def with_resolved_gate(
     docstring for the full account (split out purely to stay under this
     file's own ``no_growth`` cap).
     """
-    from .compatibility_evaluation_frontend import SEVERITY_CATEGORY_FIELDS
     from .contract_gate_require_complete_provenance import (
         resolve_require_complete_analysis_provenance,
     )
+    from .workflows.evaluation_identities import SEVERITY_CATEGORY_FIELDS
 
     config = context.evaluation_context.resolved_config
     provenance = dict(config.provenance)

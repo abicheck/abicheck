@@ -39,7 +39,9 @@ from _strict_process import StrictProcessRunner, proc
 from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit, Target
 from abicheck.buildsource.source_extractors import CastxmlSourceExtractor
 from abicheck.buildsource.source_extractors.base import SourceExtractionError
-from abicheck.buildsource.source_extractors.clang import _ClassifyContext
+from abicheck.buildsource.source_extractors.clang_node_predicates import (
+    _ClassifyContext,
+)
 from abicheck.buildsource.source_replay import (
     REPLAY_SCOPES,
     _extract_one,

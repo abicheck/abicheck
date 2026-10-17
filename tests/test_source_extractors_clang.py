@@ -977,10 +977,10 @@ class TestSyclHostOnlyGatedOnInvokedBinary:
         independently reimplemented copy that could silently drift out of
         sync with the last-flag-wins ``-fsycl``/``-fno-sycl`` scan or the
         legacy ``dpcpp``/``dpcpp-cl`` SYCL-implied-by-default handling."""
-        from abicheck.buildsource.source_extractors import clang as clang_mod
+        from abicheck.buildsource.source_extractors import clang_command
         from abicheck.extract.compiler_driver import needs_sycl_host_only
 
-        assert clang_mod.needs_sycl_host_only is needs_sycl_host_only
+        assert clang_command.needs_sycl_host_only is needs_sycl_host_only
 
     @pytest.mark.slow
     def test_property_intel_only_sycl_pass_flags_never_reach_a_non_intel_invoked_binary(
@@ -1395,7 +1395,7 @@ def test_mangled_strips_macos_mach_o_underscore() -> None:
 
 
 def test_mangled_internal_linkage_marker() -> None:
-    from abicheck.buildsource.source_extractors.clang import (
+    from abicheck.buildsource.source_extractors.clang_node_predicates import (
         _mangled_has_internal_linkage as internal,
     )
 
@@ -1423,7 +1423,7 @@ def test_mangled_internal_linkage_marker() -> None:
 
 
 def test_top_level_const_detection() -> None:
-    from abicheck.buildsource.source_extractors.clang import (
+    from abicheck.buildsource.source_extractors.clang_node_predicates import (
         _is_top_level_const as tlc,
     )
 
