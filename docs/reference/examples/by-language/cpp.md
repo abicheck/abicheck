@@ -3,7 +3,7 @@
 
 Cases whose committed fixtures include C++ sources.
 
-_91 case(s)._ [← back to all examples](../index.md)
+_93 case(s)._ [← back to all examples](../index.md)
 
 | Case | Title | Verdict | Category |
 |------|-------|---------|----------|
@@ -98,3 +98,5 @@ _91 case(s)._ [← back to all examples](../index.md)
 | [case204_class_gained_non_virtual_method](../case204_class_gained_non_virtual_method.md) | Class Gained a Non-Virtual Method | 🟢 COMPATIBLE | Addition (Compatible) |
 | [case215_return_double_pointer_lost_const](../case215_return_double_pointer_lost_const.md) | Returned Double Pointer Lost `const` | 🟠 API_BREAK | API Break |
 | [case216_overload_added_beside_initializer_list](../case216_overload_added_beside_initializer_list.md) | Overload Added Beside an `initializer_list` Overload | 🟢 COMPATIBLE | Addition (Compatible) |
+| [case217_export_loss_weak_binding_demoted](../case217_export_loss_weak_binding_demoted.md) | WEAK export loss demoted to a risk by a `binding: weak` rule | 🔴 BREAKING | Breaking |
+| [case218_export_loss_strong_binding_stays_breaking](../case218_export_loss_strong_binding_stays_breaking.md) | a GLOBAL export loss stays BREAKING under a `binding: weak` rule | 🔴 BREAKING | Breaking |
