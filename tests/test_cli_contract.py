@@ -1326,7 +1326,7 @@ def test_contract_alone_implies_contract_evaluation(tmp_path: Path) -> None:
     explicitly. The typed Python API (`api_types.CompareRequest.
     validation_errors`, `service._validate_contract_mode`) is unaffected and
     still requires both explicitly -- see test_compatibility_evaluation_frontend.py
-    / test_service_unit.py for that half of the contract.
+    / tests/test_service_compare_pipeline_unit.py for that half of the contract.
     """
     from click.testing import CliRunner
 

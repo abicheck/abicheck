@@ -570,7 +570,7 @@ class TestThePathsWhereNoAstIsAcquired:
     that acquisition block, so a first version read it unconditionally
     afterwards and raised `UnboundLocalError` on both paths — turning a
     documented graceful degradation (ADR-028 D3: never abort the dump) into
-    a crash. Caught by the existing `test_service_unit.py` wiring tests;
+    a crash. Caught by the existing `tests/test_header_graph_attach.py` and `tests/test_dump_native_run_dump.py` wiring tests;
     stated here as the invariant rather than left to them, because they are
     about header wiring and would not obviously be the place someone looks
     when adding the next thing to that block.

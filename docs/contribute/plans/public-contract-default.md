@@ -1251,7 +1251,7 @@ fields onto both an ordinary `changes` JSON entry and an
 `TestContractEvaluation*` classes), and the flag threads all the way
 through the Tier-2 service boundary ADR-049 §3.1 names as the resolution
 point — `service.py`'s `compare_snapshots`/`run_compare`/`CompareRequest`
-all accept and forward `contract_evaluation` (`tests/test_service_unit.py`'s
+all accept and forward `contract_evaluation` (`tests/test_service_compare_pipeline_unit.py`'s
 `TestContractEvaluationThreading`).
 
 What was still missing as of 2026-07-29, now that the false "not wired at
@@ -3018,7 +3018,7 @@ rather than `click.UsageError` which is CLI-specific) -- gated on
 explicit `mode="audit"` skips the baseline compare in `run_scan_core` even
 when a baseline path is set (a case the CLI guard doesn't need to consider,
 since the public CLI has no `--mode` flag left to set it explicitly). Three
-new tests in `test_service_unit.py` cover: rejection with no baseline,
+new tests in `tests/test_service_compare_pipeline_unit.py` cover: rejection with no baseline,
 rejection with a baseline but `mode="audit"`, and that a real baseline
 comparison using the config surface is unaffected.
 
