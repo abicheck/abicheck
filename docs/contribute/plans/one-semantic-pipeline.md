@@ -14161,7 +14161,7 @@ matching that description (`--depth binary` with an explicit header list,
 which silently clears the headers to `[]`) is intentional, already-shipped,
 reviewed behavior with its own dedicated regression tests
 (`tests/test_cli_scan.py::test_depth_binary_clears_headers_in_scan`,
-`tests/test_service_unit.py::test_depth_binary_clears_headers`,
+`tests/test_service_compare_evidence_adr055.py::test_depth_binary_clears_headers`,
 `tests/test_typed_dump_request.py`, `tests/test_depth_vocabulary.py`).
 Turning it into a hard `PlanningError` would be an unreviewed behavior
 change to already-tested surface, not a same-phase fix for a documented

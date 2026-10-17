@@ -131,7 +131,8 @@ from ..model.graph_facts import (
 )
 from ..model.name_decoration import macho_underscore as macho_decoration
 from ..model.source_graph import function_decl_identity
-from .type_graph import EDGE_TYPE_INHERITS, parse_clang_ast_types
+from .type_graph import EDGE_TYPE_INHERITS
+from .type_graph_walk import parse_clang_ast_types
 
 if TYPE_CHECKING:
     from ..model.source_graph import SourceGraphSummary

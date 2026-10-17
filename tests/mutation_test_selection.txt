@@ -193,6 +193,7 @@ tests/test_compare_no_baseline_cli.py
 tests/test_compare_no_baseline_options.py
 tests/test_compare_no_baseline_set.py
 tests/test_compare_pdb_path_shared_rejection.py
+tests/test_compare_policy_load.py
 tests/test_compare_public_entity_ids_threading_e2e.py
 tests/test_compare_release.py
 tests/test_compare_release_annotations.py
@@ -303,7 +304,10 @@ tests/test_dump_cache_spelling_and_probe.py
 tests/test_dump_cache_store.py
 tests/test_dump_cli_execution_behaviors.py
 tests/test_dump_depth_provenance.py
+tests/test_dump_elf_extract.py
 tests/test_dump_embed_idempotence.py
+tests/test_dump_native_run_dump.py
+tests/test_dump_pe_macho_unit.py
 tests/test_dump_provenance_include_scope.py
 tests/test_dump_request_from_cli.py
 tests/test_dump_resolved_execution_context.py
@@ -420,9 +424,11 @@ tests/test_header_exclusion.py
 tests/test_header_frontend_preflight.py
 tests/test_header_graph.py
 tests/test_header_graph_ast_stream.py
+tests/test_header_graph_attach.py
 tests/test_header_graph_projection_cache.py
 tests/test_header_parse_coverage.py
 tests/test_header_scan_deadline_integration.py
+tests/test_header_utils_inferred_roots.py
 tests/test_hidden_friends.py
 tests/test_history_scaling.py
 tests/test_hotspot_equivalence_properties.py
@@ -438,6 +444,7 @@ tests/test_incremental_compression.py
 tests/test_informational_never_gates.py
 tests/test_inline_body_internal_namespaces.py
 tests/test_inline_fact_reliability.py
+tests/test_input_resolution_unit.py
 tests/test_inputs_pack.py
 tests/test_inputs_validate.py
 tests/test_integer_abi_equivalence.py
@@ -472,6 +479,7 @@ tests/test_macro_graph.py
 tests/test_markdown_rollup_conservation.py
 tests/test_markdown_trailing_newline.py
 tests/test_member_compare_typed_path.py
+tests/test_metadata_attach_failures.py
 tests/test_model_identity.py
 tests/test_model_slots_memory_contract.py
 tests/test_multi_detector_interaction.py
@@ -583,6 +591,7 @@ tests/test_release_scope_plan.py
 tests/test_release_scope_selection.py
 tests/test_release_selection.py
 tests/test_release_suppression_audit.py
+tests/test_render_output_unit.py
 tests/test_report_change_view_entity_id.py
 tests/test_report_filtering.py
 tests/test_report_format_bucket_parity.py
@@ -620,12 +629,13 @@ tests/test_semver_recommendation.py
 tests/test_serialization.py
 tests/test_serialization_function_compiler_generated.py
 tests/test_serialization_roundtrip.py
+tests/test_service_compare_evidence_adr055.py
 tests/test_service_compare_pipeline.py
+tests/test_service_compare_pipeline_unit.py
 tests/test_service_dump_cache.py
 tests/test_service_dump_cache_compile_context.py
 tests/test_service_dump_cache_key_audit.py
 tests/test_service_dump_cache_write.py
-tests/test_service_unit.py
 tests/test_severity.py
 tests/test_shared_build_evidence_dedup.py
 tests/test_sided_include_composition.py
@@ -766,6 +776,7 @@ tests/unit/report/test_review_sections_html.py
 tests/unit/report/test_section_notes.py
 tests/unit/storage/test_bundle_facts_generation_drift.py
 tests/unit/storage/test_decode_fast_path.py
+tests/unit/storage/test_entity_id_domain_bridge.py
 tests/unit/storage/test_generation_drift_notice.py
 tests/unit/storage/test_import_baseline_set.py
 tests/unit/storage/test_import_bundle_facts.py

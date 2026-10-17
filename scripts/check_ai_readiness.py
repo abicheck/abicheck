@@ -192,7 +192,6 @@ LARGE_FILE_ALLOWLIST: frozenset[str] = frozenset(
     {
         "scripts/benchmark_comparison.py",
         "scripts/check_ai_readiness.py",
-        "tests/test_type_graph.py",
         "tests/test_l3l4l5_new_kinds.py",
         "tests/test_dumper_clang.py",
         "tests/test_source_abi.py",
@@ -200,7 +199,6 @@ LARGE_FILE_ALLOWLIST: frozenset[str] = frozenset(
         "tests/test_source_extractors_clang.py",
         "tests/test_build_source_cli.py",
         "tests/test_cov95_cli.py",
-        "tests/test_service_unit.py",
         "tests/test_cross_source_checks.py",
         "tests/test_dwarf_coverage_gaps.py",
         "tests/test_package.py",

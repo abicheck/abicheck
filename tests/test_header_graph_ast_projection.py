@@ -384,11 +384,11 @@ class TestEveryProjectionMemberIsLoadBearing:
         self, ast_name: str
     ) -> None:
         from abicheck.buildsource.call_graph import parse_clang_ast_calls
-        from abicheck.buildsource.type_graph import (
+        from abicheck.buildsource.type_graph_index import (
             index_declared_entity_files,
             index_declared_type_files,
-            parse_clang_ast_types,
         )
+        from abicheck.buildsource.type_graph_walk import parse_clang_ast_types
 
         ast = AST_CASES[ast_name]
         projection = project_header_graph_ast(ast)
