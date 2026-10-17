@@ -80,14 +80,6 @@ import re
 from collections.abc import Callable
 from typing import Any
 
-from ....extract.headers.clang.qualifiers import (
-    clang_record_is_abstract,
-    clang_record_type_traits,
-    desugared_qualtype,
-    field_own_cv_source,
-    record_kind,
-    reduce_opaque_kind_set,
-)
 from ....model import Fact, RecordType, TypeField
 from ....model.identity import entity_id_for_type
 from .context import (
@@ -99,6 +91,14 @@ from .context import (
     is_builtin_file,
     qualtype,
     source_location,
+)
+from .qualifiers import (
+    clang_record_is_abstract,
+    clang_record_type_traits,
+    desugared_qualtype,
+    field_own_cv_source,
+    record_kind,
+    reduce_opaque_kind_set,
 )
 from .vtable import build_vtable, is_record_definition
 

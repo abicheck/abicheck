@@ -26,7 +26,7 @@ comparison (Codex review, PR #1253).
 
 That is `cli_surface.copied_option_table_went_stale` one adapter out, so
 the oracle here is never this module's own table and never a pinned
-constant: it is **`abicheck.package.is_package` itself**, asked of the same
+constant: it is **`abicheck.extract.packages.is_package` itself**, asked of the same
 bytes. A test that listed the expected answers would drift exactly the way
 the shell table did.
 """
@@ -43,7 +43,7 @@ import pytest
 from _package_fixtures import _make_conda_v2, _make_tar_mode, _make_wheel
 from _workflow_exec import bash_executable, require_bash
 
-from abicheck.package import is_package
+from abicheck.extract.packages import is_package
 
 RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
 

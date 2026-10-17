@@ -394,8 +394,8 @@ class TestSuppressedRemovalCarriesDemangledSymbol:
     def test_suppressed_elf_only_removal_carries_demangled_symbol(
         self, deterministic_demangle
     ) -> None:
+        from abicheck.policy.suppression.rules import Suppression, SuppressionList
         from abicheck.reporter import to_json
-        from abicheck.suppression import Suppression, SuppressionList
 
         old = _snapshot(
             [

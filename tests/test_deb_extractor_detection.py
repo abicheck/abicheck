@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from abicheck.package import DebExtractor, detect_extractor
+from abicheck.extract.packages import DebExtractor, detect_extractor
 
 
 def _ar(first_member: bytes) -> bytes:

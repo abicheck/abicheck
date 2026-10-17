@@ -242,7 +242,7 @@ Core pipeline (in order of data flow):
      history-report-only fact over `workflows/history.py`'s
      `LongitudinalHistoryResult.deprecation_compliance`, never read by any
      pairwise `compare()` verdict)
-   - `suppression.py` — suppression rules (YAML + ABICC formats)
+   - `policy/suppression/rules.py` — suppression rules (YAML + ABICC formats)
    - `policy/finding_disposition/` — what happens to a finding after diff
      (ADR-067 "record before disposing"): `dispose_findings(changes, old,
      new, DispositionRules)` runs the default step order

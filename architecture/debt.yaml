@@ -783,7 +783,7 @@
       "review_by": "2026-11-30"
     },
     {
-      "path": "abicheck/package.py",
+      "path": "abicheck/extract/packages.py",
       "baseline_lines": 1734,
       "target": "storage",
       "rule": "no_growth",
@@ -926,14 +926,14 @@
       "review_by": "2026-11-30"
     },
     {
-      "path": "abicheck/suppression.py",
+      "path": "abicheck/policy/suppression/rules.py",
       "baseline_lines": 1018,
       "target": "policy (done; classified, remaining debt is line count only)",
       "rule": "no_growth",
       "disposition": "migrate",
       "category": "legacy_oversized_module",
       "owner": "policy",
-      "rationale": "Classification is done: `abicheck/suppression.py` is `policy` in architecture/modules.yaml, and the real `frontends -> policy` edge this entry originally recorded (cli_params.py:27,383 and cli_scan_baseline.py:52 importing SuppressionList directly) is closed -- both now route through `abicheck.workflows.suppression_input`, the same pattern `abicheck.workflows.storage` already established for `snapshot_io.py` (verified: `python scripts/check_architecture.py` reports 0 findings). What remains is only this file's own size: at 1993 lines it is far over the 800-line production cap, so it stays `no_growth`-tracked under `legacy_oversized_module` until it is itself split -- a separate, larger slice than the classification work this entry originally blocked on (CodeRabbit review caught this entry's target/rationale going stale after the classification landed).",
+      "rationale": "Classification is done: `abicheck/policy/suppression/rules.py` is `policy` in architecture/modules.yaml, and the real `frontends -> policy` edge this entry originally recorded (cli_params.py:27,383 and cli_scan_baseline.py:52 importing SuppressionList directly) is closed -- both now route through `abicheck.workflows.suppression_input`, the same pattern `abicheck.workflows.storage` already established for `snapshot_io.py` (verified: `python scripts/check_architecture.py` reports 0 findings). What remains is only this file's own size: at 1993 lines it is far over the 800-line production cap, so it stays `no_growth`-tracked under `legacy_oversized_module` until it is itself split -- a separate, larger slice than the classification work this entry originally blocked on (CodeRabbit review caught this entry's target/rationale going stale after the classification landed).",
       "review_by": "2026-11-30"
     },
     {
@@ -1752,7 +1752,7 @@
     },
     {
       "path": "tests/test_package.py",
-      "baseline_lines": 4497,
+      "baseline_lines": 4494,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",

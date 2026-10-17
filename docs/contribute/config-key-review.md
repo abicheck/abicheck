@@ -290,7 +290,7 @@ The silent `strict_abi` fallback that exists in the low-level `get_policy()`
 helper (`checker_policy.py:715`) is **not** reachable through `--policy`,
 because `PolicyFile.load()` validates the name first. No change needed here.
 
-**Suppression file** (`--suppress`, `suppression.py`): selectors `symbol`,
+**Suppression file** (`--suppress`, `policy/suppression/rules.py`): selectors `symbol`,
 `symbol_pattern`, `type_pattern`, `member_name`, `change_kind`, `namespace`,
 `source_location`, plus `reason`/`label`/`expires`. Rich but each selector earns
 its place; unknown keys are *rejected* (good — catches typos). No removal

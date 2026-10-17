@@ -1,4 +1,4 @@
-"""Direct unit tests for suppression_yaml.py's raw-scalar YAML helpers.
+"""Direct unit tests for policy/suppression/yaml_scalars.py's raw-scalar YAML helpers.
 
 Complements the end-to-end SuppressionList.load() regression tests in
 test_canonical_finding_id.py (TestFindingIdSuppressionSelector) by
@@ -11,7 +11,10 @@ from __future__ import annotations
 
 import pytest
 
-from abicheck.suppression_yaml import parse_finding_id, raw_finding_ids_by_index
+from abicheck.policy.suppression.yaml_scalars import (
+    parse_finding_id,
+    raw_finding_ids_by_index,
+)
 
 
 class TestRawFindingIdsByIndex:

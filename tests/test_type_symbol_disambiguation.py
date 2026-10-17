@@ -223,7 +223,7 @@ def test_a_rule_written_against_the_qualified_label_suppresses_it() -> None:
     """The report shows ``lib::m1::Ctx``; a rule copied from it must match,
     although suppression runs while the finding is still labelled ``Ctx``.
     The bare rule keeps matching too."""
-    from abicheck.suppression import Suppression, SuppressionList
+    from abicheck.policy.suppression.rules import Suppression, SuppressionList
 
     for symbol in ("lib::m1::Ctx", "Ctx"):
         old = _snapshot("1", ["m0", "m1"], set(), unique=False)
@@ -236,7 +236,7 @@ def test_a_rule_written_against_the_qualified_label_suppresses_it() -> None:
 
 
 def test_a_mismatched_qualified_rule_suppresses_nothing() -> None:
-    from abicheck.suppression import Suppression, SuppressionList
+    from abicheck.policy.suppression.rules import Suppression, SuppressionList
 
     old = _snapshot("1", ["m0", "m1"], set(), unique=False)
     new = _snapshot("2", ["m0", "m1"], {"m1"}, unique=False)
@@ -446,7 +446,7 @@ def test_ambiguity_ignores_baked_names_and_unspellable_declarations() -> None:
 
 
 def test_a_symbol_pattern_rule_matches_the_qualified_label() -> None:
-    from abicheck.suppression import Suppression, SuppressionList
+    from abicheck.policy.suppression.rules import Suppression, SuppressionList
 
     old = _snapshot("1", ["m0", "m1"], set(), unique=False)
     new = _snapshot("2", ["m0", "m1"], {"m0", "m1"}, unique=False)

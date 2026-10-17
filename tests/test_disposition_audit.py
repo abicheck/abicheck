@@ -60,9 +60,9 @@ from abicheck.policy.disposition_ledger import (
     record_suppressed_change,
 )
 from abicheck.policy.finding_disposition import dispose_findings
+from abicheck.policy.suppression.rules import Suppression, SuppressionList
 from abicheck.report.disposition_audit import compute_disposition_audit
 from abicheck.semver import SemverBump
-from abicheck.suppression import Suppression, SuppressionList
 
 
 def _snapshots(

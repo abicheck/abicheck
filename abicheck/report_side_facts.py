@@ -66,7 +66,7 @@ class ReportSideFacts:
     )
     # The ``--audit-suppressions`` ledger (``suppression.SuppressionAudit``),
     # attached by ``cli_compare_helpers._attach_suppression_audit`` before
-    # rendering. Typed ``object`` rather than the real type: ``suppression.py``
+    # rendering. Typed ``object`` rather than the real type: ``policy/suppression/rules.py``
     # imports ``Change`` from ``checker_types.py``, so ``checker_types.py``
     # importing ``SuppressionAudit`` back would be circular -- the same
     # reason ``DiffResult.contract_context``/``analysis_assurance`` are typed

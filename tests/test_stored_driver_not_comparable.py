@@ -96,7 +96,7 @@ class TestNotComparableMemberIsRecordedNotRaised:
     def test_stored_live_keeps_the_sibling(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        import abicheck.package as package
+        import abicheck.extract.packages as package
         from abicheck.bundle_side_input import compare_release_against_bundle_facts
 
         monkeypatch.setattr(

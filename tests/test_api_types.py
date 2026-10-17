@@ -554,7 +554,7 @@ class TestCompareResult:
         assert result.suppression is None
 
     def test_carries_the_resolved_suppression_list(self):
-        from abicheck.suppression import SuppressionList
+        from abicheck.policy.suppression.rules import SuppressionList
 
         _result, diff, old, new = self._result()
         suppression = SuppressionList([])  # empty rule set is enough here

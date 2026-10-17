@@ -44,29 +44,6 @@ from xml.etree.ElementTree import Element, tostring
 
 from ....dumper_ast_config_cpp20 import _detect_cpp20_headers
 from ....errors import SnapshotError, UnsupportedCastxmlVersionError
-from ....extract.headers.ast_config import (
-    _build_castxml_command,
-    _cache_key,
-    _resolve_compiler_binary,
-)
-from ....extract.headers.castxml.dumper import _CastxmlParser
-from ....extract.headers.castxml.policy import evaluate_castxml_version
-from ....extract.headers.castxml.probe import (
-    _castxml_cpp_retry_allowed,
-    _validate_castxml_output,
-    castxml_dump_excluding_unparseable,
-    check_scan_deadline,
-    record_unparseable_headers,
-    run_castxml,
-)
-from ....extract.headers.toolchain import (
-    _allow_unsupported_castxml_enabled,
-    _resolve_force_cpp,
-    _resolve_selected_tool,
-    _stamp_ast_parser,
-    _tool_identity,
-    _tool_identity_metadata,
-)
 from ....storage.atomic_file import atomic_write as _atomic_write
 from ....storage.cache_integrity import record_digest
 from ....storage.header_ast_cache import (
@@ -77,9 +54,32 @@ from ....storage.header_ast_cache import (
 )
 from ...castxml_header_compat import write_castxml_aggregate
 from ...path_aliases import absolutize_include_roots
+from ..ast_config import (
+    _build_castxml_command,
+    _cache_key,
+    _resolve_compiler_binary,
+)
 from ..backend_protocol import HeaderParseRequest
+from ..toolchain import (
+    _allow_unsupported_castxml_enabled,
+    _resolve_force_cpp,
+    _resolve_selected_tool,
+    _stamp_ast_parser,
+    _tool_identity,
+    _tool_identity_metadata,
+)
 from .calling_convention import calling_conventions_in
+from .dumper import _CastxmlParser
+from .policy import evaluate_castxml_version
 from .preprocessed_text import attach_preprocessed_text, resolve_preprocessed_text
+from .probe import (
+    _castxml_cpp_retry_allowed,
+    _validate_castxml_output,
+    castxml_dump_excluding_unparseable,
+    check_scan_deadline,
+    record_unparseable_headers,
+    run_castxml,
+)
 
 # The orchestrator's logger name, kept from before the move.
 log = logging.getLogger("abicheck.dumper")

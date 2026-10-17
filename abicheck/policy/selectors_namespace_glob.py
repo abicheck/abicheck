@@ -27,7 +27,7 @@ outside this pair notices the split; ``tests/test_selectors_namespace_glob.py``
 exercises this module directly (mirroring how ``tests/test_selectors.py``
 covers ``selectors.py`` itself), and ``tests/test_suppression_edge_cases.py``
 still reaches a couple of internals here directly too, for the same reason
-it already reached into ``suppression.py``'s private internals before this
+it already reached into ``policy/suppression/rules.py``'s private internals before this
 phase moved the grammar out of it.
 
 Pure stdlib (``re``/``fnmatch`` only) — no first-party import at all, so it

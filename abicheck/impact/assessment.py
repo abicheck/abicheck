@@ -17,7 +17,7 @@
 ``ImpactAssessment``/``GraphProofPath``/``FindingDecision`` are a shared,
 queryable shape over reachability/impact fields that
 ``source_graph_findings.py``, ``internal_leak.py``, ``post_processing.py``,
-``suppression.py``, and ``appcompat.py`` each independently set on
+``policy/suppression/rules.py``, and ``appcompat.py`` each independently set on
 ``Change`` today. This module only defines the shape; :mod:`.engine` builds
 one from an existing ``Change`` object. See ADR-052 for the full decision
 record, including which plan-described fields (``changed_entities``,

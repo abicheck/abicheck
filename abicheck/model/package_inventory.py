@@ -15,7 +15,7 @@
 
 """ADR-065 D1/D2 (S3): a package's **declared component inventory**.
 
-``abicheck/package.py`` used to answer "what does this package ship?" with a
+``abicheck/extract/packages.py`` used to answer "what does this package ship?" with a
 directory -- so a component the extractor never produced and a component the
 package no longer ships were one state, and no package operand could ever
 prove the absence D2 requires before an unmatched member becomes a

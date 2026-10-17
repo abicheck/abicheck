@@ -95,7 +95,7 @@ def test_reclassification_and_suppression_compose(tmp_path: Path) -> None:
     annotates whichever one the finding actually received."""
     from abicheck.checker import compare
     from abicheck.model import AbiSnapshot, Function, Visibility
-    from abicheck.suppression import Suppression, SuppressionList
+    from abicheck.policy.suppression.rules import Suppression, SuppressionList
 
     pf = _policy_file(tmp_path, symbol="foo", reason="COMDAT-inline demotions")
     old = AbiSnapshot(

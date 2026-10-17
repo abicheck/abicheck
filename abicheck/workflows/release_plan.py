@@ -30,7 +30,7 @@ comparable inputs through the real release fan-out's own owner,
 ``workflows.release_inputs.collect_release_inputs`` (any file format
 `compare` accepts, not only a real ELF shared object), plus
 ``binary_utils.build_match_map`` (the same version-aware canonical-key
-dedup) -- rather than :func:`abicheck.package.discover_shared_libraries`,
+dedup) -- rather than :func:`abicheck.extract.packages.discover_shared_libraries`,
 which only recognizes ELF shared objects and would silently show an empty
 or wrong plan for a directory of ``.json`` snapshots or another supported
 non-ELF input (an earlier version of this preview made exactly that

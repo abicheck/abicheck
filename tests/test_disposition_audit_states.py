@@ -36,8 +36,8 @@ from abicheck.checker import compare
 from abicheck.checker_policy import ChangeKind
 from abicheck.model import AbiSnapshot, Function, Variable, Visibility
 from abicheck.policy.disposition_ledger import DispositionLedger
+from abicheck.policy.suppression.rules import Suppression, SuppressionList
 from abicheck.semver import ReleaseRecommendationState, SemverBump
-from abicheck.suppression import Suppression, SuppressionList
 
 
 def _snapshots(

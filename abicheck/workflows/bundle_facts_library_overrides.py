@@ -450,7 +450,7 @@ def known_libraries_for_new_side(
     ``set(known_libraries_for_new_side(...))`` recovers the old key-only
     set for a caller that only needs bundle membership.
     """
-    from ..package import discover_shared_libraries
+    from ..extract.packages import discover_shared_libraries
     from .extraction import build_match_map
 
     # Codex review, fresh evidence: mirrors compare_release_against_

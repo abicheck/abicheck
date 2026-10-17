@@ -50,7 +50,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from ...service_compare_evidence import SideEvidence
-    from ...workflows.resolved_execution_context import ResolvedExecutionContext
+    from ..resolved_execution_context import ResolvedExecutionContext
     from ..service_requests import DumpRequest
 
 __all__ = ["ResolvedDumpRequest"]

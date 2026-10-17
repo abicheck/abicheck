@@ -223,9 +223,9 @@ class TestEvidenceDepthAndSuppressionAuditJsonByteParity:
         assert new_text == old_text
 
     def test_suppression_audit_matches_reconstructed_old_fold(self) -> None:
+        from abicheck.policy.suppression.rules import Suppression, SuppressionAudit
         from abicheck.reporter import to_json
         from abicheck.reporter_contract_blocks import suppression_rule_label
-        from abicheck.suppression import Suppression, SuppressionAudit
 
         result = self._base_result()
         base_text = to_json(result)
@@ -261,8 +261,8 @@ class TestEvidenceDepthAndSuppressionAuditJsonByteParity:
         suppression_audit *before* evidence_depth (both appended at dict
         end), so the new mechanism must attach/emit them in the same
         relative order to stay byte-identical when both are present."""
+        from abicheck.policy.suppression.rules import Suppression, SuppressionAudit
         from abicheck.reporter import to_json
-        from abicheck.suppression import Suppression, SuppressionAudit
 
         result = self._base_result()
         base_text = to_json(result)
@@ -318,8 +318,8 @@ class TestStatJsonIncludesSideFacts:
         assert payload["new_evidence_depth"] == "source"
 
     def test_suppression_audit_present_in_stat_json(self) -> None:
+        from abicheck.policy.suppression.rules import Suppression, SuppressionAudit
         from abicheck.reporter import to_stat_json
-        from abicheck.suppression import Suppression, SuppressionAudit
 
         result = self._base_result()
         rule = Suppression(symbol="never_matches_anything", reason="workaround")
@@ -369,16 +369,16 @@ class TestSuppressionRuleLabelFallbacks:
     read to this function."""
 
     def test_label_only_no_selectors_returns_bare_label(self) -> None:
+        from abicheck.policy.suppression.rules import Suppression
         from abicheck.reporter_contract_blocks import suppression_rule_label
-        from abicheck.suppression import Suppression
 
         rule = Suppression(symbol="placeholder", label="workaround")
         rule.symbol = None
         assert suppression_rule_label(rule, 0) == "workaround"
 
     def test_no_label_no_selectors_falls_back_to_bucket_index(self) -> None:
+        from abicheck.policy.suppression.rules import Suppression
         from abicheck.reporter_contract_blocks import suppression_rule_label
-        from abicheck.suppression import Suppression
 
         rule = Suppression(symbol="placeholder")
         rule.symbol = None

@@ -70,8 +70,8 @@ if TYPE_CHECKING:
     from ..compatibility_evaluation_config import CompatibilityEvaluationConfig
     from ..compatibility_evaluation_frontend import ProjectCompatibilityInputs
     from ..policy.release_gate_options import GateOptions
+    from ..policy.suppression.rules import SuppressionList
     from ..policy_file import PolicyFile
-    from ..suppression import SuppressionList
     from .compare_configuration import CompareConfiguration
     from .service_requests import CompareRequest
 

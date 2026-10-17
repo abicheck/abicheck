@@ -977,7 +977,7 @@ decision text meant by naming `suppression.py` alongside
 `internal_leak.py`, and `appcompat.py`. Resolved by re-reading the module
 itself, not by guessing at authorial intent.
 
-**Finding**: `abicheck/suppression.py` constructs no `Change` and mutates no
+**Finding**: `abicheck/policy/suppression/rules.py` constructs no `Change` and mutates no
 `Change` field, anywhere in the module — confirmed by grepping every
 assignment target in the file. `Suppression.matches`/`would_withhold`/
 `would_withhold_unknown_reachability` and `SuppressionList.evaluate` only
@@ -1164,7 +1164,7 @@ depend on anything in this ADR being done differently.
 - `abicheck/sarif.py` — `_result_for`, `_missing_contract_result`
 - `abicheck/cli_compare_fold.py` — `_fold_scoped_compat_into_text`
 - `abicheck/cli.py` — `--report-mode` `click.Choice`
-- `abicheck/suppression.py` — `SuppressionOutcome.matched_rule`/`rule_label`
+- `abicheck/policy/suppression/rules.py` — `SuppressionOutcome.matched_rule`/`rule_label`
 - `abicheck/checker.py`, `abicheck/post_processing.py` — `Change.suppression_rule` set at suppression time (`_filter_suppressed_changes`, `_filter_pattern_synthetic`, `ApplySuppression.run`, `_merge_findings_respecting_suppression`)
 - `abicheck/schemas/compare_report.schema.json`, `abicheck/schemas/__init__.py`
 - `tests/test_impact_model.py`, `tests/test_suppression.py`, `tests/test_sarif.py`, `tests/test_cov95_cli.py`, `tests/test_reporter.py`, `tests/test_reachability_aware_suppression.py`

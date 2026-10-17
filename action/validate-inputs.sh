@@ -32,7 +32,7 @@ SNAPSHOT_COMPRESSION="${INPUT_SNAPSHOT_COMPRESSION:-}"
 
 # A directory, or a file whose name/magic bytes match a recognized package
 # format (RPM, Deb, tar, conda, wheel) — mirrors action/run.sh's
-# `_is_release_style_operand()` (abicheck/package.py's `is_package()`
+# `_is_release_style_operand()` (abicheck/extract/packages.py's `is_package()`
 # detection, including its magic-byte fallback for extensionless RPM/Deb).
 # Duplicated rather than sourced so this validation step has zero
 # dependency on run.sh's internal layout; tests/test_action_validate_inputs.py

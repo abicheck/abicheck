@@ -73,7 +73,7 @@ If your detector's finding can be suppressed, it must go through the same
 reachability-aware gate every other graph-derived finding does
 ([ADR-044](adr/044-reachability-aware-suppression.md)):
 `Change.reachability_state`/`public_reachable` set honestly (never
-`PROVEN_UNREACHABLE` on `UNKNOWN` evidence), so `suppression.py`'s
+`PROVEN_UNREACHABLE` on `UNKNOWN` evidence), so `policy/suppression/rules.py`'s
 `reachability: proven-unreachable-only` gate can do its job. A new walk that
 skips this — e.g. by hand-rolling its own reachability check instead of
 routing through `post_processing.MarkReachability` or the shared

@@ -66,8 +66,8 @@ if TYPE_CHECKING:
     from ..model.acknowledgment_policy import AcknowledgmentPolicy
     from ..model.change import Change
     from ..policy.acknowledgment import AcknowledgmentList
+    from ..policy.suppression.rules import SuppressionList
     from ..policy_file import PolicyFile
-    from ..suppression import SuppressionList
 
 _logger = logging.getLogger(__name__)
 
@@ -99,8 +99,8 @@ def load_suppression_and_policy(
     Raises:
         ValidationError: If the suppression or policy file is invalid.
     """
+    from ..policy.suppression.rules import SuppressionList as _SuppressionList
     from ..policy_file import PolicyFile as _PolicyFile
-    from ..suppression import SuppressionList as _SuppressionList
 
     suppression: _SuppressionList | None = None
     if suppress is not None:

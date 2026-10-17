@@ -51,18 +51,6 @@ from ....dumper_clang_errors import (
     run_clang_ast,
 )
 from ....errors import SnapshotError
-from ....extract.headers.ast_config import (
-    _build_clang_header_command,
-    _cache_key,
-    clang_aggregate_text,
-)
-from ....extract.headers.sysinc import _resolve_clang_system_includes
-from ....extract.headers.toolchain import (
-    _configured_target_triple,
-    _resolve_force_cpp,
-    _stamp_ast_parser,
-    _tool_identity,
-)
 from ....storage.header_ast_cache import (
     _cache_path,
     ast_acquisition_active,
@@ -79,7 +67,19 @@ from ...compiler_driver import (
     resolve_dpcpp_acquisition,
 )
 from ...path_aliases import absolutize_include_roots
+from ..ast_config import (
+    _build_clang_header_command,
+    _cache_key,
+    clang_aggregate_text,
+)
 from ..backend_protocol import HeaderParseRequest
+from ..sysinc import _resolve_clang_system_includes
+from ..toolchain import (
+    _configured_target_triple,
+    _resolve_force_cpp,
+    _stamp_ast_parser,
+    _tool_identity,
+)
 from .error_header_retry import retry_excluding_error_headers
 from .locations import materialize_locations
 

@@ -17,7 +17,7 @@
 recognises, with the *name* left entirely to the caller.
 
 Shared (not a `test_` module) because plan Phase 7n made every extractor in
-`abicheck.package` route on content rather than on a suffix, so both
+`abicheck.extract.packages` route on content rather than on a suffix, so both
 `test_package.py` and `test_evidence_transport_roles.py` need archives that
 are genuinely what they claim -- an empty file named `test.tar` no longer
 proves anything, and a fixture builder that quietly produced one would make

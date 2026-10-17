@@ -1098,7 +1098,7 @@ jobs:
           python3 -c '
           import sys
           from pathlib import Path
-          from abicheck.package import TarExtractor
+          from abicheck.extract.packages import TarExtractor
 
           TarExtractor().extract(Path(sys.argv[1]), Path(sys.argv[2]))
           ' "$existing_download" .existing-asset/extracted

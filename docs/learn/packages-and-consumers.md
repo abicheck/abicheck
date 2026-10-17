@@ -9,7 +9,7 @@ canonical_for:
 summarizes:
   - project-integration
 depends_on:
-  - abicheck/package.py
+  - abicheck/extract/packages.py
   - abicheck/debian_symbols.py
   - abicheck/workflows/abi3_audit.py
 lifecycle: active

@@ -50,11 +50,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import IO, TYPE_CHECKING, Any, Protocol, runtime_checkable
 
-from .deadline import run_bounded
-from .errors import ExtractionSecurityError, SnapshotError
+from ..deadline import run_bounded
+from ..errors import ExtractionSecurityError, SnapshotError
 
 if TYPE_CHECKING:
-    from .model.package_inventory import PackageInventory
+    from ..model.package_inventory import PackageInventory
 
 _log = logging.getLogger(__name__)
 
@@ -638,7 +638,7 @@ class TarExtractor:
                 # (Codex review, fresh evidence). max_window_size reuses
                 # snapshot_io.py's own zstd-memory-bomb defense rather
                 # than a second, independently-derived window ceiling.
-                from .snapshot_io import _zstd_max_window_size_bytes
+                from ..snapshot_io import _zstd_max_window_size_bytes
 
                 max_decoded_bytes = _max_decompressed_tar_bytes()
                 dctx = zstandard_mod.ZstdDecompressor(
@@ -1126,8 +1126,8 @@ class CondaExtractor:
 # The wheel filename-tag/``METADATA`` fact readers moved to
 # ``extract/wheel_tags.py`` (ADR-065 S3 -- see that module's docstring for
 # why). Re-exported here, private helpers included, so every existing
-# ``from abicheck.package import ...`` call site and test keeps resolving.
-from .extract.wheel_tags import (  # noqa: E402
+# ``from abicheck.extract.packages import ...`` call site and test keeps resolving.
+from .wheel_tags import (  # noqa: E402
     _implementation_name_from_wheel_filename,  # noqa: F401
     _implementation_version_from_wheel_filename,  # noqa: F401
     _os_name_from_wheel_filename,  # noqa: F401
@@ -1558,8 +1558,8 @@ def package_component_inventory(
     simply is not an ELF shared object (a linker script, a static archive
     named ``.so``) is neither: it was never a comparison operand.
     """
-    from .binary_utils import _canonical_library_key
-    from .model.package_inventory import (
+    from ..binary_utils import _canonical_library_key
+    from ..model.package_inventory import (
         ComponentKind,
         PackageComponent,
         PackageInventory,

@@ -239,7 +239,7 @@ class TestUnsuppressibility:
         """The direct proof. These rules are deliberately broad -- a wildcard
         symbol selector that matches every real finding -- and are handed to
         the same predicate `checker._filter_suppressed_changes` consults."""
-        from abicheck.suppression import SuppressionList
+        from abicheck.policy.suppression.rules import SuppressionList
 
         rules = tmp_path / "s.yaml"
         rules.write_text(

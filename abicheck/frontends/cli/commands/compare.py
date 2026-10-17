@@ -48,7 +48,7 @@ from ....cli_options import (
     two_sided_input_options,
     verbose_option,
 )
-from ....frontends.cli import help as cli_help
+from .. import help as cli_help
 from ..dump_debug_config import resolve_stored_bundle_lang
 from ..options.evidence_roles import reject_unsupported_detached_debug
 from ..options.operand_path import CompareOperandPath

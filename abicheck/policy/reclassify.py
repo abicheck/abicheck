@@ -17,7 +17,7 @@
 Two rule forms already exist for steering a verdict, each half-right for a
 project that needs the other half:
 
-- ``suppression.py``'s ``Suppression`` — a rich per-symbol/pattern/namespace
+- ``policy/suppression/rules.py``'s ``Suppression`` — a rich per-symbol/pattern/namespace
   selector grammar, but its only action is *deleting* the finding.
 - ``policy_file.py``'s ``overrides:`` block — keeps the finding and changes
   its verdict, but is keyed by ``ChangeKind`` alone, with no selector: the
@@ -39,15 +39,15 @@ throws away evidence a reviewer may still want to see.
 Builds a :class:`~abicheck.policy.selectors.SelectorSet` directly (ADR-063
 D10, implementation plan Phase 9) for selector matching rather than
 re-implementing the glob/regex machinery a second time — deliberately
-bypassing :class:`~abicheck.suppression.Suppression`'s reachability /
+bypassing :class:`~abicheck.policy.suppression.rules.Suppression`'s reachability /
 ``allow_public_break`` gates, since those exist to guard against a rule
 *hiding* evidence, which does not apply here: a reclassified finding stays
 in the report, just at a different verdict. Before Phase 9, this module
-built a :class:`~abicheck.suppression.Suppression` instance purely for its
+built a :class:`~abicheck.policy.suppression.rules.Suppression` instance purely for its
 selector grammar (resolved via ``importlib.import_module`` — see below for
 why a static import couldn't be used at the time); now that the grammar
 itself lives in a dependency-free leaf module neither this module nor
-``suppression.py`` needs to import the *other*, so this module imports
+``policy/suppression/rules.py`` needs to import the *other*, so this module imports
 ``policy/selectors.py`` **statically**, and the workaround is gone.
 
 Loaded as an optional ``reclassify:`` block in a ``--policy-file`` document,
@@ -77,7 +77,7 @@ SCC growth regardless of whether the importing statement is function-local
 ``change``/``Change`` parameters stay typed ``Any`` for the same reason.
 :mod:`abicheck.policy.selectors` carries no such risk and is imported
 statically at module scope -- it is a leaf with zero dependency on
-``policy_file.py``/``checker_types.py``/``suppression.py``/this module/
+``policy_file.py``/``checker_types.py``/``policy/suppression/rules.py``/this module/
 ``finding_identity.py`` (enforced by ``scripts/check_architecture.py``, not
 just documented -- see that module's own docstring), so it cannot
 participate in the cycle above.
@@ -213,7 +213,7 @@ class ReclassifyRule:
         symbol, symbol_pattern, type_pattern, member_name, namespace,
         entity_namespace, cause_namespace, source_location, binding,
         change_kind, expires: Same selector grammar and semantics as the
-            identically named :class:`~abicheck.suppression.Suppression`
+            identically named :class:`~abicheck.policy.suppression.rules.Suppression`
             fields — see that class's docstrings for each. At least one
             selector is required, enforced by the same validation
             :class:`Suppression` already performs. ``binding`` is
@@ -225,7 +225,7 @@ class ReclassifyRule:
     **Selector fields are read once, into an internal ``SelectorSet``, at
     construction time (``__post_init__``) -- mutating one afterward does not
     change what :meth:`matches` matches, the identical contract
-    :class:`~abicheck.suppression.Suppression` documents for the same
+    :class:`~abicheck.policy.suppression.rules.Suppression` documents for the same
     reason.** Construct a new ``ReclassifyRule`` instead of mutating one in
     place if a rule's selectors need to change.
     """
@@ -252,7 +252,7 @@ class ReclassifyRule:
     binding: str | None = None
     #: Built at construction time and reused for every :meth:`matches` call
     #: rather than re-validated/re-compiled per call — mirrors how
-    #: :class:`~abicheck.suppression.Suppression` itself eagerly compiles its
+    #: :class:`~abicheck.policy.suppression.rules.Suppression` itself eagerly compiles its
     #: own patterns (it now builds an identical
     #: :class:`~abicheck.policy.selectors.SelectorSet` internally, ADR-063
     #: D10). Typed against the real leaf class directly -- unlike
@@ -642,7 +642,7 @@ def effective_verdict_for_change(
     # Reuses `base_sets` (already computed above from `policy_file.
     # base_policy` when a policy_file is given) rather than recomputing from
     # the outer `policy`/`kind_sets` parameters directly (Codex review,
-    # pre-existing bug surfaced by suppression.py's audit() calling this
+    # pre-existing bug surfaced by policy/suppression/rules.py's audit() calling this
     # with only `policy_file=` set, no `policy=`/`kind_sets=`): for a
     # policy_file whose base_policy isn't strict_abi (e.g. plugin_abi), a
     # finding with no effective_verdict/reclassify/override match fell all

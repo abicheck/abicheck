@@ -117,7 +117,7 @@ def test_surface_metrics_off_by_default() -> None:
 
 
 def test_metric_findings_suppressible() -> None:
-    from abicheck.suppression import Suppression, SuppressionList
+    from abicheck.policy.suppression.rules import Suppression, SuppressionList
 
     old = _snap(["a"])
     new = _snap(["a", "b", "c"])

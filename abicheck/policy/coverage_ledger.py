@@ -36,7 +36,7 @@ are unsuppressible."
 
 Until now only half of that existed. `contract_evidence_collect` produces
 one `EvidenceSearchRecord` per (provider, side) with its own status and
-completeness -- the raw observation -- and `suppression.py` has a full audit
+completeness -- the raw observation -- and `policy/suppression/rules.py` has a full audit
 trail of what a run's rules silenced. What was missing is the thing in
 between: a *derived* statement of which of those observations are coverage
 **failures for the domain this run selected**, in a ledger that is

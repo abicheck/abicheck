@@ -161,7 +161,7 @@ topics:
     canonical_page: use/rust-libraries.md
     fact_sources:
       - abicheck/policies/rust_c_ffi.yaml
-      - abicheck/package.py
+      - abicheck/extract/packages.py
       - abicheck/diff_templates.py
     allowed_summaries:
       - use/policies.md
@@ -467,8 +467,8 @@ topics:
   suppressions:
     canonical_page: use/suppressions.md
     fact_sources:
-      - abicheck/suppression.py
-      - abicheck/suppression_yaml.py
+      - abicheck/policy/suppression/rules.py
+      - abicheck/policy/suppression/yaml_scalars.py
     allowed_summaries:
       - skills-src/shared/policies-and-suppressions.md
       - learn/rollout-and-governance.md
@@ -720,7 +720,7 @@ topics:
   compatibility-governance:
     canonical_page: learn/rollout-and-governance.md
     fact_sources:
-      - abicheck/suppression.py
+      - abicheck/policy/suppression/rules.py
       - abicheck/policy_file.py
       # ADR-066 D4/S2: the `versioning:` namespace's typed model and its
       # two evaluators (release acceptance, deprecation-window compliance).
@@ -763,7 +763,7 @@ topics:
   packages-and-consumers:
     canonical_page: learn/packages-and-consumers.md
     fact_sources:
-      - abicheck/package.py
+      - abicheck/extract/packages.py
       - abicheck/debian_symbols.py
     task_pages:
       - use/python-extensions.md

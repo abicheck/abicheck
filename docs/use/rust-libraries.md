@@ -10,7 +10,7 @@ canonical_for:
   - rust-libraries
 depends_on:
   - abicheck/policies/rust_c_ffi.yaml
-  - abicheck/package.py
+  - abicheck/extract/packages.py
   - abicheck/diff_templates.py
 ---
 

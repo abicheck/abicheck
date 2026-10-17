@@ -105,7 +105,7 @@ no outcome axis for input completeness; the release fan-out's set
 difference and `unmatched_old` naming; the canonical fallback's silent
 non-pairing on ambiguity; `bundle_variants:`/`required:` with no
 production caller and every capture stamping the default fingerprint;
-package extraction without a component inventory (`abicheck/package.py`
+package extraction without a component inventory (`abicheck/extract/packages.py`
 returns directories); the Action's typed outcomes ending at the composite
 boundary; the degraded stranded-library snapshot.
 

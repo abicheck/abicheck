@@ -102,7 +102,7 @@ def check_macos_deployment_target_floor(
     reliable in general (Codex review #583, the deployment-target
     counterpart to the same fat-binary ambiguity already handled for
     :func:`check_wheel_tag_architecture_mismatch` and
-    :func:`abicheck.package.parse_macos_deployment_target_floor`).
+    :func:`abicheck.extract.packages.parse_macos_deployment_target_floor`).
 
     Exception: when ``runtime_floors`` also declares a ``WHEEL_ARCH``
     claim (see :func:`check_wheel_tag_architecture_mismatch`) *and* the
@@ -291,7 +291,7 @@ def check_wheel_tag_architecture_mismatch(
 
     *runtime_floors* is read via the ``WHEEL_ARCH`` key (case-insensitive,
     same normalization as the other G10/G27 checks) — a
-    :func:`abicheck.package.parse_wheel_architecture_claim` value (e.g.
+    :func:`abicheck.extract.packages.parse_wheel_architecture_claim` value (e.g.
     ``"x86_64"``, ``"aarch64"``, ``"arm64"``). Returns ``[]`` when no claim
     is declared, neither *elf* nor *macho* carries a recorded machine/
     cpu_type, or the recorded value satisfies the claim. A claim that isn't

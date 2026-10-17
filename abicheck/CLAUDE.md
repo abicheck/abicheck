@@ -23,7 +23,7 @@ Pipeline order (data flow):
    `diff_sycl.py`).
 4. **Classify** changes (`detectors.py`, `detector_registry.py`,
    `checker.py`, `checker_types.py`, `checker_policy.py`).
-5. **Policy / suppression** (`policy_file.py`, `suppression.py`,
+5. **Policy / suppression** (`policy_file.py`, `policy/suppression/rules.py`,
    `severity.py`).
 6. **Report** (`reporter.py`, `html_report.py`, `sarif.py`,
    `junit_report.py`).

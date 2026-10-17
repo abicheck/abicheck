@@ -175,7 +175,7 @@ def extract_if_package(
     (lib_dir, debug_dir, header_dir, symbols_file, container_complete).
 
     *container_complete* (ADR-065 S3) is the primary operand's own
-    :attr:`~abicheck.package.ExtractResult.container_complete`: ``True`` when
+    :attr:`~abicheck.extract.packages.ExtractResult.container_complete`: ``True`` when
     *input_path* was a package archive this extractor unpacked in full, so a
     component absent from *lib_dir* is genuinely absent; ``False`` for a
     directory operand, which proves nothing (D2). *debug_pkg*/*devel_pkg*
@@ -451,7 +451,7 @@ def resolve_release_side(
     twice -- see that function for the two-sided composition (pairing, the
     OLD-vs-NEW Debian diff, warning order).
     """
-    from ..package import package_component_inventory
+    from ..extract.packages import package_component_inventory
     from .extraction import build_match_map
     from .package_claim_conflicts import debian_symbols_binary_conflict_lines
 
@@ -708,7 +708,7 @@ def wheel_release_env_matrix(
         return env_matrix
     if not new_operand.is_file():
         return env_matrix
-    from ..package import WheelExtractor
+    from ..extract.packages import WheelExtractor
 
     if not WheelExtractor().detect(new_operand):
         return env_matrix

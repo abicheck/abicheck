@@ -107,7 +107,7 @@ PERF_SENSITIVE_PATTERNS: tuple[str, ...] = (
     "abicheck/diff_namespaces.py",
     "abicheck/versioned_symbol_scheme.py",
     "abicheck/surface.py",
-    "abicheck/suppression.py",
+    "abicheck/policy/suppression/rules.py",
     "abicheck/html_report.py",
     "abicheck/sarif.py",
     "abicheck/junit_report.py",

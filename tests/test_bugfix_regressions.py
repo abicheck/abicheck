@@ -454,7 +454,7 @@ class TestBug1SuppressionInteraction:
     """type_pattern suppression must work with member-qualified enum symbols."""
 
     def test_type_pattern_matches_enum_member_qualified_symbol(self, tmp_path):
-        from abicheck.suppression import SuppressionList
+        from abicheck.policy.suppression.rules import SuppressionList
 
         p = tmp_path / "sup.yaml"
         p.write_text(
@@ -476,7 +476,7 @@ class TestBug1SuppressionInteraction:
         assert result.suppressed_count >= 1
 
     def test_type_pattern_regex_still_works(self, tmp_path):
-        from abicheck.suppression import SuppressionList
+        from abicheck.policy.suppression.rules import SuppressionList
 
         p = tmp_path / "sup.yaml"
         p.write_text(

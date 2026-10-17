@@ -319,7 +319,7 @@ class TestStageBaseline:
 
         # Confirm it's a real, valid zstd archive TarExtractor can read
         # back -- not just that the script exited 0.
-        from abicheck.package import TarExtractor
+        from abicheck.extract.packages import TarExtractor
 
         extracted = tmp_path / "extracted"
         extracted.mkdir()

@@ -221,7 +221,7 @@ class TestStoredDriversFailAnUnmatchedDegradedMember:
         )
 
     def test_stored_live(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        import abicheck.package as package
+        import abicheck.extract.packages as package
         from abicheck.bundle_side_input import compare_release_against_bundle_facts
         from abicheck.serialization import save_bundle_facts, save_snapshot
 

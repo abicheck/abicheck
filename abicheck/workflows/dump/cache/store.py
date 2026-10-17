@@ -79,7 +79,7 @@ def _lookup_key(key: str, binary_path: Path) -> AbiSnapshot | None:
     any other read problem here -- never a caller-visible failure."""
     if not key:
         return None
-    from ....workflows import memory_trace
+    from ... import memory_trace
 
     started = time.monotonic()
     # Traced: on a hit this load replaces the whole dump, so without it
@@ -132,7 +132,7 @@ def _store_key(snap: AbiSnapshot, key: str, binary_path: Path) -> None:
     keep preferring an old snapshot over a freshly stored one."""
     if not key:
         return
-    from ....workflows import memory_trace
+    from ... import memory_trace
 
     with memory_trace.phase("dump.cache.store"):
         SNAPSHOT_DISK_CACHE.store(lambda: _write_entry(snap, key, binary_path))

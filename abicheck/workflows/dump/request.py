@@ -50,25 +50,25 @@ from typing import TYPE_CHECKING
 
 from ...buildsource.source_inputs import granting_live_source_licence
 from ...errors import ValidationError
-from ...workflows.artifact import ResolvedArtifactPlan
-from ...workflows.artifact.compile_context_gate import side_effective_compile_context
-from ...workflows.artifact.dump_execution_options import (
+from ..artifact import ResolvedArtifactPlan
+from ..artifact.compile_context_gate import side_effective_compile_context
+from ..artifact.dump_execution_options import (
     DumpExecutionOptions as DumpExecutionOptions,
     _DumpAssuranceView as _DumpAssuranceView,
 )
-from ...workflows.artifact.dump_request import (
+from ..artifact.dump_request import (
     ResolvedDumpRequest as ResolvedDumpRequest,
 )
-from ...workflows.artifact.execute import (
+from ..artifact.execute import (
     _resolve_side_snapshot_impl,
     enforce_requested_depth,
 )
-from ...workflows.artifact.execute_header_only import (
+from ..artifact.execute_header_only import (
     execute_header_only_dump_request,
     is_header_only_evidence,
 )
-from ...workflows.artifact.execute_source_only import execute_source_only_dump_request
-from ...workflows.artifact.resolve import (
+from ..artifact.execute_source_only import execute_source_only_dump_request
+from ..artifact.resolve import (
     is_raw_source_tree,
     reject_hybrid_source_frontend,
 )
@@ -80,8 +80,8 @@ if TYPE_CHECKING:
     from ...compile_context import CompileContext
     from ...model import AbiSnapshot
     from ...service_compare_evidence import SideEvidence
-    from ...workflows.resolved_execution_context import ResolvedExecutionContext
-    from ...workflows.service_requests import DumpRequest
+    from ..resolved_execution_context import ResolvedExecutionContext
+    from ..service_requests import DumpRequest
 
 __all__ = [
     "DumpExecutionOptions",
@@ -270,8 +270,8 @@ def resolve_dump_request(request: DumpRequest) -> ResolvedDumpRequest:
 
     from ...header_utils import split_public_header_inputs
     from ...model.header_ast_frontends import HEADER_AST_FRONTENDS
-    from ...workflows.input_resolution import detect_binary_format
-    from ...workflows.plan import AnalysisPlanner
+    from ..input_resolution import detect_binary_format
+    from ..plan import AnalysisPlanner
 
     request.validate()
     # ADR-063 Phase 4: reject a request no resolved collector/backend
@@ -361,7 +361,7 @@ def resolve_dump_request(request: DumpRequest) -> ResolvedDumpRequest:
         public_headers=tuple(public_headers),
         public_header_dirs=tuple(public_header_dirs),
     )
-    from ...workflows.resolved_execution_context import ResolvedExecutionContext
+    from ..resolved_execution_context import ResolvedExecutionContext
 
     return ResolvedDumpRequest(
         request=request,
@@ -418,7 +418,7 @@ def execute_dump_request(
     """
     from ...dependency_info import populate_side_dependency_info
     from ...evidence_depth import depth_rank, gated_source_label
-    from ...workflows.artifact.compile_db_match import match_side_compile_db
+    from ..artifact.compile_db_match import match_side_compile_db
 
     if options is None:
         options = resolved.execution_options or DumpExecutionOptions()

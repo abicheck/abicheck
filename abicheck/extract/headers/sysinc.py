@@ -40,8 +40,8 @@ from pathlib import Path
 
 import abicheck.deadline as deadline
 
-from ...extract.env_flags import env_flag
 from ..compiler_driver import is_clang_family_binary
+from ..env_flags import env_flag
 
 #: Env knob to disable the castxml↔clang system-include auto-detection. On by
 #: default; set to a falsey value to suppress the host-compiler probe (e.g. for a

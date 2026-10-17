@@ -408,7 +408,7 @@ def test_collapse_with_suppressed_advisory_still_justifies_soname_bump():
     # it never reaches `changes`), a collapse + real SONAME bump must not emit
     # SONAME_BUMP_UNNECESSARY — the relink-required state is carried on the
     # context, set before the advisory is suppressed.
-    from abicheck.suppression import Suppression, SuppressionList
+    from abicheck.policy.suppression.rules import Suppression, SuppressionList
 
     old = _snap_with_soname("75.1", "75", soname="libicui18n.so.75")
     new = _snap_with_soname("78.3", "78", soname="libicui18n.so.78")
@@ -433,7 +433,7 @@ def test_suppressed_advisory_is_attributed_to_its_matching_rule():
     # `suppression_rule` stamp, unlike every other late-finding suppression
     # path (ApplySuppression, merge_late_findings) -- a
     # labelled rule matching this advisory left no attribution behind.
-    from abicheck.suppression import Suppression, SuppressionList
+    from abicheck.policy.suppression.rules import Suppression, SuppressionList
 
     old = _snap_with_soname("75.1", "75", soname="libicui18n.so.75")
     new = _snap_with_soname("78.3", "78", soname="libicui18n.so.75")

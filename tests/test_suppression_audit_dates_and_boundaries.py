@@ -37,8 +37,8 @@ from abicheck.model.evidence_status import CrossSourceEvolution
 from abicheck.policy.classification import (
     excluded_from_verdict_as_persistent_hygiene,
 )
+from abicheck.policy.suppression.rules import Suppression, SuppressionList
 from abicheck.policy_file import PolicyFile
-from abicheck.suppression import Suppression, SuppressionList
 
 #: Later than every real run of this suite; rules below expire before it.
 _TODAY = date(2031, 1, 1)

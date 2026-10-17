@@ -36,7 +36,7 @@ the caller's own documented exception type, built by the ``error`` callback,
 so each manifest format keeps its own error vocabulary without keeping its
 own parser.
 
-**Deliberately not used by** :mod:`abicheck.suppression_yaml`: a suppression
+**Deliberately not used by** :mod:`abicheck.policy.suppression.yaml_scalars`: a suppression
 document's duplicate key is *not* an error there. That format resolves YAML
 merge keys (``<<:``) and mirrors ``yaml.safe_load``'s own last-value-wins
 mapping semantics on purpose, because its raw-node pass has to agree,

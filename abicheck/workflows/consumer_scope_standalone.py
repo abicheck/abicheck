@@ -40,8 +40,8 @@ from .consumer_scope import (
 )
 
 if TYPE_CHECKING:
+    from ..policy.suppression.rules import SuppressionList
     from ..policy_file import PolicyFile
-    from ..suppression import SuppressionList
 
 
 def check_appcompat(

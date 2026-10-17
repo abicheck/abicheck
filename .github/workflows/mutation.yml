@@ -140,7 +140,7 @@ jobs:
               - 'abicheck/compare/finding_identity/change_identity.py'
               - 'abicheck/compare/finding_identity/report_ids.py'
               - 'abicheck/name_classification.py'
-              - 'abicheck/suppression.py'
+              - 'abicheck/policy/suppression/rules.py'
               - 'abicheck/policy/selectors.py'
               - 'abicheck/policy/selectors_namespace_glob.py'
               - 'abicheck/snapshot_io.py'

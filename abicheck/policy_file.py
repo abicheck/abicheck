@@ -294,7 +294,7 @@ def _parse_reclassify_expires(raw: Any, path: Path, index: int) -> date | None:
     unnormalized and later crash ``Suppression.is_expired()``'s ``date.today()
     > self.expires`` comparison (``TypeError``: can't compare ``date`` and
     ``datetime``). Normalized to ``.date()`` here, mirroring
-    ``suppression.py``'s ``_parse_expires`` handling of the identical case.
+    ``policy/suppression/rules.py``'s ``_parse_expires`` handling of the identical case.
     """
     if raw is None:
         return None
@@ -362,7 +362,7 @@ def _parse_reclassify(raw: Any, path: Path) -> list[ReclassifyRule]:
     reclassification) into a list of :class:`ReclassifyRule`.
 
     Unlike ``overrides:`` (keyed by ``ChangeKind`` alone), each entry here
-    carries the same selector grammar :mod:`abicheck.suppression` already
+    carries the same selector grammar :mod:`abicheck.policy.suppression.rules` already
     implements, plus a required ``to:`` severity -- see
     ``abicheck/policy/reclassify.py``'s module docstring.
     """

@@ -1039,7 +1039,7 @@ def test_env_matrix_diagnostics_stay_beside_their_own_check(monkeypatch):
     from abicheck.checker_policy import ChangeKind
     from abicheck.model import AbiSnapshot
     from abicheck.model.change import Change
-    from abicheck.suppression import SuppressionOutcome
+    from abicheck.policy.suppression.rules import SuppressionOutcome
 
     names = ["floor", "musl", "macos", "arch", "rpath", "closure"]
     for module, attr, name in [

@@ -29,8 +29,8 @@ from abicheck.model import (
     Variable,
     Visibility,
 )
+from abicheck.policy.suppression.rules import SuppressionList
 from abicheck.serialization import snapshot_from_dict, snapshot_to_json
-from abicheck.suppression import SuppressionList
 
 # ---------------------------------------------------------------------------
 # Helpers

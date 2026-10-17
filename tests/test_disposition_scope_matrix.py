@@ -487,7 +487,7 @@ def test_the_effective_total_agrees_with_the_verdict(
     records.
     """
     from abicheck.model import Function, Visibility
-    from abicheck.suppression import Suppression, SuppressionList
+    from abicheck.policy.suppression.rules import Suppression, SuppressionList
 
     old = AbiSnapshot(library="libmatrix", version="1.0")
     new = AbiSnapshot(library="libmatrix", version="2.0")

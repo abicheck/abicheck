@@ -109,7 +109,11 @@ EXEMPTION_CEILINGS: dict[str, int] = {
     # 49: plus the two path-prefix checks in manifest_tu_scope_field, moved
     # from comparability.py into compare/ (a scanned owner) by the dump-cache
     # refactor. Path-string handling, not naming heuristics.
-    "own_format": 49,
+    # 50: plus the finding-id hash validator in
+    # policy/suppression/yaml_scalars.py, which the scan now reaches (the
+    # module moved from the root into a scanned policy subpackage). Format
+    # check on abicheck's own key shape, not a naming heuristic.
+    "own_format": 50,
     "platform": 21,
     # 9: main replaced the two fnmatch frozen-namespace matchers with one
     # policy.frozen_namespace helper.

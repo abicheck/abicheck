@@ -367,4 +367,5 @@ HEURISTICS: dict[str, str] = {
     "abicheck.compare.finding_identity.mangled::<module>::re:'\\\\A_Z[A-Za-z0-9_$]+(?:\\\\.[A-Za-z0-9_$]+)*\\\\Z'": "grammar",
     "abicheck.compare.finding_identity.mangled::_looks_structurally_mangled::affix.startswith:'?'": "grammar",
     "abicheck.compare.finding_identity.mangled::_looks_structurally_mangled::affix.startswith:'_Z'": "grammar",
+    "abicheck.policy.suppression.yaml_scalars::<module>::re:'[0-9a-f]{16}'": "own_format",
 }
