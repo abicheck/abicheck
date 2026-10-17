@@ -50,8 +50,6 @@ from __future__ import annotations
 import argparse
 import ast
 import json
-import os
-import signal
 import subprocess
 import sys
 import tomllib
@@ -79,28 +77,19 @@ TIMED_OUT_RC = 124
 def run_mutmut(cmd: list[str], timeout: float) -> tuple[str, int]:
     """Run a mutmut subcommand, returning ``(stdout + stderr, returncode)``.
 
-    On *timeout* the whole process group is killed, not just mutmut itself:
-    its pytest workers otherwise outlive it and keep writing results while
-    the caller reads them (CI showed them as orphans at job cleanup). The
-    output so far is returned with :data:`TIMED_OUT_RC`.
+    Through :func:`abicheck.deadline.run_bounded`, so a timeout kills the whole
+    process group: mutmut's pytest workers otherwise outlive it and keep
+    writing results while the caller reads them (CI showed them as orphans at
+    job cleanup). The output so far is returned with :data:`TIMED_OUT_RC`.
     """
-    proc = subprocess.Popen(  # noqa: S603 — fixed argv, no shell
-        cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        start_new_session=hasattr(os, "killpg"),
-    )
+    from abicheck.deadline import run_bounded
+
     try:
-        out, err = proc.communicate(timeout=timeout)
-        return out + err, proc.returncode
-    except subprocess.TimeoutExpired:
-        if hasattr(os, "killpg"):
-            os.killpg(proc.pid, signal.SIGKILL)
-        else:
-            proc.kill()
-        out, err = proc.communicate()
-        return out + err, TIMED_OUT_RC
+        proc = run_bounded(cmd, timeout=timeout, capture_output=True, text=True)
+    except subprocess.TimeoutExpired as exc:
+        return (exc.output or "") + (exc.stderr or ""), TIMED_OUT_RC
+    return proc.stdout + proc.stderr, proc.returncode
+
 
 #: pyproject sections whose change alters what a mutation run measures or how
 #: its suite runs. Any other pyproject edit (a dependency pin, project
