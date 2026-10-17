@@ -39,7 +39,7 @@ import argparse
 import collections
 import json
 import pathlib
-import xml.etree.ElementTree as ET
+import xml.etree.ElementTree as ET  # nosec B405 - parses the junit report this run wrote
 from collections.abc import Iterable, Mapping
 from typing import NamedTuple
 
@@ -125,7 +125,7 @@ def junit_durations(path: pathlib.Path) -> dict[str, float]:
     more than once (a rerun) has its times summed. A missing or non-numeric
     ``time`` counts as zero.
     """
-    tree = ET.parse(path)  # our own CI's report, not external input
+    tree = ET.parse(path)  # nosec B314 - our own CI's report, not external input
     seconds: collections.Counter[str] = collections.Counter()
     for case in tree.iter("testcase"):
         key = ".".join(
