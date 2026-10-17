@@ -309,14 +309,11 @@ tests/test_dump_request_from_cli.py
 tests/test_dump_resolved_execution_context.py
 tests/test_dump_source_only_execution.py
 tests/test_dumper_clang.py
-tests/test_dumper_clang_extern_c_identity.py
 tests/test_dumper_clang_vtable.py
-tests/test_dumper_clang_vtable_redecl.py
 tests/test_dumper_contract_wiring.py
 tests/test_dumper_coverage.py
 tests/test_dumper_hybrid.py
 tests/test_dumper_manifest.py
-tests/test_dumper_manifest_semantic_ir.py
 tests/test_dumper_members.py
 tests/test_dumper_presence_semantic_ir.py
 tests/test_dumper_scoping.py
@@ -364,6 +361,7 @@ tests/test_exit_decision.py
 tests/test_explicit_ctor.py
 tests/test_export_declaration_evidence.py
 tests/test_export_existence_reconciliation.py
+tests/test_export_loss_binding_unit.py
 tests/test_export_owner_resolution.py
 tests/test_export_reconciliation_and_obligations.py
 tests/test_export_surface.py
@@ -699,6 +697,7 @@ tests/test_symbol_origin.py
 tests/test_symbol_origin_ownership_properties.py
 tests/test_symbol_renamed_batch_evidence.py
 tests/test_symbol_versioning_coexistence.py
+tests/test_template_finding_binding.py
 tests/test_template_graph.py
 tests/test_template_graph_fold.py
 tests/test_template_graph_identity.py
@@ -716,6 +715,7 @@ tests/test_typedef_qualified_collision.py
 tests/test_typedef_version_sentinel.py
 tests/test_typefield_case_a_facts.py
 tests/test_undeclared_export_additions.py
+tests/test_undeclared_export_binding.py
 tests/test_undocumented_export_surface_scope.py
 tests/test_unversioned_exported_symbol.py
 tests/test_use_case_impact.py
