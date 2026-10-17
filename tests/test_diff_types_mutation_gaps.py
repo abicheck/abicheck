@@ -412,8 +412,10 @@ def test_reserved_fallback_candidate_exclusion_is_or_not_and(
         "reserved0",
         _field("reserved0"),
         [_field("newa"), _field("newb")],
-        reserved=reserved,
-        renamed=renamed,
+        # Copies: the helper records consumed names into these sets, and a
+        # parametrize literal is shared by every session in one process (mutmut).
+        reserved=set(reserved),
+        renamed=set(renamed),
     )
     assert ch is not None
     assert ch.new_value == expected
