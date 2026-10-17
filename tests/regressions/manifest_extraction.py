@@ -329,4 +329,41 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
         fixed_by=(1623,),
         seed_tests=("tests/test_diff_templates_fn_type_arity.py",),
     ),
+    BugClass(
+        id="evidence.malformed_input_yields_value",
+        invariant=(
+            "A malformed input that has no exact interpretation -- a "
+            "stack-consuming op on an insufficient stack, an opcode the "
+            "evaluator does not implement, a missing or truncated operand -- "
+            "yields an explicit unknown, never a plausible value. A guessed "
+            "offset becomes a layout fact that can manufacture a field-offset "
+            "break or hide a real one. The defect was an evaluator with no "
+            "failure channel: an underflowing DW_OP_plus fell through to a "
+            "constant (0x22 pushed as 34), a non-opcode item or an unknown "
+            "tuple opcode was skipped (0), and a truncated LEB128 operand "
+            "was read as its partial value."
+        ),
+        fixed_by=(1649,),
+        seed_tests=(
+            "tests/test_dwarf_snapshot.py",
+            "tests/test_phase3_dwarf_helpers.py",
+            # F1 harness cell: a malformed member location reads as unknown.
+            "tests/test_family_f1_evidence_ablation.py",
+        ),
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "The evaluator implements only DW_OP_plus, "
+                    "DW_OP_plus_uconst, DW_OP_constu, DW_OP_consts and "
+                    "DW_OP_lit0..31. A member location using any other op "
+                    "(minus, mul, deref, shl, ...) now reads as unknown instead "
+                    "of an exact offset. Mainstream compilers do not emit these "
+                    "in data_member_location, but layouts that depend on them "
+                    "lose their field-offset evidence until the ops are "
+                    "implemented."
+                ),
+                reference="docs/contribute/known-gaps.md (unfiled; no issue number yet)",
+            ),
+        ),
+    ),
 )

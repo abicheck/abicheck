@@ -510,6 +510,52 @@ class TestExpandAnonymousMember:
         assert [(f.name, f.byte_offset) for f in result.value] == [("x", 12)]
 
 
+# An expression whose DW_OP_plus has only the base entry: no exact offset.
+_UNEVALUABLE_LOCATION = [0x22]
+
+
+class TestUnevaluableMemberLocation:
+    """An unevaluable member location never becomes a recorded offset."""
+
+    def test_anonymous_member_with_unknown_offset_is_failed(self):
+        die = _Die("DW_TAG_member", {"DW_AT_type": _Attr(10, "DW_FORM_ref_addr")})
+        result = _expand_anonymous_member(die, _CU(), {}, None)
+        assert result.status is FactStatus.FAILED
+
+    def test_inner_member_with_unknown_offset_is_failed(self):
+        inner = _Die(
+            "DW_TAG_member",
+            {"DW_AT_name": "x", "DW_AT_data_member_location": _UNEVALUABLE_LOCATION},
+        )
+        target = _Die("DW_TAG_union_type", {"DW_AT_byte_size": 8}, [inner], offset=10)
+        die = _Die("DW_TAG_member", {"DW_AT_type": _Attr(10, "DW_FORM_ref_addr")})
+        cu = _CU()
+        cu._die_map = {10: target}
+        result = _expand_anonymous_member(die, cu, {}, 0)
+        assert result.status is FactStatus.FAILED
+
+    @pytest.mark.parametrize("named_member", [True, False])
+    def test_struct_layout_not_recorded(self, named_member):
+        attrs = {"DW_AT_data_member_location": _UNEVALUABLE_LOCATION}
+        if named_member:
+            attrs["DW_AT_name"] = "b"
+        else:
+            attrs["DW_AT_type"] = _Attr(10, "DW_FORM_ref_addr")
+        good = _Die(
+            "DW_TAG_member", {"DW_AT_name": "a", "DW_AT_data_member_location": 0}
+        )
+        die = _Die(
+            "DW_TAG_structure_type",
+            {"DW_AT_name": "S", "DW_AT_byte_size": 8},
+            [good, _Die("DW_TAG_member", attrs)],
+        )
+        meta = DwarfMetadata(has_dwarf=True)
+        cu = _CU()
+        cu._die_map = {10: _Die("DW_TAG_union_type", {"DW_AT_byte_size": 4}, offset=10)}
+        _process_struct(die, meta, cu, {})
+        assert "S" not in meta.structs
+
+
 class TestStructWithUnreadableAnonymousMember:
     """A struct whose anonymous member cannot be read records no layout.
 
