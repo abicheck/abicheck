@@ -3,7 +3,7 @@
 
 Listed in `BREAKING_KINDS` — runtime ABI break.
 
-_111 case(s)._ [← back to all examples](../index.md)
+_113 case(s)._ [← back to all examples](../index.md)
 
 | Case | Title | Verdict | Category |
 |------|-------|---------|----------|
@@ -118,3 +118,5 @@ _111 case(s)._ [← back to all examples](../index.md)
 | [case209_calling_convention_changed_via_macro](../case209_calling_convention_changed_via_macro.md) | Calling Convention Changed via a Macro | 🔴 BREAKING | Breaking |
 | [case212_calling_convention_macro_undefined_after_use](../case212_calling_convention_macro_undefined_after_use.md) | Calling Convention Macro `#undef`'d After Use | 🔴 BREAKING | Breaking |
 | [case213_calling_convention_function_like_macro_changed](../case213_calling_convention_function_like_macro_changed.md) | Calling Convention via a Function-Like Macro | 🔴 BREAKING | Breaking |
+| [case217_export_loss_weak_binding_demoted](../case217_export_loss_weak_binding_demoted.md) | WEAK export loss demoted to a risk by a `binding: weak` rule | 🔴 BREAKING | Breaking |
+| [case218_export_loss_strong_binding_stays_breaking](../case218_export_loss_strong_binding_stays_breaking.md) | a GLOBAL export loss stays BREAKING under a `binding: weak` rule | 🔴 BREAKING | Breaking |

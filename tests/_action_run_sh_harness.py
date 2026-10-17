@@ -174,14 +174,21 @@ def _run_action(tmp_path: Path, env_extra: dict[str, str], bindir: Path) -> dict
     # through `env_extra` -- which is exactly the precondition `run_step`
     # cannot make, so it does not opt in.
     def _run() -> subprocess.CompletedProcess[str]:
-        return subprocess.run(
+        # Bytes, decoded here with errors="replace", not text=True: a strict
+        # decode turns any non-UTF-8 byte that reaches the Action's stdout
+        # (a fixture archive's binary content, say) into a harness crash
+        # before a single assertion runs. The exit code and the output and
+        # summary files are what the tests check, and those are unaffected.
+        proc = subprocess.run(
             [bash, str(RUN_SH)],
             capture_output=True,
-            text=True,
             env=env,
             cwd=tmp_path,
             check=False,
         )
+        proc.stdout = proc.stdout.decode("utf-8", errors="replace")  # type: ignore[assignment]
+        proc.stderr = proc.stderr.decode("utf-8", errors="replace")  # type: ignore[assignment]
+        return proc  # type: ignore[return-value]
 
     proc, (out_bytes, summary_bytes) = run_writing_env_files(
         [out, summary], _run, retry=True

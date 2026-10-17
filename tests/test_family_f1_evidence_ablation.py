@@ -650,3 +650,76 @@ def test_unknown_version_binding_never_adds_a_finding(side: str, binding: str) -
             if r["layer"] == f"crosscheck:{CHECK_UNVERSIONED_EXPORTED_SYMBOL}"
         )
         assert row["status"] != "present", row
+
+
+# ``Change.symbol_binding`` on template findings (bug class
+# ``detector.selector_axis_unstamped``): an uncaptured ELF binding on any
+# removed instantiation is ablated evidence. It must never let a
+# ``binding: weak`` rule demote the finding -- the aggregate fails closed to
+# ``None`` -- so ablation can only keep the finding at its full severity.
+@pytest.mark.parametrize("size", [1, 2, 3])
+@pytest.mark.parametrize("kind", ["leak", "missing"])
+def test_unknown_template_binding_never_demotes(kind: str, size: int) -> None:
+    from abicheck.checker_policy import Verdict
+    from abicheck.diff_templates import (
+        detect_internal_template_leaks,
+        detect_missing_instantiations,
+    )
+    from abicheck.model import AbiSnapshot
+    from abicheck.model.declarations import Function, Visibility
+    from abicheck.model.elf_facts import SymbolBinding
+    from abicheck.policy.reclassify import ReclassifyRule
+
+    stem = "lib::__detail::walk" if kind == "leak" else "descriptor"
+    suffix = "" if kind == "leak" else "::get"
+    args = ["long", "double", "char"][:size]
+
+    def fn(arg: str, binding: SymbolBinding | None) -> Function:
+        name = f"{stem}<{arg}>{suffix}"
+        return Function(
+            name=name,
+            mangled=f"sym:{name}",
+            return_type="void",
+            visibility=Visibility.PUBLIC,
+            elf_binding=binding,
+        )
+
+    def findings(ablated: int | None) -> list:
+        removed = [
+            fn(a, None if i == ablated else SymbolBinding.WEAK)
+            for i, a in enumerate(args)
+        ]
+        survivor = fn("int", SymbolBinding.GLOBAL)
+        old = AbiSnapshot(
+            library="libx.so", version="1", functions=[survivor, *removed]
+        )
+        new = AbiSnapshot(
+            library="libx.so", version="2", functions=[fn("int", SymbolBinding.GLOBAL)]
+        )
+        detect = (
+            detect_internal_template_leaks
+            if kind == "leak"
+            else detect_missing_instantiations
+        )
+        return detect(old, new)
+
+    rule = ReclassifyRule(
+        to_verdict=Verdict.COMPATIBLE_WITH_RISK,
+        to="risk",
+        change_kind=(
+            "internal_template_leaks_via_public_api"
+            if kind == "leak"
+            else "instantiation_missing_from_binary"
+        ),
+        symbol_pattern=".*",
+        binding="weak",
+    )
+    # Full evidence: every member is WEAK, so the rule demotes everything.
+    full = findings(None)
+    assert full and all(rule.matches(f) for f in full)
+    for ablated in range(size):
+        cut = findings(ablated)
+        # Same findings observed -- ablation never removes one ...
+        assert {f.symbol for f in cut} == {f.symbol for f in full}
+        # ... and never lets the unknown member be demoted as WEAK.
+        assert any(not rule.matches(f) for f in cut)
