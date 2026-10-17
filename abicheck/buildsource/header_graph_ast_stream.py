@@ -200,7 +200,10 @@ from .call_graph import (
     _walk_calls,
     collect_function_bodies,
 )
-from .header_graph_ast_projection import HeaderGraphAstProjection
+from .header_graph_ast_projection import (
+    HeaderGraphAstProjection,
+    validate_ast_shape,
+)
 from .semantic_fact_folds import SemanticFactStream
 from .type_graph import _dedupe_edges as _dedupe_type_edges
 from .type_graph_index import _index_declared_entities, _new_ast_indexes
@@ -647,6 +650,12 @@ def project_header_graph_ast_file(path: Path) -> HeaderGraphAstProjection:
     materialize = LocationMaterializer()
     location_states: list[tuple[Any, Any]] = []
     for element in stream_top_level_decls(path, extents):
+        # Every element is checked here, in the one pass that reads the whole
+        # document, so the second and third passes never see an unvetted node.
+        # The same shape contract as `project_header_graph_ast` (see its
+        # docstring): a streamed document must not read as a clean empty
+        # surface where the whole-tree path would have refused it.
+        validate_ast_shape(element)
         location_states.append(materialize.state)
         materialize(element)
         collect_special_member_names(element, special)

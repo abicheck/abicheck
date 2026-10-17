@@ -957,3 +957,56 @@ class TestTheFixtureStillExercisesTheBoundaryRules:
         own = [states_a_file(n) for n in top_level]
         assert any(own), "no top-level declaration states a file at all"
         assert not all(own), "every top-level declaration states its own file"
+
+
+class TestAMalformedStreamedDocumentIsRefused:
+    """The streamed projection enforces the whole-tree path's shape contract.
+
+    The stream passes read each element on its own, so a wrong-typed `inner`
+    anywhere below a top-level declaration would otherwise read as an empty
+    surface here while the whole-tree path refuses it. The oracle is the
+    clang contract (`inner` is absent or an array of objects), stated in the
+    test, not the validator's own verdict.
+    """
+
+    @pytest.mark.parametrize(
+        "element",
+        [
+            {"kind": "FunctionDecl", "name": "f", "inner": "x"},
+            {"kind": "FunctionDecl", "name": "f", "inner": {"a": 1}},
+            {"kind": "FunctionDecl", "name": "f", "inner": None},
+            {
+                "kind": "NamespaceDecl",
+                "name": "n",
+                "inner": [{"kind": "FunctionDecl", "name": "f", "inner": 7}],
+            },
+            {"kind": "NamespaceDecl", "name": "n", "inner": ["oops"]},
+        ],
+    )
+    def test_a_wrong_typed_inner_below_the_top_level_is_refused(
+        self, tmp_path: Path, element: dict
+    ) -> None:
+        from abicheck.buildsource.header_graph_ast_projection import (
+            MalformedClangAstError,
+        )
+
+        path = _write(
+            tmp_path,
+            {"kind": "TranslationUnitDecl", "inner": [element]},
+            indent=2,
+        )
+        with pytest.raises(MalformedClangAstError):
+            project_header_graph_ast_file(path)
+
+    def test_a_conforming_streamed_document_is_projected(self, tmp_path: Path) -> None:
+        """Control: the refusal above is the shape, not streaming in general.
+
+        The streamed projection must agree exactly with the whole-tree one
+        (the module's stated contract), so the oracle is the whole-tree path.
+        """
+        doc = {
+            "kind": "TranslationUnitDecl",
+            "inner": [{"kind": "FunctionDecl", "name": "f", "inner": []}],
+        }
+        streamed = project_header_graph_ast_file(_write(tmp_path, doc, indent=2))
+        assert streamed == project_header_graph_ast(doc)

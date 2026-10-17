@@ -711,15 +711,26 @@ def acquire_header_graph_ast(
         try:
             with memory_trace.phase("dump.header_graph.project"):
                 projection = project_header_graph_ast(ast_root)
-        except _MALFORMED_AST_ERRORS:
+        except _MALFORMED_AST_ERRORS as exc:
             # Same containment as the streaming loader above, and for the
-            # same reason: the readers walk a tree whose shape they trust,
-            # so a document whose `inner` is a number rather than a list
-            # raises `TypeError` out of the walk. That is reachable from a
-            # corrupt AST cache entry, and letting it escape would abort a
-            # whole dump over a bad cache file -- the exact failure ADR-028
-            # D3 forbids. Degrade to the declaration-only graph instead.
+            # same reason: the readers walk a tree whose shape they trust, so
+            # a malformed `inner` (reachable from a corrupt AST cache entry)
+            # must not abort a whole dump -- the exact failure ADR-028 D3
+            # forbids. Degrade to the declaration-only graph instead.
+            #
+            # And record it as a failure, not a silent absence. With
+            # `projection = None` and no `ast_failure`, the call/override/
+            # template passes were simply left unstamped while the snapshot's
+            # own declaration and type passes still read as run, so nothing
+            # told a reader the AST was unusable. `ast_failure` is what
+            # `_attach_header_graph` turns into the explicit degraded markers
+            # a real clang parse failure already gets.
             projection = None
+            ast_failure = (
+                "clang AST is malformed, call/reference edges not collected: "
+                f"{str(exc).strip() or type(exc).__name__}"
+            )
+            _log.warning("header graph: %s", ast_failure)
         if projection is not None and derived_projection.cache_path is not None:
             # Store beside the AST entry this projection was derived from, so
             # the two share one key and one lifetime. Best-effort by design:
