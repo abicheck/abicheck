@@ -508,3 +508,82 @@ class TestAstReleasedBeforeGraphBuild:
         assert handoff == []  # the fake really did hand the tree over
         assert observed["projection_supplied"] is True
         assert observed["ast_alive_during_build"] is False
+
+
+class TestTheProjectionRefusesAMalformedShape:
+    """`inner` is a list of objects, or absent; anything else is refused.
+
+    The oracle is the clang JSON contract itself (a leaf omits `inner`; a
+    container's `inner` is an array of node objects), stated here rather than
+    read back from the validator. A wrong-typed `inner` must be refused rather
+    than projected, because the readers treat a string or mapping as an empty
+    list and would report a complete, empty surface.
+    """
+
+    @pytest.mark.parametrize(
+        "ast",
+        [
+            {"kind": "TranslationUnitDecl", "inner": "x"},
+            {"kind": "TranslationUnitDecl", "inner": {"a": 1}},
+            {"kind": "TranslationUnitDecl", "inner": None},
+            {"kind": "TranslationUnitDecl", "inner": 0},
+            {"kind": "TranslationUnitDecl", "inner": [1, "x", None]},
+            {
+                "kind": "TranslationUnitDecl",
+                "inner": [{"kind": "FunctionDecl", "inner": "x"}],
+            },
+            {
+                "kind": "TranslationUnitDecl",
+                "inner": [{"kind": "FunctionDecl", "inner": [None]}],
+            },
+            "not an object at the root",
+        ],
+    )
+    def test_a_wrong_typed_container_is_refused(self, ast: object) -> None:
+        from abicheck.buildsource.header_graph_ast_projection import (
+            MalformedClangAstError,
+            validate_ast_shape,
+        )
+
+        with pytest.raises(MalformedClangAstError):
+            validate_ast_shape(ast)
+
+    @pytest.mark.parametrize(
+        "ast",
+        [
+            {"kind": "TranslationUnitDecl"},
+            {"kind": "TranslationUnitDecl", "inner": []},
+            {
+                "kind": "TranslationUnitDecl",
+                "inner": [
+                    {"kind": "FunctionDecl", "name": "f"},
+                    {"kind": "FunctionDecl", "name": "g", "inner": []},
+                ],
+            },
+        ],
+    )
+    def test_a_conforming_tree_is_accepted(self, ast: object) -> None:
+        from abicheck.buildsource.header_graph_ast_projection import (
+            validate_ast_shape,
+        )
+
+        validate_ast_shape(ast)
+
+    def test_a_deep_tree_is_checked_without_recursion(self) -> None:
+        """Far past Python's default recursion limit, and still accepted.
+
+        The check walks with an explicit stack; a recursive walk would raise
+        RecursionError on a chain this deep. A real clang AST is nowhere near
+        it, but a corrupt one must not be able to crash the check itself.
+        """
+        from abicheck.buildsource.header_graph_ast_projection import (
+            validate_ast_shape,
+        )
+
+        root: dict = {"kind": "TranslationUnitDecl", "inner": []}
+        node = root
+        for _ in range(20_000):
+            child: dict = {"kind": "NamespaceDecl", "inner": []}
+            node["inner"].append(child)
+            node = child
+        validate_ast_shape(root)

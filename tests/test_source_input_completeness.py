@@ -546,13 +546,15 @@ class TestExpectedInputSetEdgeCases:
         """One path can be reached both as an explicit root and through a walk,
         so every disposition needs a rank; a missing one would raise KeyError
         mid-scan. Exhaustive so a new member cannot be added without one."""
-        from abicheck.buildsource.source_inputs import _rank
+        from abicheck.buildsource.source_inputs import _PRECEDENCE_INDEX
 
-        assert isinstance(_rank(disposition), int)
-        # The resolver keeps the stronger claim when a path is seen twice, and
-        # EXCLUDED is the weakest: nothing may downgrade a path to EXCLUDED.
+        assert disposition in _PRECEDENCE_INDEX
+        # EXCLUDED is the weakest (highest index): nothing downgrades to it.
         if disposition is not SourceInputDisposition.EXCLUDED:
-            assert _rank(disposition) > _rank(SourceInputDisposition.EXCLUDED)
+            assert (
+                _PRECEDENCE_INDEX[disposition]
+                < _PRECEDENCE_INDEX[SourceInputDisposition.EXCLUDED]
+            )
 
     def test_a_gap_never_downgrades_to_a_weaker_disposition(
         self, tmp_path: Path
@@ -966,3 +968,149 @@ class TestSourceInputSetMergeProperties:
         empty = SourceInputSet(licence=one.licence)
         assert one.merged(empty) == one
         assert empty.merged(one).inputs == one.inputs
+
+
+#: The stated precedence for one path reached by two routes, strongest first.
+#: Written out by hand rather than read from DISPOSITION_PRECEDENCE, so it is an
+#: oracle independent of the implementation's table. A real read outranks every
+#: gap; an observed gap outranks a bare SELECTED, which asserts only that nothing
+#: was looked at yet; NOT_LICENSED and EXCLUDED are the weakest statements.
+_STATED_STRENGTH: tuple[SourceInputDisposition, ...] = (
+    SourceInputDisposition.SCANNED,
+    SourceInputDisposition.UNREADABLE,
+    SourceInputDisposition.MISSING,
+    SourceInputDisposition.UNSUPPORTED,
+    SourceInputDisposition.SELECTED,
+    SourceInputDisposition.NOT_LICENSED,
+    SourceInputDisposition.EXCLUDED,
+)
+
+#: Every ordered pair of dispositions: the domain is 7 x 7 = 49, small enough to
+#: close completely rather than sample.
+_ORDERED_PAIRS: tuple[tuple[SourceInputDisposition, SourceInputDisposition], ...] = (
+    tuple((a, b) for a in SourceInputDisposition for b in SourceInputDisposition)
+)
+
+
+def _expected_survivor(
+    first: SourceInputDisposition, second: SourceInputDisposition
+) -> SourceInputDisposition:
+    return min((first, second), key=_STATED_STRENGTH.index)
+
+
+def _recorded_survivor(
+    tree: Path, first: SourceInputDisposition, second: SourceInputDisposition
+) -> SourceInputDisposition:
+    """Record *first* then *second* on one path through the public walk.
+
+    Two directory roots, the outer one then the subdirectory, reach the same
+    candidate in a fixed order, so `resolve_source_inputs` records the two
+    dispositions one after the other. The classifier is caller-supplied, so any
+    disposition can be presented as the verdict, not only the ones a real walk
+    happens to produce.
+    """
+    sub = tree / "sub"
+    sub.mkdir(parents=True, exist_ok=True)
+    shared = sub / "shared.hpp"
+    shared.write_text(PACKED_SOURCE)
+    verdicts = iter((first, second))
+    result = resolve_source_inputs(
+        [tree, sub],
+        licence=SourceReadLicence.live_extraction(),
+        classify_candidate=lambda _path: next(verdicts),
+    )
+    (item,) = [i for i in result.inputs if i.path == str(shared)]
+    return item.disposition
+
+
+def _merged_survivor(
+    first: SourceInputDisposition, second: SourceInputDisposition
+) -> tuple[SourceInputDisposition, SourceInputDisposition]:
+    """The survivor of *merging* the two dispositions, in each order."""
+    licence = SourceReadLicence.live_extraction()
+    a = SourceInputSet(
+        inputs=(SourceInput(path="shared.hpp", disposition=first),), licence=licence
+    )
+    b = SourceInputSet(
+        inputs=(SourceInput(path="shared.hpp", disposition=second),), licence=licence
+    )
+
+    def _only(merged: SourceInputSet) -> SourceInputDisposition:
+        (item,) = merged.inputs
+        return item.disposition
+
+    return _only(a.merged(b)), _only(b.merged(a))
+
+
+class TestSamePathPrecedenceHasOneOwner:
+    """Two routes to one path must resolve to the same stated strength.
+
+    The walk's recording (`_record`) and `SourceInputSet.merged` each used to
+    keep their own precedence table, and the two disagreed: the recording's
+    comment promised "a real selection never downgrades to a gap" while its
+    ranks did the opposite, and equal-rank gaps (MISSING vs UNREADABLE) let the
+    label depend on which route was seen first. One table now decides both, and
+    these tests state the order once as an oracle over every ordered pair.
+    """
+
+    @pytest.mark.parametrize(("first", "second"), _ORDERED_PAIRS)
+    def test_recording_keeps_the_stated_strength(
+        self,
+        tmp_path: Path,
+        first: SourceInputDisposition,
+        second: SourceInputDisposition,
+    ) -> None:
+        assert _recorded_survivor(tmp_path, first, second) == _expected_survivor(
+            first, second
+        )
+
+    @pytest.mark.parametrize(("first", "second"), _ORDERED_PAIRS)
+    def test_merge_keeps_the_stated_strength_in_either_order(
+        self, first: SourceInputDisposition, second: SourceInputDisposition
+    ) -> None:
+        forward, backward = _merged_survivor(first, second)
+        expected = _expected_survivor(first, second)
+        assert forward == expected
+        assert backward == expected
+
+    @pytest.mark.parametrize(("first", "second"), _ORDERED_PAIRS)
+    def test_recording_and_merge_agree_on_every_pair(
+        self,
+        tmp_path: Path,
+        first: SourceInputDisposition,
+        second: SourceInputDisposition,
+    ) -> None:
+        recorded = _recorded_survivor(tmp_path, first, second)
+        forward, backward = _merged_survivor(first, second)
+        assert recorded == forward == backward
+
+    def test_a_named_file_and_its_directory_agree_in_either_root_order(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The same contract through the scanner: an explicit file root and the
+        directory holding it, where the walk's probe fails on that one file.
+
+        The gap is observed, so the label is UNREADABLE and the file is not read,
+        whichever root is listed first.
+        """
+        from abicheck.buildsource import pattern_facts_files
+
+        tree = tmp_path / "tree"
+        tree.mkdir()
+        header = tree / "Core"  # extensionless, so the walk has to probe it
+        header.write_text(PACKED_SOURCE)
+        real_probe = pattern_facts_files._extensionless_is_text
+        monkeypatch.setattr(
+            pattern_facts_files,
+            "_extensionless_is_text",
+            lambda p: None if Path(p) == header else real_probe(p),
+        )
+
+        def labels(roots: list[Path]) -> dict[str, SourceInputDisposition]:
+            result = find_pattern_facts([str(r) for r in roots])
+            assert result.files_scanned == 0
+            return {i.path: i.disposition for i in result.inputs.inputs}
+
+        expected = {str(header): SourceInputDisposition.UNREADABLE}
+        assert labels([header, tree]) == expected
+        assert labels([tree, header]) == expected

@@ -305,6 +305,20 @@ DISPOSITION_PRECEDENCE: tuple[SourceInputDisposition, ...] = (
     SourceInputDisposition.EXCLUDED,
 )
 
+#: The one strength index for a disposition: its position in
+#: :data:`DISPOSITION_PRECEDENCE`, where a lower index is stronger. Both the
+#: directory walk's recording (:func:`resolve_source_inputs`) and
+#: :meth:`SourceInputSet.merged` decide through :func:`_outranks`, so neither
+#: keeps a table of its own that could drift from the other.
+_PRECEDENCE_INDEX: dict[SourceInputDisposition, int] = {
+    d: i for i, d in enumerate(DISPOSITION_PRECEDENCE)
+}
+
+
+def _outranks(a: SourceInputDisposition, b: SourceInputDisposition) -> bool:
+    """True when disposition *a* is strictly stronger than *b*."""
+    return _PRECEDENCE_INDEX[a] < _PRECEDENCE_INDEX[b]
+
 
 @dataclass(frozen=True)
 class SourceInputSet:
@@ -409,11 +423,10 @@ class SourceInputSet:
         observations are still reported. Neither side permitted keeps this
         set's own withheld licence and its reason.
         """
-        rank = {d: i for i, d in enumerate(DISPOSITION_PRECEDENCE)}
         by_path: dict[str, SourceInput] = {}
         for item in (*self.inputs, *other.inputs):
             held = by_path.get(item.path)
-            if held is None or rank[item.disposition] < rank[held.disposition]:
+            if held is None or _outranks(item.disposition, held.disposition):
                 by_path[item.path] = item
         licence = self.licence
         if not licence.permitted and other.licence.permitted:
@@ -476,10 +489,11 @@ def resolve_source_inputs(
     def _record(path: Path | str, disposition: SourceInputDisposition) -> None:
         key = str(path)
         # A path reachable both as an explicit root and through a directory
-        # walk keeps the strongest claim: a gap never downgrades to EXCLUDED,
-        # and a real selection never downgrades to a gap.
+        # walk keeps the strongest disposition under DISPOSITION_PRECEDENCE. An
+        # observed gap outranks a bare SELECTED, which asserts only that nothing
+        # was looked at yet, so the label reports what the walk actually saw.
         prior = resolved.get(key)
-        if prior is None or _rank(disposition) > _rank(prior):
+        if prior is None or _outranks(disposition, prior):
             resolved[key] = disposition
 
     for root in root_list:
@@ -571,19 +585,3 @@ def resolve_source_inputs(
         ),
         licence=licence,
     )
-
-
-#: Precedence used when one path is reachable twice (explicit root + walk).
-_DISPOSITION_RANK: dict[SourceInputDisposition, int] = {
-    SourceInputDisposition.EXCLUDED: 0,
-    SourceInputDisposition.SELECTED: 1,
-    SourceInputDisposition.SCANNED: 1,
-    SourceInputDisposition.UNSUPPORTED: 2,
-    SourceInputDisposition.MISSING: 3,
-    SourceInputDisposition.UNREADABLE: 3,
-    SourceInputDisposition.NOT_LICENSED: 4,
-}
-
-
-def _rank(disposition: SourceInputDisposition) -> int:
-    return _DISPOSITION_RANK[disposition]
