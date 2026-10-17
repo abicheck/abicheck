@@ -40,7 +40,10 @@ from ..policy.classification import (
 from ..policy.disposition_ledger import RuleProvenance
 from ..report_model import VERDICT_TO_SEVERITY_LABEL as _VERDICT_TO_SEVERITY_LABEL
 from ..report_summary import build_summary
-from .change_annotations import change_annotation_fields as _change_annotation_fields
+from .change_annotations import (
+    change_annotation_fields as _change_annotation_fields,
+    removed_instantiations_field,
+)
 from .change_operation import entity_for_change, operation_for_change
 from .contract_fields import (
     add_contract_evaluation_fields as _add_contract_evaluation_fields,
@@ -441,6 +444,9 @@ def suppressed_change_entry(
         entry["impact_assessment"] = assessment.to_dict()
     if getattr(c, "symbol_binding", None):
         entry["symbol_binding"] = c.symbol_binding
+    removed_insts = removed_instantiations_field(c)
+    if removed_insts is not None:
+        entry["removed_instantiations"] = removed_insts
     # Codex review, fresh evidence: an elf_only-visibility removal's
     # demangled_symbol (schema 3.14) reaches every other machine-format
     # projection of this same Change -- a suppressed one must not lose it

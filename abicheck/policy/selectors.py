@@ -101,6 +101,27 @@ from .selectors_namespace_glob import (
 # this same import, before this phase moved it here).
 _VALID_BINDING: frozenset[str] = frozenset(b.value for b in SymbolBinding)
 
+# ChangeKind values whose evidence is a lost ELF export: the symbol was in the
+# old library's export table and is absent from the new one (or no longer
+# exported). Every one of these carries `Change.symbol_binding` (the old-side
+# linkage) so a `binding:` selector can match it -- see `_matches_binding`.
+# Adding an emitter of export-loss evidence means adding its kind here; the
+# integration guard in tests/test_export_loss_binding_invariant.py then holds
+# it to the same contract.
+EXPORT_LOSS_KINDS: frozenset[ChangeKind] = frozenset(
+    {
+        ChangeKind.FUNC_REMOVED,
+        ChangeKind.FUNC_REMOVED_ELF_ONLY,
+        ChangeKind.FUNC_DELETED_ELF_FALLBACK,
+        ChangeKind.VAR_REMOVED,
+        ChangeKind.VAR_REMOVED_ELF_ONLY,
+        ChangeKind.FUNC_VISIBILITY_CHANGED,
+        ChangeKind.VAR_VISIBILITY_CHANGED,
+        ChangeKind.INSTANTIATION_MISSING_FROM_BINARY,
+        ChangeKind.INTERNAL_TEMPLATE_LEAKS_VIA_PUBLIC_API,
+    }
+)
+
 # Pre-built valid `change_kind` values for fast validation.
 _VALID_CHANGE_KINDS: frozenset[str] = frozenset(ck.value for ck in ChangeKind)
 
@@ -296,7 +317,9 @@ def _matches_binding(binding: str, change: SelectorMatchable) -> bool:
     finding this rule was never actually audited against (the same
     fail-closed-on-unknown-evidence discipline ``reachability:
     proven-unreachable-only`` already uses for
-    ``Change.reachability_state``).
+    ``Change.reachability_state``). The kinds that are export-loss evidence
+    and so carry a binding whenever the old ELF table has one are
+    :data:`EXPORT_LOSS_KINDS`.
     """
     return change.symbol_binding == binding
 

@@ -27,12 +27,13 @@ from typing import Any
 if str(Path(__file__).resolve().parent) not in sys.path:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
 from architecture_graph import find_cycle  # noqa: E402 -- sibling leaf, see that module
+from architecture_names import (  # noqa: E402 -- sibling leaf, see that module
+    GENERIC_NAMES,
+    GENERIC_SUFFIXES,
+    generic_owner_messages,
+)
 
 SCHEMA_VERSION = 1
-GENERIC_NAMES = frozenset(
-    {"helpers.py", "utils.py", "common.py", "misc.py", "base.py", "extra.py", "more.py"}
-)
-GENERIC_SUFFIXES = ("_helpers", "_utils", "_lib")
 DEBT_FIELDS = frozenset(
     {
         "path",
@@ -1588,6 +1589,8 @@ def check_repository(root: Path, *, base_revision: str | None = None) -> list[Fi
     dispositions_config = _load_mapping(
         root / "architecture/dispositions.yaml", findings
     )
+    for message in generic_owner_messages(debt, dispositions_config):
+        findings.append(Finding("schema", message))
     layers = _validate_modules(modules, findings)
     disposition_paths = _validate_dispositions(
         dispositions_config, layers, findings, root

@@ -52,7 +52,16 @@ against `limits.package_agents`.
 `debt.yaml` has `schema_version: 1` and a `files` list. Every record requires
 `path`, positive `baseline_lines`, `target`, `rule: no_growth`,
 `disposition` (`migrate` or `accept`), `category`, `owner`, non-empty
-`rationale`, and an ISO `review_by` date. Paths are unique, repository-relative
+`rationale`, and an ISO `review_by` date.
+`owner` names the responsibility area the entry's path belongs to, not a
+person: the `modules.yaml` layer that classifies the file (`model`,
+`storage`, `extract`, `compare`, `policy`, `workflows`, `report`,
+`frontends`), `buildsource` for an unclassified `abicheck/buildsource/` file,
+`legacy-root` for any other unclassified flat root module, or `tests` (or a
+layer name, for a test under `tests/unit/<layer>/` or one whose basename
+matches a single production module) for a test. The shared placeholder
+`abicheck maintainers` is rejected in `debt.yaml`, `dispositions.yaml`, and
+`dependency_direction_exceptions` entries, which name an owner the same way. Paths are unique, repository-relative
 Python files below `abicheck/` or `tests/`, and the recorded baseline must
 meet the applicable production or test ceiling. The checker fails if a
 tracked file grows; a reduced file is allowed so debt can be paid down
