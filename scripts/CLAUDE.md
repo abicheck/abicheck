@@ -15,6 +15,7 @@ One row per script: name, first sentence of its purpose, trigger. **Read the ful
 | `gen_repo_facts.py` | Single source of truth for volatile repository facts (CLAUDE.md "M1-4"). | `verify.py --only repo-facts` (CI `ai-readiness` job). |
 | `check_ai_readiness.py` | AI-readiness gate (file size, CLAUDE.md coverage, test ratio, ChangeKind invariants, mypy baseline drift, import cycles, engine/CLI dependency-direction boundary, test-assertion density, ADR … | CI (`ai-readiness`) and `pre-commit`, both via `verify.py --only ai-readiness`. |
 | `find_duplicate_tests.py` | Reports same-module `test_*` functions with byte-identical bodies (matching parameters and decorators too). | Manual. |
+| `test_refactor_churn.py` | Report-only: ranks `test_*` functions by how many `refactor:`/`perf:`/`style:` commits edited them, assertion edits first (mirror tests that had to change although behaviour did not). | Manual. |
 | `usecase_paths.py` | Which code each use case runs. | CI (`usecase-paths.yml`: PR base-vs-head diff; weekly full ranking and dead-code list); manual. |
 | `usecase_adr_reach.py` | `usecase_paths.py`'s `adr-reach` and `ratchet` analyses. | imported (by `usecase_paths.py`); weekly `usecase-paths.yml` (`ratchet --strict` over a … |
 | `production_references.py` | `usecase_paths.py dead`'s reference analysis, the rule of `docs/contribute/plans/dead-code-and-single-owner.md` made executable: an unreached function is **dead** when every reference to its name in … | imported by `usecase_paths.py dead`. |

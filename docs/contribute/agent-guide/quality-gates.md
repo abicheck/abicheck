@@ -127,6 +127,12 @@ Several mechanisms guard test quality so coverage can't be "filled" without veri
   ceiling), and a weekly run with no committed
   baseline records one (artifact `mutation-baseline`) instead of failing. Per-lane trigger detail lives in
   `.github/AGENTS.md`'s workflow table rather than being copied here.
+- **Mirror-test churn** — `scripts/test_refactor_churn.py` (report-only, not wired into a
+  gate; tests in `tests/test_test_refactor_churn.py`). Ranks each `test_*` function by the
+  edits that behaviour-preserving commits (`refactor:`/`perf:`/`style:`) made to it, assertion
+  edits first: a test that a commit claiming no behaviour change had to re-state is a mirror
+  of the implementation, and it is the usual reason a refactor breaks tests. Read a
+  candidate's commits before changing the test; the assertion/setup labels are syntactic.
 - **Metamorphic property tests** — `tests/test_detector_properties.py` (`slow`).
   Hypothesis-generated snapshot pairs checked against invariants that hold for *any*
   input (idempotence, determinism, direction-symmetry of touched symbols, emitted-kind
