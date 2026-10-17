@@ -1663,7 +1663,7 @@ class TestComputeConfidenceDwarfFlag:
     """Placeholder DWARF objects (has_dwarf=False) must not add a tier."""
 
     @pytest.mark.parametrize(
-        ("meta_cls", "attr", "tier", "has_dwarf", "counted"),
+        ("meta_cls", "attr", "tier", "sides", "counted"),
         [
             (DwarfMetadata, "debug_layout", "dwarf", (False, False), False),
             (DwarfMetadata, "debug_layout", "dwarf", (True, True), True),

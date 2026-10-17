@@ -985,7 +985,6 @@ class TestResolveReleaseSeverityConfig:
 
     def test_returns_config_when_preset(self) -> None:
         cfg = _resolve_release_severity_config("strict", None, None, None, None)
-        # The strict preset escalates every category to error.
         assert cfg == SeverityConfig(*[SeverityLevel.ERROR] * 4)
 
     def test_a_single_category_override_alone_is_honoured(self) -> None:
@@ -1787,13 +1786,9 @@ class TestUsedByScoping:
     def test_multi_app_semantically_identical_change_not_double_counted(
         self, tmp_path, monkeypatch
     ) -> None:
-        # Regression (CLI-audit P2): unlike the shared-object case above,
-        # `appcompat._check_pe_ordinal_imports` constructs a FRESH
-        # PE_ORDINAL_RETARGETED Change per `scope_diff_to_app` call, so two
-        # apps retargeting the same ordinal get two distinct Change objects
-        # with identical kind/symbol/description but different id() -- the
-        # old id()-keyed dedup in `_apply_used_by_scoping` would count that
-        # as two findings instead of one.
+        # Regression (CLI-audit P2): `appcompat._check_pe_ordinal_imports` builds
+        # a fresh Change per app, so id()-keyed dedup in `_apply_used_by_scoping`
+        # counted two identical findings as two. Dedup must key on content.
         import abicheck.workflows.consumer_scope as appcompat_mod
         from abicheck.workflows.consumer_scope import AppCompatResult
 
@@ -1837,10 +1832,8 @@ class TestUsedByScoping:
             "json=-",
         )
         data = json.loads(result.stdout)
-        # Workstream D-S1: the real gate/exit code reflect only the empty
-        # full-library diff; the content-keyed (finding_id) dedup this test
-        # targets is now visible in the additive `changes` fold-in instead
-        # of the gating severity block.
+        # Workstream D-S1: the gate reflects only the empty full-library diff;
+        # the content-keyed dedup under test shows in the `changes` fold-in.
         assert result.exit_code == 0
         assert data["severity"]["categories"]["abi_breaking"]["count"] == 0
         removed_entries = [c for c in data["changes"] if c["symbol"] == "foo"]
