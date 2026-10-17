@@ -128,3 +128,30 @@ def test_compare_verdict_for_an_appended_field(facts, verdict, kind) -> None:
     assert kind in kinds
     assert ({ADDED, COMPATIBLE} - {kind}).isdisjoint(kinds)
     assert result.verdict == verdict
+
+
+def test_added_field_changes_carry_entity_id_and_skip_only_the_fam() -> None:
+    """Each added-field finding carries the record's entity id, and the
+    trailing flexible array member is skipped without dropping the fields
+    after it in iteration order."""
+    from abicheck.diff_types import _added_field_changes
+    from abicheck.model.identity import entity_id_for_type
+
+    eid = entity_id_for_type((), "S")
+    new_fields = {
+        "data": TypeField(name="data", type="int[]", offset_bits=32),
+        "b": TypeField(name="b", type="int", offset_bits=64),
+    }
+    changes = _added_field_changes(
+        "S",
+        RecordType(name="S", kind="struct", vtable_fact=Fact.present([])),
+        {"a": _A},
+        new_fields,
+        set(),
+        set(),
+        "data",
+        entity_id=eid,
+    )
+    assert [(c.kind, c.description, c.entity_id) for c in changes] == [
+        (COMPATIBLE, "Field added: S::b", eid)
+    ]
