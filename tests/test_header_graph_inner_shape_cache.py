@@ -20,6 +20,7 @@ and each run asserts the mechanism it claims to test.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -29,6 +30,9 @@ from _malformed_clang_ast import (
     CALL_GRAPH_PASS,
     reads_as_collected,
 )
+
+from abicheck.buildsource.header_graph_ast_projection import project_header_graph_ast
+from abicheck.buildsource.header_graph_ast_stream import project_header_graph_ast_file
 
 # Module-attribute access, not ``from ... import``: importing the harness class
 # by name would make pytest collect its tests a second time in this module.
@@ -77,3 +81,29 @@ def test_a_root_inner_of_any_shape_is_never_read_as_a_clean_empty_tu(
         # Positive control: a valid root is a genuine zero, read as collected.
         assert reads_as_collected(graph, CALL_GRAPH_PASS), f"{phase}/{shape}"
         assert graph.degraded_passes.get(CALL_GRAPH_PASS) is None
+
+
+@pytest.mark.parametrize(
+    "doc",
+    [
+        # `inner` as a value, not the array key: the scanner must skip it and
+        # still find the real root `inner` that follows.
+        {"kind": "inner", "inner": []},
+        # A valid root array, streamed: the stream must agree with the tree.
+        {"kind": "TranslationUnitDecl", "inner": []},
+    ],
+)
+def test_a_streamed_valid_root_matches_the_whole_tree(
+    tmp_path: Path, doc: dict
+) -> None:
+    """The streamed projection of a well-formed root equals the whole-tree one.
+
+    The malformed roots are covered through the cache above. This pins the
+    accepting side of the same scanner, so the change cannot make a valid
+    document refuse, and it runs the stream on the changed lines itself.
+    """
+    path = tmp_path / "ast.json"
+    path.write_text(json.dumps(doc))
+
+    streamed = projection_tests._as_tuple(project_header_graph_ast_file(path))
+    assert streamed == projection_tests._as_tuple(project_header_graph_ast(doc))
