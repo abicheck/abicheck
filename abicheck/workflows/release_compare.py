@@ -672,17 +672,17 @@ def _resolve_typed_release_configuration(
 ) -> PackApplication:
     """The release's configuration for a typed caller: *options* and the
     plan's gate stated at the ``API_REQUEST`` tier, the way
-    ``compatibility_evaluation_frontend.compare_request_inputs`` states a
+    ``abicheck.workflows.compare_input_adapters.compare_request_inputs`` states a
     typed scalar request, plus the project overrides at ``PROJECT_CONFIG``.
     """
     from ..compatibility_evaluation_frontend import (
         ExplicitCompatibilityInputs,
         FrontEnd,
-        SuppressionSource,
-        stated_policy_base,
     )
     from .compare_configuration import resolve_release_pack_application
     from .compare_gate_receipt import project_inputs_for_overrides
+    from .compare_input_sources import SuppressionSource
+    from .evaluation_identities import stated_policy_base
     from .ownership_contract_inputs import header_dir_spellings
     from .policy_file import PolicyFile
 

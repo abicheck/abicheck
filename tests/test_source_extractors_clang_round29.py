@@ -33,7 +33,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from abicheck.buildsource.build_evidence import CompileUnit
-from abicheck.buildsource.source_extractors.clang import build_clang_command
+from abicheck.buildsource.source_extractors.clang_command import build_clang_command
 
 
 def test_build_clang_command_rebases_include_paths_under_env_chdir() -> None:

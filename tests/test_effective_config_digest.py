@@ -559,9 +559,7 @@ class TestBaselineTierBuiltinPolicyIdentity:
     identity actually hashes) having genuinely changed."""
 
     def test_recognized_builtin_policy_carries_full_identity(self):
-        from abicheck.compatibility_evaluation_frontend import (
-            builtin_policy_identity,
-        )
+        from abicheck.workflows.evaluation_identities import builtin_policy_identity
 
         result = _result(policy="strict_abi")
         fields = effective_config_fields_from_raw(result, severity_config=None)
@@ -585,7 +583,7 @@ class TestBaselineTierBuiltinPolicyIdentity:
     def test_unrecognized_policy_name_degrades_to_bare_name_rather_than_raising(self):
         """A receipt must never turn a completed comparison into a failure
         over an unrecognized policy name (see
-        compatibility_evaluation_frontend.stated_policy_base's own
+        abicheck.workflows.evaluation_identities.stated_policy_base's own
         docstring for the precedent)."""
         result = _result(policy="totally_unknown_policy")
         fields = effective_config_fields_from_raw(result, severity_config=None)

@@ -77,13 +77,13 @@ if TYPE_CHECKING:
         ExplicitCompatibilityInputs,
         FrontEnd,
         ProjectCompatibilityInputs,
-        PublicSymbolsList,
     )
     from ..dry_run_estimate import CompileContext
     from ..environment_matrix import EnvironmentMatrix
     from ..model.change_catalog.kinds import ChangeKind
     from ..pack_application import PackApplication
     from ..policy_file import PolicyFile
+    from .compare_input_sources import PublicSymbolsList
     from .extraction import BuildConfig
     from .gate import SeverityConfig
 
@@ -619,7 +619,7 @@ def resolve_force_public_scope(
     evidence). Returns ``None`` for the list when no file was given, which
     is a different fact from a file that named no symbols.
     """
-    from ..compatibility_evaluation_frontend import (
+    from .compare_input_sources import (
         PublicSymbolsList as _List,
         collect_force_public_symbols,
     )
