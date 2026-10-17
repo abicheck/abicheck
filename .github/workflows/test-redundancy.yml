@@ -43,10 +43,10 @@ jobs:
       - name: Classify tests
         run: |
           if [ -n "$SCOPE" ]; then
-            python scripts/test_redundancy.py --scope "$SCOPE" \
+            python scripts/test_redundancy.py --coverage-file .coverage --scope "$SCOPE" \
               --json test-redundancy.json --markdown test-redundancy.md | tee test-redundancy-summary.md
           else
-            python scripts/test_redundancy.py \
+            python scripts/test_redundancy.py --coverage-file .coverage \
               --json test-redundancy.json --markdown test-redundancy.md | tee test-redundancy-summary.md
           fi
       - name: Publish the summary
