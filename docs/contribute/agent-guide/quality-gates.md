@@ -77,6 +77,7 @@ in that order of preference. `--json` prints every current finding.
 Line coverage measures *reach*, not whether a test actually checks the result.
 Several mechanisms guard test quality so coverage can't be "filled" without verifying behaviour:
 
+- **Unique-coverage report (review queue, not a gate)** — `scripts/test_unique_coverage.py`, run weekly by `.github/workflows/test-unique-coverage.yml`. It reads the per-test coverage contexts and lists each test's *unique* line coverage: zero-unique tests (ranked by lines covered, and by runtime with `--durations`), files whose tests are mostly zero-unique, and lines only one test covers. It is a **review queue, never a deletion list**: a zero-unique test can still assert a value no other test checks, and a line covered by one test is a single point of protection, not a defect. Decide per test with the test-assertion-density gate and the mutation lane (which test actually kills a mutant), and never remove a test on this report alone. The script always exits 0.
 - **FP-rate gate** — `scripts/check_fp_rate.py` (mirrored in `tests/test_fp_rate_gate.py`).
   A labelled corpus of `(old, new)` snapshot pairs run under public-surface scoping:
   internal-noise cases must stay non-breaking (no false positives), real-break cases

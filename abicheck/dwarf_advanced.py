@@ -528,8 +528,8 @@ def _type_unaligned_at(
             mt = _resolve_type_die(child, CU)
             if mt is None:
                 continue
-            abs_offset = base_offset + _decode_member_location(child)
-            if _type_unaligned_at(mt, CU, abs_offset, cache):
+            rel = _decode_member_location(child)  # None: misalignment not provable
+            if rel is not None and _type_unaligned_at(mt, CU, base_offset + rel, cache):
                 return True
     return False
 
@@ -762,14 +762,14 @@ def _check_packed(
         #   - int  (DWARF 3+ constant form — most common case)
         #   - list of DWARFExprOp (DWARF 2/3 location expression)
         #     The typical expression is [DW_OP_plus_uconst N] where N is the offset.
-        offset = _decode_member_location(child)
+        offset = _decode_member_location(child)  # None: packing not provable
 
         # Get natural alignment via type tag (NOT byte_size of composite types)
         natural = _get_type_align(child, CU)
         if natural <= 1:
             continue  # char/bool/unknown composite: cannot determine — skip
 
-        if offset % natural != 0:
+        if offset is not None and offset % natural != 0:
             log.debug(
                 "packed struct detected: %s field at offset %d (natural align %d)",
                 name,
@@ -780,8 +780,8 @@ def _check_packed(
             return  # one misaligned field is sufficient
 
 
-def _decode_member_location(member_die: Any) -> int:
-    """Decode DW_AT_data_member_location to a byte offset.
+def _decode_member_location(member_die: Any) -> int | None:
+    """Decode DW_AT_data_member_location to a byte offset, or ``None`` if unevaluable.
 
     Delegates to the shared implementation in dwarf_utils.
     """

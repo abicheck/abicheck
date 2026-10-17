@@ -38,6 +38,7 @@ from elftools.elf.elffile import ELFFile
 
 from .dwarf_snapshot_datasources import show_data_sources as show_data_sources
 from .dwarf_utils import (
+    add_bit_offsets as _add_bit_offsets,
     attr_bool as _attr_bool,
     attr_int as _attr_int,
     attr_str as _attr_str,
@@ -46,6 +47,7 @@ from .dwarf_utils import (
     dwarf_low_memory_mode,
     free_cu_die_cache,
     has_real_dwarf_info,
+    member_offset_bits as _member_offset_bits,
     resolve_die_ref as _resolve_ref,
     resolve_type_die as _resolve_type_die,
     unwrap_cv_typedef as _unwrap_cv_typedef,
@@ -1063,14 +1065,12 @@ class _DwarfSnapshotBuilder:
         # pre-existing base_offsets write and the new base_edges append —
         # a virtual base is never a primary-base candidate either way.
         if "DW_AT_data_member_location" in child.attributes:
-            offset_bits = (
-                _decode_member_location(
-                    child.attributes["DW_AT_data_member_location"].value
-                )
-                * 8
+            base_bits = _member_offset_bits(
+                child.attributes["DW_AT_data_member_location"].value
             )
-            base_offsets[base_name] = offset_bits
-            base_edges.append((base_name, offset_bits, base_die_key))
+            if base_bits is not None:
+                base_offsets[base_name] = base_bits
+            base_edges.append((base_name, base_bits, base_die_key))
 
     @staticmethod
     def _process_virtual_method_child(child: Any, vtable: list[str]) -> None:
@@ -1170,13 +1170,13 @@ class _DwarfSnapshotBuilder:
             type_name, _ = self._resolve_type(die, CU)
 
         # Byte offset
-        byte_offset = 0
+        byte_offset: int | None = 0
         if "DW_AT_data_member_location" in die.attributes:
             byte_offset = _decode_member_location(
                 die.attributes["DW_AT_data_member_location"].value
             )
 
-        offset_bits = byte_offset * 8
+        offset_bits: int | None = None if byte_offset is None else byte_offset * 8
 
         # Bitfield
         bit_size = _attr_int(die, "DW_AT_bit_size")
@@ -1186,7 +1186,7 @@ class _DwarfSnapshotBuilder:
         if is_bitfield:
             if "DW_AT_data_bit_offset" in die.attributes:
                 offset_bits = _attr_int(die, "DW_AT_data_bit_offset")
-            elif "DW_AT_bit_offset" in die.attributes:
+            elif "DW_AT_bit_offset" in die.attributes and byte_offset is not None:
                 offset_bits = byte_offset * 8 + _attr_int(die, "DW_AT_bit_offset")
 
         # Access level
@@ -1275,13 +1275,10 @@ class _DwarfSnapshotBuilder:
             return []
         if _attr_str(type_die, "DW_AT_name"):
             return []
-        outer_offset_bits = 0
+        outer_offset_bits: int | None = 0
         if "DW_AT_data_member_location" in die.attributes:
-            outer_offset_bits = (
-                _decode_member_location(
-                    die.attributes["DW_AT_data_member_location"].value
-                )
-                * 8
+            outer_offset_bits = _member_offset_bits(
+                die.attributes["DW_AT_data_member_location"].value
             )
         outer_access = _access_from_dwarf(
             _attr_int(die, "DW_AT_accessibility"), default_access
@@ -1294,7 +1291,9 @@ class _DwarfSnapshotBuilder:
                 flattened.append(
                     replace(
                         inner,
-                        offset_bits=(inner.offset_bits or 0) + outer_offset_bits,
+                        offset_bits=_add_bit_offsets(
+                            inner.offset_bits, outer_offset_bits
+                        ),
                         access=outer_access,
                     )
                 )
