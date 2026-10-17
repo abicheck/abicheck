@@ -87,6 +87,10 @@ from adr_status_sync import (  # noqa: E402
     _adr_status_text,
     check_adr_status_sync,
 )
+from assertion_resolution import (  # noqa: E402
+    asserting_function_names,
+    function_index,
+)
 from engine_cli_boundary import check_engine_cli_boundary  # noqa: E402
 from fact_detector_misuse import check_fact_detector_misuse  # noqa: E402
 from fact_field_readers import check_fact_field_readers  # noqa: E402
@@ -114,6 +118,7 @@ from no_inline_gate_computation import (  # noqa: E402
 )
 from perf_antipatterns import check_perf_antipatterns  # noqa: E402
 from semantic_ir_cutover import check_semantic_ir_cutover  # noqa: E402
+from test_mirror_patterns import check_test_mirror_patterns  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Tunables
@@ -3256,52 +3261,6 @@ def check_cli_contract(f: Findings) -> None:
 # ---------------------------------------------------------------------------
 
 
-# Substrings that mark a call as assertion-bearing: explicit asserts, the
-# unittest-style ``self.assert*`` family, ``pytest.raises``/``warns``/``fail``,
-# and common project helper-naming (``_check_*``, ``verify_*``, ``*_roundtrip``).
-_ASSERTION_CALL_HINTS: tuple[str, ...] = (
-    "assert",
-    "check",
-    "verify",
-    "expect",
-    "validate",
-    "ensure",
-    "roundtrip",
-    "raises",
-    "warns",
-    "fail",
-)
-
-
-def _call_attr_or_name(node: ast.Call) -> str:
-    func = node.func
-    if isinstance(func, ast.Name):
-        return func.id
-    if isinstance(func, ast.Attribute):
-        return func.attr
-    return ""
-
-
-def _has_direct_assertion(fn: ast.AST) -> bool:
-    """True if *fn*'s body itself asserts (assert stmt, with-block, or a call
-    whose name hints at an assertion)."""
-    for node in ast.walk(fn):
-        if isinstance(node, ast.Assert):
-            return True
-        # ``with pytest.raises(...)`` / ``with caplog ...`` express expectations.
-        if isinstance(node, ast.With | ast.AsyncWith):
-            return True
-        if isinstance(node, ast.Call):
-            name = _call_attr_or_name(node).lower()
-            if any(h in name for h in _ASSERTION_CALL_HINTS):
-                return True
-    return False
-
-
-def _called_function_names(fn: ast.AST) -> set[str]:
-    return {_call_attr_or_name(n) for n in ast.walk(fn) if isinstance(n, ast.Call)}
-
-
 def check_test_assertion_density(f: Findings) -> None:
     """WARN on ``test_*`` functions that make no assertion, directly or via a
     same-file helper.
@@ -3309,9 +3268,10 @@ def check_test_assertion_density(f: Findings) -> None:
     This is the coverage-honesty guard the testing review asked for: a test
     that executes code without asserting anything still lifts line coverage but
     verifies nothing. The check resolves same-file helper calls to a fixed
-    point, so tests that delegate their checks to a helper (e.g. golden-file
-    comparisons) are not flagged. Remaining hits are genuine smoke tests —
-    legitimate, but worth a deliberate confirmation rather than an accident.
+    point (``assertion_resolution.asserting_function_names``), so tests that
+    delegate their checks to a helper (e.g. golden-file comparisons) are not
+    flagged. Remaining hits are genuine smoke tests — legitimate, but worth a
+    deliberate confirmation rather than an accident.
     """
     if not TESTS.exists():
         return
@@ -3322,22 +3282,8 @@ def check_test_assertion_density(f: Findings) -> None:
         except SyntaxError:
             continue
 
-        funcs: dict[str, ast.AST] = {}
-        for node in ast.walk(tree):
-            if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
-                funcs.setdefault(node.name, node)  # first definition wins
-
-        asserting = {name for name, fn in funcs.items() if _has_direct_assertion(fn)}
-        # Propagate: a function asserts if it calls a function that asserts.
-        changed = True
-        while changed:
-            changed = False
-            for name, fn in funcs.items():
-                if name in asserting:
-                    continue
-                if _called_function_names(fn) & asserting:
-                    asserting.add(name)
-                    changed = True
+        funcs = function_index(tree)
+        asserting = asserting_function_names(funcs)
 
         for node in ast.walk(tree):
             if (
@@ -3483,6 +3429,7 @@ CHECKS: dict[str, Callable[[Findings], None]] = {
     "no-inline-gate-computation": check_no_inline_gate_computation,
     "license-header": check_license_header,
     "test-assertion-density": check_test_assertion_density,
+    "test-mirror-patterns": check_test_mirror_patterns,
 }
 
 
