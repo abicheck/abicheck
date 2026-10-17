@@ -40,9 +40,10 @@ Without ``--kills`` every test is ``unique`` or ``coverage-redundant``, never
 ``fully-redundant``: absent mutation data is never read as "no kills".
 
 **Coverage uniqueness is relative to the run that produced the data.** A
-subset run (``pytest tests/test_diff_*.py``) can call a test redundant only
-because the test covering its lines was not in that run. ``--scope`` limits
-what is *reported*, not what is *compared against*.
+subset run (``pytest tests/test_diff_*.py``) can call a test *unique* only
+because the test covering its lines was not in that run. That does not prove
+uniqueness across the full suite. ``--scope`` filters what is *reported* after
+comparison; it does not change the coverage universe.
 
 Run::
 
@@ -129,6 +130,13 @@ def load_coverage(path: Path) -> tuple[dict[Line, set[str]], set[str]]:
     data = CoverageData(basename=str(path))
     data.read()
     universe = {t for c in data.measured_contexts() if (t := context_test_id(c))}
+    if not universe:
+        # A plain `pytest --cov` run leaves data without test contexts. Reporting
+        # that as "0 test id(s) measured" would read as a clean result.
+        raise ValueError(
+            f"{path} has no per-test contexts: run pytest with --cov=abicheck "
+            "--cov-context=test"
+        )
     lines: dict[Line, set[str]] = {}
     for filename in data.measured_files():
         for lineno, contexts in data.contexts_by_lineno(filename).items():
@@ -318,17 +326,22 @@ def build_report(
     }
 
 
+def _cell(test_id: object) -> str:
+    """A test id as a code span, with pipes escaped so they cannot split the row."""
+    return "`" + str(test_id).replace("|", "\\|") + "`"
+
+
 def _row(unit: Mapping[str, object]) -> str:
     kills = (
         "unknown"
         if unit["kills"] is None
         else f"{unit['unique_kills']}/{unit['kills']}"
     )
-    subsumed = ", ".join(f"`{s}`" for s in unit["subsumed_by"]) or (
+    subsumed = ", ".join(_cell(s) for s in unit["subsumed_by"]) or (
         "(covered by several tests together)" if unit["redundant_only_by_union"] else ""
     )
     return (
-        f"| `{unit['id']}` | {unit['classification']} | {unit['covered_lines']} | "
+        f"| {_cell(unit['id'])} | {unit['classification']} | {unit['covered_lines']} | "
         f"{unit['unique_lines']} | {kills} | {subsumed} |"
     )
 

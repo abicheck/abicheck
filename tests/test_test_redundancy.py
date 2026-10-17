@@ -272,3 +272,36 @@ def test_main_writes_json_and_markdown_and_exits_zero(tmp_path: Path) -> None:
 
 def test_main_reports_a_missing_coverage_file_as_failure(tmp_path: Path) -> None:
     assert tr.main(["--coverage-file", str(tmp_path / "absent")]) == 1
+
+
+def test_a_coverage_run_without_test_contexts_is_an_error_not_an_empty_report(
+    tmp_path: Path,
+) -> None:
+    # A plain `pytest --cov` run records lines under the empty context only.
+    path = tmp_path / ".coverage"
+    data = CoverageData(basename=str(path))
+    data.set_context("")
+    data.add_lines({_SRC: [1, 2]})
+    data.write()
+
+    with pytest.raises(ValueError, match="no per-test contexts"):
+        tr.load_coverage(path)
+
+
+def test_a_pipe_in_a_test_id_cannot_split_the_markdown_row() -> None:
+    unit = {
+        "id": "tests/test_mod.py::test_a[x|y]",
+        "classification": "coverage-redundant",
+        "covered_lines": 2,
+        "unique_lines": 0,
+        "kills": None,
+        "unique_kills": None,
+        "subsumed_by": ["tests/test_mod.py::test_b[x|y]"],
+        "redundant_only_by_union": False,
+    }
+    row = tr._row(unit)
+
+    assert "`tests/test_mod.py::test_a[x\\|y]`" in row
+    assert "`tests/test_mod.py::test_b[x\\|y]`" in row
+    # Six cells have five separators; the pipes inside the ids add none.
+    assert row.count(" | ") == 5

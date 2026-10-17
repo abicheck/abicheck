@@ -336,8 +336,9 @@ Several mechanisms guard test quality so coverage can't be "filled" without veri
   makes a test `fully-redundant`:** mutmut 3.7.0 does not record which tests killed each
   mutant, so kill uniqueness needs a `--kills` file from a recorder that does not exist
   yet, and without one every redundancy is `coverage-redundant`. Coverage uniqueness is
-  relative to the run measured, so a subset run can flag a test whose coverage is held by
-  a test outside it. Mutate before deleting: a clone group is a review queue, not a verdict.
+  relative to the run measured: a subset run can mark a test `unique` because the test
+  covering its lines sits outside that run, which does not prove uniqueness across the full
+  suite. Mutate before deleting: a clone group is a review queue, not a verdict.
 
 ## Line-coverage floor
 
