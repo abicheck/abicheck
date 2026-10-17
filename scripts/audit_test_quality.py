@@ -56,7 +56,7 @@ import os
 import pathlib
 import subprocess
 import sys
-from collections.abc import Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from typing import NamedTuple
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -129,17 +129,8 @@ _NONEMPTY_LEN_FORMS = frozenset({(ast.Gt, 0), (ast.GtE, 1), (ast.NotEq, 0)})
 _NONEMPTY_LEN_REVERSED_FORMS = frozenset({(ast.Lt, 0), (ast.LtE, 1), (ast.NotEq, 0)})
 #: Name fragments check_ai_readiness's test-assertion-density gate treats as
 #: assertion-bearing. Mirrored so the two tools agree on what "asserts" means.
-_ASSERTION_HINTS: tuple[str, ...] = (
-    "assert",
-    "check",
-    "verify",
-    "expect",
-    "validate",
-    "ensure",
-    "roundtrip",
-    "raises",
-    "warns",
-    "fail",
+_ASSERTION_HINTS = tuple(
+    "assert check verify expect validate ensure roundtrip raises warns fail".split()
 )
 
 #: Nodes whose bodies are a separate scope; a test's own statements stop here.
@@ -257,15 +248,18 @@ def _test_functions(tree: ast.Module) -> list[tuple[str, _FuncDef]]:
 
 def _abicheck_names(tree: ast.Module) -> frozenset[str]:
     """Names bound by importing from ``abicheck`` anywhere in the file."""
+
+    def ours(module: str | None) -> bool:
+        return module is not None and module.split(".")[0] == "abicheck"
+
     names: set[str] = set()
     for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom) and node.module:
-            if node.module == "abicheck" or node.module.startswith("abicheck."):
-                names.update(a.asname or a.name for a in node.names)
+        if isinstance(node, ast.ImportFrom) and ours(node.module):
+            names.update(a.asname or a.name for a in node.names)
         elif isinstance(node, ast.Import):
-            for alias in node.names:
-                if alias.name == "abicheck" or alias.name.startswith("abicheck."):
-                    names.add(alias.asname or alias.name.split(".")[0])
+            names.update(
+                a.asname or a.name.split(".")[0] for a in node.names if ours(a.name)
+            )
     return frozenset(names)
 
 
@@ -474,64 +468,83 @@ def _asserting_helpers(tree: ast.Module) -> frozenset[str]:
 # ---------------------------------------------------------------------------
 
 
-def _flags_for(
-    fn: _FuncDef, names: frozenset[str], helpers: frozenset[str]
-) -> tuple[str, ...]:
+class _TestFacts(NamedTuple):
+    nodes: list[ast.AST]
+    asserts: list[ast.Assert]
+    value_asserts: list[ast.Assert]
+    raises: bool
+    calls: list[ast.Call]
+    assert_calls: list[ast.Call]
+    patching: bool
+
+
+def _collect(fn: _FuncDef) -> _TestFacts:
     nodes = list(_own_nodes(fn.body))
     asserts = [n for n in nodes if isinstance(n, ast.Assert)]
-    value_asserts = [a for a in asserts if not _is_weak(a.test)]
-    raises = [
-        n
-        for n in nodes
-        if isinstance(n, ast.With | ast.AsyncWith)
-        and any(_is_raises(i.context_expr) for i in n.items)
-    ]
     calls = [n for n in nodes if isinstance(n, ast.Call)]
-    assert_calls = [c for c in calls if _call_name(c).startswith("assert")]
-    has_other = bool(raises or assert_calls)
-
     # Decorators are outside the body but can patch the whole test.
     decorator_calls = [
         n for dec in fn.decorator_list for n in ast.walk(dec) if isinstance(n, ast.Call)
     ]
-    patching = any(
-        _is_patching_call(c) for c in itertools.chain(calls, decorator_calls)
+    return _TestFacts(
+        nodes=nodes,
+        asserts=asserts,
+        value_asserts=[a for a in asserts if not _is_weak(a.test)],
+        raises=any(
+            isinstance(n, ast.With | ast.AsyncWith)
+            and any(_is_raises(i.context_expr) for i in n.items)
+            for n in nodes
+        ),
+        calls=calls,
+        assert_calls=[c for c in calls if _call_name(c).startswith("assert")],
+        patching=any(map(_is_patching_call, itertools.chain(calls, decorator_calls))),
     )
 
-    type_only = bool(asserts) and not value_asserts and not has_other
 
-    mock_expectations_ok = (
-        bool(asserts or assert_calls)
-        and not raises
-        and all(_is_mock_verify(a.test) for a in asserts)
-        and all(_call_name(c) in _MOCK_VERIFY_METHODS for c in assert_calls)
-    )
-    mock_echo = patching and mock_expectations_ok
+def _type_only(t: _TestFacts) -> bool:
+    return bool(t.asserts) and not (t.value_asserts or t.raises or t.assert_calls)
 
-    value_shape_ok = bool(value_asserts) and not has_other
-    inputs = _constructor_inputs(nodes)
-    set_then_read = value_shape_ok and all(
-        _echoes_input(a, inputs) for a in value_asserts
-    )
-    constant_mirror = value_shape_ok and all(
-        _is_constant_mirror(a.test, names) for a in value_asserts
+
+def _mock_echo(t: _TestFacts) -> bool:
+    if not t.patching or t.raises or not (t.asserts or t.assert_calls):
+        return False
+    return all(_is_mock_verify(a.test) for a in t.asserts) and all(
+        _call_name(c) in _MOCK_VERIFY_METHODS for c in t.assert_calls
     )
 
-    has_expectation = bool(asserts or raises or assert_calls) or any(
-        _has_hint(_call_name(c)) or _call_name(c) in helpers for c in calls
-    )
-    no_assert = not has_expectation
 
-    shape = {
-        "type_only": type_only,
-        "mock_echo": mock_echo,
-        "set_then_read": set_then_read,
-        "constant_mirror": constant_mirror,
+def _value_asserts_all(t: _TestFacts, pred: Callable[[ast.Assert], bool]) -> bool:
+    """Every value assert satisfies *pred*, and nothing else expresses a check."""
+    if not t.value_asserts or t.raises or t.assert_calls:
+        return False
+    return all(pred(a) for a in t.value_asserts)
+
+
+def _no_assert(t: _TestFacts, helpers: frozenset[str]) -> bool:
+    if t.asserts or t.raises or t.assert_calls:
+        return False
+    return not any(
+        _has_hint(_call_name(c)) or _call_name(c) in helpers for c in t.calls
+    )
+
+
+def _flags_for(
+    fn: _FuncDef, names: frozenset[str], helpers: frozenset[str]
+) -> tuple[str, ...]:
+    t = _collect(fn)
+    inputs = _constructor_inputs(t.nodes)
+    flags = {
+        "type_only": _type_only(t),
+        "mock_echo": _mock_echo(t),
+        "set_then_read": _value_asserts_all(t, lambda a: _echoes_input(a, inputs)),
+        "constant_mirror": _value_asserts_all(
+            t, lambda a: _is_constant_mirror(a.test, names)
+        ),
+        "no_assert": _no_assert(t, helpers),
     }
-    trivial_size = _statement_count(fn.body) <= _TRIVIAL_MAX_STATEMENTS and any(
-        shape[f] for f in _VALUE_SHAPE_FLAGS
-    )
-    flags = {**shape, "no_assert": no_assert, "trivial_size": trivial_size}
+    flags["trivial_size"] = _statement_count(
+        fn.body
+    ) <= _TRIVIAL_MAX_STATEMENTS and any(flags[f] for f in _VALUE_SHAPE_FLAGS)
     return tuple(f for f in FLAGS if flags[f])
 
 
