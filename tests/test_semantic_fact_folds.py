@@ -67,7 +67,7 @@ from abicheck.buildsource.template_graph import (
     merge_template_instantiations,
     parse_clang_ast_templates,
 )
-from abicheck.buildsource.type_graph import ast_derived_scope
+from abicheck.buildsource.type_graph_index import ast_derived_scope
 from abicheck.extract.headers.clang.locations import materialize_locations
 from abicheck.model import AbiSnapshot
 from abicheck.model.source_graph import SourceGraphSummary

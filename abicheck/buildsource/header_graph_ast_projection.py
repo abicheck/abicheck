@@ -28,13 +28,13 @@ header-graph-attach-memory.md``).
 The graph builder never needs the tree itself. It reads exactly four pure,
 compact projections of it:
 
-* :func:`~abicheck.buildsource.type_graph.index_declared_type_files` --
+* :func:`~abicheck.buildsource.type_graph_index.index_declared_type_files` --
   qualified type name -> declaring file;
-* :func:`~abicheck.buildsource.type_graph.parse_clang_ast_types` --
+* :func:`~abicheck.buildsource.type_graph_walk.parse_clang_ast_types` --
   ``TypeEdge`` list;
 * :func:`~abicheck.buildsource.call_graph.parse_clang_ast_calls` --
   ``CallEdge`` list;
-* :func:`~abicheck.buildsource.type_graph.index_declared_entity_files` --
+* :func:`~abicheck.buildsource.type_graph_index.index_declared_entity_files` --
   declared identity -> declaring file, consulted only to resolve the
   *source* side of a ``DECL_REFERENCES_DECL`` edge.
 
@@ -117,13 +117,13 @@ from .semantic_fact_folds import (
     merge_semantic_facts,
     parse_semantic_facts,
 )
-from .type_graph import (
+from .type_graph import augment_graph_with_types
+from .type_graph_index import (
     ast_derived_scope,
-    augment_graph_with_types,
     index_declared_entity_files,
     index_declared_type_files,
-    parse_clang_ast_types,
 )
+from .type_graph_walk import parse_clang_ast_types
 
 _H = TypeVar("_H")
 
