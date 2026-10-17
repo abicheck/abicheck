@@ -53,13 +53,6 @@ from abicheck.compatibility_evaluation_frontend import (
     ExplicitCompatibilityInputs,
     FrontEnd,
     ProjectCompatibilityInputs,
-    SuppressionSource,
-    builtin_policy_identity,
-    collect_force_public_symbols,
-    compare_cli_inputs,
-    compare_request_inputs,
-    compatibility_config_from_compare_request,
-    severity_preset_identity,
 )
 from abicheck.compatibility_evaluation_packs import PackKind
 from abicheck.compatibility_evaluation_resolver import (
@@ -72,6 +65,19 @@ from abicheck.errors import PackManifestError
 from abicheck.policy.severity import SeverityLevel, resolve_severity_config
 from abicheck.policy_file import PolicyFile
 from abicheck.service import CompareRequest, InputSpec
+from abicheck.workflows.compare_input_adapters import (
+    compare_cli_inputs,
+    compare_request_inputs,
+    compatibility_config_from_compare_request,
+)
+from abicheck.workflows.compare_input_sources import (
+    SuppressionSource,
+    collect_force_public_symbols,
+)
+from abicheck.workflows.evaluation_identities import (
+    builtin_policy_identity,
+    severity_preset_identity,
+)
 
 
 class TestDefaults:
@@ -1245,22 +1251,6 @@ class TestPackSuppliedSeverityActivatesAuto:
         )
         assert cfg.gate.severity.quality_issues is SeverityLevel.ERROR
         assert cfg.gate.exit_code_scheme == "severity"
-
-
-class TestSymbolListParsing:
-    def test_the_shared_merge_helper_reads_both_sources(self, tmp_path):
-        # `collect_force_public_symbols` is the one definition the live CLI and
-        # this resolver share, so the format stays in one place.
-        listed = tmp_path / "symbols.txt"
-        listed.write_text("# comment\n\nfrom_file\n  spaced  \n")
-        assert collect_force_public_symbols(("inline", " ", ""), listed) == {
-            "inline",
-            "from_file",
-            "spaced",
-        }
-
-    def test_no_list_file_means_inline_symbols_only(self):
-        assert collect_force_public_symbols(("a", "b"), None) == {"a", "b"}
 
 
 class TestUnstatableSelectors:

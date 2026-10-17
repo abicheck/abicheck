@@ -1915,9 +1915,7 @@ class TestWideningOverlay:
 
 
 def test_collect_force_public_symbols_no_file():
-    from abicheck.compatibility_evaluation_frontend import (
-        collect_force_public_symbols,
-    )
+    from abicheck.workflows.compare_input_sources import collect_force_public_symbols
 
     assert collect_force_public_symbols((), None) == set()
     assert collect_force_public_symbols(("a", " ", "b"), None) == {"a", "b"}
