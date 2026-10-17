@@ -580,6 +580,12 @@ def test_the_exempt_marker_on_the_def_or_a_decorator_drops_the_finding(
     assert gated_findings([record]) == {flag: set() for flag in GATED_FLAGS}
 
 
+def test_a_marker_on_a_wrapped_signature_line_is_an_exemption() -> None:
+    src = "def test_pin(\n    self,  # test-quality: ok wire spelling\n):\n    run()\n"
+    (record,) = audit_source(src)
+    assert record.exempt
+
+
 def test_a_marker_inside_the_body_is_not_an_exemption() -> None:
     (record,) = audit_source("def test_x():\n    run()  # test-quality: ok\n")
     assert not record.exempt

@@ -2,8 +2,6 @@
  "type_only": [],
  "mock_echo": [],
  "set_then_read": [],
- "constant_mirror": [
-  "tests/test_review_fixes.py::TestConfidenceComputation.test_confidence_str_comparison_still_works"
- ],
+ "constant_mirror": [],
  "no_assert": []
 }

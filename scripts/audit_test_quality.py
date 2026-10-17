@@ -563,9 +563,11 @@ def audit_source(source: str, file: str = "<source>") -> list[TestAudit]:
 
 
 def _is_exempt(fn: _FuncDef, lines: list[str]) -> bool:
-    """True when the marker sits on the ``def`` line or a decorator line."""
+    """True when the marker sits on a decorator line or anywhere in the
+    signature, which a formatter may wrap over several lines."""
     first = min([d.lineno for d in fn.decorator_list] + [fn.lineno])
-    return any(EXEMPT_MARKER in lines[i - 1] for i in range(first, fn.lineno + 1))
+    last = max(fn.lineno, fn.body[0].lineno - 1)
+    return any(EXEMPT_MARKER in lines[i - 1] for i in range(first, last + 1))
 
 
 def _display_path(path: pathlib.Path) -> str:
