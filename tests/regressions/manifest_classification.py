@@ -518,4 +518,24 @@ CLASSIFICATION_BUG_CLASSES: tuple[BugClass, ...] = (
             ),
         ),
     ),
+    BugClass(
+        id="detector.selector_axis_unstamped",
+        invariant=(
+            "A policy selector axis (here `binding:`, read from "
+            "Change.symbol_binding) is only as expressive as the detector "
+            "that emits the finding. A detector that never stamps the field "
+            "makes the selector silently inert for that kind, so a rule that "
+            "should demote a WEAK-only loss never matches. An aggregate over "
+            "several removed members must not read as one member's linkage: "
+            "it reports 'weak' only when every member is WEAK, and None when "
+            "any member's binding is unknown (fail closed)."
+        ),
+        fixed_by=(1630,),
+        seed_tests=(
+            "tests/test_template_finding_binding.py",
+            "tests/test_family_f1_evidence_ablation.py",
+        ),
+        public_surfaces=("reclassify", "json_report"),
+        axes={"evidence": ("header", "elf")},
+    ),
 )
