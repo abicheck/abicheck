@@ -192,7 +192,16 @@ from abicheck.model import (  # noqa: E402
 )
 from abicheck.pe_metadata import PeExport, PeMetadata  # noqa: E402
 from abicheck.policy.severity import categorize_changes  # noqa: E402
-from abicheck.policy.suppression.rules import Suppression, SuppressionList  # noqa: E402
+
+# The base side of the PR-vs-base gate runs an installed pre-move copy of
+# abicheck, which still names this module `abicheck.suppression`.
+try:
+    from abicheck.policy.suppression.rules import (  # noqa: E402
+        Suppression,
+        SuppressionList,
+    )
+except ImportError:
+    from abicheck.suppression import Suppression, SuppressionList  # noqa: E402
 from abicheck.sarif import to_sarif_str  # noqa: E402
 from abicheck.serialization import (  # noqa: E402
     snapshot_from_dict,
