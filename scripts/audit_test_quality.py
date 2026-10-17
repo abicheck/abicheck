@@ -319,8 +319,8 @@ def _is_weak(node: ast.expr) -> bool:
     return False
 
 
-def _attr_literal(node: ast.expr) -> tuple[str, ast.Constant] | None:
-    """``(attr, literal)`` for ``obj.attr == LITERAL`` (either operand order)."""
+def _attr_literal(node: ast.expr) -> tuple[ast.Attribute, ast.Constant] | None:
+    """``(obj.attr, literal)`` for ``obj.attr == LITERAL`` (either operand order)."""
     if not (isinstance(node, ast.Compare) and len(node.ops) == 1):
         return None
     if not isinstance(node.ops[0], ast.Eq):
@@ -328,7 +328,7 @@ def _attr_literal(node: ast.expr) -> tuple[str, ast.Constant] | None:
     left, right = node.left, node.comparators[0]
     for attr_side, lit_side in ((left, right), (right, left)):
         if isinstance(attr_side, ast.Attribute) and isinstance(lit_side, ast.Constant):
-            return attr_side.attr, lit_side
+            return attr_side, lit_side
     return None
 
 
@@ -371,17 +371,11 @@ def _echoes_input(
     pair = _attr_literal(assert_node.test)
     if pair is None:
         return False
-    attr, literal = pair
-    test = assert_node.test
-    assert isinstance(test, ast.Compare)
-    attr_node = (
-        test.left if isinstance(test.left, ast.Attribute) else test.comparators[0]
-    )
-    assert isinstance(attr_node, ast.Attribute)
+    attr_node, literal = pair
     if not isinstance(attr_node.value, ast.Name):
         return False
     pairs = inputs.get(attr_node.value.id, set())
-    return (attr, literal.value, type(literal.value)) in pairs
+    return (attr_node.attr, literal.value, type(literal.value)) in pairs
 
 
 def _abicheck_constant(node: ast.expr, names: frozenset[str]) -> bool:
