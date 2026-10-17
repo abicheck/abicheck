@@ -92,8 +92,12 @@ def test_every_scenario_fixture_exists_and_is_a_github_repository():
 
 
 def test_fixture_workflows_parse():
-    for path in (EVAL / "fixtures").glob("*/.github/workflows/*.yml"):
-        assert isinstance(yaml.safe_load(path.read_text(encoding="utf-8")), dict), path
+    paths = sorted((EVAL / "fixtures").glob("*/.github/workflows/*.yml"))
+    assert paths, "no fixture workflows found under skills-src/evaluation"
+    for path in paths:
+        doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+        assert isinstance(doc, dict) and isinstance(doc.get("jobs"), dict), path
+        assert doc["jobs"], f"{path} declares no jobs"
 
 
 # --------------------------------------------------------------------------

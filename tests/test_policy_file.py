@@ -302,31 +302,62 @@ versioning:
 
 
 @pytest.mark.parametrize(
-    "known_key,value",
+    "known_key,value,honored",
     [
-        ("base_policy", "strict_abi"),
-        ("overrides", {}),
-        ("reclassify", []),
-        ("frozen_namespaces", []),
-        ("internal_namespaces", []),
-        ("evidence_policy", {}),
-        ("versioning", {"scheme": "strict_semver"}),
-        ("acknowledgment", {}),
+        ("base_policy", "strict_abi", lambda pf: pf.base_policy == "strict_abi"),
+        (
+            "overrides",
+            {"func_removed": "break"},
+            lambda pf: set(pf.overrides) == {ChangeKind.FUNC_REMOVED},
+        ),
+        ("reclassify", [], lambda pf: pf.reclassify == []),
+        (
+            "frozen_namespaces",
+            ["std"],
+            lambda pf: pf.frozen_namespaces == ["std"],
+        ),
+        (
+            "internal_namespaces",
+            ["detail"],
+            lambda pf: (
+                pf.internal_namespaces == ["detail"]
+                and pf.internal_namespaces_stated is True
+            ),
+        ),
+        (
+            "evidence_policy",
+            {"require_evidence": {"build_context": True}},
+            lambda pf: pf.require_evidence == {"build_context": True},
+        ),
+        (
+            "versioning",
+            {"scheme": "strict_semver"},
+            lambda pf: (
+                pf.versioning_stated is True
+                and pf.versioning.scheme.value == "strict_semver"
+            ),
+        ),
+        (
+            "acknowledgment",
+            {},
+            lambda pf: pf.acknowledgment_policy_stated is True,
+        ),
     ],
 )
 def test_policy_file_every_documented_top_level_key_still_accepted(
-    tmp_path: Path, known_key: str, value: object
+    tmp_path: Path, known_key: str, value: object, honored: object
 ) -> None:
     """Every top-level key `PolicyFile.load` actually parses must stay
     accepted by the new unknown-key rejection -- a regression here would
-    make a real, valid policy document fail to load."""
+    make a real, valid policy document fail to load -- and the parsed value
+    must reach the matching field, not be silently dropped."""
     import yaml
 
     p = tmp_path / f"{known_key}.yaml"
     p.write_text(yaml.safe_dump({known_key: value}), encoding="utf-8")
 
     pf = PolicyFile.load(p)
-    assert pf is not None
+    assert honored(pf)
 
 
 def test_policy_file_risk_severity_produces_compatible_with_risk(

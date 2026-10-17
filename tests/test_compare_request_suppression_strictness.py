@@ -17,6 +17,7 @@ from pathlib import Path
 import pytest
 from _family_f2_routes import _invoke, write_operands
 
+from abicheck.checker import Verdict
 from abicheck.errors import ValidationError
 from abicheck.service import CompareRequest, InputSpec
 from abicheck.service_compare_pipeline import run_compare_request
@@ -95,11 +96,30 @@ def test_expired_message_is_identical_on_both_front_ends(tmp_path: Path) -> None
     assert str(api_err.value) in cli.output
 
 
-@pytest.mark.parametrize("rules", [EXPIRED, UNJUSTIFIED])
-def test_defaults_off_keep_the_previous_behavior(rules: str, tmp_path: Path) -> None:
+def _outcome(result: object) -> tuple[object, list[tuple[str, str]]]:
+    diff = result.diff  # type: ignore[attr-defined]
+    return diff.verdict, sorted((c.kind.value, c.symbol) for c in diff.changes)
+
+
+@pytest.mark.parametrize(
+    ("rules", "verdict", "findings"),
+    [
+        # An expired rule is not applied: the removal of ``foo`` still counts.
+        (
+            EXPIRED,
+            Verdict.BREAKING,
+            [("func_added", "baz"), ("func_removed", "foo")],
+        ),
+        # An unjustified rule still suppresses ``foo`` when the setting is off.
+        (UNJUSTIFIED, Verdict.COMPATIBLE, [("func_added", "baz")]),
+    ],
+)
+def test_defaults_off_keep_the_previous_behavior(
+    rules: str, verdict: Verdict, findings: list[tuple[str, str]], tmp_path: Path
+) -> None:
     """Off (the default), neither setting rejects anything -- unchanged."""
     sup, _ = _files(tmp_path, rules)
-    assert _api(tmp_path / "api", sup).diff is not None
+    assert _outcome(_api(tmp_path / "api", sup)) == (verdict, findings)
 
 
 def test_settings_on_accept_a_valid_file(tmp_path: Path) -> None:
@@ -107,7 +127,8 @@ def test_settings_on_accept_a_valid_file(tmp_path: Path) -> None:
     result = _api(
         tmp_path / "api", sup, strict_suppressions=True, require_justification=True
     )
-    assert result.diff is not None
+    # A well-formed rule is applied exactly as it is with the settings off.
+    assert _outcome(result) == (Verdict.COMPATIBLE, [("func_added", "baz")])
 
 
 @pytest.mark.parametrize(

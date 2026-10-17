@@ -333,11 +333,14 @@ class TestRetainSemantics:
         import weakref
 
         scope = AstAcquisitionScope()
-        root = _Root()
+        root = _Root("kept")
         ref = weakref.ref(root)
         scope.retain(root)
         del root
-        assert ref() is not None, "the retained object was collected"
+        held = ref()
+        assert held is not None, "the retained object was collected"
+        assert held.payload == "kept"  # the same object, not a copy or stand-in
+        assert scope.group_stats()["retained_groups"] == 1
 
     def test_reuse_refreshes_a_group_so_the_cold_one_is_evicted(self) -> None:
         """LRU, not FIFO: the root a fan-out keeps coming back to must stay.

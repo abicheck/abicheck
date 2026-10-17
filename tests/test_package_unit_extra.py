@@ -126,10 +126,19 @@ class TestRpmExtractionSuccess:
 
         mock_popen.side_effect = [rpm2cpio_proc, cpio_proc]
 
+        pkg = tmp_path / "pkg.rpm"
         # Should not raise
-        RpmExtractor._rpm_extract(tmp_path / "pkg.rpm", tmp_path)
+        RpmExtractor._rpm_extract(pkg, tmp_path)
 
         assert mock_popen.call_count == 2
+        rpm_call, cpio_call = mock_popen.call_args_list
+        # rpm2cpio reads the package; its output feeds cpio, which unpacks
+        # into the target directory.
+        assert rpm_call.args[0] == ["/usr/bin/rpm2cpio", str(pkg)]
+        assert cpio_call.args[0][0] == "/usr/bin/cpio"
+        assert "-id" in cpio_call.args[0]
+        assert cpio_call.kwargs["stdin"] is rpm2cpio_proc.stdout
+        assert cpio_call.kwargs["cwd"] == str(tmp_path)
         rpm2cpio_proc.stdout.close.assert_called_once()
 
 
@@ -244,6 +253,8 @@ class TestZstTarSecurityChecks:
         tar_bytes = buf.getvalue()
         # Should not raise since both paths are within root
         self._extract_with_zstd_mock(tar_bytes, tmp_path)
+        assert (tmp_path / "realfile.txt").is_file()
+        assert (tmp_path / "hardlink.txt").is_file()
 
 
 class TestZstFallbackToExternalCommand:

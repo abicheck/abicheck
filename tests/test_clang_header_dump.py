@@ -281,10 +281,14 @@ def test_clang_header_dump_memoizes_inside_ast_memoize_scope(
 
     with dumper_cache.ast_memoize_scope():
         clang_header_dump([header], [], run_ast=runner)
-        assert dumper_cache._ast_memo_slot.value is not None  # written
+        written = dumper_cache._ast_memo_slot.value
+        assert written is not None  # written
+        backend, _key, root = written
+        assert backend == "clang"
+        assert root == {"kind": "TranslationUnitDecl", "inner": []}
     # The scope exiting doesn't itself clear the slot -- only a subsequent
     # pop (the header-graph attach step) does; still present right after.
-    assert dumper_cache._ast_memo_slot.value is not None
+    assert dumper_cache._ast_memo_slot.value is written
 
 
 def test_ast_memoize_scope_cleans_up_its_own_writes_on_exception(

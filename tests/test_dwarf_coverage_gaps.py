@@ -93,9 +93,9 @@ class TestAttrStr:
 
     def test_bytes_invalid_utf8(self):
         die = MockDIE(attributes={"DW_AT_name": MockAttr(b"\xff\xfe")})
-        result = attr_str(die, "DW_AT_name")
-        assert isinstance(result, str)
-        assert len(result) > 0
+        # Undecodable bytes become replacement characters, one per bad byte,
+        # rather than raising or yielding an empty name.
+        assert attr_str(die, "DW_AT_name") == "\ufffd\ufffd"
 
     def test_none_value(self):
         die = MockDIE(attributes={"DW_AT_name": MockAttr(None)})

@@ -418,7 +418,11 @@ class TestPeIntegration:
             dll = _compile_dll(src, "imports.dll", Path(td))
             meta = parse_pe_metadata(dll)
 
-        assert len(meta.imports) > 0, "Expected at least one import DLL"
+        # The DLL calls malloc, so the CRT import must name it -- whichever
+        # runtime DLL the toolchain links (ucrtbase for MSVC, msvcrt for MinGW).
+        assert any("malloc" in names for names in meta.imports.values()), (
+            f"malloc not among imports: {meta.imports}"
+        )
 
     def test_parse_nonexistent_path_returns_empty(self) -> None:
         """Non-existent path → empty PeMetadata, no exception."""

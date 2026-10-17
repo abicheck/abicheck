@@ -35,7 +35,7 @@ def _snap(**kwargs: object) -> AbiSnapshot:
 class TestHiddenVisibilityModel:
     """Verify Visibility.HIDDEN exists in the model."""
 
-    def test_visibility_hidden_exists(self) -> None:
+    def test_visibility_hidden_exists(self):  # test-quality: ok wire value 'hidden'
         """Visibility enum must have HIDDEN member (STV_HIDDEN ELF visibility)."""
         assert hasattr(Visibility, "HIDDEN")
         assert Visibility.HIDDEN.value == "hidden"

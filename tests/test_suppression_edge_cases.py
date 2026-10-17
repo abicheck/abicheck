@@ -861,7 +861,11 @@ class TestSuppressionAudit:
             ]
         )
         audit = sl.audit(changes)
-        assert len(audit.high_risk_matches) > 0
+        assert len(audit.high_risk_matches) == 1
+        rule, matched = audit.high_risk_matches[0]
+        assert rule.symbol == "_Z3foov"
+        assert matched.kind == ChangeKind.FUNC_REMOVED
+        assert audit.has_issues
 
     def test_expired_rules_in_audit(self):
         """Expired rules should appear in audit.expired_rules."""

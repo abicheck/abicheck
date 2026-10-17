@@ -362,8 +362,9 @@ def test_serialization_roundtrip_no_crash() -> None:
     # This must not raise TypeError: Object of type set is not JSON serializable
     json_str = snapshot_to_json(snap)
     data = from_sectioned_document(json.loads(json_str))
-    assert isinstance(data["dwarf_advanced"]["packed_structs"], list)
-    assert isinstance(data["dwarf_advanced"]["toolchain"]["abi_flags"], list)
+    # Each set arrives as a list holding exactly its members.
+    assert sorted(data["dwarf_advanced"]["packed_structs"]) == ["A", "B"]
+    assert data["dwarf_advanced"]["toolchain"]["abi_flags"] == ["-fshort-enums"]
 
 
 def test_serialization_roundtrip_set_values() -> None:

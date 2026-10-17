@@ -147,8 +147,11 @@ class TestSdkVendorPolicy:
     """sdk_vendor downgrades source-level-only API_BREAK kinds."""
 
     def test_some_kinds_are_downgraded(self):
-        """sdk_vendor should downgrade at least some kinds."""
-        assert len(SDK_VENDOR_DOWNGRADED) > 0
+        """sdk_vendor downgrades source-level renames, which a vendor SDK
+        consumer recompiles past, and must not downgrade a real binary break
+        such as a function removal."""
+        assert ChangeKind.FIELD_RENAMED in SDK_VENDOR_DOWNGRADED
+        assert ChangeKind.FUNC_REMOVED not in SDK_VENDOR_DOWNGRADED
 
     @pytest.mark.parametrize(
         "kind", sorted(SDK_VENDOR_DOWNGRADED, key=lambda k: k.value)
@@ -178,8 +181,10 @@ class TestPluginAbiPolicy:
     """plugin_abi downgrades calling-convention BREAKING kinds."""
 
     def test_some_kinds_are_downgraded(self):
-        """plugin_abi should downgrade at least some kinds."""
-        assert len(PLUGIN_ABI_DOWNGRADED) > 0
+        """plugin_abi downgrades calling-convention changes, and must keep
+        a plain function removal breaking."""
+        assert ChangeKind.CALLING_CONVENTION_CHANGED in PLUGIN_ABI_DOWNGRADED
+        assert ChangeKind.FUNC_REMOVED not in PLUGIN_ABI_DOWNGRADED
 
     @pytest.mark.parametrize(
         "kind", sorted(PLUGIN_ABI_DOWNGRADED, key=lambda k: k.value)

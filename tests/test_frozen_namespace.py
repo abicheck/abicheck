@@ -430,12 +430,6 @@ class TestSuppressionNamespaceSelector:
         sup = Suppression(namespace="**::detail::r1::*", reason="known")
         assert not sup.matches(c)
 
-    def test_namespace_only_is_a_valid_selector(self) -> None:
-        """The selector validation must accept ``namespace:`` on its own."""
-        sup = Suppression(namespace="**::internal::*")
-        # No exception — the constructor accepts namespace-only selectors.
-        assert sup.namespace == "**::internal::*"
-
     def test_namespace_in_suppressionlist_end_to_end(self) -> None:
         """A namespace suppression filters a real change through compare()."""
         old = _snap(

@@ -63,9 +63,31 @@ class TestAnalysisAssuranceStaysFlat:
     silently regressing to "missing"."""
 
     def test_analysis_assurance_still_resolves_at_the_flat_path(self) -> None:
-        import abicheck.analysis_assurance as module
+        from types import SimpleNamespace
 
-        assert hasattr(module, "analysis_assurance_exit_contribution")
+        from abicheck.analysis_assurance import (
+            INCOMPLETE_ANALYSIS_EXIT_CONTRIBUTION,
+            AnalysisAssurance,
+            analysis_assurance_exit_contribution,
+        )
+
+        incomplete = SimpleNamespace(
+            analysis_assurance=AnalysisAssurance(status="partial")
+        )
+        complete = SimpleNamespace(
+            analysis_assurance=AnalysisAssurance(status="complete")
+        )
+        # The flat module still carries the flag's contract, not just a name.
+        assert analysis_assurance_exit_contribution(
+            incomplete, require_complete=True
+        ) == (INCOMPLETE_ANALYSIS_EXIT_CONTRIBUTION)
+        assert (
+            analysis_assurance_exit_contribution(complete, require_complete=True) == 0
+        )
+        assert (
+            analysis_assurance_exit_contribution(incomplete, require_complete=False)
+            == 0
+        )
 
     def test_analysis_assurance_has_not_moved_under_policy(self) -> None:
         import importlib.util
