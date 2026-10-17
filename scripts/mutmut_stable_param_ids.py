@@ -13,7 +13,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""pytest plugin: parametrize ids that stay the same across in-process sessions.
+"""pytest plugin for the mutation lane: parametrize ids that stay the same across
+in-process sessions, and cheapest-tests-first order during a mutant run.
 
 mutmut 3 runs several pytest sessions in one process: the stats pass records
 every test's node id, then the clean run and the per-mutant runs (forked from
@@ -41,11 +42,23 @@ generator included. Nothing is changed in the first session. Loaded only by
 mutmut puts ``mutants/`` on ``sys.path`` and ``scripts/`` is in
 ``also_copy``). It changes no test's selection or outcome, only which spelling
 a later session gives its id.
+
+Second job: mutmut runs each mutant's tests with ``pytest -x``, so a killed
+mutant stops at its first failing test. During a mutant run (``MUTANT_UNDER_TEST``
+names a mutant, not the clean/stats/fail sentinels) the plugin stably sorts the
+collected items by the ``duration_by_test`` recorded in ``mutmut-stats.json``
+(cwd ``mutants/``), unknown durations last. The order of the verdicts is
+unchanged; only the cost of killed mutants drops. A missing or unreadable
+stats file leaves the order alone.
 """
 
 from __future__ import annotations
 
+import json
+import math
+import os
 from collections.abc import Callable, Generator, Sequence
+from pathlib import Path
 
 import pytest
 
@@ -56,6 +69,41 @@ except ImportError:  # pragma: no cover - only on an unsupported pytest
     _escape = None
 
 _SEEN = pytest.StashKey[set[int]]()
+
+# mutmut's sentinels for the non-mutant runs (see mutmut's __main__.py and
+# mutation/trampoline.py); "" is the clean run.
+_NOT_A_MUTANT = frozenset({"", "fail", "stats", "list_all_tests", "mutant_generation"})
+_STATS_FILE = "mutmut-stats.json"
+_DURATIONS: dict[Path, dict[str, float]] = {}
+
+
+def load_durations(path: Path) -> dict[str, float]:
+    """``duration_by_test`` from mutmut's stats file, cached per path for the
+    process. A missing or unreadable file yields no durations."""
+    key = path.absolute()
+    if key not in _DURATIONS:
+        try:
+            raw = json.loads(key.read_text(encoding="utf-8"))["duration_by_test"]
+            _DURATIONS[key] = {
+                str(k): float(v)
+                for k, v in raw.items()
+                if isinstance(v, (int, float)) and not isinstance(v, bool)
+            }
+        except (OSError, ValueError, KeyError, TypeError, AttributeError):
+            _DURATIONS[key] = {}
+    return _DURATIONS[key]
+
+
+def pytest_collection_modifyitems(
+    config: pytest.Config, items: list[pytest.Item]
+) -> None:
+    """Cheapest tests first, so a killed mutant's ``-x`` run stops early."""
+    if os.environ.get("MUTANT_UNDER_TEST", "") in _NOT_A_MUTANT:
+        return
+    durations = load_durations(Path(_STATS_FILE))
+    if durations:
+        # list.sort is stable; unknown durations (inf) keep their order at the end.
+        items.sort(key=lambda item: durations.get(item.nodeid, math.inf))
 
 
 def unescape_ids(
