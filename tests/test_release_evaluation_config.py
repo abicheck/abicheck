@@ -333,12 +333,12 @@ class TestReleaseNoPackStillResolvesProjectBackedConfig:
         # config it was scored under.
         assert diff.evaluation_config is not None
         assert application.resolved_config is not None
-        # The member was scored under the project's own override, and the
-        # provenance says so -- not the built-in default.
-        scored = diff.evaluation_config
-        assert scored.policy.overrides["func_removed"] is Verdict.COMPATIBLE
-        assert (
-            scored.provenance["policy.overrides"].layer is SelectorLayer.PROJECT_CONFIG
+        # The member is scored under exactly the config the project resolved,
+        # carrying the project's override (ignore -> COMPATIBLE), not a
+        # regenerated or default one.
+        assert diff.evaluation_config is application.resolved_config
+        assert diff.evaluation_config.policy.overrides["func_removed"].name == (
+            "COMPATIBLE"
         )
 
 

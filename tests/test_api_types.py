@@ -419,6 +419,13 @@ class TestCompareRequestHashableWithEnvMatrix:
             env_matrix=EnvironmentMatrix(runtime_floors={"GLIBC": floor}),
         )
 
+    def test_hash_does_not_raise(self):
+        # This is the reported defect verbatim: it used to raise
+        # `TypeError: unhashable type: 'EnvironmentMatrix'`.
+        first, second = self._request(), self._request()
+        assert first == second
+        assert hash(first) == hash(second)
+
     def test_two_requests_with_equal_env_matrix_hash_and_compare_equal(self):
         a = self._request()
         b = self._request()
@@ -433,11 +440,9 @@ class TestCompareRequestHashableWithEnvMatrix:
         b = self._request("2.34")
         assert a != b
         # Hash collision is legal in general, but these two floors must not
-        # be treated as the same cache key/set member: both survive in a set
-        # and each keys its own cache entry.
-        assert a != b
+        # be treated as the same cache key/set member.
         assert len({a, b}) == 2
-        assert {a: "2.28", b: "2.34"}[a] == "2.28"
+        assert {a: "old", b: "new"}[a] == "old"
 
     def test_request_with_no_env_matrix_stays_hashable(self):
         # The plain default (env_matrix=None) must be unaffected.
@@ -445,7 +450,6 @@ class TestCompareRequestHashableWithEnvMatrix:
         twin = CompareRequest(old=InputSpec.of("a"), new=InputSpec.of("b"))
         assert req == twin
         assert hash(req) == hash(twin)
-        assert {req: "cached"}[twin] == "cached"
 
 
 class TestCompareRequestRuntimeResolvableAnnotations:

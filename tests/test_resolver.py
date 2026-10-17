@@ -21,6 +21,7 @@ from pathlib import Path
 
 import pytest
 
+from abicheck.elf_metadata import parse_elf_metadata
 from abicheck.workflows.elf_dependency_resolver import (
     _search_library,
     resolve_dependencies,
@@ -154,11 +155,12 @@ class TestResolveDependencies:
         assert graph.nodes
         for key, node in graph.nodes.items():
             assert node.elf_metadata is not None, f"Node {key} has no elf_metadata"
-            # Real ELF objects carry a dynamic symbol table, and the attached
-            # metadata describes this node's own file, not another one's.
-            assert node.elf_metadata.symbols, f"Node {key} has no symbols"
-            if node.elf_metadata.soname:
-                assert node.elf_metadata.soname == node.soname, key
+            # The attached metadata must be the parse of that node's own file,
+            # and the node's denormalised fields must agree with it.
+            oracle = parse_elf_metadata(node.path)
+            assert node.elf_metadata.needed == oracle.needed, key
+            assert node.elf_metadata.soname == oracle.soname, key
+            assert node.needed == oracle.needed, key
 
     def test_nonexistent_binary(self, tmp_path):
         graph = resolve_dependencies(tmp_path / "nonexistent")

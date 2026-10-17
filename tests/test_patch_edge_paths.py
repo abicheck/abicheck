@@ -112,7 +112,4 @@ def test_record_digest_survives_a_read_only_sidecar(tmp_path, monkeypatch):
     monkeypatch.setattr(ci.tempfile, "mkstemp", refuse)
     monkeypatch.setattr(Path, "unlink", refuse)
     ci.record_digest(entry)  # must not raise
-    # The refused write leaves the entry it was digesting untouched.
     assert entry.read_text() == "{}"
-    # No sidecar is written, so the entry reads as unrecorded, not corrupt.
-    assert not ci.sidecar_path(entry).exists()

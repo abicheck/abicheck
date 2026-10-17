@@ -54,8 +54,13 @@ class TestRunCompare:
         new_p = self._make_snap_file(tmp_path, "libtest", "2.0")
         result, old, new = run_compare(old_p, new_p).as_tuple()
         assert isinstance(result, DiffResult)
-        assert isinstance(old, AbiSnapshot)
-        assert isinstance(new, AbiSnapshot)
+        assert (result.old_version, result.new_version, result.library) == (
+            "1.0",
+            "2.0",
+            "libtest",
+        )
+        assert (old.library, old.version) == ("libtest", "1.0")
+        assert (new.library, new.version) == ("libtest", "2.0")
 
     def test_compare_with_suppression(self, tmp_path):
         old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
@@ -66,6 +71,11 @@ class TestRunCompare:
         )
         result, _, _ = run_compare(old_p, new_p, suppress=sf).as_tuple()
         assert isinstance(result, DiffResult)
+        assert (result.old_version, result.new_version, result.library) == (
+            "1.0",
+            "2.0",
+            "libtest",
+        )
 
     def test_headers_passed_as_public_headers(self, tmp_path, monkeypatch):
         """run_compare_request (the CompareRequest chokepoint used by the

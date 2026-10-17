@@ -397,49 +397,49 @@ class TestIsPackage:
 class TestDetectExtractor:
     def test_directory(self, tmp_path: Path) -> None:
         ext = detect_extractor(tmp_path)
-        assert isinstance(ext, DirExtractor)
+        assert type(ext) is DirExtractor
 
     def test_tar_gz(self, tmp_path: Path) -> None:
         f = tmp_path / "test.tar.gz"
         _make_tar(f, {"README": b"hello"})
         ext = detect_extractor(f)
-        assert isinstance(ext, TarExtractor)
+        assert type(ext) is TarExtractor
 
     def test_tar_xz(self, tmp_path: Path) -> None:
         f = tmp_path / "test.tar.xz"
         _make_tar_mode(f, "w:xz")
         ext = detect_extractor(f)
-        assert isinstance(ext, TarExtractor)
+        assert type(ext) is TarExtractor
 
     def test_rpm(self, tmp_path: Path) -> None:
         f = tmp_path / "test.rpm"
         f.write_bytes(b"\xed\xab\xee\xdb" + b"\x00" * 100)
         ext = detect_extractor(f)
-        assert isinstance(ext, RpmExtractor)
+        assert type(ext) is RpmExtractor
 
     def test_deb(self, tmp_path: Path) -> None:
         f = tmp_path / "test.deb"
         f.write_bytes(b"!<arch>\n" + b"debian-binary".ljust(60))
         ext = detect_extractor(f)
-        assert isinstance(ext, DebExtractor)
+        assert type(ext) is DebExtractor
 
     def test_conda(self, tmp_path: Path) -> None:
         f = tmp_path / "test.conda"
         _make_conda_v2(f, {})
         ext = detect_extractor(f)
-        assert isinstance(ext, CondaExtractor)
+        assert type(ext) is CondaExtractor
 
     def test_whl(self, tmp_path: Path) -> None:
         f = tmp_path / "test-1.0-py3-none-any.whl"
         _make_wheel(f, {"test/__init__.py": b""})
         ext = detect_extractor(f)
-        assert isinstance(ext, WheelExtractor)
+        assert type(ext) is WheelExtractor
 
     def test_conda_legacy_tar_bz2(self, tmp_path: Path) -> None:
         f = tmp_path / "numpy-1.26-h123-0.tar.bz2"
         _make_conda_legacy(f, {"lib/libopenblas.so": b"elf"})
         ext = detect_extractor(f)
-        assert isinstance(ext, CondaExtractor)
+        assert type(ext) is CondaExtractor
 
     def test_unknown(self, tmp_path: Path) -> None:
         f = tmp_path / "test.xyz"

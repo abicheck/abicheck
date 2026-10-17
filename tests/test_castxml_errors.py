@@ -717,7 +717,7 @@ def test_header_ast_parser_falls_back_to_clang_on_toolchain_failure(
     parser = _header_ast_parser(
         [Path("a.h")], [], backend="auto", **_ast_parser_kwargs(tmp_path)
     )
-    assert isinstance(parser, _ClangAstParser)
+    assert type(parser) is _ClangAstParser
 
 
 def test_header_ast_parser_falls_back_to_clang_on_guard_error(tmp_path, monkeypatch):
@@ -752,7 +752,7 @@ def test_header_ast_parser_falls_back_to_clang_on_guard_error(tmp_path, monkeypa
     parser = _header_ast_parser(
         [Path("a.h")], [], backend="auto", **_ast_parser_kwargs(tmp_path)
     )
-    assert isinstance(parser, _ClangAstParser)
+    assert type(parser) is _ClangAstParser
 
 
 def test_header_ast_parser_no_fallback_when_castxml_explicit(tmp_path, monkeypatch):
@@ -830,7 +830,7 @@ def test_header_ast_parser_auto_device_routes_to_clang_not_rejected(
         frontend_context="device",
         **_ast_parser_kwargs(tmp_path),
     )
-    assert isinstance(parser, _ClangAstParser)
+    assert type(parser) is _ClangAstParser
 
 
 def test_header_ast_parser_env_pinned_castxml_rejects_device_context(
@@ -899,7 +899,7 @@ def test_header_ast_parser_clang_backend_returns_clang_parser(tmp_path, monkeypa
     parser = _header_ast_parser(
         [Path("a.h")], [], backend="clang", **_ast_parser_kwargs(tmp_path)
     )
-    assert isinstance(parser, _ClangAstParser)
+    assert type(parser) is _ClangAstParser
 
 
 def test_header_ast_parser_castxml_success_returns_castxml_parser(
@@ -921,4 +921,4 @@ def test_header_ast_parser_castxml_success_returns_castxml_parser(
     parser = _header_ast_parser(
         [Path("a.h")], [], backend="auto", **_ast_parser_kwargs(tmp_path)
     )
-    assert isinstance(parser, _CastxmlParser)
+    assert type(parser) is _CastxmlParser

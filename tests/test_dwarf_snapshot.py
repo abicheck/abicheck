@@ -858,17 +858,14 @@ class TestDumpMachoDwarfOnlyWarning:
 
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
-            try:
-                _dump_macho(
-                    fake_path,
-                    headers=[],
-                    extra_includes=[],
-                    version="1.0",
-                    compiler="c++",
-                    dwarf_only=True,
-                )
-            except Exception as exc:  # noqa: BLE001 - Expected to fail on fake binary
-                assert str(exc)
+            _dump_macho(
+                fake_path,
+                headers=[],
+                extra_includes=[],
+                version="1.0",
+                compiler="c++",
+                dwarf_only=True,
+            )
 
         dwarf_warnings = [
             x

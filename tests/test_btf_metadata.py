@@ -569,6 +569,7 @@ class TestBtfErrorHandling:
         meta = parse_btf_from_bytes(data[:30])
         # Should degrade gracefully (empty or partial)
         assert isinstance(meta, BtfMetadata)
+        assert meta == BtfMetadata()
 
 
 # ---------------------------------------------------------------------------

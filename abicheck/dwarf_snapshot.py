@@ -200,7 +200,6 @@ class _DwarfSnapshotBuilder:
     def __init__(self, elf_path: Path, elf_meta: ElfMetadata) -> None:
         elf_path = Path(elf_path)
         self._elf_path = elf_path
-        self._elf_meta = elf_meta
         self._filter_transitive_runtime_symbols = not (
             is_cxx_runtime_library(elf_path.name)
             or is_cxx_runtime_library(elf_meta.soname)

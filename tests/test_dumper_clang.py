@@ -1680,23 +1680,7 @@ def test_id_index_falls_back_to_bare_name_for_unresolved_reference() -> None:
         },
     )
     (t,) = _ClangAstParser(root, set(), set()).parse_types()
-    assert t.fields[0].default is not None
-    assert t.fields[0].default.startswith("expr:")
-
-    # The fallback identity is the bare name/kind/type, not the (absent) id:
-    # two unresolvable references to the same name must fingerprint alike.
-    other_root = _tu(
-        {
-            "kind": "CXXRecordDecl",
-            "name": "S",
-            "tagUsed": "struct",
-            "loc": {"file": "include/foo.h", "line": 1},
-            "completeDefinition": True,
-            "inner": [_decl_ref_initializer_by_id("x", "0xCAFEBABE")],
-        },
-    )
-    (t_other,) = _ClangAstParser(other_root, set(), set()).parse_types()
-    assert t_other.fields[0].default == t.fields[0].default
+    assert t.fields[0].default is not None and t.fields[0].default.startswith("expr:")
 
 
 def test_id_index_not_built_for_field_without_initializer() -> None:

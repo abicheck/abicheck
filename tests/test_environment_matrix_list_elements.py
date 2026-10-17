@@ -180,5 +180,5 @@ class TestHashableEndToEnd:
             },
             strict=True,
         )
-        assert hash(matrix) == hash(matrix)
-        assert {matrix} == {matrix}
+        assert isinstance(hash(matrix), int)
+        assert matrix in {matrix}

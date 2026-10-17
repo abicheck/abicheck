@@ -105,7 +105,15 @@ class TestIncludeSearchOrderIsPartOfTheKey:
 
     def test_equal_sequences_still_share_one_acquisition(self) -> None:
         """The reuse the key exists for is not lost by the fix."""
-        assert _identity(["/a", "/b"]).key() == _identity(["/a", "/b"]).key()
+        one = _identity(["/a", "/b"])
+        two = _identity(["/a", "/b"])
+        assert one.key() == two.key()
+        # Non-vacuous: the shared key is for the two-entry sequence, not an
+        # empty or collapsed identity.
+        assert list(one.includes) == [
+            str(Path("/a").resolve()),
+            str(Path("/b").resolve()),
+        ]
 
 
 class TestMembershipOnlyInputsStayNormalized:

@@ -381,10 +381,12 @@ class TestNoReaderDiscardsTheContractSilently:
         doc = self._document(with_version=False)
         del doc["public_surface"]
         manifest = self._import(doc, tmp_path)
-        # The import keeps the one variant it was given, and stores no
-        # public-surface section for a contract the document never had.
+        # The import produced the one declared variant, with its
+        # bundle_composition section stored, and no artifacts.
         assert [v.variant_id for v in manifest.variant_refs] == ["default"]
-        assert set(manifest.variant_refs[0].sections) == {"bundle_composition"}
+        (variant,) = manifest.variant_refs
+        assert set(variant.sections) == {"bundle_composition"}
+        assert manifest.artifact_refs == ()
 
 
 class TestACaptureStampsTheVersionItsContentsNeed:

@@ -69,6 +69,28 @@ _CLASS_SEP = "ǁ"
 #: functions carry no mutable code — not an aborted measurement.
 NOTHING_MATCHES_MARKER = "Filtered for specific mutants, but nothing matches"
 
+#: The return code :func:`run_mutmut` reports for a command it stopped at its
+#: wall-clock cap (the ``timeout(1)`` convention).
+TIMED_OUT_RC = 124
+
+
+def run_mutmut(cmd: list[str], timeout: float) -> tuple[str, int]:
+    """Run a mutmut subcommand, returning ``(stdout + stderr, returncode)``.
+
+    Through :func:`abicheck.deadline.run_bounded`, so a timeout kills the whole
+    process group: mutmut's pytest workers otherwise outlive it and keep
+    writing results while the caller reads them (CI showed them as orphans at
+    job cleanup). The output so far is returned with :data:`TIMED_OUT_RC`.
+    """
+    from abicheck.deadline import run_bounded
+
+    try:
+        proc = run_bounded(cmd, timeout=timeout, capture_output=True, text=True)
+    except subprocess.TimeoutExpired as exc:
+        return (exc.output or "") + (exc.stderr or ""), TIMED_OUT_RC
+    return proc.stdout + proc.stderr, proc.returncode
+
+
 #: pyproject sections whose change alters what a mutation run measures or how
 #: its suite runs. Any other pyproject edit (a dependency pin, project
 #: metadata, another tool's config) does not, and must not trigger the lane.

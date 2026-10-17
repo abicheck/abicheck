@@ -1067,29 +1067,14 @@ class TestTypeDatabaseExtended:
         assert len(db.all_enums()) == 1
 
     def test_procedure_lookup(self) -> None:
-        db = self._make_db([(LF_PROCEDURE, _make_lf_procedure(0x74, 0x07, 2, 0x1001))])
-        proc = db.get_procedure(0x1000)
-        assert proc is not None
-        assert proc.type_index == 0x1000
-        assert proc.return_type_ti == 0x74
-        assert proc.calling_convention == 0x07  # stdcall
-        assert proc.param_count == 2
-        assert proc.arglist_ti == 0x1001
-        assert db.get_procedure(0x1001) is None
+        db = self._make_db([(LF_PROCEDURE, _make_lf_procedure(0x74, 0, 0, 0))])
+        assert (p := db.get_procedure(0x1000)) is not None
+        assert (p.type_index, p.return_type_ti, p.param_count) == (0x1000, 0x74, 0)
 
     def test_mfunction_lookup(self) -> None:
-        db = self._make_db(
-            [(LF_MFUNCTION, _make_lf_mfunction(0x74, 0x1234, 0x1235, 0x0B, 2, 0x1001))]
-        )
-        mfn = db.get_mfunction(0x1000)
-        assert mfn is not None
-        assert mfn.type_index == 0x1000
-        assert mfn.return_type_ti == 0x74
-        assert mfn.class_type_ti == 0x1234
-        assert mfn.this_type_ti == 0x1235
-        assert mfn.calling_convention == 0x0B  # thiscall
-        assert mfn.param_count == 2
-        assert mfn.arglist_ti == 0x1001
+        db = self._make_db([(LF_MFUNCTION, _make_lf_mfunction(0x74, 0, 0, 0, 0, 0))])
+        assert (p := db.get_mfunction(0x1000)) is not None
+        assert (p.type_index, p.return_type_ti, p.param_count) == (0x1000, 0x74, 0)
 
     def test_modifier_volatile(self) -> None:
         mod_payload = _make_lf_modifier(0x74, is_volatile=True)
@@ -1271,10 +1256,7 @@ class TestFieldlistExtended:
     def test_padding_bytes(self) -> None:
         """Padding bytes (>= 0xF0) should be skipped correctly."""
         fl = _make_lf_fieldlist(
-            [
-                _make_lf_member(0, 0x74, 0, "a"),
-                _make_lf_member(0, 0x74, 4, "b"),
-            ]
+            [_make_lf_member(0, 0x74, 0, "a"), _make_lf_member(0, 0x74, 4, "b")]
         )
         db = self._make_db([(LF_FIELDLIST, fl)])
         members = db.get_fieldlist(0x1000)

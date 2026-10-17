@@ -101,6 +101,7 @@ from abicheck.checker_policy import (  # noqa: E402
     EvidenceTier,
     Verdict,
     compute_verdict,
+    impact_for,
     policy_for,
     policy_kind_sets,
 )
@@ -137,6 +138,11 @@ class TestPolicyLookups:
         entry = policy_for(_Fake())  # type: ignore[arg-type]
         assert entry.default_verdict == Verdict.BREAKING
         assert entry.severity == "error"
+
+    def test_impact_for_returns_string(self) -> None:
+        """impact_for returns a (possibly empty) string for every kind (line 700)."""
+        for kind in ChangeKind:
+            assert impact_for(kind).strip(), kind
 
 
 class TestPolicyKindSets:

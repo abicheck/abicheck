@@ -67,6 +67,7 @@ STATUS_SKIPPED = "skipped"
 STATUS_TYPE_CHECKED = "caught by type check"
 
 STATUS_TIMEOUT = "timeout"
+STATUS_NOT_CHECKED = "not checked"
 
 #: Statuses that represent a *resolved, acceptable* outcome: the mutant was
 #: killed by a test, deliberately excluded, rejected by the type checker, or
@@ -323,6 +324,38 @@ def survivors_by_module(records: list[MutantRecord]) -> dict[str, list[str]]:
         if r.is_survivor:
             out.setdefault(r.module_path, []).append(r.key)
     return {k: sorted(v) for k, v in sorted(out.items())}
+
+
+def survivor_listing(by_module: dict[str, list[str]]) -> list[str]:
+    """Per-module counts, each followed by its surviving mutant keys.
+
+    The keys go into the job log, not only the uploaded results file: a
+    reader who can see the log but cannot download artifacts (a restricted
+    network, an expired artifact) would otherwise get counts with nothing
+    to act on.
+    """
+    lines: list[str] = []
+    for module, keys in by_module.items():
+        lines.append(f"  {module}: {len(keys)}")
+        lines.extend(f"    {key}" for key in keys)
+    return lines
+
+
+def partial_run_report(results_text: str) -> list[str]:
+    """What a run that hit its wall-clock cap had measured by then.
+
+    Diagnostic only, never a gate input: the unmeasured remainder could hold
+    any number of survivors. It names what survived so far, so a timed-out
+    shard's log is not a blank.
+    """
+    records = parse_mutant_records(results_text)
+    measured = [r for r in records if r.status != STATUS_NOT_CHECKED]
+    lines = [
+        f"mutation-score: partial results (diagnostic, not gated): "
+        f"{len(measured)} mutant(s) measured, "
+        f"{sum(1 for r in measured if r.is_survivor)} surviving"
+    ]
+    return lines + survivor_listing(survivors_by_module(measured))
 
 
 def load_cicd_stats(mutants_dir: Path) -> dict[str, int] | None:

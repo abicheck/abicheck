@@ -618,6 +618,11 @@ class TestCompareRequestAdr055Evidence:
         )
         result, _, _ = run_compare_request(request).as_tuple()
         assert isinstance(result, DiffResult)
+        assert (result.old_version, result.new_version, result.library) == (
+            "1.0",
+            "2.0",
+            "libtest",
+        )
 
     def test_android_frontend_allowed_with_build_info_only(self, tmp_path, monkeypatch):
         """build_info alone never drives L4 extraction (only L3 compile-DB
@@ -643,6 +648,11 @@ class TestCompareRequestAdr055Evidence:
         )
         result, _, _ = run_compare_request(request).as_tuple()
         assert isinstance(result, DiffResult)
+        assert (result.old_version, result.new_version, result.library) == (
+            "1.0",
+            "2.0",
+            "libtest",
+        )
 
     def test_hybrid_frontend_allowed_without_explicit_source_depth(
         self, tmp_path, monkeypatch
@@ -673,6 +683,11 @@ class TestCompareRequestAdr055Evidence:
         )
         result, _, _ = run_compare_request(request).as_tuple()
         assert isinstance(result, DiffResult)
+        assert (result.old_version, result.new_version, result.library) == (
+            "1.0",
+            "2.0",
+            "libtest",
+        )
 
     def test_manifest_forced_includes_feed_pair_wide_cxx20_detection(
         self, tmp_path, monkeypatch
@@ -784,7 +799,11 @@ class TestCompareRequestAdr055Evidence:
             old=InputSpec.of(old_p), new=InputSpec.of(new_p), depth="BUILD"
         )
         result, _, _ = run_compare_request(request).as_tuple()
-        assert isinstance(result, DiffResult)
+        assert (result.old_version, result.new_version, result.library) == (
+            "1.0",
+            "2.0",
+            "libtest",
+        )
 
     def test_pair_wide_dialect_merges_into_unrelated_side_compile(
         self, tmp_path, monkeypatch
@@ -1013,6 +1032,11 @@ class TestCompareRequestDepthSatisfaction:
         )
         result, _, _ = run_compare_request(request).as_tuple()
         assert isinstance(result, DiffResult)
+        assert (result.old_version, result.new_version, result.library) == (
+            "1.0",
+            "2.0",
+            "libtest",
+        )
 
     def test_depth_binary_always_satisfied(self, tmp_path, monkeypatch):
         old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
@@ -1027,6 +1051,11 @@ class TestCompareRequestDepthSatisfaction:
         )
         result, _, _ = run_compare_request(request).as_tuple()
         assert isinstance(result, DiffResult)
+        assert (result.old_version, result.new_version, result.library) == (
+            "1.0",
+            "2.0",
+            "libtest",
+        )
 
     def test_no_depth_skips_the_gate(self, tmp_path, monkeypatch):
         old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
@@ -1039,3 +1068,8 @@ class TestCompareRequestDepthSatisfaction:
         request = CompareRequest(old=InputSpec.of(old_p), new=InputSpec.of(new_p))
         result, _, _ = run_compare_request(request).as_tuple()
         assert isinstance(result, DiffResult)
+        assert (result.old_version, result.new_version, result.library) == (
+            "1.0",
+            "2.0",
+            "libtest",
+        )

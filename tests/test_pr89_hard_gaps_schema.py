@@ -707,6 +707,13 @@ class TestSchemaVersionBaseline:
         assert "schema_version" in d
         assert d["schema_version"] == SCHEMA_VERSION
 
+    def test_schema_version_is_int(self) -> None:
+        """schema_version in the serialized dict must be an int."""
+        snap = _snap()
+        d = snapshot_to_dict(snap)
+        assert isinstance(d["schema_version"], int)
+        assert d["schema_version"] == SCHEMA_VERSION
+
     def test_schema_version_survives_json_roundtrip(self) -> None:
         """schema_version must survive JSON serialization and deserialization."""
         snap = _snap(

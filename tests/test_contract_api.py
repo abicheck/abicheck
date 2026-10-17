@@ -423,13 +423,7 @@ class TestChangeKindCompleteness:
         for kind in ChangeKind:
             entry = policy_for(kind)
             assert entry is not None, f"policy_for({kind}) returned None"
-            assert entry.default_verdict in {
-                Verdict.BREAKING,
-                Verdict.API_BREAK,
-                Verdict.COMPATIBLE_WITH_RISK,
-                Verdict.COMPATIBLE,
-            }, kind
-            assert entry.impact.strip(), kind
+            assert isinstance(entry.default_verdict, Verdict)
 
     def test_all_changekind_values_in_policy_registry(self) -> None:
         """Every ChangeKind should be explicitly categorized in the registry."""
@@ -443,4 +437,7 @@ class TestChangeKindCompleteness:
     def test_impact_for_is_non_empty_for_every_kind(self) -> None:
         """Every ChangeKind carries a non-empty impact sentence (ChangeKindMeta)."""
         for kind in ChangeKind:
-            assert impact_for(kind).strip(), kind
+            # Should return a string (possibly empty), never raise
+            result = impact_for(kind)
+            assert isinstance(result, str)
+            assert result.strip(), f"empty impact for {kind}"

@@ -62,7 +62,7 @@ def test_refused_when_other_side_has_no_header_evidence():
     new = _snap(["/n/include/dnnl.h"], ("*_ze*",))
     reason = exclusion_asymmetry_reason_for(old, new)
     assert reason is not None
-    assert "new: *_ze*" in reason
+    assert "the --exclude-header patterns differ" in reason
 
 
 def test_refused_under_non_glob_rule():
@@ -71,7 +71,7 @@ def test_refused_under_non_glob_rule():
     new.excluded_header_matching = "exact"
     reason = exclusion_asymmetry_reason_for(old, new)
     assert reason is not None
-    assert "old: glob; new: exact" in reason
+    assert "the --exclude-header patterns differ" in reason
 
 
 _HEADERS = ["/p/a.h", "/p/b_ze.h", "/p/sub/c.hpp"]

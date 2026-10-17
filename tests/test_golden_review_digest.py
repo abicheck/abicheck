@@ -22,6 +22,7 @@ from pathlib import Path
 import pytest
 
 from abicheck.checker import compare
+from abicheck.checker_policy import ChangeKind, Verdict
 from abicheck.report.dispatch_markdown import to_review_digest
 from tests.test_golden_output import _fn, _snap
 
@@ -29,7 +30,7 @@ TESTS_DIR = Path(__file__).parent
 GOLDEN_DIR = TESTS_DIR / "golden" / "review"
 
 
-def _run_golden(case_id: str, old, new, update: bool) -> None:
+def _run_golden(case_id: str, old, new, update: bool):
     golden_path = GOLDEN_DIR / f"{case_id}.md"
     result = compare(old, new)
     actual = to_review_digest(result)
@@ -38,7 +39,7 @@ def _run_golden(case_id: str, old, new, update: bool) -> None:
         GOLDEN_DIR.mkdir(parents=True, exist_ok=True)
         golden_path.write_text(actual, encoding="utf-8")
         pytest.skip(f"Updated golden: {golden_path.name}")
-        return
+        return result
 
     if not golden_path.exists():
         pytest.fail(
@@ -59,13 +60,15 @@ def _run_golden(case_id: str, old, new, update: bool) -> None:
             )
         )
         pytest.fail(f"Golden mismatch for {case_id}:\n{diff}")
+    return result
 
 
 @pytest.mark.golden
 def test_golden_review_no_change(update_goldens: bool) -> None:
     old = _snap(ver="1.0", funcs=[_fn("compute", "_Z7computei")])
     new = _snap(ver="2.0", funcs=[_fn("compute", "_Z7computei")])
-    _run_golden("no_change", old, new, update_goldens)
+    result = _run_golden("no_change", old, new, update_goldens)
+    assert result.verdict == Verdict.NO_CHANGE
 
 
 @pytest.mark.golden
@@ -75,7 +78,9 @@ def test_golden_review_func_removed(update_goldens: bool) -> None:
         funcs=[_fn("compute", "_Z7computei"), _fn("helper", "_Z6helperi")],
     )
     new = _snap(ver="2.0", funcs=[_fn("compute", "_Z7computei")])
-    _run_golden("func_removed", old, new, update_goldens)
+    result = _run_golden("func_removed", old, new, update_goldens)
+    assert result.verdict == Verdict.BREAKING
+    assert [c.kind for c in result.changes] == [ChangeKind.FUNC_REMOVED]
 
 
 @pytest.mark.golden
@@ -85,4 +90,6 @@ def test_golden_review_compatible_addition(update_goldens: bool) -> None:
         ver="2.0",
         funcs=[_fn("compute", "_Z7computei"), _fn("helper", "_Z6helperi")],
     )
-    _run_golden("compatible_addition", old, new, update_goldens)
+    result = _run_golden("compatible_addition", old, new, update_goldens)
+    assert result.verdict == Verdict.COMPATIBLE
+    assert [c.kind for c in result.changes] == [ChangeKind.FUNC_ADDED]

@@ -124,17 +124,6 @@ def _make_minimal_elf(tmp_path: Path) -> Path:
 class TestPeMetadataMinimal:
     """Test PE metadata parsing with minimal fixture binaries."""
 
-    def test_minimal_pe_parses_without_crash(self, tmp_path: Path) -> None:
-        """parse_pe_metadata should handle a minimal PE without crashing."""
-        from abicheck.pe_metadata import parse_pe_metadata
-
-        pe_file = _make_minimal_pe(tmp_path)
-        meta = parse_pe_metadata(pe_file)
-        # Should return PeMetadata (even if empty exports)
-        from abicheck.pe_metadata import PeMetadata
-
-        assert isinstance(meta, PeMetadata)
-
     def test_minimal_pe_has_empty_exports(self, tmp_path: Path) -> None:
         """Minimal PE should have no exports (no export directory)."""
         from abicheck.pe_metadata import parse_pe_metadata
@@ -164,6 +153,7 @@ class TestPeMalformed:
 
         meta = parse_pe_metadata(pe_file)
         assert isinstance(meta, PeMetadata)
+        assert len(meta.exports) == 0
 
     def test_empty_file_returns_empty_metadata(self, tmp_path: Path) -> None:
         from abicheck.pe_metadata import PeMetadata, parse_pe_metadata
@@ -173,6 +163,7 @@ class TestPeMalformed:
 
         meta = parse_pe_metadata(pe_file)
         assert isinstance(meta, PeMetadata)
+        assert len(meta.exports) == 0
 
     def test_random_bytes_returns_empty_metadata(self, tmp_path: Path) -> None:
         from abicheck.pe_metadata import PeMetadata, parse_pe_metadata
@@ -182,6 +173,7 @@ class TestPeMalformed:
 
         meta = parse_pe_metadata(pe_file)
         assert isinstance(meta, PeMetadata)
+        assert len(meta.exports) == 0
 
 
 # ===========================================================================
@@ -191,14 +183,6 @@ class TestPeMalformed:
 
 class TestMachoMetadataMinimal:
     """Test Mach-O metadata parsing with minimal fixture binaries."""
-
-    def test_minimal_macho_le_parses_without_crash(self, tmp_path: Path) -> None:
-        """parse_macho_metadata should handle a minimal 64-bit LE Mach-O."""
-        from abicheck.macho_metadata import MachoMetadata, parse_macho_metadata
-
-        macho_file = _make_minimal_macho(tmp_path)
-        meta = parse_macho_metadata(macho_file)
-        assert isinstance(meta, MachoMetadata)
 
     def test_minimal_macho_be_graceful(self, tmp_path: Path) -> None:
         """parse_macho_metadata should handle big-endian Mach-O magic gracefully."""
@@ -226,14 +210,6 @@ class TestMachoMetadataMinimal:
 class TestElfMetadataMinimal:
     """Test ELF metadata parsing with minimal fixture binaries."""
 
-    def test_minimal_elf_parses_gracefully(self, tmp_path: Path) -> None:
-        """parse_elf_metadata should handle a minimal ELF without crashing."""
-        from abicheck.elf_metadata import ElfMetadata, parse_elf_metadata
-
-        elf_file = _make_minimal_elf(tmp_path)
-        meta = parse_elf_metadata(elf_file)
-        assert isinstance(meta, ElfMetadata)
-
     def test_minimal_elf_has_no_symbols(self, tmp_path: Path) -> None:
         """Minimal ELF with no sections should have no symbols."""
         from abicheck.elf_metadata import parse_elf_metadata
@@ -251,6 +227,7 @@ class TestElfMetadataMinimal:
 
         meta = parse_elf_metadata(elf_file)
         assert isinstance(meta, ElfMetadata)
+        assert len(meta.symbols) == 0
 
 
 # ===========================================================================

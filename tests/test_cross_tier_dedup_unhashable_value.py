@@ -92,7 +92,8 @@ def test_dedup_survives_a_non_scalar_value_slot(value: object) -> None:
 
 def test_the_transition_key_is_hashable_for_a_list_value() -> None:
     key = cross_tier_transition(_change("sym", ["a"], ["b"]))
-    assert hash(key) == hash(key)
+    assert isinstance(hash(key), int)
+    assert key in {key}
 
 
 def test_findings_differing_only_in_a_list_value_stay_distinct() -> None:

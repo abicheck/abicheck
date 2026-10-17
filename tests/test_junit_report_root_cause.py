@@ -26,6 +26,8 @@ its flat one-result-per-finding shape.
 
 from __future__ import annotations
 
+import re
+
 from defusedxml.ElementTree import fromstring as xml_fromstring
 
 from abicheck.checker_policy import ChangeKind, Verdict
@@ -202,8 +204,8 @@ class TestRenderOutputForwardsReportModeToJunit:
         xml = render_output("junit", result, old, report_mode="root-cause")
         fail = _parse(xml).find(".//failure")
         assert fail is not None
-        assert fail.get("rootCauseId") is not None
         assert fail.get("rootCause") == "ns::detail::Impl"
+        assert re.fullmatch(r"[0-9a-f]{16}", fail.get("rootCauseId") or "")
 
     def test_render_output_junit_full_mode_unaffected(self) -> None:
         from abicheck.service import render_output

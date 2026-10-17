@@ -259,6 +259,7 @@ class TestSnapshotLocalIdentityPayload:
         must depend on what it asked for, never on the input's shape --
         otherwise a consumer's precedence order changes silently with its
         data."""
-        assert isinstance(
-            snapshot_local_identity(spelling, entity_id), SnapshotLocalIdentity
-        )
+        local = snapshot_local_identity(spelling, entity_id)
+        assert isinstance(local, SnapshotLocalIdentity)
+        assert local.spelling == spelling
+        assert local.entity_id is entity_id

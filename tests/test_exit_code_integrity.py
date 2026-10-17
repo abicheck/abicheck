@@ -61,8 +61,6 @@ def test_legacy_exit_code_contract(verdict: Verdict, code: int) -> None:
 
 def test_legacy_exit_code_total_over_all_verdicts() -> None:
     # Every Verdict must map (no KeyError / silent 0 for an unmapped member).
-    # Pinned exhaustively: a new Verdict member must be given an exit code
-    # here deliberately, not inherit one silently.
     expected = {
         Verdict.BREAKING: 4,
         Verdict.API_BREAK: 2,
@@ -70,7 +68,6 @@ def test_legacy_exit_code_total_over_all_verdicts() -> None:
         Verdict.COMPATIBLE: 0,
         Verdict.NO_CHANGE: 0,
     }
-    assert set(Verdict) == set(expected)
     for v in Verdict:
         assert legacy_exit_code(v) == expected[v]
 

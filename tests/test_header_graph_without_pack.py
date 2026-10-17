@@ -234,7 +234,8 @@ class TestSurfaceGraphFollowsL5Scope:
     def test_kept_at_source(self) -> None:
         snap = self._snap_with_graph()
         projected = project_snapshot_to_depth(snap, "source")
-        assert projected.surface_graph is snap.surface_graph
+        assert projected.surface_graph is not None
+        assert projected.surface_graph == snap.surface_graph
 
     def test_a_surviving_pack_keeps_it_behind_its_l5_row(self) -> None:
         from abicheck.evidence_depth import resolve_l5_source_graph

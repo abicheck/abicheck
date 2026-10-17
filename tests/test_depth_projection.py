@@ -499,9 +499,7 @@ class TestExtractionContractCleared:
         )
         projected = project_snapshot_to_depth(snap, depth)
         assert projected.contract is not None
-        # Kept as the same contract, not a copy that drifted in transit.
-        assert projected.contract.profile_fingerprint == "p"
-        assert projected.contract.scope_fingerprint == "s"
+        assert projected.contract == snap.contract
 
 
 class TestHiddenVisibilityDropped:

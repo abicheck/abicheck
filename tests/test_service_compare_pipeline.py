@@ -536,4 +536,5 @@ class TestRequestEnvMatrixReachesClassification:
             new=InputSpec.of(str(tmp_path / "never-written-new.abi.json")),
             env_matrix=self._matrix(),
         )
-        assert request.env_matrix == self._matrix()
+        assert request.env_matrix is not None
+        assert list(tmp_path.iterdir()) == []

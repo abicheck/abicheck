@@ -690,12 +690,14 @@ class TestEdgeCoverage:
 
     def test_parse_elf_metadata_non_regular_file(self, tmp_path):
         """parse_elf_metadata returns empty ElfMetadata for non-regular files (e.g. dir)."""
-        from abicheck.elf_metadata import parse_elf_metadata
+        from abicheck.elf_metadata import ElfMetadata, parse_elf_metadata
 
         # Use a directory — not a regular file
         result = parse_elf_metadata(tmp_path)
-        assert result is not None
-        # Should return empty metadata gracefully
-        from abicheck.elf_metadata import ElfMetadata
-
-        assert isinstance(result, ElfMetadata)
+        # Empty metadata, not a parse of the directory: every field at its default.
+        assert type(result) is ElfMetadata
+        assert result.soname == ""
+        assert result.needed == []
+        assert result.symbols == []
+        assert result.imports == []
+        assert result.versions_defined == []

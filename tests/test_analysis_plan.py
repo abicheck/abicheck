@@ -141,6 +141,7 @@ class TestBazelBuildTargetScoping:
         )
         plan = AnalysisPlanner.resolve(request)
         assert isinstance(plan, AnalysisPlan)
+        assert plan.requested_depth == "build"
 
     def test_ordinary_compile_db_build_info_is_unaffected(self, tmp_path: Path):
         """A plain ``compile_commands.json`` (not a Bazel jsonproto)
@@ -159,6 +160,7 @@ class TestBazelBuildTargetScoping:
         )
         plan = AnalysisPlanner.resolve(request)
         assert isinstance(plan, AnalysisPlan)
+        assert plan.requested_depth == "build"
 
     def test_no_build_targets_is_unaffected(self, tmp_path: Path):
         """A pre-captured Bazel jsonproto with no requested scoping at all
@@ -172,6 +174,7 @@ class TestBazelBuildTargetScoping:
         )
         plan = AnalysisPlanner.resolve(request)
         assert isinstance(plan, AnalysisPlan)
+        assert plan.requested_depth == "build"
 
     def test_dump_config_sourced_target_scope_raises_planning_error(
         self, tmp_path: Path
@@ -360,6 +363,7 @@ class TestBazelBuildTargetScoping:
         )
         plan = AnalysisPlanner.resolve(request)
         assert isinstance(plan, AnalysisPlan)
+        assert plan.requested_depth == "binary"
 
     def test_flow2_inputs_pack_with_bundled_config_is_unaffected_headerless(
         self, tmp_path: Path
@@ -394,6 +398,8 @@ class TestBazelBuildTargetScoping:
         )
         plan = AnalysisPlanner.resolve(request)
         assert isinstance(plan, AnalysisPlan)
+        assert plan.operation == "dump"
+        assert [s.label for s in plan.sides] == ["input"]
 
     def test_pack_with_bundled_config_and_real_headers_raises_planning_error(
         self, tmp_path: Path
@@ -444,6 +450,7 @@ class TestBazelBuildTargetScoping:
         )
         plan = AnalysisPlanner.resolve(request)
         assert isinstance(plan, AnalysisPlan)
+        assert plan.requested_depth == "build"
 
     def test_malformed_abicheck_yml_is_unaffected_by_this_check(self, tmp_path: Path):
         """A malformed ``.abicheck.yml`` is not this check's problem to
@@ -463,6 +470,7 @@ class TestBazelBuildTargetScoping:
         )
         plan = AnalysisPlanner.resolve(request)
         assert isinstance(plan, AnalysisPlan)
+        assert plan.requested_depth == "build"
 
     def test_nonexistent_build_info_path_is_unaffected(self, tmp_path: Path):
         """A ``build_info`` path that does not exist on disk cannot be
@@ -480,6 +488,7 @@ class TestBazelBuildTargetScoping:
         )
         plan = AnalysisPlanner.resolve(request)
         assert isinstance(plan, AnalysisPlan)
+        assert plan.requested_depth == "build"
 
     def test_depth_binary_is_unaffected(self, tmp_path: Path):
         """Codex review, fresh evidence: ``depth="binary"`` resolves to
@@ -501,6 +510,7 @@ class TestBazelBuildTargetScoping:
         )
         plan = AnalysisPlanner.resolve(request)
         assert isinstance(plan, AnalysisPlan)
+        assert plan.requested_depth == "binary"
 
     def test_depth_binary_case_insensitive_is_unaffected(self, tmp_path: Path):
         aquery = _write(tmp_path / "aquery.json", _EMPTY_AQUERY)
@@ -515,6 +525,7 @@ class TestBazelBuildTargetScoping:
         )
         plan = AnalysisPlanner.resolve(request)
         assert isinstance(plan, AnalysisPlan)
+        assert plan.requested_depth == "BINARY"
 
     def test_other_depths_still_rejected_alongside_binary(self, tmp_path: Path):
         """A depth other than ``binary``/headerless ``headers`` still
@@ -555,6 +566,7 @@ class TestBazelBuildTargetScoping:
         )
         plan = AnalysisPlanner.resolve(request)
         assert isinstance(plan, AnalysisPlan)
+        assert plan.requested_depth == "headers"
 
     def test_depth_headers_with_real_headers_is_still_rejected(self, tmp_path: Path):
         """The converse of the test above: real headers at ``depth="headers"``
@@ -624,6 +636,7 @@ class TestBazelBuildTargetScoping:
         )
         plan = AnalysisPlanner.resolve(request)
         assert isinstance(plan, AnalysisPlan)
+        assert plan.requested_depth == "build"
 
     def test_resolved_collect_mode_off_does_not_exempt_real_headers(
         self, tmp_path: Path
@@ -674,6 +687,7 @@ class TestBazelBuildTargetScoping:
         )
         plan = AnalysisPlanner.resolve(request)
         assert isinstance(plan, AnalysisPlan)
+        assert plan.requested_depth == "headers"
 
 
 class TestAnalysisPlanShape:
