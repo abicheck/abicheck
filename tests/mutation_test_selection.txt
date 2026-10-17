@@ -366,6 +366,7 @@ tests/test_exit_decision.py
 tests/test_explicit_ctor.py
 tests/test_export_declaration_evidence.py
 tests/test_export_existence_reconciliation.py
+tests/test_export_loss_binding_unit.py
 tests/test_export_owner_resolution.py
 tests/test_export_reconciliation_and_obligations.py
 tests/test_export_surface.py
@@ -513,6 +514,7 @@ tests/test_pair_evidence_shared.py
 tests/test_parallel_safety.py
 tests/test_param_kind_enum_identity.py
 tests/test_param_kind_fact.py
+tests/test_param_kind_fact_integration.py
 tests/test_parameter_facts_cutover.py
 tests/test_pattern_audit_scenarios.py
 tests/test_pattern_modulation_disclosure.py
@@ -701,6 +703,7 @@ tests/test_symbol_origin.py
 tests/test_symbol_origin_ownership_properties.py
 tests/test_symbol_renamed_batch_evidence.py
 tests/test_symbol_versioning_coexistence.py
+tests/test_template_finding_binding.py
 tests/test_template_graph.py
 tests/test_template_graph_fold.py
 tests/test_template_graph_identity.py
@@ -770,6 +773,7 @@ tests/unit/report/test_review_sections_html.py
 tests/unit/report/test_section_notes.py
 tests/unit/storage/test_bundle_facts_generation_drift.py
 tests/unit/storage/test_decode_fast_path.py
+tests/unit/storage/test_entity_id_domain_bridge.py
 tests/unit/storage/test_generation_drift_notice.py
 tests/unit/storage/test_import_baseline_set.py
 tests/unit/storage/test_import_bundle_facts.py
