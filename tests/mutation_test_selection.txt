@@ -780,6 +780,7 @@ tests/unit/report/test_review_sections_html.py
 tests/unit/report/test_section_notes.py
 tests/unit/storage/test_bundle_facts_generation_drift.py
 tests/unit/storage/test_decode_fast_path.py
+tests/unit/storage/test_entity_id_domain_bridge.py
 tests/unit/storage/test_generation_drift_notice.py
 tests/unit/storage/test_import_baseline_set.py
 tests/unit/storage/test_import_bundle_facts.py
