@@ -3287,12 +3287,16 @@ class TestRejectHardlinkFallbackAmplification:
     (Codex)."""
 
     @staticmethod
+    def _add_real(tf: tarfile.TarFile, size: int) -> None:
+        info = tarfile.TarInfo(name="real.bin")
+        info.size = size
+        tf.addfile(info, io.BytesIO(b"x" * size))
+
+    @staticmethod
     def _write_archive(tmp_path: Path, *, real_size: int, hardlink_count: int) -> Path:
         archive = tmp_path / "hardlinks.tar"
         with tarfile.open(archive, "w") as tf:
-            info = tarfile.TarInfo(name="real.bin")
-            info.size = real_size
-            tf.addfile(info, io.BytesIO(b"x" * real_size))
+            TestRejectHardlinkFallbackAmplification._add_real(tf, real_size)
             for i in range(hardlink_count):
                 link = tarfile.TarInfo(name=f"alias{i}.bin")
                 link.type = tarfile.LNKTYPE
@@ -3326,9 +3330,7 @@ class TestRejectHardlinkFallbackAmplification:
         monkeypatch.setenv("_ABICHECK_TAR_ZST_MAX_DECODED_BYTES", "1000")
         archive = tmp_path / "poisoned.tar"
         with tarfile.open(archive, "w") as tf:
-            info = tarfile.TarInfo(name="real.bin")
-            info.size = 600
-            tf.addfile(info, io.BytesIO(b"x" * 600))
+            self._add_real(tf, 600)
             for i in range(10):
                 link = tarfile.TarInfo(name=f"alias{i}.bin")
                 link.type = tarfile.LNKTYPE
@@ -3402,14 +3404,11 @@ class TestRejectHardlinkFallbackAmplification:
         monkeypatch.setenv("_ABICHECK_TAR_ZST_MAX_DECODED_BYTES", "1000")
         archive = tmp_path / "chained.tar"
         with tarfile.open(archive, "w") as tf:
-            info = tarfile.TarInfo(name="real.bin")
-            info.size = 600
-            tf.addfile(info, io.BytesIO(b"x" * 600))
+            self._add_real(tf, 600)
             for i in range(10):
                 link = tarfile.TarInfo(name=f"alias{i}.bin")
                 link.type = tarfile.LNKTYPE
-                # Each alias points to the previous one, not straight to
-                # the real file -- a 10-deep chain.
+                # Each alias points to the previous one: a 10-deep chain.
                 link.linkname = "real.bin" if i == 0 else f"alias{i - 1}.bin"
                 link.size = 0
                 tf.addfile(link)
@@ -3421,17 +3420,13 @@ class TestRejectHardlinkFallbackAmplification:
     def test_dangling_hardlink_reference_does_not_crash_the_check(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        # A hard link naming a member that doesn't exist in the archive
-        # can't be exploited for amplification (extraction fails outright
-        # on it either way) -- must degrade safely, not raise internally
-        # (an AttributeError/KeyError escaping this check's own logic).
+        # A hard link to a missing member cannot amplify (extraction fails
+        # on it anyway): the check must degrade safely, not raise internally.
         from abicheck.extract.packages import _reject_hardlink_fallback_amplification
 
         archive = tmp_path / "dangling.tar"
         with tarfile.open(archive, "w") as tf:
-            info = tarfile.TarInfo(name="real.bin")
-            info.size = 600
-            tf.addfile(info, io.BytesIO(b"x" * 600))
+            self._add_real(tf, 600)
             link = tarfile.TarInfo(name="alias.bin")
             link.type = tarfile.LNKTYPE
             link.linkname = "nonexistent.bin"

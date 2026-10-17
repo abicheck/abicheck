@@ -808,9 +808,7 @@ def test_resolve_driver_disagreement_excused_when_caller_pins_explicit_gcc_path(
     ev = BuildEvidence(compile_units=[cu_a, cu_b])
     explicit = CompileContext(gcc_path="/opt/custom/clang-cl")
     result = resolve_header_compile_context(ev, [header], explicit=explicit)
-    # Excused rather than raised: both units matched, and the derived context
-    # comes from the clang-cl unit's own driver. The caller's pin is merged
-    # over it later (see _merge_l3_compile_context), not here.
+    # Excused, not raised: the derived context uses the clang-cl unit's driver.
     assert len(result.matched_units) == 2
     assert result.context is not None
     assert result.context.gcc_path == "clang-cl"
@@ -975,13 +973,8 @@ def test_resolve_slash_d_pin_still_fails_closed_without_pin(tmp_path: Path) -> N
 
 
 def test_explicit_pin_of_gcc_path_true_for_gcc_prefix_only() -> None:
-    """P2 review finding ("Treat an explicit prefix as a compiler-selector
-    pin"): `_ExplicitPin.gcc_path` must also be True when only
-    `explicit.gcc_prefix` is set -- either explicit selector field alone
-    already fully resolves the compiler-selection dimension for
-    `_merge_l3_compile_context`'s purposes (per the earlier gcc_path/
-    gcc_prefix mutual-exclusivity fix), so the ambiguity-signature masking
-    must treat the two as one dimension too."""
+    """An explicit gcc_prefix alone pins the compiler-selector dimension
+    (P2 review: "Treat an explicit prefix as a compiler-selector pin")."""
     from abicheck.buildsource.header_compile_context import _ExplicitPin
 
     pin = _ExplicitPin.of(CompileContext(gcc_prefix="/opt/llvm/bin/"))

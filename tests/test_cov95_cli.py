@@ -53,7 +53,7 @@ from abicheck.frontends.cli.runtime import (
 )
 from abicheck.model import AbiSnapshot, Function, Visibility
 from abicheck.policy.effective_gate import EffectiveGate
-from abicheck.policy.severity import SeverityLevel
+from abicheck.policy.severity import SeverityConfig, SeverityLevel
 from abicheck.report.render_release_markdown import (
     _release_md_bundle_findings,
     _release_md_matrix_findings,
@@ -985,18 +985,12 @@ class TestResolveReleaseSeverityConfig:
 
     def test_returns_config_when_preset(self) -> None:
         cfg = _resolve_release_severity_config("strict", None, None, None, None)
-        assert cfg is not None
         # The strict preset escalates every category to error.
-        assert cfg.abi_breaking == SeverityLevel.ERROR
-        assert cfg.potential_breaking == SeverityLevel.ERROR
-        assert cfg.quality_issues == SeverityLevel.ERROR
-        assert cfg.addition == SeverityLevel.ERROR
+        assert cfg == SeverityConfig(*[SeverityLevel.ERROR] * 4)
 
     def test_a_single_category_override_alone_is_honoured(self) -> None:
         cfg = _resolve_release_severity_config(None, "warning", None, None, None)
-        assert cfg is not None
-        assert cfg.abi_breaking == SeverityLevel.WARNING
-        assert cfg.addition == SeverityLevel.INFO  # untouched default
+        assert cfg == SeverityConfig(abi_breaking=SeverityLevel.WARNING)
 
 
 class TestExitCompareRelease:

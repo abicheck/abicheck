@@ -179,8 +179,7 @@ class TestEvaluateLocationExpr:
 
     def test_tuple_plus_insufficient_stack(self) -> None:
         """Tuple DW_OP_plus with insufficient stack."""
-        # Only the implicit base 0 is on the stack; DW_OP_plus needs two
-        # values, so it is a no-op and the result stays the base address.
+        # Only the implicit base 0 is on the stack; DW_OP_plus needs two.
         assert _evaluate_location_expr([(0x22, 0)]) == 0
 
     def test_unknown_tuple_opcode(self) -> None:
@@ -1221,9 +1220,7 @@ extern "C" SensorData make_sensor(int c, int s) {
         )
 
     def test_cpp_const_variable(self, cpp_lib: Path) -> None:
-        """A namespace-scope C++ ``const`` has internal linkage: it is not part
-        of the binary's ABI, so the snapshot must not report it as a variable,
-        and building the snapshot must not crash on it."""
+        """Internal-linkage const is not ABI: not reported, and no crash."""
         from abicheck.dwarf_unified import parse_dwarf
         from abicheck.elf_metadata import parse_elf_metadata
 
