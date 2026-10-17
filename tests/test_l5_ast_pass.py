@@ -190,6 +190,36 @@ def test_every_real_family_reads_the_same_single_dump(monkeypatch) -> None:
         assert out.diagnostics == [f"dumped {cu.source}" for cu in units]
 
 
+@pytest.mark.parametrize(
+    "malformed",
+    [
+        {"kind": "TranslationUnitDecl", "inner": "x"},
+        {"kind": "TranslationUnitDecl", "inner": {"a": 1}},
+        {"kind": "TranslationUnitDecl", "inner": None},
+        {
+            "kind": "TranslationUnitDecl",
+            "inner": [{"kind": "FunctionDecl", "name": "f", "inner": {"a": 1}}],
+        },
+    ],
+)
+def test_every_real_family_refuses_a_malformed_tree_as_a_degraded_tu(
+    monkeypatch, malformed: dict
+) -> None:
+    """A wrong-typed `inner` must degrade the TU for every family.
+
+    Without the refusal, each family's reader treats the string or mapping as
+    an empty list and returns "ran, found nothing" for a tree it could not
+    read. The oracle is the stated contract: every family records the refusal
+    as a diagnostic, which is what the fold reads to degrade the pass.
+    """
+    monkeypatch.setattr(l5_ast_pass, "run_clang_ast_dump", lambda *a, **k: malformed)
+    unit = CompileUnit(id="cu://a", source="/p/src/a.cpp")
+    outcomes = run_ast_passes(BuildEvidence(compile_units=[unit]), "clang++")
+    assert set(outcomes) == {p.name for p in L5_AST_PASSES}
+    for name, out in outcomes.items():
+        assert any("clang AST is malformed" in d for d in out.diagnostics), name
+
+
 def test_argv_and_cwd_are_the_replay_context_of_each_unit(monkeypatch) -> None:
     import os
 

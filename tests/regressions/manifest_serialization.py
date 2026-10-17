@@ -32,7 +32,7 @@ not actually cover.
 
 from __future__ import annotations
 
-from .bug_class_schema import BugClass
+from .bug_class_schema import BugClass, KnownGap
 
 SERIALIZATION_BUG_CLASSES: tuple[BugClass, ...] = (
     BugClass(
@@ -118,5 +118,54 @@ SERIALIZATION_BUG_CLASSES: tuple[BugClass, ...] = (
             "rendering": ("str", "format", "json"),
             "interpreter": ("3.11", "3.13", "3.15", "3.15t"),
         },
+    ),
+    BugClass(
+        id="storage.short_decode_mistaken_for_complete_decode",
+        invariant=(
+            "A bounded read over a compressed/streamed source must never "
+            'treat "the decoder returned without raising" as "the '
+            'decode is complete": a stream cut at an arbitrary raw-byte '
+            "boundary yields a *short* result -- commonly zero bytes -- "
+            "with no exception at all, so a result shorter than the "
+            "requested length is a truncation signal that must escalate "
+            "the raw read exactly as a raised exception does, unless the "
+            "underlying source is already exhausted. Concretely: "
+            "bounded_decoded_prefix(p, n) == read_snapshot_bytes(p)[:n] "
+            "for every valid storage envelope whose first n decoded bytes "
+            "are reachable within the reader's own raw-input budget, at "
+            "every compression ratio; past that budget the answer is None "
+            '("no prefix within budget"), never a short value that would '
+            "read as the real prefix."
+        ),
+        fixed_by=(1164,),
+        seed_tests=("tests/test_bounded_decoded_prefix_properties.py",),
+        public_surfaces=("python-api",),
+        axes={
+            "algorithm": ("zstd", "gzip"),
+            "compression_ratio": ("low", "high"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    'The same "short read is not EOF" shape exists in '
+                    "every other bounded/streamed reader in the tree "
+                    "(`workflows/bundle_compare_operand.py`'s own larger-"
+                    "window probe, `workflows/dump/cache/`'s archive reader, "
+                    "the DWARF/PE section readers). Only the snapshot "
+                    "storage envelope's prefix primitive has a "
+                    "generalized suite; the siblings are untested against "
+                    "this invariant. Separately, the bounded reader's own "
+                    "guarantee stops at its raw-input cap: an envelope can "
+                    "place arbitrarily much stored input before its n-th "
+                    "decoded byte (a tiny data frame, a megabyte skippable "
+                    "frame, then the payload), and reading far enough to "
+                    "decode it is the whole-file decompression the bounded "
+                    "reader exists to avoid. That case answers None by "
+                    "design and is pinned by a test, but it is a real "
+                    "narrowing of the invariant above, not a closed case."
+                ),
+                reference="docs/contribute/plans/bug-class-regression-testing.md#phase-7",
+            ),
+        ),
     ),
 )
