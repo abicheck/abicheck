@@ -368,6 +368,7 @@ tests/test_exit_decision.py
 tests/test_explicit_ctor.py
 tests/test_export_declaration_evidence.py
 tests/test_export_existence_reconciliation.py
+tests/test_export_loss_binding_unit.py
 tests/test_export_owner_resolution.py
 tests/test_export_reconciliation_and_obligations.py
 tests/test_export_surface.py
@@ -709,6 +710,7 @@ tests/test_symbol_origin.py
 tests/test_symbol_origin_ownership_properties.py
 tests/test_symbol_renamed_batch_evidence.py
 tests/test_symbol_versioning_coexistence.py
+tests/test_template_finding_binding.py
 tests/test_template_graph.py
 tests/test_template_graph_fold.py
 tests/test_template_graph_identity.py
