@@ -992,7 +992,7 @@ def discover_artifact_set(paths: list[Path], *, explicit: bool) -> dict[str, Pat
     - **Symlink-alias deduplication.** A completely ordinary Unix install
       layout has both a versioned real file (``libfoo.so.1``) and an
       unversioned dev symlink to it (``libfoo.so``) — ``discover_shared_
-      libraries()`` (``abicheck/package.py``) lists both as separate
+      libraries()`` (``abicheck/extract/packages.py``) lists both as separate
       discovered paths, and both canonicalize to the same name. Resolving
       each path (``Path.resolve()``) and deduplicating identical targets
       *before* collision-checking means this common layout is accepted, not
@@ -1053,7 +1053,7 @@ def discover_artifact_set(paths: list[Path], *, explicit: bool) -> dict[str, Pat
         # (package.discover_shared_libraries) already restricts its own
         # members to real shared objects -- the explicit-list form must not
         # be laxer just because the caller typed the path out (Codex review).
-        from .package import _is_elf_shared_object
+        from .extract.packages import _is_elf_shared_object
 
         unsupported = [
             p for p in resolved_by_real.values() if not _is_elf_shared_object(p)

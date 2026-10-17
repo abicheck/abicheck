@@ -797,7 +797,7 @@ class TestArchiveExtraction:
         self, tmp_path: Path
     ) -> None:
         """P0.2: a malicious caller repository must not be able to plant its
-        own abicheck/package.py (or point PYTHONPATH at one) and have that
+        own abicheck/extract/packages.py (or point PYTHONPATH at one) and have that
         file imported instead of the installed distribution during archive
         extraction (Codex review)."""
         baseline_dir = tmp_path / "baseline-src"
@@ -810,9 +810,9 @@ class TestArchiveExtraction:
 
         marker = tmp_path / "workspace-package-imported"
         shadow_pkg = tmp_path / "abicheck"
-        shadow_pkg.mkdir()
+        (shadow_pkg / "extract").mkdir(parents=True)
         (shadow_pkg / "__init__.py").write_text("", encoding="utf-8")
-        (shadow_pkg / "package.py").write_text(
+        (shadow_pkg / "extract" / "packages.py").write_text(
             "from pathlib import Path\n"
             f"Path({str(marker)!r}).write_text('imported', encoding='utf-8')\n"
             "raise RuntimeError('workspace shadow package imported')\n",
@@ -892,7 +892,7 @@ class TestArchiveExtraction:
         self, tmp_path: Path
     ) -> None:
         # The .tar.zst extraction path delegates to
-        # abicheck.package.TarExtractor._safe_extract_zst_tar, which
+        # abicheck.extract.packages.TarExtractor._safe_extract_zst_tar, which
         # validates every member's path before extracting -- unlike a bare
         # tarfile.extractall() on Python <3.12 (no filter="data" support),
         # which would happily write a "../"-escaping member outside

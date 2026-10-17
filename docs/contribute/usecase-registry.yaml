@@ -268,7 +268,7 @@ use_cases:
       the plan docs/contribute/plans/g8-static-libraries.md.
     evidence:
       modules: [abicheck/binary_utils.py, abicheck/service.py]
-      tests: [tests/test_compare_input_modes.py, tests/test_service_unit.py]
+      tests: [tests/test_compare_input_modes.py, tests/test_service_compare_pipeline_unit.py, tests/test_input_resolution_unit.py]
       docs: [docs/learn/limitations.md]
 
   - id: UC-ARCH-ffi-consumers
@@ -707,7 +707,7 @@ use_cases:
         abicheck/diff_versioning.py,
         abicheck/checker_policy.py,
         abicheck/model/change_catalog/platform.py,
-        abicheck/package.py,
+        abicheck/extract/packages.py,
       ]
       tests: [tests/test_environment_drift.py, tests/test_package.py]
     note: >
@@ -744,7 +744,7 @@ use_cases:
         abicheck/numpy_capi.py,
         abicheck/diff_numpy_capi.py,
         abicheck/model/change_catalog/build.py,
-        abicheck/package.py,
+        abicheck/extract/packages.py,
       ]
       tests: [
         tests/test_numpy_capi.py,
@@ -786,7 +786,7 @@ use_cases:
       modules: [
         abicheck/diff_versioning.py,
         abicheck/diff_wheel_deployment.py,
-        abicheck/package.py,
+        abicheck/extract/packages.py,
         abicheck/model/change_catalog/build.py,
       ]
       tests: [

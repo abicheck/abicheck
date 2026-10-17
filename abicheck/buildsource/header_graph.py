@@ -129,13 +129,14 @@ from .type_graph import (
     EDGE_DECL_HAS_TYPE,
     EDGE_TYPE_HAS_FIELD_TYPE,
     EDGE_TYPE_INHERITS,
-    RESOLUTION_UNIQUE_CANDIDATE,
-    RESOLUTION_UNRESOLVED,
     TypeEdge,
+    augment_graph_with_types,
+)
+from .type_graph_index import RESOLUTION_UNIQUE_CANDIDATE, RESOLUTION_UNRESOLVED
+from .type_graph_names import (
     _base_type_name,
     _is_excluded_type,
     _resolve_nested_type_names,
-    augment_graph_with_types,
 )
 
 if TYPE_CHECKING:
@@ -273,7 +274,7 @@ def _flat_structural_type_edges(
     works uniformly regardless of which frontend parsed the headers, at zero
     extra compiler-invocation cost. Confidence is always
     :data:`~abicheck.model.graph_facts.CONF_REDUCED` — even a
-    :data:`~abicheck.buildsource.type_graph.RESOLUTION_UNIQUE_CANDIDATE` match
+    :data:`~abicheck.buildsource.type_graph_index.RESOLUTION_UNIQUE_CANDIDATE` match
     here is a weaker guess than the AST path's scope-walk resolution.
 
     Every endpoint is keyed through the shared identity table (I1): a record

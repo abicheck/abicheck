@@ -67,7 +67,9 @@ from .l5_ast_run import AstPassOutcome, L5AstRun
 from .macro_graph import merge_decl_ranges, parse_tu_decl_ranges
 from .override_graph import merge_override_facts, parse_clang_ast_override_facts
 from .template_graph import merge_template_instantiations, parse_clang_ast_templates
-from .type_graph import ast_derived_scope, merge_type_edges, parse_clang_ast_types
+from .type_graph import merge_type_edges
+from .type_graph_index import ast_derived_scope
+from .type_graph_walk import parse_clang_ast_types
 
 if TYPE_CHECKING:
     from ..model.source_graph import SourceGraphSummary

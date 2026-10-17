@@ -1,4 +1,4 @@
-"""Additional unit tests for abicheck.package — RPM extraction, zstd tar, build-ID resolution."""
+"""Additional unit tests for abicheck.extract.packages — RPM extraction, zstd tar, build-ID resolution."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from abicheck.errors import ExtractionSecurityError
-from abicheck.package import (
+from abicheck.extract.packages import (
     CondaExtractor,
     RpmExtractor,
     _read_build_id,
@@ -249,7 +249,7 @@ class TestZstTarSecurityChecks:
 class TestZstFallbackToExternalCommand:
     """Fallback to system zstd command (lines 480-490)."""
 
-    @patch("abicheck.package.TarExtractor._safe_extract")
+    @patch("abicheck.extract.packages.TarExtractor._safe_extract")
     @patch("subprocess.Popen")
     @patch("shutil.which", return_value="/usr/bin/zstd")
     def test_uses_subprocess_when_no_python_zstandard(
@@ -335,7 +335,10 @@ class TestResolveBuildId:
         bid_path.parent.mkdir(parents=True)
         bid_path.touch()
 
-        with patch("abicheck.package._read_build_id", return_value="abcdef1234"):
+        with patch(
+            "abicheck.extract.packages._read_build_id",
+            return_value="abcdef1234",
+        ):
             result = resolve_debug_info(binary, debug_dir)
 
         assert result == bid_path
@@ -351,7 +354,7 @@ class TestResolveBuildId:
         mirrored.parent.mkdir(parents=True)
         mirrored.touch()
 
-        with patch("abicheck.package._read_build_id", return_value=None):
+        with patch("abicheck.extract.packages._read_build_id", return_value=None):
             result = resolve_debug_info(binary, debug_dir)
 
         assert result == mirrored
@@ -367,7 +370,7 @@ class TestResolveBuildId:
         dbg_file.parent.mkdir(parents=True)
         dbg_file.touch()
 
-        with patch("abicheck.package._read_build_id", return_value=None):
+        with patch("abicheck.extract.packages._read_build_id", return_value=None):
             result = resolve_debug_info(binary, debug_dir)
 
         assert result == dbg_file
@@ -396,7 +399,10 @@ class TestResolveBuildId:
                 return build_id  # matches
             return None
 
-        with patch("abicheck.package._read_build_id", side_effect=fake_read_build_id):
+        with patch(
+            "abicheck.extract.packages._read_build_id",
+            side_effect=fake_read_build_id,
+        ):
             result = resolve_debug_info(binary, debug_dir)
 
         assert result == cand2
@@ -417,7 +423,7 @@ class TestResolveBuildId:
         cand2.touch()
 
         # No build-id to disambiguate
-        with patch("abicheck.package._read_build_id", return_value=None):
+        with patch("abicheck.extract.packages._read_build_id", return_value=None):
             result = resolve_debug_info(binary, debug_dir)
 
         assert result == cand1
@@ -431,7 +437,7 @@ class TestResolveBuildId:
         debug_dir = tmp_path / "debug"
         debug_dir.mkdir()
 
-        with patch("abicheck.package._read_build_id", return_value=None):
+        with patch("abicheck.extract.packages._read_build_id", return_value=None):
             result = resolve_debug_info(binary, debug_dir)
 
         assert result is None

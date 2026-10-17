@@ -18,7 +18,7 @@ exactly the class of change ADR-044's own "Post-merge review rounds" note
 says needs a recorded decision, not a routine PR.
 **Type:** Initiative plan (cross-cutting; not tied to a single
 `usecase-registry.yaml` gap — spans `abicheck/buildsource/`,
-`post_processing.py`, `suppression.py`, `appcompat.py`, `reporter.py`,
+`post_processing.py`, `policy/suppression/rules.py`, `appcompat.py`, `reporter.py`,
 `sarif.py`, and the docs/examples catalog).
 **Effort:** XL (phased) · **Risk:** high overall — Phase 2 changes graph
 identity, Phase 3 changes reporting-contract shape, Phase 4 adds a whole new
@@ -39,7 +39,7 @@ version-over-version diff findings (`PUBLIC_API_INTERNAL_DEPENDENCY_ADDED`,
 etc. — `source_graph_findings.py`), computes transitive public reachability
 with BFS proof paths (`internal_leak.py`), gates suppression before it can
 hide a public-reachable break (`post_processing.MarkReachability` /
-`suppression.py`, ADR-044, now with tri-state `ReachabilityState` — Phase 1),
+`policy/suppression/rules.py`, ADR-044, now with tri-state `ReachabilityState` — Phase 1),
 and intersects real `--used-by` consumer binaries against the diff
 (`appcompat.py`).
 
@@ -48,7 +48,7 @@ several independently-computed graph-derived annotations**, not a unified
 model:
 
 - `source_graph_findings.py`, `internal_leak.py`, `post_processing.py`,
-  `suppression.py`, and `appcompat.py` each answer overlapping "is this
+  `policy/suppression/rules.py`, and `appcompat.py` each answer overlapping "is this
   reachable / why / how confidently" questions independently, with no shared
   object.
 - Graph node/edge identity is a `(src, dst, kind)` triple with a fallback
@@ -118,13 +118,13 @@ model:
     tagged. See the Phase 3 section below ("Slice 10") for the exact
     per-function site count and breakdown.
 
-  A third entry D2's original decision text named, `suppression.py`,
+  A third entry D2's original decision text named, `policy/suppression/rules.py`,
   contains **no** `Change(...)` construction at all (confirmed by direct
   search, unchanged from Slice 8/9's finding) — the diagnostic construction
   near it (`SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK`) actually lives in
   `post_processing.py` and carries no reachability evidence to cache. **G29
   Phase 3 Slice 11 resolved this**, the one item from D2's original scope
-  still open after Slice 10: `suppression.py` mutates no `Change` field
+  still open after Slice 10: `policy/suppression/rules.py` mutates no `Change` field
   anywhere in the module (confirmed by grepping every assignment target),
   so it was never a producer to migrate — the mutation D2's text was
   naming is `checker._filter_suppressed_changes`/
@@ -133,7 +133,7 @@ model:
   earlier in `DEFAULT_PIPELINE`, ADR-044 D1's ordering, so every `Change`
   those callers see already carries a cached `impact_assessment`). D2's
   text conflated "the suppression subsystem" (the caller sites) with "the
-  `suppression.py` module" (a pure predicate engine with nothing to
+  `policy/suppression/rules.py` module" (a pure predicate engine with nothing to
   migrate, by design — see ADR-052 Slice 11 for the full resolution).
 - **G29.3** (Phase 2, **D1-D6 all done, ADR-046**) — Graph core v2:
   relation/occurrence identity split (**done**), an evidence-preserving
@@ -268,7 +268,7 @@ Implemented in [PR #607](https://github.com/abicheck/abicheck/pull/607):
   complete **and** the subject is internal-namespaced (a trusted call graph
   never proves an *exported* symbol's own reachability — it only walks
   dependencies of consumer-compiled public entries); otherwise `UNKNOWN`.
-- `suppression.py`: new `reachability: proven-unreachable-only` value +
+- `policy/suppression/rules.py`: new `reachability: proven-unreachable-only` value +
   `allow_unknown_reachability` rule field; `Suppression.would_withhold_unknown_reachability`;
   `SuppressionOutcome.withheld_unknown_rule`.
 - New advisory `ChangeKind.SUPPRESSION_REACHABILITY_UNKNOWN` diagnostic,
@@ -437,7 +437,7 @@ below — `changed_entities`/`affected_consumers`/`affected_use_cases`/
 added as permanently-`None` placeholders) and
 `abicheck/impact/engine.py`'s `assess_change`, a **pure read view** built
 from the `Change` fields `source_graph_findings.py`/`internal_leak.py`/
-`post_processing.py`/`suppression.py`/`appcompat.py` already independently
+`post_processing.py`/`policy/suppression/rules.py`/`appcompat.py` already independently
 set — none of those producers changed in slice 1 (see ADR-052 D2: the
 plan's originally-stated "existing fields become derived views over
 `ImpactAssessment`" direction is *not* implemented yet; this slice derives
@@ -531,7 +531,7 @@ sites, each resolved by a real audit rather than an assumption:
   instead of a construction-time cache write; `MarkReachability`'s own new
   caching reaches every one of these findings anyway, once tagged.
 
-A third entry the original decision text named, `suppression.py`, is
+A third entry the original decision text named, `policy/suppression/rules.py`, is
 **resolved (G29 Phase 3 Slice 11)** rather than a producer site: direct
 search found no `Change(...)` construction *or mutation* anywhere in this
 module — it only reads `Change` fields for rule matching, returning a
@@ -543,7 +543,7 @@ the caller — `checker._filter_suppressed_changes`/
 already covered by Slice 10's `MarkReachability` caching (which runs
 earlier in the pipeline, so every `Change` those callers see already
 carries a cached `impact_assessment`). D2's text conflated the suppression
-*subsystem* (the callers) with the `suppression.py` *module* (a pure
+*subsystem* (the callers) with the `policy/suppression/rules.py` *module* (a pure
 predicate engine, correctly untouched) — see ADR-052 Slice 11 for the full
 resolution. This closes the last item from D2's original five-producer
 scope.
@@ -585,7 +585,7 @@ section describes, most of it still open:
   properties) rather than the originally-described full flip, since that
   conversion touches every existing `Change(...)` construction site
   repo-wide and was judged out of scope for a verifiably-safe slice.
-  `suppression.py`'s D2 role — the one remaining item from D2's original
+  `policy/suppression/rules.py`'s D2 role — the one remaining item from D2's original
   scope — **is resolved (Slice 11, above)**: the module has no `Change`
   construction/mutation site to migrate.
 - `reporter.py`/`sarif.py`: structured `impact` object in JSON (**done**,
@@ -1896,7 +1896,7 @@ input through both.
 `GRAPH_COVERAGE_INSUFFICIENT_FOR_SUPPRESSION`'s "generalizes
 `SUPPRESSION_REACHABILITY_UNKNOWN`" description above, and is worth
 recording before anyone else picks that item up.** `Suppression.
-_passes_reachability_gate` (`suppression.py`) has *two* reachability modes
+_passes_reachability_gate` (`policy/suppression/rules.py`) has *two* reachability modes
 whose behavior on a graph-coverage gap differs, and only one of them has a
 diagnostic today. `reachability: "proven-unreachable-only"` treats
 `Change.reachability_state == UNKNOWN` as a **withheld match** unless
@@ -2049,7 +2049,7 @@ examples/case194.../case205.../           # Phase 6
 
 Modified (recurring across phases): `abicheck/buildsource/source_graph.py`,
 `source_graph_findings.py`, `internal_leak.py`, `post_processing.py`,
-`suppression.py`, `appcompat.py`, `reporter.py`, `sarif.py`,
+`policy/suppression/rules.py`, `appcompat.py`, `reporter.py`, `sarif.py`,
 `junit_report.py`, `service_render.py`, `change_registry*.py`,
 `checker_policy.py`, `checker_types.py`.
 

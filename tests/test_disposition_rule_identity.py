@@ -33,7 +33,7 @@ of the `policy.disposition_conservation` bug class.
 
 from __future__ import annotations
 
-from abicheck.suppression import Suppression, SuppressionList
+from abicheck.policy.suppression.rules import Suppression, SuppressionList
 
 
 def test_every_matching_relevant_field_separates_two_rules() -> None:

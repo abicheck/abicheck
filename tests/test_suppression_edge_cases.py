@@ -21,7 +21,7 @@ from abicheck.model import (
     Visibility,
 )
 from abicheck.model.change import Change
-from abicheck.suppression import Suppression, SuppressionList
+from abicheck.policy.suppression.rules import Suppression, SuppressionList
 
 
 def _snap(

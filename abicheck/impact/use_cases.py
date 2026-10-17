@@ -194,7 +194,7 @@ def load_use_case_manifest(path: str | Path) -> list[UseCaseDefinition]:
     ``use_case`` name), a syntactically invalid one, one that repeats a
     mapping key or uses an unhashable one
     (:mod:`abicheck.model.yaml_strict`), or one that isn't valid UTF-8 — the same hard-load-error discipline
-    ``policy_file.py``/``suppression.py`` already use for user-supplied
+    ``policy_file.py``/``policy/suppression/rules.py`` already use for user-supplied
     YAML, since silently skipping or overwriting a malformed entry could
     make a use case's declared coverage quietly disappear.
 

@@ -5,7 +5,7 @@ Grouped by the five helpers that carried surviving mutants:
 * ``_append_enum_scoped_changes`` (enum ``is_scoped`` transitions)
 * ``_append_type_abstract_changes`` (record ``is_abstract`` transitions)
 * ``_try_match_reserved_field`` (reserved-field-put-into-use matching)
-* ``_new_field_change_kind`` (field addition kind for polymorphic types)
+* ``new_field_change_kind`` (field addition kind for polymorphic types)
 * ``_exported_elf_symbol_names`` (ELF dynamic-export name retention)
 * ``_diff_removed_field`` (removed-field classification: reserved use,
   rename, type change, or plain removal)
@@ -21,12 +21,12 @@ from collections import defaultdict
 import pytest
 
 from abicheck.checker import ChangeKind
+from abicheck.compare.field_addition import new_field_change_kind
 from abicheck.diff_types import (
     _append_enum_scoped_changes,
     _append_type_abstract_changes,
     _diff_removed_field,
     _exported_elf_symbol_names,
-    _new_field_change_kind,
     _try_match_reserved_field,
 )
 from abicheck.elf_metadata import ElfMetadata
@@ -424,7 +424,7 @@ def test_reserved_fallback_candidate_exclusion_is_or_not_and(
     assert ch.new_value == expected
 
 
-# ── _new_field_change_kind ──────────────────────────────────────────────────
+# ── new_field_change_kind ───────────────────────────────────────────────────
 
 
 def _record(
@@ -468,7 +468,7 @@ def _record(
     ],
 )
 def test_new_field_change_kind(kind, vtable, virtual_bases, expected):
-    assert _new_field_change_kind(_record(kind, vtable, virtual_bases)) == expected
+    assert new_field_change_kind(_record(kind, vtable, virtual_bases)) == expected
 
 
 # ── _exported_elf_symbol_names ──────────────────────────────────────────────

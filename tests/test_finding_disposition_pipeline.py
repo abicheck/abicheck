@@ -38,8 +38,8 @@ from abicheck.policy.finding_disposition import (
     dispose_findings,
 )
 from abicheck.policy.finding_disposition.pipeline import DispositionPipeline
+from abicheck.policy.suppression.rules import Suppression, SuppressionList
 from abicheck.policy_file import PolicyFile
-from abicheck.suppression import Suppression, SuppressionList
 
 
 def _snapshots() -> tuple[AbiSnapshot, AbiSnapshot]:

@@ -41,7 +41,7 @@ from abicheck.model import (
 )
 from abicheck.model.change import Change
 from abicheck.policy.finding_disposition import DispositionRules, dispose_findings
-from abicheck.suppression import Suppression, SuppressionList
+from abicheck.policy.suppression.rules import Suppression, SuppressionList
 
 
 def _dispose(changes, old, new, suppression=None):

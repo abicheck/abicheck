@@ -35,7 +35,7 @@ from pathlib import Path
 import pytest
 
 from abicheck.errors import ExtractionSecurityError
-from abicheck.package import (
+from abicheck.extract.packages import (
     CondaExtractor,
     TarExtractor,
     WheelExtractor,

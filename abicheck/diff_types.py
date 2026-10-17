@@ -22,6 +22,7 @@ from collections.abc import Collection, Mapping
 from .compare.base_class_diff import diff_bases as _diff_bases
 from .compare.enum_sentinel import is_confirmed_enum_sentinel
 from .compare.fact_gate import both_facts_present
+from .compare.field_addition import new_field_change_kind
 from .compare.public_surface import (
     reconciled_function_surfaces,
     should_filter_transitive_runtime_symbols,
@@ -100,7 +101,6 @@ from .model import (
     func_signature_cv_only_differ,
     is_binary_exported,
     is_non_abi_surface_type as _is_non_abi_surface_type,
-    resolved_fact_value,
     stdlib_namespaces_excluded as _exclude_stdlib_namespaces,
 )
 from .model.change import Change
@@ -836,7 +836,7 @@ def _added_field_changes(
                 continue
             changes.append(
                 make_change(
-                    _new_field_change_kind(t_new),
+                    new_field_change_kind(t_new),
                     symbol=name,
                     name=name,
                     detail=fname,
@@ -1076,19 +1076,6 @@ def _diff_flexible_array_member(
                 )
 
     return changes
-
-
-def _new_field_change_kind(t_new: RecordType) -> ChangeKind:
-    # Field addition is BREAKING for polymorphic types or types with vtables;
-    # COMPATIBLE only for standard-layout types without virtual functions.
-    new_vtable = resolved_fact_value(t_new.vtable_fact, [])
-    new_virtual_bases = resolved_fact_value(t_new.virtual_bases_fact, [])
-    is_polymorphic = bool(new_vtable or new_virtual_bases)
-    return (
-        ChangeKind.TYPE_FIELD_ADDED_COMPATIBLE
-        if not is_polymorphic and t_new.kind == "struct"
-        else ChangeKind.TYPE_FIELD_ADDED
-    )
 
 
 def _diff_type_bases(name: str, t_old: RecordType, t_new: RecordType) -> list[Change]:

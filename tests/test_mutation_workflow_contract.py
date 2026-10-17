@@ -300,25 +300,27 @@ def test_hypothesis_deadlines_are_relaxed_only_under_mutmut(
     )
 
 
-def test_the_lane_does_not_cache_mutmut_results() -> None:
-    """Removed deliberately, and pinned so it cannot return unnoticed.
+def test_a_mutmut_cache_never_crosses_a_commit() -> None:
+    """A cache may only resume the same commit and shard.
 
     mutmut skips a mutant whose *source function hash* is unchanged, so reuse
-    is sound only if nothing outside those functions changed. Three review
-    rounds found ways that breaks — a test-only commit, a module-level
-    constant, a deletion-only hunk — and the conservative rule covering the
-    last one (any hunk containing a removal) matches essentially every edit,
-    since a modification *is* a removal plus an addition. At that point the
-    cache never hits and only carries risk, so the lane does a full run.
-    Reinstating it needs a design that consults the removed side of the diff,
-    not another new-side heuristic.
+    across commits is unsound: a test-only commit, a module-level constant or
+    a deletion-only hunk all change verdicts without changing that hash. On the
+    same commit nothing changed, so resuming a timed-out or retried shard is
+    exact. Every key and restore prefix must therefore start with the commit
+    sha and the shard, and PR runs do not use it.
     """
     steps = _workflow()["jobs"]["mutmut"]["steps"]
     caches = [s for s in steps if str(s.get("uses", "")).startswith("actions/cache")]
-    assert not caches, (
-        "a mutmut cache was reintroduced — see this test's docstring for why "
-        "new-side heuristics cannot make it safe"
-    )
+    assert len(caches) == 2, "expected one restore and one save step"
+    prefix = "mutmut-${{ github.sha }}-${{ matrix.shard }}-"
+    for step in caches:
+        assert "pull_request" in str(step.get("if", "")), step
+        keys = [
+            step["with"]["key"],
+            *str(step["with"].get("restore-keys", "")).splitlines(),
+        ]
+        assert all(k.startswith(prefix) for k in keys), keys
 
 
 def test_the_trigger_has_no_workflow_level_paths_filter() -> None:
@@ -669,7 +671,7 @@ _ACCEPTED_KILL_LOSS = {
             "abicheck.policy.selectors_namespace_glob",
             "abicheck.storage.snapshot_encode",
             "abicheck.storage.snapshot_schema_versions",
-            "abicheck.suppression",
+            "abicheck.policy.suppression.rules",
             "abicheck.surface_graph",
         }
     ),
@@ -720,7 +722,7 @@ _ACCEPTED_KILL_LOSS = {
             "abicheck.storage.snapshot_encode",
             "abicheck.storage.snapshot_reliability_flags",
             "abicheck.storage.snapshot_schema_versions",
-            "abicheck.suppression",
+            "abicheck.policy.suppression.rules",
             "abicheck.surface_graph",
         }
     ),

@@ -522,7 +522,7 @@ class TestIsReleaseStyleOperand:
         assert not _run_predicate('_is_release_style_operand "/no/such/path.so"')
 
     def test_extensionless_rpm_detected_by_magic_bytes(self, tmp_path) -> None:
-        # abicheck/package.py:is_package() classifies an extensionless RPM by
+        # abicheck/extract/packages.py:is_package() classifies an extensionless RPM by
         # its lead magic (0xedabeedb) regardless of filename — the Action's
         # name-suffix-only precheck missed this, so it would still add
         # --write for an operand the CLI goes on to reject

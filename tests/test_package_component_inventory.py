@@ -22,7 +22,7 @@ tests" rule:
 * :class:`~abicheck.model.package_inventory.PackageInventory` -- a small
   reusable record with a completeness flag whose whole job is to keep
   "declared", "complete" and "unproduced" from collapsing onto each other;
-* :func:`~abicheck.package.package_component_inventory` -- exercised through
+* :func:`~abicheck.extract.packages.package_component_inventory` -- exercised through
   the real extractors on real containers, not through a hand-built tuple of
   names, because the property being defended is "a container this build
   unpacks in full yields a complete inventory";
@@ -41,6 +41,12 @@ from pathlib import Path
 
 import pytest
 
+from abicheck.extract.packages import (
+    DirExtractor,
+    TarExtractor,
+    WheelExtractor,
+    package_component_inventory,
+)
 from abicheck.model.package_inventory import (
     ComponentKind,
     PackageComponent,
@@ -52,12 +58,6 @@ from abicheck.model.scope_acquisition import (
     MemberAcquisition,
     ScopeAcquisitionRecord,
     SideInventory,
-)
-from abicheck.package import (
-    DirExtractor,
-    TarExtractor,
-    WheelExtractor,
-    package_component_inventory,
 )
 from abicheck.policy.support_promise import (
     SUPPORT_PROMISE_POLICIES,
@@ -202,7 +202,7 @@ class TestPackageComponentInventoryFromRealContainers:
     def test_a_fully_unpacked_archive_yields_a_complete_inventory(
         self, tmp_path: Path, kind: str
     ) -> None:
-        from abicheck.package import discover_shared_libraries
+        from abicheck.extract.packages import discover_shared_libraries
 
         payload = {
             "usr/lib/libfoo.so.1": _so_bytes(),
@@ -231,7 +231,7 @@ class TestPackageComponentInventoryFromRealContainers:
     def test_a_directory_operand_never_proves_completeness(
         self, tmp_path: Path
     ) -> None:
-        from abicheck.package import discover_shared_libraries
+        from abicheck.extract.packages import discover_shared_libraries
 
         tree = tmp_path / "tree" / "usr" / "lib"
         tree.mkdir(parents=True)
@@ -255,7 +255,7 @@ class TestPackageComponentInventoryFromRealContainers:
         """The distinction S3 exists to draw: the package plainly ships
         `libghost.so`, so its counterpart on the other side must not read as a
         removal -- it is an acquisition failure."""
-        from abicheck.package import discover_shared_libraries
+        from abicheck.extract.packages import discover_shared_libraries
 
         lib = tmp_path / "usr" / "lib"
         lib.mkdir(parents=True)
@@ -276,7 +276,7 @@ class TestPackageComponentInventoryFromRealContainers:
         """A linker script named `libfoo.so` resolves fine and simply is not a
         comparison operand -- reporting it unproduced would manufacture an
         incomplete scope out of an ordinary package layout."""
-        from abicheck.package import discover_shared_libraries
+        from abicheck.extract.packages import discover_shared_libraries
 
         lib = tmp_path / "usr" / "lib"
         lib.mkdir(parents=True)

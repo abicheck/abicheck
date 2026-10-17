@@ -22,12 +22,12 @@ a wheel's filename pins down, and the NumPy requirement its metadata
 states. Pure parsing over a filename string or an already-built zip: no
 extraction, no filesystem walk, no policy.
 
-Moved verbatim out of ``abicheck/package.py`` (ADR-065 S3): reading a
+Moved verbatim out of ``abicheck/extract/packages.py`` (ADR-065 S3): reading a
 declared build/packaging fact is ``extract/``'s responsibility under
 ADR-061's routing table, and ``package.py`` -- an ``architecture/debt.yaml``
 ``no_growth`` module -- needed the room for the component inventory S3 adds
 there. ``package.py`` re-exports every public name below, so
-``from abicheck.package import parse_manylinux_glibc_floor`` still resolves
+``from abicheck.extract.packages import parse_manylinux_glibc_floor`` still resolves
 (the private ``_``-prefixed helpers are re-exported too: ``tests/
 test_package.py`` imports several of them by name).
 """

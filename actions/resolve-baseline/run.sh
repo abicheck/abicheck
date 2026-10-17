@@ -131,7 +131,7 @@ elif [[ -f "$BASELINE_PATH" ]]; then
       # abicheck) -- on a minimal/self-hosted runner without one, tar fails
       # before resolution even though the archive itself is perfectly
       # valid, misreporting a good baseline as corrupt (Codex review, fifth
-      # round). Delegate to abicheck.package.TarExtractor's own
+      # round). Delegate to abicheck.extract.packages.TarExtractor's own
       # _safe_extract_zst_tar (already installed by the earlier "Install
       # abicheck" step) instead of reimplementing the same zstd-vs-
       # zstandard fallback here: it tries the Python 'zstandard' package
@@ -148,7 +148,7 @@ elif [[ -f "$BASELINE_PATH" ]]; then
       # floor): do not prepend the script's own directory / the current
       # working directory to sys.path, and ignore PYTHONPATH/other PYTHON*
       # env vars entirely. Without it, a malicious caller repository could
-      # plant its own abicheck/package.py in the checkout (or point
+      # plant its own abicheck/extract/packages.py in the checkout (or point
       # PYTHONPATH at one) and have *that* file imported instead of the
       # installed abicheck package -- python3 -c's implicit "prepend cwd"
       # behavior is exactly the shadowing vector. (Safe-path mode, -P,
@@ -157,7 +157,7 @@ elif [[ -f "$BASELINE_PATH" ]]; then
       python3 -I -c '
 import sys
 from pathlib import Path
-from abicheck.package import TarExtractor
+from abicheck.extract.packages import TarExtractor
 
 TarExtractor._safe_extract_zst_tar(Path(sys.argv[1]), Path(sys.argv[2]))
 ' "$_ARCHIVE_COPY" "$BASELINE_DIR" \
@@ -177,7 +177,7 @@ TarExtractor._safe_extract_zst_tar(Path(sys.argv[1]), Path(sys.argv[2]))
       python3 -I -c '
 import sys
 from pathlib import Path
-from abicheck.package import TarExtractor
+from abicheck.extract.packages import TarExtractor
 
 TarExtractor._safe_extract(Path(sys.argv[1]), Path(sys.argv[2]))
 ' "$_ARCHIVE_COPY" "$BASELINE_DIR" \

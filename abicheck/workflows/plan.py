@@ -83,7 +83,7 @@ resolves to collect mode ``"off"`` and silently clears the header list
 (:func:`abicheck.service_compare_evidence._headers`,
 :func:`abicheck.cli_dump_depth.resolve_dump_collect_context`) — is
 intentional, already-shipped, reviewed behavior with its own dedicated
-regression tests (``tests/test_service_unit.py::test_depth_binary_clears_headers``,
+regression tests (``tests/test_service_compare_evidence_adr055.py::test_depth_binary_clears_headers``,
 ``tests/test_cli_compare_release_stranded_depth.py``,
 ``tests/test_typed_dump_request.py``, ``tests/test_depth_vocabulary.py``),
 not an acknowledged gap. Turning it into a hard :class:`~abicheck.errors.PlanningError`

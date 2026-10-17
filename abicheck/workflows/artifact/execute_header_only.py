@@ -78,7 +78,7 @@ from .execute import enforce_requested_depth
 
 if TYPE_CHECKING:
     from ...model import AbiSnapshot
-    from ...workflows.resolved_execution_context import ResolvedExecutionContext
+    from ..resolved_execution_context import ResolvedExecutionContext
 
 __all__ = [
     "HeaderOnlyDumpOutcome",

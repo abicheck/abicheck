@@ -19,7 +19,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from abicheck.buildsource.type_graph import _resolve_nested_type_names
+from abicheck.buildsource.type_graph_names import _resolve_nested_type_names
 from abicheck.checker import ChangeKind, compare
 from abicheck.diff_bit_int import _bit_int_width
 from abicheck.dwarf_utils import base_type_name

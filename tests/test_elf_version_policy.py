@@ -844,7 +844,7 @@ class TestCheckerIntegration:
         """Late-generated SONAME advisories must still pass suppression."""
         from abicheck.checker import compare
         from abicheck.model import AbiSnapshot, Function, Visibility
-        from abicheck.suppression import Suppression, SuppressionList
+        from abicheck.policy.suppression.rules import Suppression, SuppressionList
 
         old = AbiSnapshot(
             library="libfoo.so.1",

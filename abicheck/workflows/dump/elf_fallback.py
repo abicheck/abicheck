@@ -39,7 +39,7 @@ from ...extract.headers.toolchain import _safe_mtime, _safe_size
 from ...extract.semantic_normalizer import normalize_header_ast
 from ...model import AbiSnapshot, RecordType
 from ...model.semantic_ir import SemanticIR
-from ...workflows.snapshot_factory import new_snapshot
+from ..snapshot_factory import new_snapshot
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -139,7 +139,7 @@ def _try_dwarf_snapshot(
     metadata parse; the snapshot DIE walk reuses it instead of re-opening
     ``so_path`` (F5b). The caller retains ownership and closes it.
     """
-    from ...workflows.dwarf_snapshot_assembly import build_snapshot_from_dwarf
+    from ..dwarf_snapshot_assembly import build_snapshot_from_dwarf
 
     if dwarf_only and headers:
         warnings.warn(

@@ -57,23 +57,6 @@ from typing import TYPE_CHECKING
 import abicheck.deadline as deadline
 
 from ...dump_manifest import DumpManifest, IncludeEntry, TranslationUnit
-from ...extract.header_ast_fields import parse_header_ast_fields
-from ...extract.headers.clang.streaming import (
-    streaming_prune_suppressed,
-    suppress_streaming_prune,
-)
-from ...extract.headers.toolchain import (
-    _parser_ast_fallback_reason,
-    _parser_ast_supported,
-    _parser_ast_toolchain,
-    _parser_ast_unsupported_reasons,
-    _parser_frontend_context_kind,
-)
-from ...extract.manifest_semantic_ir import manifest_semantic_ir
-from ...extract.path_aliases import absolutize_include_roots
-from ...extract.progress import track
-from ...extract.semantic_normalizer import normalize_header_ast
-from ...extract.tu_jobs import _tu_jobs
 from ...model import EnumType, Function, RecordType, Variable
 from ...model.identity import EntityId
 from ...model.semantic_ir import SemanticIR
@@ -84,10 +67,27 @@ from ...tu_fragment import (
     entity_key as entity_key,
 )
 from ...tu_merge import merge_fragments as merge_tu_fragments
+from ..header_ast_fields import parse_header_ast_fields
+from ..manifest_semantic_ir import manifest_semantic_ir
+from ..path_aliases import absolutize_include_roots
+from ..progress import track
+from ..semantic_normalizer import normalize_header_ast
+from ..tu_jobs import _tu_jobs
+from .clang.streaming import (
+    streaming_prune_suppressed,
+    suppress_streaming_prune,
+)
+from .toolchain import (
+    _parser_ast_fallback_reason,
+    _parser_ast_supported,
+    _parser_ast_toolchain,
+    _parser_ast_unsupported_reasons,
+    _parser_frontend_context_kind,
+)
 
 if TYPE_CHECKING:
     from ...dumper_clang import _ClangAstParser
-    from ...extract.headers.castxml.dumper import _CastxmlParser
+    from .castxml.dumper import _CastxmlParser
 
 log = logging.getLogger(__name__)
 _TU_PROGRESS = "header AST (translation units)"

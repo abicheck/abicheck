@@ -72,7 +72,7 @@ Pure: no file I/O, no subprocess. Callers read ``.abicheck.yml`` (via
 already-parsed objects in.
 
 **Precondition, not re-checked here:** *config* must already have passed
-:func:`~.project_targets.validate_project_targets` with no errors. This
+:func:`~.project_targets_validation.validate_project_targets` with no errors. This
 module trusts ``depth``/``gate_mode``/``channel``/references are valid --
 the same "parsing alone isn't validation" split ``project_targets.py``'s
 own docstring documents for its caller.
@@ -142,8 +142,8 @@ from typing import Any
 from .build_output import BuildOutput
 from .build_output_profile import build_system_cell_fields
 from .check_report import build_check_id
+from .project_profile_routing import DEFAULT_PROFILE_RUNNER_LABEL
 from .project_targets import (
-    DEFAULT_PROFILE_RUNNER_LABEL,
     TARGET_KIND_LIBRARY,
     BundleSpec,
     CheckSpec,
@@ -871,7 +871,7 @@ def _generate_bundle_checks(
             # Windows/macOS profile can never resolve (Codex review). An
             # EXPLICIT profiles: entry naming a non-ELF profile is already
             # rejected as a config-validation error by
-            # project_targets.validate_project_targets -- this is a
+            # project_targets_validation.validate_project_targets -- this is a
             # defensive backstop for a caller that invokes
             # generate_run_plan() directly without validating first. The
             # IMPLICIT sweep case (no profiles: list -- "every contract
@@ -1004,7 +1004,7 @@ def generate_run_plan(
     coverage gaps are reported via the returned
     :class:`RunPlanGenerationReport`, matching
     :func:`~.build_output.validate_build_output`'s/
-    :func:`~.project_targets.validate_project_targets`'s own contract. A
+    :func:`~.project_targets_validation.validate_project_targets`'s own contract. A
     caller that wants a hard failure on any error should check
     ``report.ok`` itself (the CLI wrapper does).
     """

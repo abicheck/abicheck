@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from abicheck.suppression import SuppressionList
+from abicheck.policy.suppression.rules import SuppressionList
 
 # ─── helpers ──────────────────────────────────────────────────────────────────
 

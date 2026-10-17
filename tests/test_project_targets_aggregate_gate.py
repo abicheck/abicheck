@@ -32,11 +32,8 @@ from __future__ import annotations
 
 import pytest
 
-from abicheck.buildsource.project_targets import (
-    AggregateGateSpec,
-    ProjectTargetsConfig,
-    validate_project_targets,
-)
+from abicheck.buildsource.project_targets import AggregateGateSpec, ProjectTargetsConfig
+from abicheck.buildsource.project_targets_validation import validate_project_targets
 
 # A minimal, valid single-target config -- enough to exercise
 # validate_project_targets() without pulling in test_project_targets.py's

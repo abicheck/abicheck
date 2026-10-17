@@ -422,7 +422,7 @@ _ARTIFACT_NAMES = frozenset(
 #:       findings whose binding was captured. Lets a JSON/SARIF consumer tell
 #:       a WEAK-COMDAT removal apart from a GLOBAL/strong export's removal —
 #:       the structured counterpart to the new ``binding:`` suppression
-#:       selector (see ``suppression.py``'s ``Suppression.binding``).
+#:       selector (see ``policy/suppression/rules.py``'s ``Suppression.binding``).
 #:       Additive optional key (Codex review; renumbered from a conflicting
 #:       2.29/2.30 when the PR #735/#733 rebase claimed those versions
 #:       first).
@@ -464,7 +464,7 @@ _ARTIFACT_NAMES = frozenset(
 #:       ``--ast-frontend clang`` switch on the same underlying change, so a
 #:       ``--suppress`` rule written against one header backend's report can
 #:       reliably match the equivalent finding in the other's (the new
-#:       ``finding_id:`` suppression selector — see ``suppression.py``'s
+#:       ``finding_id:`` suppression selector — see ``policy/suppression/rules.py``'s
 #:       ``Suppression.finding_id``). Additive optional key. Renumbered from
 #:       a conflicting 2.35 when the PR #755 rebase claimed that version
 #:       first (same "renumber, don't reuse" convention as the 2.32 entry

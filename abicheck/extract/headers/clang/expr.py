@@ -45,6 +45,8 @@ import re
 from collections.abc import Callable
 from typing import Any
 
+from ....model.mangled_name import itanium_scope_components
+
 # Canonical definition moved to ``extract.headers.clang.templates`` (ADR-061
 # Phase 5 item 1): that package's own ``build_specialization_index`` and its
 # sibling `_index_template_param_*` walks need this constant, and `extract`
@@ -56,8 +58,7 @@ from typing import Any
 # ``itanium_scope_components`` import below no longer needs this same
 # workaround -- ADR-061 D1 moved it to ``model/mangled_name.py``, which any
 # layer may import.)
-from ....extract.headers.clang.templates import _SCOPE_NODE_KINDS as _SCOPE_NODE_KINDS
-from ....model.mangled_name import itanium_scope_components
+from .templates import _SCOPE_NODE_KINDS as _SCOPE_NODE_KINDS
 
 #: Literal node kinds whose ``value`` is a stable, human-meaningful constant.
 _LITERAL_NODE_KINDS = frozenset(

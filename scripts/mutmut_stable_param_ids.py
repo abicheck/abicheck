@@ -13,7 +13,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""pytest plugin: parametrize ids that stay the same across in-process sessions.
+"""pytest plugin for the mutation lane: parametrize ids that stay the same across
+in-process sessions, and cheapest-tests-first order during a mutant run.
 
 mutmut 3 runs several pytest sessions in one process: the stats pass records
 every test's node id, then the clean run and the per-mutant runs (forked from
@@ -41,11 +42,35 @@ generator included. Nothing is changed in the first session. Loaded only by
 mutmut puts ``mutants/`` on ``sys.path`` and ``scripts/`` is in
 ``also_copy``). It changes no test's selection or outcome, only which spelling
 a later session gives its id.
+
+Second job: mutmut runs each mutant's tests with ``pytest -x``, so a killed
+mutant stops at its first failing test. During a mutant run (``MUTANT_UNDER_TEST``
+names a mutant, not the clean/stats/fail sentinels) the plugin stably sorts the
+collected items by the ``duration_by_test`` recorded in ``mutmut-stats.json``
+(cwd ``mutants/``), unknown durations last. The order of the verdicts is
+unchanged; only the cost of killed mutants drops. A missing or unreadable
+stats file leaves the order alone.
+
+Third job: the same mutant run also deselects every test whose recorded
+duration is at least ``SLOW_TEST_CUTOFF_SECONDS`` (1.0 s; override with the
+``MUTMUT_SLOW_TEST_CUTOFF`` environment variable, a value <= 0 disables it).
+Measured on 102 killed mutants (14 functions, seed 7, all 429 killed keys
+sampled under a per-function cap): running only tests under 1.0 s kept all
+102 kills (0 lost, 95% Wilson CI 0-3.6%), and the summed ``-x`` runtime fell
+from 7402 s to 3392 s. Tests with an unknown duration are never deselected.
+If the cutoff would leave no test, the full sorted set runs instead, so a
+mutant never runs with zero tests. Deselected items are reported through
+``pytest_deselected``, so pytest's own accounting still sees them. Clean,
+stats and listing runs, and a missing or unreadable stats file, are untouched.
 """
 
 from __future__ import annotations
 
+import json
+import math
+import os
 from collections.abc import Callable, Generator, Sequence
+from pathlib import Path
 
 import pytest
 
@@ -56,6 +81,74 @@ except ImportError:  # pragma: no cover - only on an unsupported pytest
     _escape = None
 
 _SEEN = pytest.StashKey[set[int]]()
+
+# mutmut's sentinels for the non-mutant runs (see mutmut's __main__.py and
+# mutation/trampoline.py); "" is the clean run.
+_NOT_A_MUTANT = frozenset({"", "fail", "stats", "list_all_tests", "mutant_generation"})
+_STATS_FILE = "mutmut-stats.json"
+_DURATIONS: dict[Path, dict[str, float]] = {}
+# Measured cutoff (see the module docstring); overridden by _CUTOFF_ENV.
+SLOW_TEST_CUTOFF_SECONDS = 1.0
+_CUTOFF_ENV = "MUTMUT_SLOW_TEST_CUTOFF"
+
+
+def load_durations(path: Path) -> dict[str, float]:
+    """``duration_by_test`` from mutmut's stats file, cached per path for the
+    process. A missing or unreadable file yields no durations."""
+    key = path.absolute()
+    if key not in _DURATIONS:
+        try:
+            raw = json.loads(key.read_text(encoding="utf-8"))["duration_by_test"]
+            _DURATIONS[key] = {
+                str(k): float(v)
+                for k, v in raw.items()
+                if isinstance(v, (int, float)) and not isinstance(v, bool)
+            }
+        except (OSError, ValueError, KeyError, TypeError, AttributeError):
+            _DURATIONS[key] = {}
+    return _DURATIONS[key]
+
+
+def slow_test_cutoff() -> float:
+    """Seconds from ``MUTMUT_SLOW_TEST_CUTOFF``; the default when it is unset or
+    not a number. A value <= 0 disables the cutoff."""
+    raw = os.environ.get(_CUTOFF_ENV, "").strip()
+    if not raw:
+        return SLOW_TEST_CUTOFF_SECONDS
+    try:
+        return float(raw)
+    except ValueError:
+        return SLOW_TEST_CUTOFF_SECONDS
+
+
+def pytest_collection_modifyitems(
+    config: pytest.Config, items: list[pytest.Item]
+) -> None:
+    """Cheapest tests first, so a killed mutant's ``-x`` run stops early; then
+    drop the tests recorded as slower than the cutoff (never an unknown one)."""
+    if os.environ.get("MUTANT_UNDER_TEST", "") in _NOT_A_MUTANT:
+        return
+    durations = load_durations(Path(_STATS_FILE))
+    if not durations:
+        return
+    # list.sort is stable; unknown durations (inf) keep their order at the end.
+    items.sort(key=lambda item: durations.get(item.nodeid, math.inf))
+    cutoff = slow_test_cutoff()
+    if cutoff <= 0:
+        return
+    fast: list[pytest.Item] = []
+    slow: list[pytest.Item] = []
+    for item in items:
+        duration = durations.get(item.nodeid)
+        if duration is not None and duration >= cutoff:
+            slow.append(item)
+        else:
+            fast.append(item)
+    # Never leave a mutant with zero tests: keep the full sorted set instead.
+    if not slow or not fast:
+        return
+    items[:] = fast
+    config.hook.pytest_deselected(items=slow)
 
 
 def unescape_ids(

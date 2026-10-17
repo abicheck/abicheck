@@ -137,7 +137,7 @@ module = [
     "abicheck.dwarf_unified",
     "abicheck.dwarf_presence",
     "abicheck.dumper",
-    "abicheck.package",
+    "abicheck.extract.packages",
     "abicheck.pdb_parser",
     "abicheck.pdb_metadata",
     "abicheck.pdb_utils",
@@ -226,8 +226,8 @@ disable_error_code = ["no-any-return", "misc", "type-arg"]
 # the package is listed in [project.optional-dependencies.dev].
 module = [
     "abicheck.policy_file",
-    "abicheck.suppression",
-    "abicheck.suppression_yaml",
+    "abicheck.policy.suppression.rules",
+    "abicheck.policy.suppression.yaml_scalars",
     "abicheck.environment_matrix",
     "abicheck.probe_harness",
     "abicheck.bundle",
@@ -477,7 +477,7 @@ only_mutate = [
     "abicheck/compare/finding_identity/change_identity.py",
     "abicheck/compare/finding_identity/report_ids.py",
     "abicheck/name_classification.py",  # internal/public name classification
-    "abicheck/suppression.py",  # suppression rule matching
+    "abicheck/policy/suppression/rules.py",  # suppression rule matching
     "abicheck/policy/selectors.py",  # ADR-063 D10: shared selector-matching grammar (moved out of suppression.py)
     "abicheck/policy/selectors_namespace_glob.py",  # namespace-glob compile/match (moved out of suppression.py)
     "abicheck/snapshot_io.py",  # ADR-059 storage envelope (gzip/zstd)

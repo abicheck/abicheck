@@ -29,7 +29,7 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 from abicheck.cli_compare_release_helpers import _extract_if_package
-from abicheck.package import ExtractResult
+from abicheck.extract.packages import ExtractResult
 
 
 def _make_mock_extractor(

@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from abicheck.checker import Change, ChangeKind, compare
-from abicheck.suppression import Suppression, SuppressionList
+from abicheck.policy.suppression.rules import Suppression, SuppressionList
 
 # ─── helpers ──────────────────────────────────────────────────────────────────
 

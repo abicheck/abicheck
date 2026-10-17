@@ -21,9 +21,9 @@ from abicheck.model.change import Change
 from abicheck.policy.effective_gate import EffectiveGate
 from abicheck.policy.evaluate import effective_kind_sets, evaluate
 from abicheck.policy.finding_disposition import DispositionRules, dispose_findings
+from abicheck.policy.suppression.rules import Suppression, SuppressionList
 from abicheck.policy_file import PolicyFile
 from abicheck.post_processing import EscalateFrozenNamespaceViolations
-from abicheck.suppression import Suppression, SuppressionList
 
 # ── Test fixtures ──────────────────────────────────────────────────────────
 

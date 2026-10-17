@@ -14,10 +14,10 @@ import pytest
 
 from abicheck.checker import Change, ChangeKind, DiffResult, Verdict, compare
 from abicheck.model import AbiSnapshot, Function, Param, Variable
+from abicheck.policy.suppression.rules import SuppressionList
 from abicheck.policy_file import PolicyFile
 from abicheck.reporter import to_json, to_markdown, to_stat, to_stat_json
 from abicheck.serialization import load_snapshot, snapshot_from_dict
-from abicheck.suppression import SuppressionList
 
 # ---------------------------------------------------------------------------
 # 1. Malformed ELF files (abicheck/elf_metadata.py)
@@ -180,7 +180,7 @@ class TestMalformedJsonSnapshots:
 
 
 # ---------------------------------------------------------------------------
-# 3. Malformed suppression files (abicheck/suppression.py)
+# 3. Malformed suppression files (abicheck/policy/suppression/rules.py)
 # ---------------------------------------------------------------------------
 
 

@@ -96,8 +96,8 @@ if TYPE_CHECKING:
     from ..environment_matrix import EnvironmentMatrix
     from ..model import AbiSnapshot
     from ..model.change import Change
+    from ..policy.suppression.rules import SuppressionList
     from ..policy_file import PolicyFile
-    from ..suppression import SuppressionList
 
 __all__ = [
     "NO_BASELINE_SELECTION",

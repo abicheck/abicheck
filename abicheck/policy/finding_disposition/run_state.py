@@ -34,9 +34,9 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
     from ...model import AbiSnapshot
     from ...model.change import Change
     from ...policy_file import PolicyFile
-    from ...suppression import SuppressionList
     from ...surface import PublicSurface
     from ..disposition_ledger import DispositionLedger
+    from ..suppression.rules import SuppressionList
 
 
 @dataclass(frozen=True)

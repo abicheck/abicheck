@@ -140,7 +140,7 @@ jobs:
               - 'abicheck/compare/finding_identity/change_identity.py'
               - 'abicheck/compare/finding_identity/report_ids.py'
               - 'abicheck/name_classification.py'
-              - 'abicheck/suppression.py'
+              - 'abicheck/policy/suppression/rules.py'
               - 'abicheck/policy/selectors.py'
               - 'abicheck/policy/selectors_namespace_glob.py'
               - 'abicheck/snapshot_io.py'
@@ -374,6 +374,19 @@ jobs:
           ABICHECK_MIN_EXECUTED: '2'
         run: python -m pytest tests/test_mutation_results.py tests/test_mutation_scope.py -m slow -q
 
+      - name: Restore this commit's partial mutmut results
+        # Same commit and shard only: a re-run or retry after a timeout
+        # resumes from the verdicts the earlier attempt recorded. mutmut skips
+        # a mutant whose stored result exists, which is sound here because the
+        # source, tests and config are byte-identical. Never keyed across
+        # commits; see test_a_mutmut_cache_never_crosses_a_commit.
+        if: github.event_name != 'pull_request'
+        uses: actions/cache/restore@v4
+        with:
+          path: mutants
+          key: mutmut-${{ github.sha }}-${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            mutmut-${{ github.sha }}-${{ matrix.shard }}-
       - name: Run mutation testing (diff-scoped)
         if: github.event_name == 'pull_request'
         # --require-baseline for the runs whose question --diff-scoped
@@ -459,6 +472,12 @@ jobs:
             python scripts/check_mutation_score.py --run --shard "$SHARD" \
               --json mutation-receipt.json
           fi
+      - name: Save this commit's partial mutmut results
+        if: always() && github.event_name != 'pull_request'
+        uses: actions/cache/save@v4
+        with:
+          path: mutants
+          key: mutmut-${{ github.sha }}-${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}
       - name: Save mutmut results
         if: always()
         run: mutmut results > mutmut-results.txt 2>&1 || true

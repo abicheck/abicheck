@@ -89,7 +89,7 @@ other half of why an escape hatch was not added back in a different shape).
    member whose own content happens to contain the marker text (e.g. an
    embedded ``BundleFacts`` fixture in a test package) must not
    misclassify the whole package.** Originally "fixed" by checking
-   ``abicheck.package.is_package`` before the marker scan and refusing to
+   ``abicheck.extract.packages.is_package`` before the marker scan and refusing to
    scan a recognized package at all -- reverted (Codex review, round 2,
    fresh evidence): ``is_package`` classifies purely by filename
    suffix/magic bytes, so a real ``--bundle-facts-out`` document named

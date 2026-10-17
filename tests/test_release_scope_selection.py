@@ -863,7 +863,7 @@ class TestStoredLiveDriverSurvivesAMemberExtractionFailure:
     def test_sibling_comparisons_survive(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, damage: bytes
     ) -> None:
-        import abicheck.package as package
+        import abicheck.extract.packages as package
         from abicheck.bundle_side_input import compare_release_against_bundle_facts
 
         monkeypatch.setattr(
@@ -905,7 +905,7 @@ class TestStoredLiveExtractionFailureIsAnOperationalError:
 
     @staticmethod
     def _point_discovery_at_json(monkeypatch: pytest.MonkeyPatch) -> None:
-        import abicheck.package as package
+        import abicheck.extract.packages as package
 
         monkeypatch.setattr(
             package,

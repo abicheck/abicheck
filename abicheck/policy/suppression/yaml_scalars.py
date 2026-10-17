@@ -12,8 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Raw-scalar YAML helpers for ``suppression.py``, split out to stay under
-the file-size cap (CLAUDE.md). No dependency on ``suppression.py`` itself,
+"""Raw-scalar YAML helpers for ``policy/suppression/rules.py``, split out to stay under
+the file-size cap (CLAUDE.md). No dependency on ``policy/suppression/rules.py`` itself,
 so the import direction stays one-way.
 
 **Deliberately does not use** :mod:`abicheck.model.yaml_strict`, the strict

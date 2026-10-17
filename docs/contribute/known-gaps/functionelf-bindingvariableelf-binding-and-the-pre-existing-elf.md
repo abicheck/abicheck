@@ -48,7 +48,7 @@ fields share) reads only that survivor. A `Function`/`Variable` whose
 `mangled` matches such a bare name therefore reports whichever binding
 happened to parse last, not "the" binding — and if that happens to be
 `WEAK` while an older, still-live version was `GLOBAL`, a `binding: weak`
-suppression rule (`suppression.py`) could match a removal that, from the
+suppression rule (`policy/suppression/rules.py`) could match a removal that, from the
 `GLOBAL` version's perspective, is a real break. The first pass did not fix this: a correct
 fix needs `symbol_map` (or a sibling index) to preserve every versioned
 entry per bare name rather than collapsing to one — a change with several

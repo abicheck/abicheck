@@ -109,7 +109,7 @@ literals: `_ARRAY_API`/`_UFUNC_API` presence markers, and the
 Returns `None` (not an empty surface) when neither marker is present — an
 ordinary, non-NumPy library produces no finding.
 
-`abicheck/package.py`'s `parse_wheel_numpy_requirement`/
+`abicheck/extract/packages.py`'s `parse_wheel_numpy_requirement`/
 `parse_numpy_requirement_from_metadata` extract the declared `numpy`
 version-specifier range from a wheel's `*.dist-info/METADATA`
 `Requires-Dist: numpy...` line (skipping marker-gated/optional-extra
@@ -140,7 +140,7 @@ entries) as the "declared" side.
 - `abicheck/model.py` (`numpy_capi` field on `AbiSnapshot`),
   `abicheck/serialization.py` (persist/derive), `abicheck/service.py`
   (`_try_attach_numpy_capi_surface`, called for all three binary formats).
-- `abicheck/package.py` (wheel `Requires-Dist: numpy` parsing).
+- `abicheck/extract/packages.py` (wheel `Requires-Dist: numpy` parsing).
 - `abicheck/checker.py` (wires `diff_numpy_capi_surfaces` into `compare()`).
 
 ## Tests

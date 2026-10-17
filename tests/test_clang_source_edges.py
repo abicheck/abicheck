@@ -23,7 +23,7 @@ from __future__ import annotations
 import pytest
 
 import abicheck.buildsource.call_graph as call_graph
-import abicheck.buildsource.type_graph as type_graph
+import abicheck.buildsource.type_graph_walk as type_graph_walk
 from abicheck.buildsource.source_extractors.clang_source_edges import (
     build_source_edges,
 )
@@ -239,7 +239,7 @@ def test_build_source_edges_type_failure_preserves_call_edges(
     def _boom(ast_root: dict) -> list:
         raise ValueError("boom")
 
-    monkeypatch.setattr(type_graph, "parse_clang_ast_types", _boom)
+    monkeypatch.setattr(type_graph_walk, "parse_clang_ast_types", _boom)
     ast = _tu(
         _func(
             "caller",
@@ -262,7 +262,7 @@ def test_build_source_edges_both_parsers_fail_yields_two_diagnostics(
         raise ValueError("boom")
 
     monkeypatch.setattr(call_graph, "parse_clang_ast_calls", _boom)
-    monkeypatch.setattr(type_graph, "parse_clang_ast_types", _boom)
+    monkeypatch.setattr(type_graph_walk, "parse_clang_ast_types", _boom)
     diags: list[str] = []
     edges = build_source_edges(_tu(), diags)
     assert edges == []

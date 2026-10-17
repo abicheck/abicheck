@@ -55,7 +55,7 @@ class TestCompareReleaseAgainstBundleFactsEnvMatrixDigestWithNoCompletedComparis
     def test_carries_the_digest_with_zero_matched_pairs(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        import abicheck.package as package_mod
+        import abicheck.extract.packages as package_mod
         from abicheck.environment_matrix import EnvironmentMatrix
 
         # OLD facts name a library ("libfoo.so") that NEW's discovered file
@@ -85,7 +85,7 @@ class TestCompareReleaseAgainstBundleFactsEnvMatrixDigestWithNoCompletedComparis
     def test_omits_the_digest_without_a_declared_matrix(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        import abicheck.package as package_mod
+        import abicheck.extract.packages as package_mod
 
         facts_path = self._old_facts_with_library(tmp_path, "libfoo.so")
         new_dir = tmp_path / "new"

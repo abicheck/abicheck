@@ -51,8 +51,8 @@ from ..disposition_ledger import record_suppressed_change
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from ...model.change import Change
-    from ...suppression import Suppression, SuppressionList
     from ..disposition_ledger import DispositionLedger
+    from ..suppression.rules import Suppression, SuppressionList
     from .run_state import PipelineContext
 
 

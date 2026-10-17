@@ -53,7 +53,7 @@ class TestPullRequestPathsCoverTheSubsystemsThisLaneExercises:
     def test_original_package_and_bundle_paths_are_still_covered(self) -> None:
         paths = _pr_paths()
         for expected in (
-            "abicheck/package.py",
+            "abicheck/extract/packages.py",
             "abicheck/cli_compare_release.py",
             "abicheck/bundle.py",
         ):

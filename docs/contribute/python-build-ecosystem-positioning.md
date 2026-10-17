@@ -65,7 +65,7 @@ genuinely unimplemented; several of the ecosystem gaps below are narrower.)
 
 - **Wheel and conda-package comparison.** `abicheck compare` accepts wheel,
   `.conda` (v2 zip), legacy conda `.tar.bz2`, RPM, Deb, and plain archive
-  inputs (`abicheck/package.py`), and discovers/matches contained native
+  inputs (`abicheck/extract/packages.py`), and discovers/matches contained native
   binaries.
 - **Uniform CPython-extension recognition.** abicheck already treats
   extension modules produced by Cython, pybind11, nanobind, or hand-written
@@ -304,7 +304,7 @@ none of those tools share with each other today.
 
 | Idea above | Closest existing plan/ADR | Relationship |
 |---|---|---|
-| Wheel/conda package comparison | `abicheck/package.py`, [ADR-006](adr/006-package-level-comparison.md) | Already implemented; this doc proposes wiring it into cibuildwheel/rattler-build recipes, not new extraction code. |
+| Wheel/conda package comparison | `abicheck/extract/packages.py`, [ADR-006](adr/006-package-level-comparison.md) | Already implemented; this doc proposes wiring it into cibuildwheel/rattler-build recipes, not new extraction code. |
 | CPython-extension recognition, abi3 audit | G14 | Already implemented (`python_ext.py`, `stable_abi.py`); already treats Cython/pybind11/nanobind/C uniformly at the "is this a CPython extension" level. |
 | `.pyi` Python API diff | G23 | Already implemented; nanobind's stub generator and a scikit-build-core manifest are both natural new *inputs* to this existing diff, not a new diff engine. |
 | Bundle / multi-extension analysis | [ADR-023](adr/023-bundle-aware-multi-binary-analysis.md) | Already implemented; the binding-ABI provider below would add a framework-identity dimension bundle analysis doesn't currently carry. |

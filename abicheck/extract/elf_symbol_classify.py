@@ -173,8 +173,8 @@ def _pyelftools_exported_symbols(so_path: Path) -> tuple[set[str], set[str]]:
     from elftools.elf.elffile import ELFFile
     from elftools.elf.sections import SymbolTableSection
 
-    from ..extract.elf_string_table import buffered_string_table, string_table_of
-    from ..extract.elf_symbol_fastpath import (
+    from .elf_string_table import buffered_string_table, string_table_of
+    from .elf_symbol_fastpath import (
         SHN_ABS,
         SHN_UNDEF,
         STB_GLOBAL,

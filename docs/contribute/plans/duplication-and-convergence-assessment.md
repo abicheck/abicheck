@@ -2078,7 +2078,7 @@ Ordered by dependency, not by size:
      the `parsed_with_build_context` stamp and its unmatched-database
      negative in `test_header_compile_context.py`; the header-graph attach,
      its `--dwarf-only`/`lang` normalisation, the Python/NumPy attach and
-     the AST-memoize scope in `test_service_unit.py`; the
+     the AST-memoize scope in `tests/test_header_graph_attach.py`; the
      explicit-`-I`-only provenance-widening rule in
      `test_service_input_resolution.py`; the legacy `-p` token precedence
      in `test_legacy_compile_db_typed_threading.py`). "Rehome the unique

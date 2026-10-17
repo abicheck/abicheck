@@ -50,7 +50,7 @@ from abicheck.checker_policy import ChangeKind, ReachabilityState
 from abicheck.impact.engine import assess_change
 from abicheck.model import AbiSnapshot
 from abicheck.policy.finding_disposition import DispositionRules, dispose_findings
-from abicheck.suppression import Suppression, SuppressionList
+from abicheck.policy.suppression.rules import Suppression, SuppressionList
 
 
 def _surface_with(decls, mapping, *, target="target://libfoo") -> SourceAbiSurface:

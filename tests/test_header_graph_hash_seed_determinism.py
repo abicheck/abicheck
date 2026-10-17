@@ -40,10 +40,8 @@ from hypothesis import given, settings, strategies as st
 from abicheck.buildsource.header_graph_ast_projection import (
     _unseeded_decl_endpoints,
 )
-from abicheck.buildsource.type_graph import (
-    TypeEdge,
-    index_declared_type_files,
-)
+from abicheck.buildsource.type_graph import TypeEdge
+from abicheck.buildsource.type_graph_index import index_declared_type_files
 
 PUB = "/proj/include/pub.h"
 PRIV = "/proj/include/detail/impl.h"

@@ -471,7 +471,7 @@ class DsoOnlyClassification:
 def classify_dso_only_package_map(pkg_map: dict[str, Path]) -> DsoOnlyClassification:
     """Map a package to its DSO-only members, also reporting those it could not classify."""
     from ..bundle import _stored_elf_metadata
-    from ..package import _has_shared_object_name
+    from ..extract.packages import _has_shared_object_name
     from ..project_snapshot_store import read_artifact_ref, read_manifest_summary
 
     members: dict[str, Path] = {}

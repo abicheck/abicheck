@@ -36,7 +36,7 @@ seed/fold's cleanup ordering (``tests/test_typed_dump_request.py``), the
 ``parsed_with_build_context`` stamp and its unmatched-database negative
 (``tests/test_header_compile_context.py``), the header-graph attach and its
 ``--dwarf-only``/``lang`` normalisation, the Python/NumPy surface attach and
-the AST-memoize scope (``tests/test_service_unit.py``), the
+the AST-memoize scope (``tests/test_header_graph_attach.py``), the
 explicit-``-I``-only provenance-widening rule
 (``tests/test_service_input_resolution.py``), and the legacy
 ``-p``/``--compile-db`` token threading

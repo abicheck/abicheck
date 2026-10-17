@@ -35,9 +35,9 @@ from abicheck.checker_policy import ChangeKind
 from abicheck.checker_types import DiffResult
 from abicheck.frontends.cli.release_report import render_release_summary
 from abicheck.model.change import Change
+from abicheck.policy.suppression.rules import Suppression, SuppressionList
 from abicheck.report.disposition_audit import DispositionAudit
 from abicheck.report.release_document import release_disposition_audit_block
-from abicheck.suppression import Suppression, SuppressionList
 
 
 def _removed_and_suppressed(n: int) -> DiffResult:

@@ -41,6 +41,7 @@ from pathlib import Path
 import pytest
 from hypothesis import HealthCheck, given, settings, strategies as st
 
+from abicheck.policy.suppression.rules import Suppression, SuppressionList
 from abicheck.report.no_baseline import (
     AUDIT_REPORT_SCHEMA_VERSION,
     NO_BASELINE_EXIT_AXIS_LABELS,
@@ -50,7 +51,6 @@ from abicheck.report.no_baseline import (
     render_no_baseline,
 )
 from abicheck.schemas import AUDIT_REPORT_SCHEMA_PATH
-from abicheck.suppression import Suppression, SuppressionList
 from abicheck.workflows.no_baseline_compare import (
     resolve_no_baseline_candidate,
     run_no_baseline_compare,

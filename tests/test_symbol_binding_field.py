@@ -28,8 +28,8 @@ from abicheck.diff_symbols import _check_removed_function, _var_removed
 from abicheck.elf_metadata import ElfMetadata, ElfSymbol, SymbolBinding
 from abicheck.extract.elf_symbol_classify import _populate_elf_visibility
 from abicheck.model import AbiSnapshot, FactStatus, Function, Variable
+from abicheck.policy.suppression.rules import Suppression
 from abicheck.serialization import snapshot_from_dict, snapshot_to_dict
-from abicheck.suppression import Suppression
 
 
 def _snapshot_with_binding(func_binding: SymbolBinding) -> AbiSnapshot:
@@ -347,7 +347,7 @@ class TestSuppressionBindingSelector:
 
 class TestSuppressionYamlLoading:
     def test_binding_key_loads_from_yaml(self, tmp_path: Path) -> None:
-        from abicheck.suppression import SuppressionList
+        from abicheck.policy.suppression.rules import SuppressionList
 
         p = tmp_path / "suppressions.yml"
         p.write_text(
@@ -362,7 +362,7 @@ class TestSuppressionYamlLoading:
         assert loaded._suppressions[0].binding == "weak"
 
     def test_unknown_key_still_rejected(self, tmp_path: Path) -> None:
-        from abicheck.suppression import SuppressionList
+        from abicheck.policy.suppression.rules import SuppressionList
 
         p = tmp_path / "suppressions.yml"
         p.write_text(

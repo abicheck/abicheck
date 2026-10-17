@@ -40,8 +40,8 @@ if str(_REPO_DIR / "scripts") not in sys.path:
 import example_catalog  # noqa: E402
 
 from abicheck.checker import ChangeKind, Verdict, compare  # noqa: E402
+from abicheck.policy.suppression.rules import SuppressionList  # noqa: E402
 from abicheck.serialization import snapshot_from_dict  # noqa: E402
-from abicheck.suppression import SuppressionList  # noqa: E402
 
 _GT = example_catalog.load_ground_truth()["verdicts"]
 
@@ -136,7 +136,7 @@ class TestCase193OrdinaryExportedFnCallNotReachable:
         test_broad_suppression_applies_cleanly_no_diagnostic below. The graph
         stays quiet on the common case (case193) while it stays loud on the
         rare one (case192)."""
-        from abicheck.suppression import Suppression
+        from abicheck.policy.suppression.rules import Suppression
 
         old, new = snapshots
         suppression = SuppressionList(

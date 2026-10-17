@@ -1834,7 +1834,7 @@ _is_release_style_operand_uncached() {
 import sys
 from pathlib import Path
 
-from abicheck.package import is_package
+from abicheck.extract.packages import is_package
 
 raise SystemExit(0 if is_package(Path(sys.argv[1])) else 3)
 ' "$_probe_path") || _probe_rc=$?
@@ -1888,14 +1888,14 @@ from pathlib import Path
 def is_release(path):
     # For a non-directory, "directory or package" is exactly
     # `is_package` -- the same function classify_compare_operand
-    # consults -- and `abicheck.package` imports in a fraction of the
+    # consults -- and `abicheck.extract.packages` imports in a fraction of the
     # time `abicheck.cli_resolve` does. Only a directory needs the full
     # classifier (single- vs multi-artifact ProjectSnapshot package).
     if path.is_dir():
         from abicheck.cli_resolve import classify_compare_operand
 
         return classify_compare_operand(path) in {"directory", "package"}
-    from abicheck.package import is_package
+    from abicheck.extract.packages import is_package
 
     return is_package(path)
 
@@ -1938,14 +1938,14 @@ from pathlib import Path
 def is_release(path):
     # For a non-directory, "directory or package" is exactly
     # `is_package` -- the same function classify_compare_operand
-    # consults -- and `abicheck.package` imports in a fraction of the
+    # consults -- and `abicheck.extract.packages` imports in a fraction of the
     # time `abicheck.cli_resolve` does. Only a directory needs the full
     # classifier (single- vs multi-artifact ProjectSnapshot package).
     if path.is_dir():
         from abicheck.cli_resolve import classify_compare_operand
 
         return classify_compare_operand(path) in {"directory", "package"}
-    from abicheck.package import is_package
+    from abicheck.extract.packages import is_package
 
     return is_package(path)
 
@@ -3213,7 +3213,7 @@ for asset in data.get("assets") or []:
 
   local extracted_dir="$BASELINE_DIR/baseline-set-extracted"
   mkdir -p "$extracted_dir"
-  # Delegates to abicheck.package.TarExtractor's own safe extraction (member
+  # Delegates to abicheck.extract.packages.TarExtractor's own safe extraction (member
   # validation: rejects path traversal, symlink escapes, device/FIFO
   # entries) -- the same extractor actions/resolve-baseline/run.sh uses for
   # an identically-shaped baseline-set archive, rather than reimplementing
@@ -3223,7 +3223,7 @@ for asset in data.get("assets") or []:
       (cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" -c '
 import sys
 from pathlib import Path
-from abicheck.package import TarExtractor
+from abicheck.extract.packages import TarExtractor
 
 TarExtractor._safe_extract_zst_tar(Path(sys.argv[1]), Path(sys.argv[2]))
 ' "$archive_path" "$extracted_dir") \
@@ -3233,7 +3233,7 @@ TarExtractor._safe_extract_zst_tar(Path(sys.argv[1]), Path(sys.argv[2]))
       (cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" -c '
 import sys
 from pathlib import Path
-from abicheck.package import TarExtractor
+from abicheck.extract.packages import TarExtractor
 
 TarExtractor._safe_extract(Path(sys.argv[1]), Path(sys.argv[2]))
 ' "$archive_path" "$extracted_dir") \

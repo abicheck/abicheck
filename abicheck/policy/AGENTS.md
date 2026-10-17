@@ -102,13 +102,13 @@ or a CLI flag directly is in the wrong layer.
   siblings) — see this module's own docstring for the full reasoning.
 - `selectors.py` / `selectors_namespace_glob.py` — ADR-063 D10
   (implementation plan Phase 9): the shared selector-matching primitive
-  (`SelectorSet`) behind `suppression.py`'s `Suppression` and
+  (`SelectorSet`) behind `policy/suppression/rules.py`'s `Suppression` and
   `reclassify.py`'s `ReclassifyRule` — one grammar (`symbol`/
   `symbol_pattern`/`type_pattern`/`member_name`/`namespace`/
   `entity_namespace`/`cause_namespace`/`source_location`/`change_kind`/
   `binding`/`finding_id`/`expires`) instead of two independently-maintained
   copies. **Genuinely dependency-free leaves** — zero import of
-  `checker_types.py`/`suppression.py`/`reclassify.py`/`policy_file.py`/
+  `checker_types.py`/`policy/suppression/rules.py`/`reclassify.py`/`policy_file.py`/
   `compare/finding_identity/`, checked directly by
   `scripts/check_architecture.py` (narrower than the general
   `policy -> compare` layer edge, which would otherwise permit

@@ -256,7 +256,7 @@ class TestSuppressionAudit:
     """Tests for SuppressionList.audit()."""
 
     def test_audit_stale_rules(self):
-        from abicheck.suppression import Suppression, SuppressionList
+        from abicheck.policy.suppression.rules import Suppression, SuppressionList
 
         slist = SuppressionList(
             [
@@ -269,7 +269,7 @@ class TestSuppressionAudit:
         assert audit.has_issues
 
     def test_audit_matching_rule_not_stale(self):
-        from abicheck.suppression import Suppression, SuppressionList
+        from abicheck.policy.suppression.rules import Suppression, SuppressionList
 
         slist = SuppressionList(
             [
@@ -287,7 +287,7 @@ class TestSuppressionAudit:
         assert len(audit.high_risk_matches) == 1
 
     def test_audit_expired_rules(self):
-        from abicheck.suppression import Suppression, SuppressionList
+        from abicheck.policy.suppression.rules import Suppression, SuppressionList
 
         past = date.today() - timedelta(days=10)
         slist = SuppressionList(
@@ -300,7 +300,7 @@ class TestSuppressionAudit:
         assert audit.has_issues
 
     def test_audit_near_expiry(self):
-        from abicheck.suppression import Suppression, SuppressionList
+        from abicheck.policy.suppression.rules import Suppression, SuppressionList
 
         soon = date.today() + timedelta(days=5)
         slist = SuppressionList(
@@ -312,7 +312,7 @@ class TestSuppressionAudit:
         assert len(audit.near_expiry_rules) == 1
 
     def test_audit_no_issues(self):
-        from abicheck.suppression import Suppression, SuppressionList
+        from abicheck.policy.suppression.rules import Suppression, SuppressionList
 
         slist = SuppressionList(
             [
@@ -331,7 +331,7 @@ class TestSuppressionAudit:
         assert not audit.has_issues
 
     def test_audit_summary_output(self):
-        from abicheck.suppression import Suppression, SuppressionList
+        from abicheck.policy.suppression.rules import Suppression, SuppressionList
 
         slist = SuppressionList(
             [
@@ -343,7 +343,7 @@ class TestSuppressionAudit:
         assert "stale" in summary.lower() or "matched nothing" in summary.lower()
 
     def test_audit_summary_no_issues(self):
-        from abicheck.suppression import Suppression, SuppressionList
+        from abicheck.policy.suppression.rules import Suppression, SuppressionList
 
         slist = SuppressionList(
             [
@@ -360,7 +360,7 @@ class TestSuppressionAudit:
         assert "No issues found" in summary
 
     def test_audit_summary_high_risk(self):
-        from abicheck.suppression import Suppression, SuppressionList
+        from abicheck.policy.suppression.rules import Suppression, SuppressionList
 
         slist = SuppressionList(
             [
@@ -377,7 +377,7 @@ class TestSuppressionAudit:
         assert "BREAKING" in summary
 
     def test_audit_summary_expired(self):
-        from abicheck.suppression import Suppression, SuppressionList
+        from abicheck.policy.suppression.rules import Suppression, SuppressionList
 
         past = date.today() - timedelta(days=10)
         slist = SuppressionList(
@@ -390,7 +390,7 @@ class TestSuppressionAudit:
         assert "expired" in summary.lower()
 
     def test_audit_summary_near_expiry(self):
-        from abicheck.suppression import Suppression, SuppressionList
+        from abicheck.policy.suppression.rules import Suppression, SuppressionList
 
         soon = date.today() + timedelta(days=5)
         slist = SuppressionList(
@@ -403,7 +403,7 @@ class TestSuppressionAudit:
         assert "expiring soon" in summary.lower()
 
     def test_audit_match_counts(self):
-        from abicheck.suppression import Suppression, SuppressionList
+        from abicheck.policy.suppression.rules import Suppression, SuppressionList
 
         slist = SuppressionList(
             [

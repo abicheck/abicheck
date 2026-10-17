@@ -51,7 +51,7 @@ from abicheck.model.consumer_spec import (
     ConsumerUnreadableError,
 )
 from abicheck.policy.classification import Verdict
-from abicheck.suppression import Suppression, SuppressionList
+from abicheck.policy.suppression.rules import Suppression, SuppressionList
 from abicheck.workflows.consumer_scope import (
     check_against_facts,
     scope_diff_to_app,

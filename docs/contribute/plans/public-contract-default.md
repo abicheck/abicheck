@@ -158,13 +158,13 @@ Add a leaf-layer immutable object (exact module name may vary):
 ```python
 @dataclass(frozen=True)
 class CompatibilityEvaluationConfig:
-    contract: ContractConfig          # mode, unresolved behavior, overlays
-    evidence: EvidenceConfig          # providers, requirements, variants
-    surface: SurfaceConfig            # explicit scope and surface hints
-    assurance: AssuranceConfig        # evidence/coverage requirements
-    policy: CompatibilityPolicyConfig # immutable base/packs/overrides
-    gate: GateConfig                  # exit scheme, preset/packs/severity overrides
-    suppressions: SuppressionConfig   # immutable rules and digest
+    contract: ContractConfig  # mode, unresolved behavior, overlays
+    evidence: EvidenceConfig  # providers, requirements, variants
+    surface: SurfaceConfig  # explicit scope and surface hints
+    assurance: AssuranceConfig  # evidence/coverage requirements
+    policy: CompatibilityPolicyConfig  # immutable base/packs/overrides
+    gate: GateConfig  # exit scheme, preset/packs/severity overrides
+    suppressions: SuppressionConfig  # immutable rules and digest
     provenance: Mapping[str, ValueProvenance]
 ```
 
@@ -1251,7 +1251,7 @@ fields onto both an ordinary `changes` JSON entry and an
 `TestContractEvaluation*` classes), and the flag threads all the way
 through the Tier-2 service boundary ADR-049 §3.1 names as the resolution
 point — `service.py`'s `compare_snapshots`/`run_compare`/`CompareRequest`
-all accept and forward `contract_evaluation` (`tests/test_service_unit.py`'s
+all accept and forward `contract_evaluation` (`tests/test_service_compare_pipeline_unit.py`'s
 `TestContractEvaluationThreading`).
 
 What was still missing as of 2026-07-29, now that the false "not wired at
@@ -3018,7 +3018,7 @@ rather than `click.UsageError` which is CLI-specific) -- gated on
 explicit `mode="audit"` skips the baseline compare in `run_scan_core` even
 when a baseline path is set (a case the CLI guard doesn't need to consider,
 since the public CLI has no `--mode` flag left to set it explicitly). Three
-new tests in `test_service_unit.py` cover: rejection with no baseline,
+new tests in `tests/test_service_compare_pipeline_unit.py` cover: rejection with no baseline,
 rejection with a baseline but `mode="audit"`, and that a real baseline
 comparison using the config surface is unaffected.
 
@@ -3210,7 +3210,7 @@ the file being the sole stale one rendered as `rule#0`, and two different
 rules could each render as "rule#0" across two different buckets.
 `SuppressionAudit` has no field carrying a rule's original index (`match_
 counts` does, but its own list-typed buckets don't), and threading one
-through would touch `suppression.py`'s public dataclass shape for a
+through would touch `policy/suppression/rules.py`'s public dataclass shape for a
 display-only concern. Fixed instead by falling back through each of the
 rule's own matching selectors (`symbol`/`symbol_pattern`/`type_pattern`/
 `member_name`/`source_location`/`namespace`/`entity_namespace`/

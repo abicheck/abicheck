@@ -124,7 +124,7 @@ class TestCompareReleaseAgainstBundleFactsResolutionUnit:
         observe it without castxml, since `_check_dependency_scope_
         comparable` only fires when a side carries header-derived
         declarations, which no plain-ELF fixture has)."""
-        import abicheck.package as package_mod
+        import abicheck.extract.packages as package_mod
         import abicheck.workflows.compare_policy as compare_policy_mod
         import abicheck.workflows.input_resolution as input_resolution_mod
 
@@ -179,7 +179,7 @@ class TestCompareReleaseAgainstBundleFactsResolutionUnit:
         completed comparison and the structured scope result survive
         instead of the exception escaping to a global refusal (Codex
         review, thirtieth round); the CLI still exits 16 on it."""
-        import abicheck.package as package_mod
+        import abicheck.extract.packages as package_mod
         import abicheck.workflows.input_resolution as input_resolution_mod
 
         facts_path = self._old_facts(tmp_path)
@@ -236,7 +236,7 @@ class TestCompareReleaseAgainstBundleFactsResolutionUnit:
         reclassify/override rules never reached that call regardless of
         whether the caller's own policy document declared any (Codex
         review; the highest-leverage gap in this driver)."""
-        import abicheck.package as package_mod
+        import abicheck.extract.packages as package_mod
         import abicheck.workflows.compare_policy as compare_policy_mod
         import abicheck.workflows.input_resolution as input_resolution_mod
         from abicheck.checker_policy import ChangeKind, Verdict as VerdictEnum
@@ -295,7 +295,7 @@ class TestCompareReleaseAgainstBundleFactsResolutionUnit:
         other comparison entry point in this codebase (the same class of
         gap the ``policy_file`` fix above closed for reclassify/override
         rules)."""
-        import abicheck.package as package_mod
+        import abicheck.extract.packages as package_mod
         import abicheck.workflows.compare_policy as compare_policy_mod
         import abicheck.workflows.input_resolution as input_resolution_mod
         from abicheck.workflows.suppression_input import SuppressionList
@@ -351,7 +351,7 @@ class TestCompareReleaseAgainstBundleFactsResolutionUnit:
         received only the bare ``policy`` name -- ``BundleDiffResult.
         bundle_verdict`` never saw the policy file at all. Pinned end to end
         via the real returned ``BundleDiffResult``, not a mock."""
-        import abicheck.package as package_mod
+        import abicheck.extract.packages as package_mod
         import abicheck.workflows.compare_policy as compare_policy_mod
         import abicheck.workflows.input_resolution as input_resolution_mod
         from abicheck.policy_file import PolicyFile
@@ -406,7 +406,7 @@ class TestCompareReleaseAgainstBundleFactsResolutionUnit:
         #883's own registered gap of "checked independently, not all
         derived from one production helper" for at least this one detector
         family."""
-        import abicheck.package as package_mod
+        import abicheck.extract.packages as package_mod
         import abicheck.workflows.input_resolution as input_resolution_mod
         from abicheck.policy_file import PolicyFile
 
@@ -495,7 +495,7 @@ class TestCompareReleaseAgainstBundleFactsResolutionUnit:
         happens to enumerate last. `libcore.so.9` sorts after `libcore.so.10`
         lexicographically but must lose to it under real version
         comparison."""
-        import abicheck.package as package_mod
+        import abicheck.extract.packages as package_mod
         import abicheck.workflows.compare_policy as compare_policy_mod
         import abicheck.workflows.input_resolution as input_resolution_mod
 
@@ -546,7 +546,7 @@ class TestCompareReleaseAgainstBundleFactsResolutionUnit:
         header-scoped comparison on a host with no working castxml (a
         clang/icpx-only host) died rather than using the caller's own
         resolved compiler binding/frontend."""
-        import abicheck.package as package_mod
+        import abicheck.extract.packages as package_mod
         import abicheck.workflows.compare_policy as compare_policy_mod
         import abicheck.workflows.input_resolution as input_resolution_mod
         from abicheck.compile_context import CompileContext
@@ -603,7 +603,7 @@ class TestCompareReleaseAgainstBundleFactsResolutionUnit:
         alongside a ``-fsycl``/``icpx`` one). A per-library override for one
         library must not leak onto a library with no entry in that map, which
         must keep falling back to the uniform default."""
-        import abicheck.package as package_mod
+        import abicheck.extract.packages as package_mod
         import abicheck.workflows.compare_policy as compare_policy_mod
         import abicheck.workflows.input_resolution as input_resolution_mod
         from abicheck.compile_context import CompileContext
@@ -690,7 +690,7 @@ class TestSurfaceMetricsReachesLiveBundleFactsDriver:
     def test_surface_metrics_is_not_an_opt_out_on_the_live_bundle_facts_path(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        import abicheck.package as package_mod
+        import abicheck.extract.packages as package_mod
         import abicheck.workflows.compare_policy as compare_policy_mod
         import abicheck.workflows.input_resolution as input_resolution_mod
 
@@ -747,7 +747,7 @@ class TestSurfaceMetricsReachesLiveBundleFactsDriver:
         live-NEW pair whose public surface genuinely grew must report
         ``public_surface_grew`` the same way a scalar `compare` of the
         identical pair does."""
-        import abicheck.package as package_mod
+        import abicheck.extract.packages as package_mod
         import abicheck.workflows.input_resolution as input_resolution_mod
 
         old_snapshot = AbiSnapshot(
@@ -956,7 +956,7 @@ class TestCompareReleaseAgainstBundleFactsEnvMatrix:
     def test_env_matrix_raises_runtime_floor_finding_to_breaking(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        import abicheck.package as package_mod
+        import abicheck.extract.packages as package_mod
         import abicheck.workflows.input_resolution as input_resolution_mod
         from abicheck.environment_matrix import EnvironmentMatrix
 

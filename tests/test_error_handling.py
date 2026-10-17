@@ -24,12 +24,12 @@ from abicheck.model import (
     RecordType,
     Visibility,
 )
+from abicheck.policy.suppression.rules import Suppression, SuppressionList
 from abicheck.serialization import (
     load_snapshot,
     snapshot_from_dict,
     snapshot_to_dict,
 )
-from abicheck.suppression import Suppression, SuppressionList
 
 
 def _snap(**kwargs):

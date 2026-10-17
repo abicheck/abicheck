@@ -106,7 +106,7 @@ def validate_evidence_depth(field_name: str, value: str) -> None:
 # extend in lockstep (see that module's own comment for why).
 #: Anchored with ``\Z``, not a trailing ``$`` -- without ``re.MULTILINE``,
 #: ``$`` also matches just before a trailing ``\n`` (Codex review; see
-#: ``project_targets._IDENTIFIER_RE``'s identical fix for the full
+#: ``project_targets_validation._IDENTIFIER_RE``'s identical fix for the full
 #: rationale), which would let a constructed check_id carrying an embedded
 #: newline (e.g. from an unvalidated explicit_id) slip past this check.
 CHECK_ID_PATTERN = re.compile(
@@ -392,7 +392,7 @@ class Change:
     # here too when the symbol's binding was never captured, or when an
     # undeclared export's versioned aliases disagree (see
     # ElfMetadata.unambiguous_symbol). Exists so a suppression rule's ``binding:``
-    # selector (suppression.py) can narrow a removal rule to the common
+    # selector (policy/suppression/rules.py) can narrow a removal rule to the common
     # WEAK-COMDAT-inline case. Provider-side evidence only, NOT proof of
     # safety — see AGENTS.md's "Linkage-blind removal" entry. Deliberately a
     # plain string, not the ``SymbolBinding`` enum itself, mirroring

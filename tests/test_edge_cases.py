@@ -20,15 +20,15 @@ import pytest
 from abicheck.checker import Change, DiffResult, Verdict, compare
 from abicheck.checker_policy import ChangeKind
 from abicheck.errors import ExtractionSecurityError
-from abicheck.model import AbiSnapshot, Function
-from abicheck.package import (
+from abicheck.extract.packages import (
     TarExtractor,
     _is_elf_shared_object,
     _safe_zip_extract,
 )
+from abicheck.model import AbiSnapshot, Function
+from abicheck.policy.suppression.rules import Suppression
 from abicheck.policy_file import PolicyFile
 from abicheck.serialization import snapshot_from_dict, snapshot_to_json
-from abicheck.suppression import Suppression
 
 # ---------------------------------------------------------------------------
 # 1. Corrupt ELF magic — _is_elf_shared_object
@@ -400,7 +400,7 @@ class TestSubprocessTimeout:
 
     def test_deb_extraction_ar_timeout(self, tmp_path: Path) -> None:
         """Mock ar command timing out during deb extraction."""
-        from abicheck.package import DebExtractor
+        from abicheck.extract.packages import DebExtractor
 
         deb_path = tmp_path / "test.deb"
         deb_path.write_bytes(b"!<arch>\n" + b"\x00" * 100)
@@ -408,7 +408,7 @@ class TestSubprocessTimeout:
         out = tmp_path / "out"
         out.mkdir()
 
-        with mock.patch("abicheck.package.run_bounded") as mock_run:
+        with mock.patch("abicheck.extract.packages.run_bounded") as mock_run:
             mock_run.side_effect = subprocess.TimeoutExpired(cmd="ar", timeout=120)
             with pytest.raises(subprocess.TimeoutExpired):
                 DebExtractor().extract(deb_path, out)
@@ -417,7 +417,7 @@ class TestSubprocessTimeout:
         self, tmp_path: Path
     ) -> None:
         """A nonzero ``ar x`` exit raises CalledProcessError, as ``check=True`` did."""
-        from abicheck.package import DebExtractor
+        from abicheck.extract.packages import DebExtractor
 
         deb_path = tmp_path / "test.deb"
         deb_path.write_bytes(b"!<arch>\n" + b"\x00" * 100)
@@ -426,8 +426,11 @@ class TestSubprocessTimeout:
 
         failed = subprocess.CompletedProcess(["ar", "x"], 1, b"", b"ar: bad archive")
         with (
-            mock.patch("abicheck.package.shutil.which", return_value="/usr/bin/ar"),
-            mock.patch("abicheck.package.run_bounded", return_value=failed),
+            mock.patch(
+                "abicheck.extract.packages.shutil.which",
+                return_value="/usr/bin/ar",
+            ),
+            mock.patch("abicheck.extract.packages.run_bounded", return_value=failed),
         ):
             with pytest.raises(subprocess.CalledProcessError) as excinfo:
                 DebExtractor().extract(deb_path, out)

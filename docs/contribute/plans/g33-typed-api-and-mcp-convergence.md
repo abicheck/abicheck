@@ -234,7 +234,7 @@ gained `sources`/`build_info`/`dump_manifest`/`compile`/`public_header_dirs`,
 `CompareRequest` gained `depth`/`frontend_context`, and the resolution wiring
 lives in the new `abicheck/service_compare_evidence.py`. The gate holds:
 neither `service.py` comment quoted above still exists. Tests:
-`TestCompareRequestAdr055Evidence` (`tests/test_service_unit.py`) and the
+`TestCompareRequestAdr055Evidence` (`tests/test_service_compare_evidence_adr055.py`) and the
 ADR-055 D1 blocks in `tests/test_api_types.py`.
 
 The two-resolution-path question this note raised was first **decided as
@@ -315,7 +315,7 @@ suppression list. Without it the MCP server would have kept a
 `SuppressionList.load` call solely to re-derive what the service had already
 loaded — the duplication Phase 4 removes, reintroduced by the shape chosen to
 enable removing it. Tests: `TestCompareResult` (`tests/test_api_types.py`),
-`TestRunCompareRequestV2` (`tests/test_service_unit.py`).
+`TestRunCompareRequestV2` (`tests/test_service_compare_pipeline_unit.py`).
 
 ### Phase 4 — route `abi_compare` through `run_compare_request` (ADR-055 D4)
 

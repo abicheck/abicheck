@@ -553,7 +553,7 @@ class TestExtractionErrorSurvivesAggregation:
         from test_release_scope_bundle import _lib
         from test_release_scope_completeness import _facts_file, _write
 
-        import abicheck.package as package
+        import abicheck.extract.packages as package
         from abicheck.cli import main
 
         monkeypatch.setattr(

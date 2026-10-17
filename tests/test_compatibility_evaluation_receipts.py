@@ -47,9 +47,9 @@ from abicheck.compatibility_evaluation_frontend import (
     ProjectCompatibilityInputs,
 )
 from abicheck.contract_relevance_types import SelectorLayer
+from abicheck.policy.suppression.rules import SuppressionList
 from abicheck.policy_file import PolicyFile
 from abicheck.service import CompareRequest, InputSpec
-from abicheck.suppression import SuppressionList
 from abicheck.workflows.compare_input_adapters import (
     compare_cli_inputs,
     compatibility_config_from_compare_request,

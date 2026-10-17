@@ -34,7 +34,7 @@ from abicheck.model.change import Change
 from abicheck.model.change_catalog.kinds import ChangeKind
 from abicheck.policy.disposition_ledger import Disposition, DispositionLedger
 from abicheck.policy.finding_disposition import dispose_by_suppression
-from abicheck.suppression import Suppression, SuppressionList
+from abicheck.policy.suppression.rules import Suppression, SuppressionList
 
 _DIAGNOSTIC_KINDS = {
     ChangeKind.SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK,

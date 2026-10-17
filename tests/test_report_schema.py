@@ -471,7 +471,7 @@ class TestReportValidatesAgainstSchema:
         # only ever evaluated kept + out_of_surface + redundant -- suppression
         # silently erased the contract decision even though the finding
         # itself is still rendered.
-        from abicheck.suppression import Suppression, SuppressionList
+        from abicheck.policy.suppression.rules import Suppression, SuppressionList
 
         old, new = _breaking_pair()
         suppression = SuppressionList([Suppression(symbol="_Z5api_bv")])
@@ -495,7 +495,7 @@ class TestReportValidatesAgainstSchema:
         # (rendered in every markdown report shape) never read the stamped
         # fields -- the suppression-note line for a stamped finding carried
         # no [contract: ...] tag even though the JSON sibling did.
-        from abicheck.suppression import Suppression, SuppressionList
+        from abicheck.policy.suppression.rules import Suppression, SuppressionList
 
         old, new = _breaking_pair()
         suppression = SuppressionList([Suppression(symbol="_Z5api_bv")])

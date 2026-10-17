@@ -128,17 +128,7 @@ from ..extract.dependency_exclusion import dependency_exclusion_scope
 from ..extract.dump_manifest_roots import dump_manifest_header_roots
 from ..extract.headers.clang.layout_tool import attach_clang_layout
 from ..extract.headers.clang.streaming import suppress_streaming_prune
-from ..header_conditionals import attach_build_context_for_parsed_headers
-from ..header_utils import (
-    dedup_paths_preserve_order,
-    deferred_token_dirs,
-    include_operand_dirs,
-    iter_directory_headers,
-    resolve_inferred_header_roots,
-    split_public_header_inputs,
-)
-from ..numpy_capi import extract_numpy_capi_surface
-from ..package import (
+from ..extract.packages import (
     _ELF_MAGIC,
     _ET_DYN,
     PackageExtractor,
@@ -151,6 +141,16 @@ from ..package import (
     package_component_inventory,
     resolve_debug_info as resolve_package_debug_info,
 )
+from ..header_conditionals import attach_build_context_for_parsed_headers
+from ..header_utils import (
+    dedup_paths_preserve_order,
+    deferred_token_dirs,
+    include_operand_dirs,
+    iter_directory_headers,
+    resolve_inferred_header_roots,
+    split_public_header_inputs,
+)
+from ..numpy_capi import extract_numpy_capi_surface
 from ..python_api import detect_python_api
 from ..python_ext import detect_python_extension
 from ..storage.header_ast_cache import ast_acquisition_scope, ast_memoize_scope

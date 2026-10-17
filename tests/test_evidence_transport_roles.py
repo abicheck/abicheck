@@ -58,6 +58,7 @@ from click.testing import CliRunner, Result
 
 from abicheck.cli import main
 from abicheck.errors import ExtractionSecurityError
+from abicheck.extract.packages import detect_extractor, is_package
 from abicheck.frontends.cli.options.evidence_roles import (
     split_build_evidence,
     split_debug_evidence,
@@ -65,7 +66,6 @@ from abicheck.frontends.cli.options.evidence_roles import (
     unsided_debug_packages,
 )
 from abicheck.model import AbiSnapshot, Function, Visibility
-from abicheck.package import detect_extractor, is_package
 from abicheck.serialization import snapshot_to_json
 from abicheck.workflows.evidence_transport import (
     PROBE_MATRIX_SCHEMA,
@@ -732,7 +732,7 @@ class TestContentSniffsDegradeGracefully:
     than propagate out and abort dispatch to every other extractor."""
 
     def test_an_unreadable_zip_yields_no_members(self, tmp_path: Path) -> None:
-        from abicheck.package import _zip_entry_names
+        from abicheck.extract.packages import _zip_entry_names
 
         broken = tmp_path / "broken"
         broken.write_bytes(b"PK\x03\x04 truncated right here")
@@ -740,7 +740,10 @@ class TestContentSniffsDegradeGracefully:
         assert not is_package(broken)
 
     def test_a_corrupt_zstd_stream_is_not_a_tar(self, tmp_path: Path) -> None:
-        from abicheck.package import looks_like_tar_container, looks_like_zstd
+        from abicheck.extract.packages import (
+            looks_like_tar_container,
+            looks_like_zstd,
+        )
 
         path = tmp_path / "operand"
         path.write_bytes(b"\x28\xb5\x2f\xfd" + b"garbage" * 8)
@@ -794,7 +797,7 @@ class TestContentSniffsDegradeGracefully:
         """
         import tarfile as _tarfile
 
-        from abicheck.package import CondaExtractor
+        from abicheck.extract.packages import CondaExtractor
 
         def _touched(members: int) -> int:
             path = tmp_path / f"tar-{members}"
@@ -823,13 +826,13 @@ class TestContentSniffsDegradeGracefully:
         self, tmp_path: Path
     ) -> None:
         """The negative control: bounding the sniff did not blind it."""
-        from abicheck.package import CondaExtractor
+        from abicheck.extract.packages import CondaExtractor
 
         path = _write_tar(tmp_path / "pkg", {"info/index.json": b"{}"}, mode="w:bz2")
         assert CondaExtractor().detect(path)
 
     def test_magic_read_of_a_directory_is_not_a_crash(self, tmp_path: Path) -> None:
-        from abicheck.package import looks_like_zip, looks_like_zstd
+        from abicheck.extract.packages import looks_like_zip, looks_like_zstd
 
         d = tmp_path / "dir"
         d.mkdir()

@@ -23,7 +23,7 @@ untrusted `.abicheck.yml` itself.
 ``buildsource.extractor_manifest``'s security model): a `.abicheck.yml`
 found by auto-discovery may *declare* a logical ``binding`` id
 (``ProfileCompileSpec.binding``, validated whitespace-free by
-``project_targets._safe_profile_atom`` so it can never smuggle argv), but it
+``project_compile_arg_guard.safe_profile_atom`` so it can never smuggle argv), but it
 must never carry a raw executable path or shell-interpretable string —
 that would let a repository an operator merely checked out (not
 configured) point abicheck at an arbitrary local binary. A bindings file is

@@ -291,7 +291,7 @@ class TestBinaryFormatDetection:
 
     def test_elf_shared_object_detection(self, tmp_path: Path) -> None:
         """_is_elf_shared_object should detect minimal ELF ET_DYN."""
-        from abicheck.package import _is_elf_shared_object
+        from abicheck.extract.packages import _is_elf_shared_object
 
         elf_file = _make_minimal_elf(tmp_path)
         # Minimal ELF with ET_DYN type should be detected
@@ -299,7 +299,7 @@ class TestBinaryFormatDetection:
 
     def test_non_elf_not_shared_object(self, tmp_path: Path) -> None:
         """_is_elf_shared_object should return False for non-ELF files."""
-        from abicheck.package import _is_elf_shared_object
+        from abicheck.extract.packages import _is_elf_shared_object
 
         pe_file = _make_minimal_pe(tmp_path)
         assert _is_elf_shared_object(pe_file) is False

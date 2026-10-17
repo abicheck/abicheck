@@ -6,7 +6,7 @@ on:
     - cron: "17 5 * * 1"
   pull_request:
     paths:
-      - "abicheck/package.py"
+      - "abicheck/extract/packages.py"
       - "abicheck/cli_compare_release.py"
       - "abicheck/bundle.py"
       - "tests/test_package.py"
