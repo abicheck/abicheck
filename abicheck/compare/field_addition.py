@@ -40,32 +40,26 @@ from __future__ import annotations
 from ..model.availability import FactStatus
 from ..model.change_catalog.kinds import ChangeKind
 from ..model.entities import RecordType
-from ..model.fact import Fact, fact_confirmed_true, resolved_fact_value
+from ..model.fact import fact_confirmed_true, resolved_fact_value
 
 _UNSEEN = frozenset({FactStatus.UNSUPPORTED, FactStatus.FAILED})
-
-
-def _could_not_see(fact: Fact[list[str]] | None) -> bool:
-    if fact is None:
-        return False
-    if fact.status in _UNSEEN:
-        return True
-    return fact.status is FactStatus.PARTIAL and not fact.value
 
 
 def new_field_change_kind(t_new: RecordType) -> ChangeKind:
     """``TYPE_FIELD_ADDED_COMPATIBLE`` only for a struct proven non-polymorphic."""
     if t_new.kind != "struct":
         return ChangeKind.TYPE_FIELD_ADDED
-    if resolved_fact_value(t_new.vtable_fact, []) or resolved_fact_value(
-        t_new.virtual_bases_fact, []
-    ):
+    facts = (t_new.vtable_fact, t_new.virtual_bases_fact)
+    if any(resolved_fact_value(f, []) for f in facts):
         return ChangeKind.TYPE_FIELD_ADDED
-    proven_by_trait = fact_confirmed_true(
-        t_new.is_standard_layout_fact
-    ) or fact_confirmed_true(t_new.is_trivially_copyable_fact)
-    if not proven_by_trait and (
-        _could_not_see(t_new.vtable_fact) or _could_not_see(t_new.virtual_bases_fact)
+    unseen = any(
+        f is not None
+        and (f.status in _UNSEEN or (f.status is FactStatus.PARTIAL and not f.value))
+        for f in facts
+    )
+    if unseen and not (
+        fact_confirmed_true(t_new.is_standard_layout_fact)
+        or fact_confirmed_true(t_new.is_trivially_copyable_fact)
     ):
         return ChangeKind.TYPE_FIELD_ADDED
     return ChangeKind.TYPE_FIELD_ADDED_COMPATIBLE
