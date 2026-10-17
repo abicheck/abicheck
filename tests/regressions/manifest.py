@@ -732,9 +732,9 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
             # (parse failure, skipped .dynsym, parse-failed stored block)
             # read as "exports nothing" -> every required symbol "missing".
             "tests/unit/extract/test_library_export_read_failures.py",
+            "tests/test_field_added_unknown_polymorphism.py",  # vtables unseen (PDB UNSUPPORTED/FAILED/empty PARTIAL) read as non-polymorphic -> appended field COMPATIBLE
         ),
-        # Only the two consumer-scoping seeds reach a public surface: their
-        # integration tests drive `abicheck compare --used-by` end to end.
+        # Only the two consumer-scoping seeds reach a public surface: their integration tests drive `abicheck compare --used-by` end to end.
         public_surfaces=("cli",),
         known_gaps=(
             KnownGap(
