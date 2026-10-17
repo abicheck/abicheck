@@ -52,6 +52,7 @@ from .call_graph import (
 )
 from .callback_graph import merge_callback_edges, parse_clang_ast_callbacks
 from .clang_ast_run import run_clang_ast_dump
+from .header_graph_ast_projection import MalformedClangAstError, validate_ast_shape
 from .inline_graph_fold import (
     _scope_narrowed_target,
     fold_call_graph,
@@ -146,6 +147,18 @@ def _run_unit(
         cwd=_replay_cwd(cu),
         diagnostics=dump_diagnostics,
     )
+    if ast is not None:
+        # The passes below read every node's `inner` as a list of objects, and
+        # a wrong-typed one reads as an empty TU rather than failing: the
+        # pass would then report "ran, found nothing" for a tree it could not
+        # read. Refuse the tree here, the way a dump that will not parse is
+        # refused -- no pass gets a result, and the TU's diagnostic marks the
+        # call/type/override/template/callback folds degraded.
+        try:
+            validate_ast_shape(ast)
+        except MalformedClangAstError as exc:
+            dump_diagnostics.append(f"clang AST is malformed: {exc}")
+            ast = None
     results: list[Any] = []
     diagnostics: list[list[str]] = []
     # One TU's passes share its type graph: the type_graph pass and both

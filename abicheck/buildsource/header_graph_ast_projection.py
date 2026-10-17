@@ -185,8 +185,57 @@ class HeaderGraphAstProjection:
     function_bodies: frozenset[str] = frozenset()
 
 
+class MalformedClangAstError(ValueError):
+    """A clang AST whose container shapes the header-graph readers assume are violated.
+
+    The readers walk every node's ``inner`` as a list of objects. A value of
+    another JSON type either raises partway through a walk, or -- for a string
+    or a mapping, which iterate without error -- yields no children at all. The
+    projection would then read as a complete, empty surface, so a malformed
+    tree is rejected before any reader sees it (ADR-028 D3: failed evidence is
+    an explicit fact, never an empty one).
+    """
+
+
+def validate_ast_shape(ast_root: object) -> None:
+    """Reject *ast_root* unless every node is an object with a list ``inner``.
+
+    A node may omit ``inner`` (a leaf), but if the key is present it must be a
+    list, and every element of that list must itself be an object. Walks with
+    an explicit stack rather than recursion, so a deeply nested tree cannot
+    exhaust the interpreter's stack, and does it in a single pass.
+    """
+    if not isinstance(ast_root, dict):
+        raise MalformedClangAstError(
+            f"clang AST root is {type(ast_root).__name__}, expected an object"
+        )
+    stack: list[dict[str, Any]] = [ast_root]
+    while stack:
+        node = stack.pop()
+        if "inner" not in node:
+            continue
+        children = node["inner"]
+        if not isinstance(children, list):
+            raise MalformedClangAstError(
+                f"clang AST node {node.get('kind')!r} has 'inner' of type "
+                f"{type(children).__name__}, expected a list"
+            )
+        for child in children:
+            if not isinstance(child, dict):
+                raise MalformedClangAstError(
+                    f"clang AST node {node.get('kind')!r} has a child of type "
+                    f"{type(child).__name__}, expected an object"
+                )
+            stack.append(child)
+
+
 def project_header_graph_ast(ast_root: dict[str, Any]) -> HeaderGraphAstProjection:
-    """Read *ast_root* once into the compact form the graph builder needs."""
+    """Read *ast_root* once into the compact form the graph builder needs.
+
+    Raises :class:`MalformedClangAstError` on a tree whose shape the readers
+    cannot trust (see :func:`validate_ast_shape`).
+    """
+    validate_ast_shape(ast_root)
     # The type-file index, the type edges and the entity-file index all come
     # from one whole-TU index walk (type_graph.ast_derived_scope).
     with ast_derived_scope():

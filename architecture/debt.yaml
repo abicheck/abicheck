@@ -982,7 +982,7 @@
     },
     {
       "path": "tests/regressions/manifest.py",
-      "baseline_lines": 1491,
+      "baseline_lines": 1448,
       "target": "tests/regressions (already home; a BugClass entry's prose is not further extractable)",
       "rule": "no_growth",
       "disposition": "migrate",

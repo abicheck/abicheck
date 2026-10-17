@@ -40,6 +40,12 @@ from typing import Any
 
 import pytest
 from _clang_ast_cache_isolation import _reset_ast_memo
+from _malformed_clang_ast import (
+    AST_DERIVED_PASSES,
+    CALL_GRAPH_PASS,
+    MISSHAPEN_ASTS,
+    reads_as_collected,
+)
 
 from abicheck.buildsource.call_graph import CallEdge
 from abicheck.buildsource.header_graph_ast_projection import (
@@ -646,27 +652,7 @@ class TestThePathsWhereNoAstIsAcquired:
         assert isinstance(snap.surface_graph, SourceGraphSummary)
         assert snap.surface_graph.edges == []
 
-    @pytest.mark.parametrize(
-        ("label", "ast"),
-        [
-            ("inner is a number", {"kind": "TranslationUnitDecl", "inner": 1}),
-            (
-                "a child's inner is a number",
-                {
-                    "kind": "TranslationUnitDecl",
-                    "inner": [{"kind": "FunctionDecl", "name": "f", "inner": 7}],
-                },
-            ),
-            (
-                "a child's inner is a string",
-                {
-                    "kind": "TranslationUnitDecl",
-                    "inner": [{"kind": "CXXRecordDecl", "name": "R", "inner": "x"}],
-                },
-            ),
-            ("inner is a mapping", {"kind": "TranslationUnitDecl", "inner": {"a": 1}}),
-        ],
-    )
+    @pytest.mark.parametrize(("label", "ast"), MISSHAPEN_ASTS)
     def test_a_readable_but_misshapen_ast_still_attaches_a_graph(
         self, monkeypatch, label: str, ast: dict
     ) -> None:
@@ -700,25 +686,59 @@ class TestThePathsWhereNoAstIsAcquired:
         snap = self._attach(self._snapshot(), [Path(PUBLIC_HEADER)])
         assert isinstance(snap.surface_graph, SourceGraphSummary)
         assert snap.surface_graph.edges == []
+        # The status oracle. A malformed AST is *failed* evidence, so no pass
+        # that the AST feeds may read as collected, and the call graph must
+        # carry the explicit degraded marker (ADR-028 D3), not merely be
+        # absent. The same contract a real clang parse failure already meets.
+        graph = snap.surface_graph
+        for name in AST_DERIVED_PASSES:
+            assert not reads_as_collected(graph, name), (
+                f"{label}: {name} reads as collected from a malformed AST"
+            )
+        assert graph.degraded_passes.get(CALL_GRAPH_PASS) is True, label
 
-    def test_the_misshapen_asts_really_do_break_the_readers(self) -> None:
-        """Vacuity guard: each fixture above must actually raise.
+    def test_a_well_formed_empty_ast_reads_the_call_graph_as_collected(
+        self, monkeypatch
+    ) -> None:
+        """Control for the status oracle above.
 
-        If a shape stopped reaching the walk, the containment test would
-        pass while proving nothing about containment.
+        A valid, empty translation unit is a genuine zero: the call graph ran
+        and found nothing. If the oracle could not tell this apart from a
+        malformed AST, the parametrized test would pass vacuously.
+        """
+        import abicheck.service_header_graph_attach as attach_mod
+
+        monkeypatch.setattr(
+            attach_mod, "expand_header_inputs", lambda headers: list(headers)
+        )
+        monkeypatch.setattr(
+            attach_mod, "resolve_inferred_header_roots", lambda *a, **k: ([], [])
+        )
+        monkeypatch.setattr(
+            "abicheck.extract.headers.clang.backend.clang_header_dump",
+            lambda *a, **k: ({"kind": "TranslationUnitDecl", "inner": []}, None, True),
+        )
+
+        snap = self._attach(self._snapshot(), [Path(PUBLIC_HEADER)])
+        graph = snap.surface_graph
+        assert reads_as_collected(graph, CALL_GRAPH_PASS)
+        assert graph.degraded_passes.get(CALL_GRAPH_PASS) is None
+
+    def test_the_misshapen_asts_are_rejected_at_the_projection_boundary(
+        self,
+    ) -> None:
+        """Vacuity guard: each fixture must be malformed under the validator.
+
+        If a shape stopped being malformed, the status test above would pass
+        without exercising the containment it claims to prove.
         """
         from abicheck.buildsource.header_graph_ast_projection import (
+            MalformedClangAstError,
             project_header_graph_ast,
         )
 
-        for ast in (
-            {"kind": "TranslationUnitDecl", "inner": 1},
-            {
-                "kind": "TranslationUnitDecl",
-                "inner": [{"kind": "FunctionDecl", "name": "f", "inner": 7}],
-            },
-        ):
-            with pytest.raises((TypeError, AttributeError)):
+        for _label, ast in MISSHAPEN_ASTS:
+            with pytest.raises(MalformedClangAstError):
                 project_header_graph_ast(ast)
 
 
