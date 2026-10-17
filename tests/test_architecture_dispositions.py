@@ -367,3 +367,119 @@ def test_real_repository_dispositions_file_is_internally_consistent() -> None:
         or "dispositions.yaml" in f.message
     ]
     assert findings == []
+
+
+def _debt_entry(owner: str) -> dict[str, object]:
+    return {
+        "path": "abicheck/legacy.py",
+        "baseline_lines": 9,
+        "target": "model",
+        "rule": "no_growth",
+        "disposition": "migrate",
+        "category": "legacy_monolith",
+        "owner": owner,
+        "rationale": "Move it as a tested vertical slice.",
+        "review_by": "2026-11-30",
+    }
+
+
+@pytest.mark.parametrize("owner", ["abicheck maintainers", " Abicheck Maintainers "])
+def test_debt_entry_generic_owner_fails_schema(tmp_path: Path, owner: str) -> None:
+    """A debt entry must name the responsibility area its path belongs to;
+    the shared placeholder owner tells a reviewer nothing about who moves
+    the file, so it is rejected rather than accepted as an owner."""
+    root = _tree(tmp_path)
+    _write(root / "abicheck/legacy.py", "VALUE = 1\n" * 10)
+    debt = {"schema_version": 1, "files": [_debt_entry(owner)]}
+    _write(root / "architecture/debt.yaml", json.dumps(debt))
+
+    findings = check_repository(root)
+
+    assert any(
+        f.rule == "schema" and "owner" in f.message and repr(owner) in f.message
+        for f in findings
+    )
+
+
+def test_debt_entry_generic_owner_match_ignores_case_and_padding(
+    tmp_path: Path,
+) -> None:
+    root = _tree(tmp_path)
+    _write(root / "abicheck/legacy.py", "VALUE = 1\n" * 10)
+    debt = {"schema_version": 1, "files": [_debt_entry("  Abicheck Maintainers ")]}
+    _write(root / "architecture/debt.yaml", json.dumps(debt))
+
+    assert "schema" in _rules(root)
+
+
+def test_debt_entry_named_area_owner_is_accepted(tmp_path: Path) -> None:
+    root = _tree(tmp_path)
+    _write(root / "abicheck/legacy.py", "VALUE = 1\n" * 10)
+    debt = {"schema_version": 1, "files": [_debt_entry("extract")]}
+    _write(root / "architecture/debt.yaml", json.dumps(debt))
+
+    assert "schema" not in _rules(root)
+
+
+def test_disposition_generic_owner_fails_schema(tmp_path: Path) -> None:
+    root = _tree(tmp_path)
+    _write(root / "abicheck/legacy.py", "VALUE = 1\n" * 10)
+    dispositions = {
+        "schema_version": 1,
+        "modules": [
+            {
+                "path": "abicheck/legacy.py",
+                "disposition": "accept",
+                "owner": "abicheck maintainers",
+                "reason": "A reviewed, permanent exception.",
+                "review_by": "2026-11-30",
+            }
+        ],
+    }
+    _write(root / "architecture/dispositions.yaml", json.dumps(dispositions))
+
+    findings = check_repository(root)
+
+    assert any(f.rule == "schema" and "owner" in f.message for f in findings)
+
+
+def test_dependency_exception_generic_owner_fails_schema(tmp_path: Path) -> None:
+    root = _tree(tmp_path)
+    _add_package(root, "workflows")
+    _write(
+        root / "abicheck/workflows/bridge.py",
+        "from abicheck.frontends import frontends_leaf\n",
+    )
+    _add_package(root, "frontends")
+    _write(root / "abicheck/frontends/frontends_leaf.py", "VALUE = 1\n")
+    debt = json.loads((root / "architecture/debt.yaml").read_text())
+    debt["dependency_direction_exceptions"] = [
+        {
+            "path": "abicheck/workflows/bridge.py",
+            "target": "abicheck.frontends",
+            "source_layer": "workflows",
+            "target_layer": "frontends",
+            "rule": "dependency-direction",
+            "owner": "abicheck maintainers",
+            "rationale": "exercise the exception mechanism",
+            "review_by": "2099-01-01",
+        }
+    ]
+    _write(root / "architecture/debt.yaml", json.dumps(debt))
+
+    findings = check_repository(root)
+
+    assert any(f.rule == "schema" and "owner" in f.message for f in findings)
+
+
+@pytest.mark.repo_scan
+def test_real_repository_ledgers_name_no_generic_owner() -> None:
+    """Every committed ledger entry names the responsibility area it belongs
+    to; none carries the shared placeholder that the schema now rejects."""
+    root = Path(__file__).resolve().parent.parent
+    findings = [
+        f
+        for f in check_repository(root)
+        if f.rule == "schema" and ".owner:" in f.message
+    ]
+    assert findings == []

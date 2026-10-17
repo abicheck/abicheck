@@ -7,14 +7,14 @@
       "target_layer": "extract",
       "slice": "extract/build/compile_commands.py -- ADR-061 D2 names this exact destination for compile_commands.json build-context capture (ADR-020a).",
       "rationale": "A real, physically-migrated `frontends` module (cli_helpers_compare.py) imports this module directly today. Trial-classifying it into `extract` measured 4 new frontends -> extract violations (frontends may only import model/workflows/report). The frontends call site needs a workflows-owned wrapper (the same shape gap A's cli_dump_helpers.py -> header_conditionals.py precedent used) before this file can be classified into extract without breaking that caller.",
-      "owner": "abicheck maintainers",
+      "owner": "extract",
       "review_by": "2026-12-15"
     },
     {
       "path": "abicheck/checker_policy.py",
       "disposition": "retain",
       "supported_reason": "ADR-061 gap B executed this record's own trial migration for real: the derived kind-set/impact/verdict algorithms (BREAKING_KINDS-style frozensets, impact_for, apply_policy_file_overrides) moved to `policy/classification.py`, and the per-finding evidence-status/cross-source-evolution predicates (EvidenceTier.rank, is_cross_source_resolved, has_binary_evidence) moved to `policy/evidence_status.py` -- ChangeKind identity itself already lived in model/change_catalog and this module only re-exported it. What remains is a 132-line pure re-export facade preserving every existing `from abicheck.checker_policy import ...` path. P1 Codex review (fresh evidence) found ~90 of the ~103 internal callers this record originally described as unmigrated were in fact reachable via their real owner: every caller needing ONLY ChangeKind/HasKind/VALID_BASE_POLICIES (model-owned, not part of this split at all) now imports `model.change_catalog.kinds`/`model.change_catalog.registry` directly, dropping the facade dependency entirely -- 57 files; every caller in a layer whose declared `may_import` includes `policy` (policy/workflows/report/frontends... except frontends itself, see below) now imports `policy.classification`/`policy.evidence_status` directly for whatever policy-owned names it needs, splitting the import when it also needs a model-owned name -- 37 files. A fresh grep after that sweep confirms exactly 14 files still import this facade directly, each for a verified, structural reason, not oversight: `checker_types.py` (this record's own original trial-migration example -- `model`-classified, `model -> policy` is a forbidden edge, and `model` may import nothing at all); six `frontends`-classified CLI modules (`cli_compare_release_helpers.py`/`cli_compare_release_matrix.py`/`cli_compare_release_pairwise.py`/`cli_helpers_compare.py`/`cli_scan.py`/`cli_scan_baseline.py`) -- `frontends -> policy` is also a forbidden edge (`frontends` may import only `model`/`report`/`workflows`), confirmed empirically against `check_architecture.py`, and every one of the six needs at least one policy-owned name (`Verdict`/`ADDITION_KINDS`/`COMPATIBLE_KINDS`/`API_BREAK_KINDS`/`BREAKING_KINDS`/`compute_verdict`/`is_cross_source_resolved`) with no model-only subset available; six `compare`-classified detector modules (`buildsource/cross_source_checks_base.py`, `confidence.py`, `diff_elf_layout.py`, `diff_namespaces.py`, `diff_templates.py`, `diff_versioning.py`) -- `compare -> policy` is likewise forbidden (`compare` may import only `model`), each needing at least one policy-owned name (`Confidence`/`EvidenceTier`/`ReachabilityState`/`Verdict`/`API_BREAK_KINDS`/`BREAKING_KINDS`); and one unclassified leaf, `surface_graph.py` -- not layer-restricted at all (the general `check_architecture.py` layer gate does not evaluate an unclassified module), but a dedicated, narrower invariant test (`tests/test_surface_graph.py::test_surface_graph_module_imports_nothing_from_policy`) asserts this specific module's own parsed imports never include `policy` in either direction, since `policy`'s own `PublicSurfaceQuery` calls *into* `surface_graph.py` and the reverse must never happen -- redirecting its `EvidenceTier` import to `policy.evidence_status` was tried and reverted for exactly this reason (caught by that test, not the layer gate). The facade stays unclassified rather than moving into `model` or `policy`: classifying it into either would reproduce, for these 14 verified callers, the exact direction violation (or, for `surface_graph.py`, the narrower leaf-purity violation) the real implementation's move was meant to resolve elsewhere. It is also declared in modules.yaml's public_root_surfaces.",
-      "owner": "abicheck maintainers",
+      "owner": "legacy-root",
       "review_by": "2027-03-01"
     },
     {
@@ -23,7 +23,7 @@
       "target_layer": "compare",
       "slice": "compare/comparability.py, alongside its already-classified sibling compare/comparability_profile.py.",
       "rationale": "extract (dumper_contract.py, dumper_hybrid.py) and frontends (cli_dump_helpers.py) import this module directly today. Trial classification into `compare` measured 11 new violations (extract -> compare and frontends -> compare are both forbidden). Those call sites need to route through a workflows-owned wrapper before this file can move; its four sibling modules (comparability_fields.py, comparability_json.py, comparability_language_mode.py, comparability_sequences.py) were classified into `compare` in this same change because, unlike the parent, they carry no direct extract/frontends importers of their own.",
-      "owner": "abicheck maintainers",
+      "owner": "legacy-root",
       "review_by": "2026-12-15"
     },
     {
@@ -32,14 +32,14 @@
       "target_layer": "policy",
       "slice": "policy/contract_evidence.py, alongside its already-classified sibling policy/contract_evidence_collect.py -- ADR-049 Phase 4's persisted contract_evidence/evaluation_context schema.",
       "rationale": "frontends (cli_compare_receipt.py, cli_scan_receipt.py) import this module directly today. Trial classification into `policy` measured 8 new frontends -> policy violations. Needs those call sites routed through workflows first.",
-      "owner": "abicheck maintainers",
+      "owner": "legacy-root",
       "review_by": "2026-12-15"
     },
     {
       "path": "abicheck/deadline.py",
       "disposition": "accept",
       "reason": "Scan-wide deadline propagation and process-group-safe subprocess execution, genuinely reached directly today from storage (dumper_cache.py), extract, frontends (cli.py, cli_compare_helpers.py), and workflows alike. D1 explicitly forbids `model` -- the only layer every one of those callers may reach without a new violation -- from owning subprocess execution, and no other single layer's may_import list can admit all four real caller layers at once (trial classification into `extract` measured 5 new violations, including a new extract <-> storage responsibility cycle, since storage may only import model). This is a genuine cross-cutting infrastructure primitive, not a business-logic module any one responsibility package should claim; it is retained as an unclassified root leaf, the same way this repository already treats config-location and error-type leaves.",
-      "owner": "abicheck maintainers",
+      "owner": "legacy-root",
       "review_by": "2027-03-01",
       "notes": "A future fix would interpose a workflows-owned deadline-context service between storage/extract's direct calls and this module, but that is a real design task, not attempted here."
     },
@@ -49,7 +49,7 @@
       "target_layer": "compare",
       "slice": "compare/detectors/cpp/library_family_patterns.py -- already listed among compare's own diff_ detector family.",
       "rationale": "Trial classification into `compare` measured 2 new compare -> extract violations: this module's own body reads two still-unclassified siblings directly (checker_policy.py and internal_leak.py) rather than anything in extract per se, but internal_leak.py itself reaches into extract-classified buildsource modules, which surfaces as a compare -> extract edge once diff_cpp_patterns is classified. Blocked on internal_leak.py's and checker_policy.py's own dispositions closing first.",
-      "owner": "abicheck maintainers",
+      "owner": "legacy-root",
       "review_by": "2026-12-15"
     },
     {
@@ -58,7 +58,7 @@
       "target_layer": "compare",
       "slice": "compare/detectors/cpp/stdlib_impl.py -- D-stdlib cross-implementation standard-library compatibility diff, alongside compare's other diff_ detectors.",
       "rationale": "This module's own body imports extract and policy directly (compare may only import model). Trial classification measured 7 new compare -> extract / compare -> policy violations. Needs its extract/policy reads replaced with model-shared values, or routed through a workflows composition point, before reclassification.",
-      "owner": "abicheck maintainers",
+      "owner": "legacy-root",
       "review_by": "2026-12-15"
     },
     {
@@ -67,7 +67,7 @@
       "target_layer": "compare",
       "slice": "compare's internal-namespace-leak detector, alongside its sibling diff_* detectors.",
       "rationale": "This module's own body imports several extract-classified buildsource modules (entity_identity.py, graph_facts.py, source_graph_findings.py, source_graph_query.py) plus two still-unclassified siblings (checker_policy.py, impact/engine.py) directly. Trial classification into `compare` measured 4 new compare -> extract violations. Needs real decoupling of its buildsource reads (through a model-shared graph value, or a workflows composition point) before reclassification, not just a debt entry.",
-      "owner": "abicheck maintainers",
+      "owner": "legacy-root",
       "review_by": "2026-12-15"
     },
     {
@@ -76,7 +76,7 @@
       "target_layer": "storage",
       "slice": "storage/serialization.py -- gap E's own open item, verbatim: 'its own ~1500 remaining lines of codec logic are a separate, not-yet-attempted classification.'",
       "rationale": "frontends (cli_buildsource.py, cli_buildsource_merge.py, and others) import this module directly across 19 measured call sites. Trial classification into `storage` measured 19 new frontends -> storage violations. Needs those call sites routed through workflows first (gap E names workflows/snapshot_load.py as the precedent for the one legacy-backfill responsibility already split out of this file).",
-      "owner": "abicheck maintainers",
+      "owner": "legacy-root",
       "review_by": "2026-12-15"
     },
     {
@@ -85,7 +85,7 @@
       "target_layer": "compare",
       "slice": "compare's runtime symbol-binding rebind detector, alongside stack_checker.py's own workflows-side orchestration.",
       "rationale": "This module's own body imports workflows directly (compare may only import model). Trial classification into `compare` produced an observed compare <-> workflows responsibility cycle (6 new findings). Needs its workflows-layer read replaced with a model-shared value, or moved to be workflows-owned outright, before reclassification.",
-      "owner": "abicheck maintainers",
+      "owner": "legacy-root",
       "review_by": "2026-12-15"
     },
     {
@@ -94,7 +94,7 @@
       "target_layer": "compare",
       "slice": "compare's indexed AbiSnapshot query layer (ADR-025 D0) -- matching/identity machinery per D1's own compare description.",
       "rationale": "A compare-classified caller (diff_surface_metrics.py) already reaches into policy directly on its own, so classifying this module into either `compare` or `policy` both produced a new responsibility cycle in a trial run (4 and 5 new findings respectively, both naming a compare <-> policy cycle). The upstream diff_surface_metrics.py -> policy edge needs closing first, independent of this file's own placement.",
-      "owner": "abicheck maintainers",
+      "owner": "legacy-root",
       "review_by": "2026-12-15"
     }
   ]

@@ -5024,5 +5024,51 @@
   "subjects": [
    "safe-changes-correctly-not-flagged"
   ]
+ },
+ "case217_export_loss_weak_binding_demoted": {
+  "entity": "rule",
+  "scenario_kind": null,
+  "operation": "compare",
+  "ecosystem": "generic",
+  "topics": [
+   "symbols"
+  ],
+  "languages": [
+   "cpp"
+  ],
+  "scope": "single-library",
+  "artifact_shape": "compiled-pair",
+  "validation_owner": "compiler-pair",
+  "related_rules": [],
+  "rule_slug": "export-loss-weak-binding-demoted",
+  "variant_of": null,
+  "relation_type": null,
+  "relation_axis": null,
+  "subjects": [
+   "elf-export-and-linker-metadata"
+  ]
+ },
+ "case218_export_loss_strong_binding_stays_breaking": {
+  "entity": "rule",
+  "scenario_kind": null,
+  "operation": "compare",
+  "ecosystem": "generic",
+  "topics": [
+   "symbols"
+  ],
+  "languages": [
+   "cpp"
+  ],
+  "scope": "single-library",
+  "artifact_shape": "compiled-pair",
+  "validation_owner": "compiler-pair",
+  "related_rules": [],
+  "rule_slug": "export-loss-strong-binding-stays-breaking",
+  "variant_of": null,
+  "relation_type": null,
+  "relation_axis": null,
+  "subjects": [
+   "elf-export-and-linker-metadata"
+  ]
  }
 }
