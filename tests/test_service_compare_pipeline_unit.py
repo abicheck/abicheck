@@ -45,8 +45,6 @@ class TestRunCompare:
                 ),
             ],
         )
-        from abicheck.serialization import save_snapshot
-
         p = tmp_path / f"{name}_{version}.json"
         save_snapshot(snap, p)
         return p

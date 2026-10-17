@@ -19,7 +19,7 @@ The original regression this PR fixed (scan wall-clock going from ~10-15s to
 5-6 minutes once the header-only semantic graph became unconditional, G31
 Phase A) was found by wall-clock measurement, not by a unit test -- every
 test added alongside the fix itself (``test_dumper_clang.py``,
-``tests/test_header_graph_attach.py``, ``test_cli_dump_helpers_coverage.py``) checks the
+``test_header_graph_attach.py``, ``test_cli_dump_helpers_coverage.py``) checks the
 *mechanism* (is ``ast_memoize_scope()`` active, is the memo slot populated/
 consumed) via mocks, not real wall-clock time, so none of them would catch a
 future change that silently stops reusing the in-process AST while leaving

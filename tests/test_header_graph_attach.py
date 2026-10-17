@@ -39,7 +39,7 @@ class TestRunDumpHeaderGraph:
         snap = AbiSnapshot(library="lib", version="1.0", platform="pe")
         with fake_format_adapter("pe", result=snap):
             result = run_dump(p, "pe", [], [], "1.0", "c++")
-        assert result.build_source is None
+        assert result.surface_graph is None
 
     def test_embeds_graph_from_clang_ast(self, tmp_path):
         p = tmp_path / "lib.dll"

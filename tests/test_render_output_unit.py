@@ -33,7 +33,7 @@ class TestRenderOutput:
     def test_json_format(self, diff_result, snap):
         out = render_output("json", diff_result, snap)
         d = json.loads(out)
-        assert "library" in d or "verdict" in d or isinstance(d, dict)
+        assert d["library"] == "libtest"
 
     def test_markdown_format(self, diff_result, snap):
         out = render_output("markdown", diff_result, snap)
