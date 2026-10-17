@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
 from abicheck import dwarf_advanced as da, dwarf_metadata as dm
 
 
@@ -97,7 +99,25 @@ def test_dwarf_advanced_decode_member_location_forms():
 
     assert da._decode_member_location(int_member) == 12
     assert da._decode_member_location(expr_member) == 16
-    assert da._decode_member_location(bad_member) == 0
+    # An unsupported opcode has no exact offset: unknown, not a silent 0.
+    assert da._decode_member_location(bad_member) is None
+
+
+def test_dwarf_metadata_unevaluable_member_location_is_not_recorded_as_zero():
+    """A named member whose location is unevaluable must not get offset 0.
+
+    The layout producer raises instead, so the enclosing record's layout is
+    left unrecorded rather than fabricated with a wrong field offset.
+    """
+    bad = _Die(
+        "DW_TAG_member",
+        {
+            "DW_AT_name": _Attr("x"),
+            "DW_AT_data_member_location": _Attr([(0x22, 0)]),  # plus, no operands
+        },
+    )
+    with pytest.raises(dm._UnevaluableMemberLocation):
+        dm._process_member(bad, None, {})
 
 
 def test_dwarf_advanced_get_type_align_follows_typedef_chain_and_alignment_attr():

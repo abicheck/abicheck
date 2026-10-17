@@ -151,115 +151,149 @@ BASE_PRUNE_TAGS: frozenset[str] = frozenset(
 # ---------------------------------------------------------------------------
 
 
+class _UnevaluableLocation(Exception):
+    """A location expression has no exact offset.
+
+    Raised internally for a stack underflow, an opcode outside the supported
+    set, a missing or truncated operand, or an item that is neither an opcode
+    nor a tuple. :func:`_evaluate_location_expr` turns it into ``None``; it is
+    never turned into a value, because a guessed offset manufactures layout
+    facts (a false break or a hidden one).
+    """
+
+
+# Opcodes that carry one operand in the stream (DW_OP_plus_uconst, constu, consts).
+_OPERAND_OPS = frozenset({0x23, 0x10, 0x11})
+
+
 def _read_uleb128(items: list[object], i: int) -> tuple[int, int]:
-    """Read a ULEB128-encoded value from a raw byte list starting at *i*.
+    """Read a ULEB128 operand from a raw item list starting at *i*.
 
     Returns ``(value, new_index)`` where *new_index* is the position after
-    the last consumed byte.
+    the terminating byte. Raises :class:`_UnevaluableLocation` if the operand
+    is truncated: a partial value is not an offset.
     """
     result = 0
     shift = 0
-    while i < len(items):
-        b = items[i]
+    while True:
+        b = items[i] if i < len(items) else None
         if not isinstance(b, int):
-            break
+            raise _UnevaluableLocation("truncated ULEB128 operand")
         i += 1
         result |= (b & 0x7F) << shift
         if (b & 0x80) == 0:
-            break
+            return result, i
         shift += 7
-    return result, i
 
 
 def _read_sleb128(items: list[object], i: int) -> tuple[int, int]:
-    """Read a SLEB128-encoded value from a raw byte list starting at *i*.
+    """Read a SLEB128 operand from a raw item list starting at *i*.
 
-    Returns ``(value, new_index)`` with correct sign extension.
+    Returns ``(value, new_index)`` with correct sign extension. Raises
+    :class:`_UnevaluableLocation` if the operand is truncated.
     """
     result = 0
     shift = 0
-    last_byte = 0
-    while i < len(items):
-        b = items[i]
+    while True:
+        b = items[i] if i < len(items) else None
         if not isinstance(b, int):
-            break
-        last_byte = b
+            raise _UnevaluableLocation("truncated SLEB128 operand")
         i += 1
         result |= (b & 0x7F) << shift
         shift += 7
         if (b & 0x80) == 0:
             break
     # Sign extend if the high bit of the last byte is set
-    if shift < 64 and (last_byte & 0x40):
+    if shift < 64 and (b & 0x40):
         result |= -(1 << shift)
     return result, i
 
 
-def _evaluate_location_expr(expr: list[object]) -> int:
+def _evaluate_location_expr(expr: list[object]) -> int | None:
     """Evaluate a DWARF location expression list to a byte offset.
 
     DWARF ``DW_AT_data_member_location`` can be a list of opcodes/operands
-    rather than a plain integer.  Common patterns:
-    - ``[DW_OP_plus_uconst, N]`` — offset is N
-    - ``[DW_OP_constu, N]`` or ``[DW_OP_consts, N]`` — push N
-    - ``[DW_OP_lit0..DW_OP_lit31]`` — push literal 0–31
+    rather than a plain integer.  Supported operations:
+    - ``DW_OP_plus_uconst N`` — add N to the top of the stack
+    - ``DW_OP_constu N`` / ``DW_OP_consts N`` — push N
+    - ``DW_OP_lit0..DW_OP_lit31`` — push literal 0–31
+    - ``DW_OP_plus`` — pop two values, push their sum
 
     Handles three item formats:
     1. **pyelftools DWARFExprOp** — namedtuple with ``.op`` (int) and
        ``.args`` (list); ``item[1]`` is the *op_name* string, not an operand.
     2. **Plain (opcode, operand) tuples** — used by tests and some toolchains.
     3. **Raw integer streams** — opcode bytes with LEB128-encoded operands.
+
+    The stack starts with the containing object's base address, modelled as
+    0, so an empty expression evaluates to 0.
+
+    Returns ``None`` when the expression has no exact offset: a stack
+    underflow, an unsupported opcode, a missing or truncated operand, or a
+    non-opcode item. A value is never guessed from such an expression.
     """
     stack: list[int] = [0]  # implicit base address
-    i = 0
     items = list(expr)
-    while i < len(items):
-        item = items[i]
+    i = 0
+    try:
+        while i < len(items):
+            item = items[i]
+            if isinstance(item, tuple):
+                _eval_tuple_item(item, stack)
+                i += 1
+            elif isinstance(item, int):
+                i = _eval_raw_int_item(item, items, i, stack)
+            else:
+                raise _UnevaluableLocation(f"non-opcode item {item!r}")
+    except _UnevaluableLocation:
+        return None
+    return stack[-1]
 
-        # ---- DWARFExprOp or plain tuple ----
-        if isinstance(item, tuple):
-            _eval_tuple_item(item, stack)
-            i += 1
-            continue
 
-        # ---- Raw integer stream ----
-        if isinstance(item, int):
-            i = _eval_raw_int_item(item, items, i, stack)
-            continue
+def _apply_op(op: int, operand: int | None, stack: list[int]) -> None:
+    """Apply one opcode to *stack*, or raise if it cannot be computed exactly.
 
-        i += 1
-
-    return stack[-1] if stack else 0
+    Every op that consumes stack entries checks for underflow here, so none
+    can fall through to a partial result.
+    """
+    if op in _OPERAND_OPS and operand is None:
+        raise _UnevaluableLocation(f"DW_OP 0x{op:02x} has no operand")
+    if op == 0x23:  # DW_OP_plus_uconst: unary, needs one entry
+        if not stack:
+            raise _UnevaluableLocation("stack underflow in DW_OP_plus_uconst")
+        stack[-1] += operand or 0
+    elif op in (0x10, 0x11):  # DW_OP_constu, DW_OP_consts
+        stack.append(operand or 0)
+    elif 0x30 <= op <= 0x4F:  # DW_OP_lit0..DW_OP_lit31
+        stack.append(op - 0x30)
+    elif op == 0x22:  # DW_OP_plus: binary, needs two entries
+        if len(stack) < 2:
+            raise _UnevaluableLocation("stack underflow in DW_OP_plus")
+        b = stack.pop()
+        stack[-1] += b
+    else:
+        raise _UnevaluableLocation(f"unsupported DW_OP 0x{op:02x}")
 
 
 def _eval_tuple_item(item: tuple[object, ...], stack: list[int]) -> None:
-    """Evaluate a single tuple item (DWARFExprOp or plain tuple) onto *stack*."""
+    """Evaluate a single tuple item (DWARFExprOp or plain tuple) onto *stack*.
+
+    Raises :class:`_UnevaluableLocation` for an opcode that is not an int, or
+    for any opcode :func:`_apply_op` cannot compute exactly.
+    """
     # pyelftools DWARFExprOp: hasattr(item, 'args')
     if hasattr(item, "args"):
-        op = getattr(item, "op", 0)
+        op = getattr(item, "op", None)
         args = getattr(item, "args", [])
-        operand = args[0] if args else 0
+        raw_operand = args[0] if args else None
     else:
         # Plain (opcode, operand, ...) tuple
-        op = item[0] if len(item) > 0 else 0
-        operand = item[1] if len(item) > 1 else 0
-        if not (isinstance(op, int) and isinstance(operand, int)):
-            return
-
-    if isinstance(op, int):
-        # DW_OP_plus_uconst = 0x23
-        if op == 0x23:
-            stack[-1] = stack[-1] + operand if stack else operand
-        # DW_OP_constu = 0x10, DW_OP_consts = 0x11
-        elif op in (0x10, 0x11):
-            stack.append(operand)
-        # DW_OP_lit0..DW_OP_lit31 = 0x30..0x4f
-        elif 0x30 <= op <= 0x4F:
-            stack.append(op - 0x30)
-        # DW_OP_plus = 0x22
-        elif op == 0x22 and len(stack) >= 2:
-            b = stack.pop()
-            stack[-1] += b
+        op = item[0] if len(item) > 0 else None
+        raw_operand = item[1] if len(item) > 1 else None
+    if not isinstance(op, int):
+        raise _UnevaluableLocation(f"non-integer opcode {op!r}")
+    operand = raw_operand if isinstance(raw_operand, int) else None
+    _apply_op(op, operand, stack)
 
 
 def _eval_raw_int_item(
@@ -270,50 +304,50 @@ def _eval_raw_int_item(
 ) -> int:
     """Evaluate a single raw-integer item onto *stack*.
 
-    Returns the updated index *i* (already advanced past operands).
+    Returns the updated index *i* (already advanced past operands). A raw
+    integer is always an opcode here: an unsupported or underflowing one is
+    an error, not a constant.
     """
-    # DW_OP_plus_uconst = 0x23 (operand: ULEB128)
-    if item == 0x23:
-        val, i = _read_uleb128(items, i + 1)
-        stack[-1] = stack[-1] + val if stack else val
+    if item == 0x11:  # DW_OP_consts: SLEB128 operand
+        operand, i = _read_sleb128(items, i + 1)
+        _apply_op(item, operand, stack)
         return i
-    # DW_OP_constu = 0x10 (operand: ULEB128)
-    if item == 0x10:
-        val, i = _read_uleb128(items, i + 1)
-        stack.append(val)
+    if item in _OPERAND_OPS:  # DW_OP_plus_uconst, DW_OP_constu: ULEB128 operand
+        operand, i = _read_uleb128(items, i + 1)
+        _apply_op(item, operand, stack)
         return i
-    # DW_OP_consts = 0x11 (operand: SLEB128)
-    if item == 0x11:
-        val, i = _read_sleb128(items, i + 1)
-        stack.append(val)
-        return i
-    # DW_OP_lit0..DW_OP_lit31 (0x30..0x4f) — no operand
-    if 0x30 <= item <= 0x4F:
-        stack.append(item - 0x30)
-        return i + 1
-    # DW_OP_plus = 0x22 — no operand
-    if item == 0x22 and len(stack) >= 2:
-        b = stack.pop()
-        stack[-1] += b
-        return i + 1
-    # Unknown opcode or bare integer — treat as constant
-    stack.append(item)
+    _apply_op(item, None, stack)
     return i + 1
 
 
-def decode_member_location(val: int | list[object] | None) -> int:
+def decode_member_location(val: int | list[object] | None) -> int | None:
     """Decode DW_AT_data_member_location to a byte offset.
 
     Handles all forms produced by different DWARF versions:
-    - None → 0
+    - None (attribute absent) → 0
     - Constant integer (DWARF 3+) → value directly
     - Location expression list (DWARF 2/3) → evaluated via stack machine
+
+    Returns ``None`` when a location expression is unevaluable (see
+    :func:`_evaluate_location_expr`). Callers must record the member's offset
+    as unknown; they must not substitute 0.
     """
     if val is None:
         return 0
     if isinstance(val, int):
         return val
     return _evaluate_location_expr(val)
+
+
+def member_offset_bits(val: int | list[object] | None) -> int | None:
+    """``DW_AT_data_member_location`` as a bit offset, or ``None`` if unevaluable."""
+    byte_offset = decode_member_location(val)
+    return None if byte_offset is None else byte_offset * 8
+
+
+def add_bit_offsets(a: int | None, b: int | None) -> int | None:
+    """Sum two bit offsets; an unknown (``None``) operand keeps the sum unknown."""
+    return None if a is None or b is None else a + b
 
 
 # ---------------------------------------------------------------------------
