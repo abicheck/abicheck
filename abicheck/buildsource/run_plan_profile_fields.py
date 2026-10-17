@@ -36,13 +36,12 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
-from .project_targets import (
+from .project_profile_routing import (
     DEFAULT_PROFILE_RUNNER_LABEL,
-    ProfileCompileSpec,
-    ProjectTargetsConfig,
     runner_label_for_os,
     unroutable_os_message,
 )
+from .project_targets import ProfileCompileSpec, ProjectTargetsConfig
 
 
 def _compose_gcc_options(compile_spec: ProfileCompileSpec) -> str:
@@ -51,7 +50,7 @@ def _compose_gcc_options(compile_spec: ProfileCompileSpec) -> str:
     ``check-target``'s ``gcc-options`` input (P1 toolchain-profile audit).
 
     Every atom was already whitespace-validated by
-    ``ProfileCompileSpec.from_dict`` (``_safe_profile_atom`` -- no argv
+    ``ProfileCompileSpec.from_dict`` (``safe_profile_atom`` -- no argv
     smuggling), so plain space-joining is safe here. A consequence of that
     validation: no atom -- including an ``abi_macros`` value -- may itself
     contain a space, since this function has no further escaping step to
@@ -173,7 +172,7 @@ def _scheduling_fields_for_profile(
 
     An ``os:`` that names nothing schedulable raises instead of defaulting:
     quietly sending it to a Linux runner would produce a green cell that
-    checked the wrong platform. :func:`~abicheck.buildsource.project_targets.
+    checked the wrong platform. :func:`~abicheck.buildsource.project_targets_validation.
     _profile_issues` reports the same condition at ``project validate`` time,
     so reaching this raise means validation was skipped, not that the message
     is new.

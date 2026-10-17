@@ -192,7 +192,7 @@ class TestAllowNewTargetProjection:
         assert "allow_new_target" not in check.to_dict()
 
     def test_bundle_checks_never_project_allow_new_target(self) -> None:
-        # project_targets.validate_project_targets already rejects
+        # project_targets_validation.validate_project_targets already rejects
         # allow_new_target: true on a bundle check's own CheckSpec, so
         # generate_run_plan is never asked to project one for a bundle
         # check -- this pins that _generate_bundle_checks itself has no

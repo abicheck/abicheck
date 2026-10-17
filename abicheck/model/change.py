@@ -106,7 +106,7 @@ def validate_evidence_depth(field_name: str, value: str) -> None:
 # extend in lockstep (see that module's own comment for why).
 #: Anchored with ``\Z``, not a trailing ``$`` -- without ``re.MULTILINE``,
 #: ``$`` also matches just before a trailing ``\n`` (Codex review; see
-#: ``project_targets._IDENTIFIER_RE``'s identical fix for the full
+#: ``project_targets_validation._IDENTIFIER_RE``'s identical fix for the full
 #: rationale), which would let a constructed check_id carrying an embedded
 #: newline (e.g. from an unvalidated explicit_id) slip past this check.
 CHECK_ID_PATTERN = re.compile(

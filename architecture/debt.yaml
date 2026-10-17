@@ -201,7 +201,7 @@
     },
     {
       "path": "abicheck/buildsource/project_targets.py",
-      "baseline_lines": 1806,
+      "baseline_lines": 1106,
       "target": "extract/build-or-source",
       "rule": "no_growth",
       "disposition": "migrate",

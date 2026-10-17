@@ -39,14 +39,16 @@ import pytest
 import yaml
 from _workflow_exec import bash_executable, require_bash
 
-from abicheck.buildsource.project_targets import (
+from abicheck.buildsource.project_profile_routing import (
     DEFAULT_PROFILE_RUNNER_LABEL,
     PROFILE_DEPENDENCY_SOURCES,
+    runner_label_for_os,
+)
+from abicheck.buildsource.project_targets import (
     ProfileSpec,
     load_project_targets_config,
-    runner_label_for_os,
-    validate_project_targets,
 )
+from abicheck.buildsource.project_targets_validation import validate_project_targets
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
