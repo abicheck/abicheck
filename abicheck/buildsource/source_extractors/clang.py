@@ -60,32 +60,43 @@ from pathlib import Path
 from typing import Any
 
 from ... import deadline
-from ..._compiler_options import clang_ast_dump_tail
 from ...deadline import run_bounded
-from ...extract.compiler_driver import is_intel_sycl_driver, needs_sycl_host_only
-from ...header_conditionals import _include_guard_macro, _strip_comments
+from ...extract.compiler_driver import is_intel_sycl_driver
 from ...model.execution_cache import memoized, path_witness
 from ..build_evidence import CompileUnit
 from ..model import LayerConfidence
 from ..source_abi import (
     SourceAbiTu,
     SourceEntity,
-    SourceLocation,
     coverage_state_for_family,
     default_fact_set,
 )
 from ._argv import (
     effective_directory,
-    is_msvc_mode,
-    pick_compiler_binary,
-    replay_extra_flags,
     resolve_read_files,
-    split_public_roots,
     unredact_home,
 )
-from ._argv_shortopts import rebase_structured_path as _rebase_structured_path
 from ._deadline_bound import run_bounded_for_extraction
 from .base import SourceExtractionError
+from .clang_command import (
+    build_clang_command,
+    build_clang_macro_command,
+)
+from .clang_macros import macros_from_preprocessor
+from .clang_node_predicates import (
+    _SCOPE_NODE_KINDS,
+    _ClassifyContext,
+    _default_member_access,
+    _is_accessible,
+    _is_concept_node,
+    _is_constexpr_var_node,
+    _is_function_node,
+    _is_template_node,
+    _is_type_node,
+    _is_typedef_node,
+    _is_variable_node,
+    _location,
+)
 from .clang_nodes import (
     _default_arg_repr,
     _entity_names,
@@ -100,7 +111,6 @@ from .clang_nodes import (
     _param_ids,
     _qualified,
     _signature,
-    _signature_desugared,
     _subtree_hash,
     _template_params,
 )
@@ -246,27 +256,6 @@ def _clang_compiler_version(clang_bin: str) -> str:
         return ""
 
 
-#: AST node kinds clang emits for the entities we fingerprint. Includes the C++
-#: special members (constructor/destructor/conversion) so a change to a public
-#: ``Widget(int n = 1)`` default, or an inline constructor body edit, is detected
-#: — not just ordinary functions/methods (Codex review #339, P2).
-_FUNCTION_NODE_KINDS = frozenset(
-    {
-        "FunctionDecl",
-        "CXXMethodDecl",
-        "CXXConstructorDecl",
-        "CXXDestructorDecl",
-        "CXXConversionDecl",
-    }
-)
-_TEMPLATE_NODE_KINDS = frozenset({"FunctionTemplateDecl", "ClassTemplateDecl"})
-#: Decl contexts we descend into to reach members/nested decls, tracking the
-#: enclosing scope name so a member's qualified name is built (``ns::Cls::f``).
-_SCOPE_NODE_KINDS = frozenset(
-    {"NamespaceDecl", "CXXRecordDecl", "ClassTemplateDecl", "LinkageSpecDecl"}
-)
-
-
 #: Header extensions that are typically *generated* by the build (TableGen `.inc`,
 #: autotools/CMake `*.h.in` → `config.h`, protobuf/flatbuffers/moc outputs). When a
 #: "file not found" names one of these, the real cause is "the target wasn't built".
@@ -302,433 +291,6 @@ def _missing_generated_header_hint(stderr: str) -> str:
         "generated headers to exist — build the target (or its codegen step) first, "
         "then re-run; configure-only trees do not produce them."
     )
-
-
-def _std_flag(standard: str, msvc: bool) -> list[str]:
-    if not standard:
-        return []
-    return [f"/std:{standard}"] if msvc else [f"-std={standard}"]
-
-
-def _clang_context_args(
-    compile_unit: CompileUnit, compiler_binary: str | None, *, clang_bin: str = "clang"
-) -> tuple[list[str], bool]:
-    """The shared compile-context argv prefix (no mode tail / source) and msvc flag.
-
-    Mirrors the compile unit's language standard, defines/undefines, include and
-    system-include paths, sysroot, target triple, and ABI-relevant flags, so both
-    the AST pass and the macro pass parse the same TU the real build compiled.
-
-    A real build's own recorded ``-fsycl`` (carried through via
-    ``replay_extra_flags``'s ``ABI_RELEVANT_FLAG_PREFIXES``) makes Intel's
-    oneAPI DPC++/C++ driver (icx/icpx/dpcpp[-cl]) run *two* separate ``-cc1``
-    passes for one compile — a SYCL device-side pass and a host-side pass,
-    each writing a complete document to the same stdout stream back-to-back
-    with no separator, which breaks both the AST pass's single-document JSON
-    reader and the macro pass's single-stream text reader. Mirrors the fix
-    already shipped for the L2 header-AST backend
-    (``dumper_ast_config._build_clang_header_command`` /
-    ``abicheck.extract.compiler_driver.needs_sycl_host_only``): append ``-fsycl-host-only`` here
-    too, collapsing the compile back to the single host-side pass that
-    actually links into the scanned binary — the device pass describes
-    SPIR-V kernel code that never becomes part of the host ``.so``'s
-    exported symbols, so L4 replay has no use for it either way. A no-op for
-    any non-Intel driver, or when the caller's own flags already pin a
-    single pass (``-fsycl-host-only``/``-fsycl-device-only``) or explicitly
-    disable SYCL (``-fno-sycl`` last-flag-wins) — see
-    ``needs_sycl_host_only``'s own docstring for the full precedence.
-
-    The host-only decision is gated on *clang_bin* — the binary this command
-    will actually be run with — not on ``pick_compiler_binary``'s *emulated*
-    compiler below (``cc_bin``, used only for flag-shape decisions like
-    ``msvc``/language-standard translation). Without ``--compiler``/an
-    explicit ``compiler_binary`` override, ``cc_bin`` falls back to the real
-    build's own recorded ``argv[0]`` (e.g. ``icpx``) purely to emulate its
-    accepted flag shape, while *clang_bin* stays the generic default
-    (``"clang"``) that is genuinely invoked. Gating on ``cc_bin`` instead
-    would append ``-fsycl-host-only`` to a stock clang invocation whenever a
-    SYCL TU's real build happened to use an Intel driver — stock clang
-    hard-rejects the flag ("unknown argument"), turning every such TU into a
-    failed/partial L4 extraction instead of the single ordinary pass stock
-    clang already parses a bare ``-fsycl`` as (Codex review).
-    """
-    cc_bin = pick_compiler_binary(compile_unit, compiler_binary)
-    msvc = is_msvc_mode(cc_bin)
-    cc_id = "msvc" if msvc else "gnu"
-
-    cmd: list[str] = []
-    if msvc:
-        cmd.append("--driver-mode=cl")
-    # Force the language so a header replayed directly still parses as C/C++.
-    lang = "c++" if compile_unit.language.lower() in ("cxx", "c++", "cpp") else "c"
-    if not msvc:
-        cmd += ["-x", lang]
-    cmd += _std_flag(compile_unit.standard, msvc)
-    define_opt = "/D" if msvc else "-D"
-    undef_opt = "/U" if msvc else "-U"
-    for key, value in compile_unit.defines.items():
-        cmd.append(f"{define_opt}{key}={value}" if value else f"{define_opt}{key}")
-    for undef in compile_unit.undefines:
-        cmd.append(f"{undef_opt}{undef}")
-    inc_opt = "/I" if msvc else "-I"
-    # Round 29 follow-up (Codex review, "Apply env chdir before resolving
-    # structured include paths", fresh evidence): `CompileUnit.include_paths`/
-    # `system_include_paths` are already STRUCTURED, absolute paths, resolved
-    # by the producing adapter against the compile unit's own recorded
-    # `directory` -- before any leading `env -C DIR` prefix in `argv` is
-    # considered. `extract()`'s own `run_directory` (the effective directory
-    # the real compiler process ran from) already accounts for that -- but
-    # only for the REPLAY subprocess's own cwd, and `replay_extra_flags()`'s
-    # raw, unresolved flag values, not for these two already-absolute
-    # structured fields. So `env -C build clang -Iinclude ...` recorded in
-    # `directory=/work` resolves `include_paths` to `/work/include` at
-    # adapter-construction time, and this function -- without the rebase
-    # below -- would still emit `-I /work/include`, even though the real
-    # compiler searched `/work/build/include`. Rebase each structured path
-    # from its old base (`compile_unit.directory`) onto the real effective
-    # one, via a literal string-prefix substitution (not a lexical
-    # posixpath/ntpath join+normalize like `join_path_token` elsewhere in
-    # this PR series) -- each path here was itself already constructed by
-    # simply joining the SAME `compile_unit.directory` string onto a
-    # relative operand, so undoing that exact prefix and re-joining the
-    # effective directory in its place reproduces precisely what the
-    # adapter would have produced had it known the effective directory to
-    # begin with, without needing to guess the join grammar a second time.
-    # A path outside `compile_unit.directory` entirely (e.g. an absolute
-    # `-Isysroot/include` operand the real build recorded verbatim) has no
-    # matching prefix and is therefore left unchanged, exactly as it must
-    # be -- it was never relative to the pre-chdir directory in the first
-    # place.
-    run_directory = effective_directory(compile_unit.argv, compile_unit.directory)
-    # Round 31 Finding 1 (Codex review, fresh evidence): provenance is
-    # tracked per LIST POSITION, not by value -- two occurrences that
-    # normalize to the identical final string (one relative-then-joined,
-    # one genuinely explicit) must not collapse onto one shared answer.
-    # `explicit_or_unknown()` also degrades a legacy/absent-field pack to
-    # "do not rebase" rather than "derived" (round 31 Finding 3).
-    include_explicit = compile_unit.explicit_or_unknown(system=False)
-    system_include_explicit = compile_unit.explicit_or_unknown(system=True)
-    for inc, is_explicit in zip(compile_unit.include_paths, include_explicit):
-        cmd += [
-            inc_opt,
-            _rebase_structured_path(
-                inc,
-                compile_unit.directory,
-                run_directory,
-                explicit_absolute=is_explicit,
-            ),
-        ]
-    for inc, is_explicit in zip(
-        compile_unit.system_include_paths, system_include_explicit
-    ):
-        rebased = _rebase_structured_path(
-            inc,
-            compile_unit.directory,
-            run_directory,
-            explicit_absolute=is_explicit,
-        )
-        cmd += ["/I", rebased] if msvc else ["-isystem", rebased]
-    if compile_unit.sysroot and not msvc:
-        cmd.append(f"--sysroot={compile_unit.sysroot}")
-    if compile_unit.target_triple and not msvc:
-        cmd.append(f"--target={compile_unit.target_triple}")
-    extra = replay_extra_flags(compile_unit, cmd, cc_id)
-    if compile_unit.standard:
-        # ``standard`` is normalized from the *effective* (last) dialect flag.
-        # Do not replay an earlier conflicting -std=/std: token from
-        # abi_relevant_flags after it, or clang would silently parse the TU at
-        # the wrong language level (e.g. CMake's gnu++17 then c++20 pair).
-        extra = [
-            flag
-            for flag in extra
-            if not flag.startswith("-std=")
-            and not flag.lower().startswith(("/std:", "-std:"))
-        ]
-    if not is_intel_sycl_driver(clang_bin):
-        # A real build's own recorded -fsycl-host-only/-fsycl-device-only
-        # (carried through above via replay_extra_flags's abi_relevant_flags/
-        # argv scan) each pin a SPECIFIC SYCL compilation pass -- and stock
-        # clang cannot honor either: it hard-rejects both as "unknown
-        # argument", AND (confirmed empirically against a real clang 18
-        # install) its own bare -fsycl with NEITHER selector compiles as
-        # DEVICE context by default (defines __SYCL_DEVICE_ONLY__), not
-        # host. So dropping -fsycl-device-only and falling through to a
-        # bare -fsycl "coincidentally" matches its recorded pass -- but
-        # dropping -fsycl-host-only does NOT: it silently flips an
-        # explicitly HOST-pinned TU into a device-context compile (Codex
-        # review; an earlier revision of this fix got exactly this
-        # asymmetry wrong, treating the two selectors as interchangeable).
-        # Both therefore degrade this one TU explicitly (a clear message,
-        # not the raw "unknown argument") rather than ever stamping source
-        # facts for a DIFFERENT compilation context than the one actually
-        # recorded. A bare, unselected -fsycl (no explicit pin either way)
-        # is deliberately left alone -- carried through as-is, matching the
-        # L2 header-AST backend's own established accepted approximation
-        # for that ambiguous shape (see this function's own docstring).
-        pinned = {"-fsycl-host-only", "-fsycl-device-only"} & set(extra)
-        if pinned:
-            raise SourceExtractionError(
-                f"compile unit {compile_unit.source!r} was recorded with "
-                f"{sorted(pinned)!r} (an Intel-only SYCL pass-selector "
-                "flag), but the binary this command will actually run "
-                f"with ({clang_bin!r}) is not an Intel oneAPI DPC++/C++ "
-                "driver and cannot honor it. L4 source-ABI replay has no "
-                "way to correctly represent that pass under a different "
-                "compiler, so this translation unit degrades to partial "
-                "coverage rather than being silently replayed under the "
-                "wrong compilation context -- set compile.compiler in "
-                ".abicheck.yml to the real icx/icpx/dpcpp driver to extract it."
-            )
-    if needs_sycl_host_only(clang_bin, [*cmd, *extra]):
-        extra = [*extra, "-fsycl-host-only"]
-    cmd += extra
-    return cmd, msvc
-
-
-def build_clang_command(
-    compile_unit: CompileUnit,
-    source: Path,
-    *,
-    clang_bin: str = "clang",
-    compiler_binary: str | None = None,
-) -> list[str]:
-    """Build the ``clang -ast-dump=json`` argv for a compile unit's context (D2).
-
-    A clang-cl/MSVC compile unit is driven through clang's ``cl`` driver mode.
-    """
-    cmd, _msvc = _clang_context_args(compile_unit, compiler_binary, clang_bin=clang_bin)
-    return [clang_bin, *cmd, *clang_ast_dump_tail(str(source))]
-
-
-def build_clang_macro_command(
-    compile_unit: CompileUnit,
-    source: Path,
-    *,
-    clang_bin: str = "clang",
-    compiler_binary: str | None = None,
-) -> list[str]:
-    """Build the ``clang -E -dD`` argv that dumps macro definitions (ADR-030 D6).
-
-    The JSON AST carries no preprocessor macros, so a separate preprocess pass
-    (``-E -dD``: emit ``#define`` directives with line markers) is needed for
-    ``public_macro_value_changed`` to ever fire (Codex review #339, P2). Same
-    compile context as the AST pass so the macro set matches the real build.
-    """
-    cmd, msvc = _clang_context_args(compile_unit, compiler_binary, clang_bin=clang_bin)
-    # cl-driver mode ignores -dD; clang-cl's `/d1PP` is the documented "retain
-    # macro definitions in /E mode" flag, so a Windows/clang-cl build still emits
-    # #define directives for macros_from_preprocessor (Codex review #339, P2). We
-    # keep the line markers (no -P / no /EP) to attribute each macro to its file.
-    if msvc:
-        preprocess = ["/E", "/d1PP"]
-    else:
-        preprocess = ["-E", "-dD"]
-    return [clang_bin, *cmd, *preprocess, "-ferror-limit=0", str(source)]
-
-
-class _ClassifyContext:
-    """Public-surface classification for clang file paths (ADR-024 / ADR-030)."""
-
-    def __init__(self, public_header_roots: list[str]) -> None:
-        from ...extract.declaration_provenance import build_public_set
-
-        # A public root may be a *directory* (`--headers include/`). Feeding it to
-        # build_public_set as a header file would never match a decl under it
-        # (`include` vs `include/api.h`), dropping the whole public include tree;
-        # split file roots from directory roots first (Codex review #339, P2).
-        file_roots, dir_roots = split_public_roots(public_header_roots)
-        self.exact_header_segs = [_file_segments(root) for root in file_roots]
-        self.exact_header_segs = [seg for seg in self.exact_header_segs if seg]
-        _, self.dir_segs, self.have_set = build_public_set([], dir_roots)
-        self.have_set = self.have_set or bool(self.exact_header_segs)
-
-    def classify(self, file: str) -> tuple[str, str, bool]:
-        """Return ``(visibility, origin_label, api_relevant)`` for a file.
-
-        Mirrors the castxml extractor: a header that is both public and generated
-        stays public but is marked ``GENERATED`` (so ``generated_header_changed``
-        owns it); a generated *private* header (not in the public set) is demoted
-        off the public surface.
-        """
-        from ...extract.declaration_provenance import (
-            classify_origin,
-            is_generated_header,
-        )
-        from ...model import ScopeOrigin
-
-        if _matches_exact_public_header(file, self.exact_header_segs):
-            if is_generated_header(file):
-                return "generated", "GENERATED", True
-            return "public_header", "PUBLIC_HEADER", True
-        origin = classify_origin(file, [], self.dir_segs, have_public_set=self.have_set)
-        if origin == ScopeOrigin.PUBLIC_HEADER and is_generated_header(file):
-            return "generated", "GENERATED", True
-        if origin == ScopeOrigin.PUBLIC_HEADER:
-            return "public_header", "PUBLIC_HEADER", True
-        if origin == ScopeOrigin.GENERATED:
-            return "private_header", "PRIVATE_HEADER", False
-        return "unknown", "UNKNOWN", False
-
-
-#: A ``-E`` line marker: ``# <line> "<file>" [flags]`` — sets the current file.
-_LINE_MARKER_RE = re.compile(r'^#\s+\d+\s+"([^"]*)"')
-#: A C identifier (a macro name).
-_MACRO_NAME_RE = re.compile(r"[A-Za-z_]\w*")
-
-
-def _parse_define(rest: str) -> tuple[str, str] | None:
-    """Parse the text after ``#define `` into ``(name, normalized-value)``.
-
-    Keeps the function-like parameter list as part of the value (``(a,b) body``),
-    so a change to either the parameters or the body reads as a value change.
-    """
-    m = _MACRO_NAME_RE.match(rest)
-    if not m:
-        return None
-    name = m.group(0)
-    i = m.end()
-    params = ""
-    if i < len(rest) and rest[i] == "(":  # function-like macro
-        depth = 0
-        j = i
-        while j < len(rest):
-            if rest[j] == "(":
-                depth += 1
-            elif rest[j] == ")":
-                depth -= 1
-            j += 1
-            if depth == 0:
-                break
-        params = rest[i:j]
-        i = j
-    body = rest[i:].strip()
-    value = re.sub(r"\s+", " ", f"{params} {body}".strip())
-    return name, value
-
-
-def _is_include_guard(name: str, value: str, file: str) -> bool:
-    """Whether ``name`` is the include guard of ``file`` (ADR-030 follow-up #2).
-
-    Include guards (``#ifndef FOO_H`` / ``#define FOO_H``) surface from the
-    ``-E -dD`` pass as empty-valued macro entities — harmless but noisy. Both
-    checks below require an empty replacement (a guard never expands to
-    anything), which keeps a real empty feature flag (e.g.
-    ``#define FOO_ENABLED``) from being dropped:
-
-    - **Filename-derived** (cheap, no I/O): the name, with surrounding
-      underscores stripped, equals the header's filename-derived token
-      including the extension suffix (``foo.h`` → ``FOO_H``; matches
-      ``FOO_H``, ``_FOO_H``, ``FOO_H_``, ``__FOO_H__``). Exact match, not a
-      substring, so an intentional empty feature macro that merely starts
-      with the stem (``FOO_H_FEATURE``) is not dropped.
-    - **Structural** (fallback): a project-prefixed guard
-      (``MYLIB_FOO_H``, ``CASE47_V1_HPP``) doesn't derive from the filename
-      at all, so the preprocessed ``-E -dD`` stream's spelling-only signal
-      misses it. Reading the file's own source and checking whether ``name``
-      is genuinely its leading ``#ifndef``/``#define`` pair (the standard
-      whole-file guard idiom, see :func:`_include_guard_macro`) catches this
-      regardless of naming convention. Best-effort: a read failure just skips
-      to the false-negative default below.
-    """
-    if value or not file:
-        return False
-    base = re.split(r"[\\/]", file)[-1]
-    stem = re.sub(r"[^A-Za-z0-9]+", "_", base).upper().strip("_")  # foo.h -> FOO_H
-    if stem and name.upper().strip("_") == stem:
-        return True
-    try:
-        text = Path(file).read_text(encoding="utf-8", errors="replace")
-    except OSError:
-        return False
-    lines = _strip_comments(text).splitlines()
-    return _include_guard_macro(lines) == name
-
-
-def _unfold_continuations(lines: list[str]) -> list[str]:
-    """Join backslash-continued physical lines into single logical lines.
-
-    A multi-line macro (``#define FOO(x) \\`` then its body) is split by
-    ``splitlines()``; without unfolding, only the first physical line — usually
-    ending in ``\\`` — is captured and the rest of the body is dropped, hiding
-    any edit below the first line from ``public_macro_value_changed`` (CodeRabbit
-    review). ``#`` line markers never carry a trailing backslash, so they are
-    unaffected.
-    """
-    out: list[str] = []
-    pending: str | None = None
-    for line in lines:
-        chunk = line[:-1] if line.endswith("\\") else line
-        pending = chunk if pending is None else pending + " " + chunk.lstrip()
-        if not line.endswith("\\"):
-            out.append(pending)
-            pending = None
-    if pending is not None:
-        out.append(pending)
-    return out
-
-
-def macros_from_preprocessor(
-    text: str, public_header_roots: list[str]
-) -> tuple[list[SourceEntity], list[str]]:
-    """Parse ``clang -E -dD`` output into public-header macro entities (ADR-030 D6).
-
-    Pure: tracks the current file from ``#`` line markers, records the final
-    definition of each macro (honoring later ``#undef``), and keeps only macros
-    whose declaring file is on the public source surface — builtin/command-line
-    and system macros carry ``<built-in>``/system files and are filtered out.
-
-    Returns ``(macro entities, every real file the preprocessor read)``. The file
-    list feeds the per-TU cache dependency set, so it must contain *all* files
-    the preprocessor touched — not just the public macro-declaring ones — or a
-    macro-only *private* header (e.g. ``detail/config.h`` whose ``#define`` gates
-    an ``#if`` in a public header) would never invalidate the dump: it
-    contributes no public macro entity and no clang AST node, so an edit to it
-    would otherwise pass cache validation and reuse stale facts (Codex review
-    #339, P2; P1 covered only the public ones).
-    """
-    ctx = _ClassifyContext(public_header_roots)
-    current = ""
-    defs: dict[str, tuple[str, str]] = {}  # name -> (value, file)
-    # Every real file named by a `#` line marker — the complete set the
-    # preprocessor read. `<built-in>`/`<command line>`/`<scratch space>`
-    # pseudo-files are not real dependencies and are skipped.
-    touched: set[str] = set()
-    for line in _unfold_continuations(text.splitlines()):
-        marker = _LINE_MARKER_RE.match(line)
-        if marker:
-            current = marker.group(1)
-            if current and not current.startswith("<"):
-                touched.add(current)
-            continue
-        if line.startswith("#define "):
-            parsed = _parse_define(line[len("#define ") :])
-            if parsed:
-                defs[parsed[0]] = (parsed[1], current)
-        elif line.startswith("#undef "):
-            defs.pop(line[len("#undef ") :].strip(), None)
-
-    entities: list[SourceEntity] = []
-    for name, (value, file) in sorted(defs.items()):
-        visibility, origin, public = ctx.classify(file)
-        if not public:
-            continue
-        if _is_include_guard(name, value, file):
-            continue
-        entities.append(
-            SourceEntity(
-                id=_hash("macro", name, value),
-                kind="macro",
-                qualified_name=name,
-                value=value,
-                names=_entity_names(name),
-                ownership=_entity_ownership(visibility, origin),
-                source_location=_location(file, 0, origin),
-                visibility=visibility,
-                api_relevant=True,
-                confidence=LayerConfidence.HIGH,
-            )
-        )
-    return entities, sorted(touched)
 
 
 def source_abi_from_clang_ast(
@@ -805,215 +367,6 @@ def _collect_files(node: Any, files: set[str] | None = None) -> set[str]:
         for child in node.get("inner", []):
             _collect_files(child, files)
     return files
-
-
-#: C++ access specifiers that hide a member from consumers. A private/protected
-#: member cannot be called or its inline body relied on, so it must stay off the
-#: L4 public surface even when declared in a public header (Codex review #339,
-#: P2). ``""``/``"none"``/``"public"`` mean "no restriction" (free functions,
-#: namespace-scope decls, public members).
-_NON_PUBLIC_ACCESS = frozenset({"private", "protected"})
-
-
-def _is_accessible(access: str) -> bool:
-    """Whether a decl with this C++ member-access is reachable by consumers."""
-    return access not in _NON_PUBLIC_ACCESS
-
-
-def _default_member_access(record: dict[str, Any]) -> str:
-    """Default member access for a record's body before any ``AccessSpecDecl``.
-
-    ``class`` defaults to private; ``struct``/``union`` default to public
-    (clang records this as ``tagUsed``). Determines the access of members that
-    appear before the first explicit ``public:``/``private:`` section.
-    """
-    return "private" if record.get("tagUsed") == "class" else "public"
-
-
-def _is_template_node(kind: str | None, name: str) -> bool:
-    """Return ``True`` when this AST node is a named template declaration.
-
-    Template bodies are fingerprinted whole; callers must skip descent into
-    the templated pattern to avoid re-emitting the inner FunctionDecl/Record.
-    """
-    return kind in _TEMPLATE_NODE_KINDS and bool(name)
-
-
-def _is_function_node(kind: str | None, name: str, accessible: bool) -> bool:
-    """Return ``True`` for a named, accessible function/method node."""
-    return kind in _FUNCTION_NODE_KINDS and bool(name) and accessible
-
-
-def _is_constexpr_var_node(
-    kind: str | None, name: str, node: dict[str, Any], accessible: bool
-) -> bool:
-    """Return ``True`` for a named, accessible ``constexpr`` variable node."""
-    return (
-        kind == "VarDecl" and bool(name) and bool(node.get("constexpr")) and accessible
-    )
-
-
-#: Decl containers whose direct ``VarDecl`` children have linkage (become real
-#: symbols). A ``VarDecl`` reached anywhere else in the walk — inside a function
-#: body's ``CompoundStmt``/``DeclStmt`` — is a stack local with no symbol and is
-#: never an ABI variable (``TranslationUnitDecl`` is the walk root's own kind).
-_VARIABLE_SCOPE_KINDS = frozenset(
-    {"TranslationUnitDecl", "NamespaceDecl", "CXXRecordDecl", "LinkageSpecDecl"}
-)
-
-
-def _mangled_has_internal_linkage(mangled: str) -> bool:
-    """Return ``True`` when an Itanium *mangled* name marks internal linkage.
-
-    clang has already done the linkage analysis and encoded it two ways, both
-    handled here:
-
-    * the GCC/clang seniority marker ``L`` prefixing the entity's own
-      ``<unqualified-name>`` — a namespace/file-scope ``static`` *or* a
-      namespace-scope ``const`` without ``extern`` (``_ZN2nsL7g_constE``,
-      ``_ZL1xE``);
-    * an **anonymous-namespace** component ``_GLOBAL__N_`` (``namespace { int x; }``
-      mangles as ``_ZN12_GLOBAL__N_11xE``) — internal linkage with *no* ``L``
-      marker (Codex review).
-
-    Such an entity never appears in the dynamic symbol table, so emitting it as a
-    ``variable`` would populate ``decls_without_symbol`` and risk a spurious
-    ``source_binary_provenance_mismatch`` against the correct binary. This parses
-    by Itanium length prefixes — so an ``L`` *inside* a source name (a namespace
-    literally ending in ``L``) is never miscounted — and bails to ``False``
-    (external, keep) on any exotic production, so a real export is never dropped.
-    """
-    m = mangled
-    if not m.startswith("_Z"):
-        return False
-    # Anonymous namespace: a reserved compiler component, so a plain substring
-    # test is unambiguous (a user cannot name an entity `_GLOBAL__N_`).
-    if "_GLOBAL__N_" in m:
-        return True
-    i = 2
-    n = len(m)
-    if i < n and m[i] == "N":  # nested-name: N [CV/ref] <prefix> <name> E
-        i += 1
-        while i < n and m[i] in "rVKO":  # cv-qualifiers / ref-qualifiers
-            i += 1
-    while i < n:
-        c = m[i]
-        if c == "E":
-            break
-        if c == "L":  # seniority marker before a <source-name> ⇒ internal linkage
-            return i + 1 < n and m[i + 1].isdigit()
-        if c.isdigit():  # <source-name> ::= <length> <identifier> — skip wholesale
-            j = i
-            length = 0
-            while j < n and m[j].isdigit():
-                length = length * 10 + (ord(m[j]) - 48)
-                j += 1
-                if length > n - j:  # malformed length ⇒ bail safe
-                    return False
-            i = j + length
-            continue
-        return False  # template/substitution/other production ⇒ treat as external
-    return False
-
-
-def _is_top_level_const(qual: str) -> bool:
-    """Return ``True`` when a type spelling is const-qualified at the top level.
-
-    Top-level const (``const int``, ``ns::Foo const``, ``int *const``) marks the
-    *object* itself const — which at namespace scope without ``extern`` gives
-    internal linkage in C++. An **array** is const iff its element type is const,
-    so it is reduced to that element type (``const int[2]`` / ``const char[8]``
-    are internal; an array of mutable pointers ``const char *[2]`` is not).
-    Pointer/reference-to-const (``const char *``) is NOT top-level const (the
-    pointer object is mutable, external), so a leading ``const`` only counts when
-    the reduced element type is not a pointer.
-    """
-    q = qual.strip().rstrip("&").strip()
-    # Array: reduce to the element type (spelled before the first ``[``).
-    bracket = q.find("[")
-    if bracket != -1:
-        q = q[:bracket].strip()
-    # Trailing ``const`` must be a standalone token, not the tail of an identifier
-    # (a type named ``almost_const`` is not const-qualified). ``int *const`` /
-    # ``ns::Foo const`` qualify; the char before ``const`` is then a non-identifier
-    # character (space / ``*``) or the string is exactly ``const``.
-    if q.endswith("const") and (len(q) == 5 or not (q[-6].isalnum() or q[-6] == "_")):
-        return True
-    return q.startswith("const ") and "*" not in q
-
-
-def _is_variable_node(
-    kind: str | None,
-    name: str,
-    node: dict[str, Any],
-    accessible: bool,
-    enclosing_kind: str | None,
-) -> bool:
-    """Return ``True`` for a named, accessible **externally-linked** data variable.
-
-    These are the globals and static data members that become exported ``OBJECT``
-    symbols (e.g. ``llvm::raw_ostream::RED``), so capturing them lets a binary
-    data export map back to a source declaration (ADR-030 D4). ``constexpr``
-    variables are handled by ``_emit_constexpr`` and excluded here.
-
-    A block-scope local (enclosing kind is a statement, not a decl container) has
-    no linkage and is dropped. Internal-linkage variables never appear in the
-    dynamic symbol table, so they are dropped two ways: (1) the mangled-name
-    marker — a C++ *namespace/file-scope* ``static``, a namespace-scope ``const``
-    without ``extern``, or an anonymous-namespace variable all carry it; and
-    (2) an explicit ``storageClass == "static"`` filter for the case clang gives
-    **no** mangled name (a C / ``extern "C"`` file-scope ``static``, whose
-    ``mangledName`` is absent or equals ``name``), which (1) cannot see. A
-    ``static`` **data member** (enclosing ``CXXRecordDecl``) has external linkage
-    and is kept by both. The mangled name is clang's own linkage verdict, so this
-    stays authoritative without re-deriving C++ linkage rules.
-    """
-    if kind != "VarDecl" or not name or not accessible:
-        return False
-    if node.get("constexpr"):
-        return False
-    if enclosing_kind not in _VARIABLE_SCOPE_KINDS:
-        return False
-    mangled = _mangled(node)
-    if _mangled_has_internal_linkage(mangled):
-        return False
-    # C / extern "C" file-scope static: no mangled name carries the marker, so
-    # filter on storageClass directly. A static data member is external, so keep
-    # it (its enclosing kind is a record).
-    if node.get("storageClass") == "static" and enclosing_kind != "CXXRecordDecl":
-        return False
-    # MSVC / clang-cl mangling (`?name@...`) has no Itanium internal-linkage
-    # marker, so a namespace-scope top-level `const` without `extern` — internal
-    # linkage in C++ — would slip through the marker check. Fall back to the
-    # language rule from the type (Codex review). A static data member is
-    # external (enclosing record), and `extern` overrides, so both are excluded.
-    if (
-        mangled.startswith("?")
-        and enclosing_kind != "CXXRecordDecl"
-        and node.get("storageClass") != "extern"
-        and not node.get("inline")
-        and (
-            _is_top_level_const(_signature(node))
-            or _is_top_level_const(_signature_desugared(node))
-        )
-    ):
-        return False
-    return True
-
-
-def _is_type_node(kind: str | None, name: str, accessible: bool) -> bool:
-    """Return ``True`` for a named, accessible record or enum declaration."""
-    return kind in ("CXXRecordDecl", "EnumDecl") and bool(name) and accessible
-
-
-def _is_typedef_node(kind: str | None, name: str, accessible: bool) -> bool:
-    """Return ``True`` for a named, accessible typedef or type-alias declaration."""
-    return kind in ("TypedefDecl", "TypeAliasDecl") and bool(name) and accessible
-
-
-def _is_concept_node(kind: str | None, name: str, accessible: bool) -> bool:
-    """Return ``True`` for a named, accessible C++20 concept declaration."""
-    return kind == "ConceptDecl" and bool(name) and accessible
 
 
 def _emit_node(
@@ -1169,10 +522,6 @@ def _walk(
         running_access=_initial_running_access(accessible, kind, node, access),
         enclosing_kind=kind,
     )
-
-
-def _location(file: str, line: int, origin_label: str) -> SourceLocation:
-    return SourceLocation(path=file, line=line, origin=origin_label)
 
 
 def _emit_concept(

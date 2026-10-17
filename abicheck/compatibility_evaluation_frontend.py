@@ -38,14 +38,16 @@ vs. ``api_request``, and the option spelling that goes with it), and
 ``compare`` kwargs against the equivalent
 :class:`~abicheck.workflows.service_requests.CompareRequest` through it:
 
-- :func:`compare_cli_inputs` -- the ``compare`` command's real kwargs
-  (``cli.py``'s option destinations: ``--contract``, ``--scope-public-headers``,
-  ``--policy``/``--policy-file``, ``--severity-preset``,
-  ``--public-symbol``, ``--suppress``), plus the set of parameters the user
-  *actually typed* (Click's ``ctx.get_parameter_source(...)`` is what a live
-  caller would pass), since several of those options carry a non-``None``
-  click default that must not be mistaken for a stated value.
-- :func:`compare_request_inputs` -- the same semantic fields off a typed
+- :func:`~abicheck.workflows.compare_input_adapters.compare_cli_inputs` -- the
+  ``compare`` command's real kwargs (``cli.py``'s option destinations:
+  ``--contract``, ``--scope-public-headers``, ``--policy``/``--policy-file``,
+  ``--severity-preset``, ``--public-symbol``, ``--suppress``), plus the set of
+  parameters the user *actually typed* (Click's
+  ``ctx.get_parameter_source(...)`` is what a live caller would pass), since
+  several of those options carry a non-``None`` click default that must not be
+  mistaken for a stated value.
+- :func:`~abicheck.workflows.compare_input_adapters.compare_request_inputs` --
+  the same semantic fields off a typed
   :class:`~abicheck.workflows.service_requests.CompareRequest`.
 - :meth:`ProjectCompatibilityInputs.from_build_config` -- the project's own
   ``.abicheck.yml`` (``buildsource.build_config.BuildConfig``), contributing
@@ -70,14 +72,12 @@ Phase 5's "same typed config" work, and the default flip is Phase 7. See
 
 from __future__ import annotations
 
-import hashlib
-import json
-from collections.abc import Collection, Hashable, Iterable, Mapping, Sequence
+from collections.abc import Hashable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from pathlib import Path
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, cast
 
 from .change_registry_types import Verdict
 from .compatibility_evaluation_config import (
@@ -114,18 +114,25 @@ from .compatibility_evaluation_wiring import (
     resolve_selected_packs,
 )
 from .contract_relevance_types import ContractMode, SelectorLayer, coerce_contract_mode
-from .model.change_catalog.registry import VALID_BASE_POLICIES
-from .model.execution_cache import memoized
 from .model.ownership_rules import OwnershipRules
-from .policy.classification import policy_kind_sets
 from .policy.gate_pack_fold import gate_exit_code_scheme
 from .policy.severity import SEVERITY_PRESETS, SeverityConfig, SeverityLevel
 from .policy.versioning_policy import (
     VersioningPolicy,
     built_in_default_versioning_policy,
 )
+from .workflows.compare_input_sources import (
+    PublicSymbolsList,
+    SuppressionSource,
+    _normalized_symbols,
+)
+from .workflows.evaluation_identities import (
+    SEVERITY_CATEGORY_FIELDS,
+    _digest,
+    builtin_policy_identity,
+    severity_preset_identity,
+)
 from .workflows.ownership_contract_inputs import (
-    header_dir_spellings,
     project_ownership_inputs,
     resolve_ownership_inputs,
 )
@@ -133,7 +140,6 @@ from .workflows.ownership_contract_inputs import (
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from .buildsource.build_config import BuildConfig
     from .policy_file import PolicyFile
-    from .workflows.service_requests import CompareRequest
 
 # Field names double as provenance-receipt keys. Declared once so the receipt
 # a consumer reads and the pack-route table in
@@ -151,15 +157,6 @@ GATE_PACKS_FIELD = "gate.packs"
 SUPPRESSIONS_FIELD = "suppressions"
 
 #: ``gate.severity.<category>`` field name per :class:`SeverityConfig` field.
-SEVERITY_CATEGORY_FIELDS: Mapping[str, str] = {
-    category: f"gate.severity.{category}"
-    for category in (
-        "abi_breaking",
-        "potential_breaking",
-        "quality_issues",
-        "addition",
-    )
-}
 
 
 class FrontEnd(StrEnum):
@@ -185,252 +182,8 @@ class FrontEnd(StrEnum):
 
 
 # --------------------------------------------------------------------------
-# D6 immutable identities for the built-in (file-less) base policy and
-# severity preset.
-# --------------------------------------------------------------------------
-
-
-def _digest(payload: object) -> str:
-    return hashlib.sha256(
-        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    ).hexdigest()
-
-
-def stated_policy_base(policy: Any, policy_file: Any) -> Any:
-    """*policy*, unless a ``policy_file`` overrode it with a value this
-    resolver would reject.
-
-    Both the MCP tool and the scan API validate ``policy`` **only when no
-    ``policy_file`` is given** -- the file takes precedence over the base
-    name -- so an unknown ``policy`` alongside a valid file is an accepted
-    request whose comparison completes under the file's own base. Handing
-    that ignored value to the resolver made :func:`builtin_policy_identity`
-    raise and killed an otherwise-finished run: a receipt turning a
-    successful comparison into a failure, the one thing a receipt must never
-    do (Codex review, found once on the MCP path and then again on the scan
-    path -- hence living here rather than in either front end).
-
-    Dropped rather than repaired: the value chose nothing, so naming it in
-    the receipt would be false either way, and the resolver reads the base
-    off ``policy_file`` exactly as the comparison did. With no file present
-    the value passes through unchanged, so a genuinely unknown policy still
-    fails loudly where the front end validates it.
-    """
-    if policy_file is None or policy is None:
-        return policy
-    return policy if policy in VALID_BASE_POLICIES else None
-
-
-@memoized
-def builtin_policy_identity(name: str) -> ImmutableIdentity:
-    """The replayable identity of a built-in ``--policy`` base.
-
-    ADR-049 D6 requires every selected base to carry an
-    ``id``/``version``/``sha256``, but a built-in base is code, not a file --
-    there are no bytes to digest. The digest is therefore taken over what the
-    base actually *is*: the four ``ChangeKind`` sets
-    :func:`~abicheck.checker_policy.policy_kind_sets` resolves it to. That
-    makes the identity detect the drift a digest exists to detect -- a
-    registry change that moves a kind between buckets changes the base's
-    meaning and changes its digest -- which a bare ``id``/``version`` pair
-    could not.
-
-    ``version`` is ``1`` for every built-in base: the built-ins are not
-    independently versioned artifacts, and the digest already distinguishes
-    two revisions of the same name.
-
-    Raises ``ValueError`` for a name outside
-    :data:`~abicheck.checker_policy.VALID_BASE_POLICIES` -- ``policy_kind_sets``
-    itself falls back to ``strict_abi`` for an unknown name, which is the
-    right behavior for classification (never crash a comparison over a typo)
-    but exactly wrong for an identity (it would mint a ``sdk_vendr`` identity
-    carrying ``strict_abi``'s digest).
-    """
-    if name not in VALID_BASE_POLICIES:
-        raise ValueError(
-            f"unknown base policy {name!r}: choose from {sorted(VALID_BASE_POLICIES)}"
-        )
-    breaking, api_break, compatible, risk = policy_kind_sets(name)
-    return ImmutableIdentity(
-        id=name,
-        version=1,
-        sha256=_digest(
-            {
-                "base_policy": name,
-                "breaking": sorted(k.value for k in breaking),
-                "api_break": sorted(k.value for k in api_break),
-                "compatible": sorted(k.value for k in compatible),
-                "risk": sorted(k.value for k in risk),
-            }
-        ),
-    )
-
-
-@memoized
-def severity_preset_identity(name: str) -> ImmutableIdentity:
-    """The replayable identity of a built-in ``--severity-preset``.
-
-    Same reasoning as :func:`builtin_policy_identity`: a preset is code, so
-    the digest is taken over the four category levels it resolves to.
-    The CLI spelling ``info-only`` and its programmatic alias ``info_only``
-    (``SEVERITY_PRESETS`` carries both keys for the same
-    :class:`~abicheck.policy.severity.SeverityConfig`) normalize to one canonical id,
-    so two equivalent semantic inputs resolve to an equal object (D7) instead
-    of to two identities that differ only in punctuation.
-    """
-    preset = SEVERITY_PRESETS.get(name)
-    if preset is None:
-        raise ValueError(
-            f"unknown severity preset {name!r}: choose from {sorted(SEVERITY_PRESETS)}"
-        )
-    canonical_id = name.replace("_", "-")
-    return ImmutableIdentity(
-        id=canonical_id,
-        version=1,
-        sha256=_digest(
-            {
-                "severity_preset": canonical_id,
-                **{
-                    category: getattr(preset, category).value
-                    for category in SEVERITY_CATEGORY_FIELDS
-                },
-            }
-        ),
-    )
-
-
-# --------------------------------------------------------------------------
 # Normalized, front-end-agnostic inputs.
 # --------------------------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class SuppressionSource:
-    """A selected ``--suppress`` file, already read and digested.
-
-    Kept separate from :class:`ExplicitCompatibilityInputs` so the resolver
-    itself stays I/O-free: :meth:`from_file` is the one place that touches
-    the filesystem, and a caller that already loaded the rule file (every
-    real front end does, well before configuration is resolved) can build
-    this from what it has.
-    """
-
-    path: str | None
-    sha256: str
-    rules: tuple[str, ...] = ()
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "rules", tuple(self.rules))
-
-    @classmethod
-    def from_loaded(
-        cls, suppression: Any, path: Any = None
-    ) -> SuppressionSource | None:
-        """Build one from a list a front end already loaded. ``None`` passes through.
-
-        The single-read rule: built from the list that really scored the run,
-        never a re-read of *path*, so the digest cannot describe content that
-        did not.
-
-        **The digest falls back to the rules' own content** when the list
-        carries no ``source_sha256``. That is not a rare case: a
-        programmatically constructed or merged
-        :class:`~abicheck.suppression.SuppressionList` has none, and every
-        front end that accepts one could hand it over. Taking ``""`` there --
-        which each of them previously did, by spelling this
-        ``getattr(...) or ""`` inline -- made :class:`SuppressionConfig`
-        reject the input and fail an otherwise-valid run (Codex review, found
-        on the scan path; the MCP path had it too). ``contract_context.
-        suppression_config_for`` already derived the fallback correctly, so
-        this is that rule shared rather than a fourth transcription of it:
-        the rules are persisted verbatim beside the digest, so a digest over
-        them authenticates exactly what a replay would re-read.
-        """
-        if suppression is None:
-            return None
-        from .contract_evidence_collect import content_digest
-
-        rules = tuple(suppression.rule_identities())
-        return cls(
-            path=str(path) if path is not None else None,
-            sha256=getattr(suppression, "source_sha256", None)
-            or content_digest(list(rules)),
-            rules=rules,
-        )
-
-    @classmethod
-    def from_file(
-        cls, path: str | Path, *, require_justification: bool = False
-    ) -> SuppressionSource:
-        """Read, digest, and summarize a real suppression file.
-
-        ``sha256`` is the digest ``SuppressionList.load`` captured over the
-        raw bytes it parsed (exact replay, ADR-049 D6); ``rules`` is
-        :meth:`~abicheck.suppression.SuppressionList.rule_identities`. One
-        read produces both, so they always describe the same content.
-        *require_justification* is forwarded to the loader so a front end
-        running with ``--require-justification`` gets the same hard error
-        here that it gets from its own load.
-        """
-        from .suppression import SuppressionList
-
-        file_path = Path(path)
-        loaded = SuppressionList.load(
-            file_path, require_justification=require_justification
-        )
-        # The digest comes from the same read that produced these rules --
-        # digesting the path separately could pair one content's hash with
-        # another's rules if the file changed in between (Codex review).
-        return cls(
-            path=str(file_path),
-            sha256=loaded.source_sha256 or "",
-            rules=loaded.rule_identities(),
-        )
-
-
-@dataclass(frozen=True)
-class PublicSymbolsList:
-    """A selected ``--public-symbols-list`` file, already read.
-
-    Kept apart from the inline ``--public-symbol`` values rather than merged
-    into them: flattening the two lost which symbols came from the file, so
-    the receipt for ``surface.explicit_scope`` named only ``--public-symbol``
-    and no path — even for a list-file-only invocation, which a replay then
-    had no way to reproduce (Codex review).
-    """
-
-    path: str | None
-    items: tuple[str, ...] = ()
-    #: The digest of the file's raw bytes. The items alone cannot stand in for
-    #: it: reading drops comments and blank lines, and the union that forms
-    #: ``surface.explicit_scope`` sorts and deduplicates, so a real edit to
-    #: this file can leave the item list identical -- exactly the drift
-    #: :class:`~abicheck.compatibility_evaluation_config.DigestedItems` says a
-    #: digest exists to catch (Codex review, fresh evidence).
-    sha256: str | None = None
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "items", tuple(self.items))
-
-    @classmethod
-    def from_file(cls, path: str | Path) -> PublicSymbolsList:
-        items, digest = read_symbols_list_with_digest(path)
-        return cls(path=str(path), items=items, sha256=digest)
-
-
-def _normalized_symbols(values: Iterable[str]) -> tuple[str, ...]:
-    """Inline symbol values, normalized the way the live run normalizes them.
-
-    :func:`collect_force_public_symbols` -- what the real comparison forces --
-    strips every value and drops blanks, so keeping ``--public-symbol ' foo '``
-    verbatim here resolved ``surface.explicit_scope`` to ``" foo "`` for a run
-    that actually forces ``"foo"``: an effective configuration, and a digest,
-    that misrepresent the run (Codex review, fresh evidence). Applied in the
-    input models rather than in one adapter so every front end -- and a caller
-    constructing the dataclass directly -- normalizes identically. The
-    list-file reader (:func:`read_symbols_list`) already does the same.
-    """
-    return tuple(stripped for value in values if (stripped := value.strip()))
 
 
 @dataclass(frozen=True)
@@ -735,65 +488,6 @@ def _resolve(
 #: from pack-vs-pack conflict detection), and several of the fields marked
 #: this way have no resolved value yet at the point the mapping is built.
 _STATED_ELSEWHERE: Hashable = "<stated by another layer>"
-
-
-def collect_force_public_symbols(
-    public_symbols: tuple[str, ...],
-    symbols_list: Path | None,
-    *,
-    already_read: PublicSymbolsList | None = None,
-) -> set[str]:
-    """Merge ``--public-symbol`` values with a ``--public-symbols-list`` file.
-
-    The list file is one symbol per line; blank lines and ``#`` comments are
-    ignored (à la abi-compliance-checker ``-symbols-list``). Inline trailing
-    comments are not stripped — a ``#`` must start the line to be a comment.
-
-    Lives here rather than in the CLI layer, so this module can build ``surface.explicit_scope`` from *both* sources without
-    importing a CLI-layer module. Reading only the inline tuple made a
-    list-file-only invocation resolve to no explicit scope at all, and a
-    mixed one silently drop every symbol the file supplied (Codex review).
-
-    *already_read* lets a caller that will *also* build a receipt from this
-    file supply the one read both need. Reading it twice pairs the receipt's
-    digest with content that may not be what scored the run, and lets a file
-    deleted mid-run fail an otherwise-finished comparison during receipt
-    generation (Codex review, fresh evidence) -- the same single-read rule
-    the policy, suppression, project-config, and required-symbol sources
-    already follow.
-    """
-    out: set[str] = {s.strip() for s in public_symbols if s.strip()}
-    if already_read is not None:
-        out.update(already_read.items)
-    elif symbols_list is not None:
-        out.update(read_symbols_list(symbols_list))
-    return out
-
-
-def read_symbols_list(path: str | Path) -> tuple[str, ...]:
-    """The symbols named by a ``--public-symbols-list`` file, in file order."""
-    return _parse_symbols_list(Path(path).read_bytes())
-
-
-def read_symbols_list_with_digest(path: str | Path) -> tuple[tuple[str, ...], str]:
-    """The symbols a list file names, plus the digest of the bytes they were
-    parsed from.
-
-    One read produces both, the same rule ``PolicyFile.load``/
-    ``SuppressionList.load`` follow: digesting the path in a separate read
-    could pair one content's hash with another's items. The digest is over
-    the raw bytes, so a line-ending-only change is drift, not a no-op.
-    """
-    raw = Path(path).read_bytes()
-    return _parse_symbols_list(raw), hashlib.sha256(raw).hexdigest()
-
-
-def _parse_symbols_list(raw: bytes) -> tuple[str, ...]:
-    return tuple(
-        line
-        for source in raw.decode("utf-8").splitlines()
-        if (line := source.strip()) and not line.startswith("#")
-    )
 
 
 def _policy_file_override_slugs(policy_file: PolicyFile | None) -> dict[str, Verdict]:
@@ -1690,7 +1384,8 @@ def _overrides_provenance(
 
 
 # --------------------------------------------------------------------------
-# Front-end adapters.
+# Front-end selection. The adapters that build an ``ExplicitCompatibilityInputs``
+# from a front end's own inputs live in ``workflows/compare_input_adapters.py``.
 # --------------------------------------------------------------------------
 
 #: ``compare`` kwargs that carry a non-``None`` click default, so their value
@@ -1698,162 +1393,3 @@ def _overrides_provenance(
 #: A live Click caller resolves these with
 #: ``ctx.get_parameter_source(name) is ParameterSource.COMMANDLINE``.
 DEFAULTED_COMPARE_PARAMETERS: frozenset[str] = frozenset({"policy"})
-
-
-def _load_policy_file(path: str | Path) -> PolicyFile:
-    """Load a ``--policy-file`` document from a path an invocation named."""
-    from .policy_file import PolicyFile as _PolicyFile
-
-    return _PolicyFile.load(Path(path))
-
-
-def compare_cli_inputs(
-    kwargs: Mapping[str, Any],
-    *,
-    explicit_parameters: Collection[str] = (),
-    policy_file: PolicyFile | None = None,
-    suppression: SuppressionSource | None = None,
-    policy_base_option: str | None = None,
-    policy_base_path: str | None = None,
-    policy_base_sha256: str | None = None,
-    public_symbols_list: PublicSymbolsList | None = None,
-) -> ExplicitCompatibilityInputs:
-    """Normalize the ``compare`` command's real kwargs into resolver inputs.
-
-    *kwargs* is the command's own parameter mapping (``cli.py``'s option
-    destinations, verbatim). *explicit_parameters* names the parameters the
-    user actually typed; it only matters for
-    :data:`DEFAULTED_COMPARE_PARAMETERS`, whose click defaults are
-    indistinguishable from a stated value. Every other option already uses
-    ``None``/``()`` for "not given", so it is read directly.
-
-    *policy_file* and *suppression* let a caller pass what it already loaded
-    (the CLI loads both long before configuration would be resolved). Left
-    unset, they are loaded from the ``policy_file_path``/``suppress`` kwargs
-    the command itself carries -- silently ignoring a path the invocation
-    really named would make the resolved configuration misrepresent the run.
-
-    *policy_base_option* names the option that selected ``policy`` when it was
-    not ``--policy``: ``compare`` switches an untouched ``--policy`` to
-    ``plugin_abi`` for a ``--required-symbol``
-    contract, and that value is read as stated regardless of
-    *explicit_parameters* (it was not typed, but it was chosen -- see
-    :attr:`ExplicitCompatibilityInputs.policy_base_option`).
-    *policy_base_path*/*policy_base_sha256* identify the list file when that
-    option is the file form.
-
-    *public_symbols_list* is the same "pass what you already read" affordance
-    (re-reading could pair the receipt's digest with content that did not
-    score the run). It stays its own :class:`PublicSymbolsList`, so the
-    receipt names the file; :func:`_explicit_scope` forms the union the live
-    CLI's :func:`collect_force_public_symbols` produces.
-    """
-    typed = set(explicit_parameters)
-
-    def _defaulted(name: str) -> Any:
-        return kwargs.get(name) if name in typed else None
-
-    symbols_list_path = kwargs.get("public_symbols_list")
-    if public_symbols_list is None and symbols_list_path is not None:
-        public_symbols_list = PublicSymbolsList.from_file(symbols_list_path)
-    symbols_list = public_symbols_list
-    if policy_file is None and kwargs.get("policy_file_path") is not None:
-        policy_file = _load_policy_file(kwargs["policy_file_path"])
-    if suppression is None and kwargs.get("suppress") is not None:
-        suppression = SuppressionSource.from_file(
-            kwargs["suppress"],
-            require_justification=bool(kwargs.get("require_justification")),
-        )
-    return ExplicitCompatibilityInputs(
-        contract_mode=kwargs.get("contract_mode"),
-        # No CLI spelling since one-comparison-product Phase 9b: the
-        # project tier (`scope.public`) is the CLI's only legacy-alias input.
-        policy_base=(
-            kwargs.get("policy") if policy_base_option else _defaulted("policy")
-        ),
-        policy_base_option=policy_base_option,
-        policy_base_path=policy_base_path,
-        policy_base_sha256=policy_base_sha256,
-        policy_file=policy_file,
-        public_symbols=tuple(kwargs.get("public_symbols") or ()),
-        public_symbols_list=symbols_list,
-        suppression=suppression,
-        severity_preset=kwargs.get("severity_preset"),
-        severity_abi_breaking=kwargs.get("severity_abi_breaking"),
-        severity_potential_breaking=kwargs.get("severity_potential_breaking"),
-        severity_quality_issues=kwargs.get("severity_quality_issues"),
-        severity_addition=kwargs.get("severity_addition"),
-        pack_paths=tuple(str(p) for p in kwargs.get("pack_paths") or ()),
-        header_dirs=header_dir_spellings(kwargs.get("headers") or ()),
-    )
-
-
-def compare_request_inputs(
-    request: CompareRequest,
-    *,
-    policy_file: PolicyFile | None = None,
-    suppression: SuppressionSource | None = None,
-) -> ExplicitCompatibilityInputs:
-    """Normalize a typed :class:`~abicheck.workflows.service_requests.CompareRequest`.
-
-    Every field is read as *stated* unless ``request.stated_settings`` names
-    the stated ones (then an unnamed ``policy`` is the built-in default, as
-    for the CLI); unlike the CLI, the typed request has no
-    "unset" representation for ``policy`` (defaults to ``"strict_abi"``) or
-    ``scope_public`` (defaults to ``True``) -- a caller constructing the
-    request chose those values, whether deliberately or by accepting the
-    dataclass default. ``checker.compare`` treats the same two the same way
-    and for the same reason (see ``_apply_contract_evaluation_shadow``'s
-    ``scope_public_headers_is_explicit=True``).
-
-    ``severity_preset`` forwards too, else this receipt's ``gate.*`` block
-    could disagree with ``CompareResult.exit_decision``; with no
-    per-category or pack field it resolves like a CLI run stating none.
-    ``policy_file_path``/``suppress`` are loaded from the request unless the
-    caller passes them already loaded. ``policy_base`` goes through
-    :func:`stated_policy_base` (an unknown name beside a valid file is
-    accepted; the file wins). ADR-075 D7: the new side's ``-H`` directories
-    and ``InputSpec.ownership`` are the request's stated ownership inputs.
-    """
-    if policy_file is None and request.policy_file_path is not None:
-        policy_file = _load_policy_file(request.policy_file_path)
-    if suppression is None and request.suppress is not None:
-        suppression = SuppressionSource.from_file(request.suppress)
-    return ExplicitCompatibilityInputs(
-        contract_mode=request.contract_mode,
-        # `scope_public=True` is the field's own default and, since ADR-049
-        # Phase 7, states no domain: the evidence-adaptive built-in default
-        # decides. Only `False` (the legacy alias for `all`) is a statement.
-        scope_public_headers=None if request.scope_public else False,
-        policy_base=(
-            stated_policy_base(request.policy, policy_file)
-            if request.stated_settings is None or "policy" in request.stated_settings
-            else None
-        ),
-        policy_file=policy_file,
-        public_symbols=tuple(sorted(request.force_public_symbols or ())),
-        suppression=suppression,
-        severity_preset=request.severity_preset,
-        pack_paths=tuple(str(p) for p in request.pack_paths),
-        header_dirs=header_dir_spellings(
-            (*request.new.headers, *request.new.public_header_dirs)
-        ),
-        ownership=getattr(request.new.ownership, "rules", None),
-    )
-
-
-def compatibility_config_from_compare_request(
-    request: CompareRequest,
-    *,
-    policy_file: PolicyFile | None = None,
-    suppression: SuppressionSource | None = None,
-    project: ProjectCompatibilityInputs | None = None,
-) -> CompatibilityEvaluationConfig:
-    """One-call adapter: typed request -> resolved effective configuration."""
-    return resolve_compatibility_evaluation_config(
-        front_end=FrontEnd.API,
-        explicit=compare_request_inputs(
-            request, policy_file=policy_file, suppression=suppression
-        ),
-        project=project,
-    )

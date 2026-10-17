@@ -339,7 +339,7 @@ class TestCompareRequestContractContextGateReceipt:
         monkeypatched to raise, so this only passes if the receipt path
         builds its `SuppressionSource` from the already-loaded
         `SuppressionList` (`.from_loaded`) instead."""
-        from abicheck.compatibility_evaluation_frontend import SuppressionSource
+        from abicheck.workflows.compare_input_sources import SuppressionSource
 
         def _boom(*args: object, **kwargs: object) -> None:
             raise AssertionError(
