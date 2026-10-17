@@ -310,11 +310,14 @@ tests/test_dump_request_from_cli.py
 tests/test_dump_resolved_execution_context.py
 tests/test_dump_source_only_execution.py
 tests/test_dumper_clang.py
+tests/test_dumper_clang_extern_c_identity.py
 tests/test_dumper_clang_vtable.py
+tests/test_dumper_clang_vtable_redecl.py
 tests/test_dumper_contract_wiring.py
 tests/test_dumper_coverage.py
 tests/test_dumper_hybrid.py
 tests/test_dumper_manifest.py
+tests/test_dumper_manifest_semantic_ir.py
 tests/test_dumper_members.py
 tests/test_dumper_presence_semantic_ir.py
 tests/test_dumper_scoping.py
@@ -406,7 +409,6 @@ tests/test_golden_output.py
 tests/test_golden_review_digest.py
 tests/test_golden_root_cause.py
 tests/test_graph_entity_identity.py
-tests/test_graph_identity_invariants.py
 tests/test_graph_observed_persistence.py
 tests/test_graph_reconcile.py
 tests/test_graph_reconcile_candidate_index.py
@@ -510,7 +512,6 @@ tests/test_pair_evidence_shared.py
 tests/test_parallel_safety.py
 tests/test_param_kind_enum_identity.py
 tests/test_param_kind_fact.py
-tests/test_param_kind_fact_integration.py
 tests/test_parameter_facts_cutover.py
 tests/test_pattern_audit_scenarios.py
 tests/test_pattern_modulation_disclosure.py
@@ -705,6 +706,7 @@ tests/test_template_graph_identity.py
 tests/test_template_graph_value_decls.py
 tests/test_tier_accuracy_gate.py
 tests/test_tu_merge.py
+tests/test_type_indirection.py
 tests/test_type_symbol_disambiguation.py
 tests/test_typed_api_gate_options.py
 tests/test_typed_dump_request.py
@@ -767,7 +769,6 @@ tests/unit/report/test_review_sections_html.py
 tests/unit/report/test_section_notes.py
 tests/unit/storage/test_bundle_facts_generation_drift.py
 tests/unit/storage/test_decode_fast_path.py
-tests/unit/storage/test_entity_id_domain_bridge.py
 tests/unit/storage/test_generation_drift_notice.py
 tests/unit/storage/test_import_baseline_set.py
 tests/unit/storage/test_import_bundle_facts.py
