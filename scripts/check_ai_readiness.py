@@ -343,7 +343,7 @@ FILE_SIZE_GRANDFATHERED: dict[str, int] = {
     "action/report_query.py": 948,
     "scripts/benchmark_scaling.py": 1953,
     "scripts/bench_release_memory.py": 881,
-    "scripts/check_architecture.py": 1728,
+    "scripts/check_architecture.py": 1720,
     "scripts/check_docs_contract.py": 1423,
     "scripts/check_fp_rate.py": 1880,
     "scripts/check_header_graph_perf.py": 1547,
