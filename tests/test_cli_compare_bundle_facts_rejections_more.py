@@ -31,7 +31,6 @@ rejection tests this file continues.
 from __future__ import annotations
 
 import shutil
-import subprocess
 from pathlib import Path
 
 import click
@@ -59,6 +58,31 @@ _STUB_BUNDLE_FACTS_JSON = (
 _MALFORMED_BUT_CLASSIFIABLE_JSON = (
     '{"artifact_type": "abicheck.bundle-facts", "schema_version": 2}'
 )
+
+
+def _write_deb_without_data_tar(path: Path) -> None:
+    """Write a deb-shaped ar archive with no ``data.tar.*`` member, byte for byte.
+
+    Not built with the host's ``ar``: the member layout is tool-specific. An
+    archive that carries a symbol index can start with that index instead of
+    ``debian-binary`` (deb-format(5)), and then it is not recognised as a .deb
+    at all. The macOS CI leg of this test took that not-a-deb path. Writing the
+    format here keeps the fixture identical on every host; ``ar`` is still
+    needed, because extraction shells out to it.
+    """
+    out = bytearray(b"!<arch>\n")
+    for name, body in ((b"debian-binary", b"2.0\n"), (b"dummy.txt", b"dummy\n")):
+        out += (
+            name.ljust(16)
+            + b"0".ljust(12)
+            + b"0".ljust(6)
+            + b"0".ljust(6)
+            + b"644".ljust(8)
+            + str(len(body)).encode().ljust(10)
+            + b"`\n"
+            + body
+        )
+    path.write_bytes(bytes(out))
 
 
 def _invoke(*args: str) -> tuple[int, str]:
@@ -271,22 +295,12 @@ class TestCompareOldBundleFactsEarlyRejections:
         # concise operational error. A .deb (ar archive) with no
         # data.tar.* member reliably reproduces this -- `ar x` succeeds,
         # DebExtractor._deb_extract raises a real SnapshotError.
-        ar = shutil.which("ar")
-        if ar is None:
+        if shutil.which("ar") is None:
             pytest.skip("ar is not available")
         facts_path = tmp_path / "old.bundlefacts.json"
         facts_path.write_text(_STUB_BUNDLE_FACTS_JSON)
-        staging = tmp_path / "staging"
-        staging.mkdir()
-        (staging / "debian-binary").write_text("2.0\n")
-        (staging / "dummy.txt").write_text("dummy\n")
         fake_deb = tmp_path / "fake.deb"
-        subprocess.run(
-            [ar, "rcs", str(fake_deb), "debian-binary", "dummy.txt"],
-            cwd=staging,
-            check=True,
-            capture_output=True,
-        )
+        _write_deb_without_data_tar(fake_deb)
 
         code, out = _invoke(
             "compare",

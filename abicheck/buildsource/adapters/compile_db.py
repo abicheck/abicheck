@@ -26,6 +26,7 @@ from pathlib import Path
 
 from ...build_context import _extract_flags, load_compile_db
 from ..build_evidence import BuildEvidence, CompileUnit
+from ..link_attribution import normalize_source_path
 from ..redaction import DEFAULT_REDACTION, RedactionPolicy
 from .adapter_shared import (
     compile_unit_id,
@@ -57,13 +58,17 @@ class CompileDbAdapter:
         for entry in entries:
             argv = list(entry.arguments)
             ctx = _extract_flags(argv, entry.directory)
-            source = str(entry.file)
+            # POSIX separators whatever OS collected the database: the evidence
+            # may be compared on another OS, and a native "D:\...\foo.cpp" never
+            # matches the "/"-keyed graph paths built from it.
+            source = normalize_source_path(str(entry.file))
+            directory = normalize_source_path(str(entry.directory))
             abi_flags = extract_abi_relevant_flags(argv)
             red_argv = self.redaction.argv(argv)
             cu = CompileUnit(
                 id=compile_unit_id(self.redaction.path(source), red_argv),
                 source=self.redaction.path(source),
-                directory=self.redaction.path(str(entry.directory)),
+                directory=self.redaction.path(directory),
                 argv=red_argv,
                 language=effective_language(argv, source),
                 standard=ctx.language_standard or "",
