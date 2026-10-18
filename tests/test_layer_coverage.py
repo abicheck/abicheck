@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 
+import pytest
 from click.testing import CliRunner
 
 from abicheck.buildsource import pack_io
@@ -633,13 +634,25 @@ def test_collect_evidence_empty_pack_when_no_adapters(tmp_path):
     assert l3.status is CoverageStatus.NOT_COLLECTED
 
 
-def test_collect_evidence_failed_compile_db_records_extractor(tmp_path):
-    bad = tmp_path / "missing.json"
-    _merged, extractors = _run_default_adapters(compile_db=bad)
-    # The adapter failure is recorded as a diagnostic/extractor status, not a crash.
-    assert any(
-        e.name == "compile_commands" and e.status == "failed" for e in extractors
-    )
+@pytest.mark.parametrize(
+    "compile_db_text", [None, "[{not json"], ids=["missing", "malformed"]
+)
+def test_run_compile_db_failure_records_failed_extractor(tmp_path, compile_db_text):
+    """An unreadable or unparseable compile DB is a failed ``compile_commands``
+    extractor with a diagnostic: no crash, and no empty success. Drives the
+    production ``inline._run_compile_db`` directly."""
+    from abicheck.buildsource.build_config import BuildConfig
+    from abicheck.buildsource.inline import _run_compile_db
+
+    compile_db = tmp_path / "compile_commands.json"
+    if compile_db_text is not None:
+        compile_db.write_text(compile_db_text)
+    merged = BuildEvidence()
+    extractors: list[ExtractorRecord] = []
+    _run_compile_db(compile_db, BuildConfig().system, merged, extractors, None)
+    assert [(e.name, e.status) for e in extractors] == [("compile_commands", "failed")]
+    assert merged.compile_units == []
+    assert merged.diagnostics[0].startswith("compile_commands: ")
 
 
 def test_collect_evidence_ninja_compdb(tmp_path):

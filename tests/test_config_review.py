@@ -17,6 +17,7 @@ import inspect
 import json
 from pathlib import Path
 
+import pytest
 from click.testing import CliRunner
 
 from abicheck.cli import main
@@ -69,6 +70,31 @@ def _write_identical(tmp_path: Path) -> tuple[Path, Path]:
     old_p.write_text(snapshot_to_json(snap), encoding="utf-8")
     new_p.write_text(snapshot_to_json(snap), encoding="utf-8")
     return old_p, new_p
+
+
+def _func(name: str, mangled: str) -> Function:
+    return Function(
+        name=name, mangled=mangled, return_type="int", visibility=Visibility.PUBLIC
+    )
+
+
+def _write_release(
+    root: Path, members: dict[str, tuple[list[Function], list[Function]]]
+) -> tuple[Path, Path]:
+    """One ``<lib>.json`` snapshot per member on each side of a release directory."""
+    old_dir, new_dir = root / "old", root / "new"
+    old_dir.mkdir(parents=True)
+    new_dir.mkdir()
+    for lib, (old_funcs, new_funcs) in members.items():
+        for side_dir, version, funcs in (
+            (old_dir, "1.0", old_funcs),
+            (new_dir, "2.0", new_funcs),
+        ):
+            snap = AbiSnapshot(library=f"{lib}.so", version=version, functions=funcs)
+            (side_dir / f"{lib}.json").write_text(
+                snapshot_to_json(snap), encoding="utf-8"
+            )
+    return old_dir, new_dir
 
 
 # ── §3 demangle tri-state ──────────────────────────────────────────────────
@@ -355,15 +381,22 @@ class TestCompareReleaseDefaults:
         out = CliRunner().invoke(main, ["compare", "--help-all"]).output
         assert "auto-detect" in out
 
-    def test_severity_options_present(self):
-        out = CliRunner().invoke(main, ["compare", "--help-all"]).output
-        # `compare` now drives directory/package (release) comparisons too, and
-        # --severity-preset is the whole of its CLI severity surface: the four
-        # per-category overrides were hidden duplicates of `.abicheck.yml`'s
-        # own `severity:` block and have been removed, so the config file is
-        # their one spelling.
-        assert "--severity-preset" in out
-        assert "--severity-abi-breaking" not in out
+    def test_severity_options_present(self, tmp_path):
+        # --severity-preset is the whole of `compare`'s CLI severity surface:
+        # the preset is accepted and runs, while the four per-category
+        # overrides (hidden duplicates of `.abicheck.yml`'s `severity:` block,
+        # since removed) are unknown options, a usage error (exit 64).
+        old_p, new_p = _write_identical(tmp_path)
+        accepted = CliRunner().invoke(
+            main, ["compare", str(old_p), str(new_p), "--severity-preset", "default"]
+        )
+        assert accepted.exit_code == 0
+        retired = CliRunner().invoke(
+            main,
+            ["compare", str(old_p), str(new_p), "--severity-abi-breaking", "error"],
+        )
+        assert retired.exit_code == 64
+        assert "No such option" in retired.output
 
 
 # ── §5 compare-release severity-aware exit aggregation ──────────────────────
@@ -417,6 +450,30 @@ class TestCompareReleaseSeverityExit:
         )
         # Removed C++ symbol == BREAKING == legacy exit 4.
         assert result.exit_code == 4
+
+    @pytest.mark.parametrize(
+        "member_order",
+        [("libbad", "libok"), ("libok", "libbad")],
+        ids=["bad-first", "ok-first"],
+    )
+    def test_worst_member_sets_the_release_exit(self, tmp_path, member_order):
+        # Oracle: docs/reference/exit-codes.md. Under the default preset a
+        # BREAKING member (abi_breaking == error) exits 4 and the clean member
+        # does not soften it; info-only downgrades that break to 0. The member
+        # order must not change either answer.
+        removed = _func("foo", "_Z3foov")
+        members = {
+            "libbad": ([removed], []),
+            "libok": ([removed], [removed]),
+        }
+        old_dir, new_dir = _write_release(
+            tmp_path, {lib: members[lib] for lib in member_order}
+        )
+        base = ["compare", str(old_dir), str(new_dir)]
+        default = CliRunner().invoke(main, [*base, "--severity-preset", "default"])
+        assert default.exit_code == 4
+        info_only = CliRunner().invoke(main, [*base, "--severity-preset", "info-only"])
+        assert info_only.exit_code == 0
 
 
 # ── §2.3 --severity-* respected under --used-by/--required-symbol scoping ──
@@ -745,66 +802,66 @@ class TestComputeReleaseSeverityExitCode:
 
         assert release_severity_exit_code([], _gate("info-only")) == 0
 
-    def test_aggregates_breaking_change(self):
-        from abicheck.workflows.release_exit_fold import release_severity_exit_code
-
-        # default preset: abi_breaking == error -> exit 4.
-        gate = _gate("default")
-        assert release_severity_exit_code([_member(_breaking_diff(), gate)], gate) == 4
-        # info-only downgrades everything below error -> exit 0.
-        gate = _gate("info-only")
-        assert release_severity_exit_code([_member(_breaking_diff(), gate)], gate) == 0
-
 
 class TestReleaseSeverityPolicyAndGlobal:
     """P2: per-library policy-file kind overrides; P1: bundle/matrix folding."""
 
-    def test_per_library_uses_effective_kind_sets(self):
-        from abicheck.checker import Verdict
-        from abicheck.policy_file import PolicyFile
-        from abicheck.workflows.release_exit_fold import release_severity_exit_code
-
-        diff = _breaking_diff()
-        # A policy file that reclassifies the (normally breaking) change as
-        # compatible. Proves the exit consults the per-library effective kind
-        # sets (policy.evaluate.effective_kind_sets), not the canonical sets.
-        diff.policy_file = PolicyFile(
-            overrides={c.kind: Verdict.COMPATIBLE for c in diff.changes}
+    def test_per_library_policy_override_changes_the_release_exit(self, tmp_path):
+        # Oracle: docs/use/policies.md, `ignore` -> COMPATIBLE -> exit 0. The
+        # same override must reach a release exit as it does a one-library
+        # compare. Control: with no policy file the removal still breaks.
+        old_dir, new_dir = _write_release(
+            tmp_path, {"libbad": ([_func("foo", "_Z3foov")], [])}
         )
-        gate = _gate("default")
-        # Control: the same diff without the override does gate.
-        assert release_severity_exit_code([_member(_breaking_diff(), gate)], gate) == 4
-        assert release_severity_exit_code([_member(diff, gate)], gate) == 0
+        policy = tmp_path / "policy.yaml"
+        policy.write_text("overrides:\n  func_removed: ignore\n", encoding="utf-8")
+        base = ["compare", str(old_dir), str(new_dir), "--severity-preset", "default"]
+        assert CliRunner().invoke(main, base).exit_code == 4
+        overridden = CliRunner().invoke(main, [*base, "--policy", str(policy)])
+        assert overridden.exit_code == 0
 
-    def test_per_library_honours_frozen_namespace_floor(self):
-        """Codex review on #549: a policy-file override that demotes a kind
-        must not silently drop a frozen-namespace-tagged finding below its raw
-        severity — this is the same floor annotation_report_entries() now honours
-        (via result.policy_file), so the release exit code must match it."""
-        from abicheck.checker import Change, ChangeKind, DiffResult, Verdict
-        from abicheck.policy_file import PolicyFile
-        from abicheck.workflows.release_exit_fold import release_severity_exit_code
-
-        c = Change(
-            ChangeKind.FUNC_REMOVED,
-            "_Z3foov",
-            "removed: foo",
-            frozen_namespace_violation="**::detail::r1::*",
+    @pytest.mark.parametrize(
+        ("frozen", "expected_exit"),
+        [
+            # The removed symbol sits in a frozen namespace: the floor keeps
+            # the break at its raw BREAKING exit despite the override.
+            ("**::detail::r1::*", 4),
+            # No frozen match: the override is free to demote it to exit 0.
+            ("**::other::*", 0),
+            # No frozen namespace at all (the non-vacuity control).
+            (None, 0),
+        ],
+        ids=["frozen-match", "frozen-miss", "no-frozen"],
+    )
+    def test_frozen_namespace_floor_survives_the_override(
+        self, tmp_path, frozen, expected_exit
+    ):
+        # Codex review on #549: a policy-file override that demotes a kind must
+        # not drop a frozen-namespace finding below its raw severity. Oracle:
+        # docs/use/policies.md ("the frozen-namespace verdict floor still take
+        # precedence"); the pattern is matched against the `::` qualified name.
+        old_dir, new_dir = _write_release(
+            tmp_path,
+            {"libfz": ([_func("ns::detail::r1::foo", "_ZN2ns6detail2r13fooEv")], [])},
         )
-        pf = PolicyFile(overrides={ChangeKind.FUNC_REMOVED: Verdict.COMPATIBLE})
-        diff = DiffResult(
-            old_version="1.0",
-            new_version="2.0",
-            library="libtest.so",
-            changes=[c],
-            verdict=Verdict.BREAKING,
-            policy_file=pf,
+        text = "overrides:\n  func_removed: ignore\n"
+        if frozen is not None:
+            text = f"frozen_namespaces:\n  - '{frozen}'\n" + text
+        policy = tmp_path / "policy.yaml"
+        policy.write_text(text, encoding="utf-8")
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare",
+                str(old_dir),
+                str(new_dir),
+                "--severity-preset",
+                "default",
+                "--policy",
+                str(policy),
+            ],
         )
-        # default preset: abi_breaking == error. Without the policy_file floor
-        # this would wrongly exit 0 (the override demotes FUNC_REMOVED to
-        # COMPATIBLE); the frozen guard must keep it at its raw BREAKING exit.
-        gate = _gate("default")
-        assert release_severity_exit_code([_member(diff, gate)], gate) == 4
+        assert result.exit_code == expected_exit
 
     def test_format_release_junit_forwards_severity_config(self):
         """Codex review on #549: `compare-release --format junit` with a
@@ -898,17 +955,27 @@ class TestReleaseSeverityPolicyAndGlobal:
         matrix = _breaking_diff()
         assert fold_release_global_severity(0, None, matrix, _gate("default")) == 4
 
-    def test_fold_bundle_break_raises_exit(self):
-        import types
-
+    def test_fold_bundle_break_raises_exit(self, tmp_path):
+        from abicheck.bundle import BundleDiffResult, BundleFinding
+        from abicheck.checker import ChangeKind
         from abicheck.workflows.release_exit_fold import fold_release_global_severity
 
-        change = _breaking_diff().changes[0]
-        finding = types.SimpleNamespace(to_change=lambda: change)
-        bundle = types.SimpleNamespace(
-            bundle_findings=[finding], policy="strict_abi", policy_file=None
+        # A real bundle result (no stubs) whose only finding is bundle-level:
+        # every member is clean, so the base code is 0. Oracle: the
+        # docs/reference/exit-codes.md severity table, as for a per-library break.
+        bundle = BundleDiffResult(
+            old_root=tmp_path / "old",
+            new_root=tmp_path / "new",
+            bundle_findings=[
+                BundleFinding(
+                    kind=ChangeKind.FUNC_REMOVED,
+                    symbol="_Z3foov",
+                    description="removed: foo",
+                )
+            ],
         )
         assert fold_release_global_severity(0, bundle, None, _gate("default")) == 4
+        assert fold_release_global_severity(0, bundle, None, _gate("info-only")) == 0
 
     def test_fold_bundle_honors_the_bundle_result_own_policy(self):
         # G38 stabilization Phase 10 (Codex review, fresh evidence): this

@@ -281,12 +281,12 @@ class TestSmallHelpers:
     def test_resolve_dump_depth_maps_each_depth(
         self, depth: str, expected: str
     ) -> None:
-        from abicheck.cli_dump_helpers import resolve_dump_depth
+        from abicheck.cli_dump_depth import resolve_dump_depth
 
         assert resolve_dump_depth(depth, "source-target") == expected
 
     def test_resolve_dump_depth_no_preset_returns_default_mode(self) -> None:
-        from abicheck.cli_dump_helpers import resolve_dump_depth
+        from abicheck.cli_dump_depth import resolve_dump_depth
 
         # No --depth preset → the command's default collect mode is returned.
         assert resolve_dump_depth(None, "build") == "build"

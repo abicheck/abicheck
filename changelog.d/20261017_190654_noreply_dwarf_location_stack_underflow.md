@@ -10,5 +10,5 @@
   anonymous member, the enclosing record's layout is not recorded). A guessed offset
   could manufacture a field-offset break or hide a real one. Well-formed expressions
   are unchanged. Because the same input now records a different fact, the extractor
-  generation is bumped from 3 to 4, so cached packages from older builds are reported
-  as generation drift rather than reused.
+  generation is bumped from 3 to 4, so cached packages from older builds are still read,
+  with a generation-drift notice.

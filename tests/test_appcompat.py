@@ -27,6 +27,8 @@ their owners:
 
 from __future__ import annotations
 
+import inspect
+import re
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -47,6 +49,7 @@ from abicheck.workflows.consumer_scope import (
     scope_diff_to_consumer_facts,
 )
 from abicheck.workflows.consumer_scope_standalone import check_appcompat
+from abicheck.workflows.dump import native as dump_native
 
 # ---------------------------------------------------------------------------
 # Public data structures and facade surface
@@ -142,14 +145,30 @@ class TestParseAppRequirements:
 # ---------------------------------------------------------------------------
 
 _STANDALONE = "abicheck.workflows.consumer_scope_standalone"
+# check_appcompat hands run_dump positional and keyword arguments; binding
+# them against the public signature makes the assertions name-based, so a
+# change to call style or argument order is not a change to the contract.
+_RUN_DUMP_SIGNATURE = inspect.signature(dump_native.run_dump)
 
 
-def _boundary(diff, scoped=None, fmt="elf"):
-    """Patches for the dump/compare boundary plus the delegated scoping."""
+def _elf_stub(path):
+    """A file the format detector reads as ELF. Only the magic is needed:
+    the dump boundary is mocked, so nothing ever parses it."""
+    path.write_bytes(b"\x7fELF" + b"\x00" * 60)
+    return path
+
+
+def _paths(tmp_path):
     return (
-        patch(
-            "abicheck.workflows.input_resolution.detect_binary_format", return_value=fmt
-        ),
+        tmp_path / "app",
+        _elf_stub(tmp_path / "old.so"),
+        _elf_stub(tmp_path / "new.so"),
+    )
+
+
+def _boundary(diff, scoped=None):
+    """Mocks at the dump/compare boundary plus the delegated scoping."""
+    return (
         patch("abicheck.workflows.dump.native.run_dump", return_value=MagicMock()),
         patch("abicheck.workflows.compare_policy.compare_snapshots", return_value=diff),
         patch(
@@ -160,75 +179,91 @@ def _boundary(diff, scoped=None, fmt="elf"):
     )
 
 
-def _paths(tmp_path):
-    return tmp_path / "app", tmp_path / "old.so", tmp_path / "new.so"
-
-
-def _run_dump_calls(tmp_path, **kwargs):
-    diff = DiffResult(old_version="1", new_version="2", library="libfoo")
-    detect, run_dump, compare, scope = _boundary(diff)
-    with detect, run_dump as mock_run_dump, compare, scope:
-        check_appcompat(*_paths(tmp_path), **kwargs)
-    assert mock_run_dump.call_count == 2
-    return mock_run_dump.call_args_list
+def _dumped_sides(tmp_path, **kwargs):
+    """Run check_appcompat and return the old-side and new-side run_dump
+    arguments, bound by parameter name."""
+    run_dump, compare, scope = _boundary(
+        DiffResult(old_version="1", new_version="2", library="libfoo")
+    )
+    app, old_lib, new_lib = _paths(tmp_path)
+    with run_dump as mock_run_dump, compare, scope:
+        check_appcompat(app, old_lib, new_lib, **kwargs)
+    old_call, new_call = mock_run_dump.call_args_list
+    old, new = (
+        _RUN_DUMP_SIGNATURE.bind(*call.args, **call.kwargs).arguments
+        for call in (old_call, new_call)
+    )
+    assert (old["path"], new["path"]) == (old_lib, new_lib)
+    return old, new
 
 
 class TestCheckAppcompat:
-    def test_unrecognised_binary_format_raises(self, tmp_path):
-        """check_appcompat resolves each side's format itself (T5) ahead of
-        run_dump -- an unresolvable format must raise, not reach run_dump
-        with binary_fmt=None."""
+    @pytest.mark.parametrize("bad_side", ["old", "new"])
+    def test_unrecognised_binary_format_names_the_bad_side(self, tmp_path, bad_side):
+        """An unresolvable format on either side raises ValidationError naming
+        that side's path, and no dump is started."""
         from abicheck.errors import ValidationError
 
+        app, old_lib, new_lib = _paths(tmp_path)
+        bad = old_lib if bad_side == "old" else new_lib
+        bad.write_bytes(b"\x00\x00\x00\x00")
         with (
             patch(
-                "abicheck.workflows.input_resolution.detect_binary_format",
-                return_value=None,
+                "abicheck.workflows.dump.native.run_dump",
+                side_effect=AssertionError("dump started"),
             ),
-            pytest.raises(ValidationError, match="Unrecognised binary format"),
+            pytest.raises(
+                ValidationError,
+                match=re.escape(f"Unrecognised binary format for {bad}"),
+            ),
         ):
-            check_appcompat(*_paths(tmp_path))
+            check_appcompat(app, old_lib, new_lib)
 
-    def test_headers_passed_as_public_headers(self, tmp_path):
-        """-H/--header is a public header list: the per-side paths must reach
-        run_dump() as public_headers."""
+    def test_headers_reach_the_dumper_per_side(self, tmp_path):
+        """-H/--header is a public header list: each side's own path reaches
+        run_dump as both its header and its public header."""
         old_hdr, new_hdr = tmp_path / "old.h", tmp_path / "new.h"
-        old_call, new_call = _run_dump_calls(
-            tmp_path, old_headers=[old_hdr], new_headers=[new_hdr]
-        )
-        assert old_call.kwargs["public_headers"] == [old_hdr]
-        assert new_call.kwargs["public_headers"] == [new_hdr]
+        old, new = _dumped_sides(tmp_path, old_headers=[old_hdr], new_headers=[new_hdr])
+        assert (old["headers"], old["public_headers"]) == ([old_hdr], [old_hdr])
+        assert (new["headers"], new["public_headers"]) == ([new_hdr], [new_hdr])
 
-    def test_both_dumps_leave_include_dependencies_at_default(self, tmp_path):
-        """run_dump's wrapper defaults include_dependencies to True (Codex
-        review, PR #840) -- check_appcompat must not override it."""
-        for call in _run_dump_calls(tmp_path):
-            assert "include_dependencies" not in call.kwargs
+    def test_include_dependencies_is_left_to_the_dump_wrapper(self, tmp_path):
+        """check_appcompat must not pass include_dependencies itself: the
+        run_dump wrapper owns that default."""
+        old, new = _dumped_sides(tmp_path)
+        assert "include_dependencies" not in old
+        assert "include_dependencies" not in new
 
-    def test_includes_passed_as_public_include_search_dirs(self, tmp_path):
-        """Explicit per-side -I lists reach run_dump()'s
-        public_include_search_dirs (Codex review, PR #839 round 7)."""
+    def test_includes_reach_the_dumper_per_side(self, tmp_path):
+        """Explicit per-side -I lists reach run_dump as both its include
+        search dirs and its public include search dirs."""
         old_inc, new_inc = tmp_path / "old_include", tmp_path / "new_include"
-        old_call, new_call = _run_dump_calls(
+        old, new = _dumped_sides(
             tmp_path,
             old_headers=[tmp_path / "old.h"],
             new_headers=[tmp_path / "new.h"],
             old_includes=[old_inc],
             new_includes=[new_inc],
         )
-        assert old_call.kwargs["public_include_search_dirs"] == [old_inc]
-        assert new_call.kwargs["public_include_search_dirs"] == [new_inc]
+        assert (old["includes"], old["public_include_search_dirs"]) == (
+            [old_inc],
+            [old_inc],
+        )
+        assert (new["includes"], new["public_include_search_dirs"]) == (
+            [new_inc],
+            [new_inc],
+        )
 
     def test_shared_headers_and_includes_fall_back_to_both_sides(self, tmp_path):
         hdr, inc = tmp_path / "foo.h", tmp_path / "include"
-        for call in _run_dump_calls(tmp_path, headers=[hdr], includes=[inc]):
-            assert call.kwargs["public_headers"] == [hdr]
-            assert call.kwargs["public_include_search_dirs"] == [inc]
+        old, new = _dumped_sides(tmp_path, headers=[hdr], includes=[inc])
+        for side in (old, new):
+            assert side["public_headers"] == [hdr]
+            assert side["public_include_search_dirs"] == [inc]
 
-    def test_lang_c(self, tmp_path):
-        """lang='c' reaches run_dump()'s positional `lang` slot unchanged."""
-        for call in _run_dump_calls(tmp_path, lang="c"):
-            assert call.args[5] == "c"
+    def test_lang_reaches_the_dumper_on_both_sides(self, tmp_path):
+        old, new = _dumped_sides(tmp_path, lang="c")
+        assert old["lang"] == new["lang"] == "c"
 
     @pytest.mark.parametrize(
         "required, exports, changes, verdict, missing",
@@ -306,9 +341,8 @@ class TestCheckAppcompat:
                 d, consumer, lib, new, policy=kw["policy"]
             )
 
-        detect, run_dump, compare, _ = _boundary(diff)
+        run_dump, compare, _ = _boundary(diff)
         with (
-            detect,
             run_dump,
             compare,
             patch(f"{_STANDALONE}.scope_diff_to_app", side_effect=fake_scope),
@@ -324,11 +358,11 @@ class TestCheckAppcompat:
         close.assert_called_once()
         assert close.call_args.kwargs["gating"] == result.breaking_for_app
 
-    def test_policy_file_reaches_scoping(self, tmp_path):
+    def test_policy_file_reaches_compare_and_scoping(self, tmp_path):
         pf = MagicMock()
         diff = DiffResult(old_version="1", new_version="2", library="libfoo")
-        detect, run_dump, compare, scope = _boundary(diff)
-        with detect, run_dump, compare as mock_compare, scope as mock_scope:
+        run_dump, compare, scope = _boundary(diff)
+        with run_dump, compare as mock_compare, scope as mock_scope:
             check_appcompat(*_paths(tmp_path), policy_file=pf, policy="sdk_vendor")
         assert mock_compare.call_args.kwargs["policy_file"] is pf
         assert mock_scope.call_args.kwargs["policy_file"] is pf
