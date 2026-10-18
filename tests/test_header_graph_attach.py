@@ -22,16 +22,19 @@ class TestRunDumpHeaderGraph:
     def test_embeds_by_default_when_headers_given(self, tmp_path):
         # G29 Phase A regression: no flag needed any more — a plain run_dump
         # call with headers present attempts the graph attach by default.
-        # api.h is a relative, nonexistent path here (this test only cares
-        # about the no-op-vs-attempted gate, not clang-parse success), so the
-        # attach degrades gracefully to a declaration-only graph rather than
-        # crashing — same contract as test_degrades_gracefully_when_clang_unavailable.
+        # The header is a real file so the attach can key its header node on
+        # it; clang-parse success is not needed (a failed parse degrades to a
+        # declaration-only graph, same contract as
+        # test_degrades_gracefully_when_clang_unavailable).
         p = tmp_path / "lib.dll"
         p.write_bytes(b"MZ" + b"\x00" * 100)
+        header = tmp_path / "api.h"
+        header.write_text("void f();\n")
         snap = AbiSnapshot(library="lib", version="1.0", platform="pe")
         with fake_format_adapter("pe", result=snap):
-            result = run_dump(p, "pe", [Path("api.h")], [], "1.0", "c++")
+            result = run_dump(p, "pe", [header], [], "1.0", "c++")
         assert result.surface_graph is not None
+        assert f"header://{header}" in {n.id for n in result.surface_graph.nodes}
 
     def test_noop_when_no_headers_parsed(self, tmp_path):
         p = tmp_path / "lib.dll"
@@ -337,6 +340,7 @@ class TestRunDumpHeaderGraph:
         with fake_format_adapter("pe", result=snap):
             result = run_dump(p, "pe", [header], [], "1.0", "c++")
         assert result.surface_graph is not None
+        assert f"header://{header}" in {n.id for n in result.surface_graph.nodes}
 
 
 class TestRunDumpHeaderGraphSkippedForDwarfOnly:
@@ -587,7 +591,7 @@ class TestAttachHeaderGraphDeviceContext:
         with patch(
             "abicheck.buildsource.header_graph.ClangHeaderIncludeExtractor"
         ) as mock_extractor:
-            _attach_header_graph(
+            attached = _attach_header_graph(
                 snap,
                 header_graph=True,
                 header_graph_includes=True,
@@ -599,6 +603,12 @@ class TestAttachHeaderGraphDeviceContext:
                 public_header_dirs=None,
             )
         mock_extractor.assert_not_called()
+        # The skipped include pass is reported honestly as not collected,
+        # with no host-resolved include edges attached to the device graph.
+        graph = attached.surface_graph
+        assert graph.coverage["include_edges"]["collected"] is False
+        assert graph.coverage["include_edges"]["count"] == 0
+        assert not any(e.kind == "COMPILE_UNIT_INCLUDES_FILE" for e in graph.edges)
 
     def test_host_context_still_uses_include_extractor(self, tmp_path):
         from abicheck.dry_run_estimate import CompileContext
@@ -611,7 +621,7 @@ class TestAttachHeaderGraphDeviceContext:
             "abicheck.buildsource.header_graph.ClangHeaderIncludeExtractor"
         ) as mock_extractor:
             mock_extractor.return_value.extract.return_value = ({}, [])
-            _attach_header_graph(
+            attached = _attach_header_graph(
                 snap,
                 header_graph=True,
                 header_graph_includes=True,
@@ -623,6 +633,9 @@ class TestAttachHeaderGraphDeviceContext:
                 public_header_dirs=None,
             )
         mock_extractor.return_value.extract.assert_called_once()
+        # The host pass ran and its (empty) include map was folded in: the
+        # include-edge pass is reported as collected, not as skipped.
+        assert attached.surface_graph.coverage["include_edges"]["collected"] is True
 
     def test_streaming_prune_is_suppressed_for_this_call(self, tmp_path, monkeypatch):
         """Codex review, PR #840: `_attach_header_graph`'s own
@@ -679,7 +692,7 @@ class TestAttachHeaderGraphDeviceContext:
             "abicheck.buildsource.header_graph.ClangHeaderIncludeExtractor"
         ) as mock_extractor:
             mock_extractor.return_value.extract.return_value = ({}, [])
-            _attach_header_graph(
+            attached = _attach_header_graph(
                 snap,
                 header_graph=True,
                 header_graph_includes=True,
@@ -691,6 +704,9 @@ class TestAttachHeaderGraphDeviceContext:
                 public_header_dirs=None,
             )
         mock_extractor.return_value.extract.assert_called_once()
+        # The host pass ran and its (empty) include map was folded in: the
+        # include-edge pass is reported as collected, not as skipped.
+        assert attached.surface_graph.coverage["include_edges"]["collected"] is True
 
 
 class TestAttachHeaderGraphCompilerSelection:

@@ -160,7 +160,7 @@ def test_changekind_classification_completeness() -> None:
 from abicheck.policy.suppression.rules import Suppression  # noqa: E402
 
 
-@settings(max_examples=50)
+@settings(max_examples=50)  # test-quality: ok no-crash fuzz
 @given(
     pattern=st.text(
         min_size=1,
@@ -168,7 +168,9 @@ from abicheck.policy.suppression.rules import Suppression  # noqa: E402
         alphabet=st.characters(whitelist_categories=("L", "N", "P", "S")),
     ),
 )
-def test_suppression_pattern_fuzz(pattern: str) -> None:
+def test_suppression_pattern_fuzz(
+    pattern: str,
+) -> None:
     """Random pattern strings must either create a valid Suppression or raise ValueError."""
     try:
         s = Suppression(symbol_pattern=pattern)
@@ -230,6 +232,8 @@ def test_reporter_handles_arbitrary_changes(
     # Verify the JSON is actually parseable
     parsed = json.loads(js)
     assert isinstance(parsed, dict)
+    # The arbitrary symbol survives the JSON round trip unchanged.
+    assert parsed["changes"][0]["symbol"] == symbol
 
 
 # ---------------------------------------------------------------------------
@@ -291,7 +295,7 @@ def test_detect_binary_format_fuzz(data: bytes) -> None:
 from abicheck.policy_file import PolicyFile  # noqa: E402
 
 
-@settings(max_examples=50)
+@settings(max_examples=50)  # test-quality: ok no-crash fuzz
 @given(
     content=st.text(
         min_size=0,
@@ -299,7 +303,9 @@ from abicheck.policy_file import PolicyFile  # noqa: E402
         alphabet=st.characters(whitelist_categories=("L", "N", "P", "Z", "S")),
     ),
 )
-def test_policy_file_yaml_fuzz(content: str) -> None:
+def test_policy_file_yaml_fuzz(
+    content: str,
+) -> None:
     """Random YAML-like strings must either parse or raise a clean error."""
     with tempfile.TemporaryDirectory() as td:
         policy_path = Path(td) / "policy.yaml"

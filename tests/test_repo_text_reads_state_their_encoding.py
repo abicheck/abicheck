@@ -45,6 +45,7 @@ from pathlib import Path
 
 import pytest
 from _workflow_files import ENCODING, workflow_paths
+from _yaml_fast import safe_load
 
 TESTS_DIR = Path(__file__).resolve().parent
 
@@ -281,8 +282,10 @@ def test_workflow_text_is_utf8_that_a_cp1252_host_could_not_have_decoded(
     path: Path,
 ) -> None:
     """Each workflow must be valid UTF-8 — and collectively they must contain
-    at least one byte `cp1252` rejects, or the rule above defends nothing."""
-    path.read_bytes().decode("utf-8")
+    at least one byte `cp1252` rejects, or the rule above defends nothing.
+    Beyond decoding, the text must parse as a YAML mapping (a workflow is one)."""
+    text = path.read_bytes().decode("utf-8")
+    assert "jobs" in safe_load(text), f"{path.name} has no jobs mapping"
 
 
 def test_some_checked_in_workflow_really_defeats_the_platform_default() -> None:

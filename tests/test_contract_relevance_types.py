@@ -185,7 +185,7 @@ class TestContractReasonCodes:
 
 
 class TestSchemaVersionStrategy:
-    def test_each_counter_pins_its_current_value(self):
+    def test_each_counter_pins_its_current_value(self):  # test-quality: ok counter pin
         # Not "they all start at one" any more: `IDENTITY_ALGORITHM_VERSION`
         # bumped on its own (the qualified-typedef tail fix changed the
         # produced type graph without changing any block's shape), and

@@ -71,6 +71,14 @@ def test_make_change_explicit_description_overrides_template() -> None:
         description="bespoke wording with offset 0x40",
     )
     assert change.description == "bespoke wording with offset 0x40"
+    assert change.kind is ChangeKind.FUNC_RETURN_CHANGED
+    assert change.symbol == "_Z3foov"
+    # The template path, given the same inputs, would have worded it
+    # differently: the explicit text really replaced the template output.
+    templated = make_change(
+        ChangeKind.FUNC_RETURN_CHANGED, symbol="_Z3foov", old="int", new="long"
+    )
+    assert templated.description != change.description
 
 
 def test_make_change_requires_template_or_description() -> None:

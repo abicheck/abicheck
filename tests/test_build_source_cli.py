@@ -499,11 +499,8 @@ def test_collect_evidence_redacts_manifest_paths(tmp_path, monkeypatch):
     from abicheck.buildsource.redaction import RedactionPolicy
 
     policy = RedactionPolicy(home_replacements={str(tmp_path): "~"})
-    # `_collect` (this test file's port of the deleted `collect` command body)
-    # redacts the binary/input paths using its own imported `DEFAULT_REDACTION`
-    # binding, but the extractor-manifest rows are built by helpers living in
-    # abicheck.cli_buildsource_helpers that read that module's own binding.
-    # Patch both so every manifest path is redacted before write.
+    # `_collect` and abicheck.cli_buildsource_helpers each bind DEFAULT_REDACTION;
+    # patch both so every manifest path is redacted before write.
     monkeypatch.setattr(sys.modules[__name__], "DEFAULT_REDACTION", policy)
     monkeypatch.setattr("tests._build_source_collect.DEFAULT_REDACTION", policy)
     cdb = _write_cdb(tmp_path, "c++20")
@@ -2317,9 +2314,7 @@ def test_build_config_from_dict_and_load(tmp_path):
 
     # Empty input falls back to all-defaults.
     assert BuildConfig.from_dict({}).system == "auto"
-    # ADR-043 CLI reset: a block key given a scalar (not a mapping) is a hard
-    # error now, not a silent coercion to `{}` (this used to be exactly the gap
-    # the now-removed `abicheck config validate` command existed to catch).
+    # ADR-043: a block key given a scalar (not a mapping) is a hard error.
     with pytest.raises(ValueError, match="build must be a mapping"):
         BuildConfig.from_dict({"build": "nope"})
 
@@ -2463,9 +2458,7 @@ def test_l4_coverage_row_reports_tu_and_cache_counts():
 
 
 def test_l4_coverage_detail_partial_and_empty():
-    # The detail helper degrades gracefully: an empty coverage dict yields an
-    # empty string (no spurious segments), and absent optional counts are simply
-    # omitted (ADR-035 P5 — branch coverage of _l4_coverage_detail).
+    # Empty coverage yields "" and absent optional counts are omitted (ADR-035 P5).
     from abicheck.buildsource.inline import _l4_coverage_detail
     from abicheck.buildsource.source_abi import SourceAbiSurface
 
@@ -2483,9 +2476,7 @@ def test_l4_coverage_detail_partial_and_empty():
 
 
 def test_l4_coverage_detail_reports_full_accounting():
-    # When exports are attributed (synthesized/template) or classified
-    # (non-public) rather than directly matched, the detail must surface the
-    # accounted/unmatched totals so a low "matched" ratio doesn't read as a gap.
+    # Attributed or non-public exports must surface accounted/unmatched totals.
     from abicheck.buildsource.inline import _l4_coverage_detail
     from abicheck.buildsource.source_abi import SourceAbiSurface
 
@@ -3262,9 +3253,8 @@ def test_exported_symbols_from_snapshot_uses_elf_dynamic_table():
     assert "_ZN3FooC1Ev" in exports
     assert "_ZN3FooC2Ev" in exports
     assert "_Z3barv" in exports
-    # The DWARF-only unified C4 tag is NOT a real export — it must not leak into
-    # the export set (or a source decl mangled C4 would exact-match a phantom and
-    # inflate exported_symbols/matched_symbols; Codex review).
+    # The DWARF-only unified C4 tag is not a real export; it must not leak into
+    # the export set (Codex review).
     assert "_ZN3FooC4Ev" not in exports
 
 
@@ -3481,7 +3471,12 @@ def test_embedded_source_graph_l5_roundtrips(tmp_path):
     save_snapshot(snap, out)
     reloaded = load_snapshot(out)
     assert reloaded.build_source is not None
-    assert reloaded.build_source.source_graph is not None
+    graph, original = reloaded.build_source.source_graph, snap.build_source.source_graph
+    assert graph is not None
+    assert [n.id for n in graph.nodes] == [n.id for n in original.nodes]
+    edges = [(e.kind, e.src, e.dst) for e in graph.edges]
+    assert sorted(edges) == sorted((e.kind, e.src, e.dst) for e in original.edges)
+    assert "COMPILE_UNIT_BUILDS_SOURCE" in {kind for kind, _, _ in edges}
 
 
 def test_build_info_invalid_compile_db_is_graceful(tmp_path):
@@ -3546,7 +3541,9 @@ def test_collect_no_input_is_noop(tmp_path):
     out = tmp_path / "ev"
     # Must not raise — a graceful empty pack, never a traceback.
     pack = _collect(out)
-    assert pack is not None
+    empty = (pack.build_evidence, pack.source_abi, pack.source_graph)
+    assert empty == (None, None, None)
+    assert not pack.live_source_evidence
 
 
 def test_relink_source_surface_with_binary_exports(tmp_path):

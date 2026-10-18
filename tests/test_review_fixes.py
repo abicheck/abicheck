@@ -205,7 +205,9 @@ class TestConfidenceComputation:
         assert isinstance(result.confidence, Confidence)
         assert result.confidence is Confidence.LOW
 
-    def test_confidence_str_comparison_still_works(self):
+    def test_confidence_str_comparison_still_works(
+        self,
+    ):  # test-quality: ok JSON wire spelling
         """Confidence enum is str-based so string comparisons keep working."""
         assert Confidence.HIGH == "high"
         assert Confidence.MEDIUM == "medium"

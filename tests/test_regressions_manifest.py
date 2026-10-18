@@ -317,7 +317,9 @@ def _canary_strictness_violation(source: str) -> str | None:
 
 class TestRegistryShape:
     def test_registry_is_non_empty(self) -> None:
-        assert len(BUG_CLASSES) > 0
+        # Non-emptiness alone would let the parametrized per-entry tests
+        # vanish silently; a known escape-history entry must be registered.
+        assert "extraction.ast_wrapper_chain_traversal" in all_ids()
 
     def test_every_entry_is_a_bug_class(self) -> None:
         assert all(isinstance(bc, BugClass) for bc in BUG_CLASSES)

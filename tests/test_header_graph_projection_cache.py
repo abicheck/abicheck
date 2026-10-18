@@ -62,6 +62,10 @@ from abicheck.buildsource.header_graph_projection_cache import (
 )
 from abicheck.buildsource.source_graph import SourceGraphSummary
 from abicheck.buildsource.type_graph import TypeEdge
+from abicheck.model.source_graph_coverage import (
+    HEADER_CALL_GRAPH_PASS,
+    HEADER_DECLARATIONS_PASS,
+)
 
 PUBLIC_HEADER = "/proj/include/pub.h"
 PRIVATE_HEADER = "/proj/include/detail/impl.h"
@@ -598,6 +602,17 @@ class TestThePathsWhereNoAstIsAcquired:
             public_headers=None,
             public_header_dirs=None,
         )
+
+    @staticmethod
+    def _assert_declaration_only_graph(snap) -> None:
+        """The degraded attach keeps the declaration graph and marks exactly
+        the AST-derived call graph as not collected (degraded), rather than
+        either crashing or claiming a full call graph it never built."""
+        graph = snap.surface_graph
+        assert graph is not None
+        assert graph.degraded_passes.get(HEADER_CALL_GRAPH_PASS) is True
+        assert graph.extractor_passes.get(HEADER_DECLARATIONS_PASS) is True
+        assert HEADER_CALL_GRAPH_PASS not in graph.extractor_passes
 
     def _snapshot(self):
         from abicheck.model import AbiSnapshot

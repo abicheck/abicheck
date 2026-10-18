@@ -68,6 +68,14 @@ CI's `pr` profile.
   kind must be backend-spelling-stable, *and* distinct transitions must not
   collide (stability alone is satisfiable by hashing everything to a
   constant).
+- **Test-quality ratchet** (`scripts/audit_test_quality.py --check`, CI
+  `test-quality` step) — fails a new test whose asserts cannot fail for a
+  wrong behaviour: only `is not None`/`isinstance(x, dict)`/`hasattr`, a
+  constructor echo (`C(a=1).a == 1`), a constant-spelling pin, a
+  mock-was-called-only check, or no assert at all. Assert the value, the
+  error or the chosen branch instead. A deliberate shape takes
+  `# test-quality: ok <reason>` on its `def` line. Rules and process:
+  `docs/contribute/agent-guide/quality-gates.md` "Test-quality ratchet".
 - **Silent-skip guard** (`conftest.py`): export `ABICHECK_MIN_EXECUTED=<n>` and
   the session fails unless ≥ n tests actually ran — used by the marker lanes in
   CI so a missing tool can't pass with 0 tests. Every `test_*` should assert

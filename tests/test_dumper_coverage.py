@@ -1158,22 +1158,18 @@ class TestFromHeadersProvenance:
             patch.object(dumper, "_resolve_debug_metadata", side_effect=_fake_resolve),
             patch.object(dumper, "_try_dwarf_snapshot") as mock_try_dwarf,
         ):
-            dumper._dump_elf(so, [], [], "1.0", "c++")
+            snap = dumper._dump_elf(so, [], [], "1.0", "c++")
         mock_try_dwarf.assert_not_called()
+        assert snap.from_headers is False  # ELF export table only
+        funcs = [(f.name, f.visibility) for f in snap.declarations.functions]
+        assert funcs == [("foo", "elf_only")]
 
     def test_dwarf_only_with_resolved_btf_does_not_trigger_dwarf_snapshot(
         self,
         tmp_path: Path,
     ) -> None:
-        """Regression (Codex review, second finding): --dwarf-only combined
-        with --debug-format=btf/ctf (or auto resolving to BTF on a kernel
-        binary) must not call _try_dwarf_snapshot either — there is no real
-        DWARF to walk, and doing so anyway (session=None) would open so_path
-        directly and build the primary snapshot from whatever real,
-        possibly-stale DWARF the binary also carries, contradicting the
-        explicit BTF/CTF selection. A UserWarning explains --dwarf-only was
-        ignored instead of silently doing something the caller didn't ask
-        for."""
+        """Regression (Codex review): --dwarf-only with BTF/CTF resolved must
+        not call _try_dwarf_snapshot; a UserWarning says it was ignored."""
         from unittest.mock import patch
 
         import abicheck.elf_metadata as _elfmod

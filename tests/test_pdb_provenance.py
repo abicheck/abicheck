@@ -173,10 +173,6 @@ class TestExtractUdtSourceFiles:
 
 
 class TestDwarfMetadataDeclFile:
-    def test_struct_layout_carries_decl_file(self) -> None:
-        layout = StructLayout(name="Vec3", byte_size=12, decl_file="include/api.h")
-        assert layout.decl_file == "include/api.h"
-
     def test_decl_file_defaults_none(self) -> None:
         assert StructLayout(name="X", byte_size=4).decl_file is None
         assert EnumInfo(name="E", underlying_byte_size=4).decl_file is None

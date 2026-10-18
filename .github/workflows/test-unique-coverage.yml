@@ -1,0 +1,67 @@
+name: Test unique coverage
+
+# Which tests are the only ones covering a line, and which tests add nothing
+# line coverage does not already get from the rest of the suite
+# (scripts/test_unique_coverage.py). Weekly and on demand only; report-only.
+# Nothing here gates a PR and the script always exits 0: a zero-unique test is
+# a review queue entry, never a deletion list.
+#
+# The per-test coverage contexts make this run slower than the unit lanes in
+# ci.yml; it deliberately does not reuse their shards, because the shard
+# coverage data is combined elsewhere and carries no per-test contexts.
+
+on:
+  schedule:
+    - cron: '17 4 * * 1'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  unique-coverage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
+        with:
+          python-version: '3.13'
+          cache: 'pip'
+
+      - name: Install
+        run: pip install -e ".[dev]"
+
+      - name: Run the fast unit suite with per-test coverage contexts
+        # Test failures do not stop the report: the data file and the junit
+        # report are written either way, and a partial run still ranks tests.
+        continue-on-error: true
+        run: >-
+          pytest tests/
+          -m "not integration and not libabigail and not abicc and not slow and not golden"
+          -n 4 --cov=abicheck --cov=scripts --cov=action --cov-context=test --cov-report=
+          --junitxml=junit.xml -q -p no:randomly
+
+      - name: Rank tests by unique line coverage
+        run: |
+          python scripts/test_unique_coverage.py --data .coverage --durations junit.xml --json unique.json > report.txt
+          {
+            echo '```text'
+            cat report.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: test-unique-coverage
+          path: |
+            report.txt
+            unique.json
+          if-no-files-found: warn

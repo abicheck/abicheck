@@ -201,7 +201,11 @@ class TestClaimValidation:
             "confident": True,
             "diagnosis": diagnosis,
         }
-        assert claim_mod.validate(claim) is not None
+        # Rejected for the diagnosis itself, not for some other field.
+        reason = claim_mod.validate(claim)
+        assert reason is not None
+        assert reason.startswith("diagnosis ")
+        assert reason.endswith("does not name a cause from the vocabulary")
 
     @pytest.mark.parametrize("cause", sorted(claim_mod.DIAGNOSIS_CAUSES))
     def test_every_vocabulary_cause_validates(self, cause):

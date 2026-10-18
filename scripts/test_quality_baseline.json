@@ -1,0 +1,7 @@
+{
+ "type_only": [],
+ "mock_echo": [],
+ "set_then_read": [],
+ "constant_mirror": [],
+ "no_assert": []
+}

@@ -455,6 +455,8 @@ class TestGenerateSymbolsFile:
         )
         sf = generate_symbols_file(meta, package="my-libfoo", version="1.0")
         assert sf.package == "my-libfoo"
+        # The name must reach the emitted header line, where dpkg reads it.
+        assert sf.format().splitlines()[0].split()[1] == "my-libfoo"
 
     def test_ifunc_included(self):
         meta = _make_elf_meta(

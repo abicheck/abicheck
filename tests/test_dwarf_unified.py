@@ -232,8 +232,10 @@ class TestShims:
         _require_tool("gcc")
         so = _compile_so(tmp_path, "libshimcount", "int f(void) { return 0; }")
         with patch("abicheck.dwarf_unified.parse_dwarf", wraps=parse_dwarf) as mock:
-            parse_dwarf_metadata(so)
+            result = parse_dwarf_metadata(so)
             assert mock.call_count == 1
+        assert mock.call_args.args == (so,)
+        assert result == parse_dwarf(so)[0]
 
 
 # ---------------------------------------------------------------------------
@@ -426,6 +428,10 @@ class TestDwarfSession:
         so = _compile_so(tmp_path, "libsessdbl", _SESSION_SRC, lang="cpp")
         sess = open_dwarf_session(so)
         assert sess is not None
+        # The session is a live handle on the file it was opened from.
+        assert sess.path == so
+        assert sess.arch
+        assert sess.dwarf is not None
         sess.close()
         # Double close must not raise.
         sess.close()

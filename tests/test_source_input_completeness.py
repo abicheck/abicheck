@@ -549,6 +549,12 @@ class TestExpectedInputSetEdgeCases:
         from abicheck.buildsource.source_inputs import _PRECEDENCE_INDEX
 
         assert disposition in _PRECEDENCE_INDEX
+        # EXCLUDED is the weakest (highest index): nothing downgrades to it.
+        if disposition is not SourceInputDisposition.EXCLUDED:
+            assert (
+                _PRECEDENCE_INDEX[disposition]
+                < _PRECEDENCE_INDEX[SourceInputDisposition.EXCLUDED]
+            )
 
     def test_a_gap_never_downgrades_to_a_weaker_disposition(
         self, tmp_path: Path

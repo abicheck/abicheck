@@ -80,7 +80,15 @@ class TestCheckSingleEnv:
         assert result.baseline_graph.node_count >= 2  # At least root + libc
 
     def test_bindings_populated(self, result):
-        assert len(result.bindings_baseline) > 0
+        # A healthy system binary only ever yields resolved bindings (weak
+        # references with no provider are OK at runtime); anything else would
+        # be a missing or mis-versioned symbol the loadability check misses.
+        statuses = {b.status for b in result.bindings_baseline}
+        assert statuses <= {BindingStatus.RESOLVED_OK, BindingStatus.WEAK_UNRESOLVED}
+        assert any(
+            b.status is BindingStatus.RESOLVED_OK and b.provider
+            for b in result.bindings_baseline
+        )
 
     def test_nonexistent_binary(self, tmp_path):
         result = check_single_env(tmp_path / "nonexistent")
@@ -91,7 +99,7 @@ class TestCheckSingleEnv:
 
 
 class TestStackVerdict:
-    def test_verdict_values(self):
+    def test_verdict_values(self):  # test-quality: ok stack JSON wire values
         assert StackVerdict.PASS.value == "pass"
         assert StackVerdict.WARN.value == "warn"
         assert StackVerdict.FAIL.value == "fail"

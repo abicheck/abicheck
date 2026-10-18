@@ -509,7 +509,8 @@ class TestEvidenceTiersReflection:
 
     def test_empty_snapshot_minimal_tiers(self):
         r = compare(_snap(), _snap())
-        assert isinstance(r.evidence_tiers, list)
+        # No header, ELF, DWARF or other evidence on either side: no tier claimed.
+        assert r.evidence_tiers == []
 
     def test_header_tier_present_with_functions(self):
         f = _pub_func("api", "_Z3apiv")
@@ -549,7 +550,10 @@ class TestCoverageWarnings:
         f = _pub_func("api", "_Z3apiv")
         r = compare(_snap(functions=[f]), _snap(functions=[f]))
         # Should have warnings about missing metadata
-        assert len(r.coverage_warnings) > 0
+        assert (
+            "No binary metadata available; verdict is based on header analysis only"
+            in r.coverage_warnings
+        )
 
     def test_elf_plus_dwarf_fewer_warnings(self):
         """With ELF + DWARF, fewer warnings expected."""

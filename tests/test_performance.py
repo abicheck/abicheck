@@ -314,13 +314,15 @@ class TestManyChangeKinds:
             verdict=Verdict.BREAKING,
         )
 
-        # to_json should not raise
+        # to_json should not raise, and must carry every kind exactly once
         j = to_json(diff)
-        assert len(j) > 0
+        emitted = [c["kind"] for c in json.loads(j)["changes"]]
+        assert sorted(emitted) == sorted(k.value for k in ChangeKind)
 
-        # to_markdown should not raise
+        # to_markdown should not raise, and must name every finding's symbol
         md = to_markdown(diff)
-        assert len(md) > 0
+        missing = [k.value for k in ChangeKind if f"_sym_{k.value}" not in md]
+        assert not missing
 
     def test_all_changekind_sarif_render_without_error(self) -> None:
         from abicheck.sarif import to_sarif_str
@@ -341,8 +343,11 @@ class TestManyChangeKinds:
             verdict=Verdict.BREAKING,
         )
 
-        sarif = to_sarif_str(diff)
-        assert len(sarif) > 0
+        sarif = json.loads(to_sarif_str(diff))
+        results = sarif["runs"][0]["results"]
+        assert sorted(r["ruleId"] for r in results) == sorted(
+            k.value for k in ChangeKind
+        )
 
 
 # ===========================================================================

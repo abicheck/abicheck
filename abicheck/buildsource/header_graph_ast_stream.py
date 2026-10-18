@@ -358,9 +358,18 @@ def _validate_root_suffix(fh: Any, buf: bytearray, pos: int) -> None:
 
 
 def _after_colon_bracket(fh: Any, buf: bytearray, pos: int) -> int | None:
-    """Index just past ``: [`` starting at *pos*, or ``None`` if that is not
-    what follows (so the ``inner`` just matched was a value, not the array
-    key -- e.g. ``"kind": "inner"``)."""
+    """Index just past ``: [`` starting at *pos*, or ``None`` if no ``:``
+    follows (so the ``inner`` just matched was a value, not a key -- e.g.
+    ``"kind": "inner"``).
+
+    A key that *is* followed by ``:`` but whose value is not an array raises
+    rather than returning ``None``. Returning ``None`` there would make the
+    scanner skip the key as though the root had no ``inner``, and a root with
+    no ``inner`` is the legitimate empty translation unit -- so a malformed
+    ``"inner": {...}`` (or ``null``, or a scalar) would read as a complete,
+    empty surface. The whole-tree validator refuses the same tree
+    (``validate_ast_shape``); this must refuse it too.
+    """
     seen_colon = False
     while True:
         while pos < len(buf):
@@ -374,7 +383,12 @@ def _after_colon_bracket(fh: Any, buf: bytearray, pos: int) -> int | None:
                 seen_colon = True
                 pos += 1
                 continue
-            return pos + 1 if char == b"[" else None
+            if char == b"[":
+                return pos + 1
+            raise ClangAstStreamError(
+                "root 'inner' is not an array (found a value starting with "
+                f"{char.decode('ascii', 'replace')!r})"
+            )
         chunk = fh.read(_CHUNK)
         if not chunk:
             return None

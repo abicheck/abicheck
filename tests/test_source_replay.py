@@ -833,43 +833,23 @@ def test_cache_invalidates_when_dependency_deleted(tmp_path: Path) -> None:
     assert cache.get("k1") is None
 
 
-def test_cache_get_ignores_corrupt_entry(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "payload",
+    [
+        "{ not valid json",
+        "[1, 2, 3]",
+        # CodeRabbit: deps not a dict.
+        '{"deps": "not-a-dict", "tu": {"tu_id": "x"}}',
+        # An entity without "id" makes SourceEntity.from_dict raise KeyError.
+        '{"deps": {}, "tu": {"tu_id": "x", "functions": [{}]}}',
+    ],
+    ids=["corrupt", "non-object", "non-dict-deps", "bad-tu-payload"],
+)
+def test_cache_get_ignores_malformed_entry(tmp_path: Path, payload: str) -> None:
     cache = SourceAbiCache(tmp_path / "cache")
     cache.cache_dir.mkdir(parents=True)
-    (cache.cache_dir / "k.json").write_text("{ not valid json")
-    assert cache.get("k") is None  # corrupt entry is a miss, never an error
-
-
-def test_cache_get_ignores_non_object_entry(tmp_path: Path) -> None:
-    cache = SourceAbiCache(tmp_path / "cache")
-    cache.cache_dir.mkdir(parents=True)
-    (cache.cache_dir / "k.json").write_text("[1, 2, 3]")
-    assert cache.get("k") is None
-
-
-def test_cache_get_ignores_non_dict_deps(tmp_path: Path) -> None:
-    # CodeRabbit: a malformed entry (deps not a dict) is a miss, never a crash.
-    import json as _json
-
-    cache = SourceAbiCache(tmp_path / "cache")
-    cache.cache_dir.mkdir(parents=True)
-    (cache.cache_dir / "k.json").write_text(
-        _json.dumps({"deps": "not-a-dict", "tu": {"tu_id": "x"}})
-    )
-    assert cache.get("k") is None
-
-
-def test_cache_get_ignores_bad_tu_payload(tmp_path: Path) -> None:
-    # A structurally bad `tu` payload (missing required entity id) is a miss.
-    import json as _json
-
-    cache = SourceAbiCache(tmp_path / "cache")
-    cache.cache_dir.mkdir(parents=True)
-    # An entity dict without "id" makes SourceEntity.from_dict raise KeyError.
-    (cache.cache_dir / "k.json").write_text(
-        _json.dumps({"deps": {}, "tu": {"tu_id": "x", "functions": [{}]}})
-    )
-    assert cache.get("k") is None
+    (cache.cache_dir / "k.json").write_text(payload)
+    assert cache.get("k") is None  # malformed entry is a miss, never an error
 
 
 def test_cache_put_ignores_unwritable_cache_dir(
@@ -985,13 +965,20 @@ def test_cache_key_uses_path_string_for_missing_root(tmp_path: Path) -> None:
     src = tmp_path / "a.cpp"
     src.write_text("int a;\n")
     cu = _cu("cu://x", str(src))
-    key = compute_tu_cache_key(
-        extractor_name="clang-source",
-        extractor_version="0.1",
-        compile_unit=cu,
-        public_header_roots=["does/not/exist.h"],
-    )
+
+    def _key(roots: list[str]) -> str | None:
+        return compute_tu_cache_key(
+            extractor_name="clang-source",
+            extractor_version="0.1",
+            compile_unit=cu,
+            public_header_roots=roots,
+        )
+
+    key = _key(["does/not/exist.h"])
     assert key is not None
+    # A missing root is keyed by its path string: a different path must differ.
+    assert _key(["does/not/exist.h"]) == key
+    assert _key(["other/missing.h"]) != key
 
 
 # -- driver ------------------------------------------------------------------

@@ -457,6 +457,7 @@ class TestSchemaCeiling:
             path.write_text(self._document(older))
             elf, _ = _stored_file_snapshot_evidence(path)
             assert elf is not None, f"schema_version {older} was rejected"
+            assert elf.soname == "libfuture.so.1"
 
     def test_below_the_hard_rejection_threshold_still_decodes(
         self, tmp_path: Path
@@ -480,6 +481,7 @@ class TestSchemaCeiling:
         path.write_text(self._document(below))
         elf, _ = _stored_file_snapshot_evidence(path)
         assert elf is not None
+        assert elf.soname == "libfuture.so.1"
 
 
 class TestDiscoveryAndBundleSniffAgree:

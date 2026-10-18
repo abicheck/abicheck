@@ -137,7 +137,8 @@ def local_vptr_member_offset_bits(child: Any) -> int | None:
     if not member_name.startswith("_vptr"):
         return None
     loc = child.attributes.get("DW_AT_data_member_location")
-    return _decode_member_location(loc.value if loc is not None else None) * 8
+    byte_offset = _decode_member_location(loc.value if loc is not None else None)
+    return None if byte_offset is None else byte_offset * 8
 
 
 _TRANSPARENT_QUALIFIER_TAGS = ("DW_TAG_volatile_type", "DW_TAG_restrict_type")
