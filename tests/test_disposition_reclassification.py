@@ -32,21 +32,25 @@ must never move a finding's ``counts()`` bucket or ``detected_total``.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
+from click.testing import CliRunner
 
 from abicheck.checker_policy import ChangeKind, Verdict
 from abicheck.checker_types import DiffResult
+from abicheck.cli import main
+from abicheck.model import AbiSnapshot, Function, Variable, Visibility
 from abicheck.model.change import Change
 from abicheck.policy.disposition_close import (
     ledger_for,
     reclassifications,
     reclassified_total,
 )
-from abicheck.policy.evaluate import effective_kind_sets
 from abicheck.policy_file import PolicyFile
 from abicheck.report.disposition_audit import compute_disposition_audit
+from abicheck.serialization import snapshot_to_json
 
 
 def _policy_file(tmp_path: Path, *, symbol: str, reason: str) -> PolicyFile:
@@ -166,84 +170,107 @@ def test_reclassification_is_read_not_recomputed_by_the_ledger(
 @pytest.mark.parametrize(
     ("kind", "symbol", "to"),
     [
-        (ChangeKind.FUNC_REMOVED, "inline_foo", "ignore"),
-        (ChangeKind.VAR_REMOVED, "inline_bar", "risk"),
+        (ChangeKind.FUNC_REMOVED, "_Z6inlinev", "ignore"),
+        (ChangeKind.VAR_REMOVED, "_Z3barv", "risk"),
     ],
 )
 def test_every_finding_dict_builder_agrees_on_reclassified_by(
     tmp_path: Path, kind: ChangeKind, symbol: str, to: str
 ) -> None:
-    """The oneDAL-release bug: the release fan-out's own finding projection
-    (``cli_compare_release_matrix._release_finding_dicts``) never computed
-    ``reclassified_by`` at all -- 0/10 emitted findings ever carried it, even
-    though the aggregate disposition-audit ledger (the *same* policy file, the
-    *same* change) tallied the reclassification correctly. The gap was a
-    missing field in one entry-builder, not a wrong ``policy_file`` -- so the
-    general invariant is *parity*: every per-finding entry-builder that
-    exists to report a shared ``Change`` must resolve the same
-    ``reclassified_by`` value for it, via the one canonical helper
-    (``change_json.reclassified_by_for_change``), rather than some builders
-    computing it and a sibling silently omitting it.
-
-    Covers all three of this codebase's finding-dict builders (`compare`'s
-    full/leaf JSON entries, `scan --against`'s baseline dicts, and the
-    release fan-out's own capped dicts) against two different reclassify
-    kinds/targets, not just the one input the original report reproduced.
+    """The oneDAL-release bug: the release fan-out never stamped
+    ``reclassified_by`` on its findings, although the disposition ledger counted
+    the same reclassification. The invariant is parity across the public
+    outputs: a reclassified change names its deciding reason in the single-pair
+    JSON, the release JSON and the release Markdown, for more than one kind.
     """
-    p = tmp_path / "policy.yaml"
-    p.write_text(
+    policy = tmp_path / "policy.yaml"
+    policy.write_text(
         f"reclassify:\n  - kind: {kind.value}\n    symbol: {symbol}\n"
         f'    to: {to}\n    reason: "inlines-hidden-demotion"\n',
         encoding="utf-8",
     )
-    pf = PolicyFile.load(p)
+    expected = "inlines-hidden-demotion"
+
+    # Precondition, asserted rather than assumed: the ledger must see one real
+    # reclassification, or the parity checks below pass vacuously.
+    pf = PolicyFile.load(policy)
     change = Change(kind=kind, symbol=symbol, description="x")
     diff = DiffResult(
-        changes=[change],
-        old_version="1",
-        new_version="2",
-        library="l",
-        policy_file=pf,
+        changes=[change], old_version="1", new_version="2", library="l", policy_file=pf
     )
-
-    # Precondition, asserted rather than assumed (AGENTS.md's "assert your
-    # fixture's preconditions" trap): this change really is in the failing
-    # regime the bug report described -- the ledger must see a real
-    # reclassification, or every assertion below would pass vacuously.
     ledger = ledger_for(diff)
     assert reclassified_total(ledger) == 1
-    assert reclassifications(ledger) == (("inlines-hidden-demotion", 1),)
+    assert reclassifications(ledger) == ((expected, 1),)
 
-    from abicheck.report.change_json import (
-        change_to_dict,
-        reclassified_by_for_change,
+    old_dir = tmp_path / "old"
+    new_dir = tmp_path / "new"
+    old_dir.mkdir()
+    new_dir.mkdir()
+    _write_one_library_pair(old_dir, new_dir, kind, symbol)
+    policy_args = ["--policy", str(policy)]
+
+    single = _run_json(
+        "compare",
+        str(old_dir / "libfoo.json"),
+        str(new_dir / "libfoo.json"),
+        *policy_args,
+        "-o",
+        "json=-",
     )
+    (single_change,) = [c for c in single["changes"] if c["kind"] == kind.value]
+    assert single_change["reclassified_by"] == expected
 
-    expected = reclassified_by_for_change(change, pf)
-    assert expected == "inlines-hidden-demotion"
-
-    # 1. `compare`'s own full-mode JSON entry (`change_to_dict`) -- needs
-    # real `kind_sets` (as a live `compare()` run always supplies) for the
-    # reclassify resolution branch to run at all.
-    full_entry = change_to_dict(
-        change, policy_file=pf, kind_sets=effective_kind_sets(diff)
+    release = _run_json(
+        "compare", str(old_dir), str(new_dir), *policy_args, "-o", "json=-"
     )
-    assert full_entry["reclassified_by"] == expected
+    (finding,) = [
+        f for f in release["libraries"][0]["findings"] if f["kind"] == kind.value
+    ]
+    assert finding["reclassified_by"] == expected
 
-    # 2. (`scan --against`'s baseline finding dict, formerly checked here
-    #    too, was deleted with the `scan` command -- ADR-068 Phase 6.)
+    markdown = (
+        CliRunner()
+        .invoke(
+            main,
+            ["compare", str(old_dir), str(new_dir), *policy_args, "-o", "markdown=-"],
+        )
+        .stdout
+    )
+    assert f"_Reclassified by:_ {expected}" in markdown
 
-    # 3. The release fan-out's own capped per-library finding dict -- the
-    # one builder that regressed.
-    from abicheck.cli_compare_release_matrix import _release_finding_dicts
 
-    release_dicts, _cut_kinds = _release_finding_dicts(diff, None, None)
-    assert release_dicts[0]["reclassified_by"] == expected
+def _write_one_library_pair(
+    old_dir: Path, new_dir: Path, kind: ChangeKind, symbol: str
+) -> None:
+    """One library, one removed symbol of *kind*, as a directory-compare pair."""
+    if kind is ChangeKind.FUNC_REMOVED:
+        old = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            functions=[
+                Function(
+                    name=symbol,
+                    mangled=symbol,
+                    return_type="int",
+                    visibility=Visibility.PUBLIC,
+                )
+            ],
+            from_headers=True,
+        )
+    else:
+        old = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            variables=[Variable(name=symbol, mangled=symbol, type="int")],
+            from_headers=True,
+        )
+    new = AbiSnapshot(library="libfoo.so", version="2.0", from_headers=True)
+    (old_dir / "libfoo.json").write_text(snapshot_to_json(old), encoding="utf-8")
+    (new_dir / "libfoo.json").write_text(snapshot_to_json(new), encoding="utf-8")
 
-    # 4. The release fan-out's Markdown rendering of that same dict (Codex
-    # review, PR #1176 follow-up): fixing the JSON dict alone left the
-    # Markdown report discarding the field a second time.
-    from abicheck.reporter import release_finding_detail_lines
 
-    md_lines = release_finding_detail_lines(release_dicts[0])
-    assert any(expected in line for line in md_lines)
+def _run_json(*args: str) -> dict:
+    """Run the CLI and parse stdout (a breaking verdict exits non-zero but still
+    writes its JSON, so the exit code is not asserted here)."""
+    result = CliRunner().invoke(main, list(args))
+    return json.loads(result.stdout)
