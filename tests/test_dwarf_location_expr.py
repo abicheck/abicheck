@@ -9,6 +9,7 @@ evaluator's own helpers.
 from __future__ import annotations
 
 import pytest
+from elftools.dwarf.dwarf_expr import DWARFExprOp
 
 from abicheck.dwarf_utils import _evaluate_location_expr
 
@@ -53,12 +54,9 @@ class TestEvaluateLocationExprUnknowns:
 # ── location-expression underflow class ────────────────────────────────────
 
 
-class _DwarfExprOpLike:
-    """Minimal stand-in with pyelftools DWARFExprOp's ``op`` / ``args`` shape."""
-
-    def __init__(self, op: int, args: list[object]) -> None:
-        self.op = op
-        self.args = args
+def _expr_op(op: int, args: list[object]) -> DWARFExprOp:
+    """A real pyelftools ``DWARFExprOp`` (a namedtuple), as the parser yields."""
+    return DWARFExprOp(op=op, op_name=f"0x{op:02x}", args=args, offset=0)
 
 
 # Stack-consuming ops the evaluator supports, with how many entries each pops
@@ -69,7 +67,7 @@ _UNDERFLOW_CASES = [
     pytest.param([0x22], id="raw-plus"),
     pytest.param([(0x22, 0)], id="tuple-plus"),
     pytest.param([(0x22, None)], id="tuple-plus-no-operand-slot"),
-    pytest.param([_DwarfExprOpLike(0x22, [])], id="dwarfexprop-plus"),
+    pytest.param([_expr_op(0x22, [])], id="dwarfexprop-plus"),
     # Partial-value trap: lit1 leaves [base, 1]; the first plus consumes it,
     # the second plus then has one entry and must not return the partial 1.
     pytest.param([0x31, 0x22, 0x22], id="raw-plus-after-valid-plus"),
