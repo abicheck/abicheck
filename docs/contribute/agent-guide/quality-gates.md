@@ -367,8 +367,9 @@ Several mechanisms guard test quality so coverage can't be "filled" without veri
 - **Test redundancy report** — `scripts/test_redundancy.py` (report only, not a gate;
   `.github/workflows/test-redundancy.yml`, manual). Reads the per-test coverage contexts
   (`pytest --cov-context=test`) and classifies each test case and function as `unique`,
-  `coverage-redundant` (every line it covers is also covered by another test; names the
-  test(s) that cover all of its lines alone), `fully-redundant` (also kills no mutant no
+  `coverage-redundant` (every line it covers is also covered by another test; `subsumed_by`
+  names each test that covers all of its lines by itself, and "covered by several tests
+  together" means only a union of tests covers them), `fully-redundant` (also kills no mutant no
   other test kills), or `unknown` (no covered line recorded). **Coverage alone never
   makes a test `fully-redundant`:** mutmut 3.7.0 does not record which tests killed each
   mutant, so kill uniqueness needs a `--kills` file from a recorder that does not exist
