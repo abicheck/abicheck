@@ -47,17 +47,22 @@ def _collect_one(tmp_path: Path, directory: str, file: str):
 
 
 @pytest.mark.parametrize(
-    ("directory", "file", "source", "unit_directory"),
+    ("directory_suffix", "file", "source_tail"),
     [
-        ("/work/build", "src/foo.cpp", "/work/build/src/foo.cpp", "/work/build"),
-        ("/work/build", "src\\foo.cpp", "/work/build/src/foo.cpp", "/work/build"),
-        ("/work\\build", "src/foo.cpp", "/work/build/src/foo.cpp", "/work/build"),
+        ("", "src/foo.cpp", "src/foo.cpp"),
+        ("", "src\\foo.cpp", "src/foo.cpp"),
+        ("\\build", "src/foo.cpp", "build/src/foo.cpp"),
+        ("\\build", "src\\foo.cpp", "build/src/foo.cpp"),
     ],
 )
 def test_source_and_directory_use_posix_separators(
-    tmp_path: Path, directory: str, file: str, source: str, unit_directory: str
+    tmp_path: Path, directory_suffix: str, file: str, source_tail: str
 ) -> None:
-    unit = _collect_one(tmp_path, directory, file)
-    assert unit.source == source
-    assert unit.directory == unit_directory
+    # Expected values come from pathlib's as_posix(), not from the code under
+    # test, and are rooted at tmp_path so the case holds on every host: a bare
+    # "/work/build" is drive-relative on Windows and would read D:/work/....
+    root = tmp_path.as_posix()
+    unit = _collect_one(tmp_path, str(tmp_path) + directory_suffix, file)
+    assert unit.source == f"{root}/{source_tail}"
+    assert unit.directory == root + directory_suffix.replace("\\", "/")
     assert "\\" not in unit.id
