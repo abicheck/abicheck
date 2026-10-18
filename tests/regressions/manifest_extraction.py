@@ -345,6 +345,7 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
         ),
         fixed_by=(1649,),
         seed_tests=(
+            "tests/test_dwarf_location_expr.py",
             "tests/test_dwarf_snapshot.py",
             "tests/test_phase3_dwarf_helpers.py",
             # F1 harness cell: a malformed member location reads as unknown.
