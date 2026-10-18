@@ -85,7 +85,7 @@ class TestFuncDeletedChangeKind:
         """FUNC_DELETED must be in BREAKING_KINDS (abicc #100)."""
         assert ChangeKind.FUNC_DELETED in BREAKING_KINDS
 
-    def test_func_deleted_enum_value(self) -> None:
+    def test_func_deleted_enum_value(self) -> None:  # test-quality: ok wire value
         """FUNC_DELETED enum value is 'func_deleted'."""
         assert ChangeKind.FUNC_DELETED.value == "func_deleted"
 

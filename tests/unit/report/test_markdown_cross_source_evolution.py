@@ -130,7 +130,9 @@ def test_report_mode_root_cause_is_unaffected_by_the_kind_split():
     change count. (``leaf`` was the other mode here until plan slice 7o
     retired it.)"""
     result = _result([_evolved_change(CrossSourceEvolution.PERSISTENT, "a")])
-    for mode in ("root-cause",):
-        # Must not raise, and must not silently drop the finding.
-        md = to_markdown(result, report_mode=mode)
-        assert isinstance(md, str)
+    md = to_markdown(result, report_mode="root-cause")
+    # The verdict is unchanged, and the finding is neither dropped nor
+    # re-tagged by the section split.
+    assert "`COMPATIBLE_WITH_RISK`" in md
+    assert "## Root Causes (1)" in md
+    assert "- **unversioned_exported_symbol**: a is exported without a version" in md

@@ -149,7 +149,19 @@ class TestDwarfSemanticIrCvQualification:
 
     def test_semantic_ir_is_populated(self, snapshot) -> None:
         assert snapshot.canonical_ir is not None
-        assert len(snapshot.canonical_ir.occurrences) > 0
+        # Every variable in the fixture must carry exactly one IR occurrence,
+        # not merely "some occurrence somewhere".
+        declared = {v.name: v for v in snapshot.declarations.variables}
+        for name in (
+            "g_const_int",
+            "g_plain_ptr",
+            "g_const_ptr",
+            "g_ptr_to_const",
+            "g_volatile_int",
+        ):
+            assert name in declared
+            occurrence = _one_entity(snapshot, declared[name].entity_id)
+            assert occurrence is not None
 
     def test_by_value_const_is_top_level(self, snapshot) -> None:
         assert self._cv_qualification_for(snapshot, "g_const_int") == ("const",)

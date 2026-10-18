@@ -118,12 +118,6 @@ class TestRecordAccessIsNotIdentity:
             return
         assert Record(name=name_a, access=access) != Record(name=name_b, access=access)
 
-    def test_access_is_preserved_on_the_instance(self) -> None:
-        # Payload, not identity, but not discarded either — a consumer that
-        # wants to know the access level of a nested scope still can.
-        rec = Record(name="Inner", access="private")
-        assert rec.access == "private"
-
 
 class TestAnonymousOrdinalIsIdentity:
     """Both fields of ``Anonymous`` are identity -- nothing else

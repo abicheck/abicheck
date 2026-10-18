@@ -170,12 +170,12 @@ class TestRunnerTreatment:
         assert problem and "baseline arm could see" in problem
 
     def test_a_skill_arm_seeing_extra_skills_is_not_evidence(self):
-        problem = runner.check_treatment(
-            "skill",
-            SCENARIO_BREAKING,
-            sorted([SCENARIO_BREAKING["skill"], "other-skill"]),
+        visible = sorted([SCENARIO_BREAKING["skill"], "other-skill"])
+        problem = runner.check_treatment("skill", SCENARIO_BREAKING, visible)
+        assert problem == (
+            f"skill arm should see exactly ['{SCENARIO_BREAKING['skill']}'], "
+            f"saw: {visible}"
         )
-        assert problem is not None
 
     def test_the_intended_arms_pass(self):
         assert runner.check_treatment("baseline", SCENARIO_BREAKING, []) is None
@@ -188,7 +188,9 @@ class TestRunnerTreatment:
 
     def test_an_unreported_skill_list_is_not_silently_treated_as_empty(self):
         """None means unverified; [] means positively nothing. They differ."""
-        assert runner.check_treatment("baseline", SCENARIO_BREAKING, None) is not None
+        assert runner.check_treatment("baseline", SCENARIO_BREAKING, None) == (
+            "the CLI never reported which skills it could see"
+        )
 
     def test_visible_skills_are_read_out_of_the_init_event(self):
         events = [
@@ -1071,17 +1073,21 @@ class TestWorkspacePathLeak:
     """
 
     @pytest.mark.parametrize(
-        "leaky",
+        ("leaky", "token"),
         [
-            "home/user/abicheck/runs",
-            "tmp/-home-user-abicheck-0152/scratchpad/runs",
-            "tmp/ABICheck-evals",
-            "tmp/eval/BREAKING/x",
-            "tmp/eval/compatible_runs",
+            ("home/user/abicheck/runs", "abicheck"),
+            ("tmp/-home-user-abicheck-0152/scratchpad/runs", "abicheck"),
+            ("tmp/ABICheck-evals", "ABICheck"),
+            ("tmp/eval/BREAKING/x", "BREAKING"),
+            ("tmp/eval/compatible_runs", "compatible"),
         ],
     )
-    def test_a_path_naming_the_tool_or_a_verdict_is_a_leak(self, tmp_path, leaky):
-        assert runner.workspace_path_leak(tmp_path / leaky / "workspace") is not None
+    def test_a_path_naming_the_tool_or_a_verdict_is_a_leak(
+        self, tmp_path, leaky, token
+    ):
+        leak = runner.workspace_path_leak(tmp_path / leaky / "workspace")
+        assert leak is not None
+        assert leak.endswith(f"contains {token!r}")
 
     @pytest.mark.parametrize(
         "neutral", ["skill-eval-runs", "se/removed-export/skill/0", "a/b/c"]

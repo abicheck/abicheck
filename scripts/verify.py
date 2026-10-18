@@ -377,23 +377,23 @@ STEPS: tuple[Step, ...] = (
         frozenset({PR, FULL}),
         description="ADR-061 responsibility packages, dependency direction, and debt no-growth gate",
     ),
+    # Two static ratchets against shrink-only baselines; both read
+    # $ARCHITECTURE_BASE, so CI rejects a baseline that grew on this branch.
     Step(
-        # Static, deterministic: code only tests keep alive (the 80% coverage
-        # floor counts a test as a caller) and cross-module exact clones,
-        # against a shrink-only baseline. Reads $ARCHITECTURE_BASE like the
-        # step above, so CI rejects a baseline that grew on this branch.
-        "usage-ratchet",
+        "usage-ratchet",  # code only tests keep alive; cross-module clones
         _pyscript("scripts/check_usage_ratchet.py"),
         frozenset({PR, FULL}),
         description="Usage ratchet: test-only functions/modules and cross-module exact clones (shrink-only baseline)",
     ),
     Step(
-        # Empirical time exponents of the hot paths (compare by symbol/type
-        # count, add/remove and rename matching, policy classification,
-        # history by release count): each case in its own subprocess, fastest
-        # CPU-time sample per doubling size, log-log slope against a per-case
-        # ceiling. ~15 s, so it belongs in the PR lane; the call-count gates
-        # cannot see a function whose *body* turned quadratic.
+        "test-quality",  # tests whose asserts cannot fail for a wrong behaviour
+        _pyscript("scripts/audit_test_quality.py", "--check"),
+        frozenset({PR, FULL}),
+        description="Test-quality ratchet: tautological tests (shrink-only baseline)",
+    ),
+    Step(
+        # Hot-path time exponents (log-log slope per case vs a ceiling, ~15 s):
+        # call-count gates cannot see a function whose *body* turned quadratic.
         "complexity-bench",
         _pyscript("scripts/complexity_bench.py", "--strict"),
         frozenset({PR, FULL}),

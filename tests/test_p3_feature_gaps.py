@@ -265,7 +265,10 @@ class TestFlexibleArrayMemberChanged:
             for c in result.changes
             if c.kind == ChangeKind.FLEXIBLE_ARRAY_MEMBER_CHANGED
         ]
-        assert len(fam_changes) >= 1
+        assert len(fam_changes) == 1
+        assert fam_changes[0].symbol == "S"
+        assert fam_changes[0].description == "Flexible array member added: S::data"
+        assert result.verdict == Verdict.COMPATIBLE
 
 
 # ===========================================================================

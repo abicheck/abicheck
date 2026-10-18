@@ -21,6 +21,7 @@ from click.testing import CliRunner
 
 from abicheck.cli import main
 from abicheck.model import AbiSnapshot, Function, Visibility
+from abicheck.policy.severity import SeverityConfig, SeverityLevel
 from abicheck.serialization import snapshot_to_json
 
 # ── helpers ──────────────────────────────────────────────────────────────
@@ -1008,9 +1009,12 @@ class TestReleaseSeverityPolicyAndGlobal:
     def test_resolve_config_set_with_flag(self):
         from abicheck.workflows.gate import _resolve_release_severity_config
 
-        assert (
-            _resolve_release_severity_config("strict", None, None, None, None)
-            is not None
+        config = _resolve_release_severity_config("strict", None, None, None, None)
+        assert config == SeverityConfig(
+            abi_breaking=SeverityLevel.ERROR,
+            potential_breaking=SeverityLevel.ERROR,
+            quality_issues=SeverityLevel.ERROR,
+            addition=SeverityLevel.ERROR,
         )
 
 

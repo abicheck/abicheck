@@ -505,8 +505,11 @@ class TestTypesSectionDTO:
         dto = types_to_dto(section)
         reloaded = SectionDTO.from_dict(dto.to_dict())
         section2 = types_from_dto(reloaded)
+        # The reloaded document must equal a freshly-dumped one, nested lists
+        # included, so a detector sees no spurious mismatch.
+        assert section2.to_document() == section.to_document()
         entry = section2.to_document()["types"][0]
-        assert isinstance(entry, dict)
+        assert entry == {"name": "Foo", "bases": ["Base"]}
         assert isinstance(entry["bases"], list)
         assert entry["bases"] == ["Base"]
         # json.dumps must accept the reconstructed document -- a leftover
@@ -600,7 +603,8 @@ class TestGraphSectionDTO:
         reloaded = SectionDTO.from_dict(dto.to_dict())
         section2 = graph_from_dto(reloaded)
         document = section2.to_document()
-        assert isinstance(document["surface_graph"], dict)
+        assert document == section.to_document()
+        assert document["surface_graph"] == {"nodes": ["a", "b"]}
         assert isinstance(document["surface_graph"]["nodes"], list)
         assert document["surface_graph"]["nodes"] == ["a", "b"]
         import json

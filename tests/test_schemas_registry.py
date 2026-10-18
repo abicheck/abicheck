@@ -16,6 +16,8 @@
 
 from __future__ import annotations
 
+import re
+
 import pytest
 
 from abicheck import schemas
@@ -68,8 +70,18 @@ class TestSchemasCurrent:
         # because a human hand-copied this number instead of reading it
         # from serialization.SCHEMA_VERSION -- guard the type too, not just
         # the value, so a docs generator can format it without guessing.
-        assert isinstance(schemas.current("snapshot"), int)
+        version = schemas.current("snapshot")
+        assert type(version) is int
+        assert version >= 1
 
-    @pytest.mark.parametrize("name", ["compare", "build-output", "run-plan", "release"])
-    def test_other_versions_are_strings(self, name):
-        assert isinstance(schemas.current(name), str)
+    @pytest.mark.parametrize(
+        ("name", "shape"),
+        [
+            ("compare", r"\d+\.\d+"),
+            ("release", r"\d+\.\d+"),
+            ("build-output", r"abicheck\.build-output/v\d+"),
+            ("run-plan", r"abicheck\.run-plan/v\d+"),
+        ],
+    )
+    def test_other_versions_follow_their_documented_shape(self, name, shape):
+        assert re.fullmatch(shape, schemas.current(name))

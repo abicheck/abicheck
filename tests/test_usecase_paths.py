@@ -369,10 +369,19 @@ def test_every_flow_placeholder_is_one_the_recorder_provides() -> None:
 
 
 def test_every_scenario_test_named_in_the_catalog_exists() -> None:
+    import inspect
+
     import test_scenarios
 
-    for sc in up.load_scenarios():
-        assert hasattr(test_scenarios, sc["test"]), sc["id"]
+    scenarios = up.load_scenarios()
+    assert scenarios, "catalog lists no scenarios, so the check would be vacuous"
+    for sc in scenarios:
+        # The catalog must name a real test function defined in that module,
+        # not a re-export, a constant or a helper that happens to share a name.
+        target = getattr(test_scenarios, sc["test"], None)
+        assert inspect.isfunction(target), sc["id"]
+        assert sc["test"].startswith("test_"), sc["id"]
+        assert target.__module__ == test_scenarios.__name__, sc["id"]
 
 
 # ── changed functions ───────────────────────────────────────────────────────

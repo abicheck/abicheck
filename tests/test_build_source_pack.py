@@ -1907,7 +1907,7 @@ def test_coverage_status_default_round_trip():
     assert cov is None  # empty pack has no coverage rows until populated
 
 
-def test_coverage_status_enum_values():
+def test_coverage_status_enum_values():  # test-quality: ok pins the on-disk status spellings of the evidence-pack coverage table, which packs serialize
     assert CoverageStatus.PRESENT.value == "present"
     assert CoverageStatus.NOT_COLLECTED.value == "not_collected"
 

@@ -663,7 +663,7 @@
     },
     {
       "path": "abicheck/dwarf_snapshot.py",
-      "baseline_lines": 1747,
+      "baseline_lines": 1746,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -1004,7 +1004,7 @@
     },
     {
       "path": "tests/unit/report/test_build_report_document.py",
-      "baseline_lines": 1618,
+      "baseline_lines": 1610,
       "target": "report",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -1180,7 +1180,7 @@
     },
     {
       "path": "tests/test_build_source_cli.py",
-      "baseline_lines": 3783,
+      "baseline_lines": 3780,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -1257,7 +1257,7 @@
     },
     {
       "path": "tests/test_checker_reporter_branches.py",
-      "baseline_lines": 1713,
+      "baseline_lines": 1694,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -1356,7 +1356,7 @@
     },
     {
       "path": "tests/test_compile_db_filter_scope.py",
-      "baseline_lines": 1246,
+      "baseline_lines": 1245,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -1400,7 +1400,7 @@
     },
     {
       "path": "tests/test_cov95_cli.py",
-      "baseline_lines": 3398,
+      "baseline_lines": 3397,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -1543,7 +1543,7 @@
     },
     {
       "path": "tests/test_dumper_coverage.py",
-      "baseline_lines": 1393,
+      "baseline_lines": 1389,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -1609,7 +1609,7 @@
     },
     {
       "path": "tests/test_dwarf_snapshot.py",
-      "baseline_lines": 1821,
+      "baseline_lines": 1788,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -1681,17 +1681,6 @@
       "disposition": "migrate",
       "category": "legacy_oversized_test_module",
       "owner": "extract",
-      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
-      "review_by": "2026-11-30"
-    },
-    {
-      "path": "tests/test_header_compile_context_gcc_path.py",
-      "baseline_lines": 1201,
-      "target": "tests/unit-or-contract ownership matching production migration",
-      "rule": "no_growth",
-      "disposition": "migrate",
-      "category": "legacy_oversized_test_module",
-      "owner": "tests",
       "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
       "review_by": "2026-11-30"
     },
@@ -1972,7 +1961,7 @@
     },
     {
       "path": "tests/test_source_replay.py",
-      "baseline_lines": 1240,
+      "baseline_lines": 1227,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",

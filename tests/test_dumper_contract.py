@@ -99,18 +99,27 @@ def test_attach_extraction_contract_with_malformed_gcc_options_does_not_raise(
     not abort the dump: ``shlex.split`` raising ``ValueError`` is caught and
     the contract is still computed from ``gcc_option_tokens`` alone."""
     header = tmp_path / "api.h"
-    snap = AbiSnapshot(library="libfoo.so", version="1.0", from_headers=True)
-    _attach_extraction_contract(
-        snap,
-        headers=[header],
-        extra_includes=None,
-        gcc_options='-DFOO="unterminated',
-        gcc_option_tokens=(),
-        lang=None,
-        public_headers=None,
-        public_header_dirs=None,
-    )
-    assert snap.contract is not None
+    tokens = ("-DFOO=1",)
+
+    def _contract(gcc_options: str | None):
+        snap = AbiSnapshot(library="libfoo.so", version="1.0", from_headers=True)
+        _attach_extraction_contract(
+            snap,
+            headers=[header],
+            extra_includes=None,
+            gcc_options=gcc_options,
+            gcc_option_tokens=tokens,
+            lang=None,
+            public_headers=None,
+            public_header_dirs=None,
+        )
+        return snap.contract
+
+    malformed = _contract('-DFOO="unterminated')
+    assert malformed is not None
+    # The unparseable string contributes nothing: the contract matches the
+    # one computed from the structured tokens alone.
+    assert malformed == _contract(None)
 
 
 def _attach_resolved_standard(

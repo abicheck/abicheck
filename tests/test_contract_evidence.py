@@ -18,6 +18,8 @@ decision_receipt snapshot block shapes."""
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from abicheck.compatibility_evaluation_config import (
@@ -87,9 +89,12 @@ class TestInputIdentity:
         assert ident.sha256 == "abc123"
         assert ident.path is None
 
-    def test_with_path(self):
+    def test_path_is_an_optional_string(self):
         ident = InputIdentity(sha256="abc123", path="include/foo.h")
         assert ident.path == "include/foo.h"
+        # A pathlib.Path is not accepted as the human-readable path.
+        with pytest.raises(TypeError, match="InputIdentity.path"):
+            InputIdentity(sha256="abc123", path=Path("include/foo.h"))  # type: ignore[arg-type]
 
     def test_empty_sha256_rejected(self):
         with pytest.raises(ValueError):

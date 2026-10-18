@@ -1028,7 +1028,22 @@ class TestPrewarmDemangleFromJsonValue:
         with patch.dict("sys.modules", {"cxxfilt": None}):
             with patch("abicheck.demangle.run_bounded") as mock_run:
                 _mod.prewarm_demangle_from_json_value(value)
-        mock_run.assert_not_called()
+                mock_run.assert_not_called()
+                # Positive control on the same walker: one embedded token in
+                # an otherwise identical tree does reach the demangler, so the
+                # empty tree above is a real negative, not a dead walk.
+                mock_run.return_value = subprocess.CompletedProcess(
+                    args=["c++filt"],
+                    returncode=0,
+                    stdout="zzprobe::tok()\n",
+                    stderr="",
+                )
+                _mod.prewarm_demangle_from_json_value(
+                    {**value, "e": {"f": "_ZN7zzprobe3tokEv"}}
+                )
+        # The one batched call carried exactly the embedded token on stdin.
+        assert mock_run.call_count == 1
+        assert mock_run.call_args.kwargs["input"] == "_ZN7zzprobe3tokEv"
 
     def test_non_string_scalars_do_not_raise(self):
         """ints/floats/bools/None reach the walk unscathed -- a real document

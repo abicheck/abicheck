@@ -181,7 +181,7 @@ class TestDeriveBaselineLibraries:
 
 
 class TestAcceptedMainCacheKeys:
-    def test_default_key_prefix(self) -> None:
+    def test_default_key_prefix(self) -> None:  # test-quality: ok CI cache key prefix
         assert DEFAULT_ACCEPTED_MAIN_KEY_PREFIX == "abicheck-baseline-main"
 
     def test_cache_key_format(self) -> None:
