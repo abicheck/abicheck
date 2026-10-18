@@ -452,3 +452,36 @@ def test_verbatim_move_to_another_file_is_not_an_edit(tmp_path: Path) -> None:
 
     assert data["tests"] == []
     assert data["gone"] == []
+
+
+def test_reorder_that_also_changes_a_body_still_counts_the_changed_test(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "reorder_edit"
+    _init(repo)
+    first = "def test_first():\n    value = 1\n    assert value == 1\n"
+    second = "def test_second():\n    value = 2\n    assert value == 2\n"
+    _commit(repo, "feat: two tests", files={MOD: first + "\n\n" + second})
+    # The same swap, but test_second's assertion also changes: a real edit.
+    edited = second.replace("assert value == 2", "assert value == 3")
+    _commit(repo, "refactor: reorder and tighten", files={MOD: edited + "\n\n" + first})
+
+    data = churn.to_json(churn.analyse(repo, "1 year ago"))
+
+    assert [t["test"] for t in data["tests"]] == [f"{MOD}::test_second"]
+    assert _counts(data["tests"][0]) == (1, 1, 0, 0)
+
+
+def test_inherited_git_repository_variables_do_not_redirect_the_report(
+    churn_repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A git hook exports GIT_DIR and GIT_INDEX_FILE; they must not win over -C.
+    other = tmp_path / "other"
+    _init(other)
+    monkeypatch.setenv("GIT_DIR", str(other / ".git"))
+    monkeypatch.setenv("GIT_INDEX_FILE", str(other / "index"))
+
+    data = churn.to_json(churn.analyse(churn_repo, "1 year ago"))
+
+    assert data["commits_scanned"] == 10
+    assert [t["test"] for t in data["tests"]][:1] == [f"{MOD}::test_add"]
