@@ -27,6 +27,7 @@ from pathlib import Path
 import pytest
 
 from abicheck.buildsource.adapters.compile_db import CompileDbAdapter
+from abicheck.buildsource.redaction import RedactionPolicy
 
 
 def _collect_one(tmp_path: Path, directory: str, file: str):
@@ -43,7 +44,10 @@ def _collect_one(tmp_path: Path, directory: str, file: str):
         ),
         encoding="utf-8",
     )
-    return CompileDbAdapter(db).collect().compile_units[0]
+    # Home redaction is a separate policy (it rewrites a home prefix to "~");
+    # switch it off so these cases isolate the separator behaviour under test.
+    redaction = RedactionPolicy(redact_home=False)
+    return CompileDbAdapter(db, redaction=redaction).collect().compile_units[0]
 
 
 @pytest.mark.parametrize(
