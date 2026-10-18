@@ -935,28 +935,24 @@ class TestProfileMatrix:
         _write_report(tmp_path, clang, "COMPATIBLE")
         r = aggregate_reports_dir(tmp_path, expected=_expect(gcc, clang))
         d = r.to_dict()
-        assert d["profile_matrix"] == [
-            {
-                "base_target": "libfoo",
-                "profiles": ["linux-clang20", "linux-gcc14"],
-                "affected_profiles": ["linux-gcc14"],
-                "incomplete_profiles": [],
-                "unanalyzed_profiles": [],
-                "contract_incomplete_profiles": [],
-                **{
-                    k: []
-                    for k in (
-                        "analysis_incomplete_profiles",
-                        "scope_incomplete_profiles",
-                        "audit_only_profiles",
-                    )
-                },
-                "verdict_by_profile": {
-                    "linux-clang20": "COMPATIBLE",
-                    "linux-gcc14": "BREAKING",
-                },
-            }
-        ]
+        (entry,) = d["profile_matrix"]
+        assert entry["base_target"] == "libfoo"
+        assert entry["profiles"] == ["linux-clang20", "linux-gcc14"]
+        assert entry["affected_profiles"] == ["linux-gcc14"]
+        assert entry["verdict_by_profile"] == {
+            "linux-clang20": "COMPATIBLE",
+            "linux-gcc14": "BREAKING",
+        }
+        # Both checks ran to a verdict, so no profile is reported as a gap.
+        for gap in (
+            "incomplete_profiles",
+            "unanalyzed_profiles",
+            "contract_incomplete_profiles",
+            "analysis_incomplete_profiles",
+            "scope_incomplete_profiles",
+            "audit_only_profiles",
+        ):
+            assert entry[gap] == [], gap
         text = r.render_text()
         assert "Profile matrix:" in text
         assert "libfoo: affected on linux-gcc14" in text
