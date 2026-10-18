@@ -34,6 +34,7 @@ import pytest
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 
+import refactor_churn_source as source  # noqa: E402
 import test_refactor_churn as churn  # noqa: E402
 
 pytestmark = pytest.mark.skipif(shutil.which("git") is None, reason="needs git")
@@ -77,6 +78,7 @@ def _git(repo: Path, *args: str) -> str:
         check=True,
         capture_output=True,
         text=True,
+        env=source._git_env(),
     ).stdout
 
 
@@ -102,7 +104,7 @@ def _commit(
         (repo / new).parent.mkdir(parents=True, exist_ok=True)
         os.replace(repo / old, repo / new)
     _git(repo, "add", "-A")
-    env = dict(os.environ)
+    env = source._git_env()
     if date is not None:
         env["GIT_AUTHOR_DATE"] = date
         env["GIT_COMMITTER_DATE"] = date
@@ -314,6 +316,7 @@ def test_shallow_clone_is_reported_and_then_fetched(
         ["git", "clone", "-q", "--depth", "1", churn_repo.as_uri(), str(clone)],
         check=True,
         capture_output=True,
+        env=source._git_env(),
     )
 
     partial = churn.to_json(churn.analyse(clone, "1 year ago", unshallow=False))
@@ -383,12 +386,12 @@ SNIPPET = textwrap.dedent(
 def test_line_labels_separate_assertions_from_setup(
     line: int, label: str | None
 ) -> None:
-    src = churn._parse_source(SNIPPET)
+    src = source._parse_source(SNIPPET)
     assert src.label(line) == label
 
 
 def test_innermost_test_is_chosen_for_an_enclosed_line() -> None:
-    src = churn._parse_source(SNIPPET)
+    src = source._parse_source(SNIPPET)
     assert src.test_at(8) == "test_one"
     assert src.test_at(1) is None
 
@@ -408,6 +411,21 @@ def test_innermost_test_is_chosen_for_an_enclosed_line() -> None:
 )
 def test_commit_kind_follows_conventional_prefix(subject: str, kind: str) -> None:
     assert churn._kind(subject) == kind
+
+
+def test_reordering_unchanged_tests_in_one_file_is_not_an_edit(tmp_path: Path) -> None:
+    repo = tmp_path / "reorder"
+    _init(repo)
+    first = "def test_first():\n    value = 1\n    assert value == 1\n"
+    second = "def test_second():\n    value = 2\n    assert value == 2\n"
+    _commit(repo, "feat: two tests", files={MOD: first + "\n\n" + second})
+    # A refactor that swaps the two tests; neither body changes.
+    _commit(repo, "refactor: reorder tests", files={MOD: second + "\n\n" + first})
+
+    data = churn.to_json(churn.analyse(repo, "1 year ago"))
+
+    assert data["tests"] == []
+    assert data["gone"] == []
 
 
 def test_verbatim_move_to_another_file_is_not_an_edit(tmp_path: Path) -> None:

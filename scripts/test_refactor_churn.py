@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 # Copyright 2026 Nikolay Petrov
 # SPDX-License-Identifier: Apache-2.0
 #
@@ -43,11 +44,12 @@ Method:
   ``neutral`` and attributes nothing when it is an import, blank or a comment.
   Anything else is ``setup``.
 * A test that did not exist at the parent revision was *created* by the
-  commit, not edited, and is not counted. A test removed from one place and
-  re-created under the same name in the same commit is a *move* (a file split,
-  say), and is not counted either: its removed lines are not an edit. A move
-  that also changes the body is therefore under-counted. Import-only and
-  blank-only hunks are not counted.
+  commit, not edited, and is not counted. A test whose body is unchanged but
+  which the commit moved (to another place in its file, or to another file
+  under the same name) is not counted either: a reorder or a split is not an
+  edit. A moved test whose body also changed is counted against its old
+  location, so its record reads as gone. Import-only and blank-only hunks are
+  not counted.
 * Tests with a refactor edit that no longer exist at HEAD are reported
   separately as ``gone``.
 
@@ -65,219 +67,21 @@ exits 0 whenever the analysis runs, and 1 when git cannot produce it.
 from __future__ import annotations
 
 import argparse
-import ast
 import dataclasses
-import functools
 import json
 import pathlib
 import re
-import subprocess
 import sys
-from collections.abc import Iterator
+
+from refactor_churn_source import ChurnError, _Blobs, _git, _run, _Source
 
 TESTS_PATH = "tests"
 REFACTOR_RE = re.compile(r"^(refactor|perf|style)(\([^)]*\))?!?:")
 FEATFIX_RE = re.compile(r"^(feat|fix)(\([^)]*\))?!?:")
 HUNK_RE = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
-RAISES_NAMES = frozenset(
-    {"raises", "warns", "assertRaises", "assertWarns", "assertRaisesRegex"}
-)
-EXPECTED_PREFIXES = ("expected", "want")
 #: ASCII record and field separators: they cannot appear in a commit subject.
 SEP = "\x1e"
 FIELD = "\x1f"
-
-
-class ChurnError(RuntimeError):
-    """A git call failed, so the report cannot be produced."""
-
-
-def _run(repo: pathlib.Path, *args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        ["git", "-C", str(repo), *args],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        check=False,
-    )
-
-
-def _git(repo: pathlib.Path, *args: str) -> str:
-    proc = _run(repo, *args)
-    if proc.returncode != 0:
-        raise ChurnError(f"git {' '.join(args)} failed: {proc.stderr.strip()}")
-    return proc.stdout
-
-
-# ---------------------------------------------------------------------------
-# One file at one revision
-# ---------------------------------------------------------------------------
-
-
-@dataclasses.dataclass
-class _Source:
-    """One file at one revision, reduced to what attribution needs."""
-
-    #: qualified name (``Class::test_x``) -> (first, last) line of the span,
-    #: decorators included.
-    tests: dict[str, tuple[int, int]]
-    assertion_lines: frozenset[int]
-    neutral_lines: frozenset[int]
-    #: The file does not parse at this revision; it attributes nothing.
-    broken: bool = False
-
-    def label(self, line: int) -> str | None:
-        """``assertion``, ``setup``, or None for a line that is not an edit."""
-        if line in self.assertion_lines:
-            return "assertion"
-        if line in self.neutral_lines:
-            return None
-        return "setup"
-
-    def test_at(self, line: int) -> str | None:
-        """The innermost test whose span holds ``line``."""
-        containing = [
-            n for n, (first, last) in self.tests.items() if first <= line <= last
-        ]
-        return max(containing, key=lambda n: self.tests[n][0], default=None)
-
-
-def _span(node: ast.AST) -> range:
-    first = getattr(node, "lineno")
-    return range(first, (getattr(node, "end_lineno", None) or first) + 1)
-
-
-def _callee(func: ast.expr) -> str | None:
-    if isinstance(func, ast.Name):
-        return func.id
-    if isinstance(func, ast.Attribute):
-        return func.attr
-    return None
-
-
-def _assigns_expected(node: ast.Assign | ast.AnnAssign) -> bool:
-    targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-    return any(
-        isinstance(t, ast.Name) and t.id.lower().startswith(EXPECTED_PREFIXES)
-        for t in targets
-    )
-
-
-def _test_spans(tree: ast.Module) -> dict[str, tuple[int, int]]:
-    """Every ``test*`` function, keyed by ``Class::name``. Not descended into."""
-    spans: dict[str, tuple[int, int]] = {}
-
-    def visit(body: list[ast.stmt], prefix: str) -> None:
-        for node in body:
-            if isinstance(node, ast.ClassDef):
-                visit(node.body, f"{prefix}{node.name}::")
-            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                if node.name.startswith("test"):
-                    first = min([node.lineno, *(d.lineno for d in node.decorator_list)])
-                    spans[prefix + node.name] = (first, node.end_lineno or node.lineno)
-            else:
-                # Compound statements (if/try/with/match) can hold tests too.
-                for field in _BLOCK_FIELDS:
-                    visit(getattr(node, field, None) or [], prefix)
-
-    visit(tree.body, "")
-    return spans
-
-
-#: Fields that hold nested statements. Every assertion, import and assignment
-#: this module labels is a statement, so walking only these skips the expression
-#: tree, which ``ast.walk`` visits in full and which dominated the run's time.
-_BLOCK_FIELDS = ("body", "orelse", "finalbody", "handlers", "cases")
-
-
-def _statements(body: list[ast.stmt]) -> Iterator[ast.stmt]:
-    stack: list[ast.AST] = list(body)
-    while stack:
-        node = stack.pop()
-        yield node  # type: ignore[misc]
-        for field in _BLOCK_FIELDS:
-            stack.extend(getattr(node, field, None) or ())
-
-
-def _scan(tree: ast.Module, text: str) -> tuple[set[int], set[int]]:
-    """Assertion lines and neutral lines (imports, blanks, comments) in one pass."""
-    assertion: set[int] = set()
-    neutral: set[int] = set()
-    for node in _statements(tree.body):
-        if isinstance(node, (ast.Import, ast.ImportFrom)):
-            neutral.update(_span(node))
-        elif isinstance(node, ast.Assert):
-            assertion.update(_span(node))
-        elif isinstance(node, (ast.With, ast.AsyncWith)):
-            for item in node.items:
-                expr = item.context_expr
-                if isinstance(expr, ast.Call) and _callee(expr.func) in RAISES_NAMES:
-                    assertion.update(_span(expr))
-        elif isinstance(node, ast.Expr) and isinstance(node.value, ast.Call):
-            if (_callee(node.value.func) or "").startswith("assert"):
-                assertion.update(_span(node))
-        elif isinstance(node, (ast.Assign, ast.AnnAssign)) and _assigns_expected(node):
-            assertion.update(_span(node))
-    for number, line in enumerate(text.split("\n"), 1):
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#"):
-            neutral.add(number)
-    return assertion, neutral
-
-
-@functools.lru_cache(maxsize=512)
-def _parse_source(text: str) -> _Source:
-    """Parse one file version. Cached by content: a file's old side in one
-    commit is usually the new side it had in an earlier one."""
-    try:
-        tree = ast.parse(text)
-    except (SyntaxError, ValueError):
-        return _Source({}, frozenset(), frozenset(), broken=True)
-    assertion, neutral = _scan(tree, text)
-    return _Source(
-        tests=_test_spans(tree),
-        assertion_lines=frozenset(assertion),
-        neutral_lines=frozenset(neutral),
-    )
-
-
-class _Blobs:
-    """Reads ``rev:path`` blobs through one long-lived ``git cat-file --batch``.
-
-    One process instead of one ``git show`` per file revision: the walk reads
-    about two blobs per changed file, and process start-up dominated the run.
-    """
-
-    def __init__(self, repo: pathlib.Path) -> None:
-        self.repo = repo
-        self._proc = subprocess.Popen(
-            ["git", "-C", str(repo), "cat-file", "--batch"],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-        )
-
-    def __enter__(self) -> _Blobs:
-        return self
-
-    def __exit__(self, *exc: object) -> None:
-        if self._proc.stdin is not None:
-            self._proc.stdin.close()
-        self._proc.wait()
-
-    def source(self, rev: str, path: str) -> _Source:
-        """The file at ``rev``, as a commit-independent parsed source."""
-        stdin, stdout = self._proc.stdin, self._proc.stdout
-        assert stdin is not None and stdout is not None
-        stdin.write(f"{rev}:{path}\n".encode())
-        stdin.flush()
-        header = stdout.readline().decode("utf-8", errors="replace").split()
-        if len(header) != 3 or header[1] != "blob":
-            raise ChurnError(f"cannot read {rev}:{path}: {' '.join(header)}")
-        data = stdout.read(int(header[2]))
-        stdout.read(1)  # cat-file prints one LF after every object
-        # Decoded without newline translation: git counts only "\n" in line numbers.
-        return _parse_source(data.decode("utf-8", errors="replace"))
 
 
 # ---------------------------------------------------------------------------
@@ -455,9 +259,9 @@ def _walk(
     for commit in commits:
         kind = _kind(commit.subject)
         touched: dict[tuple[str, str], set[str]] = {}
-        #: Test names this commit created, and (key, name) pairs it left in place.
-        created: set[str] = set()
-        present: set[tuple[str, str]] = set()
+        #: Body digests before the commit, by (key, name); after it, by name.
+        old_bodies: dict[tuple[str, str], str] = {}
+        new_bodies: dict[str, set[str]] = {}
         for sec in commit.sections:
             old_key = _key(canon, sec.old)
             if sec.old and sec.new and sec.old != sec.new:
@@ -479,18 +283,22 @@ def _walk(
             unparsed += sum(1 for s in (old_src, new_src) if s and s.broken)
             existing = set(old_src.tests) if old_src else set()
             if new_src is not None and new_key is not None:
-                created.update(set(new_src.tests) - existing)
-                present.update((new_key, name) for name in new_src.tests)
+                for name, digest in new_src.bodies.items():
+                    new_bodies.setdefault(name, set()).add(digest)
+            if old_src is not None and old_key is not None:
+                for name, digest in old_src.bodies.items():
+                    old_bodies[(old_key, name)] = digest
             for old_range, new_range in sec.hunks:
                 if old_src is not None and old_key is not None:
                     _mark(touched, old_key, old_src, old_range, None)
                 if new_src is not None and new_key is not None:
                     _mark(touched, new_key, new_src, new_range, existing)
-        # A test this commit removed from one place and re-created under the same
-        # name is a move, not an edit: its removed lines would otherwise read as
-        # assertion edits to a test whose body did not change. A move that also
-        # changes the body is therefore under-counted.
-        for entry in [e for e in touched if e[1] in created and e not in present]:
+        # A test whose body survives the commit under the same name is a move, not
+        # an edit: its removed lines would otherwise read as assertion edits to a
+        # test that did not change. A body that changed matches nothing, so it stays.
+        for entry in [
+            e for e in touched if old_bodies.get(e) in new_bodies.get(e[1], ())
+        ]:
             del touched[entry]
         for (key, name), labels in touched.items():
             record = records.setdefault((key, name), _Record(key, name))
