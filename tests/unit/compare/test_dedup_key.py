@@ -130,16 +130,16 @@ _UNHASHABLE = [
 class TestTheResultIsAlwaysHashable:
     @given(_EXACT)
     def test_any_value_yields_a_hashable_result(self, value: object) -> None:
-        key = hashable_value(value)
-        hash(key)
-        assert key == hashable_value(value)
+        first, second = hashable_value(value), hashable_value(value)
+        # Same input, same key: the result must be usable as a set member.
+        assert first is second or first == second
+        assert hash(first) == hash(second)
 
     @pytest.mark.parametrize("value", _UNHASHABLE)
     def test_known_unhashable_shapes(self, value: object) -> None:
         key = hashable_value(value)
-        hash(key)
-        # Equal values must key equal, or dedup would split one finding.
         assert key == hashable_value(copy.deepcopy(value))
+        assert hash(key) == hash(hashable_value(copy.deepcopy(value)))
 
     @pytest.mark.parametrize("value", _UNHASHABLE)
     def test_the_result_survives_entering_a_set(self, value: object) -> None:
@@ -152,8 +152,8 @@ class TestTheResultIsAlwaysHashable:
 
         obj = Hostile()
         key = hashable_value(obj)
-        hash(key)
         assert key == hashable_value(obj)
+        assert len({key, hashable_value(obj)}) == 1
 
 
 class TestEqualValuesKeyEqually:
@@ -262,8 +262,8 @@ class TestOpaqueValuesKeyByIdentity:
     def test_an_opaque_value_is_hashable(self) -> None:
         value = self._opaque("x")
         key = hashable_value(value)
-        hash(key)
-        assert key.value is value
+        assert key == hashable_value(value)
+        assert len({key, hashable_value(value)}) == 1
 
     def test_the_same_object_keys_equally_every_time(self) -> None:
         value = self._opaque("x")

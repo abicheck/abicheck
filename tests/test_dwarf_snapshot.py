@@ -1188,7 +1188,7 @@ extern "C" SensorData make_sensor(int c, int s) {
         )
 
     def test_cpp_const_variable(self, cpp_lib: Path) -> None:
-        """Const global variable should be extracted."""
+        """Internal-linkage const is not ABI: not reported, and no crash."""
         from abicheck.dwarf_unified import parse_dwarf
         from abicheck.elf_metadata import parse_elf_metadata
 
@@ -1201,12 +1201,11 @@ extern "C" SensorData make_sensor(int c, int s) {
             dwarf_adv,
         )
 
-        # MAGIC may or may not be exported depending on linker, but
-        # the build_snapshot should not crash processing it
         assert snap is not None
+        assert "MAGIC" not in {v.name for v in snap.declarations.variables}
 
     def test_version_and_language_profile(self, cpp_lib: Path) -> None:
-        """build_snapshot_from_dwarf should accept version and language_profile."""
+        """version/language_profile are applied without displacing extracted types."""
         from abicheck.dwarf_unified import parse_dwarf
         from abicheck.elf_metadata import parse_elf_metadata
 
@@ -1223,6 +1222,7 @@ extern "C" SensorData make_sensor(int c, int s) {
 
         assert snap.version == "2.0.0"
         assert snap.language_profile == "cpp"
+        assert {"Base", "Derived", "Flags"} <= {t.name for t in snap.declarations.types}
 
     def test_rvalue_reference_param(self, cpp_lib: Path) -> None:
         """Rvalue reference parameters should be detected."""

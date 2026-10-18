@@ -41,6 +41,7 @@ class TestRenderOutput:
         assert "libtest" in out
 
     def test_md_format(self, diff_result, snap):
+        # "md" is an alias of "markdown": same renderer, same output.
         out = render_output("md", diff_result, snap)
         assert isinstance(out, str)
         assert "libtest" in out

@@ -171,10 +171,6 @@ class TestContractConfigUnresolvedBehavior:
         contract = ContractConfig(mode=ContractMode.PUBLIC)
         assert contract.unresolved == "not_checkable"
 
-    def test_warn_is_accepted(self):
-        contract = ContractConfig(mode=ContractMode.PUBLIC, unresolved="warn")
-        assert contract.unresolved == "warn"
-
     def test_unsupported_value_is_a_value_error(self):
         with pytest.raises(ValueError, match="unresolved"):
             ContractConfig(mode=ContractMode.PUBLIC, unresolved="warning")
@@ -605,9 +601,13 @@ class TestImmutableIdentityRequiresDigest:
         with pytest.raises(TypeError):
             ImmutableIdentity(id="strict_abi", version=1)  # type: ignore[call-arg]
 
-    def test_sha256_round_trips(self):
-        identity = _identity("strict_abi", sha256="abc123")
-        assert identity.sha256 == "abc123"
+    def test_a_redefined_digest_is_a_different_identity(self):
+        # Same id and version, different content: the digest is what tells
+        # the two apart, so a silently redefined pack cannot compare equal.
+        original = _identity("strict_abi", sha256="abc123")
+        redefined = _identity("strict_abi", sha256="def456")
+        assert original != redefined
+        assert original == _identity("strict_abi", sha256="abc123")
 
     def test_empty_string_sha256_is_rejected(self):
         # A present-but-empty digest is exactly as useless as a missing one.
@@ -799,10 +799,6 @@ class TestGateConfigExitCodeScheme:
         gate = GateConfig()
         assert gate.exit_code_scheme == "severity"
 
-    def test_legacy_is_accepted(self):
-        gate = GateConfig(exit_code_scheme="legacy")
-        assert gate.exit_code_scheme == "legacy"
-
     def test_auto_is_rejected(self):
         with pytest.raises(ValueError, match="exit_code_scheme"):
             GateConfig(exit_code_scheme="auto")
@@ -885,10 +881,6 @@ class TestScopedGateSelection:
         scope = ScopedGateSelection(kind="used_by", targets=("/opt/app1", "/opt/app2"))
         assert scope.kind == "used_by"
         assert scope.targets == ("/opt/app1", "/opt/app2")
-
-    def test_required_symbol_kind_is_accepted(self):
-        scope = ScopedGateSelection(kind="required_symbol", targets=("plugin_init",))
-        assert scope.kind == "required_symbol"
 
     def test_default_targets_is_empty_tuple(self):
         assert ScopedGateSelection(kind="used_by").targets == ()

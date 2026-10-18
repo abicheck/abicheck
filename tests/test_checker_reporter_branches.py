@@ -290,7 +290,10 @@ class TestAffectedSymbolsComputation:
         result = compare(old, new)
         # Should have field-related changes with Container as root
         field_changes = [c for c in result.changes if "Container" in c.symbol]
-        assert len(field_changes) >= 1
+        kinds = {c.kind.value for c in field_changes}
+        assert kinds == {"type_field_removed", "type_field_offset_changed"}
+        want = {"_Z13use_container9Container", "use_container"}
+        assert all(set(c.affected_symbols) == want for c in field_changes)
 
 
 class TestRedundantChangeFiltering:
@@ -440,8 +443,13 @@ class TestEnumEdgeCases:
 
         result = compare(old, new)
         # FLAG_A removed because two new members share value=1 (no unique rename candidate)
-        # Should have some enum changes
-        assert len(result.changes) > 0
+        removed = [
+            c for c in result.changes if c.kind is ChangeKind.ENUM_MEMBER_REMOVED
+        ]
+        assert [c.symbol for c in removed] == ["Flags::FLAG_A"]
+        assert (removed[0].old_value, removed[0].new_value) == ("1", None)
+        assert ChangeKind.ENUM_MEMBER_RENAMED not in {c.kind for c in result.changes}
+        assert result.verdict == Verdict.BREAKING
 
 
 # ===========================================================================
@@ -1652,62 +1660,35 @@ class TestEnrichAffectedSymbolsNamespace:
 
 
 class TestComputeConfidenceDwarfFlag:
-    """Placeholder DWARF objects (has_dwarf=False) must not add 'dwarf' tier."""
+    """Placeholder DWARF objects (has_dwarf=False) must not add a tier."""
 
-    def test_placeholder_dwarf_not_counted(self):
-        old = _make_snap(
-            functions=[
-                Function(
-                    name="f",
-                    mangled="_f",
-                    return_type="void",
-                    visibility=Visibility.PUBLIC,
-                ),
-            ]
-        )
-        old.declarations.debug_layout = DwarfMetadata(has_dwarf=False)
-        new = _make_snap(
-            functions=[
-                Function(
-                    name="f",
-                    mangled="_f",
-                    return_type="void",
-                    visibility=Visibility.PUBLIC,
-                ),
-            ]
-        )
-        new.declarations.debug_layout = DwarfMetadata(has_dwarf=False)
+    @pytest.mark.parametrize(
+        ("meta_cls", "attr", "tier", "sides", "counted"),
+        [
+            (DwarfMetadata, "debug_layout", "dwarf", (False, False), False),
+            (DwarfMetadata, "debug_layout", "dwarf", (True, True), True),
+            (DwarfMetadata, "debug_layout", "dwarf", (True, False), True),
+            (
+                AdvancedDwarfMetadata,
+                "debug_advanced",
+                "dwarf_advanced",
+                (False, False),
+                False,
+            ),
+            (
+                AdvancedDwarfMetadata,
+                "debug_advanced",
+                "dwarf_advanced",
+                (True, True),
+                True,
+            ),
+        ],
+    )
+    def test_dwarf_tier_counted_only_for_real_dwarf(
+        self, meta_cls, attr, tier, sides, counted
+    ):
+        old, new = _make_snap(), _make_snap()
+        setattr(old.declarations, attr, meta_cls(has_dwarf=sides[0]))
+        setattr(new.declarations, attr, meta_cls(has_dwarf=sides[1]))
         tiers, _conf, _warns, _etier = _compute_confidence([], old, new)
-        assert "dwarf" not in tiers
-
-    def test_real_dwarf_counted(self):
-        old = _make_snap()
-        old.declarations.debug_layout = DwarfMetadata(has_dwarf=True)
-        new = _make_snap()
-        new.declarations.debug_layout = DwarfMetadata(has_dwarf=True)
-        tiers, _conf, _warns, _etier = _compute_confidence([], old, new)
-        assert "dwarf" in tiers
-
-    def test_placeholder_dwarf_advanced_not_counted(self):
-        old = _make_snap()
-        old.declarations.debug_advanced = AdvancedDwarfMetadata(has_dwarf=False)
-        new = _make_snap()
-        new.declarations.debug_advanced = AdvancedDwarfMetadata(has_dwarf=False)
-        tiers, _conf, _warns, _etier = _compute_confidence([], old, new)
-        assert "dwarf_advanced" not in tiers
-
-    def test_real_dwarf_advanced_counted(self):
-        old = _make_snap()
-        old.declarations.debug_advanced = AdvancedDwarfMetadata(has_dwarf=True)
-        new = _make_snap()
-        new.declarations.debug_advanced = AdvancedDwarfMetadata(has_dwarf=True)
-        tiers, _conf, _warns, _etier = _compute_confidence([], old, new)
-        assert "dwarf_advanced" in tiers
-
-    def test_one_side_real_dwarf_counted(self):
-        old = _make_snap()
-        old.declarations.debug_layout = DwarfMetadata(has_dwarf=True)
-        new = _make_snap()
-        new.declarations.debug_layout = DwarfMetadata(has_dwarf=False)
-        tiers, _conf, _warns, _etier = _compute_confidence([], old, new)
-        assert "dwarf" in tiers
+        assert (tier in tiers) is counted

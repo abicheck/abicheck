@@ -149,12 +149,16 @@ class TestTheFourFiguresStaySeparate:
     def test_tracemalloc_is_opt_in_separately(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
+        import tracemalloc
+
         out = tmp_path / "trace.jsonl"
         _enable(monkeypatch, out, tracemalloc=True)
+        monkeypatch.setattr(tracemalloc, "get_traced_memory", lambda: (4096, 8192))
         memory_trace.sample("phase")
         (record,) = memory_trace.read_samples(out)
-        assert isinstance(record["tracemalloc_current_bytes"], int)
-        assert isinstance(record["tracemalloc_peak_bytes"], int)
+        assert record["tracemalloc_current_bytes"] == 4096
+        assert record["tracemalloc_peak_bytes"] == 8192
+        assert record["tracemalloc_phase_peak_bytes"] == 8192
 
 
 class TestPhasesAndCounts:

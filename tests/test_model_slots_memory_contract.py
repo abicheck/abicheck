@@ -192,10 +192,33 @@ class TestSlottingDidNotChangeBehaviour:
 
     def test_post_init_fact_bridging_still_runs(self) -> None:
         """`__post_init__` writes declared fields; slots must not block it."""
-        p = Param(name="a", type="int")
+        from abicheck.model.declarations import ParamKind
+        from abicheck.model.fact import FactStatus
+
+        p = Param(
+            name="a",
+            type="int",
+            kind=ParamKind.POINTER,
+            is_restrict=True,
+            is_va_list=False,
+        )
+        # Each constructor input is bridged into its Fact sibling, with the
+        # value carried and the status marked as collected.
         assert p.kind_fact is not None
-        assert p.is_va_list_fact is not None
+        assert (p.kind_fact.status, p.kind_fact.value) == (
+            FactStatus.PRESENT,
+            ParamKind.POINTER,
+        )
         assert p.is_restrict_fact is not None
+        assert (p.is_restrict_fact.status, p.is_restrict_fact.value) == (
+            FactStatus.PRESENT,
+            True,
+        )
+        assert p.is_va_list_fact is not None
+        assert (p.is_va_list_fact.status, p.is_va_list_fact.value) == (
+            FactStatus.PRESENT,
+            False,
+        )
 
     @pytest.mark.parametrize("cls", SLOTTED_TYPES, ids=lambda c: c.__name__)
     def test_copy_and_deepcopy_still_work(self, cls) -> None:

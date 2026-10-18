@@ -468,7 +468,8 @@ class TestExclusionsAreRefusedAgainstAManifest:
             reject_exclusions_against_a_manifest,
         )
 
-        reject_exclusions_against_a_manifest(patterns, manifest)
+        # Allowed means: returns normally, with no value to act on.
+        assert reject_exclusions_against_a_manifest(patterns, manifest) is None
 
 
 class TestAsymmetricExclusionsAreNotComparable:

@@ -608,17 +608,11 @@ class TestCompareRequestAppliesTheSameScopeGuard:
     def test_a_scope_matched_filter_is_unaffected_by_the_guard(
         self, tmp_path: Path
     ) -> None:
-        """Not "no filter" -- a bare, unfiltered compare of this exact project
-        would still fail closed on the real ambiguity
-        (`TestDumpCliHonorsTheFilterInTheFold.
-        test_unfiltered_still_fails_closed_on_the_real_ambiguity`), which
-        would make a `resolve_compare_request` call here indistinguishable
-        from the guard actually firing. Isolating the guard itself needs a
-        filter that resolves that ambiguity (as it does on the CLI/`dump`
-        paths) *and* a collect mode (`"headers"` -> `"off"`) the guard
-        permits regardless of the filter -- so this pins "the guard doesn't
-        misfire on a legitimate filtered compare", not "no filter changes
-        nothing"."""
+        """A filter that resolves the ambiguity must not trip the guard.
+
+        Not "no filter": an unfiltered compare fails closed on the real
+        ambiguity, so this pins that a legitimate filtered compare passes.
+        """
         from abicheck.service import CompareRequest, InputSpec
         from abicheck.service_compare_pipeline import resolve_compare_request
 
@@ -634,7 +628,10 @@ class TestCompareRequestAppliesTheSameScopeGuard:
         )
         request = CompareRequest(old=side, new=side, frontend="clang", depth="headers")
         pair = resolve_compare_request(request)
-        assert pair.old is not None and pair.new is not None
+        # The guard lets the filtered request through; the filter took effect.
+        assert pair.old.from_headers is True
+        assert [f.name for f in pair.old.type_by_name("S").fields] == ["a"]
+        assert [f.name for f in pair.new.type_by_name("S").fields] == ["a"]
 
 
 @pytest.mark.integration
@@ -1020,6 +1017,7 @@ class TestScopeGuardCoversPackAndBazelBuildInfo:
         resolved = compile_db_for_filter_scope_check(
             aquery, None, (tmp_path / "api.h",)
         )
+        assert resolved == aquery
         error = compile_db_filter_scope_error("foo.cpp", resolved, "build")
         assert error is not None and "build.compile_db_filter" in error
 
@@ -1129,6 +1127,7 @@ class TestScopeGuardCoversSourcesPacks:
 
         pack = self._classic_pack(tmp_path)
         resolved = compile_db_for_filter_scope_check(None, pack, (tmp_path / "api.h",))
+        assert resolved == pack
         error = compile_db_filter_scope_error("foo.cpp", resolved, "build")
         assert error is not None and "build.compile_db_filter" in error
 

@@ -512,15 +512,12 @@ class TestDataModelConsistency:
         """DwarfMetadata from PDB has all required attributes."""
         meta, _ = parse_pdb_debug_info(pdb_with_struct_and_enum)
 
-        # Core attributes
-        assert hasattr(meta, "structs")
-        assert hasattr(meta, "enums")
-        assert hasattr(meta, "has_dwarf")
-
-        # Types match
-        assert isinstance(meta.structs, dict)
-        assert isinstance(meta.enums, dict)
-        assert isinstance(meta.has_dwarf, bool)
+        # The fixture defines exactly these records; PDB output must carry
+        # them under their names, not merely as empty containers.
+        assert set(meta.structs) == {"Vec3", "Data"}
+        assert set(meta.enums) == {"Access"}
+        assert meta.structs["Vec3"].name == "Vec3"
+        assert meta.enums["Access"].name == "Access"
 
     def test_struct_layout_fields_present(self, pdb_with_struct_and_enum: Path) -> None:
         """StructLayout from PDB has all required attributes for checker."""
@@ -571,10 +568,9 @@ class TestDataModelConsistency:
         """ToolchainInfo from PDB has all required attributes."""
         _, adv = parse_pdb_debug_info(pdb_with_struct_and_enum)
         tc = adv.toolchain
-        assert isinstance(tc.producer_string, str)
-        assert isinstance(tc.compiler, str)
-        assert isinstance(tc.version, str)
-        assert isinstance(tc.abi_flags, set)
+        assert tc.compiler == "MSVC"
+        assert "MSVC" in tc.producer_string
+        assert "-m64" in tc.abi_flags  # AMD64 fixture
 
     def test_checker_diff_dwarf_compatible(
         self, pdb_with_struct_and_enum: Path

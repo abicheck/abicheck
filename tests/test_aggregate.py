@@ -759,7 +759,7 @@ class TestErrorReleaseReportFindings:
 
 
 class TestRendering:
-    def test_schema_version_is_pinned(self):
+    def test_schema_version_is_pinned(self):  # test-quality: ok version pin
         """The one place the version is written as a literal.
 
         Every other assertion compares against `AGGREGATE_SCHEMA_VERSION`,

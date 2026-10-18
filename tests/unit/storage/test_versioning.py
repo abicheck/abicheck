@@ -204,8 +204,13 @@ class TestUnstatedComparisonContractFailsClosed:
         This repo's convention is that a hand-edited or newer package never
         aborts a load; it is refused when a decision is actually made from it.
         """
-        assert StorageVersions.from_dict({}) is not None
-        assert StorageVersions.from_dict({"producer": {}}) is not None
+        bare = StorageVersions.from_dict({})
+        with_producer = StorageVersions.from_dict({"producer": {}})
+        # Parsing an unversioned or partial dict yields the explicit unstated
+        # sentinel rather than raising or inventing this build's version.
+        assert bare.comparison_contract_version == UNSTATED_VERSION
+        assert with_producer.comparison_contract_version == UNSTATED_VERSION
+        assert with_producer.package_format_version == bare.package_format_version
 
     def test_a_stated_current_version_is_readable(self) -> None:
         versions = StorageVersions.from_dict(

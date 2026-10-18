@@ -222,10 +222,18 @@ def test_a_failed_eviction_removal_is_skipped(
 def test_eviction_on_an_unreadable_directory_is_a_no_op(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    monkeypatch.setattr(store, "_CACHE_DIR", tmp_path / "snapshots")
+    cache_dir = tmp_path / "snapshots"
+    cache_dir.mkdir()
+    monkeypatch.setattr(store, "_CACHE_DIR", cache_dir)
+    monkeypatch.setattr(store, "MAX_ENTRIES", 1)
+    entries = [cache_dir / f"{name}.json.zst" for name in ("a", "b", "c")]
+    for entry in entries:
+        entry.write_bytes(b"x")
 
     def no_glob(self: Path, pattern: str):  # type: ignore[no-untyped-def]
         raise OSError("unreadable")
 
     monkeypatch.setattr(Path, "glob", no_glob)
-    store._evict_if_needed()
+    store._evict_if_needed()  # over the cap, yet nothing can be listed
+    # Nothing was listed, so nothing was removed.
+    assert all(entry.exists() for entry in entries)

@@ -64,26 +64,31 @@ def test_default_construction_is_hashable() -> None:
 
 
 def test_fully_populated_matrix_is_hashable() -> None:
-    matrix = EnvironmentMatrix(
-        compilers=["gcc-13", "clang-17"],
-        abi_version="18",
-        libstdcxx_dual_abi="cxx11",
-        runtime_floors={"GLIBC": "2.28", "CXXABI": "1.3.13"},
-        sycl=SyclConstraints(
-            implementation="dpcpp",
-            backends=["level_zero", "opencl"],
-            min_pi_version="1",
-        ),
-        cuda=CudaConstraints(
-            gpu_architectures=["sm_80", "sm_90"],
-            driver_range=("525.0", "580.0"),
-            toolkit_version="12.4",
-            require_ptx=True,
-        ),
-        target_os="linux",
-        target_arch="x86_64",
-    )
-    assert isinstance(hash(matrix), int)
+    def build() -> EnvironmentMatrix:
+        return EnvironmentMatrix(
+            compilers=["gcc-13", "clang-17"],
+            abi_version="18",
+            libstdcxx_dual_abi="cxx11",
+            runtime_floors={"GLIBC": "2.28", "CXXABI": "1.3.13"},
+            sycl=SyclConstraints(
+                implementation="dpcpp",
+                backends=["level_zero", "opencl"],
+                min_pi_version="1",
+            ),
+            cuda=CudaConstraints(
+                gpu_architectures=["sm_80", "sm_90"],
+                driver_range=("525.0", "580.0"),
+                toolkit_version="12.4",
+                require_ptx=True,
+            ),
+            target_os="linux",
+            target_arch="x86_64",
+        )
+
+    a, b = build(), build()
+    assert a == b
+    assert hash(a) == hash(b)
+    assert len({a, b}) == 1
 
 
 def test_equal_matrices_hash_equal_even_with_different_dict_insertion_order() -> None:

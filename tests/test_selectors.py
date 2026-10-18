@@ -96,6 +96,11 @@ class TestSelectorSetValidation:
     def test_finding_id_alone_is_a_valid_selector(self) -> None:
         s = SelectorSet(finding_id="abc123")
         assert s.finding_id == "abc123"
+        assert s.matches_selectors(_FakeChange("foo"), canonical_finding_id="abc123")
+        assert not s.matches_selectors(
+            _FakeChange("foo"), canonical_finding_id="def456"
+        )
+        assert not s.matches_selectors(_FakeChange("foo"), canonical_finding_id=None)
 
     def test_binding_alone_is_still_rejected(self) -> None:
         """P2 (CLI-audit): `binding` stays conjunctive-only by design (see
@@ -124,10 +129,22 @@ class TestSelectorSetValidation:
         work (regression guard, not just an error-message claim)."""
         s = SelectorSet(binding="weak", symbol_pattern=".*")
         assert s.binding == "weak"
+        assert s.matches_selectors(_FakeChange("foo", symbol_binding="weak"))
+        assert not s.matches_selectors(_FakeChange("foo", symbol_binding="global"))
 
     def test_binding_with_a_real_narrowing_selector_is_accepted(self) -> None:
         s = SelectorSet(binding="weak", namespace="my::ns::*")
         assert s.binding == "weak"
+        in_ns = _FakeChange("foo", qualified_name="my::ns::foo", symbol_binding="weak")
+        assert s.matches_selectors(in_ns)
+        other_binding = _FakeChange(
+            "foo", qualified_name="my::ns::foo", symbol_binding="global"
+        )
+        assert not s.matches_selectors(other_binding)
+        other_ns = _FakeChange(
+            "foo", qualified_name="other::foo", symbol_binding="weak"
+        )
+        assert not s.matches_selectors(other_ns)
 
     def test_datetime_expires_is_normalized_to_date(self) -> None:
         s = SelectorSet(symbol="foo", expires=datetime(2026, 1, 1, 12, 0))

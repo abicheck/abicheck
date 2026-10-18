@@ -220,7 +220,7 @@ class TestARunMustHaveCompared:
 
     def test_a_real_breaking_run_is_accepted(self) -> None:
         """Non-vacuity: the guard must let the expected outcome through."""
-        bench._require_a_measured_comparison(_row())
+        assert bench._require_a_measured_comparison(_row()) is None
 
 
 class TestFixtureIdentity:
@@ -309,8 +309,11 @@ class TestTheVocabularyThresholdGuard:
         return path
 
     def test_it_passes_when_the_threshold_is_cleared(self, tmp_path) -> None:
-        bench._require_the_vocabulary_threshold_was_crossed(
-            self._trace(tmp_path, 9_000_000), 8 * 1024 * 1024
+        assert (
+            bench._require_the_vocabulary_threshold_was_crossed(
+                self._trace(tmp_path, 9_000_000), 8 * 1024 * 1024
+            )
+            is None
         )
 
     def test_it_fails_when_the_threshold_is_not_cleared(self, tmp_path) -> None:
@@ -329,7 +332,7 @@ class TestTheVocabularyThresholdGuard:
 
     def test_it_is_disabled_at_zero(self) -> None:
         """Opt-in: a run that makes no threshold claim needs no trace."""
-        bench._require_the_vocabulary_threshold_was_crossed(None, 0)
+        assert bench._require_the_vocabulary_threshold_was_crossed(None, 0) is None
 
     def test_a_trace_with_no_cache_counters_does_not_pass(self, tmp_path) -> None:
         """Absent counters must read as 'not proven', never as 'fine'.

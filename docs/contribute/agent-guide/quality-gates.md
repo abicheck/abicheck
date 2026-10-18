@@ -71,6 +71,42 @@ consumer, delete it (and its test), or merge the clone into one owner --
 in that order of preference. `--json` prints every current finding.
 `scripts/usecase_paths.py` remains the dynamic, report-only counterpart.
 
+## Test-quality ratchet (tautological tests)
+
+Coverage counts a line as tested once a test runs it, whatever the test then
+checks. `scripts/audit_test_quality.py --check` (`verify.py`'s `test-quality`
+step, `pr` profile, CI `ai-readiness` job) reads every `test_*` function
+statically and flags the ones whose asserts cannot fail for a wrong
+*behaviour*, only for a renamed attribute or a removed call:
+
+| Flag | Shape | Why it is low-value |
+|---|---|---|
+| `type_only` | every assert is `is not None`, `callable`, `hasattr`, `isinstance(x, <builtin>)` or `len(x) > 0` | any non-empty result passes |
+| `mock_echo` | patches something and only checks *that* a mock was called | proves the wiring, not the outcome |
+| `set_then_read` | `x = C(attr=LIT)` then `assert x.attr == LIT`, nothing else | the dataclass echoes its constructor |
+| `constant_mirror` | pins an `abicheck` constant or enum `.value` to a literal, nothing else | restates the source |
+| `no_assert` | no assert, `pytest.raises`, `assert*` call or asserting helper | checks nothing |
+
+Not flagged, on purpose: `is None`, bare truthiness (`assert result.ok`,
+`assert not offenders`), negations (`not hasattr`), `isinstance` against a
+project class (the class a dispatcher picked), and mock checks that read the
+arguments (`assert_called_with`, `call_args`) -- each is a real outcome.
+
+`scripts/test_quality_baseline.json` holds the findings that existed when the
+gate was adopted, keyed `file::Class.test` with no line numbers, and only
+shrinks: a finding absent from it fails, a baselined key that is no longer
+found fails until `python scripts/audit_test_quality.py --check --update`
+removes it, and with `$ARCHITECTURE_BASE` (CI sets it) a key the base
+revision's baseline lacks fails, so a branch cannot baseline its own finding.
+
+When it fails on your change, in order of preference: make the test check the
+behaviour it exists for (the value, the error, the chosen branch); delete it
+if another test already covers that behaviour; or, when the shape is
+deliberate (a serialized-format spelling pin, a must-not-raise smoke test),
+put `# test-quality: ok <reason>` on its `def` or a decorator line. Without
+`--check` the script prints a ranked report (`--json PATH` for every row),
+which is the work queue for paying the baseline down.
+
 ## Test-quality gates (beyond line coverage)
 
 Line coverage measures *reach*, not whether a test actually checks the result.

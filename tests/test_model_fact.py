@@ -286,6 +286,12 @@ class TestReplaceWithFactSync:
         r = RecordType(name="Foo", kind="struct")
         r2 = replace_with_fact_sync(r, kind="union")
         assert r2.kind == "union"
+        # The record's other fields, and the fact siblings it does have, are
+        # carried over exactly -- the replace touched only the one field.
+        assert r2.name == "Foo"
+        assert r2.bases == r.bases
+        assert r2.bases_fact == r.bases_fact
+        assert dataclasses.replace(r2, kind="struct") == r
 
     def test_touching_an_unrelated_field_leaves_the_pair_untouched(self) -> None:
         r = RecordType(name="Foo", kind="struct", bases=["Base"])

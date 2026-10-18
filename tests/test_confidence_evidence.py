@@ -425,7 +425,9 @@ class TestCoverageWarnings:
             _snap(functions=[f], elf=elf),
             _snap(functions=[f], elf=elf),
         )
-        assert len(r.coverage_warnings) > 0
+        assert "Detector 'dwarf' disabled: no DWARF debug info on either side" in (
+            r.coverage_warnings
+        )
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -484,8 +486,10 @@ class TestDetectorResults:
         """At least some detectors should report results."""
         f = _pub_func("api", "_Z3apiv")
         r = compare(_snap(functions=[f]), _snap(functions=[f]))
-        assert isinstance(r.detector_results, list)
-        assert len(r.detector_results) > 0
+        names = {dr.name for dr in r.detector_results}
+        # The functions detector always runs on a header-only comparison,
+        # and the ELF detector reports itself disabled rather than vanishing.
+        assert {"functions", "elf"} <= names
 
     def test_each_detector_has_name(self):
         """Every detector result should have a name."""

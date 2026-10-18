@@ -126,16 +126,17 @@ class TestVersioningPolicyModel:
         assert d["enforcement"] == "block"
 
     def test_policy_is_hashable(self) -> None:
-        # Required for FieldCandidate.value (ADR-049 D7 resolver).
-        assert isinstance(hash(built_in_default_versioning_policy()), int)
-        assert isinstance(
-            hash(
-                VersioningPolicy(
-                    support_window=SupportWindow(kind="explicit", versions=("1.0",))
-                )
-            ),
-            int,
+        # Required for FieldCandidate.value (ADR-049 D7 resolver): equal
+        # policies must hash alike and distinct ones must stay distinct keys.
+        default = built_in_default_versioning_policy()
+        same_default = built_in_default_versioning_policy()
+        custom = VersioningPolicy(
+            support_window=SupportWindow(kind="explicit", versions=("1.0",))
         )
+        assert default == same_default
+        assert hash(default) == hash(same_default)
+        assert custom != default
+        assert len({default, same_default, custom}) == 2
 
 
 class TestReleaseAcceptance:
