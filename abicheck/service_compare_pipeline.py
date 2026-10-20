@@ -57,6 +57,7 @@ from typing import TYPE_CHECKING, Any
 from .buildsource.header_graph_ast_projection import header_graph_bisection_scope
 from .compile_context import CompileContext
 from .dependency_info import populate_pair_dependency_info
+from .dump_manifest import manifest_forced_includes as _manifest_forced_includes
 from .environment_matrix import EnvironmentMatrix
 from .errors import ValidationError
 from .extract.env_flags import env_flag
@@ -138,20 +139,6 @@ def _deadline_bound_side_worker(
 
     with deadline.with_deadline_ts(deadline_ts):
         return worker()
-
-
-def _manifest_forced_includes(dump_manifest: object) -> list[Path]:
-    """Forced includes declared by a ``--dump-manifest``'s translation units.
-
-    A manifest replaces the side's ``headers`` (which is then empty), so its
-    own forced includes must feed the pair-wide C++20 scan too or a
-    manifest-only side's C++20 signal goes undetected (Codex review).
-    """
-    return [
-        inc
-        for tu in getattr(dump_manifest, "translation_units", ())
-        for inc in tu.forced_includes
-    ]
 
 
 def _pair_compile_context(request: CompareRequest, lang: str) -> CompileContext | None:
@@ -670,6 +657,7 @@ def run_compare(
     exclude_headers: tuple[str, ...] = _declared_default(InputSpec, "exclude_headers"),
     acknowledgments_path: Path | None = None,
     acknowledgment_unacknowledged_additions: str | None = None,
+    acknowledgment_breaks: str | None = None,
 ) -> CompareResult:
     """Compare two ABI inputs and return the classified diff result.
 
@@ -833,5 +821,6 @@ def run_compare(
         env_matrix=env_matrix,
         acknowledgments_path=acknowledgments_path,
         acknowledgment_unacknowledged_additions=acknowledgment_unacknowledged_additions,
+        acknowledgment_breaks=acknowledgment_breaks,
     )
     return run_compare_request(request)

@@ -4,7 +4,7 @@
 
 Every `with:` input and `outputs.*` value for the [abicheck GitHub Action](../use/github-action.md), generated directly from `action.yml` — see that page for setup, mode/input compatibility, and usage recipes; this page is the exhaustive field list only.
 
-## Inputs (85)
+## Inputs (86)
 
 | Input | Required | Default | Description |
 |---|:--:|---|---|
@@ -74,6 +74,7 @@ Every `with:` input and `outputs.*` value for the [abicheck GitHub Action](../us
 | `policy` | no | strict_abi | Built-in policy profile: strict_abi (default), sdk_vendor, plugin_abi. |
 | `policy-file` | no | — | Path to a YAML policy document with per-kind (overrides:) or selector-scoped (reclassify:) verdict re-classification, or the name of a packaged built-in one (e.g. `security`). Forwarded as `--policy`, which takes a profile name or a document; setting this outranks `policy` for the run, exactly as the removed `--policy-file` flag did. |
 | `suppress` | no | — | Path to a YAML suppression file to filter known/intentional changes. |
+| `acknowledgments` | no | — | Path to a YAML acknowledgment-records file (ADR-067) for this run: changes a team reviewed and accepted, each named by `finding_id`, or by `symbol` with `change_kind`. Forwarded as `compare --acknowledgments`, which overrides `.abicheck.yml`'s `acknowledgment.file`. Compare mode only. The file is read from the checked-out tree, which a pull request can edit: on `pull_request`, call the `protect-acknowledgments` reusable workflow so a change to this file needs a label. Whether an accepted break leaves the exit code is `acknowledgment.breaks`, which only a `build-config` you named can set (a discovered `.abicheck.yml` cannot loosen the gate). |
 | `verbose` | no | false | Enable verbose/debug output from abicheck. |
 | `python-version` | no | 3.13 | Python version for setup-python. |
 | `install-deps` | no | true | Deprecated — use `dependency-source` instead (kept for one release cycle). Ignored if `dependency-source` is set. true (the default) maps to dependency-source=conda-forge; false maps to dependency-source=none. |

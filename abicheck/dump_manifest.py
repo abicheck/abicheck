@@ -406,6 +406,22 @@ def parse_manifest(
     )
 
 
+def manifest_forced_includes(manifest: object) -> list[Path]:
+    """Forced includes declared by a ``--dump-manifest``'s translation units.
+
+    A manifest replaces a side's ``headers`` (which is then empty), so its own
+    forced includes must feed the pair-wide C++20 scan too, or a manifest-only
+    side's C++20 signal goes undetected (Codex review). Moved here from
+    ``service_compare_pipeline`` (the manifest's owner, and that module sits at
+    its architecture debt ceiling).
+    """
+    return [
+        inc
+        for tu in getattr(manifest, "translation_units", ())
+        for inc in tu.forced_includes
+    ]
+
+
 def load_manifest(path: Path) -> DumpManifest:
     """Load and validate a ``--dump-manifest`` YAML file from *path*.
 

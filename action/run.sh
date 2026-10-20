@@ -3956,6 +3956,10 @@ elif [[ "$MODE" == "compare" ]]; then
   # exactly as the removed `--policy-file` flag did.
   add_single_flag "--policy" "${INPUT_POLICY_FILE:-${INPUT_POLICY:-}}"
   add_single_flag "--suppress" "${INPUT_SUPPRESS:-}"
+  # ADR-067 D5: this run's acknowledgment records. Operator-named, like
+  # `suppress`, so the CLI trusts it to supply records (a discovered
+  # .abicheck.yml is not; see add_compile_context_flags' overlay strip).
+  add_single_flag "--acknowledgments" "${INPUT_ACKNOWLEDGMENTS:-}"
 
   # Severity configuration. Audit-only: --severity-preset is ALSO the
   # ADR-068 2026-09-10 amendment's audit-gate opt-in (`compare --no-baseline`

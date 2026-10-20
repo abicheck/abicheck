@@ -354,6 +354,32 @@ def test_sc_accept_known_break(tmp_path: Path) -> None:
     assert res.exit_code == 0
 
 
+def test_sc_accept_known_break_via_acknowledgments(tmp_path: Path) -> None:
+    """A reviewed acknowledgment record accepts one known break. With
+    `acknowledgment.breaks: accept` the run passes; the record names the change
+    kind, so only that removal is accepted."""
+    acks = tmp_path / "acks.yml"
+    acks.write_text(
+        "version: 1\nacknowledgments:\n"
+        "  - symbol: deprecated_fn\n"
+        "    change_kind: func_removed\n"
+        "    reason: Removed in the v2 API cleanup\n",
+        encoding="utf-8",
+    )
+    cfg = tmp_path / "breaks.abicheck.yml"
+    cfg.write_text("acknowledgment:\n  breaks: accept\n", encoding="utf-8")
+    res = _compare(
+        tmp_path,
+        _lib("1", [_fn("a"), _fn("deprecated_fn")]),
+        _lib("2", [_fn("a")]),
+        "--config",
+        str(cfg),
+        "--acknowledgments",
+        str(acks),
+    )
+    assert res.exit_code == 0, res.output
+
+
 def test_sc_offline_snapshot(tmp_path: Path) -> None:
     # Snapshots are the portable interchange format: compare two stored JSON
     # snapshots offline, no binaries or castxml required.

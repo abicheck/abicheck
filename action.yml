@@ -730,6 +730,18 @@ inputs:
   suppress:
     description: 'Path to a YAML suppression file to filter known/intentional changes.'
     required: false
+  acknowledgments:
+    description: >
+      Path to a YAML acknowledgment-records file (ADR-067) for this run: changes
+      a team reviewed and accepted, each named by `finding_id`, or by `symbol`
+      with `change_kind`. Forwarded as `compare --acknowledgments`, which
+      overrides `.abicheck.yml`'s `acknowledgment.file`. Compare mode only. The
+      file is read from the checked-out tree, which a pull request can edit:
+      on `pull_request`, call the `protect-acknowledgments` reusable workflow
+      so a change to this file needs a label. Whether an accepted break leaves
+      the exit code is `acknowledgment.breaks`, which only a `build-config`
+      you named can set (a discovered `.abicheck.yml` cannot loosen the gate).
+    required: false
   verbose:
     description: 'Enable verbose/debug output from abicheck.'
     required: false

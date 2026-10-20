@@ -438,6 +438,17 @@ for _i in "${!_scoped_input_names[@]}"; do
   fi
 done
 
+# ADR-067 D5: `acknowledgments` is compare-only. Under another mode it changes
+# nothing (warn), and a records file that does not exist must fail here, before
+# the Python install, rather than as a CLI usage error after it.
+if [[ -n "${INPUT_ACKNOWLEDGMENTS:-}" ]]; then
+  if [[ "$MODE" != "compare" ]]; then
+    _warn "acknowledgments is set but has no effect: it only applies to mode: compare (mode is '$MODE')."
+  elif [[ ! -f "$INPUT_ACKNOWLEDGMENTS" ]]; then
+    _fail "acknowledgments file not found: '$INPUT_ACKNOWLEDGMENTS' -- the records file must exist in the checked-out tree (a missing or misspelled path would otherwise fail only after the Python install)."
+  fi
+fi
+
 # abi-baseline: compare mode (used as old-library, including the audit-only
 # shape's own "have I got a baseline" check) only.
 _ABI_BASELINE="${INPUT_ABI_BASELINE:-}"
