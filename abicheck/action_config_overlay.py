@@ -189,7 +189,7 @@ from abicheck.model.bundle_facts import DEFAULT_MAX_JSON_OBJECT_NODES
 from .action_config_overlay_compile import merge_compile_block
 from .buildsource.build_config import BuildConfig
 from .config_paths import project_root_for_config
-from .frontends.cli.commands.compare_bundle_facts_rejections import (
+from .workflows.bundle_facts_stored_request import (
     resolve_max_json_object_nodes_cfg,
 )
 
@@ -232,7 +232,7 @@ def strip_untrusted_execution_keys(base: dict[str, object]) -> dict[str, object]
     caps (never strips -- a lower value is never a
     decode-bomb risk) ``resource_limits.max_bundle_facts_decode_nodes`` via
     the identical
-    :func:`~abicheck.frontends.cli.commands.compare_bundle_facts_rejections.
+    :func:`~abicheck.workflows.bundle_facts_stored_request.
     resolve_max_json_object_nodes_cfg` the CLI itself calls, so the two can
     never drift.
 

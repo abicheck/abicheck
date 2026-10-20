@@ -1,0 +1,223 @@
+"""The stored-bundle-facts ``compare`` rules, exercised on the workflow
+interface with no Click context.
+
+The CLI characterization suites (``test_cli_compare_bundle_facts_*.py``) pin
+the exit codes and rendered messages end to end. These tests pin the same
+rules one layer down: which request is rejected, why, in what order, and that
+the release fan-out's shared messages have not drifted.
+"""
+
+from __future__ import annotations
+
+import re
+from pathlib import Path
+
+import click
+import pytest
+
+from abicheck.workflows.bundle_facts_stored_compare import (
+    per_library_report_path,
+)
+from abicheck.workflows.bundle_facts_stored_request import (
+    STORED_BUNDLE_FACTS_FORMATS,
+    BundleFactsCompareError,
+    BundleFactsCompareRequest,
+    validate_bundle_facts_request,
+)
+
+
+def _request(tmp_path: Path, **overrides: object) -> BundleFactsCompareRequest:
+    new_input = tmp_path / "new"
+    new_input.mkdir(exist_ok=True)
+    fields: dict[str, object] = {
+        "old_facts_path": tmp_path / "old.bundlefacts.json",
+        "new_input": new_input,
+    }
+    fields.update(overrides)
+    return BundleFactsCompareRequest(**fields)  # type: ignore[arg-type]
+
+
+def test_supported_formats_are_json_and_markdown() -> None:
+    assert STORED_BUNDLE_FACTS_FORMATS == frozenset({"json", "markdown"})
+
+
+def test_a_plain_request_validates_with_no_config(tmp_path: Path) -> None:
+    assert validate_bundle_facts_request(_request(tmp_path)) is None
+
+
+@pytest.mark.parametrize(
+    ("overrides", "message"),
+    [
+        ({"fmt": "sarif"}, "-o sarif=... is not available"),
+        (
+            {"secondary_writes": (("html", Path("x.html")),)},
+            "-o html=... is not available",
+        ),
+        (
+            {"bundle_facts_out": Path("b.json")},
+            "--bundle-facts-out is not supported",
+        ),
+        ({"dry_run": True}, "--dry-run is not supported"),
+        ({"contract_mode": "strict"}, "--contract is not supported"),
+        ({"severity_preset": "default"}, "--severity-preset/--pack"),
+        ({"used_by_apps": ("app",)}, "--used-by/--used-by-manifest is not supported"),
+        ({"required_symbols": ("sym",)}, "--required-symbol is not supported"),
+        (
+            {"use_cases_manifest": Path("uc.yml")},
+            "--use-cases is not supported",
+        ),
+        (
+            {"diagnostic_comparison": True},
+            "--diagnostic-comparison is not supported",
+        ),
+        (
+            {"include_labels": {Path("a"): "x"}},
+            "A labeled --include",
+        ),
+        (
+            {"build_or_source_operands_given": True},
+            "--sources/--build-info/--dump-manifest are not supported",
+        ),
+        (
+            {"probe_matrix_given": True},
+            "build-configuration matrix is not supported",
+        ),
+        ({"debug_info_given": True}, "--debug-info is not supported"),
+        ({"old_devel_pkg_given": True}, "A --header old=... development package"),
+        (
+            {"dependency_flags_given": True},
+            "--follow-deps/--search-path/--ld-library-path are not",
+        ),
+        ({"debug_roots_given": True}, "--debug-info is not supported"),
+        ({"depth": "build"}, "--depth build is not supported"),
+        ({"depth": "source"}, "--depth source is not supported"),
+        ({"show_only": True}, "--view show=... is not supported"),
+        ({"report_mode": "filtered"}, "--view <mode> is not supported"),
+        (
+            {"old_headers_only": (Path("h"),)},
+            "--header old=.../--include old=...",
+        ),
+        ({"old_version": "v2"}, "--version old=... is not supported"),
+    ],
+)
+def test_each_unsupported_option_is_a_usage_error(
+    tmp_path: Path, overrides: dict[str, object], message: str
+) -> None:
+    with pytest.raises(BundleFactsCompareError, match=re.escape(message)) as exc_info:
+        validate_bundle_facts_request(_request(tmp_path, **overrides))
+    assert exc_info.value.usage is True
+
+
+@pytest.mark.parametrize(
+    ("overrides", "message"),
+    [
+        (
+            {"new_is_stored": True, "headers": (Path("h"),)},
+            "--header new=.../--include new=...",
+        ),
+        (
+            {"new_is_stored": True, "new_devel_pkg": Path("devel")},
+            "A --header new=... development package",
+        ),
+        (
+            {"new_is_stored": True, "bundle_facts_library_manifest": Path("m.yml")},
+            "--bundle-facts-library-manifest is not supported",
+        ),
+        (
+            {"new_is_stored": True, "new_version": "v9"},
+            "--version new=... is not supported",
+        ),
+        (
+            {"new_is_stored": True, "include_dependencies": True},
+            "--include-system-declarations is not supported",
+        ),
+    ],
+)
+def test_stored_new_side_rejects_live_only_options(
+    tmp_path: Path, overrides: dict[str, object], message: str
+) -> None:
+    with pytest.raises(BundleFactsCompareError, match=re.escape(message)):
+        validate_bundle_facts_request(_request(tmp_path, **overrides))
+
+
+def test_new_side_rules_do_not_apply_to_a_live_new_input(tmp_path: Path) -> None:
+    """The same options are fine when NEW_INPUT is live: the stored/stored
+    rules are gated on ``new_is_stored``."""
+    request = _request(tmp_path, headers=(Path("h"),), new_version="v9")
+    assert validate_bundle_facts_request(request) is None
+
+
+def test_release_only_messages_match_the_release_helper(tmp_path: Path) -> None:
+    """The directory/package rules are reused verbatim from the release
+    fan-out. Parity is pinned here so the two copies cannot drift apart."""
+    from abicheck.cli_compare_options import _reject_set_input_flags
+
+    cases: list[tuple[dict[str, object], dict[str, object]]] = [
+        ({"used_by_apps": ("app",)}, {"used_by_apps": ("app",)}),
+        ({"required_symbols": ("sym",)}, {"required_symbols": ("sym",)}),
+        (
+            {"use_cases_manifest": tmp_path / "uc.yml"},
+            {"use_cases_manifest": tmp_path / "uc.yml"},
+        ),
+        ({"diagnostic_comparison": True}, {"diagnostic_comparison": True}),
+        (
+            {"include_labels": {Path("a"): "x"}},
+            {"include_labels": {Path("a"): "x"}},
+        ),
+    ]
+    for release_kwargs, request_kwargs in cases:
+        with pytest.raises(click.UsageError) as release:
+            _reject_set_input_flags(**release_kwargs)  # type: ignore[arg-type]
+        with pytest.raises(BundleFactsCompareError) as stored:
+            validate_bundle_facts_request(_request(tmp_path, **request_kwargs))
+        assert str(stored.value) == release.value.message
+
+
+def test_the_first_violated_rule_names_the_error(tmp_path: Path) -> None:
+    """Rule order is part of the contract: dry-run is checked before the
+    contract and the view modes, so it is the message a multi-fault request
+    reports."""
+    request = _request(tmp_path, dry_run=True, contract_mode="strict", show_only=True)
+    with pytest.raises(BundleFactsCompareError, match="--dry-run is not supported"):
+        validate_bundle_facts_request(request)
+
+
+def test_depth_is_checked_before_the_view_modes(tmp_path: Path) -> None:
+    request = _request(tmp_path, depth="build", show_only=True)
+    with pytest.raises(BundleFactsCompareError, match="--depth build"):
+        validate_bundle_facts_request(request)
+
+
+def test_a_malformed_config_is_a_usage_error(tmp_path: Path) -> None:
+    config = tmp_path / ".abicheck.yml"
+    config.write_text("not_a_real_key: 1\n")
+    request = _request(tmp_path, config_path=config)
+    with pytest.raises(
+        BundleFactsCompareError, match="cannot parse build config"
+    ) as exc:
+        validate_bundle_facts_request(request)
+    assert exc.value.usage is True
+
+
+def test_config_severity_block_is_rejected_on_the_stored_path(tmp_path: Path) -> None:
+    config = tmp_path / ".abicheck.yml"
+    config.write_text("severity:\n  preset: default\n")
+    request = _request(tmp_path, config_path=config)
+    with pytest.raises(BundleFactsCompareError, match=r"declares severity: settings"):
+        validate_bundle_facts_request(request)
+
+
+@pytest.mark.parametrize(
+    ("library", "expected_name"),
+    [
+        ("libfoo.so.1", "libfoo.so.1.json"),
+        # OLD_FACTS is user-supplied: no traversal may escape the output dir.
+        ("../../etc/passwd", "passwd.json"),
+        ("/abs/libbar.so", "libbar.so.json"),
+        ("", "library.json"),
+    ],
+)
+def test_per_library_report_path_keeps_only_the_final_component(
+    tmp_path: Path, library: str, expected_name: str
+) -> None:
+    assert per_library_report_path(tmp_path, library) == tmp_path / expected_name

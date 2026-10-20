@@ -416,7 +416,7 @@ def compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
     # normally and never silently rewritten.
     exports = kwargs["exports"]
     assert isinstance(exports, ExportSet)
-    from .compare_bundle_facts_rejections import STORED_BUNDLE_FACTS_FORMATS
+    from ....workflows.bundle_facts_stored_request import STORED_BUNDLE_FACTS_FORMATS
     from .compare_default_format import renderable_formats, resolve_export_set
 
     kwargs["exports"] = resolve_export_set(

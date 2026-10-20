@@ -13,48 +13,25 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""CLI dispatch for a stored-bundle-facts OLD_INPUT `compare` (G38 Phase 13
-follow-up; CLI cleanup phase two, PR I).
+"""CLI adapter for a stored-bundle-facts OLD_INPUT ``compare``.
 
-``bundle_side_input.compare_release_against_bundle_facts`` was fully
-implemented and parity-tested but, per its own module docstring, deliberately
-never exposed on any CLI command: every file that would host its dispatch
-(``cli_compare_release.py``, ``cli_compare_helpers.py``) sits within a
-handful of lines of the AI-readiness 2000-line hard cap, and the ~44-flag
-release fan-out most of those flags belong to does not apply once the OLD
-side is already a resolved, stored snapshot rather than a live directory.
-
-This module is the thin CLI adapter that closes that gap without touching
-either capped file: :func:`dispatch` is called directly from
-``compare.compare_cmd`` *before* the ordinary ``run_compare``/
-``_dispatch_release_compare`` machinery ever runs, whenever OLD_INPUT
-classifies as a stored BundleFacts document
-(``workflows/bundle_compare_operand.py``). It resolves the small,
-purpose-built option subset ``compare_release_against_bundle_facts`` needs
-from the same parsed ``compare`` kwargs, calls it, and renders the result as
-its own ``mode: "bundle_facts"`` JSON/markdown envelope -- deliberately not
-the full release-summary shape the live directory/package fan-out builds,
-since this is a narrower surface, not a drop-in replacement for it.
+Dispatch order is ``compare.compare_cmd`` -> :func:`dispatch` (this module)
+-> ``workflows.bundle_facts_stored_compare.execute_bundle_facts_compare``.
+This module only parses the Click kwargs into a
+:class:`~abicheck.workflows.bundle_facts_stored_request.BundleFactsCompareRequest`,
+renders the outcome, writes the artifacts, and maps the verdict to an exit
+code. Which options a stored comparison can honor, and how it compares,
+live in ``workflows/``: a rule that changes must not require a Click
+context to test.
 
 Lives under ``frontends/cli/commands/`` (ADR-061), not as a flat
 ``cli_compare_bundle_facts.py`` root sibling: the ``cli_`` root prefix family
 is frozen (``architecture/modules.yaml``'s ``frozen-root-family`` gate).
 
-Library-removal accounting (``--fail-on-removed-library``) is out of scope
-here (rejected, not silently ignored) -- computing it means re-scanning
-``old_facts_path`` a second time for ``per_library_snapshots.keys()``,
-defeating the point of handing in an already-loaded facts document.
-
-NEW_INPUT is extracted with the same ``_extract_if_package`` primitive the
-live fan-out uses for a package, not just a directory (``--devel-pkg new=...`` too).
-
-**Every other flag `dispatch()` doesn't explicitly wire through is rejected
-outright (``click.UsageError``, exit 64)** --
-``compare_bundle_facts_rejections.reject_unsupported_options()``, split out
-purely to keep this file under its own no-growth cap; see that module's own
-docstring. A zero-match comparison is a ``ClickException``, not a
-``NO_CHANGE`` verdict -- exit 0 must mean a real comparison found nothing
-broken, not that nothing was compared at all.
+Library-removal accounting (``--fail-on-removed-library``) is rejected, not
+silently ignored: answering it would re-scan OLD_FACTS a second time.
+A zero-match comparison is a ``ClickException``, not a ``NO_CHANGE``
+verdict -- exit 0 must mean a real comparison found nothing broken.
 """
 
 from __future__ import annotations
@@ -65,29 +42,48 @@ from typing import Any
 import click
 
 from ....model.sided_inputs import compose_sided_paths
-from ....report.comparison_scope import ComparisonScopeTerms
 
 # Via `report`, which re-exports it: `frontends -> policy` is forbidden
 # (`architecture/modules.yaml`), even for a signature's own annotation.
+from ....report.comparison_scope import ComparisonScopeTerms, comparison_scope_terms
 from ....report.release_assurance_section import ReleaseAssuranceDecision
 from ....report.release_document import (
     StoredReleaseEvaluation,
     build_release_report,
     stored_reported_verdict,
 )
-from ....report.release_stored_scope import scope_terms_for
 from ....report.render_release_report import (
     render_stored_release_json,
     render_stored_release_markdown,
 )
-from ....workflows.release_assurance_members import release_assurance_from_results
+from ....workflows.bundle_facts_stored_compare import (
+    execute_bundle_facts_compare,
+    per_library_report_path,
+)
+from ....workflows.bundle_facts_stored_request import (
+    BundleFactsCompareError,
+    BundleFactsCompareRequest,
+    reject_explicit_compile_config,
+)
+from ....workflows.gate import resolve_scope_decision
+
+
+def _click_error(exc: BundleFactsCompareError) -> click.ClickException:
+    """The Click exception a workflow error renders as: exit 64 for a usage
+    error, exit 1 for an operational failure."""
+    if exc.param_hint is not None:
+        return click.BadParameter(str(exc), param_hint=exc.param_hint)
+    if exc.usage:
+        return click.UsageError(str(exc))
+    return click.ClickException(str(exc))
 
 
 def _resolve_new_side_headers_includes(
     kwargs: dict[str, Any],
 ) -> tuple[list[Path], list[Path]]:
-    """NEW-side headers/includes (`model.sided_inputs`). The OLD side has
-    none of its own here (already a resolved, stored snapshot)."""
+    """NEW-side headers/includes (`model.sided_inputs`), for the compile
+    context. The OLD side has none of its own (already a resolved, stored
+    snapshot)."""
     headers = compose_sided_paths(
         kwargs.get("headers") or (), kwargs.get("new_headers_only") or ()
     )
@@ -101,32 +97,19 @@ def resolve_dispatch_compile_context(
     ctx: click.Context, kwargs: dict[str, Any], *, new_is_stored: bool
 ) -> Any:
     """Resolve ``dispatch()``'s ``compile_context`` argument, mutating
-    *kwargs* the same way ``compare_cmd`` used to before delegating here --
-    split out purely to keep ``compare.py`` under its architecture cap.
+    *kwargs* the same way ``compare_cmd`` used to before delegating here.
 
-    When *new_is_stored* (CLI cleanup phase two, PR I's stored/stored
-    shape), this skips ``resolve_compile_context`` entirely and returns
-    ``None``: neither side does any header-frontend extraction, so running
-    it anyway would merge ``.abicheck.yml``'s own ``compile.include_dirs``
-    into ``kwargs["includes"]`` -- which the stored/stored NEW-side
-    rejections (``compare_bundle_facts_rejections.py``) would then wrongly
-    refuse as an *explicit* ``--include``, breaking every stored/stored
-    invocation run from a project directory with a compile: block (Codex
-    review, PR #1060). ``kwargs["config"]`` is still resolved either way,
-    since the config-block rejection checks in that same module still
-    apply. An *explicit* ``--config`` with a real ``compile:`` block is
-    rejected too (``reject_explicit_compile_config_for_stored_pair``, which
-    since Phase 7 also covers the former ``--allow-ast-frontend-fallback``/
-    ``--allow-unsupported-castxml`` flags' config-key equivalents)."""
+    When *new_is_stored* this skips ``resolve_compile_context`` and returns
+    ``None``: neither side does any header-frontend extraction, so running it
+    anyway would merge ``.abicheck.yml``'s own ``compile.include_dirs`` into
+    ``kwargs["includes"]`` and the stored/stored rejections would then wrongly
+    refuse it as an explicit ``--include`` (Codex review, PR #1060). An
+    *explicit* ``--config`` with a real ``compile:`` block is still rejected.
+    """
     from ....config_paths import resolve_project_config
-    from .compare_bundle_facts_rejections import (
-        apply_env_toggles_for_stored_pair,
-        reject_explicit_compile_config_for_stored_pair,
-    )
 
     # Codex review: mirror run_compare's own cwd-upward cfg_path fallback --
-    # resolve_compile_context alone never auto-discovers without a
-    # --sources tree.
+    # resolve_compile_context alone never auto-discovers without a --sources tree.
     _config_explicit = (
         ctx.get_parameter_source("config") == click.core.ParameterSource.COMMANDLINE
     )
@@ -135,7 +118,10 @@ def resolve_dispatch_compile_context(
     ).path
     if new_is_stored:
         if _config_explicit and kwargs["config"] is not None:
-            reject_explicit_compile_config_for_stored_pair(kwargs["config"])
+            try:
+                reject_explicit_compile_config(kwargs["config"])
+            except BundleFactsCompareError as exc:
+                raise _click_error(exc) from exc
         return None
 
     from ....cli_options import (
@@ -144,9 +130,9 @@ def resolve_dispatch_compile_context(
     )
 
     _headers, _includes = _resolve_new_side_headers_includes(kwargs)
-    # The compile-context flags are gone from compare's CLI (ADR-037 D8.1),
-    # so every one of them is passed as its "nothing explicit" default --
-    # i.e. "defer to .abicheck.yml's compile: block".
+    # The compile-context flags are gone from compare's CLI (ADR-037 D8.1), so
+    # every one is passed as its "nothing explicit" default -- i.e. "defer to
+    # .abicheck.yml's compile: block".
     compile_context, merged_includes = resolve_compile_context(
         ctx,
         sysroot=None,
@@ -160,67 +146,159 @@ def resolve_dispatch_compile_context(
         compiler_option_tokens=(),
         # ADR-074's -D/--define -- Click really does populate this one.
         defines=tuple(kwargs.get("defines") or ()),
-        # kwargs["config"] may be the cwd-upward auto-discovered path above
-        # -- use the real `_config_explicit` so the compile.compiler trust
-        # gate isn't fooled (PR #1154).
+        # Use the real `_config_explicit` so the compile.compiler trust gate
+        # isn't fooled by an auto-discovered path (PR #1154).
         config_explicit=_config_explicit,
     )
     apply_env_toggles_for_stored_pair(
         ctx, kwargs["config"], apply_compile_config_env_toggles
     )
-    # Forward the *merged* include list (Codex review), not the raw kwargs
-    # resolve_compile_context was given -- .abicheck.yml's compile.
-    # include_dirs would otherwise be dropped by dispatch()'s own
-    # independent re-derivation from raw kwargs.
+    # Forward the *merged* include list (Codex review), so .abicheck.yml's
+    # compile.include_dirs is not dropped by dispatch()'s own re-derivation.
     kwargs["includes"] = tuple(merged_includes)
     kwargs["new_includes_only"] = ()
     return compile_context
 
 
-def _load_library_overrides(
-    manifest_path: Path,
-    *,
-    known_libraries: set[str],
-    selected_paths: dict[str, Path],
-) -> tuple[dict[str, list[Path]], dict[str, list[Path]], dict[str, Any]]:
-    """Load and validate ``--bundle-facts-library-manifest``.
+def apply_env_toggles_for_stored_pair(
+    ctx: click.Context,
+    config_path: Path | None,
+    apply_env_toggles: Any,
+) -> None:
+    """Apply ``compile.ast_frontend_fallback``/``compile.allow_unsupported_
+    castxml`` for the stored-OLD_FACTS + live-NEW_INPUT ``compare`` path.
 
-    Thin wrapper over :func:`~abicheck.workflows.bundle_facts_library_
-    overrides.load_bundle_facts_library_overrides` -- the actual file
-    reading/YAML-loading lives in that ``workflows``-classified module, not
-    here, since it needs ``dump_manifest``'s duplicate-key-checking strict
-    YAML loader (classified ``extract``) and ``frontends`` may not import
-    ``extract`` directly (only ``workflows`` may -- ``architecture/
-    modules.yaml``).
-
-    Translates :class:`~abicheck.workflows.bundle_facts_library_overrides.
-    BundleFactsLibraryOverridesError` (a ``ValueError`` subclass) into
-    :class:`click.UsageError` here, rather than letting it reach
-    ``dispatch()``'s own ``except (SnapshotError, ValueError, OSError)``
-    clause (Codex review): invalid YAML, a duplicate manifest key, an
-    unrecognized key, or a library name outside *known_libraries* is a
-    malformed CLI input -- AGENTS.md's exit-code table reserves ``64`` for
-    exactly that (``cli._EXIT_USAGE_ERROR``, via ``_AbicheckGroup``'s
-    UsageError-exit-2-to-64 remap) -- not the generic operational-failure
-    exit ``1`` that clause produces for e.g. a malformed OLD_FACTS document.
-    Mirrors ``dump.py``'s own ``_load_dump_manifest_or_reject()``, which
-    does the identical translation for ``--dump-manifest``'s
-    ``ManifestValidationError``.
+    This path does real header-AST extraction later, but it never applied these
+    two toggles the way ``run_compare``/``dump`` do (CodeRabbit review, PR
+    #1146). Call this after ``resolve_compile_context`` has validated
+    *config_path* and before extraction runs. *apply_env_toggles* is the
+    caller's own ``cli_options.apply_compile_config_env_toggles``, passed in
+    rather than imported here to keep ``cli_options`` out of this module's
+    import graph (the CLI-registration cycle).
     """
-    from ....workflows.bundle_facts_library_overrides import (
-        BundleFactsLibraryOverridesError,
-        load_bundle_facts_library_overrides,
-    )
+    if config_path is None:
+        return
+    from ....workflows.extraction import load_build_config_with_digest
 
     try:
-        overrides = load_bundle_facts_library_overrides(
-            manifest_path,
-            known_libraries=known_libraries,
-            selected_paths=selected_paths,
-        )
-    except BundleFactsLibraryOverridesError as exc:
-        raise click.UsageError(str(exc)) from exc
-    return overrides.headers, overrides.includes, overrides.compile
+        cfg = load_build_config_with_digest(config_path)[0]
+    except ValueError as exc:
+        # A malformed config is a usage error (exit 64), discovered or not;
+        # the compile-context merge may have tolerated it with a warning.
+        raise click.UsageError(
+            f"cannot parse build config {config_path}: {exc}"
+        ) from exc
+    apply_env_toggles(ctx, cfg)
+
+
+def _warn(message: str) -> None:
+    click.echo(f"Warning: {message}", err=True)
+
+
+#: The kwargs that together mean "a build/source operand was given" for a
+#: stored comparison's rejection. The rule itself is the workflow's.
+_BUILD_SOURCE_KWARGS = (
+    "old_sources",
+    "new_sources",
+    "old_build_info",
+    "new_build_info",
+    "old_dump_manifest",
+    "new_dump_manifest",
+)
+
+
+def _request_from_kwargs(
+    kwargs: dict[str, Any],
+    *,
+    compile_context: Any,
+    new_is_stored: bool,
+    config_explicit: bool,
+) -> BundleFactsCompareRequest:
+    """Map compare's parsed, normalized kwargs onto the workflow request.
+
+    Each field is a faithful projection of one kwarg; presence-only fields
+    reduce to a bool here because the workflow's rules read nothing else.
+    """
+    from ..options.params import _load_suppression_and_policy
+
+    output = kwargs.get("output")
+    output_dir = kwargs.get("output_dir")
+    bundle_facts_out = kwargs.get("bundle_facts_out")
+    return BundleFactsCompareRequest(
+        old_facts_path=kwargs["old_input"],
+        new_input=kwargs["new_input"],
+        new_is_stored=new_is_stored,
+        config_path=kwargs.get("config"),
+        config_explicit=config_explicit,
+        compile_context=compile_context,
+        policy=kwargs["policy"],
+        load_suppression_and_policy=lambda: _load_suppression_and_policy(
+            kwargs.get("suppress"),
+            kwargs["policy"],
+            kwargs.get("policy_file_path"),
+        ),
+        warn=_warn,
+        fmt=kwargs.get("fmt", "json"),
+        secondary_writes=kwargs.get("secondary_writes", ()),
+        output=Path(output) if output is not None else None,
+        output_dir=Path(output_dir) if output_dir is not None else None,
+        bundle_facts_out=Path(bundle_facts_out)
+        if bundle_facts_out is not None
+        else None,
+        depth=kwargs.get("depth"),
+        lang=kwargs.get("lang", "c++"),
+        lang_explicit=bool(kwargs.get("lang_explicit", False)),
+        new_version=kwargs.get("new_version", "new"),
+        old_version=kwargs.get("old_version"),
+        include_dependencies=bool(kwargs.get("include_dependencies", False)),
+        show_only=bool(kwargs.get("show_only")),
+        report_mode=kwargs.get("report_mode"),
+        contract_mode=kwargs.get("contract_mode"),
+        severity_preset=kwargs.get("severity_preset"),
+        pack_paths=tuple(kwargs.get("pack_paths") or ()),
+        dry_run=bool(kwargs.get("dry_run")),
+        headers=tuple(kwargs.get("headers") or ()),
+        new_headers_only=tuple(kwargs.get("new_headers_only") or ()),
+        old_headers_only=tuple(kwargs.get("old_headers_only") or ()),
+        includes=tuple(kwargs.get("includes") or ()),
+        new_includes_only=tuple(kwargs.get("new_includes_only") or ()),
+        old_includes_only=tuple(kwargs.get("old_includes_only") or ()),
+        new_devel_pkg=kwargs.get("devel_pkg2"),
+        old_devel_pkg_given=kwargs.get("devel_pkg1") is not None,
+        manifest_path=kwargs.get("manifest_path"),
+        bundle_facts_library_manifest=kwargs.get("bundle_facts_library_manifest"),
+        # A --used-by-manifest-named consumer is as unsupported as a bare
+        # --used-by one, so both spellings reach the same rule.
+        used_by_apps=(
+            tuple(kwargs.get("used_by_apps") or ())
+            + tuple(kwargs.get("used_by_manifests") or ())
+        ),
+        required_symbols=tuple(kwargs.get("required_symbols_opt") or ()),
+        use_cases_manifest=kwargs.get("use_cases_manifest"),
+        diagnostic_comparison=bool(kwargs.get("diagnostic_comparison", False)),
+        include_labels=kwargs.get("include_labels"),
+        build_or_source_operands_given=any(
+            kwargs.get(name) is not None for name in _BUILD_SOURCE_KWARGS
+        ),
+        probe_matrix_given=(
+            kwargs.get("probe_matrix_old") is not None
+            or kwargs.get("probe_matrix_new") is not None
+        ),
+        debug_info_given=(
+            kwargs.get("debug_info2") is not None
+            or kwargs.get("debug_info1") is not None
+        ),
+        debug_roots_given=bool(
+            kwargs.get("debug_roots")
+            or kwargs.get("debug_roots_old")
+            or kwargs.get("debug_roots_new")
+        ),
+        dependency_flags_given=bool(
+            kwargs.get("follow_deps")
+            or kwargs.get("search_paths")
+            or kwargs.get("ld_library_path")
+        ),
+    )
 
 
 def dispatch(
@@ -233,629 +311,87 @@ def dispatch(
     """Handle a ``compare OLD_FACTS NEW_INPUT`` invocation where OLD_FACTS
     classified as a stored BundleFacts document.
 
-    *new_is_stored* (CLI cleanup phase two, PR I), when true, means
-    NEW_INPUT classified as a stored BundleFacts document too -- both sides
-    are then diffed by ``workflows.bundle_stored_pair_compare.
-    compare_stored_bundle_facts_pair`` (a pure in-memory per-library diff,
-    no binaries read, no header AST parsed on either side) instead of
-    ``compare_release_against_bundle_facts`` (which extracts and dumps
-    NEW_INPUT as a live directory/package). The default ``False`` is the
-    original stored/live shape, unchanged.
+    *new_is_stored*, when true, means NEW_INPUT classified as a stored
+    BundleFacts document too -- both sides are then diffed in memory by
+    ``compare_stored_bundle_facts_pair``. The default ``False`` is the
+    stored/live shape, which extracts NEW_INPUT as a live directory/package.
 
-    *config_explicit* is ``compare_cmd``'s own ``_config_explicit``,
-    threaded through unchanged -- by dispatch time ``kwargs["config"]``
-    no longer distinguishes an explicit path from an auto-discovered one.
+    *config_explicit* is ``compare_cmd``'s own ``_config_explicit``: by dispatch
+    time ``kwargs["config"]`` no longer distinguishes an explicit path from an
+    auto-discovered one.
 
-    *kwargs* is ``compare_cmd``'s already-parsed, already-``normalize_sided_
-    options``-processed option dict -- the same dict that would otherwise be
-    forwarded to ``run_compare``. Never returns normally: like every other
-    verdict-emitting command, it exits via ``sys.exit`` (through the shared
-    ``_exit_compare_release`` legacy-scheme mapping).
+    *kwargs* is ``compare_cmd``'s already-parsed, already-normalized option
+    dict. Never returns normally: like every other verdict-emitting command,
+    it exits via ``sys.exit`` (through ``_exit_compare_release``).
 
-    *compile_context* is resolved by the caller (``compare_cmd``,
-    ``cli_options.resolve_compile_context``) rather than here: this leaf
-    module is deliberately kept out of ``cli_options``'s own import graph --
-    ``cli_options`` transitively reaches back through ``cli_resolve ->
-    service -> ... -> cli_compare_helpers -> frontends.cli.commands.compare``
-    (the pre-existing, allowlisted CLI-registration cycle), and importing it
-    here would pull this module into that cycle (AI-readiness
-    ``import-cycle-growth`` gate, AGENTS.md: never extend the allowlist
-    reactively).
+    *compile_context* is resolved by the caller (``compare_cmd``), not here:
+    this leaf module is kept out of ``cli_options``'s own import graph.
     """
-    # bundle_side_input.py is classified `workflows` (architecture/
-    # modules.yaml) -- `frontends -> workflows` is a legal edge
-    # (`may_import: [model, workflows, report]`), so this is no longer an
-    # architecture-boundary workaround. Resolved via importlib rather than a
-    # static `from ....bundle_side_input import ...` purely for the
-    # AI-readiness `import-cycle-growth` gate, which is unrelated to package
-    # classification: bundle_side_input transitively imports `service`,
-    # which is itself already inside the pre-existing, allowlisted CLI-
-    # registration import cycle (service -> ... -> cli_compare_helpers ->
-    # frontends.cli.commands.compare). This call is already deferred to
-    # dispatch-time either way; importlib just keeps that AST-level scan
-    # (which walks every import regardless of nesting, static or lazy) from
-    # registering a static edge that would pull this module into that cycle
-    # (AGENTS.md: never extend that allowlist reactively).
-    import importlib
-
-    _bundle_side_input = importlib.import_module("abicheck.bundle_side_input")
-    compare_release_against_bundle_facts = (
-        _bundle_side_input.compare_release_against_bundle_facts
-    )
-    # PR I: same importlib indirection as compare_release_against_bundle_
-    # facts above, and for the identical reason -- workflows.bundle_stored_
-    # pair_compare also transitively imports `service` (Codex review moved
-    # the function itself out of bundle_side_input.py into this real
-    # workflows/ module, but the import-cycle-growth concern documented
-    # above is unrelated to which module hosts the function).
-    _bundle_stored_pair_compare = importlib.import_module(
-        "abicheck.workflows.bundle_stored_pair_compare"
-    )
-    compare_stored_bundle_facts_pair = (
-        _bundle_stored_pair_compare.compare_stored_bundle_facts_pair
-    )
     from ....cli_compare_release_helpers import _exit_compare_release
-
-    # known_libraries_for_new_side lives in workflows/bundle_facts_library_
-    # overrides.py, not bundle_side_input.py (Codex review, fresh evidence):
-    # that module is grandfathered flat-root legacy, and new behavior
-    # belongs in a real workflows/ module even though frontends -> workflows
-    # already makes it reachable either way. A plain import (not the
-    # importlib indirection above) is safe here: this module, unlike
-    # bundle_side_input, does not transitively import `service`.
-    from ....workflows.bundle_facts_library_overrides import (
-        BundleFactsLibraryOverridesError,
-        known_libraries_for_new_side,
-    )
-
-    # Phase 7d (one-comparison-product.md §4.1): --dso-only/
-    # --include-private-dso/--fail-on-removed-library (and, since, the
-    # former --require-complete-analysis / assurance.require_complete) are
-    # config-only now -- loaded here, ahead of reject_unsupported_options,
-    # since a project that sets any of them can no longer state them as CLI
-    # kwargs for this dispatcher to reject.
-    from ....workflows.extraction import (
-        load_build_config_with_digest as _load_cfg_early,
-    )
-    from ..options.params import _load_suppression_and_policy
-    from .compare_bundle_facts_rejections import (
-        reject_unsupported_options,
-        resolve_max_json_object_nodes_cfg,
-    )
-
-    _early_cfg_path = kwargs.get("config")
-    _early_cfg = None
-    if _early_cfg_path is not None:
-        try:
-            _early_cfg = _load_cfg_early(_early_cfg_path)[0]
-        except ValueError as exc:
-            # Same parse-or-raise translation reject_unsupported_options()
-            # itself applies to kwargs["config"] a few lines below -- this
-            # load runs strictly before it now, so it must not bypass that
-            # existing "malformed config is a clean UsageError, never a raw
-            # traceback" contract (Codex review precedent, this module's
-            # own test suite).
-            raise click.UsageError(
-                f"cannot parse build config {_early_cfg_path}: {exc}"
-            ) from exc
-    # Codex review, fresh evidence: when NEW_INPUT resolves to neither a
-    # directory nor a recognized package archive,
-    # compare_release_against_bundle_facts() treats it as exactly one
-    # library file with no ELF-type check at all (unlike the directory-walk
-    # case, where discover_shared_libraries()'s own ET_DYN/non-PIE filter
-    # already makes dso_only a no-op) -- so release.dso_only/
-    # release.include_private_dso would silently have no effect there.
-    # Computed here, ahead of reject_unsupported_options, rather than after
-    # dispatch()'s own later `new_dir = kwargs["new_input"]` binding, so the
-    # combination is rejected before either setting is silently ignored.
-    from ....workflows.extraction import is_package as _is_package_early
-
-    _new_input_early: Path = kwargs["new_input"]
-    _new_is_single_file = not new_is_stored and not (
-        _new_input_early.is_dir() or _is_package_early(_new_input_early)
-    )
-    reject_unsupported_options(
-        kwargs,
-        new_is_stored=new_is_stored,
-        dso_only=bool(_early_cfg.release_dso_only) if _early_cfg else False,
-        include_private_dso=(
-            bool(_early_cfg.release_include_private_dso) if _early_cfg else False
-        ),
-        fail_on_removed=(
-            bool(_early_cfg.gate_fail_on_removed_library) if _early_cfg else False
-        ),
-        support_promise=(_early_cfg.release_support_promise if _early_cfg else None),
-        new_is_single_file=_new_is_single_file,
-        require_complete_analysis=(
-            bool(_early_cfg.assurance_require_complete) if _early_cfg else False
-        ),
-    )
-
-    old_facts_path: Path = kwargs["old_input"]
-    new_dir: Path = kwargs["new_input"]
-    fmt = kwargs.get("fmt", "json")
-    # ADR-068 D4/Phase 5: --write is repeatable on `compare` now; this
-    # dispatcher honors every requested write (see the loop near the bottom
-    # of this function), not just the first.
-    secondary_writes: tuple[tuple[str, Path], ...] = kwargs.get("secondary_writes", ())
-    depth = kwargs.get("depth")
-    headers, includes = _resolve_new_side_headers_includes(kwargs)
-    if depth == "binary":
-        # Codex review: run_compare's own --depth binary clears every header
-        # operand (_normalize_compare_options) so the comparison stays pure
-        # L0/L1 symbol/debug-info evidence with no L2 header AST at all --
-        # this dispatcher independently re-derives `headers` from the same
-        # raw kwargs that flag feeds, so without this it silently kept
-        # whatever --header/--new-header was given and ran L2 extraction
-        # anyway, reporting findings outside the requested depth.
-        headers = []
-    # No CLI frontend flag exists (ADR-037 D8.1); compile.frontend in the
-    # config is folded in by the resolved compile context.
-    header_backend = "auto"
-
-    suppression, policy_file = _load_suppression_and_policy(
-        kwargs.get("suppress"), kwargs["policy"], kwargs.get("policy_file_path")
-    )
-    # Round 9: this dispatcher bypasses run_compare (module docstring), so
-    # it never picked up the PROJECT_CONFIG-tier `.abicheck.yml` fold every
-    # other route applies -- no `--pack` fold to order against (none here).
-    from ....errors import PolicyError
-    from ....workflows import policy_file as _policy_file_mod
-
-    _pf0 = policy_file
-    try:
-        policy_file = _policy_file_mod.merge_project_config_policy_overrides(
-            policy_file,
-            base_policy=kwargs["policy"],
-            project_cfg=_early_cfg,
-            project_path=_early_cfg_path,
-        )
-    except PolicyError as exc:
-        raise click.BadParameter(str(exc), param_hint="--config") from exc
-    for w in _policy_file_mod.project_config_policy_downgrade_warnings(  # round 9/10
-        _pf0, policy_file, project_path=_early_cfg_path
-    ):
-        click.echo(f"Warning: {w}", err=True)
-
-    # PR J: bundle: replaces --bundle-system-providers/--bundle-cohort.
-    # kwargs["config"] is already resolved (explicit/auto-discovered) by
-    # compare.py's dispatch call site -- read the same field
-    # ResolvedCompareConfig would, off the loaded BuildConfig directly.
-    # Not re-validated: that call site already raises a UsageError for a
-    # malformed config before dispatch() ever runs. Reuses the config
-    # already loaded above for the Phase 7d reject_unsupported_options()
-    # call rather than parsing .abicheck.yml a second time.
-    _bundle_cfg = _early_cfg
-    bundle_system_providers = (
-        list(_bundle_cfg.bundle_system_providers) if _bundle_cfg else []
-    )
-    bundle_cohorts = list(_bundle_cfg.bundle_cohorts) if _bundle_cfg else []
-    # Phase 7d (one-comparison-product.md §4.1): --include-private-dso is
-    # gone as a CLI flag on `compare` -- release.include_private_dso in
-    # .abicheck.yml is its only source now, read off the same _bundle_cfg
-    # already loaded above for bundle_system_providers/cohorts.
-    include_private_dso_cfg = (
-        bool(_bundle_cfg.release_include_private_dso) if _bundle_cfg else False
-    )
-    # Phase 7g: --max-json-object-nodes is gone -- resource_limits.
-    # max_bundle_facts_decode_nodes in .abicheck.yml is its only source now
-    # -- see resolve_max_json_object_nodes_cfg()'s own docstring (Codex).
-    max_json_object_nodes_cfg = resolve_max_json_object_nodes_cfg(
-        _bundle_cfg.resource_limits_max_bundle_facts_decode_nodes
-        if _bundle_cfg
-        else None,
-        config_explicit=config_explicit,
-        default=importlib.import_module(
-            "abicheck.model.bundle_facts"
-        ).DEFAULT_MAX_JSON_OBJECT_NODES,
-    )
-
-    if new_is_stored:
-        # PR I stored/stored: NEW_INPUT is itself a stored BundleFacts
-        # document too -- no extraction, no header AST, no live NEW-side
-        # resolution (compare_stored_bundle_facts_pair() is a pure in-memory
-        # diff of both sides' already-persisted per-library AbiSnapshots).
-        # resource_limits.max_bundle_facts_decode_nodes applies to *both*
-        # sides' load here (one unscoped config key), unlike the
-        # stored/live branch below.
-        from ....errors import SnapshotError
-
-        try:
-            result = compare_stored_bundle_facts_pair(
-                old_facts_path,
-                new_dir,
-                manifest_path=kwargs.get("manifest_path"),
-                system_providers=bundle_system_providers or None,
-                cohorts=bundle_cohorts or None,
-                policy=kwargs["policy"],
-                policy_file=policy_file,
-                suppress=suppression,
-                old_max_json_object_nodes=max_json_object_nodes_cfg,
-                new_max_json_object_nodes=max_json_object_nodes_cfg,
-                depth=kwargs.get("depth"),
-                env_matrix=_early_cfg.deployment if _early_cfg else None,  # ADR-020b
-            )
-        # Same translation the stored/live branch below applies (its own
-        # comments explain each of these four exception types).
-        except (SnapshotError, TypeError, ValueError, OSError) as exc:
-            raise click.ClickException(str(exc)) from exc
-    else:
-        # Codex review: NEW_INPUT is documented ("a live release directory/
-        # package") to accept a package archive (wheel/deb/rpm/tar), but
-        # compare_release_against_bundle_facts() treats any non-directory path
-        # as a single library file -- a package operand silently produced zero
-        # matches instead of the shared libraries inside it. Extract it first,
-        # the same way the live release fan-out does (_extract_if_package),
-        # sharing that primitive rather than re-implementing package detection
-        # here. --devel-pkg new=... is honored the same way too (its header_dir
-        # becomes the NEW-side header root when no explicit --new-header was
-        # given, and its discovered include roots are appended) -- --debug-info
-        # is rejected above, since this driver has no debug-dir param for it.
-        from ....cli_compare_release_helpers import (
-            _discover_include_roots,
-            _extract_if_package,
-        )
-        from ....errors import SnapshotError
-        from ....workflows.extraction import detect_extractor, is_package
-
-        _temp_dir_paths: list[str] = []
-
-        def _make_temp_dir(prefix: str) -> Path:
-            import tempfile
-
-            path = tempfile.mkdtemp(prefix=prefix)
-            _temp_dir_paths.append(path)
-            return Path(path)
-
-        try:
-            # Codex review: extraction itself must be inside this scope --
-            # make_temp_dir() records the directory before extractor.extract()
-            # runs, so a malformed/corrupt archive that matches a known
-            # extension (a real format, bad content) raises *after* the temp
-            # dir already exists; extracting outside this try/finally leaked it
-            # even without --keep-extracted. It also must be inside the
-            # except (SnapshotError, ValueError) boundary just below (Codex
-            # review, fresh evidence) -- _extract_if_package raises
-            # SnapshotError for a malformed-but-recognized archive, and that
-            # used to propagate past this function as a raw Python traceback
-            # instead of the clean CLI error every other SnapshotError here
-            # produces.
-            try:
-                lib_dir, _new_debug_dir, header_dir, _new_symbols_file, _whole = (
-                    _extract_if_package(
-                        new_dir,
-                        None,
-                        kwargs.get("devel_pkg2"),
-                        _make_temp_dir,
-                        is_package,
-                        detect_extractor,
-                    )
-                )
-                if header_dir is not None and depth != "binary":
-                    # Codex review: --depth binary's uniform `headers = []`
-                    # clear above (dispatch()'s own comment) must survive
-                    # package/--devel-pkg extraction too -- without this guard,
-                    # a NEW_INPUT package (or `--devel-pkg new=...`) that
-                    # discovers its own header_dir would reassign `headers`
-                    # right back to a non-empty list here, silently re-enabling
-                    # L2 header extraction for that library under a depth that
-                    # promises pure L0/L1 evidence with no header AST at all.
-                    if not headers:
-                        headers = [header_dir]
-                    includes = includes + _discover_include_roots(header_dir)
-
-                per_library_headers: dict[str, list[Path]] | None = None
-                per_library_includes: dict[str, list[Path]] | None = None
-                per_library_compile: dict[str, Any] | None = None
-                manifest_path = kwargs.get("bundle_facts_library_manifest")
-                if manifest_path is not None:
-                    # G38 Phase 17: known_libraries is derived from the same
-                    # primitives compare_release_against_bundle_facts() itself
-                    # uses on this identical lib_dir, so a manifest entry naming
-                    # a library outside the bundle is a hard, immediate error
-                    # instead of silently never being looked up.
-                    include_private_dso = include_private_dso_cfg
-                    new_library_paths = known_libraries_for_new_side(
-                        lib_dir, include_private_dso=include_private_dso
-                    )
-                    per_library_headers, per_library_includes, per_library_compile = (
-                        _load_library_overrides(
-                            Path(manifest_path),
-                            known_libraries=set(new_library_paths),
-                            selected_paths=new_library_paths,
-                        )
-                    )
-                    if depth == "binary":
-                        # Codex review: the uniform `headers` clear above only
-                        # covers the uniform operand -- a manifest-supplied
-                        # per-library header root would otherwise still run L2
-                        # extraction for that one library under --depth binary,
-                        # reporting findings outside the requested depth.
-                        per_library_headers = {}
-                        per_library_includes = {}
-                        per_library_compile = {}
-
-                result = compare_release_against_bundle_facts(
-                    old_facts_path,
-                    lib_dir,
-                    headers=headers or None,
-                    includes=includes or None,
-                    per_library_headers=per_library_headers,
-                    per_library_includes=per_library_includes,
-                    per_library_compile=per_library_compile,
-                    header_backend=header_backend,
-                    compile=compile_context,
-                    new_version=kwargs.get("new_version", "new"),
-                    lang=kwargs.get("lang", "c++"),
-                    # Codex review, fresh evidence: kwargs["lang_explicit"] is
-                    # compare_cmd's own ctx.get_parameter_source("lang") ==
-                    # COMMANDLINE detection (compare.py, mirroring run_compare's
-                    # identical lang_explicit computation) -- without threading
-                    # it through, an explicit --lang c++ on a language-ambiguous
-                    # NEW-side header was indistinguishable from Click's own
-                    # default and silently let resolve_input() auto-detect past
-                    # it, which can change the extracted API and findings.
-                    lang_explicit=bool(kwargs.get("lang_explicit", False)),
-                    include_private_dso=include_private_dso_cfg,
-                    manifest_path=kwargs.get("manifest_path"),
-                    system_providers=bundle_system_providers or None,
-                    cohorts=bundle_cohorts or None,
-                    policy=kwargs["policy"],
-                    policy_file=policy_file,
-                    suppress=suppression,
-                    include_dependencies=bool(
-                        kwargs.get("include_dependencies", False)
-                    ),
-                    max_json_object_nodes=max_json_object_nodes_cfg,
-                    env_matrix=_early_cfg.deployment
-                    if _early_cfg
-                    else None,  # ADR-020b
-                )
-            except BundleFactsLibraryOverridesError as exc:
-                # Codex review, fresh evidence: compare_release_against_bundle_
-                # facts() itself re-validates the manifest's per-library keys
-                # against the libraries actually matched between OLD_FACTS and
-                # NEW_INPUT (a check known_libraries_for_new_side()'s earlier,
-                # NEW-side-only pass cannot make) -- this is a malformed-CLI-
-                # input case exactly like every other BundleFactsLibraryOverrides
-                # Error in this module, so it gets the same exit-64 usage-error
-                # translation rather than falling into the generic ValueError
-                # clause below (exit 1).
-                raise click.UsageError(str(exc)) from exc
-            # TypeError (Codex review, fresh evidence): a malformed nested
-            # build_mode/contract field inside one of OLD_FACTS's per-library
-            # snapshots is rejected rather than coerced at the storage boundary
-            # (storage AGENTS.md invariant 6) -- bundle_facts_from_dict()'s own
-            # per_library_snapshots comprehension calls snapshot_from_dict()
-            # with no nested guard, so that TypeError propagates all the way
-            # here and must be caught alongside ValueError like every other
-            # malformed-OLD_FACTS shape.
-            except (SnapshotError, TypeError, ValueError, OSError) as exc:
-                # Same CLI-boundary translation every other SnapshotError-raising
-                # entry point uses (cli_resolve.py et al.) -- without this, a
-                # container-node-budget rejection (or any other SnapshotError) would
-                # surface as a raw Python traceback instead of a clean CLI error.
-                # Also catches ValueError (Codex review): a malformed-but-parseable
-                # OLD_FACTS document -- missing/wrong-shaped 'per_library_snapshots',
-                # a bad 'filesystem_aliases'/'library_filenames' entry
-                # (bundle_facts_serialization.bundle_facts_from_dict and
-                # storage.bundle_facts_validation's validators all raise plain
-                # ValueError, not SnapshotError, for these) -- would otherwise leak
-                # the same raw traceback. json.JSONDecodeError (malformed JSON) is
-                # itself a ValueError subclass. OSError covers load_bundle_facts()'s
-                # own IsADirectoryError/PermissionError/etc when OLD_INPUT -- a plain
-                # click.Path(exists=True) argument, not dir_okay=False -- turns out
-                # to be a directory or otherwise unreadable file.
-                raise click.ClickException(str(exc)) from exc
-        finally:
-            # Mirrors _cleanup_temp_dirs: always remove the tempdir now --
-            # --keep-extracted is gone (Phase 7d, ADR-068 D5).
-            import shutil as _shutil
-
-            for _td in _temp_dir_paths:
-                _shutil.rmtree(_td, ignore_errors=True)
-
-    scope_terms = scope_terms_for(
-        result,
-        kwargs,
-        on_incomplete_scope=(_bundle_cfg.scope_on_incomplete if _bundle_cfg else None),
-    )
-    if not result.per_library and result.scope_record is None:
-        # No pair and no record to say so -> usage error (Codex). With a record
-        # a zero-pair run renders like the fan-out's: D7 exits 1 (round 30).
-        _new_desc = (
-            f"{new_dir}'s stored per_library_snapshots"
-            if new_is_stored
-            else str(new_dir)
-        )
-        raise click.ClickException(
-            f"No library in {_new_desc} matched any library in "
-            f"{old_facts_path}'s stored per_library_snapshots -- nothing "
-            "was compared. Check that NEW_INPUT and OLD_FACTS reference "
-            "the same release."
-        )
-    if not result.per_library and fmt != "json":
-        click.echo(
-            "Warning: no library pair was compared -- no comparison completed.",
-            err=True,
-        )
-
-    # Codex review, fresh evidence: route both writes through the shared
-    # CLI-safe writer every other output/--write path uses -- a direct
-    # write_text() raises an uncaught FileNotFoundError when -o/--write
-    # names a file under a nonexistent parent directory, where
-    # _safe_write_output() creates the missing parent and translates any
-    # write failure into a concise ClickException instead.
     from ..runtime import _safe_write_output
 
-    output = kwargs.get("output")
-    output_dir = kwargs.get("output_dir")
-    if output_dir is not None:
-        output_dir = Path(output_dir)
-        # Codex review, fresh evidence: an --output-dir that already exists
-        # as a regular file -- entirely unrelated to -o/--output/--write --
-        # is not caught by the reserved-path collision checks below (it
-        # names neither of them), yet `output_dir.mkdir(parents=True,
-        # exist_ok=True)` still raises a raw, uncaught FileExistsError for
-        # it (`exist_ok=True` tolerates an existing *directory*, not an
-        # existing file), after the primary report has already been
-        # written. Reject it up front instead, as a general precondition
-        # independent of whether -o/--output/--write were even given.
-        if output_dir.exists() and not output_dir.is_dir():
-            raise click.UsageError(
-                f"-o json={output_dir}/: this path already exists and "
-                "is not a directory -- choose a different per-library directory"
-            )
-        # Codex review: --output-dir's per-library filenames
-        # (`{safe_name}.json`, derived from diff.library below) are known
-        # up front -- reject a collision with -o/--output or --write's own
-        # secondary_output *before* any artifact is written, rather than
-        # letting whichever write happens to run second silently clobber
-        # the first (the primary/secondary writes below run before this
-        # loop, so a collision would otherwise overwrite one of them with
-        # no signal anything was lost).
-        reserved_paths = {
-            p.resolve()
-            for p in (
-                Path(output) if output is not None else None,
-                *(Path(w_path) for _w_fmt, w_path in secondary_writes),
-            )
-            if p is not None
-        }
-        if reserved_paths:
-            # Codex review, fresh evidence: the per-library-filename check
-            # below only catches a collision with one of the *generated*
-            # child report paths -- it misses the more direct case where
-            # --output-dir itself names the same (previously nonexistent)
-            # path as -o/--output or --write. Both Click options accept
-            # that combination on their own, and without this check the
-            # primary write below creates a *file* at that path, after
-            # which `output_dir.mkdir(...)` raises a raw FileExistsError
-            # instead of the same clean usage error every other collision
-            # here produces.
-            output_dir_resolved = output_dir.resolve()
-            if output_dir_resolved in reserved_paths:
-                raise click.UsageError(
-                    f"-o json={output_dir}/: this path is also named by "
-                    "another -o target -- a directory and a report "
-                    "file cannot share the same path, choose a different "
-                    "per-library directory or a different -o path"
-                )
-            for diff in result.per_library:
-                safe_name = Path(diff.library).name or "library"
-                target = (output_dir / f"{safe_name}.json").resolve()
-                if target in reserved_paths:
-                    raise click.UsageError(
-                        f"-o json={output_dir}/: the per-library report "
-                        f"for {diff.library!r} would be written to "
-                        f"{target}, which collides with "
-                        "another -o target's path -- choose a different "
-                        "per-library directory, or a different -o path"
-                    )
-        # Codex review, fresh evidence: this was previously deferred until
-        # after the primary/secondary writes below, right before the
-        # per-library write loop. When some *ancestor* of --output-dir
-        # (not output_dir itself -- the check above only catches that
-        # narrower case) is a regular file, mkdir(parents=True) raises
-        # NotADirectoryError only at that later point, by which time the
-        # primary/secondary report has already been written to disk --
-        # so a "failed" command silently left a partial artifact behind.
-        # Creating (and validating) the directory up front, before any
-        # report is rendered or written, makes this precondition failure
-        # behave the same as every other rejection above: no artifact
-        # written at all.
-        try:
-            output_dir.mkdir(parents=True, exist_ok=True)
-        except OSError as exc:
-            # Mirrors _safe_write_output's own OSError -> ClickException
-            # translation for the identical operation (creating a report's
-            # parent directory) -- covers a permission failure, a full
-            # disk, or a non-directory *parent* path component.
-            raise click.ClickException(f"Cannot create {output_dir}: {exc}") from exc
+    request = _request_from_kwargs(
+        kwargs,
+        compile_context=compile_context,
+        new_is_stored=new_is_stored,
+        config_explicit=config_explicit,
+    )
+    try:
+        outcome = execute_bundle_facts_compare(request)
+    except BundleFactsCompareError as exc:
+        raise _click_error(exc) from exc
 
-    # ADR-071 D8: the identical fold, over this driver's own members --
-    # `result.per_library` carries real `DiffResult`s, so both operand shapes
-    # reach one `resolve_release_assurance_decision` and cannot diverge on
-    # what `assurance.require_complete` means. Retires this driver's own
-    # mirror of the release rejection.
-    #
-    # Resolved HERE, ahead of every render and per-library write, not just
-    # before the exit (Codex review, P1): computing it afterwards left the
-    # rendered JSON without the canonical top-level
-    # `analysis_assurance_exit_contribution` and each `--output-dir` report
-    # serialized without the setting, so this driver exited 1 while every
-    # document it published read 0 to `aggregate`/the deferred gate.
-    _require_complete = bool(
-        _bundle_cfg.assurance_require_complete if _bundle_cfg else False
-    )
-    assurance_decision = release_assurance_from_results(
-        getattr(result, "per_library", ()),
-        # Off the same `_bundle_cfg` every other release-shaped setting here
-        # is: the key is config-only and project-wide (D4).
-        require_complete=_require_complete,
-    )
+    scope_terms = comparison_scope_terms(outcome.scope_decision)
+    result = outcome.result
     text = _render(
         result,
-        fmt,
-        old_facts_path=old_facts_path,
-        new_dir=new_dir,
+        request.fmt,
+        old_facts_path=request.old_facts_path,
+        new_dir=request.new_input,
         new_is_stored=new_is_stored,
         scope_terms=scope_terms,
-        assurance_decision=assurance_decision,
+        assurance_decision=outcome.assurance_decision,
     )
-    if output is not None:
-        _safe_write_output(Path(output), text)
+    if request.output is not None:
+        _safe_write_output(request.output, text)
     else:
         click.echo(text)
-    for secondary_fmt, secondary_output in secondary_writes:
-        # Codex review: render and write every promised secondary artifact
-        # (each already validated to be json/markdown) rather than silently
-        # dropping any -- re-rendering rather than reusing `text` since a
-        # secondary format can legitimately differ from the primary one.
-        secondary_text = _render(
-            result,
-            secondary_fmt,
-            old_facts_path=old_facts_path,
-            new_dir=new_dir,
-            new_is_stored=new_is_stored,
-            scope_terms=scope_terms,
-            assurance_decision=assurance_decision,
+    for secondary_fmt, secondary_output in request.secondary_writes:
+        # Every promised secondary artifact is rendered and written, not
+        # dropped -- re-rendered since a secondary format can differ.
+        _safe_write_output(
+            Path(secondary_output),
+            _render(
+                result,
+                secondary_fmt,
+                old_facts_path=request.old_facts_path,
+                new_dir=request.new_input,
+                new_is_stored=new_is_stored,
+                scope_terms=scope_terms,
+                assurance_decision=outcome.assurance_decision,
+            ),
         )
-        _safe_write_output(Path(secondary_output), secondary_text)
-    if output_dir is not None:
-        # Codex review: NEW_INPUT is a release-style operand, so --output-dir
-        # writes one `{library}.json` per matched library, mirroring the
-        # live release fan-out's own layout.
+    if request.output_dir is not None:
+        # NEW_INPUT is a release-style operand, so --output-dir writes one
+        # `{library}.json` per matched library, mirroring the live release
+        # fan-out's own layout.
         from ....reporter import to_json
 
         for diff in result.per_library:
-            # Codex review: `diff.library` originates in OLD_FACTS -- a
-            # user-supplied document, not a path this process resolved
-            # itself -- so an absolute or `../`-laden value must not reach
-            # the filesystem unsanitized (unlike the live release fan-out's
-            # `old_path.stem`, which is always derived from a real,
-            # already-resolved Path). `Path(...).name` is the same
-            # basename-only normalization that driver's own `.stem`
-            # provides: it yields only the final path component regardless
-            # of how many `/`/`..` segments precede it, so it can never
-            # escape `output_dir` on this platform's own separator rules.
-            safe_name = Path(diff.library).name or "library"
-            # Codex review: a direct write_text() leaked a traceback for an
-            # unwritable output_dir; routed through the shared writer.
-            # ADR-071 (Codex review, P1): without the setting an incomplete
-            # member's own file reports a clean exit for a run it floored.
             _safe_write_output(
-                output_dir / f"{safe_name}.json",
-                to_json(diff, require_complete_analysis=_require_complete),
+                per_library_report_path(request.output_dir, diff.library),
+                to_json(
+                    diff, require_complete_analysis=outcome.require_complete_analysis
+                ),
             )
 
     _exit_compare_release(
         stored_reported_verdict(result),
         fail_on_removed=False,
         removed_keys=[],
-        incomplete_scope_exit_contribution=scope_terms.decision.incomplete_scope_exit_contribution,
-        no_comparison_completed_exit_contribution=scope_terms.decision.no_comparison_completed_exit_contribution,
-        assurance_decision=assurance_decision,
+        incomplete_scope_exit_contribution=outcome.scope_decision.incomplete_scope_exit_contribution,
+        no_comparison_completed_exit_contribution=outcome.scope_decision.no_comparison_completed_exit_contribution,
+        assurance_decision=outcome.assurance_decision,
     )
 
 
@@ -871,15 +407,18 @@ def _render(
 ) -> str:
     """Hand the stored-operand comparison to the one release report builder
     (``report.release_document``) and render it as *fmt* (``markdown``, else
-    JSON)."""
+    JSON). With no *scope_terms*, the default ``scope.on_incomplete`` policy
+    is applied to *result*'s own scope record."""
+    if scope_terms is None:
+        scope_terms = comparison_scope_terms(
+            resolve_scope_decision(getattr(result, "scope_record", None), None)
+        )
     report = build_release_report(
         StoredReleaseEvaluation(
             result=result,
             old_facts_path=old_facts_path,
             new_dir=new_dir,
-            scope_terms=(
-                scope_terms if scope_terms is not None else scope_terms_for(result, {})
-            ),
+            scope_terms=scope_terms,
             new_is_stored=new_is_stored,
             assurance_decision=assurance_decision,
         )

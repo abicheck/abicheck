@@ -33,7 +33,6 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
-import click
 import pytest
 from click.testing import CliRunner
 
@@ -604,23 +603,27 @@ class TestStoredPairExplicitCompileConfig:
     def test_each_compile_key_is_rejected(
         self, tmp_path: Path, compile_block: str
     ) -> None:
-        from abicheck.frontends.cli.commands.compare_bundle_facts_rejections import (
-            reject_explicit_compile_config_for_stored_pair,
+        from abicheck.workflows.bundle_facts_stored_request import (
+            BundleFactsCompareError,
+            reject_explicit_compile_config,
         )
 
         cfg = tmp_path / "cfg.yml"
         cfg.write_text("compile:\n" + compile_block)
-        with pytest.raises(click.UsageError, match="declares compile: settings"):
-            reject_explicit_compile_config_for_stored_pair(cfg)
+        with pytest.raises(
+            BundleFactsCompareError, match="declares compile: settings"
+        ) as exc_info:
+            reject_explicit_compile_config(cfg)
+        assert exc_info.value.usage is True
 
     def test_config_without_compile_block_is_accepted(self, tmp_path: Path) -> None:
-        from abicheck.frontends.cli.commands.compare_bundle_facts_rejections import (
-            reject_explicit_compile_config_for_stored_pair,
+        from abicheck.workflows.bundle_facts_stored_request import (
+            reject_explicit_compile_config,
         )
 
         cfg = tmp_path / "cfg.yml"
         cfg.write_text("severity:\n  preset: default\n")
-        assert reject_explicit_compile_config_for_stored_pair(cfg) is None
+        assert reject_explicit_compile_config(cfg) is None
 
     def test_removed_frontend_flag_is_an_unknown_option(self, tmp_path: Path) -> None:
         facts_path = tmp_path / "old.bundlefacts.json"
