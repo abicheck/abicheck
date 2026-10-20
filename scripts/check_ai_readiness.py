@@ -365,7 +365,7 @@ FILE_SIZE_GRANDFATHERED: dict[str, int] = {
     "scripts/backend_capabilities.py": 1575,
     "scripts/verify.py": 1163,
     "scripts/check_bugfix_test_contract.py": 1140,
-    "skills-src/evaluation/agents/ci-setup/grader.py": 903,
+    "skills-src/evaluation/agents/ci-setup/grader.py": 852,
     "skills-src/evaluation/agents/skills/graders/dimensions.py": 841,
     "skills-src/evaluation/agents/skills/graders/evidence.py": 802,
     "skills-src/evaluation/agents/skills/runners/claude_code.py": 1790,

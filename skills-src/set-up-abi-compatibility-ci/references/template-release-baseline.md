@@ -46,10 +46,10 @@ jobs:
         with:
           ref: ${{ env.TAG }}
 
-      <build-steps>
+      - run: <build-steps>      # one run step per build command, or a `run: |` block
 
       - name: Dump ABI snapshot
-        uses: abicheck/abicheck@<sha>  # v0.6.0
+        uses: abicheck/abicheck@<sha>  # v0.7.0
         with:
           mode: dump
           new-library: <lib-path>
@@ -58,16 +58,29 @@ jobs:
           new-version: ${{ env.TAG }}
           output-file: <lib>.abicheck.json
 
-      - name: Attach snapshot to the release
-        run: gh release upload "$TAG" <lib>.abicheck.json --clobber
+      - name: Attach snapshot to the release (write-once)
+        run: |
+          # Never --clobber: a re-run must not replace the snapshot consumers
+          # already resolved. This check makes the refusal explicit; a plain
+          # upload also refuses a duplicate name on its own.
+          if gh release view "$TAG" --json assets -q '.assets[].name' \
+               | grep -Fxq '<lib>.abicheck.json'; then
+            echo "::error::<lib>.abicheck.json already exists on $TAG. Baselines are write-once. To re-baseline, delete that asset deliberately (gh release delete-asset $TAG <lib>.abicheck.json) and re-run." >&2
+            exit 1
+          fi
+          gh release upload "$TAG" <lib>.abicheck.json
         env:
           GH_TOKEN: ${{ github.token }}
 ```
 
 **Bootstrap:** after merging, run this workflow once by hand
 (`gh workflow run abi-baseline.yml -f tag=<latest-tag>`) so the latest
-existing release gets a snapshot. Until then, the PR check has nothing to
-fetch and fails — state that in the setup report as a required step.
+existing release gets a snapshot. The run fails if that release already has
+the asset; that is the write-once guard, not a fault to route around. Until a
+snapshot is attached, the PR check has nothing to fetch and fails — state that
+in the setup report as a required step. The check-then-upload step can race
+with a second run for the same tag. The losing run's upload then fails loudly
+and the winner's asset stands, so nothing is replaced silently.
 
 ### `.github/workflows/abi-check.yml`
 
@@ -95,7 +108,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      <build-steps>
+      - run: <build-steps>      # one run step per build command, or a `run: |` block
 
       - name: Compare against the last release
         uses: abicheck/abicheck@v0.7.0
@@ -149,3 +162,91 @@ In the PR workflow, replace `abi-baseline` with an explicit download plus
 If the matrix build is expensive, build once in a separate job and pass the
 build tree with `actions/upload-artifact`/`download-artifact`, rather than
 rebuilding per library.
+
+## Baseline-set variant (one archive per contract profile)
+
+Use this only when the repository already builds each contract profile and
+writes a `build-output.json` for it. The publisher works from that build
+output, not from a bare `.so` and headers, so a repository without contract
+profiles stays on the single-snapshot template above.
+
+**Release side.** Call the reusable publisher instead of writing an upload
+step. It dumps every library of each profile, packs one archive per profile,
+and applies the write-once rule itself: differing content fails the run, and
+nothing is clobbered. Its reference is
+[`publish-baseline.yml`](../../../docs/reference/publish-baseline.md).
+
+```yaml
+  publish-baseline:
+    needs: <build-job>          # each profile's build uploads an abicheck-build-<profile-id> artifact
+    permissions:
+      contents: write           # this job alone writes the release asset
+    uses: abicheck/abicheck/.github/workflows/publish-baseline.yml@<sha>  # v0.7.0
+    with:
+      build-output-artifact-prefix: abicheck-build-
+      build-config: .abicheck.yml   # needed even when the file sits at the repository root
+```
+
+**PR side.** When `baseline-profile` and `baseline-target` are both set, the
+root Action reads the target's snapshot out of the release archive:
+
+```yaml
+      - name: Compare against the latest release baseline set
+        uses: abicheck/abicheck@v0.7.0
+        with:
+          abi-baseline: latest-release
+          baseline-profile: <profile-id>
+          baseline-target: <lib>        # the library name in the archive's manifest.json
+          new-library: <lib-path>
+          new-header: <public-headers>
+          lang: <lang>
+          new-version: ${{ github.event.pull_request.head.sha || github.sha }}
+          fail-on-breaking: 'false'
+          fail-on-api-break: 'false'
+```
+
+`abi-baseline` selects the archive by its asset name. It does not check the
+manifest's generation. Add `baseline-generation: <generation>` only when the
+publisher's `asset-name-template` contains `{generation}`.
+
+**Explicit resolution.** When a stale generation, a wrong profile, or a
+missing baseline must fail with its own typed outcome, stage the archive and
+resolve it with [`actions/resolve-baseline`](../../../docs/reference/resolve-baseline.md)
+(every outcome other than resolved fails the step, so none reaches the compare
+as an empty or stale baseline), then compare against the snapshot it returns:
+
+```yaml
+      - name: Fetch the latest baseline-set archive
+        run: gh release download --pattern 'abicheck-baseline-<profile-id>.tar.zst' --dir baseline
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Resolve <lib>'s baseline
+        id: baseline
+        uses: abicheck/abicheck/actions/resolve-baseline@v0.7.0
+        with:
+          baseline-path: baseline/abicheck-baseline-<profile-id>.tar.zst
+          channel: release-contract
+          target: <lib>
+          profile: <profile-id>
+          expected-baseline-generation: <generation>   # omit to skip the generation check
+
+      - name: ABI compatibility check
+        uses: abicheck/abicheck@v0.7.0
+        with:
+          old-library: ${{ steps.baseline.outputs.snapshot-path }}
+          new-library: <lib-path>
+          new-header: <public-headers>
+          lang: <lang>
+          new-version: ${{ github.event.pull_request.head.sha || github.sha }}
+          fail-on-breaking: 'false'
+          fail-on-api-break: 'false'
+```
+
+**Refreshing after a scanner upgrade.** Do not re-run a release to change
+the baseline: the asset is write-once. Set `baseline-generation` on the
+publisher, and put `{generation}` in its `asset-name-template` (for example
+`abicheck-baseline-g{generation}-{profile}.tar.zst`), so the new generation is
+a separate asset beside the old one. Then move the PR job's
+`baseline-generation` (or `expected-baseline-generation`) to the same value.
+See [scanner upgrades and baseline generations](../../../docs/use/baseline-management.md#scanner-upgrades-and-baseline-generations).

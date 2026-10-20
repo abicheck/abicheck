@@ -26,6 +26,12 @@ jobs:
           new-library: out/libkv.so
           header: include/
           output-file: libkv.abicheck.json
-      - run: gh release upload "$TAG" libkv.abicheck.json --clobber
+      - name: Attach snapshot to the release (write-once)
+        run: |
+          if gh release view "$TAG" --json assets -q '.assets[].name' | grep -Fxq libkv.abicheck.json; then
+            echo "::error::libkv.abicheck.json already exists on $TAG; baselines are write-once" >&2
+            exit 1
+          fi
+          gh release upload "$TAG" libkv.abicheck.json
         env:
           GH_TOKEN: ${{ github.token }}

@@ -30,6 +30,12 @@ jobs:
           compile-db: build/compile_commands.json
           dependency-source: conda-forge-clang20
           output-file: libvecmath.abicheck.json
-      - run: gh release upload "$TAG" libvecmath.abicheck.json --clobber
+      - name: Attach snapshot to the release (write-once)
+        run: |
+          if gh release view "$TAG" --json assets -q '.assets[].name' | grep -Fxq libvecmath.abicheck.json; then
+            echo "::error::libvecmath.abicheck.json already exists on $TAG; baselines are write-once" >&2
+            exit 1
+          fi
+          gh release upload "$TAG" libvecmath.abicheck.json
         env:
           GH_TOKEN: ${{ github.token }}
