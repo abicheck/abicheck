@@ -174,7 +174,7 @@ class TestEvidenceView:
         assert evidence.depth_satisfied is None
 
     def test_from_assurance_copies_the_real_analysis_assurance_verbatim(self):
-        from abicheck.analysis_assurance import AnalysisAssurance
+        from abicheck.policy.analysis_assurance import AnalysisAssurance
 
         assurance = AnalysisAssurance(
             requested_depth="headers", effective_depth="binary", depth_satisfied=False
@@ -213,7 +213,7 @@ class TestEvidenceView:
         `not_comparable` short-circuit returns a real `AnalysisAssurance`
         whose `requested_depth` is `None` even when a depth was genuinely
         requested -- the fallback must be used in exactly that case."""
-        from abicheck.analysis_assurance import AnalysisAssurance
+        from abicheck.policy.analysis_assurance import AnalysisAssurance
 
         not_comparable = AnalysisAssurance(status="not_comparable")
         assert (
@@ -230,7 +230,7 @@ class TestEvidenceView:
     def test_from_assurance_prefers_assurances_own_requested_depth_over_the_fallback(
         self,
     ):
-        from abicheck.analysis_assurance import AnalysisAssurance
+        from abicheck.policy.analysis_assurance import AnalysisAssurance
 
         assurance = AnalysisAssurance(requested_depth="build", effective_depth="build")
         evidence = EvidenceView.from_assurance(assurance, requested_depth="headers")
@@ -275,7 +275,7 @@ class TestResolvedExecutionContextEvidenceIntegration:
         fallback (used when *assurance* itself carries no ``requested_depth``,
         e.g. a ``not_comparable`` short-circuit) -- so that path can't
         reintroduce the same mixed-case leak through the back door."""
-        from abicheck.analysis_assurance import AnalysisAssurance
+        from abicheck.policy.analysis_assurance import AnalysisAssurance
 
         plan = _plan(requested_depth="HEADERS")
         assurance = AnalysisAssurance(requested_depth=None, effective_depth=None)
@@ -283,7 +283,7 @@ class TestResolvedExecutionContextEvidenceIntegration:
         assert ctx.evidence.requested_depth == "headers"
 
     def test_from_plan_with_assurance_builds_the_full_post_execution_view(self):
-        from abicheck.analysis_assurance import AnalysisAssurance
+        from abicheck.policy.analysis_assurance import AnalysisAssurance
 
         plan = _plan(requested_depth="source")
         assurance = AnalysisAssurance(
@@ -295,7 +295,7 @@ class TestResolvedExecutionContextEvidenceIntegration:
         assert ctx.evidence.depth_satisfied is False
 
     def test_with_assurance_returns_a_new_context_leaving_the_original_untouched(self):
-        from abicheck.analysis_assurance import AnalysisAssurance
+        from abicheck.policy.analysis_assurance import AnalysisAssurance
 
         plan = _plan(requested_depth="headers")
         original = ResolvedExecutionContext.from_plan(plan)
@@ -339,7 +339,7 @@ class TestResolvedExecutionContextEvidenceIntegration:
         `compute_analysis_assurance()`'s own `not_comparable` short-circuit
         produces (`requested_depth=None`) must not erase the plan's own
         genuinely known requested depth."""
-        from abicheck.analysis_assurance import AnalysisAssurance
+        from abicheck.policy.analysis_assurance import AnalysisAssurance
 
         plan = _plan(requested_depth="headers")
         not_comparable = AnalysisAssurance(status="not_comparable")
@@ -350,7 +350,7 @@ class TestResolvedExecutionContextEvidenceIntegration:
     def test_with_assurance_with_a_not_comparable_assurance_preserves_the_requested_depth(
         self,
     ):
-        from abicheck.analysis_assurance import AnalysisAssurance
+        from abicheck.policy.analysis_assurance import AnalysisAssurance
 
         plan = _plan(requested_depth="build")
         original = ResolvedExecutionContext.from_plan(plan)

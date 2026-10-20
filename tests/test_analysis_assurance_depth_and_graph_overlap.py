@@ -53,9 +53,12 @@ from pathlib import Path
 from click.testing import CliRunner
 
 from abicheck import checker
-from abicheck.analysis_assurance import AnalysisAssurance, compute_analysis_assurance
 from abicheck.cli import main
 from abicheck.model import AbiSnapshot, Function, Visibility
+from abicheck.policy.analysis_assurance import (
+    AnalysisAssurance,
+    compute_analysis_assurance,
+)
 from abicheck.serialization import save_snapshot, snapshot_to_json
 
 
@@ -624,9 +627,11 @@ class TestGraphCompletenessPartialFamilyOverlap:
     def test_unit_level_isdisjoint_vs_inequality_direct(self, tmp_path: Path) -> None:
         """Direct unit-level check of _graph_completeness itself, isolating
         the predicate from the rest of the rollup."""
-        from abicheck.analysis_assurance import _graph_completeness
         from abicheck.buildsource.pack import BuildSourcePack
         from abicheck.buildsource.source_graph import SourceGraphSummary
+        from abicheck.policy.analysis_assurance._graph_completeness import (
+            _graph_completeness,
+        )
 
         old_pack = BuildSourcePack(
             root=tmp_path / "old",
@@ -785,10 +790,12 @@ class TestGraphCompletenessConditionallyApplicableFamily:
         ``archive_graph`` because it linked a static library; new links no
         static library at all, so the pass correctly never ran there. This
         must read as complete, not unknown."""
-        from abicheck.analysis_assurance import _graph_completeness
         from abicheck.buildsource.pack import BuildSourcePack
         from abicheck.buildsource.source_graph import SourceGraphSummary
         from abicheck.model.graph_facts import GraphNode
+        from abicheck.policy.analysis_assurance._graph_completeness import (
+            _graph_completeness,
+        )
 
         old_pack = BuildSourcePack(
             root=tmp_path / "old",
@@ -846,10 +853,12 @@ class TestGraphCompletenessConditionallyApplicableFamily:
         unknown/asymmetric -- the conditional-applicability exemption must
         not over-correct into silencing a genuine shortfall for this
         family."""
-        from abicheck.analysis_assurance import _graph_completeness
         from abicheck.buildsource.pack import BuildSourcePack
         from abicheck.buildsource.source_graph import SourceGraphSummary
         from abicheck.model.graph_facts import GraphNode
+        from abicheck.policy.analysis_assurance._graph_completeness import (
+            _graph_completeness,
+        )
 
         old_pack = BuildSourcePack(
             root=tmp_path / "old",
@@ -912,9 +921,11 @@ class TestGraphCompletenessConditionallyApplicableFamily:
         unconditionally-attempted family (``call_graph``) confirmed on one
         side and not the other must still read as asymmetric -- there is no
         node-presence signal that could ever exempt it."""
-        from abicheck.analysis_assurance import _graph_completeness
         from abicheck.buildsource.pack import BuildSourcePack
         from abicheck.buildsource.source_graph import SourceGraphSummary
+        from abicheck.policy.analysis_assurance._graph_completeness import (
+            _graph_completeness,
+        )
 
         old_pack = BuildSourcePack(
             root=tmp_path / "old",
@@ -991,7 +1002,9 @@ class TestSourceTreeMismatchFailure:
     def test_unit_level_manifest_scan_flags_unprefixed_failed_record(
         self, tmp_path: Path
     ) -> None:
-        from abicheck.analysis_assurance import _manifest_layer_incompleteness
+        from abicheck.policy.analysis_assurance._manifest_layers import (
+            _manifest_layer_incompleteness,
+        )
 
         pack = self._pack_with_mismatch(tmp_path, "pack")
         incomplete, notes = _manifest_layer_incompleteness(pack, pack)

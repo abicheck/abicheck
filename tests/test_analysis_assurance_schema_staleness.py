@@ -33,10 +33,10 @@ import json
 from pathlib import Path
 
 from abicheck import checker
-from abicheck.analysis_assurance import AnalysisAssurance
 from abicheck.fact_provenance import func_fact_key
 from abicheck.model import AbiSnapshot, Function, Visibility
 from abicheck.model.snapshot_reliability import family_reliable
+from abicheck.policy.analysis_assurance import AnalysisAssurance
 from abicheck.policy.analysis_assurance_degraded_facts import (
     degraded_reliability_facts,
 )

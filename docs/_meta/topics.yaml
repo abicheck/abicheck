@@ -408,7 +408,8 @@ topics:
   analysis-assurance:
     canonical_page: reference/exit-codes.md
     fact_sources:
-      - abicheck/analysis_assurance.py
+      - abicheck/policy/analysis_assurance/_compute.py
+      - abicheck/policy/analysis_assurance/_result.py
       # schema_staleness_status's own pair-aware policy: whether either
       # compared snapshot carries a *_facts_reliable flag stale enough to
       # matter for this pair (PR #1209).

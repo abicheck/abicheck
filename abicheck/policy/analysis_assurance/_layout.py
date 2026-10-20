@@ -11,16 +11,13 @@
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
-# limitations under the License.
-
 """E-S1 (docs/contribute/plans/vision-api-abi-evolution.md section E /
 cli-cleanup-phase-two.md Block 5): which registered layout-bearing
 detectors ran with zero usable DWARF/DWARF-advanced evidence on either
 side of a comparison.
 
-Split out of ``analysis_assurance.py`` (which sits at this repo's
-``architecture/debt.yaml`` no-growth baseline) rather than added there --
-this module depends only on ``model.AbiSnapshot``, a real leaf.
+It is one axis of the ``analysis_assurance`` package (moved from the
+former flat ``analysis_assurance_layout.py``); this module depends only on ``model.AbiSnapshot``, a real leaf.
 
 **The gap this closes:** a snapshot pair with no debug info on either side
 still gets an ordinary ``DetectorResult(enabled=True, changes_count=0)``
@@ -31,15 +28,14 @@ exact case (recorded ``not_evaluated``, C-S1/#1082 -- deliberately left
 untouched by this slice, see this function's own docstring). That zero is
 indistinguishable from "checked this pair's layout, found nothing" without
 an independent signal derived straight from each side's own evidence,
-rather than from ``DetectorRegistry`` state -- this module is that signal.
-"""
+rather than from ``DetectorRegistry`` state -- this module is that signal."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .model import AbiSnapshot
+    from ...model import AbiSnapshot
 
 __all__ = ["DWARF_ONLY_LAYOUT_DETECTORS", "layout_unverified_detectors"]
 
@@ -60,7 +56,7 @@ def layout_unverified_detectors(old: AbiSnapshot, new: AbiSnapshot) -> tuple[str
     *old*/*new* -- see this module's own docstring.
     """
 
-    from .model.debug_evidence import debug_info_evidence
+    from ...model.debug_evidence import debug_info_evidence
 
     if debug_info_evidence(old).any or debug_info_evidence(new).any:
         return ()

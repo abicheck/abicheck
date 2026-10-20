@@ -64,15 +64,15 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from ..analysis_assurance import (
+from ..confidence import note_if_same_binary_compared
+from ..policy.acknowledgment_gate import (
+    additions_review_exit_contribution as additions_review_exit_contribution,
+)
+from ..policy.analysis_assurance import (
     analysis_assurance_exit_contribution,
     analysis_assurance_report_dict,
     assurance_floor_diagnostic,
     compute_analysis_assurance,
-)
-from ..confidence import note_if_same_binary_compared
-from ..policy.acknowledgment_gate import (
-    additions_review_exit_contribution as additions_review_exit_contribution,
 )
 from ..policy.contract_coverage_exit import (
     announce_coverage_floor,

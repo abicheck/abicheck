@@ -385,7 +385,7 @@ CHECKER_GLOBS: tuple[str, ...] = (
     "abicheck/internal_leak.py",
     "abicheck/type_reachability*.py",
     "abicheck/confidence.py",
-    "abicheck/analysis_assurance*.py",
+    "abicheck/policy/analysis_assurance/*.py",
     "abicheck/export_surface.py",
     "abicheck/surface*.py",
     "abicheck/contract_*.py",

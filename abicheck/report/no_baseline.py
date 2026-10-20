@@ -165,7 +165,7 @@ def _no_baseline_exit_axes(
     axis. The compatibility axis is absent by construction, not zeroed:
     ADR-068 D2 gives an audit none.
     """
-    from ..analysis_assurance import analysis_assurance_exit_contribution
+    from ..policy.analysis_assurance import analysis_assurance_exit_contribution
     from ..policy.audit_gate_exit import audit_gate_exit_contribution
     from ..policy.contract_coverage_exit import coverage_exit_floor
     from ..policy.exit_decision_precedence import EXIT_EVIDENCE_CONTRACT_ERROR

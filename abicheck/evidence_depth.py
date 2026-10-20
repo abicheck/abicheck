@@ -338,7 +338,7 @@ class ReportedDepth:
     """How a report states the depth a run was asked for and reached.
 
     Resolution lives here, with the ladder, rather than inline in
-    ``analysis_assurance.compute_analysis_assurance``: deciding what an
+    ``policy.analysis_assurance.compute_analysis_assurance``: deciding what an
     *absent* request means is a statement about the ladder's vocabulary,
     and the rule has to hold identically for every consumer that publishes
     a depth (the pairwise block, the release roll-up, the artifact

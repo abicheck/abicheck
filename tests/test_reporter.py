@@ -163,7 +163,7 @@ class TestAnalysisAssuranceExitContributionPersistence:
         assert "analysis_assurance_exit_contribution" not in d
 
     def test_present_and_zero_without_the_flag(self):
-        from abicheck.analysis_assurance import AnalysisAssurance
+        from abicheck.policy.analysis_assurance import AnalysisAssurance
 
         r = _result(Verdict.COMPATIBLE)
         r.analysis_assurance = AnalysisAssurance(status="partial")
@@ -173,7 +173,7 @@ class TestAnalysisAssuranceExitContributionPersistence:
         assert d["analysis_assurance_exit_contribution"] == 0
 
     def test_one_when_the_flag_is_set_and_status_is_partial(self):
-        from abicheck.analysis_assurance import AnalysisAssurance
+        from abicheck.policy.analysis_assurance import AnalysisAssurance
 
         r = _result(Verdict.COMPATIBLE)
         r.analysis_assurance = AnalysisAssurance(status="partial")
@@ -181,7 +181,7 @@ class TestAnalysisAssuranceExitContributionPersistence:
         assert d["analysis_assurance_exit_contribution"] == 1
 
     def test_zero_when_the_flag_is_set_and_status_is_complete(self):
-        from abicheck.analysis_assurance import AnalysisAssurance
+        from abicheck.policy.analysis_assurance import AnalysisAssurance
 
         r = _result(Verdict.COMPATIBLE)
         r.analysis_assurance = AnalysisAssurance(status="complete")
@@ -190,7 +190,7 @@ class TestAnalysisAssuranceExitContributionPersistence:
 
     def test_persisted_in_leaf_and_root_cause_modes_too(self):
         # All three JSON paths call the shared add_contract_context -- a regression pinned to only one mode would miss the other two.
-        from abicheck.analysis_assurance import AnalysisAssurance
+        from abicheck.policy.analysis_assurance import AnalysisAssurance
 
         c = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "Public function removed: foo")
         r = _result(Verdict.BREAKING, changes=[c])
@@ -218,7 +218,7 @@ class TestAnalysisAssuranceExitContributionPersistence:
         analysis while the stat report itself carried no
         `analysis_assurance_exit_contribution` (or a stale `0`) --
         `abicheck aggregate` read the missing/wrong value as a pass."""
-        from abicheck.analysis_assurance import AnalysisAssurance
+        from abicheck.policy.analysis_assurance import AnalysisAssurance
 
         r = _result(Verdict.COMPATIBLE)
         r.analysis_assurance = AnalysisAssurance(status="partial")

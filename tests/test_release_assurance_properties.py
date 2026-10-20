@@ -187,7 +187,7 @@ class TestCardinalityAgreement:
         Restated rather than imported into the implementation (the policy
         leaf may not import the flat-root module -- see its docstring), so
         this is the executable check that the two cannot drift apart."""
-        from abicheck.analysis_assurance import (
+        from abicheck.policy.analysis_assurance import (
             INCOMPLETE_ANALYSIS_EXIT_CONTRIBUTION as SCALAR,
         )
 

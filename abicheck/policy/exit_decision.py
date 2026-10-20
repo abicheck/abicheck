@@ -663,8 +663,8 @@ def resolve_compare_exit_decision(
     forwarded to :func:`~.severity.compute_exit_code`, keeps this agreeing
     with an already-frozen ``ReportEnvelope`` (Codex review, fresh evidence).
     """
-    from ..analysis_assurance import analysis_assurance_exit_contribution
     from .acknowledgment_gate import additions_review_exit_contribution
+    from .analysis_assurance import analysis_assurance_exit_contribution
     from .contract_coverage_exit import coverage_exit_floor
     from .severity import compute_exit_code, legacy_exit_code
 

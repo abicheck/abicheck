@@ -5,7 +5,7 @@
 Owns deciding relevance, suppression, classification, severity, and exit-code
 (gate) effect for an already-identified change. Most of that behavior still
 lives in flat root modules `architecture/modules.yaml` lists as this layer's
-``legacy_paths`` (``analysis_assurance.py``, ...); new code belongs here.
+``legacy_paths`` (``contract_evaluation.py``, ...); new code belongs here.
 ``checker_policy.py`` stays an unclassified re-export only because the public
 Python API documentation names it.
 """

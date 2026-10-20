@@ -11,13 +11,10 @@ reported" (that is `report/`). This layer's product invariant (the local consequ
 Most of that behavior still lives in flat root modules that
 `architecture/modules.yaml` lists as this layer's `legacy_paths`. Those stay
 where they are until a behavior-preserving vertical slice moves them;
-`architecture/debt.yaml` holds an oversized one (`analysis_assurance.py`) at
-`no_growth` with an explicit rationale — its own debt entry states it
-"cannot move safely without a behavior-preserving vertical slice", and
-`scripts/check_architecture.py`'s `debt-exemption` gate mechanically
-enforces that a debt-tracked file's path cannot change within the same PR
-that would also need to renew its baseline, so it stays flat until a PR
-whose only job is that move does so deliberately.
+The analysis-assurance block is the one package here that was migrated
+out of the flat root: `analysis_assurance/` owns it, with
+`compute_analysis_assurance` as its one public entry point and each axis as
+a private submodule. Its former `architecture/debt.yaml` entry is retired.
 
 `checker_policy.py` is the one flat re-export left over this package: the
 public Python API documentation (`docs/use/python-api.md`) names it, so it

@@ -177,7 +177,7 @@ def member_assurance_entry_fields(result: Any) -> dict[str, object]:
     ``architecture/modules.yaml``'s ``legacy_paths``), while
     ``frontends -> workflows`` is the sanctioned seam.
     """
-    from ..analysis_assurance import analysis_assurance_exit_contribution
+    from ..policy.analysis_assurance import analysis_assurance_exit_contribution
 
     status, notes = member_assurance_fields(result)
     return {

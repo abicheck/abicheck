@@ -65,7 +65,7 @@ class TestAnalysisAssuranceStaysFlat:
     def test_analysis_assurance_still_resolves_at_the_flat_path(self) -> None:
         from types import SimpleNamespace
 
-        from abicheck.analysis_assurance import (
+        from abicheck.policy.analysis_assurance import (
             INCOMPLETE_ANALYSIS_EXIT_CONTRIBUTION,
             AnalysisAssurance,
             analysis_assurance_exit_contribution,
@@ -89,7 +89,10 @@ class TestAnalysisAssuranceStaysFlat:
             == 0
         )
 
-    def test_analysis_assurance_has_not_moved_under_policy(self) -> None:
+    def test_analysis_assurance_has_moved_under_policy(self) -> None:
         import importlib.util
 
-        assert importlib.util.find_spec("abicheck.policy.analysis_assurance") is None
+        assert (
+            importlib.util.find_spec("abicheck.policy.analysis_assurance") is not None
+        )
+        assert importlib.util.find_spec("abicheck.analysis_assurance") is None

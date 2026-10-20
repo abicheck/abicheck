@@ -42,8 +42,8 @@ path (D1, ``AGENTS.md``'s "One model, any cardinality").
 
 A leaf by construction: it takes the already-extracted ``(name, status,
 notes)`` of each member rather than ``AnalysisAssurance`` objects.
-``abicheck/analysis_assurance.py`` is a flat-root module that itself imports
-from ``policy``, so a ``policy -> analysis_assurance`` import would be a real
+``policy/analysis_assurance/`` is a package that itself imports from
+``policy``, so a ``policy -> analysis_assurance`` import would be a real
 cycle; taking plain values also matches how
 ``resolve_release_exit_decision`` already reads its per-member axes off plain
 ``library_results`` dicts.
