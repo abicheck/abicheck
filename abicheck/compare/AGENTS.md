@@ -60,6 +60,14 @@ severity, or a CLI flag is in the wrong layer.
   differently-spelled qualified names as one declaration. The snapshot-
   normalization half moved to `storage/closure_identity.py` instead.
 
+- `template_instance_absence.py` — `TemplateInstanceAbsence` (the header-depth
+  removal decision for a template instance the new header no longer
+  enumerates): when the primary template is still declared once in the new
+  header graph, the outcome is `func_visibility_changed` or nothing, never a
+  declaration removal. Called from `diff_symbols._match_old_function`, the
+  last step before `_check_removed_function`. Limits and rejected variants:
+  `docs/contribute/known-gaps/class-template-specialization-members-a-new-header-stops-enumerating.md`.
+
 ## Conventions
 
 - Every module starts with `from __future__ import annotations`.
