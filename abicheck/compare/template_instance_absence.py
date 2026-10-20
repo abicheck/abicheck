@@ -60,7 +60,8 @@ from ..model import Function
 from ..model.change import Change
 from ..model.change_catalog.kinds import ChangeKind
 from ..model.edge_coverage import EdgeAnswer
-from ..model.export_entity_name import entity_name_components
+from ..model.export_entity_name import entity_name_components, has_synthetic_component
+from ..model.graph_identity import decl_node_identity
 from ..model.surface_facts import (
     is_binary_exported,
     is_export_confirmed_absent,
@@ -76,7 +77,6 @@ if TYPE_CHECKING:
 __all__ = ["TemplateInstanceAbsence", "primary_stem"]
 
 #: Node-id prefix of a declaration in the header graph (``decl://<qname>#sha``).
-_DECL_PREFIX = "decl://"
 
 
 def primary_stem(mangled: str) -> str | None:
@@ -90,7 +90,7 @@ def primary_stem(mangled: str) -> str | None:
     parsed = entity_name_components(mangled)
     if parsed is None or not parsed.template_positions:
         return None
-    if any(part.startswith("{") for part in parsed.components):
+    if has_synthetic_component(parsed):
         return None
     return "::".join(parsed.components)
 
@@ -113,11 +113,8 @@ class TemplateInstanceAbsence:
         if self._declared is None:
             graph = getattr(self._new, "surface_graph", None)
             node_ids = {node.id for node in graph.nodes} if graph is not None else set()
-            self._declared = Counter(
-                node_id[len(_DECL_PREFIX) :].split("#", 1)[0]
-                for node_id in node_ids
-                if node_id.startswith(_DECL_PREFIX)
-            )
+            identities = (decl_node_identity(node_id) for node_id in node_ids)
+            self._declared = Counter(i for i in identities if i is not None)
         return self._declared
 
     def changes_for(
