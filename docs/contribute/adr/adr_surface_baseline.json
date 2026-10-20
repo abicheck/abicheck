@@ -631,7 +631,7 @@
     "ADR-071": {
       "disposition": "surfaced",
       "surfaces": [
-        "action: require-complete-analysis",
+        "action: analysis-assurance-complete",
         "report: compare_report.analysis_assurance"
       ],
       "use_cases": [
@@ -832,7 +832,7 @@
     "ADR-067 report: compare_report.disposition_audit",
     "ADR-068 cli: compare --no-baseline",
     "ADR-070 action: extra-args",
-    "ADR-071 action: require-complete-analysis",
+    "ADR-071 action: analysis-assurance-complete",
     "ADR-071 report: compare_report.analysis_assurance",
     "ADR-072 action: pr-comment-detail",
     "ADR-072 report: format:review",

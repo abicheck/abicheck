@@ -109,6 +109,21 @@ inputs:
     description: 'Exit 8 when a library present in old is proven removed in new -- NEW must have a proven-complete declared inventory: either a stored ProjectSnapshot package whose capture asserted inventory_complete, or a package archive (e.g. .rpm/.deb) whose own readable member table this run extracted and could enumerate in full; a live directory, or an archive whose member table could not be read in full, is an unproven inventory and an unmatched library there is an incomplete scope instead, governed by the scope.on_incomplete key in .abicheck.yml. compare mode, directory/package operands only. Deliberately no declared default -- see dso-only''s own description for why.'
     required: false
 
+  analysis-assurance-complete:
+    description: >
+      Per-job override of `.abicheck.yml`'s `assurance.require_complete` for
+      this invocation. Unset (the default) inherits the config unchanged.
+      'true' requires complete analysis evidence (an incomplete run exits 1)
+      even when the config does not say so; 'false' lifts that floor for this
+      run even when the discovered or build-config `.abicheck.yml` sets
+      `assurance.require_complete: true`. mode: compare only (single-pair,
+      audit-only and directory/package operands alike). Written as an
+      `assurance:` overlay into the same --config document the
+      release-topology inputs use. Deliberately no declared default -- see
+      dso-only's own description for why: an omitted input must stay
+      distinguishable from an explicit 'false'.
+    required: false
+
   # ── Header inputs ───────────────────────────────────────────────────────────
   header:
     description: >
@@ -1236,6 +1251,7 @@ runs:
         INPUT_DSO_ONLY: ${{ inputs.dso-only }}
         INPUT_INCLUDE_PRIVATE_DSO: ${{ inputs.include-private-dso }}
         INPUT_FAIL_ON_REMOVED_LIBRARY: ${{ inputs.fail-on-removed-library }}
+        INPUT_ANALYSIS_ASSURANCE_COMPLETE: ${{ inputs.analysis-assurance-complete }}
         INPUT_ABI_BASELINE: ${{ inputs.abi-baseline }}
         INPUT_BASELINE_PROFILE: ${{ inputs.baseline-profile }}
         INPUT_BASELINE_TARGET: ${{ inputs.baseline-target }}
@@ -1462,6 +1478,7 @@ runs:
         INPUT_DSO_ONLY: ${{ inputs.dso-only }}
         INPUT_INCLUDE_PRIVATE_DSO: ${{ inputs.include-private-dso }}
         INPUT_FAIL_ON_REMOVED_LIBRARY: ${{ inputs.fail-on-removed-library }}
+        INPUT_ANALYSIS_ASSURANCE_COMPLETE: ${{ inputs.analysis-assurance-complete }}
         INPUT_PR_COMMENT: ${{ inputs.pr-comment }}
         INPUT_PR_COMMENT_MODE: ${{ inputs.pr-comment-mode }}
         INPUT_PR_COMMENT_ON: ${{ inputs.pr-comment-on }}

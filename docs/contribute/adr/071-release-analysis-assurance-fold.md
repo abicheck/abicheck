@@ -157,6 +157,22 @@ per-library one — so it applies uniformly to every member, the same way
 exit code, report bytes, and stderr are unchanged**. That is what makes this
 purely additive despite touching the exit fold.
 
+**D4 amendment (2026-10-20): job-scoped override.** D4's "no new policy
+setting" still holds, and so does its project-wide scope for the policy
+itself: `assurance.require_complete` remains the one setting, its default is
+still `false`, and the exit fold, the report and the policy key are unchanged.
+What the amendment adds is a *per-invocation selector* over that one setting,
+on the root Action and on `actions/check-target`: the tri-state input
+`analysis-assurance-complete`. Unset (`''`) inherits the config. `'true'`
+raises the floor for that job even when the config does not set it. `'false'`
+lifts the floor for that job even when a discovered or build-config
+`.abicheck.yml` sets `assurance.require_complete: true`. It is written as an
+`assurance:` overlay onto the `--config` document, the same mechanism
+`dso-only` and `fail-on-removed-library` already use, so it adds no policy key,
+no exit code and no report field. It is not a per-library override: the
+selector applies to every member of the job it is set on, as D4 requires. The
+retired `require-complete-analysis` input stays a tombstone and is not reused.
+
 **D5 — The aggregate status is the worst member status, and it agrees with
 the contribution by construction.** The release's reported
 `analysis_assurance_status` is `complete` iff *every* compared member's is
@@ -286,7 +302,9 @@ last): `cli_compare_options._reject_set_input_flags`,
 `assurance.require_complete: true` now runs end to end.
 
 What this ADR does **not** do: it adds no per-library
-`assurance.require_complete` override (the setting stays project-wide, D4),
+`assurance.require_complete` override (the setting stays project-wide, D4;
+the job-scoped `analysis-assurance-complete` selector recorded in the D4
+amendment is per invocation, not per library),
 and it does not give the release report a per-member `analysis_assurance`
 *block* — only the status, contribution, and notes. A full per-member
 assurance block is a report-schema question of its own size; the members

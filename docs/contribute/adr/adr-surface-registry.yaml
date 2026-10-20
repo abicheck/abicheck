@@ -599,7 +599,7 @@ adrs:
     disposition: surfaced
     use_cases: [UC-WF-compare]
     surfaces:
-      - action: require-complete-analysis
+      - action: analysis-assurance-complete
       - report: compare_report.analysis_assurance
 
   - id: ADR-072
