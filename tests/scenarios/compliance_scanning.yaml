@@ -68,6 +68,26 @@ scenarios:
     automated: true
     test: test_sc_accept_known_break
 
+  - id: SC-ACCEPT-KNOWN-BREAK-ACK
+    title: Accept a reviewed break with an acknowledgment record, without weakening the verdict
+    persona: Library maintainer
+    narrative: >
+      A maintainer reviewed one removed symbol and recorded it as an
+      acknowledgment with its change kind. With `acknowledgment.breaks: accept`
+      in the explicit config, the gate passes (exit 0) for that break. The
+      verdict and the report still show it as a break, and an unreviewed sibling
+      break on the same run would still gate.
+    flow:
+      - abicheck compare old.json new.json --config breaks.abicheck.yml --acknowledgments acks.yml
+    expected:
+      exit_code: 0
+    surfaces:
+      - cli: compare --acknowledgments
+      - action: acknowledgments
+    validates: UC-WF-compare
+    automated: true
+    test: test_sc_accept_known_break_via_acknowledgments
+
   - id: SC-SUPPRESSION-EXPIRY
     title: Strict suppressions fail when a waiver has expired
     persona: Library maintainer

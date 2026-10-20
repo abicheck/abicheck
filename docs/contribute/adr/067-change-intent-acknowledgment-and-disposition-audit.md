@@ -69,7 +69,10 @@ acknowledgment" invariant). Acknowledgment is recorded through the
 identical ledger primitive suppression already uses
 (`DispositionLedger.resolve_acknowledgments`, `DispositionRecord.
 acknowledged_by` — a D2 overlay attribute, exactly like `reclassified_by`,
-never a seventh terminal disposition), surfaced in the `disposition_audit`
+never a seventh terminal disposition; the resolver is
+`abicheck/policy/disposition_acknowledgment.py`'s `resolve_acknowledgments`,
+called by the ledger close in `abicheck/policy/disposition_close.py`'s
+`finalize_ledger`), surfaced in the `disposition_audit`
 report block (schema 3.10: `acknowledged_total`/`acknowledgments`) the same
 way reclassification already is. D6's additions review gate
 (`abicheck/policy/acknowledgment_gate.py`) is a policy file `acknowledgment:`
@@ -103,6 +106,35 @@ member's contribution with `max`; `CompareRequest.acknowledgments_path`/
 `acknowledgment_unacknowledged_additions` carry both settings. See
 [Change acknowledgment](../../use/acknowledgments.md) for the user-facing
 format and gate contract.
+
+**Break gate, matching strictness, and the remaining surfaces (2026-10-20,
+the ADR-067 P8 slice).** An acknowledged *break* now has an explicit gate
+decision, the one D5 left to policy: `acknowledgment.breaks: gate|accept`
+(`abicheck/model/acknowledgment_policy.py`, carried on `AcknowledgmentPolicy`,
+resolved once by `workflows/acknowledgment_inputs.py`). `gate` (default) keeps
+today's behaviour: the record is an overlay and the exit code is what the break
+alone decides. `accept` records an acknowledged gating break as `non_gating`
+under the `acknowledgment` application point
+(`abicheck/policy/acknowledgment_breaks.py`) and drops it from the population
+the compatibility exit is decided over; the verdict, the changes list and the
+release recommendation are unchanged, and only that finding moves, so a sibling
+break on the same run still gates. Matching is strict: a `symbol` record must
+name a `change_kind` (`PolicyError` otherwise, G2); a record that matches more
+than one change in a run is `AmbiguousAcknowledgmentError` (G3); an unscoped
+record and an expired record each produce a warning, and an expired record
+never matches. The surfaces are `compare --acknowledgments FILE` (overrides
+`acknowledgment.file`) and the Action's `acknowledgments` input, both over the
+same resolver, with `CompareRequest.acknowledgment_breaks` and
+`checker.compare(acknowledgment_breaks=...)` for the typed API. Trust: a
+discovered `.abicheck.yml` cannot supply `breaks`, and the Action's overlay
+builder strips `acknowledgment.file` and `breaks` from a discovered document
+(G5: a pull-request-planted records file had been reaching the explicit
+`--config` overlay). Provenance on `pull_request` is the existing
+`protect-committed-baseline` reusable check, documented in the user guide. The
+capability reachability invariant (`tests/test_policy_capability_reachability.py`)
+keeps each policy capability reachable from every front end that claims it.
+Not in this slice: unused/expired acknowledgment rows in `disposition_audit`
+(owned by the audit workstream), and the base/head policy delta (S4).
 
 **Owner (2026-10, behavior-preserving refactor).** D1's "record before
 disposing" is now owned by one module rather than by caller discipline:

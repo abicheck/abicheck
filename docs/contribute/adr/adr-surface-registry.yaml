@@ -570,8 +570,10 @@ adrs:
     use_cases: [UC-WF-compare]
     surfaces:
       - cli: compare --suppress
+      - cli: compare --acknowledgments
+      - action: acknowledgments
       - report: compare_report.disposition_audit
-    missing: S4 is not implemented.
+    missing: S4 is not implemented; the unused/expired acknowledgment rows in disposition_audit are the audit workstream's, not yet landed.
 
   - id: ADR-068
     file: 068-one-comparison-product-and-scan-retirement.md
