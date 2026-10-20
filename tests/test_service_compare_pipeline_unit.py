@@ -544,12 +544,12 @@ class TestContractEvaluationThreading:
 
     def test_get_type_hints_resolves_without_nameerror(self):
         """Codex review: `run_compare` moved from `service.py` into
-        `workflows.compare.resolve.py` in this same PR, and `Path` was only
+        `workflows/compare/execute.py` in this same PR, and `Path` was only
         imported there under `TYPE_CHECKING` -- with `from __future__ import
         annotations` (PEP 563), `typing.get_type_hints(run_compare)` (a
         schema generator or docs tool introspecting this public function)
         raised `NameError: name 'Path' is not defined`. Fixed by importing
-        `pathlib.Path` unconditionally in `workflows.compare.resolve.py`."""
+        `pathlib.Path` unconditionally in `workflows/compare/execute.py`."""
         import typing
 
         hints = typing.get_type_hints(run_compare)

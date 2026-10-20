@@ -191,7 +191,7 @@ def compare_stored_bundle_facts_pair(
     and then applied as a ceiling to every stored snapshot on both sides
     (``policy.depth_projection.project_snapshot_to_depth``) before diffing
     -- the same floor-then-ceiling pairing ``classify_compare_pair``
-    (``workflows.compare.resolve.py``) applies for every other
+    (``workflows/compare/execute.py``) applies for every other
     resolved-snapshot comparison path (``cli_compare_helpers.py``,
     formerly ``cli_scan_baseline.py``). Only ``binary``/``headers`` are reachable
     here at all, since ``--depth build``/``source`` are rejected

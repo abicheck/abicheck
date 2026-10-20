@@ -275,7 +275,7 @@ class TestCompareRequestAdr055Evidence:
         )
 
         captured = {}
-        # classify_compare_pair (workflows.compare.resolve.py) imports
+        # classify_compare_pair (workflows/compare/execute.py) imports
         # compare_snapshots from its real owner (workflows.compare_policy,
         # ADR-061 gap A) rather than the flat abicheck.service facade, so the
         # patch target follows it.

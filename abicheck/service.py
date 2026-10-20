@@ -46,13 +46,13 @@ from .workflows.service_requests import (
 # format's primary extraction is a ``workflows.dump.formats`` adapter. To
 # substitute an extractor, replace its entry in
 # ``workflows.dump.native.FORMAT_ADAPTERS`` rather than patching a private name.
-# run_compare_request/run_compare moved to workflows.compare.resolve.py (CLI
+# run_compare_request/run_compare moved to workflows/compare/execute.py (CLI
 # cleanup phase two, PR B slice 1) to stay under the AI-readiness file-size
 # cap once run_compare gained pack_policy_overrides/pack_internal_namespaces
 # -- re-exported below, same pattern as resolve_compare_request/
 # classify_compare_pair already use.
 # ── Compare pipeline (ADR-055 D1): `run_compare_request`'s two phases live in
-# the leaf module ``workflows.compare`` so the native ``compare`` CLI can
+# the ``workflows/compare/`` package so the native ``compare`` CLI can
 # run its ADR-049 configuration step (``workflows.compare_configuration``) between them and
 # still share this resolution instead of keeping a second copy. Re-exported here
 # so ``from abicheck.service import resolve_compare_request`` works.

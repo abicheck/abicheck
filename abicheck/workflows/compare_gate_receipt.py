@@ -18,7 +18,7 @@
 ``abicheck/workflows/AGENTS.md`` -- the same routing ``scan_gate_options.py``
 follows for its ``scan`` counterpart) both because that is the ADR-061
 responsibility-package home for this kind of coordination and to keep
-``workflows.compare.resolve.py`` under the ``new-file-size`` gate's 800-line
+the compare pipeline (``workflows/compare/``) under the ``new-file-size`` gate's 800-line
 production cap (that module carries no ``no_growth`` debt entry, unlike a
 pre-ADR-061 legacy file -- growing it past the cap is a hard error, not a
 reviewed baseline bump).
@@ -87,7 +87,7 @@ def _project_inputs_for_request(
     Findings-analysis-fixes review round 5, finding 3 (Codex review, fresh
     evidence): ``classify_compare_pair`` folds ``request.project_policy_
     overrides`` into the *scoring* ``PolicyFile`` (see
-    ``workflows.compare.resolve.py``), but this receipt-building function
+    ``workflows.compare_request_policy.resolve_request_policy_inputs``), but this receipt-building function
     previously built its ``CompatibilityEvaluationConfig`` with no ``project=``
     input at all -- so a direct ``run_compare_request()`` call using this
     field recorded its own override's provenance as ``API_REQUEST`` (from

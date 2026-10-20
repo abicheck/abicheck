@@ -18,7 +18,7 @@ compile_contexts``.
 
 Split out of :mod:`abicheck.workflows.artifact.execute` (Codex review, PR
 #1047, fresh evidence) rather than grown further there: both
-``execute.py`` and ``workflows.compare.resolve.py`` were already at or past
+``execute.py`` and the compare pipeline (``workflows/compare/``) were already at or past
 the 800-line production cap, and this gate is a genuinely separable,
 dependency-light concern -- the one place that decides whether a resolved
 ``CompileContext`` is safe to record, and the two-sided helper built on top

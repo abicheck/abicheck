@@ -267,7 +267,7 @@ class TestRequestedDepthPropagationSharedPipeline:
         assert aa.status == "complete", aa
 
     def test_direct_api_uppercase_depth_is_normalized(self, tmp_path: Path) -> None:
-        """PR #767 follow-up (P2 review, ``workflows.compare.resolve.py:476``):
+        """PR #767 follow-up (P2 review, the former ``service_compare_pipeline.py:476``, now ``workflows/compare/execute.py``):
         ``CompareRequest.validation_errors()`` (``_depth_errors`` in
         ``api_types.py``) accepts ``depth`` case-insensitively
         (``depth.lower() in USER_DEPTHS``), so a direct caller passing
