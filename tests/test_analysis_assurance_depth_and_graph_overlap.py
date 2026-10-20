@@ -227,7 +227,7 @@ class TestRequestedDepthPropagation:
 class TestRequestedDepthPropagationSharedPipeline:
     """PR #767 follow-up (P2 review, ``discussion_r3787839902``): the CLI-only
     fix above (``cli_compare_helpers._report_compare_result``) left the
-    shared ``service_compare_pipeline.classify_compare_pair`` -- what
+    shared ``workflows.compare.execute.classify_compare_pair`` -- what
     ``service.run_compare_request()`` (the typed Python API / MCP
     ``abi_compare`` entry point) actually runs -- never populating either
     ``DiffResult.requested_depth`` or ``analysis_assurance.depth_satisfied``
@@ -267,7 +267,7 @@ class TestRequestedDepthPropagationSharedPipeline:
         assert aa.status == "complete", aa
 
     def test_direct_api_uppercase_depth_is_normalized(self, tmp_path: Path) -> None:
-        """PR #767 follow-up (P2 review, ``service_compare_pipeline.py:476``):
+        """PR #767 follow-up (P2 review, ``workflows.compare.resolve.py:476``):
         ``CompareRequest.validation_errors()`` (``_depth_errors`` in
         ``api_types.py``) accepts ``depth`` case-insensitively
         (``depth.lower() in USER_DEPTHS``), so a direct caller passing
@@ -342,10 +342,8 @@ class TestRequestedDepthPropagationSharedPipeline:
         rather than going through the full resolve step."""
         from abicheck.service import CompareRequest, InputSpec
         from abicheck.service_compare_evidence import SideEvidence
-        from abicheck.service_compare_pipeline import (
-            ResolvedComparePair,
-            classify_compare_pair,
-        )
+        from abicheck.workflows.compare.execute import classify_compare_pair
+        from abicheck.workflows.compare_classify import ResolvedComparePair
 
         old, new = _header_pair()
         old_p, new_p = self._snapshot_files(tmp_path)
@@ -385,10 +383,8 @@ class TestRequestedDepthPropagationSharedPipeline:
         fires and ``requested_depth`` stays at its default ``None``."""
         from abicheck.service import CompareRequest, InputSpec
         from abicheck.service_compare_evidence import SideEvidence
-        from abicheck.service_compare_pipeline import (
-            ResolvedComparePair,
-            classify_compare_pair,
-        )
+        from abicheck.workflows.compare.execute import classify_compare_pair
+        from abicheck.workflows.compare_classify import ResolvedComparePair
 
         old, new = _header_pair()
         old_p, new_p = self._snapshot_files(tmp_path)
@@ -415,7 +411,7 @@ class TestRequestedDepthPropagationSharedPipeline:
         context: object,
     ) -> object:
         from abicheck.service_compare_evidence import SideEvidence
-        from abicheck.service_compare_pipeline import ResolvedComparePair
+        from abicheck.workflows.compare_classify import ResolvedComparePair
 
         evidence = SideEvidence(
             headers=[], compile=None, collect_mode="off", dump_manifest=None
@@ -440,7 +436,7 @@ class TestRequestedDepthPropagationSharedPipeline:
         ``request.depth`` -- the ordinary case, since both are seeded from
         the same request in every real invocation."""
         from abicheck.service import CompareRequest, InputSpec
-        from abicheck.service_compare_pipeline import classify_compare_pair
+        from abicheck.workflows.compare.execute import classify_compare_pair
         from abicheck.workflows.resolved_execution_context import (
             EvidenceView,
             ResolvedExecutionContext,
@@ -471,7 +467,7 @@ class TestRequestedDepthPropagationSharedPipeline:
         this classification never actually saw. Must defer to
         ``request.depth`` instead."""
         from abicheck.service import CompareRequest, InputSpec
-        from abicheck.service_compare_pipeline import classify_compare_pair
+        from abicheck.workflows.compare.execute import classify_compare_pair
         from abicheck.workflows.resolved_execution_context import (
             EvidenceView,
             ResolvedExecutionContext,

@@ -18,7 +18,7 @@
 The named acceptance scenario is the ``--build-target`` + pre-captured Bazel
 ``aquery``/``cquery`` gap (``docs/contribute/known-gaps.md``): every one of
 these tests reproduces it end to end through
-:func:`abicheck.service_compare_pipeline.resolve_compare_request`/
+:func:`abicheck.workflows.compare.resolve.resolve_compare_request`/
 :func:`abicheck.workflows.dump.request.resolve_dump_request` -- the shared
 chokepoint every front end (CLI, typed Python API, the release/bundle
 fan-out) resolves a request through -- asserting :class:`~abicheck.errors.PlanningError`,
@@ -106,7 +106,7 @@ class TestBazelBuildTargetScoping:
         self, tmp_path: Path
     ):
         """Every ``compare``-shaped front end resolves through this one
-        function (``service_compare_pipeline.resolve_compare_request``) --
+        function (``workflows.compare.resolve.resolve_compare_request``) --
         the release/bundle fan-out (``cli_compare_release._run_compare_pair``)
         included, since it calls ``service.run_compare`` ->
         ``run_compare_request`` -> this function, per this phase's own Files
@@ -117,7 +117,7 @@ class TestBazelBuildTargetScoping:
         (``build_targets``/``build_info`` are not amongst its keyword
         arguments).
         """
-        from abicheck.service_compare_pipeline import resolve_compare_request
+        from abicheck.workflows.compare.resolve import resolve_compare_request
 
         aquery = _write(tmp_path / "aquery.json", _EMPTY_AQUERY)
         old = InputSpec.of(path=tmp_path / "old.so", sources=tmp_path)

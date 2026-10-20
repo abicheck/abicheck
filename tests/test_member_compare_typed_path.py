@@ -30,14 +30,16 @@ from typing import Any
 import pytest
 from _family_f2_routes import CORPUS
 
-from abicheck import service_compare_pipeline
 from abicheck.change_registry_types import Verdict
 from abicheck.checker_policy import ChangeKind
 from abicheck.compile_context import CompileContext
 from abicheck.environment_matrix import EnvironmentMatrix
 from abicheck.reporter import to_json
 from abicheck.serialization import snapshot_to_json
-from abicheck.service_compare_pipeline import run_compare
+from abicheck.workflows.compare import (
+    execute as compare_execute,
+)
+from abicheck.workflows.compare.execute import run_compare
 from abicheck.workflows.member_compare import compare_member
 from abicheck.workflows.release_member_request import (
     MemberDelta,
@@ -104,7 +106,7 @@ def test_member_request_equals_the_keyword_api_request(
     request = _rich_request(tmp_path)
     seen: list[object] = []
     monkeypatch.setattr(
-        service_compare_pipeline,
+        compare_execute,
         "run_compare_request",
         lambda typed: seen.append(typed),
     )

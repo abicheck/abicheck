@@ -259,7 +259,7 @@ def public_header_sets_for_candidate(
     The *second* root cause of this path's "renders an empty report against a
     live binary" gap, distinct from the finding-partition one: a two-sided
     ``compare`` has always folded each side's ``--header`` values into that
-    side's public-header provenance sets (``service_compare_pipeline.
+    side's public-header provenance sets (``workflows.compare.
     _public_header_sets``, via the same ``split_public_header_inputs``
     primitive used here), which is what gives a declaration a resolvable
     :class:`~abicheck.model.ScopeOrigin` -- and four of the eleven

@@ -103,7 +103,7 @@ def _parallel_extraction_enabled() -> bool:
     carrying a dump manifest, sequential resolution happens exactly when the
     knob is off, so this inverts back to the knob's own reading."""
     from abicheck.service import CompareRequest, InputSpec
-    from abicheck.service_compare_pipeline import resolve_sides_sequentially
+    from abicheck.workflows.compare.resolve import resolve_sides_sequentially
 
     request = CompareRequest(
         old=InputSpec(path=Path("old.so")), new=InputSpec(path=Path("new.so"))

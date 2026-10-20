@@ -18,7 +18,7 @@
 ``cli_compare_helpers.run_compare`` used to carry its own copy of the whole
 classification phase (depth projection, evidence fold, ``compare_snapshots``,
 the evidence-contract axes, operand metadata, requested depth, assurance,
-evidence depths) beside ``service_compare_pipeline.classify_compare_pair``.
+evidence depths) beside ``workflows.compare.execute.classify_compare_pair``.
 Each route divergence the F2 harness found was then fixed twice, once per
 copy. ``workflows.compare_classify.classify_resolved_pair`` is now the only
 implementation, and this module pins that through the public workflow:

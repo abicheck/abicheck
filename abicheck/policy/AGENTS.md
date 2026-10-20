@@ -130,7 +130,7 @@ or a CLI flag directly is in the wrong layer.
   `scripts/check_tier_accuracy.py`'s `project()` — generalized from that
   script's synthetic corpus onto a real `AbiSnapshot` and its own public
   `binary`/`headers`/`build`/`source` ladder (`evidence_depth.DEPTH_RANK`,
-  a `model`-layer leaf, not `compare`). `service_compare_pipeline.
+  a `model`-layer leaf, not `compare`). `workflows.compare.execute.
   classify_compare_pair` applies it as a view over what gets classified,
   right after `workflows.artifact.execute.enforce_requested_depth` confirms
   the floor — deliberately separate functions (floor vs. ceiling), not one.

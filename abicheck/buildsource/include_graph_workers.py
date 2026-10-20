@@ -316,7 +316,7 @@ def run_probes(
     # the old and new sides concurrently (ABICHECK_PARALLEL_EXTRACTION),
     # and each side builds its own pool -- two pools each sized for the
     # whole host would jointly oversubscribe it, the same hazard
-    # `service_compare_pipeline.resolve_sides_sequentially` documents for
+    # `workflows.compare.resolve.resolve_sides_sequentially` documents for
     # manifest dumps. The semaphore bounds *concurrently spawned clang
     # processes* across the request; the pools above it can stay
     # independent. Admits against the live host budget, never a per-pool size

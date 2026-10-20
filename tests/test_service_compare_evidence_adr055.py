@@ -10,9 +10,7 @@ from abicheck.checker_types import DiffResult
 from abicheck.errors import SnapshotError, ValidationError
 from abicheck.model import AbiSnapshot
 from abicheck.serialization import save_snapshot
-from abicheck.service_compare_pipeline import (
-    run_compare_request,
-)
+from abicheck.workflows.compare.execute import run_compare_request
 from abicheck.workflows.request_inputs import (
     InputSpec,
 )
@@ -277,7 +275,7 @@ class TestCompareRequestAdr055Evidence:
         )
 
         captured = {}
-        # classify_compare_pair (service_compare_pipeline.py) imports
+        # classify_compare_pair (workflows.compare.resolve.py) imports
         # compare_snapshots from its real owner (workflows.compare_policy,
         # ADR-061 gap A) rather than the flat abicheck.service facade, so the
         # patch target follows it.
@@ -713,7 +711,7 @@ class TestCompareRequestAdr055Evidence:
             return None
 
         # ADR-055 D1: the pair-wide scan runs in the shared
-        # `service_compare_pipeline`, which imports this helper from the module
+        # `workflows.compare`, which imports this helper from the module
         # that defines it rather than through `service`'s re-export -- so the
         # spy belongs on `dry_run_estimate`, where it lives.
         monkeypatch.setattr(

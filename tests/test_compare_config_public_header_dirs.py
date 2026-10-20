@@ -252,16 +252,18 @@ class TestDirectoryReleaseCompareReachesConfigDirs:
     def test_config_public_header_dirs_reaches_the_matched_pair(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        import abicheck.service_compare_pipeline as pipeline_mod
+        from abicheck.workflows.compare import (
+            execute as compare_execute,
+        )
 
         seen_requests: list[CompareRequest] = []
-        real = pipeline_mod.resolve_compare_request
+        real = compare_execute.resolve_compare_request
 
         def _spy(request: CompareRequest, **kwargs: object) -> object:
             seen_requests.append(request)
             return real(request, **kwargs)
 
-        monkeypatch.setattr(pipeline_mod, "resolve_compare_request", _spy)
+        monkeypatch.setattr(compare_execute, "resolve_compare_request", _spy)
 
         (tmp_path / ".abicheck.yml").write_text(
             yaml.safe_dump({"scope": {"public_header_dirs": ["include/public"]}}),

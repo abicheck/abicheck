@@ -16,7 +16,7 @@
 -- ``one-semantic-pipeline.md``'s plan, "PR 1". Pins the type's shape and its
 composition-only contract directly (construct a few contexts by hand), the
 way ``model/semantic_ir.py`` was pinned before any consumer migrated onto it.
-``service_compare_pipeline.resolve_compare_request`` is now the first real
+``workflows.compare.resolve.resolve_compare_request`` is now the first real
 call site (see ``TestResolvedExecutionContextWiring`` in
 ``tests/test_service_compare_pipeline.py``); these tests still cover the
 primitive directly, unit-style, rather than only through that one caller.
@@ -254,7 +254,7 @@ class TestResolvedExecutionContextEvidenceIntegration:
     def test_from_plan_lower_cases_a_case_insensitive_plan_depth(self):
         """A typed-API caller can spell a valid ``--depth`` value
         case-insensitively (e.g. ``"HEADERS"``) and ``AnalysisPlan`` itself
-        does not normalize it -- ``service_compare_pipeline.classify_
+        does not normalize it -- ``workflows.compare.execute.classify_
         compare_pair`` only normalizes ``DiffResult.requested_depth`` later,
         after this context already exists. Without normalizing here too,
         the mixed-case value fails to appear in the lower-case ladder

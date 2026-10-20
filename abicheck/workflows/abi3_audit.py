@@ -132,7 +132,7 @@ def fold(
 
     Deliberately short-named: both call sites reach it module-qualified
     (``abi3_audit.fold(...)``), which reads at the call site and keeps the
-    one-line call inside ``service_compare_pipeline.py``'s own line budget.
+    one-line call inside ``workflows.compare.resolve.py``'s own line budget.
 
     The one place the fold happens, shared by the native ``compare`` CLI and
     the typed pipeline, so the two cannot disagree about *when* the audit's

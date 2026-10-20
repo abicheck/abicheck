@@ -21,7 +21,7 @@ from click.testing import CliRunner
 from abicheck.cli import main
 from abicheck.model import AbiSnapshot, Function, Param
 from abicheck.serialization import save_snapshot
-from abicheck.service_compare_pipeline import run_compare_request
+from abicheck.workflows.compare.execute import run_compare_request
 from abicheck.workflows.service_requests import (
     CompareRequest,
     InputSpec,

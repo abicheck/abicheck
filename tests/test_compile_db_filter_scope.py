@@ -589,7 +589,7 @@ class TestCompareRequestAppliesTheSameScopeGuard:
     def test_a_side_with_the_scope_mismatch_is_refused(self, tmp_path: Path) -> None:
         from abicheck.errors import ValidationError
         from abicheck.service import CompareRequest, InputSpec
-        from abicheck.service_compare_pipeline import resolve_compare_request
+        from abicheck.workflows.compare.resolve import resolve_compare_request
 
         so_path, header, compile_db = TestDumpCliHonorsTheFilterInTheFold._project(
             tmp_path
@@ -614,7 +614,7 @@ class TestCompareRequestAppliesTheSameScopeGuard:
         ambiguity, so this pins that a legitimate filtered compare passes.
         """
         from abicheck.service import CompareRequest, InputSpec
-        from abicheck.service_compare_pipeline import resolve_compare_request
+        from abicheck.workflows.compare.resolve import resolve_compare_request
 
         so_path, header, compile_db = TestDumpCliHonorsTheFilterInTheFold._project(
             tmp_path
@@ -728,7 +728,7 @@ class TestScopeGuardCoversSourcesOnlyAutoDiscovery:
     ) -> None:
         from abicheck.errors import ValidationError
         from abicheck.service import CompareRequest, InputSpec
-        from abicheck.service_compare_pipeline import resolve_compare_request
+        from abicheck.workflows.compare.resolve import resolve_compare_request
 
         so_path, header, _compile_db = TestDumpCliHonorsTheFilterInTheFold._project(
             tmp_path
@@ -863,7 +863,7 @@ class TestScopeGuardCoversNestedBuildInfoDatabases:
     ) -> None:
         from abicheck.errors import ValidationError
         from abicheck.service import CompareRequest, InputSpec
-        from abicheck.service_compare_pipeline import resolve_compare_request
+        from abicheck.workflows.compare.resolve import resolve_compare_request
 
         so_path, header, build_info = self._project_with_nested_build_info(tmp_path)
         side = InputSpec(

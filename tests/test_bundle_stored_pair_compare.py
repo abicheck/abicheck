@@ -395,7 +395,7 @@ class TestCompareStoredBundleFactsPair:
     ) -> None:
         """An explicit ``depth`` must reach each per-library ``DiffResult``'s
         own ``requested_depth``/``analysis_assurance.depth_satisfied`` --
-        ``service_compare_pipeline.resolve_compare_request()`` stamps both
+        ``workflows.compare.resolve.resolve_compare_request()`` stamps both
         after its own floor/ceiling pair, and this driver enforces and
         projects depth the identical way but previously never stamped
         either, so every stored/stored ``--depth`` run persisted them as

@@ -41,11 +41,14 @@ from pathlib import Path
 
 import pytest
 
-from abicheck import service_compare_evidence as sce, service_compare_pipeline
+from abicheck import service_compare_evidence as sce
 from abicheck.errors import ValidationError
 from abicheck.model import AbiSnapshot
 from abicheck.workflows.artifact.dump_execution_options import DumpExecutionOptions
 from abicheck.workflows.artifact.execute import SideResolution
+from abicheck.workflows.compare import (
+    resolve as compare_resolve,
+)
 from abicheck.workflows.plan import AnalysisPlanner
 from abicheck.workflows.request_inputs import InputSpec
 from abicheck.workflows.service_requests import CompareRequest, DumpRequest
@@ -211,9 +214,7 @@ def _spy_resolution(monkeypatch: pytest.MonkeyPatch) -> dict[str, dict]:
             effective_compile_context=None,
         )
 
-    monkeypatch.setattr(
-        service_compare_pipeline, "_resolve_side_snapshot_impl", _fake_impl
-    )
+    monkeypatch.setattr(compare_resolve, "_resolve_side_snapshot_impl", _fake_impl)
     return seen
 
 
@@ -237,7 +238,7 @@ def test_a_side_execution_plan_reaches_side_resolution_verbatim(
         changed_paths=("other.c",),
     )
 
-    service_compare_pipeline.resolve_compare_request(request)
+    compare_resolve.resolve_compare_request(request)
 
     old = seen["old"]
     assert old["build_config"] == config
@@ -288,7 +289,7 @@ def test_a_side_execution_plan_matches_its_compile_database(
         new=InputSpec(path=_elf(tmp_path / "b.so"), version="new"),
     )
 
-    service_compare_pipeline.resolve_compare_request(request, notify=notes.append)
+    compare_resolve.resolve_compare_request(request, notify=notes.append)
 
     assert seen["old"]["compile_db_matched"] is True
     assert "-DFOO=1" in seen["old"]["compile_db_tokens"]

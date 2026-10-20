@@ -86,10 +86,8 @@ def _kwargs(spec: dict) -> dict:
 @pytest.mark.parametrize("name", sorted(VARIANTS))
 def test_one_resolution_read_by_every_consumer(tmp_path, monkeypatch, name):
     import abicheck.workflows.compare_input_adapters as adapters
-    from abicheck.service_compare_pipeline import (
-        classify_compare_pair,
-        resolve_compare_request,
-    )
+    from abicheck.workflows.compare.execute import classify_compare_pair
+    from abicheck.workflows.compare.resolve import resolve_compare_request
     from abicheck.workflows.compare_gate_receipt import (
         resolve_request_evaluation_config,
     )
@@ -148,10 +146,8 @@ def test_the_variants_resolve_to_different_configs(tmp_path):
     """Vacuity guard on the oracle: if every variant resolved to the same
     config, equality with the oracle would hold for a resolver that ignored
     the request entirely."""
-    from abicheck.service_compare_pipeline import (
-        classify_compare_pair,
-        resolve_compare_request,
-    )
+    from abicheck.workflows.compare.execute import classify_compare_pair
+    from abicheck.workflows.compare.resolve import resolve_compare_request
 
     seen = []
     for i, name in enumerate(sorted(VARIANTS)):
@@ -168,10 +164,8 @@ def test_the_variants_resolve_to_different_configs(tmp_path):
 
 def test_a_hand_built_pair_without_context_gets_none(tmp_path):
     from abicheck.service_compare_evidence import SideEvidence
-    from abicheck.service_compare_pipeline import (
-        ResolvedComparePair,
-        classify_compare_pair,
-    )
+    from abicheck.workflows.compare.execute import classify_compare_pair
+    from abicheck.workflows.compare_classify import ResolvedComparePair
 
     request = _request(tmp_path)
     ev = SideEvidence(headers=[], compile=None, collect_mode="off", dump_manifest=None)
@@ -200,10 +194,8 @@ def test_returned_context_reports_the_depth_classification_used(tmp_path):
     (CodeRabbit review, PR #1415)."""
     import dataclasses
 
-    from abicheck.service_compare_pipeline import (
-        classify_compare_pair,
-        resolve_compare_request,
-    )
+    from abicheck.workflows.compare.execute import classify_compare_pair
+    from abicheck.workflows.compare.resolve import resolve_compare_request
 
     resolved_under = _request(tmp_path, depth="binary")
     pair = resolve_compare_request(resolved_under)

@@ -15,7 +15,7 @@
 
 """A typed ``CompareRequest``'s policy inputs, resolved once.
 
-``classify_compare_pair`` (``service_compare_pipeline.py``) used to assemble
+``classify_compare_pair`` (``workflows.compare.resolve.py``) used to assemble
 these inline: a forwarded pack's overrides, the D7 evaluation config (read
 *before* the project-config fold, which is the weakest tier), the
 project-config ``policy.overrides`` fold, and -- since ADR-067 D5/D6 reached

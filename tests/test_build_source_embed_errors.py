@@ -112,7 +112,7 @@ def test_typed_api_raises_snapshot_error_for_a_corrupt_pack(
 ) -> None:
     """A Tier-2 caller gets ``SnapshotError``, never a Click exception."""
     from abicheck.service import CompareRequest, InputSpec
-    from abicheck.service_compare_pipeline import run_compare_request
+    from abicheck.workflows.compare.execute import run_compare_request
 
     old, new = snaps
     request = CompareRequest(
