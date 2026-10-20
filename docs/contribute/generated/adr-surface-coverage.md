@@ -87,7 +87,7 @@ Which public surface reaches each ADR, which use cases it serves, and whether a 
 | [ADR-068](../adr/068-one-comparison-product-and-scan-retirement.md) | surfaced | UC-WF-compare, UC-WF-cli-contract | `cli: compare --no-baseline` | — |
 | [ADR-069](../adr/069-name-shape-is-not-contract-membership.md) | internal | — | — | Product rule applied inside policy/; no switch or field of its own. |
 | [ADR-070](../adr/070-action-layer-does-not-encode-cli-semantics.md) | partial | — | `action: extra-args` | Only D3 is implemented; D1, D2 and D4 remain. |
-| [ADR-071](../adr/071-release-analysis-assurance-fold.md) | surfaced | UC-WF-compare | `action: require-complete-analysis`<br>`report: compare_report.analysis_assurance` | — |
+| [ADR-071](../adr/071-release-analysis-assurance-fold.md) | surfaced | UC-WF-compare | `action: analysis-assurance-complete`<br>`report: compare_report.analysis_assurance` | — |
 | [ADR-072](../adr/072-pr-comment-reporting-fidelity.md) | surfaced | UC-REP-markdown-html | `action: pr-comment-detail`<br>`report: format:review` | — |
 | [ADR-073](../adr/073-report-only-publication-and-the-trusted-reporter-boundary.md) | surfaced | — | `action: actions/report`<br>`action: actions/verify-source-run` | — |
 | [ADR-074](../adr/074-logical-macro-definitions-on-the-cli.md) | surfaced | UC-TC-header-scope-robustness | `cli: compare --define`<br>`cli: dump --define` | — |
@@ -218,7 +218,7 @@ Which public surface reaches each ADR, which use cases it serves, and whether a 
 - ADR-067 report: compare_report.disposition_audit
 - ADR-068 cli: compare --no-baseline
 - ADR-070 action: extra-args
-- ADR-071 action: require-complete-analysis
+- ADR-071 action: analysis-assurance-complete
 - ADR-071 report: compare_report.analysis_assurance
 - ADR-072 action: pr-comment-detail
 - ADR-072 report: format:review

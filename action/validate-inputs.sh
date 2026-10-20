@@ -414,6 +414,20 @@ for _i in "${!_bool_input_names[@]}"; do
   fi
 done
 
+# analysis-assurance-complete: a tri-state, per-job override of
+# assurance.require_complete (action.yml's own description has the full
+# account). Unset inherits the config; 'true' and 'false' both overlay it, in
+# either direction. Any other value is refused outright, rather than reading
+# as "inherit" the way an unrecognized value would. compare mode only: that is
+# the only shape whose exit code carries the assurance floor.
+case "${INPUT_ANALYSIS_ASSURANCE_COMPLETE:-}" in
+  '' | true | false) ;;
+  *) _fail "analysis-assurance-complete '${INPUT_ANALYSIS_ASSURANCE_COMPLETE}' is not recognized. Use 'true' or 'false' to override assurance.require_complete for this run, or leave it unset to inherit .abicheck.yml." ;;
+esac
+if [[ -n "${INPUT_ANALYSIS_ASSURANCE_COMPLETE:-}" && "$MODE" != "compare" ]]; then
+  _warn "analysis-assurance-complete is set but has no effect: it only applies to mode: compare (mode is '$MODE')."
+fi
+
 # used-by/required-symbol/required-symbols: compare mode only
 # (ADR-043 scoped-comparison contracts). --used-by and --required-symbol/
 # --required-symbols are mutually exclusive on the CLI itself, but that

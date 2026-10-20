@@ -1600,6 +1600,21 @@ PYEOF
 # caller bug, not a user input to accommodate -- that case still fails
 # loud rather than silently producing a two---config command line.
 add_release_topology_config_flags() {
+  # $1 (optional): "scalar" for the single-pair and audit-only compare shapes.
+  # Those have no directory/package fan-out, so the only key that applies to
+  # them is assurance.require_complete (analysis-assurance-complete); the
+  # release-only inputs are neither read nor written for them. Omitted (or any
+  # other value) is the directory/package release shape, which writes every
+  # key this function knows about. Both shapes overlay the same --config file,
+  # so the assurance override reaches the CLI whichever branch the operand took.
+  local _scope="${1:-release}"
+  local _dso_only="" _include_private_dso="" _fail_on_removed_library=""
+  if [[ "$_scope" != "scalar" ]]; then
+    _dso_only="${INPUT_DSO_ONLY:-}"
+    _include_private_dso="${INPUT_INCLUDE_PRIVATE_DSO:-}"
+    _fail_on_removed_library="${INPUT_FAIL_ON_REMOVED_LIBRARY:-}"
+  fi
+  local _analysis_assurance_complete="${INPUT_ANALYSIS_ASSURANCE_COMPLETE:-}"
   # dso-only/include-private-dso/fail-on-removed-library deliberately carry
   # no declared default in action.yml (Codex review, fresh evidence): an
   # explicit `false` from the workflow must be able to override a
@@ -1611,9 +1626,10 @@ add_release_topology_config_flags() {
   # unreachable. So this guard -- and the overlay-generation below -- keys
   # off whether each input was actually GIVEN (non-empty string) at all,
   # never off its truthiness.
-  if [[ -z "${INPUT_DSO_ONLY:-}" \
-        && -z "${INPUT_INCLUDE_PRIVATE_DSO:-}" \
-        && -z "${INPUT_FAIL_ON_REMOVED_LIBRARY:-}" ]]; then
+  if [[ -z "$_dso_only" \
+        && -z "$_include_private_dso" \
+        && -z "$_fail_on_removed_library" \
+        && -z "$_analysis_assurance_complete" ]]; then
     return 0
   fi
   local _config_idx=-1 _i
@@ -1689,9 +1705,10 @@ add_release_topology_config_flags() {
   fi
   local _release_overlay_json
   _release_overlay_json=$(cd "$_PY_SAFE_DIR" \
-  && ABICHECK_RELEASE_DSO_ONLY="${INPUT_DSO_ONLY:-}" \
-  ABICHECK_RELEASE_INCLUDE_PRIVATE_DSO="${INPUT_INCLUDE_PRIVATE_DSO:-}" \
-  ABICHECK_GATE_FAIL_ON_REMOVED_LIBRARY="${INPUT_FAIL_ON_REMOVED_LIBRARY:-}" \
+  && ABICHECK_RELEASE_DSO_ONLY="$_dso_only" \
+  ABICHECK_RELEASE_INCLUDE_PRIVATE_DSO="$_include_private_dso" \
+  ABICHECK_GATE_FAIL_ON_REMOVED_LIBRARY="$_fail_on_removed_library" \
+  ABICHECK_ASSURANCE_REQUIRE_COMPLETE="$_analysis_assurance_complete" \
   PYTHONPATH= "$_PY_BIN" - <<'PYEOF'
 # Synthesizes a minimal .abicheck.yml `release:`/`gate:` block (as JSON, a
 # valid YAML subset abicheck's own yaml.safe_load parses identically) from
@@ -1727,6 +1744,14 @@ if release_blk:
 _fail_on_removed = os.environ.get("ABICHECK_GATE_FAIL_ON_REMOVED_LIBRARY", "")
 if _fail_on_removed:
     doc["gate"] = {"fail_on_removed_library": _fail_on_removed == "true"}
+# analysis-assurance-complete: the tri-state per-job override of
+# assurance.require_complete. Same rule as every key above: written only when
+# given, so "omitted" leaves the base config's own value standing, and an
+# explicit "false" overrides a discovered "true" (the one direction the old
+# one-way input could never reach).
+_assurance_complete = os.environ.get("ABICHECK_ASSURANCE_REQUIRE_COMPLETE", "")
+if _assurance_complete:
+    doc["assurance"] = {"require_complete": _assurance_complete == "true"}
 json.dump(doc, sys.stdout)
 PYEOF
   )
@@ -4024,6 +4049,13 @@ elif [[ "$MODE" == "compare" ]]; then
     # (one-comparison-product.md §4.1, ADR-068 D5) -- extraction cleanup is
     # now unconditional, so there is no Action input for it any more.
     add_release_topology_config_flags
+  else
+    # Single-pair and audit-only compare: no fan-out, so the only overlay key
+    # that applies is assurance.require_complete (see the function's own
+    # scope comment). Previously only the directory/package shape reached the
+    # overlay at all, which left a job no way to override the config on a
+    # single-library run.
+    add_release_topology_config_flags scalar
   fi
 
 elif [[ "$MODE" == "deps-tree" ]]; then
@@ -4128,7 +4160,7 @@ if [[ -n "${INPUT_EXTRA_ARGS:-}" ]]; then
   # account. Caught here, once, right before the append that would create
   # the collision.
   if _cmd_has_config_flag && _extra_args_has_config_flag; then
-    echo "::error::extra-args passes its own --config, which conflicts with the --config this Action already synthesized from a dso-only/fail-on-removed-library/include-private-dso/compile-context input (both cannot be honored -- Click keeps only the last one, silently dropping the other). Use the 'build-config' input instead of 'extra-args: --config ...' when combining a synthesized setting with a project config file; it merges with, rather than replaces, the synthesized overlay."
+    echo "::error::extra-args passes its own --config, which conflicts with the --config this Action already synthesized from a dso-only/fail-on-removed-library/include-private-dso/analysis-assurance-complete/compile-context input (both cannot be honored -- Click keeps only the last one, silently dropping the other). Use the 'build-config' input instead of 'extra-args: --config ...' when combining a synthesized setting with a project config file; it merges with, rather than replaces, the synthesized overlay."
     exit 1
   fi
   # A flag `compare` genuinely lacks -- `--pattern-verdicts` included --

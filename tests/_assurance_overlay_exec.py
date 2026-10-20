@@ -74,11 +74,17 @@ def _run_overlay(workspace: Path, env: dict[str, str]) -> Any:
     actual ``$SOURCES_ROOT``/``$SOURCES_PAIRWISE``/
     ``$SOURCES_MERGE_COMPILE`` value the moment the step gained that env
     key, rather than the empty string these tests intend.
+
+    ``ANALYSIS_ASSURANCE_COMPLETE`` defaults to ``'true'``: the step only runs
+    when the input is non-empty, and ``'true'`` is what every pre-existing test
+    here was written against. A test exercising the ``'false'`` direction
+    passes it explicitly.
     """
     merged = {
         "SOURCES_ROOT": "",
         "SOURCES_PAIRWISE": "",
         "SOURCES_MERGE_COMPILE": "",
+        "ANALYSIS_ASSURANCE_COMPLETE": "true",
         **env,
     }
     return run_step(_overlay_step(), workspace=workspace, env=merged)
