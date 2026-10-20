@@ -1323,7 +1323,7 @@
     },
     {
       "path": "tests/test_compare_release.py",
-      "baseline_lines": 1749,
+      "baseline_lines": 1744,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",

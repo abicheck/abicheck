@@ -10,7 +10,7 @@ declared ``deployment:`` contract (``.abicheck.yml``'s ``deployment:``
 block / ``EnvironmentMatrix``) must publish the same
 ``env_matrix_source_sha256`` content digest the scalar ``compare`` report
 and the ``--no-baseline`` audit report already carry -- both per library
-(surviving ``_strip_diff_results_and_adjust_verdict`` discarding each
+(surviving ``project_release_library_results`` discarding each
 library's ``DiffResult``) and once, at the release envelope, since one
 release run threads the identical ``EnvironmentMatrix`` to every library.
 Before the fix, neither was present: a within-floor release was

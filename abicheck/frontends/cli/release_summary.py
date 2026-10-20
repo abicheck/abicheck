@@ -167,7 +167,7 @@ def _write_release_summary_file(
     # render`'s existing no-op-when-unfiltered behaviour), which also
     # strips the private `findings_view`/`findings_total_count`/
     # `findings_total_count_view`/`impact_table_view` accounting keys
-    # `_strip_diff_results_and_adjust_verdict` stashes on each entry --
+    # `project_release_library_results` stashes on each entry --
     # without this, the raw `library_results` list (never otherwise
     # cleaned for this sidecar) leaked those internal keys straight into
     # `summary.json`'s per-library entries (Codex review, fresh evidence,

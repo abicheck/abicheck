@@ -175,7 +175,7 @@ def release_findings_for_render(
     """Project *library_results* into the shape one render should see,
     without mutating the shared list.
 
-    ``cli_compare_release_matrix._strip_diff_results_and_adjust_verdict``
+    ``report.release_findings.project_release_library_results``
     stashes private per-library keys beside the always-full ``findings``/
     ``findings_truncated`` pair: ``findings_view``/``findings_view_truncated``/
     ``findings_view_truncated_kinds`` (present only when a ``--view show=``

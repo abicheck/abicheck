@@ -15,7 +15,7 @@
 
 """No internal stash key survives into a rendered release entry.
 
-`_strip_diff_results_and_adjust_verdict` popped six named keys. A member
+`project_release_library_results` popped six named keys. A member
 entry is then serialized straight to JSON, so a *seventh* stash key --
 added by any later change, for any reason -- becomes
 ``TypeError: Object of type X is not JSON serializable`` raised at the very
@@ -38,8 +38,8 @@ import json
 
 import pytest
 
-from abicheck.cli_compare_release_matrix import (
-    _strip_diff_results_and_adjust_verdict,
+from abicheck.report.release_findings import (
+    project_release_library_results,
     strip_internal_keys,
 )
 
@@ -79,7 +79,7 @@ class TestInternalKeysAreStripped:
     @pytest.mark.parametrize("key", INTERNAL_KEYS)
     def test_each_key_is_removed_whatever_it_is_called(self, key):
         entries = [_entry(**{key: _NotSerializable()})]
-        _strip_diff_results_and_adjust_verdict(entries, [], "compatible")
+        project_release_library_results(entries, [], "compatible")
         assert key not in entries[0]
 
     def test_every_internal_key_at_once_and_the_result_serializes(self):
@@ -90,7 +90,7 @@ class TestInternalKeysAreStripped:
         leaves some *other* unserializable value behind.
         """
         entries = [_entry(**{k: _NotSerializable() for k in INTERNAL_KEYS})]
-        _strip_diff_results_and_adjust_verdict(entries, [], "compatible")
+        project_release_library_results(entries, [], "compatible")
         assert not [k for k in entries[0] if k.startswith("_")]
         json.dumps(entries[0])  # raises TypeError on regression
 
@@ -105,7 +105,7 @@ class TestInternalKeysAreStripped:
                 impact_table_view=None,
             )
         ]
-        _strip_diff_results_and_adjust_verdict(entries, [], "compatible")
+        project_release_library_results(entries, [], "compatible")
         assert entries[0] == {
             "library": "libfoo.so",
             "verdict": "compatible",
@@ -119,13 +119,13 @@ class TestInternalKeysAreStripped:
             _entry(library=f"lib{i}.so", _old_snapshot=_NotSerializable())
             for i in range(6)
         ]
-        _strip_diff_results_and_adjust_verdict(entries, [], "compatible")
+        project_release_library_results(entries, [], "compatible")
         assert all("_old_snapshot" not in e for e in entries)
         json.dumps(entries)
 
     def test_an_entry_with_no_internal_keys_is_unchanged(self):
         entries = [_entry()]
-        _strip_diff_results_and_adjust_verdict(entries, [], "compatible")
+        project_release_library_results(entries, [], "compatible")
         assert entries[0] == {"library": "libfoo.so", "verdict": "compatible"}
 
 
