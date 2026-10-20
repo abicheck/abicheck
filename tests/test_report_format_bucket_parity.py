@@ -98,6 +98,10 @@ def _envelope(*, show_impact: bool = False) -> tuple[DiffResult, ReportEnvelope]
         policy="strict_abi",
         policy_file=policy_file,
     )
+    # A real comparison stores the policy-aware verdict (checker's
+    # ``_compute_verdict_for``); a bare ``DiffResult`` keeps the dataclass
+    # default ``NO_CHANGE`` and contradicts its own breaking changes.
+    result.verdict = policy_file.compute_verdict(changes)
     return result, build_report_envelope(
         result,
         _snapshot("1.0"),
@@ -215,3 +219,42 @@ def test_html_lists_each_active_reclassify_rule_once() -> None:
     reclassify = doc["confidence"]["policy_reclassify"]
     assert len(reclassify) == 1
     assert "_Z3oldv" in reclassify[0]
+
+
+def test_document_headline_facts_reach_json_markdown_and_html() -> None:
+    """One shared ``ReportDocument`` feeds every projection, so its headline
+    facts -- verdict, exit code, raw detected count, reclassified count and
+    the rule that moved a finding -- must read identically in JSON, Markdown
+    and HTML. Bug class ``report.cross_format_headline_drift``: a renderer
+    that re-derives a headline from its own inputs can disagree with the exit
+    code or disposition audit the same document carries.
+
+    The counts come from the oracle table above: nine detected findings, one
+    moved by the ``accepted-removal`` rule.
+    """
+    _, envelope = _envelope()
+    facts = envelope.document.to_mapping()
+    audit = facts["disposition_audit"]
+    detected = len(_ORACLE)
+    reclassified = sum(1 for row in _ORACLE.values() if row[3] is not None)
+    assert audit["detected_total"] == detected
+    assert audit["reclassified_total"] == reclassified
+    verdict = facts["verdict"]
+    assert verdict == "BREAKING"
+
+    json_report = json.loads(render_envelope("json", envelope))
+    markdown = render_envelope("markdown", envelope)
+    html = render_envelope("html", envelope)
+
+    assert json_report["verdict"] == verdict
+    assert json_report["exit"]["code"] == facts["exit"]["code"] == 4
+    assert json_report["disposition_audit"] == audit
+    assert _RULE_LABEL in json.dumps(json_report["policy_reclassify"])
+
+    assert f"| **Verdict** | ❌ `{verdict}` |" in markdown
+    assert f"| Detected (raw) | {detected} |" in markdown
+    assert f"**Reclassified:** {reclassified} " in markdown
+    assert _RULE_LABEL in markdown
+
+    assert f"Compatibility: {verdict}" in html
+    assert _RULE_LABEL in html
