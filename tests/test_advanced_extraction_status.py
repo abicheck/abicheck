@@ -41,7 +41,7 @@ from abicheck.model.dwarf_facts import (
     AdvancedExtractionStatus,
     advanced_facts_collected,
 )
-from abicheck.policy.analysis_assurance._context import _dwarf_context_status
+from abicheck.policy.analysis_assurance import compute_analysis_assurance
 from abicheck.serialization import snapshot_from_dict
 from abicheck.storage.snapshot_encode import snapshot_content_digest, snapshot_to_json
 
@@ -174,11 +174,12 @@ def test_failed_side_reads_as_asymmetric_not_as_no_debug_info():
         has_dwarf=True, target_arch="x86_64", extraction=S.COMPLETED, **_PAYLOAD
     )
     failed = AdvancedDwarfMetadata(has_dwarf=True, extraction=S.FAILED)
-    status, notes = _dwarf_context_status(
-        _snap(dwarf_advanced=collected), _snap(dwarf_advanced=failed)
-    )
-    assert status == "asymmetric"
-    assert any("failed" in note for note in notes)
+    old, new = _snap(dwarf_advanced=collected), _snap(dwarf_advanced=failed)
+    aa = compute_analysis_assurance(compare(old, new), old, new)
+    assert aa.dwarf_context_status == "asymmetric"
+    failed_notes = [n for n in aa.notes if "DWARF advanced extraction failed" in n]
+    assert len(failed_notes) == 1, aa.notes
+    assert "new side" in failed_notes[0]
 
 
 def test_status_is_not_persisted_so_the_stored_document_is_unchanged():
@@ -240,19 +241,21 @@ def test_failure_inside_the_walk_records_failed(monkeypatch, tmp_path: Path):
 def test_every_failed_side_is_named_and_a_missing_payload_is_not_failed():
     failed_old = AdvancedDwarfMetadata(has_dwarf=True, extraction=S.FAILED)
     failed_new = AdvancedDwarfMetadata(has_dwarf=True, extraction=S.FAILED)
-    status, notes = _dwarf_context_status(
-        _snap(dwarf_advanced=failed_old), _snap(dwarf_advanced=failed_new)
-    )
-    assert status == "asymmetric"
-    assert len(notes) == 2
-    assert any("old side" in note for note in notes)
-    assert any("new side" in note for note in notes)
+    old, new = _snap(dwarf_advanced=failed_old), _snap(dwarf_advanced=failed_new)
+    aa = compute_analysis_assurance(compare(old, new), old, new)
+    assert aa.dwarf_context_status == "asymmetric"
+    failed_notes = [n for n in aa.notes if "DWARF advanced extraction failed" in n]
+    assert len(failed_notes) == 2, aa.notes
+    assert any("old side" in note for note in failed_notes)
+    assert any("new side" in note for note in failed_notes)
 
     # A side with no advanced payload at all is not a failed read.
-    status, notes = _dwarf_context_status(_snap(), _snap(dwarf_advanced=failed_new))
-    assert status == "asymmetric"
-    assert len(notes) == 1
-    assert "new side" in notes[0]
+    old, new = _snap(), _snap(dwarf_advanced=failed_new)
+    aa = compute_analysis_assurance(compare(old, new), old, new)
+    assert aa.dwarf_context_status == "asymmetric"
+    failed_notes = [n for n in aa.notes if "DWARF advanced extraction failed" in n]
+    assert len(failed_notes) == 1, aa.notes
+    assert "new side" in failed_notes[0]
 
 
 def test_snapshot_without_advanced_payload_reads_as_unrecorded_and_unsupported():
