@@ -2028,14 +2028,12 @@ def test_class_template_public_member_patterns_are_emitted() -> None:
                         "loc": {"line": 2},
                         "inner": [
                             {"kind": "TemplateTypeParmDecl", "name": "T"},
-                            "non-dict-template-child",
                             {
                                 "kind": "CXXRecordDecl",
                                 "name": "Box",
                                 "tagUsed": "class",
                                 "loc": {"line": 3},
                                 "inner": [
-                                    "non-dict-record-child",
                                     {"kind": "AccessSpecDecl", "access": "public"},
                                     {
                                         "kind": "CXXMethodDecl",

@@ -234,7 +234,7 @@
     },
     {
       "path": "abicheck/buildsource/source_extractors/clang.py",
-      "baseline_lines": 1221,
+      "baseline_lines": 1208,
       "target": "extract/build-or-source",
       "rule": "no_growth",
       "disposition": "migrate",

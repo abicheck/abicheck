@@ -16,6 +16,10 @@ re-verification status line (2026-10-09, `456989f`). Do not re-open an
 entry from here without reproducing it on current `main`; record a new
 gap on the main page instead.
 
+### A clang AST with a wrong-typed `inner` read as an empty L4 source surface (closed 2026-10-21)
+
+**Status (2026-10-21): CLOSED.** `source_abi_from_clang_ast` now runs `validate_ast_shape` before any reader and raises `SourceExtractionError` on a tree whose container shapes it cannot trust, so `ClangSourceExtractor.extract()` records the TU as a failed extraction instead of an empty surface (ADR-028 D3). The shared misshapen fixtures in `tests/_malformed_clang_ast.py` gained a deep `null` case. The `or []` coercions remain in the L4 readers, but they are unreachable on a validated tree. Regression: `tests/test_source_extractors_clang_ast_shape.py`.
+
 ### Opaque-type suppression fell back to bare RecordType.name when stable identities were incomplete (closed 2026-10-14)
 
 **Status (2026-10-14): CLOSED.** Both remaining mechanical parts are fixed. `find_by_value_types`'s leaf widening now applies C++ unqualified lookup (`compare/opaque_leaf_lookup.py`): a bare leaf reference written inside a known scope does not expose `ns::Handle` when the snapshot declares a same-leaf type in a scope that lookup reaches first; with no such declaration, or no known scope, the reference stays exposed. `find_opaque_struct_types`' asymmetric-existence rule now pairs a forward declaration with a definition under either spelling (`name` or `qualified_name`), so a DWARF forward declaration keyed `ns::Handle` and a header definition keyed `Handle`/`ns::Handle` (or the reverse) are no longer read as "absent", and a visible declaration's `qualified_name` also blocks the spelling tier. Accepted by design, not a gap: a change with no identity whose spelling is shared only by opaque declarations is suppressed by spelling, since no identity or visible namesake contradicts it. Regression: `tests/test_opaque_leaf_lookup.py`.
