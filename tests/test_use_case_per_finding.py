@@ -35,8 +35,8 @@ from hypothesis import given, settings, strategies as st
 from abicheck.buildsource.pack import BuildSourcePack
 from abicheck.buildsource.source_graph import GraphEdge, GraphNode, SourceGraphSummary
 from abicheck.cli import main
-from abicheck.impact.use_case_impact import UseCaseChange, UseCaseImpact
 from abicheck.model import AbiSnapshot, Function
+from abicheck.policy.use_case_attribution import UseCaseChange, UseCaseImpact
 from abicheck.serialization import save_snapshot
 
 _UNIVERSE = ("a", "b", "c", "d")

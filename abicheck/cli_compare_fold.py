@@ -510,34 +510,34 @@ def _fold_use_case_impact_into_text(
     ``--demangle``. Only the newly-appended lines are demangled, never
     *text* itself (already correctly demangled or not by the caller).
     """
-    from .impact.use_case_impact import UseCaseImpact, render_use_case_impact_lines
+    from .report.use_case_impact_render import use_case_impact_text_lines
 
-    impact = getattr(result, "use_case_impact", None)
-    if not isinstance(impact, UseCaseImpact) or fmt not in TEXT_REPORT_FORMATS:
+    if (
+        fmt not in TEXT_REPORT_FORMATS
+        or getattr(result, "use_case_impact", None) is None
+    ):
         return text
+    displayed = None
     if show_only:
         from .report.view import apply_show_only
         from .root_cause_evidence import scoped_only_changes_filtered
 
-        # Every argument the JSON paths pass, so a policy-sensitive token
-        # ("breaking") filters identically in both renders rather than
-        # against the default policy here. Scoped-only findings are appended
-        # through the shared filter for the same reason the JSON paths' own
-        # `displayed_with_scoped_only` does: this fold runs alongside
-        # `_fold_scoped_compat_into_text`, which puts them in the findings
-        # list above, so projecting onto `result.changes` alone would drop
-        # every attribution that landed on one.
-        impact = impact.restricted_to(
-            apply_show_only(
-                list(result.changes),
-                show_only,
-                policy=result.policy,
-                kind_sets=effective_kind_sets(result),
-                policy_file=result.policy_file,
-            )
-            + scoped_only_changes_filtered(result, show_only)
-        )
-    appended = "\n".join(render_use_case_impact_lines(impact))
+        # Every argument the JSON paths pass, so a policy token ("breaking")
+        # filters identically in both renders. Scoped-only findings go through
+        # the same filter as the JSON paths' `displayed_with_scoped_only`:
+        # they are listed above, so projecting onto `result.changes` alone
+        # would drop every attribution that landed on one.
+        displayed = apply_show_only(
+            list(result.changes),
+            show_only,
+            policy=result.policy,
+            kind_sets=effective_kind_sets(result),
+            policy_file=result.policy_file,
+        ) + scoped_only_changes_filtered(result, show_only)
+    lines = use_case_impact_text_lines(result, displayed)
+    if lines is None:
+        return text
+    appended = "\n".join(lines)
     if demangle:
         from .demangle import demangle_text
 

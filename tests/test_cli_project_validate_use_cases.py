@@ -227,14 +227,15 @@ class TestStructuralValidationOnly:
         via monkeypatch rather than an actual race/chmod, since this suite
         runs as root in some environments where a permission bit is a
         no-op."""
-        import abicheck.impact.use_cases as use_cases_mod
+        # Patched where the typed read resolves it (its module binds the name).
+        import abicheck.workflows.compare.use_case_attribution as attribution
 
         manifest = _write_manifest(tmp_path, "- use_case: x\n  entrypoints: [train]\n")
 
         def _raise_os_error(path):
             raise OSError("permission denied")
 
-        monkeypatch.setattr(use_cases_mod, "load_use_case_manifest", _raise_os_error)
+        monkeypatch.setattr(attribution, "load_use_case_manifest", _raise_os_error)
         res = _run([str(manifest)])
         assert res.exit_code == 64
         assert res.exception is None or isinstance(res.exception, SystemExit)
