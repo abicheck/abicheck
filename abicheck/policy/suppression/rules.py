@@ -48,10 +48,10 @@ from ..rule_identity import rule_identity
 from ..selectors import SelectorSet
 from .audit import SuppressionAudit as SuppressionAudit
 from .entry_fields import (
-    parse_allow_public_break,
-    parse_allow_unknown_reachability,
-    parse_entry_id,
-    parse_expires,
+    parse_allow_public_break as _parse_allow_public_break,
+    parse_allow_unknown_reachability as _parse_allow_unknown_reachability,
+    parse_entry_id as _parse_entry_id,
+    parse_expires as _parse_expires,
 )
 from .yaml_scalars import parse_finding_id, raw_finding_ids_by_index
 
@@ -308,7 +308,7 @@ class Suppression:
                 f"Valid values: {sorted(_VALID_REACHABILITY)}"
             )
         # ADR-044 D2 (Codex review): SuppressionList.load already rejects a
-        # non-bool allow_public_break via parse_allow_public_break, but a
+        # non-bool allow_public_break via _parse_allow_public_break, but a
         # programmatic caller can construct Suppression directly — Python
         # does not enforce the dataclass field's `bool` annotation at
         # runtime, so e.g. allow_public_break="false" would otherwise pass
@@ -660,13 +660,13 @@ class SuppressionList:
                     f"Suppression entry {i} has unknown key(s): {sorted(unknown)}. "
                     f"Allowed keys: {sorted(_KNOWN_ENTRY_KEYS)}"
                 )
-            user_id = parse_entry_id(item.get("id"), i, seen_ids)
+            user_id = _parse_entry_id(item.get("id"), i, seen_ids)
             # Parse expires date
-            expires = parse_expires(item.get("expires"), i)
-            allow_public_break = parse_allow_public_break(
+            expires = _parse_expires(item.get("expires"), i)
+            allow_public_break = _parse_allow_public_break(
                 item.get("allow_public_break"), i
             )
-            allow_unknown_reachability = parse_allow_unknown_reachability(
+            allow_unknown_reachability = _parse_allow_unknown_reachability(
                 item.get("allow_unknown_reachability"), i
             )
             try:
