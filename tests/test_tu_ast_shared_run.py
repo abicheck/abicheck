@@ -34,18 +34,23 @@ from abicheck._compiler_options import CLANG_GCC_HEADER_COMPAT_DEFINES
 from abicheck.buildsource import clang_ast_run
 from abicheck.buildsource.adapters.compile_db import CompileDbAdapter
 from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
+from abicheck.buildsource.clang_ast_run import STAGE_DEADLINE_AFTER_PARSE, STAGE_EMPTY
 from abicheck.buildsource.l5_ast_pass import (
     L5_AST_PASSES,
     consume_tu_dump,
     plan_l5_run,
+    plan_shared_l5_run,
     run_ast_passes,
 )
+from abicheck.buildsource.source_extractors.base import SourceExtractionError
 from abicheck.buildsource.source_extractors.clang import ClangSourceExtractor
 from abicheck.buildsource.source_extractors.clang_command import (
     build_clang_command,
     compile_unit_invocation,
 )
+from abicheck.buildsource.source_extractors.clang_dump_errors import ast_or_raise
 from abicheck.buildsource.source_replay import run_source_replay
+from abicheck.buildsource.source_replay_shared import shared_tu_work
 
 #: The parse-only flag prefixes the L5 passes replayed before the shared argv
 #: (``call_graph._SAFE_REPLAY_FLAG_PREFIXES``). Restated here as the reference.
@@ -494,3 +499,89 @@ def test_one_bad_tu_is_its_own_diagnostic_not_a_pool_failure(tmp_path: Path) -> 
     # The bad TU is named in its own L4 diagnostic, and only there.
     assert any("bad.cpp" in d for d in diagnostics), diagnostics
     assert not any("c.c" in d or "a.cpp" in d for d in diagnostics), diagnostics
+
+
+class _FinishFails(ClangSourceExtractor):
+    """An extractor whose tree is read but whose macro pass fails."""
+
+    def __init__(self, tree: dict[str, Any]) -> None:
+        super().__init__()
+        self._tree = tree
+
+    def dump_for(self, cu):
+        return clang_ast_run.TuAstDump(self._tree, 0)
+
+    def source_abi_from_dump(self, cu, dump, *, public_header_roots):
+        return "raw-tu"
+
+    def finish_source_abi(self, cu, tu, *, public_header_roots):
+        raise SourceExtractionError("macro pass failed")
+
+
+def test_a_failing_macro_pass_is_that_tu_s_l4_diagnostic(tmp_path: Path) -> None:
+    """The macro pass runs after the tree is read; its failure is one TU's.
+
+    The L4 result is the diagnostic with no TU, and the L5 hook still sees the
+    dump (the L5 side of the same TU is unaffected by the L4 macro failure).
+    """
+    build = _fixture_build(tmp_path)
+    cu = build.compile_units[0]
+    dump_tree = {"kind": "TranslationUnitDecl", "inner": []}
+    extractor = _FinishFails(dump_tree)
+    seen: list[Any] = []
+
+    def consume(dump, unit):
+        seen.append(dump.ast)
+        return [], []
+
+    item = (cu, True, True)
+    (tu, l4_error), l5 = shared_tu_work(extractor, [], consume, item)
+    assert tu is None
+    assert l4_error == f"{cu.source or cu.id}: macro pass failed"
+    assert seen == [dump_tree]
+    assert l5 == ([], [])
+
+
+@pytest.mark.parametrize(
+    ("stage", "message"),
+    [
+        (STAGE_DEADLINE_AFTER_PARSE, "scan deadline exceeded after loading AST"),
+        (STAGE_EMPTY, "clang produced no AST for"),
+    ],
+)
+def test_ast_or_raise_maps_each_failed_stage_to_its_l4_text(
+    tmp_path: Path, stage: str, message: str
+) -> None:
+    """Each failed stage raises the L4 SourceExtractionError text it always had."""
+    cu = _fixture_build(tmp_path).compile_units[0]
+    dump = clang_ast_run.TuAstDump(None, 0, stage=stage, error="")
+    with pytest.raises(SourceExtractionError, match=message):
+        ast_or_raise(cu, dump)
+
+
+def test_ast_or_raise_returns_the_tree_of_a_clean_dump(tmp_path: Path) -> None:
+    """A read tree passes straight through."""
+    cu = _fixture_build(tmp_path).compile_units[0]
+    tree = {"kind": "TranslationUnitDecl", "inner": []}
+    assert ast_or_raise(cu, clang_ast_run.TuAstDump(tree, 0)) == tree
+
+
+def test_planner_shares_only_for_a_clang_extractor_that_is_wanted(
+    tmp_path: Path,
+) -> None:
+    """The shared L5 plan exists only when L5 wants the TU and L4 is clang."""
+    build = _fixture_build(tmp_path)
+    units = list(build.compile_units)
+    assert (
+        plan_shared_l5_run(
+            ClangSourceExtractor(), False, build, "clang", (), units, "full"
+        )
+        is None
+    )
+    assert plan_shared_l5_run(object(), True, build, "clang", (), units, "full") is None
+    assert (
+        plan_shared_l5_run(
+            ClangSourceExtractor(), True, build, "clang", (), units, "headers-only"
+        )
+        is not None
+    )
