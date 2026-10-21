@@ -78,6 +78,7 @@ ALLOWLIST: dict[str, str] = {
     "abicheck/storage/ast_cache_budget.py::_last_checked": "throttle for the AST-cache size sweep (when to evict); never consulted for a cache entry's content",
     "abicheck/storage/acyclic_json.py::_active": "gc-pause nesting counter around a JSON decode; not a cache",
     "abicheck/storage/acyclic_json.py::_restore_enabled": "gc state to restore when the outermost pause ends; not a cache",
+    "abicheck/storage/acyclic_json.py::_off_since": "when overlapping gc pauses last turned collection off, to bound that window; not a cache",
     "abicheck/storage/acyclic_json.py::_relax_active": "gc-threshold nesting counter around a live dump; not a cache",
     "abicheck/storage/acyclic_json.py::_relax_restore": "gc thresholds to restore when the outermost relaxed scope ends; not a cache",
     "abicheck/storage/ast_size_observer.py::_INTAKE_HOOK": "optional instrumentation hook installed by memory_trace; never affects a result",
