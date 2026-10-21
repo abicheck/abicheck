@@ -819,8 +819,11 @@ _ACCEPTED_KILL_LOSS = {
     # Widened (ADR-061 gap E closure package 6), same reason as the two
     # entries above: this file's own `abicheck.serialization` reachability
     # now transitively reaches the five storage codec modules too.
+    # Widened again (ADR-067 P1): the disposition audit's rule inventory reads
+    # the suppression rule model, so this file's reach now includes it.
     "tests/test_reusable_workflows_project_evidence.py": frozenset(
         {
+            "abicheck.policy.suppression.rules",
             "abicheck.policy.classification",
             "abicheck.model.evidence_status",
             "abicheck.compare.finding_identity.change_identity",

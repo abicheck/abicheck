@@ -295,7 +295,7 @@ class TestFieldBecameConst:
         kinds = _kinds(r)
         assert ChangeKind.FIELD_BECAME_CONST in kinds
         assert ChangeKind.TYPE_FIELD_TYPE_CHANGED not in kinds
-        assert r.verdict == Verdict.API_BREAK
+        assert r.verdict == Verdict.COMPATIBLE_WITH_RISK  # ADR-084: no header evidence
 
 
 class TestFieldLostConst:
@@ -489,7 +489,7 @@ class TestFieldRenamed:
         # that would overstate a source-only break as BREAKING (case35).
         assert ChangeKind.TYPE_FIELD_REMOVED not in _kinds(r)
         assert ChangeKind.TYPE_FIELD_ADDED_COMPATIBLE not in _kinds(r)
-        assert r.verdict == Verdict.API_BREAK
+        assert r.verdict == Verdict.COMPATIBLE_WITH_RISK  # ADR-084: no header evidence
 
     def test_field_renamed_reports_severity_not_verdict_breaking(self):
         """A rename-only diff resolves to API_BREAK, never BREAKING."""
@@ -506,7 +506,7 @@ class TestFieldRenamed:
             fields=[TypeField("col", "int", 0), TypeField("row", "int", 32)],
         )
         r = compare(_snap(types=[t_old]), _snap(types=[t_new]))
-        assert r.verdict == Verdict.API_BREAK
+        assert r.verdict == Verdict.COMPATIBLE_WITH_RISK  # ADR-084: no header evidence
 
     def test_field_renamed_with_differently_spelled_equal_type(self):
         """A rename is still reported even when the two sides spell the

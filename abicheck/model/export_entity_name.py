@@ -281,6 +281,12 @@ def entity_name_components(symbol: str) -> EntityName | None:
     return EntityName(tuple(comps), frozenset(positions), tuple(spans), nested)
 
 
+def has_synthetic_component(name: EntityName) -> bool:
+    """Whether *name* has a component this parser synthesizes (``{ctor}``,
+    ``{dtor}``, ``{op:..}``, ``{subst}``) and so has no header spelling."""
+    return any(part.startswith("{") for part in name.components)
+
+
 def strip_template_args(name: str) -> str:
     """``ns::Box<int, ns::T<2>>::get`` -> ``ns::Box::get`` (bracket-aware)."""
     out: list[str] = []

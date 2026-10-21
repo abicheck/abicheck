@@ -84,6 +84,34 @@ are identical" are different statements about a run, and the audit keeps them
 apart. `not_evaluated` is a reporting distinction only: it never changes a
 verdict, an exit code, or the run's reported confidence.
 
+## Configured rules and their status
+
+Every configured suppression, `reclassify:` and acknowledgment rule has one row
+in the audit, including a rule that matched nothing. Each row says how the rule
+fared, so "this waiver does nothing any more" is visible rather than silent:
+
+| Field | Meaning |
+|---|---|
+| `status` | `active` (disposed of at least one finding), `shadowed_only` (matched findings, but an earlier rule claimed them all), `expired` (past its `expires` date), `unused` (matched nothing, and at least one detector that can produce one of the rule's change kinds ran), `not_evaluated` (matched nothing, and none of those detectors ran). |
+| `matched_count` | Findings the rule disposed of. For a reclassify rule, the findings whose verdict it changed (also `changed_count`). |
+| `shadowed_count` | Findings the rule also matched but an earlier rule claimed, or a no-op reclassification. |
+| `selector_matched_count` | `matched_count` plus `shadowed_count`. |
+| `rule_id` | The rule's `id:` when it has one, else its canonical identity. `label` and `reason` are their own fields. |
+| `entry_index` | The rule's position in its file, so two identical entries stay two rows. |
+
+The status is decided per rule. A rule's `kind`/`change_kind` selector names
+the change kinds it can match; a rule with no kind selector could match any
+kind. A detector that can produce one of those kinds is a candidate for the
+rule. A zero-match rule reads `unused` when at least one candidate ran, and
+`not_evaluated` when none did. So on an ELF-only library, a stale symbol-kind
+rule reads `unused`, while a rule scoped to a DWARF-only kind reads
+`not_evaluated` because its only candidate (the DWARF detector) did not run.
+A rule scoped to a kind that no detector produces (one a pipeline step emits)
+also reads `not_evaluated`: no detector ran that could have checked it.
+See the
+[unused-rules axis](../reference/exit-codes.md#the-unused-rules-axis)
+for the `unused_rules: block` gate that reacts to `unused` only.
+
 ## What it means for suppression
 
 A suppression records that a finding was *withheld*; it is not evidence the

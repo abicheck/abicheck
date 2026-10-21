@@ -103,6 +103,7 @@ class ReleaseMemberCompareRequest:
     #: records only when the config was named with --config).
     acknowledgments_path: Path | None = None
     acknowledgment_unacknowledged_additions: str | None = None
+    acknowledgment_breaks: str | None = None
 
 
 @dataclass(frozen=True)
@@ -164,6 +165,7 @@ _MAPPED_FIELDS = frozenset(
         "exclude_headers",
         "acknowledgments_path",
         "acknowledgment_unacknowledged_additions",
+        "acknowledgment_breaks",
     }
 )
 
@@ -263,4 +265,5 @@ def member_compare_request(request: ReleaseMemberCompareRequest) -> CompareReque
         acknowledgment_unacknowledged_additions=(
             request.acknowledgment_unacknowledged_additions
         ),
+        acknowledgment_breaks=request.acknowledgment_breaks,
     )

@@ -1467,7 +1467,7 @@ class TestRendererOrderIndependence:
 
         assert "policy_reclassify" not in json_out
         assert json_out["disposition_audit"]["reclassified_total"] == 0
-        assert json_out["disposition_audit"]["reclassifications"] == []
+        assert len(json_out["disposition_audit"]["reclassifications"]) == 1
 
     def test_legacy_exit_code_reuses_the_envelope_s_captured_today(self) -> None:
         """Codex review, fresh evidence: with no severity configuration in

@@ -50,18 +50,6 @@ from .release_schema import RELEASE_SCHEMA_VERSION
 #: per-artifact lookups that use function-local imports (not this set),
 #: since some of those modules transitively import this package themselves
 #: and a module-level import here would turn that into a real import cycle.
-_ARTIFACT_NAMES = frozenset(
-    {
-        "snapshot",
-        "compare",
-        "audit",
-        "audit-set",
-        "aggregate",
-        "build-output",
-        "run-plan",
-        "release",
-    }
-)
 
 
 #: SemVer-style (MAJOR.MINOR) version of the compare-report JSON schema.
@@ -725,6 +713,14 @@ _ARTIFACT_NAMES = frozenset(
 #: 2.51 -- ADR-067 C-S1 (scalar policy-disposition audit): every JSON report gains an additive top-level ``disposition_audit`` block (``report.disposition_audit.compute_disposition_audit`` -- ``detected_total``/``effective_total``/per-``Disposition`` ``counts``/``rules``/``not_evaluated_detectors``), each ``suppression.suppressed_changes[]`` entry gains an additive ``rule`` object (rule id, source file, reason, label, expiry, intent, ``allow_public_break``) recording *which* suppression hid the finding, and each ``detectors[]`` entry gains an additive ``not_evaluated`` boolean distinguishing "did not run" from "ran, found nothing". Additive only: no existing key changes shape or meaning, and no verdict, gate, or exit code moves. Renumbered from a conflicting 2.50 when the origin/main merge claimed that version first for ADR-065 S2's ``comparison_scope`` block (same "renumber, don't reuse" convention as the 2.32/2.36/2.38 entries above).
 #: 2.52 -- ADR-067 C-S1 review follow-up: ``disposition_audit`` gains an additive ``policy_overlays`` integer -- findings policy generated *about* another finding (a withheld-suppression advisory), which appear in ``effective_total`` but in neither ``detected_total`` nor ``counts``, so a consumer reconciling the three can account for the difference. Additive only.
 #: 2.53 -- ADR-063 Track T3 (Codex review, PR #1078, twenty-fourth round): ``finding_id``'s documented algorithm gains a seventh, conditional input -- ``Change.disambiguator`` (never itself a reported field) -- appended only for a typedef/constant occurrence-level finding needing collision disambiguation. Every other finding's id is unchanged; the schema's own description was updated to match (previously undocumented since the seventeenth round introduced the conditional append). Renumbered twice by successive origin/main merges: first from a conflicting 2.50 (ADR-065 S2's ``comparison_scope``/``run_outcome`` additions), then from the resulting conflicting 2.51 (ADR-067 C-S1's ``disposition_audit`` block) -- same "renumber, don't reuse" convention as the 2.32/2.36/2.38/2.48/2.49/2.51 entries above.
+#: 2.54 -- ADR-067 P1/P2 (configured-rule inventory, optional rule ``id:``):
+#:       ``disposition_audit`` gains one row per configured rule, zero-count
+#:       rules included, with ``status``, ``shadowed_count`` and
+#:       ``selector_matched_count``; ``rule_id`` for a ``reclassify:`` rule is
+#:       now its ``id:`` or canonical identity instead of its label or reason
+#:       (a value change, not a new key). Both grammars accept an optional
+#:       file-unique ``id:``. Full field list: the 6.3 entry below. Additive
+#:       except the ``rule_id`` value change, which is in the changelog.
 #: 3.0 -- workstream D-S1 (vision-api-abi-evolution.md "D. Optional
 #:       prebuilt-consumer lifecycle"): ``--used-by``/``--required-symbol(s)``
 #:       no longer replaces ``verdict``/``severity``/``run_outcome``/
@@ -1092,7 +1088,23 @@ _ARTIFACT_NAMES = frozenset(
 #:        severity setting that made ``quality_issues`` an error: such a finding
 #:        no longer gates.
 #: 6.2 -- additive ``removed_instantiations`` (uncapped removed set) on internal-template leak findings; ``symbol_binding`` on missing-instantiation and leak findings (aggregate, ``weak`` only if all WEAK).
-REPORT_SCHEMA_VERSION = "6.2"
+#: 6.3 -- ADR-067 P1 (configured-rule inventory): ``disposition_audit.rules``,
+#:       ``reclassifications`` and ``acknowledgments`` now carry one row per
+#:       configured rule, zero-count rules included (previously only rules
+#:       that disposed of a finding). Each row gains ``status`` (active |
+#:       shadowed_only | not_evaluated | unused | expired), ``shadowed_count``,
+#:       ``selector_matched_count``, ``entry_index``, and -- for reclassify --
+#:       ``changed_count`` (= ``matched_count``, which keeps its meaning).
+#:       ``rule_id`` is the rule's new optional ``id:`` when set, else its
+#:       canonical identity (previously the label/reason prose for a reclassify
+#:       rule). ``disposition_audit.unused_rules_review`` and the additive
+#:       ``exit.unused_rules_contribution`` (the ``unused_rules`` gate, default
+#:       ``allow``) are new. ``suppression_audit.stale_rules`` is now a
+#:       projection of the same inventory and lists rule ids. Exit codes do
+#:       not move unless a policy opts into ``unused_rules: block``.
+REPORT_SCHEMA_VERSION = "6.3"
+
+from .artifact_versions import current_artifact_version  # noqa: E402
 
 # The directory/package release envelope's own version and version history
 # live in `release_schema.py` (see that module's docstring for why); the
@@ -1101,63 +1113,15 @@ REPORT_SCHEMA_VERSION = "6.2"
 
 
 def current(name: str) -> str | int:
-    """Return the current version abicheck emits for persisted artifact *name*.
+    """The current version abicheck emits for persisted artifact *name*.
 
-    One read-only lookup facade over the version constants each artifact's
-    own module already owns (ADR-055 D3) -- current-version discovery only.
-    *name* is one of ``"snapshot"``, ``"compare"``, ``"audit"``
-    (``compare --no-baseline``), ``"audit-set"`` (``compare --no-baseline
-    DIR``), ``"release"``, ``"aggregate"``,
-    ``"build-output"``, or ``"run-plan"``. ``"scan"`` was retired with the
-    ``scan`` command itself (ADR-068 Phase 6).
-
-    A doc generator can pull every current version number from here instead
-    of a human hand-copying one -- the exact failure mode that let
-    ``docs/use/python-api.md`` claim snapshots carried ``schema_version 8``
-    long after the real value reached 17.
+    See :func:`abicheck.schemas.artifact_versions.current_artifact_version`.
     """
-    if name not in _ARTIFACT_NAMES:
-        raise ValueError(
-            f"Unknown schema artifact {name!r}; expected one of "
-            f"{sorted(_ARTIFACT_NAMES)}"
-        )
-    if name == "audit":
-        from ..report.no_baseline_document import AUDIT_REPORT_SCHEMA_VERSION
-
-        return AUDIT_REPORT_SCHEMA_VERSION
-    if name == "audit-set":
-        from ..report.no_baseline_document import AUDIT_SET_REPORT_SCHEMA_VERSION
-
-        return AUDIT_SET_REPORT_SCHEMA_VERSION
-    if name == "snapshot":
-        from ..serialization import SCHEMA_VERSION
-
-        return SCHEMA_VERSION
-    if name == "compare":
-        return REPORT_SCHEMA_VERSION
-    if name == "release":
-        return RELEASE_SCHEMA_VERSION
-    if name == "aggregate":
-        from ..workflows.aggregate import AGGREGATE_SCHEMA_VERSION
-
-        return AGGREGATE_SCHEMA_VERSION
-    if name == "build-output":
-        from ..buildsource.build_output import BUILD_OUTPUT_SCHEMA
-
-        return BUILD_OUTPUT_SCHEMA
-    # The *highest* of the three conditional stamps, not the base
-    # RUN_PLAN_SCHEMA -- a run-plan.json declares one of
-    # RUN_PLAN_SCHEMA/`_GATE`/`_SKIPPED` depending on whether it carries a
-    # `gate` block or a `skipped` block, so there is no single fixed "the"
-    # version this artifact always emits. The highest version abicheck can
-    # produce is the truthful answer a doc generator needs to be prepared to
-    # parse, not a lower, conditionally-emitted one (Codex review; raised to
-    # v3 with plan slice 7r's `skipped` block, since a registry still saying
-    # v2 tells a consumer it need only support v2 against a build that can
-    # emit v3).
-    from ..buildsource.run_plan_schema import RUN_PLAN_SCHEMA_SKIPPED
-
-    return RUN_PLAN_SCHEMA_SKIPPED
+    return current_artifact_version(
+        name,
+        report_version=REPORT_SCHEMA_VERSION,
+        release_version=RELEASE_SCHEMA_VERSION,
+    )
 
 
 __all__ = [

@@ -69,7 +69,10 @@ acknowledgment" invariant). Acknowledgment is recorded through the
 identical ledger primitive suppression already uses
 (`DispositionLedger.resolve_acknowledgments`, `DispositionRecord.
 acknowledged_by` — a D2 overlay attribute, exactly like `reclassified_by`,
-never a seventh terminal disposition), surfaced in the `disposition_audit`
+never a seventh terminal disposition; the resolver is
+`abicheck/policy/disposition_acknowledgment.py`'s `resolve_acknowledgments`,
+called by the ledger close in `abicheck/policy/disposition_close.py`'s
+`finalize_ledger`), surfaced in the `disposition_audit`
 report block (schema 3.10: `acknowledged_total`/`acknowledgments`) the same
 way reclassification already is. D6's additions review gate
 (`abicheck/policy/acknowledgment_gate.py`) is a policy file `acknowledgment:`
@@ -103,6 +106,35 @@ member's contribution with `max`; `CompareRequest.acknowledgments_path`/
 `acknowledgment_unacknowledged_additions` carry both settings. See
 [Change acknowledgment](../../use/acknowledgments.md) for the user-facing
 format and gate contract.
+
+**Break gate, matching strictness, and the remaining surfaces (2026-10-20,
+the ADR-067 P8 slice).** An acknowledged *break* now has an explicit gate
+decision, the one D5 left to policy: `acknowledgment.breaks: gate|accept`
+(`abicheck/model/acknowledgment_policy.py`, carried on `AcknowledgmentPolicy`,
+resolved once by `workflows/acknowledgment_inputs.py`). `gate` (default) keeps
+today's behaviour: the record is an overlay and the exit code is what the break
+alone decides. `accept` records an acknowledged gating break as `non_gating`
+under the `acknowledgment` application point
+(`abicheck/policy/acknowledgment_breaks.py`) and drops it from the population
+the compatibility exit is decided over; the verdict, the changes list and the
+release recommendation are unchanged, and only that finding moves, so a sibling
+break on the same run still gates. Matching is strict: a `symbol` record must
+name a `change_kind` (`PolicyError` otherwise, G2); a record that matches more
+than one change in a run is `AmbiguousAcknowledgmentError` (G3); an unscoped
+record and an expired record each produce a warning, and an expired record
+never matches. The surfaces are `compare --acknowledgments FILE` (overrides
+`acknowledgment.file`) and the Action's `acknowledgments` input, both over the
+same resolver, with `CompareRequest.acknowledgment_breaks` and
+`checker.compare(acknowledgment_breaks=...)` for the typed API. Trust: a
+discovered `.abicheck.yml` cannot supply `breaks`, and the Action's overlay
+builder strips `acknowledgment.file` and `breaks` from a discovered document
+(G5: a pull-request-planted records file had been reaching the explicit
+`--config` overlay). Provenance on `pull_request` is the existing
+`protect-committed-baseline` reusable check, documented in the user guide. The
+capability reachability invariant (`tests/test_policy_capability_reachability.py`)
+keeps each policy capability reachable from every front end that claims it.
+Not in this slice: unused/expired acknowledgment rows in `disposition_audit`
+(owned by the audit workstream), and the base/head policy delta (S4).
 
 **Owner (2026-10, behavior-preserving refactor).** D1's "record before
 disposing" is now owned by one module rather than by caller discipline:
@@ -421,3 +453,108 @@ preserving the audit row; a policy widened in a PR; a baseline overwritten;
 report/CLI/API/Action parity. Properties: policy and view changes never
 mutate the raw fact/change set; audit counts conserve normalized changes
 and never count matched rules as separate removals.
+
+## Addendum (2026-10-20): configured-rule inventory and the unused-rules gate
+
+*Amends D3 and adds a gate. The decisions above are not edited in place.*
+
+**Problem.** Every audit aggregate was a projection of the disposition
+*records*, so a rule that disposed of no finding was absent from
+`disposition_audit`: a zero-match suppression, a `reclassify:` rule that
+matched nothing, an acknowledgment that covered nothing. A rule whose selectors
+matched a finding an earlier rule had already claimed was also absent. "Record
+before disposing" held for findings but not for the rules configured to act on
+them.
+
+**Rule id (D3).** A rule's `rule_id` is its optional `id:` when the document
+states one, and otherwise its canonical rule identity
+(`abicheck/policy/rule_identity.py`). `label` is a grouping tag and `reason` is
+prose: both are reported as their own fields and are never the identifier.
+`id:` is accepted in both the suppression and the `reclassify:` grammars, must
+be a non-empty string, and must be unique within its document; a repeat is a
+`PolicyError`. `id:` never affects matching. Two byte-identical entries are two
+rules, and each row carries `entry_index`, its zero-based position in the file.
+A `reclassify:` rule's identity no longer embeds an enum repr (its `to_verdict`
+is covered by `to`).
+
+**Configured rules are recorded (D3's "may" becomes "must" for configured
+rules).** Every configured suppression, reclassify and acknowledgment rule has
+exactly one audit row, zero-count rows included, in the JSON
+`disposition_audit.rules`, `reclassifications` and `acknowledgments`
+(`abicheck/policy/rule_inventory.py`, `abicheck/policy/disposition_rules.py`).
+The rows are the one source for the human views, the `suppression_audit`
+stale list and the gate, so they cannot disagree. Human views collapse
+zero-count rows to one line; the JSON keeps every row.
+
+**Counting.** `matched_count` keeps its meaning: findings the rule *disposed
+of*. For a suppression, first-match credit. For a reclassify rule, the
+verdict-changing decider, which the JSON also names `changed_count`. For an
+acknowledgment, the findings it covered. `shadowed_count` is every other finding
+the rule's selectors matched: one an earlier rule claimed, or a no-op
+reclassification. `selector_matched_count` is their sum.
+
+**Status (per rule, 2026-10-21).** Each row carries one of: `active`
+(disposed of at least one finding); `shadowed_only` (matched, disposed of
+none); `expired` (past its `expires` date, with nothing disposed of); `unused`
+(matched nothing, and at least one detector that can produce one of the rule's
+change kinds ran); `not_evaluated` (matched nothing, and none of those detectors
+ran). The check runs in that order. A rule's candidate detectors are those that
+can produce its `kind`/`change_kind` selector; a rule with no kind selector can
+match any kind, so every detector that produces a kind is a candidate. A kind
+that no registered detector produces leaves its rule `not_evaluated`. This keeps
+D3's "absent is not removed": a rule is never `unused` unless a check that could
+have matched it ran. Acknowledgment rows take the same statuses; ambiguous-match
+handling is unchanged.
+
+**Which detectors can produce a rule's kind (resolved 2026-10-21).** The status
+above was first decided globally: any refused detector made every unmatched
+rule `not_evaluated`, so `unused` was reported only when every detector ran.
+Detectors do not declare their kinds in the registry, so the mapping is derived
+once, from the source, into `abicheck/policy/detector_kind_map.py`
+(`scripts/gen_detector_kind_map.py`). For each registered detector it lists the
+`ChangeKind` values its function reaches through first-party calls and
+references, and it lists the kinds no detector reaches. `tests/test_detector_kind_map.py`
+fails on drift, on a missing detector or kind, and on any kind a detector emits
+on the controlled mutation catalogue that its entry does not credit. The map is
+an over-approximation where the walk cannot resolve a call, so it errs toward
+`unused`. A refused detector no longer affects a rule it cannot have checked.
+The ELF-only comparison that prompted this now reads a stale symbol-kind rule
+as `unused`, and a DWARF-only kind as `not_evaluated`.
+
+**The `unused_rules` gate (D6's pattern).** A top-level policy key
+`unused_rules: allow|warn|block` (default `allow`, so no existing run changes)
+and no command-line flag (the former `--fail-on-unused-rules` was removed; the
+policy key is the only setting). `block` contributes `1` when at least one
+configured rule has status `unused`. It is a fourth `0`/`1` exit axis folded with `max`
+(`ExitDecision.unused_rules_contribution`, reason `unused_rules`), so it never
+lowers a `2`, `4`, `7`, `8` or `16`, and it never changes what was observed
+(`abicheck/policy/unused_rules_gate.py`). Only the `unused` status triggers it.
+A scalar `compare` evaluates its own rules. For a directory or package release
+the gate is evaluated over the union of members: a member could evaluate a rule
+when its status is anything but `not_evaluated`. A rule is unused for the release
+only when every member that could evaluate it left it unused, and at least one
+could. A member that could not evaluate it is ignored. The release audit row
+folds with the same rule (`fold_rule_status`), so the gate and the row agree. The
+strictest member mode applies.
+
+**Schema.** Report schema 6.3 (`abicheck/schemas/__init__.py`): the row fields
+above, `disposition_audit.unused_rules_review` and
+`exit.unused_rules_contribution`. `suppression_audit.stale_rules` is now a
+projection of the same inventory and lists rule ids. Two changes are not purely
+additive and are in the changelog: a configured rule with no finding now appears
+in `rules`, `reclassifications` and `acknowledgments`, so a consumer that assumed
+non-empty rows must tolerate zero-count rows; and a reclassify rule's `rule_id`
+is its `id:` or canonical identity instead of its label or reason.
+
+**Reclassification's per-finding display label is unchanged.** The
+`reclassified_by` field on a finding keeps its label-or-reason-or-verdict value.
+The audit keys reclassify rows on the configured rule, not on that display
+string.
+
+**Still open.** A kind that a pipeline step (not a registered detector) emits,
+such as `inline_body_changed`, reads `not_evaluated` even when that step ran,
+because no detector run can be credited with it. Recording pipeline steps as
+producers would need the same per-step evaluation record, and is not decided
+here. The row's optional list of candidate detectors that did not run is not
+added to the JSON report. The acknowledgment `breaks: gate|accept` policy is
+owned by its own change and is not decided here.

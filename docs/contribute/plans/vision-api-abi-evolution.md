@@ -364,17 +364,26 @@ ignore rule is not an acknowledgment" invariant); the additions review gate
 fourth orthogonal exit axis, inside `ExitDecision` since 2026-10 and loaded
 by `compare` (single-pair and directory/package) and the typed `CompareRequest` from `.abicheck.yml`'s `acknowledgment:` block); acknowledgment
 recorded through the same ledger primitive suppression/reclassification
-already use (`DispositionLedger.resolve_acknowledgments`,
+already use (`abicheck/policy/disposition_acknowledgment.py`'s
+`resolve_acknowledgments`, called from the ledger close,
 `DispositionRecord.acknowledged_by`); shared record ids with B
 (`Acknowledgment.record_id`'s `component`/`baseline`/`candidate` scheme
 matches `workflows.history.HistoryEntry.version`'s own labels, without
 waiting on B-S2). Report schema 3.9 -> 3.10 (additive: `disposition_audit`
 gains `acknowledged_total`/`acknowledgments`/
 `unacknowledged_additions_review`). Engine-level wiring only
-(`checker.compare(acknowledgments=...)`, the CLI exit-code fold) — no
-native `compare`/`scan` CLI flag to load an acknowledgment document from a
-path yet; that front-end surface is a follow-up. S4: policy-delta and
-suppression-growth warnings.
+(`checker.compare(acknowledgments=...)`, the CLI exit-code fold). The front-end
+surface has since landed (2026-10-20, ADR-067 P8): `compare --acknowledgments
+FILE` and the Action's `acknowledgments` input, both over the one resolver in
+`workflows/acknowledgment_inputs.py`; `acknowledgment.breaks: gate|accept`
+(an acknowledged break leaves the exit code only under `accept`, and only for
+that finding); strict matching (`symbol` requires `change_kind`, one finding
+per record per run, unscoped and expired records warn); the Action's overlay
+builder no longer launders a discovered records file into the explicit
+`--config` (G5). The capability reachability invariant is
+`tests/test_policy_capability_reachability.py`. S4: policy-delta and
+suppression-growth warnings. Unused and expired acknowledgment rows in
+`disposition_audit` are owned by the audit workstream, not this slice.
 
 ### D. Optional prebuilt-consumer lifecycle — amend ADR-005/047/052/057, extend G29/G30
 

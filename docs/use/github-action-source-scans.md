@@ -476,7 +476,9 @@ jobs:
       # -R is required here: gh normally infers the repo from a local git
       # checkout, but this job only downloads artifacts, never checks out
       # the repo, so gh has no repository context to infer from.
-      - run: gh release upload ${{ github.ref_name }} baselines/*.abicheck.json --clobber -R ${{ github.repository }}
+      # No --clobber: a published baseline is write-once; a re-run for the same
+      # tag fails rather than replacing it (see baseline-storage.md).
+      - run: gh release upload ${{ github.ref_name }} baselines/*.abicheck.json -R ${{ github.repository }}
         env: { GH_TOKEN: ${{ secrets.GITHUB_TOKEN }} }
 ```
 

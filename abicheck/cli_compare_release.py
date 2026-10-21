@@ -52,10 +52,9 @@ from .cli_options import (
     verbose_option,
 )
 from .errors import (
-    ReleaseOperandContentError,
-    ReleaseOperandUsageError,
     SnapshotError,
 )
+from .frontends.cli.release_compare_request import execute_release_compare_checked
 from .frontends.cli.release_member_reporter import CliReleaseReporter
 from .frontends.cli.release_report import render_release_summary
 from .frontends.cli.runtime import _setup_verbosity, _write_or_echo
@@ -67,14 +66,12 @@ from .report.release_public_surface_section import assemble_release_public_surfa
 from .workflows.release_compare import (
     ReleaseCompareOptions,
     ReleaseCompareOutcome,
-    execute_release_compare,
 )
 
 if TYPE_CHECKING:
     from .compile_context import CompileContext
     from .environment_matrix import EnvironmentMatrix
     from .pack_application import PackApplication
-    from .workflows.release_request import ReleaseComparePlan
 
 
 #: The formats the release fan-out actually produces.
@@ -424,6 +421,7 @@ def compare_release_cmd(
     project_policy_overrides: dict[Any, Any] | None = None,
     acknowledgments_path: Path | None = None,
     acknowledgment_unacknowledged_additions: str | None = None,
+    acknowledgment_breaks: str | None = None,
     # ADR-020b / ADR-068 D5: resolved once by the caller
     # (`cli_compare_helpers.run_compare`'s `resolved_cfg.deployment`, the
     # same place `collapse_versioned_symbols`/`public_header_dirs` above are
@@ -602,7 +600,7 @@ def compare_release_cmd(
                 output_dir.mkdir(parents=True, exist_ok=True)
 
             severity_config = plan.gate.severity
-            outcome = _execute_release_compare(
+            outcome = execute_release_compare_checked(
                 plan,
                 ReleaseCompareOptions(
                     old_version=old_version,
@@ -627,6 +625,7 @@ def compare_release_cmd(
                     exclude_headers=exclude_headers,
                     acknowledgments_path=acknowledgments_path,
                     acknowledgment_unacknowledged_additions=acknowledgment_unacknowledged_additions,
+                    acknowledgment_breaks=acknowledgment_breaks,
                     support_promise=support_promise,
                     manifest_path=manifest_path,
                     bundle_system_providers=bundle_system_providers,
@@ -664,25 +663,6 @@ def compare_release_cmd(
             )
         finally:
             _cleanup_temp_dirs(_temp_dir_paths)
-
-
-def _execute_release_compare(
-    plan: ReleaseComparePlan,
-    options: ReleaseCompareOptions,
-    *,
-    reporter: CliReleaseReporter,
-) -> ReleaseCompareOutcome:
-    """:func:`abicheck.workflows.release_compare.execute_release_compare`,
-    with its typed operand errors (a bad ``--manifest``, an undecodable
-    embedded manifest, an unwritable ``--bundle-facts-out``, a one-sided
-    probe matrix) turned into the ``click`` types -- and so the exit codes
-    and messages -- this command always produced."""
-    try:
-        return execute_release_compare(plan, options, reporter=reporter)
-    except ReleaseOperandUsageError as exc:
-        raise click.UsageError(str(exc)) from exc
-    except ReleaseOperandContentError as exc:
-        raise click.ClickException(str(exc)) from exc
 
 
 def _render_release_outcome(

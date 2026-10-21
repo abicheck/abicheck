@@ -38,6 +38,7 @@ from abicheck.policy.disposition_close import (
 )
 from abicheck.policy.disposition_ledger import Disposition, RuleProvenance
 from abicheck.policy.disposition_types import DispositionRecord
+from abicheck.policy.rule_inventory import RuleAuditRow, RuleRef
 from abicheck.report.disposition_audit import (
     _REVIEW_RULE_CAP,
     DispositionAudit,
@@ -50,7 +51,29 @@ from abicheck.report.disposition_audit import (
 from abicheck.workflows.aggregate.disposition_axis import disposition_audit_block
 
 
+def _row(kind: str, index: int, rule_id: str, count: int) -> RuleAuditRow:
+    """One configured-rule row, as the audit now carries them (P1)."""
+    return RuleAuditRow(
+        ref=RuleRef(kind, "policy.yaml", index),
+        rule_id=rule_id,
+        label=None,
+        reason=None,
+        expires=None,
+        status="active" if count else "unused",
+        matched_count=count,
+        shadowed_count=0,
+        selector_matched_count=count,
+    )
+
+
 def _audit(**kwargs: object) -> DispositionAudit:
+    """A :class:`DispositionAudit` from the pre-P1 tuple spellings.
+
+    ``rules`` takes ``(RuleProvenance, count)`` pairs, ``reclassifications``
+    ``(rule_id, count)`` and ``acknowledgments`` ``(record_id, count)``; they
+    are converted to the row shape here, so a test states its scenario in the
+    same terms it always did.
+    """
     base: dict[str, object] = {
         "detected_total": 0,
         "effective_total": 0,
@@ -59,6 +82,32 @@ def _audit(**kwargs: object) -> DispositionAudit:
         "not_evaluated_detectors": (),
     }
     base.update(kwargs)
+    rules = base["rules"]
+    if rules and not isinstance(rules[0], RuleAuditRow):  # type: ignore[index]
+        base["rules"] = tuple(
+            RuleAuditRow(
+                ref=RuleRef("suppression", prov.source_file, index),
+                rule_id=str(prov.rule_id),
+                label=prov.label,
+                reason=prov.reason,
+                expires=None,
+                status="active" if count else "unused",
+                matched_count=count,
+                shadowed_count=0,
+                selector_matched_count=count,
+            )
+            for index, (prov, count) in enumerate(rules)  # type: ignore[union-attr]
+        )
+    for field_name, kind in (
+        ("reclassifications", "reclassify"),
+        ("acknowledgments", "acknowledgment"),
+    ):
+        pairs = base.get(field_name) or ()
+        if pairs and not isinstance(pairs[0], RuleAuditRow):  # type: ignore[index]
+            base[field_name] = tuple(
+                _row(kind, index, str(rule_id), count)
+                for index, (rule_id, count) in enumerate(pairs)  # type: ignore[union-attr]
+            )
     return DispositionAudit(**base)  # type: ignore[arg-type]
 
 
@@ -120,7 +169,9 @@ class TestFoldMergesDuplicateIdentitiesAcrossMembers:
         )
         folded = fold_disposition_audits([a, b])
         assert folded.reclassified_total == 3
-        assert folded.reclassifications == (("r1", 3),)
+        assert [(r.rule_id, r.matched_count) for r in folded.reclassifications] == [
+            ("r1", 3)
+        ]
         assert folded.scope_reasons == (("proven_out_of_contract", 4),)
         # Deduplicated by name, not doubled.
         assert folded.not_evaluated_detectors == (det,)
@@ -133,7 +184,7 @@ class TestFoldMergesDuplicateIdentitiesAcrossMembers:
         folded = fold_disposition_audits(
             [_audit(detected_total=21, counts=(("suppressed", 21),), rules=rules)]
         )
-        assert folded.rules == rules
+        assert [row.rule_id for row in folded.rules] == [f"rule-{i}" for i in range(6)]
         assert [row["matched_count"] for row in folded.to_dict()["rules"]] == [
             1,
             2,

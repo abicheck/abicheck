@@ -39,7 +39,9 @@ from ..change_registry import REGISTRY
 from ..checker_types import DiffResult
 from ..model.change import Change
 from ..model.change_catalog.kinds import HasKind
+from ..policy.classification import evidence_status_for_result, impact_for
 from ..policy.evaluate import effective_kind_sets
+from ..policy.reclassify import active_reclassify_rules
 from ..policy.severity import (
     IssueCategory,
     KindSets,
@@ -119,6 +121,47 @@ def reclassified_by_label(
     if rule is None:
         return None
     return str(rule.label or rule.reason or rule.to_verdict.value)
+
+
+def impact_text_for(change: object, evidence_tiers: Sequence[str] = ()) -> str:
+    """The per-change impact text: the kind's registry impact, caveated by
+    the evidence the run actually had for it.
+
+    ``evidence_tiers`` lets an UNATTRIBUTED finding's impact text carry the
+    same evidence caveat the JSON/Markdown views already do. Empty for a
+    change with no kind (a stub or a non-``Change`` value).
+    """
+    kind = getattr(change, "kind", None)
+    if not kind:
+        return ""
+    evidence_status = evidence_status_for_result(cast(HasKind, change), evidence_tiers)
+    return impact_for(kind, evidence_status) or ""
+
+
+def active_reclassify_labels(
+    policy_file: object | None, today: date | None
+) -> tuple[str, ...]:
+    """The ``reclassify:`` rules still in effect on *today*, as display text.
+
+    Expired rules are dropped rather than disclosed as though they applied:
+    the disclosure states the run's active policy, not every rule the file
+    ever named.
+    """
+    rules = getattr(policy_file, "reclassify", None) if policy_file else None
+    if not rules:
+        return ()
+    return tuple(rule.describe() for rule in active_reclassify_rules(rules, today))
+
+
+def kind_sets_for_result(result: DiffResult) -> KindSets:
+    """The effective kind sets a projection resolves its verdicts against.
+
+    Projections read this seam rather than ``policy.evaluate`` directly, so a
+    renderer-adjacent compute module can state its dependence on policy in
+    one place. The resolution itself is unchanged: this returns exactly
+    :func:`~abicheck.policy.evaluate.effective_kind_sets` for *result*.
+    """
+    return effective_kind_sets(result)
 
 
 def build_report_findings(

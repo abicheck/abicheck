@@ -797,8 +797,8 @@ class TestTagTypeRenamedDetector:
         assert f.old_value == "mylib::method::brute_force"
         assert f.new_value == "mylib::method::search_brute"
         assert f.affected_symbols and len(f.affected_symbols) == 1
-        assert f.public_reachable is True
-        assert f.reachability_kind == "direct_public_symbol"
+        assert f.public_reachable is False  # ADR-084: no header observation
+        assert f.reachability_kind is None
 
     def test_no_symbol_evidence_no_finding(self) -> None:
         old_tag = RecordType(name="a::tagA", kind="struct", size_bits=8)

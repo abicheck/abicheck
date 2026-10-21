@@ -28,6 +28,10 @@ are covered below.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
+import pytest
+
 from abicheck.checker_policy import EvidenceStatus, evidence_status_for_result
 from abicheck.compare.namespace_move import (
     emit_namespace_move_batches,
@@ -38,6 +42,7 @@ from abicheck.diff_symbols_renames import (
     find_prefix_rename_pairs,
 )
 from abicheck.model import Function
+from abicheck.model.change_catalog.kinds import ChangeKind
 from abicheck.model.elf_facts import SymbolBinding
 
 
@@ -272,3 +277,18 @@ class TestRealisticMangledKeyVsDemangledNameMismatch:
             evidence_status_for_result(changes[0], ["header", "elf"])
             is EvidenceStatus.UNATTRIBUTED
         )
+
+
+@pytest.mark.parametrize(
+    "kind",
+    [ChangeKind.FUNC_REMOVED, ChangeKind.VAR_REMOVED, ChangeKind.SYMBOL_RENAMED_BATCH],
+)
+def test_an_object_with_no_symbol_binding_attribute_reads_as_unattributed(
+    kind: ChangeKind,
+) -> None:
+    """A ``HasKind`` with no ``symbol_binding`` attribute at all is the same
+    "no observed symbol-table entry" signal as an unset one -- not an error."""
+    change = SimpleNamespace(kind=kind)
+    assert evidence_status_for_result(change, ["elf"]) is EvidenceStatus.UNATTRIBUTED
+    # Off-ELF the binding is never read, so the kind-level answer stands.
+    assert evidence_status_for_result(change, ["pe"]) is EvidenceStatus.ARTIFACT_PROVEN

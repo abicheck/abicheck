@@ -18,7 +18,7 @@
 from __future__ import annotations
 
 import functools
-from collections.abc import Callable, Container, Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from typing import Any
 
 from .compare import export_transition as _export_transition
@@ -62,11 +62,11 @@ from .compare.parameter_facts import (
 )
 from .compare.public_surface import (
     is_extern_c_function,
-    observed_exports,
     reconciled_function_surfaces,
     reconciled_variable_surfaces,
     should_filter_transitive_runtime_symbols,
 )
+from .compare.template_instance_absence import TemplateInstanceAbsence
 from .compare.type_map_pair import TypeMap, type_map_key
 from .detector_registry import registry
 from .diff_cxx_rules import (
@@ -373,9 +373,9 @@ def _match_old_function(
     new_all: dict[str, Function],
     matched_by_name: set[str],
     elf_only_mode: bool,
+    template_absence: TemplateInstanceAbsence,
     params_unconfirmed: bool = False,
     is_llp64: bool = False,
-    old_exported_symbols: Container[str] = frozenset(),
     check_signature: Callable[..., list[Change]] | None = None,
 ) -> list[Change]:
     """Classify a single old function: matched by mangled, extern-C fallback, or removed.
@@ -437,6 +437,9 @@ def _match_old_function(
         matched_by_name.add(f_old.name)
         return result
 
+    decided = template_absence.changes_for(mangled, f_old, elf_only_mode)
+    if decided is not None:
+        return decided
     return [_check_removed_function(mangled, f_old, new_all, elf_only_mode)]
 
 
@@ -527,11 +530,8 @@ def _diff_functions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     # data-model-dependent integer ABI-equivalence checks below.
     is_llp64 = "pe" in (getattr(old, "platform", None), getattr(new, "platform", None))
     changes: list[Change] = []
-    # Computed once per comparison, not per declaration: the removal path
-    # cross-checks each candidate against the OLD artifact's own export
-    # table (see `_match_old_function`'s `old_exported_symbols`).
-    _old_exported_functions = observed_exports(old, FUNCTION_SYMBOL_TYPES)
-    _new_exported_functions = observed_exports(new, FUNCTION_SYMBOL_TYPES)
+    # Once per comparison: see compare/template_instance_absence.py.
+    template_absence = TemplateInstanceAbsence(new)
     old_map, _reconciled_new_functions = reconciled_function_surfaces(old, new)
     # ADR-049 Phase 2: the new side's matching index. A ``Mapping`` over the
     # same keys ``public_functions`` returns -- so every loop below is
@@ -597,9 +597,9 @@ def _diff_functions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                 new_all,
                 matched_by_name,
                 elf_only_mode,
+                template_absence,
                 params_unconfirmed,
                 is_llp64,
-                old_exported_symbols=_old_exported_functions,
                 check_signature=check_signature,
             )
         )

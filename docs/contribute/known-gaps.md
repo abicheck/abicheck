@@ -59,6 +59,10 @@ Each entry's status line says what is still open. A PARTIAL entry's write-up als
 
 ### False-clean risk
 
+#### A binary-gate demotion does not state a coverage gap (ADR-084)
+
+**Status (2026-10-21): OPEN.** When the ADR-084 gate demotes a binary-only source-level claim, the verdict narrows and the finding records its rule, but the run's coverage warnings do not change. `tests/test_family_f1_evidence_ablation.py` requires that a verdict which narrows from broken to clean because a fact became unknown carry a stated gap: lower confidence, a new coverage warning, a changed analysis-assurance record, or a higher contract-coverage floor. The demotion currently gives none of these. The fix is a coverage warning naming the unbacked claim, appended where `DiffResult.coverage_warnings` is assembled in `checker.py`. That file is at its no-growth ratchet (1407 lines), so adding it needs a responsibility moved out of `checker.py` first, not a raised baseline. The F1 cell `pimpl_inline_body_renamed` / `RecordType.source_header_fact` is the one that fails.
+
 #### A refused clang AST still leaves the header type pass collected (2026-10-17)
 
 **Status (2026-10-17): OPEN, residual.** A malformed or failed clang AST now degrades the call, override, template, callback and virtual-dispatch passes. The header type pass is still stamped from the snapshot's own declarations (the flat fallback in `header_graph.build_header_only_graph`), so its AST-only edges (`DECL_HAS_TYPE` on parameters and variables, `DECL_REFERENCES_DECL`) read as collected with role coverage unstamped. A real clang parse failure leaves the same state today. Degrading the type pass whenever `ast_failure` is set would close it, but it changes the existing clang-failure behaviour too and needs its own review.
@@ -172,6 +176,14 @@ Each entry's status line says what is still open. A PARTIAL entry's write-up als
 
 ### False-positive risk
 
+#### Two BINARY_GATED detectors still assert public reachability from the export population (ADR-084)
+
+**Status (2026-10-21): OPEN.** ADR-084 made the verdict of every `BINARY_GATED` kind depend on observed header or source evidence, and removed the hard-coded `public_reachable=True` from `std_reexport_removed` and `tag_type_renamed`. Two detectors in the same bucket still set the tags from the binary export population: `unspecified_return_now_named` (`diff_templates.py`, the `public_reachable=True` set on the finding built around line 1160, where the comment says `_index()` filters to `Visibility.PUBLIC`) and `experimental_removed_without_replacement` (`diff_namespaces.py`, `_emit_experimental_change`, `public_reachable=subject_is_public`, with `subject_is_public` derived from export at about lines 977 and 996). Their verdict is correct, because the gate ignores tags, but a consumer reading `public_reachable`/`reachability_kind` on these two kinds is told the subject is proven public when only the export table shows it. Fix by building them with `public_reachability(has_observed_source_contract_evidence(...))` as `compare/namespace_shape_detectors.py` now does.
+
+#### DWARF-level BINARY_GATED kinds are classified by reading the producers, not probed
+
+**Status (2026-10-21): OPEN.** `policy/binary_gated_contract.py` `BINARY_GATED` includes 19 DWARF-level kinds (`type_became_abstract`, `field_renamed`, `ctor_explicit_added`, `func_became_inline`, ...) whose producers read DWARF-level type facts. Only the five kinds the ADR-084 probes reached (`mandatory_template_param_added`, `inline_function_removed`, `type_removed`, `experimental_removed_without_replacement`, `unspecified_return_now_named`) were reproduced at binary depth. The gate is safe for the rest in one direction: a kind placed in `BINARY_GATED` by mistake is only demoted in a binary-only run, and a header-only kind could not have been produced there anyway. The gap runs the other way. A kind placed in `HEADER_OR_SOURCE_GATED` that a binary-only run can in fact produce keeps a false `API_BREAK`. The `NON_BINARY_REASONS` rows for `param_default_value_removed`, `constant_changed` and `constant_removed` are the ones to probe first. Probe each DWARF-level kind with a binary-only fixture, and move any that is header-only.
+
 #### `--lang c++` explicitness not threaded to remaining fan-out callers (l0_export_delta/appcompat); dump/compare fixed
 
 **Status (re-verified 2026-10-09 at `456989f`): PARTIAL.** Closed for dump/compare CLI and the DumpRequest/CompareRequest API. `lang_explicit` is threaded through frontends/cli/commands/dump.py, compare.py, workflows/dump/{native,pe,macho}.py and workflows/artifact/*, and release_member_request.py now carries it too. The scan follow-up is moot (scan was deleted). appcompat and l0_export_delta are unverified. l0_export_delta.py takes a plain `lang: str` with no lang_explicit, so that follow-up looks still open.  
@@ -216,6 +228,11 @@ Each entry's status line says what is still open. A PARTIAL entry's write-up als
 
 **Status (re-verified 2026-10-09 at `456989f`): OPEN.** This is a pointer stub to export-loss-ownership-root-cause.md. It still lists two open items: is_inline is used as a proxy, and there is no Itanium type decoder for specialization owners. Not re-verified in code beyond that.  
 `false-positive` — Export-loss ownership still uses `is_inline` as a proxy for an inline copy and has no Itanium decoder for template-specialization owners; see `export-loss-ownership-root-cause.md`. [Full write-up](known-gaps/export-loss-ownership-inline-copy-proxy-and-template.md)
+
+#### Class-template specialization members a new header stops enumerating keep `inline_function_removed` and `type_removed` (partly fixed)
+
+**Status (2026-10-20): PARTIAL.** A template instance whose primary template is still declared once in the new header graph is no longer reported as `func_removed`/`inline_function_removed`; its export change is `func_visibility_changed`, or nothing (`compare/template_instance_absence.py`). Still open: the implicit members of a specialization the new header no longer instantiates, and the specialization's own `type_removed`.  
+`false-positive` — A class-template specialization that the new header stops instantiating still reports its implicit members as `inline_function_removed` and the specialization as `type_removed`, although the template is still declared. [Full write-up](known-gaps/class-template-specialization-members-a-new-header-stops-enumerating.md)
 
 #### MinGW toolchain headers are not classified as dependencies (2026-09-23)
 
@@ -432,6 +449,7 @@ Approaches that were tried, measured or reviewed and did not help. Their value i
 | Approach | Measured result | Evidence caveat | Write-up |
 |---|---|---|---|
 | Demote a vanished weak/vague-linkage export (`Function.is_inline`, then COMDAT membership) | Both proved a fact about the library's build, not that consumers own a copy; `extern template` breaks the second. Reverted twice. | — | [Linkage-blind removal — attempted twice, reverted twice. The evidence keeps proving something adjacent to the invariant](known-gaps/linkage-blind-removal-attempted-twice-reverted-twice-the.md) |
+| Treat a symbol the new binary still exports as not removed, with no declaration gate | Silences a plain function the header dropped while the binary still exports it (`ns::bar`), a real API removal that reports `func_removed` today. The gate on the primary template's declaration is what keeps it. | — | [Class-template specialization members a new header stops enumerating (partly fixed)](known-gaps/class-template-specialization-members-a-new-header-stops-enumerating.md) |
 | Demote stdlib closure instantiations as "unnameable" | Source nameability is not ABI compatibility; the fix was also dead code for its ELF-only case. Reverted. | — | [A third instance of the same shape (code-review report item 3): demoting a stdlib closure instantiation as "unnameable" — attempted, reverted](known-gaps/a-third-instance-of-the-same-shape-code-review-report-item-3.md) |
 | Per-finding evidence-provider downgrade for header-only layout findings | The suspected misattribution does not occur on either header backend; no fix applied. | Premise did not reproduce | [Evidence-provider model — investigated, found not to reproduce as described; no fix applied](known-gaps/evidence-provider-model-investigated-found-not-to-reproduce-as.md) |
 | L2 performance bottlenecks found by the full-CLI harness | Frame for the measurement-only perf rows below (`scripts/check_l2_cli_perf.py`). | — | [L2 performance bottlenecks found by the full-CLI harness (measured, not fixed)](known-gaps/l2-performance-bottlenecks-found-by-the-full-cli-harness.md) |
