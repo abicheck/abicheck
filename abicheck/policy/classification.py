@@ -67,7 +67,7 @@ from ..model.evidence_status import (
     is_cross_source_persistent,
 )
 from ..model.execution_cache import memoized
-from .binary_gated_contract import is_binary_gate_demoted
+from .binary_gate_marker import is_binary_gate_demoted
 
 # ---------------------------------------------------------------------------
 # Classification sets — DERIVED from change_registry.py (single source of truth)
@@ -444,18 +444,26 @@ def effective_category(
     # MagicMock test doubles whose attribute access auto-creates a truthy mock,
     # mirroring the ``frozen_namespace_violation`` guard in policy_file.
     override = getattr(change, "effective_verdict", None)
-    if isinstance(override, Verdict):
+    gated = is_binary_gate_demoted(change)
+    if isinstance(override, Verdict) and not gated:
         return override
     kind = change.kind
     if kind in breaking:
-        return Verdict.BREAKING
-    if kind in api_break:
-        return Verdict.API_BREAK
-    if kind in risk:
+        category = Verdict.BREAKING
+    elif kind in api_break:
+        category = Verdict.API_BREAK
+    elif kind in risk:
+        category = Verdict.COMPATIBLE_WITH_RISK
+    elif kind in compatible:
+        category = Verdict.COMPATIBLE
+    else:
+        return Verdict.BREAKING  # unclassified → fail-safe
+    # ADR-084: the binary gate caps a source-level claim it could not back. It
+    # lowers only the API_BREAK the policy left standing, so a policy that
+    # relaxed or escalated the kind decides the category as it always did.
+    if gated and category is Verdict.API_BREAK:
         return Verdict.COMPATIBLE_WITH_RISK
-    if kind in compatible:
-        return Verdict.COMPATIBLE
-    return Verdict.BREAKING  # unclassified → fail-safe
+    return category
 
 
 def excluded_from_verdict_as_persistent_hygiene(

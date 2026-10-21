@@ -342,8 +342,10 @@ def test_enum_rename_recommendation_follows_policy() -> None:
     # opt out of default public-header scoping (ADR-024 Phase 5) to exercise the
     # policy-aware recommender on the enum rename itself.
     strict = compare(old, new, policy="strict_abi", scope_to_public_surface=False)
-    assert strict.verdict is Verdict.API_BREAK
-    assert recommend_release(strict).bump is SemverBump.MAJOR
+    # No header observation: ADR-084 demotes the source-level rename, so the
+    # recommender no longer sees an API_BREAK.
+    assert strict.verdict is Verdict.COMPATIBLE_WITH_RISK
+    assert recommend_release(strict).bump is not SemverBump.MAJOR
 
     vendor = compare(old, new, policy="sdk_vendor", scope_to_public_surface=False)
     assert vendor.verdict is Verdict.COMPATIBLE

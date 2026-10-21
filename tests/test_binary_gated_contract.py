@@ -19,6 +19,8 @@ from pathlib import Path
 
 import pytest
 
+from abicheck.buildsource.pack import BuildSourcePack
+from abicheck.buildsource.source_abi import SourceAbiSurface, SourceEntity
 from abicheck.change_registry import API_BREAK_KINDS
 from abicheck.checker import compare
 from abicheck.compare.namespace_shape_detectors import _build_std_reexport_change
@@ -31,6 +33,7 @@ from abicheck.model.change_catalog.registry import Verdict
 from abicheck.model.evidence_status import EvidenceStatus, ReachabilityState
 from abicheck.model.fact import Fact
 from abicheck.model.source_contract_evidence import (
+    PUBLIC_SOURCE_VISIBILITIES,
     has_observed_source_contract_evidence,
 )
 from abicheck.policy.binary_gated_contract import (
@@ -178,7 +181,9 @@ def test_binary_only_run_does_not_keep_an_unbacked_api_break(kind: ChangeKind) -
 
     finding = _finding(result, kind)
     assert result.verdict != Verdict.API_BREAK
-    assert finding.effective_verdict == Verdict.COMPATIBLE_WITH_RISK
+    # The gate marks the finding; the verdict is a cap the policy resolves.
+    assert finding.effective_verdict is None
+    assert result.verdict == Verdict.COMPATIBLE_WITH_RISK
     assert finding.modulation_rule == BINARY_GATE_RULE_ID
     assert finding.modulation_reason
     # ADR-067: the demotion is recorded with its rule, not silently applied.
@@ -226,7 +231,8 @@ def test_unbacked_subject_is_demoted_even_when_another_declaration_is_backed() -
     )
 
     finding = _finding(result, ChangeKind.INLINE_FUNCTION_REMOVED)
-    assert finding.effective_verdict == Verdict.COMPATIBLE_WITH_RISK
+    assert finding.modulation_rule == BINARY_GATE_RULE_ID
+    assert result.verdict == Verdict.COMPATIBLE_WITH_RISK
 
 
 def test_a_header_observed_contract_without_an_export_keeps_the_api_break() -> None:
@@ -247,6 +253,56 @@ def test_a_header_observed_contract_without_an_export_keeps_the_api_break() -> N
 
     assert _finding(result, ChangeKind.TYPE_REMOVED).effective_verdict is None
     assert result.verdict == Verdict.API_BREAK
+
+
+def _source_pack_snapshot(visibility: str) -> AbiSnapshot:
+    """A binary-only snapshot whose embedded L4 source pack saw *SUBJECT*."""
+    pack = BuildSourcePack.empty(Path("."))
+    pack.source_abi = SourceAbiSurface(
+        reachable_inline_bodies=[
+            SourceEntity(
+                id="src:subject",
+                kind="inline",
+                qualified_name=SUBJECT,
+                visibility=visibility,
+            )
+        ]
+    )
+    return AbiSnapshot(
+        library="libsubject.so",
+        version="1",
+        from_headers=False,
+        build_source=pack,
+    )
+
+
+def test_a_public_header_source_entity_backs_the_removal() -> None:
+    """The L4 source pack parsed the public header; the binary alone could not."""
+    old = _source_pack_snapshot("public_header")
+    new = _snapshot(from_headers=False)
+    changes = [_claim(ChangeKind.INLINE_FUNCTION_REMOVED)]
+
+    assert demote_unproven_binary_api_breaks(changes, old, new) == []
+    assert changes[0].effective_verdict is None
+
+
+def test_a_private_header_source_entity_does_not_back_the_removal() -> None:
+    old = _source_pack_snapshot("private_header")
+    new = _snapshot(from_headers=False)
+    changes = [_claim(ChangeKind.INLINE_FUNCTION_REMOVED)]
+
+    demoted = demote_unproven_binary_api_breaks(changes, old, new)
+
+    assert demoted == changes
+    assert changes[0].effective_verdict is None
+    assert changes[0].modulation_rule == BINARY_GATE_RULE_ID
+
+
+def test_public_source_visibilities_are_the_linkers_public_set() -> None:
+    """The model leaf repeats the linker's set; this pins the two together."""
+    from abicheck.buildsource.source_link import _PUBLIC_VISIBILITY
+
+    assert PUBLIC_SOURCE_VISIBILITIES == _PUBLIC_VISIBILITY
 
 
 def test_an_unresolved_subject_in_a_header_run_is_not_demoted() -> None:
@@ -295,7 +351,7 @@ def test_a_binary_export_alone_does_not_keep_an_api_break(kind: ChangeKind) -> N
 
     result = compare(old, new, extra_changes=[_claim(kind)])
 
-    assert _finding(result, kind).effective_verdict == Verdict.COMPATIBLE_WITH_RISK
+    assert _finding(result, kind).effective_verdict is None
     assert result.verdict != Verdict.API_BREAK
 
 
@@ -325,6 +381,60 @@ def test_a_header_backed_api_break_keeps_its_source_contract_label() -> None:
     assert evidence_status_for_result(finding) is EvidenceStatus.SOURCE_CONTRACT
 
 
+@pytest.mark.parametrize(
+    ("policy", "expected"),
+    [
+        # A named policy that relaxes the kind keeps its answer: the gate caps
+        # an API_BREAK the policy left standing, nothing else.
+        ("sdk_vendor", Verdict.COMPATIBLE),
+        ("strict_abi", Verdict.COMPATIBLE_WITH_RISK),
+    ],
+)
+def test_the_gate_caps_policy_verdicts_instead_of_overriding_them(
+    policy: str, expected: Verdict
+) -> None:
+    """Policy decides acceptance: the gate must not outrank a policy's own answer."""
+    old = _snapshot(_binary_only_function(SUBJECT, SUBJECT_MANGLED), from_headers=False)
+    new = _snapshot(_binary_only_function(SUBJECT, SUBJECT_MANGLED), from_headers=False)
+
+    result = compare(
+        old,
+        new,
+        extra_changes=[_claim(ChangeKind.ENUM_MEMBER_RENAMED)],
+        policy=policy,
+        scope_to_public_surface=False,
+    )
+
+    assert result.verdict == expected
+    assert (
+        _finding(result, ChangeKind.ENUM_MEMBER_RENAMED).kind
+        is ChangeKind.ENUM_MEMBER_RENAMED
+    )
+
+
+def test_a_policy_file_escalation_is_not_lowered_by_the_gate() -> None:
+    """An explicit ``BREAKING`` override on a binary-gated kind survives a binary-only run."""
+    from abicheck.policy_file import PolicyFile
+
+    old = _snapshot(_binary_only_function(SUBJECT, SUBJECT_MANGLED), from_headers=False)
+    new = _snapshot(_binary_only_function(SUBJECT, SUBJECT_MANGLED), from_headers=False)
+    policy_file = PolicyFile(
+        base_policy="strict_abi",
+        overrides={ChangeKind.TYPE_REMOVED: Verdict.BREAKING},
+    )
+
+    result = compare(
+        old,
+        new,
+        extra_changes=[_claim(ChangeKind.TYPE_REMOVED)],
+        policy_file=policy_file,
+        scope_to_public_surface=False,
+    )
+
+    assert _finding(result, ChangeKind.TYPE_REMOVED).effective_verdict is None
+    assert result.verdict == Verdict.BREAKING
+
+
 def test_a_non_binary_kind_is_never_demoted() -> None:
     """The gate is for BINARY_GATED kinds only; a header-gated kind passes through."""
     old = _snapshot(_binary_only_function(SUBJECT, SUBJECT_MANGLED), from_headers=False)
@@ -337,7 +447,7 @@ def test_a_non_binary_kind_is_never_demoted() -> None:
     assert result.verdict == Verdict.API_BREAK
 
 
-def test_the_gate_mutates_verdict_only_and_never_drops_a_finding() -> None:
+def test_the_gate_marks_and_never_drops_a_finding() -> None:
     old = _snapshot(_binary_only_function(SUBJECT, SUBJECT_MANGLED), from_headers=False)
     new = _snapshot(_binary_only_function(SUBJECT, SUBJECT_MANGLED), from_headers=False)
     claim = _claim(ChangeKind.TYPE_REMOVED)
@@ -594,5 +704,5 @@ def test_castxml_records_carry_the_header_observation(tmp_path: Path) -> None:
         for d in (*old_b.declarations.functions, *old_b.declarations.types)
     )
     binary_removal = _finding(compare(old_b, new_b), ChangeKind.TYPE_REMOVED)
-    assert binary_removal.effective_verdict == Verdict.COMPATIBLE_WITH_RISK
+    assert binary_removal.effective_verdict is None
     assert binary_removal.modulation_rule == BINARY_GATE_RULE_ID

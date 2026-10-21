@@ -1,7 +1,7 @@
 # ADR-084: A Binary-Depth Run May Not Keep a Source-Level Break It Cannot Back
 
 **Date:** 2026-10-21
-**Status:** Accepted — implemented. The exit-code change for header-less runs was approved by the maintainer. Three follow-ups are recorded in `docs/contribute/known-gaps.md` (see "Not done" below).
+**Status:** Accepted — implemented. The exit-code change for header-less runs was approved by the maintainer. The follow-ups are recorded in "Not done" below and in `docs/contribute/known-gaps.md`.
 
 Governed by: [ADR-009](009-verdict-system-and-exit-codes.md) (verdict and exit codes), [ADR-028](028-source-build-evidence-pack.md) (artifact evidence is authoritative; build and source evidence corroborates), [ADR-042](042-compatibility-and-gate-decision-separation.md) (`effective_verdict` modulation, annotate and never remove), [ADR-044](044-reachability-aware-suppression.md) (reachability tags), [ADR-067](067-change-intent-acknowledgment-and-disposition-audit.md) (record before disposing).
 
@@ -34,7 +34,9 @@ Membership in `BINARY_GATED` was set by reading the producers, not by probing ea
 `abicheck/model/source_contract_evidence.py` `has_observed_source_contract_evidence` answers one question: did a producer that read a header or source observe this declaration as contract? A declaration qualifies when either holds:
 
 - fact (a) `declared_in_headers` is confirmed (a header parse of this run declared it), or
-- fact (b) `in_public_contract` is confirmed by a non-binary producer (a supplied public-header set, or the L4 source extractor).
+- fact (b) `in_public_contract` is confirmed by a non-binary producer (a supplied public-header set).
+
+A third class counts for a *name*, not a declaration: the snapshot's embedded L4 source pack (`build_source.source_abi`) records each declaration a source extractor found in a public header as a `SourceEntity` with a `public_header` or `generated` visibility (`PUBLIC_SOURCE_VISIBILITIES`, pinned to `buildsource/source_link.py` by a test). A removed declaration exists only on the old side, but its source entity is what the producer saw in the header, so `observed_source_contract_names` returns those names and the gate matches a finding's symbol and owner against them. This is how a `--sources` run keeps its `API_BREAK` (`case157_inline_function_removed`).
 
 It does **not** qualify on:
 
@@ -52,11 +54,13 @@ The narrower predicate `has_observed_contract_evidence` (in `model/surface_facts
 1. **Resolve the subject.** The finding's `symbol` is matched against the declarations of *both* snapshots by name, mangled name and qualified name, and against the owner of a member (`lib::A::f` also matches `lib::A`).
 2. **Keep** `API_BREAK` if any resolved declaration satisfies D2.
 3. **Unresolved subject.** The subject takes the run-level answer: in a run that parsed headers, the run's own evidence decides (an unresolved spelling is a name the index cannot match, not proof that nothing was observed); in a binary-only run there is no evidence and the finding is demoted.
-4. **Otherwise demote** to `COMPATIBLE_WITH_RISK` with `modulation_rule = "binary_gated_api_break"` and a `modulation_reason` naming what is missing. The gate sets `effective_verdict`, the existing per-finding mechanism (ADR-042). It never removes the finding.
+4. **Otherwise mark** the finding with `modulation_rule = "binary_gated_api_break"` and a `modulation_reason` naming what is missing. The gate writes **no verdict**. It never removes the finding.
+
+The verdict is a cap, applied where the policy resolves a category. `policy.classification.effective_category` (the one place a finding's category is decided, and what `compute_verdict` aggregates) and `policy.reclassify.effective_verdict_for_change` (the per-finding resolver) both do this: they resolve the policy first, and lower an `API_BREAK` the policy left standing to `COMPATIBLE_WITH_RISK`. A named policy's relaxation (`sdk_vendor` keeps a source-only rename `COMPATIBLE`) and a policy-file escalation (`BREAKING`) both survive a binary-only run. The gate's first design set `effective_verdict` instead, which overrides the policy, and the test `test_a_policy_file_escalation_is_not_lowered_by_the_gate` pins why it was changed.
 
 The ADR-067 ledger records the demotion with its rule and reason (`binary_gate_rule_provenance`, passed to `finalize_ledger`). The report therefore shows a `COMPATIBLE_WITH_RISK` finding with its rule, and a passing run still lists the demoted finding.
 
-The gate reads only the declarations' observed facts. It never reads `public_reachable`, `reachability_state` or `reachability_kind` as evidence, because those tags are set from the same export population (circular), and they are absent in default runs.
+The gate reads only the declarations' observed facts, and the source pack's public-header names. It never reads `public_reachable`, `reachability_state` or `reachability_kind` as evidence, because those tags are set from the same export population (circular), and they are absent in default runs.
 
 ### D4. Reachability tags are computed from the same evidence
 
@@ -73,6 +77,8 @@ Two other detectors still assert reachability for BINARY_GATED kinds (`unspecifi
 - **Exit codes change for header-less runs.** A binary-only comparison whose only API_BREAK findings are BINARY_GATED kinds without source evidence now reports `COMPATIBLE_WITH_RISK` (exit `0` under the default exit map, as for any risk-only finding) instead of `API_BREAK` (exit `2`). Severity presets that map the risk category to a stricter level still gate. This is the approved change. A run that also has a BREAKING finding still exits `4`.
 - **Header-backed runs are unchanged.** A kind with observed evidence keeps `API_BREAK`, verified by the positive control in each parametrized test.
 - **Suppression.** A rule with `reachability: unreachable-only` now matches `std_reexport_removed` and `tag_type_renamed` when their reachability is unknown, because they no longer assert public reachability. This is the same behaviour every detector without a reachability tag already has (the default is `public_reachable=False`), so the two detectors now follow the general rule instead of a special case. The suppression is still recorded (ADR-067).
+- **Release recommendation.** `recommend_release` reads the verdict, so a header-less enum rename that was a MAJOR bump (API_BREAK) is now a non-MAJOR bump (COMPATIBLE_WITH_RISK). A source break the run cannot back is a semver judgement that now needs the header evidence; `tests/test_workflow_scenarios.py` pins the new answer. This is a consequence of the approved verdict change and should be reviewed with it.
+- **Policy precedence is preserved.** Because the cap sits after the policy, a policy's answer for a binary-gated kind is no longer silently replaced by the gate in either direction.
 - **Mixed runs.** When the old side is header-backed and the new side is binary-only (or the reverse), a finding whose subject resolves to evidence on either side keeps `API_BREAK`. The gate asks whether the *claim* was observed by a producer that read a header, and one side's header observation is enough for that.
 
 ## Alternatives considered
@@ -99,3 +105,4 @@ Two other detectors still assert reachability for BINARY_GATED kinds (`unspecifi
 - `unspecified_return_now_named` and `experimental_removed_without_replacement` still assert reachability from the export population. The verdict is correct because the gate ignores tags, but the tags overstate. Tracked in `known-gaps.md`.
 - The DWARF-level bucket members are classified by reading the producers, not probed one by one (D1).
 - The kABI and Python `.pyi` axes have their own evidence gates. This ADR does not build one for them.
+- **A demotion does not yet state a coverage gap.** `tests/test_family_f1_evidence_ablation.py` requires that a run whose verdict narrows because a fact became unknown report that narrowing (a lower confidence, a new coverage warning, or a changed assurance record). A demoted finding does not do so yet: the verdict narrows and the finding records its rule, but `DiffResult.coverage_warnings` gains nothing. The natural place for that warning is `checker.py`, which is at its no-growth ratchet, so it needs a responsibility move there rather than a raised baseline. See `known-gaps.md`.

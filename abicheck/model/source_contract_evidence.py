@@ -58,7 +58,9 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 
 __all__ = [
     "BINARY_SIDE_CONTRACT_PRODUCERS",
+    "PUBLIC_SOURCE_VISIBILITIES",
     "has_observed_source_contract_evidence",
+    "observed_source_contract_names",
     "public_reachability",
     "reachability_of",
 ]
@@ -67,6 +69,56 @@ __all__ = [
 #: artifact rather than a header or source tree. Their (b) answer is a
 #: confirmed export, not a contract observation.
 BINARY_SIDE_CONTRACT_PRODUCERS: frozenset[str] = frozenset({"dwarf", "pdb"})
+
+#: ``SourceEntity.visibility`` values an L4 source pack records for a
+#: declaration in a public header. Mirrors ``buildsource/source_link.py``'s
+#: ``_PUBLIC_VISIBILITY``, which routes the same entities to the public
+#: surface; ``tests/test_binary_gated_contract.py`` pins the two equal.
+PUBLIC_SOURCE_VISIBILITIES: frozenset[str] = frozenset({"public_header", "generated"})
+
+#: The ``SourceAbiSurface`` buckets an entity is routed into once it is public.
+_SOURCE_ABI_BUCKETS = (
+    "reachable_declarations",
+    "reachable_types",
+    "reachable_macros",
+    "reachable_templates",
+    "reachable_inline_bodies",
+)
+
+
+def observed_source_contract_names(snapshot: object) -> frozenset[str]:
+    """Every name the snapshot's embedded L4 source pack observed in a public header.
+
+    A source producer that parsed the public headers records each declaration
+    it found there as a ``SourceEntity`` with a public visibility. Its
+    qualified name, mangled name and producer-specific names are the spellings
+    a change's ``symbol`` may use. The pack is read through attributes rather
+    than an import so ``model`` stays a leaf of ``buildsource``.
+
+    Returns an empty set when the snapshot carries no source pack, or a pack
+    without a source ABI surface.
+    """
+    pack = getattr(snapshot, "build_source", None)
+    surface = getattr(pack, "source_abi", None)
+    if surface is None:
+        return frozenset()
+    names: set[str] = set()
+    for bucket in _SOURCE_ABI_BUCKETS:
+        for entity in getattr(surface, bucket, ()):
+            if not entity.api_relevant:
+                continue
+            if entity.visibility not in PUBLIC_SOURCE_VISIBILITIES:
+                continue
+            names.update(
+                value
+                for value in (
+                    entity.qualified_name,
+                    entity.mangled_name,
+                    *entity.names.values(),
+                )
+                if value
+            )
+    return frozenset(names)
 
 
 def has_observed_source_contract_evidence(

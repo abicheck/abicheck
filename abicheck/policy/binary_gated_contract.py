@@ -36,10 +36,15 @@ test in ``tests/test_binary_gated_contract.py`` fails on an unclassified kind):
   a kABI symbol file) or a missing-evidence sentinel that is not a break claim.
   Not demoted; the gate has no opinion on them.
 
-The demotion never removes a finding. It sets ``Change.effective_verdict`` and
-the per-finding ``modulation_rule``/``modulation_reason`` pair the report
-already discloses, and :func:`binary_gate_rule_provenance` lets the ADR-067
-disposition ledger carry the same rule and reason.
+The demotion never removes a finding, and it never overrides a verdict. It
+marks the finding with the per-finding ``modulation_rule``/``modulation_reason``
+pair the report already discloses, and :func:`binary_gate_rule_provenance`
+lets the ADR-067 disposition ledger carry the same rule and reason. The
+verdict itself is a cap applied where the policy resolves a category
+(``policy.classification.effective_category`` and
+``policy.reclassify.effective_verdict_for_change``): a policy's relaxation or
+escalation of the kind decides first, and the cap lowers only an ``API_BREAK``
+the policy left standing.
 """
 
 from __future__ import annotations
@@ -50,8 +55,11 @@ from typing import TYPE_CHECKING
 
 from ..change_registry import API_BREAK_KINDS
 from ..model.change_catalog.kinds import ChangeKind
-from ..model.change_catalog.registry import Verdict
-from ..model.source_contract_evidence import has_observed_source_contract_evidence
+from ..model.source_contract_evidence import (
+    has_observed_source_contract_evidence,
+    observed_source_contract_names,
+)
+from .binary_gate_marker import BINARY_GATE_RULE_ID, is_binary_gate_demoted
 from .rule_provenance import RuleProvenance
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -73,10 +81,6 @@ __all__ = [
     "demote_unproven_binary_api_breaks",
     "is_binary_gate_demoted",
 ]
-
-#: The rule id a demoted finding carries (``modulation_rule`` and the ADR-067
-#: ledger's ``rule.rule_id``).
-BINARY_GATE_RULE_ID = "binary_gated_api_break"
 
 #: The reason a demoted finding carries (``modulation_reason`` and the ledger
 #: rule's ``reason``). It states what is missing, not what was wrong.
@@ -171,16 +175,23 @@ class _SubjectIndex:
 
     #: ``spelling -> ((declaration, its snapshot's from_headers), ...)``.
     by_key: Mapping[str, tuple[tuple[_Declaration, bool], ...]]
-    #: Whether any declaration on either side carries observed header or
-    #: source evidence. The fallback for a subject that resolves to no
-    #: declaration: in a run that parsed headers, an unresolved name is a
-    #: spelling the index cannot match, not proof that nothing was observed.
+    #: Whether any declaration on either side, or any public-header entity of
+    #: either side's L4 source pack, carries observed header or source
+    #: evidence. The fallback for a subject that resolves to no declaration:
+    #: in a run that parsed headers, an unresolved name is a spelling the
+    #: index cannot match, not proof that nothing was observed.
     run_has_source_evidence: bool
+    #: Names of the public-header entities an L4 source pack observed on
+    #: either side (:func:`observed_source_contract_names`). A removed
+    #: declaration exists only in the old side's declarations, but its source
+    #: entity is what the source producer saw in the header.
+    source_names: frozenset[str]
 
     @classmethod
     def of(cls, snapshots: Iterable[AbiSnapshot | None]) -> _SubjectIndex:
         by_key: dict[str, list[tuple[_Declaration, bool]]] = {}
         run_has_source_evidence = False
+        source_names: set[str] = set()
         for snapshot in snapshots:
             if snapshot is None:
                 continue
@@ -197,9 +208,14 @@ class _SubjectIndex:
                         run_has_source_evidence = True
                     for key in _keys_of(decl):
                         by_key.setdefault(key, []).append((decl, header_parsed))
+            names = observed_source_contract_names(snapshot)
+            if names:
+                run_has_source_evidence = True
+                source_names.update(names)
         return cls(
             by_key={k: tuple(v) for k, v in by_key.items()},
             run_has_source_evidence=run_has_source_evidence,
+            source_names=frozenset(source_names),
         )
 
     def subjects(self, symbol: str) -> tuple[tuple[_Declaration, bool], ...]:
@@ -209,6 +225,12 @@ class _SubjectIndex:
             owner = symbol.rsplit("::", 1)[0]
             found.extend(self.by_key.get(owner, ()))
         return tuple(found)
+
+    def observed_in_source(self, symbol: str) -> bool:
+        """Whether an L4 source pack saw *symbol*, or its owner, in a public header."""
+        if symbol in self.source_names:
+            return True
+        return "::" in symbol and symbol.rsplit("::", 1)[0] in self.source_names
 
 
 def _keys_of(decl: object) -> tuple[str, ...]:
@@ -221,7 +243,11 @@ def _keys_of(decl: object) -> tuple[str, ...]:
 
 
 def _has_source_evidence(change: Change, index: _SubjectIndex) -> bool:
-    subjects = index.subjects(change.symbol) if change.symbol else ()
+    if not change.symbol:
+        return index.run_has_source_evidence
+    if index.observed_in_source(change.symbol):
+        return True
+    subjects = index.subjects(change.symbol)
     if subjects:
         return any(
             has_observed_source_contract_evidence(decl, header_parsed=parsed)
@@ -241,11 +267,12 @@ def demote_unproven_binary_api_breaks(
     and that carries no per-finding ``effective_verdict`` yet (a pipeline
     modulation that already decided its category keeps it). Its subject is
     resolved on either side; the finding stays ``API_BREAK`` when that
-    declaration has observed header or source evidence. An unresolved subject
-    takes the run-level answer (see :class:`_SubjectIndex`).
+    declaration, or an L4 source pack's public-header entity, has observed
+    header or source evidence. An unresolved subject takes the run-level answer
+    (see :class:`_SubjectIndex`).
 
-    Mutates the findings in place and returns the demoted ones. Nothing is
-    removed from *changes*.
+    Marks the demoted findings in place and returns them. Nothing is removed
+    from *changes*, and no verdict is written (see the module docstring).
     """
     demoted: list[Change] = []
     index: _SubjectIndex | None = None
@@ -259,16 +286,10 @@ def demote_unproven_binary_api_breaks(
             index = _SubjectIndex.of((old, new))
         if _has_source_evidence(change, index):
             continue
-        change.effective_verdict = Verdict.COMPATIBLE_WITH_RISK
         change.modulation_reason = BINARY_GATE_REASON
         change.modulation_rule = BINARY_GATE_RULE_ID
         demoted.append(change)
     return demoted
-
-
-def is_binary_gate_demoted(change: object) -> bool:
-    """Whether this gate demoted *change* (read off its rule id, not its verdict)."""
-    return getattr(change, "modulation_rule", None) == BINARY_GATE_RULE_ID
 
 
 def binary_gate_rule_provenance(change: object) -> RuleProvenance | None:

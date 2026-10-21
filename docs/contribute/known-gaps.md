@@ -59,6 +59,10 @@ Each entry's status line says what is still open. A PARTIAL entry's write-up als
 
 ### False-clean risk
 
+#### A binary-gate demotion does not state a coverage gap (ADR-084)
+
+**Status (2026-10-21): OPEN.** When the ADR-084 gate demotes a binary-only source-level claim, the verdict narrows and the finding records its rule, but the run's coverage warnings do not change. `tests/test_family_f1_evidence_ablation.py` requires that a verdict which narrows from broken to clean because a fact became unknown carry a stated gap: lower confidence, a new coverage warning, a changed analysis-assurance record, or a higher contract-coverage floor. The demotion currently gives none of these. The fix is a coverage warning naming the unbacked claim, appended where `DiffResult.coverage_warnings` is assembled in `checker.py`. That file is at its no-growth ratchet (1407 lines), so adding it needs a responsibility moved out of `checker.py` first, not a raised baseline. The F1 cell `pimpl_inline_body_renamed` / `RecordType.source_header_fact` is the one that fails.
+
 #### A refused clang AST still leaves the header type pass collected (2026-10-17)
 
 **Status (2026-10-17): OPEN, residual.** A malformed or failed clang AST now degrades the call, override, template, callback and virtual-dispatch passes. The header type pass is still stamped from the snapshot's own declarations (the flat fallback in `header_graph.build_header_only_graph`), so its AST-only edges (`DECL_HAS_TYPE` on parameters and variables, `DECL_REFERENCES_DECL`) read as collected with role coverage unstamped. A real clang parse failure leaves the same state today. Degrading the type pass whenever `ast_failure` is set would close it, but it changes the existing clang-failure behaviour too and needs its own review.

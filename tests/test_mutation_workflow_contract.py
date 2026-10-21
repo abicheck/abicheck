@@ -753,6 +753,7 @@ _ACCEPTED_KILL_LOSS = {
             "abicheck.name_classification",
             "abicheck.policy.selectors",
             "abicheck.policy.selectors_namespace_glob",
+            "abicheck.policy.suppression.rules",
         }
     ),
     # Drives `action/run.sh`, which execs the real `abicheck` console script
@@ -822,6 +823,7 @@ _ACCEPTED_KILL_LOSS = {
     "tests/test_reusable_workflows_project_evidence.py": frozenset(
         {
             "abicheck.policy.classification",
+            "abicheck.policy.suppression.rules",
             "abicheck.model.evidence_status",
             "abicheck.compare.finding_identity.change_identity",
             "abicheck.compare.finding_identity.change_kinds",
