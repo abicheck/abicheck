@@ -112,7 +112,7 @@ def _manifest_layer_incompleteness(
                 continue
             if rec.status != "partial":
                 continue
-            if not rec.name.startswith(("source_abi", "compile_", "source_graph")):
+            if not rec.source_side:
                 continue
             incomplete = True
             detail = f": {rec.detail}" if rec.detail else ""
