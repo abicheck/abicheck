@@ -164,11 +164,11 @@
       "abicheck/type_reachability.py": "89d8db3c507a58004fd6b38ad4fee5ea6c9b40a9da97f34d8067ae440aa9e9bb",
       "abicheck/type_reachability_spelling.py": "4262f30db17f2a4c5ba2a4341b8eed9f1408e335825644845e10cb08838995cb",
       "abicheck/type_reachability_stdlib_spellings.py": "0cc608abede4a96a81172caf237e1bb813100a22642d6a828838e4cd60e992ae",
-      "abicheck/workflows/compare/resolve.py": "fc0b0bf3ce68f561ac222b528d113155c90d4c158bd8db2568e7af8b630ea5be",
+      "abicheck/workflows/compare/resolve.py": "dc0381227c9e8dacaa39858d3f534ff45cbb3177f9b8645a8728c3f25c460793",
       "abicheck/workflows/elf_dependency_resolver.py": "18524281e550a7f25225441cd063de58ec33281e7bacf65fef98d1fefb101426"
     },
-    "fingerprint": "452da1a0072e06084ef27aca7cddda8315c158906eb5a1091fa6ca17f06e7aba",
+    "fingerprint": "7fb00aec886050155f8a39a502a8dd22e208bdc1b181bba7d01b0d2fcacb9523",
     "generation": 1,
-    "reason": "scoped move: service_compare_pipeline.py's resolve half moved verbatim to workflows/compare/resolve.py; no fact or graph changes"
+    "reason": "Moved the debug-format refusal (old and new side, same wording, same order) from service_compare_evidence into workflows/operand_rules.py; resolve.py now imports it directly. Nothing derived from stored facts changes, so RESOLVER_GENERATION stays at 1."
   }
 }

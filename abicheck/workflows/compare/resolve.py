@@ -49,6 +49,7 @@ from ..artifact.compile_db_match import match_side_compile_db
 from ..artifact.dump_execution_options import DumpExecutionOptions
 from ..artifact.execute import _resolve_side_snapshot_impl
 from ..compare_classify import ResolvedComparePair
+from ..operand_rules import reject_debug_format_for_non_elf
 from ..request_inputs import InputSpec, required_path
 from ..service_requests import CompareRequest
 
@@ -313,7 +314,7 @@ def resolve_compare_request(
     old_fmt = detect_binary_format(required_path(request.old, "old"))
     new_fmt = detect_binary_format(required_path(request.new, "new"))
     debug_format = _sce.normalized_debug_format(request)
-    _sce.reject_debug_format_for_non_elf(debug_format, old_fmt, new_fmt)
+    reject_debug_format_for_non_elf(debug_format, old_fmt, new_fmt)
 
     pair_compile = _pair_compile_context(request, lang)
     (

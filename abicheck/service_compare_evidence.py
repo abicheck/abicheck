@@ -69,8 +69,6 @@ __all__ = [
     "requested_frontend_override",
     "normalized_debug_format",
     "reject_compile_db_filter_scope_mismatch",
-    "reject_debug_format_for_binaries",
-    "reject_debug_format_for_non_elf",
     "resolve_compare_request_evidence",
     "resolve_dump_request_evidence",
     "resolve_side_evidence",
@@ -551,7 +549,8 @@ def reject_compile_db_filter_scope_mismatch(
     values the CLI reads ``compile_db_from_build_info`` back against.
 
     *sides* is ``(label, side, evidence)`` triples, mirroring
-    :func:`reject_debug_format_for_binaries`'s ``(label, ...)`` shape --
+    :func:`abicheck.workflows.operand_rules.reject_debug_format_for_binaries`'s
+    ``(label, ...)`` shape --
     ``dump`` passes its single ``input``, ``compare`` passes ``old``/``new``.
     Without this, a typed ``CompareRequest`` side could reach the exact
     L2-filtered/L3-unfiltered snapshot shape the CLI refuses outright: a
@@ -663,44 +662,3 @@ def normalized_debug_format(request: CompareRequest | DumpRequest) -> str | None
         return None
     normalized = request.debug_format.lower()
     return None if normalized == "auto" else normalized
-
-
-def reject_debug_format_for_binaries(
-    debug_format: str | None, sides: Iterable[tuple[str, str | None]]
-) -> None:
-    """Raise if a forced ELF debug format meets a PE/Mach-O input.
-
-    *sides* is ``(label, detected format)`` pairs, so the message names the
-    input that cannot honour the request — ``compare`` passes ``old``/``new``,
-    ``dump`` its single ``input``. See
-    :func:`reject_debug_format_for_non_elf` for why this is rejected up front
-    rather than silently dropped.
-    """
-    from .errors import ValidationError
-
-    if debug_format is None:
-        return
-    for side, binary_fmt in sides:
-        if binary_fmt in ("pe", "macho"):
-            raise ValidationError(
-                f"debug_format={debug_format!r} is only supported for ELF "
-                f"binaries, but the {side} input is {binary_fmt.upper()}."
-            )
-
-
-def reject_debug_format_for_non_elf(
-    debug_format: str | None, old_fmt: str | None, new_fmt: str | None
-) -> None:
-    """Raise if a forced ELF debug format meets a PE/Mach-O side.
-
-    The PE and Mach-O dump paths take no debug-format argument, so a forced
-    ``dwarf``/``btf``/``ctf`` is silently dropped there and the run reports
-    success having ignored what the caller asked for. The CLI rejects the
-    combination up front (``cli_compare_helpers._reject_debug_format_for_non_elf``);
-    without this the typed surface claimed that parity without having it
-    (Codex review).
-
-    A JSON-snapshot or dump input has ``fmt is None`` and is unaffected, same
-    as on the CLI side.
-    """
-    reject_debug_format_for_binaries(debug_format, (("old", old_fmt), ("new", new_fmt)))
