@@ -54,7 +54,9 @@ def _snapshots(tmp: Path, *, break_it: bool) -> tuple[Path, Path]:
 
 def _write_records(path: Path, acknowledge_g: bool) -> None:
     entries = (
-        '  - symbol: "g"\n    reason: "Planned addition"\n' if acknowledge_g else ""
+        '  - symbol: "g"\n    change_kind: func_added\n    reason: "Planned addition"\n'
+        if acknowledge_g
+        else ""
     )
     path.write_text("version: 1\nacknowledgments:\n" + entries)
 

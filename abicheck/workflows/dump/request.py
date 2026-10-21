@@ -72,6 +72,7 @@ from ..artifact.resolve import (
     is_raw_source_tree,
     reject_hybrid_source_frontend,
 )
+from ..operand_rules import reject_debug_format_for_binaries
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -297,7 +298,7 @@ def resolve_dump_request(request: DumpRequest) -> ResolvedDumpRequest:
     # shape, so this is the binary-less request, not a missing-input mistake.
     fmt = detect_binary_format(side.path) if side.path is not None else None
     debug_format = _sce.normalized_debug_format(request)
-    _sce.reject_debug_format_for_binaries(debug_format, (("input", fmt),))
+    reject_debug_format_for_binaries(debug_format, (("input", fmt),))
 
     evidence = _sce.resolve_dump_request_evidence(request)
     # Mirrors the ELF `dump` CLI's own `compile_db_filter_scope_error` check

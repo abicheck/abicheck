@@ -3,7 +3,7 @@ name: explain-abi-change
 description: Explain an ABI-related observation in a C/C++ development environment and say what actually changed — a program or plugin that stopped loading ("undefined symbol", "symbol lookup error", "version `X' not found", "cannot open shared object file"), a crash or wrong results after a library was updated or rebuilt, a C++ symbol containing `__cxx11`/`B5cxx11` that cannot be found, or a shared-library update whose new or different symbols a developer wants to understand ("the library was bumped — what changed, and does our program care?"). Use when a developer is trying to understand what is going on between a program and the shared libraries it uses, on Linux ELF with GCC or Clang. Finds which library copy is actually used, compares it with the one the program was built against, names the mechanism behind the change, and says what (if anything) to do. Also says when the change is harmless or not ABI-related at all. Not for reviewing a proposed change before it ships — that is a compatibility review.
 license: Apache-2.0
 metadata:
-  abicheck-version-range: ">=0.6.0,<0.7.0"
+  abicheck-version-range: ">=0.6.0,<0.8.0"
   layer: A
   source: skills-src/explain-abi-change/SKILL.md
 ---

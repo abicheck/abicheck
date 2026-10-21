@@ -109,7 +109,10 @@ def resolve_request_policy_inputs(
         request.acknowledgments_path,
         policy_file=pf,
         configured_action=request.acknowledgment_unacknowledged_additions,
+        configured_breaks=request.acknowledgment_breaks,
     )
+    for ack_warning in acknowledgments.warnings:
+        _logger.warning("%s", ack_warning)
     return RequestPolicyInputs(
         suppression, pf, evaluation_config, acknowledgments, application
     )

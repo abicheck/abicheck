@@ -53,6 +53,27 @@ from abicheck.policy_file import PolicyFile
 from abicheck.report.disposition_audit import compute_disposition_audit
 
 
+def _ack_row(rule_id: str, *, matched: int, status: str = "active") -> object:
+    """A configured acknowledgment's audit row (ADR-067 P1: one row per rule)."""
+    from abicheck.policy.rule_inventory import (
+        KIND_ACKNOWLEDGMENT,
+        RuleAuditRow,
+        RuleRef,
+    )
+
+    return RuleAuditRow(
+        ref=RuleRef(KIND_ACKNOWLEDGMENT, "acks.yml", 0),
+        rule_id=rule_id,
+        label=None,
+        reason=None,
+        expires=None,
+        status=status,
+        matched_count=matched,
+        shadowed_count=0,
+        selector_matched_count=matched,
+    )
+
+
 def _snapshot(version: str, functions: list[Function]) -> AbiSnapshot:
     return AbiSnapshot(
         version=version,
@@ -80,7 +101,9 @@ def test_load_requires_finding_id_or_symbol(tmp_path: Path) -> None:
 
 def test_load_requires_a_reason(tmp_path: Path) -> None:
     p = tmp_path / "ack.yml"
-    p.write_text("version: 1\nacknowledgments:\n  - symbol: 'foo'\n")
+    p.write_text(
+        "version: 1\nacknowledgments:\n  - symbol: 'foo'\n    change_kind: func_removed\n"
+    )
     with pytest.raises(ValueError, match="reason"):
         AcknowledgmentList.load(p)
 
@@ -120,7 +143,7 @@ def test_load_rejects_every_broad_suppression_only_selector(
 def test_load_rejects_unknown_keys(tmp_path: Path) -> None:
     p = tmp_path / "ack.yml"
     p.write_text(
-        "version: 1\nacknowledgments:\n  - symbol: foo\n    reason: x\n    bogus: 1\n"
+        "version: 1\nacknowledgments:\n  - symbol: foo\n    change_kind: func_removed\n    reason: x\n    bogus: 1\n"
     )
     with pytest.raises(ValueError, match="unknown key"):
         AcknowledgmentList.load(p)
@@ -131,7 +154,7 @@ def test_bounded_symbol_match_scoped_by_component_and_release(tmp_path: Path) ->
     p.write_text(
         "version: 1\n"
         "acknowledgments:\n"
-        "  - symbol: bar\n"
+        "  - symbol: bar\n    change_kind: func_added\n"
         "    component: libfoo\n"
         "    candidate: '2.0.0'\n"
         "    reason: 'intentional new API'\n"
@@ -155,7 +178,7 @@ def test_baseline_is_enforced_the_same_way_as_candidate(tmp_path: Path) -> None:
     p.write_text(
         "version: 1\n"
         "acknowledgments:\n"
-        "  - symbol: bar\n"
+        "  - symbol: bar\n    change_kind: func_added\n"
         "    baseline: '1.0.0'\n"
         "    candidate: '2.0.0'\n"
         "    reason: 'intentional new API'\n"
@@ -175,9 +198,9 @@ def test_ambiguous_match_is_a_hard_error_not_a_nearest_match(tmp_path: Path) -> 
     p.write_text(
         "version: 1\n"
         "acknowledgments:\n"
-        "  - symbol: bar\n"
+        "  - symbol: bar\n    change_kind: func_added\n"
         "    reason: 'first'\n"
-        "  - symbol: bar\n"
+        "  - symbol: bar\n    change_kind: func_added\n"
         "    reason: 'second, conflicting'\n"
     )
     acks = AcknowledgmentList.load(p)
@@ -191,7 +214,7 @@ def test_expired_acknowledgment_never_matches(tmp_path: Path) -> None:
     p.write_text(
         "version: 1\n"
         "acknowledgments:\n"
-        "  - symbol: bar\n"
+        "  - symbol: bar\n    change_kind: func_added\n"
         "    reason: 'temporary'\n"
         "    expires: '2000-01-01'\n"
     )
@@ -205,14 +228,15 @@ def test_record_id_shared_scheme_reads_component_baseline_candidate() -> None:
 
     record = Acknowledgment(
         symbol="bar",
+        change_kind="func_added",
         component="libfoo",
         baseline="1.0.0",
         candidate="2.0.0",
         reason="x",
     )
-    assert record.record_id() == "libfoo::1.0.0::2.0.0::bar"
-    bare = Acknowledgment(symbol="bar", reason="x")
-    assert bare.record_id() == "*::*::*::bar"
+    assert record.record_id() == "libfoo::1.0.0::2.0.0::bar[func_added]"
+    bare = Acknowledgment(symbol="bar", change_kind="func_added", reason="x")
+    assert bare.record_id() == "*::*::*::bar[func_added]"
 
 
 def test_is_expired_reads_through_to_the_selector() -> None:
@@ -220,7 +244,9 @@ def test_is_expired_reads_through_to_the_selector() -> None:
 
     from abicheck.policy.acknowledgment import Acknowledgment
 
-    record = Acknowledgment(symbol="bar", reason="x", expires=date(2000, 1, 1))
+    record = Acknowledgment(
+        symbol="bar", change_kind="func_added", reason="x", expires=date(2000, 1, 1)
+    )
     assert record.is_expired() is True
     assert record.is_expired(today=date(1999, 1, 1)) is False
 
@@ -235,7 +261,10 @@ def test_expires_datetime_is_normalized_to_a_date_on_direct_construction() -> No
     from abicheck.policy.acknowledgment import Acknowledgment
 
     record = Acknowledgment(
-        symbol="bar", reason="x", expires=datetime(2026, 1, 1, 12, 30)
+        symbol="bar",
+        change_kind="func_added",
+        reason="x",
+        expires=datetime(2026, 1, 1, 12, 30),
     )
     assert record.expires == date(2026, 1, 1)
 
@@ -284,8 +313,12 @@ def test_acknowledgment_to_dict_round_trips_every_optional_field() -> None:
         "reference": "https://example.com/482",
         "expires": "2026-12-31",
     }
-    bare = Acknowledgment(symbol="bar", reason="x")
-    assert bare.to_dict() == {"reason": "x", "symbol": "bar"}
+    bare = Acknowledgment(symbol="bar", change_kind="func_added", reason="x")
+    assert bare.to_dict() == {
+        "reason": "x",
+        "symbol": "bar",
+        "change_kind": "func_added",
+    }
     finding_id_only = Acknowledgment(finding_id="abc123", reason="x")
     assert finding_id_only.to_dict() == {"reason": "x", "finding_id": "abc123"}
 
@@ -295,8 +328,8 @@ def test_acknowledgment_list_len_and_iter(tmp_path: Path) -> None:
     p.write_text(
         "version: 1\n"
         "acknowledgments:\n"
-        "  - symbol: foo\n    reason: x\n"
-        "  - symbol: bar\n    reason: y\n"
+        "  - symbol: foo\n    change_kind: func_removed\n    reason: x\n"
+        "  - symbol: bar\n    change_kind: func_added\n    reason: y\n"
     )
     acks = AcknowledgmentList.load(p)
     assert len(acks) == 2
@@ -364,7 +397,7 @@ def test_load_accepts_a_native_yaml_date_for_expires(tmp_path: Path) -> None:
     through `date.fromisoformat` instead."""
     p = tmp_path / "ack.yml"
     p.write_text(
-        "version: 1\nacknowledgments:\n  - symbol: bar\n    reason: x\n    expires: 2026-12-31\n"
+        "version: 1\nacknowledgments:\n  - symbol: bar\n    change_kind: func_added\n    reason: x\n    expires: 2026-12-31\n"
     )
     acks = AcknowledgmentList.load(p)
     record = next(iter(acks))
@@ -375,7 +408,7 @@ def test_load_accepts_a_native_yaml_date_for_expires(tmp_path: Path) -> None:
 def test_load_rejects_an_unparseable_expires_string(tmp_path: Path) -> None:
     p = tmp_path / "ack.yml"
     p.write_text(
-        "version: 1\nacknowledgments:\n  - symbol: bar\n    reason: x\n    expires: 'not-a-date'\n"
+        "version: 1\nacknowledgments:\n  - symbol: bar\n    change_kind: func_added\n    reason: x\n    expires: 'not-a-date'\n"
     )
     with pytest.raises(ValueError, match="invalid 'expires' date"):
         AcknowledgmentList.load(p)
@@ -386,7 +419,7 @@ def test_load_accepts_a_native_yaml_datetime_for_expires(tmp_path: Path) -> None
     `date` -- `_parse_expires`'s own `datetime`-narrowing branch."""
     p = tmp_path / "ack.yml"
     p.write_text(
-        "version: 1\nacknowledgments:\n  - symbol: bar\n    reason: x\n"
+        "version: 1\nacknowledgments:\n  - symbol: bar\n    change_kind: func_added\n    reason: x\n"
         "    expires: 2026-12-31 10:00:00\n"
     )
     acks = AcknowledgmentList.load(p)
@@ -406,7 +439,7 @@ def test_acknowledged_finding_keeps_its_disposition_and_verdict_class(
     never suppressed and never reclassified by acknowledging it."""
     p = tmp_path / "ack.yml"
     p.write_text(
-        "version: 1\nacknowledgments:\n  - symbol: foo\n    reason: 'known break'\n"
+        "version: 1\nacknowledgments:\n  - symbol: foo\n    change_kind: func_removed\n    reason: 'known break'\n"
     )
     acks = AcknowledgmentList.load(p)
     change = Change(kind=ChangeKind.FUNC_REMOVED, symbol="foo", description="x")
@@ -421,7 +454,7 @@ def test_acknowledged_finding_keeps_its_disposition_and_verdict_class(
     ledger = ledger_for(diff)
     record = ledger.record_for(change)
     assert record is not None
-    assert record.acknowledged_by == "*::*::*::foo"
+    assert record.acknowledged_by == "*::*::*::foo[func_removed]"
     # The disposition is whatever the gate decided independent of
     # acknowledgment -- D2 forbids acknowledgment from being a terminal
     # disposition of its own.
@@ -429,14 +462,16 @@ def test_acknowledged_finding_keeps_its_disposition_and_verdict_class(
 
     assert record.disposition is Disposition.GATING
     assert acknowledged_total(ledger) == 1
-    assert ledger_acknowledgments(ledger) == (("*::*::*::foo", 1),)
+    assert ledger_acknowledgments(ledger) == (("*::*::*::foo[func_removed]", 1),)
 
 
 def test_conservation_holds_with_acknowledgments(tmp_path: Path) -> None:
     """D1: acknowledging a finding never changes the detected total or moves
     it out of the per-disposition counts -- it is a pure overlay."""
     p = tmp_path / "ack.yml"
-    p.write_text("version: 1\nacknowledgments:\n  - symbol: foo\n    reason: 'x'\n")
+    p.write_text(
+        "version: 1\nacknowledgments:\n  - symbol: foo\n    change_kind: func_removed\n    reason: 'x'\n"
+    )
     change = Change(kind=ChangeKind.FUNC_REMOVED, symbol="foo", description="x")
     diff_without = DiffResult(
         changes=[change],
@@ -493,7 +528,7 @@ def test_additions_review_block_gates_only_when_unacknowledged() -> None:
     unblocked = evaluate_unacknowledged_additions([change], None, policy)
     assert unblocked.gate_contribution == 1
 
-    p_yaml = "version: 1\nacknowledgments:\n  - symbol: bar\n    reason: 'reviewed'\n"
+    p_yaml = "version: 1\nacknowledgments:\n  - symbol: bar\n    change_kind: func_added\n    reason: 'reviewed'\n"
     import tempfile
 
     with tempfile.TemporaryDirectory() as d:
@@ -698,7 +733,7 @@ def test_compare_wires_acknowledgment_overlay_and_additions_gate(
 
     ack_path = tmp_path / "ack.yml"
     ack_path.write_text(
-        "version: 1\nacknowledgments:\n  - symbol: bar\n    reason: 'planned'\n"
+        "version: 1\nacknowledgments:\n  - symbol: bar\n    change_kind: func_added\n    reason: 'planned'\n"
     )
     acks = AcknowledgmentList.load(ack_path)
 
@@ -780,7 +815,9 @@ def test_an_acknowledgment_never_matches_a_different_finding_by_proximity(
     naming one exact symbol must never "spill over" onto a sibling finding
     that merely looks similar -- there is no fuzzy/nearest matching path."""
     p = tmp_path / "ack.yml"
-    p.write_text("version: 1\nacknowledgments:\n  - symbol: foo_v2\n    reason: 'x'\n")
+    p.write_text(
+        "version: 1\nacknowledgments:\n  - symbol: foo_v2\n    change_kind: func_added\n    reason: 'x'\n"
+    )
     acks = AcknowledgmentList.load(p)
     sibling = Change(kind=ChangeKind.FUNC_ADDED, symbol="foo_v3", description="x")
     assert acks.evaluate(sibling) is None
@@ -823,8 +860,8 @@ def test_compare_raises_on_an_ambiguous_acknowledgment_for_any_change_kind(
     p.write_text(
         "version: 1\n"
         "acknowledgments:\n"
-        "  - symbol: foo\n    reason: 'first'\n"
-        "  - symbol: foo\n    reason: 'second, conflicting'\n"
+        "  - symbol: foo\n    change_kind: func_removed\n    reason: 'first'\n"
+        "  - symbol: foo\n    change_kind: func_removed\n    reason: 'second, conflicting'\n"
     )
     acks = AcknowledgmentList.load(p)
     old = _snapshot("1.0.0", [_func("foo")])
@@ -917,7 +954,9 @@ def test_resolving_acknowledgments_twice_is_idempotent(tmp_path: Path) -> None:
     from abicheck.policy.disposition_close import close_consumer_scope
 
     p = tmp_path / "ack.yml"
-    p.write_text("version: 1\nacknowledgments:\n  - symbol: foo\n    reason: 'x'\n")
+    p.write_text(
+        "version: 1\nacknowledgments:\n  - symbol: foo\n    change_kind: func_removed\n    reason: 'x'\n"
+    )
     change = Change(kind=ChangeKind.FUNC_REMOVED, symbol="foo", description="x")
     diff = DiffResult(
         changes=[change],
@@ -928,7 +967,7 @@ def test_resolving_acknowledgments_twice_is_idempotent(tmp_path: Path) -> None:
     )
     ledger = ledger_for(diff)  # resolves acknowledged_by once
     before = ledger.record_for(change)
-    assert before is not None and before.acknowledged_by == "*::*::*::foo"
+    assert before is not None and before.acknowledged_by == "*::*::*::foo[func_removed]"
 
     close_consumer_scope(
         ledger, diff, gating=[change], scope_decides_exit=True
@@ -938,14 +977,24 @@ def test_resolving_acknowledgments_twice_is_idempotent(tmp_path: Path) -> None:
     assert after.acknowledged_by == before.acknowledged_by
 
 
-def test_ledger_acknowledgments_tallies_multiple_findings_under_one_record(
+def test_one_record_matching_two_findings_in_a_run_is_ambiguous(
     tmp_path: Path,
 ) -> None:
-    """`acknowledgments()`'s "already in tally" branch: two distinct findings
-    matched by the same acknowledgment record are tallied together, not
-    reported as two separate record ids."""
+    """ADR-067 D5/G3: a record must match exactly one finding per run.
+
+    Two distinct findings that one ``symbol``+``change_kind`` record covers are
+    a review item. A strict run (the one that owns the comparison) raises; a
+    report projection leaves both unacknowledged rather than accepting them by
+    one line. Neither is a silent double-accept.
+    """
+    from abicheck.policy.acknowledgment import AmbiguousAcknowledgmentError
+    from abicheck.policy.disposition_close import finalize_ledger
+    from abicheck.policy.disposition_ledger import DispositionLedger
+
     p = tmp_path / "ack.yml"
-    p.write_text("version: 1\nacknowledgments:\n  - symbol: foo\n    reason: 'x'\n")
+    p.write_text(
+        "version: 1\nacknowledgments:\n  - symbol: foo\n    change_kind: func_removed\n    reason: 'x'\n"
+    )
     change_a = Change(kind=ChangeKind.FUNC_REMOVED, symbol="foo", description="a")
     change_b = Change(kind=ChangeKind.FUNC_REMOVED, symbol="foo", description="b")
     diff = DiffResult(
@@ -956,8 +1005,10 @@ def test_ledger_acknowledgments_tallies_multiple_findings_under_one_record(
         acknowledgments=AcknowledgmentList.load(p),
     )
     ledger = ledger_for(diff)
-    assert acknowledged_total(ledger) == 2
-    assert ledger_acknowledgments(ledger) == (("*::*::*::foo", 2),)
+    assert acknowledged_total(ledger) == 0
+    assert ledger_acknowledgments(ledger) == ()
+    with pytest.raises(AmbiguousAcknowledgmentError, match="matches 2 changes"):
+        finalize_ledger(DispositionLedger(), diff, strict_acknowledgments=True)
 
 
 def test_disposition_record_to_dict_includes_acknowledged_by() -> None:
@@ -996,7 +1047,7 @@ def test_render_disposition_audit_note_and_lines_cover_acknowledgment_state() ->
         rules=(),
         not_evaluated_detectors=(),
         acknowledged_total=1,
-        acknowledgments=(("*::*::*::foo", 1),),
+        acknowledgments=(_ack_row("*::*::*::foo", matched=1),),
         unacknowledged_additions_review={
             "policy": "warn",
             "unacknowledged": [
@@ -1060,7 +1111,7 @@ def test_fold_disposition_audits_tallies_acknowledgments_across_members() -> Non
         rules=(),
         not_evaluated_detectors=(),
         acknowledged_total=1,
-        acknowledgments=(("*::*::*::foo", 1),),
+        acknowledgments=(_ack_row("*::*::*::foo", matched=1),),
     )
     member_b = DispositionAudit(
         detected_total=1,
@@ -1069,11 +1120,13 @@ def test_fold_disposition_audits_tallies_acknowledgments_across_members() -> Non
         rules=(),
         not_evaluated_detectors=(),
         acknowledged_total=1,
-        acknowledgments=(("*::*::*::foo", 1),),
+        acknowledgments=(_ack_row("*::*::*::foo", matched=1),),
     )
     folded = fold_disposition_audits([member_a, member_b])
     assert folded.acknowledged_total == 2
-    assert folded.acknowledgments == (("*::*::*::foo", 2),)
+    assert [(row.rule_id, row.matched_count) for row in folded.acknowledgments] == [
+        ("*::*::*::foo", 2)
+    ]
 
 
 def test_fold_disposition_audits_reports_none_when_no_member_evaluated() -> None:

@@ -138,21 +138,122 @@ def _kept_disposition(
 
 
 def _reset_dated_overlays(records: list[DispositionRecord]) -> list[DispositionRecord]:
-    """Clear ``reclassified_by``/``verdict_class`` so a stale value resolved
+    """Clear the reclassify and verdict-class overlays so a stale value resolved
     at an earlier ``today`` isn't mistaken for already-answered (Codex
     review, fresh evidence): :meth:`DispositionLedger.with_gate` calls this
     before re-running ``resolve_reclassifications``/``resolve_verdict_classes``
     on a ``checker.compare()``-built ledger, whose overlays were resolved at
     comparison time and go stale once a dated ``reclassify:`` rule's match
-    crosses this render's own ``today``.
+    crosses this render's own ``today``. The P1 stamps (``reclassify_rule``,
+    ``reclassify_hits``) are overlays too: left behind, they would keep an
+    expired rule as ``active`` in the audit while ``reclassified_by`` is clear.
     """
     return [
         replace(
             r,
             reclassified_by=None,
+            reclassify_rule=None,
+            reclassify_hits=(),
             verdict_class=None
             if r.disposition is Disposition.SUPPRESSED
             else r.verdict_class,
         )
         for r in records
     ]
+
+
+#: The four D2 dispositions no gate can move: policy already disposed of the
+#: finding, and neither gate scheme ever scored it.
+_POLICY_TERMINAL_DISPOSITIONS = frozenset(
+    {
+        Disposition.SUPPRESSED,
+        Disposition.OUT_OF_CONTRACT,
+        Disposition.UNRESOLVED_RELEVANCE,
+    }
+)
+
+
+def regate_record(
+    record: DispositionRecord,
+    change: object,
+    result: DiffResult,
+    severity_config: object,
+    gate: _GateContext,
+    severity_input: set[int],
+) -> DispositionRecord:
+    """One record's label under the resolved gate. See :meth:`with_gate`."""
+    if record.disposition in _POLICY_TERMINAL_DISPOSITIONS:
+        # D2: policy already disposed of these, and no gate scores them.
+        return record
+    if record.scope_decided:
+        # A scoped run gates on the consumer's own relevant set, so
+        # `result.changes` membership does not *exclude* anything here --
+        # but the scoped gate still applies the severity configuration to
+        # what it scores, so an included record is re-answered by kind.
+        # Only the exclusion itself is untouchable: `gate_excluded` means
+        # the consumer does not use this finding, which no severity
+        # setting overrides.
+        if record.gate_excluded:
+            return record
+        restored = severity_config is not None and id(change) in severity_input
+        if (
+            record.disposition not in (Disposition.GATING, Disposition.NON_GATING)
+            and not restored
+        ):
+            # A deduplicated row the scoped gate does not score keeps
+            # saying why it is out. One `show_redundant` restored into
+            # `result.changes` *is* scored, so it is re-answered like any
+            # other included row -- `scope_decided` marks which gate
+            # decides, never that a row is frozen.
+            return record
+        return replace(
+            record,
+            disposition=_kept_disposition(
+                change,  # type: ignore[arg-type]
+                result,
+                severity_config,
+                gate,
+            ),
+        )
+    if severity_config is None:
+        # Legacy scheme: `checker.compare` scored `kept + verdict_scored`,
+        # which is what the recorded label already answers. A
+        # `deduplicated` record was never in that input either, so only
+        # the two evaluated labels are re-answered.
+        if record.gate_excluded or record.disposition not in (
+            Disposition.GATING,
+            Disposition.NON_GATING,
+        ):
+            return record
+        return replace(
+            record,
+            disposition=_kept_disposition(
+                change,  # type: ignore[arg-type]
+                result,
+                None,
+                gate,
+            ),
+        )
+    if id(change) not in severity_input:
+        if record.disposition not in (
+            Disposition.GATING,
+            Disposition.NON_GATING,
+        ):
+            # A deduplicated row the severity gate does not score keeps
+            # saying *why* it is out -- it was folded into another
+            # finding, which `non_gating` would not convey.
+            return record
+        return replace(record, disposition=Disposition.NON_GATING, gate_excluded=True)
+    # In the severity gate's own input, whatever bucket recorded it: the
+    # gate scores it, so the audit counts it. The mechanism that had held
+    # it out stays readable in `application_point`.
+    return replace(
+        record,
+        disposition=_kept_disposition(
+            change,  # type: ignore[arg-type]
+            result,
+            severity_config,
+            gate,
+        ),
+        gate_excluded=False,
+    )

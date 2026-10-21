@@ -788,6 +788,7 @@ def compare(
     new_source_licence: SourceReadLicence | None = None,
     acknowledgments: AcknowledgmentList | None = None,
     acknowledgment_policy: AcknowledgmentPolicy | None = None,
+    acknowledgment_breaks: str | None = None,
 ) -> DiffResult:
     """Compare a candidate snapshot against a baseline and return a DiffResult.
 
@@ -917,6 +918,7 @@ def compare(
             it never changes ``changes``, the verdict, or the exit code.
         acknowledgments: ADR-067 D5/C-S3 optional :class:`~abicheck.policy.acknowledgment.AcknowledgmentList`; ``None`` is a no-op.
         acknowledgment_policy: ADR-067 D6 gate policy; outranks *policy_file*'s own (D7 resolves it before this call).
+        acknowledgment_breaks: ADR-067 D5 ``"gate"`` (default) or ``"accept"``, folded into *acknowledgment_policy* (or *policy_file*'s own). ``accept`` stops an acknowledged break from contributing to the exit code; the verdict and report still show it.
 
     Raises:
         ProfileMismatchError: *old* and *new* were extracted under
@@ -1364,26 +1366,24 @@ def compare(
 
     # ADR-067 C-S1/D3 (also resolves `acknowledged_by`, D5): `verdict_scored`
     # is the redundant subset the verdict was scored over.
+    from .policy.acknowledgment_gate import (
+        acknowledged_breaks_of,
+        attach_additions_review,
+        effective_compare_ack_policy,
+    )
+
+    ack_policy = effective_compare_ack_policy(
+        acknowledgment_policy, policy_file, acknowledgment_breaks
+    )
     result.disposition_ledger = finalize_ledger(
         ledger,
         result,
         verdict_scored=verdict_redundant,
         strict_acknowledgments=True,
+        acknowledged_breaks=acknowledged_breaks_of(ack_policy),
     )
-    if acknowledgments is not None:  # ADR-067 D6 additions-review gate
-        from .policy.acknowledgment_gate import (
-            evaluate_unacknowledged_additions_for_result as _eval_uar,
-        )
-
-        result.unacknowledged_additions_review = _eval_uar(
-            result,
-            acknowledgments,
-            acknowledgment_policy
-            or getattr(policy_file, "acknowledgment_policy", None),
-            component=(old.library if old is not None else new.library),
-            baseline=(old.version if old is not None else None),
-            release_label=new.version,
-        )
+    # ADR-067 D6 additions-review gate (a no-op without acknowledgment records).
+    attach_additions_review(result, acknowledgments, ack_policy, old=old, new=new)
 
     # P0.4 — computed last, from data the pipeline above already produced
     # (evidence tiers, comparability outcome, contract context, whatever

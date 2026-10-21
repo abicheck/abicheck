@@ -316,6 +316,10 @@ class CompareRequest:
     acknowledgment_unacknowledged_additions: str | None = field(
         default=None, kw_only=True
     )
+    #: ADR-067 D5 ``breaks``: ``"gate"`` (default) or ``"accept"`` -- whether an
+    #: acknowledged break stops contributing to the exit code. Same tiers as
+    #: the two fields above.
+    acknowledgment_breaks: str | None = field(default=None, kw_only=True)
     #: ``.abicheck.yml`` ``suppression.strict``/``suppression.require_
     #: justification`` (the CLI resolves both from config): fail on an expired
     #: rule instead of silently ignoring it, and on a rule with no ``reason``.
@@ -770,7 +774,10 @@ __all__ = [
 
 def _acknowledgment_errors(request: CompareRequest) -> list[str]:
     """``CompareRequest``'s ADR-067 D5/D6 fields, checked up front."""
-    from ..model.acknowledgment_policy import VALID_UNACKNOWLEDGED_ADDITIONS_ACTIONS
+    from ..model.acknowledgment_policy import (
+        VALID_ACKNOWLEDGMENT_BREAKS_ACTIONS,
+        VALID_UNACKNOWLEDGED_ADDITIONS_ACTIONS,
+    )
 
     errors: list[str] = []
     action = request.acknowledgment_unacknowledged_additions
@@ -778,6 +785,12 @@ def _acknowledgment_errors(request: CompareRequest) -> list[str]:
         errors.append(
             "acknowledgment_unacknowledged_additions must be one of "
             f"{sorted(VALID_UNACKNOWLEDGED_ADDITIONS_ACTIONS)}; got {action!r}"
+        )
+    breaks = request.acknowledgment_breaks
+    if breaks is not None and breaks not in VALID_ACKNOWLEDGMENT_BREAKS_ACTIONS:
+        errors.append(
+            "acknowledgment_breaks must be one of "
+            f"{sorted(VALID_ACKNOWLEDGMENT_BREAKS_ACTIONS)}; got {breaks!r}"
         )
     path = request.acknowledgments_path
     if path is not None and not Path(path).is_file():

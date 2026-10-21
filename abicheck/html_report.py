@@ -29,7 +29,7 @@ No external CSS/JS dependencies — fully self-contained single HTML file.
 from __future__ import annotations
 
 import dataclasses
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from typing import TYPE_CHECKING, Any, cast
 
 # Page chrome (DOCTYPE/head/stylesheet/body frame, verdict palette, footer) now
@@ -42,8 +42,6 @@ from typing import TYPE_CHECKING, Any, cast
 from .checker_types import DiffResult
 from .html_template import _CSS as _CSS
 from .model.change_catalog.kinds import HasKind
-from .policy.classification import evidence_status_for_result, impact_for
-from .policy.evaluate import effective_kind_sets
 from .report.change_operation import entity_for_change
 from .report.change_summary import ENTITY_LABELS, UNCLASSIFIED_LABEL
 
@@ -56,11 +54,16 @@ from .report.change_summary import ENTITY_LABELS, UNCLASSIFIED_LABEL
 # than leaving them here, is what avoids a same-layer import cycle) -- every
 # existing caller and its direct test coverage resolves through these
 # aliases unchanged.
-from .report.disposition_audit import DispositionAudit, compute_disposition_audit
+from .report.disposition_audit import disposition_audit_reusing_document
 from .report.document import ReportDocument
 from .report.edge_coverage_section import compute_edge_coverage_section
 from .report.envelope import ReportEnvelope, resolved_document, resolved_gate
-from .report.finding import effective_bucket
+from .report.finding import (
+    active_reclassify_labels,
+    effective_bucket,
+    impact_text_for,
+    kind_sets_for_result,
+)
 from .report.redundancy_reasons import redundancy_reason_text
 from .report.render_html import (
     ChangeRow,
@@ -77,6 +80,7 @@ from .report.render_html import (
     SummaryTableData,
 )
 from .report.render_html_document import render_html_document
+from .report.versioning_policy_section import compute_versioning_policy
 from .report_classifications import (
     category,
     kind_str,
@@ -86,8 +90,6 @@ from .report_summary import compatibility_metrics
 
 if TYPE_CHECKING:
     from datetime import date
-
-    from .policy.severity import SeverityConfig
 
 
 def compute_full_change_rows(
@@ -113,20 +115,14 @@ def compute_full_change_rows(
     rows = []
     for ch in changes:
         ks = kind_str(ch)
-        kind = getattr(ch, "kind", None)
         relevance = getattr(ch, "contract_relevance", None)
         assurance = getattr(ch, "contract_assurance", None)
         decision = getattr(ch, "compatibility_decision", None)
-        evidence_status = (
-            evidence_status_for_result(cast(HasKind, ch), evidence_tiers)
-            if kind
-            else None
-        )
         rows.append(
             ChangeRow(
                 kind=ks,
                 category=category(ks),
-                impact=(impact_for(kind, evidence_status) or "") if kind else "",
+                impact=impact_text_for(ch, evidence_tiers),
                 severity=severity(ks),
                 symbol=getattr(ch, "symbol", "") or "",
                 description=getattr(ch, "description", "") or "",
@@ -249,8 +245,8 @@ def compute_summary_table(
             f" [intent: {rule.intent}"
             f"{f', expires {rule.expires}' if rule.expires else ''}"
             f"{f', from {rule.source_file}' if rule.source_file else ''}]"
-            f" — {count} finding(s)"
-            for rule, count in getattr(audit, "rules", ())
+            f" — {rule.matched_count} finding(s)"
+            for rule in getattr(audit, "rules", ())
         ),
         not_evaluated_detectors=tuple(
             det.name for det in getattr(audit, "not_evaluated_detectors", ())
@@ -302,14 +298,7 @@ def compute_confidence(
     overrides: tuple[tuple[str, str], ...] = ()
     if policy_file and getattr(policy_file, "overrides", None):
         overrides = tuple((k.value, v.value) for k, v in policy_file.overrides.items())
-    reclassify: tuple[str, ...] = ()
-    if policy_file and getattr(policy_file, "reclassify", None):
-        from .policy.reclassify import active_reclassify_rules
-
-        reclassify = tuple(
-            rule.describe()
-            for rule in active_reclassify_rules(policy_file.reclassify, today)
-        )
+    reclassify = active_reclassify_labels(policy_file, today)
     comparability = getattr(result, "comparability_assurance", None)
     return ConfidenceData(
         confidence=conf_val,
@@ -432,7 +421,7 @@ def build_html_document(
     *,
     show_only: str | None = None,
     show_impact: bool = False,
-    severity_config: SeverityConfig | None = None,
+    severity_config: object | None = None,
     demangle: bool = True,
     envelope: ReportEnvelope | None = None,
 ) -> ReportDocument:
@@ -458,16 +447,8 @@ def build_html_document(
     fields -- see ADR-061's Gap C status note. A direct caller with no
     envelope (a test) keeps the independent build.
     """
-    shared_document = resolved_document(envelope)
-    shared_disposition_audit = (
-        DispositionAudit.from_dict(
-            cast(
-                "Mapping[str, Any]",
-                shared_document.to_mapping()["disposition_audit"],
-            )
-        )
-        if shared_document is not None
-        else compute_disposition_audit(result, severity_config)
+    shared_disposition_audit = disposition_audit_reusing_document(
+        result, severity_config, resolved_document(envelope)
     )
 
     verdict = (
@@ -488,7 +469,7 @@ def build_html_document(
             typed_changes,
             show_only,
             policy=result.policy,
-            kind_sets=effective_kind_sets(result)
+            kind_sets=kind_sets_for_result(result)
             if isinstance(result, DiffResult)
             else None,
             policy_file=getattr(result, "policy_file", None),
@@ -534,7 +515,7 @@ def build_html_document(
             _resolved_findings = build_report_findings(
                 display_changes,  # type: ignore[arg-type]
                 policy=result.policy,
-                kind_sets=effective_kind_sets(result),
+                kind_sets=kind_sets_for_result(result),
                 policy_file=result.policy_file,
             )
         _findings_by_id = findings_by_change_id(_resolved_findings)
@@ -591,7 +572,7 @@ def build_html_document(
         _metrics_changes,
         old_symbol_count,
         policy=getattr(result, "policy", None),
-        kind_sets=effective_kind_sets(result)
+        kind_sets=kind_sets_for_result(result)
         if isinstance(result, DiffResult)
         else None,
         policy_file=getattr(result, "policy_file", None),
@@ -724,7 +705,7 @@ def generate_html_report(
     *,
     show_only: str | None = None,
     show_impact: bool = False,
-    severity_config: SeverityConfig | None = None,
+    severity_config: object | None = None,
     demangle: bool = True,
     envelope: ReportEnvelope | None = None,
 ) -> str:
@@ -783,21 +764,6 @@ def _surface_changes(
         findings = envelope.findings_for(changes)  # type: ignore[arg-type]
         return compute_surface_changes(result, findings).to_dict()  # type: ignore[arg-type]
     return compute_surface_changes(result, changes=changes).to_dict()  # type: ignore[arg-type]
-
-
-def compute_versioning_policy(result: object) -> dict[str, object] | None:
-    """The stated versioning policy's verdict on this release, or ``None``.
-
-    The same acceptance the JSON ``release_recommendation.policy_acceptance``
-    carries: it reads only the run's verdict, never the finding set.
-    """
-    from .policy.versioning_policy import evaluate_release_acceptance
-    from .semver import stated_versioning_policy
-
-    policy = stated_versioning_policy(result)  # type: ignore[arg-type]
-    if policy is None or not hasattr(result, "verdict"):
-        return None
-    return evaluate_release_acceptance(result, policy).to_dict()  # type: ignore[arg-type]
 
 
 def compute_use_case_impact(

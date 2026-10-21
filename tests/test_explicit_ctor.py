@@ -46,7 +46,8 @@ class TestExplicitCtor:
         old = _snap("1.0", [_ctor("_ZN3FooC1Ei", is_explicit=False)])
         new = _snap("2.0", [_ctor("_ZN3FooC1Ei", is_explicit=True)])
         r = compare(old, new)
-        assert r.verdict == Verdict.API_BREAK
+        # No header observation: ADR-084 demotes this source-level claim.
+        assert r.verdict == Verdict.COMPATIBLE_WITH_RISK
         assert any(c.kind == ChangeKind.CTOR_EXPLICIT_ADDED for c in r.changes)
         assert ChangeKind.CTOR_EXPLICIT_ADDED in API_BREAK_KINDS
 

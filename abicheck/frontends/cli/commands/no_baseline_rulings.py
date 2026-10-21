@@ -215,6 +215,11 @@ def _old_sided_message(spelling: str) -> str:
 #:   listed rather than silently accepted so that is a visible decision.
 _UNSUPPORTED_OPTIONS: dict[str, tuple[str, str]] = {
     # -- describes a comparison this run never performs -------------------
+    "acknowledgments": (
+        "--acknowledgments",
+        "an acknowledgment accepts a change a comparison observed; a no-baseline "
+        "audit compares nothing, so there is no change to accept",
+    ),
     "used_by_apps": (
         "--used-by",
         "consumer scoping answers 'does this change break a consumer', which "

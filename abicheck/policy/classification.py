@@ -67,6 +67,7 @@ from ..model.evidence_status import (
     is_cross_source_persistent,
 )
 from ..model.execution_cache import memoized
+from .binary_gate_marker import is_binary_gate_demoted
 
 # ---------------------------------------------------------------------------
 # Classification sets — DERIVED from change_registry.py (single source of truth)
@@ -443,18 +444,26 @@ def effective_category(
     # MagicMock test doubles whose attribute access auto-creates a truthy mock,
     # mirroring the ``frozen_namespace_violation`` guard in policy_file.
     override = getattr(change, "effective_verdict", None)
-    if isinstance(override, Verdict):
+    gated = is_binary_gate_demoted(change)
+    if isinstance(override, Verdict) and not gated:
         return override
     kind = change.kind
     if kind in breaking:
-        return Verdict.BREAKING
-    if kind in api_break:
-        return Verdict.API_BREAK
-    if kind in risk:
+        category = Verdict.BREAKING
+    elif kind in api_break:
+        category = Verdict.API_BREAK
+    elif kind in risk:
+        category = Verdict.COMPATIBLE_WITH_RISK
+    elif kind in compatible:
+        category = Verdict.COMPATIBLE
+    else:
+        return Verdict.BREAKING  # unclassified → fail-safe
+    # ADR-084: the binary gate caps a source-level claim it could not back. It
+    # lowers only the API_BREAK the policy left standing, so a policy that
+    # relaxed or escalated the kind decides the category as it always did.
+    if gated and category is Verdict.API_BREAK:
         return Verdict.COMPATIBLE_WITH_RISK
-    if kind in compatible:
-        return Verdict.COMPATIBLE
-    return Verdict.BREAKING  # unclassified → fail-safe
+    return category
 
 
 def excluded_from_verdict_as_persistent_hygiene(
@@ -676,8 +685,12 @@ def evidence_status_for_result(
       of evidence quality — checking it there would misdowngrade every
       genuine PE/Mach-O removal.
 
-    Both gaps downgrade to :attr:`EvidenceStatus.UNATTRIBUTED`; every other
-    kind/tier/finding combination is unchanged from
+    Both gaps downgrade to :attr:`EvidenceStatus.UNATTRIBUTED`. A third,
+    ADR-084: a finding the binary-depth gate demoted to
+    ``COMPATIBLE_WITH_RISK`` (no observed header or source evidence for its
+    source-level claim) reads :attr:`EvidenceStatus.CONTEXTUAL_RISK`, not
+    ``SOURCE_CONTRACT``, so the label does not restate a claim the run could
+    not back. Every other kind/tier/finding combination is unchanged from
     :func:`evidence_status_for_change`.
 
     *evidence_tiers* defaults to ``()`` — the "unknown" case
@@ -686,6 +699,8 @@ def evidence_status_for_result(
     ``DiffResult.evidence_tiers`` through gets the exact same result as
     calling :func:`evidence_status_for_change` directly.
     """
+    if is_binary_gate_demoted(change):
+        return EvidenceStatus.CONTEXTUAL_RISK
     status = evidence_status_for_change(change)
     if status is not EvidenceStatus.ARTIFACT_PROVEN:
         return status
@@ -697,7 +712,7 @@ def evidence_status_for_result(
     # below only applies when this run's own evidence_tiers says "elf" was
     # actually examined. Without this guard, every genuine PE/Mach-O
     # BREAKING_KINDS removal would be misdowngraded to UNATTRIBUTED.
-    kind = getattr(change, "kind", None)
+    kind = change.kind
     if (
         "elf" in evidence_tiers
         and kind in _ELF_BINDING_STAMPED_KINDS

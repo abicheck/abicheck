@@ -362,7 +362,7 @@ use_cases:
     name: Pairwise compare (CI PR gate)
     status: complete
     user_task: [pr_review, local_check, release]
-    adrs: [ADR-002, ADR-006, ADR-009, ADR-013, ADR-017, ADR-042, ADR-049, ADR-055, ADR-064, ADR-065, ADR-067, ADR-068, ADR-071, ADR-078]
+    adrs: [ADR-002, ADR-006, ADR-009, ADR-013, ADR-017, ADR-042, ADR-049, ADR-055, ADR-064, ADR-065, ADR-067, ADR-068, ADR-071, ADR-078, ADR-084]
     evidence:
       tests: [tests/test_reporter.py]
       examples: [catalog/ground_truth.json]

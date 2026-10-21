@@ -74,6 +74,10 @@ OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
         # Phase 9d deleted --post-manifest: .abicheck.yml's
         # contract.overlays.post_manifest (Phase 9c) is its only spelling.
         "--abi3",
+        # ADR-067 D5: this run's acknowledgment records; overrides
+        # .abicheck.yml's acknowledgment.file (the config key stays the
+        # spelling a project commits).
+        "--acknowledgments",
         "--budget",
         "--bundle-facts-library-manifest",
         "--bundle-facts-out",

@@ -66,12 +66,14 @@ from .disposition_gate import (
     _GateContext as _GateContext,
     _kept_disposition as _kept_disposition,
     _reset_dated_overlays as _reset_dated_overlays,
+    regate_record as regate_record,
 )
 from .disposition_types import (
     CONSUMER_ONLY_APPLICATION_POINTS as _CONSUMER_ONLY,
     Disposition as Disposition,
     DispositionRecord as DispositionRecord,
 )
+from .rule_inventory import RuleRef
 from .rule_provenance import (
     RuleProvenance as RuleProvenance,
     rule_provenance as rule_provenance,
@@ -84,16 +86,6 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
     from ..model.change import Change
     from .suppression.rules import Suppression
 
-
-#: The four D2 dispositions no gate can move: policy already disposed of the
-#: finding, and neither gate scheme ever scored it.
-_POLICY_TERMINAL_DISPOSITIONS = frozenset(
-    {
-        Disposition.SUPPRESSED,
-        Disposition.OUT_OF_CONTRACT,
-        Disposition.UNRESOLVED_RELEVANCE,
-    }
-)
 
 _EFFECTIVE_DISPOSITIONS = frozenset({Disposition.GATING})
 
@@ -136,6 +128,9 @@ class DispositionLedger:
         self._anchors: list[object] = []
         #: Aliased changes (see ``dedupe_key``): kept alive, never zipped.
         self._aliases: list[object] = []
+        #: Loaded suppression lists registered as this run's rule inventory
+        #: (:meth:`register_suppression`). Read, never mutated.
+        self._inventories: list[object] = []
 
     # -- recording -----------------------------------------------------
 
@@ -151,8 +146,20 @@ class DispositionLedger:
         scope_decided: bool = False,
         dedupe_key: str | None = None,
         policy_overlay: bool = False,
+        shadowed_refs: tuple[RuleRef, ...] = (),
+        reclassify_rule: RuleRef | None = None,
+        reclassify_hits: tuple[RuleRef, ...] = (),
+        acknowledgment_rule: RuleRef | None = None,
     ) -> None:
         """Record *change*'s single terminal *disposition*.
+
+        P1 (ADR-067 D3): the rule-reference arguments name the configured rules
+        that touched this finding, so :mod:`abicheck.policy.rule_inventory` can
+        join the record to the rule it belongs to. ``shadowed_refs`` are
+        suppression rules that matched but were not the first match;
+        ``reclassify_rule`` is the reclassify rule that moved the verdict and
+        ``reclassify_hits`` every reclassify rule whose selectors matched;
+        ``acknowledgment_rule`` is the acknowledgment record that covered it.
 
         A no-op when *change* was already recorded — the disposition it
         received first is the one that actually applied to it.
@@ -218,6 +225,10 @@ class DispositionLedger:
                 gate_excluded=gate_excluded,
                 scope_decided=scope_decided,
                 policy_overlay=policy_overlay,
+                shadowed_refs=tuple(shadowed_refs),
+                reclassify_rule=reclassify_rule,
+                reclassify_hits=tuple(reclassify_hits),
+                acknowledgment_rule=acknowledgment_rule,
             )
         )
 
@@ -229,6 +240,8 @@ class DispositionLedger:
         application_point: str,
         source_file: str | None = None,
         dedupe_key: str | None = None,
+        entry_index: int | None = None,
+        shadowed_refs: tuple[RuleRef, ...] = (),
     ) -> None:
         """The one primitive every suppression application point routes through.
 
@@ -242,11 +255,33 @@ class DispositionLedger:
             change,
             Disposition.SUPPRESSED,
             application_point=application_point,
-            rule=rule_provenance(rule, source_file=source_file),
+            rule=rule_provenance(
+                rule, source_file=source_file, entry_index=entry_index
+            ),
             dedupe_key=dedupe_key,
+            shadowed_refs=shadowed_refs,
         )
 
+    def register_suppression(self, suppression: object) -> None:
+        """Declare a loaded suppression list as this comparison's rule inventory.
+
+        P1: the ledger otherwise knows only the rules that *fired*. Registering
+        the list lets the audit enumerate every configured rule, including the
+        ones that never matched. Idempotent by identity, and a ``None`` is
+        ignored, so every caller can register unconditionally.
+        """
+        if suppression is None:
+            return
+        if any(existing is suppression for existing in self._inventories):
+            return
+        self._inventories.append(suppression)
+
     # -- querying ------------------------------------------------------
+
+    @property
+    def suppression_inventories(self) -> tuple[object, ...]:
+        """The loaded suppression lists registered as this run's inventory."""
+        return tuple(self._inventories)
 
     @property
     def records(self) -> tuple[DispositionRecord, ...]:
@@ -319,8 +354,9 @@ class DispositionLedger:
         gated._aliases = list(self._aliases)
         gated._seen_ids = dict(self._seen_ids)
         gated._seen_keys = dict(self._seen_keys)
+        gated._inventories = list(self._inventories)
         gated._records = [
-            self._regated(record, change, result, severity_config, gate, severity_input)
+            regate_record(record, change, result, severity_config, gate, severity_input)
             for record, change in zip(self._records, self._anchors)
         ]
         gated._records = _reset_dated_overlays(gated._records)
@@ -374,6 +410,7 @@ class DispositionLedger:
         superseded._aliases = list(self._aliases)
         superseded._seen_ids = dict(self._seen_ids)
         superseded._seen_keys = dict(self._seen_keys)
+        superseded._inventories = list(self._inventories)
         superseded._records = [
             replace(
                 record,
@@ -387,94 +424,6 @@ class DispositionLedger:
             for index, record in enumerate(self._records)
         ]
         return superseded
-
-    @staticmethod
-    def _regated(
-        record: DispositionRecord,
-        change: object,
-        result: DiffResult,
-        severity_config: object,
-        gate: _GateContext,
-        severity_input: set[int],
-    ) -> DispositionRecord:
-        """One record's label under the resolved gate. See :meth:`with_gate`."""
-        if record.disposition in _POLICY_TERMINAL_DISPOSITIONS:
-            # D2: policy already disposed of these, and no gate scores them.
-            return record
-        if record.scope_decided:
-            # A scoped run gates on the consumer's own relevant set, so
-            # `result.changes` membership does not *exclude* anything here --
-            # but the scoped gate still applies the severity configuration to
-            # what it scores, so an included record is re-answered by kind.
-            # Only the exclusion itself is untouchable: `gate_excluded` means
-            # the consumer does not use this finding, which no severity
-            # setting overrides.
-            if record.gate_excluded:
-                return record
-            restored = severity_config is not None and id(change) in severity_input
-            if (
-                record.disposition not in (Disposition.GATING, Disposition.NON_GATING)
-                and not restored
-            ):
-                # A deduplicated row the scoped gate does not score keeps
-                # saying why it is out. One `show_redundant` restored into
-                # `result.changes` *is* scored, so it is re-answered like any
-                # other included row -- `scope_decided` marks which gate
-                # decides, never that a row is frozen.
-                return record
-            return replace(
-                record,
-                disposition=_kept_disposition(
-                    change,  # type: ignore[arg-type]
-                    result,
-                    severity_config,
-                    gate,
-                ),
-            )
-        if severity_config is None:
-            # Legacy scheme: `checker.compare` scored `kept + verdict_scored`,
-            # which is what the recorded label already answers. A
-            # `deduplicated` record was never in that input either, so only
-            # the two evaluated labels are re-answered.
-            if record.gate_excluded or record.disposition not in (
-                Disposition.GATING,
-                Disposition.NON_GATING,
-            ):
-                return record
-            return replace(
-                record,
-                disposition=_kept_disposition(
-                    change,  # type: ignore[arg-type]
-                    result,
-                    None,
-                    gate,
-                ),
-            )
-        if id(change) not in severity_input:
-            if record.disposition not in (
-                Disposition.GATING,
-                Disposition.NON_GATING,
-            ):
-                # A deduplicated row the severity gate does not score keeps
-                # saying *why* it is out -- it was folded into another
-                # finding, which `non_gating` would not convey.
-                return record
-            return replace(
-                record, disposition=Disposition.NON_GATING, gate_excluded=True
-            )
-        # In the severity gate's own input, whatever bucket recorded it: the
-        # gate scores it, so the audit counts it. The mechanism that had held
-        # it out stays readable in `application_point`.
-        return replace(
-            record,
-            disposition=_kept_disposition(
-                change,  # type: ignore[arg-type]
-                result,
-                severity_config,
-                gate,
-            ),
-            gate_excluded=False,
-        )
 
     def resolve_verdict_classes(
         self, result: DiffResult, *, today: date | None = None
@@ -558,40 +507,17 @@ class DispositionLedger:
     def resolve_reclassifications(
         self, result: DiffResult, *, today: date | None = None
     ) -> None:
-        """Fill in :attr:`DispositionRecord.reclassified_by` (ADR-067 C-S2).
+        """Stamp each record with the reclassify rules that touched it (ADR-067 C-S2, P1).
 
-        ``Change`` carries no such attribute -- the value is computed on
-        demand, like :meth:`resolve_verdict_classes` computes
-        ``verdict_class``, so every record started out ``None`` here. Mirrors
-        :func:`abicheck.change_json.reclassified_by_for_change`'s own
-        precedence (``rule.label or rule.reason or rule.to_verdict.value``)
-        without importing that ``frontends``-adjacent helper (``policy/``
-        may not depend on it); both read
-        :func:`abicheck.policy.reclassify.reclassify_rule_for_change`, so they
-        cannot disagree on *which* rule decided a change. Every record is a
-        candidate, not only ``gating``/``non_gating`` ones: reclassification
-        is an overlay attribute (D2), independent of the terminal
-        disposition policy or scope later assigned.
+        Delegates to :func:`abicheck.policy.disposition_close.stamp_reclassifications`,
+        which records the decider (``reclassify_rule``), every selector hit
+        (``reclassify_hits``) and the display label (``reclassified_by``) from one
+        :func:`~abicheck.policy.reclassify_outcome.reclassify_outcome_for_change` call.
+        Idempotent: a record already stamped is left alone.
         """
-        from .reclassify import reclassify_rule_for_change
+        from .disposition_rules import stamp_reclassifications
 
-        gate = _GateContext.of(result, today=today)
-        for index, (record, change) in enumerate(zip(self._records, self._anchors)):
-            if record.reclassified_by is not None:
-                continue  # already resolved (e.g. a re-closed scoped record)
-            rule = reclassify_rule_for_change(
-                # `self._anchors` is typed as holding `object`; the ignore
-                # belongs to this argument, not to `gate.today`. It sat on a
-                # three-arguments-on-one-line call until `ruff format` split
-                # it, which is the only reason the mismatch was visible.
-                change,  # type: ignore[arg-type]
-                gate.policy_file,
-                gate.today,
-            )
-            if rule is None:
-                continue
-            reclassified_by = rule.label or rule.reason or rule.to_verdict.value
-            self._records[index] = replace(record, reclassified_by=reclassified_by)
+        stamp_reclassifications(self, result, today=today)
 
     def refresh_promoted(self, result: DiffResult) -> None:
         """Re-answer any record whose finding an explicit scope *promoted*.
@@ -838,13 +764,50 @@ def record_suppressed_change(
     """
     if ledger is None:
         return
+    source_file = _source_file_for(suppression)
+    entry_index, shadowed = _suppression_position(
+        suppression, change, rule, source_file
+    )
     ledger.record_suppression(
         change,
         rule=rule,
         application_point=application_point,
-        source_file=_source_file_for(suppression),
+        source_file=source_file,
         dedupe_key=dedupe_key,
+        entry_index=entry_index,
+        shadowed_refs=shadowed,
     )
+
+
+def _suppression_position(
+    suppression: object | None,
+    change: Change,
+    rule: Suppression | None,
+    source_file: str | None,
+) -> tuple[int | None, tuple[RuleRef, ...]]:
+    """Where *rule* sits in its document, and which later rules also matched.
+
+    P1 (ADR-067 D3): the winning rule is first-match, so every other rule that
+    matches *change* is *shadowed*. Computed here, at the one recording
+    primitive, because the list is in hand and the winner is known -- asking
+    again later would re-evaluate against a finding whose fields may since have
+    changed. ``(None, ())`` when the rule is not in the list (a synthetic
+    decision, or a caller that passed no list).
+    """
+    from .rule_inventory import KIND_SUPPRESSION
+
+    rules = getattr(suppression, "rules", None) if suppression is not None else None
+    if rule is None or not rules:
+        return None, ()
+    winner = next((i for i, r in enumerate(rules) if r is rule), None)
+    if winner is None:
+        return None, ()
+    shadowed = tuple(
+        RuleRef(KIND_SUPPRESSION, source_file, i)
+        for i, other in enumerate(rules)
+        if i != winner and other.matches(change)
+    )
+    return winner, shadowed
 
 
 def _source_file_for(suppression: object | None) -> str | None:
