@@ -91,8 +91,8 @@ _CASE87 = (
 )
 
 
-def _require_tools() -> None:
-    for tool in ("g++", "castxml", "clang"):
+def _require_tools(*tools: str) -> None:
+    for tool in tools:
         if shutil.which(tool) is None:
             pytest.skip(f"{tool} not installed")
 
@@ -163,7 +163,7 @@ def test_header_only_default_change_is_no_l2_change(
     tmp_path: Path, header_pair: tuple[Path, Path], backend: str
 ) -> None:
     """No public surface and no export depends on Box's default: no ABI effect."""
-    _require_tools()
+    _require_tools(backend)
     old_h, new_h = header_pair
     old = _dump_header(tmp_path, old_h, backend, "old")
     new = _dump_header(tmp_path, new_h, backend, "new")
@@ -181,8 +181,29 @@ def test_castxml_cannot_expose_uninstantiated_template_defaults(
     the castxml side of the capability gap recorded in
     ``docs/reference/header-backend-capabilities.md``.
     """
-    _require_tools()
+    _require_tools("castxml", "g++")
     old_h, _ = header_pair
+    # castxml refuses a .h as C++ without a language flag, so give it a .hpp copy.
+    probe = tmp_path / "probe.hpp"
+    probe.write_text(old_h.read_text())
+    xml = tmp_path / "probe.xml"
+    subprocess.run(
+        [
+            "castxml",
+            "--castxml-cc-gnu",
+            "g++",
+            "--castxml-output=1",
+            "-std=c++17",
+            "-o",
+            str(xml),
+            str(probe),
+        ],
+        check=True,
+        capture_output=True,
+    )
+    # Assert on CastXML's own output, not the abicheck snapshot, so the claim is
+    # about the producer. The snapshot check below pins the L2 result separately.
+    assert 'name="Box"' not in xml.read_text()
     snap = _dump_header(tmp_path, old_h, "castxml", "probe").read_text()
     assert '"name": "Box"' not in snap
 
@@ -195,7 +216,7 @@ def test_clang_ast_exposes_template_default_argument(
     Pins the producer-side fact that makes a clang-only extraction possible
     later, so the header-capability note stays accurate.
     """
-    _require_tools()
+    _require_tools("clang")
     old_h, _ = header_pair
     ast = subprocess.run(
         [
@@ -235,7 +256,7 @@ def test_default_substituted_into_public_signature_breaks_at_l2(
     tmp_path: Path, public_api_pair: tuple[Path, Path], backend: str
 ) -> None:
     """The break is caught at L2 on both backends, without the default label."""
-    _require_tools()
+    _require_tools(backend)
     old_h, new_h = public_api_pair
     old = _dump_header(tmp_path, old_h, backend, "old")
     new = _dump_header(tmp_path, new_h, backend, "new")
@@ -253,7 +274,7 @@ def test_instantiated_default_change_is_attributed_at_l2(
     tmp_path: Path, backend: str
 ) -> None:
     """case87: the exported default-substituted instantiation is attributed at L2."""
-    _require_tools()
+    _require_tools("g++", backend)
     case_dir = tmp_path / "case87"
     shutil.copytree(_CASE87, case_dir, ignore=shutil.ignore_patterns("*.txt", "*.md"))
     libs: dict[str, Path] = {}

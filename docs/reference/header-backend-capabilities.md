@@ -358,19 +358,10 @@ Each of these is a documented consequence of the matrix, not a bug awaiting a
 quick patch. They are listed here so a reader can tell "abicheck cannot see
 this" apart from "abicheck saw no change".
 
-- **Default template arguments on uninstantiated templates.** CastXML emits
-  no record for a class template it has not instantiated, so a default
-  argument on one is invisible to it. The clang AST carries the default
-  (`TemplateTypeParmDecl.defaultArg`), but `dumper_clang.py` does not record
-  it. The consequence is asymmetric only for a *header-only* change: a
-  default that reaches an exported instantiation or a public signature is
-  caught as a break on both backends at L2 (labelled
-  `default_template_arg_changed` for an exported instantiation, as a
-  removed/added mangled function for a public signature). The header-only
-  shape reads `NO_CHANGE` on both, and no clang-only detector is added for
-  it, because that would be a verdict castxml cannot reproduce. See
-  [known-gaps](../contribute/known-gaps.md) and
-  `tests/test_default_template_arg_l2_matrix.py`.
+- **Default template arguments on uninstantiated templates.** A header-only
+  change to a template default reads `NO_CHANGE` on both backends, because
+  CastXML emits no record for an uninstantiated class template. See
+  [known-gaps](../contribute/known-gaps/a-header-only-default-template-argument-change-reads-no-change-at-l2.md).
 - **Secondary vtable placement under multiple inheritance.** Both backends
   apply the same `0`-if-polymorphic heuristic for `vptr_offset_bits`, so a
   secondary base's own vtable pointer at a non-zero offset is invisible to
