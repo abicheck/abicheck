@@ -570,7 +570,6 @@ topics:
       - abicheck/report/not_comparable.py
       - abicheck/buildsource/check_report_run_outcome.py
       - abicheck/workflows/aggregate/report_gate.py
-      - abicheck/cli_compare_release_helpers.py
       - abicheck/cli_compare_release_matrix.py
       - abicheck/schemas/compare_report.schema.json
     allowed_summaries:
