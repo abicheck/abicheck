@@ -1871,7 +1871,7 @@ def test_run_ast_passes_merges_template_instantiations_across_tus(
         emitted_symbols=("_ZN1WIiE3getEv",),
         file="a.cpp",
     )
-    monkeypatch.setattr(l5, "run_clang_ast_dump", lambda *_a, **_k: {})
+    monkeypatch.setattr(l5, "dump_compile_unit", lambda *a, **k: l5.TuAstDump({}, 0))
     real = next(p for p in l5.L5_AST_PASSES if p.name == "template_graph")
     fake_pass = l5.AstPass(real.name, lambda _ast, _cu: [inst], real.merge)
     build = BuildEvidence(

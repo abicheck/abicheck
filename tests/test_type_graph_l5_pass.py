@@ -85,7 +85,7 @@ def test_run_ast_passes_merges_richer_edge_across_compile_units(
         del cwd, diagnostics
         return {"source": argv[-1]}
 
-    monkeypatch.setattr(l5, "run_clang_ast_dump", fake_dump)
+    _patch_dump(monkeypatch, fake_dump)
 
     def _parse(ast, _cu) -> list[TypeEdge]:
         dst_file = "" if ast["source"] == "src/a.cpp" else "src/detail/impl.h"
@@ -119,7 +119,6 @@ def test_run_ast_passes_propagates_deadline_into_pool_workers(monkeypatch) -> No
     used to see no active deadline at all — each clang subprocess call
     inside it would run to its full fixed 120s regardless of --budget. The
     shared pass carries it through parallel_probe.run_parallel_probes."""
-    import abicheck.buildsource.l5_ast_pass as l5
     from abicheck import deadline
 
     # Force a real pool (l5_ast_pass imports _call_graph_jobs by name).
@@ -133,7 +132,7 @@ def test_run_ast_passes_propagates_deadline_into_pool_workers(monkeypatch) -> No
         seen_remaining.append(deadline.remaining())
         return None
 
-    monkeypatch.setattr(l5, "run_clang_ast_dump", fake_dump)
+    _patch_dump(monkeypatch, fake_dump)
     build = BuildEvidence(
         compile_units=[
             CompileUnit(id="cu://a", source="a.cpp"),
@@ -209,11 +208,11 @@ def test_run_ast_passes_rechecks_deadline_before_parsing_ast(
 
     ast = _tu(_record("Widget", inner=[_field("x", "int")]))
 
-    def fake_run(*_a, **_k):
+    def fake_run(*_a, **kwargs):
         # Simulate the budget running out while clang was still parsing: by
         # the time it exits successfully, the deadline has already passed.
         time.sleep(0.05)
-        return _FakeProc(_json.dumps(ast))
+        return _spilled(kwargs, _FakeProc(_json.dumps(ast)))
 
     monkeypatch.setattr("abicheck.deadline.run_bounded", fake_run)
     with deadline.deadline_scope(0.03):
@@ -239,19 +238,19 @@ def test_run_ast_passes_rechecks_deadline_before_walking_ast(
 
     ast = _tu(_record("Widget", inner=[_field("x", "int")]))
 
-    def fake_run(*_a, **_k):
-        return _FakeProc(_json.dumps(ast))
+    def fake_run(*_a, **kwargs):
+        return _spilled(kwargs, _FakeProc(_json.dumps(ast)))
 
     monkeypatch.setattr("abicheck.deadline.run_bounded", fake_run)
     from abicheck.buildsource import clang_ast_run
 
-    real_loads = clang_ast_run.json.loads
+    real_load = clang_ast_run.json.load
 
-    def _slow_loads(text: str) -> object:
+    def _slow_load(fh):
         time.sleep(0.05)
-        return real_loads(text)
+        return real_load(fh)
 
-    monkeypatch.setattr(clang_ast_run.json, "loads", _slow_loads)
+    monkeypatch.setattr(clang_ast_run.json, "load", _slow_load)
     with deadline.deadline_scope(0.03):
         outcome = _run_type_pass(_one_unit())
     assert outcome.result == []
@@ -281,13 +280,40 @@ def test_extractor_missing_clang_is_graceful() -> None:
 class _FakeProc:
     def __init__(self, stdout: str, stderr: str = "", returncode: int = 0) -> None:
         self.stdout = stdout
-        self.stderr = stderr
+        self.stderr = stderr.encode("utf-8")
         self.returncode = returncode
 
 
-def _patch_clang(monkeypatch, *, proc: _FakeProc) -> None:
+def _spilled(kwargs, proc: _FakeProc) -> _FakeProc:
+    """Write clang's stdout to the file the runner passed, as a real run does."""
+    out = kwargs.get("stdout")
+    if out is not None and hasattr(out, "write"):
+        out.write(proc.stdout.encode("utf-8"))
+    return proc
 
-    monkeypatch.setattr("abicheck.deadline.run_bounded", lambda *_a, **_k: proc)
+
+def _patch_dump(monkeypatch, fake) -> None:
+    """Replace the TU dump with *fake* ``(clang_bin, argv, cwd, diagnostics)``."""
+    import abicheck.buildsource.l5_ast_pass as l5
+    from abicheck.buildsource.clang_ast_run import STAGE_RUN, TuAstDump
+
+    def dump(cu, *, clang_bin, compiler_binary=None, timeout=None):
+        diagnostics: list[str] = []
+        tree = fake(clang_bin, [cu.source], cwd=None, diagnostics=diagnostics)
+        if tree is None:
+            return TuAstDump(
+                None, None, "", stage=STAGE_RUN, error=" ".join(diagnostics)
+            )
+        return TuAstDump(tree, 0, "")
+
+    monkeypatch.setattr(l5, "dump_compile_unit", dump)
+
+
+def _patch_clang(monkeypatch, *, proc: _FakeProc) -> None:
+    def fake_run(*_a, **kwargs):
+        return _spilled(kwargs, proc)
+
+    monkeypatch.setattr("abicheck.deadline.run_bounded", fake_run)
 
 
 def test_run_ast_passes_nonzero_exit_records_diagnostic_but_salvages_edges(

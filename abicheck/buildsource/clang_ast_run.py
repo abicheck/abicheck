@@ -13,115 +13,203 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""One bounded ``clang -Xclang -ast-dump=json`` run, shared by the L5 passes.
+"""The one bounded ``clang -ast-dump=json`` run per translation unit.
 
-A **leaf** module: the bounded dump every clang-backed L5 graph family reads --
-same argv shape, same 120s local cap folded against the active ``--budget``
-deadline, same degrade-to-``diagnostic``-and-give-up contract at every failure
-point. ``l5_ast_pass.run_ast_passes`` calls it once per TU and hands the tree to
-every family's parser (the families used to each dump the TU themselves).
+Both the L4 source replay (:class:`~.source_extractors.clang.ClangSourceExtractor`)
+and the L5 AST passes (:mod:`l5_ast_pass`) read a TU's clang AST. They share
+this module's runner and the argv from
+:func:`~.source_extractors.clang_command.build_clang_command`, so a TU that both
+tiers read is dumped once: :func:`dump_tu_ast` runs the process and returns a
+:class:`TuAstDump`, and each consumer maps that one result onto its own
+diagnostics.
+
+The dump is spilled to a temp file rather than captured in memory, so N
+concurrent workers keep their (multi-GiB) payloads on disk until each parses.
+Every failure point degrades to a :class:`TuAstDump` with a ``stage`` -- nothing
+here raises for a bad TU; a consumer decides whether that is a diagnostic (L5,
+advisory) or an L4 partial-coverage record.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import subprocess  # noqa: S404 - AST extraction shells out to clang (never shell=True)
+import tempfile
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from .. import deadline
-from .._compiler_options import CLANG_GCC_HEADER_COMPAT_DEFINES
-from ..extract.headers.clang.locations import materialize_locations
+from .build_evidence import CompileUnit
+from .source_extractors._argv import unredact_home
+from .source_extractors._deadline_bound import run_bounded_for_extraction
+from .source_extractors.base import SourceExtractionError
+from .source_extractors.clang_command import (
+    ast_clang_binary,
+    build_clang_command,
+    compile_unit_invocation,
+)
 
-#: Per-TU wall-clock ceiling for one AST dump. Folded against the scan's own
-#: remaining ``--budget`` so one hung TU can never eat the whole scan.
+#: The L5 passes' per-TU ceiling for one AST dump, folded against the scan's
+#: own remaining ``--budget``. The L4 replay passes its own (larger) per-TU
+#: timeout instead when the dump is shared (see ``ClangSourceExtractor``).
 LOCAL_CAP_S = 120.0
 
+#: Failure stages :class:`TuAstDump` reports. ``None`` means a tree was read.
+STAGE_RUN = "run"
+STAGE_EMPTY = "empty"
+STAGE_JSON = "json"
+STAGE_DEADLINE_BEFORE_PARSE = "deadline_before_parse"
+STAGE_DEADLINE_AFTER_PARSE = "deadline_after_parse"
 
-def run_clang_ast_dump(
-    clang_bin: str,
-    argv: list[str],
+
+@dataclass(eq=False)
+class TuAstDump:
+    """One TU's bounded clang AST dump, before any consumer reads it.
+
+    ``ast`` is the tree exactly as clang wrote it when ``stage`` is ``None``,
+    else ``None``. The L4 reader and the L5 passes read locations differently,
+    so each consumer decides its own view of the one tree (see
+    :func:`~.l5_ast_pass.consume_tu_dump`). ``returncode`` is clang's exit
+    status (``None`` when the process never ran to completion) and ``stderr``
+    its decoded stderr. ``error`` is the failure's own text; ``raised`` is the
+    exception behind a ``run`` failure, so a consumer that must propagate it
+    (L4 has always let a missing ``clang`` surface) can re-raise it.
+    ``json_extra_data`` marks the "more than one JSON document" shape (a SYCL or
+    offload flag that made clang run two ``-cc1`` passes).
+
+    The tree is the one large object here: consumers read it in turn, and the
+    last one :meth:`release`\\ s it before any further subprocess runs.
+    """
+
+    ast: dict[str, Any] | None
+    returncode: int | None
+    stderr: str = ""
+    stage: str | None = None
+    error: str = ""
+    json_extra_data: bool = False
+    raised: BaseException | None = None
+
+    def release(self) -> None:
+        """Drop the tree so its memory is reclaimed before the next subprocess."""
+        self.ast = None
+
+
+def _check_deadline() -> str | None:
+    """``None`` while the scan budget holds, else the failure text."""
+    try:
+        deadline.check()
+    except deadline.DeadlineExceeded as exc:
+        return str(exc)
+    return None
+
+
+def dump_tu_ast(
+    cmd: list[str],
     *,
     cwd: str | None,
-    diagnostics: list[str],
-) -> dict[str, Any] | None:
-    """Dump one TU's clang AST as JSON, or ``None`` with a recorded diagnostic.
+    timeout: float,
+    unit_label: str,
+) -> TuAstDump:
+    """Run one AST dump command and read its tree, degrading on every failure.
 
-    *argv* must already be the caller's sanitized, allowlisted flag subset —
-    this function only prepends the fixed dump flags and never consults a
-    shell. Every failure path (a failed invocation, empty output, an exhausted
-    budget, unparseable JSON) appends to *diagnostics* and answers ``None``:
-    these passes are advisory (ADR-028 D3), never authoritative, so a probe
-    failure must degrade rather than abort the scan. Whether ``clang`` is
-    present at all stays the caller's own ``available()`` check — that is an
-    overridable method on each extractor, not a property of this run.
+    *cmd* is the complete command from
+    :func:`~.source_extractors.clang_command.build_clang_command` (it already
+    carries the fixed ``-Xclang -ast-dump=json -fsyntax-only`` tail). The run is
+    bounded by ``min(timeout, remaining --budget)`` and is process-group-safe on
+    timeout, via :func:`run_bounded_for_extraction`.
 
-    A non-zero clang exit is *not* a failure path — clang still prints the
-    partial, error-recovered tree it built from the necessarily approximate
-    replayed flags, and salvaging edges from it is deliberate. It does record a
-    diagnostic, so ``extractor_pass_fully_covered`` (ADR-041 P0 slice 3) never
-    counts that TU as cleanly, fully parsed.
+    A non-zero clang exit is *not* a failure: clang still prints the partial,
+    error-recovered tree it built from the necessarily approximate replayed
+    flags, and salvaging edges from it is deliberate. The caller records it
+    (``returncode``) so coverage never counts that TU as cleanly parsed.
     """
-    cmd = [
-        clang_bin,
-        "-Xclang",
-        "-ast-dump=json",
-        "-fsyntax-only",
-        *CLANG_GCC_HEADER_COMPAT_DEFINES,
-        *argv,
-    ]
-    scan_remaining = deadline.remaining()
-    effective_timeout = (
-        LOCAL_CAP_S if scan_remaining is None else min(LOCAL_CAP_S, scan_remaining)
-    )
+    fd, name = tempfile.mkstemp(prefix="abicheck-tu-ast-", suffix=".json")
+    path = Path(name)
     try:
-        # Bound by min(LOCAL_CAP_S, active --budget deadline) — run_bounded()
-        # alone would honor a generous outer deadline verbatim instead of this
-        # pass's own cap, letting one hung TU eat the whole remaining scan
-        # budget — and process-group-safe on timeout, same as the L2/L4 clang
-        # calls (Codex review, PR #591, round 8).
-        with deadline.deadline_scope(effective_timeout):
-            proc = deadline.run_bounded(  # noqa: S603 - fixed argv, never shell=True
-                cmd,
-                cwd=cwd,
-                capture_output=True,
-                text=True,
-                timeout=LOCAL_CAP_S,
+        with os.fdopen(fd, "wb") as out:
+            try:
+                proc = run_bounded_for_extraction(
+                    cmd,
+                    timeout=timeout,
+                    tool_label="clang",
+                    unit_label=unit_label,
+                    stdout=out,
+                    stderr=subprocess.PIPE,
+                    cwd=cwd,
+                )
+            except (OSError, SourceExtractionError) as exc:
+                return TuAstDump(
+                    None, None, "", stage=STAGE_RUN, error=str(exc), raised=exc
+                )
+        stderr = proc.stderr.decode("utf-8", "replace") if proc.stderr else ""
+        if path.stat().st_size == 0:
+            return TuAstDump(None, proc.returncode, stderr, stage=STAGE_EMPTY)
+        late = _check_deadline()
+        if late is not None:
+            return TuAstDump(
+                None,
+                proc.returncode,
+                stderr,
+                stage=STAGE_DEADLINE_BEFORE_PARSE,
+                error=late,
             )
-    except (OSError, subprocess.SubprocessError, deadline.DeadlineExceeded) as exc:
-        diagnostics.append(f"clang invocation failed: {exc}")
-        return None
-    if not proc.stdout.strip():
-        diagnostics.append(f"clang produced no AST (stderr: {proc.stderr[:200]})")
-        return None
-    if proc.returncode != 0:
-        diagnostics.append(
-            f"clang exited {proc.returncode} (stderr: {proc.stderr[:200]})"
-        )
-    try:
-        # clang can exit successfully right as the budget expires; recheck
-        # before the CPU/RSS-heavy parse+walk, same as the L2/L4 post-run
-        # checks (Codex review, PR #591).
-        deadline.check()
-    except deadline.DeadlineExceeded as exc:
-        diagnostics.append(f"scan deadline exceeded before parsing clang AST: {exc}")
-        return None
-    try:
-        # Both json.loads and the caller's recursive AST walk can hit Python's
-        # recursion limit on a pathologically deep TU; guard so a degenerate AST
-        # degrades to "no edges" rather than aborting collection.
-        ast: dict[str, Any] = json.loads(proc.stdout)
-    except (ValueError, RecursionError) as exc:
-        diagnostics.append(f"could not parse clang AST JSON: {exc}")
-        return None
-    try:
-        # The JSON load itself can consume the rest of the budget on a huge AST;
-        # re-check before the recursive walk (Codex review, PR #591, round 4).
-        deadline.check()
-    except deadline.DeadlineExceeded as exc:
-        diagnostics.append(f"scan deadline exceeded before walking clang AST: {exc}")
-        return None
-    # Explicit locations, as every L2 header tree has them
-    # (`dumper_clang_errors`): a reader tracking clang's sticky file from
-    # the nodes it visits drifts, and the L5 and L2 passes must read the
-    # same tree to derive the same facts (`semantic_fact_folds`).
-    return materialize_locations(ast)
+        try:
+            # Bytes, not text: json detects the encoding. Both json.loads and the
+            # consumers' recursive walks can hit the recursion limit on a
+            # pathologically deep TU; that degrades to a stage, not an abort.
+            with open(path, "rb") as fh:
+                ast: dict[str, Any] = json.load(fh)
+        except (ValueError, RecursionError) as exc:
+            return TuAstDump(
+                None,
+                proc.returncode,
+                stderr,
+                stage=STAGE_JSON,
+                error=str(exc),
+                json_extra_data=(
+                    isinstance(exc, json.JSONDecodeError) and exc.msg == "Extra data"
+                ),
+            )
+        # The JSON load itself can consume the rest of the budget on a huge AST.
+        late = _check_deadline()
+        if late is not None:
+            return TuAstDump(
+                None,
+                proc.returncode,
+                stderr,
+                stage=STAGE_DEADLINE_AFTER_PARSE,
+                error=late,
+            )
+        return TuAstDump(ast, proc.returncode, stderr)
+    finally:
+        path.unlink(missing_ok=True)
+
+
+def dump_compile_unit(
+    compile_unit: CompileUnit,
+    *,
+    clang_bin: str,
+    compiler_binary: str | None = None,
+    timeout: float = LOCAL_CAP_S,
+) -> TuAstDump:
+    """The one AST dump of *compile_unit*, argv and cwd from the shared builders.
+
+    Every token is un-redacted, macro values included (a home path inside a
+    ``-D`` value must expand or clang parses a different TU), and the cwd is the
+    effective directory the real build compiled from.
+    """
+    source, run_directory = compile_unit_invocation(compile_unit)
+    cmd = build_clang_command(
+        compile_unit,
+        source,
+        clang_bin=ast_clang_binary(clang_bin),
+        compiler_binary=compiler_binary,
+    )
+    return dump_tu_ast(
+        [unredact_home(tok) for tok in cmd],
+        cwd=run_directory or None,
+        timeout=timeout,
+        unit_label=compile_unit.source,
+    )

@@ -1,6 +1,6 @@
 # L2/L4/L5 extraction convergence — one parse per TU, one owner per primitive
 
-**Status:** Proposed; Phase 1 implemented (this plan's first PR).
+**Status:** Proposed; Phases 1 and 2 implemented (the first two PRs).
 **Parent plans:** [Duplication & convergence assessment](duplication-and-convergence-assessment.md)
 (its P1 "Compiler invocation handling needs one typed model" owns Phase 3
 here — this plan does not restate that design), [One Semantic Pipeline](one-semantic-pipeline.md)
@@ -112,20 +112,57 @@ worker completion order. Mutating the runner to dump per family, or to fold
 in completion order, fails it. `tests/_fake_l5_ast_pass.py` is the shared
 stand-in the fold tests use in place of the old per-class fakes.
 
-### Phase 2 — L4 replay and L5 read the same dump
+### Phase 2 — L4 replay and L5 read the same dump (implemented)
 
-Make L4's `ClangSourceExtractor` and the L5 passes share one dump per TU:
-one argv builder for a clang AST replay of a `CompileUnit`, one bounded
-runner, and the L4 extractor contributing an `AstPass` to the same run
-(its macro pass, `-E -dD`, is a different invocation and stays separate).
-Prerequisite: reconcile `_clang_context_args` with
-`_safe_replay_flags_from_context` — they intentionally differ today (L5
-allowlists flags; L4 carries ABI-relevant flags through), so the unified
-builder must be the *union* L4 needs, and the L5 parsers must be shown to
-produce the same edges under it (differential test on real fixtures, both
-builders, per AGENTS.md's "a differential test must prove both of its
-configurations ran"). Expected effect: removes the remaining second dump per
-TU, i.e. roughly halves what Phase 1 leaves.
+The L4 `ClangSourceExtractor` and the L5 passes now read one
+`clang -ast-dump=json` per TU, from one argv and one bounded runner. The
+macro pass (`-E -dD`) stays a separate invocation.
+
+What landed:
+
+- **The prerequisite, first.** The L5 allowlist
+  (`call_graph._safe_replay_flags_from_context`) is deleted. The one builder
+  is `clang_command.build_clang_command`, which is L4's context argv: the
+  union of what L4 needs. The L5 parsers produce identical edges under the old
+  allowlisted argv and the union, on 253 catalog TUs and a synthetic two-TU
+  project (`tests/test_tu_ast_shared_run.py`). That test restates the old
+  allowlist as its reference and asserts both configurations ran to a tree
+  and differ as argv.
+- **The union carries no code-loading option.** A build pack is untrusted, and
+  it can carry `-fplugin=` or `-Xclang -load`. `abi_flags.drop_code_loading_options`
+  removes those forms from the final argv; nothing else is filtered, so a
+  genuine build's argv is unchanged.
+- **One runner.** `clang_ast_run.dump_tu_ast` runs the dump, spilled to a temp
+  file as L4 always did, and returns a `TuAstDump` with a failure `stage`.
+  Each reader maps the stage onto its own diagnostics: L4 keeps its
+  `SourceExtractionError` text (`clang_dump_errors.py`), L5 its own.
+- **L4 contributes to the same run.** `source_replay.run_source_replay(...,
+  l5_run=...)` dumps each TU that is an L4 cache miss or in the L5 scope
+  exactly once (`source_replay_shared.py`). L4 reads the raw tree first, the
+  L5 passes then materialize locations in place (L4's sticky-file reading
+  changes on a materialized tree, so the order is load-bearing), and the tree
+  is released before the macro subprocess.
+- **One driver.** `clang_command.ast_clang_binary` runs every AST dump under
+  `clang++` when the default `clang` is given and `clang++` is on `PATH`, as the
+  L5 passes always did. L4 output does not depend on the choice (checked below).
+
+Deliberate differences, all from sharing one argv:
+
+- L5 dumps now carry `-ferror-limit=0` (the L4 setting), so a TU with more
+  than clang's default 20 errors yields its full recovered tree to L5 too.
+- L5 dumps run in the effective build directory (`env -C`), as L4's always did.
+- When both tiers run, a TU's dump is bounded by the L4 per-TU timeout
+  (180 s by default), not the L5 120 s cap.
+
+Verified:
+
+- **L4 output is byte-identical**, so there is no `CLANG_EXTRACTOR_VERSION`
+  bump. Every `SourceAbiTu` (declarations, types, inline bodies, macros, source
+  edges, coverage, diagnostics) equals the pre-change output on 253 catalog
+  TUs, under both `clang` and `clang++`.
+- **Each TU is dumped once** when both tiers run; `test_l4_and_l5_share_one_dump_per_tu`
+  counts the dumps, and `test_standalone_passes_dump_each_tu_again` shows the
+  counter discriminates.
 
 ### Phase 3 — one compile-invocation model
 
@@ -185,6 +222,19 @@ Recorded per phase on the same PVXS fixture (`libpvxs.so.1.5`, 34 TUs,
 `-std=c++17` extraction config from PR 216, compile DB restricted to
 `src/`), unprofiled, fresh caches (`XDG_CACHE_HOME` per run).
 See the Phase 1 PR description for the before/after table.
+
+The PVXS fixture is not in this repository, so Phase 2 is measured on the
+C++ catalog instead: the 253 `catalog/cases/*/*.cpp` translation units, built
+with `-std=c++17 -fPIC -fvisibility=hidden`, public roots at the catalog root.
+One run per side, 4 CPUs, default concurrency. The process counts are exact;
+the wall times are a single run and carry noise.
+
+| Phase 2 (catalog, 253 TUs) | Before | After |
+|---|---|---|
+| clang AST-dump processes (`-ast-dump=json`) | 506 | 253 |
+| clang macro processes (`-E -dD`) | 253 | 253 |
+| Wall: L4 replay + L5 call/type/override/template/macro/callback passes | 103.1 s | 81.1 s |
+| L5 call edges folded | 4,500 | 4,500 |
 
 ## Out of scope
 

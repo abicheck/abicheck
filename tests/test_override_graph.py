@@ -22,7 +22,9 @@ required here; the live subprocess path is integration-only."""
 
 from __future__ import annotations
 
+from abicheck.buildsource import clang_ast_run
 from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
+from abicheck.buildsource.clang_ast_run import TuAstDump
 from abicheck.buildsource.override_graph import (
     RESOLUTION_OVERRIDE_CONFIRMED,
     RESOLUTION_OVERRIDE_SIGNATURE_MATCH,
@@ -922,12 +924,12 @@ def test_run_ast_passes_unredacts_home_placeholder_in_cwd(monkeypatch) -> None:
     home = os.path.expanduser("~")
     captured: dict[str, object] = {}
 
-    def fake_dump(clang_bin, argv, *, cwd, diagnostics):
-        captured["argv"] = argv
+    def fake_dump(cmd, *, cwd, timeout, unit_label):
+        captured["argv"] = cmd
         captured["cwd"] = cwd
-        return {"kind": "TranslationUnitDecl", "inner": []}
+        return TuAstDump({"kind": "TranslationUnitDecl", "inner": []}, 0, "")
 
-    monkeypatch.setattr(l5, "run_clang_ast_dump", fake_dump)
+    monkeypatch.setattr(clang_ast_run, "dump_tu_ast", fake_dump)
     l5.run_ast_passes(
         BuildEvidence(
             compile_units=[
@@ -945,7 +947,7 @@ def test_run_ast_passes_unredacts_home_placeholder_in_cwd(monkeypatch) -> None:
         passes=_override_pass(),
     )
 
-    assert captured["argv"][-2:] == ["--", f"{home}/AppData/Local/Temp/t.cpp"]
+    assert captured["argv"][-1] == f"{home}/AppData/Local/Temp/t.cpp"
     assert captured["cwd"] == f"{home}/AppData/Local/Temp"
 
 
@@ -980,7 +982,7 @@ def test_run_ast_passes_dedupes_override_edges_across_compile_units(
         CONF_HIGH,
         RESOLUTION_OVERRIDE_CONFIRMED,
     )
-    monkeypatch.setattr(l5, "run_clang_ast_dump", lambda *_a, **_k: {})
+    monkeypatch.setattr(l5, "dump_compile_unit", lambda *_a, **_k: TuAstDump({}, 0, ""))
     real = _override_pass()[0]
     fake_pass = l5.AstPass(
         real.name, lambda _ast, _cu: ([edge], frozenset(), frozenset()), real.merge

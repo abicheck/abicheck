@@ -984,10 +984,10 @@ def parse_tu_decl_ranges(
     file at that relative path (Codex review, PR #708). An already-absolute
     path, the common case, is left untouched.
     """
-    from .call_graph import _replay_cwd
+    from .source_extractors.clang_command import compile_unit_invocation
 
     ranges = parse_clang_ast_decl_ranges(ast)
-    cwd = _replay_cwd(cu)
+    _source, cwd = compile_unit_invocation(cu)
     if not cwd:
         return ranges
     return [

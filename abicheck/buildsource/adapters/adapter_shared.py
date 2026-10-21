@@ -26,13 +26,16 @@ import hashlib
 from typing import Protocol, runtime_checkable
 
 from ...header_utils import is_msvc_driver_stem
-from ..build_evidence import BuildEvidence, BuildOption, CompileUnit
-from ..source_extractors._argv import (
+from ..abi_flags import (
     _XCLANG_WRAPPED_ABI_FLAG_MARKER,
+    ABI_RELEVANT_FLAG_PREFIXES as ABI_RELEVANT_FLAG_PREFIXES,
     SPLIT_OPERAND_ABI_FLAGS,
-    expand_env_split_prefixes,
     is_split_operand_abi_flag_survivor,
     split_operand_survivor as split_operand_survivor,
+)
+from ..build_evidence import BuildEvidence, BuildOption, CompileUnit
+from ..source_extractors._argv import (
+    expand_env_split_prefixes,
     strip_launchers,
 )
 
@@ -53,131 +56,6 @@ _LANG_BY_EXT: dict[str, str] = {
     ".mm": "OBJCXX",
     ".cu": "CUDA",
 }
-
-#: ABI/API-affecting compiler-flag prefixes (ADR-029 D9). Drift in any of these
-#: is treated as a risk signal by the build-evidence diff, not mere noise.
-#:
-#: A flag here is captured per-TU into ``CompileUnit.abi_relevant_flags`` and
-#: projected into a global ``BuildOption`` by :func:`derive_build_options`; the
-#: build-evidence diff (``build_diff._diff_options``) then surfaces any drift as
-#: ``ABI_RELEVANT_BUILD_FLAG_CHANGED`` (unless the flag is a runtime-mode or
-#: toolchain flag with a dedicated finding). Per ADR-028 D3 these are risk/
-#: source-level signals — the artifact diff proves any concrete break.
-#:
-#: **Forced pre-includes (``-include``/``-imacros``/``/FI``) are deliberately
-#: NOT in this tuple, and the fix an earlier draft of this comment proposed --
-#: "a new spaced-value-flag branch in :func:`extract_abi_relevant_flags`" --
-#: was investigated and found to be actively wrong (PR D / plan PR 3B).** The
-#: L2 gap it described is real: ``header_compile_context``'s derived L2
-#: ``CompileContext`` never saw a matched compile unit's own macro-controlling
-#: forced-include header, so the P0.3 L3->L2 fold could report a real match
-#: (``matched_unit_count > 0``, ``parsed_with_build_context`` stamped) while
-#: still parsing without it. But routing the fix through *this* list would
-#: have broken L4 replay, which already handles forced includes correctly and
-#: by a different route: ``source_extractors._argv.replay_extra_flags``
-#: carries ``abi_relevant_flags`` through
-#: (``_carry_abi_relevant_flags``) **and**, separately and unconditionally,
-#: re-scans the unit's raw ``argv`` for forced-include/include-search tokens
-#: (``_scan_argv_for_extra_flags``, which is not passed the ``seen`` set the
-#: first pass builds). Capturing a forced include here would therefore have
-#: made every L4 replay command carry ``-include config.h`` **twice** -- a
-#: silent double-inclusion that a header without include guards turns into a
-#: hard redefinition error.
-#:
-#: The gap is closed at the layer that actually had it instead:
-#: ``header_utils.forced_include_operands`` is the one shared recognizer (the
-#: same option vocabulary and the same separate/joined spellings ``_argv``'s
-#: own replay matchers use, since those matchers live there now too), and
-#: ``header_compile_context._context_flags`` renders its result into the L2
-#: command directly from ``cu.argv`` -- never through
-#: ``abi_relevant_flags``, so L4 replay is untouched.
-#:
-#: Residual, deliberately-unclosed half: because a forced include is not in
-#: this tuple, it is still not projected into a ``BuildOption`` by
-#: :func:`derive_build_options`, so swapping one build's forced-include header
-#: for another does not raise ``ABI_RELEVANT_BUILD_FLAG_CHANGED`` (ADR-029
-#: D9's build-evidence drift signal). Closing *that* needs a structured
-#: ``CompileUnit`` field every adapter populates plus a
-#: ``BUILD_EVIDENCE_VERSION`` bump and ``build_diff`` wiring -- a schema slice
-#: of its own, not a follow-on to the L2 rendering fix. See ``AGENTS.md``.
-ABI_RELEVANT_FLAG_PREFIXES: tuple[str, ...] = (
-    "-std=",
-    "/std:",
-    "-stdlib=",
-    "--target=",
-    "-target",
-    "-mabi=",
-    "/arch:",
-    "-m32",
-    "-m64",
-    # Microarchitecture / float ABI — can change struct alignment (vector ABI)
-    # or the hard/soft-float calling convention (ARM), so a flip is a risk.
-    "-march=",
-    "-mtune=",
-    "-mfloat-abi=",
-    "-mfpmath=",
-    "--sysroot",
-    "-isysroot",
-    "-fvisibility",
-    "-fvisibility-inlines-hidden",
-    "-fpack-struct",
-    "/Zp",
-    "-fshort-enums",
-    "-fno-short-enums",
-    "-fshort-wchar",
-    "-fsigned-char",
-    "-funsigned-char",
-    "-fabi-version",
-    "-fno-rtti",
-    "-frtti",
-    "-fno-exceptions",
-    "-fexceptions",
-    "-flto",
-    "-fno-lto",
-    "-fwhole-program-vtables",
-    "-fno-whole-program-vtables",
-    "-ftls-model",
-    "-fextern-tls-init",
-    "-fno-extern-tls-init",
-    "-fno-threadsafe-statics",
-    "-fthreadsafe-statics",
-    "-freg-struct-return",
-    "-fpcc-struct-return",
-    # Sanitizers change object layout/instrumentation and the runtime contract.
-    "-fsanitize=",
-    "-fno-sanitize=",
-    # Position-independence / TLS access model and frame-pointer presence.
-    "-fPIC",
-    "-fpic",
-    "-fPIE",
-    "-fpie",
-    "-fno-pic",
-    "-fno-pie",
-    "-fno-PIC",
-    "-fno-PIE",
-    "-fomit-frame-pointer",
-    "-fno-omit-frame-pointer",
-    # SYCL language mode (icpx/dpcpp -fsycl/-fsycl-*): enables an entirely
-    # different parse (implicit SYCL builtins/attributes, kernel-lambda
-    # codegen), so its presence/absence is exactly the kind of parse-affecting
-    # signal this list already tracks for -std=/-fvisibility/etc. Without
-    # this, a resolved --compiler override that now actually invokes icpx/
-    # dpcpp for L4 replay (previously always a bare "clang") would replay a
-    # SYCL TU as plain C++, silently missing built-in SYCL state (Codex
-    # review). Only the flag's *presence*, carried via replay_extra_flags(),
-    # not a from-scratch reconstruction of the real build's host/device
-    # multi-pass invocation -- see the "Known gaps" entry in AGENTS.md.
-    # "-fno-sycl" is a separate, non-prefix-matching spelling (it does not
-    # start with "-fsycl") that explicitly disables SYCL mode again -- an
-    # "icpx -fsycl -fno-sycl" (last-flag-wins) command recorded only
-    # "-fsycl" without it, so replay reconstructed the wrong (SYCL-enabled)
-    # AST for what the real build actually compiled as plain C++ (Codex
-    # review, second round). Extraction is argv-order-preserving, so
-    # capturing both spellings lets the same last-flag-wins semantics reach
-    # replay unchanged.
-    "-fsycl",
-    "-fno-sycl",
-)
 
 #: Runtime-model flags normalized to a canonical (key, value) so a mode flip is
 #: diffable regardless of spelling/order, and absence (= compiler default) never
