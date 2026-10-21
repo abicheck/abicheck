@@ -248,6 +248,25 @@ on:
         description: 'Install system dependencies (castxml, gcc) before dumping. Set to false if pre-installed.'
         type: boolean
         default: true
+      attest:
+        description: >-
+          Opt-in (default false). true also creates one GitHub artifact
+          attestation (SLSA build provenance, actions/attest-build-provenance
+          pinned by SHA -- the same pin actions/stage-baseline's own attest
+          input uses) covering every release-contract archive this run
+          published or verified, so a consumer can require it with
+          verify-baseline-attestation: true. The CALLING job must grant
+          `id-token: write` and `attestations: write` (plus the
+          `contents: write` / `actions: read` it already grants); a reusable
+          workflow cannot raise its caller's permissions. Callers leaving
+          this false need not change anything.
+        type: boolean
+        default: false
+
+    outputs:
+      attestation-url:
+        description: 'URL of the attestation created when attest is true; empty otherwise.'
+        value: ${{ jobs.attest.outputs.attestation-url }}
 
     secrets:
       github-token:
@@ -1412,3 +1431,79 @@ jobs:
 
           echo "::error::$ASSET_NAME already exists on release $RELEASE_TAG with DIFFERENT content (normalized content-digest $existing_content_digest, this run built $NEW_CONTENT_DIGEST). release-contract assets are documented as immutable once published -- refusing to silently overwrite it. If this release-contract baseline-set genuinely needs to change, delete the existing asset explicitly first ('gh release delete-asset $RELEASE_TAG $ASSET_NAME --repo $REPO --yes') and re-run, or publish under a new release tag." >&2
           exit 1
+
+      # Records WHICH asset this matrix leg left on the release (both the
+      # first-publish and the identical-content-retry paths above exit 0
+      # with $ASSET_NAME on the release), so the separate attest job can
+      # attest exactly the published bytes. Only the name travels: the
+      # attest job downloads the asset itself, because on a safe retry the
+      # release keeps the EARLIER upload's bytes, not this run's archive.
+      - name: Record published asset name for attestation
+        if: inputs.attest
+        env:
+          ASSET_NAME: ${{ steps.package.outputs.asset-name }}
+          PROFILE_ID: ${{ matrix.profile_id }}
+        run: |
+          set -euo pipefail
+          mkdir -p .attest-subject
+          printf '%s\n' "$ASSET_NAME" > ".attest-subject/${PROFILE_ID}.name"
+      - name: Upload published asset name for attestation
+        if: inputs.attest
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: 'abicheck-attest-subject-${{ matrix.profile_id }}'
+          path: '.attest-subject/${{ matrix.profile_id }}.name'
+          retention-days: 1
+
+  # ── Job 3 (opt-in): attest the published release-contract archives ──────
+  # A separate job, and deliberately WITHOUT a `permissions:` block, rather
+  # than `id-token: write` / `attestations: write` on the publish job (or
+  # a pass-through of stage-baseline's own `attest` input there). GitHub
+  # checks a reusable workflow's job permissions against the caller's
+  # grant when it LOADS the workflow, before any `if:` is evaluated, so
+  # declaring either scope on any job here would fail every existing caller
+  # that does not grant it -- including every caller leaving attest false.
+  # With no block, this job inherits exactly what the caller granted: an
+  # attest: true caller grants the two scopes, and a caller that does not
+  # never reaches this job. The inherited token can also carry the
+  # caller's `contents: write`; the job only downloads release assets and
+  # runs the SHA-pinned attest action.
+  attest:
+    name: 'Attest published baseline-sets'
+    needs: [discover, publish]
+    if: inputs.attest && needs.publish.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      attestation-url: ${{ steps.attest.outputs.attestation-url }}
+    steps:
+      - name: Download published asset names
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8
+        with:
+          pattern: 'abicheck-attest-subject-*'
+          path: .attest-subject
+          merge-multiple: true
+      - name: Download the published release assets
+        env:
+          GH_TOKEN: ${{ secrets.github-token != '' && secrets.github-token || secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ inputs.release-tag != '' && inputs.release-tag || github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          mkdir -p .attest-assets
+          found=0
+          for name_file in .attest-subject/*.name; do
+            [[ -f "$name_file" ]] || continue
+            IFS= read -r asset_name < "$name_file"
+            gh release download "$RELEASE_TAG" --repo "$REPO" --pattern "$asset_name" --dir .attest-assets
+            found=$((found + 1))
+          done
+          if [[ "$found" -eq 0 ]]; then
+            echo "::error::attest: true but no published asset names were recorded -- nothing to attest." >&2
+            exit 1
+          fi
+      - name: Attest baseline-set archives
+        id: attest
+        uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f  # v3.2.0
+        with:
+          subject-path: '.attest-assets/*'

@@ -280,8 +280,19 @@ current repository) covers its exact bytes. Set
 `baseline-attestation-signer-workflow` to the publishing workflow
 (`owner/repo/.github/workflows/<file>.yml`); otherwise any workflow in that
 repository can produce an accepted attestation. Both checks can be combined.
-`publish-baseline.yml` does not attest yet: it would need the two extra
-permissions on every caller of the reusable workflow.
+`publish-baseline.yml` takes an opt-in `attest: true` input (default
+`false`). It then runs a separate `attest` job after publishing, which
+downloads each asset this run left on the release (on a safe retry, the
+earlier upload's bytes) and creates one attestation covering all of them; its
+URL is the workflow's `attestation-url` output. The **calling job** must
+grant `id-token: write` and `attestations: write` next to the
+`contents: write` / `actions: read` it already grants. No job in the
+reusable workflow declares those two scopes: GitHub checks a called
+workflow's job permissions against the caller's grant when it loads the
+workflow, before any `if:` runs, so declaring them would break every
+existing caller, even with `attest: false`. The `attest` job therefore has
+no `permissions:` block and inherits the caller's grant; callers leaving
+`attest` false change nothing.
 
 See [Storing Baselines](../use/baseline-storage.md) for the narrative
 picture of where a staged archive fits among abicheck's baseline-storage
