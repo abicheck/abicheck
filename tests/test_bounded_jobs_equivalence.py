@@ -58,6 +58,10 @@ ORACLE = [
     ("tu", 1, 4, None, None, 1),
     ("cg", 1, 4, None, None, 1),
     ("tu", 1000, None, None, None, 1),  # os.cpu_count() None -> 1 CPU
+    ("l4", 1000, None, None, None, 1),  # cpu None -> 1 for every pool
+    ("cg", 1000, None, None, None, 1),
+    ("l4", 1000, None, 6.0, None, 1),  # cap 2 does not bind a 1-CPU auto count
+    ("cg", 1000, None, 6.0, None, 1),
     # -- auto: RAM reduces the count -------------------------------------------
     ("tu", 1000, 8, 6.0, None, 2),  # auto 8, cap int(6/3) = 2
     ("l4", 1000, 8, 6.0, None, 2),
