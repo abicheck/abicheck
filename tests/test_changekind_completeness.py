@@ -956,7 +956,8 @@ class TestInlineTransitions:
         new = _snap(functions=[_func("foo", "_Z3foov", is_inline=True)])
         result = compare(old, new)
         assert ChangeKind.FUNC_BECAME_INLINE in _kinds(result)
-        assert result.verdict == Verdict.API_BREAK
+        # No header observation: ADR-084 demotes this source-level claim.
+        assert result.verdict == Verdict.COMPATIBLE_WITH_RISK
 
     def test_func_lost_inline_detected(self) -> None:
         """inline → non-inline transition should emit FUNC_LOST_INLINE."""

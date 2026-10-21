@@ -17,6 +17,10 @@ from ..diff_helpers import make_change
 from ..model.change import Change
 from ..model.change_catalog.kinds import ChangeKind
 from ..model.evidence_status import ReachabilityState
+from ..model.source_contract_evidence import (
+    has_observed_source_contract_evidence,
+    public_reachability,
+)
 from ..model.surface_facts import in_source_declaration_index
 from .qualified_name_normalization import (
     segments as _segments,
@@ -156,13 +160,17 @@ def _batch_demangle_public(snap: AbiSnapshot) -> dict[str, str]:
     return memoized("batch_demangle_public", snap, None, compute)
 
 
-def _build_std_reexport_change(declared: str, underlying: str) -> Change:
+def _build_std_reexport_change(
+    declared: str, underlying: str, *, public_evidence: bool
+) -> Change:
     """Build a single ``STD_REEXPORT_REMOVED`` finding.
 
-    ADR-044 D1 (Codex review): only ever emitted for a declaration that was a
-    *public* function (``detect_std_reexport_removed`` filters on
-    the source-declaration population before calling this) — same construction-time
-    tagging rationale as ``_emit_experimental_change``.
+    Reachability comes from the declaration the finding is about, not from
+    the construction itself (ADR-084): a header or source producer observed
+    the declaration as contract, or its public reachability is unknown. The
+    detector filters on the source-declaration population before calling
+    this, so a *declared* re-export is what it reports; a re-export seen only
+    through export-table or debug-info facts is not claimed as proven public.
     """
     return make_change(
         ChangeKind.STD_REEXPORT_REMOVED,
@@ -171,9 +179,7 @@ def _build_std_reexport_change(declared: str, underlying: str) -> Change:
         detail=underlying,
         old_value=f"{declared} → {underlying}",
         new_value=None,
-        public_reachable=True,
-        reachability_state=ReachabilityState.PROVEN_REACHABLE,
-        reachability_kind="direct_public_symbol",
+        **public_reachability(public_evidence),
     )
 
 
@@ -209,7 +215,15 @@ def detect_std_reexport_removed(
         if not _looks_like_std_reexport(declared, underlying):
             continue
         seen.add(declared)
-        changes.append(_build_std_reexport_change(declared, underlying))
+        changes.append(
+            _build_std_reexport_change(
+                declared,
+                underlying,
+                public_evidence=has_observed_source_contract_evidence(
+                    f, header_parsed=bool(old.from_headers)
+                ),
+            )
+        )
 
     return changes
 

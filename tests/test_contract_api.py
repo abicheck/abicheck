@@ -152,9 +152,10 @@ class TestCliExitCodes:
             ),
         )
 
+        # No header observation for the renamed member: ADR-084 demotes the break.
         result = runner.invoke(main, ["compare", str(old_p), str(new_p)])
-        assert result.exit_code == 2, (
-            f"API_BREAK should exit 2, got {result.exit_code}\n{result.output}"
+        assert result.exit_code == 0, (
+            f"demoted API_BREAK should exit 0, got {result.exit_code}\n{result.output}"
         )
 
     def test_breaking_exit_4(self, tmp_path: Path) -> None:

@@ -214,7 +214,9 @@ def test_sc_exit_contract(tmp_path: Path) -> None:
     assert (
         _compare(tmp_path, _lib("1", list(same)), _lib("2", list(same))).exit_code == 0
     )
-    # API_BREAK -> 2 (enum member renamed, same value: source break, binary OK)
+    # Enum member renamed, same value. With no header the source-level claim is
+    # demoted to COMPATIBLE_WITH_RISK (ADR-084), so this exits 0 here.
+    # API_BREAK -> 2 needs header evidence; see test_contract_api.
     e1 = EnumType(
         name="Mode",
         members=[EnumMember("A", 0), EnumMember("B", 1)],
@@ -233,7 +235,7 @@ def test_sc_exit_contract(tmp_path: Path) -> None:
         _lib("2", [_fn("use")], enums=[e2]),
         *no_scope_config_args(tmp_path),
     )
-    assert api.exit_code == 2
+    assert api.exit_code == 0
     # BREAKING -> 4 (removed symbol)
     assert (
         _compare(
@@ -536,8 +538,8 @@ def test_sc_policy_profile(tmp_path: Path) -> None:
     # Mode isn't referenced by a public function, so opt out of default
     # public-header scoping (ADR-024 Phase 5) to exercise the policy contrast.
     assert (
-        _compare(tmp_path, old, new, *no_scope_config_args(tmp_path)).exit_code == 2
-    )  # strict_abi: API break
+        _compare(tmp_path, old, new, *no_scope_config_args(tmp_path)).exit_code == 0
+    )  # strict_abi: demoted without header evidence (ADR-084)
     assert (
         _compare(
             tmp_path,

@@ -719,6 +719,15 @@
       "disposition": "gap",
       "surfaces": [],
       "use_cases": []
+    },
+    "ADR-084": {
+      "disposition": "surfaced",
+      "surfaces": [
+        "report: compare_report.disposition_audit"
+      ],
+      "use_cases": [
+        "UC-WF-compare"
+      ]
     }
   },
   "multichannel_without_family": [
@@ -847,6 +856,7 @@
     "ADR-074 cli: compare --define",
     "ADR-074 cli: dump --define",
     "ADR-078 report: compare_report.severity",
-    "ADR-078 report: compare_report.summary"
+    "ADR-078 report: compare_report.summary",
+    "ADR-084 report: compare_report.disposition_audit"
   ]
 }

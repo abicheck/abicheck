@@ -42,6 +42,7 @@ from .disposition_acknowledgment import (
     break_verdict_reader,
     resolve_acknowledgments,
 )
+from .binary_gated_contract import binary_gate_rule_provenance
 from .disposition_ledger import (
     Disposition,
     DispositionLedger,
@@ -315,6 +316,10 @@ def finalize_ledger(
             application_point="verdict",
             from_gate=True,
             policy_overlay=_is_policy_overlay(change),
+            # ADR-084: a finding the binary-depth gate demoted names its rule
+            # and reason here, so a COMPATIBLE_WITH_RISK that was an API_BREAK
+            # claim stays auditable rather than reading as a plain risk.
+            rule=binary_gate_rule_provenance(change),
         )
     # ``redundant_changes`` is two different populations concatenated, split at
     # ``redundant_count`` (``checker.compare``: ``redundant + opaque_filtered``,

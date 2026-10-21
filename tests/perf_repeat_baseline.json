@@ -269,12 +269,13 @@
     "abicheck/name_classification.py(is_cxx_runtime_library)": 1316,
     "abicheck/name_classification.py(is_local_rtti_symbol)": 40,
     "abicheck/name_classification.py(is_non_abi_surface_type)": 1157,
+    "abicheck/policy/binary_gate_marker.py(is_binary_gate_demoted)": 2268,
     "abicheck/policy/captured_type_identities.py(present_identities)": 2388,
     "abicheck/policy/classification.py(apply_policy_file_overrides)": 28,
     "abicheck/policy/classification.py(effective_category)": 756,
     "abicheck/policy/disposition_gate.py(_GateContext.of)": 28,
     "abicheck/policy/evaluate.py(effective_kind_sets)": 28,
-    "abicheck/policy/finding_disposition/pipeline.py(_bucket_total)": 700,
+    "abicheck/policy/finding_disposition/pipeline.py(_bucket_total)": 728,
     "abicheck/policy/finding_disposition/run_state.py(PipelineContext.baseline_or_empty)": 42,
     "abicheck/policy/header_origin_evidence.py(fact_is_stated_unknown)": 138,
     "abicheck/policy/public_surface_closure.py(_node_identifiers_or_collision)": 88,
@@ -294,5 +295,5 @@
   },
   "mode": "default",
   "n": 40,
-  "total": 244911
+  "total": 247207
 }

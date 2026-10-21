@@ -665,6 +665,13 @@ adrs:
     surfaces: []
     missing: Proposed, not yet implemented; D1 and D2 would change verdicts, exit codes and the cross-source report surface, pending acceptance.
 
+  - id: ADR-084
+    file: 084-binary-depth-source-contract-gate.md
+    disposition: surfaced
+    use_cases: [UC-WF-compare]
+    surfaces:
+      - report: compare_report.disposition_audit
+
   - id: ADR-078
     file: 078-informational-severity-category.md
     disposition: surfaced
