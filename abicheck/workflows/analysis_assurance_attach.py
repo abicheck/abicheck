@@ -51,8 +51,8 @@ def attach_analysis_assurance(
     an out-of-band ``--build-info``/``--sources`` pack is attached onto the
     snapshot before classification, so the depth-capped view carries it.
     """
-    from ..analysis_assurance import compute_analysis_assurance
     from ..evidence_depth import embedded_evidence_pack
+    from ..policy.analysis_assurance import compute_analysis_assurance
     from ..storage.snapshot_encode import same_persisted_content
 
     result.analysis_assurance = compute_analysis_assurance(

@@ -99,7 +99,7 @@ class TestRenderOutput:
 
         Asserted against ``to_stat_json`` directly now that ``render_output``
         has no ``stat`` keyword to forward through."""
-        from abicheck.analysis_assurance import AnalysisAssurance
+        from abicheck.policy.analysis_assurance import AnalysisAssurance
         from abicheck.reporter import to_stat_json
 
         diff_result.analysis_assurance = AnalysisAssurance(status="partial")

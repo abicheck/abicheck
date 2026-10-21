@@ -95,7 +95,7 @@ class TestReportedDepthNeverOutrunsTheGate:
 
 class TestImplicitDepthIsNormalized:
     def test_no_depth_requested_reports_the_depth_reached(self) -> None:
-        from abicheck.analysis_assurance import AnalysisAssurance
+        from abicheck.policy.analysis_assurance import AnalysisAssurance
 
         block = AnalysisAssurance()
         assert block.requested_depth_source == "implicit"
@@ -104,7 +104,7 @@ class TestImplicitDepthIsNormalized:
     @pytest.mark.parametrize("depth", ["binary", "headers", "build", "source"])
     def test_an_explicit_request_keeps_its_own_value(self, depth: str) -> None:
         """The normalization must never overwrite a stated request."""
-        from abicheck.analysis_assurance import AnalysisAssurance
+        from abicheck.policy.analysis_assurance import AnalysisAssurance
 
         block = AnalysisAssurance(
             requested_depth=depth, requested_depth_source="explicit"
@@ -128,7 +128,7 @@ class TestPositionalConstructorStaysBackwardCompatible:
     def test_every_pre_existing_field_keeps_its_position(self) -> None:
         import dataclasses
 
-        from abicheck.analysis_assurance import AnalysisAssurance
+        from abicheck.policy.analysis_assurance import AnalysisAssurance
 
         names = [f.name for f in dataclasses.fields(AnalysisAssurance)]
         # The order this dataclass's generated positional constructor has
@@ -155,7 +155,7 @@ class TestPositionalConstructorStaysBackwardCompatible:
         Constructed positionally through the first five slots, exactly as an
         external caller predating either late addition would.
         """
-        from abicheck.analysis_assurance import AnalysisAssurance
+        from abicheck.policy.analysis_assurance import AnalysisAssurance
 
         block = AnalysisAssurance("1.0", "complete", "headers", "headers", True)
         assert block.schema_version == "1.0"
@@ -187,7 +187,7 @@ class TestNotComparableKeepsTheRequestItWasGiven:
 
     @pytest.mark.parametrize("depth", ["binary", "headers", "build", "source"])
     def test_an_explicit_request_is_reported_as_explicit(self, depth: str) -> None:
-        from abicheck.analysis_assurance import compute_analysis_assurance
+        from abicheck.policy.analysis_assurance import compute_analysis_assurance
 
         block = compute_analysis_assurance(
             self._result(depth),
@@ -202,7 +202,7 @@ class TestNotComparableKeepsTheRequestItWasGiven:
         assert block.depth_satisfied is None
 
     def test_no_request_stays_implicit_and_unanswered(self) -> None:
-        from abicheck.analysis_assurance import compute_analysis_assurance
+        from abicheck.policy.analysis_assurance import compute_analysis_assurance
 
         block = compute_analysis_assurance(
             self._result(None),

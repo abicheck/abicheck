@@ -18,7 +18,7 @@ Index: [Known gaps](../known-gaps.md)
 `compare`'s format allowlists so a bad `--format` fails before the
 multi-minute toolchain install rather than after it — except one. A stored
 `BundleFacts` OLD side with a directory/package NEW side renders `json` or
-`markdown` only (`frontends/cli/commands/compare_bundle_facts_rejections.py`),
+`markdown` only (`workflows/bundle_facts_stored_request.py`),
 narrower than the release allowlist's `json|markdown|junit|oneline` that
 preflight applies when *either* operand is release-style. So
 `format: junit` on that shape passes preflight and then fails in the CLI with

@@ -375,8 +375,8 @@ class TestTheAssuranceRollupReadsComplete:
     code of a run configured with `assurance.require_complete`."""
 
     def _assurance(self, tmp_path, new_names):
-        from abicheck.analysis_assurance import compute_analysis_assurance
         from abicheck.checker import compare
+        from abicheck.policy.analysis_assurance import compute_analysis_assurance
 
         old = _snap(tmp_path / "old", _OLD_HEADERS, "1.3")
         new = _snap(tmp_path / "new", new_names, "1.4")
@@ -403,7 +403,7 @@ class TestTheAssuranceRollupReadsComplete:
         still produce the note it is there to produce, or their absence
         assertions would pass against a rollup that can no longer report
         anything."""
-        from abicheck.analysis_assurance_comparability import (
+        from abicheck.policy.analysis_assurance._comparability import (
             bounded_comparability_notes,
         )
 
