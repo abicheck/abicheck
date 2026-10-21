@@ -34,7 +34,12 @@ from abicheck._compiler_options import CLANG_GCC_HEADER_COMPAT_DEFINES
 from abicheck.buildsource import clang_ast_run
 from abicheck.buildsource.adapters.compile_db import CompileDbAdapter
 from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
-from abicheck.buildsource.clang_ast_run import STAGE_DEADLINE_AFTER_PARSE, STAGE_EMPTY
+from abicheck.buildsource.clang_ast_run import (
+    STAGE_DEADLINE_AFTER_PARSE,
+    STAGE_EMPTY,
+    STAGE_JSON,
+    STAGE_RUN,
+)
 from abicheck.buildsource.l5_ast_pass import (
     L5_AST_PASSES,
     consume_tu_dump,
@@ -585,3 +590,72 @@ def test_planner_shares_only_for_a_clang_extractor_that_is_wanted(
         )
         is not None
     )
+
+
+class _DumpFails(ClangSourceExtractor):
+    """An extractor whose command for the TU cannot be built."""
+
+    def dump_for(self, cu):
+        raise SourceExtractionError("no command for this unit")
+
+
+class _ReadFails(ClangSourceExtractor):
+    """An extractor whose dumped tree cannot be read as L4 facts."""
+
+    def dump_for(self, cu):
+        return clang_ast_run.TuAstDump({"kind": "TranslationUnitDecl", "inner": []}, 0)
+
+    def source_abi_from_dump(self, cu, dump, *, public_header_roots):
+        raise SourceExtractionError("tree is unreadable")
+
+
+def test_a_unit_without_a_command_is_its_own_l4_diagnostic(tmp_path: Path) -> None:
+    """A TU whose dump command cannot be built reports that reason as its diagnostic."""
+    cu = _fixture_build(tmp_path).compile_units[0]
+    seen: list[Any] = []
+
+    def consume(dump, unit):
+        seen.append(dump.stage)
+        return [], []
+
+    (tu, l4_error), l5 = shared_tu_work(_DumpFails(), [], consume, (cu, True, True))
+    assert tu is None
+    assert l4_error == f"{cu.source or cu.id}: no command for this unit"
+    assert seen == [STAGE_RUN]
+    assert l5 == ([], [])
+
+
+def test_an_unreadable_tree_is_that_tu_s_l4_diagnostic(tmp_path: Path) -> None:
+    """A tree L4 cannot read is the TU's diagnostic and no L4 surface."""
+    cu = _fixture_build(tmp_path).compile_units[0]
+    extractor = _ReadFails()
+    (tu, l4_error), l5 = shared_tu_work(extractor, [], None, (cu, True, False))
+    assert tu is None
+    assert l4_error == f"{cu.source or cu.id}: tree is unreadable"
+    assert l5 is None
+
+
+def test_a_shared_run_without_l5_hooks_is_refused(tmp_path: Path) -> None:
+    """The shared run cannot fold L5 results it has no hooks for."""
+    from types import SimpleNamespace
+
+    from abicheck.buildsource.source_replay_shared import run_shared_dumps
+
+    cu = _fixture_build(tmp_path).compile_units[0]
+    with pytest.raises(ValueError, match="needs its L5 hooks"):
+        run_shared_dumps(
+            ClangSourceExtractor(),
+            [],
+            [cu],
+            [0],
+            SimpleNamespace(consume=None, fold=None),
+            jobs_for=lambda n: 1,
+            use_process_pool=False,
+        )
+
+
+def test_ast_or_raise_reports_a_json_failure_as_an_l4_failure() -> None:
+    """A tree clang wrote but JSON cannot read is an L4 failure, not an empty surface."""
+    cu = CompileUnit(id="cu://x", source="x.cpp")
+    with pytest.raises(SourceExtractionError, match="was not valid JSON"):
+        ast_or_raise(cu, clang_ast_run.TuAstDump(None, 1, stage=STAGE_JSON))
