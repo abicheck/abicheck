@@ -46,7 +46,7 @@ class TestDebugFormatRule:
     def test_accepts_an_unforced_format_an_elf_side_or_a_snapshot(
         self, debug_format: str | None, fmt: str | None
     ) -> None:
-        reject_debug_format_for_non_elf(debug_format, fmt, fmt)
+        assert reject_debug_format_for_non_elf(debug_format, fmt, fmt) is None
 
     def test_typed_api_wording_is_unchanged(self) -> None:
         with pytest.raises(ValidationError) as info:
