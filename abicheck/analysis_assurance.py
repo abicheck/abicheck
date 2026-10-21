@@ -146,6 +146,7 @@ from .policy.analysis_assurance_l0_context import (
 from .policy.analysis_assurance_schema_staleness import (
     schema_staleness_status as _schema_staleness_status,
 )
+from .policy.binary_gate_marker import binary_gate_assurance_notes
 
 if TYPE_CHECKING:
     from .buildsource.pack import BuildSourcePack
@@ -1433,6 +1434,7 @@ def compute_analysis_assurance(
     )
     notes.extend(manifest_notes)
     notes.extend(declined_comparison_notes(result.detector_results))
+    notes.extend(binary_gate_assurance_notes(result.changes))
 
     if (export_accounting.unaccounted or 0) > 0:
         notes.append(
@@ -1506,20 +1508,6 @@ def compute_analysis_assurance(
         layout_unverified_detectors=layout_unverified_detectors,
         notes=tuple(notes),
     )
-
-
-def analysis_assurance_report_dict(result: DiffResult) -> dict[str, Any] | None:
-    """``result.analysis_assurance.to_dict()``, or ``None`` when absent/wrong
-    type -- the one narrowing implementation ``reporter._add_analysis_assurance``
-    calls from all four JSON paths (full/leaf/root-cause/stat), so the
-    ``DiffResult.analysis_assurance: object`` circular-import workaround (see
-    that field's own comment in ``checker_types.py``) has exactly one place
-    that unwraps it.
-    """
-    aa = getattr(result, "analysis_assurance", None)
-    if not isinstance(aa, AnalysisAssurance):
-        return None
-    return aa.to_dict()
 
 
 #: Exit contribution when ``--require-complete-analysis`` is set and the

@@ -38,11 +38,11 @@ from collections.abc import Iterable
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
+from .binary_gated_contract import binary_gate_rule_provenance
 from .disposition_acknowledgment import (
     break_verdict_reader,
     resolve_acknowledgments,
 )
-from .binary_gated_contract import binary_gate_rule_provenance
 from .disposition_ledger import (
     Disposition,
     DispositionLedger,

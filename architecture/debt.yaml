@@ -3,7 +3,7 @@
   "files": [
     {
       "path": "abicheck/analysis_assurance.py",
-      "baseline_lines": 1586,
+      "baseline_lines": 1574,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "disposition": "migrate",
