@@ -225,3 +225,25 @@ def test_kind_is_a_compatible_risk_never_a_break() -> None:
     assert kind in RISK_KINDS
     assert kind not in BREAKING_KINDS
     assert kind not in API_BREAK_KINDS
+
+
+def test_stale_alias_spelling_of_base_method_still_joins() -> None:
+    """``base_method`` is written at fold time. An identity alias recorded after
+    the fold leaves it spelled the old way while the edge endpoints are already
+    canonical, so the dispatch set must still join through the alias."""
+    old = _graph([_candidate("Circle")])
+    new = _graph([_candidate("Circle"), _candidate("Square")])
+    alias = "decl:demo::Shape::area_stale"
+    for e in new.edges:
+        if e.kind == "VIRTUAL_CALL_MAY_DISPATCH_TO":
+            e.attrs["base_method"] = alias
+    new.add_identity_alias(alias, BASE)
+
+    findings = virtual_dispatch_set_findings(old, new)
+
+    assert _kinds(findings) == [ChangeKind.PUBLIC_VIRTUAL_DISPATCH_SET_CHANGED]
+    assert (findings[0].old_value, findings[0].new_value) == (
+        "1 possible targets",
+        "2 possible targets",
+    )
+    assert "Added: demo::Square::area()." in findings[0].description

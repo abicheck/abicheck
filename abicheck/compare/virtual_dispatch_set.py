@@ -97,7 +97,11 @@ def _dispatch_sets(graph: SourceGraphSummary) -> dict[str, frozenset[str]]:
     candidates: dict[str, set[str]] = {}
     for e in graph.edges:
         if e.kind == _DISPATCH:
-            candidates.setdefault(str(e.attrs.get("base_method", "")), set()).add(e.dst)
+            # base_method is a raw attribute written at fold time: an identity
+            # alias recorded afterwards leaves it spelled the old way, so resolve
+            # it to the canonical id the endpoints already use.
+            base = graph.resolve_node_id(str(e.attrs.get("base_method", "")))
+            candidates.setdefault(base, set()).add(e.dst)
     return {
         base: frozenset(candidates.get(base, ()))
         for base in virtual_bases
