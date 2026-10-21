@@ -247,3 +247,24 @@ def test_stale_alias_spelling_of_base_method_still_joins() -> None:
         "2 possible targets",
     )
     assert "Added: demo::Square::area()." in findings[0].description
+
+
+def test_aliased_base_endpoint_still_joins_on_both_sides() -> None:
+    """The virtual call's endpoint and the candidate endpoints can be recorded
+    under an identity alias. Both the base and the candidates must resolve to
+    canonical ids, or the base is treated as non-public and the set is lost."""
+    alias = "decl:demo::Shape::area_alias"
+    old = _graph([_candidate("Circle")])
+    new = _graph([_candidate("Circle"), _candidate("Square")])
+    for e in new.edges:
+        if e.kind == "DECL_CALLS_DECL":
+            e.dst = alias
+    new.add_identity_alias(alias, BASE)
+
+    findings = virtual_dispatch_set_findings(old, new)
+
+    assert _kinds(findings) == [ChangeKind.PUBLIC_VIRTUAL_DISPATCH_SET_CHANGED]
+    assert (findings[0].old_value, findings[0].new_value) == (
+        "1 possible targets",
+        "2 possible targets",
+    )

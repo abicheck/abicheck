@@ -91,7 +91,7 @@ def _dispatch_sets(graph: SourceGraphSummary) -> dict[str, frozenset[str]]:
     node_by_id = {n.id: n for n in graph.nodes}
     exported = {e.src for e in graph.edges if e.kind == "SOURCE_DECL_MAPS_TO_SYMBOL"}
     virtual_bases = {
-        e.dst
+        graph.resolve_node_id(e.dst)
         for e in graph.edges
         if e.kind == _CALLS and e.resolved.get("call_kind") == "virtual"
     }
@@ -103,7 +103,7 @@ def _dispatch_sets(graph: SourceGraphSummary) -> dict[str, frozenset[str]]:
             # and resolve it the way load-time endpoints already are.
             raw = str(e.attrs.get("base_method", ""))
             base = graph.resolve_node_id(_normalize_if_decl_or_type(raw)) if raw else ""
-            candidates.setdefault(base, set()).add(e.dst)
+            candidates.setdefault(base, set()).add(graph.resolve_node_id(e.dst))
     return {
         base: frozenset(candidates.get(base, ()))
         for base in virtual_bases
