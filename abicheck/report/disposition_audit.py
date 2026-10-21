@@ -68,6 +68,7 @@ from ..policy.rule_inventory import (
 )
 from ..policy.unused_rules_gate import (
     UnusedRulesReview,
+    render_not_evaluated_rules,
     resolve_unused_rules_mode,
     strictest_mode,
     unused_rules_review,
@@ -345,6 +346,9 @@ def fold_rule_rows(
                 selector_matched_count=sum(row.selector_matched_count for row in group),
                 intent=first.intent,
                 allow_public_break=first.allow_public_break,
+                missing_evidence=next(
+                    (r.missing_evidence for r in group if r.missing_evidence), None
+                ),
             )
         )
     return tuple(folded)
@@ -685,6 +689,7 @@ def render_disposition_audit_lines(audit: DispositionAudit) -> list[str]:
         if len(unused) > _REVIEW_RULE_CAP:
             lines.append(f"- … {len(unused) - _REVIEW_RULE_CAP} more omitted")
         lines.append("")
+    lines += render_not_evaluated_rules(audit.unused_rules_review, _REVIEW_RULE_CAP)
     if audit.not_evaluated_detectors:
         # Collapsed to one line on purpose: D3 requires the *state* and its
         # count in every view, and each detector's own reason is already the

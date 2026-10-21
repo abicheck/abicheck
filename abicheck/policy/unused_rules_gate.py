@@ -31,15 +31,21 @@ gate (:mod:`abicheck.policy.acknowledgment_gate`, ADR-067 D6):
 Only status ``unused`` triggers. ``not_evaluated`` (a detector did not run),
 ``expired``, ``shadowed_only`` and ``active`` never do: each of those states
 says something other than "this rule was checked and matched nothing".
+
+``not_evaluated`` is still never silent once the user opted in (ADR-067 P1
+addendum 2): under ``warn`` and ``block`` the review lists every
+``not_evaluated`` rule with its ``missing_evidence``, and the report renders
+it as a warning. It does not gate -- missing evidence narrows a conclusion, it
+never manufactures a failure (ADR-063) -- so ``gate_contribution`` ignores it.
 """
 
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
-from .rule_inventory import UNUSED_TRIGGER_STATUS, RuleAuditRow
+from .rule_inventory import STATUS_NOT_EVALUATED, UNUSED_TRIGGER_STATUS, RuleAuditRow
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from datetime import date
@@ -84,13 +90,19 @@ class UnusedRulesReview:
     #: ``kind``/``rule_id``/``source_file``/``entry_index`` of each unused rule.
     unused: tuple[dict[str, object], ...]
     gate_contribution: int
+    #: Under ``warn``/``block``: each ``not_evaluated`` rule, with its
+    #: ``missing_evidence``. A warning, never a gate input.
+    not_evaluated: tuple[dict[str, object], ...] = ()
 
     def to_dict(self) -> dict[str, object]:
-        return {
+        out: dict[str, object] = {
             "policy": self.mode,
             "unused": [dict(entry) for entry in self.unused],
             "gate_contribution": self.gate_contribution,
         }
+        if self.mode != "allow":
+            out["not_evaluated"] = [dict(entry) for entry in self.not_evaluated]
+        return out
 
     @classmethod
     def from_dict(cls, d: Mapping[str, Any]) -> UnusedRulesReview:
@@ -98,6 +110,7 @@ class UnusedRulesReview:
             mode=str(d.get("policy", "allow")),
             unused=tuple(dict(e) for e in d.get("unused") or ()),
             gate_contribution=int(d.get("gate_contribution", 0) or 0),
+            not_evaluated=tuple(dict(e) for e in d.get("not_evaluated") or ()),
         )
 
 
@@ -105,18 +118,59 @@ def unused_rules_review(
     rows: Iterable[RuleAuditRow], *, mode: str
 ) -> UnusedRulesReview:
     """D-style gate over already-computed audit rows (no re-derivation here)."""
+    rows = tuple(rows)
     unused: tuple[dict[str, object], ...] = tuple(
-        {
-            "kind": row.kind,
-            "rule_id": row.rule_id,
-            "source_file": row.source_file,
-            "entry_index": row.entry_index,
-        }
-        for row in rows
-        if row.status == UNUSED_TRIGGER_STATUS
+        _entry(row) for row in rows if row.status == UNUSED_TRIGGER_STATUS
+    )
+    not_evaluated: tuple[dict[str, object], ...] = (
+        ()
+        if mode == "allow"
+        else tuple(
+            {**_entry(row), "missing_evidence": row.missing_evidence}
+            for row in rows
+            if row.status == STATUS_NOT_EVALUATED
+        )
     )
     contribution = 1 if (mode == "block" and unused) else 0
-    return UnusedRulesReview(mode=mode, unused=unused, gate_contribution=contribution)
+    return UnusedRulesReview(
+        mode=mode,
+        unused=unused,
+        gate_contribution=contribution,
+        not_evaluated=not_evaluated,
+    )
+
+
+def _entry(row: RuleAuditRow) -> dict[str, object]:
+    return {
+        "kind": row.kind,
+        "rule_id": row.rule_id,
+        "source_file": row.source_file,
+        "entry_index": row.entry_index,
+    }
+
+
+def render_not_evaluated_rules(
+    review: Mapping[str, object] | None, cap: int
+) -> list[str]:
+    """The Markdown warning for ``not_evaluated`` rules (empty when none)."""
+    entries = cast("list[dict[str, object]]", (review or {}).get("not_evaluated") or [])
+    if not entries:
+        return []
+    lines = [
+        f"**Warning -- rules not evaluated ({(review or {}).get('policy')}):** "
+        f"{len(entries)} configured rule(s) matched nothing, but the evidence "
+        "that could have matched them was missing, so they were not checked "
+        "(not gating)",
+        "",
+    ]
+    for entry in entries[:cap]:
+        lines.append(
+            f"- `{entry.get('rule_id')}` -- missing: {entry.get('missing_evidence') or 'unknown'}"
+        )
+    if len(entries) > cap:
+        lines.append(f"- … {len(entries) - cap} more omitted")
+    lines.append("")
+    return lines
 
 
 def unused_rules_exit_contribution(

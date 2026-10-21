@@ -166,3 +166,67 @@ def test_the_removed_fail_on_unused_rules_flag_is_rejected(tmp_path: Path) -> No
     )
     assert result.exit_code != 0
     assert not out.exists()
+
+
+# --- ADR-067 P1 addendum 2: not_evaluated is a warning, an observed kind is proof
+
+
+def _policy_mode(tmp_path: Path, rules: str, mode: str) -> Path:
+    path = tmp_path / "policy.yml"
+    path.write_text(f"unused_rules: {mode}\nreclassify:\n" + rules, encoding="utf-8")
+    return path
+
+
+@pytest.mark.parametrize("mode", ["warn", "block"])
+def test_a_not_evaluated_rule_is_a_warning_naming_the_missing_evidence(
+    tmp_path: Path, mode: str
+) -> None:
+    old, new = _build(tmp_path)
+    policy = _policy_mode(tmp_path, _DWARF_RULE, mode)
+    md = tmp_path / "report.md"
+    code, report = _run(tmp_path, old, new, policy, "-o", f"markdown={md}")
+    assert code == 0  # never gating, even under block
+    review = report["disposition_audit"]["unused_rules_review"]
+    assert review["gate_contribution"] == 0
+    (entry,) = review["not_evaluated"]
+    assert entry["entry_index"] == 0
+    assert "dwarf" in entry["missing_evidence"]
+    assert _rows_by_index(report)[0]["missing_evidence"] == entry["missing_evidence"]
+    text = md.read_text(encoding="utf-8")
+    assert "rules not evaluated" in text
+    assert "dwarf" in text
+
+
+def test_under_allow_the_not_evaluated_rule_stays_quiet(tmp_path: Path) -> None:
+    old, new = _build(tmp_path)
+    policy = _policy_mode(tmp_path, _DWARF_RULE, "allow")
+    code, report = _run(tmp_path, old, new, policy)
+    assert code == 0
+    assert "not_evaluated" not in report["disposition_audit"]["unused_rules_review"]
+
+
+def test_a_pipeline_kind_observed_in_the_run_makes_its_stale_rule_unused(
+    tmp_path: Path,
+) -> None:
+    """``public_surface_shrank`` has no registered detector; before the
+    observed-kind proof a stale rule on it could only read ``not_evaluated``."""
+    gcc = shutil.which("gcc")
+    if gcc is None:
+        pytest.skip("gcc not found")
+    old, new = tmp_path / "old.so", tmp_path / "new.so"
+    for out, src_text in ((old, _SOURCE), (new, "int keep(void) { return 3; }\n")):
+        src = out.with_suffix(".c")
+        src.write_text(src_text, encoding="utf-8")
+        subprocess.run(
+            [gcc, "-shared", "-fPIC", "-o", str(out), str(src)], check=True, timeout=60
+        )
+    rule = (
+        "  - symbol: not_a_real_symbol\n"
+        "    kind: public_surface_shrank\n"
+        "    to: ignore\n"
+        "    reason: stale\n"
+    )
+    _code, report = _run(tmp_path, old, new, _policy_mode(tmp_path, rule, "warn"))
+    kinds = {c["kind"] for c in report["changes"]}
+    assert "public_surface_shrank" in kinds
+    assert _rows_by_index(report)[0]["status"] == "unused"
