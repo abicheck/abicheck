@@ -1109,7 +1109,8 @@ remaining four tiers):
   itself never gained the ability to compute them from a single `Change` in
   isolation, matching the [Detector Impact Contract](../detector-impact-contract.md)'s
   reasoning for future detectors. `impact_group_id` diverging from
-  `root_cause_id` still needs Phase 6's `RootCauseCorrelator`.
+  `root_cause_id` was delivered by the G29 Phase 6 impact-group follow-up
+  (schema 6.4): it now follows the `RootCauseCorrelator`'s groups.
 - **`docs/reference/source-graph-schema.md`,
   `docs/contribute/detector-impact-contract.md`** — both now exist (G29
   Phase 2/3 follow-up), once D1/D5/D6/Slice 6 gave them enough real surface

@@ -126,15 +126,11 @@ section rather than as a per-finding field — see
 [Use-Case Impact](../contribute/use-case-impact.md).
 Runtime-trace ingestion (for either graph) and the per-role coverage matrix
 being wired through the impact layer are the remainder of G29 Phase 4. `root_cause_id`/`impact_group_id` (documented above) are implemented,
-but `impact_group_id` is currently only ever an alias of `root_cause_id` —
-distinguishing them (e.g. bucketing several distinct root causes that share
-one broader consumer-visible event under one group while keeping their own
-individual root-cause identities) is still open; the `RootCauseCorrelator`
-(G29 Phase 6) that would drive that distinction is implemented and now wired
-into the report surface as `root_cause_evidence` (documented above), but it
-doesn't yet feed `impact_group_id` itself — that would need the correlator's
-groups to actually re-bucket findings rather than only annotate them, a
-distinct follow-up. Computing `root_cause_id` needs whole-`DiffResult` context (which
+and `impact_group_id` follows the `RootCauseCorrelator`'s groups (G29 Phase 6):
+a finding in a multi-piece correlator group carries that group's id, which can
+exist without a `root_cause_id` (a `--used-by` bare-symbol pair shares one group
+while the report grouping leaves it ungrouped). Where both are set they are
+equal, since both hash the same grouping key. Computing `root_cause_id` needs whole-`DiffResult` context (which
 findings elsewhere reference this one) that a single finding's read view
 can't see on its own — the caller resolves it per report/scope
 (`reporter_markdown.root_cause_lookup_for_changes`) and passes it in; see

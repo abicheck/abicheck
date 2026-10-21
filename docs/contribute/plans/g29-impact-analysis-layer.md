@@ -170,9 +170,8 @@ model:
   `assess_change`, so `ImpactAssessment` itself stays a pure single-`Change`
   read view — see the
   [Detector Impact Contract](../detector-impact-contract.md).
-  `impact_group_id` is currently always an alias of `root_cause_id`;
-  making it independently meaningful still needs Phase 6's
-  `RootCauseCorrelator`.
+  `impact_group_id` now follows the `RootCauseCorrelator`'s groups (G29
+  Phase 6 impact-group follow-up, schema 6.4; see the Phase 6 section).
 - **G29.5** (Phase 4, **slices 1-2 done, ADR-057**) — A consumer graph
   (`CONSUMER_REQUIRES_SYMBOL`, `CONSUMER_REQUIRES_VERSION`, …) that joins
   with the source graph so a `CONSUMER_REQUIRED_SYMBOL_REMOVED` finding can
@@ -489,8 +488,7 @@ gaining the ability to see whole-`DiffResult` context on its own.
 alias, not yet a distinct concept. `REPORT_SCHEMA_VERSION` 2.16 → 2.19 (2.17
 and 2.18 went to ADR-050 D2's comparability-gate work and the P0
 evidence-provider audit's `"unattributed"` status respectively, both merged
-to `main` first — see `abicheck/schemas/__init__.py`'s version-history
-docstring).
+to `main` first — see `docs/contribute/report-schema-history.md`).
 Slices 8-9 (G29 Phase 3 follow-up) then delivered the D2 direction flip as a
 deliberately *scoped* subset: `Change.impact_assessment` (new, additive
 field) is populated directly by two producers — `internal_leak.py`'s two
@@ -550,7 +548,8 @@ scope.
 
 Also still open: the full `RootCauseCorrelator`-based correlation across
 consumer-overlay findings with no `caused_by_type` link (Phase 6) — which is
-also what would ever make `impact_group_id` diverge from `root_cause_id`.
+also what would ever make `impact_group_id` diverge from `root_cause_id`
+(done in the Phase 6 impact-group follow-up, schema 6.4 -- see below).
 The two reference docs below now exist (Slice 6 gave them enough real
 surface to be worth writing, closing what ADR-052 originally called
 premature) — the rest of this list is the original Phase 3 scope this
@@ -1894,6 +1893,27 @@ case, and nothing about that asymmetry is visible from either grouping's
 own code without deliberately tracing a bare-symbol, no-`caused_by_type`
 input through both.
 
+**Impact-group follow-up (schema 6.4).** `impact_assessment.impact_group_id`
+now follows `RootCauseCorrelator`'s groups instead of aliasing
+`root_cause_id`. It is resolved by `reporter_markdown.
+impact_group_lookup_for_changes` at the same call sites as
+`root_cause_evidence`, scoped-only siblings included, and
+`assess_change(impact_group_id=...)` falls back to `root_cause_id` when no
+correlator group exists (the "nothing correlates" case). A bare-symbol
+`--used-by` pair with no `caused_by_type` now shares one `impact_group_id`
+while `root_cause_id` stays absent. **The two ids therefore diverge by
+presence, not by value:** both hash the same grouping key, so whenever a
+finding carries both they are equal. The divergence the original
+expectation described (differing values) is not reachable with the current
+key scheme, and the test suite checks that claim against an independent
+oracle over randomized change sets. `root_cause_id`, `root_cause_display`,
+`root_causes[]` and every report-mode grouping are unchanged. The
+group-level `root_causes[]` rollup still keys on `root_cause_id` and is not
+re-keyed by correlator group; that is a deliberate follow-up. Additive, so
+the report schema bumps 6.3 to 6.4; `impact_group_id` may now appear without
+`root_cause_id`, which relaxes its presence rule. Covered by
+`tests/test_impact_group_id_correlator.py`.
+
 **A related, adjacent gap was found (not fixed) while scoping
 `GRAPH_COVERAGE_INSUFFICIENT_FOR_SUPPRESSION`'s "generalizes
 `SUPPRESSION_REACHABILITY_UNKNOWN`" description above, and is worth
@@ -2072,6 +2092,8 @@ Modified (recurring across phases): `abicheck/buildsource/source_graph.py`,
 - `tests/test_reporter.py::TestImpactAssessmentRootCause` /
   `tests/test_sarif.py::TestImpactAssessmentRootCause` — Phase 3 Slice 7's
   per-finding `root_cause_id`/`root_cause_display`/`impact_group_id`, done.
+- `tests/test_impact_group_id_correlator.py` -- Phase 6 impact-group
+  follow-up (schema 6.4): correlator-derived `impact_group_id`, done.
 - `tests/test_entity_resolver.py` — Phase 2 D4 (scoped implementation),
   done: `EntityResolver.resolve`'s USR/mangled/qualified-signature fallback
   chain, idempotence, alias sharing + conflict recording for two v1 ids

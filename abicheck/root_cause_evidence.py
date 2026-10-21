@@ -32,7 +32,10 @@ from typing import TYPE_CHECKING, cast
 
 from .policy.evaluate import effective_kind_sets
 from .report.view import apply_show_only, finding_id
-from .reporter_markdown import root_cause_evidence_lookup_for_changes
+from .reporter_markdown import (
+    root_cause_evidence_lookup_for_changes,
+    root_cause_lookup_for_changes,
+)
 
 if TYPE_CHECKING:
     from .checker_types import DiffResult
@@ -73,6 +76,56 @@ def scoped_only_evidence_lookup(
     """
     scoped_only = scoped_only_changes_filtered(result, show_only)
     return root_cause_evidence_lookup_for_changes(changes + scoped_only)
+
+
+def impact_group_lookup_for_changes(changes: list[Change]) -> dict[str, str]:
+    """``finding_id -> impact_group_id`` for every change that is a member of
+    a multi-piece ``RootCauseCorrelator`` group (G29 Phase 6 follow-up).
+
+    The value is the correlator group's own ``root_cause_id``, which hashes the
+    same ``caused_by_type``-else-``symbol`` key as the report-level grouping, so
+    it agrees with ``root_cause_id`` whenever both are set. It differs by
+    presence: a bare-symbol ``--used-by`` pair with no ``caused_by_type`` is one
+    correlator group that :func:`~abicheck.reporter_markdown.root_cause_for_change`
+    leaves ungrouped. Built over the real ``Change`` objects, so a scoped-only
+    sibling must be included in *changes* by the caller.
+    """
+    from .impact.correlation import correlate_root_causes
+
+    lookup: dict[str, str] = {}
+    for group in correlate_root_causes(changes):
+        for member_change, _level in group.members:
+            lookup[finding_id(member_change)] = group.root_cause_id
+    return lookup
+
+
+def impact_assessment_lookups(
+    changes: list[Change],
+) -> tuple[dict[str, tuple[str, str]], dict[str, dict[str, object]], dict[str, str]]:
+    """The three per-finding correlation lookups an ``impactAssessment`` reads,
+    over one *changes* list: ``(root_cause, root_cause_evidence, impact_group_id)``.
+    Callers pass the combined primary + scoped-only list so a scoped-only
+    sibling correlates the same way in every format.
+    """
+    return (
+        root_cause_lookup_for_changes(changes),
+        root_cause_evidence_lookup_for_changes(changes),
+        impact_group_lookup_for_changes(changes),
+    )
+
+
+def scoped_only_impact_group_lookup(
+    result: DiffResult, changes: list[Change], show_only: str | None
+) -> dict[str, str]:
+    """``finding_id -> impact_group_id`` for *changes* plus *result*'s filtered
+    ``scoped_only_changes`` -- the same combined correlator pass
+    :func:`scoped_only_evidence_lookup` runs, so a scoped-only sibling that
+    joins a finding's correlator group is seen here too (G29 Phase 6
+    follow-up: ``impact_group_id`` must reflect the real sibling ``Change``
+    objects, not just their ``caused_by_type`` strings).
+    """
+    scoped_only = scoped_only_changes_filtered(result, show_only)
+    return impact_group_lookup_for_changes(changes + scoped_only)
 
 
 def fold_evidence_summaries(

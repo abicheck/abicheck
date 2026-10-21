@@ -819,7 +819,7 @@ Every JSON report carries a top-level `report_schema_version` field
 
 ```json
 {
-  "report_schema_version": "6.3",
+  "report_schema_version": "6.4",
   "library": "libfoo.so.1",
   "verdict": "BREAKING"
 }
@@ -1040,7 +1040,7 @@ Prior to schema 3.0, a scoped compare's `verdict`/`severity`/`summary`/
 original full-library values preserved as `full_verdict`/`full_severity`/
 `full_summary`/`full_run_outcome`. Those four keys are gone as of schema
 3.0 — see this schema version's own changelog entry
-(`abicheck/schemas/__init__.py`) for the full migration note.
+([report schema version history](../contribute/report-schema-history.md)) for the full migration note.
 
 **Stability policy:**
 

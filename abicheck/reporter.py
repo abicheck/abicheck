@@ -94,7 +94,11 @@ from .reporter_markdown import (
     root_cause_lookup_for_changes as root_cause_lookup_for_changes,
     to_stat as to_stat,
 )
-from .root_cause_evidence import root_cause_group_evidence, scoped_only_evidence_lookup
+from .root_cause_evidence import (
+    root_cause_group_evidence,
+    scoped_only_evidence_lookup,
+    scoped_only_impact_group_lookup,
+)
 from .schemas import REPORT_SCHEMA_VERSION
 
 
@@ -262,6 +266,7 @@ def _to_json_root_cause(
     # never drift from each other.
     _rc_lookup = root_cause_lookup_for_changes(changes, extra_causes=extra_causes)
     _rc_evidence = scoped_only_evidence_lookup(result, changes, show_only)
+    _ig_lookup = scoped_only_impact_group_lookup(result, changes, show_only)
     entry_by_id = {
         id(c): change_to_dict(
             c,
@@ -270,6 +275,7 @@ def _to_json_root_cause(
             policy_file=result.policy_file,
             root_cause=_rc_lookup.get(finding_id(c)),
             root_cause_evidence=_rc_evidence.get(finding_id(c)),
+            impact_group_id=_ig_lookup.get(finding_id(c)),
             evidence_tiers=result.evidence_tiers,
             severity_config=severity_config,
         )

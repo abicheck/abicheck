@@ -741,9 +741,10 @@ independently-nullable keys:
   symbol is referenced by another finding's `caused_by_type`); absent for
   an uncorrelated singleton finding, so a plain finding's
   `impact_assessment` doesn't balloon with a root cause naming nothing but
-  itself. `impact_group_id` is currently always identical to
-  `root_cause_id` — a placeholder alias until a future revision gives it
-  independent meaning.
+  itself. `impact_group_id` (G29 Phase 6) is the `RootCauseCorrelator` group
+  id when this finding is a member of a multi-piece correlator group, and
+  equals `root_cause_id` otherwise. It can be present without `root_cause_id`
+  (a `--used-by` bare-symbol pair); where both are present they are equal.
 - `root_cause_evidence` (G29 Phase 6) is this finding's own entry from the
   `RootCauseCorrelator` (`abicheck.impact.correlation.correlate_root_causes`)
   — present only when this finding is a member of one of that composer's
