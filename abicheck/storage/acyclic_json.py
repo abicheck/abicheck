@@ -33,6 +33,15 @@ overlapping pause once the last one ends, so a caller that had already
 disabled collection keeps it disabled. Another
 thread that allocates during the pause loses nothing but timeliness: its
 cyclic garbage is collected at the next collection after the pause ends.
+
+Overlapping pauses can chain indefinitely: with members loading snapshots on
+parallel threads (a free-threaded build runs up to eight at once), a new
+pause began before the last one ended, the count never reached zero, and
+collection stayed off for a whole warm release run while compare threads
+piled up cyclic garbage (28-member warm run: 28 GiB vs 7.9 GiB cold on
+3.15t). So the *continuous* off-time is bounded: once collection has been
+off for :data:`MAX_CONTINUOUS_PAUSE_S`, the next pause to end runs one
+``gc.collect()`` and starts a new window.
 """
 
 from __future__ import annotations
@@ -41,6 +50,7 @@ import gc
 import json
 import sys
 import threading
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any
@@ -56,24 +66,42 @@ _lock = threading.Lock()
 _active = 0
 _restore_enabled = False
 
+#: Longest stretch, in seconds, that overlapping pauses keep collection off
+#: before an exiting pause forces one collection. Long enough that a single
+#: large parse never pays for a pass; short enough that chained pauses cannot
+#: disable collection for a whole run.
+MAX_CONTINUOUS_PAUSE_S = 0.5
+_clock = time.monotonic
+_off_since = 0.0
+
 
 @contextmanager
 def gc_paused() -> Iterator[None]:
     """Pause cyclic garbage collection for the ``with`` body, then restore
     whatever setting was in effect before the outermost overlapping pause."""
-    global _active, _restore_enabled
+    global _active, _restore_enabled, _off_since
     with _lock:
         if _active == 0:
             _restore_enabled = gc.isenabled()
+            _off_since = _clock()
             gc.disable()
         _active += 1
     try:
         yield
     finally:
+        overdue = False
         with _lock:
             _active -= 1
-            if _active == 0 and _restore_enabled:
-                gc.enable()
+            if _active == 0:
+                if _restore_enabled:
+                    gc.enable()
+            elif _restore_enabled and _clock() - _off_since >= MAX_CONTINUOUS_PAUSE_S:
+                # Other pauses are still live and will keep collection off:
+                # collect once now rather than never (see module docstring).
+                _off_since = _clock()
+                overdue = True
+        if overdue:
+            gc.collect()
 
 
 def loads_acyclic(document: str | bytes | bytearray, **kwargs: Any) -> Any:
