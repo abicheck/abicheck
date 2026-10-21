@@ -482,7 +482,7 @@ class TestContractEvaluationThreading:
         # docstring), then project_policy_overrides (findings-analysis-fixes
         # batch, second review round, defect 4: the release fan-out's own
         # `.abicheck.yml` `policy.overrides` gap), same rule.
-        assert params[-16:] == [
+        assert params[-17:] == [
             "diagnostic_comparison",
             "contract_evaluation",
             "include_dependencies",
@@ -506,6 +506,8 @@ class TestContractEvaluationThreading:
             # and typed API, appended last by the same rule.
             "acknowledgments_path",
             "acknowledgment_unacknowledged_additions",
+            # ADR-067 breaks: gate|accept, appended last by the same rule.
+            "acknowledgment_breaks",
         ]
 
     def test_new_gate_params_are_keyword_only_without_breaking_older_ones(self):
