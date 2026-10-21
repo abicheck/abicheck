@@ -251,18 +251,20 @@ class TestCompareChangedPathCli:
         uses (`_resolve_side_snapshot_impl(changed_paths=...)`), not a second
         scoping path of its own."""
         seen: list[tuple[str, ...]] = []
-        # Patched on the *caller's* module: `service_compare_pipeline` binds
+        # Patched on the *caller's* module: `workflows.compare` binds
         # the name at import time, so a patch on the defining module (or on
         # the `service_input_resolution` facade) would never be read.
-        import abicheck.service_compare_pipeline as execute_mod
+        from abicheck.workflows.compare import (
+            resolve as compare_resolve,
+        )
 
-        real = execute_mod._resolve_side_snapshot_impl
+        real = compare_resolve._resolve_side_snapshot_impl
 
         def _spy(*args: object, **kwargs: object) -> object:
             seen.append(tuple(kwargs.get("changed_paths") or ()))
             return real(*args, **kwargs)  # type: ignore[arg-type]
 
-        monkeypatch.setattr(execute_mod, "_resolve_side_snapshot_impl", _spy)
+        monkeypatch.setattr(compare_resolve, "_resolve_side_snapshot_impl", _spy)
         path = _write(
             AbiSnapshot(library="libfoo.so", version="1.0"), tmp_path / "s.json"
         )

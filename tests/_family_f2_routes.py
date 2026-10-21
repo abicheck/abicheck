@@ -55,7 +55,7 @@ from abicheck.model import (
 from abicheck.reporter import to_json
 from abicheck.serialization import snapshot_to_json
 from abicheck.service import CompareRequest, InputSpec
-from abicheck.service_compare_pipeline import run_compare_request
+from abicheck.workflows.compare.execute import run_compare_request
 
 LIB = "libfoo.so"
 

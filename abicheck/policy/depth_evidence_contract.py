@@ -55,7 +55,7 @@ request` raised for *every* rung and for stored snapshots too, pre-empting
 the recording below in exactly the cases it was written for. A directory
 `compare` routes through the latter and a single-pair one through the
 former, so packaging two binaries changed the exit code for the identical
-comparison. `service_compare_pipeline.resolve_compare_request` no longer
+comparison. `workflows.compare.resolve.resolve_compare_request` no longer
 calls `enforce_requested_depth` — see its own note — so every `compare`
 surface now answers a shortfall from here: `build`/`source` only, live
 sides only, exit 7, recorded rather than raised. `dump`'s own floors and

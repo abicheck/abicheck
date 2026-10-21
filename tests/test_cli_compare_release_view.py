@@ -496,7 +496,7 @@ class TestReleaseViewShowOnly:
         through `_release_findings_for_render`'s private-key stripping --
         so the internal `findings_view`/`findings_total_count`/
         `findings_total_count_view`/`impact_table_view` accounting keys
-        `_strip_diff_results_and_adjust_verdict` stashes on each entry used
+        `project_release_library_results` stashes on each entry used
         to leak straight into this sidecar's per-library JSON."""
         old_dir, new_dir = _write_removed_function_pair(tmp_path)
         out_dir = tmp_path / "out"

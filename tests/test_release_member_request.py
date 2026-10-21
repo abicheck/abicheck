@@ -15,7 +15,9 @@ from pathlib import Path
 
 import pytest
 
-from abicheck import service_compare_pipeline
+from abicheck.workflows.compare import (
+    execute as compare_execute,
+)
 from abicheck.workflows.release_member_request import (
     MemberDelta,
     ReleaseMemberCompareRequest,
@@ -37,7 +39,7 @@ def _delta(i: int = 0) -> MemberDelta:
 def test_every_request_field_is_a_run_compare_keyword() -> None:
     # The public keyword API must still accept every release field, so a
     # release member never carries a setting a single-pair caller cannot pass.
-    params = set(inspect.signature(service_compare_pipeline.run_compare).parameters)
+    params = set(inspect.signature(compare_execute.run_compare).parameters)
     fields = {f.name for f in dataclasses.fields(ReleaseMemberCompareRequest)}
     assert fields <= params, fields - params
 

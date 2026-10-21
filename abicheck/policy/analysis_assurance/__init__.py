@@ -64,7 +64,7 @@ Nothing here shells out, re-parses a binary, or re-runs an extractor.
   comparison's stated request in the same on-the-record way). That fix was
   CLI-only, though the underlying gap was not (P2 review,
   ``discussion_r3787839902``): ``service.run_compare_request()`` -- the
-  shared, typed Python-API/MCP entry point ``service_compare_pipeline.
+  shared, typed Python-API/MCP entry point ``workflows.compare.
   classify_compare_pair`` implements -- never gets this treatment, since
   the CLI's own ``compare`` command resolves its evidence through
   ``resolve_compare_request`` but classifies through a hand-rolled

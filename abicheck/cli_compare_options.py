@@ -159,7 +159,7 @@ def _reject_set_input_flags(
     # caller right after this function) applies a pack's policy/contract-
     # surface contributions to every library uniformly, through
     # CompareRequest.pack_policy_overrides/pack_internal_namespaces -- the
-    # same Tier-2 chokepoint (service_compare_pipeline.classify_compare_pair)
+    # same Tier-2 chokepoint (workflows.compare.execute.classify_compare_pair)
     # a single-pair `compare` folds its own packs through. Only a `kind:
     # gate` pack (gate.exit_code_scheme/gate.severity.*) is still rejected,
     # by that resolution itself, since the release fan-out has no resolved
@@ -213,7 +213,7 @@ def _resolve_depth_for_set_inputs(ctx: click.Context) -> str | None:
     :func:`abicheck.service.run_compare` like any other comparison:
 
     * **Floor enforcement does have a home.**
-      ``service_compare_pipeline.resolve_compare_request`` calls
+      ``workflows.compare.resolve.resolve_compare_request`` calls
       ``workflows.artifact.execute.enforce_requested_depth`` for *every*
       pair it resolves, the fan-out's members included, and
       ``classify_compare_pair`` applies the matching ceiling

@@ -550,7 +550,7 @@ def snapshot_content_digest(snap: AbiSnapshot) -> str:
 
     Shared by every caller of ``confidence.note_if_same_binary_compared``'s
     ``old_snapshot_digest``/``new_snapshot_digest`` fallback (Item 4 fix) --
-    the typed-API path (``service_compare_pipeline.classify_compare_pair``)
+    the typed-API path (``workflows.compare.execute.classify_compare_pair``)
     and the native CLI path (``frontends.cli.runtime._finalize_compare_
     result``) both need the identical digest for two snapshots to ever
     compare equal, so this is the one place that computation lives rather

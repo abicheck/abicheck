@@ -116,7 +116,7 @@ class ResolvedDumpRequest:
 
     ``resolved_execution_context`` (One Semantic Pipeline plan, sub-phase 4B
     -- ``dump``'s own slice of the gap
-    :class:`~abicheck.service_compare_pipeline.ResolvedComparePair`'s
+    :class:`~abicheck.workflows.compare_classify.ResolvedComparePair`'s
     identically-named field already closed for ``compare``): the
     :class:`~abicheck.workflows.resolved_execution_context.
     ResolvedExecutionContext` built from this same call's own, otherwise-

@@ -26,7 +26,7 @@ rather than incidental, so this file states it as executable invariants:
 
 * **The guarantee that did not change** -- projecting never mutates its
   argument. Every in-tree caller depends on this (a ``dump`` artifact reused
-  for a later, deeper comparison; ``service_compare_pipeline`` keeping
+  for a later, deeper comparison; ``workflows.compare`` keeping
   ``pair.old``/``pair.new`` readable after projecting a view off them).
 * **The guarantee that was never made** -- that the result is an independent
   mutable copy a caller may write *through*. At or above ``headers`` the

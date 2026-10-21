@@ -81,6 +81,7 @@ RESOLVER_SEMANTIC_FILES: tuple[str, ...] = (
     "abicheck/buildsource/providers.py",
     "abicheck/compare/export_owner_resolution.py",
     "abicheck/storage/native_identity_aliases.py",
+    "abicheck/workflows/compare/resolve.py",
 )
 
 #: Resolver-named modules that do not decide resolver semantics, each with the

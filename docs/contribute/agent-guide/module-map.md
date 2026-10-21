@@ -671,8 +671,9 @@ Core pipeline (in order of data flow):
      `run_scan_set`) — `service_scan.py` was then deleted with `scan`
      itself (ADR-068 Phase 6); the surviving dry-run cost model is
      `dry_run_estimate.estimate_scan`
-   - `service_compare_pipeline.py` — ADR-055 D1: `run_compare_request`'s two
-     phases (`resolve_compare_request` / `classify_compare_pair`), split so
+   - `workflows/compare/` (`resolve.py`, `execute.py`) — ADR-055 D1:
+     `run_compare_request`'s two phases (`resolve_compare_request` in
+     `resolve.py` / `classify_compare_pair` in `execute.py`), split so
      the native `compare` CLI can run its Click-dependent ADR-049
      `resolve_and_apply` step between them and still share one resolution
      with the typed API instead of keeping a second copy (historically also
@@ -686,7 +687,7 @@ Core pipeline (in order of data flow):
      `compare` and `dump` share (`resolve_side_snapshot`,
      `embed_side_build_source`, `enforce_requested_depth`,
      `reject_hybrid_source_frontend`). All of it was
-     `service_compare_pipeline`'s private helpers, lifted out of the pair and
+     the compare pipeline's private helpers, lifted out of the pair and
      re-expressed for one input so a change to how an input resolves lands on
      both commands at once. The pair-shaped decisions deliberately stayed
      behind — the pair-wide C++20 dialect override exists because two sides

@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Unit tests for ``service_compare_pipeline``'s ``resolve_sides_sequentially``.
+"""Unit tests for ``workflows.compare``'s ``resolve_sides_sequentially``.
 
 Split out of tests/test_service_unit.py (which was already past the
 architecture gate's 1200-line test-file cap) rather than grown further —
@@ -207,9 +207,11 @@ class TestResolvedExecutionContextWiring:
         ``resolve_input``, as ``_resolve`` above does) is what lets this test
         supply a header-scoped snapshot with a real ``effective_compile_context``
         -- the fake in ``_resolve`` deliberately can't (see the test above)."""
-        from abicheck import service_compare_pipeline
         from abicheck.compile_context import CompileContext
         from abicheck.workflows.artifact.execute import SideResolution
+        from abicheck.workflows.compare import (
+            resolve as compare_resolve,
+        )
 
         old_ctx = CompileContext(gcc_option_tokens=("-std=c++20",))
         new_ctx = CompileContext(gcc_option_tokens=("-std=c++17",))
@@ -224,10 +226,8 @@ class TestResolvedExecutionContextWiring:
                 effective_compile_context=ctx,
             )
 
-        monkeypatch.setattr(
-            service_compare_pipeline, "_resolve_side_snapshot_impl", _fake_impl
-        )
-        pair = service_compare_pipeline.resolve_compare_request(self._request(tmp_path))
+        monkeypatch.setattr(compare_resolve, "_resolve_side_snapshot_impl", _fake_impl)
+        pair = compare_resolve.resolve_compare_request(self._request(tmp_path))
 
         assert dict(pair.resolved_execution_context.compile_contexts) == {
             "old": old_ctx,
@@ -243,9 +243,11 @@ class TestResolvedExecutionContextWiring:
         docstring) -- recording it here would risk stating a wrong
         toolchain, so that side is excluded even though a compile context
         was resolved for it."""
-        from abicheck import service_compare_pipeline
         from abicheck.compile_context import CompileContext
         from abicheck.workflows.artifact.execute import SideResolution
+        from abicheck.workflows.compare import (
+            resolve as compare_resolve,
+        )
 
         old_ctx = CompileContext(gcc_option_tokens=("-std=c++20",))
         new_ctx = CompileContext(gcc_option_tokens=("-std=c++17",))
@@ -260,9 +262,7 @@ class TestResolvedExecutionContextWiring:
                 effective_compile_context=ctx,
             )
 
-        monkeypatch.setattr(
-            service_compare_pipeline, "_resolve_side_snapshot_impl", _fake_impl
-        )
+        monkeypatch.setattr(compare_resolve, "_resolve_side_snapshot_impl", _fake_impl)
         from dataclasses import replace
 
         from abicheck.dump_manifest import DumpManifest
@@ -272,7 +272,7 @@ class TestResolvedExecutionContextWiring:
             request,
             old=replace(request.old, dump_manifest=DumpManifest(base_dir=tmp_path)),
         )
-        pair = service_compare_pipeline.resolve_compare_request(request)
+        pair = compare_resolve.resolve_compare_request(request)
 
         assert dict(pair.resolved_execution_context.compile_contexts) == {
             "new": new_ctx
@@ -303,9 +303,11 @@ class TestResolvedExecutionContextWiring:
         identical dump-path regression,
         ``test_dump_resolved_execution_context.py::
         test_compile_context_included_for_a_followed_linker_script``)."""
-        from abicheck import service_compare_pipeline
         from abicheck.compile_context import CompileContext
         from abicheck.workflows.artifact.execute import SideResolution
+        from abicheck.workflows.compare import (
+            resolve as compare_resolve,
+        )
 
         target = tmp_path / "libfoo.so.1"
         target.write_bytes(b"\x7fELF" + b"\x00" * 200)
@@ -325,14 +327,12 @@ class TestResolvedExecutionContextWiring:
                 effective_compile_context=old_ctx,
             )
 
-        monkeypatch.setattr(
-            service_compare_pipeline, "_resolve_side_snapshot_impl", _fake_impl
-        )
+        monkeypatch.setattr(compare_resolve, "_resolve_side_snapshot_impl", _fake_impl)
         request = CompareRequest(
             old=InputSpec(path=old_p, version="old"),
             new=InputSpec(path=new_p, version="new"),
         )
-        pair = service_compare_pipeline.resolve_compare_request(request)
+        pair = compare_resolve.resolve_compare_request(request)
 
         assert pair.old_fmt is None  # the raw linker-script path itself
         assert dict(pair.resolved_execution_context.compile_contexts) == {
@@ -447,7 +447,7 @@ class TestRequestEnvMatrixReachesClassification:
         """A caller-built ``ResolvedComparePair`` -- direct construction,
         never through ``resolve_compare_request``."""
         from abicheck.service_compare_evidence import SideEvidence
-        from abicheck.service_compare_pipeline import ResolvedComparePair
+        from abicheck.workflows.compare_classify import ResolvedComparePair
 
         evidence = SideEvidence(
             headers=[], compile=None, collect_mode="off", dump_manifest=None
@@ -467,7 +467,7 @@ class TestRequestEnvMatrixReachesClassification:
         runtime-floor violation as ``BREAKING``, proving the matrix reaches
         real classification rather than a non-``None`` intermediate value."""
         from abicheck.model.change_catalog.registry import Verdict
-        from abicheck.service_compare_pipeline import classify_compare_pair
+        from abicheck.workflows.compare.execute import classify_compare_pair
 
         old = self._snapshot(version="1.0", glibc="2.28")
         # The new binary requires a strictly newer GLIBC symbol version than
@@ -489,7 +489,7 @@ class TestRequestEnvMatrixReachesClassification:
         """No declared floor at all: the same GLIBC delta must NOT be flagged
         as a runtime-floor violation -- the vacuity guard for the test above."""
         from abicheck.model.change_catalog.registry import Verdict
-        from abicheck.service_compare_pipeline import classify_compare_pair
+        from abicheck.workflows.compare.execute import classify_compare_pair
 
         old = self._snapshot(version="1.0", glibc="2.28")
         new = self._snapshot(version="1.1", glibc="2.34")
@@ -510,10 +510,8 @@ class TestRequestEnvMatrixReachesClassification:
         ``classify_compare_pair``) flags the identical violation the
         caller-built path does."""
         from abicheck.model.change_catalog.registry import Verdict
-        from abicheck.service_compare_pipeline import (
-            classify_compare_pair,
-            resolve_compare_request,
-        )
+        from abicheck.workflows.compare.execute import classify_compare_pair
+        from abicheck.workflows.compare.resolve import resolve_compare_request
 
         old = self._snapshot(version="1.0", glibc="2.28")
         new = self._snapshot(version="1.1", glibc="2.34")

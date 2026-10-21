@@ -20,7 +20,7 @@ from _family_f2_routes import _invoke, write_operands
 from abicheck.checker import Verdict
 from abicheck.errors import ValidationError
 from abicheck.service import CompareRequest, InputSpec
-from abicheck.service_compare_pipeline import run_compare_request
+from abicheck.workflows.compare.execute import run_compare_request
 
 EXPIRED = (
     "version: 1\nsuppressions:\n"

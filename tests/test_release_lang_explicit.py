@@ -64,7 +64,9 @@ def test_member_compare_forwards_lang_explicit(
 def test_run_compare_carries_lang_explicit_onto_the_request(
     monkeypatch: pytest.MonkeyPatch, explicit: bool
 ) -> None:
-    from abicheck import service_compare_pipeline as scp
+    from abicheck.workflows.compare import (
+        execute as compare_execute,
+    )
 
     seen: dict[str, Any] = {}
 
@@ -72,9 +74,11 @@ def test_run_compare_carries_lang_explicit_onto_the_request(
         seen["request"] = request
         raise RuntimeError("stop")
 
-    monkeypatch.setattr(scp, "run_compare_request", _capture)
+    monkeypatch.setattr(compare_execute, "run_compare_request", _capture)
     with pytest.raises(RuntimeError):
-        scp.run_compare(Path("a"), Path("b"), lang="c++", lang_explicit=explicit)
+        compare_execute.run_compare(
+            Path("a"), Path("b"), lang="c++", lang_explicit=explicit
+        )
     assert seen["request"].lang_explicit is explicit
 
 

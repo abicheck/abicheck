@@ -149,7 +149,7 @@ class ReleaseCompareOutcome:
     *library_results* still carries each member's private ``_``-prefixed
     working keys (``_diff_result`` and the evidence stash); a renderer
     projects what it needs from them and strips them
-    (``cli_compare_release_matrix._strip_diff_results_and_adjust_verdict``).
+    (``report.release_findings.project_release_library_results``).
     *worst_verdict* already includes every release-global contributor and
     the proven-removed-member floor.
     """

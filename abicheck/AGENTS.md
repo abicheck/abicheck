@@ -75,7 +75,7 @@ was repeatedly wrong for a specific existing file (`dumper_cache.py` is
 `frontends`, not `workflows`).
 
 Move one vertical slice at a time and preserve the typed request/result
-pipelines already used by `service_compare_pipeline.py`,
+pipelines already used by `workflows/compare/` (typed compare),
 `service_dump_pipeline.py`, and `service_scan.py`.
 
 ## Common task recipes

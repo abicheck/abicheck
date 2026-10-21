@@ -105,7 +105,7 @@ def _dispatch_release_compare(ctx: click.Context, **kwargs: Any) -> None:
     # "impact" is threaded through as show_impact, since (unlike leaf/
     # root-cause) an impact summary is naturally per-library: each library
     # already has its own DiffResult, so
-    # `_strip_diff_results_and_adjust_verdict` computes one impact table per
+    # `project_release_library_results` computes one impact table per
     # library from it. Demangling is no longer a value to thread at all
     # (plan slice 7o): it is resolved per format, from the format alone.
     report_mode = kwargs.pop("report_mode", "full")

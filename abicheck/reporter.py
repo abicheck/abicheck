@@ -485,7 +485,7 @@ def release_finding_entry(
     """The release fan-out's own minimal finding dict, plus ``reclassified_by``.
 
     Same ``bucket``/``kind``/``symbol``/``description``/``source_location``
-    shape ``cli_compare_release_matrix._release_finding_dicts`` has always
+    shape ``report.release_findings.release_finding_dicts`` has always
     built inline, with one addition: ``reclassified_by`` (schema 2.31) when a
     ``reclassify:`` rule decided this change's effective verdict, resolved
     through the identical :func:`reclassified_by_for_change` helper

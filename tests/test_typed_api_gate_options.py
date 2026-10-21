@@ -108,7 +108,7 @@ def _write(tmp_path: Path, old: AbiSnapshot, new: AbiSnapshot) -> tuple[Path, Pa
 
 class TestCompareRequestGateOptions:
     """`CompareRequest.severity_preset`/`exit_code_scheme` ->
-    `CompareResult.exit_decision` (`service_compare_pipeline.
+    `CompareResult.exit_decision` (`workflows.compare.
     classify_compare_pair`)."""
 
     def _run(self, old: Path, new: Path, **kwargs):
@@ -643,7 +643,7 @@ class TestCompareRequestContractContextGateReceipt:
 
 class TestCompareResultSeverityConfigRenderingParity:
     """Codex review, fresh evidence (PR #1032, commit 72fdf5b, file:line
-    `service_compare_pipeline.py:618`): `classify_compare_pair` resolved
+    the former `service_compare_pipeline.py:618`, now `workflows/compare/execute.py`): `classify_compare_pair` resolved
     `CompareResult.exit_decision` from the request's own gate, but the typed
     result carried no way for a caller to render a report that agrees with
     it -- `reporter.to_json`/`render_output` default their own
@@ -723,8 +723,8 @@ class TestCompareResultSeverityConfigRenderingParity:
 
 
 class TestRunCompareForwardsGateOptions:
-    """Codex review, fresh evidence (PR #1032, `service_compare_pipeline.py:
-    606`): ADR-064/PR G2 added `severity_preset`/`exit_code_scheme` to
+    """Codex review, fresh evidence (PR #1032, the former
+    `service_compare_pipeline.py:606`, now `workflows/compare/execute.py`): ADR-064/PR G2 added `severity_preset`/`exit_code_scheme` to
     `CompareRequest`/`CompareResult`, but the supported `abicheck.service.
     run_compare()` kwargs shim never grew matching parameters or forwarded
     them into the `CompareRequest` it builds -- a caller of this documented

@@ -148,6 +148,9 @@ PERF_SENSITIVE_PATTERNS: tuple[str, ...] = (
     # per-file list is exactly what went stale here, so this follows the
     # `buildsource/**` precedent and sweeps the family.
     "abicheck/service*.py",
+    # The typed compare pipeline (resolve + execute), moved out of the root
+    # `service*.py` family by ADR-061. Same measured window as the glob above.
+    "abicheck/workflows/compare/**",
     "scripts/benchmark_scaling.py",
     # The harnesses themselves, by prefix rather than by name: the full-CLI
     # harness has already been split twice under the file-size cap

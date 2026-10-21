@@ -3,7 +3,7 @@
 
 """The gate a classified pair is scored under, and its :class:`CompareResult`.
 
-The last step of :func:`abicheck.service_compare_pipeline.classify_compare_pair`,
+The last step of :func:`abicheck.workflows.compare.execute.classify_compare_pair`,
 after :func:`~abicheck.workflows.compare_classify.classify_resolved_pair` has
 classified the pair and attached its report fields: the suppression audit, the
 exit decision and the resolved gate receipt. The gate is resolved from a typed

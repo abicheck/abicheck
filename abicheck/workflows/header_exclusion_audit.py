@@ -155,7 +155,7 @@ def observed_member_exclusion_identities(
     """Each completed member comparison's *observed* exclusion identity.
 
     Read off the stashed ``_diff_result`` of every entry that produced one,
-    which is only possible before ``_strip_diff_results_and_adjust_verdict``
+    which is only possible before ``project_release_library_results``
     removes them -- hence a named function called at that point rather than
     an expression buried in the receipt assembly further down, where the
     evidence no longer exists.

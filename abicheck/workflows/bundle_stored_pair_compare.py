@@ -191,7 +191,7 @@ def compare_stored_bundle_facts_pair(
     and then applied as a ceiling to every stored snapshot on both sides
     (``policy.depth_projection.project_snapshot_to_depth``) before diffing
     -- the same floor-then-ceiling pairing ``classify_compare_pair``
-    (``service_compare_pipeline.py``) applies for every other
+    (``workflows/compare/execute.py``) applies for every other
     resolved-snapshot comparison path (``cli_compare_helpers.py``,
     formerly ``cli_scan_baseline.py``). Only ``binary``/``headers`` are reachable
     here at all, since ``--depth build``/``source`` are rejected
@@ -380,7 +380,7 @@ def compare_stored_bundle_facts_pair(
             not_comparable[key] = (mismatch_kind(exc), str(exc))
             continue
         if depth is not None:
-            # Codex review, PR #1060, round 10: service_compare_pipeline.
+            # Codex review, PR #1060, round 10: workflows.compare.
             # resolve_compare_request() stamps DiffResult.requested_depth
             # and recomputes analysis_assurance (depth_satisfied included)
             # after its own floor/ceiling pair -- this driver enforced and

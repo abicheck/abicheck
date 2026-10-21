@@ -17,7 +17,7 @@
 
 Every scalar ``compare`` route runs a resolved pair through
 :func:`classify_resolved_pair`: the typed API (``run_compare_request`` via
-``service_compare_pipeline.classify_compare_pair``), every release member
+``workflows.compare.execute.classify_compare_pair``), every release member
 (through the same request), and the native ``compare`` CLI
 (``cli_compare_helpers.run_compare``). Before this module the CLI kept its own
 copy of this whole phase -- depth projection, the evidence fold, the
@@ -74,7 +74,7 @@ __all__ = [
 class ResolvedComparePair:
     """Both sides of a comparison, resolved and ready to classify.
 
-    The seam between ``service_compare_pipeline.resolve_compare_request`` and
+    The seam between ``workflows.compare.resolve.resolve_compare_request`` and
     :func:`classify_resolved_pair`: the detected binary formats, and each
     side's resolved ``SideEvidence`` (``collect_mode`` drives the embed diff).
 

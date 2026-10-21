@@ -41,7 +41,6 @@ from .cli_compare_release_helpers import (
 )
 from .cli_compare_release_matrix import (
     _finalize_release_output,
-    _strip_diff_results_and_adjust_verdict,
     _validate_suppression_early,
 )
 from .cli_options import (
@@ -63,6 +62,7 @@ from .frontends.cli.runtime import _setup_verbosity, _write_or_echo
 from .model.release_selection import ReleaseSelection
 from .report.comparison_scope import comparison_scope_terms
 from .report.release_assurance_section import release_assurance_terms
+from .report.release_findings import project_release_library_results
 from .report.release_public_surface_section import assemble_release_public_surface
 from .workflows.release_compare import (
     ReleaseCompareOptions,
@@ -388,7 +388,7 @@ def compare_release_cmd(
     # (rejected outright above `_dispatch_release_compare`), the impact
     # summary is naturally per-library (each library's own DiffResult
     # already yields its own table), so it is threaded through rather than
-    # dropped or rejected -- see `_strip_diff_results_and_adjust_verdict`'s
+    # dropped or rejected -- see `project_release_library_results`'s
     # own docstring for how each library's table is computed. `False` (the
     # default) is a true no-op, matching every pre-existing caller (this
     # command has no `--view` option of its own; only `compare`'s
@@ -718,7 +718,7 @@ def _render_release_outcome(
     # findings every renderer reads, then strip every private key. The
     # verdict already carries the proven-removed floor, so this is a no-op
     # on it.
-    worst_verdict = _strip_diff_results_and_adjust_verdict(
+    worst_verdict = project_release_library_results(
         library_results,
         outcome.removed_keys,
         outcome.worst_verdict,

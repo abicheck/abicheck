@@ -120,3 +120,78 @@ def test_overlapping_pauses_on_two_threads_restore_once_the_last_ends() -> None:
         t.join(10)
     assert seen == [False]
     assert gc.isenabled()
+
+
+@settings(max_examples=200, deadline=None)
+@given(
+    steps=st.lists(st.floats(min_value=0.0, max_value=1.5), min_size=1, max_size=60),
+    width=st.integers(min_value=2, max_value=8),
+)
+def test_chained_overlapping_pauses_cannot_keep_collection_off_unbounded(
+    steps: list[float], width: int
+) -> None:
+    # Bug class: pauses that keep overlapping (members loading snapshots on
+    # parallel threads) never let the active count reach zero, so collection
+    # stayed off for a whole run. Invariant: whatever the overlap pattern,
+    # collection (an explicit collect or re-enabling) happens at least every
+    # MAX_CONTINUOUS_PAUSE_S plus one step. Oracle: a fake clock and a log of
+    # collect calls, independent of the module's own bookkeeping.
+    from abicheck.storage import acyclic_json as aj
+
+    now = [0.0]
+    collected_at: list[float] = []
+    real_collect = gc.collect
+    old_clock = aj._clock
+    aj._clock = lambda: now[0]
+    gc.collect = lambda *a, **k: collected_at.append(now[0]) or 0  # type: ignore[assignment]
+    try:
+        gc.enable()
+        live = []
+        for _ in range(width):  # a full window of overlapping pauses
+            cm = gc_paused()
+            cm.__enter__()
+            live.append(cm)
+        for dt in steps:  # rotate: a new pause starts before the oldest ends
+            now[0] += dt
+            cm = gc_paused()
+            cm.__enter__()
+            live.append(cm)
+            live.pop(0).__exit__(None, None, None)
+            assert not gc.isenabled()
+        last = 0.0
+        for t in collected_at:
+            assert t - last <= aj.MAX_CONTINUOUS_PAUSE_S + 1.5
+            last = t
+        assert now[0] - last <= aj.MAX_CONTINUOUS_PAUSE_S + 1.5
+        for cm in live:
+            cm.__exit__(None, None, None)
+        assert gc.isenabled()
+    finally:
+        gc.collect = real_collect  # type: ignore[assignment]
+        aj._clock = old_clock
+
+
+def test_chained_pauses_do_not_collect_when_the_caller_had_collection_off() -> None:
+    # The caller disabled collection itself: the bound must not override it.
+    from abicheck.storage import acyclic_json as aj
+
+    gc.disable()
+    calls: list[int] = []
+    real_collect, old_clock, now = gc.collect, aj._clock, [0.0]
+    aj._clock = lambda: now[0]
+    gc.collect = lambda *a, **k: calls.append(1) or 0  # type: ignore[assignment]
+    try:
+        a = gc_paused()
+        a.__enter__()
+        for _ in range(10):
+            now[0] += 1.0
+            b = gc_paused()
+            b.__enter__()
+            a.__exit__(None, None, None)
+            a = b
+        a.__exit__(None, None, None)
+    finally:
+        gc.collect = real_collect  # type: ignore[assignment]
+        aj._clock = old_clock
+    assert calls == []
+    assert not gc.isenabled()

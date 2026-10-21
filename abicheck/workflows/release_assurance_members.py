@@ -16,8 +16,8 @@
 """ADR-071: turning a release's own member results into the assurance fold.
 
 ``policy.release_assurance`` owns the *fold* and deliberately takes plain
-``(name, status, notes)`` triples -- it may not import the flat-root
-``analysis_assurance`` module, which itself imports from ``policy``. This
+``(name, status, notes)`` triples -- it may not import the
+``policy/analysis_assurance`` package, which itself imports from ``policy``. This
 module is the adapter that closes that gap from the other side: it reads each
 member's real ``AnalysisAssurance`` and hands the fold what it needs.
 

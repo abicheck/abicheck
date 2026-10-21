@@ -122,7 +122,7 @@ def _demangler_available() -> bool:
 def _compare(old, new):
     """The whole CompareResult -- renderers need the two snapshots too."""
     from abicheck.service import CompareRequest, InputSpec
-    from abicheck.service_compare_pipeline import run_compare_request
+    from abicheck.workflows.compare.execute import run_compare_request
 
     return run_compare_request(
         CompareRequest(old=InputSpec(path=old), new=InputSpec(path=new))

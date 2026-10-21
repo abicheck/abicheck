@@ -714,7 +714,7 @@ class TestNoteIfSameBinaryCompared:
         ``run_compare_request`` path -- previously no warning at all."""
         from abicheck.serialization import snapshot_to_json
         from abicheck.service import CompareRequest, InputSpec
-        from abicheck.service_compare_pipeline import run_compare_request
+        from abicheck.workflows.compare.execute import run_compare_request
 
         snap = _snap(functions=[_pub_func("foo", "_Z3foov", ret="int")])
         old_p = tmp_path / "old.json"
@@ -736,7 +736,7 @@ class TestNoteIfSameBinaryCompared:
         trigger the fallback."""
         from abicheck.serialization import snapshot_to_json
         from abicheck.service import CompareRequest, InputSpec
-        from abicheck.service_compare_pipeline import run_compare_request
+        from abicheck.workflows.compare.execute import run_compare_request
 
         old_snap = AbiSnapshot(library="libfoo.so", version="1.0", functions=[])
         new_snap = AbiSnapshot(
@@ -774,7 +774,7 @@ class TestNoteIfSameBinaryCompared:
         from abicheck import dumper as dumper_mod
         from abicheck.serialization import snapshot_to_json
         from abicheck.service import CompareRequest, InputSpec
-        from abicheck.service_compare_pipeline import run_compare_request
+        from abicheck.workflows.compare.execute import run_compare_request
 
         snap = _snap(functions=[_pub_func("foo", "_Z3foov")])
         so_path = tmp_path / "lib.so"
@@ -948,7 +948,7 @@ class TestNoteIfSameBinaryCompared:
 
         from abicheck import dumper as dumper_mod
         from abicheck.service import CompareRequest, InputSpec
-        from abicheck.service_compare_pipeline import run_compare_request
+        from abicheck.workflows.compare.execute import run_compare_request
 
         real_so = tmp_path / "libfoo.so.1"
         real_so.write_bytes(b"\x7fELF" + b"\x00" * 200)
@@ -973,7 +973,7 @@ class TestNoteIfSameBinaryCompared:
         linker script pointing at a same-named real DSO."""
         from abicheck.serialization import snapshot_to_json
         from abicheck.service import CompareRequest, InputSpec
-        from abicheck.service_compare_pipeline import run_compare_request
+        from abicheck.workflows.compare.execute import run_compare_request
 
         real_so = tmp_path / "libfoo.so"
         real_so.write_bytes(b"\x7fELF" + b"\x00" * 200)
@@ -1068,8 +1068,8 @@ class TestNoteIfSameBinaryCompared:
         this test passing vacuously."""
         from abicheck.checker import DiffResult
         from abicheck.model import AbiSnapshot
-        from abicheck.service_compare_pipeline import ResolvedComparePair
         from abicheck.workflows import compare_classify
+        from abicheck.workflows.compare_classify import ResolvedComparePair
         from abicheck.workflows.request_inputs import InputSpec
         from abicheck.workflows.service_requests import CompareRequest
 
