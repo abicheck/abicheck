@@ -66,6 +66,19 @@ inputs:
       caller opts in by including the placeholder.
     required: false
     default: ''
+  attest:
+    description: >
+      'false' (default) -- package only. 'true' -- also create a GitHub
+      artifact attestation (SLSA build provenance, via
+      actions/attest-build-provenance) for the archive, so a consumer can
+      require it with verify-baseline-attestation: true on the root Action or
+      actions/resolve-baseline. The calling job needs 'id-token: write' and
+      'attestations: write' permissions. Unlike archive-sha256, which only
+      helps when the consumer pins it somewhere an attacker cannot change,
+      the attestation binds the archive's bytes to the repository and
+      workflow that produced it.
+    required: false
+    default: 'false'
 
 outputs:
   asset-name:
@@ -83,6 +96,9 @@ outputs:
       digest covers the whole archive file, so a consistently repacked archive
       (one whose manifest was rewritten to match) changes it too.
     value: ${{ steps.package.outputs.archive-sha256 }}
+  attestation-url:
+    description: "URL of the attestation created when attest is 'true'; empty otherwise."
+    value: ${{ steps.attest.outputs.attestation-url }}
 
 runs:
   using: 'composite'
@@ -95,4 +111,12 @@ runs:
         ASSET_NAME_TEMPLATE: ${{ inputs.asset-name-template }}
         PROFILE: ${{ inputs.profile }}
         GENERATION: ${{ inputs.generation }}
+        ATTEST: ${{ inputs.attest }}
       run: bash "${{ github.action_path }}/run.sh"
+
+    - name: Attest baseline-set archive
+      id: attest
+      if: inputs.attest == 'true'
+      uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f  # v3.2.0
+      with:
+        subject-path: ${{ steps.package.outputs.asset-name }}

@@ -34,6 +34,7 @@ _fail_ambiguous() {
     echo "member-header-evidence=none"
     echo "archive-digest="
     echo "archive-digest-verified=false"
+    echo "archive-attestation-verified=false"
     echo "message=$message"
     echo "channel=$CHANNEL"
   } >> "${GITHUB_OUTPUT:-/dev/null}"
@@ -54,6 +55,9 @@ EXPECTED_BASELINE_GENERATION="${INPUT_EXPECTED_BASELINE_GENERATION:-}"
 EXPECTED_ARCHIVE_DIGEST="${INPUT_EXPECTED_ARCHIVE_DIGEST:-}"
 ALLOW_NEW_TARGET="${INPUT_ALLOW_NEW_TARGET:-false}"
 STAGE_MEMBER_SNAPSHOTS="${INPUT_STAGE_MEMBER_SNAPSHOTS:-false}"
+VERIFY_ATTESTATION="${INPUT_VERIFY_BASELINE_ATTESTATION:-false}"
+ATTESTATION_REPO="${INPUT_BASELINE_ATTESTATION_REPO:-}"
+ATTESTATION_SIGNER_WORKFLOW="${INPUT_BASELINE_ATTESTATION_SIGNER_WORKFLOW:-}"
 ACTION_PATH="${ACTION_PATH:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 
 # A newline in channel (or baseline-path, which _fail_ambiguous may embed
@@ -89,6 +93,29 @@ esac
 if [[ -n "$EXPECTED_ARCHIVE_DIGEST" ]] && ! [[ "$EXPECTED_ARCHIVE_DIGEST" =~ ^([Ss][Hh][Aa]256:)?[0-9A-Fa-f]{64}$ ]]; then
   _fail "expected-archive-digest '$EXPECTED_ARCHIVE_DIGEST' is not a SHA-256 digest. Use 'sha256:<64 hex characters>' or the 64 hex characters alone."
 fi
+# verify-baseline-attestation (opt-in): the archive's GitHub artifact
+# attestation is checked with `gh attestation verify` before extraction.
+# The repo/signer inputs only mean something when it is on, so setting them
+# with it off is refused rather than silently ignored.
+case "$VERIFY_ATTESTATION" in
+  true | false) ;;
+  *) _fail "verify-baseline-attestation '$VERIFY_ATTESTATION' is not recognized. Use 'true' or 'false'." ;;
+esac
+if [[ "$VERIFY_ATTESTATION" == "false" && ( -n "$ATTESTATION_REPO" || -n "$ATTESTATION_SIGNER_WORKFLOW" ) ]]; then
+  _fail "baseline-attestation-repo/baseline-attestation-signer-workflow are set but verify-baseline-attestation is 'false', so nothing would be verified. Set verify-baseline-attestation: true, or unset them."
+fi
+if [[ -n "$ATTESTATION_REPO" ]] && ! [[ "$ATTESTATION_REPO" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
+  _fail "baseline-attestation-repo '$ATTESTATION_REPO' is not an owner/repo name."
+fi
+if [[ -n "$ATTESTATION_SIGNER_WORKFLOW" ]] && ! [[ "$ATTESTATION_SIGNER_WORKFLOW" =~ ^[^[:space:]]+/\.github/workflows/[^[:space:]/]+$ ]]; then
+  _fail "baseline-attestation-signer-workflow '$ATTESTATION_SIGNER_WORKFLOW' is not a workflow path. Use 'owner/repo/.github/workflows/<file>.yml'."
+fi
+if [[ "$VERIFY_ATTESTATION" == "true" && -z "$ATTESTATION_REPO" ]]; then
+  ATTESTATION_REPO="${GITHUB_REPOSITORY:-}"
+  if [[ -z "$ATTESTATION_REPO" ]]; then
+    _fail "verify-baseline-attestation is 'true' but neither baseline-attestation-repo nor GITHUB_REPOSITORY names the repository that attested the archive."
+  fi
+fi
 if [[ "$KIND" == "target" && -z "$TARGET" ]]; then
   _fail "target input is required when kind is 'target'."
 fi
@@ -109,12 +136,16 @@ fi
 _EXTRACT_DIR=""
 ARCHIVE_DIGEST=""
 ARCHIVE_VERIFIED="false"
+ATTESTATION_VERIFIED="false"
 if [[ -d "$BASELINE_PATH" ]]; then
   # A digest pins archive bytes. A directory has none to check, so pinning one
   # is refused rather than silently ignored: the caller would believe the set
   # was verified when nothing was.
   if [[ -n "$EXPECTED_ARCHIVE_DIGEST" ]]; then
     _fail "expected-archive-digest is set but baseline-path '$BASELINE_PATH' is a directory, not an archive -- the digest pins an archive file's bytes, so there is nothing here to verify. Stage the set as its .tar.zst/.tar.gz/.tar archive, or unset expected-archive-digest."
+  fi
+  if [[ "$VERIFY_ATTESTATION" == "true" ]]; then
+    _fail "verify-baseline-attestation is 'true' but baseline-path '$BASELINE_PATH' is a directory, not an archive -- an attestation covers an archive file's bytes, so there is nothing here to verify. Stage the set as its archive, or set verify-baseline-attestation: false."
   fi
   BASELINE_DIR="$BASELINE_PATH"
 elif [[ -f "$BASELINE_PATH" ]]; then
@@ -158,6 +189,18 @@ elif [[ -f "$BASELINE_PATH" ]]; then
   # implements all three; the root Action calls the same entry point.
   # -I: the Python isolation invariant this Action applies to every
   # interpreter call against a caller-controlled workspace.
+  # Attestation first (when opted in), on the same staged bytes the digest
+  # check and extraction read, and before any member is written.
+  if [[ "$VERIFY_ATTESTATION" == "true" ]]; then
+    _ATTEST_EXIT=0
+    _ATTEST_OUTPUT=$(bash "$ACTION_PATH/../../action/verify-baseline-attestation.sh" "$_ARCHIVE_COPY" "$ATTESTATION_REPO" "$ATTESTATION_SIGNER_WORKFLOW") || _ATTEST_EXIT=$?
+    if [[ $_ATTEST_EXIT -ne 0 ]]; then
+      rm -f "$_ARCHIVE_COPY" || true
+      _ATTEST_MESSAGE=$(printf '%s\n' "$_ATTEST_OUTPUT" | sed -n 's/^message=//p')
+      _fail_ambiguous "${_ATTEST_MESSAGE:-baseline-set archive attestation verification failed (exit $_ATTEST_EXIT).}"
+    fi
+    ATTESTATION_VERIFIED="true"
+  fi
   _PREPARE_ARGS=(--archive "$_ARCHIVE_COPY" --dest "$BASELINE_DIR" --format "$_ARCHIVE_FORMAT")
   if [[ -n "$EXPECTED_ARCHIVE_DIGEST" ]]; then
     _PREPARE_ARGS+=(--expected-digest "$EXPECTED_ARCHIVE_DIGEST")
@@ -271,6 +314,7 @@ echo "::endgroup::"
   echo "channel=$CHANNEL"
   echo "archive-digest=$ARCHIVE_DIGEST"
   echo "archive-digest-verified=$ARCHIVE_VERIFIED"
+  echo "archive-attestation-verified=$ATTESTATION_VERIFIED"
 } >> "${GITHUB_OUTPUT:-/dev/null}"
 
 OUTCOME=$(echo "$RESOLVE_STDOUT" | sed -n 's/^outcome=//p')

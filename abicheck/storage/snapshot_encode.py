@@ -343,6 +343,7 @@ _DECLARATION_KEY_ANCHORS: tuple[tuple[str, tuple[str, ...]], ...] = (
 #: validated_identities``).
 _TYPE_IDENTITY_KEY = "type_identities_fact"
 _RETURN_TYPE_IDENTITY_KEY = "return_type_identities_fact"
+_SPECIALIZATION_KEY = "specialization_declared_fact"
 
 
 def _drop_advanced_extraction_status(d: dict[str, Any]) -> None:
@@ -381,6 +382,9 @@ def _drop_uncaptured_type_identities(d: dict[str, Any]) -> None:
     for rec in d.get("types", ()):
         for fld in rec.get("fields", ()):
             _drop_uncaptured(fld, _TYPE_IDENTITY_KEY)
+        # Schema v61: written only when captured, so a record from any other
+        # producer (or no specialization) encodes exactly as v60.
+        _drop_uncaptured(rec, _SPECIALIZATION_KEY)
 
 
 def _with_declarations(

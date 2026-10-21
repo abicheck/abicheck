@@ -22,8 +22,8 @@ cycle). ``diff_symbols._check_variable`` is the sole caller.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
-from typing import Any
+from collections.abc import Callable, Iterable
+from typing import TYPE_CHECKING, Any
 
 from .compare import export_transition as _export_transition
 from .compare.declaration_facts import alignment_changes
@@ -44,6 +44,9 @@ from .model.surface_facts import (
     is_export_confirmed_absent,
     surface_fact_summary,
 )
+
+if TYPE_CHECKING:
+    from .compare.template_instance_absence import TemplateInstanceAbsence
 
 
 def _is_access_narrowing(old_access: Any, new_access: Any) -> bool:
@@ -82,6 +85,21 @@ def _var_removed(mangled: str, v_old: Variable) -> list[Change]:
             surface_facts=surface_fact_summary(v_old),
         )
     ]
+
+
+def removed_variable(
+    absence: TemplateInstanceAbsence,
+) -> Callable[[str, Variable], list[Change]]:
+    """The ``on_removed`` callback of the variable join: a static data member
+    of a class-template specialization the new header only stopped
+    instantiating is judged by *absence* (``compare/template_instance_absence``);
+    every other unmatched variable is :func:`_var_removed`."""
+
+    def removed(mangled: str, v_old: Variable) -> list[Change]:
+        decided = absence.variable_changes_for(mangled, v_old)
+        return _var_removed(mangled, v_old) if decided is None else decided
+
+    return removed
 
 
 def _unexported_shape(decl: Function | Variable) -> str | None:

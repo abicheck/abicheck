@@ -695,6 +695,36 @@ inputs:
       baseline-archive-digest output.
     required: false
     default: ''
+  verify-baseline-attestation:
+    description: >
+      'false' (default) -- no provenance check beyond expected-archive-digest.
+      'true' -- before the downloaded baseline-set archive is extracted, run
+      `gh attestation verify` on it and fail the run (even under dry-run)
+      unless a GitHub artifact attestation from baseline-attestation-repo
+      (and, when set, baseline-attestation-signer-workflow) covers its exact
+      bytes. The producer creates the attestation with actions/stage-baseline's
+      attest: true. Uses github-token; the calling job needs
+      'attestations: read' when the repository is private. Requires
+      baseline-profile and baseline-target, because only that selection
+      fetches an archive.
+    required: false
+    default: 'false'
+  baseline-attestation-repo:
+    description: >
+      owner/repo whose workflow must have attested the baseline-set archive.
+      Defaults to the current repository. Only valid with
+      verify-baseline-attestation: true.
+    required: false
+    default: ''
+  baseline-attestation-signer-workflow:
+    description: >
+      Optional workflow that must have signed the attestation, as
+      'owner/repo/.github/workflows/<file>.yml' (gh attestation verify
+      --signer-workflow). Recommended: without it any workflow in
+      baseline-attestation-repo can produce an accepted attestation. Only
+      valid with verify-baseline-attestation: true.
+    required: false
+    default: ''
 
   # ── Output & policy ─────────────────────────────────────────────────────────
   format:
@@ -1296,6 +1326,9 @@ runs:
         INPUT_BASELINE_GENERATION: ${{ inputs.baseline-generation }}
         INPUT_BASELINE_PROJECT_REF: ${{ inputs.baseline-project-ref }}
         INPUT_EXPECTED_ARCHIVE_DIGEST: ${{ inputs.expected-archive-digest }}
+        INPUT_VERIFY_BASELINE_ATTESTATION: ${{ inputs.verify-baseline-attestation }}
+        INPUT_BASELINE_ATTESTATION_REPO: ${{ inputs.baseline-attestation-repo }}
+        INPUT_BASELINE_ATTESTATION_SIGNER_WORKFLOW: ${{ inputs.baseline-attestation-signer-workflow }}
         INPUT_ESTIMATE: ${{ inputs.estimate }}
         INPUT_AUDIT: ${{ inputs.audit }}
         # No-baseline capability-gap guard: compare's audit-only shape
@@ -1509,6 +1542,9 @@ runs:
         INPUT_BASELINE_GENERATION: ${{ inputs.baseline-generation }}
         INPUT_BASELINE_PROJECT_REF: ${{ inputs.baseline-project-ref }}
         INPUT_EXPECTED_ARCHIVE_DIGEST: ${{ inputs.expected-archive-digest }}
+        INPUT_VERIFY_BASELINE_ATTESTATION: ${{ inputs.verify-baseline-attestation }}
+        INPUT_BASELINE_ATTESTATION_REPO: ${{ inputs.baseline-attestation-repo }}
+        INPUT_BASELINE_ATTESTATION_SIGNER_WORKFLOW: ${{ inputs.baseline-attestation-signer-workflow }}
         INPUT_ADD_JOB_SUMMARY: ${{ inputs.add-job-summary }}
         INPUT_DEBUG_INFO1: ${{ inputs.debug-info1 }}
         INPUT_DEBUG_INFO2: ${{ inputs.debug-info2 }}

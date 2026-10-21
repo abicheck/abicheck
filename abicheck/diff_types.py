@@ -32,6 +32,7 @@ from .compare.record_layout import (
     record_layout_changes,
     record_layout_index,
 )
+from .compare.template_instance_absence import TemplateInstanceAbsence
 from .compare.typedefs import (
     diff_typedefs,
     is_version_stamped_typedef as is_version_stamped_typedef,
@@ -290,9 +291,10 @@ def _diff_types(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
             t, exclude_stdlib=excl, directly_referenced=directly_referenced
         )
     )
-    # RD2-5: don't manufacture phantom TYPE_REMOVED when the new side is stripped.
+    # No phantom TYPE_REMOVED: RD2-5 (stripped new side), and a specialization
+    # the new header only stopped instantiating (compare/template_instance_absence).
     suppress_removed = _removals_are_unconfirmed(old, new)
-
+    absence = TemplateInstanceAbsence(new, old)
     old_funcs = old.function_map
     new_funcs = new.function_map
     # Unfiltered (unlike old_map/new_map above) so a private/internal base
@@ -314,12 +316,10 @@ def _diff_types(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     )
 
     # Tracked by object identity, not key membership: a legacy-schema-vs-fresh
-    # pair can match through diff_helpers.TypeMap's bare-name alias even though the two
-    # sides' canonical keys differ (qualified vs. bare) — a "key not in
-    # old_map" check on new_map's own canonical keys would then falsely see
-    # no match and manufacture a phantom TYPE_ADDED (Codex review, PR #608).
+    # pair can match through diff_helpers.TypeMap's bare-name alias although
+    # the two sides' canonical keys differ (qualified vs. bare), so a key check
+    # would see no match and manufacture a phantom TYPE_ADDED (PR #608).
     matched_new_ids: set[int] = set()
-
     for t_old in old_map.values():
         t_new = _lookup_matched_type(old_map, new_map, t_old)
         # Emitted Change objects (symbol=/description=) and fact-provenance
@@ -334,7 +334,7 @@ def _diff_types(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         # than requiring ``symbol`` itself to be qualified.
         name = t_old.name
         if t_new is None:
-            if suppress_removed:
+            if suppress_removed or absence.specialization_vanished(t_old):
                 continue
             changes.append(
                 make_change(

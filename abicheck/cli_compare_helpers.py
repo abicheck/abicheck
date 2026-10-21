@@ -109,9 +109,16 @@ from .frontends.cli.runtime import (
     _write_or_echo,
 )
 from .frontends.render import ONELINE_FORMAT, resolve_demangle_for_format
+from .impact.use_case_reachability import explain_use_case_impact
 from .model.sided_inputs import resolve_per_side_inputs
 from .report.report_modes import normalize_report_mode
 from .serialization import run_scoped_digest_cache
+from .workflows.compare.configuration import resolve_required_symbol_policy
+from .workflows.compare.use_case_attribution import (
+    UseCaseAttributionError,
+    attach_use_case_impact,
+    read_use_case_manifest,
+)
 from .workflows.compare_configuration import (
     _pair_wide_dialect_override,
     load_required_symbols,
@@ -330,48 +337,6 @@ def _preflight_manifests_and_audit(
     return old_manifest_obj, new_manifest_obj
 
 
-def _resolve_required_symbol_policy(
-    ctx: click.Context,
-    policy: str,
-    required_symbols: tuple[str, ...],
-    required_symbols_from_file: tuple[str, ...],
-    required_symbols_path: str | None,
-    required_symbols_sha: str | None,
-) -> tuple[str, str | None, Path | None, str | None]:
-    """Pick ``policy`` for a ``--required-symbol`` contract, and say what picked it.
-
-    Required-symbol contracts default to the plugin-oriented policy unless the
-    user explicitly picked one -- an explicit ``--policy`` always wins (ADR-043).
-    Recorded, not just applied: the ADR-049 receipt has to name whatever really
-    selected ``policy.base``, and this value was chosen by a typed
-    ``--required-symbol`` rather than by ``--policy`` or a built-in default
-    (Codex review, fresh evidence -- the receipt claimed ``strict_abi`` for a run
-    that used ``plugin_abi``).
-
-    Which spelling actually *contributed* decides what the receipt names -- not
-    merely which was passed. ADR-068 D5 / plan Phase 7h folded the old, separate
-    ``--required-symbols FILE`` flag into ``--required-symbol @FILE``, so both
-    forms now share one option name for the receipt -- but a file that parsed
-    to nothing still selected nothing (Codex review, two rounds, generalized):
-    the ``@FILE`` form wins the receipt's path/digest only when it actually
-    contributed a symbol.
-
-    Returns ``(policy, selected_by, selected_path, selected_sha)``.
-    """
-    if not required_symbols or (
-        ctx.get_parameter_source("policy") == click.core.ParameterSource.COMMANDLINE
-    ):
-        return policy, None, None, None
-    if required_symbols_from_file:
-        return (
-            "plugin_abi",
-            "--required-symbol",
-            Path(required_symbols_path) if required_symbols_path else None,
-            required_symbols_sha,
-        )
-    return "plugin_abi", "--required-symbol", None, None
-
-
 @contextmanager
 def _operand_rule_errors() -> Iterator[None]:
     """Word a refused operand combination the way ``compare`` words its flags.
@@ -476,53 +441,17 @@ def _resolve_evaluation_config(
 def _attach_use_case_impact(
     result: Any, old: Any, new: Any, manifest: Path | None
 ) -> None:
-    """Attach ``compare --use-cases``'s attribution block to *result*.
+    """Attach ``compare --use-cases``'s block; a refusal is a usage error (exit 64).
 
-    A no-op without the flag. A malformed manifest, and a pair with no
-    source graph on either side to resolve entrypoints against, are usage
-    errors (exit 64) rather than a silently missing section -- the user
-    asked for an attribution the run cannot produce, and an absent block
-    would read as "no use case is affected".
+    The typed workflow owns the manifest load and the attribution (see
+    :func:`abicheck.workflows.compare.use_case_attribution.attach_use_case_impact`).
     """
-    if manifest is None:
-        return
-    from .errors import UseCaseManifestError
-    from .impact.use_case_impact import build_use_case_impact
-    from .impact.use_cases import load_use_case_manifest
-
     try:
-        definitions = load_use_case_manifest(manifest)
-    except (UseCaseManifestError, OSError) as exc:
-        # OSError alongside the manifest-specific error: Click's exists=True
-        # only proves the path was there at parse time, not at the read a
-        # moment later, and an unhandled OSError would exit 1 with a bare
-        # traceback instead of the documented usage-error path.
-        raise click.UsageError(str(exc)) from exc
-
-    # Scoped-only findings included, for the same reason
-    # `_attach_suppression_audit` below includes them: this runs *after*
-    # --used-by/--required-symbol scoping, which synthesizes fresh Change
-    # objects onto `scoped_only_changes` (e.g. PE_ORDINAL_RETARGETED) that
-    # `_fold_scoped_compat_into_text` then appends to the rendered report's
-    # own findings list. Attributing only `result.changes` left
-    # `total_changes` smaller than the list beside it, with the synthesized
-    # findings neither attributed to a use case nor counted as unattributed
-    # (Codex review).
-    impact = build_use_case_impact(
-        definitions,
-        old,
-        new,
-        list(result.changes) + list(getattr(result, "scoped_only_changes", ()) or ()),
-        manifest=str(manifest),
-    )
-    if impact is None:
-        raise click.UsageError(
-            f"--use-cases {manifest} needs a source graph to resolve "
-            "entrypoints against, and neither side carries one (dump with "
-            "--sources/--build-info, or ensure the always-on header-only "
-            "graph attached)."
+        attach_use_case_impact(
+            result, old, new, manifest, explain=explain_use_case_impact
         )
-    result.use_case_impact = impact
+    except UseCaseAttributionError as exc:
+        raise click.UsageError(str(exc)) from exc
 
 
 def _report_compare_result(
@@ -912,13 +841,16 @@ def run_compare(
             "an explicit required-symbol contract, not both."
         )
     policy, policy_selected_by, policy_selected_path, policy_selected_sha = (
-        _resolve_required_symbol_policy(
-            ctx,
+        resolve_required_symbol_policy(
             policy,
-            required_symbols,
-            required_symbols_from_file,
-            required_symbols_path,
-            required_symbols_sha,
+            required_symbols=required_symbols,
+            policy_from_commandline=(
+                ctx.get_parameter_source("policy")
+                == click.core.ParameterSource.COMMANDLINE
+            ),
+            required_symbols_from_file=required_symbols_from_file,
+            required_symbols_path=required_symbols_path,
+            required_symbols_sha=required_symbols_sha,
         )
     )
     # ADR-037 D4: load the project config and merge CLI flags over it
@@ -1095,12 +1027,9 @@ def run_compare(
     # would make the dry run's answer depend on which operand shape it was
     # given. Manifest validity has no such asymmetry.
     if use_cases_manifest is not None:
-        from .errors import UseCaseManifestError
-        from .impact.use_cases import load_use_case_manifest
-
         try:
-            load_use_case_manifest(use_cases_manifest)
-        except (UseCaseManifestError, OSError) as exc:
+            read_use_case_manifest(use_cases_manifest)
+        except UseCaseAttributionError as exc:
             raise click.UsageError(str(exc)) from exc
 
     # Parsed after the directory/package rejection above (not before, like an

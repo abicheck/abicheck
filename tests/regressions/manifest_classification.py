@@ -539,4 +539,62 @@ CLASSIFICATION_BUG_CLASSES: tuple[BugClass, ...] = (
         public_surfaces=("reclassify", "json_report"),
         axes={"evidence": ("header", "elf")},
     ),
+    BugClass(
+        id="detector.removal_from_header_enumeration",
+        invariant=(
+            "An entity castxml records only while the header instantiates it "
+            "(a function-template instance, a class-template specialization "
+            "and its implicit members, inline methods and static data "
+            "members) is not removed when the new header merely stops "
+            "instantiating it while its primary template is still declared. "
+            "Its outcome follows the new export table: still exported -> no "
+            "finding; export lost and old exported -> "
+            "func_visibility_changed/var_visibility_changed (BREAKING); old "
+            "not exported -> no finding. A deleted explicit or partial "
+            "specialization, a removed template, a non-template entity, and "
+            "an old record whose instantiation origin was not proven keep "
+            "their removal kinds."
+        ),
+        fixed_by=(1661,),
+        seed_tests=(
+            "tests/test_template_export_loss_declaration_presence.py",
+            "tests/test_template_export_loss_declaration_presence_unit.py",
+            "tests/test_class_template_specialization_absence_unit.py",
+            # F1 harness: inventories RecordType.specialization_declared_fact
+            "tests/test_family_f1_evidence_ablation.py",
+        ),
+        public_surfaces=("cli",),
+        axes={
+            "entity": (
+                "free function template",
+                "member function template",
+                "class-template method",
+                "class-template static data member",
+                "implicit special member",
+                "specialization record",
+            ),
+            "header": (
+                "still instantiates",
+                "stops instantiating",
+                "extern template",
+                "explicit specialization removed",
+                "template removed",
+            ),
+            "export": ("to_local", "to_absent", "to_hidden"),
+            "frontend": ("castxml",),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "The instantiation origin is read by castxml only; a "
+                    "clang-header or pre-v61 old snapshot keeps type_removed "
+                    "for a specialization the new header stops instantiating."
+                ),
+                reference=(
+                    "docs/contribute/known-gaps/"
+                    "class-template-specialization-members-a-new-header-stops-enumerating.md"
+                ),
+            ),
+        ),
+    ),
 )

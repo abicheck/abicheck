@@ -764,19 +764,10 @@ def _surface_changes(
 def compute_use_case_impact(
     result: object, displayed: list[object] | None
 ) -> dict[str, object] | None:
-    """``compare --use-cases``'s attribution, projected onto what is shown.
+    """``compare --use-cases``'s attribution, projected onto what is shown."""
+    from .report.use_case_impact_render import use_case_impact_block
 
-    *displayed* is the ``--show-only`` filtered list, or ``None`` when every
-    finding is displayed -- the same projection the JSON block applies.
-    """
-    from .impact.use_case_impact import UseCaseImpact
-
-    impact = getattr(result, "use_case_impact", None)
-    if not isinstance(impact, UseCaseImpact):
-        return None
-    if displayed is not None:
-        impact = impact.restricted_to(displayed)  # type: ignore[arg-type]
-    return impact.to_dict()
+    return use_case_impact_block(result, displayed)  # type: ignore[return-value]
 
 
 def compute_not_evaluated_section(
